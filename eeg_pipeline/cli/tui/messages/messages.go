@@ -93,6 +93,8 @@ type SubjectsLoadedMsg struct {
 	Subjects              []SubjectInfo
 	AvailableWindows      []string
 	AvailableEventColumns []string
+	AvailableChannels     []string
+	UnavailableChannels   []string
 	Error                 error
 }
 

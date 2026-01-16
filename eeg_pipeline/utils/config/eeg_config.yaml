@@ -461,10 +461,6 @@ behavior_analysis:
     include_in_correlations: true    # add run dummies to partial correlations
     max_dummies: 20                  # bounds dummy explosion for categorical run IDs
 
-  # Subject-level "tabular" mode: skip analyses that require epochs/time-frequency arrays.
-  trial_table_only:
-    enabled: false
-
   # Canonical per-trial table export (single source of truth for subject-level stats/plots)
   trial_table:
     enabled: true

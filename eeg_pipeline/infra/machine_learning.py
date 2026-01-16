@@ -21,7 +21,7 @@ from eeg_pipeline.infra.paths import (
     ensure_dir,
     find_clean_epochs_path,
 )
-from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.infra.tsv import read_tsv, write_parquet
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 
 logger = get_logger(__name__)
@@ -223,8 +223,8 @@ def export_predictions(
         }
     )
 
-    ensure_dir(save_path.parent)
-    pred_df.to_csv(save_path, sep="\t", index=False)
+    parquet_path = save_path.with_suffix(".parquet")
+    write_parquet(pred_df, parquet_path)
     return pred_df
 
 
@@ -255,8 +255,8 @@ def export_indices(
     if add_heldout_subject_id:
         idx_df["heldout_subject_id"] = idx_df["subject_id"].astype(str)
 
-    ensure_dir(save_path.parent)
-    idx_df.to_csv(save_path, sep="\t", index=False)
+    parquet_path = save_path.with_suffix(".parquet")
+    write_parquet(idx_df, parquet_path)
 
 
 def _is_power_channel_feature(parsed: dict) -> bool:
@@ -303,7 +303,7 @@ def _aggregate_coefficients(
     return np.nanmean(np.abs(coefficient_matrix), axis=0)
 
 
-def write_feature_importance_tsv(
+def write_feature_importance(
     subject: str,
     coef_matrix: np.ndarray,
     feature_names: List[str],
@@ -314,7 +314,7 @@ def write_feature_importance_tsv(
     target: str = "auto",
     extra_columns: Optional[dict] = None,
 ) -> Optional[Path]:
-    """Write feature importance TSV for topomap visualization."""
+    """Write feature importance parquet for topomap visualization."""
     ensure_dir(stats_dir)
 
     bands, band_channel_to_indices = _extract_power_channel_features(
@@ -346,10 +346,10 @@ def write_feature_importance_tsv(
     if not rows:
         return None
 
-    tsv_filename = f"feature_topomap_{method}_{aggregate}_{mode}_{target}.tsv"
-    output_path = stats_dir / tsv_filename
-    pd.DataFrame(rows).to_csv(output_path, sep="\t", index=False)
-    logger.info(f"Saved feature importance TSV: {output_path}")
+    filename = f"feature_topomap_{method}_{aggregate}_{mode}_{target}.parquet"
+    output_path = stats_dir / filename
+    write_parquet(pd.DataFrame(rows), output_path)
+    logger.info(f"Saved feature importance: {output_path}")
     return output_path
 
 
@@ -483,11 +483,11 @@ def aggregate_group_feature_topomaps(
     if target:
         suffix += f"_{target}"
 
-    out_tsv = stats_dir / f"feature_topomap_group_{suffix}.tsv"
-    pd.DataFrame(rows).to_csv(out_tsv, sep="\t", index=False)
-    logger.info(f"Saved group feature importance TSV: {out_tsv}")
+    out_path = stats_dir / f"feature_topomap_group_{suffix}.parquet"
+    write_parquet(pd.DataFrame(rows), out_path)
+    logger.info(f"Saved group feature importance: {out_path}")
 
-    return out_tsv
+    return out_path
 
 
 __all__ = [
@@ -497,6 +497,6 @@ __all__ = [
     "read_best_params_jsonl_combined",
     "export_predictions",
     "export_indices",
-    "write_feature_importance_tsv",
+    "write_feature_importance",
     "aggregate_group_feature_topomaps",
 ]

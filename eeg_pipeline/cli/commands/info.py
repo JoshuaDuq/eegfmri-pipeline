@@ -46,6 +46,72 @@ STATS_FILE_PATTERNS = ("*.tsv", "*.npz", "*.csv", "*.json")
 PREPROCESSING_EEG_PATTERNS = ("*ica.fif", "*_components.tsv")
 
 
+def _get_available_channels(bids_root: Path, subject_id: str) -> List[str]:
+    """Read available EEG channel names from BIDS electrodes.tsv.
+
+    Looks for electrodes.tsv in `bids_root/sub-{subject_id}/eeg/`.
+    Falls back to the first available subject if the specified subject has no file.
+    """
+    import pandas as pd
+
+    pattern = f"sub-{subject_id}_*electrodes.tsv"
+    sub_eeg_dir = bids_root / f"sub-{subject_id}" / "eeg"
+
+    electrode_files = list(sub_eeg_dir.glob(pattern)) if sub_eeg_dir.exists() else []
+
+    if not electrode_files:
+        for sub_dir in sorted(bids_root.glob("sub-*")):
+            eeg_dir = sub_dir / "eeg"
+            if eeg_dir.exists():
+                files = list(eeg_dir.glob("*electrodes.tsv"))
+                if files:
+                    electrode_files = files
+                    break
+
+    if not electrode_files:
+        return []
+
+    try:
+        df = pd.read_csv(electrode_files[0], sep="\t")
+        if "name" not in df.columns:
+            return []
+        names = df["name"].dropna().astype(str).tolist()
+        return [n for n in names if n.lower() not in ("n/a", "nan", "ecg", "eog")]
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
+        return []
+
+
+def _get_unavailable_channels(deriv_root: Path, task: str) -> List[str]:
+    """Extract bad channels from pyprep preprocessing log.
+
+    Reads from `deriv_root/preprocessed/pyprep_task_{task}_log.csv` and
+    aggregates the union of all bad channels across runs.
+    """
+    import ast
+    import pandas as pd
+
+    log_path = deriv_root / "preprocessed" / f"pyprep_task_{task}_log.csv"
+    if not log_path.exists():
+        return []
+
+    try:
+        df = pd.read_csv(log_path)
+        if "bad_channels" not in df.columns:
+            return []
+
+        bad_set: set[str] = set()
+        for val in df["bad_channels"].dropna():
+            try:
+                ch_list = ast.literal_eval(str(val))
+                if isinstance(ch_list, list):
+                    bad_set.update(ch_list)
+            except (ValueError, SyntaxError):
+                pass
+        return sorted(bad_set)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
+        return []
+
+
 def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Configure the info command parser."""
     parser = subparsers.add_parser(
@@ -321,11 +387,19 @@ def _build_subject_status_json(
             "feature_availability": feature_availability,
         })
 
+    # Discover available and unavailable channels (global for study)
+    bids_root = Path(config.bids_root) if hasattr(config, "bids_root") else None
+    first_subject = discovered_subjects[0] if discovered_subjects else ""
+    available_channels = _get_available_channels(bids_root, first_subject) if bids_root else []
+    unavailable_channels = _get_unavailable_channels(deriv_root, task)
+
     return {
         "subjects": json_results,
         "count": len(json_results),
         "available_windows": available_windows,
         "available_event_columns": available_columns,
+        "available_channels": available_channels,
+        "unavailable_channels": unavailable_channels,
     }
 
 

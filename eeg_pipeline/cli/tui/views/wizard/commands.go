@@ -1119,6 +1119,11 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			// Note: FS License is now in global config (paths.freesurfer_license)
 			if m.sourceLocCreateTrans {
 				args = append(args, "--source-create-trans")
+				// Allow identity transform when auto-creating (required for the transform to be created)
+				// This is debug-only functionality; proper coregistration should be done for production
+				if m.sourceLocAllowIdentityTrans || m.sourceLocCreateTrans {
+					args = append(args, "--source-allow-identity-trans")
+				}
 			}
 			if m.sourceLocCreateBemModel {
 				args = append(args, "--source-create-bem-model")
@@ -1695,9 +1700,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.runAdjustmentMaxDummies != 20 {
 			args = append(args, "--run-adjustment-max-dummies", fmt.Sprintf("%d", m.runAdjustmentMaxDummies))
 		}
-	}
-	if !m.trialTableOnly {
-		args = append(args, "--no-trial-table-only")
 	}
 
 	if m.fdrAlpha != 0.05 {

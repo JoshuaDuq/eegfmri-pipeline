@@ -194,6 +194,8 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         bem_cfg["create_model"] = args.source_create_bem_model
     if _get_arg_value(args, "source_create_bem_solution") is not None:
         bem_cfg["create_solution"] = args.source_create_bem_solution
+    if _get_arg_value(args, "source_allow_identity_trans") is not None:
+        bem_cfg["allow_identity_trans"] = args.source_allow_identity_trans
 
     fmri_cfg = src_cfg.setdefault("fmri", {})
     if _get_arg_value(args, "source_fmri_enabled") is not None:
@@ -280,6 +282,10 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         contrast_cfg["output_type"] = args.source_fmri_output_type
     if _get_arg_value(args, "source_fmri_resample_to_fs") is not None:
         contrast_cfg["resample_to_freesurfer"] = args.source_fmri_resample_to_fs
+    if _get_arg_value(args, "source_fmri_input_source") is not None:
+        contrast_cfg["input_source"] = args.source_fmri_input_source
+    if _get_arg_value(args, "source_fmri_require_fmriprep") is not None:
+        contrast_cfg["require_fmriprep"] = args.source_fmri_require_fmriprep
 
 
 def _apply_pac_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -716,6 +722,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-create-trans", action="store_true", default=None, dest="source_create_trans", help="Auto-create coregistration transform via Docker (requires Docker; FS license from global config).")
     parser.add_argument("--source-create-bem-model", action="store_true", default=None, dest="source_create_bem_model", help="Auto-create BEM model via Docker (requires Docker; FS license from global config).")
     parser.add_argument("--source-create-bem-solution", action="store_true", default=None, dest="source_create_bem_solution", help="Auto-create BEM solution via Docker (requires Docker; FS license from global config).")
+    parser.add_argument("--source-allow-identity-trans", action="store_true", default=None, dest="source_allow_identity_trans", help="Allow creating identity transform (DEBUG ONLY - scientifically invalid for production; use only when proper coregistration is unavailable).")
 
     # fMRI-informed source localization
     parser.add_argument("--source-fmri", action="store_true", default=None, dest="source_fmri_enabled", help="Enable fMRI-informed source localization (requires --source-subjects-dir/--source-trans/--source-bem and a stats map).")
@@ -757,6 +764,9 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-output-type", choices=["z-score", "t-stat", "cope", "beta"], default=None, help="Output statistical map type (default: z-score).")
     parser.add_argument("--source-fmri-resample-to-fs", action="store_true", default=None, dest="source_fmri_resample_to_fs", help="Auto-resample stats map to FreeSurfer subject space.")
     parser.add_argument("--no-source-fmri-resample-to-fs", action="store_false", dest="source_fmri_resample_to_fs", help="Do not auto-resample stats map to FreeSurfer subject space.")
+    parser.add_argument("--source-fmri-input-source", choices=["fmriprep", "bids_raw"], default=None, help="Input source for contrast builder: 'fmriprep' (default) or 'bids_raw' (uses files in func/).")
+    parser.add_argument("--source-fmri-require-fmriprep", action="store_true", default=None, dest="source_fmri_require_fmriprep", help="Require fMRIPrep outputs for contrast building (default: true).")
+    parser.add_argument("--no-source-fmri-require-fmriprep", action="store_false", dest="source_fmri_require_fmriprep", help="Allow using raw BIDS files if fMRIPrep outputs are missing.")
 
     # PAC
     parser.add_argument("--pac-phase-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Phase frequency range for PAC/CFC (Hz)")
@@ -847,7 +857,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--tfr-decim-phase", type=int, default=None, help="Decimation factor for phase TFR")
 
     # ITPC
-    parser.add_argument("--itpc-method", choices=["global", "fold_global", "loo"], default=None, help="ITPC computation method: global (all trials), fold_global (training only, CV-safe), loo (leave-one-out)")
+    parser.add_argument("--itpc-method", choices=["global", "fold_global", "loo", "condition"], default=None, help="ITPC computation method: global (all trials), fold_global (training only, CV-safe), loo (leave-one-out), condition (per condition group, avoids pseudo-replication)")
     parser.add_argument("--itpc-allow-unsafe-loo", action="store_true", default=None, help="Allow unsafe LOO ITPC computation")
     parser.add_argument("--no-itpc-allow-unsafe-loo", action="store_false", dest="itpc_allow_unsafe_loo")
     parser.add_argument("--itpc-baseline-correction", choices=["none", "subtract"], default=None, help="ITPC baseline correction mode")

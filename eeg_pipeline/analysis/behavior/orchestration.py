@@ -46,12 +46,12 @@ class _ResultCache:
         if self._trial_table_df is not None:
             return self._trial_table_df
 
-        trial_table_path = ctx.stats_dir / "trial_table" / "trials.tsv"
+        trial_table_path = ctx.stats_dir / "trial_table" / "trials.parquet"
         if not trial_table_path.exists():
             return None
 
-        from eeg_pipeline.infra.tsv import read_tsv
-        self._trial_table_df = read_tsv(trial_table_path)
+        from eeg_pipeline.infra.tsv import read_parquet
+        self._trial_table_df = read_parquet(trial_table_path)
         self._trial_table_path = trial_table_path
         return self._trial_table_df
 
@@ -975,10 +975,10 @@ def stage_feature_qc_screen(
         if feature_list:
             ctx.logger.info("  %s: %d features", reason, len(feature_list))
 
-    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_parquet
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "feature_qc")
-    write_tsv(qc_df, out_dir / f"feature_qc_screen{suffix}.tsv")
+    write_parquet(qc_df, out_dir / f"feature_qc_screen{suffix}.parquet")
 
     metadata = {
         "status": "ok",
@@ -1304,19 +1304,24 @@ def _write_stats_table(
     ctx: BehaviorContext,
     df: pd.DataFrame,
     path: Path,
-) -> List[Path]:
-    """Write a stats table respecting the also_save_csv context setting.
+    force_tsv: bool = False,
+) -> Path:
+    """Write a stats table, using parquet for large DataFrames.
+    
+    Automatically uses parquet format for DataFrames with >100 rows
+    unless force_tsv is True.
     
     Args:
-        ctx: BehaviorContext with also_save_csv flag
+        ctx: BehaviorContext
         df: DataFrame to write
-        path: Primary output path (TSV)
+        path: Output path (extension adjusted automatically)
+        force_tsv: If True, always use TSV regardless of size
         
     Returns:
-        List of paths written (TSV and optionally CSV)
+        Actual path written
     """
-    from eeg_pipeline.infra.tsv import write_table_with_formats
-    return write_table_with_formats(df, path, also_save_csv=ctx.also_save_csv)
+    from eeg_pipeline.infra.tsv import write_stats_table
+    return write_stats_table(df, path, force_tsv=force_tsv)
 
 
 def _get_feature_columns(
@@ -1696,6 +1701,123 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
     )
 
 
+def _compute_single_effect_size(
+    feat: str,
+    target: str,
+    df_trials: pd.DataFrame,
+    cov_df: Optional[pd.DataFrame],
+    temperature_series: Optional[pd.Series],
+    run_col: str,
+    run_adjust_in_correlations: bool,
+    method: str,
+    robust_method: Optional[str],
+    method_label: str,
+    min_samples: int,
+    want_raw: bool,
+    want_partial_cov: bool,
+    want_partial_temp: bool,
+    want_partial_cov_temp: bool,
+    want_run_mean: bool,
+    config: Any,
+) -> Dict[str, Any]:
+    """Compute effect size for a single feature-target pair (worker function for parallelization)."""
+    from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
+    from eeg_pipeline.utils.analysis.stats import compute_partial_correlations_with_cov_temp
+
+    x = pd.to_numeric(df_trials[feat], errors="coerce")
+    y = pd.to_numeric(df_trials[target], errors="coerce")
+    x_arr = x.to_numpy(dtype=float)
+    y_arr = y.to_numpy(dtype=float)
+    finite_xy = np.isfinite(x_arr) & np.isfinite(y_arr)
+
+    skip_reason = None
+    if int(finite_xy.sum()) >= min_samples:
+        feature_std = float(np.nanstd(x_arr[finite_xy], ddof=1))
+        target_std = float(np.nanstd(y_arr[finite_xy], ddof=1))
+        if feature_std <= CONSTANT_VARIANCE_THRESHOLD:
+            skip_reason = "feature_constant"
+        elif target_std <= CONSTANT_VARIANCE_THRESHOLD:
+            skip_reason = "target_constant"
+
+    r_raw, p_raw, n = safe_correlation(x_arr, y_arr, method, min_samples, robust_method=robust_method)
+
+    rec: Dict[str, Any] = {
+        "feature": str(feat),
+        "feature_type": _cache.get_feature_type(str(feat), config),
+        "band": _cache.get_feature_band(str(feat), config),
+        "target": str(target),
+        "method": method,
+        "robust_method": robust_method,
+        "method_label": method_label,
+        "n": int(n),
+        "r_raw": float(r_raw) if np.isfinite(r_raw) else np.nan if want_raw else np.nan,
+        "p_raw": float(p_raw) if np.isfinite(p_raw) else np.nan if want_raw else np.nan,
+        "r": float(r_raw) if np.isfinite(r_raw) else np.nan if want_raw else np.nan,
+        "p": float(p_raw) if np.isfinite(p_raw) else np.nan if want_raw else np.nan,
+        "p_value": float(p_raw) if np.isfinite(p_raw) else np.nan if want_raw else np.nan,
+        "skip_reason": skip_reason,
+        "run_adjustment_enabled": bool(run_adjust_in_correlations and run_col in df_trials.columns),
+        "run_column": run_col if run_col in df_trials.columns else None,
+    }
+
+    temp_for_partial = temperature_series if (temperature_series is not None and target != "temperature") else None
+
+    if want_partial_cov or want_partial_temp or want_partial_cov_temp:
+        r_pc, p_pc, n_pc, r_pt, p_pt, n_pt, r_pct, p_pct, n_pct = compute_partial_correlations_with_cov_temp(
+            roi_values=x,
+            target_values=y,
+            covariates_df=cov_df,
+            temperature_series=temp_for_partial,
+            method=method,
+            context="trial_table",
+            logger=None,
+            min_samples=min_samples,
+            config=config,
+        )
+
+        if want_partial_cov or want_partial_cov_temp:
+            rec.update({
+                "r_partial_cov": r_pc,
+                "p_partial_cov": p_pc,
+                "n_partial_cov": n_pc,
+            })
+
+        if want_partial_temp or want_partial_cov_temp:
+            rec.update({
+                "r_partial_temp": r_pt,
+                "p_partial_temp": p_pt,
+                "n_partial_temp": n_pt,
+            })
+
+        if want_partial_cov_temp:
+            rec.update({
+                "r_partial_cov_temp": r_pct,
+                "p_partial_cov_temp": p_pct,
+                "n_partial_cov_temp": n_pct,
+            })
+
+    if want_run_mean and run_col in df_trials.columns:
+        try:
+            df_run = pd.DataFrame({run_col: df_trials[run_col], "x": x, "y": y})
+            run_means = df_run.groupby(run_col, dropna=True)[["x", "y"]].mean(numeric_only=True)
+            r_run, p_run, n_run = safe_correlation(
+                run_means["x"].to_numpy(dtype=float),
+                run_means["y"].to_numpy(dtype=float),
+                method,
+                min_samples=3,
+                robust_method=None,
+            )
+            rec.update({
+                "n_runs": int(n_run),
+                "r_run_mean": float(r_run) if np.isfinite(r_run) else np.nan,
+                "p_run_mean": float(p_run) if np.isfinite(p_run) else np.nan,
+            })
+        except (ValueError, TypeError, KeyError):
+            rec.update({"n_runs": np.nan, "r_run_mean": np.nan, "p_run_mean": np.nan})
+
+    return rec
+
+
 def stage_correlate_effect_sizes(
     ctx: BehaviorContext,
     config: Any,
@@ -1705,13 +1827,14 @@ def stage_correlate_effect_sizes(
     
     Single responsibility: Compute effect sizes (r values) without p-value inference.
     Only computes requested correlation types to avoid unnecessary computation.
+    Uses joblib parallelization for large feature sets.
     """
     if design is None:
         ctx.logger.warning("Correlations effect sizes: design missing; skipping.")
         return []
 
-    from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
-    from eeg_pipeline.utils.analysis.stats import compute_partial_correlations_with_cov_temp
+    from joblib import Parallel, delayed
+    from eeg_pipeline.utils.parallel import get_n_jobs, _normalize_n_jobs
 
     method = getattr(config, "method", "spearman")
     robust_method = getattr(config, "robust_method", None)
@@ -1732,9 +1855,6 @@ def stage_correlate_effect_sizes(
     want_partial_cov_temp = "partial_cov_temp" in correlation_types
     want_run_mean = "run_mean" in correlation_types
 
-    # Robust correlations are currently only defined for the raw (bivariate) statistic.
-    # Partial correlations rely on linear residualization and would no longer be robust
-    # unless explicitly re-derived and validated for each robust method.
     if robust_method not in (None, "", False):
         if want_partial_cov or want_partial_temp or want_partial_cov_temp:
             ctx.logger.info(
@@ -1746,105 +1866,171 @@ def stage_correlate_effect_sizes(
         want_partial_temp = False
         want_partial_cov_temp = False
 
-    records: List[Dict[str, Any]] = []
-    for target in design.targets:
-        y = pd.to_numeric(design.df_trials[target], errors="coerce")
-        temp_for_partial = design.temperature_series if (design.temperature_series is not None and target != "temperature") else None
+    tasks = [
+        (feat, target)
+        for target in design.targets
+        for feat in design.feature_cols
+    ]
+    n_tasks = len(tasks)
+    n_jobs = get_n_jobs(ctx.config, default=-1, config_path="behavior_analysis.n_jobs")
+    n_jobs_actual = _normalize_n_jobs(n_jobs)
 
-        for feat in design.feature_cols:
-            x = pd.to_numeric(design.df_trials[feat], errors="coerce")
-            x_arr = x.to_numpy(dtype=float)
-            y_arr = y.to_numpy(dtype=float)
-            finite_xy = np.isfinite(x_arr) & np.isfinite(y_arr)
+    ctx.logger.info(
+        "Correlations effect sizes: %d feature-target pairs, n_jobs=%d",
+        n_tasks, n_jobs_actual,
+    )
 
-            skip_reason = None
-            if int(finite_xy.sum()) >= min_samples:
-                feature_std = float(np.nanstd(x_arr[finite_xy], ddof=1))
-                target_std = float(np.nanstd(y_arr[finite_xy], ddof=1))
-                if feature_std <= CONSTANT_VARIANCE_THRESHOLD:
-                    skip_reason = "feature_constant"
-                elif target_std <= CONSTANT_VARIANCE_THRESHOLD:
-                    skip_reason = "target_constant"
+    if n_tasks == 0:
+        return []
 
-            r_raw, p_raw, n = safe_correlation(x_arr, y_arr, method, min_samples, robust_method=robust_method)
-
-            rec: Dict[str, Any] = {
-                "feature": str(feat),
-                "feature_type": _cache.get_feature_type(str(feat), ctx.config),
-                "band": _cache.get_feature_band(str(feat), ctx.config),
-                "target": str(target),
-                "method": method,
-                "robust_method": robust_method,
-                "method_label": method_label,
-                "n": int(n),
-                "r_raw": float(r_raw) if np.isfinite(r_raw) else np.nan if want_raw else np.nan,
-                "p_raw": float(p_raw) if np.isfinite(p_raw) else np.nan if want_raw else np.nan,
-                "r": float(r_raw) if np.isfinite(r_raw) else np.nan if want_raw else np.nan,
-                "p": float(p_raw) if np.isfinite(p_raw) else np.nan if want_raw else np.nan,
-                "p_value": float(p_raw) if np.isfinite(p_raw) else np.nan if want_raw else np.nan,
-                "skip_reason": skip_reason,
-                "run_adjustment_enabled": bool(design.run_adjust_in_correlations and design.run_col in design.df_trials.columns),
-                "run_column": design.run_col if design.run_col in design.df_trials.columns else None,
-            }
-
-            if want_partial_cov or want_partial_temp or want_partial_cov_temp:
-                r_pc, p_pc, n_pc, r_pt, p_pt, n_pt, r_pct, p_pct, n_pct = compute_partial_correlations_with_cov_temp(
-                    roi_values=x,
-                    target_values=y,
-                    covariates_df=design.cov_df,
-                    temperature_series=temp_for_partial,
-                    method=method,
-                    context="trial_table",
-                    logger=ctx.logger,
-                    min_samples=min_samples,
-                    config=ctx.config,
-                )
-
-                if want_partial_cov or want_partial_cov_temp:
-                    rec.update({
-                        "r_partial_cov": r_pc,
-                        "p_partial_cov": p_pc,
-                        "n_partial_cov": n_pc,
-                    })
-
-                if want_partial_temp or want_partial_cov_temp:
-                    rec.update({
-                        "r_partial_temp": r_pt,
-                        "p_partial_temp": p_pt,
-                        "n_partial_temp": n_pt,
-                    })
-
-                if want_partial_cov_temp:
-                    rec.update({
-                        "r_partial_cov_temp": r_pct,
-                        "p_partial_cov_temp": p_pct,
-                        "n_partial_cov_temp": n_pct,
-                    })
-
-            if want_run_mean and design.run_col in design.df_trials.columns:
-                try:
-                    df_run = pd.DataFrame({design.run_col: design.df_trials[design.run_col], "x": x, "y": y})
-                    run_means = df_run.groupby(design.run_col, dropna=True)[["x", "y"]].mean(numeric_only=True)
-                    r_run, p_run, n_run = safe_correlation(
-                        run_means["x"].to_numpy(dtype=float),
-                        run_means["y"].to_numpy(dtype=float),
-                        method,
-                        min_samples=3,
-                        robust_method=None,
-                    )
-                    rec.update({
-                        "n_runs": int(n_run),
-                        "r_run_mean": float(r_run) if np.isfinite(r_run) else np.nan,
-                        "p_run_mean": float(p_run) if np.isfinite(p_run) else np.nan,
-                    })
-                except (ValueError, TypeError, KeyError) as exc:
-                    ctx.logger.debug(f"Run-level correlation failed: {exc}")
-                    rec.update({"n_runs": np.nan, "r_run_mean": np.nan, "p_run_mean": np.nan})
-
-            records.append(rec)
+    if n_jobs_actual > 1 and n_tasks >= 100:
+        records = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_compute_single_effect_size)(
+                feat=feat,
+                target=target,
+                df_trials=design.df_trials,
+                cov_df=design.cov_df,
+                temperature_series=design.temperature_series,
+                run_col=design.run_col,
+                run_adjust_in_correlations=design.run_adjust_in_correlations,
+                method=method,
+                robust_method=robust_method,
+                method_label=method_label,
+                min_samples=min_samples,
+                want_raw=want_raw,
+                want_partial_cov=want_partial_cov,
+                want_partial_temp=want_partial_temp,
+                want_partial_cov_temp=want_partial_cov_temp,
+                want_run_mean=want_run_mean,
+                config=ctx.config,
+            )
+            for feat, target in tasks
+        )
+    else:
+        records = [
+            _compute_single_effect_size(
+                feat=feat,
+                target=target,
+                df_trials=design.df_trials,
+                cov_df=design.cov_df,
+                temperature_series=design.temperature_series,
+                run_col=design.run_col,
+                run_adjust_in_correlations=design.run_adjust_in_correlations,
+                method=method,
+                robust_method=robust_method,
+                method_label=method_label,
+                min_samples=min_samples,
+                want_raw=want_raw,
+                want_partial_cov=want_partial_cov,
+                want_partial_temp=want_partial_temp,
+                want_partial_cov_temp=want_partial_cov_temp,
+                want_run_mean=want_run_mean,
+                config=ctx.config,
+            )
+            for feat, target in tasks
+        ]
 
     ctx.logger.info("Correlations effect sizes: computed %d feature-target pairs", len(records))
     return records
+
+
+def _compute_single_pvalue(
+    rec: Dict[str, Any],
+    df_trials: pd.DataFrame,
+    df_index: pd.Index,
+    cov_df: Optional[pd.DataFrame],
+    temperature_series: Optional[pd.Series],
+    groups_for_perm: Optional[pd.Series],
+    method: str,
+    robust_method: Optional[str],
+    n_perm: int,
+    perm_scheme: str,
+    rng_seed: int,
+    config: Any,
+    perm_ok_robust: bool,
+) -> Dict[str, Any]:
+    """Compute permutation p-values for a single record (worker function for parallelization)."""
+    from eeg_pipeline.utils.analysis.stats.permutation import compute_permutation_pvalues_with_cov_temp
+
+    feat = rec["feature"]
+    target = rec["target"]
+    r_raw = rec.get("r_raw", np.nan)
+    n = rec.get("n", 0)
+
+    result = rec.copy()
+
+    if not (np.isfinite(r_raw) and int(n) > 0):
+        result.update({
+            "n_permutations": int(n_perm),
+            "p_perm_raw": np.nan,
+            "p_perm_partial_cov": np.nan,
+            "p_perm_partial_temp": np.nan,
+            "p_perm_partial_cov_temp": np.nan,
+        })
+        return result
+
+    rng = np.random.default_rng(rng_seed)
+    x = pd.to_numeric(df_trials[feat], errors="coerce")
+    y = pd.to_numeric(df_trials[target], errors="coerce")
+
+    if perm_ok_robust:
+        from eeg_pipeline.utils.analysis.stats.correlation import compute_robust_correlation
+        from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+
+        x_vec = x.to_numpy(dtype=float)
+        y_vec = y.to_numpy(dtype=float)
+        valid = np.isfinite(x_vec) & np.isfinite(y_vec)
+
+        if valid.sum() < 4:
+            p_perm_raw = np.nan
+        else:
+            x_v = x_vec[valid]
+            y_v = y_vec[valid]
+            groups_v = np.asarray(groups_for_perm)[valid] if groups_for_perm is not None else None
+
+            r_obs, _ = compute_robust_correlation(x_v, y_v, method=str(robust_method).strip().lower())
+            if not np.isfinite(r_obs):
+                p_perm_raw = np.nan
+            else:
+                extreme = 0
+                for _ in range(int(n_perm)):
+                    perm_idx = permute_within_groups(len(y_v), rng, groups_v, scheme=perm_scheme)
+                    y_perm = y_v[perm_idx]
+                    r_perm, _ = compute_robust_correlation(x_v, y_perm, method=str(robust_method).strip().lower())
+                    if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
+                        extreme += 1
+                p_perm_raw = float((extreme + 1) / (int(n_perm) + 1))
+
+        result.update({
+            "n_permutations": int(n_perm),
+            "p_perm_raw": float(p_perm_raw) if np.isfinite(p_perm_raw) else np.nan,
+            "p_perm_partial_cov": np.nan,
+            "p_perm_partial_temp": np.nan,
+            "p_perm_partial_cov_temp": np.nan,
+        })
+    else:
+        temp_for_partial = temperature_series if (temperature_series is not None and target != "temperature") else None
+        p_perm, p_perm_cov, p_perm_temp, p_perm_cov_temp = compute_permutation_pvalues_with_cov_temp(
+            x_aligned=pd.Series(x.to_numpy(dtype=float), index=df_index),
+            y_aligned=pd.Series(y.to_numpy(dtype=float), index=df_index),
+            covariates_df=cov_df,
+            temp_series=temp_for_partial,
+            method=method.strip().lower(),
+            n_perm=n_perm,
+            n_eff=int(n),
+            rng=rng,
+            config=config,
+            groups=groups_for_perm,
+        )
+        result.update({
+            "n_permutations": int(n_perm),
+            "p_perm_raw": float(p_perm) if np.isfinite(p_perm) else np.nan,
+            "p_perm_partial_cov": float(p_perm_cov) if np.isfinite(p_perm_cov) else np.nan,
+            "p_perm_partial_temp": float(p_perm_temp) if np.isfinite(p_perm_temp) else np.nan,
+            "p_perm_partial_cov_temp": float(p_perm_cov_temp) if np.isfinite(p_perm_cov_temp) else np.nan,
+        })
+
+    return result
 
 
 def stage_correlate_pvalues(
@@ -1856,53 +2042,20 @@ def stage_correlate_pvalues(
     """Compute permutation p-values for correlations.
     
     Single responsibility: Add permutation-based p-values to existing effect size records.
+    Uses joblib parallelization for large record sets.
     """
     if not records or not isinstance(records, list):
         ctx.logger.warning("Correlations pvalues: no valid records; skipping.")
         return []
 
-    from eeg_pipeline.utils.analysis.stats.permutation import compute_permutation_pvalues_with_cov_temp
+    from joblib import Parallel, delayed
+    from eeg_pipeline.utils.parallel import get_n_jobs, _normalize_n_jobs
 
     method = getattr(config, "method", "spearman")
     robust_method = getattr(config, "robust_method", None)
     perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
     n_perm = get_config_int(ctx.config, "behavior_analysis.correlations.permutation.n_permutations", ctx.n_perm or 0)
     perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
-
-    def _robust_permutation_pvalue(
-        x_vec: np.ndarray,
-        y_vec: np.ndarray,
-        *,
-        robust_method: str,
-        n_perm: int,
-        rng: np.random.Generator,
-        groups: Optional[np.ndarray],
-    ) -> float:
-        from eeg_pipeline.utils.analysis.stats.correlation import compute_robust_correlation
-        from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
-
-        valid = np.isfinite(x_vec) & np.isfinite(y_vec)
-        if valid.sum() < 4:
-            return np.nan
-
-        x_v = x_vec[valid]
-        y_v = y_vec[valid]
-        groups_v = np.asarray(groups)[valid] if groups is not None else None
-
-        r_obs, _ = compute_robust_correlation(x_v, y_v, method=robust_method)
-        if not np.isfinite(r_obs):
-            return np.nan
-
-        extreme = 0
-        for _ in range(int(n_perm)):
-            perm_idx = permute_within_groups(len(y_v), rng, groups_v, scheme=perm_scheme)
-            y_perm = y_v[perm_idx]
-            r_perm, _ = compute_robust_correlation(x_v, y_perm, method=robust_method)
-            if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
-                extreme += 1
-
-        # Add-one smoothing for an exact, non-zero p-value
-        return float((extreme + 1) / (int(n_perm) + 1))
 
     perm_ok_standard = (
         perm_enabled
@@ -1932,69 +2085,58 @@ def stage_correlate_pvalues(
             })
         return records
 
-    rng = ctx.rng or np.random.default_rng(42)
-    n_computed = 0
+    base_seed = 42 if ctx.rng is None else int(ctx.rng.integers(0, 2**31))
+    n_records = len(records)
+    n_jobs = get_n_jobs(ctx.config, default=-1, config_path="behavior_analysis.n_jobs")
+    n_jobs_actual = _normalize_n_jobs(n_jobs)
 
-    for rec in records:
-        feat = rec["feature"]
-        target = rec["target"]
-        r_raw = rec.get("r_raw", np.nan)
-        n = rec.get("n", 0)
+    ctx.logger.info(
+        "Correlations pvalues: %d records, n_perm=%d, n_jobs=%d",
+        n_records, n_perm, n_jobs_actual,
+    )
 
-        if not (np.isfinite(r_raw) and int(n) > 0):
-            rec.update({
-                "n_permutations": int(n_perm),
-                "p_perm_raw": np.nan,
-                "p_perm_partial_cov": np.nan,
-                "p_perm_partial_temp": np.nan,
-                "p_perm_partial_cov_temp": np.nan,
-            })
-            continue
-
-        x = pd.to_numeric(design.df_trials[feat], errors="coerce")
-        y = pd.to_numeric(design.df_trials[target], errors="coerce")
-
-        if perm_ok_robust:
-            p_perm_raw = _robust_permutation_pvalue(
-                x.to_numpy(dtype=float),
-                y.to_numpy(dtype=float),
-                robust_method=str(robust_method).strip().lower(),
-                n_perm=int(n_perm),
-                rng=rng,
-                groups=design.groups_for_perm,
-            )
-            rec.update({
-                "n_permutations": int(n_perm),
-                "p_perm_raw": float(p_perm_raw) if np.isfinite(p_perm_raw) else np.nan,
-                "p_perm_partial_cov": np.nan,
-                "p_perm_partial_temp": np.nan,
-                "p_perm_partial_cov_temp": np.nan,
-            })
-        else:
-            temp_for_partial = design.temperature_series if (design.temperature_series is not None and target != "temperature") else None
-            p_perm, p_perm_cov, p_perm_temp, p_perm_cov_temp = compute_permutation_pvalues_with_cov_temp(
-                x_aligned=pd.Series(x.to_numpy(dtype=float), index=design.df_trials.index),
-                y_aligned=pd.Series(y.to_numpy(dtype=float), index=design.df_trials.index),
-                covariates_df=design.cov_df,
-                temp_series=temp_for_partial,
-                method=method.strip().lower(),
+    if n_jobs_actual > 1 and n_records >= 100:
+        updated_records = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_compute_single_pvalue)(
+                rec=rec,
+                df_trials=design.df_trials,
+                df_index=design.df_trials.index,
+                cov_df=design.cov_df,
+                temperature_series=design.temperature_series,
+                groups_for_perm=design.groups_for_perm,
+                method=method,
+                robust_method=robust_method,
                 n_perm=n_perm,
-                n_eff=int(n),
-                rng=rng,
+                perm_scheme=perm_scheme,
+                rng_seed=base_seed + i,
                 config=ctx.config,
-                groups=design.groups_for_perm,
+                perm_ok_robust=perm_ok_robust,
             )
-            rec.update({
-                "n_permutations": int(n_perm),
-                "p_perm_raw": float(p_perm) if np.isfinite(p_perm) else np.nan,
-                "p_perm_partial_cov": float(p_perm_cov) if np.isfinite(p_perm_cov) else np.nan,
-                "p_perm_partial_temp": float(p_perm_temp) if np.isfinite(p_perm_temp) else np.nan,
-                "p_perm_partial_cov_temp": float(p_perm_cov_temp) if np.isfinite(p_perm_cov_temp) else np.nan,
-            })
-        n_computed += 1
+            for i, rec in enumerate(records)
+        )
+    else:
+        updated_records = [
+            _compute_single_pvalue(
+                rec=rec,
+                df_trials=design.df_trials,
+                df_index=design.df_trials.index,
+                cov_df=design.cov_df,
+                temperature_series=design.temperature_series,
+                groups_for_perm=design.groups_for_perm,
+                method=method,
+                robust_method=robust_method,
+                n_perm=n_perm,
+                perm_scheme=perm_scheme,
+                rng_seed=base_seed + i,
+                config=ctx.config,
+                perm_ok_robust=perm_ok_robust,
+            )
+            for i, rec in enumerate(records)
+        ]
 
+    n_computed = sum(1 for r in updated_records if np.isfinite(r.get("p_perm_raw", np.nan)))
     ctx.logger.info("Correlations pvalues: computed %d permutation tests (n_perm=%d)", n_computed, n_perm)
-    return records
+    return updated_records
 
 
 def stage_correlate_primary_selection(
@@ -2557,7 +2699,7 @@ def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
     suffix = _feature_suffix_from_context(ctx)
     fname = f"trials{suffix}"
     out_dir = _get_stats_subfolder(ctx, "trial_table")
-    out_path = out_dir / f"{fname}.tsv"
+    out_path = out_dir / f"{fname}.parquet"
 
     # Create a simple object with df and metadata for save_trial_table
     class _TableWrapper:
@@ -2597,7 +2739,7 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     These variables are useful for habituation/dynamics analyses.
     """
     from eeg_pipeline.utils.data.trial_table import add_lag_and_delta_features
-    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_parquet
 
     df = _load_trial_table_df(ctx)
     if not _is_dataframe_valid(df):
@@ -2613,8 +2755,8 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
 
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "lag_features")
-    out_path = out_dir / f"trials_with_lags{suffix}.tsv"
-    write_tsv(df_augmented, out_path)
+    out_path = out_dir / f"trials_with_lags{suffix}.parquet"
+    write_parquet(df_augmented, out_path)
 
     meta_path = out_dir / f"lag_features{suffix}.metadata.json"
     _write_metadata_file(meta_path, lag_meta)
@@ -2632,7 +2774,7 @@ def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     cross-validated (out-of-run) prediction to avoid overfitting.
     """
     from eeg_pipeline.utils.data.trial_table import add_pain_residual
-    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_parquet
 
     df = _load_trial_table_df(ctx)
     if not _is_dataframe_valid(df):
@@ -2652,8 +2794,8 @@ def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
 
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "pain_residual")
-    out_path = out_dir / f"trials_with_residual{suffix}.tsv"
-    write_tsv(df_augmented, out_path)
+    out_path = out_dir / f"trials_with_residual{suffix}.parquet"
+    write_parquet(df_augmented, out_path)
 
     meta_path = out_dir / f"pain_residual{suffix}.metadata.json"
     _write_metadata_file(meta_path, resid_meta)
@@ -2716,15 +2858,15 @@ def write_temperature_models(
     
     Single responsibility: Persist temperature model artifacts.
     """
-    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_parquet
 
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "temperature_models")
 
     if model_comparison is not None:
         if _is_dataframe_valid(model_comparison.df):
-            comparison_path = out_dir / f"model_comparison{suffix}.tsv"
-            write_tsv(model_comparison.df, comparison_path)
+            comparison_path = out_dir / f"model_comparison{suffix}.parquet"
+            write_parquet(model_comparison.df, comparison_path)
         
         metadata_path = out_dir / f"model_comparison{suffix}.metadata.json"
         metadata_path.write_text(
@@ -2735,8 +2877,8 @@ def write_temperature_models(
 
     if breakpoint is not None:
         if _is_dataframe_valid(breakpoint.df):
-            breakpoint_path = out_dir / f"breakpoint_candidates{suffix}.tsv"
-            write_tsv(breakpoint.df, breakpoint_path)
+            breakpoint_path = out_dir / f"breakpoint_candidates{suffix}.parquet"
+            write_parquet(breakpoint.df, breakpoint_path)
         
         metadata_path = out_dir / f"breakpoint_test{suffix}.metadata.json"
         metadata_path.write_text(
@@ -2806,7 +2948,6 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     Run-level aggregates features/outcomes per run before fitting, avoiding pseudo-replication.
     """
     from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
-    from eeg_pipeline.infra.tsv import write_tsv
 
     suffix = _feature_suffix_from_context(ctx)
     method_label = config.method_label
@@ -2856,17 +2997,16 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     reg_df = _attach_temperature_metadata(reg_df, reg_meta)
 
     out_dir = _get_stats_subfolder(ctx, "trialwise_regression")
-    out_path = out_dir / f"regression_feature_effects{suffix}{method_suffix}.tsv"
+    out_path = out_dir / f"regression_feature_effects{suffix}{method_suffix}.parquet"
     if not reg_df.empty:
-        write_tsv(reg_df, out_path)
-        ctx.logger.info("Regression results saved: %s/%s (%d features)", out_dir.name, out_path.name, len(reg_df))
+        actual_path = _write_stats_table(ctx, reg_df, out_path)
+        ctx.logger.info("Regression results saved: %s (%d features)", actual_path.name, len(reg_df))
     return reg_df
 
 
 def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Fit multiple model families per feature (OLS-HC3 / robust / quantile / logistic)."""
     from eeg_pipeline.utils.analysis.stats.feature_models import run_feature_model_families
-    from eeg_pipeline.infra.tsv import write_tsv
 
     suffix = _feature_suffix_from_context(ctx)
     method_label = getattr(config, "method_label", "")
@@ -2893,17 +3033,16 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     model_df = _attach_temperature_metadata(model_df, model_meta, target_col="target")
 
     out_dir = _get_stats_subfolder(ctx, "feature_models")
-    out_path = out_dir / f"models_feature_effects{suffix}{method_suffix}.tsv"
+    out_path = out_dir / f"models_feature_effects{suffix}{method_suffix}.parquet"
     if model_df is not None and not model_df.empty:
-        write_tsv(model_df, out_path)
-        ctx.logger.info("Model families results saved: %s/%s (%d rows)", out_dir.name, out_path.name, len(model_df))
+        actual_path = _write_stats_table(ctx, model_df, out_path)
+        ctx.logger.info("Model families results saved: %s (%d rows)", actual_path.name, len(model_df))
     return model_df if model_df is not None else pd.DataFrame()
 
 
 def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Assess within-subject run/block stability of feature→outcome associations (non-gating)."""
     from eeg_pipeline.utils.analysis.stats.stability import compute_groupwise_stability
-    from eeg_pipeline.infra.tsv import write_tsv
 
     filename = _build_output_filename(ctx, config, "stability_groupwise")
 
@@ -2953,10 +3092,10 @@ def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     ctx.data_qc["stability_groupwise"] = stab_meta
 
     out_dir = _get_stats_subfolder(ctx, "stability_groupwise")
-    out_path = out_dir / f"{filename}.tsv"
+    out_path = out_dir / f"{filename}.parquet"
     if stab_df is not None and not stab_df.empty:
-        write_tsv(stab_df, out_path)
-        ctx.logger.info("Stability results saved: %s/%s (%d features)", out_dir.name, out_path.name, len(stab_df))
+        actual_path = _write_stats_table(ctx, stab_df, out_path)
+        ctx.logger.info("Stability results saved: %s (%d features)", actual_path.name, len(stab_df))
     _write_metadata_file(out_dir / f"{filename}.metadata.json", stab_meta)
     return stab_df if stab_df is not None else pd.DataFrame()
 
@@ -2964,7 +3103,6 @@ def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 def stage_consistency(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataFrame:
     """Merge correlations/regression/models and flag effect-direction contradictions (non-gating)."""
     from eeg_pipeline.utils.analysis.stats.consistency import build_effect_direction_consistency_summary
-    from eeg_pipeline.infra.tsv import write_tsv
 
     filename = _build_output_filename(ctx, config, "consistency_summary")
 
@@ -2981,17 +3119,16 @@ def stage_consistency(ctx: BehaviorContext, config: Any, results: Any) -> pd.Dat
         return pd.DataFrame()
 
     out_dir = _get_stats_subfolder(ctx, "consistency_summary")
-    out_path = out_dir / f"{filename}.tsv"
-    write_tsv(out_df, out_path)
+    out_path = out_dir / f"{filename}.parquet"
+    actual_path = _write_stats_table(ctx, out_df, out_path)
     _write_metadata_file(out_dir / f"{filename}.metadata.json", meta)
-    ctx.logger.info("Consistency summary saved: %s (%d features)", out_path.name, len(out_df))
+    ctx.logger.info("Consistency summary saved: %s (%d features)", actual_path.name, len(out_df))
     return out_df
 
 
 def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataFrame:
     """Compute leverage/Cook's summaries for top effects (non-gating)."""
     from eeg_pipeline.utils.analysis.stats.influence import compute_influence_diagnostics
-    from eeg_pipeline.infra.tsv import write_tsv
 
     df_trials = _load_trial_table_df(ctx)
     if not _is_dataframe_valid(df_trials):
@@ -3023,10 +3160,10 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
 
     out_dir = _get_stats_subfolder(ctx, "influence_diagnostics")
     filename = _build_output_filename(ctx, config, "influence_diagnostics")
-    out_path = out_dir / f"{filename}.tsv"
-    write_tsv(out_df, out_path)
+    out_path = out_dir / f"{filename}.parquet"
+    actual_path = _write_stats_table(ctx, out_df, out_path)
     _write_metadata_file(out_dir / f"{filename}.metadata.json", meta)
-    ctx.logger.info("Influence diagnostics saved: %s/%s (%d rows)", out_dir.name, out_path.name, len(out_df))
+    ctx.logger.info("Influence diagnostics saved: %s (%d rows)", actual_path.name, len(out_df))
     return out_df
 
 
@@ -3300,7 +3437,7 @@ def stage_condition_column(
     Supports primary_unit=trial|run to control unit of analysis.
     """
     from eeg_pipeline.analysis.behavior.api import split_by_condition, compute_condition_effects
-    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_parquet
 
     fail_fast = get_config_value(ctx.config, "behavior_analysis.condition.fail_fast", True)
     primary_unit = str(get_config_value(
@@ -3422,8 +3559,8 @@ def stage_condition_column(
                 analysis_type="condition_column",
             )
 
-            col_path = out_dir / f"condition_effects_column{suffix}.tsv"
-            write_tsv(column_df, col_path)
+            col_path = out_dir / f"condition_effects_column{suffix}.parquet"
+            write_parquet(column_df, col_path)
             ctx.logger.info(f"Condition column comparison: {len(column_df)} features saved to {col_path}")
             return column_df
 
@@ -3500,7 +3637,7 @@ def stage_condition_window(
     
     Single responsibility: Window contrast comparison.
     """
-    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_parquet
 
     if compare_windows is None:
         compare_windows = get_config_value(
@@ -3543,8 +3680,8 @@ def stage_condition_window(
     )
     
     if not window_df.empty:
-        win_path = out_dir / f"condition_effects_window{suffix}.tsv"
-        write_tsv(window_df, win_path)
+        win_path = out_dir / f"condition_effects_window{suffix}.parquet"
+        write_parquet(window_df, win_path)
         ctx.logger.info(f"Condition window comparison: {len(window_df)} features saved to {win_path}")
 
     return window_df
@@ -3954,10 +4091,10 @@ def stage_temporal_stats(
             df_temporal["correction_method"] = correction_method
         
         # Save combined temporal correlations using consistent naming (like regular correlations)
-        combined_tsv_path = out_dir / f"temporal_correlations{method_suffix}.tsv"
-        _write_stats_table(ctx, df_temporal, combined_tsv_path)
+        combined_path = out_dir / f"temporal_correlations{method_suffix}.parquet"
+        _write_stats_table(ctx, df_temporal, combined_path)
         ctx.logger.info(
-            f"Saved combined temporal correlations: {len(all_temporal_records)} tests -> {combined_tsv_path.name}"
+            f"Saved combined temporal correlations: {len(all_temporal_records)} tests -> {combined_path.name}"
         )
         
         # Save normalized results for temporal correlations (consistent with other correlation outputs)
@@ -3983,7 +4120,7 @@ def stage_temporal_stats(
         
         if normalized_records:
             df_normalized = pd.DataFrame(normalized_records)
-            normalized_path = out_dir / f"normalized_results{method_suffix}.tsv"
+            normalized_path = out_dir / f"normalized_results{method_suffix}.parquet"
             _write_stats_table(ctx, df_normalized, normalized_path)
             ctx.logger.debug(
                 f"Temporal normalized results: {len(normalized_records)} records -> {normalized_path.name}"
@@ -4128,7 +4265,7 @@ def run_group_level_mixed_effects(
         Results with coefficients, p-values, and family structure
     """
     from eeg_pipeline.infra.paths import deriv_stats_path
-    from eeg_pipeline.infra.tsv import read_tsv
+    from eeg_pipeline.infra.tsv import read_parquet
     
     try:
         import statsmodels.formula.api as smf
@@ -4141,15 +4278,13 @@ def run_group_level_mixed_effects(
     
     for sub in subjects:
         stats_dir = deriv_stats_path(deriv_root, sub)
-        trial_path = stats_dir / "trial_table.tsv"
-        if not trial_path.exists():
-            trial_path = stats_dir / "trials_with_features.tsv"
+        trial_path = stats_dir / "trial_table" / "trials.parquet"
         
         if not trial_path.exists():
             logger.warning(f"No trial table for sub-{sub}; skipping.")
             continue
         
-        df = read_tsv(trial_path)
+        df = read_parquet(trial_path)
         if df is None or df.empty:
             continue
         
@@ -4297,21 +4432,19 @@ def run_group_level_correlations(
         Number of permutations
     """
     from eeg_pipeline.infra.paths import deriv_stats_path
-    from eeg_pipeline.infra.tsv import read_tsv
+    from eeg_pipeline.infra.tsv import read_parquet
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
     
     all_trials: List[pd.DataFrame] = []
     
     for sub in subjects:
         stats_dir = deriv_stats_path(deriv_root, sub)
-        trial_path = stats_dir / "trial_table.tsv"
-        if not trial_path.exists():
-            trial_path = stats_dir / "trials_with_features.tsv"
+        trial_path = stats_dir / "trial_table" / "trials.parquet"
         
         if not trial_path.exists():
             continue
         
-        df = read_tsv(trial_path)
+        df = read_parquet(trial_path)
         if df is None or df.empty:
             continue
         
@@ -4460,7 +4593,7 @@ def run_group_level_analysis(
     GroupLevelResult
         Aggregated group-level results
     """
-    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_parquet
     from eeg_pipeline.infra.paths import ensure_dir
     
     logger.info("="*60)
@@ -4485,8 +4618,8 @@ def run_group_level_analysis(
         
         if output_dir and mixed_result.df is not None and not mixed_result.df.empty:
             ensure_dir(output_dir)
-            write_tsv(mixed_result.df, output_dir / "group_mixed_effects.tsv")
-            logger.info("Saved mixed-effects results: %s", output_dir / "group_mixed_effects.tsv")
+            write_parquet(mixed_result.df, output_dir / "group_mixed_effects.parquet")
+            logger.info("Saved mixed-effects results: %s", output_dir / "group_mixed_effects.parquet")
     
     if run_multilevel_correlations:
         logger.info("Running multilevel correlations with block-restricted permutations...")
@@ -4502,8 +4635,8 @@ def run_group_level_analysis(
         
         if output_dir and multilevel_df is not None and not multilevel_df.empty:
             ensure_dir(output_dir)
-            write_tsv(multilevel_df, output_dir / "group_multilevel_correlations.tsv")
-            logger.info("Saved multilevel correlations: %s", output_dir / "group_multilevel_correlations.tsv")
+            write_parquet(multilevel_df, output_dir / "group_multilevel_correlations.parquet")
+            logger.info("Saved multilevel correlations: %s", output_dir / "group_multilevel_correlations.parquet")
     
     return GroupLevelResult(
         mixed_effects=mixed_result,
@@ -4522,7 +4655,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     If b3 is significant, the feature moderates how temperature affects pain rating.
     """
     from eeg_pipeline.utils.analysis.stats.moderation import run_moderation_analysis
-    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_parquet
 
     suffix = _feature_suffix_from_context(ctx)
     method_label = getattr(config, "method_label", "")
@@ -4632,9 +4765,9 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         )
 
     out_dir = _get_stats_subfolder(ctx, "moderation")
-    out_path = out_dir / f"moderation_results{suffix}{method_suffix}.tsv"
+    out_path = out_dir / f"moderation_results{suffix}{method_suffix}.parquet"
     if not mod_df.empty:
-        write_tsv(mod_df, out_path)
+        write_parquet(mod_df, out_path)
         n_sig = int((mod_df["p_fdr"] < fdr_alpha).sum())
         ctx.logger.info(
             "Moderation: %d features tested, %d significant (FDR < %.2f)",
@@ -4651,31 +4784,31 @@ def _get_fdr_patterns(config: Any) -> List[str]:
     patterns = []
     
     if getattr(config, "run_condition_comparison", False):
-        patterns.append("condition_effects*.tsv")
+        patterns.append("condition_effects*.parquet")
     if getattr(config, "run_regression", False):
-        patterns.append("regression_feature_effects*.tsv")
+        patterns.append("regression_feature_effects*.parquet")
     if getattr(config, "run_models", False):
-        patterns.append("models_feature_effects*.tsv")
+        patterns.append("models_feature_effects*.parquet")
     if getattr(config, "run_mediation", False):
-        patterns.append("mediation*.tsv")
+        patterns.append("mediation*.parquet")
     if getattr(config, "run_moderation", False):
-        patterns.append("moderation_results*.tsv")
+        patterns.append("moderation_results*.parquet")
     if getattr(config, "run_mixed_effects", False):
-        patterns.append("mixed_effects*.tsv")
+        patterns.append("mixed_effects*.parquet")
     if getattr(config, "run_correlations", True):
-        patterns.append("correlations*.tsv")
+        patterns.append("correlations*.parquet")
     if getattr(config, "compute_pain_sensitivity", False):
-        patterns.append("pain_sensitivity*.tsv")
+        patterns.append("pain_sensitivity*.parquet")
     if getattr(config, "run_temporal_correlations", False):
         patterns.extend([
-            "temporal_correlations/*.tsv",  # Unified temporal correlations output folder
+            "temporal_correlations/*.parquet",
         ])
     if getattr(config, "run_cluster_tests", False):
-        patterns.append("cluster/*.tsv")  # Cluster results in cluster subdirectory
+        patterns.append("cluster/*.parquet")
 
     patterns = list(set(patterns))
     if not patterns:
-        patterns = ["correlations*.tsv", "condition_effects*.tsv", "pain_sensitivity*.tsv"]
+        patterns = ["correlations*.parquet", "condition_effects*.parquet", "pain_sensitivity*.parquet"]
     return patterns
 
 
@@ -4726,8 +4859,9 @@ def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.Data
     # Save summary
     if not hier_summary.empty:
         hier_dir = _get_stats_subfolder(ctx, "fdr")
-        hier_path = hier_dir / "hierarchical_fdr_summary.tsv"
-        hier_summary.to_csv(hier_path, sep="\t", index=False)
+        hier_path = hier_dir / "hierarchical_fdr_summary.parquet"
+        from eeg_pipeline.infra.tsv import write_parquet
+        write_parquet(hier_summary, hier_path)
         ctx.logger.info(f"Hierarchical FDR summary saved to {hier_path}")
 
         for _, row in hier_summary.iterrows():
@@ -4795,17 +4929,17 @@ def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
         return "\n".join([header, sep, *rows])
 
     patterns = [
-        "correlations*.tsv",
-        "pain_sensitivity*.tsv",
-        "regression_feature_effects*.tsv",
-        "models_feature_effects*.tsv",
-        "condition_effects*.tsv",
-        "consistency_summary*.tsv",
-        "influence_diagnostics*.tsv",
-        "temperature_model_comparison*.tsv",
-        "temperature_breakpoint_candidates*.tsv",
-        "hierarchical_fdr_summary.tsv",
-        "normalized_results*.tsv",
+        "correlations*.parquet",
+        "pain_sensitivity*.parquet",
+        "regression_feature_effects*.parquet",
+        "models_feature_effects*.parquet",
+        "condition_effects*.parquet",
+        "consistency_summary*.parquet",
+        "influence_diagnostics*.parquet",
+        "temperature_model_comparison*.parquet",
+        "temperature_breakpoint_candidates*.parquet",
+        "hierarchical_fdr_summary.parquet",
+        "normalized_results*.parquet",
         "summary.json",
         "analysis_metadata.json",
         "outputs_manifest.json",

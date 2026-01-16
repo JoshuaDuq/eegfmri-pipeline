@@ -429,7 +429,7 @@ func (m Model) renderBandSelection() string {
 
 	// Instructions
 	instructionStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-	b.WriteString(instructionStyle.Render("  Space: edit • A: add band • D: delete band") + "\n\n")
+	b.WriteString(instructionStyle.Render("  Space: toggle • E: edit • +: add band • D: delete band") + "\n\n")
 
 	for i, band := range m.bands {
 		isSelected := m.bandSelected[i]
@@ -512,7 +512,7 @@ func (m Model) renderROISelection() string {
 
 	// Instructions
 	instructionStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-	b.WriteString(instructionStyle.Render("  Space: edit • A: add ROI • D: delete ROI") + "\n\n")
+	b.WriteString(instructionStyle.Render("  Space: toggle • E: edit • +: add ROI • D: delete ROI") + "\n\n")
 
 	for i, roi := range m.rois {
 		isSelected := m.roiSelected[i]
@@ -558,7 +558,118 @@ func (m Model) renderROISelection() string {
 		b.WriteString("\n")
 	}
 
+	// Channel reference section
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(strings.Repeat("─", 60)) + "\n")
+
+	// Compute used vs unused channels
+	usedChannels, unusedChannels := m.computeChannelUsage()
+
+	// Unused channels (available but not yet assigned to any ROI)
+	if len(unusedChannels) > 0 {
+		unusedLabel := lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render("Unused Channels")
+		unusedCount := lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf(" (%d)", len(unusedChannels)))
+		b.WriteString(unusedLabel + unusedCount + "\n")
+
+		channelList := m.formatChannelList(unusedChannels, styles.Success)
+		b.WriteString(channelList)
+	} else if len(m.availableChannels) > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Italic(true).Render("  All channels assigned to ROIs ✓") + "\n")
+	} else {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render("  No channel information available") + "\n")
+	}
+
+	// Used channels (already assigned to one or more ROIs)
+	if len(usedChannels) > 0 {
+		b.WriteString("\n")
+		usedLabel := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("Used Channels")
+		usedCount := lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf(" (%d)", len(usedChannels)))
+		b.WriteString(usedLabel + usedCount + "\n")
+
+		channelList := m.formatChannelList(usedChannels, styles.Accent)
+		b.WriteString(channelList)
+	}
+
+	// Unavailable channels (bad channels from preprocessing)
+	if len(m.unavailableChannels) > 0 {
+		b.WriteString("\n")
+		unavailLabel := lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render("Unavailable Channels (bad)")
+		unavailCount := lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf(" (%d)", len(m.unavailableChannels)))
+		b.WriteString(unavailLabel + unavailCount + "\n")
+
+		channelList := m.formatChannelList(m.unavailableChannels, styles.Error)
+		b.WriteString(channelList)
+	}
+
 	return b.String()
+}
+
+// computeChannelUsage partitions available channels into used (in ROIs) and unused
+func (m Model) computeChannelUsage() (used, unused []string) {
+	if len(m.availableChannels) == 0 {
+		return nil, nil
+	}
+
+	// Build set of channels used across all ROIs
+	usedSet := make(map[string]bool)
+	for _, roi := range m.rois {
+		for _, ch := range strings.Split(roi.Channels, ",") {
+			ch = strings.TrimSpace(ch)
+			if ch != "" {
+				usedSet[strings.ToUpper(ch)] = true
+			}
+		}
+	}
+
+	// Partition available channels
+	for _, ch := range m.availableChannels {
+		if usedSet[strings.ToUpper(ch)] {
+			used = append(used, ch)
+		} else {
+			unused = append(unused, ch)
+		}
+	}
+
+	return used, unused
+}
+
+// formatChannelList formats a list of channel names into wrapped lines
+func (m Model) formatChannelList(channels []string, color lipgloss.Color) string {
+	if len(channels) == 0 {
+		return ""
+	}
+
+	const maxWidth = 70
+	var lines []string
+	var currentLine strings.Builder
+	currentLine.WriteString("  ")
+
+	for i, ch := range channels {
+		sep := ""
+		if i > 0 {
+			sep = ", "
+		}
+
+		entry := sep + ch
+		if currentLine.Len()+len(entry) > maxWidth {
+			lines = append(lines, currentLine.String())
+			currentLine.Reset()
+			currentLine.WriteString("  ")
+			entry = ch
+		}
+		currentLine.WriteString(entry)
+	}
+
+	if currentLine.Len() > 2 {
+		lines = append(lines, currentLine.String())
+	}
+
+	channelStyle := lipgloss.NewStyle().Foreground(color).Faint(true)
+	var result strings.Builder
+	for _, line := range lines {
+		result.WriteString(channelStyle.Render(line) + "\n")
+	}
+	return result.String()
 }
 
 func (m Model) renderSpatialSelection() string {
@@ -967,7 +1078,7 @@ func (m Model) renderTimeRange() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
 		"  Define time ranges to be computed separately.") + "\n" +
 		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  [A] Add range  [D] Delete range  [Space/Enter] Edit range") + "\n\n")
+			"  [+] Add range  [D] Delete range  [Space/Enter] Edit range") + "\n\n")
 
 	nameWidth := 15
 	valWidth := 10
@@ -1700,6 +1811,12 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	if m.expandedOption == expandedFmriCondBValue {
 		totalLines += len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn))
 	}
+	if m.expandedOption == expandedItpcConditionColumn {
+		totalLines += len(m.availableColumns)
+	}
+	if m.expandedOption == expandedItpcConditionValues {
+		totalLines += len(m.GetDiscoveredColumnValues(m.itpcConditionColumn))
+	}
 
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
@@ -1776,9 +1893,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupPAC:
 			label = "▸ PAC / CFC"
@@ -2103,7 +2220,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Mode"
 			modes := []string{"EEG-only (template)", "fMRI-informed"}
 			value = modes[m.sourceLocMode]
-			hint = "template or subject-specific"
+			hint = "template or subject-specific (fMRI-informed requires fmri-prep)"
 		case optSourceLocMethod:
 			label = "Method"
 			methods := []string{"LCMV", "eLORETA"}
@@ -2570,8 +2687,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value = val
 			expandIndicatorHint := ""
-			if len(m.discoveredColumns) > 0 {
-				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.discoveredColumns))
+			if len(m.availableColumns) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.availableColumns))
 			}
 			hint = "Space to select" + expandIndicatorHint
 			if m.expandedOption == expandedItpcConditionColumn {
@@ -3291,6 +3408,49 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				lineIdx++
 			}
 		}
+
+		// Expanded items (ITPC condition column)
+		if opt == optItpcConditionColumn && m.expandedOption == expandedItpcConditionColumn {
+			subIndent := "      " // 6 spaces for sub-items
+			for j, col := range m.availableColumns {
+				isSubFocused := j == m.subCursor
+				isSelected := m.itpcConditionColumn == col
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(col) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (ITPC condition values)
+		if opt == optItpcConditionValues && m.expandedOption == expandedItpcConditionValues {
+			subIndent := "      " // 6 spaces for sub-items
+			vals := m.GetDiscoveredColumnValues(m.itpcConditionColumn)
+			for j, v := range vals {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isColumnValueSelected(v)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(v) + "\n")
+				}
+				lineIdx++
+			}
+		}
 	}
 
 	// Show scroll indicator for items below
@@ -3352,6 +3512,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			label := "▸ Trial Table"
 			if m.behaviorGroupTrialTableExpanded {
 				label = "▾ Trial Table"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupPainResidual:
+			label := "▸ Pain Residual"
+			if m.behaviorGroupPainResidualExpanded {
+				label = "▾ Pain Residual"
 			}
 			return label, "", "Space to toggle"
 		case optBehaviorGroupCorrelations:
@@ -3500,8 +3666,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Max Run Dummies", val, "skip if > N levels"
-		case optTrialTableOnlyMode:
-			return "Trial-Table Only", m.boolToOnOff(m.trialTableOnly), "skip temporal/cluster stages"
 		case optFDRAlpha:
 			val := fmt.Sprintf("%.3f", m.fdrAlpha)
 			if m.editingNumber && m.isCurrentlyEditing(optFDRAlpha) {

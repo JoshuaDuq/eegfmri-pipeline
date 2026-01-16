@@ -38,6 +38,8 @@ type SubjectsResponse struct {
 	Count                 int                    `json:"count"`
 	AvailableWindows      []string               `json:"available_windows"`
 	AvailableEventColumns []string               `json:"available_event_columns"`
+	AvailableChannels     []string               `json:"available_channels"`
+	UnavailableChannels   []string               `json:"unavailable_channels"`
 }
 
 // ConfigSummaryResponse from eeg-pipeline info config --json
@@ -229,6 +231,8 @@ func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd
 			Subjects:              response.Subjects,
 			AvailableWindows:      response.AvailableWindows,
 			AvailableEventColumns: response.AvailableEventColumns,
+			AvailableChannels:     response.AvailableChannels,
+			UnavailableChannels:   response.UnavailableChannels,
 		}
 	}
 }

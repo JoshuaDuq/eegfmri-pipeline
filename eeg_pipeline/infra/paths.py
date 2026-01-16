@@ -96,14 +96,7 @@ def deriv_group_plots_path(deriv_root: Path, subdir: Optional[str] = None) -> Pa
 def find_connectivity_features_path(deriv_root: Path, subject: str) -> Path:
     sub = _normalize_subject_label(subject)
     base = Path(deriv_root) / sub / "eeg" / "features"
-    
-    # Try new subfolder first
-    new_path = base / "connectivity" / "features_connectivity.tsv"
-    if new_path.exists():
-        return new_path
-        
-    # Fallback to root
-    return base / "features_connectivity.tsv"
+    return base / "connectivity" / "features_connectivity.parquet"
 
 
 def _resolve_path_from_config(

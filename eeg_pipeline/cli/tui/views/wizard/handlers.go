@@ -1353,7 +1353,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.itpcMethod = (m.itpcMethod + 1) % 4 // 0: global, 1: fold_global, 2: loo, 3: condition
 		m.useDefaultAdvanced = false
 	case optItpcConditionColumn:
-		if len(m.discoveredColumns) > 0 {
+		if len(m.availableColumns) > 0 {
 			m.expandedOption = expandedItpcConditionColumn
 			m.subCursor = 0
 		} else {
@@ -2036,6 +2036,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupTrialTable:
 		m.behaviorGroupTrialTableExpanded = !m.behaviorGroupTrialTableExpanded
 		m.useDefaultAdvanced = false
+	case optBehaviorGroupPainResidual:
+		m.behaviorGroupPainResidualExpanded = !m.behaviorGroupPainResidualExpanded
+		m.useDefaultAdvanced = false
 	case optBehaviorGroupCorrelations:
 		m.behaviorGroupCorrelationsExpanded = !m.behaviorGroupCorrelationsExpanded
 		m.useDefaultAdvanced = false
@@ -2119,9 +2122,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optRunAdjustmentMaxDummies:
 		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optTrialTableOnlyMode:
-		m.trialTableOnly = !m.trialTableOnly
 		m.useDefaultAdvanced = false
 	case optFDRAlpha:
 		m.startNumberEdit()

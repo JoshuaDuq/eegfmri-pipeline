@@ -122,6 +122,64 @@ def write_table_with_formats(
     return paths_written
 
 
+PARQUET_SIZE_THRESHOLD = 100
+
+
+def write_stats_table(
+    df: pd.DataFrame,
+    path: Path,
+    index: bool = False,
+    force_tsv: bool = False,
+) -> Path:
+    """Write stats DataFrame, using parquet for large tables.
+    
+    Automatically switches to parquet format for DataFrames with more than
+    PARQUET_SIZE_THRESHOLD rows, unless force_tsv is True.
+    
+    Args:
+        df: DataFrame to write
+        path: Output path (extension will be adjusted if needed)
+        index: Whether to include index
+        force_tsv: If True, always use TSV regardless of size
+        
+    Returns:
+        Actual path written (may differ from input if extension changed)
+    """
+    use_parquet = not force_tsv and len(df) > PARQUET_SIZE_THRESHOLD
+    
+    if use_parquet:
+        actual_path = path.with_suffix(".parquet")
+        write_parquet(df, actual_path, index=index)
+    else:
+        actual_path = path.with_suffix(".tsv") if path.suffix == ".parquet" else path
+        write_tsv(df, actual_path, index=index)
+    
+    return actual_path
+
+
+def read_stats_table(path: Path, **kwargs) -> pd.DataFrame:
+    """Read stats table, checking parquet then TSV.
+    
+    Args:
+        path: Path to read (will check both .parquet and .tsv versions)
+        
+    Returns:
+        DataFrame from file
+    """
+    parquet_path = path.with_suffix(".parquet")
+    if parquet_path.exists():
+        return read_parquet(parquet_path, **kwargs)
+    
+    tsv_path = path.with_suffix(".tsv")
+    if tsv_path.exists():
+        return read_tsv(tsv_path, **kwargs)
+    
+    if path.exists():
+        return read_table(path, **kwargs)
+    
+    raise FileNotFoundError(f"No stats table found at {path} (.parquet or .tsv)")
+
+
 __all__ = [
     "read_tsv",
     "write_tsv",
@@ -131,5 +189,8 @@ __all__ = [
     "write_table",
     "write_csv",
     "write_table_with_formats",
+    "write_stats_table",
+    "read_stats_table",
+    "PARQUET_SIZE_THRESHOLD",
 ]
 

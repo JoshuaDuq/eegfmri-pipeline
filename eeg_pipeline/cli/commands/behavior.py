@@ -80,8 +80,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="run_adjustment_include_in_correlations",
     )
     compute_group.add_argument("--run-adjustment-max-dummies", type=int, default=None)
-    compute_group.add_argument("--trial-table-only", action="store_true", default=None, dest="trial_table_only")
-    compute_group.add_argument("--no-trial-table-only", action="store_false", dest="trial_table_only")
     compute_group.add_argument("--fdr-alpha", type=float, default=None)
     compute_group.add_argument("--compute-change-scores", action="store_true", default=None)
     compute_group.add_argument("--no-compute-change-scores", action="store_false", dest="compute_change_scores")
@@ -444,8 +442,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         run_adj_cfg["include_in_correlations"] = bool(args.run_adjustment_include_in_correlations)
     if getattr(args, "run_adjustment_max_dummies", None) is not None:
         run_adj_cfg["max_dummies"] = int(args.run_adjustment_max_dummies)
-    if getattr(args, "trial_table_only", None) is not None:
-        ba.setdefault("trial_table_only", {})["enabled"] = bool(args.trial_table_only)
 
     if getattr(args, "fdr_alpha", None) is not None:
         stats_cfg["fdr_alpha"] = float(args.fdr_alpha)

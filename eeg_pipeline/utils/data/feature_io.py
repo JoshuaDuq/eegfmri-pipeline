@@ -26,7 +26,7 @@ from eeg_pipeline.infra.paths import (
     deriv_stats_path,
     find_connectivity_features_path,
 )
-from eeg_pipeline.infra.tsv import read_table, read_tsv, write_tsv
+from eeg_pipeline.infra.tsv import read_table, read_tsv, write_parquet, write_tsv
 
 
 ###################################################################
@@ -53,19 +53,36 @@ def _safe_read_feature_table(
     features_dir: Path,
     base_name: str,
     logger: logging.Logger,
-    extension: str = ".tsv",
+    extension: str = ".parquet",
     config: Optional[Any] = None,
 ) -> Optional[pd.DataFrame]:
-    """Read feature table, checking subfolder first."""
+    """Read feature table from subfolder.
+    
+    For source localization features, checks both fmri_informed/ and eeg_only/
+    subdirectories to ensure features are found regardless of config mode changes.
+    """
     folder = _get_folder_for_feature(base_name, config)
     filename = f"{base_name}{extension}"
     
+    candidates: List[Path] = []
     if folder:
-        subfolder_path = features_dir / folder / filename
-        if subfolder_path.exists():
-            return _safe_read_table(subfolder_path, logger)
+        candidates.append(features_dir / folder / filename)
+    
+    name = base_name.replace("features_", "") if base_name.startswith("features_") else base_name
+    if name in ("sourcelocalization", "source_localization"):
+        candidates.append(features_dir / "sourcelocalization" / "fmri_informed" / filename)
+        candidates.append(features_dir / "sourcelocalization" / "eeg_only" / filename)
+        candidates.append(features_dir / "sourcelocalization" / filename)
+    
+    seen: set[Path] = set()
+    for c in candidates:
+        if c in seen:
+            continue
+        seen.add(c)
+        if c.exists():
+            return _safe_read_table(c, logger)
             
-    return _safe_read_table(features_dir / filename, logger)
+    return None
 
 
 def load_subject_features(
@@ -83,9 +100,7 @@ def load_subject_features(
     subject_features: Dict[str, pd.DataFrame] = {}
     for subject in subjects:
         features_dir = deriv_features_path(deriv_root, subject)
-        feature_path = features_dir / "power" / "features_power.tsv"
-        if not feature_path.exists():
-            feature_path = features_dir / "features_power.tsv"
+        feature_path = features_dir / "power" / "features_power.parquet"
         if not feature_path.exists():
             logger.warning("Missing features for sub-%s: %s", subject, feature_path)
             continue
@@ -133,6 +148,11 @@ def _validate_feature_lengths(
         )
 
 
+def _find_power_feature_path(feats_dir: Path, base_name: str) -> Path:
+    """Find power feature file in subfolder."""
+    return feats_dir / "power" / f"{base_name}.parquet"
+
+
 def _load_features_and_targets(
     subject: str,
     task: str,
@@ -142,14 +162,9 @@ def _load_features_and_targets(
 ) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame], pd.Series, Any]:
     """Load features and targets for a subject, validating alignment."""
     feats_dir = deriv_features_path(deriv_root, subject)
-    # Try new organized paths first then fallback to root
-    temporal_path = feats_dir / "power" / "features_power.tsv"
-    if not temporal_path.exists():
-        temporal_path = feats_dir / "features_power.tsv"
-        
-    active_path = feats_dir / "power" / "features_power_active.tsv"
-    if not active_path.exists():
-        active_path = feats_dir / "features_power_active.tsv"
+    
+    temporal_path = _find_power_feature_path(feats_dir, "features_power")
+    active_path = _find_power_feature_path(feats_dir, "features_power_active")
         
     conn_path = find_connectivity_features_path(deriv_root, subject)
     
@@ -243,17 +258,26 @@ def _safe_read_feature_table_with_path(
     features_dir: Path,
     base_name: str,
     logger: logging.Logger,
-    extension: str = ".tsv",
+    extension: str = ".parquet",
     config: Optional[Any] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[Path]]:
-    """Read feature table and return the DataFrame and resolved path if found."""
+    """Read feature table and return the DataFrame and resolved path if found.
+    
+    For source localization features, checks both fmri_informed/ and eeg_only/
+    subdirectories to ensure features are found regardless of config mode changes.
+    """
     folder = _get_folder_for_feature(base_name, config)
     filename = f"{base_name}{extension}"
 
     candidates: List[Path] = []
     if folder:
         candidates.append(features_dir / folder / filename)
-    candidates.append(features_dir / filename)
+    
+    name = base_name.replace("features_", "") if base_name.startswith("features_") else base_name
+    if name in ("sourcelocalization", "source_localization"):
+        candidates.append(features_dir / "sourcelocalization" / "fmri_informed" / filename)
+        candidates.append(features_dir / "sourcelocalization" / "eeg_only" / filename)
+        candidates.append(features_dir / "sourcelocalization" / filename)
 
     for candidate in candidates:
         if not candidate.exists():
@@ -447,11 +471,11 @@ def _assign_columns_safely(
     return df
 
 
-def _build_filename(base_name: str, suffix: Optional[str] = None) -> str:
+def _build_filename(base_name: str, suffix: Optional[str] = None, extension: str = ".parquet") -> str:
     """Build filename with optional suffix."""
     if suffix:
-        return f"{base_name}_{suffix}.tsv"
-    return f"{base_name}.tsv"
+        return f"{base_name}_{suffix}{extension}"
+    return f"{base_name}{extension}"
 
 
 def _get_folder_for_feature(base_name: str, config: Optional[Any] = None) -> str:
@@ -504,11 +528,10 @@ def _save_feature_dataframe(
     filename = _build_filename(base_filename, suffix)
     file_path = features_dir / folder_name / filename
     
-    # Ensure nested subdirectories exist
     file_path.parent.mkdir(parents=True, exist_ok=True)
     
     logger.info("Saving %s: %s", feature_type, file_path)
-    write_tsv(df, file_path)
+    write_parquet(df, file_path)
 
 
 def _save_feature_metadata(
@@ -841,7 +864,7 @@ def save_all_features(
     if direct_blocks:
         direct_df = pd.concat(direct_blocks, axis=1)
         direct_df = _dedupe_identical_duplicate_columns(
-            direct_df, "features_power.tsv", logger
+            direct_df, "features_power.parquet", logger
         )
     else:
         direct_df = pd.DataFrame()
@@ -851,7 +874,7 @@ def save_all_features(
         direct_filename = _build_filename("features_power", suffix)
         direct_path = features_dir / folder_name / direct_filename
         logger.info("Saving power features: %s", direct_path)
-        write_tsv(direct_df, direct_path)
+        write_parquet(direct_df, direct_path)
         _save_feature_metadata(
             direct_df, "features_power", features_dir, config, logger, suffix
         )
@@ -861,7 +884,7 @@ def save_all_features(
         active_filename = _build_filename("features_power_active", suffix)
         active_path = features_dir / folder_name / active_filename
         logger.info("Saving active-averaged EEG features: %s", active_path)
-        write_tsv(active_df, active_path)
+        write_parquet(active_df, active_path)
         _save_feature_metadata(
             active_df, "features_power_active", features_dir, config, logger, suffix
         )
@@ -873,9 +896,9 @@ def save_all_features(
         conn_path = features_dir / folder_name / conn_filename
         logger.info("Saving connectivity features: %s", conn_path)
         start_time = time.perf_counter()
-        write_tsv(conn_df, conn_path)
+        write_parquet(conn_df, conn_path)
         logger.info(
-            "Saved connectivity TSV in %.2fs (rows=%d, cols=%d)",
+            "Saved connectivity parquet in %.2fs (rows=%d, cols=%d)",
             time.perf_counter() - start_time,
             len(conn_df),
             len(conn_df.columns),

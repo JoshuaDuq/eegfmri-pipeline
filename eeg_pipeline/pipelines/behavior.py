@@ -129,7 +129,6 @@ class BehaviorPipelineConfig:
     correlation_types: List[str] = field(default_factory=lambda: ["partial_cov_temp"])
     
     # Computation flags
-    trial_table_only: bool = True
     run_trial_table: bool = True
     run_lag_features: bool = True
     run_pain_residual: bool = True
@@ -203,7 +202,6 @@ class BehaviorPipelineConfig:
             robust_method=robust_method,
             method_label=method_label,
             correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_temp"]),
-            trial_table_only=bool(get_config_value(config, "behavior_analysis.trial_table_only.enabled", True)),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
             run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
             run_pain_residual=bool(get_config_value(config, "behavior_analysis.pain_residual.enabled", True)),
@@ -465,12 +463,6 @@ class BehaviorPipeline(PipelineBase):
                 self.logger.info("Auto-enabling `trial_table` (required by selected computations).")
                 comp_flags["trial_table"] = True
 
-            temporal_or_cluster_requested = comp_flags.get("temporal", False) or comp_flags.get("cluster", False)
-            trial_table_only_enabled = bool(getattr(self.pipeline_config, "trial_table_only", True))
-            if temporal_or_cluster_requested and trial_table_only_enabled:
-                self.logger.info("Auto-disabling `trial_table_only` to honor requested temporal/cluster computations.")
-                self.pipeline_config.trial_table_only = False
-
             self.pipeline_config.run_trial_table = comp_flags["trial_table"]
             self.pipeline_config.run_lag_features = comp_flags["lag_features"]
             self.pipeline_config.run_pain_residual = comp_flags["pain_residual"]
@@ -519,15 +511,6 @@ class BehaviorPipeline(PipelineBase):
                 ]
             )
 
-        trial_table_only_mode = bool(getattr(self.pipeline_config, "trial_table_only", True))
-        if trial_table_only_mode:
-            if self.pipeline_config.run_temporal_correlations:
-                self.logger.info("trial_table_only enabled: skipping `temporal` computation.")
-                self.pipeline_config.run_temporal_correlations = False
-            if self.pipeline_config.run_cluster_tests:
-                self.logger.info("trial_table_only enabled: skipping `cluster` computation.")
-                self.pipeline_config.run_cluster_tests = False
-        
         if self.feature_categories:
             self.logger.info("Feature categories filter: %s", ", ".join(self.feature_categories))
         

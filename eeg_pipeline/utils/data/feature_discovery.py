@@ -20,24 +20,24 @@ _BYTES_PER_KILOBYTE = 1024
 
 STANDARD_FEATURE_FILES = {
     # Core spectral
-    "power": "features_power.tsv",
-    "spectral": "features_spectral.tsv",
-    "aperiodic": "features_aperiodic.tsv",
-    "erp": "features_erp.tsv",
-    "erds": "features_erds.tsv",
-    "ratios": "features_ratios.tsv",
-    "asymmetry": "features_asymmetry.tsv",
+    "power": "features_power.parquet",
+    "spectral": "features_spectral.parquet",
+    "aperiodic": "features_aperiodic.parquet",
+    "erp": "features_erp.parquet",
+    "erds": "features_erds.parquet",
+    "ratios": "features_ratios.parquet",
+    "asymmetry": "features_asymmetry.parquet",
     # Connectivity & phase
-    "connectivity": "features_connectivity.tsv",
-    "directedconnectivity": "features_directedconnectivity.tsv",
-    "sourcelocalization": "features_sourcelocalization.tsv",
-    "itpc": "features_itpc.tsv",
-    "pac": "features_pac.tsv",
+    "connectivity": "features_connectivity.parquet",
+    "directedconnectivity": "features_directedconnectivity.parquet",
+    "sourcelocalization": "features_sourcelocalization.parquet",
+    "itpc": "features_itpc.parquet",
+    "pac": "features_pac.parquet",
     # Exploratory & QC
-    "complexity": "features_complexity.tsv",
-    "bursts": "features_bursts.tsv",
-    "quality": "features_quality.tsv",
-    "temporal": "features_temporal.tsv",
+    "complexity": "features_complexity.parquet",
+    "bursts": "features_bursts.parquet",
+    "quality": "features_quality.parquet",
+    "temporal": "features_temporal.parquet",
 }
 
 FEATURE_FILE_DISPLAY_NAMES = {
@@ -124,9 +124,10 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
     """
     Find the feature file path, checking subfolder first then root.
     
-    Features can be stored in two locations:
-    - Subfolder: features/{key}/{filename} (new structure)
-    - Root: features/{filename} (legacy structure)
+    Features are stored in: features/{key}/{filename}
+    
+    For source localization features, checks both fmri_informed/ and eeg_only/
+    subdirectories to ensure files are found regardless of extraction mode.
     
     Parameters
     ----------
@@ -135,14 +136,29 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
     key : str
         Feature key (e.g., 'power', 'connectivity')
     filename : str
-        Feature filename (e.g., 'features_power.tsv')
+        Feature filename (e.g., 'features_power.parquet')
         
     Returns
     -------
     Path
-        Path to the feature file in its subfolder
+        Path to the feature file (first existing location found)
     """
-    return features_dir / key / filename
+    if key == "sourcelocalization":
+        candidates = [
+            features_dir / "sourcelocalization" / "fmri_informed" / filename,
+            features_dir / "sourcelocalization" / "eeg_only" / filename,
+            features_dir / "sourcelocalization" / filename,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return candidates[0]
+    
+    subfolder_path = features_dir / key / filename
+    if subfolder_path.exists():
+        return subfolder_path
+    
+    return subfolder_path
 
 
 def discover_feature_files(

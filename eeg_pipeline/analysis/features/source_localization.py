@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.config.loader import get_frequency_bands
+from eeg_pipeline.utils.config.loader import get_frequency_bands, get_nested_value
 
 if TYPE_CHECKING:
     import mne
@@ -30,11 +30,9 @@ if TYPE_CHECKING:
 def _cfg_get(config: Any, key: str, default: Any) -> Any:
     if config is None:
         return default
-    if hasattr(config, "get"):
+    if hasattr(config, "get") and not isinstance(config, dict):
         return config.get(key, default)
-    if isinstance(config, dict):
-        return config.get(key, default)
-    return default
+    return get_nested_value(config, key, default)
 
 
 def _as_path(value: Any) -> Optional[Path]:

@@ -135,14 +135,6 @@ def generate_coregistration_transform(
     trans_path : Path or None
         Path to generated transform file
     """
-    if not allow_identity_trans:
-        raise RuntimeError(
-            "Refusing to auto-generate an EEG↔MRI transform because doing so without digitization/coregistration "
-            "is scientifically invalid. Provide an existing `*-trans.fif` (recommended), or set "
-            "`feature_engineering.sourcelocalization.bem_generation.allow_identity_trans=true` to force creation "
-            "of an identity transform for debugging only."
-        )
-
     if not check_docker_available():
         raise RuntimeError(
             "Docker is not available. Please install Docker and ensure it is running. "
@@ -169,6 +161,15 @@ def generate_coregistration_transform(
     if trans_path.exists() and not overwrite:
         logger.info(f"Using existing trans file: {trans_path}")
         return trans_path
+
+    # Safety check: refuse to auto-generate identity transform unless explicitly allowed
+    if not allow_identity_trans:
+        raise RuntimeError(
+            "Refusing to auto-generate an EEG↔MRI transform because doing so without digitization/coregistration "
+            "is scientifically invalid. Provide an existing `*-trans.fif` (recommended), or set "
+            "`feature_engineering.sourcelocalization.bem_generation.allow_identity_trans=true` to force creation "
+            "of an identity transform for debugging only."
+        )
 
     python_script = f"""import mne
 import numpy as np

@@ -16,7 +16,7 @@ from typing import Optional, List, Any, Dict, Tuple
 import pandas as pd
 import numpy as np
 
-from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.infra.tsv import read_tsv, read_table
 from .covariates import _build_covariate_matrices
 
 
@@ -28,18 +28,18 @@ def _build_correlation_stats_candidates(
 ) -> List[str]:
     """Build list of candidate filenames for precomputed correlation stats."""
     method_suffix = f"_{method_label}" if method_label else ""
-    base_filename = f"corr_stats_{feature_type}_vs_{target_suffix}{method_suffix}.tsv"
+    base_filename = f"corr_stats_{feature_type}_vs_{target_suffix}{method_suffix}.parquet"
     
     candidates = [base_filename]
     
     if target_suffix_alt:
-        alt_filename = f"corr_stats_{feature_type}_vs_{target_suffix_alt}{method_suffix}.tsv"
+        alt_filename = f"corr_stats_{feature_type}_vs_{target_suffix_alt}{method_suffix}.parquet"
         candidates.append(alt_filename)
     
     if method_label:
-        candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix}.tsv")
+        candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix}.parquet")
         if target_suffix_alt:
-            candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv")
+            candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}.parquet")
     
     return candidates
 
@@ -102,7 +102,7 @@ def load_precomputed_correlations(
         if not filepath.exists():
             continue
         
-        dataframe = read_tsv(filepath)
+        dataframe = read_table(filepath)
         if dataframe is not None and not dataframe.empty:
             return dataframe
 

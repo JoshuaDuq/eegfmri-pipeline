@@ -1002,14 +1002,16 @@ type Model struct {
 	plotComparisonROIsSpec    string
 
 	// Subject selection
-	subjects         []types.SubjectStatus
-	subjectSelected  map[string]bool
-	subjectCursor    int
-	subjectsLoading  bool
-	subjectFilter    string
-	filteringSubject bool
-	availableWindows []string
-	availableColumns []string
+	subjects            []types.SubjectStatus
+	subjectSelected     map[string]bool
+	subjectCursor       int
+	subjectsLoading     bool
+	subjectFilter       string
+	filteringSubject    bool
+	availableWindows    []string
+	availableColumns    []string
+	availableChannels   []string // EEG channels from electrodes.tsv
+	unavailableChannels []string // Bad channels from preprocessing log
 
 	// Review/Execute
 	ReadyToExecute    bool
@@ -1255,9 +1257,10 @@ type Model struct {
 	sourceLocFmriRandomSeed    int     // Random seed for voxel subsampling
 
 	// BEM/Trans generation options (Docker-based)
-	sourceLocCreateTrans       bool // Auto-create coregistration transform via Docker
-	sourceLocCreateBemModel    bool // Auto-create BEM model via Docker
-	sourceLocCreateBemSolution bool // Auto-create BEM solution via Docker
+	sourceLocCreateTrans        bool // Auto-create coregistration transform via Docker
+	sourceLocAllowIdentityTrans bool // Allow creating identity transform (DEBUG ONLY)
+	sourceLocCreateBemModel     bool // Auto-create BEM model via Docker
+	sourceLocCreateBemSolution  bool // Auto-create BEM solution via Docker
 
 	// fMRI GLM contrast builder (for fMRI-informed mode)
 	sourceLocFmriContrastEnabled   bool     // Build contrast from BOLD data (vs. load pre-computed)
@@ -1360,7 +1363,6 @@ type Model struct {
 	rngSeed               int     // 0 = use project default
 	controlTemperature    bool    // Include temperature as covariate
 	controlTrialOrder     bool    // Include trial order as covariate
-	trialTableOnly        bool    // Skip computations that require epochs/time-frequency arrays
 	fdrAlpha              float64 // FDR correction threshold
 	behaviorConfigSection int     // Behavior config section index (legacy, kept for compatibility)
 	behaviorNJobs         int     // -1 = all
@@ -1381,6 +1383,7 @@ type Model struct {
 	// Behavior advanced config section expansion (collapsed by default for compact UI)
 	behaviorGroupGeneralExpanded      bool
 	behaviorGroupTrialTableExpanded   bool
+	behaviorGroupPainResidualExpanded bool
 	behaviorGroupCorrelationsExpanded bool
 	behaviorGroupPainSensExpanded     bool
 	behaviorGroupRegressionExpanded   bool
@@ -2005,7 +2008,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		rngSeed:               0,
 		controlTemperature:    true,
 		controlTrialOrder:     true,
-		trialTableOnly:        true,
 		fdrAlpha:              0.05,
 		behaviorConfigSection: 0,
 		behaviorNJobs:         -1,
@@ -2829,49 +2831,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			m.handleRight()
 		case " ":
-			// Space to edit bands or ROIs, or handle default space behavior
-			switch m.CurrentStep {
-			case types.StepSelectBands:
-				m.startBandEdit()
-			case types.StepSelectROIs:
-				m.startROIEdit()
-			default:
-				m.handleSpace()
-				// Check for pending file picker command (set by file path options)
-				if m.pendingFileCmd != nil {
-					cmd := m.pendingFileCmd
-					m.pendingFileCmd = nil
-					return m, cmd
-				}
-				// Check for pending fMRI conditions discovery command
-				if m.pendingFmriConditionsCmd != nil {
-					cmd := m.pendingFmriConditionsCmd
-					m.pendingFmriConditionsCmd = nil
-					return m, cmd
-				}
+			// Space to toggle selections
+			m.handleSpace()
+			// Check for pending file picker command (set by file path options)
+			if m.pendingFileCmd != nil {
+				cmd := m.pendingFileCmd
+				m.pendingFileCmd = nil
+				return m, cmd
+			}
+			// Check for pending fMRI conditions discovery command
+			if m.pendingFmriConditionsCmd != nil {
+				cmd := m.pendingFmriConditionsCmd
+				m.pendingFmriConditionsCmd = nil
+				return m, cmd
 			}
 		case "enter":
 			return m.handleEnter()
 		case "tab":
 			m.handleTab()
 		case "a":
-			isTimeRangeStep := m.CurrentStep == types.StepTimeRange
-			isNotEditing := m.editingRangeIdx == noRangeEditing
-			if isTimeRangeStep && isNotEditing {
-				newName := fmt.Sprintf("range%d", len(m.TimeRanges)+1)
-				m.TimeRanges = append(m.TimeRanges, types.TimeRange{Name: newName, Tmin: "", Tmax: ""})
-				m.timeRangeCursor = len(m.TimeRanges) - 1
-				m.editingRangeIdx = m.timeRangeCursor
-				m.editingField = fieldName
-			} else {
-				switch m.CurrentStep {
-				case types.StepSelectBands:
-					m.addNewBand()
-				case types.StepSelectROIs:
-					m.addNewROI()
+			// Handle expanded lists in advanced config first
+			if m.CurrentStep == types.StepAdvancedConfig && m.expandedOption >= 0 {
+				switch m.expandedOption {
+				case expandedConnectivityMeasures:
+					for i := range connectivityMeasures {
+						m.connectivityMeasures[i] = true
+					}
+				case expandedDirectedConnMeasures:
+					for i := range directedConnectivityMeasures {
+						m.directedConnMeasures[i] = true
+					}
 				default:
+					// For other expanded lists, use default selectAll behavior
 					m.selectAll()
 				}
+			} else {
+				// "A" is now only for "Select All"
+				m.selectAll()
 			}
 		case "d", "x":
 			isTimeRangeStep := m.CurrentStep == types.StepTimeRange
@@ -2907,12 +2903,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "+", "=":
-			// Legacy support - map to add
-			switch m.CurrentStep {
-			case types.StepSelectBands:
-				m.addNewBand()
-			case types.StepSelectROIs:
-				m.addNewROI()
+			// Add new item (time range, band, or ROI)
+			isTimeRangeStep := m.CurrentStep == types.StepTimeRange
+			isNotEditing := m.editingRangeIdx == noRangeEditing
+			if isTimeRangeStep && isNotEditing {
+				newName := fmt.Sprintf("range%d", len(m.TimeRanges)+1)
+				m.TimeRanges = append(m.TimeRanges, types.TimeRange{Name: newName, Tmin: "", Tmax: ""})
+				m.timeRangeCursor = len(m.TimeRanges) - 1
+				m.editingRangeIdx = m.timeRangeCursor
+				m.editingField = fieldName
+			} else {
+				switch m.CurrentStep {
+				case types.StepSelectBands:
+					m.addNewBand()
+				case types.StepSelectROIs:
+					m.addNewROI()
+				}
 			}
 
 		case "-", "_":
@@ -3353,11 +3359,92 @@ func (m *Model) SetTimeRanges(ranges []types.TimeRange) {
 	}
 }
 
+// SetBands restores band definitions and selection states from persisted state.
+func (m *Model) SetBands(bands []FrequencyBand, selected []bool) {
+	if len(bands) > 0 {
+		m.bands = bands
+		m.bandSelected = make(map[int]bool)
+		for i, sel := range selected {
+			if i < len(bands) {
+				m.bandSelected[i] = sel
+			}
+		}
+	}
+}
+
+// GetBands returns the current band definitions for persistence.
+func (m Model) GetBands() []FrequencyBand {
+	return m.bands
+}
+
+// GetBandSelected returns the band selection states for persistence.
+func (m Model) GetBandSelected() []bool {
+	result := make([]bool, len(m.bands))
+	for i := range m.bands {
+		result[i] = m.bandSelected[i]
+	}
+	return result
+}
+
+// SetROIs restores ROI definitions and selection states from persisted state.
+func (m *Model) SetROIs(rois []ROIDefinition, selected []bool) {
+	if len(rois) > 0 {
+		m.rois = rois
+		m.roiSelected = make(map[int]bool)
+		for i, sel := range selected {
+			if i < len(rois) {
+				m.roiSelected[i] = sel
+			}
+		}
+	}
+}
+
+// GetROIs returns the current ROI definitions for persistence.
+func (m Model) GetROIs() []ROIDefinition {
+	return m.rois
+}
+
+// GetROISelected returns the ROI selection states for persistence.
+func (m Model) GetROISelected() []bool {
+	result := make([]bool, len(m.rois))
+	for i := range m.rois {
+		result[i] = m.roiSelected[i]
+	}
+	return result
+}
+
+// SetSpatialSelected restores spatial mode selection from persisted state.
+func (m *Model) SetSpatialSelected(selected []bool) {
+	if len(selected) > 0 {
+		for i, sel := range selected {
+			if i < len(spatialModes) {
+				m.spatialSelected[i] = sel
+			}
+		}
+	}
+}
+
+// GetSpatialSelected returns spatial selection states for persistence.
+func (m Model) GetSpatialSelected() []bool {
+	result := make([]bool, len(spatialModes))
+	for i := range spatialModes {
+		result[i] = m.spatialSelected[i]
+	}
+	return result
+}
+
 // SetAvailableMetadata stores runtime-derived metadata (e.g., discovered time
 // windows / event columns) for use in UI hints and lightweight validation.
 func (m *Model) SetAvailableMetadata(windows []string, eventColumns []string) {
 	m.availableWindows = append([]string(nil), windows...)
 	m.availableColumns = append([]string(nil), eventColumns...)
+}
+
+// SetChannelInfo stores available and unavailable EEG channels from BIDS data
+// and preprocessing logs. Used by ROI selection to validate channel names.
+func (m *Model) SetChannelInfo(available, unavailable []string) {
+	m.availableChannels = append([]string(nil), available...)
+	m.unavailableChannels = append([]string(nil), unavailable...)
 }
 
 func (m *Model) SetFeaturePlotters(plotters map[string][]PlotterInfo) {
@@ -3472,7 +3559,7 @@ func (m Model) getExpandedListLength() int {
 	case expandedCorrelationsTargetColumn:
 		return len(m.availableColumns) + 1 // +1 for "(none)" option
 	case expandedItpcConditionColumn:
-		return len(m.discoveredColumns)
+		return len(m.availableColumns)
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
 		return len(m.fmriDiscoveredColumns)
 	case expandedFmriCondAValue:
@@ -3534,7 +3621,7 @@ func (m Model) getExpandedListItems() []string {
 	case expandedCorrelationsTargetColumn:
 		return append([]string{"(none)"}, m.availableColumns...)
 	case expandedItpcConditionColumn:
-		return m.discoveredColumns
+		return m.availableColumns
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
 		return m.fmriDiscoveredColumns
 	case expandedFmriCondAValue:
@@ -4709,6 +4796,7 @@ const (
 	// Behavior section headers (expand/collapse)
 	optBehaviorGroupGeneral
 	optBehaviorGroupTrialTable
+	optBehaviorGroupPainResidual
 	optBehaviorGroupCorrelations
 	optBehaviorGroupPainSens
 	optBehaviorGroupRegression
@@ -4900,7 +4988,6 @@ const (
 	optRunAdjustmentColumn
 	optRunAdjustmentIncludeInCorrelations
 	optRunAdjustmentMaxDummies
-	optTrialTableOnlyMode
 	optFDRAlpha
 	// Behavior options - Cluster
 	optClusterThreshold
@@ -6218,62 +6305,83 @@ func (m Model) getBehaviorOptions() []optionType {
 	var options []optionType
 	options = append(options, optUseDefaults)
 
-	// General section - always visible, but contents depend on selected computations
-	options = append(options, optBehaviorGroupGeneral)
-	if m.behaviorGroupGeneralExpanded {
-		// Always show core statistical options
-		options = append(options,
-			optCorrMethod,
-			optRobustCorrelation,
-			optBootstrap,
-			optRNGSeed,
-			optBehaviorNJobs,
-			optFDRAlpha,
-		)
+	// Check if any computation is selected
+	hasAnyComputation := len(m.SelectedComputations()) > 0
 
-		// N Permutations - relevant for cluster, temporal, regression, or correlations with permutation enabled
-		needsPermutations := m.isComputationSelected("cluster") ||
-			m.isComputationSelected("temporal") ||
-			m.isComputationSelected("regression") ||
-			m.isComputationSelected("correlations")
-		if needsPermutations {
-			options = append(options, optNPerm)
-		}
+	// General section - only show if at least one computation is selected
+	if hasAnyComputation {
+		options = append(options, optBehaviorGroupGeneral)
+		if m.behaviorGroupGeneralExpanded {
+			// RNG Seed and N Jobs are always relevant
+			options = append(options, optRNGSeed, optBehaviorNJobs)
 
-		// Covariate controls - relevant for regression, models, influence, correlations, stability
-		needsCovariates := m.isComputationSelected("regression") ||
-			m.isComputationSelected("models") ||
-			m.isComputationSelected("influence") ||
-			m.isComputationSelected("correlations") ||
-			m.isComputationSelected("stability")
-		if needsCovariates {
-			options = append(options, optControlTemp, optControlOrder)
-		}
+			// Correlation method and robust correlation - only for correlations, stability, pain_sensitivity
+			needsCorrelationMethod := m.isComputationSelected("correlations") ||
+				m.isComputationSelected("stability") ||
+				m.isComputationSelected("pain_sensitivity")
+			if needsCorrelationMethod {
+				options = append(options, optCorrMethod, optRobustCorrelation)
+			}
 
-		// Run adjustment - relevant for trial_table, correlations
-		needsRunAdjustment := m.isComputationSelected("trial_table") ||
-			m.isComputationSelected("correlations")
-		if needsRunAdjustment {
-			options = append(options,
-				optRunAdjustmentEnabled,
-				optRunAdjustmentColumn,
-				optRunAdjustmentIncludeInCorrelations,
-				optRunAdjustmentMaxDummies,
-			)
-		}
+			// Bootstrap - relevant for correlations, stability
+			needsBootstrap := m.isComputationSelected("correlations") ||
+				m.isComputationSelected("stability")
+			if needsBootstrap {
+				options = append(options, optBootstrap)
+			}
 
-		// Trial table only mode - relevant when trial_table is selected
-		if m.isComputationSelected("trial_table") {
-			options = append(options, optTrialTableOnlyMode)
-		}
+			// FDR Alpha - relevant for correlations, condition, temporal, cluster, regression
+			needsFDR := m.isComputationSelected("correlations") ||
+				m.isComputationSelected("condition") ||
+				m.isComputationSelected("temporal") ||
+				m.isComputationSelected("cluster") ||
+				m.isComputationSelected("regression")
+			if needsFDR {
+				options = append(options, optFDRAlpha)
+			}
 
-		// Change scores, LOSO stability, Bayes factors - relevant for correlations
-		if m.isComputationSelected("correlations") {
-			options = append(options,
-				optComputeChangeScores,
-				optComputeLosoStability,
-				optComputeBayesFactors,
-			)
+			// N Permutations - relevant for cluster, temporal, regression, correlations, mediation, moderation
+			needsPermutations := m.isComputationSelected("cluster") ||
+				m.isComputationSelected("temporal") ||
+				m.isComputationSelected("regression") ||
+				m.isComputationSelected("correlations") ||
+				m.isComputationSelected("mediation") ||
+				m.isComputationSelected("moderation")
+			if needsPermutations {
+				options = append(options, optNPerm)
+			}
+
+			// Covariate controls - relevant for regression, models, influence, correlations, stability, pain_sensitivity
+			needsCovariates := m.isComputationSelected("regression") ||
+				m.isComputationSelected("models") ||
+				m.isComputationSelected("influence") ||
+				m.isComputationSelected("correlations") ||
+				m.isComputationSelected("stability") ||
+				m.isComputationSelected("pain_sensitivity")
+			if needsCovariates {
+				options = append(options, optControlTemp, optControlOrder)
+			}
+
+			// Run adjustment - relevant for trial_table, correlations
+			needsRunAdjustment := m.isComputationSelected("trial_table") ||
+				m.isComputationSelected("correlations")
+			if needsRunAdjustment {
+				options = append(options,
+					optRunAdjustmentEnabled,
+					optRunAdjustmentColumn,
+					optRunAdjustmentIncludeInCorrelations,
+					optRunAdjustmentMaxDummies,
+				)
+			}
+
+			// Change scores, LOSO stability, Bayes factors - relevant for correlations
+			if m.isComputationSelected("correlations") {
+				options = append(options,
+					optComputeChangeScores,
+					optComputeLosoStability,
+					optComputeBayesFactors,
+				)
+			}
 		}
 	}
 
@@ -6290,6 +6398,15 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTrialTableExtraEventCols,
 				optTrialTableHighMissingFrac,
 				optFeatureSummariesEnabled,
+			)
+		}
+	}
+
+	// Pain Residual section - only show if pain_residual computation is selected
+	if m.isComputationSelected("pain_residual") {
+		options = append(options, optBehaviorGroupPainResidual)
+		if m.behaviorGroupPainResidualExpanded {
+			options = append(options,
 				optPainResidualEnabled,
 				optPainResidualMethod,
 				optPainResidualPolyDegree,
@@ -6521,10 +6638,12 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Output section - always visible
-	options = append(options, optBehaviorGroupOutput)
-	if m.behaviorGroupOutputExpanded {
-		options = append(options, optAlsoSaveCsv)
+	// Output section - only show if at least one computation is selected
+	if hasAnyComputation {
+		options = append(options, optBehaviorGroupOutput)
+		if m.behaviorGroupOutputExpanded {
+			options = append(options, optAlsoSaveCsv)
+		}
 	}
 
 	return options

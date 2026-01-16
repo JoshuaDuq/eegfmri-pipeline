@@ -261,15 +261,7 @@ func (m Model) buildBreadcrumbRow() string {
 		}
 	}
 
-	stepCounter := lipgloss.NewStyle().Foreground(styles.TextDim).
-		Render(fmt.Sprintf("Step %d of %d", m.stepIndex+1, len(m.steps)))
-
-	validIcon := lipgloss.NewStyle().Foreground(styles.Success).Render(" " + styles.CheckMark)
-	if len(m.validateStep()) > 0 {
-		validIcon = lipgloss.NewStyle().Foreground(styles.Warning).Render(" " + styles.WarningMark)
-	}
-
-	return strings.Join(parts, connector) + "    " + stepCounter + validIcon
+	return strings.Join(parts, connector)
 }
 
 func (m Model) breadcrumbStep(idx int, step types.WizardStep) (icon, text string) {
@@ -400,7 +392,7 @@ func (m Model) getStepHints() []string {
 		}
 	case types.StepTimeRange:
 		return []string{
-			styles.RenderKeyHint("A", "Add"),
+			styles.RenderKeyHint("+", "Add"),
 			styles.RenderKeyHint("D", "Delete"),
 			styles.RenderKeyHint("Space", "Edit"),
 			styles.RenderKeyHint("Enter", "Next"),

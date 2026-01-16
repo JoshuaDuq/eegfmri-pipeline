@@ -103,6 +103,10 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
             runs = [int(r) for r in runs_raw]
         elif isinstance(runs_raw, str):
             runs = [int(r.strip()) for r in runs_raw.split(",") if r.strip()]
+        
+        # If explicitly empty list/string, treat as None (auto-detect) per comment in yaml
+        if runs is not None and len(runs) == 0:
+            runs = None
 
     drift = contrast_cfg.get("drift_model", "cosine")
     if drift == "none":
@@ -308,6 +312,7 @@ def discover_confounds(
 
     search_dirs = [
         bids_derivatives / "fmriprep" / sub_label / "func",
+        bids_derivatives / "preprocessed" / sub_label / "fmri" / sub_label / "func",
         bids_derivatives / "preprocessed" / sub_label / "fmri" / "func",
         bids_derivatives / sub_label / "func",
     ]
@@ -355,6 +360,7 @@ def _discover_fmriprep_preproc_bold(
 
     search_dirs = [
         bids_derivatives / "fmriprep" / sub_label / "func",
+        bids_derivatives / "preprocessed" / sub_label / "fmri" / sub_label / "func",
         bids_derivatives / "preprocessed" / sub_label / "fmri" / "func",
     ]
 
@@ -435,20 +441,54 @@ def _select_confound_columns(confounds_df: pd.DataFrame) -> pd.DataFrame:
     return selected
 
 
+@dataclass
+class ConditionRemapResult:
+    """Result of condition remapping for a single run."""
+
+    events_df: pd.DataFrame
+    synthetic_labels: List[str]
+    cond_a_found: bool
+    cond_b_found: bool
+    cond_a_count: int = 0
+    cond_b_count: int = 0
+    missing_cond_a_msg: str = ""
+    missing_cond_b_msg: str = ""
+
+
 def _remap_events_by_condition_columns(
     events_df: pd.DataFrame,
     cfg: ContrastBuilderConfig,
-) -> Tuple[pd.DataFrame, List[str]]:
+    *,
+    strict: bool = False,
+) -> ConditionRemapResult:
     """
     Remap events trial_type based on condition column/value pairs.
 
     When condition_a_column is specified, creates synthetic trial_type labels
     (e.g., 'cond_a', 'cond_b') by filtering on the specified column values.
 
-    Returns (modified_events_df, synthetic_condition_labels).
+    Parameters
+    ----------
+    events_df : pd.DataFrame
+        Events dataframe with at least 'onset', 'duration', 'trial_type'.
+    cfg : ContrastBuilderConfig
+        Configuration with condition column/value pairs.
+    strict : bool
+        If True, raise ValueError when conditions are missing (legacy behavior).
+        If False, return result with found=False flags for missing conditions.
+
+    Returns
+    -------
+    ConditionRemapResult
+        Contains modified events_df, synthetic labels, and status flags.
     """
     if not cfg.condition_a_column:
-        return events_df, []
+        return ConditionRemapResult(
+            events_df=events_df,
+            synthetic_labels=[],
+            cond_a_found=True,
+            cond_b_found=True,
+        )
 
     events_out = events_df.copy()
     synthetic_labels = []
@@ -458,27 +498,41 @@ def _remap_events_by_condition_columns(
     col_b = cfg.condition_b_column
     val_b = cfg.condition_b_value
 
+    # Validate column A exists (this is always required)
     if col_a not in events_df.columns:
         raise ValueError(
             f"Condition A column '{col_a}' not found in events. "
             f"Available columns: {list(events_df.columns)}"
         )
 
+    # Check condition A value
     val_a_typed = _coerce_condition_value(val_a, events_df[col_a])
     mask_a = events_df[col_a] == val_a_typed
-    if not mask_a.any():
-        raise ValueError(
+    cond_a_found = mask_a.any()
+    cond_a_count = int(mask_a.sum())
+    missing_cond_a_msg = ""
+
+    if not cond_a_found:
+        missing_cond_a_msg = (
             f"Condition A value '{val_a}' not found in column '{col_a}'. "
             f"Available values: {sorted(events_df[col_a].dropna().unique().tolist())}"
         )
+        if strict:
+            raise ValueError(missing_cond_a_msg)
 
     label_a = f"cond_a_{cfg.name}"
-    events_out.loc[mask_a, "trial_type"] = label_a
-    synthetic_labels.append(label_a)
-    logger.info(
-        "Mapped %d events where %s=%s to '%s'",
-        mask_a.sum(), col_a, val_a, label_a
-    )
+    if cond_a_found:
+        events_out.loc[mask_a, "trial_type"] = label_a
+        synthetic_labels.append(label_a)
+        logger.info(
+            "Mapped %d events where %s=%s to '%s'",
+            cond_a_count, col_a, val_a, label_a
+        )
+
+    # Check condition B if specified
+    cond_b_found = True
+    cond_b_count = 0
+    missing_cond_b_msg = ""
 
     if col_b and val_b:
         if col_b not in events_df.columns:
@@ -486,23 +540,39 @@ def _remap_events_by_condition_columns(
                 f"Condition B column '{col_b}' not found in events. "
                 f"Available columns: {list(events_df.columns)}"
             )
+
         val_b_typed = _coerce_condition_value(val_b, events_df[col_b])
         mask_b = events_df[col_b] == val_b_typed
-        if not mask_b.any():
-            raise ValueError(
+        cond_b_found = mask_b.any()
+        cond_b_count = int(mask_b.sum())
+
+        if not cond_b_found:
+            missing_cond_b_msg = (
                 f"Condition B value '{val_b}' not found in column '{col_b}'. "
                 f"Available values: {sorted(events_df[col_b].dropna().unique().tolist())}"
             )
+            if strict:
+                raise ValueError(missing_cond_b_msg)
 
         label_b = f"cond_b_{cfg.name}"
-        events_out.loc[mask_b, "trial_type"] = label_b
-        synthetic_labels.append(label_b)
-        logger.info(
-            "Mapped %d events where %s=%s to '%s'",
-            mask_b.sum(), col_b, val_b, label_b
-        )
+        if cond_b_found:
+            events_out.loc[mask_b, "trial_type"] = label_b
+            synthetic_labels.append(label_b)
+            logger.info(
+                "Mapped %d events where %s=%s to '%s'",
+                cond_b_count, col_b, val_b, label_b
+            )
 
-    return events_out, synthetic_labels
+    return ConditionRemapResult(
+        events_df=events_out,
+        synthetic_labels=synthetic_labels,
+        cond_a_found=cond_a_found,
+        cond_b_found=cond_b_found,
+        cond_a_count=cond_a_count,
+        cond_b_count=cond_b_count,
+        missing_cond_a_msg=missing_cond_a_msg,
+        missing_cond_b_msg=missing_cond_b_msg,
+    )
 
 
 def _coerce_condition_value(value: str, series: pd.Series) -> Any:
@@ -550,9 +620,10 @@ def fit_first_level_glm(
             f"Found: {list(events_df.columns)}, need: {required_cols}"
         )
 
-    events_df, synthetic_labels = _remap_events_by_condition_columns(events_df, cfg)
-
-    events_df = events_df[["onset", "duration", "trial_type"]].copy()
+    # Use strict=True for single-run: cannot skip the only run
+    remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=True)
+    events_df = remap_result.events_df[["onset", "duration", "trial_type"]].copy()
+    synthetic_labels = remap_result.synthetic_labels
 
     confounds = None
     if confounds_path is not None and confounds_path.exists():
@@ -576,19 +647,37 @@ def fit_first_level_glm(
 
     return flm, synthetic_labels
 
+@dataclass
+class MultiRunGLMResult:
+    """Result from multi-run GLM fitting with run inclusion details."""
+
+    flm: Any  # FirstLevelModel
+    synthetic_labels: List[str]
+    all_conditions: List[str]
+    confound_columns: List[str]
+    included_bold_paths: List[Path]
+    included_events_paths: List[Path]
+    included_confounds_paths: List[Optional[Path]]
+    skipped_runs: List[Tuple[int, str]]  # (run_idx, reason)
+    total_cond_a_events: int
+    total_cond_b_events: int
+
 
 def fit_first_level_glm_multi_run(
     bold_paths: List[Path],
     events_paths: List[Path],
     confounds_paths: List[Optional[Path]],
     cfg: ContrastBuilderConfig,
-) -> Tuple["FirstLevelModel", List[str], List[str], List[str]]:
+) -> MultiRunGLMResult:
     """
     Fit a first-level GLM across runs using nilearn's multi-run support.
 
     This avoids the scientifically invalid approach of averaging per-run z/t maps.
 
-    Returns (fitted FirstLevelModel, synthetic_condition_labels, all_conditions).
+    Runs missing one or both requested conditions are excluded from the GLM
+    with a warning. The GLM only fails if NO runs contain both conditions.
+
+    Returns MultiRunGLMResult with fitted model and run inclusion details.
     """
     from nilearn.glm.first_level import FirstLevelModel
 
@@ -601,14 +690,25 @@ def fit_first_level_glm_multi_run(
     logger.info("Fitting multi-run GLM (%d runs, TR=%.2fs)", len(bold_paths), tr)
 
     required_cols = {"onset", "duration", "trial_type"}
-    events_list: List[pd.DataFrame] = []
-    confounds_list: List[Optional[pd.DataFrame]] = []
+
+    # Track which runs are valid for inclusion
+    valid_bold_paths: List[Path] = []
+    valid_events_list: List[pd.DataFrame] = []
+    valid_events_paths: List[Path] = []
+    valid_confounds_list: List[Optional[pd.DataFrame]] = []
+    valid_confounds_paths: List[Optional[Path]] = []
+    skipped_runs: List[Tuple[int, str]] = []
+
     all_conditions: set[str] = set()
     synthetic_labels: List[str] = []
-
     confound_columns: set[str] = set()
 
-    for run_idx, (events_path, confounds_path) in enumerate(zip(events_paths, confounds_paths), start=1):
+    total_cond_a_events = 0
+    total_cond_b_events = 0
+
+    for run_idx, (bold_path, events_path, confounds_path) in enumerate(
+        zip(bold_paths, events_paths, confounds_paths), start=1
+    ):
         events_df = pd.read_csv(events_path, sep="\t")
         if not required_cols.issubset(events_df.columns):
             raise ValueError(
@@ -616,14 +716,44 @@ def fit_first_level_glm_multi_run(
                 f"Found: {list(events_df.columns)}, need: {required_cols}"
             )
 
-        events_df, run_synth = _remap_events_by_condition_columns(events_df, cfg)
-        if run_synth and not synthetic_labels:
-            synthetic_labels = run_synth
+        # Remap conditions, allowing missing values (strict=False)
+        remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=False)
 
-        events_df = events_df[["onset", "duration", "trial_type"]].copy()
-        events_list.append(events_df)
-        all_conditions.update(str(c) for c in events_df["trial_type"].dropna().unique().tolist())
+        # Check if this run should be skipped due to missing conditions
+        needs_both = cfg.condition_b_column and cfg.condition_b_value
+        run_valid = True
+        skip_reason = ""
 
+        if cfg.condition_a_column:
+            if not remap_result.cond_a_found:
+                run_valid = False
+                skip_reason = remap_result.missing_cond_a_msg
+            elif needs_both and not remap_result.cond_b_found:
+                run_valid = False
+                skip_reason = remap_result.missing_cond_b_msg
+
+        if not run_valid:
+            skipped_runs.append((run_idx, skip_reason))
+            logger.warning(
+                "Run %d excluded from GLM: %s",
+                run_idx, skip_reason
+            )
+            continue
+
+        # Run is valid - include it
+        total_cond_a_events += remap_result.cond_a_count
+        total_cond_b_events += remap_result.cond_b_count
+
+        if remap_result.synthetic_labels and not synthetic_labels:
+            synthetic_labels = remap_result.synthetic_labels
+
+        events_out = remap_result.events_df[["onset", "duration", "trial_type"]].copy()
+        valid_bold_paths.append(bold_path)
+        valid_events_paths.append(events_path)
+        valid_events_list.append(events_out)
+        all_conditions.update(str(c) for c in events_out["trial_type"].dropna().unique().tolist())
+
+        # Handle confounds
         confounds = None
         if confounds_path is not None and confounds_path.exists():
             confounds_df = pd.read_csv(confounds_path, sep="\t")
@@ -631,7 +761,24 @@ def fit_first_level_glm_multi_run(
             if confounds is not None:
                 confound_columns.update(list(confounds.columns))
                 logger.info("Run %d: using %d confound regressors", run_idx, confounds.shape[1])
-        confounds_list.append(confounds)
+        valid_confounds_list.append(confounds)
+        valid_confounds_paths.append(confounds_path)
+
+    # Validate we have at least one run with both conditions
+    if not valid_bold_paths:
+        skip_summary = "; ".join(f"Run {r}: {msg}" for r, msg in skipped_runs)
+        raise ValueError(
+            f"No runs contain both requested condition values. "
+            f"Skipped all {len(bold_paths)} runs. Details: {skip_summary}"
+        )
+
+    if skipped_runs:
+        logger.warning(
+            "Excluded %d/%d runs due to missing conditions. "
+            "Proceeding with %d runs (cond_a: %d events, cond_b: %d events)",
+            len(skipped_runs), len(bold_paths), len(valid_bold_paths),
+            total_cond_a_events, total_cond_b_events
+        )
 
     # If fMRIPrep brain masks exist, use their intersection to stabilize masking.
     mask_img = None
@@ -639,8 +786,11 @@ def fit_first_level_glm_multi_run(
         import nibabel as nib
         from nilearn.masking import intersect_masks
 
-        mask_paths = [p for p in (_discover_brain_mask_for_bold(bp) for bp in bold_paths) if p is not None]
-        if len(mask_paths) == len(bold_paths) and mask_paths:
+        mask_paths = [
+            p for p in (_discover_brain_mask_for_bold(bp) for bp in valid_bold_paths)
+            if p is not None
+        ]
+        if len(mask_paths) == len(valid_bold_paths) and mask_paths:
             mask_imgs = [nib.load(str(p)) for p in mask_paths]
             mask_img = intersect_masks(mask_imgs, threshold=1.0)
     except Exception:
@@ -658,9 +808,20 @@ def fit_first_level_glm_multi_run(
         minimize_memory=False,
     )
 
-    flm.fit(bold_paths, events=events_list, confounds=confounds_list)
+    flm.fit(valid_bold_paths, events=valid_events_list, confounds=valid_confounds_list)
 
-    return flm, synthetic_labels, sorted(all_conditions), sorted(confound_columns)
+    return MultiRunGLMResult(
+        flm=flm,
+        synthetic_labels=synthetic_labels,
+        all_conditions=sorted(all_conditions),
+        confound_columns=sorted(confound_columns),
+        included_bold_paths=valid_bold_paths,
+        included_events_paths=valid_events_paths,
+        included_confounds_paths=valid_confounds_paths,
+        skipped_runs=skipped_runs,
+        total_cond_a_events=total_cond_a_events,
+        total_cond_b_events=total_cond_b_events,
+    )
 
 
 def compute_contrast_map(
@@ -779,7 +940,7 @@ def build_contrast_from_runs(
         events_paths.append(events_path)
         confounds_paths.append(discover_confounds(bids_derivatives, subject, task, run_num))
 
-    flm, synthetic_labels, all_conditions, confound_columns = fit_first_level_glm_multi_run(
+    glm_result = fit_first_level_glm_multi_run(
         bold_paths=bold_paths,
         events_paths=events_paths,
         confounds_paths=confounds_paths,
@@ -787,17 +948,37 @@ def build_contrast_from_runs(
     )
 
     contrast_map, contrast_def, output_type = compute_contrast_map(
-        flm,
+        glm_result.flm,
         cfg,
-        all_conditions,
-        synthetic_labels=synthetic_labels or None,
+        glm_result.all_conditions,
+        synthetic_labels=glm_result.synthetic_labels or None,
     )
+
+    # Build comprehensive metadata with run provenance
     meta: Dict[str, Any] = {
-        "n_runs": int(len(bold_paths)),
-        "bold_paths": [str(p) for p in bold_paths],
-        "events_paths": [str(p) for p in events_paths],
-        "confounds_paths": [str(p) if p is not None else None for p in confounds_paths],
-        "confound_columns": confound_columns,
+        # Discovered runs (before filtering)
+        "n_runs_discovered": len(bold_paths),
+        "discovered_bold_paths": [str(p) for p in bold_paths],
+        "discovered_events_paths": [str(p) for p in events_paths],
+        # Included runs (after filtering for conditions)
+        "n_runs_included": len(glm_result.included_bold_paths),
+        "included_bold_paths": [str(p) for p in glm_result.included_bold_paths],
+        "included_events_paths": [str(p) for p in glm_result.included_events_paths],
+        "included_confounds_paths": [
+            str(p) if p is not None else None
+            for p in glm_result.included_confounds_paths
+        ],
+        # Skipped runs with reasons
+        "n_runs_skipped": len(glm_result.skipped_runs),
+        "skipped_runs": [
+            {"run_index": idx, "reason": reason}
+            for idx, reason in glm_result.skipped_runs
+        ],
+        # Event counts
+        "total_cond_a_events": glm_result.total_cond_a_events,
+        "total_cond_b_events": glm_result.total_cond_b_events,
+        # GLM details
+        "confound_columns": glm_result.confound_columns,
         "contrast_def": contrast_def,
         "output_type": output_type,
     }

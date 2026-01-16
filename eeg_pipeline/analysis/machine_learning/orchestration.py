@@ -69,7 +69,7 @@ from eeg_pipeline.utils.data.machine_learning import (
 from eeg_pipeline.utils.data.machine_learning import load_epochs_with_targets
 from eeg_pipeline.utils.data.machine_learning import load_active_matrix
 from eeg_pipeline.utils.config.loader import load_config
-from eeg_pipeline.infra.tsv import read_tsv, write_tsv
+from eeg_pipeline.infra.tsv import read_tsv, write_tsv, write_parquet, write_stats_table
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.machine_learning import (
     export_predictions,
@@ -260,11 +260,11 @@ def nested_loso_predictions(
         if config_dict is None:
             config_dict = {}
         paths = config_dict.get("paths", {})
-        predictions_path = paths.get("predictions", {}).get("elasticnet_loso", "machine_learning/predictions/elasticnet_loso.tsv")
-        metrics_path = paths.get("per_subject_metrics", {}).get("elasticnet_loso", "machine_learning/per_subject_metrics/elasticnet_loso.tsv")
-        indices_path = paths.get("indices", {}).get("elasticnet_loso", "machine_learning/indices/elasticnet_loso.tsv")
+        predictions_path = paths.get("predictions", {}).get("elasticnet_loso", "machine_learning/predictions/elasticnet_loso.parquet")
+        metrics_path = paths.get("per_subject_metrics", {}).get("elasticnet_loso", "machine_learning/per_subject_metrics/elasticnet_loso.parquet")
+        indices_path = paths.get("indices", {}).get("elasticnet_loso", "machine_learning/indices/elasticnet_loso.parquet")
         
-        write_tsv(pd.DataFrame({
+        write_parquet(pd.DataFrame({
             "y_true": y_true,
             "y_pred": y_pred,
             "group": np.asarray(groups_ordered),
@@ -272,7 +272,7 @@ def nested_loso_predictions(
             "trial_index": test_indices_order,
         }), results_dir / predictions_path)
 
-        write_tsv(pd.DataFrame(per_subj), results_dir / metrics_path)
+        write_parquet(pd.DataFrame(per_subj), results_dir / metrics_path)
 
         idx_df = pd.DataFrame({
             "subject_id": np.asarray(groups_ordered),
@@ -280,7 +280,7 @@ def nested_loso_predictions(
             "fold": fold_ids,
             "trial_index": test_indices_order,
         })
-        write_tsv(idx_df, results_dir / indices_path)
+        write_parquet(idx_df, results_dir / indices_path)
 
         if n_perm > 0 and len(null_r) > 0:
             null_path = results_dir / "machine_learning" / "null_distribution.npz"
@@ -548,16 +548,16 @@ def within_subject_kfold_predictions(
         if config_dict is None:
             config_dict = {}
         paths = config_dict.get("paths", {})
-        predictions_path = paths.get("predictions", {}).get("within_subject_kfold", "machine_learning/predictions/within_subject_kfold.tsv")
-        metrics_path = paths.get("per_subject_metrics", {}).get("within_subject_kfold", "machine_learning/per_subject_metrics/within_subject_kfold.tsv")
+        predictions_path = paths.get("predictions", {}).get("within_subject_kfold", "machine_learning/predictions/within_subject_kfold.parquet")
+        metrics_path = paths.get("per_subject_metrics", {}).get("within_subject_kfold", "machine_learning/per_subject_metrics/within_subject_kfold.parquet")
         
-        write_tsv(pd.DataFrame({
+        write_parquet(pd.DataFrame({
             "y_true": y_true_all,
             "y_pred": y_pred_all,
             "group": groups_all,
         }), results_dir / predictions_path)
 
-        write_tsv(pd.DataFrame(per_subj), results_dir / metrics_path)
+        write_parquet(pd.DataFrame(per_subj), results_dir / metrics_path)
 
     return y_true_all, y_pred_all, pooled, per_subj
 
@@ -606,11 +606,11 @@ def loso_baseline_predictions(
         if config_dict is None:
             config_dict = {}
         paths = config_dict.get("paths", {})
-        predictions_path = paths.get("predictions", {}).get("baseline_loso", "machine_learning/predictions/baseline_loso.tsv")
-        metrics_path = paths.get("per_subject_metrics", {}).get("baseline_loso", "machine_learning/per_subject_metrics/baseline_loso.tsv")
-        indices_path = paths.get("indices", {}).get("baseline_loso", "machine_learning/indices/baseline_loso.tsv")
+        predictions_path = paths.get("predictions", {}).get("baseline_loso", "machine_learning/predictions/baseline_loso.parquet")
+        metrics_path = paths.get("per_subject_metrics", {}).get("baseline_loso", "machine_learning/per_subject_metrics/baseline_loso.parquet")
+        indices_path = paths.get("indices", {}).get("baseline_loso", "machine_learning/indices/baseline_loso.parquet")
         
-        write_tsv(pd.DataFrame({
+        write_parquet(pd.DataFrame({
             "y_true": y_true_all,
             "y_pred": y_pred_all,
             "group": groups_all,
@@ -618,7 +618,7 @@ def loso_baseline_predictions(
             "trial_index": test_indices_all,
         }), results_dir / predictions_path)
 
-        write_tsv(pd.DataFrame(per_subj), results_dir / metrics_path)
+        write_parquet(pd.DataFrame(per_subj), results_dir / metrics_path)
 
         idx_df = pd.DataFrame({
             "subject_id": groups_all,
@@ -626,7 +626,7 @@ def loso_baseline_predictions(
             "fold": fold_ids_all,
             "trial_index": test_indices_all,
         })
-        write_tsv(idx_df, results_dir / indices_path)
+        write_parquet(idx_df, results_dir / indices_path)
 
     return y_true_all, y_pred_all, pooled, per_subj
 

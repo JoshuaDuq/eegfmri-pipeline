@@ -49,6 +49,36 @@ const (
 type TUIState struct {
 	TimeRanges   []types.TimeRange `json:"time_ranges"`
 	LastPipeline int               `json:"last_pipeline"`
+
+	// Band configuration
+	Bands        []BandState `json:"bands,omitempty"`
+	BandSelected []bool      `json:"band_selected,omitempty"`
+
+	// ROI configuration
+	ROIs        []ROIState `json:"rois,omitempty"`
+	ROISelected []bool     `json:"roi_selected,omitempty"`
+
+	// Spatial selection
+	SpatialSelected []bool `json:"spatial_selected,omitempty"`
+
+	// Per-pipeline advanced configuration
+	// Key is pipeline name (e.g., "features", "behavior", "preprocessing")
+	PipelineConfigs map[string]map[string]interface{} `json:"pipeline_configs,omitempty"`
+}
+
+// BandState holds serializable band configuration
+type BandState struct {
+	Key    string  `json:"key"`
+	Name   string  `json:"name"`
+	LowHz  float64 `json:"low_hz"`
+	HighHz float64 `json:"high_hz"`
+}
+
+// ROIState holds serializable ROI configuration
+type ROIState struct {
+	Key      string `json:"key"`
+	Name     string `json:"name"`
+	Channels string `json:"channels"`
 }
 
 // Model is the root application model
@@ -186,6 +216,87 @@ func (m *Model) saveState() {
 		// Cannot write state file - state won't be saved
 		return
 	}
+}
+
+// restoreWizardConfig restores bands, ROIs, spatial selection, and pipeline config from persistent state
+func (m *Model) restoreWizardConfig() {
+	// Restore bands
+	if len(m.persistentState.Bands) > 0 {
+		bands := make([]wizard.FrequencyBand, len(m.persistentState.Bands))
+		for i, b := range m.persistentState.Bands {
+			bands[i] = wizard.FrequencyBand{
+				Key:    b.Key,
+				Name:   b.Name,
+				LowHz:  b.LowHz,
+				HighHz: b.HighHz,
+			}
+		}
+		m.wizard.SetBands(bands, m.persistentState.BandSelected)
+	}
+
+	// Restore ROIs
+	if len(m.persistentState.ROIs) > 0 {
+		rois := make([]wizard.ROIDefinition, len(m.persistentState.ROIs))
+		for i, r := range m.persistentState.ROIs {
+			rois[i] = wizard.ROIDefinition{
+				Key:      r.Key,
+				Name:     r.Name,
+				Channels: r.Channels,
+			}
+		}
+		m.wizard.SetROIs(rois, m.persistentState.ROISelected)
+	}
+
+	// Restore spatial selection
+	if len(m.persistentState.SpatialSelected) > 0 {
+		m.wizard.SetSpatialSelected(m.persistentState.SpatialSelected)
+	}
+
+	// Restore pipeline-specific advanced config
+	if m.persistentState.PipelineConfigs != nil {
+		pipelineName := m.selectedPipeline.String()
+		if cfg, ok := m.persistentState.PipelineConfigs[pipelineName]; ok {
+			m.wizard.ImportConfig(cfg)
+		}
+	}
+}
+
+// saveWizardConfig copies bands, ROIs, spatial selection, and pipeline config to persistent state
+func (m *Model) saveWizardConfig() {
+	// Save bands
+	bands := m.wizard.GetBands()
+	m.persistentState.Bands = make([]BandState, len(bands))
+	for i, b := range bands {
+		m.persistentState.Bands[i] = BandState{
+			Key:    b.Key,
+			Name:   b.Name,
+			LowHz:  b.LowHz,
+			HighHz: b.HighHz,
+		}
+	}
+	m.persistentState.BandSelected = m.wizard.GetBandSelected()
+
+	// Save ROIs
+	rois := m.wizard.GetROIs()
+	m.persistentState.ROIs = make([]ROIState, len(rois))
+	for i, r := range rois {
+		m.persistentState.ROIs[i] = ROIState{
+			Key:      r.Key,
+			Name:     r.Name,
+			Channels: r.Channels,
+		}
+	}
+	m.persistentState.ROISelected = m.wizard.GetROISelected()
+
+	// Save spatial selection
+	m.persistentState.SpatialSelected = m.wizard.GetSpatialSelected()
+
+	// Save pipeline-specific advanced config
+	if m.persistentState.PipelineConfigs == nil {
+		m.persistentState.PipelineConfigs = make(map[string]map[string]interface{})
+	}
+	pipelineName := m.selectedPipeline.String()
+	m.persistentState.PipelineConfigs[pipelineName] = m.wizard.ExportConfig()
 }
 
 // Init implements tea.Model
@@ -385,6 +496,7 @@ func (m *Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) {
 	subjects := m.convertSubjects(msg.Subjects)
 	m.wizard.SetSubjects(subjects)
 	m.wizard.SetAvailableMetadata(msg.AvailableWindows, msg.AvailableEventColumns)
+	m.wizard.SetChannelInfo(msg.AvailableChannels, msg.UnavailableChannels)
 }
 
 func (m *Model) convertSubjects(sourceSubjects []messages.SubjectInfo) []types.SubjectStatus {
@@ -664,6 +776,7 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 
 	m.wizard = wizard.New(m.selectedPipeline, m.repoRoot)
 	m.wizard.SetTimeRanges(m.persistentState.TimeRanges)
+	m.restoreWizardConfig()
 	m.wizard.SetSubjectsLoading()
 	m.pushState(StatePipelineWizard)
 	m.mainMenu.SelectedPipeline = -1
@@ -723,6 +836,7 @@ func (m Model) handleWizardUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Only save on key messages to avoid redundant disk I/O on ticks
 	if _, ok := msg.(tea.KeyMsg); ok {
+		m.saveWizardConfig()
 		m.saveState()
 	}
 
