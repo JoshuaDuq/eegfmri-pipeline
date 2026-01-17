@@ -301,6 +301,64 @@ def _get_available_event_columns(bids_root: Path, subject_id: str, task: str) ->
         return []
 
 
+def _process_single_subject(
+    subj_id: str,
+    has_epochs: bool,
+    has_features: bool,
+    deriv_root: Path,
+    task: str,
+    config: Any,
+    global_epoch_metadata: dict,
+) -> dict:
+    """Process a single subject to build status information."""
+    from eeg_pipeline.utils.data.subjects import get_epoch_metadata
+    from eeg_pipeline.infra.paths import deriv_features_path, deriv_stats_path
+    
+    available_bands = []
+    has_stats = False
+    has_preprocessing = False
+
+    if has_features or has_epochs:
+        features_dir = deriv_features_path(deriv_root, subj_id)
+        feature_availability = detect_feature_availability(features_dir)
+        if features_dir.exists():
+            available_bands = detect_available_bands(features_dir)
+    else:
+        feature_availability = _empty_feature_availability()
+
+    # Check for EEG preprocessing (ICA files in preprocessed directory)
+    eeg_prep_dir = deriv_root / "preprocessed" / f"sub-{subj_id}" / "eeg"
+    if eeg_prep_dir.exists():
+        for pattern in PREPROCESSING_EEG_PATTERNS:
+            if any(eeg_prep_dir.glob(pattern)):
+                has_preprocessing = True
+                break
+
+    stats_dir = deriv_stats_path(deriv_root, subj_id)
+    if stats_dir.exists():
+        for pattern in STATS_FILE_PATTERNS:
+            if any(stats_dir.glob(pattern)):
+                has_stats = True
+                break
+
+    metadata = {}
+    if has_epochs:
+        metadata = get_epoch_metadata(subj_id, task, deriv_root, config=config)
+        if not metadata and global_epoch_metadata:
+            metadata = global_epoch_metadata
+
+    return {
+        "id": subj_id,
+        "has_epochs": has_epochs,
+        "has_preprocessing": has_preprocessing,
+        "has_features": has_features,
+        "has_stats": has_stats,
+        "epoch_metadata": metadata,
+        "available_bands": available_bands,
+        "feature_availability": feature_availability,
+    }
+
+
 def _build_subject_status_json(
     discovered_subjects: List[str],
     epochs_subjects: set,
@@ -310,8 +368,9 @@ def _build_subject_status_json(
     config: Any,
 ) -> dict:
     """Build JSON output for subject status mode."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from eeg_pipeline.utils.data.subjects import get_epoch_metadata
-    from eeg_pipeline.infra.paths import deriv_features_path, deriv_stats_path
+    from eeg_pipeline.infra.paths import deriv_features_path
 
     results = []
     for subj in discovered_subjects:
@@ -322,6 +381,7 @@ def _build_subject_status_json(
         }
         results.append(status)
 
+    # Get global epoch metadata from first subject with epochs
     global_epoch_metadata = {}
     for subj in discovered_subjects:
         if subj in epochs_subjects:
@@ -329,6 +389,7 @@ def _build_subject_status_json(
             if global_epoch_metadata:
                 break
 
+    # Get available windows from first subject with features
     available_windows = []
     for result in results:
         subj_id = _extract_subject_id(result["subject"])
@@ -338,6 +399,7 @@ def _build_subject_status_json(
             available_windows = windows
             break
 
+    # Get available columns from first subject
     available_columns = []
     for result in results:
         subj_id = _extract_subject_id(result["subject"])
@@ -346,52 +408,33 @@ def _build_subject_status_json(
             available_columns = columns
             break
 
+    # Process subjects in parallel (I/O bound operations)
     json_results = []
-    for result in results:
-        subj_id = _extract_subject_id(result["subject"])
-        available_bands = []
-        has_stats = False
-        has_preprocessing = False
-
-        if result["features"] or result["epochs"]:
-            features_dir = deriv_features_path(deriv_root, subj_id)
-            feature_availability = detect_feature_availability(features_dir)
-            if features_dir.exists():
-                available_bands = detect_available_bands(features_dir)
-        else:
-            feature_availability = _empty_feature_availability()
-
-        # Check for EEG preprocessing (ICA files in preprocessed directory)
-        eeg_prep_dir = deriv_root / "preprocessed" / f"sub-{subj_id}" / "eeg"
-        if eeg_prep_dir.exists():
-            for pattern in PREPROCESSING_EEG_PATTERNS:
-                if any(eeg_prep_dir.glob(pattern)):
-                    has_preprocessing = True
-                    break
-
-        stats_dir = deriv_stats_path(deriv_root, subj_id)
-        if stats_dir.exists():
-            for pattern in STATS_FILE_PATTERNS:
-                if any(stats_dir.glob(pattern)):
-                    has_stats = True
-                    break
-
-        metadata = {}
-        if result["epochs"]:
-            metadata = get_epoch_metadata(subj_id, task, deriv_root, config=config)
-            if not metadata and global_epoch_metadata:
-                metadata = global_epoch_metadata
-
-        json_results.append({
-            "id": subj_id,
-            "has_epochs": result["epochs"],
-            "has_preprocessing": has_preprocessing,
-            "has_features": result["features"],
-            "has_stats": has_stats,
-            "epoch_metadata": metadata,
-            "available_bands": available_bands,
-            "feature_availability": feature_availability,
-        })
+    with ThreadPoolExecutor(max_workers=min(8, len(results))) as executor:
+        futures = []
+        for result in results:
+            subj_id = _extract_subject_id(result["subject"])
+            future = executor.submit(
+                _process_single_subject,
+                subj_id,
+                result["epochs"],
+                result["features"],
+                deriv_root,
+                task,
+                config,
+                global_epoch_metadata,
+            )
+            futures.append(future)
+        
+        for future in as_completed(futures):
+            try:
+                json_results.append(future.result())
+            except Exception:
+                # If processing fails for a subject, skip it
+                pass
+    
+    # Sort results to maintain consistent order
+    json_results.sort(key=lambda x: x["id"])
 
     # Discover available and unavailable channels (global for study)
     bids_root = Path(config.bids_root) if hasattr(config, "bids_root") else None
