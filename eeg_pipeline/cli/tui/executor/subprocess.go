@@ -315,186 +315,17 @@ func LoadConfigKeys(repoRoot string, keys []string) tea.Cmd {
 	}
 }
 
-// RunPipelineCommand executes a pipeline command with progress streaming
-func RunPipelineCommand(repoRoot string, command string) tea.Cmd {
-	return func() tea.Msg {
-		parts, err := splitShellWords(command)
-		if err != nil {
-			parts = strings.Fields(command)
-		}
-		if len(parts) == 0 {
-			return messages.CommandDoneMsg{ExitCode: 1, Error: nil}
-		}
-
-		// Convert eeg-pipeline to python -m eeg_pipeline
-		var args []string
-		if parts[0] == "eeg-pipeline" {
-			args = append([]string{"-m", "eeg_pipeline"}, parts[1:]...)
-		} else {
-			args = parts[1:]
-		}
-
-		// Add --progress-json flag for real-time progress
-		args = append(args, "--progress-json")
-
-		startTime := time.Now()
-		pyCmd := GetPythonCommand(repoRoot)
-		cmd := exec.Command(pyCmd, args...)
-		cmd.Dir = repoRoot
-		// Disable colored output and enable unbuffered output
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			return messages.CommandDoneMsg{ExitCode: 1, Error: err, Duration: time.Since(startTime)}
-		}
-
-		stderr, _ := cmd.StderrPipe()
-
-		if err := cmd.Start(); err != nil {
-			return messages.CommandDoneMsg{ExitCode: 1, Error: err, Duration: time.Since(startTime)}
-		}
-
-		// Read stdout for progress JSON
-		go func() {
-			scanner := bufio.NewScanner(stdout)
-			for scanner.Scan() {
-				line := scanner.Text()
-				// Try to parse as JSON progress event
-				if strings.HasPrefix(line, "{") {
-					var event ProgressEvent
-					if json.Unmarshal([]byte(line), &event) == nil {
-						// Events would be sent via channel in full implementation
-						// For now, just consume
-						_ = event
-					}
-				}
-			}
-		}()
-
-		// Read stderr
-		go func() {
-			scanner := bufio.NewScanner(stderr)
-			for scanner.Scan() {
-				_ = scanner.Text()
-			}
-		}()
-
-		err = cmd.Wait()
-		duration := time.Since(startTime)
-
-		exitCode := 0
-		success := true
-		if err != nil {
-			success = false
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			} else {
-				exitCode = 1
-			}
-		}
-
-		return messages.CommandDoneMsg{
-			ExitCode: exitCode,
-			Duration: duration,
-			Success:  success,
-			Error:    nil,
-		}
-	}
-}
-
-func splitShellWords(raw string) ([]string, error) {
-	type quoteState int
-	const (
-		stateNone quoteState = iota
-		stateSingle
-		stateDouble
-	)
-
-	var out []string
-	var cur strings.Builder
-	state := stateNone
-	escaped := false
-
-	flush := func() {
-		if cur.Len() == 0 {
-			return
-		}
-		out = append(out, cur.String())
-		cur.Reset()
-	}
-
-	for _, r := range raw {
-		if escaped {
-			cur.WriteRune(r)
-			escaped = false
-			continue
-		}
-
-		switch state {
-		case stateNone:
-			if r == '\\' {
-				escaped = true
-				continue
-			}
-			if r == '\'' {
-				state = stateSingle
-				continue
-			}
-			if r == '"' {
-				state = stateDouble
-				continue
-			}
-			if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-				flush()
-				continue
-			}
-			cur.WriteRune(r)
-		case stateSingle:
-			if r == '\'' {
-				state = stateNone
-				continue
-			}
-			cur.WriteRune(r)
-		case stateDouble:
-			if r == '\\' {
-				escaped = true
-				continue
-			}
-			if r == '"' {
-				state = stateNone
-				continue
-			}
-			cur.WriteRune(r)
-		}
-	}
-
-	if escaped {
-		return nil, fmt.Errorf("unfinished escape sequence")
-	}
-	if state != stateNone {
-		return nil, fmt.Errorf("unterminated quote")
-	}
-	flush()
-	return out, nil
-}
-
-// ProgressStreamCmd creates a command that streams progress events
-// This returns the initial command and a channel for progress events
 type ProgressStreamer struct {
 	Command  string
 	RepoRoot string
 	Events   chan tea.Msg
-	Done     chan bool
 }
 
-// NewProgressStreamer creates a streamer for real-time progress
 func NewProgressStreamer(repoRoot string, command string) *ProgressStreamer {
 	return &ProgressStreamer{
 		Command:  command,
 		RepoRoot: repoRoot,
 		Events:   make(chan tea.Msg, 100),
-		Done:     make(chan bool),
 	}
 }
 
@@ -508,7 +339,6 @@ func (ps *ProgressStreamer) Start() tea.Cmd {
 			return nil
 		}
 
-		// Build command
 		var args []string
 		if parts[0] == "eeg-pipeline" {
 			args = append([]string{"-m", "eeg_pipeline"}, parts[1:]...)
@@ -537,14 +367,11 @@ func (ps *ProgressStreamer) Start() tea.Cmd {
 			return nil
 		}
 
-		// Send started message
 		ps.Events <- messages.CommandStartedMsg{Operation: ps.Command}
 
-		// Track subjects for progress
 		subjectIndex := 0
 		totalSubjects := 0
 
-		// Read and parse progress events
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -586,8 +413,6 @@ func (ps *ProgressStreamer) Start() tea.Cmd {
 							Message: event.Message,
 							Subject: event.Subject,
 						}
-					case "complete":
-						// Will be handled by cmd.Wait()
 					case "error":
 						ps.Events <- messages.LogMsg{
 							Level:   "error",
@@ -597,7 +422,6 @@ func (ps *ProgressStreamer) Start() tea.Cmd {
 					}
 				}
 			} else {
-				// Regular log line
 				ps.Events <- messages.LogMsg{
 					Level:   "info",
 					Message: line,
@@ -605,7 +429,6 @@ func (ps *ProgressStreamer) Start() tea.Cmd {
 			}
 		}
 
-		// Wait for command to finish
 		err = cmd.Wait()
 		duration := time.Since(startTime)
 
@@ -642,28 +465,10 @@ func (ps *ProgressStreamer) WaitForEvent() tea.Cmd {
 	}
 }
 
-// runPythonJSONCommand executes a Python module command in the repository root,
-// ensuring consistent environment configuration and a python3 fallback. It
-// returns the command's stdout if successful, or an error if both attempts fail.
 func runPythonJSONCommand(repoRoot string, args []string) ([]byte, error) {
 	pyCmd := GetPythonCommand(repoRoot)
 	cmd := exec.Command(pyCmd, args...)
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-
-	output, err := cmd.Output()
-	if err == nil {
-		return output, nil
-	}
-
-	fallbackCmd := exec.Command("python3", args...)
-	fallbackCmd.Dir = repoRoot
-	fallbackCmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-
-	output, err = fallbackCmd.Output()
-	if err != nil {
-		return nil, err
-	}
-
-	return output, nil
+	return cmd.Output()
 }

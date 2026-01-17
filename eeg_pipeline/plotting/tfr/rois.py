@@ -9,17 +9,21 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 import mne
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from eeg_pipeline.plotting.io.figures import unwrap_figure
 from eeg_pipeline.utils.formatting import sanitize_label
 from eeg_pipeline.utils.config.loader import get_config_value
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
+    build_rois_from_info,
+    get_tfr_decim,
     resolve_tfr_workers,
 )
 from ..core.utils import get_font_sizes, log
@@ -69,7 +73,7 @@ def compute_roi_tfrs(
     freqs: np.ndarray,
     n_cycles: np.ndarray,
     config,
-    roi_map: Optional[Dict[str, List[str]]] = None,
+    roi_map: Optional[Dict[str, list[str]]] = None,
 ) -> Dict[str, mne.time_frequency.EpochsTFR]:
     """Compute TFR for each ROI by averaging channels within each ROI.
     
@@ -85,8 +89,10 @@ def compute_roi_tfrs(
         Dictionary mapping ROI names to EpochsTFR objects
     """
     if roi_map is None:
-        from ...utils.analysis.tfr import build_rois_from_info as _build_rois
-        roi_map = _build_rois(epochs.info, config=config)
+        roi_map = build_rois_from_info(epochs.info, config=config)
+    
+    workers = resolve_tfr_workers(workers_default=-1)
+    decim_power = get_tfr_decim(config, mode="power")
     
     roi_tfrs = {}
     for roi, channel_names in roi_map.items():
@@ -108,15 +114,6 @@ def compute_roi_tfrs(
             tmin=epochs.tmin,
             metadata=epochs.metadata,
             verbose=False,
-        )
-        
-        workers_default = (
-            int(config.get("time_frequency_analysis.tfr.workers", -1))
-            if config else -1
-        )
-        workers = resolve_tfr_workers(workers_default=workers_default)
-        decim_power = (
-            config.get("time_frequency_analysis.tfr.decim_power", 4) if config else 4
         )
         
         power = roi_epochs.compute_tfr(
@@ -217,7 +214,7 @@ def _plot_roi_tfr_figure(
 
 def contrast_pain_nonpain_rois(
     roi_tfrs: Dict[str, mne.time_frequency.EpochsTFR],
-    events_df: Optional[pd.DataFrame],
+    events_df: Optional["pd.DataFrame"],
     out_dir: Path,
     config,
     baseline: Tuple[Optional[float], Optional[float]],
@@ -280,7 +277,7 @@ def contrast_pain_nonpain_rois(
                 "tfr_pain_minus_nonpain_bl.png", config, baseline_used,
                 font_sizes, logger
             )
-        except (FileNotFoundError, ValueError, RuntimeError, KeyError, IndexError) as exc:
+        except (ValueError, RuntimeError, KeyError, IndexError) as exc:
             log(
                 f"ROI {roi}: error while computing ROI contrasts ({exc})",
                 logger, "error"

@@ -624,7 +624,7 @@ func (m Model) renderRow(row plottingAdvancedRow, plotByID map[string]PlotItem, 
 		plot := plotByID[row.plotID]
 		return []renderLine{m.renderPlotHeaderLine(plot, m.plotItemConfigExpanded[row.plotID], focused)}
 	case plottingRowPlotField:
-		return m.renderPlotField(row, plotByID, labelWidth, focused)
+		return m.renderPlotField(row, labelWidth, focused)
 	case plottingRowOption:
 		return m.renderOption(row.opt, labelWidth, focused)
 	default:
@@ -632,10 +632,8 @@ func (m Model) renderRow(row plottingAdvancedRow, plotByID map[string]PlotItem, 
 	}
 }
 
-func (m Model) renderPlotField(row plottingAdvancedRow, plotByID map[string]PlotItem, labelWidth int, focused bool) []renderLine {
-	plot := plotByID[row.plotID]
+func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused bool) []renderLine {
 	cfg := m.plotItemConfigs[row.plotID]
-	_ = plot
 
 	switch row.plotField {
 	case plotItemConfigFieldTfrDefaultBaselineWindow:

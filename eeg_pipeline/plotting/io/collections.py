@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List
@@ -10,7 +11,6 @@ import pandas as pd
 
 from eeg_pipeline.infra.paths import ensure_dir, deriv_plots_path
 from eeg_pipeline.infra.logging import get_subject_logger
-from eeg_pipeline.plotting.io.figures import get_default_config as _get_default_config
 from eeg_pipeline.plotting.config import get_plot_config
 
 
@@ -23,13 +23,6 @@ def _extract_significant_records(
         if isinstance(result_set, dict) and "significant" in result_set:
             significant_records.extend(result_set["significant"])
     return significant_records
-
-
-def _get_plot_formats(plot_config: Any) -> List[str]:
-    """Get plot file formats from configuration."""
-    if hasattr(plot_config, "formats"):
-        return plot_config.formats
-    return ["png", "svg"]
 
 
 def _sanitize_filename(name: str) -> str:
@@ -55,7 +48,7 @@ def _build_plot_filename(
 def _copy_plot_file(
     source_path: Path,
     destination_path: Path,
-    logger: Any,
+    logger: logging.Logger,
 ) -> bool:
     """Copy a single plot file, returning True if successful."""
     try:
@@ -70,7 +63,7 @@ def _copy_significant_plots(
     significant_records: List[Dict[str, Any]],
     significant_dir: Path,
     plot_formats: List[str],
-    logger: Any,
+    logger: logging.Logger,
 ) -> int:
     """Copy all significant plot files to destination directory."""
     copied_count = 0
@@ -125,7 +118,7 @@ def _save_summary_table(
     significant_records: List[Dict[str, Any]],
     subject: str,
     significant_dir: Path,
-    logger: Any,
+    logger: logging.Logger,
 ) -> None:
     """Save summary TSV file of significant correlations."""
     if not significant_records:
@@ -144,7 +137,6 @@ def collect_significant_plots(
     deriv_root: Path,
     all_results: List[Dict[str, Any]],
     config=None,
-    alpha: float = 0.05,
 ) -> Path:
     """Collect and organize significant correlation plots.
 
@@ -156,7 +148,6 @@ def collect_significant_plots(
         deriv_root: Root directory for derivatives.
         all_results: List of result dictionaries containing significant records.
         config: Optional configuration dictionary.
-        alpha: Significance threshold (currently unused, preserved for API compatibility).
 
     Returns:
         Path to the directory containing collected significant plots.
@@ -168,7 +159,6 @@ def collect_significant_plots(
     if not isinstance(all_results, list):
         raise TypeError("all_results must be a list")
 
-    config = config or _get_default_config()
     logger = get_subject_logger("behavior_analysis", subject)
 
     plot_config = get_plot_config(config)
@@ -185,7 +175,7 @@ def collect_significant_plots(
         logger.info("No significant correlations found to collect")
         return significant_directory
 
-    plot_formats = _get_plot_formats(plot_config)
+    plot_formats = list(plot_config.formats)
     copied_count = _copy_significant_plots(
         significant_records, significant_directory, plot_formats, logger
     )

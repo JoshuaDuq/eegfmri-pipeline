@@ -19,7 +19,7 @@ def _resolve_logger(ctx: CtxT, logger: Optional[logging.Logger]) -> logging.Logg
 
 class CategorizedPlotRegistry(Generic[CtxT]):
     """Base class for categorized plot registries.
-    
+
     Each subclass gets its own isolated _registry dict via __init_subclass__.
     This prevents plotters registered in FeaturePlotRegistry from appearing
     in BehaviorPlotRegistry and vice versa.
@@ -93,51 +93,4 @@ class CategorizedPlotManager(Generic[CtxT]):
                 self.logger.info(f"Running {name}...")
                 self._execute_plotter(name, func)
 
-        return self.saved_plots
-
-
-class FlatPlotRegistry(Generic[CtxT]):
-    _registry: List[Tuple[str, PlotterFunc[CtxT]]] = []
-
-    @classmethod
-    def register(cls, name: str):
-        def decorator(func: PlotterFunc[CtxT]):
-            cls._registry.append((name, func))
-            return func
-
-        return decorator
-
-    @classmethod
-    def get_plotters(cls) -> List[Tuple[str, PlotterFunc[CtxT]]]:
-        return list(cls._registry)
-
-
-class FlatPlotManager(Generic[CtxT]):
-    def __init__(self, ctx: CtxT, *, logger: Optional[logging.Logger] = None):
-        self.ctx = ctx
-        self.logger = _resolve_logger(ctx, logger)
-        self.saved_plots: Dict[str, Path] = {}
-
-    def _execute_plotter(self, name: str, func: PlotterFunc[CtxT]) -> None:
-        try:
-            self.logger.info(f"Running plotter: {name}")
-            func(self.ctx, self.saved_plots)
-        except Exception as exc:
-            self.logger.error(f"Plotter '{name}' failed: {exc}", exc_info=True)
-
-    def run_all(self, *, plotters: List[Tuple[str, PlotterFunc[CtxT]]]) -> Dict[str, Path]:
-        for name, func in plotters:
-            self._execute_plotter(name, func)
-        return self.saved_plots
-
-    def run_selected(
-        self,
-        plot_names: List[str],
-        *,
-        plotters: List[Tuple[str, PlotterFunc[CtxT]]],
-    ) -> Dict[str, Path]:
-        selected_names = set(plot_names)
-        for name, func in plotters:
-            if name in selected_names:
-                self._execute_plotter(name, func)
         return self.saved_plots

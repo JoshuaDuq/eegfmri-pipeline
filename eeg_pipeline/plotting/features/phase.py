@@ -135,33 +135,6 @@ def _convert_itpc_wide_to_long(itpc_df: pd.DataFrame,
         })
     
     if not rows:
-        itpc_cols = [c for c in itpc_df.columns 
-                    if c.startswith("itpc_") and "_ch_" in c]
-        if not itpc_cols:
-            log_if_present(logger, "warning", 
-                          "No ITPC columns found in wide format; skipping topomaps")
-            return None
-        
-        for col in itpc_cols:
-            parts = col.replace("itpc_", "").replace("_val", "").split("_ch_")
-            if len(parts) != 2:
-                continue
-            
-            segment_band = parts[0]
-            channel = parts[1]
-            sb_parts = segment_band.split("_")
-            if len(sb_parts) >= 2:
-                segment = sb_parts[0]
-                band = "_".join(sb_parts[1:])
-                itpc_val = pd.to_numeric(itpc_df[col], errors="coerce").mean()
-                rows.append({
-                    "channel": channel,
-                    "band": band,
-                    "time_bin": segment,
-                    "itpc": itpc_val,
-                })
-    
-    if not rows:
         log_if_present(logger, "warning", 
                       "Could not parse ITPC columns; skipping topomaps")
         return None
@@ -765,9 +738,6 @@ def plot_itpc_by_condition(
                           f"Saved ITPC column comparison plots for {len(roi_names)} ROIs")
 
 
-
-
-
 def _get_pac_plot_cfg(config):
     """Get PAC-specific plot configuration.
     
@@ -994,8 +964,6 @@ def plot_pac_time_ribbons(
         )
         plt.close(fig)
         log_if_present(logger, "info", f"Saved PAC time ribbon for ROI {roi}, phase {phase_f:.1f}")
-
-
 
 
 def _get_pac_columns_for_roi(pac_df: pd.DataFrame, segment: str, pair: str, 
@@ -1305,92 +1273,6 @@ def plot_pac_by_condition(
             
             log_if_present(logger, "info", 
                           f"Saved PAC column comparison plots for {len(roi_names)} ROIs")
-
-
-
-
-def convert_pac_wide_to_long(
-    pac_df: pd.DataFrame,
-    logger: Optional[logging.Logger] = None,
-    config: Any = None,
-) -> Optional[pd.DataFrame]:
-    """Convert PAC data from wide format to long format for comodulograms.
-    
-    This function parses standard PAC column names (pac_segment_phase_amp_ch_stat)
-    and produces a simplified DataFrame with [roi, phase_freq, amp_freq, pac].
-    Use this if you have flat feature files and need to reconstruct the matrix structure.
-    """
-    records = []
-    
-    from eeg_pipeline.utils.config.loader import get_config_value
-    from eeg_pipeline.domain.features.naming import NamingSchema
-
-    band_defs = get_config_value(config, "time_frequency_analysis.bands", {}) or {}
-    center_freq_map = {}
-    for band, bounds in band_defs.items():
-        try:
-            low, high = float(bounds[0]), float(bounds[1])
-        except Exception:
-            continue
-        center_freq_map[str(band)] = (low + high) / 2.0
-
-    if not center_freq_map:
-        center_freq_map = {"delta": 2.5, "theta": 6, "alpha": 10, "beta": 20, "gamma": 40}
-    
-    # Iterate columns
-    for col in pac_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if parsed.get("valid") and parsed.get("group") == "pac":
-            band_pair = str(parsed.get("band") or "")
-        else:
-            # Expected: pac_active_theta_beta_ch_Fp1_pac
-            # or pac_active_theta_beta_ch_Fp1_mi
-            if not str(col).startswith('pac_'):
-                continue
-
-            parts = str(col).split('_')
-            band_pair = ""
-            # parts: [pac, <segment>, <phase>, <amp>, ..., val]
-            # We need identifying band names.
-            # Heuristic: look for band names in parts
-            parts_bands = [p for p in parts if p in center_freq_map]
-            if len(parts_bands) >= 2:
-                band_pair = f"{parts_bands[0]}_{parts_bands[1]}"
-
-        if not band_pair or "_" not in band_pair:
-            continue
-
-        phase_band, amp_band = band_pair.split("_", 1)
-        if phase_band not in center_freq_map or amp_band not in center_freq_map:
-            continue
-            
-        # ROI?
-        # Look for "ch" or "ch_"
-        roi = "Global"
-        parts = str(col).split('_')
-        if "ch" in parts:
-            idx = parts.index("ch")
-            if idx + 1 < len(parts):
-                roi = parts[idx + 1]
-        elif any(p.startswith("chpair") for p in parts):
-            continue
-             
-        val = pac_df[col].mean()
-        
-        if pd.notna(val):
-            records.append({
-                'roi': roi,
-                'phase_freq': center_freq_map[phase_band],
-                'amp_freq': center_freq_map[amp_band],
-                'pac': val
-            })
-            
-    if not records:
-        if logger:
-             logger.warning("No PAC columns matched heuristic parsing for wide-to-long conversion")
-        return None
-        
-    return pd.DataFrame(records)
 
 
 def plot_pac_summary(

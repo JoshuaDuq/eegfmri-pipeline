@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Tuple
-
-import numpy as np
+from typing import TYPE_CHECKING, Any, Tuple
 
 if TYPE_CHECKING:
     from eeg_pipeline.types import PrecomputedData, TimeWindows
@@ -129,37 +127,3 @@ def validate_extractor_inputs(
             return False, f"{extractor_name}: windows is None"
     
     return True, ""
-
-
-def get_segment_mask(
-    windows: Any,
-    segment_name: str,
-) -> Optional[np.ndarray]:
-    """Get segment mask using consistent access pattern.
-    
-    Standardizes access to window masks across all feature modules.
-    Attempts to use the preferred `get_mask` method first, then falls
-    back to dictionary access if available.
-    
-    Parameters
-    ----------
-    windows : Any
-        Window object with either `get_mask` method or `masks` dict attribute.
-    segment_name : str
-        Name of the segment to retrieve.
-    
-    Returns
-    -------
-    Optional[np.ndarray]
-        Boolean mask array for the segment, or None if not found.
-    """
-    if windows is None or not segment_name:
-        return None
-
-    if hasattr(windows, "get_mask"):
-        return windows.get_mask(segment_name)
-
-    if hasattr(windows, "masks") and isinstance(windows.masks, dict):
-        return windows.masks.get(segment_name)
-
-    return None

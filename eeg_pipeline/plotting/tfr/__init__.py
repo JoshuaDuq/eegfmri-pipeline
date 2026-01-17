@@ -1,29 +1,24 @@
 """
 Time-frequency representation (TFR) plotting module.
 
-Low-level plotting primitives live here. High-level orchestration/IO is defined in
-`pipelines.viz.tfr` to keep responsibilities separated.
+Low-level plotting primitives live here. High-level orchestration is defined in
+`plotting.orchestration.tfr` to keep responsibilities separated.
 """
 
 from __future__ import annotations
 
 import importlib
 
-###################################################################
-# Visualization orchestration wrappers (pipeline layer)
-###################################################################
-# These lightweight wrappers avoid an import-time dependency on
-# `eeg_pipeline.pipelines.viz.tfr`, preventing circular imports while
-# preserving the public API.
-
 
 def visualize_subject_tfr(*args, **kwargs):
+    """Wrapper to avoid circular imports."""
     from eeg_pipeline.plotting.orchestration.tfr import visualize_subject_tfr as _impl
 
     return _impl(*args, **kwargs)
 
 
 def visualize_tfr_for_subjects(*args, **kwargs):
+    """Wrapper to avoid circular imports."""
     from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects as _impl
 
     return _impl(*args, **kwargs)
@@ -31,8 +26,6 @@ def visualize_tfr_for_subjects(*args, **kwargs):
 
 __all__ = [
     # Channel-level TFR plotting
-    "plot_cz_all_trials_raw",
-    "plot_cz_all_trials",
     "plot_channels_all_trials",
     "contrast_channels_pain_nonpain",
     # Scalp-mean TFR plotting
@@ -68,8 +61,6 @@ __all__ = [
 def __getattr__(name: str):
     _module_map = {
         # Channel-level TFR plotting
-        "plot_cz_all_trials_raw": "channels",
-        "plot_cz_all_trials": "channels",
         "plot_channels_all_trials": "channels",
         "contrast_channels_pain_nonpain": "channels",
         # Scalp-mean TFR plotting

@@ -14,24 +14,18 @@ Usage:
     from eeg_pipeline.plotting.behavioral import visualize_behavior_for_subjects
 
     # Or use high-level visualizers
-    from eeg_pipeline.plotting import visualize_erp_for_subjects
+    from eeg_pipeline.plotting import visualize_tfr_for_subjects
 
 Lazy Imports:
     Many plotting functions use lazy imports to reduce startup time.
     Access them directly from this module - they will be loaded on first use.
 """
 
-# Configuration
 from .config import get_plot_config, PlotConfig
 
 __all__ = [
-    # Configuration
     "get_plot_config",
     "PlotConfig",
-    # High-level visualizers (lazy via __getattr__)
-    "visualize_features_for_subjects",
-    "visualize_subject_erp",
-    "visualize_erp_for_subjects",
     "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
     "visualize_subject_behavior",
@@ -41,9 +35,7 @@ __all__ = [
 
 def __getattr__(name: str):
     """Lazy import for plotting functions."""
-    # Map function names to their submodules
     _module_map = {
-        # Core
         "log": "core",
         "format_cluster_significance_info": "core",
         "format_ttest_significance_info": "core",
@@ -57,20 +49,16 @@ def __getattr__(name: str):
         "add_normalized_colorbar": "core",
         "create_difference_colorbar": "core",
         "add_diff_colorbar": "core",
-        "create_colorbar_for_topomaps": "core",
         "build_topomap_diff_label": "core",
         "build_topomap_percentage_label": "core",
         "create_scalpmean_tfr_from_existing": "core",
         "get_strict_mode": "core",
         "compute_cluster_significance_from_combined": "core",
-        "compute_significance_mask": "core",
-        # Features
         "plot_channel_power_heatmap": "features",
         "plot_power_time_courses": "features",
         "plot_power_spectral_density": "features",
         "plot_power_spectral_density_by_pain": "features",
         "plot_power_time_course_by_temperature": "features",
-        "plot_trial_power_variability": "features",
         "plot_inter_band_spatial_power_correlation": "features",
         "plot_connectivity_circle_for_band": "features",
         "plot_sliding_connectivity_trajectories": "features",
@@ -94,13 +82,6 @@ def __getattr__(name: str):
         "plot_aperiodic_run_trajectories": "features",
         "plot_aperiodic_topomaps": "features",
         "plot_aperiodic_vs_pain": "features",
-        "visualize_features_for_subjects": "features",
-        # ERP
-        "visualize_subject_erp": "erp",
-        "visualize_erp_for_subjects": "erp",
-        # TFR
-        "plot_cz_all_trials_raw": "tfr",
-        "plot_cz_all_trials": "tfr",
         "plot_channels_all_trials": "tfr",
         "plot_scalpmean_all_trials": "tfr",
         "contrast_scalpmean_pain_nonpain": "tfr",
@@ -113,7 +94,6 @@ def __getattr__(name: str):
         "plot_temporal_topomaps_allbands_active": "tfr",
         "visualize_subject_tfr": "tfr",
         "visualize_tfr_for_subjects": "tfr",
-        # Behavioral
         "generate_correlation_scatter": "behavioral",
         "plot_residual_qc": "behavioral",
         "plot_regression_residual_diagnostics": "behavioral",
@@ -123,7 +103,6 @@ def __getattr__(name: str):
         "plot_pain_nonpain_clusters": "behavioral",
         "visualize_subject_behavior": "behavioral",
         "visualize_behavior_for_subjects": "behavioral",
-        # Machine Learning
         "plot_time_generalization_matrix": "machine_learning",
         "plot_time_generalization_with_null": "machine_learning",
         "plot_prediction_scatter": "machine_learning",
@@ -138,7 +117,6 @@ def __getattr__(name: str):
         "plot_riemann_sliding_window": "machine_learning",
         "plot_incremental_validity": "machine_learning",
         "plot_feature_importance_top_n": "machine_learning",
-        "plot_feature_importance_stability": "machine_learning",
     }
 
     if name in _module_map:

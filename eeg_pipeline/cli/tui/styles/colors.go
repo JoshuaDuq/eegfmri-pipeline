@@ -15,5 +15,4 @@ var (
 	Text      = lipgloss.Color("#E5E7EB") // Gray-200
 	TextDim   = lipgloss.Color("#94A3B8") // Slate-400
 	BgDark    = lipgloss.Color("#0B1120") // Slate-950
-	BgBase    = lipgloss.Color("#111827") // Slate-900
 )

@@ -385,10 +385,6 @@ def plot_connectivity_circle_by_condition(
     if features_df is None or features_df.empty or events_df is None:
         log_if_present(logger, "warning", "No feature data for connectivity plot")
         return
-    
-    if plot_connectivity_circle is None:
-        log_if_present(logger, "warning", "mne-connectivity not installed")
-        return
 
     comparison_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if comparison_info is None:
@@ -733,10 +729,6 @@ def plot_edge_significance_circle_from_stats(
 
     mat, nodes = build_matrix_from_edges(edge_vals)
     plot_cfg = get_plot_config(config)
-    if plot_connectivity_circle is None:
-        log_if_present(logger, "warning", "mne-connectivity not installed; skipping significance circle")
-        return
-
     fig_size = plot_cfg.get_figure_size("standard", plot_type="connectivity")
     fig, ax = plt.subplots(figsize=fig_size, subplot_kw=dict(polar=True))
     vmax = np.nanmax(np.abs(mat)) if np.isfinite(mat).any() else 1.0
@@ -819,7 +811,8 @@ def plot_graph_metric_distributions(
             parts["bodies"][0].set_facecolor("#3b528b")
             parts["bodies"][0].set_alpha(0.6)
             
-            jitter = np.random.uniform(-0.1, 0.1, len(vals))
+            rng = np.random.default_rng(42)
+            jitter = rng.uniform(-0.1, 0.1, len(vals))
             ax.scatter(jitter, vals, c="#3b528b", alpha=0.3, s=10)
             
             ax.axhline(np.mean(vals), color="black", linestyle="--", linewidth=1, alpha=0.7)
@@ -999,9 +992,10 @@ def _plot_column_comparison_connectivity(
                 boxplot["boxes"][1].set_alpha(0.6)
                 
                 jitter_range = 0.08
-                ax.scatter(np.random.uniform(-jitter_range, jitter_range, len(values1)), 
+                rng = np.random.default_rng(42)
+                ax.scatter(rng.uniform(-jitter_range, jitter_range, len(values1)), 
                           values1, c=segment_colors["v1"], alpha=0.3, s=6)
-                ax.scatter(1 + np.random.uniform(-jitter_range, jitter_range, len(values2)), 
+                ax.scatter(1 + rng.uniform(-jitter_range, jitter_range, len(values2)), 
                           values2, c=segment_colors["v2"], alpha=0.3, s=6)
                 
                 all_values = np.concatenate([values1, values2])
@@ -1105,33 +1099,6 @@ def plot_connectivity_by_condition(
             features_df, events_df, measures, bands, roi_names, roi_definitions,
             subject, save_dir, config, logger, stats_dir
         )
-
-
-def plot_connectivity_band_segment_condition(
-    features_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Connectivity comparison by Measure × Band.
-
-    
-    Delegates to plot_connectivity_by_condition for unified implementation.
-    """
-    plot_connectivity_by_condition(
-        features_df=features_df,
-        events_df=events_df,
-        subject=subject,
-        save_dir=save_dir,
-        logger=logger,
-        config=config,
-    )
-
-
-
-
 
 
 def plot_connectivity_heatmap(
@@ -1347,10 +1314,6 @@ def plot_sliding_state_centroids(
     n_states = centroids.shape[0]
     nodes = sorted({n for pair in edge_pairs for n in pair})
     node_idx = {n: i for i, n in enumerate(nodes)}
-
-    if plot_connectivity_circle is None:
-        log_if_present(logger, "warning", "mne-connectivity not installed; skipping centroid circles")
-        return
 
     for s_idx in range(n_states):
         adj = np.zeros((len(nodes), len(nodes)), dtype=float)

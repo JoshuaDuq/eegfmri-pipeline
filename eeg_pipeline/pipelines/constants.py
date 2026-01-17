@@ -19,8 +19,6 @@ FREQUENCY_BANDS: List[str] = [
     "gamma",
 ]
 
-# Removed hardcoded FREQUENCY_BAND_RANGES. Ranges should be fetched from config.
-
 
 MANDATORY_TIME_WINDOWS: List[str] = [
     "baseline",
@@ -162,59 +160,3 @@ ML_MODE_DESCRIPTIONS: Dict[str, str] = {
     "timegen": "Time generalization",
     "classify": "Binary classification",
 }
-
-
-def get_definitions_dict() -> Dict[str, List[Dict[str, str]]]:
-    """Return all definitions as a dictionary for JSON export."""
-    frequency_band_entries = [
-        {
-            "key": band,
-            "name": band.title(),
-            "description": f"{band.title()} frequency band",
-        }
-        for band in FREQUENCY_BANDS
-    ]
-
-    feature_category_entries = [
-        {
-            "key": category,
-            "name": category.title(),
-            "description": FEATURE_CATEGORY_DESCRIPTIONS.get(category, ""),
-        }
-        for category in FEATURE_CATEGORIES
-    ]
-
-    behavior_computation_entries = [
-        {
-            "key": computation,
-            "name": computation.replace("_", " ").title(),
-            "description": BEHAVIOR_COMPUTATION_DESCRIPTIONS.get(computation, ""),
-        }
-        for computation in BEHAVIOR_COMPUTATIONS
-    ]
-
-    preprocessing_mode_entries = [
-        {
-            "key": mode,
-            "name": mode.replace("-", " ").title(),
-            "description": PREPROCESSING_MODE_DESCRIPTIONS.get(mode, ""),
-        }
-        for mode in PREPROCESSING_MODES
-    ]
-
-    ml_mode_entries = [
-        {
-            "key": mode,
-            "name": mode.title(),
-            "description": ML_MODE_DESCRIPTIONS.get(mode, ""),
-        }
-        for mode in ML_MODES
-    ]
-
-    return {
-        "frequency_bands": frequency_band_entries,
-        "feature_categories": feature_category_entries,
-        "behavior_computations": behavior_computation_entries,
-        "preprocessing_modes": preprocessing_mode_entries,
-        "ml_modes": ml_mode_entries,
-    }

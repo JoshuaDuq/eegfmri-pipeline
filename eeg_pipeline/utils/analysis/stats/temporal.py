@@ -30,7 +30,7 @@ from eeg_pipeline.utils.analysis.tfr import (
 from eeg_pipeline.utils.analysis.windowing import build_time_windows_fixed_size_clamped
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.feature_io import _load_features_and_targets
-from eeg_pipeline.utils.data.tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
+from eeg_pipeline.utils.data.tfr_alignment import compute_aligned_data_length
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
@@ -45,6 +45,11 @@ MIN_VARIANCE_THRESHOLD = 1e-12
 MIN_DENOMINATOR_THRESHOLD = 1e-15
 MIN_OBSERVATIONS_FOR_CORRELATION = 10
 PARALLELIZATION_TASK_THRESHOLD = 50
+
+
+def _to_numpy_array(y: Any) -> np.ndarray:
+    """Convert y to numpy array, handling pandas Series."""
+    return y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
 
 
 def _compute_single_bin_correlation(
@@ -256,16 +261,14 @@ def _compute_correlations_for_condition(
 
     idx = np.where(mask)[0] if mask.dtype == bool else mask
     tfr_c, y_c = tfr[idx], y[mask]
-    groups_c = None
     if groups is not None:
         try:
             groups_arr = np.asarray(groups)
-            if groups_arr.shape[0] == y.shape[0]:
-                groups_c = groups_arr[mask]
-            else:
-                groups_c = groups_arr
+            groups_c = groups_arr[mask] if groups_arr.shape[0] == y.shape[0] else groups_arr
         except Exception:
             groups_c = None
+    else:
+        groups_c = None
     use_spearman = corr_fn == spearmanr
     method = "spearman" if use_spearman else "pearson"
     cov_vals = cov_df.iloc[idx].apply(pd.to_numeric, errors="coerce").to_numpy() if cov_df is not None and not cov_df.empty else None
@@ -354,30 +357,35 @@ def _compute_correlations_for_condition(
         compute_cluster_correction_2d, compute_cluster_masses_2d
     )
 
-    # Support both legacy `behavior_analysis.cluster_correction.*` and current
-    # `behavior_analysis.cluster.*` keys from utils/config/eeg_config.yaml.
-    cluster_cfg = {}
-    if config is not None:
-        cluster_cfg = config.get("behavior_analysis.cluster_correction", {}) or {}
-        if not cluster_cfg:
-            cluster_cfg = config.get("behavior_analysis.cluster", {}) or {}
-    c_alpha = float(cluster_cfg.get("alpha", alpha))
-    n_cluster_perm = int(cluster_cfg.get("n_permutations", 0))
-    cluster_forming_threshold = cluster_cfg.get("cluster_forming_threshold", cluster_cfg.get("forming_threshold"))
+    c_alpha = float(
+        get_config_value(config, "behavior_analysis.cluster.alpha", None) or
+        get_config_value(config, "behavior_analysis.cluster_correction.alpha", alpha)
+    )
+    n_cluster_perm = int(
+        get_config_value(config, "behavior_analysis.cluster.n_permutations", None) or
+        get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 0)
+    )
+    cluster_forming_threshold = (
+        get_config_value(config, "behavior_analysis.cluster.forming_threshold", None) or
+        get_config_value(config, "behavior_analysis.cluster_correction.cluster_forming_threshold", None) or
+        get_config_value(config, "behavior_analysis.cluster_correction.forming_threshold", None)
+    )
     # Cluster engine derives thresholds in t-stat space; if a user config provides
     # a very small value (often a p-value like 0.05), ignore it and derive instead.
-    try:
-        if cluster_forming_threshold is not None and float(cluster_forming_threshold) < 1.0:
-            if logger:
-                logger.warning(
-                    "%s: cluster_forming_threshold=%.4g looks like a p-value/r threshold; deriving threshold by permutation instead.",
-                    name,
-                    float(cluster_forming_threshold),
-                )
+    if cluster_forming_threshold is not None:
+        try:
+            threshold_float = float(cluster_forming_threshold)
+            if threshold_float < 1.0:
+                if logger:
+                    logger.warning(
+                        "%s: cluster_forming_threshold=%.4g looks like a p-value/r threshold; deriving threshold by permutation instead.",
+                        name,
+                        threshold_float,
+                    )
+                cluster_forming_threshold = None
+        except (ValueError, TypeError):
             cluster_forming_threshold = None
-    except Exception:
-        cluster_forming_threshold = None
-    seed = int(get_config_value(config, "project.random_state", 42)) if config is not None else 42
+    seed = int(get_config_value(config, "project.random_state", 42))
     cluster_rng = np.random.default_rng(seed)
 
     cluster_labels = np.zeros_like(corrs, dtype=int)
@@ -521,15 +529,8 @@ def _determine_condition_values(
     if not condition_column:
         condition_column = get_pain_column_from_config(config, events)
 
-    condition_vec = None
-    condition_values = []
-
     if split_by_condition and condition_column and condition_column in events.columns:
-        condition_vec = (
-            events[condition_column].to_numpy()[:n_trials]
-            if len(events) >= n_trials
-            else events[condition_column].to_numpy()
-        )
+        condition_vec = events[condition_column].to_numpy()[:n_trials]
 
         if isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
             exemplar = pd.Series(condition_vec).dropna()
@@ -556,14 +557,13 @@ def _determine_condition_values(
             logger.info(
                 f"{analysis_name}: splitting by '{condition_column}' with values {condition_values}"
             )
-    elif not split_by_condition:
-        logger.info(f"{analysis_name}: split_by_condition=False, computing over all trials")
-        condition_values = ["all"]
-        condition_vec = np.array(["all"] * n_trials)
     else:
-        logger.warning(
-            f"{analysis_name}: condition column '{condition_column}' not found, computing over all trials"
-        )
+        if not split_by_condition:
+            logger.info(f"{analysis_name}: split_by_condition=False, computing over all trials")
+        else:
+            logger.warning(
+                f"{analysis_name}: condition column '{condition_column}' not found, computing over all trials"
+            )
         condition_values = ["all"]
         condition_vec = np.array(["all"] * n_trials)
 
@@ -651,10 +651,17 @@ def _run_tf_correlations_core(
             denominator = max(MIN_DENOMINATOR_THRESHOLD, 1.0 - r**2)
             cluster_stat[freq_idx, time_idx] = r * np.sqrt(dof / denominator)
 
-    cluster_cfg = config.get("behavior_analysis.cluster_correction", {})
-    n_perm = max(int(cluster_cfg.get("n_permutations", 100)), int(hm_cfg.get("n_cluster_perm", 0)))
-    c_alpha = float(cluster_cfg.get("alpha", config.get("statistics.sig_alpha", 0.05)))
-    rng = np.random.default_rng(int(config.get("project.random_state", 42)))
+    n_perm_cfg = int(
+        get_config_value(config, "behavior_analysis.cluster.n_permutations", None) or
+        get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 100)
+    )
+    n_perm = max(n_perm_cfg, int(hm_cfg.get("n_cluster_perm", 0)))
+    c_alpha = float(
+        get_config_value(config, "behavior_analysis.cluster.alpha", None) or
+        get_config_value(config, "behavior_analysis.cluster_correction.alpha", None) or
+        get_config_value(config, "statistics.sig_alpha", 0.05)
+    )
+    rng = np.random.default_rng(int(get_config_value(config, "project.random_state", 42)))
     cov_mat = cov_df.to_numpy() if cov_df is not None and not cov_df.empty else None
 
     c_labels, c_pvals, c_sig, c_recs, perm_masses, c_thresh = (
@@ -667,11 +674,7 @@ def _run_tf_correlations_core(
     )
     if n_perm > 0:
         run_col = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
-        groups = None
-        if run_col and events is not None and run_col in events.columns:
-            groups = events[run_col].to_numpy()
-        elif events is not None and "run_id" in events.columns:
-            groups = events["run_id"].to_numpy()
+        groups = events[run_col].to_numpy() if run_col and events is not None and run_col in events.columns else None
         c_labels, c_pvals, c_sig, c_recs, perm_masses, c_thresh = compute_cluster_correction_2d(
             correlations=cluster_stat, p_values=pvals, bin_data=bin_data,
             informative_bins=info_bins, y_array=y_arr, cluster_alpha=c_alpha,
@@ -689,7 +692,6 @@ def _run_tf_correlations_core(
 
     method = "spearman" if use_spearman else "pearson"
     
-    # Build TF grid records using the unified helper
     recs = _build_tf_grid_records(
         corrs, pvals, n_valid, times, freqs, time_edges, method, roi_label,
         c_pvals if n_perm > 0 else None,
@@ -697,7 +699,6 @@ def _run_tf_correlations_core(
         c_sig if n_perm > 0 else None,
     )
     
-    # Save to unified temporal_correlations folder
     temporal_dir = stats_dir / "temporal_correlations"
     ensure_dir(temporal_dir)
     if recs:
@@ -777,7 +778,6 @@ def _build_temporal_tsv_records(
                 if not np.isfinite(r) or not np.isfinite(p):
                     continue
                 
-                # Extract cluster correction values if available
                 p_cluster = np.nan
                 cluster_id = 0
                 is_cluster_sig = False
@@ -848,26 +848,21 @@ def _build_roi_averaged_records(
             
         for band_idx in range(n_bands):
             for window_idx in range(n_windows):
-                # Extract values for this ROI
                 roi_corrs = corrs[band_idx, window_idx, ch_indices]
                 roi_pvals = pvals[band_idx, window_idx, ch_indices]
                 roi_n = n_valid[band_idx, window_idx, ch_indices]
                 
-                # Filter to valid values
                 valid_mask = np.isfinite(roi_corrs) & np.isfinite(roi_pvals)
                 if not valid_mask.any():
                     continue
                     
-                # Compute ROI average (Fisher z-transform for proper averaging)
                 valid_corrs = roi_corrs[valid_mask]
                 z_values = np.arctanh(np.clip(valid_corrs, -0.9999, 0.9999))
                 z_mean = np.mean(z_values)
                 r_mean = np.tanh(z_mean)
                 
-                # Use minimum n across ROI channels
                 n_mean = int(np.min(roi_n[valid_mask]))
                 
-                # Combine p-values using Fisher's method
                 valid_pvals = roi_pvals[valid_mask]
                 valid_pvals = np.clip(valid_pvals, 1e-300, 1.0)  # Avoid log(0)
                 chi2_stat = -2 * np.sum(np.log(valid_pvals))
@@ -973,7 +968,6 @@ def _save_temporal_topomap_npz(
     
     ensure_dir(out_dir)
     
-    # Build the NPZ payload with condition names as keys
     npz_payload = {
         "ch_names": np.array(ch_names, dtype=object),
         "info": info,
@@ -981,7 +975,6 @@ def _save_temporal_topomap_npz(
     }
     
     for cond_name, res in condition_results.items():
-        # Store each condition's results as a nested dict
         npz_payload[cond_name] = res
     
     npz_path = out_dir / f"temporal_correlations_by_condition{suffix}.npz"
@@ -1024,7 +1017,7 @@ def _run_temporal_by_condition_core(
     if len(win_s) == 0:
         return
 
-    y_arr = y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
+    y_arr = _to_numpy_array(y)
     n = compute_aligned_data_length(tfr, events)
 
     temporal_cfg = config.get("behavior_analysis.temporal", {}) or {}
@@ -1055,19 +1048,13 @@ def _run_temporal_by_condition_core(
     all_tsv_records = []
     ch_names = tfr.ch_names
 
-    # Check if ROI averages should be included
     include_roi_averages = bool(temporal_cfg.get("include_roi_averages", True))
-    roi_definitions = None
-    if include_roi_averages:
-        roi_definitions = config.get("channel_rois", {}) or {}
+    roi_definitions = config.get("channel_rois", {}) or {} if include_roi_averages else None
     
-    # Collect per-condition results for NPZ export (topomap plotting)
     condition_results = {}
 
-    run_col = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
-    groups_all = None
-    if run_col and run_col in events.columns:
-        groups_all = events[run_col].to_numpy()[:n] if len(events) >= n else events[run_col].to_numpy()
+    run_col = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id")).strip()
+    groups_all = events[run_col].to_numpy()[:n] if run_col and run_col in events.columns else None
     
     for cond_val in condition_values:
         if cond_val == "all":
@@ -1087,10 +1074,8 @@ def _run_temporal_by_condition_core(
             cov_df, config, n_jobs, groups=groups_cond,
         )
         if res:
-            # Store result for NPZ export
             condition_results[safe_name] = res
             
-            # Per-channel records
             cond_records = _build_temporal_tsv_records(res, safe_name, ch_names, method)
             for rec in cond_records:
                 rec["feature"] = "power"
@@ -1106,7 +1091,6 @@ def _run_temporal_by_condition_core(
                 if roi_records:
                     logger.info(f"Added {len(roi_records)} ROI-averaged records for condition '{safe_name}'")
 
-    # Save NPZ file for topomap plotting
     _save_temporal_topomap_npz(
         condition_results, ch_names, epochs.info, out_dir, sfx, logger
     )
@@ -1202,49 +1186,6 @@ def compute_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
 ###################################################################
 
 
-def _compute_itpc_for_window(
-    tfr_complex: np.ndarray,
-    fmin: float,
-    fmax: float,
-    t0: float,
-    t1: float,
-    times: np.ndarray,
-    freqs: np.ndarray,
-) -> Optional[np.ndarray]:
-    """Compute ITPC for a specific time window and frequency band.
-    
-    ITPC is computed as the magnitude of the mean complex-valued phase unit vectors:
-        ITPC = |mean(exp(1j * phase))|
-    
-    Returns shape (n_channels,) with mean ITPC across trials for each channel.
-    """
-    freq_mask = (freqs >= fmin) & (freqs <= fmax)
-    time_mask = (times >= t0) & (times < t1)
-    
-    if not freq_mask.any() or not time_mask.any():
-        return None
-    
-    # tfr_complex shape: (n_trials, n_channels, n_freqs, n_times)
-    # Extract relevant frequency and time bins
-    data_sub = tfr_complex[:, :, freq_mask, :][:, :, :, time_mask]
-    
-    if data_sub.size == 0:
-        return None
-    
-    # Extract phase from complex TFR
-    phase = np.angle(data_sub)
-    
-    # Compute phase unit vectors and average across trials
-    # ITPC = |mean_trials(exp(1j*phase))|
-    phase_vectors = np.exp(1j * phase)  # (n_trials, n_ch, n_freq_sub, n_time_sub)
-    mean_vector = np.mean(phase_vectors, axis=0)  # (n_ch, n_freq_sub, n_time_sub)
-    
-    # Take magnitude (ITPC) and average across freq and time bins
-    itpc = np.abs(mean_vector).mean(axis=(1, 2))  # (n_ch,)
-    
-    return itpc
-
-
 def _extract_trial_itpc(
     tfr_complex: np.ndarray,
     fmin: float,
@@ -1278,21 +1219,14 @@ def _extract_trial_itpc(
     
     n_trials, n_ch = data_sub.shape[0], data_sub.shape[1]
     
-    # Extract phase
-    phase = np.angle(data_sub)  # (n_trials, n_ch, n_freq_sub, n_time_sub)
-    
-    # Compute circular mean phase across trials for each (ch, freq, time)
+    phase = np.angle(data_sub)
     phase_vectors = np.exp(1j * phase)
-    mean_vector = np.mean(phase_vectors, axis=0)  # (n_ch, n_freq_sub, n_time_sub)
-    mean_phase = np.angle(mean_vector)  # circular mean phase
+    mean_vector = np.mean(phase_vectors, axis=0)
+    mean_phase = np.angle(mean_vector)
     
-    # Compute each trial's alignment with the mean phase
-    # cos(phase_trial - mean_phase) gives +1 if aligned, -1 if anti-aligned
     phase_diff = phase - mean_phase[np.newaxis, :, :, :]
-    alignment = np.cos(phase_diff)  # (n_trials, n_ch, n_freq_sub, n_time_sub)
-    
-    # Average across freq and time bins
-    trial_itpc = alignment.mean(axis=(2, 3))  # (n_trials, n_ch)
+    alignment = np.cos(phase_diff)
+    trial_itpc = alignment.mean(axis=(2, 3))
     
     return trial_itpc
 
@@ -1329,14 +1263,12 @@ def _run_itpc_temporal_by_condition_core(
     baseline_correction = bool(itpc_cfg.get("baseline_correction", True))
     baseline_window = itpc_cfg.get("baseline_window", [-0.5, -0.01])
     
-    # Time window configuration from user settings
     time_range_ms = temporal_cfg.get("time_range_ms", [-200, 1000])
     time_resolution_ms = temporal_cfg.get("time_resolution_ms", 50)
     tmin_s = time_range_ms[0] / 1000.0
     tmax_s = time_range_ms[1] / 1000.0
     win_size_s = time_resolution_ms / 1000.0
     
-    # Compute complex TFR for phase extraction
     tfr_complex = compute_complex_tfr(epochs, config, logger=logger)
     if tfr_complex is None:
         return None
@@ -1346,7 +1278,6 @@ def _run_itpc_temporal_by_condition_core(
     freqs = np.asarray(tfr_complex.freqs)
     ch_names = tfr_complex.ch_names
     
-    # Use user-configured time range, clamped to available data
     clipped = clip_time_range(times, tmin_s, tmax_s)
     if clipped is None:
         logger.warning("ITPC temporal: no valid time range after clipping")
@@ -1356,7 +1287,7 @@ def _run_itpc_temporal_by_condition_core(
         logger.warning("ITPC temporal: no time windows generated")
         return None
     
-    y_arr = y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
+    y_arr = _to_numpy_array(y)
     n = compute_aligned_data_length(tfr_complex, events)
     
     condition_values, condition_vec = _determine_condition_values(
@@ -1366,7 +1297,6 @@ def _run_itpc_temporal_by_condition_core(
     fmax = float(np.max(freqs))
     all_bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
     
-    # Filter bands if user selected specific ones
     if selected_bands:
         bands = {k: v for k, v in all_bands.items() if k.lower() in [b.lower() for b in selected_bands]}
         if not bands:
@@ -1544,18 +1474,15 @@ def _extract_trial_erds(
     if not freq_mask.any() or not time_mask.any() or not bl_mask.any():
         return None
     
-    # tfr_power shape: (n_trials, n_channels, n_freqs, n_times)
     active_data = tfr_power[:, :, freq_mask, :][:, :, :, time_mask]
     baseline_data = tfr_power[:, :, freq_mask, :][:, :, :, bl_mask]
     
     if active_data.size == 0 or baseline_data.size == 0:
         return None
     
-    # Average power across freq and time bins
-    active_mean = active_data.mean(axis=(2, 3))  # (n_trials, n_ch)
-    baseline_mean = baseline_data.mean(axis=(2, 3))  # (n_trials, n_ch)
+    active_mean = active_data.mean(axis=(2, 3))
+    baseline_mean = baseline_data.mean(axis=(2, 3))
     
-    # Compute ERDS normalization
     if method == "zscore":
         baseline_std = baseline_data.std(axis=(2, 3))  # (n_trials, n_ch)
         baseline_std = np.where(
@@ -1623,7 +1550,7 @@ def _run_erds_temporal_by_condition_core(
     if len(win_s) == 0:
         return None
     
-    y_arr = y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
+    y_arr = _to_numpy_array(y)
     n = compute_aligned_data_length(tfr, events)
     
     condition_values, condition_vec = _determine_condition_values(
@@ -1633,12 +1560,12 @@ def _run_erds_temporal_by_condition_core(
     fmax = float(np.max(freqs))
     all_bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
     if selected_bands:
-        selected_bands_lower = [b.lower() for b in selected_bands]
-        bands = {
-            k: v
-            for k, v in all_bands.items()
-            if k.lower() in selected_bands_lower
-        } or all_bands
+        bands = {k: v for k, v in all_bands.items() if k.lower() in [b.lower() for b in selected_bands]}
+        if not bands:
+            logger.warning(f"ERDS temporal: no matching bands in {selected_bands}, using all bands")
+            bands = all_bands
+        else:
+            logger.info(f"ERDS temporal: using selected bands {list(bands.keys())}")
     else:
         bands = all_bands
     

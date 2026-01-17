@@ -80,7 +80,7 @@ def _count_columns_and_rows(path: Path) -> tuple[int, int]:
     """
     Count columns and rows in a feature file.
     
-    Supports TSV and Parquet formats. Returns (0, 0) if file doesn't exist
+    Supports Parquet and TSV formats. Returns (0, 0) if file doesn't exist
     or cannot be read.
     
     Parameters
@@ -100,9 +100,7 @@ def _count_columns_and_rows(path: Path) -> tuple[int, int]:
         if path.suffix == ".parquet":
             import pandas as pd
             dataframe = pd.read_parquet(path)
-            column_count = len(dataframe.columns)
-            row_count = len(dataframe)
-            return column_count, row_count
+            return len(dataframe.columns), len(dataframe)
         
         if path.suffix == ".tsv":
             with open(path, 'r', encoding='utf-8') as file:
@@ -110,8 +108,7 @@ def _count_columns_and_rows(path: Path) -> tuple[int, int]:
                 if not header_line:
                     return 0, 0
                 
-                tab_separated_values = header_line.split('\t')
-                column_count = len(tab_separated_values)
+                column_count = len(header_line.split('\t'))
                 row_count = sum(1 for _ in file)
                 return column_count, row_count
     except (OSError, ValueError, ImportError):
@@ -122,14 +119,12 @@ def _count_columns_and_rows(path: Path) -> tuple[int, int]:
 
 def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path:
     """
-    Find the feature file path, checking subfolder first then root.
+    Find the feature file path.
     
     Features are stored in: features/{key}/{filename}
     
     For source localization features, checks both fmri_informed/ and eeg_only/
     subdirectories to ensure files are found regardless of extraction mode.
-    
-    Checks for both .parquet and .tsv extensions for backward compatibility.
     
     Parameters
     ----------
@@ -143,7 +138,7 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
     Returns
     -------
     Path
-        Path to the feature file (first existing location found)
+        Path to the feature file (first existing location found, or expected path)
     """
     if key == "sourcelocalization":
         candidates = [
@@ -156,11 +151,7 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
                 return candidate
         return candidates[0]
     
-    subfolder_path = features_dir / key / filename
-    if subfolder_path.exists():
-        return subfolder_path
-    
-    return subfolder_path
+    return features_dir / key / filename
 
 
 def discover_feature_files(
@@ -170,9 +161,6 @@ def discover_feature_files(
 ) -> dict[str, FeatureFileInfo]:
     """
     Discover available feature files for a subject.
-    
-    Searches for feature files in both subfolder structure (features/{key}/)
-    and root features directory for backwards compatibility.
     
     Parameters
     ----------

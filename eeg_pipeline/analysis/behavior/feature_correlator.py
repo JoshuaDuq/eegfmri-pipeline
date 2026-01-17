@@ -51,7 +51,6 @@ class CorrelationConfig:
     n_bootstrap: int = 0
     n_permutations: int = 0
     rng: Optional[np.random.Generator] = None
-    filter_threshold: float = 0.0
     compute_bayes_factor: bool = False
     robust_method: Optional[str] = None  # "percentage_bend", "winsorized", "shepherd"
     method_label: Optional[str] = None

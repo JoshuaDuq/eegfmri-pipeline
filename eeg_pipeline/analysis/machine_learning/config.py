@@ -9,18 +9,11 @@ from typing import Any, Dict
 from eeg_pipeline.utils.config.loader import load_config
 
 
-def _ensure_config(config: Any) -> Any:
-    """
-    Return an explicit configuration object, loading one if `config` is None.
-    """
-    return config if config is not None else load_config()
-
-
 def get_ml_config(config: Any = None) -> Dict[str, Any]:
     """
     Extract ML configuration with unified defaults for regression and classification.
     """
-    resolved_config = _ensure_config(config)
+    resolved_config = config if config is not None else load_config()
 
     cv_config = resolved_config.get("machine_learning.cv", {})
     constant_config = resolved_config.get("machine_learning.constants", {})
@@ -28,6 +21,7 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
     model_config = resolved_config.get("machine_learning.models", {})
 
     elasticnet_config = model_config.get("elasticnet", {})
+    ridge_config = model_config.get("ridge", {})
     random_forest_config = model_config.get("random_forest", {})
     svm_config = model_config.get("svm", {})
     lr_config = model_config.get("logistic_regression", {})
@@ -50,6 +44,8 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
         "elasticnet_selection": elasticnet_config.get("selection", "cyclic"),
         "elasticnet_alpha_grid": elasticnet_config.get("alpha_grid", [0.01, 0.1, 1.0, 10.0]),
         "elasticnet_l1_ratio_grid": elasticnet_config.get("l1_ratio_grid", [0.1, 0.5, 0.9]),
+        # Ridge regression
+        "ridge_alpha_grid": ridge_config.get("alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0]),
         # Random Forest (shared)
         "rf_n_estimators": random_forest_config.get("n_estimators", 100),
         "rf_bootstrap": random_forest_config.get("bootstrap", True),
@@ -71,9 +67,3 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
 
 
 __all__ = ["get_ml_config"]
-
-
-
-
-
-

@@ -37,9 +37,6 @@ def _create_rating_distribution_plot(
     config: Any,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Create histogram plot of rating distribution with statistics."""
-    if config is None:
-        raise ValueError("config is required for behavioral plotting")
-    
     plot_cfg = get_plot_config(config)
     behavioral_config = _get_behavioral_config(plot_cfg)
     rating_config = behavioral_config.get("rating_distribution", {})
@@ -84,7 +81,7 @@ def plot_behavioral_response_patterns(
     """Plot and save rating distribution for a subject."""
     if config is None:
         raise ValueError("config is required for behavioral plotting")
-    
+
     plot_cfg = get_plot_config(config)
     fig, _ = _create_rating_distribution_plot(y, config)
 
@@ -106,20 +103,15 @@ def _extract_correlation_method_label(config: Optional[Any]) -> Optional[str]:
     """Extract formatted correlation method label from config."""
     if config is None:
         return None
-    
+
     raw_method = get_config_value(
-        config, "behavior_analysis.statistics.correlation_method", None
+        config, "behavior_analysis.statistics.correlation_method", "spearman"
     )
-    if raw_method is None:
-        raw_method = get_config_value(
-            config, "behavior_analysis.correlation_method", "spearman"
-        )
-    
     method = normalize_correlation_method(raw_method, default="spearman")
     robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
     if robust_method is not None:
         robust_method = str(robust_method).strip().lower() or None
-    
+
     return format_correlation_method_label(method, robust_method)
 
 
@@ -137,31 +129,28 @@ def _find_unified_correlation_file(
     stats_dir: Path, method_label: Optional[str], target_rating: str
 ) -> Optional[pd.DataFrame]:
     """Search for unified correlations*.tsv files with optional method suffix."""
-    method_suffix = f"_{method_label}" if method_label else ""
-    
     glob_candidates: list[Path] = []
     if method_label:
-        pattern = f"correlations*{method_suffix}.tsv"
+        pattern = f"correlations*_{method_label}.tsv"
         glob_candidates.extend(sorted(stats_dir.glob(pattern)))
     glob_candidates.extend(sorted(stats_dir.glob("correlations*.tsv")))
-    
+
     for path in glob_candidates:
         df = _try_read_tsv(path)
         if df is None:
             continue
-        
+
         if "target" in df.columns:
             target_filtered = df[
                 df["target"].astype(str).str.lower() == str(target_rating).lower()
             ].copy()
             if not target_filtered.empty:
                 return target_filtered
-            return df
-        
+
         df_with_target = df.copy()
         df_with_target["target"] = target_rating
         return df_with_target
-    
+
     return None
 
 
@@ -175,20 +164,12 @@ def _load_correlation_stats(
     behavioral_config = _get_behavioral_config(plot_cfg)
     target_rating = behavioral_config.get("target_rating", "rating")
     method_label = _extract_correlation_method_label(config)
-    
+
     df = _find_unified_correlation_file(stats_dir, method_label, target_rating)
     if df is not None:
         return df
-    
-    method_suffix = f"_{method_label}" if method_label else ""
-    unified_patterns = (
-        [f"correlations*{method_suffix}.tsv"] if method_label else []
-    ) + ["correlations*.tsv"]
-    
-    logger.warning(
-        "No correlation stats found. Expected one of: %s",
-        ", ".join(unified_patterns),
-    )
+
+    logger.warning("No correlation stats found in %s", stats_dir)
     return None
 
 
@@ -237,36 +218,36 @@ def _create_predictor_label(row: pd.Series) -> str:
     band = row.get("band")
     identifier = row.get("identifier")
     segment = row.get("segment")
-    
+
     if identifier:
         label = f"{group}:{identifier}"
     else:
         label = group
-    
+
     if band:
         label = f"{label} ({band})"
-    
+
     if segment:
         label = f"{label} [{segment}]"
-    
+
     if "target" in row and pd.notna(row["target"]):
         label = f"{label} → {row['target']}"
-    
+
     return label
 
 
 def _prepare_predictor_table(df: pd.DataFrame) -> pd.DataFrame:
     """Prepare correlation dataframe for plotting by extracting and formatting columns."""
-    if df is None or df.empty:
+    if df.empty:
         return pd.DataFrame()
 
     df = df.copy()
     df = _extract_correlation_columns(df)
-    
+
     p_kind = _extract_p_value_column(df)
     if p_kind is None:
         return pd.DataFrame()
-    
+
     df["p_plot"] = pd.to_numeric(df[p_kind], errors="coerce")
     df["p_kind"] = p_kind
 
@@ -281,17 +262,14 @@ def _prepare_predictor_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _filter_significant_predictors(df: pd.DataFrame, alpha: float) -> pd.DataFrame:
-    if df is None or df.empty:
+    """Filter predictors by significance threshold."""
+    if df.empty:
         return pd.DataFrame()
     return df[
         (df["p_plot"].notna())
         & (df["p_plot"] <= alpha)
         & df["r"].notna()
     ].copy()
-
-
-def _create_predictor_labels(df: pd.DataFrame) -> pd.Series:
-    return df["predictor"].astype(str)
 
 
 def _get_correlation_method_label_for_plot(config: Any) -> str:
@@ -318,7 +296,7 @@ def _add_value_labels(ax: plt.Axes, df_top: pd.DataFrame, config: dict) -> None:
     """Add correlation value and p-value labels to each bar."""
     value_fontsize = config.get("value_fontsize", 10)
     value_x_offset = config.get("value_x_offset", 0.01)
-    
+
     for i, (_, row) in enumerate(df_top.iterrows()):
         r_val = row["r"]
         p_val = row["p_plot"]
@@ -326,7 +304,7 @@ def _add_value_labels(ax: plt.Axes, df_top: pd.DataFrame, config: dict) -> None:
         sign_str = "(+)" if r_val >= 0 else "(-)"
         x_pos = abs_r_val + value_x_offset
         label_text = f"{abs_r_val:.3f} {sign_str} (p={p_val:.3f})"
-        
+
         ax.text(
             x_pos,
             i,
@@ -363,7 +341,7 @@ def _create_predictors_plot(
     bar_alpha = predictors_config.get("bar_alpha", 0.8)
     bar_edgecolor = predictors_config.get("bar_edgecolor", "black")
     bar_linewidth = predictors_config.get("bar_linewidth", 0.5)
-    
+
     y_pos = np.arange(len(df_top))
     ax.barh(
         y_pos,
@@ -377,12 +355,12 @@ def _create_predictors_plot(
     ax.set_yticks(y_pos)
     label_fontsize = predictors_config.get("label_fontsize", 11)
     ax.set_yticklabels(df_top["predictor"], fontsize=label_fontsize)
-    
+
     method_label = _get_correlation_method_label_for_plot(config)
     xlabel_text = f"|{method_label}| with Behavior (p < {alpha})"
     xlabel_fontsize = predictors_config.get("xlabel_fontsize", 12)
     ax.set_xlabel(xlabel_text, fontweight="bold", fontsize=xlabel_fontsize)
-    
+
     title_fontsize = predictors_config.get("title_fontsize", 14)
     title_pad = predictors_config.get("title_pad", 20)
     ax.set_title(
@@ -397,7 +375,7 @@ def _create_predictors_plot(
     max_r = df_top["abs_r"].max()
     xlim_multiplier = predictors_config.get("xlim_multiplier", 1.25)
     ax.set_xlim(0, max_r * xlim_multiplier)
-    
+
     grid_alpha = predictors_config.get("grid_alpha", 0.3)
     grid_linestyle = predictors_config.get("grid_linestyle", "-")
     grid_linewidth = predictors_config.get("grid_linewidth", 0.5)
@@ -422,8 +400,8 @@ def _export_top_predictors(
     """Export top predictors to TSV file."""
     top_predictors_file = stats_dir / f"top_{top_n}_behavioral_predictors.tsv"
     export_cols = ["predictor", "r", "abs_r", "p_plot", "p_kind", "n"]
-    
-    if "target" in df_top.columns and "target" not in export_cols:
+
+    if "target" in df_top.columns:
         export_cols = ["target"] + export_cols
 
     df_top_export = df_top[export_cols].copy()
@@ -478,9 +456,6 @@ def plot_top_behavioral_predictors(
     """Plot and save top behavioral predictors based on correlation statistics."""
     if config is None:
         raise ValueError("config is required for behavioral plotting")
-    
-    if task is None:
-        task = config.task
 
     alpha = (
         alpha
@@ -511,13 +486,7 @@ def plot_top_behavioral_predictors(
         logger.warning(f"No significant correlations found (p <= {alpha})")
         return
 
-    df_top = df_sig.nlargest(top_n, "abs_r")
-    if df_top.empty:
-        logger.warning("No top correlations to plot")
-        return
-
-    df_top["predictor"] = _create_predictor_labels(df_top)
-    df_top = df_top.sort_values("abs_r", ascending=True)
+    df_top = df_sig.nlargest(top_n, "abs_r").sort_values("abs_r", ascending=True)
 
     fig, _ = _create_predictors_plot(df_top, top_n, alpha, config)
     plt.tight_layout()

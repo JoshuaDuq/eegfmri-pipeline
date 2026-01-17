@@ -85,12 +85,6 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         help="Significance level for prediction intervals (default: 0.1 = 90%% coverage).",
     )
     parser.add_argument(
-        "--shap-n-samples",
-        type=int,
-        default=100,
-        help="Number of background samples for SHAP (default: 100).",
-    )
-    parser.add_argument(
         "--perm-n-repeats",
         type=int,
         default=10,
@@ -156,20 +150,13 @@ def setup_ml(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     return parser
 
 
-def _extract_arg(args: argparse.Namespace, name: str, default: Any) -> Any:
-    """Extract argument value with default fallback."""
-    return getattr(args, name, default)
-
-
 def _update_path_config(args: argparse.Namespace, config: Any) -> None:
     """Update config with path overrides from arguments."""
-    bids_root = _extract_arg(args, "bids_root", None)
-    if bids_root is not None:
-        config.setdefault("paths", {})["bids_root"] = bids_root
+    if args.bids_root is not None:
+        config.setdefault("paths", {})["bids_root"] = args.bids_root
     
-    deriv_root = _extract_arg(args, "deriv_root", None)
-    if deriv_root is not None:
-        config.setdefault("paths", {})["deriv_root"] = deriv_root
+    if args.deriv_root is not None:
+        config.setdefault("paths", {})["deriv_root"] = args.deriv_root
 
 
 def _parse_max_depth_values(raw_values: List[str]) -> List[Optional[int]]:
@@ -202,9 +189,8 @@ def _update_model_config(args: argparse.Namespace, config: Any) -> None:
         max_depth_values = _parse_max_depth_values(args.rf_max_depth_grid)
         config["machine_learning.models.random_forest.max_depth_grid"] = max_depth_values
     
-    ridge_alpha_grid = _extract_arg(args, "ridge_alpha_grid", None)
-    if ridge_alpha_grid is not None:
-        alpha_values = [float(v) for v in ridge_alpha_grid]
+    if args.ridge_alpha_grid is not None:
+        alpha_values = [float(v) for v in args.ridge_alpha_grid]
         config["machine_learning.models.ridge.alpha_grid"] = alpha_values
 
 
@@ -219,14 +205,10 @@ def _print_stage_list() -> None:
 
 def _print_dry_run_info(args: argparse.Namespace, subjects: List[str]) -> None:
     """Print dry-run information and exit."""
-    mode = _extract_arg(args, "mode", "regression")
-    cv_scope = _extract_arg(args, "cv_scope", "group")
-    model = _extract_arg(args, "model", "elasticnet")
-    
-    print(f"\n[DRY RUN] Would execute ML stage: {mode}")
+    print(f"\n[DRY RUN] Would execute ML stage: {args.mode}")
     print(f"  Subjects: {subjects}")
-    print(f"  CV scope: {cv_scope}")
-    print(f"  Model: {model}")
+    print(f"  CV scope: {args.cv_scope}")
+    print(f"  Model: {args.model}")
     print(f"  n_perm: {args.n_perm}")
     print(f"  inner_splits: {args.inner_splits}")
 
@@ -251,33 +233,30 @@ def _build_pipeline_kwargs(args: argparse.Namespace, config: Any) -> Dict[str, A
     )
     
     return {
-        "cv_scope": _extract_arg(args, "cv_scope", "group"),
+        "cv_scope": args.cv_scope,
         "n_perm": args.n_perm,
         "inner_splits": args.inner_splits,
         "outer_jobs": args.outer_jobs,
         "rng_seed": rng_seed,
-        "model": _extract_arg(args, "model", "elasticnet"),
-        "uncertainty_alpha": _extract_arg(args, "uncertainty_alpha", 0.1),
-        "perm_n_repeats": _extract_arg(args, "perm_n_repeats", 10),
+        "model": args.model,
+        "uncertainty_alpha": args.uncertainty_alpha,
+        "perm_n_repeats": args.perm_n_repeats,
     }
 
 
 def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the ml command."""
-    if _extract_arg(args, "list_stages", False):
+    if args.list_stages:
         _print_stage_list()
         return
     
     from eeg_pipeline.pipelines.machine_learning import MLPipeline
     
-    mode = _extract_arg(args, "mode", "regression")
-    cv_scope = _extract_arg(args, "cv_scope", "group")
-    
-    if _extract_arg(args, "dry_run", False):
+    if args.dry_run:
         _print_dry_run_info(args, subjects)
         return
     
-    _validate_ml_requirements(subjects, cv_scope, config)
+    _validate_ml_requirements(subjects, args.cv_scope, config)
     
     progress = create_progress_reporter(args)
     task = resolve_task(args.task, config)
@@ -291,7 +270,7 @@ def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     pipeline.run_batch(
         subjects=subjects,
         task=task,
-        mode=mode,
+        mode=args.mode,
         progress=progress,
         **pipeline_kwargs,
     )

@@ -25,7 +25,8 @@ from scipy import stats
 from eeg_pipeline.infra.paths import ensure_dir, deriv_plots_path, deriv_features_path
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.infra.tsv import read_tsv
-from eeg_pipeline.plotting.core.utils import get_band_colors
+from eeg_pipeline.plotting.core.colors import get_band_colors
+from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.data.features import (
     get_aperiodic_columns,
     get_connectivity_columns_by_band,
@@ -43,7 +44,6 @@ MIN_DATA_POINTS_FOR_NONLINEARITY = 10
 POLYNOMIAL_DEGREE = 2
 FIT_POINTS = 100
 SIGNIFICANCE_THRESHOLD = 0.05
-DEFAULT_BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
 MAX_APERIODIC_METRICS = 3
 NORMALIZED_THRESHOLD = 0.5
 
@@ -706,14 +706,12 @@ def _create_plot_config(
     bands: List[str],
     band_colors: Dict[str, str],
 ) -> PlotConfig:
-    """Create plot configuration with defaults."""
-    default_bands = bands if bands else DEFAULT_BANDS
-    default_colors = band_colors if band_colors else get_band_colors()
+    """Create plot configuration."""
     return PlotConfig(
         feature_type=feature_type,
         y_label=y_label,
-        bands=default_bands,
-        band_colors=default_colors,
+        bands=bands,
+        band_colors=band_colors,
     )
 
 
@@ -774,8 +772,6 @@ def visualize_dose_response(
         raise ValueError("Task must be a non-empty string")
     
     saved_files: Dict[str, Path] = {}
-    
-    from eeg_pipeline.plotting.config import get_plot_config
     
     plot_cfg = get_plot_config(config)
     behavioral_config = plot_cfg.get_behavioral_config()
@@ -874,17 +870,7 @@ def visualize_dose_response(
                 itpc_dir = output_dir / "itpc"
                 ensure_dir(itpc_dir)
                 itpc_config = _create_plot_config("ITPC", "Mean ITPC", bands, band_colors)
-                _plot_dose_response_curves(
-                    df_itpc,
-                    TEMPERATURE_COLUMN,
-                    itpc_cols,
-                    itpc_config,
-                    subject,
-                    itpc_dir,
-                    saved_files,
-                    logger,
-                )
-                _plot_nonlinearity_test(
+                _plot_feature_dose_response(
                     df_itpc,
                     TEMPERATURE_COLUMN,
                     itpc_cols,

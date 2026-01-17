@@ -34,7 +34,7 @@ import pandas as pd
 
 
 ###################################################################
-# SHAP Availability Check
+# Helper Functions
 ###################################################################
 
 
@@ -45,6 +45,55 @@ def _check_shap_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+def _generate_feature_names(n_features: int) -> List[str]:
+    """Generate default feature names."""
+    return [f"feature_{i}" for i in range(n_features)]
+
+
+def _ensure_path(path: Path) -> Path:
+    """Ensure path exists and return Path object."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _extract_estimator_and_transform(model: Any, X: np.ndarray) -> Tuple[Any, np.ndarray]:
+    """Extract estimator from pipeline and transform X through preprocessing."""
+    estimator = model
+    if hasattr(model, "named_steps"):
+        step_names = list(model.named_steps.keys())
+        estimator = model.named_steps[step_names[-1]]
+        
+        X_transformed = X
+        for name in step_names[:-1]:
+            step = model.named_steps[name]
+            if hasattr(step, "transform"):
+                X_transformed = step.transform(X_transformed)
+        X = X_transformed
+    
+    return estimator, X
+
+
+def _create_predict_fn(model: Any):
+    """Create prediction function for KernelExplainer."""
+    if hasattr(model, "predict_proba"):
+        def predict_fn(x):
+            return model.predict_proba(x)[:, 1]
+        return predict_fn
+    return model.predict
+
+
+def _handle_binary_classification_output(shap_values: Union[np.ndarray, List], expected_value: Optional[Union[float, np.ndarray]] = None) -> Tuple[np.ndarray, Optional[Union[float, np.ndarray]]]:
+    """Handle binary classification output format."""
+    if isinstance(shap_values, list) and len(shap_values) == 2:
+        shap_values = shap_values[1]
+    
+    if expected_value is not None and isinstance(expected_value, np.ndarray) and len(expected_value) == 2:
+        expected_value = expected_value[1]
+    
+    return shap_values, expected_value
 
 
 ###################################################################
@@ -147,61 +196,32 @@ def compute_shap_values(
     X = np.asarray(X)
     
     if feature_names is None:
-        feature_names = [f"feature_{i}" for i in range(X.shape[1])]
+        feature_names = _generate_feature_names(X.shape[1])
     
-    # Get the actual estimator from pipeline if needed
-    estimator = model
-    if hasattr(model, "named_steps"):
-        # It's a pipeline - get the last step
-        step_names = list(model.named_steps.keys())
-        estimator = model.named_steps[step_names[-1]]
-        
-        # Transform X through preprocessing steps
-        X_transformed = X
-        for name in step_names[:-1]:
-            step = model.named_steps[name]
-            if hasattr(step, "transform"):
-                X_transformed = step.transform(X_transformed)
-        X = X_transformed
+    estimator, X = _extract_estimator_and_transform(model, X)
     
-    # Select explainer based on model type
     rng = np.random.default_rng(seed)
     
     try:
         if hasattr(estimator, "feature_importances_"):
-            # Tree-based model (RF, XGBoost, etc.)
             explainer = shap.TreeExplainer(estimator)
             shap_values = explainer.shap_values(X, check_additivity=check_additivity)
         elif hasattr(estimator, "coef_"):
-            # Linear model
             explainer = shap.LinearExplainer(estimator, X)
             shap_values = explainer.shap_values(X)
         else:
-            # Fall back to KernelExplainer (model-agnostic but slower)
             n_bg = min(background_samples, len(X))
             bg_idx = rng.choice(len(X), n_bg, replace=False)
             background = X[bg_idx]
             
-            # Create prediction function
-            if hasattr(model, "predict_proba"):
-                predict_fn = lambda x: model.predict_proba(x)[:, 1]
-            else:
-                predict_fn = model.predict
-            
+            predict_fn = _create_predict_fn(model)
             explainer = shap.KernelExplainer(predict_fn, background)
             shap_values = explainer.shap_values(X, nsamples=100)
     except Exception as e:
         raise RuntimeError(f"SHAP computation failed: {e}")
     
-    # Handle multi-class output
-    if isinstance(shap_values, list):
-        # For binary classification, use class 1
-        if len(shap_values) == 2:
-            shap_values = shap_values[1]
-    
     expected_value = explainer.expected_value
-    if isinstance(expected_value, np.ndarray) and len(expected_value) == 2:
-        expected_value = expected_value[1]
+    shap_values, expected_value = _handle_binary_classification_output(shap_values, expected_value)
     
     return SHAPResult(
         shap_values=shap_values,
@@ -285,7 +305,7 @@ def compute_shap_for_cv_folds(
         raise ImportError("SHAP not installed")
     
     if feature_names is None:
-        feature_names = [f"feature_{i}" for i in range(X.shape[1])]
+        feature_names = _generate_feature_names(X.shape[1])
     
     # Collect SHAP values from each fold
     all_shap_importance = []
@@ -298,13 +318,12 @@ def compute_shap_for_cv_folds(
         model = model_factory()
         model.fit(X_train, y_train)
         
-        # Compute SHAP on test set
         try:
             result = compute_shap_values(
                 model, X_test, feature_names, seed=seed + fold_idx
             )
             all_shap_importance.append(result.mean_abs_shap)
-        except Exception:
+        except (RuntimeError, ImportError) as e:
             continue
     
     if not all_shap_importance:
@@ -315,10 +334,9 @@ def compute_shap_for_cv_folds(
     mean_importance = np.mean(stacked, axis=0)
     std_importance = np.std(stacked, axis=0)
     
-    # Adjust feature names if preprocessing changed count
     n_features = len(mean_importance)
     if n_features != len(feature_names):
-        feature_names = [f"feature_{i}" for i in range(n_features)]
+        feature_names = _generate_feature_names(n_features)
     
     return pd.DataFrame({
         "feature": feature_names,
@@ -366,23 +384,20 @@ def compute_shap_interactions(
     import shap
     
     if feature_names is None:
-        feature_names = [f"feature_{i}" for i in range(X.shape[1])]
+        feature_names = _generate_feature_names(X.shape[1])
     
-    # Get estimator from pipeline
-    estimator = model
-    if hasattr(model, "named_steps"):
-        step_names = list(model.named_steps.keys())
-        estimator = model.named_steps[step_names[-1]]
+    estimator, _ = _extract_estimator_and_transform(model, X)
     
     if not hasattr(estimator, "feature_importances_"):
         raise ValueError("Interaction analysis requires tree-based model")
     
     # Compute interactions
     explainer = shap.TreeExplainer(estimator)
-    shap_interaction = explainer.shap_interaction_values(X[:min(500, len(X))])
+    n_samples = min(500, len(X))
+    shap_interaction = explainer.shap_interaction_values(X[:n_samples])
     
     if isinstance(shap_interaction, list):
-        shap_interaction = shap_interaction[1]  # Binary classification
+        shap_interaction, _ = _handle_binary_classification_output(shap_interaction, None)
     
     # Mean absolute interaction strength
     mean_interaction = np.mean(np.abs(shap_interaction), axis=0)
@@ -460,8 +475,7 @@ def plot_shap_summary(
     plt.tight_layout()
     
     if save_path:
-        save_path = Path(save_path)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path = _ensure_path(save_path)
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
     
     return fig
@@ -516,11 +530,9 @@ def plot_shap_bar(
     plt.tight_layout()
     
     if save_path:
-        save_path = Path(save_path)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path = _ensure_path(save_path)
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
     
-    plt.close(fig)
     return fig
 
 
@@ -577,8 +589,7 @@ def plot_shap_dependence(
     plt.tight_layout()
     
     if save_path:
-        save_path = Path(save_path)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path = _ensure_path(save_path)
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
     
     return fig
@@ -634,20 +645,3 @@ def save_shap_results(
     saved["values"] = shap_path
     
     return saved
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

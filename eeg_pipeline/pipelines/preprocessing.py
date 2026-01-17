@@ -20,7 +20,6 @@ Modes:
 
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import sys
@@ -28,8 +27,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
-
-logger = logging.getLogger(__name__)
 
 
 STEP_BAD_CHANNELS = "bad-channels"
@@ -61,6 +58,26 @@ class PreprocessingPipeline(PipelineBase):
         super().__init__(name="preprocessing", config=config)
         self.bids_root = Path(self.config.bids_root)
     
+    def _extract_preprocessing_params(
+        self,
+        task: Optional[str],
+        kwargs: Dict[str, Any],
+    ) -> tuple[str, str, bool, int, Any]:
+        """Extract and normalize preprocessing parameters from kwargs.
+        
+        Returns:
+            Tuple of (resolved_task, mode, use_icalabel, n_jobs, progress)
+        """
+        from eeg_pipeline.cli.common import ProgressReporter
+        
+        resolved_task = task or self.config.get("project.task", "thermalactive")
+        mode = kwargs.get("mode", "full")
+        use_icalabel = kwargs.get("use_icalabel", True)
+        n_jobs = kwargs.get("n_jobs", 1)
+        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        
+        return resolved_task, mode, use_icalabel, n_jobs, progress
+    
     def process_subject(
         self,
         subject: str,
@@ -78,22 +95,15 @@ class PreprocessingPipeline(PipelineBase):
                 - n_jobs: Number of parallel jobs
                 - progress: ProgressReporter for TUI feedback
         """
-        from eeg_pipeline.cli.common import ProgressReporter
-        
-        resolved_task = task or self.config.get("project.task", "thermalactive")
-        mode = kwargs.get("mode", "full")
-        use_icalabel = kwargs.get("use_icalabel", True)
-        n_jobs = kwargs.get("n_jobs", 1)
-        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        resolved_task, mode, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
         
         progress.subject_start(f"sub-{subject}")
         
         steps = self._get_steps_for_mode(mode)
-        subjects = [subject]
         
         self._execute_steps(
             steps=steps,
-            subjects=subjects,
+            subjects=[subject],
             task=resolved_task,
             use_icalabel=use_icalabel,
             n_jobs=n_jobs,
@@ -113,18 +123,16 @@ class PreprocessingPipeline(PipelineBase):
         Args:
             subjects: List of subject IDs
             task: Task name
-            **kwargs: Preprocessing options (see process_subject)
+            **kwargs: Preprocessing options:
+                - mode: 'full', 'bad-channels', 'ica', or 'epochs'
+                - use_icalabel: Whether to use mne-icalabel
+                - n_jobs: Number of parallel jobs
+                - progress: ProgressReporter for TUI feedback
             
         Returns:
             List of per-subject status dictionaries
         """
-        from eeg_pipeline.cli.common import ProgressReporter
-        
-        resolved_task = task or self.config.get("project.task", "thermalactive")
-        mode = kwargs.get("mode", "full")
-        use_icalabel = kwargs.get("use_icalabel", True)
-        n_jobs = kwargs.get("n_jobs", 1)
-        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        resolved_task, mode, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
         
         progress.start("preprocessing", subjects)
         
@@ -223,7 +231,7 @@ class PreprocessingPipeline(PipelineBase):
         
         normalized_subjects = self._normalize_subjects(subjects)
         subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
-        self.logger.info(f"Running PyPREP bad channel detection for {subject_count} subjects")
+        self.logger.info(f"Running PyPREP bad channel detection for {subject_count} subject(s)")
         
         pyprep_cfg = self.config.get("pyprep", {})
         run_bads_detection(
@@ -295,7 +303,7 @@ class PreprocessingPipeline(PipelineBase):
         
         normalized_subjects = self._normalize_subjects(subjects)
         subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
-        self.logger.info(f"Running ICA labeling for {subject_count} subjects")
+        self.logger.info(f"Running ICA labeling for {subject_count} subject(s)")
         
         icalabel_cfg = self.config.get("icalabel", {})
         run_ica_label(
@@ -335,10 +343,10 @@ class PreprocessingPipeline(PipelineBase):
         
         self.logger.info("Statistics collection complete")
     
-    def _run_mne_bids_pipeline(self, steps: str, subjects: List[str] = None, **kwargs) -> None:
+    def _run_mne_bids_pipeline(self, steps: str, subjects: List[str] = None) -> None:
         """Run MNE-BIDS pipeline with a generated config file.
         
-        mne_bids_pipeline 1.9.0 requires settings in a Python config file,
+        mne_bids_pipeline requires settings in a Python config file,
         not CLI arguments. This generates a temporary config and passes it
         via --config.
         
@@ -369,7 +377,6 @@ class PreprocessingPipeline(PipelineBase):
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
             
-            # mne_bids_pipeline 1.9.0 lacks __main__.py, invoke _main.main() directly
             invoke_script = (
                 "import sys; "
                 "sys.argv = ['mne_bids_pipeline'] + sys.argv[1:]; "

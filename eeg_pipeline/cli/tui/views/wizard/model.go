@@ -1364,7 +1364,7 @@ type Model struct {
 	controlTemperature    bool    // Include temperature as covariate
 	controlTrialOrder     bool    // Include trial order as covariate
 	fdrAlpha              float64 // FDR correction threshold
-	behaviorConfigSection int     // Behavior config section index (legacy, kept for compatibility)
+	behaviorConfigSection int
 	behaviorNJobs         int     // -1 = all
 
 	behaviorComputeChangeScores  bool
@@ -2123,7 +2123,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalConditionValues:    "",
 		temporalIncludeROIAverages: true,
 		temporalIncludeTFGrid:      true,
-		// Temporal feature selection - duplicate defaults removed (using values from temporalFeature*Enabled fields above)
 		temporalITPCBaselineCorrection: true,
 		temporalITPCBaselineMin:        -0.5,
 		temporalITPCBaselineMax:        -0.01,
@@ -2570,11 +2569,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sourceLocFmriCondIdx2 = 0
 			}
 			// Set condition strings from indices
-			if len(msg.Conditions) > 0 {
-				m.sourceLocFmriCondAValue = msg.Conditions[m.sourceLocFmriCondIdx1]
-				if len(msg.Conditions) > 1 && m.sourceLocFmriCondIdx2 < len(msg.Conditions) {
-					m.sourceLocFmriCondBValue = msg.Conditions[m.sourceLocFmriCondIdx2]
-				}
+			m.sourceLocFmriCondAValue = msg.Conditions[m.sourceLocFmriCondIdx1]
+			if len(msg.Conditions) > 1 && m.sourceLocFmriCondIdx2 < len(msg.Conditions) {
+				m.sourceLocFmriCondBValue = msg.Conditions[m.sourceLocFmriCondIdx2]
 			}
 		}
 		return m, nil
@@ -2826,10 +2823,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleUp()
 		case "down", "j":
 			m.handleDown()
-		case "left", "h":
-			m.handleLeft()
-		case "right", "l":
-			m.handleRight()
 		case " ":
 			// Space to toggle selections
 			m.handleSpace()
@@ -2922,7 +2915,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "-", "_":
-			// Legacy support - map to delete
 			switch m.CurrentStep {
 			case types.StepSelectBands:
 				m.removeBand()
@@ -2940,18 +2932,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.helpOverlay.Width = min(50, m.width-10)
-		if m.CurrentStep == types.StepSelectPlots {
-			m.UpdatePlotOffset()
-		}
-		if m.CurrentStep == types.StepSelectFeaturePlotters {
-			m.UpdateFeaturePlotterOffset()
-		}
-		if m.CurrentStep == types.StepSelectComputations {
-			m.UpdateComputationOffset()
-		}
-		if m.CurrentStep == types.StepAdvancedConfig {
-			m.UpdateAdvancedOffset()
-		}
 	}
 
 	// Always update plot offset if in that step to ensure it's in sync
@@ -5644,7 +5624,6 @@ func (m Model) getFeaturesOptions() []optionType {
 						optSourceLocFmriMaxTotalVox,
 						optSourceLocFmriRandomSeed,
 					)
-					// fMRI contrast builder options (when building from BOLD)
 					options = append(options, optSourceLocFmriContrastEnabled)
 					if m.sourceLocFmriContrastEnabled {
 						options = append(options, optSourceLocFmriContrastType)
@@ -6024,7 +6003,6 @@ func (m Model) getPlottingAdvancedRows() []plottingAdvancedRow {
 		if opt == optUseDefaults {
 			continue
 		}
-		// Deprecated global options moved into per-plot config.
 		if opt == optPlotGroupTFRMisc || opt == optPlotTfrDefaultBaselineWindow {
 			continue
 		}
@@ -6204,10 +6182,6 @@ func (m Model) getPlottingOptions() []optionType {
 		)
 	}
 
-	options = append(options, optPlotGroupTFRMisc)
-	if m.plotGroupTFRMiscExpanded {
-		options = append(options, optPlotTfrDefaultBaselineWindow)
-	}
 
 	options = append(options, optPlotGroupTopomap)
 	if m.plotGroupTopomapExpanded {

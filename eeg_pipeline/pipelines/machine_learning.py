@@ -13,6 +13,11 @@ Modes:
 - regression: LOSO regression predicting pain intensity
 - timegen: Time-generalization analysis
 - classify: Binary pain classification
+- model_comparison: Compare multiple models (ElasticNet/Ridge/RF)
+- incremental_validity: Δ performance from EEG over baseline
+- uncertainty: Conformal prediction intervals
+- shap: SHAP feature importance
+- permutation: Permutation feature importance
 
 Usage:
     pipeline = MLPipeline(config=config)
@@ -75,6 +80,11 @@ class MLPipeline(PipelineBase):
         - regression: LOSO regression predicting pain intensity
         - timegen: Time-generalization analysis
         - classify: Binary pain classification
+        - model_comparison: Compare multiple models (ElasticNet/Ridge/RF)
+        - incremental_validity: Δ performance from EEG over baseline
+        - uncertainty: Conformal prediction intervals
+        - shap: SHAP feature importance
+        - permutation: Permutation feature importance
     """
     
     def __init__(self, config: Optional[Any] = None):
@@ -144,7 +154,7 @@ class MLPipeline(PipelineBase):
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_uncertainty_stage
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
         
-        X, y, groups, feature_names, meta = load_active_matrix(
+        X, y, groups, _, _ = load_active_matrix(
             subjects, task, self.deriv_root, self.config, self.logger
         )
         
@@ -167,7 +177,7 @@ class MLPipeline(PipelineBase):
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_shap_importance_stage
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
         
-        X, y, groups, feature_names, meta = load_active_matrix(
+        X, y, groups, feature_names, _ = load_active_matrix(
             subjects, task, self.deriv_root, self.config, self.logger
         )
         
@@ -191,7 +201,7 @@ class MLPipeline(PipelineBase):
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_permutation_importance_stage
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
         
-        X, y, groups, feature_names, meta = load_active_matrix(
+        X, y, groups, feature_names, _ = load_active_matrix(
             subjects, task, self.deriv_root, self.config, self.logger
         )
         

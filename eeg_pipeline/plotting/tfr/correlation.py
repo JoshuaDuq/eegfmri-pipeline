@@ -102,14 +102,12 @@ def _get_baseline_window(config) -> List[float]:
     Returns:
         Baseline window as [start, end] in seconds
     """
-    if config:
-        baseline_window = config.get(
-            "plotting.tfr.default_baseline_window",
-            config.get("time_frequency_analysis.baseline_window", [-0.5, -0.01]),
-        )
-    else:
-        baseline_window = [-0.5, -0.01]
-    return baseline_window
+    if not config:
+        return [-0.5, -0.01]
+    return config.get(
+        "plotting.tfr.default_baseline_window",
+        config.get("time_frequency_analysis.baseline_window", [-0.5, -0.01]),
+    )
 
 
 def _annotate_correlation_figure(
@@ -199,15 +197,15 @@ def _select_correlation_method(
             )
             return None, None
         return result
-    else:
-        method_suffix = f"_{method.lower()}"
-        subjects_found = (
-            subjects_param
-            or _discover_subjects_with_data(
-                roi_suffix, method_suffix, config, allowed_subjects
-            )
+    
+    method_suffix = f"_{method.lower()}"
+    subjects_found = (
+        subjects_param
+        or _discover_subjects_with_data(
+            roi_suffix, method_suffix, config, allowed_subjects
         )
-        return method_suffix, subjects_found
+    )
+    return method_suffix, subjects_found
 
 
 def _get_default_alpha(config) -> float:
@@ -225,13 +223,11 @@ def _get_default_alpha(config) -> float:
     plot_config = get_plot_config(config)
     if plot_config:
         tfr_config = plot_config.plot_type_configs.get("tfr", {})
-        default_alpha = tfr_config.get(
+        return tfr_config.get(
             "default_significance_alpha",
             get_config_value(config, "statistics.sig_alpha", 0.05),
         )
-    else:
-        default_alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
-    return default_alpha
+    return get_config_value(config, "statistics.sig_alpha", 0.05)
 
 
 def _get_default_min_subjects(config) -> int:
@@ -243,11 +239,9 @@ def _get_default_min_subjects(config) -> int:
     Returns:
         Minimum number of subjects required
     """
-    if config:
-        min_subjects = int(config.get("analysis.min_subjects_for_topomaps", 3))
-    else:
-        min_subjects = 3
-    return min_subjects
+    if not config:
+        return 3
+    return int(config.get("analysis.min_subjects_for_topomaps", 3))
 
 
 def _normalize_roi_name(roi: Optional[str]) -> str:
@@ -261,8 +255,7 @@ def _normalize_roi_name(roi: Optional[str]) -> str:
     """
     if roi is None:
         return ""
-    roi_lower = roi.lower()
-    roi_sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", roi_lower)
+    roi_sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", roi.lower())
     return f"_{roi_sanitized}"
 
 
@@ -293,18 +286,7 @@ def _load_valid_subject_data(
         if dataframe is None or dataframe.empty:
             continue
         
-        # Normalize column names for unified format compatibility
-        column_mapping = {}
-        if "r" in dataframe.columns and "correlation" not in dataframe.columns:
-            column_mapping["r"] = "correlation"
-        if "freq" in dataframe.columns and "frequency" not in dataframe.columns:
-            column_mapping["freq"] = "frequency"
-        if "time_start" in dataframe.columns and "time" not in dataframe.columns:
-            column_mapping["time_start"] = "time"
-        if column_mapping:
-            dataframe = dataframe.rename(columns=column_mapping)
-        
-        required_columns = ["correlation", "frequency", "time"]
+        required_columns = ["r", "freq", "time_start"]
         missing = [c for c in required_columns if c not in dataframe.columns]
         if missing:
             continue
@@ -360,16 +342,16 @@ def _build_correlation_matrices(
     
     for dataframe in dataframes:
         dataframe_copy = dataframe.copy()
-        dataframe_copy["frequency"] = np.round(
-            dataframe_copy["frequency"].astype(float), rounding_precision
+        dataframe_copy["freq"] = np.round(
+            dataframe_copy["freq"].astype(float), rounding_precision
         )
-        dataframe_copy["time"] = np.round(
-            dataframe_copy["time"].astype(float), rounding_precision
+        dataframe_copy["time_start"] = np.round(
+            dataframe_copy["time_start"].astype(float), rounding_precision
         )
         pivot_table = dataframe_copy.pivot_table(
-            index="frequency",
-            columns="time",
-            values="correlation",
+            index="freq",
+            columns="time_start",
+            values="r",
             aggfunc="mean",
         )
         pivot_table_aligned = pivot_table.reindex(
@@ -489,6 +471,78 @@ def _save_group_statistics(
     return output_path
 
 
+def _create_correlation_heatmap(
+    data: np.ndarray,
+    frequencies: np.ndarray,
+    times: np.ndarray,
+    title: str,
+    colorbar_label: str,
+    roi_suffix: str,
+    method_suffix: str,
+    alpha: float,
+    config,
+    logger: Optional[logging.Logger],
+    filename_suffix: str,
+) -> Tuple[plt.Figure, List[Path]]:
+    """Create correlation heatmap plot.
+    
+    Args:
+        data: Correlation matrix to plot
+        frequencies: Frequency values
+        times: Time values
+        title: Plot title
+        colorbar_label: Colorbar label
+        roi_suffix: ROI suffix for file name
+        method_suffix: Method suffix
+        alpha: Significance threshold
+        config: Configuration object
+        logger: Optional logger
+        filename_suffix: Suffix for output filename
+        
+    Returns:
+        Tuple of (figure, figure_paths)
+    """
+    plot_config = get_plot_config(config)
+    figure_size = plot_config.get_figure_size("small", plot_type="tfr")
+    
+    extent = [times[0], times[-1], frequencies[0], frequencies[-1]]
+    colormap = "RdBu_r"
+    vmin, vmax = -0.6, 0.6
+    
+    figure, axis = plt.subplots(figsize=figure_size)
+    image = axis.imshow(
+        data,
+        origin="lower",
+        aspect="auto",
+        extent=extent,
+        cmap=colormap,
+        vmin=vmin,
+        vmax=vmax,
+    )
+    axis.axvline(0.0, color="k", linestyle="--", alpha=0.6)
+    axis.set_xlabel("Time (s)")
+    axis.set_ylabel("Frequency (Hz)")
+    axis.set_title(title)
+    
+    colorbar = plt.colorbar(image, ax=axis)
+    colorbar.set_label(colorbar_label)
+    plt.tight_layout()
+    
+    _annotate_correlation_figure(figure, config, alpha)
+    
+    plots_dir = deriv_group_plots_path(config.deriv_root, "tf_corr")
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    filename_base = f"tf_corr_group_{filename_suffix}{roi_suffix}{method_suffix}"
+    
+    _save_fig(figure, plots_dir, filename_base, config, logger=logger)
+    
+    figure_paths = [
+        plots_dir / f"{filename_base}.{ext}" for ext in plot_config.formats
+    ]
+    
+    return figure, figure_paths
+
+
 def _create_mean_correlation_plot(
     r_mean: np.ndarray,
     frequencies: np.ndarray,
@@ -516,48 +570,23 @@ def _create_mean_correlation_plot(
     Returns:
         Tuple of (figure, figure_paths)
     """
-    plot_config = get_plot_config(config)
-    figure_size = plot_config.get_figure_size("small", plot_type="tfr")
-    
-    extent = [times[0], times[-1], frequencies[0], frequencies[-1]]
-    colormap = "RdBu_r"
-    vmin, vmax = -0.6, 0.6
-    
-    figure, axis = plt.subplots(figsize=figure_size)
-    image = axis.imshow(
-        r_mean,
-        origin="lower",
-        aspect="auto",
-        extent=extent,
-        cmap=colormap,
-        vmin=vmin,
-        vmax=vmax,
-    )
-    axis.axvline(0.0, color="k", linestyle="--", alpha=0.6)
-    axis.set_xlabel("Time (s)")
-    axis.set_ylabel("Frequency (Hz)")
-    
     roi_display = roi or "All channels"
     method_display = method_suffix.strip("_").title()
-    axis.set_title(f"Group TF correlation — mean r ({method_display}, {roi_display})")
+    title = f"Group TF correlation — mean r ({method_display}, {roi_display})"
     
-    colorbar = plt.colorbar(image, ax=axis)
-    colorbar.set_label("r")
-    plt.tight_layout()
-    
-    _annotate_correlation_figure(figure, config, alpha)
-    
-    plots_dir = deriv_group_plots_path(config.deriv_root, "tf_corr")
-    plots_dir.mkdir(parents=True, exist_ok=True)
-    filename_base = f"tf_corr_group_rmean{roi_suffix}{method_suffix}"
-    
-    _save_fig(figure, plots_dir, filename_base, config, logger=logger)
-    
-    figure_paths = [
-        plots_dir / f"{filename_base}.{ext}" for ext in plot_config.formats
-    ]
-    
-    return figure, figure_paths
+    return _create_correlation_heatmap(
+        r_mean,
+        frequencies,
+        times,
+        title,
+        "r",
+        roi_suffix,
+        method_suffix,
+        alpha,
+        config,
+        logger,
+        "rmean",
+    )
 
 
 def _create_significant_correlation_plot(
@@ -589,51 +618,24 @@ def _create_significant_correlation_plot(
     Returns:
         Tuple of (figure, figure_paths)
     """
-    plot_config = get_plot_config(config)
-    figure_size = plot_config.get_figure_size("small", plot_type="tfr")
-    
-    extent = [times[0], times[-1], frequencies[0], frequencies[-1]]
-    colormap = "RdBu_r"
-    vmin, vmax = -0.6, 0.6
-    
     significant_correlations = np.where(significant_mask, r_mean, np.nan)
-    
-    figure, axis = plt.subplots(figsize=figure_size)
-    image = axis.imshow(
-        significant_correlations,
-        origin="lower",
-        aspect="auto",
-        extent=extent,
-        cmap=colormap,
-        vmin=vmin,
-        vmax=vmax,
-    )
-    axis.axvline(0.0, color="k", linestyle="--", alpha=0.6)
-    axis.set_xlabel("Time (s)")
-    axis.set_ylabel("Frequency (Hz)")
-    
     roi_display = roi or "All channels"
     method_display = method_suffix.strip("_").title()
     title = f"Group TF correlation — FDR<{alpha:g} ({method_display}, {roi_display})"
-    axis.set_title(title)
     
-    colorbar = plt.colorbar(image, ax=axis)
-    colorbar.set_label("r (significant)")
-    plt.tight_layout()
-    
-    _annotate_correlation_figure(figure, config, alpha)
-    
-    plots_dir = deriv_group_plots_path(config.deriv_root, "tf_corr")
-    plots_dir.mkdir(parents=True, exist_ok=True)
-    filename_base = f"tf_corr_group_sig{roi_suffix}{method_suffix}"
-    
-    _save_fig(figure, plots_dir, filename_base, config, logger=logger)
-    
-    figure_paths = [
-        plots_dir / f"{filename_base}.{ext}" for ext in plot_config.formats
-    ]
-    
-    return figure, figure_paths
+    return _create_correlation_heatmap(
+        significant_correlations,
+        frequencies,
+        times,
+        title,
+        "r (significant)",
+        roi_suffix,
+        method_suffix,
+        alpha,
+        config,
+        logger,
+        "sig",
+    )
 
 
 def group_tf_correlation(

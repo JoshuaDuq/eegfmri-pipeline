@@ -10,6 +10,8 @@ Functions:
 - ensure_numeric: Convert DataFrame columns to numeric types efficiently
 - ensure_numeric_array: Convert arrays to numeric with error handling
 - broadcast_values: Efficient broadcasting for granularity operations
+- compute_scaling_params: Compute mean and std for scaling
+- apply_scaling: Apply scaling parameters to DataFrame
 """
 
 from __future__ import annotations
@@ -52,12 +54,10 @@ def ensure_numeric(
     >>> numeric_df["a"].dtype
     dtype('float64')
     """
-    if columns is None:
-        columns = df.columns.tolist()
-    
     target_df = df if inplace else df.copy()
+    columns_to_convert = columns if columns is not None else df.columns.tolist()
     
-    for col in columns:
+    for col in columns_to_convert:
         if col in target_df.columns:
             target_df[col] = pd.to_numeric(target_df[col], errors="coerce")
     
@@ -86,12 +86,7 @@ def ensure_numeric_array(
     if isinstance(arr, pd.Series):
         return pd.to_numeric(arr, errors="coerce").to_numpy(dtype=dtype)
     
-    try:
-        return np.asarray(arr, dtype=dtype)
-    except (ValueError, TypeError):
-        result = np.empty_like(arr, dtype=dtype)
-        result[:] = np.nan
-        return result
+    return np.asarray(arr, dtype=dtype)
 
 
 def broadcast_values(
@@ -149,12 +144,8 @@ def compute_scaling_params(
     tuple[dict, dict]
         (means, stds) dictionaries mapping column names to values
     """
-    if mask is not None:
-        subset = df.iloc[mask]
-    else:
-        subset = df
-    
-    numeric = subset.apply(pd.to_numeric, errors="coerce")
+    subset = df.iloc[mask] if mask is not None else df
+    numeric = ensure_numeric(subset)
     
     means = numeric.mean().to_dict()
     stds = (
@@ -193,10 +184,11 @@ def apply_scaling(
         Scaled DataFrame
     """
     target_df = df if inplace else df.copy()
+    columns_to_scale = [col for col in means if col in target_df.columns and col in stds]
     
-    for col in means:
-        if col in target_df.columns and col in stds:
-            numeric = pd.to_numeric(target_df[col], errors="coerce")
-            target_df[col] = (numeric - means[col]) / stds[col]
+    if columns_to_scale:
+        ensure_numeric(target_df, columns=columns_to_scale, inplace=True)
+        for col in columns_to_scale:
+            target_df[col] = (target_df[col] - means[col]) / stds[col]
     
     return target_df

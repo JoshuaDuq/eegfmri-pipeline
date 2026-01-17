@@ -45,11 +45,11 @@ def _order_ratio_pairs_by_config(pairs: List[str], config: Any) -> List[str]:
     if not config_pairs:
         return pairs
     
-    ordered = []
-    for entry in config_pairs:
-        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
-            pair_name = f"{entry[0]}_{entry[1]}"
-            ordered.append(pair_name)
+    ordered = [
+        f"{entry[0]}_{entry[1]}"
+        for entry in config_pairs
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2
+    ]
     
     if not ordered:
         return pairs
@@ -72,6 +72,11 @@ def _extract_ratio_pairs_from_dataframe(features_df: pd.DataFrame) -> List[str]:
     return sorted(list(pairs))
 
 
+def _normalize_roi_identifier(name: str) -> str:
+    """Normalize ROI identifier for comparison (case-insensitive, ignore separators)."""
+    return name.lower().replace("_", "").replace("-", "")
+
+
 def _get_ratio_columns_for_segment_pair_roi(
     features_df: pd.DataFrame,
     segment: str,
@@ -83,8 +88,7 @@ def _get_ratio_columns_for_segment_pair_roi(
     
     for column in features_df.columns:
         parsed = NamingSchema.parse(str(column))
-        is_valid_ratio = parsed.get("valid") and parsed.get("group") == "ratios"
-        if not is_valid_ratio:
+        if not parsed.get("valid") or parsed.get("group") != "ratios":
             continue
         
         parsed_segment = str(parsed.get("segment") or "")
@@ -93,28 +97,13 @@ def _get_ratio_columns_for_segment_pair_roi(
             continue
         
         scope = parsed.get("scope") or ""
-        is_global_scope = scope == "global"
-        is_roi_scope = scope == "roi"
         
         if roi_name == "all":
-            if is_global_scope:
+            if scope == "global":
                 matching_columns.append(column)
-        elif is_roi_scope:
+        elif scope == "roi":
             roi_identifier = str(parsed.get("identifier") or "")
-            roi_normalized = roi_name.lower().replace("_", "").replace("-", "")
-            identifier_normalized = roi_identifier.lower().replace("_", "").replace("-", "")
-            if identifier_normalized == roi_normalized:
-                matching_columns.append(column)
-    
-    if roi_name == "all" and not matching_columns:
-        for column in features_df.columns:
-            parsed = NamingSchema.parse(str(column))
-            is_valid_ratio = parsed.get("valid") and parsed.get("group") == "ratios"
-            is_matching_segment = str(parsed.get("segment")) == segment
-            is_matching_band = str(parsed.get("band")) == pair
-            is_roi_scope = parsed.get("scope") == "roi"
-            
-            if is_valid_ratio and is_matching_segment and is_matching_band and is_roi_scope:
+            if _normalize_roi_identifier(roi_identifier) == _normalize_roi_identifier(roi_name):
                 matching_columns.append(column)
     
     return matching_columns
@@ -157,10 +146,9 @@ def _get_comparison_roi_names(config: Any) -> List[str]:
             if "all" not in roi_names:
                 roi_names.append("all")
         else:
-            requested_normalized = requested_roi.lower().replace("_", "").replace("-", "")
+            requested_normalized = _normalize_roi_identifier(requested_roi)
             for config_roi in config_roi_names:
-                config_normalized = config_roi.lower().replace("_", "").replace("-", "")
-                if requested_normalized == config_normalized:
+                if _normalize_roi_identifier(config_roi) == requested_normalized:
                     roi_names.append(config_roi)
                     break
     
@@ -329,8 +317,8 @@ def _plot_column_comparison_ratios(
     plot_cfg = get_plot_config(config)
     
     condition_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
-    number_of_pairs = len(pairs)
-    number_of_trials = len(features_df)
+    n_pairs = len(pairs)
+    n_trials = len(features_df)
     
     for roi_name in roi_names:
         cell_data = _collect_ratio_cell_data(
@@ -346,7 +334,7 @@ def _plot_column_comparison_ratios(
             logger=logger,
         )
         
-        fig, axes = plt.subplots(1, number_of_pairs, figsize=(3 * number_of_pairs, 5), squeeze=False)
+        fig, axes = plt.subplots(1, n_pairs, figsize=(3 * n_pairs, 5), squeeze=False)
         
         for pair_idx, pair in enumerate(pairs):
             ax = axes.flatten()[pair_idx]
@@ -379,7 +367,7 @@ def _plot_column_comparison_ratios(
             ax.spines["right"].set_visible(False)
         
         _add_column_comparison_title(
-            fig, subject, roi_name, label1, label2, number_of_trials,
+            fig, subject, roi_name, label1, label2, n_trials,
             n_significant, len(qvalues), use_precomputed, plot_cfg
         )
         
@@ -549,7 +537,6 @@ def plot_ratios_by_condition(
         f"compare_windows={compare_windows}, compare_columns={compare_columns}"
     )
     
-    plot_cfg = get_plot_config(config)
     ensure_dir(save_dir)
     
     if compare_windows and len(segments) >= 2:
@@ -563,7 +550,6 @@ def plot_ratios_by_condition(
             features_df, events_df, pairs, roi_names, subject, save_dir,
             config, logger, stats_dir
         )
-
 
 
 __all__ = [

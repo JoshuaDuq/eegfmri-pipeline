@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from eeg_pipeline.utils.analysis.stats._regression_utils import _ols_fit
+
 
 ###################################################################
 # Data Transformation
@@ -24,7 +26,18 @@ from scipy import stats
 
 
 def center_series(series: pd.Series) -> pd.Series:
-    """Center series by subtracting mean."""
+    """Center series by subtracting mean.
+    
+    Parameters
+    ----------
+    series : pd.Series
+        Input series
+        
+    Returns
+    -------
+    pd.Series
+        Centered series (zero mean)
+    """
     return series - series.mean()
 
 
@@ -53,7 +66,21 @@ def zscore_array(x: np.ndarray) -> np.ndarray:
 
 
 def zscore_series(series: pd.Series) -> pd.Series:
-    """Z-score normalize series."""
+    """Z-score normalize pandas Series.
+    
+    Standardizes series to zero mean and unit variance.
+    Returns empty series if variance is zero or invalid.
+    
+    Parameters
+    ----------
+    series : pd.Series
+        Input series
+        
+    Returns
+    -------
+    pd.Series
+        Z-scored series (empty if variance is zero or invalid)
+    """
     mean = series.mean()
     std_val = series.std(ddof=1)
     if std_val <= 0:
@@ -66,7 +93,22 @@ def apply_pooling_strategy(
     y: pd.Series,
     pooling_strategy: str,
 ) -> Tuple[pd.Series, pd.Series]:
-    """Apply pooling strategy for correlation."""
+    """Apply pooling strategy for correlation analysis.
+    
+    Parameters
+    ----------
+    x : pd.Series
+        First variable
+    y : pd.Series
+        Second variable
+    pooling_strategy : str
+        Strategy: "within_subject_centered", "within_subject_zscored", or "none"
+        
+    Returns
+    -------
+    Tuple[pd.Series, pd.Series]
+        Transformed (x, y) series
+    """
     if pooling_strategy == "within_subject_centered":
         return center_series(x), center_series(y)
     if pooling_strategy == "within_subject_zscored":
@@ -78,7 +120,20 @@ def prepare_data_for_plotting(
     x_data: pd.Series,
     y_data: pd.Series,
 ) -> Tuple[pd.Series, pd.Series, int]:
-    """Prepare data for plotting by removing NaNs."""
+    """Prepare data for plotting by removing NaN values.
+    
+    Parameters
+    ----------
+    x_data : pd.Series
+        First input series
+    y_data : pd.Series
+        Second input series
+        
+    Returns
+    -------
+    Tuple[pd.Series, pd.Series, int]
+        (x_clean, y_clean, n_valid)
+    """
     mask = x_data.notna() & y_data.notna()
     return x_data[mask], y_data[mask], int(mask.sum())
 
@@ -87,7 +142,23 @@ def prepare_data_without_validation(
     x_data: pd.Series,
     y_data: pd.Series,
 ) -> Tuple[pd.Series, pd.Series, int]:
-    """Return data without validation."""
+    """Return data without NaN filtering.
+    
+    Used when data has already been validated (e.g., partial residuals
+    where NaNs were handled during regression).
+    
+    Parameters
+    ----------
+    x_data : pd.Series
+        First input series
+    y_data : pd.Series
+        Second input series
+        
+    Returns
+    -------
+    Tuple[pd.Series, pd.Series, int]
+        (x_data, y_data, length)
+    """
     return x_data, y_data, len(x_data)
 
 
@@ -95,7 +166,20 @@ def _align_and_validate_series(
     x_array: np.ndarray,
     y_array: np.ndarray,
 ) -> Tuple[pd.Series, pd.Series]:
-    """Align series to same length and remove NaNs."""
+    """Align arrays to same length and remove NaNs.
+    
+    Parameters
+    ----------
+    x_array : np.ndarray
+        First input array
+    y_array : np.ndarray
+        Second input array
+        
+    Returns
+    -------
+    Tuple[pd.Series, pd.Series]
+        Aligned and validated series
+    """
     x_series = pd.Series(np.asarray(x_array))
     y_series = pd.Series(np.asarray(y_array))
     
@@ -113,7 +197,24 @@ def _process_subject_data(
     subject_id: str,
     pooling_strategy: str,
 ) -> Tuple[pd.Series, pd.Series, List[str]]:
-    """Process single subject's data and return normalized series with IDs."""
+    """Process single subject's data and return normalized series with IDs.
+    
+    Parameters
+    ----------
+    x_array : np.ndarray
+        First variable array
+    y_array : np.ndarray
+        Second variable array
+    subject_id : str
+        Subject identifier
+    pooling_strategy : str
+        Pooling strategy to apply
+        
+    Returns
+    -------
+    Tuple[pd.Series, pd.Series, List[str]]
+        (x_normalized, y_normalized, subject_ids)
+    """
     x_series, y_series = _align_and_validate_series(x_array, y_array)
     
     if x_series.empty:
@@ -140,7 +241,24 @@ def prepare_group_data(
     subj_order: List[str],
     pooling_strategy: str,
 ) -> Tuple[pd.Series, pd.Series, List[str]]:
-    """Prepare group data for correlation analysis."""
+    """Prepare group data for correlation analysis.
+    
+    Parameters
+    ----------
+    x_lists : List[np.ndarray]
+        List of first variable arrays (one per subject)
+    y_lists : List[np.ndarray]
+        List of second variable arrays (one per subject)
+    subj_order : List[str]
+        Subject identifiers in order
+    pooling_strategy : str
+        Pooling strategy to apply per subject
+        
+    Returns
+    -------
+    Tuple[pd.Series, pd.Series, List[str]]
+        (x_concatenated, y_concatenated, subject_ids)
+    """
     x_series_list, y_series_list, subject_ids = [], [], []
 
     for idx, (x_array, y_array) in enumerate(zip(x_lists, y_lists)):
@@ -178,8 +296,17 @@ def compute_linear_residuals(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute linear regression residuals for plotting/visualization.
     
-    Uses consolidated regression utilities internally for consistency.
-    Returns fitted values, residuals, and valid x values for plotting.
+    Parameters
+    ----------
+    x_data : pd.Series
+        Predictor variable
+    y_data : pd.Series
+        Outcome variable
+        
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray, np.ndarray]
+        (fitted_values, residuals, x_valid)
     """
     x_numeric = pd.to_numeric(x_data, errors="coerce")
     y_numeric = pd.to_numeric(y_data, errors="coerce")
@@ -190,9 +317,6 @@ def compute_linear_residuals(
     
     if len(x_valid) < 2:
         return np.array([]), np.array([]), np.array([])
-    
-    # Use consolidated regression utilities for consistency
-    from eeg_pipeline.utils.analysis.stats._regression_utils import _ols_fit
     
     design_matrix = np.column_stack([np.ones(len(x_valid)), x_valid])
     beta = _ols_fit(design_matrix, y_valid)
@@ -212,7 +336,24 @@ def fit_linear_regression(
     x_range: np.ndarray,
     min_samples: int = 3,
 ) -> np.ndarray:
-    """Fit linear regression and return predictions."""
+    """Fit linear regression and return predictions over specified range.
+    
+    Parameters
+    ----------
+    x : np.ndarray
+        Predictor values
+    y : np.ndarray
+        Outcome values
+    x_range : np.ndarray
+        Range of x values for prediction
+    min_samples : int
+        Minimum samples required for fitting
+        
+    Returns
+    -------
+    np.ndarray
+        Predicted y values (NaN-filled if insufficient samples)
+    """
     if len(x) < min_samples:
         return np.full_like(x_range, np.nan)
     coefficients = np.polyfit(x, y, 1)
@@ -226,7 +367,24 @@ def _create_bin_mask(
     bin_index: int,
     is_last_bin: bool,
 ) -> np.ndarray:
-    """Create boolean mask for values in specified bin."""
+    """Create boolean mask for values in specified bin.
+    
+    Parameters
+    ----------
+    y_pred : np.ndarray
+        Predicted values
+    bin_edges : np.ndarray
+        Bin edge values
+    bin_index : int
+        Index of current bin
+    is_last_bin : bool
+        Whether this is the last bin (inclusive upper bound)
+        
+    Returns
+    -------
+    np.ndarray
+        Boolean mask for values in bin
+    """
     lower_bound = bin_edges[bin_index]
     upper_bound = bin_edges[bin_index + 1]
     
@@ -240,7 +398,22 @@ def compute_binned_statistics(
     y_true: np.ndarray,
     n_bins: int,
 ) -> Tuple[List[float], List[float], List[float]]:
-    """Compute binned means and standard errors."""
+    """Compute binned means and standard errors for calibration plots.
+    
+    Parameters
+    ----------
+    y_pred : np.ndarray
+        Predicted values (used for binning)
+    y_true : np.ndarray
+        True values (used for statistics)
+    n_bins : int
+        Number of bins
+        
+    Returns
+    -------
+    Tuple[List[float], List[float], List[float]]
+        (bin_centers, bin_means, bin_stds)
+    """
     y_min = y_pred.min()
     y_max = y_pred.max()
     bin_edges = np.linspace(y_min, y_max, n_bins + 1)
@@ -276,7 +449,24 @@ def _reject_peaks(
     peak_rejection_z: float,
     min_points: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Reject spectral peaks using robust outlier detection."""
+    """Reject spectral peaks using robust outlier detection.
+    
+    Parameters
+    ----------
+    frequencies : np.ndarray
+        Frequency values
+    psd_values : np.ndarray
+        Power spectral density values
+    peak_rejection_z : float
+        Z-score threshold for peak rejection
+    min_points : int
+        Minimum points required after rejection
+        
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        (frequencies, psd_values) with peaks removed
+    """
     mad = stats.median_abs_deviation(
         psd_values, scale="normal", nan_policy="omit"
     )
@@ -304,7 +494,24 @@ def fit_aperiodic(
     peak_rejection_z: float = 3.5,
     min_points: int = 5,
 ) -> Tuple[float, float]:
-    """Fit aperiodic (1/f) component to log-log PSD."""
+    """Fit aperiodic (1/f) component to log-log PSD.
+    
+    Parameters
+    ----------
+    log_freqs : np.ndarray
+        Log-transformed frequencies
+    log_psd : np.ndarray
+        Log-transformed power spectral density
+    peak_rejection_z : float
+        Z-score threshold for peak rejection
+    min_points : int
+        Minimum points required for fitting
+        
+    Returns
+    -------
+    Tuple[float, float]
+        (intercept, slope) or (np.nan, np.nan) if fitting fails
+    """
     finite_mask = np.isfinite(log_freqs) & np.isfinite(log_psd)
     frequencies = log_freqs[finite_mask]
     psd_values = log_psd[finite_mask]
@@ -332,7 +539,24 @@ def fit_aperiodic_to_all_epochs(
     peak_rejection_z: float = 3.5,
     min_points: int = 5,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Fit aperiodic to all epochs and channels."""
+    """Fit aperiodic component to all epochs and channels.
+    
+    Parameters
+    ----------
+    log_freqs : np.ndarray
+        Log-transformed frequencies (1D array)
+    log_psd : np.ndarray
+        Log-transformed PSD with shape (n_epochs, n_channels, n_freqs)
+    peak_rejection_z : float
+        Z-score threshold for peak rejection
+    min_points : int
+        Minimum points required for fitting
+        
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        (offsets, slopes) with shape (n_epochs, n_channels)
+    """
     n_epochs, n_channels, _ = log_psd.shape
     offsets = np.full((n_epochs, n_channels), np.nan)
     slopes = np.full((n_epochs, n_channels), np.nan)
@@ -471,7 +695,6 @@ def compute_change_features(
         ref_seg = str(ref_window).strip().lower()
         tgt_seg = str(target_window).strip().lower()
 
-        # Find all columns in the reference segment.
         ref_keys = [k for k in by_segment.keys() if k[1] == ref_seg]
         for group, _seg, band, scope, identifier, stat in ref_keys:
             ref_col = by_segment[(group, ref_seg, band, scope, identifier, stat)]
@@ -582,8 +805,6 @@ def prepare_aligned_data(
     Z_clean = clean_data if has_covariates else None
 
     return x_clean, y_clean, Z_clean, n_total, n_kept
-
-
 
 
 __all__ = [

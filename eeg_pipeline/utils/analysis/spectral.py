@@ -13,11 +13,10 @@ from typing import Any, Optional, Tuple
 
 import numpy as np
 import mne
-from mne.time_frequency import psd_array_welch
+from mne.time_frequency import psd_array_multitaper, psd_array_welch
 from scipy.signal import hilbert
 
 from eeg_pipeline.types import BandData, PSDData
-from mne.time_frequency import psd_array_multitaper
 
 
 # Filter design constants
@@ -39,10 +38,8 @@ MIN_SAMPLES_FOR_PSD = 64
 
 def _safe_filter_length(n_times: int, sfreq: float, l_freq: float) -> str:
     """Compute filter length that fits within signal, or 'auto' if safe."""
-    if l_freq <= 0:
-        l_freq = DEFAULT_LOW_FREQ_HZ
-    
-    default_length = int(FILTER_LENGTH_MULTIPLIER * sfreq / l_freq)
+    effective_l_freq = l_freq if l_freq > 0 else DEFAULT_LOW_FREQ_HZ
+    default_length = int(FILTER_LENGTH_MULTIPLIER * sfreq / effective_l_freq)
     
     if default_length >= n_times:
         safe_length = n_times - 1
@@ -60,7 +57,7 @@ def _parse_padding_config(
 ) -> Tuple[float, float]:
     """Extract padding parameters from config or function arguments."""
     pad_seconds = DEFAULT_PAD_SECONDS
-    pad_cycles = DEFAULT_PAD_CYCLES
+    pad_cycles_value = DEFAULT_PAD_CYCLES
     
     if config is not None and hasattr(config, "get"):
         config_pad_sec = config.get("feature_engineering.band_envelope.pad_sec")
@@ -73,7 +70,7 @@ def _parse_padding_config(
         config_pad_cycles = config.get("feature_engineering.band_envelope.pad_cycles")
         if config_pad_cycles is not None:
             try:
-                pad_cycles = float(config_pad_cycles)
+                pad_cycles_value = float(config_pad_cycles)
             except (ValueError, TypeError):
                 pass
     
@@ -85,11 +82,11 @@ def _parse_padding_config(
     
     if pad_cycles is not None:
         try:
-            pad_cycles = float(pad_cycles)
+            pad_cycles_value = float(pad_cycles)
         except (ValueError, TypeError):
             pass
     
-    return pad_seconds, pad_cycles
+    return pad_seconds, pad_cycles_value
 
 
 def _compute_padding_samples(
@@ -220,12 +217,12 @@ def compute_band_data(
     try:
         flat_data = data.reshape(-1, n_times)
         
-        pad_seconds, pad_cycles_value = _parse_padding_config(
+        pad_seconds, pad_cycles = _parse_padding_config(
             config, pad_sec, pad_cycles
         )
         
         pad_samples = _compute_padding_samples(
-            pad_seconds, pad_cycles_value, fmin, sfreq, n_times
+            pad_seconds, pad_cycles, fmin, sfreq, n_times
         )
         
         flat_data_padded, n_times_padded = _apply_padding(flat_data, pad_samples)
@@ -278,7 +275,6 @@ def _parse_psd_config(config: Any, n_times: int, sfreq: float) -> dict[str, Any]
     if config is not None and hasattr(config, "get"):
         psd_cfg = config.get("feature_engineering.psd", {}) or {}
         if not psd_cfg:
-            # Backward/parallel config path used by other spectral feature extractors
             psd_cfg = config.get("feature_engineering.spectral", {}) or {}
     
     nyquist_freq = sfreq / 2.0
@@ -288,6 +284,7 @@ def _parse_psd_config(config: Any, n_times: int, sfreq: float) -> dict[str, Any]
     
     n_fft = int(psd_cfg.get("n_fft", default_n_fft))
     n_fft = max(2, min(n_fft, n_times))
+    
     n_overlap_raw = psd_cfg.get("n_overlap", None)
     if n_overlap_raw is None:
         n_overlap = default_n_overlap if n_fft == default_n_fft else max(0, n_fft // 2)
@@ -468,16 +465,10 @@ def compute_psd_bandpower(
     
     if n_times < 64:
         if logger:
-            warned = getattr(logger, "_psd_bandpower_short_warned", None)
-            if not isinstance(warned, set):
-                warned = set()
-            if int(n_times) not in warned:
-                logger.warning(
-                    "PSD bandpower skipped: only %d samples (< 64 minimum).",
-                    n_times,
-                )
-                warned.add(int(n_times))
-                setattr(logger, "_psd_bandpower_short_warned", warned)
+            logger.warning(
+                "PSD bandpower skipped: only %d samples (< 64 minimum).",
+                n_times,
+            )
         return None
     
     nyquist = sfreq / 2.0
@@ -491,7 +482,7 @@ def compute_psd_bandpower(
                 fmin=fmin,
                 fmax=fmax,
                 bandwidth=bandwidth,
-                adaptive=bool(adaptive),
+                adaptive=adaptive,
                 normalization="full",
                 verbose=False,
             )
@@ -633,9 +624,7 @@ def subtract_evoked(
 
     ref_mask = train_mask if train_mask is not None else np.ones(n_epochs, dtype=bool)
     ref_data = data[ref_mask]
-
-    # Always compute a grand evoked fallback from the reference set (train-only if provided)
-    grand_evoked = np.nanmean(ref_data, axis=0, keepdims=True) if ref_data.size else np.nanmean(data, axis=0, keepdims=True)
+    grand_evoked = np.nanmean(ref_data, axis=0, keepdims=True)
 
     if condition_labels is None:
         induced = data - grand_evoked
@@ -655,13 +644,8 @@ def subtract_evoked(
         else:
             valid_labels = np.array(
                 [
-                    (lbl is not None)
-                    and not (
-                        isinstance(lbl, (float, np.floating)) and np.isnan(lbl)
-                    )
-                    and not (
-                        isinstance(lbl, (np.floating,)) and np.isnan(float(lbl))
-                    )
+                    lbl is not None
+                    and not (isinstance(lbl, (float, np.floating)) and np.isnan(lbl))
                     for lbl in condition_labels
                 ],
                 dtype=bool,

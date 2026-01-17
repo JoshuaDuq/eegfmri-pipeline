@@ -3,7 +3,7 @@
 ###################################################################
 project:
   task: "thermalactive"  # Task name used in BIDS paths and file naming
-  random_state: &random_state 42  # Primary random seed for reproducible analyses
+  random_state: 42  # Primary random seed for reproducible analyses
   subject_list: null  # Optional list of subjects to process (null = all found)
 
 paths:
@@ -52,7 +52,7 @@ frequency_bands: &frequency_bands
 time_windows:
   active: &active_window [3.0, 10.5]  # Active/task period [s]
   baseline_tfr: &baseline_window_tfr [-5.0, -0.01]  # TFR baseline window [s]
-  baseline_erp: &baseline_window_erp [-0.2, 0.0]  # ERP baseline window [s]
+  baseline_erp: [-0.2, 0.0]  # ERP baseline window [s]
 
 # 2.3 Numeric Guards
 numeric:
@@ -155,7 +155,6 @@ time_frequency_analysis:
 feature_engineering:
   feature_categories: ["power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "erp", "bursts"]
   spatial_modes: ["roi", "channels", "global"]
-  create_combined_features: false
 
   # Per-family spatial transforms: CSD is excellent for phase connectivity but changes
   # the meaning/units/topography of amplitude-derived features. Configure separately.
@@ -805,8 +804,8 @@ statistics:
   n_bootstrap: 1000
   
   constants:
-    fisher_z_clip_min: &fisher_z_clip_min -0.999999
-    fisher_z_clip_max: &fisher_z_clip_max 0.999999
+    fisher_z_clip_min: -0.999999
+    fisher_z_clip_max: 0.999999
     min_samples_for_stats: 2
     min_samples_per_covariate: 5
     partial_corr_base_samples: 5

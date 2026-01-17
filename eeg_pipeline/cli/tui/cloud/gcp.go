@@ -13,9 +13,8 @@ import (
 )
 
 const (
-	sshConnectTimeoutSeconds = 5
-	vmStartupWaitDuration    = 10 * time.Second
-	defaultDirectoryPerms    = 0755
+	vmStartupWaitDuration = 10 * time.Second
+	defaultDirectoryPerms = 0755
 )
 
 // Config holds GCP cloud configuration
@@ -63,23 +62,15 @@ type (
 		IP      string
 		Error   error
 	}
-	SyncStartedMsg  struct{}
 	SyncCompleteMsg struct {
 		Duration time.Duration
 		Error    error
-	}
-	RunStartedMsg struct {
-		Command string
-	}
-	RunOutputMsg struct {
-		Line string
 	}
 	RunCompleteMsg struct {
 		ExitCode int
 		Duration time.Duration
 		Error    error
 	}
-	PullStartedMsg  struct{}
 	PullCompleteMsg struct {
 		Duration time.Duration
 		Error    error

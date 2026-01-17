@@ -13,8 +13,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .base import get_statistics_constants
-from .base import _safe_float
+from .base import _safe_float, get_statistics_constants
 
 
 def extract_roi_statistics(
@@ -141,11 +140,6 @@ def compute_roi_percentage_change(
 
 def compute_roi_pvalue(
     mask_vec: np.ndarray,
-    ch_names: List[str],
-    p_ch: Optional[np.ndarray],
-    sig_mask: Optional[np.ndarray],
-    is_cluster: bool,
-    cluster_p_min: Optional[float],
     data_group_a: Optional[np.ndarray] = None,
     data_group_b: Optional[np.ndarray] = None,
     paired: bool = False,
@@ -155,11 +149,6 @@ def compute_roi_pvalue(
 
     Args:
         mask_vec: Boolean mask for channels in ROI.
-        ch_names: Channel names (for reference, currently unused).
-        p_ch: Per-channel p-values (for reference, currently unused).
-        sig_mask: Significance mask (for reference, currently unused).
-        is_cluster: Whether using cluster correction (for reference, currently unused).
-        cluster_p_min: Minimum cluster p-value (for reference, currently unused).
         data_group_a: Data array for group A (samples x channels).
         data_group_b: Data array for group B (samples x channels).
         paired: Whether to use paired t-test.

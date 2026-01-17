@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -51,8 +52,9 @@ def _get_top_feature_indices(scores: pd.Series, n_top: int = 10) -> list:
 
 def _get_group_column_name(df: pd.DataFrame) -> str:
     """Extract group column name from dataframe, defaulting to 'groups'."""
-    group_column = df.get("group_column", ["groups"])
-    return str(group_column[0]) if group_column else "groups"
+    if "group_column" in df.columns and not df["group_column"].empty:
+        return str(df["group_column"].iloc[0])
+    return "groups"
 
 
 def _annotate_top_features(
@@ -91,11 +93,8 @@ def _create_stability_plot(
     subject: str,
     task: str,
     group_column_name: str,
-    df: pd.DataFrame,
 ) -> tuple[Any, Any]:
     """Create the stability scatter plot figure and axes."""
-    import matplotlib.pyplot as plt
-
     fig, ax = plt.subplots(figsize=(7.0, 4.5), dpi=150)
 
     ax.scatter(
@@ -124,8 +123,6 @@ def plot_stability_groupwise(
     plots_dir: Path,
 ) -> Dict[str, Path]:
     """Plot stability groupwise analysis for a subject and task."""
-    import matplotlib.pyplot as plt
-
     stats_dir = deriv_stats_path(deriv_root, subject)
     if not stats_dir.exists():
         return {}
@@ -160,7 +157,6 @@ def plot_stability_groupwise(
         subject,
         task,
         group_column_name,
-        df,
     )
 
     _annotate_top_features(ax, overall_correlation, group_std, df, top_indices)

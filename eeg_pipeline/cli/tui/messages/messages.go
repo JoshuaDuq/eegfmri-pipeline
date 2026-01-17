@@ -31,8 +31,6 @@ type CommandStartedMsg struct {
 	Operation     string
 	Subjects      []string
 	TotalSubjects int
-	OutputChan    chan string
-	DoneChan      chan error
 }
 
 // CommandDoneMsg indicates command execution has completed
@@ -41,11 +39,6 @@ type CommandDoneMsg struct {
 	Duration time.Duration
 	Success  bool
 	Error    error
-}
-
-// CommandOutputMsg contains a line of command output
-type CommandOutputMsg struct {
-	Line string
 }
 
 // StreamOutputMsg contains a line of streaming output during execution
@@ -162,16 +155,6 @@ type SubjectDoneMsg struct {
 // =========================================================================
 // Progress Tracking Messages
 // =========================================================================
-
-// ProgressUpdateMsg contains progress information for current operation
-type ProgressUpdateMsg struct {
-	Subject   string
-	Step      string
-	Current   int
-	Total     int
-	TotalSubj int
-	SubjIdx   int
-}
 
 // StepProgressMsg provides detailed progress for a specific step
 type StepProgressMsg struct {

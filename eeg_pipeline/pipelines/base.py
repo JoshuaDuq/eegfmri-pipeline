@@ -75,26 +75,22 @@ class PipelineBase(ABC):
 
         for entry in entries:
             error_text = str(entry.get("error", "")).replace("\n", " | ")
-            traceback_text = str(entry.get("traceback_path", "")).replace(
-                "\n", " | "
-            )
+            traceback_path = str(entry.get("traceback_path", ""))
             subject_id = entry.get("subject", "")
             status = entry.get("status", "")
             duration = entry.get("duration_s", "")
 
             row = (
                 f"{subject_id}\t{status}\t{duration}\t"
-                f"{error_text}\t{traceback_text}"
+                f"{error_text}\t{traceback_path}"
             )
             rows.append(row)
 
         ledger_path.write_text("\n".join(rows))
 
-    def _complete_progress(
-        self, progress: Any, success: bool
-    ) -> None:
+    def _complete_progress(self, progress: Any, success: bool) -> None:
         """Complete progress tracking if available."""
-        if progress is not None and hasattr(progress, "complete"):
+        if progress is not None:
             progress.complete(success=success)
 
     def _process_single_subject(
@@ -175,7 +171,7 @@ class PipelineBase(ABC):
         resolved_task = self._validate_batch_inputs(subjects, task)
         progress = kwargs.get("progress")
 
-        if progress is not None and hasattr(progress, "start"):
+        if progress is not None:
             progress.start(self.name, subjects)
 
         ledger: List[Dict[str, Any]] = []

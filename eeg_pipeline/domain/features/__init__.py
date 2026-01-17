@@ -9,28 +9,7 @@ from eeg_pipeline.domain.features.registry import (
 )
 
 
-FEATURE_TYPES = (
-    "power",
-    "connectivity",
-    "directedconnectivity",
-    "sourcelocalization",
-    "aperiodic",
-    "complexity",
-    "itpc",
-    "pac",
-    "quality",
-    "erds",
-    "spectral",
-    "ratios",
-    "asymmetry",
-    "erp",
-    "bursts",
-    "temporal",
-)
-
-
 __all__ = [
-    "FEATURE_TYPES",
     "NamingSchema",
     "FeatureRegistry",
     "FeatureRule",

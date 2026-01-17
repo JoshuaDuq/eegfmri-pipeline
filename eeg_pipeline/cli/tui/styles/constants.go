@@ -1,46 +1,19 @@
 package styles
 
-///////////////////////////////////////////////////////////////////
-// Layout Constants
-///////////////////////////////////////////////////////////////////
-
 const (
-	MinTerminalWidth   = 60
-	MinTerminalHeight  = 20
-	MaxTerminalWidth   = 300
-	DefaultCardPadding = 2
-	MaxVisibleSubjects = 10
+	MinTerminalWidth  = 60
+	MinTerminalHeight = 20
+	MaxTerminalWidth  = 300
 
-	MenuLeftColumnPercent  = 55
-	MenuRightColumnPercent = 45
-	MinLeftColumnWidth     = 30
-	MinRightColumnWidth    = 25
+	MinContentWidth = 50
+	MaxContentWidth = 280
 
-	MinContentWidth     = 50
-	MaxContentWidth     = 280
-	DefaultContentWidth = 60
-
-	SummaryLabelWidth = 16
-	SummaryValueWidth = 30
-
-	// Responsive layout constants
-	NarrowThreshold    = 100 // Width below which to use narrow layout
-	ShortThreshold     = 25  // Height below which to use compact layout
-	VeryShortThreshold = 20  // Height below which to hide optional elements
-
-	// List display constants
-	MinListItems     = 5 // Minimum items to show in a scrollable list
-	DefaultListItems = 10
-	ListScrollMargin = 2 // Lines kept visible above/below cursor when scrolling
-	HeaderFooterRows = 6 // Base reserved rows (header ~3 + footer ~3), views add more as needed
+	MinListItems     = 5
+	ListScrollMargin = 2
 )
 
-///////////////////////////////////////////////////////////////////
-// Execution & Logging Constants
-///////////////////////////////////////////////////////////////////
-
 const (
-	MaxScrollbackLines = 0 // 0 for unlimited
+	MaxScrollbackLines = 0
 	LogBufferChannels  = 1000
 
 	ScrollStepSize        = 3
@@ -52,18 +25,13 @@ const (
 	MinLogWidth      = 60
 	MaxLogWidth      = 300
 
-	DefaultProgressBarWidth = 50
-	MinProgressBarWidth     = 20
-	MaxProgressBarWidth     = 50
-	MiniProgressBarWidth    = 35
+	MinProgressBarWidth = 20
+	MaxProgressBarWidth = 50
 
-	TickIntervalMs         = 100
-	ProgressStaleWarningMs = 30000
+	TickIntervalMs = 100
 
-	// Resource monitoring interval (in seconds)
 	ResourceMonitorIntervalSec = 1
 
-	// Execution view layout constants (lines reserved for each section)
 	ExecHeaderLines            = 2
 	ExecInfoPanelLines         = 6
 	ExecProgressSectionLines   = 8
@@ -74,24 +42,10 @@ const (
 	ExecMetricsDashboardLines  = 8
 	ExecCompletionSummaryLines = 14
 	ExecCopyModeBannerLines    = 1
-	ExecSearchInputLines       = 1
+	ExecSearchInputLines = 1
+
+	MaxRecentErrors = 5
 )
-
-///////////////////////////////////////////////////////////////////
-// Command & Validation Constants
-///////////////////////////////////////////////////////////////////
-
-const (
-	DefaultCommandTimeout = 0 // 0 means no timeout at the TUI level
-	MaxRetryAttempts      = 3
-	MinSubjectsRequired   = 1 // Minimum number of subjects required to enable analysis views
-	MinCategoriesRequired = 1 // Minimum number of categories required to compute behavioral summaries
-	MaxRecentErrors       = 5
-)
-
-///////////////////////////////////////////////////////////////////
-// Status Marks
-///////////////////////////////////////////////////////////////////
 
 const (
 	CheckMark    = "✓"
@@ -100,37 +54,13 @@ const (
 	ActiveMark   = "●"
 	SelectedMark = "➜"
 	BulletMark   = "•"
-	ArrowRight   = "→"
 	WarningMark  = "⚠"
 )
-
-///////////////////////////////////////////////////////////////////
-// Keyboard Shortcuts
-///////////////////////////////////////////////////////////////////
-
-const (
-	KeyUp     = "↑"
-	KeyDown   = "↓"
-	KeyLeft   = "←"
-	KeyRight  = "→"
-	KeyEnter  = "Enter"
-	KeyEscape = "Esc"
-	KeySpace  = "Space"
-	KeyTab    = "Tab"
-)
-
-///////////////////////////////////////////////////////////////////
-// Mode Constants
-///////////////////////////////////////////////////////////////////
 
 const (
 	ModeCompute   = "compute"
 	ModeVisualize = "visualize"
 )
-
-///////////////////////////////////////////////////////////////////
-// Divider Styles
-///////////////////////////////////////////////////////////////////
 
 type DividerStyle int
 

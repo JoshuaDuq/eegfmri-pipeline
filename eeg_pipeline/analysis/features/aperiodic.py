@@ -16,14 +16,13 @@ from typing import Optional, List, Dict, Tuple, Any, NamedTuple
 import numpy as np
 import pandas as pd
 import mne
-import warnings
 from scipy import stats
 from scipy.optimize import curve_fit
 from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.domain.features.constants import get_segment_mask, validate_extractor_inputs
+from eeg_pipeline.domain.features.constants import validate_extractor_inputs
 from eeg_pipeline.utils.config.loader import get_frequency_bands_for_aperiodic
 from eeg_pipeline.utils.analysis.stats import compute_residuals
 from eeg_pipeline.utils.parallel import get_n_jobs
@@ -86,6 +85,14 @@ class KneeFitResult(NamedTuple):
     peak_rejected: bool
     fit_indices: np.ndarray
     status: int
+
+
+# Configuration helpers
+def _get_config_value(config: Any, key: str, default: Any = None) -> Any:
+    """Get config value with safe fallback."""
+    if hasattr(config, "get"):
+        return config.get(key, default)
+    return default
 
 
 # Validation functions
@@ -410,7 +417,7 @@ def _build_line_noise_mask(
 
 def _parse_line_noise_config(config: Any) -> LineNoiseConfig:
     """Parse line noise exclusion configuration from config object."""
-    aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
+    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
     
     exclude = bool(aperiodic_cfg.get("exclude_line_noise", True))
     
@@ -707,10 +714,11 @@ def _compute_psd(
 
 def _parse_psd_config(config: Any) -> Tuple[str, Dict[str, Any], float, float]:
     """Parse PSD computation configuration."""
-    aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
+    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
+    constants_cfg = _get_config_value(config, "feature_engineering.constants", {})
     
-    fmin = float(aperiodic_cfg.get("fmin", config.get("feature_engineering.constants.aperiodic_fmin", _DEFAULT_FMIN)))
-    fmax = float(aperiodic_cfg.get("fmax", config.get("feature_engineering.constants.aperiodic_fmax", _DEFAULT_FMAX)))
+    fmin = float(aperiodic_cfg.get("fmin", constants_cfg.get("aperiodic_fmin", _DEFAULT_FMIN)))
+    fmax = float(aperiodic_cfg.get("fmax", constants_cfg.get("aperiodic_fmax", _DEFAULT_FMAX)))
     
     psd_method = str(aperiodic_cfg.get("psd_method", "multitaper")).strip().lower()
     if psd_method not in {"multitaper", "welch"}:
@@ -917,6 +925,59 @@ def _compute_power_corrected_band_power(
     return pc_matrix
 
 
+# Window mask rebuilding (shared between extract_aperiodic_features and extract_aperiodic_from_precomputed)
+def _rebuild_window_masks(
+    windows: Any,
+    times: np.ndarray,
+    target_name: Optional[str],
+    allow_full_epoch_fallback: bool,
+    logger: Any,
+) -> Tuple[Dict[str, np.ndarray], Optional[str]]:
+    """Rebuild window masks for the current time axis.
+    
+    Returns:
+        Tuple of (segments_dict, error_message)
+    """
+    segments: Dict[str, np.ndarray] = {}
+    error_msg: Optional[str] = None
+    
+    if target_name and windows is not None:
+        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
+        if window_range is not None and len(window_range) >= 2:
+            tmin, tmax = float(window_range[0]), float(window_range[1])
+            mask = (times >= tmin) & (times < tmax)
+        else:
+            mask = windows.get_mask(target_name)
+            if mask is not None and len(mask) != len(times):
+                mask = None
+        
+        if mask is not None and len(mask) == len(times) and np.any(mask):
+            segments = {target_name: mask}
+        else:
+            if allow_full_epoch_fallback:
+                logger.warning(
+                    "Aperiodic: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                    target_name,
+                )
+                segments = {target_name: np.ones(len(times), dtype=bool)}
+            else:
+                logger.error(
+                    "Aperiodic: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                    target_name,
+                )
+                error_msg = f"invalid_target_window_mask:{target_name}"
+    else:
+        if windows is not None and hasattr(windows, 'ranges'):
+            for seg_name, seg_range in windows.ranges.items():
+                if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
+                    tmin, tmax = float(seg_range[0]), float(seg_range[1])
+                    mask = (times >= tmin) & (times < tmax)
+                    if np.any(mask):
+                        segments[seg_name] = mask
+    
+    return segments, error_msg
+
+
 # Spatial aggregation
 def _build_roi_map(ch_names: List[str], config: Any) -> Dict[str, List[int]]:
     """Build ROI mapping from channel names to indices."""
@@ -1061,7 +1122,7 @@ def _extract_aperiodic_for_segment(
     line_config = _parse_line_noise_config(config)
     
     # Check if induced spectra (evoked subtraction) is requested
-    aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
+    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
     subtract_evoked = bool(aperiodic_cfg.get("subtract_evoked", False))
     
     if subtract_evoked:
@@ -1102,12 +1163,12 @@ def _extract_aperiodic_for_segment(
     log_psd = np.log10(np.maximum(psds, _MIN_POWER_LOG10))
     
     # Parse fit parameters
-    model = str(config.get("feature_engineering.aperiodic.model", "fixed")).strip().lower()
+    model = str(aperiodic_cfg.get("model", "fixed")).strip().lower()
     if model not in {"fixed", "knee"}:
         model = "fixed"
     
-    peak_z = float(config.get("feature_engineering.aperiodic.peak_rejection_z", _DEFAULT_PEAK_REJECTION_Z))
-    min_pts = int(config.get("feature_engineering.aperiodic.min_fit_points", _DEFAULT_MIN_FIT_POINTS))
+    peak_z = float(aperiodic_cfg.get("peak_rejection_z", _DEFAULT_PEAK_REJECTION_Z))
+    min_pts = int(aperiodic_cfg.get("min_fit_points", _DEFAULT_MIN_FIT_POINTS))
     fit_params = _validate_fit_parameters(peak_z, min_pts, model)
     
     n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_aperiodic")
@@ -1143,11 +1204,11 @@ def _extract_aperiodic_for_segment(
     )
     
     # Apply quality filters
-    min_r2 = float(config.get("feature_engineering.aperiodic.min_r2", 0.0))
+    min_r2 = float(aperiodic_cfg.get("min_r2", 0.0))
     if not np.isfinite(min_r2):
         min_r2 = 0.0
     
-    max_rms = config.get("feature_engineering.aperiodic.max_rms", None)
+    max_rms = aperiodic_cfg.get("max_rms", None)
     if max_rms is not None:
         try:
             max_rms = float(max_rms)
@@ -1281,7 +1342,7 @@ def extract_aperiodic_features(
     min_samples = int(sfreq)
     
     # Scientific validity: aperiodic fits are unstable on short segments
-    aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
+    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
     min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", _DEFAULT_MIN_SEGMENT_SEC))
     if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
         min_segment_sec = _DEFAULT_MIN_SEGMENT_SEC
@@ -1293,60 +1354,20 @@ def extract_aperiodic_features(
         "min_segment_sec": min_segment_sec,
     }
     
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
+        _get_config_value(config, "feature_engineering.windows.allow_full_epoch_fallback", False)
     )
     
     # CRITICAL: Rebuild masks for the current (potentially cropped) time axis
     # This prevents shape mismatches when epochs have been cropped after windows were built
-    current_times = epochs.times
-    
-    # Always derive mask from windows - never use np.ones() blindly
-    if target_name and windows is not None:
-        # Rebuild mask for the current time axis using window ranges
-        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
-        if window_range is not None and len(window_range) >= 2:
-            tmin, tmax = float(window_range[0]), float(window_range[1])
-            mask = (current_times >= tmin) & (current_times < tmax)
-        else:
-            mask = windows.get_mask(target_name)
-            # Validate mask length matches data
-            if mask is not None and len(mask) != len(times):
-                # Mask was built for different time axis; rebuild not possible
-                mask = None
-        
-        if mask is not None and len(mask) == len(times) and np.any(mask):
-            segments = {target_name: mask}
-        else:
-            if allow_full_epoch_fallback:
-                logger.warning(
-                    "Aperiodic: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                    target_name,
-                )
-                segments = {target_name: np.ones_like(times, dtype=bool)}
-            else:
-                logger.error(
-                    "Aperiodic: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                    target_name,
-                )
-                qc_payload["error"] = f"invalid_target_window_mask:{target_name}"
-                return pd.DataFrame(), [], qc_payload
-    else:
-        # Rebuild all segment masks for the current time axis
-        segments = {}
-        if windows is not None and hasattr(windows, 'ranges'):
-            for seg_name, seg_range in windows.ranges.items():
-                if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
-                    tmin, tmax = float(seg_range[0]), float(seg_range[1])
-                    mask = (current_times >= tmin) & (current_times < tmax)
-                    if np.any(mask):
-                        segments[seg_name] = mask
+    segments, error_msg = _rebuild_window_masks(
+        windows, epochs.times, target_name, allow_full_epoch_fallback, logger
+    )
+    if error_msg:
+        qc_payload["error"] = error_msg
+        return pd.DataFrame(), [], qc_payload
     
     for seg_name, mask in segments.items():
         if mask is None or np.sum(mask) < min_samples:
@@ -1445,7 +1466,7 @@ def extract_aperiodic_from_precomputed(
     times = precomputed.times
     data_all = np.asarray(precomputed.data, dtype=float)
     
-    aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
+    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
     min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", _DEFAULT_MIN_SEGMENT_SEC))
     peak_rejection_z = float(aperiodic_cfg.get("peak_rejection_z", _DEFAULT_PEAK_REJECTION_Z))
     min_fit_points = int(aperiodic_cfg.get("min_fit_points", _DEFAULT_MIN_FIT_POINTS))
@@ -1467,59 +1488,24 @@ def extract_aperiodic_from_precomputed(
         "subtract_evoked": bool(subtract_evoked),
     }
     
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
     allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
+        _get_config_value(config, "feature_engineering.windows.allow_full_epoch_fallback", False)
     )
     
     # CRITICAL: Rebuild masks for the current time axis
     # This prevents shape mismatches when epochs have been cropped after windows were built
-    if target_name and windows is not None:
-        # Rebuild mask for the current time axis using window ranges
-        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
-        if window_range is not None and len(window_range) >= 2:
-            tmin, tmax = float(window_range[0]), float(window_range[1])
-            mask = (times >= tmin) & (times < tmax)
-        else:
-            mask = windows.get_mask(target_name)
-            # Validate mask length matches data
-            if mask is not None and len(mask) != len(times):
-                mask = None
-        
-        if mask is not None and len(mask) == len(times) and np.any(mask):
-            segments = {target_name: mask}
-        else:
-            if logger:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "Aperiodic: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "Aperiodic: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                segments = {target_name: np.ones(len(times), dtype=bool)}
-            else:
-                qc_payload["error"] = f"invalid_target_window_mask:{target_name}"
-                return pd.DataFrame(), [], qc_payload
-    else:
-        # Rebuild all segment masks for the current time axis
-        segments = {}
-        if windows is not None and hasattr(windows, 'ranges'):
-            for seg_name, seg_range in windows.ranges.items():
-                if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
-                    tmin, tmax = float(seg_range[0]), float(seg_range[1])
-                    mask = (times >= tmin) & (times < tmax)
-                    if np.any(mask):
-                        segments[seg_name] = mask
+    if logger is None:
+        import logging
+        logger = logging.getLogger("aperiodic")
+    
+    segments, error_msg = _rebuild_window_masks(
+        windows, times, target_name, allow_full_epoch_fallback, logger
+    )
+    if error_msg:
+        qc_payload["error"] = error_msg
+        return pd.DataFrame(), [], qc_payload
     
     if not segments:
         if logger:
@@ -1642,41 +1628,13 @@ def _aggregate_aperiodic_features(
     spatial_modes: List[str],
     config: Any,
 ) -> None:
-    """Aggregate aperiodic features by spatial mode."""
-    from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
-    from eeg_pipeline.utils.analysis.channels import build_roi_map
-    
-    if "channels" in spatial_modes:
-        for ch_idx, ch_name in enumerate(ch_names):
-            col_slope = NamingSchema.build("aperiodic", seg_name, "slope", "ch", "value", channel=ch_name)
-            col_offset = NamingSchema.build("aperiodic", seg_name, "offset", "ch", "value", channel=ch_name)
-            data_dict[col_slope] = slopes[:, ch_idx]
-            data_dict[col_offset] = offsets[:, ch_idx]
-    
-    if "global" in spatial_modes:
-        valid_per_epoch = np.sum(np.isfinite(slopes), axis=1)
-        global_slope = np.where(valid_per_epoch >= 3, np.nanmean(slopes, axis=1), np.nan)
-        global_offset = np.where(valid_per_epoch >= 3, np.nanmean(offsets, axis=1), np.nan)
-        
-        col_slope = NamingSchema.build("aperiodic", seg_name, "slope", "global", "mean")
-        col_offset = NamingSchema.build("aperiodic", seg_name, "offset", "global", "mean")
-        data_dict[col_slope] = global_slope
-        data_dict[col_offset] = global_offset
-    
-    if "roi" in spatial_modes:
-        roi_defs = get_roi_definitions(config)
-        if roi_defs:
-            roi_map = build_roi_map(ch_names, roi_defs)
-            for roi_name, idxs in roi_map.items():
-                if len(idxs) >= 2:
-                    roi_slopes = slopes[:, idxs]
-                    roi_offsets = offsets[:, idxs]
-                    valid_per_epoch = np.sum(np.isfinite(roi_slopes), axis=1)
-                    
-                    roi_slope_mean = np.where(valid_per_epoch >= 2, np.nanmean(roi_slopes, axis=1), np.nan)
-                    roi_offset_mean = np.where(valid_per_epoch >= 2, np.nanmean(roi_offsets, axis=1), np.nan)
-                    
-                    col_slope = NamingSchema.build("aperiodic", seg_name, "slope", "roi", "mean", channel=roi_name)
-                    col_offset = NamingSchema.build("aperiodic", seg_name, "offset", "roi", "mean", channel=roi_name)
-                    data_dict[col_slope] = roi_slope_mean
-                    data_dict[col_offset] = roi_offset_mean
+    """Aggregate aperiodic features by spatial mode (legacy function for extract_aperiodic_from_precomputed)."""
+    roi_map = _build_roi_map(ch_names, config) if "roi" in spatial_modes else {}
+    metrics = {
+        "slope": ("broadband", "slope", slopes),
+        "offset": ("broadband", "offset", offsets),
+    }
+    aggregated = _aggregate_features_by_spatial_mode(
+        metrics, ch_names, seg_name, spatial_modes, roi_map
+    )
+    data_dict.update(aggregated)

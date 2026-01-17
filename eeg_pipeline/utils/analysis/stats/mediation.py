@@ -159,8 +159,6 @@ def _compute_t_statistic_p_value(
     return p_value if np.isfinite(p_value) else np.nan
 
 
-
-
 def compute_mediation_paths(
     X: np.ndarray,
     M: np.ndarray,

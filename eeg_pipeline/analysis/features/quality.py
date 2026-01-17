@@ -20,6 +20,7 @@ import pandas as pd
 import mne
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
+from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import EPSILON_STD
 
@@ -35,8 +36,6 @@ DEFAULT_SNR_SIGNAL_BAND = [1.0, 30.0]
 DEFAULT_SNR_NOISE_BAND = [40.0, 80.0]
 DEFAULT_MUSCLE_BAND = [30.0, 80.0]
 SNR_DB_MULTIPLIER = 10
-HIGH_VARIANCE_THRESHOLD_MULTIPLIER = 10
-HIGH_VARIANCE_ABSOLUTE_THRESHOLD = 100
 
 
 def _extract_quality_config(config: Any) -> Dict[str, Any]:
@@ -273,6 +272,7 @@ def _compute_signal_metrics(
     
     return metrics
 
+
 def _store_metric_values(
     results: Dict[str, List[float]],
     metrics: Dict[str, np.ndarray],
@@ -324,18 +324,17 @@ def extract_quality_features(
     config = getattr(ctx, "config", None)
     
     results = {}
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     logger = getattr(ctx, "logger", None)
+    
+    has_config_get = config is not None and hasattr(config, "get")
     allow_full_epoch_fallback = bool(
         config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if config is not None and hasattr(config, "get")
+        if has_config_get
         else False
     )
     
-    # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
         mask = windows.get_mask(target_name)
         if mask is not None and np.any(mask):
@@ -382,95 +381,9 @@ def extract_quality_features(
     return df, list(df.columns)
 
 
-def _identify_constant_features(series: pd.Series) -> bool:
-    """Check if feature has zero variance."""
-    valid_values = series.dropna()
-    if len(valid_values) == 0:
-        return False
-    return float(valid_values.std()) == 0
-
-
-def _identify_high_variance_features(series: pd.Series) -> bool:
-    """Check if feature has unusually high variance."""
-    valid_values = series.dropna()
-    if len(valid_values) == 0:
-        return False
-    
-    std = float(valid_values.std())
-    mean = float(valid_values.mean())
-    
-    if mean != 0:
-        return std > mean * HIGH_VARIANCE_THRESHOLD_MULTIPLIER
-    return std > HIGH_VARIANCE_ABSOLUTE_THRESHOLD
-
-
-def _get_feature_columns(df: pd.DataFrame, subject_col: Optional[str]) -> List[str]:
-    """Extract feature column names, excluding metadata columns."""
-    metadata_columns = {subject_col, "epoch", "trial", "condition"}
-    return [col for col in df.columns if col not in metadata_columns]
-
-
-def generate_quality_report(
-    df: pd.DataFrame,
-    subject_col: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Generate quality report from precomputed features DataFrame.
-    
-    Args:
-        df: DataFrame with feature columns
-        subject_col: Optional column name for subject identifier
-        
-    Returns:
-        Dictionary with quality metrics summary
-    """
-    if df.empty:
-        return {"status": "empty", "n_rows": 0, "n_features": 0}
-    
-    feature_columns = _get_feature_columns(df, subject_col)
-    
-    missing_fractions = {}
-    constant_features = []
-    high_variance_features = []
-    
-    for column in feature_columns:
-        if column not in df.columns:
-            continue
-        
-        series = pd.to_numeric(df[column], errors="coerce")
-        n_total = len(series)
-        n_missing = series.isna().sum()
-        
-        missing_fractions[column] = (
-            float(n_missing / n_total) if n_total > 0 else 1.0
-        )
-        
-        if _identify_constant_features(series):
-            constant_features.append(column)
-        elif _identify_high_variance_features(series):
-            high_variance_features.append(column)
-    
-    mean_missing_fraction = (
-        float(np.mean(list(missing_fractions.values())))
-        if missing_fractions
-        else 0.0
-    )
-    
-    return {
-        "n_rows": len(df),
-        "n_features": len(feature_columns),
-        "missing_fraction": missing_fractions,
-        "constant_features": constant_features,
-        "high_variance_features": high_variance_features,
-        "n_constant": len(constant_features),
-        "n_high_variance": len(high_variance_features),
-        "mean_missing_fraction": mean_missing_fraction,
-    }
-
-
 def compute_trial_quality_metrics(
     epochs: mne.Epochs,
     config: Any = None,
-    logger: Any = None,
 ) -> pd.DataFrame:
     """Compute trial-level quality metrics from epochs.
     
@@ -483,8 +396,6 @@ def compute_trial_quality_metrics(
         Preprocessed epochs
     config : Any
         Configuration object
-    logger : Any
-        Logger instance (unused, kept for API compatibility)
         
     Returns
     -------

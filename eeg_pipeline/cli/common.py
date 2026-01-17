@@ -8,15 +8,10 @@ Shared argument parsing utilities and helper functions for CLI subcommands.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any, List, Optional
 
-from eeg_pipeline.cli.progress import (
-    ProgressEvent,
-    ProgressReporter,
-    create_progress_reporter,
-)
+from eeg_pipeline.cli.progress import create_progress_reporter, ProgressReporter
 from eeg_pipeline.infra.paths import resolve_deriv_root
 
 
@@ -124,28 +119,3 @@ def validate_min_subjects(
 def get_deriv_root(config: Any) -> Path:
     """Get derivatives root path from config."""
     return resolve_deriv_root(config=config)
-
-
-def output_json(data: Any) -> None:
-    """Print data as formatted JSON."""
-    print(json.dumps(data, indent=2, default=str))
-
-
-def output_text(data: Any) -> None:
-    """Print data as plain text."""
-    print(data)
-
-
-def output_formatted_text(data: Any, formatter: Callable[[Any], str]) -> None:
-    """Print data formatted by the provided formatter function."""
-    print(formatter(data))
-
-
-def output_result(args: argparse.Namespace, data: Any, text_formatter: Optional[Callable[[Any], str]] = None) -> None:
-    """Output result as JSON or formatted text based on args."""
-    if getattr(args, "output_json", False):
-        output_json(data)
-    elif text_formatter is not None:
-        output_formatted_text(data, text_formatter)
-    else:
-        output_text(data)

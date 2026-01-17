@@ -24,22 +24,6 @@ from eeg_pipeline.plotting.machine_learning.helpers import (
 logger = logging.getLogger(__name__)
 
 
-def _validate_importance_dataframe(
-    importance_df: pd.DataFrame,
-    model_name: str,
-) -> bool:
-    """Validate importance dataframe has required structure."""
-    if importance_df is None or len(importance_df) == 0:
-        logger.warning(f"Empty importance dataframe for {model_name}")
-        return False
-    
-    if 'feature_name' not in importance_df.columns:
-        logger.warning(f"Missing 'feature_name' column for {model_name}")
-        return False
-    
-    return True
-
-
 def _get_importance_column_name(importance_df: pd.DataFrame) -> str:
     """Get the name of the importance column."""
     if 'mean_abs_shap' in importance_df.columns:
@@ -66,7 +50,12 @@ def plot_feature_importance_top_n(
     config: Optional[Any] = None,
 ) -> None:
     """Plot top N most important features from a feature importance dataframe."""
-    if not _validate_importance_dataframe(importance_df, model_name):
+    if importance_df is None or len(importance_df) == 0:
+        logger.warning(f"Empty importance dataframe for {model_name}")
+        return
+    
+    if 'feature_name' not in importance_df.columns:
+        logger.warning(f"Missing 'feature_name' column for {model_name}")
         return
     
     values, ylabel = extract_importance_column(importance_df, top_n)
@@ -233,7 +222,7 @@ def _compute_kde_for_channel(
         y_kde = kde(x_range)
         normalized_kde = y_kde / y_kde.max()
         return normalized_kde
-    except Exception:
+    except (ValueError, np.linalg.LinAlgError):
         return np.zeros_like(x_range)
 
 
@@ -305,8 +294,7 @@ def _plot_ridge_channel(
     ax.spines['right'].set_visible(False)
     ax.spines['bottom'].set_visible(False)
     
-    is_intermediate_channel = channel_idx < n_channels - 1
-    if is_intermediate_channel:
+    if channel_idx < n_channels - 1:
         ax.spines['left'].set_visible(False)
         ax.set_xticks([])
 
@@ -429,6 +417,9 @@ def _prepare_stability_data(
     if top_n_channels is not None and top_n_channels > 0:
         top_channels = channel_means.head(top_n_channels).index.tolist()
         df = df[df['channel'].isin(top_channels)]
+        channel_means = df.groupby('channel')['importance'].mean().sort_values(
+            ascending=False
+        )
     
     if len(df) == 0:
         logger.warning(
@@ -436,9 +427,7 @@ def _prepare_stability_data(
         )
         return pd.DataFrame(), []
     
-    channels_ordered = df.groupby('channel')['importance'].mean().sort_values(
-        ascending=False
-    ).index.tolist()
+    channels_ordered = channel_means.index.tolist()
     
     return df, channels_ordered
 

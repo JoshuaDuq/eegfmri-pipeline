@@ -58,7 +58,7 @@ import pandas as pd
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import EPSILON_PSD, validate_precomputed
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
-from eeg_pipeline.utils.analysis.windowing import make_mask_for_times, get_segment_masks
+from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels, build_roi_map
 from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
 from eeg_pipeline.utils.config.loader import get_frequency_bands, get_feature_constant
@@ -575,7 +575,6 @@ def extract_power_from_precomputed(
     Returns:
         Tuple of (features_dataframe, column_names_list, qc_dict).
     """
-    # Import validate_window_masks from precomputed.extras
     from eeg_pipeline.analysis.features.precomputed.extras import validate_window_masks
     
     is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)

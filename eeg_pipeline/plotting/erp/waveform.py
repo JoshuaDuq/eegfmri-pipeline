@@ -44,16 +44,13 @@ def _build_metadata_query(column: str, value: Any) -> str:
     str
         Query string in pandas/MNE syntax.
     """
-    column_expression = f"`{column}`"
-    try:
-        numeric_value = pd.to_numeric(str(value), errors="coerce")
-        if not np.isnan(numeric_value):
-            if float(numeric_value).is_integer():
-                return f"{column_expression} == {int(numeric_value)}"
-            return f"{column_expression} == {float(numeric_value)}"
-    except (ValueError, TypeError):
-        pass
-    return f"{column_expression} == {repr(str(value))}"
+    column_expr = f"`{column}`"
+    numeric_value = pd.to_numeric(str(value), errors="coerce")
+    if not np.isnan(numeric_value):
+        if float(numeric_value).is_integer():
+            return f"{column_expr} == {int(numeric_value)}"
+        return f"{column_expr} == {float(numeric_value)}"
+    return f"{column_expr} == {repr(str(value))}"
 
 
 def _filter_roi_map_by_config(roi_map: Dict[str, List[int]], config: Any) -> Dict[str, List[int]]:
@@ -74,17 +71,19 @@ def _filter_roi_map_by_config(roi_map: Dict[str, List[int]], config: Any) -> Dic
     comparison_rois = get_config_value(
         config, "plotting.comparisons.comparison_rois", []
     )
-    has_specific_rois = any(roi.lower() != "all" for roi in comparison_rois)
     
-    if not comparison_rois or not has_specific_rois:
+    if not comparison_rois:
         return roi_map
     
-    filtered_map = {}
-    for roi_name in comparison_rois:
-        if roi_name.lower() == "all":
-            continue
-        if roi_name in roi_map:
-            filtered_map[roi_name] = roi_map[roi_name]
+    specific_rois = [roi for roi in comparison_rois if roi.lower() != "all"]
+    if not specific_rois:
+        return roi_map
+    
+    filtered_map = {
+        roi_name: roi_map[roi_name]
+        for roi_name in specific_rois
+        if roi_name in roi_map
+    }
     
     return filtered_map
 
@@ -429,10 +428,14 @@ def plot_erp_contrast(
 
     if cond_a is None or cond_b is None or label_a is None or label_b is None:
         metadata = getattr(epochs, "metadata", None)
-        comparison_spec = (
-            resolve_comparison_spec(metadata, config, require_enabled=False)
-            if metadata is not None
-            else None
+        if metadata is None:
+            logger.warning(
+                "No metadata available; skipping ERP contrast."
+            )
+            return saved_paths
+        
+        comparison_spec = resolve_comparison_spec(
+            metadata, config, require_enabled=False
         )
         if comparison_spec is None:
             logger.warning(

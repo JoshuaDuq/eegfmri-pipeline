@@ -13,10 +13,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Optional, List, Any, Dict, Tuple
-import pandas as pd
-import numpy as np
 
-from eeg_pipeline.infra.tsv import read_tsv, read_table
+import numpy as np
+import pandas as pd
+
+from eeg_pipeline.infra.tsv import read_table
+from eeg_pipeline.utils.data.manipulation import find_column
 from .covariates import _build_covariate_matrices
 
 
@@ -60,12 +62,12 @@ def load_precomputed_correlations(
     method_label: Optional[str] = None,
 ) -> Optional[pd.DataFrame]:
     """
-    Load precomputed correlation statistics from TSV files.
+    Load precomputed correlation statistics from parquet or TSV files.
     
     Parameters
     ----------
     stats_dir : Path
-        Directory containing correlation stats TSV files
+        Directory containing correlation stats files
     feature_type : str
         Type of feature: "power", "aperiodic", "connectivity", "itpc", "complexity", "power_roi"
     target : str
@@ -92,10 +94,6 @@ def load_precomputed_correlations(
         target_suffix_alt,
         method_label=method_label,
     )
-    
-    if not candidates:
-        logger.warning(f"Unknown feature type for stats loading: {feature_type}")
-        return None
 
     for filename in candidates:
         filepath = stats_dir / filename
@@ -111,27 +109,18 @@ def load_precomputed_correlations(
 
 def _find_roi_column(dataframe: pd.DataFrame) -> Optional[str]:
     """Find the ROI/channel/feature column name in the dataframe."""
-    from eeg_pipeline.utils.data.manipulation import find_column
-    possible_columns = ["roi", "channel", "feature"]
-    return find_column(dataframe, possible_columns)
+    return find_column(dataframe, ["roi", "channel", "feature"])
 
 
 def _find_band_column(dataframe: pd.DataFrame) -> Optional[str]:
     """Find the band column name in the dataframe."""
-    from eeg_pipeline.utils.data.manipulation import find_column
     return find_column(dataframe, ["band"])
-
-
-def _extract_stat_value(row: pd.Series, key: str, default: Any = np.nan) -> Any:
-    """Extract a statistic value from a row with a default fallback."""
-    return row.get(key, default)
 
 
 def get_precomputed_stats_for_roi_band(
     stats_df: Optional[pd.DataFrame],
     roi: str,
     band: str,
-    logger: Optional[logging.Logger] = None,
 ) -> Dict[str, Any]:
     """
     Extract precomputed stats for a specific ROI and band from a stats DataFrame.
@@ -144,8 +133,6 @@ def get_precomputed_stats_for_roi_band(
         Region of interest identifier
     band : str
         Frequency band identifier
-    logger : Logger, optional
-        Logger instance (currently unused, kept for API compatibility)
         
     Returns
     -------
@@ -169,21 +156,21 @@ def get_precomputed_stats_for_roi_band(
         & (stats_df[band_column].astype(str) == band)
     ]
     
-    if len(matching_rows) == 0:
+    if matching_rows.empty:
         return {}
         
     row = matching_rows.iloc[0]
 
-    q_global = _extract_stat_value(row, "q_global", np.nan)
-    q_value = q_global if not np.isnan(q_global) else _extract_stat_value(row, "q", np.nan)
-    fdr_reject = bool(_extract_stat_value(row, "fdr_reject", False))
+    q_global = row.get("q_global", np.nan)
+    q_value = q_global if not np.isnan(q_global) else row.get("q", np.nan)
+    fdr_reject = bool(row.get("fdr_reject", False))
     
     return {
-        "r": _extract_stat_value(row, "r", np.nan),
-        "p": _extract_stat_value(row, "p", np.nan),
-        "n": _extract_stat_value(row, "n", 0),
-        "ci_low": _extract_stat_value(row, "ci_low", np.nan),
-        "ci_high": _extract_stat_value(row, "ci_high", np.nan),
+        "r": row.get("r", np.nan),
+        "p": row.get("p", np.nan),
+        "n": row.get("n", 0),
+        "ci_low": row.get("ci_low", np.nan),
+        "ci_high": row.get("ci_high", np.nan),
         "q": q_value,
         "fdr_reject": fdr_reject,
     }
@@ -333,8 +320,5 @@ def load_subject_scatter_data(
         )
         
     except Exception as e:
-        # Catch all exceptions to gracefully handle any loading failure
-        # (FileNotFoundError, ValueError, etc.) and return None values.
-        # This allows callers to handle missing data without crashing.
         logger.error(f"Failed to load scatter data for sub-{subject}: {e}")
         return None, None, None, None, None, None, None, None, None

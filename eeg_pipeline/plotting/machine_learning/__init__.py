@@ -29,7 +29,6 @@ __all__ = [
     "plot_incremental_validity",
     # Feature importance plotting
     "plot_feature_importance_top_n",
-    "plot_feature_importance_stability",
 ]
 
 
@@ -46,7 +45,7 @@ def __getattr__(name: str):
         "plot_bootstrap_distributions": "performance",
         "plot_permutation_null": "performance",
         # Residual diagnostics plotting
-        "plot_residual_diagnostics": "diagnostics",
+        "plot_residual_diagnostics": "helpers",
         # Model comparison plotting
         "plot_model_comparison": "comparisons",
         "plot_riemann_band_comparison": "comparisons",
@@ -54,7 +53,6 @@ def __getattr__(name: str):
         "plot_incremental_validity": "comparisons",
         # Feature importance plotting
         "plot_feature_importance_top_n": "importance",
-        "plot_feature_importance_stability": "importance",
     }
 
     module_name = _module_map.get(name)

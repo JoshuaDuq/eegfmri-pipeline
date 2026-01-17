@@ -6,7 +6,7 @@ Statistical masking, cluster significance computation, and T-test helpers.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import mne
@@ -21,7 +21,6 @@ from ...utils.analysis.stats import (
 )
 
 
-# Constants
 MIN_SUBJECTS_REQUIRED = 2
 EMPTY_CLUSTER_RESULT = (None, None, None, None)
 DEFAULT_ALPHA = 0.05
@@ -95,7 +94,7 @@ def _handle_cluster_test_error(
         )
     strict_mode = get_strict_mode(config)
     if strict_mode:
-        raise
+        raise error
     return EMPTY_CLUSTER_RESULT
 
 
@@ -231,13 +230,11 @@ def _align_channels_to_common(
     aligned_arrays = []
     
     for mean_array, tfr in zip(mean_arrays, tfr_list):
-        channel_indices = [
-            tfr.info["ch_names"].index(ch)
-            for ch in common_channels
-            if ch in tfr.info["ch_names"]
-        ]
-        
-        if len(channel_indices) != len(common_channels):
+        try:
+            channel_indices = [
+                tfr.info["ch_names"].index(ch) for ch in common_channels
+            ]
+        except ValueError:
             continue
         
         aligned_arrays.append(mean_array[channel_indices])
@@ -276,8 +273,7 @@ def compute_cluster_significance_from_combined(
     if not tfr1_list or not tfr2_list:
         return EMPTY_CLUSTER_RESULT
     
-    if (len(tfr1_list) < MIN_SUBJECTS_REQUIRED or
-            len(tfr2_list) < MIN_SUBJECTS_REQUIRED):
+    if len(tfr1_list) < MIN_SUBJECTS_REQUIRED or len(tfr2_list) < MIN_SUBJECTS_REQUIRED:
         if logger:
             log(
                 f"Cluster test requires at least {MIN_SUBJECTS_REQUIRED} subjects "
@@ -294,8 +290,7 @@ def compute_cluster_significance_from_combined(
         tfr2_list, fmin, fmax_eff, tmin, tmax
     )
     
-    if (len(subject_a_means) < MIN_SUBJECTS_REQUIRED or
-            len(subject_b_means) < MIN_SUBJECTS_REQUIRED):
+    if len(subject_a_means) < MIN_SUBJECTS_REQUIRED or len(subject_b_means) < MIN_SUBJECTS_REQUIRED:
         if logger:
             log(
                 "Insufficient subjects with valid data for cluster test; skipping.",
@@ -323,12 +318,10 @@ def compute_cluster_significance_from_combined(
         subject_b_means, tfr_b_valid, common_channels
     )
     
-    if (len(group_a_aligned) < MIN_SUBJECTS_REQUIRED or
-            len(group_b_aligned) < MIN_SUBJECTS_REQUIRED):
+    if len(group_a_aligned) < MIN_SUBJECTS_REQUIRED or len(group_b_aligned) < MIN_SUBJECTS_REQUIRED:
         if logger:
             log(
-                "Insufficient subjects after channel alignment for cluster test; "
-                "skipping.",
+                "Insufficient subjects after channel alignment for cluster test; skipping.",
                 logger,
                 "warning"
             )
@@ -372,56 +365,6 @@ def compute_cluster_significance_from_combined(
         return _handle_cluster_test_error(e, config, logger)
 
 
-def compute_significance_mask(
-    tfr_sub: mne.time_frequency.EpochsTFR,
-    mask_a: np.ndarray,
-    mask_b: np.ndarray,
-    fmin: float,
-    fmax: float,
-    tmin: float,
-    tmax: float,
-    config=None,
-) -> Tuple[Optional[np.ndarray], Dict[str, Optional[float]]]:
-    """Compute significance mask for TFR data.
-    
-    Args:
-        tfr_sub: EpochsTFR object
-        mask_a: Boolean mask for condition A
-        mask_b: Boolean mask for condition B
-        fmin: Minimum frequency
-        fmax: Maximum frequency
-        tmin: Minimum time
-        tmax: Maximum time
-        config: Optional config dictionary
-    
-    Returns:
-        Tuple of (significance_mask, cluster_info_dict)
-        Returns (None, {}) if diff_annotation_enabled is False
-    """
-    viz_params = get_viz_params(config)
-    if not viz_params["diff_annotation_enabled"]:
-        return None, {}
-    
-    sig_mask, cluster_p_min, cluster_k, cluster_mass = cluster_test_epochs(
-        tfr_sub,
-        mask_a,
-        mask_b,
-        fmin=fmin,
-        fmax=fmax,
-        tmin=tmin,
-        tmax=tmax,
-        paired=False,
-        config=config
-    )
-    
-    cluster_info = {
-        "cluster_p_min": cluster_p_min,
-        "cluster_k": cluster_k,
-        "cluster_mass": cluster_mass
-    }
-    return sig_mask, cluster_info
-
-
 def _get_test_type_description(paired: bool) -> str:
     """Get description string for test type.
     
@@ -447,13 +390,14 @@ def _format_baseline_correction(
     Returns:
         Formatted baseline correction string
     """
+    base_str = "baseline correction: logratio"
     if baseline_used is None:
-        return "baseline correction: logratio"
+        return base_str
     
     bl_start, bl_end = baseline_used
     if bl_start is not None and bl_end is not None:
-        return f"baseline correction: logratio [{bl_start:.2f}, {bl_end:.2f}]s"
-    return "baseline correction: logratio"
+        return f"{base_str} [{bl_start:.2f}, {bl_end:.2f}]s"
+    return base_str
 
 
 def build_statistical_title(

@@ -18,7 +18,6 @@ from eeg_pipeline.analysis.features.results import (
     FeatureSet,
     ExtractionResult,
     FeatureExtractionResult,
-    combine_feature_groups,
 )
 from eeg_pipeline.analysis.features.precomputed.erds import extract_erds_from_precomputed
 from eeg_pipeline.analysis.features.precomputed.extras import (
@@ -97,8 +96,8 @@ def _prepare_precomputed_data(
         "asymmetry",
         "complexity",
         "bursts",
-        "spectral",  # Added: ensures IAF-adjusted bands apply to spectral features
-        "aperiodic",  # Added: ensures IAF-adjusted bands apply to aperiodic features
+        "spectral",
+        "aperiodic",
     }
     baseline_dependent_categories = {"erds", "bursts"}
 
@@ -106,10 +105,18 @@ def _prepare_precomputed_data(
     if not needs_precompute:
         return None
 
-    if ctx.precomputed is not None:
-        precomputed_data = ctx.precomputed
-        needs_baseline = bool(baseline_dependent_categories & set(ctx.feature_categories))
-        has_time_range = tmin is not None or tmax is not None
+    needs_baseline = bool(baseline_dependent_categories & set(ctx.feature_categories))
+    has_time_range = tmin is not None or tmax is not None
+
+    cached = None
+    getter = getattr(ctx, "get_precomputed_for_family", None)
+    if callable(getter):
+        cached = getter("spectral")
+    if cached is None:
+        cached = ctx.precomputed
+
+    if cached is not None:
+        precomputed_data = cached
 
         if has_time_range and not needs_baseline:
             ctx.logger.info(f"Cropping precomputed intermediates to range [{tmin}, {tmax}]")
@@ -124,9 +131,13 @@ def _prepare_precomputed_data(
     if working_epochs is None:
         raise ValueError("Missing epochs; cannot precompute feature intermediates.")
 
-    if not working_epochs.preload:
+    epochs_for_precompute = working_epochs
+    if has_time_range and needs_baseline:
+        epochs_for_precompute = getattr(ctx, "_original_epochs", None) or working_epochs
+
+    if not epochs_for_precompute.preload:
         ctx.logger.info("Preloading epochs data...")
-        working_epochs.load_data()
+        epochs_for_precompute.load_data()
 
     relevant_categories = sorted(list(precompute_categories & set(ctx.feature_categories)))
     ctx.logger.info(f"Computing shared intermediate data for: {', '.join(relevant_categories)}...")
@@ -137,15 +148,20 @@ def _prepare_precomputed_data(
     )
 
     precomputed_data = precompute_data(
-        working_epochs,
+        epochs_for_precompute,
         power_bands,
         ctx.config,
         ctx.logger,
         windows_spec=ctx.windows,
         compute_psd_data=needs_psd,
         frequency_bands_override=getattr(ctx, "frequency_bands", None),
+        feature_family="spectral",
     )
-    ctx.set_precomputed(precomputed_data)
+    setter = getattr(ctx, "set_precomputed_for_family", None)
+    if callable(setter):
+        setter("spectral", precomputed_data)
+    else:
+        ctx.set_precomputed(precomputed_data)
     return precomputed_data
 
 
@@ -217,11 +233,10 @@ def _compute_tfr_for_features(
     tfr_complex = None
     tfr_power = None
     
-    # Use original epochs for TFR to preserve baseline window
     epochs_for_tfr = getattr(ctx, "_original_epochs", None) or ctx.epochs
     epochs_for_power_tfr = epochs_for_tfr
 
-    # Optional evoked subtraction for induced power features (pain paradigms)
+    # Evoked subtraction for induced power features (pain paradigms)
     power_cfg = ctx.config.get("feature_engineering.power", {}) if hasattr(ctx.config, "get") else {}
     want_induced_power = bool(power_cfg.get("subtract_evoked", False))
     ctx.power_evoked_subtracted = False
@@ -258,10 +273,26 @@ def _compute_tfr_for_features(
 
     needs_complex = any(category in ctx.feature_categories for category in ["itpc", "pac"])
     if needs_complex:
-        tfr_complex = compute_complex_tfr(epochs_for_tfr, ctx.config, ctx.logger)
+        epochs_for_complex = epochs_for_tfr
+        try:
+            from eeg_pipeline.analysis.features.preparation import _apply_spatial_transform, _get_spatial_transform_type
+
+            phase_family = "itpc" if "itpc" in ctx.feature_categories else "pac"
+            phase_transform = _get_spatial_transform_type(ctx.config, feature_family=phase_family)
+            if phase_transform in {"csd", "laplacian"}:
+                epochs_for_complex = epochs_for_tfr.copy().pick_types(
+                    eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+                )
+                epochs_for_complex = _apply_spatial_transform(
+                    epochs_for_complex, phase_transform, ctx.config, ctx.logger
+                )
+        except Exception:
+            pass
+
+        tfr_complex = compute_complex_tfr(epochs_for_complex, ctx.config, ctx.logger)
         if tfr_complex is not None:
             ctx.tfr_complex = tfr_complex
-            if not ctx.power_evoked_subtracted:
+            if not ctx.power_evoked_subtracted and epochs_for_complex is epochs_for_tfr:
                 ctx.logger.info("Deriving power TFR from complex TFR...")
                 tfr_power = tfr_complex.copy()
                 tfr_power.data = np.abs(tfr_complex.data) ** 2
@@ -271,7 +302,6 @@ def _compute_tfr_for_features(
         ctx.logger.info("Using pre-computed TFR from context")
         tfr_power = ctx.tfr
 
-    # If induced power is requested, compute power TFR directly on evoked-subtracted epochs.
     if tfr_power is None and ctx.power_evoked_subtracted:
         from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
 
@@ -286,7 +316,6 @@ def _compute_tfr_for_features(
         if np.isfinite(baseline_start) and np.isfinite(baseline_end):
             baseline_override = (float(baseline_start), float(baseline_end))
 
-    # Compute TFR on full epochs to ensure baseline is available
     tfr, baseline_df, baseline_cols, baseline_start, baseline_end = compute_tfr_for_subject(
         epochs_for_power_tfr,
         ctx.aligned_events,
@@ -377,15 +406,40 @@ def _extract_pac_features(
     pac_config = ctx.config.get("feature_engineering.pac", {}) if hasattr(ctx.config, "get") else {}
     pac_source = str(pac_config.get("source", "precomputed")).strip().lower()
 
-    if pac_source == "precomputed" and precomputed_data is not None:
-        ctx.logger.info(
-            "Using Hilbert PAC from precomputed analytic signals "
-            "(recommended for scientific validity)"
-        )
-        pac_trials_df, pac_cols = extract_pac_from_precomputed(precomputed_data, ctx.config)
-        if pac_trials_df is not None and not pac_trials_df.empty:
-            return None, None, None, pac_trials_df, None
-        return None, None, None, None, None
+    if pac_source == "precomputed":
+        precomputed_pac = None
+        getter = getattr(ctx, "get_precomputed_for_family", None)
+        if callable(getter):
+            precomputed_pac = getter("pac")
+        if precomputed_pac is None:
+            precomputed_pac = precomputed_data
+        if precomputed_pac is None and getattr(ctx, "epochs", None) is not None:
+            from eeg_pipeline.utils.config.loader import get_frequency_band_names
+
+            bands_for_pac = ctx.bands if ctx.bands else get_frequency_band_names(ctx.config)
+            precomputed_pac = precompute_data(
+                ctx.epochs,
+                bands_for_pac,
+                ctx.config,
+                ctx.logger,
+                windows_spec=ctx.windows,
+                feature_family="pac",
+            )
+            setter = getattr(ctx, "set_precomputed_for_family", None)
+            if callable(setter):
+                setter("pac", precomputed_pac)
+            else:
+                ctx.set_precomputed(precomputed_pac)
+
+        if precomputed_pac is not None:
+            ctx.logger.info(
+                "Using Hilbert PAC from precomputed analytic signals "
+                "(recommended for scientific validity)"
+            )
+            pac_trials_df, pac_cols = extract_pac_from_precomputed(precomputed_pac, ctx.config)
+            if pac_trials_df is not None and not pac_trials_df.empty:
+                return None, None, None, pac_trials_df, None
+            return None, None, None, None, None
 
     if pac_source == "precomputed" and precomputed_data is None:
         ctx.logger.warning(
@@ -563,17 +617,15 @@ def extract_all_features(
         ctx.logger.info(f"Spatial aggregation modes: {', '.join(ctx.spatial_modes)}")
 
     power_bands = ctx.bands if ctx.bands else get_frequency_band_names(ctx.config)
-    # Store original epochs for baseline correction before cropping
     ctx._original_epochs = ctx.epochs
     windows_full = ctx.windows
     working_epochs = _prepare_working_epochs(ctx, tmin, tmax)
     expected_n_trials = len(working_epochs)
-    # Update ctx.epochs with cropped version so extractors see correct time range
     ctx.epochs = working_epochs
 
-    # Rebase masks onto the cropped time axis while preserving the original (requested) ranges.
-    # This prevents mask/time-length mismatches (e.g., ERP/quality) while still allowing
-    # baseline-dependent computations to reference the original baseline range.
+    # Rebase masks onto cropped time axis while preserving original ranges.
+    # Prevents mask/time-length mismatches while allowing baseline-dependent
+    # computations to reference the original baseline range.
     if windows_full is not None and getattr(windows_full, "ranges", None) is not None:
         from eeg_pipeline.types import TimeWindows
 
@@ -592,7 +644,6 @@ def extract_all_features(
                 continue
             new_masks[win_name] = (new_times >= start) & (new_times < end)
 
-        # Preserve user-facing ranges even if out-of-range for the cropped times.
         baseline_range = ranges_full.get("baseline", (np.nan, np.nan))
         active_key = None
         if ctx.name and ctx.name in new_masks:
@@ -975,8 +1026,6 @@ def extract_precomputed_features(
     precomputed: Optional[PrecomputedData] = None,
 ) -> ExtractionResult:
     """Extract features from precomputed intermediate data."""
-    from eeg_pipeline.utils.config.loader import get_config_value
-
     if feature_groups is None:
         feature_groups = ["erds", "spectral"]
 
@@ -1025,46 +1074,29 @@ def extract_precomputed_features(
         )
 
     if "aperiodic" in feature_groups:
-        logger.info("Extracting aperiodic features...")
-        try:
-            from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_from_precomputed
-            df, cols, qc = extract_aperiodic_from_precomputed(precomputed, bands)
-            if not df.empty:
-                result.features["aperiodic"] = FeatureSet(df, cols, "aperiodic")
-                result.qc["aperiodic"] = qc
-            else:
-                result.qc["aperiodic"] = {"skipped_reason": "empty_result"}
-        except Exception as exc:
-            logger.error(f"Failed to extract aperiodic features: {exc}")
-            result.qc["aperiodic"] = {"skipped_reason": f"error: {exc}"}
+        from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_from_precomputed
+        _extract_precomputed_feature_group(
+            "aperiodic", extract_aperiodic_from_precomputed, precomputed, logger, result, bands
+        )
 
     if "connectivity" in feature_groups:
-        logger.info("Extracting connectivity features (PLV) from precomputed phases...")
-        try:
-            conn_df, conn_cols = extract_connectivity_from_precomputed(precomputed)
-            if not conn_df.empty:
-                result.features["connectivity"] = FeatureSet(conn_df, conn_cols, "connectivity")
-            else:
-                result.qc["connectivity"] = {"skipped_reason": "empty_result"}
-        except Exception as exc:
-            logger.error(f"Failed to extract connectivity features: {exc}")
-            result.qc["connectivity"] = {"skipped_reason": f"error: {exc}"}
+        _extract_precomputed_feature_group(
+            "connectivity", extract_connectivity_from_precomputed, precomputed, logger, result
+        )
 
     if "directed_connectivity" in feature_groups:
-        logger.info("Extracting directed connectivity features (PSI, DTF, PDC)...")
-        try:
-            dconn_df, dconn_cols = extract_directed_connectivity_from_precomputed(
+        def extract_directed_connectivity_wrapper(precomputed, *args, **kwargs):
+            return extract_directed_connectivity_from_precomputed(
                 precomputed, config=config, logger=logger
             )
-            if not dconn_df.empty:
-                result.features["directed_connectivity"] = FeatureSet(
-                    dconn_df, dconn_cols, "directed_connectivity"
-                )
-            else:
-                result.qc["directed_connectivity"] = {"skipped_reason": "empty_result"}
-        except Exception as exc:
-            logger.error(f"Failed to extract directed connectivity features: {exc}")
-            result.qc["directed_connectivity"] = {"skipped_reason": f"error: {exc}"}
+
+        _extract_precomputed_feature_group(
+            "directed_connectivity",
+            extract_directed_connectivity_wrapper,
+            precomputed,
+            logger,
+            result,
+        )
 
     if "ratios" in feature_groups:
         _extract_precomputed_feature_group(
@@ -1087,35 +1119,21 @@ def extract_precomputed_features(
         )
 
     if "asymmetry" in feature_groups:
-        logger.info("Computing hemispheric asymmetry features...")
         n_jobs = int(config.get("feature_engineering.parallel.n_jobs_bands", -1))
-        try:
-            asym_df, asym_cols = extract_asymmetry_from_precomputed(precomputed, n_jobs=n_jobs)
-            if not asym_df.empty:
-                result.features["asymmetry"] = FeatureSet(asym_df, asym_cols, "asymmetry")
-            else:
-                result.qc["asymmetry"] = {"skipped_reason": "empty_result"}
-        except Exception as exc:
-            logger.error(f"Failed to extract asymmetry features: {exc}")
-            result.qc["asymmetry"] = {"skipped_reason": f"error: {exc}"}
+        _extract_precomputed_feature_group(
+            "asymmetry", extract_asymmetry_from_precomputed, precomputed, logger, result, n_jobs=n_jobs
+        )
 
     if "complexity" in feature_groups:
-        logger.info("Computing complexity metrics (LZC, permutation entropy)...")
         n_jobs = int(config.get("feature_engineering.parallel.n_jobs_complexity", -1))
-        try:
-            comp_df, comp_cols = extract_complexity_from_precomputed(precomputed, n_jobs=n_jobs)
-            if not comp_df.empty:
-                result.features["complexity"] = FeatureSet(comp_df, comp_cols, "complexity")
-            else:
-                result.qc["complexity"] = {"skipped_reason": "empty_result"}
-        except Exception as exc:
-            logger.error(f"Failed to extract complexity features: {exc}")
-            result.qc["complexity"] = {"skipped_reason": f"error: {exc}"}
+        _extract_precomputed_feature_group(
+            "complexity", extract_complexity_from_precomputed, precomputed, logger, result, n_jobs=n_jobs
+        )
 
     if "quality" in feature_groups:
         logger.info("Computing trial-level quality metrics...")
         try:
-            qual_df = compute_trial_quality_metrics(epochs, config, logger)
+            qual_df = compute_trial_quality_metrics(epochs, config)
             qual_cols = list(qual_df.columns)
             if not qual_df.empty:
                 result.features["quality"] = FeatureSet(qual_df, qual_cols, "quality")
@@ -1126,9 +1144,6 @@ def extract_precomputed_features(
             result.qc["quality"] = {"skipped_reason": f"error: {exc}"}
 
     return result
-
-
-
 
 __all__ = [
     "extract_all_features",

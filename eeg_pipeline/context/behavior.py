@@ -21,7 +21,6 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.infra.paths import deriv_features_path
-from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.utils.analysis.stats.correlation import (
     CorrelationRecord,
     compute_correlation,
@@ -152,7 +151,6 @@ class BehaviorContext:
     _combined_features_df: Optional[pd.DataFrame] = None
     _combined_features_signature: Optional[str] = None
     _trial_table_df: Optional[pd.DataFrame] = None
-    _computation_cache: Dict[str, Any] = field(default_factory=dict)
     feature_manifests: Dict[str, Any] = field(default_factory=dict)
     feature_paths: Dict[str, Path] = field(default_factory=dict)
 
@@ -322,7 +320,7 @@ class BehaviorContext:
                     self.feature_manifests[key] = json.loads(
                         meta_path.read_text(encoding="utf-8")
                     )
-            except (OSError, IOError, json.JSONDecodeError) as exc:
+            except (OSError, json.JSONDecodeError) as exc:
                 self.logger.warning("Failed to load feature metadata for %s: %s", path, exc)
             current_df = getattr(self, attr_name)
             if current_df is None:
@@ -338,7 +336,7 @@ class BehaviorContext:
             self.logger.info(
                 "Loaded %s: %d columns, %d rows", key, df.shape[1], df.shape[0]
             )
-        except (IOError, pd.errors.EmptyDataError, ValueError) as e:
+        except (OSError, pd.errors.EmptyDataError, ValueError) as e:
             self.logger.warning("Failed to load %s: %s", key, e)
 
     def _load_targets_from_file(self, features_dir: Path) -> None:
@@ -460,9 +458,9 @@ class BehaviorContext:
         """Iterate over all feature tables as (name, dataframe) pairs.
         
         Centralizes the canonical ordering of feature types to avoid duplication.
-        Uses FEATURE_TYPES from domain.features for consistency.
+        Uses FEATURE_CATEGORIES from domain.features.constants for consistency.
         """
-        from eeg_pipeline.domain.features import FEATURE_TYPES
+        from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
 
         feature_dataframes = {
             "power": self.power_df,
@@ -482,9 +480,10 @@ class BehaviorContext:
             "asymmetry": self.asymmetry_df,
             "temporal": self.temporal_df,
         }
+        feature_types = list(FEATURE_CATEGORIES) + ["temporal"]
         return [
             (feature_type, feature_dataframes.get(feature_type))
-            for feature_type in FEATURE_TYPES
+            for feature_type in feature_types
         ]
 
     def _get_feature_counts(self) -> Dict[str, int]:
@@ -538,8 +537,6 @@ class BehaviorContext:
 
     def _validate_alignment(self) -> bool:
         """Validate trial alignment between features, events, and targets."""
-        import json
-
         if not self._check_events_targets_length_match():
             return False
 
@@ -573,13 +570,8 @@ class BehaviorContext:
 
     def _load_alignment_manifest(self) -> Optional[Dict[str, Any]]:
         """Load trial alignment manifest from disk."""
-        import json
-
         features_dir = deriv_features_path(self.deriv_root, self.subject)
-        
-        # Use reorganized metadata path
         manifest_path = features_dir / "metadata" / _TRIAL_ALIGNMENT_MANIFEST
-        # (Legacy fallback removed)
 
         if not manifest_path.exists():
             raise FileNotFoundError(
@@ -1194,41 +1186,3 @@ class BehaviorContext:
     def add_result(self, result: ComputationResult) -> None:
         """Add a computation result."""
         self.results[result.name] = result
-
-
-###################################################################
-# AnalysisConfig
-###################################################################
-
-
-@dataclass
-class AnalysisConfig:
-    """Lightweight configuration extracted from BehaviorContext."""
-    subject: str
-    config: Any
-    logger: Any
-    rng: np.random.Generator
-    stats_dir: Optional[Path] = None
-    bootstrap: int = 0
-    n_perm: int = 0
-    use_spearman: bool = True
-    method: str = "spearman"
-    min_samples_channel: int = 10
-    min_samples_roi: int = 20
-    groups: Optional[np.ndarray] = None
-
-    @classmethod
-    def from_context(cls, ctx: "BehaviorContext") -> "AnalysisConfig":
-        return cls(
-            subject=ctx.subject,
-            config=ctx.config,
-            logger=ctx.logger,
-            rng=ctx.rng or np.random.default_rng(42),
-            stats_dir=ctx.stats_dir,
-            bootstrap=ctx.bootstrap,
-            n_perm=ctx.n_perm,
-            use_spearman=ctx.use_spearman,
-            method=ctx.method,
-            min_samples_channel=ctx.min_samples_channel,
-            min_samples_roi=ctx.min_samples_roi,
-        )

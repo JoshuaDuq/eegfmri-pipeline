@@ -39,8 +39,7 @@ def _get_cluster_n_permutations(
     default_value = 100
     
     if tfr_config:
-        tfr_default = tfr_config.get("default_cluster_n_perm", default_value)
-        return get_config_value(config, "statistics.cluster_n_perm", tfr_default)
+        default_value = tfr_config.get("default_cluster_n_perm", default_value)
     
     return get_config_value(config, "statistics.cluster_n_perm", default_value)
 
@@ -125,10 +124,10 @@ def build_topomap_diff_label(
         n_permutations,
     )
     
-    if cluster_text:
-        return f"{percentage_label} | {cluster_text}"
+    if not cluster_text:
+        return percentage_label
     
-    return percentage_label
+    return f"{percentage_label} | {cluster_text}"
 
 
 def build_topomap_percentage_label(data: np.ndarray) -> str:

@@ -11,12 +11,16 @@ Functions for assessing measurement reliability and predictive validity:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import logging
 
 import numpy as np
 import pandas as pd
 from scipy import stats
+
+from eeg_pipeline.types import ProgressCallback, null_progress
+from .base import get_subject_seed
 
 
 ###################################################################
@@ -28,10 +32,11 @@ DEFAULT_POWER = 0.8
 DEFAULT_RANDOM_STATE = 42
 MIN_SAMPLES_FOR_CORRELATION = 3
 MIN_SAMPLES_FOR_SPLIT_HALF = 4
-MIN_SAMPLES_FOR_RELIABILITY = 10
 MIN_SAMPLES_PER_SPLIT = 10
-MIN_SAMPLES_FOR_CALIBRATION = 10
 MIN_SAMPLES_FOR_POWER = 4
+MIN_GROUPS_FOR_ICC = 2
+MIN_PIVOT_ROWS_FOR_ICC = 2
+MIN_PIVOT_COLS_FOR_ICC = 2
 RELIABILITY_THRESHOLD_ACCEPTABLE = 0.7
 RELIABILITY_THRESHOLD_GOOD = 0.8
 RELIABILITY_THRESHOLD_EXCELLENT = 0.9
@@ -226,10 +231,6 @@ def compute_icc_from_dataframe(
 
     groups = df_clean[group_col].unique()
     n_groups = len(groups)
-
-    MIN_GROUPS_FOR_ICC = 2
-    MIN_PIVOT_ROWS_FOR_ICC = 2
-    MIN_PIVOT_COLS_FOR_ICC = 2
 
     if n_groups < MIN_GROUPS_FOR_ICC:
         return np.nan, (np.nan, np.nan)
@@ -1038,6 +1039,8 @@ def compute_feature_split_half_reliability(
     if n_trials < min_total_samples:
         return np.nan, np.nan, np.nan
 
+    from .correlation import compute_correlation
+    
     rel_values = []
     for _ in range(int(n_boot)):
         idx = rng.permutation(n_trials)
@@ -1058,7 +1061,6 @@ def compute_feature_split_half_reliability(
             feature_a = Xa[:, col]
             feature_b = Xb[:, col]
             
-            from .correlation import compute_correlation
             r_a, _ = compute_correlation(feature_a, ya, method)
             r_b, _ = compute_correlation(feature_b, yb, method)
             r_a = r_a if np.isfinite(r_a) else np.nan
@@ -1074,7 +1076,6 @@ def compute_feature_split_half_reliability(
         if not np.any(valid_mask):
             continue
         
-        from .correlation import compute_correlation
         r_half, _ = compute_correlation(
             correlations_a[valid_mask],
             correlations_b[valid_mask],
@@ -1136,6 +1137,8 @@ def compute_correlation_split_half_reliability(
     y_valid = y[valid_mask]
     indices = np.arange(n_valid)
     
+    from .correlation import compute_correlation
+    
     correlations = []
     half_size = n_valid // 2
     
@@ -1144,7 +1147,6 @@ def compute_correlation_split_half_reliability(
         idx1 = indices[:half_size]
         idx2 = indices[half_size:2 * half_size]
         
-        from .correlation import compute_correlation
         r1, _ = compute_correlation(x_valid[idx1], y_valid[idx1], method)
         r2, _ = compute_correlation(x_valid[idx2], y_valid[idx2], method)
         r1 = r1 if np.isfinite(r1) else np.nan
@@ -1161,23 +1163,9 @@ def compute_correlation_split_half_reliability(
     return float(_apply_spearman_brown(mean_half_correlation))
 
 
-# Re-export from base for backwards compatibility
-from .base import get_subject_seed
-
-
 ###################################################################
 # DataFrame-Based Reliability (Wide Format)
 ###################################################################
-
-from dataclasses import dataclass
-from typing import Callable
-
-try:
-    from eeg_pipeline.types import ProgressCallback, null_progress
-except ImportError:
-    ProgressCallback = Callable[[str, float], None]
-    def null_progress(msg: str, frac: float) -> None:
-        pass
 
 
 @dataclass
@@ -1218,10 +1206,6 @@ def _pearson_with_ci(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, float]
     ci_lower, ci_upper = fisher_ci(r, n, config=None)
     
     return float(r), ci_lower, ci_upper
-
-
-# Alias for backwards compatibility
-_spearman_brown = _apply_spearman_brown
 
 
 def compute_odd_even_reliability(
@@ -1272,9 +1256,9 @@ def compute_odd_even_reliability(
         odd_vals, even_vals = odd_vals[:min_len], even_vals[:min_len]
         
         r, ci_lower, ci_upper = _pearson_with_ci(odd_vals, even_vals)
-        reliability = _spearman_brown(r)
-        ci_lower_sb = _spearman_brown(ci_lower) if np.isfinite(ci_lower) else np.nan
-        ci_upper_sb = _spearman_brown(ci_upper) if np.isfinite(ci_upper) else np.nan
+        reliability = _apply_spearman_brown(r)
+        ci_lower_sb = _apply_spearman_brown(ci_lower) if np.isfinite(ci_lower) else np.nan
+        ci_upper_sb = _apply_spearman_brown(ci_upper) if np.isfinite(ci_upper) else np.nan
         
         results[col] = ReliabilityResult(
             name=col, reliability=reliability,
@@ -1362,9 +1346,9 @@ def compute_bootstrap_reliability(
         
         half = len(finite_means) // 2
         r, ci_lower, ci_upper = _pearson_with_ci(finite_means[:half], finite_means[half:2*half])
-        reliability = _spearman_brown(r)
-        ci_lower_sb = _spearman_brown(ci_lower) if np.isfinite(ci_lower) else np.nan
-        ci_upper_sb = _spearman_brown(ci_upper) if np.isfinite(ci_upper) else np.nan
+        reliability = _apply_spearman_brown(r)
+        ci_lower_sb = _apply_spearman_brown(ci_lower) if np.isfinite(ci_lower) else np.nan
+        ci_upper_sb = _apply_spearman_brown(ci_upper) if np.isfinite(ci_upper) else np.nan
         
         results[col] = ReliabilityResult(
             name=col, reliability=reliability,
@@ -1501,7 +1485,7 @@ __all__ = [
     "compute_dataframe_reliability",
     "filter_reliable_features",
     # Hierarchical FDR
-    "hierarchical_fdr",
+    "hierarchical_fdr_dict",
     "compute_hierarchical_fdr_summary",
     # Predictive validity
     "cross_validated_prediction",

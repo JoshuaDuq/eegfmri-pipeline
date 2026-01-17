@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import mne
@@ -18,8 +18,7 @@ from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.style import use_style
 
 
-# Constants
-_TIME_WINDOW_SECONDS = 0.05  # +/- 50ms window around component center
+_TIME_WINDOW_SECONDS = 0.05
 _TITLE_FONTSIZE = 8
 _MIN_CONDITIONS_FOR_CONTRAST = 2
 _DEFAULT_COMPONENTS = [
@@ -38,6 +37,18 @@ def _extract_component_times(components: List[Dict[str, Any]]) -> List[float]:
         List of midpoint times in seconds.
     """
     return [(component["start"] + component["end"]) / 2.0 for component in components]
+
+
+def _get_primary_extension(plot_config: Any) -> str:
+    """Get primary file extension from plot configuration.
+    
+    Args:
+        plot_config: Plot configuration object.
+    
+    Returns:
+        Primary file extension (default: "png").
+    """
+    return plot_config.formats[0] if plot_config.formats else "png"
 
 
 def _set_title_fontsize(figure: plt.Figure, fontsize: int = _TITLE_FONTSIZE) -> None:
@@ -112,7 +123,7 @@ def _plot_overall_topomaps(
         Path where figure was saved.
     """
     evoked = epochs.average()
-    primary_ext = plot_config.formats[0] if plot_config.formats else "png"
+    primary_ext = _get_primary_extension(plot_config)
     save_path = save_dir / f"sub-{subject}_erp_topomaps_all.{primary_ext}"
     return _create_and_save_topomap(evoked, times, save_path, plot_config, logger)
 
@@ -141,7 +152,7 @@ def _plot_condition_topomaps(
         List of paths where figures were saved.
     """
     saved_paths = []
-    primary_ext = plot_config.formats[0] if plot_config.formats else "png"
+    primary_ext = _get_primary_extension(plot_config)
     
     for condition_name, query in conditions.items():
         try:
@@ -196,7 +207,7 @@ def _plot_contrast_topomaps(
         evoked_b = epochs[conditions[condition_keys[1]]].average()
         difference = mne.combine_evoked([evoked_a, evoked_b], weights=[1, -1])
         
-        primary_ext = plot_config.formats[0] if plot_config.formats else "png"
+        primary_ext = _get_primary_extension(plot_config)
         save_path = save_dir / f"sub-{subject}_erp_topomaps_contrast.{primary_ext}"
         return _create_and_save_topomap(difference, times, save_path, plot_config, logger)
     except (KeyError, ValueError, IndexError) as error:
@@ -219,24 +230,15 @@ def plot_erp_topomaps(
     2. Condition-specific topomaps (if conditions provided)
     3. Contrast topomaps between first two conditions (if 2+ conditions provided)
     
-    Parameters
-    ----------
-    epochs : mne.Epochs
-        Epochs object containing ERP data.
-    subject : str
-        Subject identifier for file naming.
-    save_dir : Path
-        Directory where figures will be saved.
-    config : Any
-        Configuration object containing ERP component definitions.
-    logger : logging.Logger
-        Logger instance for warnings and errors.
-    conditions : dict, optional
-        Dictionary mapping condition names to query strings for epoch selection.
+    Args:
+        epochs: Epochs object containing ERP data.
+        subject: Subject identifier for file naming.
+        save_dir: Directory where figures will be saved.
+        config: Configuration object containing ERP component definitions.
+        logger: Logger instance for warnings and errors.
+        conditions: Optional dictionary mapping condition names to query strings.
     
-    Returns
-    -------
-    List[Path]
+    Returns:
         List of paths where figures were saved.
     """
     save_dir.mkdir(parents=True, exist_ok=True)

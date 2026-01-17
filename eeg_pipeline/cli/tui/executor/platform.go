@@ -157,35 +157,6 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 	}
 }
 
-// GetPlatform returns the current platform name
-func GetPlatform() string {
-	return runtime.GOOS
-}
-
-// IsMac returns true if running on macOS
-func IsMac() bool {
-	return GetPlatform() == "darwin"
-}
-
-// IsLinux returns true if running on Linux
-func IsLinux() bool {
-	return GetPlatform() == "linux"
-}
-
-// IsWindows returns true if running on Windows
-func IsWindows() bool {
-	return GetPlatform() == "windows"
-}
-
-// GetHomeDir returns the user's home directory
-func GetHomeDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return home
-}
-
 // PickFileMsg is the message type for file picker results
 type PickFileMsg struct {
 	Path  string

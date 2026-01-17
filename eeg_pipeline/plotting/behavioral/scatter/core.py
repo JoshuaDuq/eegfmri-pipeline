@@ -34,7 +34,6 @@ from eeg_pipeline.utils.analysis.stats import (
     joint_valid_mask,
     update_stats_from_dataframe,
 )
-from eeg_pipeline.utils.data.features import infer_power_band
 
 
 @dataclass
@@ -622,9 +621,8 @@ def _get_temporal_columns(
     temporal_df: pd.DataFrame,
     band: str,
     time_label: str,
-    config: Optional[Any] = None,
 ) -> List[str]:
-    v2_cols = []
+    columns = []
     for c in temporal_df.columns:
         parsed = NamingSchema.parse(str(c))
         if not (parsed.get("valid") and parsed.get("group") == "power"):
@@ -635,16 +633,8 @@ def _get_temporal_columns(
             continue
         if str(parsed.get("scope") or "") != "ch":
             continue
-        v2_cols.append(str(c))
-    if v2_cols:
-        return v2_cols
-
-    return [
-        c
-        for c in temporal_df.columns
-        if infer_power_band(str(c), bands=[str(band)]) == str(band).lower()
-        and str(c).endswith(f"_{time_label}")
-    ]
+        columns.append(str(c))
+    return columns
 
 
 def _plot_partial_residuals(
@@ -739,7 +729,6 @@ def _plot_single_temporal_correlation(
     if has_covariates:
         annotated_stats = None
         annot_ci = None
-        bootstrap_ci_for_plot = 0
     else:
         r_temporal, p_temporal, n_eff_temporal, ci_temporal = compute_correlation_stats(
             temporal_vals,
@@ -751,7 +740,6 @@ def _plot_single_temporal_correlation(
         )
         annotated_stats = (r_temporal, p_temporal, n_eff_temporal)
         annot_ci = ci_temporal
-        bootstrap_ci_for_plot = 0
 
     x_label = get_temporal_xlabel(time_label)
     y_label = "Rating" if target_type == target_rating else "Temperature (°C)"
@@ -771,8 +759,7 @@ def _plot_single_temporal_correlation(
         output_path=output_path,
         method_code=method_code,
         Z_covars=covariate_data,
-        covar_names=covariate_names,
-        bootstrap_ci=bootstrap_ci_for_plot,
+        bootstrap_ci=0,
         rng=rng,
         roi_channels=roi_channels,
         logger=logger,
@@ -819,7 +806,7 @@ def _plot_temporal_correlations(
 ) -> None:
     """Plot correlations for multiple temporal segments."""
     for time_label in time_labels:
-        temporal_cols = _get_temporal_columns(temporal_df, band, time_label, config)
+        temporal_cols = _get_temporal_columns(temporal_df, band, time_label)
         if not temporal_cols:
             continue
 
@@ -924,7 +911,6 @@ def plot_target_correlations(
         r_val, p_val, n_eff, ci_val = _compute_correlation_with_covariates(
             power_vals, target_vals, covariate_data, method_code, config
         )
-        bootstrap_ci_for_plot = 0
     else:
         r_val, p_val, n_eff, ci_val = _compute_correlation_without_covariates(
             power_vals,
@@ -935,7 +921,6 @@ def plot_target_correlations(
             min_samples_for_plot,
             stats_df,
         )
-        bootstrap_ci_for_plot = 0
 
     annotated_stats = (r_val, p_val, n_eff)
     annot_ci = ci_val
@@ -957,8 +942,7 @@ def plot_target_correlations(
         output_path=output_path,
         method_code=method_code,
         Z_covars=covariate_data,
-        covar_names=covariate_names,
-        bootstrap_ci=bootstrap_ci_for_plot,
+        bootstrap_ci=0,
         rng=rng,
         roi_channels=roi_channels,
         logger=logger,

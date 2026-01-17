@@ -6,7 +6,7 @@ Common helper functions for creating standardized plots across the pipeline.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +14,6 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.patches import Patch
 
-from eeg_pipeline.utils.analysis.stats import fdr_bh
 from eeg_pipeline.plotting.core.colors import (
     DEFAULT_NEGATIVE_DIRECTION_COLOR,
     get_band_colors,
@@ -22,23 +21,8 @@ from eeg_pipeline.plotting.core.colors import (
 )
 
 
-###################################################################
-# Color Constants
-###################################################################
-
-
 CORRELATION_COLORMAP = "RdBu_r"
 EFFECT_SIZE_COLORMAP = "PuOr_r"
-
-
-def get_correlation_cmap() -> str:
-    """Get standard correlation colormap name."""
-    return CORRELATION_COLORMAP
-
-
-def get_effect_cmap() -> str:
-    """Get standard effect size colormap name."""
-    return EFFECT_SIZE_COLORMAP
 
 
 ###################################################################
@@ -54,7 +38,7 @@ def _determine_marker(
     marker: str,
     fdr_marker: str,
 ) -> Optional[str]:
-    """Determine which marker to use based on significance.
+    """Determine marker based on significance.
     
     Args:
         p_value: P-value
@@ -67,9 +51,9 @@ def _determine_marker(
     Returns:
         Marker string or None if not significant
     """
-    use_fdr_correction = q_value is not None and fdr_alpha is not None
-    if use_fdr_correction and pd.notna(q_value) and q_value < fdr_alpha:
-        return fdr_marker
+    if q_value is not None and fdr_alpha is not None:
+        if pd.notna(q_value) and q_value < fdr_alpha:
+            return fdr_marker
     
     if pd.notna(p_value) and p_value < alpha:
         return marker
@@ -101,13 +85,10 @@ def add_significance_markers(
         fdr_alpha: Optional FDR alpha threshold
         fdr_marker: Marker character for FDR-significant cells
     """
-    if p_values is None or p_values.empty:
-        return
-    if data_values is None or data_values.empty:
+    if p_values.empty or data_values.empty:
         return
     
-    use_fdr_correction = q_values is not None and fdr_alpha is not None
-    if use_fdr_correction and not q_values.empty:
+    if q_values is not None and fdr_alpha is not None and not q_values.empty:
         q_values = q_values.reindex_like(p_values)
     
     for i, row in enumerate(p_values.index):
@@ -117,8 +98,9 @@ def add_significance_markers(
             
             p_val = p_values.loc[row, col]
             q_val = None
-            if use_fdr_correction and row in q_values.index and col in q_values.columns:
-                q_val = q_values.loc[row, col]
+            if q_values is not None and fdr_alpha is not None:
+                if row in q_values.index and col in q_values.columns:
+                    q_val = q_values.loc[row, col]
             
             marker_text = _determine_marker(
                 p_val, q_val, alpha, fdr_alpha, marker, fdr_marker
@@ -135,33 +117,6 @@ def add_significance_markers(
                     fontweight="bold",
                     color="black",
                 )
-
-
-def compute_q_values_table(
-    p_values: pd.DataFrame,
-    alpha: float = 0.05,
-    config: Any = None,
-) -> Optional[pd.DataFrame]:
-    """BH-FDR adjustment for a rectangular p-value table.
-    
-    Args:
-        p_values: DataFrame of p-values
-        alpha: FDR alpha threshold
-        config: Pipeline config
-    
-    Returns:
-        DataFrame of q-values aligned to input, or None if input is invalid
-    """
-    if p_values is None or p_values.empty:
-        return None
-    
-    flattened_p_values = pd.to_numeric(p_values.stack(), errors="coerce")
-    if flattened_p_values.empty:
-        return None
-    
-    q_values_flat = fdr_bh(flattened_p_values.values, alpha=alpha, config=config)
-    q_series = pd.Series(q_values_flat, index=flattened_p_values.index)
-    return q_series.unstack().reindex_like(p_values)
 
 
 def create_horizontal_bar_plot(
@@ -272,10 +227,9 @@ def add_effect_size_guidelines(
         medium: Medium effect threshold
         large: Large effect threshold
     """
-    is_vertical = orientation == "vertical"
-    line_func = ax.axvline if is_vertical else ax.axhline
-    
+    line_func = ax.axvline if orientation == "vertical" else ax.axhline
     thresholds = [-large, -medium, -small, small, medium, large]
+    
     for threshold in thresholds:
         line_func(threshold, color="gray", linestyle=":", linewidth=0.5, alpha=0.5)
 
@@ -333,11 +287,7 @@ def format_stats_summary(
     Returns:
         Formatted summary string
     """
-    if n_total == 0:
-        percentage = 0.0
-    else:
-        percentage = 100 * n_significant / n_total
-    
+    percentage = 0.0 if n_total == 0 else 100 * n_significant / n_total
     return f"Significant {effect_type}: {n_significant}/{n_total} ({percentage:.1f}%)"
 
 
@@ -394,11 +344,9 @@ def add_band_legend(
         fontsize: Legend font size
     """
     band_colors = get_band_colors()
-    
-    if bands is None:
-        bands = list(band_colors.keys())
-    
+    bands = bands or list(band_colors.keys())
     default_color = "gray"
+    
     legend_elements = [
         Patch(facecolor=band_colors.get(band, default_color), label=band.title())
         for band in bands

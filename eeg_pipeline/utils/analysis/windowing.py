@@ -8,7 +8,6 @@ All windowing logic should import from this module.
 Provides:
 - time_mask, freq_mask: Basic masking functions
 - sliding_window_centers: Connectivity sliding windows
-- compute_time_windows: Full window computation returning TimeWindows
 - TimeWindowSpec: Builder class for complex windowing scenarios
 - WindowMetadata: Metadata for individual windows
 """
@@ -217,36 +216,6 @@ def build_time_windows_fixed_count(
     return starts[valid], ends[valid]
 
 
-def compute_time_windows(
-    times: np.ndarray,
-    config: Any,
-    *,
-    logger: Optional[logging.Logger] = None,
-    strict: bool = True,
-) -> TimeWindows:
-    """
-    Compute all time window masks once.
-    
-    Uses configuration to determine baseline and active windows.
-    """
-    if config is not None:
-        sampling_rate = float(getattr(config, "sfreq", 1.0))
-    else:
-        sampling_rate = 1.0
-    
-    spec = TimeWindowSpec(
-        times=times,
-        config=config,
-        sampling_rate=sampling_rate,
-        logger=logger,
-    )
-    return time_windows_from_spec(
-        spec,
-        logger=logger,
-        strict=strict,
-    )
-
-
 ###################################################################
 # TimeWindowSpec Builder Class
 ###################################################################
@@ -379,47 +348,6 @@ class TimeWindowSpec:
                 continue
             self._add_window(win_name, float(start), float(end))
     
-    def _add_full_epoch_window(self):
-        """Add a full-epoch window when no explicit windows are defined."""
-        if self.times is not None and len(self.times) > 0:
-            self._add_window("full", self.times[0], self.times[-1])
-    
-    def _get_config_window(self, key: str) -> Optional[Tuple[float, float]]:
-        """Get window definition from config for given key."""
-        if self.config is None:
-            return None
-        
-        feat_cfg = self.config.get("feature_engineering.windows", {})
-        tf_cfg = self.config.get("time_frequency_analysis", {})
-        
-        window_def = feat_cfg.get(key) or tf_cfg.get(key)
-        if isinstance(window_def, (list, tuple)) and len(window_def) >= 2:
-            return (float(window_def[0]), float(window_def[1]))
-        
-        return None
-    
-    def _find_named_window_in_config(self, name: str) -> Optional[Tuple[float, float]]:
-        """Find named window in config sections."""
-        if self.config is None:
-            return None
-        
-        config_sections = [
-            self.config.get("feature_engineering.windows", {}),
-            self.config.get("feature_engineering.features", {}),
-            self.config.get("time_frequency_analysis", {}),
-        ]
-        
-        for cfg in config_sections:
-            for key in [name, f"{name}_window"]:
-                val = cfg.get(key)
-                if isinstance(val, (list, tuple)) and len(val) >= 2:
-                    try:
-                        return (float(val[0]), float(val[1]))
-                    except (ValueError, TypeError):
-                        continue
-        
-        return None
-
     def _add_window(self, name: str, start: float, end: float, prefix: str = ""):
         """Add a window with clamping and validation."""
         full_name = f"{prefix}_{name}" if prefix else name
@@ -627,34 +555,6 @@ def _determine_active_key(name: Optional[str], masks: Dict[str, np.ndarray]) -> 
 
 
 ###################################################################
-# Pain Window Utilities (migrated from general.py)
-###################################################################
-
-
-def get_active_window(
-    constants: Optional[Dict[str, Any]] = None,
-    config: Optional[Any] = None,
-) -> Tuple[float, float]:
-    """Get the active window from config or constants."""
-    if config is not None:
-        active_window = config.get("time_frequency_analysis.active_window")
-        if active_window is None:
-            raise ValueError("active_window not found in config")
-        return tuple(active_window)
-    
-    if constants is None:
-        raise ValueError("Either constants or config must be provided")
-    
-    if "ACTIVE_WINDOW" not in constants:
-        raise KeyError(
-            "ACTIVE_WINDOW not found in constants. "
-            "Use ACTIVE_WINDOW (tuple) not ACTIVE_END (float)"
-        )
-    
-    return constants["ACTIVE_WINDOW"]
-
-
-###################################################################
 # Segment Masks for Feature Extraction
 ###################################################################
 
@@ -676,15 +576,15 @@ def get_segment_masks(
         if target_name in all_masks:
             targeted[target_name] = all_masks[target_name]
         elif target_name.lower() in all_masks:
-             targeted[target_name] = all_masks[target_name.lower()]
-             
+            targeted[target_name] = all_masks[target_name.lower()]
+        
         if not targeted:
             # Fallback for case-insensitive lookup
             for name, mask in all_masks.items():
                 if name.lower() == target_name.lower():
                     targeted[target_name] = mask
                     break
-                    
+        
         return targeted
     
     # If no specific target, return all masks. 

@@ -66,12 +66,6 @@ def _resolve_single_path(value: str, config_dir: Path, project_root: Path) -> st
     if not value or value.strip() == "":
         return value
     
-    try:
-        float(value)
-        return value
-    except ValueError:
-        pass
-
     if not _looks_like_path_string(value):
         return value
     
@@ -277,7 +271,6 @@ def _apply_thread_limits(config: Dict[str, Any]) -> None:
 
 def load_config(
     config_path: Optional[Union[str, Path]] = None,
-    script_name: Optional[str] = None,
     apply_thread_limits: bool = True
 ) -> ConfigDict:
     """Load configuration from YAML file.
@@ -288,7 +281,6 @@ def load_config(
     Args:
         config_path: Optional path to config file. If None, uses default
                     eeg_config.yaml in config directory.
-        script_name: Optional script name (for logging, currently unused)
         apply_thread_limits: Whether to apply thread limits from config
         
     Returns:
@@ -454,42 +446,16 @@ def get_frequency_bands(config: Any) -> Dict[str, List[float]]:
         if bands:
             return bands
     
-    if hasattr(config, "frequency_bands"):
-        return config.frequency_bands
-    
     return get_default_frequency_bands()
 
 
 def get_frequency_band_names(config: Any) -> List[str]:
-    """Get frequency band names (list of strings) from config.
-    
-    Derives band names from frequency_bands keys. Replaces the old
-    features.frequency_bands config path.
-    """
+    """Get frequency band names (list of strings) from config."""
     freq_bands = get_frequency_bands(config)
     if freq_bands:
         return list(freq_bands.keys())
     
-    # Fallback to default bands if config not available
     return ["delta", "theta", "alpha", "beta", "gamma"]
-
-
-def parse_temporal_bin_config(bin_config: Any) -> Optional[Tuple[float, float, str]]:
-    if isinstance(bin_config, dict):
-        return (
-            float(bin_config.get("start", 0.0)),
-            float(bin_config.get("end", 0.0)),
-            str(bin_config.get("label", "unknown"))
-        )
-    
-    if isinstance(bin_config, (list, tuple)) and len(bin_config) >= 3:
-        return (
-            float(bin_config[0]),
-            float(bin_config[1]),
-            str(bin_config[2])
-        )
-    
-    return None
 
 
 ###################################################################
@@ -506,10 +472,8 @@ def get_default_frequency_bands() -> Dict[str, List[float]]:
     }
 
 def get_frequency_bands_for_aperiodic(config: Any) -> Dict[str, List[float]]:
-    freq_bands = get_frequency_bands(config)
-    if not freq_bands:
-        freq_bands = get_default_frequency_bands()
-    return freq_bands
+    """Get frequency bands for aperiodic analysis with fallback to defaults."""
+    return get_frequency_bands(config) or get_default_frequency_bands()
 
 
 ###################################################################
@@ -540,8 +504,6 @@ def get_min_samples(config: Any, sample_type: str = "default") -> int:
         return defaults.get(sample_type, 5)
     return int(get_config_value(config, f"behavior_analysis.min_samples.{sample_type}",
                                  defaults.get(sample_type, 5)))
-
-
 
 
 ###################################################################

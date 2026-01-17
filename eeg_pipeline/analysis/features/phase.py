@@ -29,6 +29,25 @@ _MIN_TIMES_FOR_SURROGATES = 3
 
 # --- Helpers ---
 
+def _safe_config_get(config: Any, key: str, default: Any = None) -> Any:
+    """Safely get value from config, handling dict-like and object-like configs.
+    
+    If default is a dict and the result is not a dict, returns default.
+    This ensures type consistency when expecting dict values.
+    """
+    if config is None:
+        return default
+    if hasattr(config, "get"):
+        result = config.get(key, default)
+    elif isinstance(config, dict):
+        result = config.get(key, default)
+    else:
+        result = default
+    
+    if isinstance(default, dict) and not isinstance(result, dict):
+        return default
+    return result
+
 def _get_itpc_method(config: Any) -> str:
     """Get ITPC computation method from config.
     
@@ -41,13 +60,13 @@ def _get_itpc_method(config: Any) -> str:
                    condition-level analyses). Requires condition_column in config.
     - 'loo': Leave-one-out ITPC (per-trial). Requires train_mask and explicit opt-in.
     """
-    method = str(config.get("feature_engineering.itpc.method", "fold_global")).strip().lower()
+    method = str(_safe_config_get(config, "feature_engineering.itpc.method", "fold_global")).strip().lower()
     if method not in {"loo", "global", "fold_global", "condition"}:
         raise ValueError(
             "Invalid ITPC method. Supported values are 'loo', 'global', 'fold_global', and 'condition'. "
             f"Got: {method!r}"
         )
-    if method == "loo" and not bool(config.get("feature_engineering.itpc.allow_unsafe_loo", False)):
+    if method == "loo" and not bool(_safe_config_get(config, "feature_engineering.itpc.allow_unsafe_loo", False)):
         raise ValueError(
             "ITPC method 'loo' is disabled by default because it creates cross-trial dependence "
             "and can cause leakage in trial-level analyses. Set "
@@ -520,7 +539,7 @@ def _validate_pac_band_pair(
 
 def _extract_pac_config(config: Any) -> Dict[str, Any]:
     """Extract and validate PAC configuration."""
-    pac_cfg = config.get("feature_engineering.pac", {}) if config is not None else {}
+    pac_cfg = _safe_config_get(config, "feature_engineering.pac", {})
     method = str(pac_cfg.get("method", "mvl")).strip().lower()
     if method != "mvl":
         raise ValueError(f"PAC: unsupported method '{method}'. Only 'mvl' is implemented.")
@@ -576,43 +595,6 @@ def _prepare_pac_data_and_times(
     return data, tfr_freqs, tfr_times
 
 
-def _compute_pac_mvl(
-    phase_angles: np.ndarray,
-    amplitudes: np.ndarray,
-    normalize: bool,
-    epsilon: float,
-    n_times: int,
-) -> np.ndarray:
-    """Compute PAC using Mean Vector Length method.
-    
-    Args:
-        phase_angles: Phase angles of shape (n_epochs, n_phase_freqs, n_times)
-        amplitudes: Amplitudes of shape (n_epochs, n_amp_freqs, n_times)
-        normalize: Whether to normalize by sum of amplitudes
-        epsilon: Small value to prevent division by zero
-        n_times: Number of time points
-        
-    Returns:
-        PAC values of shape (n_epochs,)
-    """
-    # Average phase unit vectors across phase frequencies
-    phase_unit_vectors = np.exp(1j * phase_angles)
-    mean_phase_vector = np.nanmean(phase_unit_vectors, axis=1)  # (epochs, times)
-    
-    # Average amplitudes across amplitude frequencies
-    mean_amplitude = np.nanmean(amplitudes, axis=1)  # (epochs, times)
-    
-    if normalize:
-        denominator = np.nansum(mean_amplitude, axis=1) + epsilon
-        numerator = np.nansum(mean_amplitude * mean_phase_vector, axis=1)
-    else:
-        denominator = float(n_times)
-        numerator = np.nanmean(mean_amplitude * mean_phase_vector, axis=1)
-    
-    pac_values = np.abs(numerator / denominator)
-    return pac_values
-
-
 def _compute_pac_surrogates(
     phase_unit_vectors: np.ndarray,
     amplitudes: np.ndarray,
@@ -624,34 +606,73 @@ def _compute_pac_surrogates(
 ) -> np.ndarray:
     """Compute PAC surrogate distribution for z-scoring.
     
+    Args:
+        phase_unit_vectors: Phase unit vectors of shape (n_epochs, n_times) or (n_epochs, n_ch, n_times)
+        amplitudes: Amplitudes of shape (n_epochs, n_times) or (n_epochs, n_ch, n_times)
+        n_surrogates: Number of surrogate samples
+        normalize: Whether to normalize by sum of amplitudes
+        epsilon: Small value to prevent division by zero
+        n_times: Number of time points
+        rng: Random number generator
+        
     Returns:
-        Surrogate PAC values of shape (n_epochs, n_surrogates)
+        Surrogate PAC values of shape (n_epochs, n_surrogates) or (n_epochs, n_ch, n_surrogates)
     """
     n_epochs = phase_unit_vectors.shape[0]
-    surrogates = np.full((n_epochs, n_surrogates), np.nan, dtype=float)
+    is_per_channel = phase_unit_vectors.ndim == 3
+    
+    if is_per_channel:
+        n_ch = phase_unit_vectors.shape[1]
+        surrogates = np.full((n_epochs, n_ch, n_surrogates), np.nan, dtype=float)
+    else:
+        surrogates = np.full((n_epochs, n_surrogates), np.nan, dtype=float)
     
     for epoch_idx in range(n_epochs):
-        epoch_amplitude = amplitudes[epoch_idx]
-        epoch_phase = phase_unit_vectors[epoch_idx]
-        
-        if not (np.isfinite(epoch_amplitude).any() and np.isfinite(epoch_phase).any()):
-            continue
-        
-        if normalize:
-            denominator = np.nansum(epoch_amplitude) + epsilon
+        if is_per_channel:
+            for ch_idx in range(n_ch):
+                epoch_amplitude = amplitudes[epoch_idx, ch_idx]
+                epoch_phase = phase_unit_vectors[epoch_idx, ch_idx]
+                
+                if not (np.isfinite(epoch_amplitude).any() and np.isfinite(epoch_phase).any()):
+                    continue
+                
+                if normalize:
+                    denominator = np.nansum(epoch_amplitude) + epsilon
+                else:
+                    denominator = float(n_times)
+                
+                for surrogate_idx in range(n_surrogates):
+                    shift = int(rng.integers(1, n_times - 1))
+                    shifted_amplitude = np.roll(epoch_amplitude, shift)
+                    
+                    if normalize:
+                        numerator = np.nansum(shifted_amplitude * epoch_phase)
+                    else:
+                        numerator = np.nanmean(shifted_amplitude * epoch_phase)
+                    
+                    surrogates[epoch_idx, ch_idx, surrogate_idx] = float(np.abs(numerator / denominator))
         else:
-            denominator = float(n_times)
-        
-        for surrogate_idx in range(n_surrogates):
-            shift = int(rng.integers(1, n_times - 1))
-            shifted_amplitude = np.roll(epoch_amplitude, shift)
+            epoch_amplitude = amplitudes[epoch_idx]
+            epoch_phase = phase_unit_vectors[epoch_idx]
+            
+            if not (np.isfinite(epoch_amplitude).any() and np.isfinite(epoch_phase).any()):
+                continue
             
             if normalize:
-                numerator = np.nansum(shifted_amplitude * epoch_phase)
+                denominator = np.nansum(epoch_amplitude) + epsilon
             else:
-                numerator = np.nanmean(shifted_amplitude * epoch_phase)
+                denominator = float(n_times)
             
-            surrogates[epoch_idx, surrogate_idx] = float(np.abs(numerator / denominator))
+            for surrogate_idx in range(n_surrogates):
+                shift = int(rng.integers(1, n_times - 1))
+                shifted_amplitude = np.roll(epoch_amplitude, shift)
+                
+                if normalize:
+                    numerator = np.nansum(shifted_amplitude * epoch_phase)
+                else:
+                    numerator = np.nanmean(shifted_amplitude * epoch_phase)
+                
+                surrogates[epoch_idx, surrogate_idx] = float(np.abs(numerator / denominator))
     
     return surrogates
 
@@ -708,7 +729,7 @@ def _build_roi_map_if_needed(
 
 def _get_baseline_correction_mode(config: Any) -> str:
     """Extract baseline correction mode from config."""
-    itpc_cfg = config.get("feature_engineering.itpc", {}) if hasattr(config, "get") else {}
+    itpc_cfg = _safe_config_get(config, "feature_engineering.itpc", {})
     baseline_correction = str(itpc_cfg.get("baseline_correction", "none")).strip().lower()
     if baseline_correction not in {"none", "subtract"}:
         return "none"
@@ -778,7 +799,7 @@ def extract_phase_features(
     condition_labels = None
     min_trials_per_condition = 10
     if itpc_method == "condition":
-        itpc_cfg = config.get("feature_engineering.itpc", {}) if hasattr(config, "get") else {}
+        itpc_cfg = _safe_config_get(config, "feature_engineering.itpc", {})
         condition_column = itpc_cfg.get("condition_column")
         min_trials_per_condition = int(itpc_cfg.get("min_trials_per_condition", 10))
         if not condition_column:
@@ -814,11 +835,7 @@ def extract_phase_features(
     
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
-    allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
-    )
+    allow_full_epoch_fallback = bool(_safe_config_get(config, "feature_engineering.windows.allow_full_epoch_fallback", False))
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -1078,17 +1095,14 @@ def compute_pac_comodulograms(
     amp_indices = np.where(amp_mask)[0]
     
     normalize = bool(pac_cfg.get("normalize", True))
-    if hasattr(config, "get"):
-        epsilon = float(config.get("feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
-    else:
-        epsilon = _EPSILON_COMPLEX
+    epsilon = float(_safe_config_get(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
     
     seed = pac_cfg.get("random_seed", None)
     rng = np.random.default_rng(None if seed in (None, "", 0) else int(seed))
     
     ch_names = _get_channel_names_from_tfr(tfr_complex, n_ch, logger)
     
-    tf_bands = config.get("time_frequency_analysis.bands", {}) if config is not None else {}
+    tf_bands = _safe_config_get(config, "time_frequency_analysis.bands", {})
     requested_pairs = pac_cfg.get("pairs")
     pairs = _parse_requested_pac_pairs(requested_pairs)
     
@@ -1147,10 +1161,7 @@ def compute_pac_comodulograms(
                 pair_channel_data_z[band_pair_name][:, channel_idx] = pac_z
     
     if spatial_modes is None:
-        if hasattr(config, "get"):
-            spatial_modes = config.get("feature_engineering.spatial_modes", ["roi", "global"])
-        else:
-            spatial_modes = ["roi", "global"]
+        spatial_modes = _safe_config_get(config, "feature_engineering.spatial_modes", ["roi", "global"])
     
     roi_map = _build_roi_map_if_needed(spatial_modes, ch_names, config)
     
@@ -1203,7 +1214,7 @@ def extract_itpc_from_precomputed(
             f"ITPC(method='{itpc_method}') in analysis_mode='trial_ml_safe' requires precomputed.train_mask."
         )
 
-    itpc_cfg = cfg.get("feature_engineering.itpc", {}) if hasattr(cfg, "get") else {}
+    itpc_cfg = _safe_config_get(cfg, "feature_engineering.itpc", {})
     condition_column = itpc_cfg.get("condition_column", None)
     min_trials_per_condition = int(itpc_cfg.get("min_trials_per_condition", 10))
 
@@ -1228,11 +1239,7 @@ def extract_itpc_from_precomputed(
     
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        cfg.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(cfg, "get")
-        else False
-    )
+    allow_full_epoch_fallback = bool(_safe_config_get(cfg, "feature_engineering.windows.allow_full_epoch_fallback", False))
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -1422,17 +1429,14 @@ def extract_pac_from_precomputed(
         return pd.DataFrame(), []
 
     # Get PAC config
-    pac_cfg = config.get("feature_engineering.pac", {}) if hasattr(config, "get") else {}
+    pac_cfg = _safe_config_get(config, "feature_engineering.pac", {})
     method = str(pac_cfg.get("method", "mvl")).strip().lower()
     if method != "mvl":
         raise ValueError(f"PAC (precomputed): unsupported method '{method}'. Only 'mvl' is implemented.")
     n_surrogates = int(pac_cfg.get("n_surrogates", 0))
     requested_pairs = pac_cfg.get("pairs", [("theta", "gamma"), ("alpha", "gamma")])
     normalize = bool(pac_cfg.get("normalize", True))
-    if hasattr(config, "get"):
-        eps_amp = float(config.get("feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
-    else:
-        eps_amp = _EPSILON_COMPLEX
+    eps_amp = float(_safe_config_get(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
     seed = pac_cfg.get("random_seed", None)
     rng = np.random.default_rng(None if seed in (None, "", 0) else int(seed))
     allow_harmonic_overlap = bool(pac_cfg.get("allow_harmonic_overlap", False))
@@ -1442,21 +1446,17 @@ def extract_pac_from_precomputed(
     # Get spatial modes and ROI map
     spatial_modes = getattr(precomputed, "spatial_modes", None)
     if spatial_modes is None:
-        spatial_modes = config.get("feature_engineering.spatial_modes", ["roi", "global"]) if hasattr(config, "get") else ["roi", "global"]
+        spatial_modes = _safe_config_get(config, "feature_engineering.spatial_modes", ["roi", "global"])
     
     # Standard bands for pair lookup
-    tf_bands = config.get("time_frequency_analysis.bands", {}) if hasattr(config, "get") else {}
+    tf_bands = _safe_config_get(config, "time_frequency_analysis.bands", {})
     
     ch_names = precomputed.ch_names
     n_ch = len(ch_names)  # Required for surrogate and waveform QC loops
     n_epochs = precomputed.data.shape[0]
     windows = precomputed.windows
 
-    allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
-    )
+    allow_full_epoch_fallback = bool(_safe_config_get(config, "feature_engineering.windows.allow_full_epoch_fallback", False))
     target_name = getattr(windows, "name", None) if windows else None
 
     if target_name and windows is not None:
@@ -1529,40 +1529,21 @@ def extract_pac_from_precomputed(
 
             pac_z = None
             if n_surrogates > 0 and n_times > _MIN_TIMES_FOR_SURROGATES:
+                surrogates = _compute_pac_surrogates(
+                    phase_unit_vectors, amplitude_data, n_surrogates,
+                    normalize, eps_amp, n_times, rng
+                )
                 pac_z = np.full_like(pac_val, np.nan, dtype=float)
                 for epoch_idx in range(n_epochs):
                     for channel_idx in range(n_ch):
-                        epoch_amplitude = amplitude_data[epoch_idx, channel_idx]
-                        epoch_phase = phase_unit_vectors[epoch_idx, channel_idx]
-
-                        if not (np.isfinite(epoch_amplitude).any() and np.isfinite(epoch_phase).any()):
-                            continue
-
-                        if normalize:
-                            denominator_epoch = np.nansum(epoch_amplitude) + eps_amp
-                        else:
-                            denominator_epoch = float(n_times)
-
-                        surrogates = np.full((n_surrogates,), np.nan, dtype=float)
-                        for surrogate_idx in range(n_surrogates):
-                            shift = int(rng.integers(1, n_times - 1))
-                            shifted_amplitude = np.roll(epoch_amplitude, shift)
-
-                            if normalize:
-                                numerator_surrogate = np.nansum(shifted_amplitude * epoch_phase)
-                            else:
-                                numerator_surrogate = np.nanmean(shifted_amplitude * epoch_phase)
-
-                            surrogates[surrogate_idx] = float(
-                                np.abs(numerator_surrogate / denominator_epoch)
-                            )
-
-                        surrogate_mean = float(np.nanmean(surrogates))
-                        surrogate_std = float(np.nanstd(surrogates, ddof=1))
-                        if np.isfinite(surrogate_std) and surrogate_std > 0:
-                            pac_z[epoch_idx, channel_idx] = (
-                                pac_val[epoch_idx, channel_idx] - surrogate_mean
-                            ) / surrogate_std
+                        epoch_surrogates = surrogates[epoch_idx, channel_idx]
+                        if np.isfinite(epoch_surrogates).any():
+                            surrogate_mean = float(np.nanmean(epoch_surrogates))
+                            surrogate_std = float(np.nanstd(epoch_surrogates, ddof=1))
+                            if np.isfinite(surrogate_std) and surrogate_std > 0:
+                                pac_z[epoch_idx, channel_idx] = (
+                                    pac_val[epoch_idx, channel_idx] - surrogate_mean
+                                ) / surrogate_std
 
             pair_label = f"{phase_band}_{amp_band}"
 

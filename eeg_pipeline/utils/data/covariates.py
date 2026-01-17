@@ -7,6 +7,7 @@ Functions for extracting and managing alignment covariates (e.g., temperature, t
 
 from __future__ import annotations
 
+import warnings
 from typing import List, Optional, Dict, Any, Tuple
 
 import pandas as pd
@@ -95,22 +96,6 @@ def _canonical_covariate_name(name: Optional[str], config: Optional[Any] = None)
 ###################################################################
 
 
-def extract_default_covariates(events_df: pd.DataFrame, config: Any) -> List[str]:
-    """Extract default covariates (temperature, trial) from events."""
-    covariates = []
-    
-    temperature_columns = config.get("event_columns.temperature")
-    temperature_column = _pick_first_column(events_df, temperature_columns)
-    if temperature_column:
-        covariates.append(temperature_column)
-    
-    trial_column = _pick_first_column(events_df, TRIAL_COLUMN_CANDIDATES)
-    if trial_column:
-        covariates.append(trial_column)
-    
-    return covariates
-
-
 def extract_temperature_data(
     aligned_events: Optional[pd.DataFrame],
     config: Any,
@@ -181,10 +166,8 @@ def _resolve_default_covariates(
         covariate_columns.append(trial_column)
         column_name_map[trial_column] = canonical_name
     else:
-        # Check if user might be accidentally using run/block as trial order
         run_block_col = _pick_first_column(events_df, RUN_BLOCK_COLUMNS)
         if run_block_col:
-            import warnings
             warnings.warn(
                 f"No true trial index column found (tried: {TRIAL_COLUMN_CANDIDATES}). "
                 f"Found '{run_block_col}' but run/block IDs are categorical grouping variables, "
@@ -256,18 +239,12 @@ def _remove_temperature_column(
     if temperature_column is None:
         return covariates_df.copy()
     
-    columns_to_drop = []
-    if temperature_column in covariates_df.columns:
-        columns_to_drop.append(temperature_column)
-    
+    columns_to_drop = {temperature_column}
     temperature_canonical = _canonical_covariate_name(temperature_column, config=config)
-    if (
-        temperature_canonical
-        and temperature_canonical in covariates_df.columns
-        and temperature_canonical != temperature_column
-    ):
-        columns_to_drop.append(temperature_canonical)
+    if temperature_canonical and temperature_canonical != temperature_column:
+        columns_to_drop.add(temperature_canonical)
     
+    columns_to_drop = [col for col in columns_to_drop if col in covariates_df.columns]
     if not columns_to_drop:
         return covariates_df.copy()
     
@@ -371,7 +348,6 @@ def build_covariates_without_temp(
 
 __all__ = [
     "extract_temperature_data",
-    "extract_default_covariates",
     "build_covariate_matrix",
     "build_covariates_without_temp",
 ]

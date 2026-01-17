@@ -9,20 +9,7 @@ from __future__ import annotations
 
 import importlib
 
-
-def visualize_features(*args, **kwargs):
-    from eeg_pipeline.plotting.orchestration.features import visualize_features as _impl
-
-    return _impl(*args, **kwargs)
-
-
-def visualize_features_for_subjects(*args, **kwargs):
-    from eeg_pipeline.plotting.orchestration.features import visualize_features_for_subjects as _impl
-
-    return _impl(*args, **kwargs)
-
 __all__ = [
-    # Power plotting
     "plot_channel_power_heatmap",
     "plot_power_time_courses",
     "plot_power_spectral_density",
@@ -34,9 +21,7 @@ __all__ = [
     "plot_band_power_topomaps",
     "plot_spectral_slope_topomap",
     "plot_feature_importance_ranking",
-    # PAC plotting
     "plot_pac_summary",
-    # Connectivity plotting
     "plot_sliding_connectivity_trajectories",
     "plot_sliding_degree_heatmap",
     "plot_edge_significance_circle_from_stats",
@@ -50,46 +35,32 @@ __all__ = [
     "plot_sliding_state_occupancy_boxplot",
     "plot_sliding_state_occupancy_ribbons",
     "plot_sliding_state_lagged_correlation_surfaces",
-    # Phase plotting
     "plot_itpc_heatmap",
     "plot_itpc_topomaps",
     "plot_pac_comodulograms",
     "plot_pac_time_ribbons",
-    # Aperiodic plotting
     "plot_aperiodic_residual_spectra",
     "plot_aperiodic_run_trajectories",
     "plot_aperiodic_topomaps",
     "plot_aperiodic_vs_pain",
-    # Visualization orchestration
-    "visualize_features",
-    "visualize_features_for_subjects",
     "FeaturePlotContext",
-    # CFC visualizations
-
-    # Quality visualizations
     "plot_feature_distribution_grid",
     "plot_outlier_trials_heatmap",
     "plot_snr_distribution",
     "plot_reliability_summary",
     "plot_quality_summary_dashboard",
-    # Complexity visualizations (new)
-    "plot_complexity_by_band",
+    "plot_hjorth_by_band",
     "plot_complexity_by_condition",
-    # ERDS visualizations
     "plot_erds_temporal_evolution",
     "plot_erds_latency_distribution",
     "plot_erds_erd_ers_separation",
     "plot_erds_global_summary",
-    # Spectral visualizations
     "plot_spectral_summary",
     "plot_spectral_edge_frequency",
-    # Ratio visualizations
     "plot_ratios_by_pair",
     "plot_ratios_by_condition",
-    # Asymmetry visualizations
     "plot_asymmetry_by_band",
     "plot_asymmetry_by_condition",
-    # Burst visualizations
     "plot_bursts_by_band",
     "plot_bursts_by_condition",
 ]
@@ -97,7 +68,6 @@ __all__ = [
 
 def __getattr__(name: str):
     _module_map = {
-        # Power plotting
         "plot_channel_power_heatmap": "power",
         "plot_power_time_courses": "power",
         "plot_power_spectral_density": "power",
@@ -109,9 +79,7 @@ def __getattr__(name: str):
         "plot_band_power_topomaps": "power",
         "plot_spectral_slope_topomap": "power",
         "plot_feature_importance_ranking": "power",
-        # PAC plotting
         "plot_pac_summary": "phase",
-        # Connectivity plotting
         "plot_sliding_connectivity_trajectories": "connectivity",
         "plot_sliding_degree_heatmap": "connectivity",
         "plot_edge_significance_circle_from_stats": "connectivity",
@@ -125,43 +93,32 @@ def __getattr__(name: str):
         "plot_sliding_state_occupancy_boxplot": "connectivity",
         "plot_sliding_state_occupancy_ribbons": "connectivity",
         "plot_sliding_state_lagged_correlation_surfaces": "connectivity",
-        # Phase plotting
         "plot_itpc_heatmap": "phase",
         "plot_itpc_topomaps": "phase",
         "plot_pac_comodulograms": "phase",
         "plot_pac_time_ribbons": "phase",
-        # Aperiodic plotting
         "plot_aperiodic_residual_spectra": "aperiodic",
         "plot_aperiodic_run_trajectories": "aperiodic",
         "plot_aperiodic_topomaps": "aperiodic",
         "plot_aperiodic_vs_pain": "aperiodic",
-        # Visualization orchestration is exposed as top-level wrappers above
-        # Context
         "FeaturePlotContext": "context",
-        # Quality visualizations
         "plot_feature_distribution_grid": "quality",
         "plot_outlier_trials_heatmap": "quality",
         "plot_snr_distribution": "quality",
         "plot_reliability_summary": "quality",
         "plot_quality_summary_dashboard": "quality",
-        # Complexity visualizations
-        "plot_complexity_by_band": "complexity",
+        "plot_hjorth_by_band": "complexity",
         "plot_complexity_by_condition": "complexity",
-        # ERDS visualizations
         "plot_erds_temporal_evolution": "erds",
         "plot_erds_latency_distribution": "erds",
         "plot_erds_erd_ers_separation": "erds",
         "plot_erds_global_summary": "erds",
-        # Spectral visualizations
         "plot_spectral_summary": "spectral",
         "plot_spectral_edge_frequency": "spectral",
-        # Ratio visualizations
         "plot_ratios_by_pair": "ratios",
         "plot_ratios_by_condition": "ratios",
-        # Asymmetry visualizations
         "plot_asymmetry_by_band": "asymmetry",
         "plot_asymmetry_by_condition": "asymmetry",
-        # Burst visualizations
         "plot_bursts_by_band": "bursts",
         "plot_bursts_by_condition": "bursts",
     }

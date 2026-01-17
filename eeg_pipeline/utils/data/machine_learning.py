@@ -92,17 +92,6 @@ def _load_trial_alignment_manifest(
     return manifest
 
 
-def _find_target_column(
-    df: pd.DataFrame,
-    config: EEGConfig,
-) -> Optional[str]:
-    """Find target column from dataframe using config."""
-    rating_columns = config.get("event_columns.rating", [])
-    if not rating_columns:
-        return None
-    return pick_target_column(df, target_columns=list(rating_columns))
-
-
 def load_ml_data(
     subject: str,
     deriv_root: Path,
@@ -123,7 +112,6 @@ def load_ml_data(
     sub = f"sub-{subject}"
     feat_dir = deriv_root / sub / "eeg" / "features"
     
-    # Path to parquet files (strictly parquet now)
     X_path = feat_dir / "power" / "features_power.parquet"
     y_path = feat_dir / "behavior" / "target_vas_ratings.parquet"
         
@@ -160,12 +148,10 @@ def load_ml_data(
     rating_columns = config.get("event_columns.rating", [])
     tgt_col = pick_target_column(y_df, target_columns=list(rating_columns) if rating_columns else [])
     if tgt_col is None:
-        tgt_col = _find_target_column(y_df, config)
-        if tgt_col is None:
-            raise ValueError(
-                f"No suitable target column found in {y_path} for subject {sub}, task {task}. "
-                f"Available columns: {list(y_df.columns)}"
-            )
+        raise ValueError(
+            f"No suitable target column found in {y_path} for subject {sub}, task {task}. "
+            f"Available columns: {list(y_df.columns)}"
+        )
 
     y = pd.to_numeric(y_df[tgt_col], errors="coerce")
 
@@ -476,7 +462,6 @@ def load_active_matrix(
 
         data = epochs.get_data(picks=picks)
         times = np.asarray(epochs.times, dtype=float)
-        sfreq = float(epochs.info["sfreq"])
 
         baseline_window = get_config_value(
             config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]
@@ -585,10 +570,9 @@ def load_epoch_windows(
 
         data = epochs.get_data()
         times = epochs.times
-        sfreq = epochs.info["sfreq"]
 
-        window_samples = int(window_size * sfreq)
-        step_samples = int(window_step * sfreq)
+        window_samples = int(window_size * epochs.info["sfreq"])
+        step_samples = int(window_step * epochs.info["sfreq"])
 
         n_windows = (len(times) - window_samples) // step_samples + 1
         if n_windows < 1:
@@ -649,10 +633,7 @@ def extract_epoch_data_block(
     for idx in indices:
         subject_id, trial_idx = trial_records[int(idx)]
         epochs = aligned_epochs[subject_id]
-        try:
-            X_i = epochs.get_data(picks="eeg", reject_by_annotation=None)[trial_idx]
-        except TypeError:
-            X_i = epochs.get_data(picks="eeg")[trial_idx]
+        X_i = epochs.get_data(picks="eeg", reject_by_annotation=None)[trial_idx]
         X_list.append(X_i)
     return np.stack(X_list, axis=0)
 
@@ -702,10 +683,9 @@ def load_kept_indices(
         logger = logging.getLogger(__name__)
 
     base_dir = deriv_root / subject_label / "eeg" / "features"
-    # Check new metadata home first, then quality (temporary home), then root
     dropped_path = base_dir / "metadata" / "dropped_trials.tsv"
-        
-    if dropped_path is None:
+    
+    if not dropped_path.exists():
         return None
 
     dropped_df = read_tsv(dropped_path)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import json as json_module
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, List, Optional
@@ -93,7 +93,7 @@ def _update_config_paths(config: Any, source_root: str | None, bids_root: str | 
     if source_root:
         config.setdefault("paths", {})["source_data"] = source_root
     if bids_root:
-        config.setdefault("paths", {})["bids_root"] = str(Path(bids_root))
+        config.setdefault("paths", {})["bids_root"] = bids_root
 
 
 def _run_raw_to_bids_mode(
@@ -134,12 +134,11 @@ def _run_merge_behavior_mode(
     progress.start("utilities_merge_behavior", subjects)
     progress.step("Merging behavior", current=1, total=2)
     
-    dry_run = getattr(args, "dry_run", False)
     pipeline.run_merge_behavior(
         task=task,
         event_prefixes=args.event_prefix,
         event_types=args.event_type,
-        dry_run=dry_run,
+        dry_run=args.dry_run,
     )
     
     progress.step("Finalizing", current=2, total=2)
@@ -155,15 +154,14 @@ def run_utilities(args: argparse.Namespace, subjects: List[str], config: Any) ->
 
     progress = create_progress_reporter(args)
     task = resolve_task(args.task, config)
-    target_subjects = subjects or []
 
     _update_config_paths(config, args.source_root, args.bids_root)
     pipeline = UtilityPipeline(config=config)
 
     if args.mode == "raw-to-bids":
-        _run_raw_to_bids_mode(pipeline, task, target_subjects, args, progress)
+        _run_raw_to_bids_mode(pipeline, task, subjects, args, progress)
     elif args.mode == "merge-behavior":
-        _run_merge_behavior_mode(pipeline, task, target_subjects, args, progress)
+        _run_merge_behavior_mode(pipeline, task, subjects, args, progress)
 
 
 def get_dir_size(root: Path) -> int:
@@ -208,7 +206,7 @@ def _run_clean_mode(args: argparse.Namespace, subjects: List[str], config: Any) 
     to_remove = []
     total_size = 0
 
-    if args.target == "preview" or args.target == "all":
+    if args.target in ("preview", "all"):
         print("CLEANUP PREVIEW")
         print("=" * 50)
         for name, path in targets.items():
@@ -219,11 +217,12 @@ def _run_clean_mode(args: argparse.Namespace, subjects: List[str], config: Any) 
 
         if args.subjects:
             for subj in args.subjects:
-                feat_dir = deriv_root / "features" / f"sub-{subj.replace('sub-', '')}"
+                subject_id = subj.replace("sub-", "") if subj.startswith("sub-") else subj
+                feat_dir = deriv_root / "features" / f"sub-{subject_id}"
                 if feat_dir.exists():
                     size = get_dir_size(feat_dir)
                     total_size += size
-                    print(f"  sub-{subj} features {format_size(size):>10}")
+                    print(f"  sub-{subject_id} features {format_size(size):>10}")
 
         print("-" * 50)
         print(f"  {'TOTAL':15} {format_size(total_size):>10}")
@@ -267,7 +266,7 @@ def _run_clean_mode(args: argparse.Namespace, subjects: List[str], config: Any) 
         return
 
     if args.output_json:
-        print(json_module.dumps({
+        print(json.dumps({
             "files": [str(f) for f in to_remove[:50]],
             "total_files": len(to_remove),
             "total_size": total_size,
@@ -277,8 +276,7 @@ def _run_clean_mode(args: argparse.Namespace, subjects: List[str], config: Any) 
 
     print(f"Found {len(to_remove)} files ({format_size(total_size)})")
 
-    dry_run = getattr(args, "dry_run", False)
-    if dry_run:
+    if args.dry_run:
         print("\nDry run - no files removed. Files that would be deleted:")
         for f in to_remove[:20]:
             print(f"  {f}")
@@ -295,10 +293,9 @@ def _run_clean_mode(args: argparse.Namespace, subjects: List[str], config: Any) 
     deleted = 0
     for f in to_remove:
         try:
-            if f.is_file():
-                f.unlink()
-                deleted += 1
-        except Exception as e:
+            f.unlink()
+            deleted += 1
+        except (OSError, PermissionError) as e:
             print(f"Warning: Could not delete {f}: {e}")
 
     print(f"✓ Deleted {deleted} files ({format_size(total_size)})")

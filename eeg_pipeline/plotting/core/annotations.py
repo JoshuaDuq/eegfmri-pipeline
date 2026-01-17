@@ -50,9 +50,7 @@ def format_cluster_significance_info(
     sig_parts.append(cluster_info)
     sig_parts.append(f"Channels: {', '.join(roi_sig_chs)}")
     if p_ch is not None:
-        roi_p_vals = [p_ch[idx] for idx in roi_sig_indices]
-        p_value_strings = [f"{p_val:.3f}" for p_val in roi_p_vals]
-        p_str = ', '.join(p_value_strings)
+        p_str = ', '.join(f"{p_ch[idx]:.3f}" for idx in roi_sig_indices)
         sig_parts.append(f"p-values: {p_str}")
     return " | ".join(sig_parts)
 
@@ -347,8 +345,7 @@ def render_roi_annotations(
         
         if i < len(annotations) - 1:
             extra_spacing = annotation_line_height * annotation_spacing_multiplier
-            spacing_ax = annotation_min_spacing + extra_spacing
-            total_line_spacing = annotation_line_height + spacing_ax
+            total_line_spacing = annotation_line_height + annotation_min_spacing + extra_spacing
             y_pos_ax -= total_line_spacing
 
 
@@ -376,19 +373,15 @@ def get_sig_marker_text(config=None) -> str:
     config = ensure_config(config)
     plot_cfg = get_plot_config(config)
     
-    if plot_cfg:
-        tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
-        default_sig_alpha = tfr_config.get(
-            "default_significance_alpha",
-            get_config_value(config, "statistics.sig_alpha", 0.05)
-        )
-        default_cluster_n_perm = tfr_config.get(
-            "default_cluster_n_perm",
-            get_config_value(config, "statistics.cluster_n_perm", 100)
-        )
-    else:
-        default_sig_alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
-        default_cluster_n_perm = get_config_value(config, "statistics.cluster_n_perm", 100)
+    tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
+    default_sig_alpha = tfr_config.get(
+        "default_significance_alpha",
+        get_config_value(config, "statistics.sig_alpha", 0.05)
+    )
+    default_cluster_n_perm = tfr_config.get(
+        "default_cluster_n_perm",
+        get_config_value(config, "statistics.cluster_n_perm", 100)
+    )
     
     alpha = get_config_value(config, "statistics.sig_alpha", default_sig_alpha)
     n_perm = get_config_value(config, "statistics.cluster_n_perm", default_cluster_n_perm)
@@ -411,7 +404,6 @@ def add_roi_annotations(
     p_ch: Optional[np.ndarray] = None,
     cluster_p_min: Optional[float] = None,
     cluster_k: Optional[int] = None,
-    cluster_mass: Optional[float] = None,
     is_cluster: Optional[bool] = None,
     data_format: Optional[str] = None,
     data_group_a: Optional[np.ndarray] = None,
@@ -435,7 +427,6 @@ def add_roi_annotations(
         p_ch: Optional per-channel p-values
         cluster_p_min: Optional minimum cluster p-value
         cluster_k: Optional cluster size
-        cluster_mass: Optional cluster mass
         is_cluster: Whether cluster test was used
         data_format: Optional data format string
         data_group_a: Optional data for group A
@@ -463,19 +454,17 @@ def add_roi_annotations(
     if data_finite.size == 0:
         return
     
-    has_valid_groups = data_group_a is not None and data_group_b is not None
-    if has_valid_groups:
-        groups_have_valid_shapes = _validate_group_data_shapes(
-            data_group_a, data_group_b, len(ch_names)
-        )
-        if not groups_have_valid_shapes:
+    if data_group_a is not None and data_group_b is not None:
+        if not _validate_group_data_shapes(data_group_a, data_group_b, len(ch_names)):
             data_group_a = None
             data_group_b = None
     
     from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
+    
     config = ensure_config(config)
     plot_cfg = get_plot_config(config)
     tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
+    
     if fdr_alpha is None:
         default_alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
         fdr_alpha_fallback = get_config_value(config, "statistics.fdr_alpha", default_alpha)
@@ -483,10 +472,7 @@ def add_roi_annotations(
             config, "behavior_analysis.statistics.fdr_alpha", fdr_alpha_fallback
         )
     
-    if plot_cfg:
-        percent_detection_threshold = tfr_config.get("percent_detection_threshold", 5.0)
-    else:
-        percent_detection_threshold = 5.0
+    percent_detection_threshold = tfr_config.get("percent_detection_threshold", 5.0)
     is_percent_format = _detect_data_format(
         data, data_format, percent_threshold=percent_detection_threshold
     )
@@ -499,8 +485,6 @@ def add_roi_annotations(
         compute_roi_percentage_change,
         compute_roi_pvalue,
     )
-    
-    has_significant_channels = sig_mask is not None and sig_mask.any()
     
     roi_pvalues_raw = {}
     roi_data_dict = {}
@@ -515,15 +499,7 @@ def add_roi_annotations(
         roi_data_dict[roi] = (pct, mask_vec)
         
         roi_pvalue = compute_roi_pvalue(
-            mask_vec,
-            ch_names,
-            p_ch,
-            sig_mask,
-            is_cluster,
-            cluster_p_min,
-            data_group_a,
-            data_group_b,
-            paired,
+            mask_vec, data_group_a, data_group_b, paired
         )
         roi_pvalues_raw[roi] = roi_pvalue
     
@@ -540,7 +516,7 @@ def add_roi_annotations(
         roi_pvalue = roi_pvalues_corrected.get(roi)
         
         sig_info = None
-        if has_significant_channels:
+        if sig_mask is not None and sig_mask.any():
             roi_sig_indices, roi_sig_chs = extract_significant_roi_channels(
                 ch_names, mask_vec, sig_mask
             )

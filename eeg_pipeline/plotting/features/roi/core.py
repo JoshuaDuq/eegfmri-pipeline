@@ -30,10 +30,7 @@ def get_roi_definitions(config: Any) -> Dict[str, List[str]]:
     """
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    rois = get_config_value(config, "rois", {})
-    if not rois:
-        rois = get_config_value(config, "time_frequency_analysis.rois", {})
-    return rois
+    return get_config_value(config, "rois", {})
 
 
 def get_roi_channels(roi_patterns: List[str], all_channels: List[str]) -> List[str]:
@@ -102,7 +99,7 @@ def aggregate_by_roi(
         Series with mean values across ROI channels for each row.
         Returns Series of NaNs if no matching columns found.
     """
-    if roi_channels is None or len(roi_channels) == 0:
+    if not roi_channels:
         return pd.Series([np.nan] * len(features_df), index=features_df.index)
 
     matching_columns = []
@@ -175,7 +172,7 @@ def aggregate_connectivity_by_roi(
         Series with mean connectivity values for edges within ROI.
         Returns Series of NaNs if no matching columns found.
     """
-    if roi_channels is None or len(roi_channels) == 0:
+    if not roi_channels:
         return pd.Series([np.nan] * len(features_df), index=features_df.index)
 
     roi_channels_set = set(roi_channels)

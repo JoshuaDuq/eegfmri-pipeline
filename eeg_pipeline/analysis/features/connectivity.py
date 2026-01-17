@@ -200,11 +200,16 @@ def _warn_if_phase_connectivity_without_spatial_transform(
     if not warn_enabled:
         return
     
-    spatial_transform = (
-        str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
-        if hasattr(config, "get")
-        else "none"
-    )
+    try:
+        from eeg_pipeline.analysis.features.preparation import _get_spatial_transform_type
+
+        spatial_transform = _get_spatial_transform_type(config, feature_family="connectivity")
+    except Exception:
+        spatial_transform = (
+            str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
+            if hasattr(config, "get")
+            else "none"
+        )
     if spatial_transform in {"csd", "laplacian"}:
         return
     
@@ -250,34 +255,15 @@ def _validate_segment_duration_for_connectivity(
     return True
 
 
-def _normalize_phase_estimator(value: Any) -> str:
-    v = str(value).strip().lower()
-    if v in {"across", "across_epochs", "acrossepochs", "across-epochs"}:
-        return "across_epochs"
-    if v in {"trial", "trialwise", "within_epoch", "within-epoch", "withinepoch"}:
-        return "within_epoch"
-    return "within_epoch"
-
-
 def _resolve_phase_measures(conn_cfg: Dict[str, Any]) -> List[str]:
+    """Extract phase-based connectivity measures from config dict."""
     supported_measures = {"wpli", "wpli2_debiased", "imcoh", "plv", "pli"}
-    measures_cfg = conn_cfg.get("measures")
+    measures_cfg = conn_cfg.get("measures", [])
     if isinstance(measures_cfg, (list, tuple)) and measures_cfg:
         measures = {str(m).strip().lower() for m in measures_cfg}
         measures = measures & supported_measures
         return [m for m in ("wpli2_debiased", "wpli", "imcoh", "plv", "pli") if m in measures]
-    out: List[str] = []
-    if bool(conn_cfg.get("enable_wpli2_debiased", False)):
-        out.append("wpli2_debiased")
-    if bool(conn_cfg.get("enable_wpli", True)):
-        out.append("wpli")
-    if bool(conn_cfg.get("enable_imcoh", False)):
-        out.append("imcoh")
-    if bool(conn_cfg.get("enable_plv", False)):
-        out.append("plv")
-    if bool(conn_cfg.get("enable_pli", False)):
-        out.append("pli")
-    return out
+    return []
 
 
 def _apply_across_epochs_phase_estimates_inplace(
@@ -343,41 +329,22 @@ def _apply_across_epochs_phase_estimates_inplace(
     masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
 
     def _run(method: str, seg_data: np.ndarray, freqs: np.ndarray, fmin: float, fmax: float, use_n_cycles: Any):
-        # Prefer across-epochs averaging if supported by installed mne-connectivity.
-        try:
-            return spectral_connectivity_time(
-                seg_data,
-                freqs=freqs,
-                method=method,
-                indices=indices,
-                sfreq=sfreq,
-                fmin=fmin,
-                fmax=fmax,
-                average=True,
-                faverage=True,
-                mode=conn_mode,
-                n_cycles=use_n_cycles,
-                decim=decim,
-                n_jobs=1,
-                verbose=False,
-            )
-        except TypeError:
-            return spectral_connectivity_time(
-                seg_data,
-                freqs=freqs,
-                method=method,
-                indices=indices,
-                sfreq=sfreq,
-                fmin=fmin,
-                fmax=fmax,
-                average=False,
-                faverage=True,
-                mode=conn_mode,
-                n_cycles=use_n_cycles,
-                decim=decim,
-                n_jobs=1,
-                verbose=False,
-            )
+        return spectral_connectivity_time(
+            seg_data,
+            freqs=freqs,
+            method=method,
+            indices=indices,
+            sfreq=sfreq,
+            fmin=fmin,
+            fmax=fmax,
+            average=True,
+            faverage=True,
+            mode=conn_mode,
+            n_cycles=use_n_cycles,
+            decim=decim,
+            n_jobs=1,
+            verbose=False,
+        )
 
     for _label, epoch_idx in epoch_groups.items():
         epoch_idx = np.asarray(epoch_idx, dtype=int)
@@ -440,15 +407,7 @@ def _apply_across_epochs_phase_estimates_inplace(
                     try:
                         con = _run(method_use, seg_data, freqs, fmin, fmax, use_n_cycles)
                     except Exception:
-                        if method_use == "wpli2_debiased":
-                            try:
-                                method_use = "wpli"
-                                method_label = "wpli"
-                                con = _run(method_use, seg_data, freqs, fmin, fmax, use_n_cycles)
-                            except Exception:
-                                continue
-                        else:
-                            continue
+                        continue
 
                     con_data = np.asarray(con.get_data())
                     if con_data.ndim == 3:
@@ -546,14 +505,6 @@ def _graph_metrics(
     }
 
 
-def _mask_array(arr: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
-    if mask is None:
-        return arr
-    if isinstance(mask, np.ndarray) and np.any(mask):
-        return arr[:, mask]
-    return arr
-
-
 def _compute_graph_metrics_for_epochs(
     con_vals: np.ndarray,
     pair_i: np.ndarray,
@@ -590,7 +541,6 @@ def _compute_graph_metrics_for_epochs(
     if n_jobs == 1:
         graph_rows = [_graph_row(ep_idx) for ep_idx in range(con_vals.shape[0])]
     else:
-        from joblib import Parallel, delayed
         graph_rows = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(_graph_row)(ep_idx) for ep_idx in range(con_vals.shape[0])
         )
@@ -607,7 +557,13 @@ def extract_connectivity_features(
     conn_cfg = ConnectivityConfig.from_dict(ctx.config)
     _warn_if_phase_connectivity_without_spatial_transform(ctx.config, conn_cfg.measures, ctx.logger)
 
-    precomputed = getattr(ctx, "precomputed", None)
+    precomputed = None
+    getter = getattr(ctx, "get_precomputed_for_family", None)
+    if callable(getter):
+        precomputed = getter("connectivity")
+    if precomputed is None:
+        precomputed = getattr(ctx, "precomputed", None)
+
     if precomputed is None:
         if getattr(ctx, "epochs", None) is None:
             return pd.DataFrame(), []
@@ -620,19 +576,23 @@ def extract_connectivity_features(
             ctx.config,
             ctx.logger,
             windows_spec=ctx.windows,
+            feature_family="connectivity",
         )
         try:
-            ctx.set_precomputed(precomputed)
+            setter = getattr(ctx, "set_precomputed_for_family", None)
+            if callable(setter):
+                setter("connectivity", precomputed)
+            else:
+                ctx.set_precomputed(precomputed)
         except Exception:
             pass
 
-    # Only process the segment name from the context (fallback to active/full)
     ctx_name = getattr(ctx, "name", None)
     segments: List[str] = []
     if ctx_name:
         segments = [ctx_name]
     elif getattr(ctx, "windows", None) is not None:
-        for key in ("active", "active"):
+        for key in ("active", "plateau"):
             mask = ctx.windows.get_mask(key)
             if mask is not None and np.any(mask):
                 segments = [key]
@@ -1073,43 +1033,11 @@ def extract_connectivity_from_precomputed(
             # Re-raise other ValueErrors
             raise
         except Exception as e:
-            # Graceful fallback for newer method names on older mne-connectivity installs.
-            if method_use == "wpli2_debiased":
-                if logger is not None:
-                    logger.warning(
-                        "Connectivity: method '%s' failed for segment '%s' band '%s' (%s); falling back to 'wpli'.",
-                        method_use,
-                        seg_name,
-                        band,
-                        e,
-                    )
-                try:
-                    method_use = "wpli"
-                    method_label = "wpli"
-                    con = _run(method_use, use_average=use_across_epochs)
-                except ValueError as e2:
-                    error_msg = str(e2).lower()
-                    if "wavelet" in error_msg or "n_cycles" in error_msg or "longer than" in error_msg:
-                        if logger is not None:
-                            logger.warning(
-                                f"Connectivity: wpli fallback also skipped for segment '{seg_name}' band '{band}' - "
-                                f"segment too short for wavelet-based connectivity."
-                            )
-                        return pd.DataFrame()
-                    raise
-                except Exception as e2:
-                    if logger is not None:
-                        logger.warning(
-                            "Connectivity: fallback 'wpli' also failed for segment '%s' band '%s': %s",
-                            seg_name,
-                            band,
-                            e2,
-                        )
-                    return pd.DataFrame()
-            else:
-                if logger is not None:
-                    logger.warning(f"Connectivity: {method} failed for segment '{seg_name}' band '{band}': {e}")
-                return pd.DataFrame()
+            if logger is not None:
+                logger.warning(
+                    f"Connectivity: {method} failed for segment '{seg_name}' band '{band}': {e}"
+                )
+            return pd.DataFrame()
 
         con_data = np.asarray(con.get_data())
         
@@ -1452,65 +1380,6 @@ def _compute_cross_spectrum(
                 csd_matrix[ep_idx, i, j, :] = csd_ij[freq_mask]
     
     return csd_matrix, freqs_band
-
-
-def _compute_psi_from_csd(
-    csd: np.ndarray,
-    freqs: np.ndarray,
-) -> np.ndarray:
-    """
-    Compute Phase Slope Index from cross-spectral density.
-    
-    PSI measures the direction of information flow based on the slope of the
-    phase spectrum. Positive PSI(i→j) indicates information flows from i to j.
-    
-    Reference: Nolte et al. (2008) "Robustly estimating the flow direction of 
-    information in complex physical systems"
-    
-    Parameters
-    ----------
-    csd : np.ndarray
-        Cross-spectral density of shape (n_epochs, n_channels, n_channels, n_freqs)
-    freqs : np.ndarray
-        Frequency vector
-        
-    Returns
-    -------
-    psi : np.ndarray
-        Phase slope index of shape (n_epochs, n_channels, n_channels)
-        Positive values indicate flow from row to column index.
-    """
-    n_epochs, n_channels, _, n_freqs = csd.shape
-    
-    if n_freqs < 2:
-        return np.full((n_epochs, n_channels, n_channels), np.nan)
-    
-    psi = np.zeros((n_epochs, n_channels, n_channels))
-    
-    for ep_idx in range(n_epochs):
-        for i in range(n_channels):
-            for j in range(n_channels):
-                if i == j:
-                    continue
-                    
-                csd_ij = csd[ep_idx, i, j, :]
-                
-                coherency = csd_ij / np.sqrt(
-                    np.abs(csd[ep_idx, i, i, :]) * np.abs(csd[ep_idx, j, j, :]) + 1e-12
-                )
-                
-                phase = np.angle(coherency)
-                
-                phase_unwrapped = np.unwrap(phase)
-                
-                if len(freqs) > 1:
-                    slope, _ = np.polyfit(freqs, phase_unwrapped, 1)
-                else:
-                    slope = 0.0
-                
-                psi[ep_idx, i, j] = slope
-    
-    return psi
 
 
 def _compute_psi_imaginary(
@@ -1876,13 +1745,7 @@ def extract_directed_connectivity_from_precomputed(
     enable_dtf = bool(directed_cfg.get("enable_dtf", False))
     enable_pdc = bool(directed_cfg.get("enable_pdc", False))
     
-    methods = []
-    if enable_psi:
-        methods.append("psi")
-    if enable_dtf:
-        methods.append("dtf")
-    if enable_pdc:
-        methods.append("pdc")
+    methods = [m for m, enabled in (("psi", enable_psi), ("dtf", enable_dtf), ("pdc", enable_pdc)) if enabled]
     
     if not methods:
         if logger is not None:
@@ -2081,7 +1944,12 @@ def extract_directed_connectivity_features(
     if not bands:
         return pd.DataFrame(), []
     
-    precomputed = getattr(ctx, "precomputed", None)
+    precomputed = None
+    getter = getattr(ctx, "get_precomputed_for_family", None)
+    if callable(getter):
+        precomputed = getter("connectivity")
+    if precomputed is None:
+        precomputed = getattr(ctx, "precomputed", None)
     if precomputed is None:
         if getattr(ctx, "epochs", None) is None:
             return pd.DataFrame(), []
@@ -2096,9 +1964,14 @@ def extract_directed_connectivity_features(
             ctx.config,
             ctx.logger,
             windows_spec=ctx.windows,
+            feature_family="directedconnectivity",
         )
         try:
-            ctx.set_precomputed(precomputed)
+            setter = getattr(ctx, "set_precomputed_for_family", None)
+            if callable(setter):
+                setter("connectivity", precomputed)
+            else:
+                ctx.set_precomputed(precomputed)
         except Exception:
             pass
     

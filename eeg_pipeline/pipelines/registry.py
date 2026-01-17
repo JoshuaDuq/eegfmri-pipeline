@@ -54,13 +54,9 @@ class PipelineRegistry:
             if name in cls._pipelines:
                 raise ValueError(f"Pipeline '{name}' is already registered")
 
-            pipeline_description = description
-            if pipeline_description is None:
-                pipeline_description = pipeline_cls.__doc__ or ""
-
             cls._pipelines[name] = pipeline_cls
             cls._metadata[name] = {
-                "description": pipeline_description,
+                "description": description or pipeline_cls.__doc__ or "",
                 "requires_epochs": requires_epochs,
                 "requires_features": requires_features,
                 "class_name": pipeline_cls.__name__,
@@ -91,9 +87,7 @@ class PipelineRegistry:
             raise PipelineNotFoundError(name, available=cls.list_names())
 
         pipeline_cls = cls._pipelines[name]
-        if config is not None:
-            return pipeline_cls(config=config)
-        return pipeline_cls()
+        return pipeline_cls(config=config) if config is not None else pipeline_cls()
 
     @classmethod
     def get_class(cls, name: str) -> Type[PipelineBase]:
@@ -166,26 +160,6 @@ class PipelineRegistry:
         ]
 
 
-def register_pipeline(
-    name: str,
-    description: Optional[str] = None,
-    requires_epochs: bool = True,
-    requires_features: bool = False,
-) -> Callable[[Type[PipelineBase]], Type[PipelineBase]]:
-    """
-    Convenience function for pipeline registration.
-
-    Equivalent to @PipelineRegistry.register(...)
-    """
-    return PipelineRegistry.register(
-        name=name,
-        description=description,
-        requires_epochs=requires_epochs,
-        requires_features=requires_features,
-    )
-
-
 __all__ = [
     "PipelineRegistry",
-    "register_pipeline",
 ]

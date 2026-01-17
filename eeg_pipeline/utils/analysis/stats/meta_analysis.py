@@ -9,19 +9,19 @@ and forest plot utilities for group-level inference.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
-import pandas as pd
 from scipy import stats
 from scipy.special import betaln
+
+from .correlation import fisher_z, inverse_fisher_z
 
 
 _MIN_SAMPLE_SIZE = 4
 _MIN_CORRELATION = -0.9999
 _MAX_CORRELATION = 0.9999
 _DEFAULT_PRIOR_SCALE = 0.707
-_DEFAULT_Z_CRITICAL = 1.96
 
 
 @dataclass
@@ -61,16 +61,6 @@ class MetaAnalysisResult:
             "n_studies": self.n_studies,
             "n_total": self.n_total,
         }
-
-
-# Import unified Fisher z functions from correlation module
-from .correlation import fisher_z, inverse_fisher_z
-
-# Import ensure_bootstrap_ci from bootstrap module to avoid duplication
-from .bootstrap import ensure_bootstrap_ci
-
-# Re-export for backward compatibility (aliases for array-focused usage)
-# The functions in correlation.py now handle both scalars and arrays
 
 
 def correlation_se(n: np.ndarray) -> np.ndarray:
@@ -297,52 +287,6 @@ def random_effects_meta(
     )
 
 
-def _leave_one_out_analysis(
-    r_values: np.ndarray,
-    n_values: np.ndarray,
-    meta_function,
-) -> List[Tuple[int, MetaAnalysisResult]]:
-    """Perform leave-one-out analysis with specified meta-analysis function."""
-    n_studies = len(r_values)
-    results = []
-    
-    for excluded_index in range(n_studies):
-        mask = np.ones(n_studies, dtype=bool)
-        mask[excluded_index] = False
-        result = meta_function(r_values[mask], n_values[mask])
-        results.append((excluded_index, result))
-    
-    return results
-
-
-def leave_one_out_meta_fixed(
-    r_values: np.ndarray,
-    n_values: np.ndarray,
-) -> List[Tuple[int, MetaAnalysisResult]]:
-    """
-    Leave-one-out sensitivity analysis using fixed-effects model.
-    
-    Returns list of (excluded_index, meta_result) tuples.
-    """
-    r_array = np.asarray(r_values)
-    n_array = np.asarray(n_values)
-    return _leave_one_out_analysis(r_array, n_array, fixed_effects_meta)
-
-
-def leave_one_out_meta_random(
-    r_values: np.ndarray,
-    n_values: np.ndarray,
-) -> List[Tuple[int, MetaAnalysisResult]]:
-    """
-    Leave-one-out sensitivity analysis using random-effects model.
-    
-    Returns list of (excluded_index, meta_result) tuples.
-    """
-    r_array = np.asarray(r_values)
-    n_array = np.asarray(n_values)
-    return _leave_one_out_analysis(r_array, n_array, random_effects_meta)
-
-
 def _empty_meta_result() -> MetaAnalysisResult:
     """Return empty meta-analysis result."""
     empty_array = np.array([])
@@ -365,10 +309,6 @@ def _empty_meta_result() -> MetaAnalysisResult:
         study_weights=empty_array,
         study_ns=empty_array,
     )
-
-
-# Import ensure_bootstrap_ci from bootstrap module to avoid duplication
-from .bootstrap import ensure_bootstrap_ci
 
 
 def bayes_factor_correlation(

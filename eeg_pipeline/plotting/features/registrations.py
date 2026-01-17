@@ -50,7 +50,7 @@ from eeg_pipeline.plotting.features.quality import (
 )
 from eeg_pipeline.plotting.features.complexity import (
     plot_complexity_by_condition,
-    plot_complexity_by_band,
+    plot_hjorth_by_band,
 )
 from eeg_pipeline.plotting.features.spectral import (
     plot_spectral_summary,
@@ -77,7 +77,6 @@ from eeg_pipeline.plotting.features.phase import (
     plot_pac_by_condition,
     plot_pac_comodulograms,
     plot_pac_time_ribbons,
-    convert_pac_wide_to_long,
 )
 from eeg_pipeline.plotting.features.power import (
     plot_power_by_condition,
@@ -162,10 +161,7 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
                 ["baseline", "active"],
             )
 
-        has_temporal_data = ctx.temporal_df is None
-        has_all_features = ctx.all_features is not None
-        has_aligned_events = ctx.aligned_events is not None
-        if has_temporal_data and has_all_features and has_aligned_events:
+        if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
             safe_plot(
                 ctx,
                 saved_files,
@@ -415,7 +411,7 @@ def plot_complexity(ctx: FeaturePlotContext, saved_files):
         "complexity_by_band",
         "complexity",
         None,
-        plot_complexity_by_band,
+        plot_hjorth_by_band,
         features_df=ctx.complexity_df,
         save_path=comp_dir / f"sub-{ctx.subject}_complexity_by_band",
         config=ctx.config,
@@ -869,7 +865,7 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
                         ctx.logger,
                         ctx.config,
                     )
-            except Exception as e:
+            except (OSError, ValueError, KeyError) as e:
                 ctx.logger.debug(f"Could not load ITPC data: {e}")
 
     if ctx.itpc_df is not None and ctx.epochs_info is not None:
@@ -1207,14 +1203,11 @@ def _normalize_condition_key(label: str) -> str:
 def _build_epoch_query(col: str, value: Any) -> str:
     """Build an epoch query string for a column and value."""
     col_expr = f"`{col}`"
-    try:
-        numeric_value = pd.to_numeric(str(value), errors="coerce")
-        if not np.isnan(numeric_value):
-            if float(numeric_value).is_integer():
-                return f"{col_expr} == {int(numeric_value)}"
-            return f"{col_expr} == {float(numeric_value)}"
-    except Exception:
-        pass
+    numeric_value = pd.to_numeric(str(value), errors="coerce")
+    if not np.isnan(numeric_value):
+        if float(numeric_value).is_integer():
+            return f"{col_expr} == {int(numeric_value)}"
+        return f"{col_expr} == {float(numeric_value)}"
     return f"{col_expr} == {repr(str(value))}"
 
 
@@ -1239,7 +1232,7 @@ def _resolve_erp_conditions(
         try:
             if len(epochs[query]) > 0:
                 available_conditions[name] = query
-        except Exception:
+        except (ValueError, KeyError, AttributeError):
             continue
 
     return available_conditions if available_conditions else None
@@ -1332,10 +1325,7 @@ def _find_snr_column(quality_df: pd.DataFrame) -> str | None:
         if parsed.get("scope") != "global":
             continue
         if parsed.get("stat") == "snr":
-            snr_col = str(col)
-            if parsed.get("segment") == "active":
-                return snr_col
-            return snr_col
+            return str(col)
     return None
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import json
 import logging
 import os
@@ -11,7 +10,7 @@ import mne
 import numpy as np
 import pandas as pd
 
-from ..config.loader import load_config, get_constants, get_config_value, ensure_config, get_frequency_band_names, get_frequency_bands
+from ..config.loader import load_config, get_constants, get_config_value, ensure_config, get_frequency_bands
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.windowing import (
     build_time_windows_fixed_count,
@@ -43,10 +42,9 @@ def _get_tfr_constants(config=None):
 
 
 def _get_min_baseline_samples(config) -> int:
-    """Get minimum baseline samples, supporting both config key names.
+    """Get minimum baseline samples from config.
     
-    Prefers min_baseline_samples (config standard), falls back to 
-    min_samples_for_baseline_validation for compatibility.
+    Supports both min_baseline_samples (standard) and min_samples_for_baseline_validation (legacy).
     """
     val = get_config_value(config, "time_frequency_analysis.constants.min_baseline_samples", None)
     if val is None:
@@ -302,18 +300,10 @@ def _extract_baseline_power_features(
     baseline_indices: Tuple[int, int],
     logger: logging.Logger,
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """Local helper to extract baseline power."""
+    """Extract baseline power features from TFR data."""
     b_start, b_end = baseline_indices
-    # Retrieve data in baseline window: (n_epochs, n_ch, n_freqs, n_times_baseline)
-    # Note: tfr.data is (n_epochs, n_ch, n_freqs, n_times)
-    
-    # We need to slice indices carefully. MNE times are mapped.
-    # But b_start, b_end are passed as indices from validate_baseline_indices?
-    # validate_baseline_indices returns indices relative to times array.
-    
     data_baseline = tfr.data[..., int(b_start):int(b_end)]
-    # Avg over time
-    data_mean_time = np.mean(data_baseline, axis=-1) # (n_epochs, n_ch, n_freqs)
+    data_mean_time = np.mean(data_baseline, axis=-1)
     
     results = {}
     ch_names = tfr.info["ch_names"]
@@ -328,7 +318,6 @@ def _extract_baseline_power_features(
         if not np.any(freq_mask):
             continue
         
-        # Frequency-weighted mean across band bins (TFR frequencies are often log-spaced).
         band_freqs = np.asarray(freqs[freq_mask], dtype=float)
         if band_freqs.size >= 2 and np.all(np.isfinite(band_freqs)):
             w = np.gradient(band_freqs).astype(float)
@@ -336,12 +325,12 @@ def _extract_baseline_power_features(
         else:
             w = np.ones((band_freqs.size,), dtype=float)
 
-        p = data_mean_time[..., freq_mask]  # (n_epochs, n_ch, n_freqs_in_band)
+        p = data_mean_time[..., freq_mask]
         w3 = w[None, None, :]
         finite = np.isfinite(p) & np.isfinite(w3)
         num = np.nansum(np.where(finite, p * w3, 0.0), axis=-1)
         den = np.nansum(np.where(finite, w3, 0.0), axis=-1)
-        band_power = np.where(den > 0, num / den, np.nan)  # (n_epochs, n_ch)
+        band_power = np.where(den > 0, num / den, np.nan)
         
         for i, ch in enumerate(ch_names):
             col = NamingSchema.build("power", "baseline", band, "ch", "mean", channel=ch)
@@ -1955,9 +1944,7 @@ def avg_alltrials_to_avg_tfr(
     baseline: Tuple[Optional[float], Optional[float]],
     logger: Optional[logging.Logger] = None,
 ) -> "mne.time_frequency.AverageTFR":
-    # 1. Average raw power (Induced)
     tfr_avg = power.copy().average()
-    # 2. Apply baseline to average
     apply_baseline_and_crop(tfr_avg, baseline=baseline, mode="logratio", logger=logger)
     return tfr_avg
 
@@ -1968,9 +1955,7 @@ def avg_by_mask_to_avg_tfr(
     baseline: Tuple[Optional[float], Optional[float]],
     logger: Optional[logging.Logger] = None,
 ) -> Optional["mne.time_frequency.AverageTFR"]:
-    # 1. Subset and Average raw power (Induced)
     t = power.copy()[mask].average()
-    # 2. Apply baseline to average
     apply_baseline_and_crop(t, baseline=baseline, mode="logratio", logger=logger)
     return t
 
@@ -2085,26 +2070,6 @@ def clip_time_range(times: np.ndarray, tmin_req: float, tmax_req: float) -> Opti
         return None
     
     return tmin_clip, tmax_clip
-
-
-def create_time_windows_fixed_size(tmin_start: float, tmax_clip: float, window_size_ms: float, config: Optional[Any] = None) -> Tuple[np.ndarray, np.ndarray]:
-    return build_time_windows_fixed_size_clamped(
-        tmin_start,
-        tmax_clip,
-        window_size_ms / 1000.0,
-    )
-
-
-def create_time_windows_fixed_count(tmin_clip: float, tmax_clip: float, window_count: int) -> Tuple[np.ndarray, np.ndarray]:
-    return build_time_windows_fixed_count(tmin_clip, tmax_clip, window_count)
-
-
-def create_time_mask_strict(times: np.ndarray, tmin: float, tmax: float) -> np.ndarray:
-    return time_mask_strict(times, tmin, tmax)
-
-
-def create_time_mask_loose(times: np.ndarray, tmin: float, tmax: float, logger: Optional[logging.Logger] = None) -> np.ndarray:
-    return time_mask_loose(times, tmin, tmax, logger=logger)
 
 
 def clip_time_window(
@@ -2330,7 +2295,6 @@ def extract_roi_contrast_data(
     if not (pain_mask.any() and non_mask.any()):
         return None
     
-    # These functions perform: Average Raw -> Apply Baseline (Induced Power)
     a_p = avg_by_mask_to_avg_tfr(power, pain_mask, baseline=baseline, logger=logger)
     a_n = avg_by_mask_to_avg_tfr(power, non_mask, baseline=baseline, logger=logger)
     
@@ -2363,15 +2327,13 @@ def extract_band_power(
     if not np.any(freq_mask_indices):
         return None
     
-    # Integrate power over frequency (accounts for non-uniform spacing) then
-    # average over the selected time window to avoid bandwidth bias.
     band_data = tfr_data[:, :, freq_mask_indices, :][:, :, :, time_mask_array]
     freqs_band = freqs[freq_mask_indices]
     if freqs_band.size < 2:
         return None
     
-    band_power_freq_int = np.trapz(band_data, freqs_band, axis=2)  # (epochs, channels, times)
-    return band_power_freq_int.mean(axis=2)  # (epochs, channels)
+    band_power_freq_int = np.trapz(band_data, freqs_band, axis=2)
+    return band_power_freq_int.mean(axis=2)
 
 
 def process_temporal_bin(
@@ -2409,13 +2371,21 @@ def process_temporal_bin(
 
 def compute_itpc_map(tfr_data: np.ndarray, logger: Optional[logging.Logger] = None) -> np.ndarray:
     """
-    Compute inter-trial phase coherence (ITPC) map from complex TFR data using
-    memory-efficient accumulation (avoids allocating full unit-phase array).
-    Args:
-        tfr_data: array with shape (epochs, channels, freqs, times) containing COMPLEX values
-        logger: optional logger for warnings
-    Returns:
-        itpc_map: array with shape (channels, freqs, times) with values in [0, 1]
+    Compute inter-trial phase coherence (ITPC) map from complex TFR data.
+    
+    Uses memory-efficient accumulation to avoid allocating full unit-phase array.
+    
+    Parameters
+    ----------
+    tfr_data : np.ndarray
+        Array with shape (epochs, channels, freqs, times) containing complex values
+    logger : Optional[logging.Logger]
+        Optional logger for warnings
+        
+    Returns
+    -------
+    np.ndarray
+        ITPC map with shape (channels, freqs, times) with values in [0, 1]
     """
     logger = _get_logger(logger)
     if tfr_data.ndim != 4:
@@ -2430,7 +2400,6 @@ def compute_itpc_map(tfr_data: np.ndarray, logger: Optional[logging.Logger] = No
 
     for epoch_idx in range(n_epochs):
         epoch = tfr_data[epoch_idx]
-        # Normalize to unit magnitude to extract phase without extra angle call
         amp = np.abs(epoch) + _EPSILON_MIN_VALUE
         unit = epoch / amp
         sum_real += unit.real
@@ -2470,15 +2439,12 @@ def apply_baseline_and_average(
     baseline: Tuple[Optional[float], Optional[float]],
     logger: Optional[logging.Logger] = None
 ):
-    # Average first (if epochs) to compute Induced Power
     tfr_copy = tfr.copy()
     if isinstance(tfr_copy, mne.time_frequency.EpochsTFR):
         tfr_avg = tfr_copy.average()
     else:
         tfr_avg = tfr_copy
         
-    # Then apply baseline to the average
-    # Note: 'logratio' here computes 10*log10(avg_power / avg_baseline)
     baseline_used = apply_baseline_and_crop(
         tfr_avg, baseline=baseline, mode="logratio", logger=logger
     )
@@ -2518,10 +2484,6 @@ __all__ = [
     "align_paired_avg_tfrs",
     "clip_time_window",
     "clip_time_range",
-    "create_time_windows_fixed_size",
-    "create_time_windows_fixed_count",
-    "create_time_mask_strict",
-    "create_time_mask_loose",
     # TFR data extraction utilities
     "extract_trial_band_power",
     "extract_band_channel_means",

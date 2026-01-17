@@ -7,42 +7,41 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.plotting.config import get_plot_config
+from eeg_pipeline.infra.logging import get_subject_logger
+from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.plotting.behavioral.scatter.core import (
     create_roi_scatter_plots,
     setup_scatter_context,
 )
-from eeg_pipeline.infra.paths import deriv_features_path
-from eeg_pipeline.infra.tsv import read_table
-from eeg_pipeline.utils.data import load_precomputed_correlations
-from eeg_pipeline.infra.logging import get_subject_logger
+from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.analysis.stats.correlation import format_correlation_method_label
 from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.data import load_precomputed_correlations
 
 
-def _extract_itpc_columns(features_df: pd.DataFrame, band: str, roi_channels: List[str]) -> List[str]:
+def _extract_itpc_columns(
+    features_df: pd.DataFrame, band: str, roi_channels: List[str]
+) -> List[str]:
     """Extract ITPC column names matching band and ROI channels."""
     roi_set = set(roi_channels)
     matching_columns = []
-    
+
     for col in features_df.columns:
         parsed = NamingSchema.parse(str(col))
         if not parsed.get("valid"):
             continue
-        
-        is_itpc_feature = (
+
+        if (
             parsed.get("group") == "itpc"
             and parsed.get("segment") == "active"
             and parsed.get("band") == band
             and parsed.get("scope") == "ch"
-        )
-        if not is_itpc_feature:
-            continue
-        
-        channel_identifier = parsed.get("identifier")
-        if channel_identifier in roi_set:
-            matching_columns.append(str(col))
-    
+        ):
+            channel_identifier = parsed.get("identifier")
+            if channel_identifier in roi_set:
+                matching_columns.append(str(col))
+
     return matching_columns
 
 
@@ -56,15 +55,17 @@ def _extract_itpc_values(
     matching_columns = _extract_itpc_columns(features_df, band, roi_channels)
     if not matching_columns:
         return pd.Series(dtype=float), False
-    
+
     roi_data = features_df[matching_columns]
     numeric_data = roi_data.apply(pd.to_numeric, errors="coerce")
     averaged_values = numeric_data.mean(axis=1)
-    
+
     return averaged_values, True
 
 
-def _format_itpc_title(band_title: str, roi: str, target: str, metric: Optional[str]) -> str:
+def _format_itpc_title(
+    band_title: str, roi: str, target: str, metric: Optional[str]
+) -> str:
     return f"ITPC ({band_title}) vs {target} — {roi}"
 
 
@@ -100,13 +101,16 @@ def plot_itpc_roi_scatter(
     behavioral_config = get_plot_config(config).get_behavioral_config()
     default_rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
-    
-    raw_robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
-    robust_method = None
-    if raw_robust_method is not None:
-        normalized_method = str(raw_robust_method).strip().lower()
-        robust_method = normalized_method if normalized_method else None
-    
+
+    raw_robust_method = get_config_value(
+        config, "behavior_analysis.robust_correlation", None
+    )
+    robust_method = (
+        str(raw_robust_method).strip().lower() if raw_robust_method else None
+    )
+    if robust_method == "":
+        robust_method = None
+
     correlation_method = "spearman" if use_spearman else "pearson"
     method_label = format_correlation_method_label(correlation_method, robust_method)
 
@@ -117,12 +121,14 @@ def plot_itpc_roi_scatter(
     features_dir = deriv_features_path(deriv_root, subject)
     itpc_path = features_dir / "itpc" / "features_itpc.tsv"
     if not itpc_path.exists():
-        itpc_path = features_dir / "features_itpc.tsv"
-    itpc_df = read_table(itpc_path) if itpc_path.exists() else None
-    if itpc_df is None or itpc_df.empty:
         logger.warning("ITPC features not found at %s", itpc_path)
         return {"significant": [], "all": []}
-    
+
+    itpc_df = read_table(itpc_path)
+    if itpc_df.empty:
+        logger.warning("ITPC features file is empty at %s", itpc_path)
+        return {"significant": [], "all": []}
+
     num_itpc_samples = len(itpc_df)
     num_target_samples = len(data.rating_series)
     if num_itpc_samples != num_target_samples:
@@ -151,8 +157,10 @@ def plot_itpc_roi_scatter(
     )
 
     frequency_bands_config = config.get("frequency_bands", {})
-    bands_to_use = config.get("power.bands_to_use") or list(frequency_bands_config.keys())
-    
+    bands_to_use = config.get("power.bands_to_use") or list(
+        frequency_bands_config.keys()
+    )
+
     results = create_roi_scatter_plots(
         data=data,
         feature_type="itpc",

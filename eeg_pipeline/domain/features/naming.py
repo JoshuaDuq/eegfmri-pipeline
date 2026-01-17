@@ -8,101 +8,19 @@ from this module.
 
 Provides:
 - NamingSchema: Builder class for structured names (group.segment.band.scope.stat)
-- FeatureMetadata: Dataclass for structured metadata
-- DOMAINS, TIME_LABELS, STATISTICS: Standard constants
 - generate_manifest, save_manifest: Manifest generation
 - save_features_organized: I/O helpers
-- get_fine_time_bins, get_coarse_time_bins: Temporal bin generators
-- parse_feature_name: Parse NamingSchema v2 format
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import numpy as np
 import pandas as pd
-
-
-###################################################################
-# Constants
-###################################################################
-
-
-DOMAINS = {
-    "power": "power",
-    "spectral": "spectral",
-    "aper": "aper",
-    "erp": "erp",
-    "erds": "erds",
-    "ratio": "ratio",
-    "asym": "asym",
-    "conn": "conn",
-    "itpc": "itpc",
-    "pac": "pac",
-    "comp": "comp",
-    "bursts": "bursts",
-    "qual": "qual",
-}
-
-TIME_LABELS = {
-    "baseline": "baseline",
-    "early": "early",
-    "mid": "mid",
-    "late": "late",
-    "full": "full",
-    "t1": "t1",
-    "t2": "t2",
-    "t3": "t3",
-    "t4": "t4",
-    "t5": "t5",
-    "t6": "t6",
-    "t7": "t7",
-}
-
-STATISTICS = {
-    "mean": "mean",
-    "std": "std",
-    "max": "max",
-    "min": "min",
-    "cv": "cv",
-    "zscore": "zscore",
-    "percent": "percent",
-    "logratio": "logratio",
-    "slope": "slope",
-    "diff": "diff",
-    "onset": "onset",
-    "peak": "peak",
-    "latency": "latency",
-    "latency_diff": "latency_diff",
-    "duration": "duration",
-    "auc": "auc",
-    "count": "count",
-    "ptp": "ptp",
-}
-
-
-###################################################################
-# Data Classes
-###################################################################
-
-
-@dataclass
-class FeatureMetadata:
-    """Metadata for a single feature (NamingSchema v2 format)."""
-
-    name: str
-    group: str
-    segment: str
-    band: str
-    scope: str
-    identifier: Optional[str] = None
-    statistic: Optional[str] = None
-    description: Optional[str] = None
 
 
 ###################################################################
@@ -175,122 +93,13 @@ class NamingSchema:
 
         if scope == "global":
             result["stat"] = "_".join(parts[scope_idx + 1:])
-        elif scope in ("ch", "chpair", "roi"):
+        else:
             if scope_idx + 1 >= len(parts):
                 return {"valid": False}
             result["identifier"] = parts[scope_idx + 1]
             result["stat"] = "_".join(parts[scope_idx + 2:])
-        else:
-            return {"valid": False}
 
         return result
-
-
-###################################################################
-# Time Bin Generators
-###################################################################
-
-
-def get_fine_time_bins(
-    active_start: float = 3.0,
-    active_end: float = 10.5,
-    n_bins: int = 7,
-) -> List[Dict[str, Any]]:
-    """Generate fine temporal bins for HRF modeling."""
-    if active_end <= active_start:
-        raise ValueError("active_end must be greater than active_start")
-    if n_bins < 1:
-        raise ValueError("n_bins must be at least 1")
-
-    bin_duration = (active_end - active_start) / n_bins
-    bins = []
-    for bin_index in range(n_bins):
-        bin_start = active_start + bin_index * bin_duration
-        bin_end = bin_start + bin_duration
-        bins.append(
-            {
-                "start": round(bin_start, 2),
-                "end": round(bin_end, 2),
-                "label": f"t{bin_index + 1}",
-            }
-        )
-    return bins
-
-
-def get_coarse_time_bins() -> List[Dict[str, Any]]:
-    """Get standard coarse temporal bins (early, mid, late)."""
-    return [
-        {"start": 3.0, "end": 5.0, "label": "early"},
-        {"start": 5.0, "end": 7.5, "label": "mid"},
-        {"start": 7.5, "end": 10.5, "label": "late"},
-    ]
-
-
-def get_all_time_bins(include_fine: bool = True) -> List[Dict[str, Any]]:
-    """Get all temporal bins (coarse + optionally fine)."""
-    bins = get_coarse_time_bins()
-    if include_fine:
-        bins.extend(get_fine_time_bins())
-    return bins
-
-
-###################################################################
-# Structured Metadata Parsing
-###################################################################
-
-
-def parse_feature_name(name: str) -> FeatureMetadata:
-    """Parse a feature name (NamingSchema v2)."""
-    parts = name.split("_")
-
-    if len(parts) < 5:
-        return FeatureMetadata(
-            name=name,
-            group="unknown",
-            segment="unknown",
-            band="unknown",
-            scope="unknown",
-        )
-
-    group = parts[0]
-    segment = parts[1]
-    band = parts[2]
-    scope = parts[3]
-
-    if scope == "global":
-        identifier = None
-        statistic = "_".join(parts[4:])
-    elif scope in ("ch", "chpair", "roi"):
-        if len(parts) >= 6:
-            identifier = parts[4]
-            statistic = "_".join(parts[5:])
-        else:
-            identifier = parts[4] if len(parts) > 4 else "unknown"
-            statistic = "unknown"
-    else:
-        statistic = parts[-1]
-        return FeatureMetadata(
-            name=name,
-            group=group,
-            segment="unknown",
-            band="unknown",
-            scope="unknown",
-            statistic=statistic,
-        )
-
-    scope_description = identifier if identifier else scope
-    description = f"{group} feature on {segment} in {band} band ({scope_description})"
-
-    return FeatureMetadata(
-        name=name,
-        group=group,
-        segment=segment,
-        band=band,
-        scope=scope,
-        identifier=identifier,
-        statistic=statistic,
-        description=description,
-    )
 
 
 ###################################################################
@@ -353,20 +162,19 @@ def generate_manifest(
     columns_by_segment: Dict[str, List[str]] = {}
 
     for column_name in feature_columns:
-        feature_name = str(column_name)
-        parsed = NamingSchema.parse(feature_name)
-        feature_entry = _create_feature_entry(feature_name, parsed)
+        parsed = NamingSchema.parse(column_name)
+        feature_entry = _create_feature_entry(column_name, parsed)
         features.append(feature_entry)
 
         group = feature_entry.get("group", "unknown")
         band = feature_entry.get("band", "unknown")
         segment = feature_entry.get("segment", "unknown")
 
-        columns_by_group.setdefault(group, []).append(feature_name)
+        columns_by_group.setdefault(group, []).append(column_name)
         if band and band != "unknown":
-            columns_by_band.setdefault(band, []).append(feature_name)
+            columns_by_band.setdefault(band, []).append(column_name)
         if segment and segment != "unknown":
-            columns_by_segment.setdefault(segment, []).append(feature_name)
+            columns_by_segment.setdefault(segment, []).append(column_name)
 
     provenance = infer_feature_provenance(
         feature_columns=feature_columns,
@@ -390,8 +198,11 @@ def generate_manifest(
 
 
 def _config_get(config: Any, key: str, default: Any = None) -> Any:
+    """Extract value from config object (dict or object with get method)."""
     if config is None:
         return default
+    if isinstance(config, dict):
+        return config.get(key, default)
     getter = getattr(config, "get", None)
     if callable(getter):
         try:
@@ -399,12 +210,8 @@ def _config_get(config: Any, key: str, default: Any = None) -> Any:
         except TypeError:
             try:
                 return getter(key)
-            except Exception:
+            except (TypeError, AttributeError):
                 return default
-        except Exception:
-            return default
-    if isinstance(config, dict):
-        return config.get(key, default)
     return default
 
 
@@ -417,10 +224,10 @@ def infer_feature_provenance(
     """Infer per-column statistical validity properties for downstream analyses."""
     df_attrs = dict(df_attrs or {})
 
-    analysis_mode = str(_config_get(config, "feature_engineering.analysis_mode", "group_stats") or "group_stats").strip().lower()
-    itpc_method = str(_config_get(config, "feature_engineering.itpc.method", "fold_global") or "fold_global").strip().lower()
-    conn_granularity_cfg = str(_config_get(config, "feature_engineering.connectivity.granularity", "trial") or "trial").strip().lower()
-    conn_phase_estimator_cfg = str(_config_get(config, "feature_engineering.connectivity.phase_estimator", "within_epoch") or "within_epoch").strip().lower()
+    analysis_mode = str(_config_get(config, "feature_engineering.analysis_mode", "group_stats")).strip().lower()
+    itpc_method = str(_config_get(config, "feature_engineering.itpc.method", "fold_global")).strip().lower()
+    conn_granularity_cfg = str(_config_get(config, "feature_engineering.connectivity.granularity", "trial")).strip().lower()
+    conn_phase_estimator_cfg = str(_config_get(config, "feature_engineering.connectivity.phase_estimator", "within_epoch")).strip().lower()
 
     conn_granularity = str(df_attrs.get("feature_granularity") or conn_granularity_cfg).strip().lower()
     broadcast_warning = df_attrs.get("broadcast_warning")
@@ -467,9 +274,9 @@ def infer_feature_provenance(
             reason = "Connectivity is computed within-epoch per trial." if trialwise_valid else "Connectivity is aggregated across epochs and broadcast."
             return {
                 "analysis_unit": analysis_unit,
-                "broadcasted": bool(broadcasted),
-                "cross_trial_dependence": bool(broadcasted),
-                "trialwise_valid": bool(trialwise_valid),
+                "broadcasted": broadcasted,
+                "cross_trial_dependence": broadcasted,
+                "trialwise_valid": trialwise_valid,
                 "reason": reason,
             }
 
@@ -483,9 +290,9 @@ def infer_feature_provenance(
 
     columns: Dict[str, Any] = {}
     for name in feature_columns:
-        parsed = NamingSchema.parse(str(name))
+        parsed = NamingSchema.parse(name)
         group = parsed.get("group") if parsed.get("valid") else "unknown"
-        columns[str(name)] = group_props(str(group))
+        columns[name] = group_props(group)
 
     out: Dict[str, Any] = {
         "analysis_mode": analysis_mode,
@@ -535,7 +342,7 @@ def save_features_organized(
         subject=subject,
         task=task,
         qc=qc,
-        df_attrs=dict(getattr(df, "attrs", {}) or {}),
+        df_attrs=dict(getattr(df, "attrs", None) or {}),
     )
     manifest_path = subject_dir / f"{base_filename}_features_manifest.json"
     save_manifest(manifest, manifest_path)
@@ -552,15 +359,7 @@ def save_features_organized(
 
 
 __all__ = [
-    "DOMAINS",
-    "TIME_LABELS",
-    "STATISTICS",
-    "FeatureMetadata",
     "NamingSchema",
-    "get_fine_time_bins",
-    "get_coarse_time_bins",
-    "get_all_time_bins",
-    "parse_feature_name",
     "generate_manifest",
     "save_manifest",
     "save_features_organized",

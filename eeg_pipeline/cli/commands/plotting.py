@@ -116,9 +116,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--savefig-dpi", type=int, default=None, help="Savefig DPI (default from config)")
     parser.add_argument("--shared-colorbar", action="store_true", default=None, help="Use shared colorbar across subplots")
     parser.add_argument("--no-shared-colorbar", action="store_false", dest="shared_colorbar", help="Disable shared colorbar")
-    # Backwards-compatible aliases (ITPC-specific naming).
-    parser.add_argument("--itpc-shared-colorbar", action="store_true", default=None, dest="shared_colorbar", help=argparse.SUPPRESS)
-    parser.add_argument("--no-itpc-shared-colorbar", action="store_false", dest="shared_colorbar", help=argparse.SUPPRESS)
 
     defaults_overrides = parser.add_argument_group("Plot defaults & styling overrides")
     defaults_overrides.add_argument("--bbox-inches", type=str, default=None, help="Matplotlib bbox_inches for savefig (default from config)")
@@ -193,9 +190,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="color_condition_2",
         help="Color for comparison condition 2 (value2/label2) (default from config)",
     )
-    # Backwards-compatible aliases (suppressed from help).
-    defaults_overrides.add_argument("--color-nonpain", type=str, default=None, dest="color_condition_1", help=argparse.SUPPRESS)
-    defaults_overrides.add_argument("--color-pain", type=str, default=None, dest="color_condition_2", help=argparse.SUPPRESS)
     defaults_overrides.add_argument("--color-significant", type=str, default=None, help="Color for significant items (default from config)")
     defaults_overrides.add_argument("--color-nonsignificant", type=str, default=None, help="Color for non-significant items (default from config)")
     defaults_overrides.add_argument("--color-gray", type=str, default=None, help="Gray color (default from config)")
@@ -443,7 +437,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
 
     return parser
-
 
 
 def _resolve_plot_ids(args: argparse.Namespace) -> List[str]:
@@ -1233,8 +1226,6 @@ def _render_plots_without_per_plot_config(
 
 def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the plotting command."""
-    from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects
-
     if args.mode == "tfr":
         return _run_tfr_mode(args, subjects, config)
 

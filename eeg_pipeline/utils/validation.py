@@ -11,7 +11,6 @@ Usage
 from eeg_pipeline.utils.validation import (
     validate_epochs,
     validate_features,
-    validate_targets,
     ValidationResult,
 )
 
@@ -44,16 +43,12 @@ DEFAULT_SAMPLING_FREQ = 500
 DEFAULT_MAX_AMPLITUDE_UV = 500
 DEFAULT_MIN_ROWS = 10
 DEFAULT_MAX_NAN_FRACTION = 0.1
-DEFAULT_MIN_SAMPLES = 10
 DEFAULT_PERCENT_THRESHOLD = 5.0
 CRITICAL_NAN_FRACTION = 0.01
 WARNING_EXTREME_FRACTION = 0.1
-CRITICAL_NAN_FRACTION_CONNECTIVITY = 0.1
 ZERO_VARIANCE_THRESHOLD = 1e-12
-ZERO_VARIANCE_TARGET_THRESHOLD = 1e-10
 SAMPLING_FREQ_TOLERANCE = 1.0
 SMALL_EPOCH_COUNT = 50
-MIN_UNIQUE_VALUES_WARNING = 3
 VOLTS_TO_MICROVOLTS = 1e6
 
 
@@ -426,252 +421,6 @@ def validate_features(
 
 
 ###################################################################
-# Target Validation
-###################################################################
-
-
-def _convert_to_array(targets: Any) -> np.ndarray:
-    """Convert targets to numpy array."""
-    if isinstance(targets, pd.Series):
-        return targets.values
-    return np.asarray(targets)
-
-
-def _check_targets_empty(values: np.ndarray) -> Optional[str]:
-    """Check if targets array is empty."""
-    if len(values) == 0:
-        return "Targets is empty"
-    return None
-
-
-def _check_valid_sample_count(n_valid: int, min_samples: int) -> Optional[str]:
-    """Check if valid sample count meets minimum."""
-    if n_valid < min_samples:
-        return f"Insufficient valid samples: {n_valid} < {min_samples}"
-    return None
-
-
-def _check_all_nan(n_valid: int) -> Optional[str]:
-    """Check if all values are NaN."""
-    if n_valid == 0:
-        return "All target values are NaN"
-    return None
-
-
-def _check_value_range(
-    valid_values: np.ndarray, expected_range: Optional[tuple[float, float]]
-) -> Optional[str]:
-    """Check if values are within expected range."""
-    if expected_range is None:
-        return None
-    min_val, max_val = expected_range
-    out_of_range = int(np.sum((valid_values < min_val) | (valid_values > max_val)))
-    if out_of_range > 0:
-        return f"{out_of_range} values outside expected range [{min_val}, {max_val}]"
-    return None
-
-
-def _check_target_variance(valid_values: np.ndarray) -> Optional[str]:
-    """Check if target has sufficient variance."""
-    variance = float(np.var(valid_values))
-    if variance < ZERO_VARIANCE_TARGET_THRESHOLD:
-        return "Target has zero variance (all identical values)"
-    return None
-
-
-def _check_unique_value_count(valid_values: np.ndarray) -> Optional[str]:
-    """Check for suspiciously few unique values."""
-    unique_count = len(np.unique(valid_values))
-    if unique_count <= MIN_UNIQUE_VALUES_WARNING:
-        return f"Target has only {unique_count} unique values"
-    return None
-
-
-def validate_targets(
-    targets: pd.Series | np.ndarray,
-    min_samples: int = DEFAULT_MIN_SAMPLES,
-    expected_range: Optional[tuple[float, float]] = None,
-    logger: Optional[logging.Logger] = None,
-) -> ValidationResult:
-    """
-    Validate target variable (e.g., VAS ratings).
-
-    Checks:
-    - Not None/empty
-    - Minimum sample count
-    - Values within expected range
-    - Sufficient variance
-    - Not all NaN
-
-    Parameters
-    ----------
-    targets : pd.Series or np.ndarray
-        Target variable
-    min_samples : int
-        Minimum required samples
-    expected_range : tuple, optional
-        (min_value, max_value) expected range
-    logger : logging.Logger, optional
-        Logger for warnings
-
-    Returns
-    -------
-    ValidationResult
-        Validation outcome
-    """
-    logger = _get_logger(logger)
-    issues = []
-    warnings = []
-
-    if targets is None:
-        return ValidationResult.failure(["Targets is None"])
-
-    values = _convert_to_array(targets)
-
-    empty_issue = _check_targets_empty(values)
-    if empty_issue:
-        return ValidationResult.failure([empty_issue])
-
-    valid_mask = np.isfinite(values)
-    n_valid = int(np.sum(valid_mask))
-
-    sample_issue = _check_valid_sample_count(n_valid, min_samples)
-    if sample_issue:
-        issues.append(sample_issue)
-
-    all_nan_issue = _check_all_nan(n_valid)
-    if all_nan_issue:
-        return ValidationResult.failure([all_nan_issue])
-
-    valid_values = values[valid_mask]
-
-    range_warning = _check_value_range(valid_values, expected_range)
-    if range_warning:
-        warnings.append(range_warning)
-
-    variance_issue = _check_target_variance(valid_values)
-    if variance_issue:
-        issues.append(variance_issue)
-
-    unique_warning = _check_unique_value_count(valid_values)
-    if unique_warning:
-        warnings.append(unique_warning)
-
-    valid = len(issues) == 0
-    metadata = {
-        "n_total": len(values),
-        "n_valid": n_valid,
-        "nan_fraction": float(1 - n_valid / len(values)),
-        "mean": float(np.mean(valid_values)),
-        "std": float(np.std(valid_values)),
-        "min": float(np.min(valid_values)),
-        "max": float(np.max(valid_values)),
-    }
-
-    result = ValidationResult(
-        valid=valid,
-        issues=issues,
-        warnings=warnings,
-        metadata=metadata,
-    )
-
-    if not valid or warnings:
-        result.log_issues(logger)
-
-    return result
-
-
-###################################################################
-# Connectivity Validation
-###################################################################
-
-
-def _check_connectivity_shape(
-    data: np.ndarray, n_epochs: int, n_channels: int
-) -> list[str]:
-    """Check connectivity data shape matches expected dimensions."""
-    issues = []
-    if data.ndim != 3:
-        issues.append(
-            f"Expected 3D array (epochs, channels, times), got {data.ndim}D"
-        )
-    else:
-        if data.shape[0] != n_epochs:
-            issues.append(f"Epoch count mismatch: {data.shape[0]} != {n_epochs}")
-        if data.shape[1] != n_channels:
-            issues.append(
-                f"Channel count mismatch: {data.shape[1]} != {n_channels}"
-            )
-    return issues
-
-
-def _check_connectivity_nan(data: np.ndarray) -> tuple[list[str], list[str]]:
-    """Check for NaN/Inf in connectivity data."""
-    issues = []
-    warnings = []
-    nan_fraction = float(np.mean(~np.isfinite(data)))
-    if nan_fraction > 0:
-        if nan_fraction > CRITICAL_NAN_FRACTION_CONNECTIVITY:
-            issues.append(f"Data contains {nan_fraction:.1%} NaN/Inf values")
-        else:
-            warnings.append(f"Data contains {nan_fraction:.2%} NaN/Inf values")
-    return issues, warnings
-
-
-def validate_connectivity_input(
-    data: np.ndarray,
-    n_epochs: int,
-    n_channels: int,
-    logger: Optional[logging.Logger] = None,
-) -> ValidationResult:
-    """
-    Validate input for connectivity computation.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        Data array (epochs, channels, times)
-    n_epochs : int
-        Expected number of epochs
-    n_channels : int
-        Expected number of channels
-    logger : logging.Logger, optional
-        Logger
-
-    Returns
-    -------
-    ValidationResult
-        Validation outcome
-    """
-    _get_logger(logger)
-    issues = []
-    warnings = []
-
-    if data is None:
-        return ValidationResult.failure(["Data is None"])
-
-    shape_issues = _check_connectivity_shape(data, n_epochs, n_channels)
-    issues.extend(shape_issues)
-
-    nan_issues, nan_warnings = _check_connectivity_nan(data)
-    issues.extend(nan_issues)
-    warnings.extend(nan_warnings)
-
-    valid = len(issues) == 0
-    metadata = {
-        "shape": data.shape,
-        "nan_fraction": float(np.mean(~np.isfinite(data))),
-    }
-
-    return ValidationResult(
-        valid=valid,
-        issues=issues,
-        warnings=warnings,
-        metadata=metadata,
-    )
-
-
-###################################################################
 # Data Format Helpers
 ###################################################################
 
@@ -682,18 +431,11 @@ def _get_percent_threshold(
     """Extract percent threshold from config or use default."""
     if percent_threshold is not None:
         return percent_threshold
-
-    if config and hasattr(config, "get"):
-        return float(
-            get_config_value(
-                config, "io.constants.percent_threshold", DEFAULT_PERCENT_THRESHOLD
-            )
+    return float(
+        get_config_value(
+            config, "io.constants.percent_threshold", DEFAULT_PERCENT_THRESHOLD
         )
-
-    if config and hasattr(config, "io") and hasattr(config.io, "constants"):
-        return config.io.constants.percent_threshold
-
-    return DEFAULT_PERCENT_THRESHOLD
+    )
 
 
 def detect_data_format(
@@ -800,21 +542,6 @@ def ensure_aligned_lengths(
 ###################################################################
 
 
-def validate_epochs_for_plotting(
-    epochs: mne.Epochs, logger: Optional[logging.Logger] = None
-) -> bool:
-    """Check if epochs are valid for plotting."""
-    if epochs is None:
-        if logger:
-            logger.warning("Epochs object is None")
-        return False
-    if len(epochs) == 0:
-        if logger:
-            logger.warning("Epochs object is empty")
-        return False
-    return True
-
-
 def require_epochs_tfr(
     tfr: Any, context_msg: str, logger: Optional[logging.Logger] = None
 ) -> bool:
@@ -823,22 +550,6 @@ def require_epochs_tfr(
         if logger:
             logger.warning(f"{context_msg} requires EpochsTFR; skipping.")
         return False
-    return True
-
-
-def validate_predictor_file(
-    df: pd.DataFrame, predictor_type: str, target: str, logger: logging.Logger
-) -> bool:
-    """Validate predictor file columns."""
-    if predictor_type == "Channel":
-        required_columns = {"channel", "band"}
-        missing_columns = required_columns - set(df.columns)
-        if missing_columns:
-            logger.debug(
-                f"Skipping combined file for target '{target}' - missing required columns "
-                f"(expected 'channel' and 'band')"
-            )
-            return False
     return True
 
 

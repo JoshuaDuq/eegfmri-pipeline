@@ -110,7 +110,6 @@ const (
 	StepPreprocessingFiltering
 	StepPreprocessingICA
 	StepPreprocessingEpochs
-	StepReviewExecute
 	wizardStepCount // Sentinel for bounds checking
 )
 
@@ -134,7 +133,6 @@ var wizardStepNames = [wizardStepCount]string{
 	StepPreprocessingFiltering:    "Filtering",
 	StepPreprocessingICA:          "ICA",
 	StepPreprocessingEpochs:       "Epochs",
-	StepReviewExecute:             "", // Deprecated - no longer used
 }
 
 // String returns the display name for the wizard step
@@ -177,24 +175,12 @@ type SubjectStatus struct {
 
 // RequiresEpochs returns true if the pipeline needs epoched data
 func (p Pipeline) RequiresEpochs() bool {
-	switch p {
-	case PipelineFeatures:
-		return true
-	case PipelinePreprocessing, PipelineRawToBIDS, PipelineBehavior, PipelineML, PipelinePlotting, PipelineMergePsychoPyData, PipelineFmri:
-		return false
-	default:
-		return false
-	}
+	return p == PipelineFeatures
 }
 
 // RequiresFeatures returns true if the pipeline needs extracted features
 func (p Pipeline) RequiresFeatures() bool {
-	switch p {
-	case PipelineBehavior, PipelineML:
-		return true
-	default:
-		return false
-	}
+	return p == PipelineBehavior || p == PipelineML
 }
 
 // ValidateSubject checks if a subject meets the pipeline's data requirements.
@@ -224,7 +210,6 @@ func (p Pipeline) GetDataSource() string {
 		return "all"
 	case PipelineFmri:
 		return "bids_fmri"
-	default:
-		return "epochs"
 	}
+	return "epochs"
 }

@@ -15,7 +15,7 @@ import datetime
 
 import numpy as np
 import pandas as pd
-from scipy.stats import gaussian_kde, uniform
+from scipy.stats import gaussian_kde
 from scipy import stats
 
 from .fdr import fdr_bh
@@ -68,19 +68,23 @@ def compute_correlation_vmax(data: Union[np.ndarray, List[Dict]]) -> float:
     
     all_corrs = []
     for bd in data:
-        sig_mask = bd.get('significant_mask', np.ones(len(bd['correlations']), dtype=bool))
-        sig_corrs = bd['correlations'][sig_mask]
-        all_corrs.extend(sig_corrs[np.isfinite(sig_corrs)])
+        correlations = bd['correlations']
+        sig_mask = bd.get('significant_mask', np.ones(len(correlations), dtype=bool))
+        sig_corrs = correlations[sig_mask]
+        finite_sig = sig_corrs[np.isfinite(sig_corrs)]
+        if len(finite_sig) > 0:
+            all_corrs.extend(finite_sig)
     
     if not all_corrs:
-        all_corrs = []
         for bd in data:
-            all_corrs.extend(bd['correlations'][np.isfinite(bd['correlations'])])
+            correlations = bd['correlations']
+            finite_corrs = correlations[np.isfinite(correlations)]
+            all_corrs.extend(finite_corrs)
     
-    if all_corrs:
-        return max(abs(np.min(all_corrs)), abs(np.max(all_corrs)))
+    if not all_corrs:
+        return DEFAULT_CORRELATION_VMAX
     
-    return DEFAULT_CORRELATION_VMAX
+    return max(abs(np.min(all_corrs)), abs(np.max(all_corrs)))
 
 
 ###################################################################
@@ -111,7 +115,6 @@ def compute_permutation_distribution_data(
     n_extreme = np.sum(np.abs(null) >= np.abs(observed_statistic))
     p_value = (n_extreme + 1) / (len(null) + 1)
     
-    # Percentiles for CI bands
     percentiles = [2.5, 5, 95, 97.5]
     pct_values = {f"p{p}": float(np.percentile(null, p)) for p in percentiles}
     
@@ -147,7 +150,6 @@ def compute_cluster_mass_histogram_data(
     if len(null) == 0:
         return {"error": "Empty null distribution"}
     
-    # Combined range for consistent binning
     all_masses = np.concatenate([obs, null])
     bin_edges = np.linspace(all_masses.min(), all_masses.max(), n_bins + 1)
     
@@ -159,11 +161,8 @@ def compute_cluster_mass_histogram_data(
     
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     
-    # Critical threshold (95th percentile of null)
     threshold_95 = float(np.percentile(null, 95))
     threshold_99 = float(np.percentile(null, 99))
-    
-    # Count significant clusters
     n_sig_95 = int(np.sum(obs > threshold_95)) if len(obs) > 0 else 0
     n_sig_99 = int(np.sum(obs > threshold_99)) if len(obs) > 0 else 0
     
@@ -178,9 +177,9 @@ def compute_cluster_mass_histogram_data(
         "n_significant_95": n_sig_95,
         "n_significant_99": n_sig_99,
         "observed_masses": (
-            obs.tolist()
-            if len(obs) < MAX_OBSERVED_MASSES_TO_RETURN
-            else obs[:MAX_OBSERVED_MASSES_TO_RETURN].tolist()
+            obs[:MAX_OBSERVED_MASSES_TO_RETURN].tolist()
+            if len(obs) >= MAX_OBSERVED_MASSES_TO_RETURN
+            else obs.tolist()
         ),
     }
 
@@ -200,21 +199,13 @@ def compute_pp_plot_data(
     if len(p) == 0:
         return {"error": "No valid p-values"}
     
-    # Sort p-values
     p_sorted = np.sort(p)
     n = len(p_sorted)
-    
-    # Expected quantiles under uniform
     expected = (np.arange(1, n + 1) - 0.5) / n
     
-    # Kolmogorov-Smirnov test for uniformity
     ks_stat, ks_p = stats.kstest(p, 'uniform')
-    
-    # Compute confidence bands (Kolmogorov-Smirnov)
-    alpha = 0.05
     ks_critical_value = KS_CRITICAL_ALPHA_05 / np.sqrt(n)
     
-    # Subsample for plotting if too many points
     if n > n_points:
         idx = np.linspace(0, n - 1, n_points, dtype=int)
         expected_plot = expected[idx]
@@ -259,8 +250,6 @@ def compute_qq_plot_data(
     
     x_sorted = np.sort(x)
     n = len(x_sorted)
-    
-    # Theoretical quantiles
     probs = (np.arange(1, n + 1) - 0.5) / n
     
     if distribution == "t":
@@ -271,10 +260,8 @@ def compute_qq_plot_data(
         theoretical = stats.norm.ppf(probs)
         dist_name = "Normal"
     
-    # Fit line
     slope, intercept, r_value, _, _ = stats.linregress(theoretical, x_sorted)
     
-    # Shapiro-Wilk test
     if len(x) <= SHAPIRO_WILK_MAX_SAMPLE_SIZE:
         sw_stat, sw_p = stats.shapiro(x)
     else:
@@ -314,11 +301,9 @@ def compute_effect_size_distribution_data(
     if len(es) == 0:
         return {"error": "No valid effect sizes"}
     
-    # Histogram
     counts, bin_edges = np.histogram(es, bins=n_bins, density=True)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     
-    # Summary stats
     summary = {
         "mean": float(np.mean(es)),
         "median": float(np.median(es)),
@@ -340,7 +325,6 @@ def compute_effect_size_distribution_data(
         "summary": summary,
     }
     
-    # Add CI data if provided
     if ci_lows is not None and ci_highs is not None:
         ci_l = np.asarray(ci_lows).ravel()
         ci_h = np.asarray(ci_highs).ravel()
@@ -373,18 +357,15 @@ def compute_bootstrap_distribution_data(
     if len(boot) == 0:
         return {"error": "Empty bootstrap distribution"}
     
-    # Histogram
     counts, bin_edges = np.histogram(boot, bins=n_bins, density=True)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     
-    # CI bounds
     alpha = 1 - ci_level
     lower_percentile = 100 * alpha / 2
     upper_percentile = 100 * (1 - alpha / 2)
     ci_low = float(np.percentile(boot, lower_percentile))
     ci_high = float(np.percentile(boot, upper_percentile))
     
-    # Bias-corrected estimate
     boot_mean = float(np.mean(boot))
     bias = boot_mean - observed_statistic
     
@@ -426,7 +407,6 @@ def compute_raincloud_data(
             result["groups"][name] = {"error": "Insufficient data"}
             continue
         
-        # KDE
         try:
             kde = gaussian_kde(x)
             data_range = np.ptp(x)
@@ -439,7 +419,6 @@ def compute_raincloud_data(
             x_range = np.array([])
             kde_vals = np.array([])
         
-        # Summary stats
         result["groups"][name] = {
             "raw_points": x.tolist(),
             "kde_x": x_range.tolist(),
@@ -479,20 +458,17 @@ def compute_spaghetti_plot_data(
     n_subjects = len(subjects)
     n_conditions = len(conditions)
     
-    # Build matrix
     data_matrix = np.full((n_subjects, n_conditions), np.nan)
     for i, subj in enumerate(subjects):
         for j, cond in enumerate(conditions):
             if cond in subject_data[subj]:
                 data_matrix[i, j] = subject_data[subj][cond]
     
-    # Compute group means and CIs
     group_means = np.nanmean(data_matrix, axis=0)
     group_stds = np.nanstd(data_matrix, axis=0)
     n_per_condition = np.sum(~np.isnan(data_matrix), axis=0)
     group_sems = group_stds / np.sqrt(n_per_condition)
     
-    # Individual trajectories
     trajectories = []
     for i, subj in enumerate(subjects):
         traj = {
@@ -534,14 +510,12 @@ def compute_correction_comparison_data(
     if n == 0:
         return {"error": "No valid p-values"}
     
-    # Apply corrections
     bonf_adj, bonf_reject, bonf_alpha = compute_fwer_bonferroni(p, alpha)
     holm_adj, holm_reject = compute_fwer_holm(p, alpha)
     sidak_adj, sidak_reject, sidak_alpha = compute_fwer_sidak(p, alpha)
     fdr_adj = fdr_bh(p, alpha)
     fdr_reject = fdr_adj < alpha
     
-    # Count significant
     results = {
         "n_tests": n,
         "alpha": alpha,
@@ -574,7 +548,6 @@ def compute_correction_comparison_data(
         },
     }
     
-    # Sorted p-values for visualization
     sorted_idx = np.argsort(p)
     results["sorted_p"] = p[sorted_idx].tolist()
     results["sorted_idx"] = sorted_idx.tolist()
@@ -626,21 +599,16 @@ def format_provenance_text(provenance: Dict[str, Any], max_chars: int = 100) -> 
     
     if "sample_size" in provenance:
         parts.append(f"n={provenance['sample_size']}")
-    
     if "test_type" in provenance:
         parts.append(provenance["test_type"])
-    
     if "correction_method" in provenance:
         parts.append(f"corr={provenance['correction_method']}")
-    
     if "n_permutations" in provenance:
         parts.append(f"perm={provenance['n_permutations']}")
-    
     if "random_seed" in provenance:
         parts.append(f"seed={provenance['random_seed']}")
     
     text = " | ".join(parts)
-    
     if len(text) > max_chars:
         text = text[:max_chars - 3] + "..."
     
@@ -664,13 +632,10 @@ def save_stats_for_plot(
             json.dump(stats_dict, f, indent=2, default=str)
     elif output_format == "csv":
         stats_path = plot_path.with_suffix(".stats.csv")
-        flat_dict = {}
-        for k, v in stats_dict.items():
-            if isinstance(v, (list, np.ndarray)):
-                truncated_str = str(v)[:ARRAY_TRUNCATION_LENGTH]
-                flat_dict[k] = truncated_str
-            else:
-                flat_dict[k] = v
+        flat_dict = {
+            k: str(v)[:ARRAY_TRUNCATION_LENGTH] if isinstance(v, (list, np.ndarray)) else v
+            for k, v in stats_dict.items()
+        }
         pd.DataFrame([flat_dict]).to_csv(stats_path, index=False)
     else:
         raise ValueError(f"Unknown format: {output_format}")

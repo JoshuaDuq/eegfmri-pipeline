@@ -15,14 +15,14 @@ class EEGPipelineError(Exception):
     """Base exception for all EEG pipeline errors."""
 
     def __init__(self, message: str, context: Optional[dict] = None):
+        super().__init__(message)
         self.message = message
         self.context = context or {}
-        super().__init__(message)
 
     def __str__(self) -> str:
         if not self.context:
             return self.message
-        context_items = ", ".join(f"{key}={value}" for key, value in self.context.items())
+        context_items = ", ".join(f"{k}={v}" for k, v in self.context.items())
         return f"{self.message} [{context_items}]"
 
 
@@ -87,8 +87,8 @@ class SubjectProcessingError(EEGPipelineError):
         super().__init__(message, context)
         self.subject = subject
         self.step = step
-        self.cause = cause
         if cause is not None:
+            self.cause = cause
             self.__cause__ = cause
 
 

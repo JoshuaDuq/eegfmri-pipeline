@@ -14,7 +14,7 @@ from eeg_pipeline.plotting.config import PlotConfig, get_plot_config
 from eeg_pipeline.plotting.behavioral.builders import generate_correlation_scatter
 from eeg_pipeline.utils.analysis.stats import compute_kde_scale
 from eeg_pipeline.utils.data import _pick_first_column
-from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_dir, _load_events_df
+from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir, _load_events_df
 from eeg_pipeline.plotting.io.figures import (
     get_band_color,
     get_behavior_footer as _get_behavior_footer,
@@ -178,8 +178,8 @@ def _plot_temperature_rating_correlation(
     logger: logging.Logger,
 ) -> None:
     """Generate scatter plot of temperature vs rating with correlation statistics."""
-    correlation_method = plot_config.get_behavioral_config().get("method_spearman", "spearman")
-    rng_seed = plot_config.get_behavioral_config().get("default_rng_seed", 42)
+    behavioral_config = plot_config.get_behavioral_config()
+    rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = np.random.default_rng(rng_seed)
 
     output_path = output_dir / f"psychometrics_temp_vs_rating_sub-{subject}"
@@ -192,15 +192,8 @@ def _plot_temperature_rating_correlation(
         title_prefix=f"Psychometrics — Temperature vs Rating — sub-{subject}",
         band_color=get_band_color("alpha", config),
         output_path=output_path,
-        method_code=correlation_method,
-        Z_covars=None,
-        covar_names=None,
-        bootstrap_ci=0,
         rng=rng,
-        roi_channels=None,
         logger=logger,
-        annotated_stats=None,
-        annot_ci=None,
         config=config,
     )
 
@@ -216,9 +209,7 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
 
     plot_subdir = behavioral_config.get("plot_subdir", "behavior")
     plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
-    stats_dir = deriv_stats_path(deriv_root, subject)
     ensure_dir(plots_dir)
-    ensure_dir(stats_dir)
 
     events = _load_events_df(subject, task, config=config)
     if events is None or len(events) == 0:

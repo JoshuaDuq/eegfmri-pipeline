@@ -20,13 +20,11 @@ from scipy import stats
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.features.utils import get_numeric_feature_columns
-from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.utils.config.loader import get_config_value
 
 
 # Constants
 _MAD_NORMALIZATION_FACTOR = 0.6745
-_MIN_SAMPLES_FOR_NORMALITY_TEST = 3
 _MIN_SAMPLES_FOR_HISTOGRAM = 5
 _MAX_SAMPLES_FOR_SHAPIRO = 5000
 _NORMALITY_P_THRESHOLD = 0.05
@@ -146,7 +144,6 @@ def plot_feature_distribution_grid(
     *,
     feature_cols: Optional[List[str]] = None,
     n_cols: int = 4,
-    figsize_per_plot: Tuple[float, float] = (3, 2.5),
     max_features: int = 16,
     config: Any = None,
 ) -> plt.Figure:
@@ -154,7 +151,6 @@ def plot_feature_distribution_grid(
     plot_cfg = get_plot_config(config)
     cfg = get_config_value(config, "plotting.plots.features.quality.distribution", {})
     n_cols = cfg.get("n_cols", n_cols)
-    figsize_per_plot = tuple(cfg.get("figsize_per_plot", figsize_per_plot))
     max_features = cfg.get("max_features", max_features)
 
     if not _validate_dataframe(df):
@@ -224,7 +220,7 @@ def plot_outlier_trials_heatmap(
     *,
     z_threshold: float = 3.0,
     feature_cols: Optional[List[str]] = None,
-    figsize: Tuple[float, float] = (12, 8),
+    figsize: Optional[Tuple[float, float]] = None,
     max_features: int = 30,
     max_trials: int = 100,
     config: Any = None,
@@ -294,7 +290,7 @@ def plot_snr_distribution(
     *,
     snr_col: str = "snr_db",
     threshold_db: float = 3.0,
-    figsize: Tuple[float, float] = (8, 5),
+    figsize: Optional[Tuple[float, float]] = None,
     config: Any = None,
 ) -> plt.Figure:
     """Plot distribution of trial SNR values."""
@@ -373,7 +369,6 @@ def plot_reliability_summary(
     save_path: Path,
     *,
     icc_col: str = "icc",
-    feature_col: str = "feature",
     figsize: Tuple[float, float] = (10, 6),
     config: Any = None,
 ) -> plt.Figure:
@@ -412,7 +407,7 @@ def plot_reliability_summary(
         ax2.pie(counts_valid, labels=labels_valid, colors=colors_valid, autopct="%1.0f%%", startangle=90)
         ax2.set_title("Reliability Categories", fontsize=plot_cfg.font.title, fontweight="bold")
     else:
-        ax2.text(0.5, 0.5, "No data", ha="center", va="center")
+        ax2.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax2.transAxes)
     
     plt.tight_layout()
     save_fig(fig, save_path)
@@ -437,8 +432,7 @@ def _format_feature_issue(feature_name: str, info: Dict[str, Any]) -> Optional[s
     if not issue_parts:
         return None
     
-    issue_text = ", ".join(issue_parts)
-    return f"  {feature_name[:30]}: {issue_text}"
+    return f"  {feature_name[:30]}: {', '.join(issue_parts)}"
 
 
 def plot_quality_summary_dashboard(
@@ -516,16 +510,13 @@ def plot_quality_summary_dashboard(
     distribution_issues = quality_report.get("distribution_issues", {})
     if distribution_issues:
         issues_list = []
-        max_features_to_show = 10
-        for feature_name, info in list(distribution_issues.items())[:max_features_to_show]:
+        for feature_name, info in list(distribution_issues.items())[:10]:
             issue_text = _format_feature_issue(feature_name, info)
             if issue_text:
                 issues_list.append(issue_text)
         
         if issues_list:
-            max_issues_in_text = 8
-            issues_to_show = issues_list[:max_issues_in_text]
-            issues_text = "Top Feature Issues:\n" + "\n".join(issues_to_show)
+            issues_text = "Top Feature Issues:\n" + "\n".join(issues_list[:8])
             ax4.text(
                 0.1,
                 0.9,

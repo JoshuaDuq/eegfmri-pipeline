@@ -9,7 +9,6 @@ functions to keep pipeline modules thin.
 
 from __future__ import annotations
 
-import inspect
 import logging
 import re
 from pathlib import Path
@@ -193,7 +192,6 @@ def run_raw_to_bids(
             return 0
 
     ensure_dataset_description(bids_root, name=f"{task} EEG")
-    montage_name = montage if montage else None
 
     for i, vhdr in enumerate(vhdrs, 1):
         subject_label = parse_subject_id(vhdr)
@@ -202,8 +200,8 @@ def run_raw_to_bids(
         raw = mne.io.read_raw_brainvision(vhdr, preload=False, verbose=False)
         set_channel_types(raw)
 
-        if montage_name:
-            set_montage(raw, montage_name)
+        if montage:
+            set_montage(raw, montage)
 
         raw.info["line_freq"] = line_freq
 
@@ -225,21 +223,13 @@ def run_raw_to_bids(
             root=bids_root,
         )
 
-        signature = inspect.signature(write_raw_bids)
-        parameters = signature.parameters
-        kwargs: dict = {}
-        if "allow_preload" in parameters:
-            kwargs["allow_preload"] = bool(getattr(raw, "preload", False))
-        if "format" in parameters:
-            kwargs["format"] = "BrainVision"
-        if "verbose" in parameters:
-            kwargs["verbose"] = False
-
         write_raw_bids(
             raw=raw,
             bids_path=bids_path,
             overwrite=overwrite,
-            **kwargs,
+            allow_preload=raw.preload,
+            format="BrainVision",
+            verbose=False,
         )
 
         log.info("[%d/%d] Wrote: sub-%s", i, len(vhdrs), subject_label)

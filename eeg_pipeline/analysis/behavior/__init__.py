@@ -52,18 +52,13 @@ from eeg_pipeline.utils.parallel import (
     parallel_map,
     parallel_subjects,
 )
-from eeg_pipeline.pipelines.behavior import (
-    BehaviorPipeline,
-    BehaviorPipelineConfig as PipelineConfig,
-    BehaviorPipelineResults as PipelineResults,
-)
+
+# Note: BehaviorPipeline, BehaviorPipelineConfig, BehaviorPipelineResults
+# should be imported directly from eeg_pipeline.pipelines.behavior when needed
+# to avoid circular imports.
 
 
 __all__ = [
-    # Pipeline orchestration
-    "BehaviorPipeline",
-    "PipelineConfig",
-    "PipelineResults",
     # Unified correlation pipeline
     "FeatureBehaviorCorrelator",
     "CorrelationConfig",

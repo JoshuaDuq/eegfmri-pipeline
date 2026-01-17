@@ -83,7 +83,7 @@ def _compute_knots(
         quantile_low, quantile_high, num=max(n_knots, MIN_KNOTS_FOR_NONLINEAR)
     )
     knots = np.quantile(valid_temperature_values, quantile_values)
-    knots = np.unique(np.asarray(knots, dtype=float))
+    knots = np.unique(knots)
 
     return np.sort(knots)
 
@@ -171,9 +171,8 @@ def build_temperature_rcs_design(
         )
     )
 
-    n_valid = int(finite_mask.sum())
     meta: Dict[str, Any] = {
-        "n_valid": n_valid,
+        "n_valid": int(finite_mask.sum()),
         "min_samples": min_samples,
         "n_knots": n_knots,
         "quantile_low": quantile_low,
@@ -201,7 +200,7 @@ def build_temperature_rcs_design(
     if knot_validation_error:
         meta["status"] = knot_validation_error
         if knot_validation_error == "skipped_insufficient_unique_knots":
-            meta["knots_unique"] = int(knots.size)
+            meta["knots_unique"] = knots.size
         return output_dataframe, ["temperature"], meta
 
     second_to_last_knot = float(knots[-2])
@@ -209,21 +208,19 @@ def build_temperature_rcs_design(
     boundary_knot_difference = last_knot - second_to_last_knot
 
     interior_knots = knots[1:-1]
-    n_spline_terms = int(max(len(interior_knots) - 1, 0))
+    n_spline_terms = len(interior_knots) - 1
 
     if n_spline_terms <= 0:
         meta["status"] = "ok_linear_only"
-        meta["knots"] = [float(k) for k in knots.tolist()]
+        meta["knots"] = knots.tolist()
         return output_dataframe, ["temperature"], meta
 
-    temperature_all = temperature_values.astype(float)
     covariate_names: List[str] = ["temperature"]
 
     for term_index, interior_knot in enumerate(interior_knots[:-1]):
-        interior_knot_value = float(interior_knot)
         spline_term = _compute_spline_basis_term(
-            temperature_all,
-            interior_knot_value,
+            temperature_values,
+            float(interior_knot),
             second_to_last_knot,
             last_knot,
             boundary_knot_difference,
@@ -235,8 +232,8 @@ def build_temperature_rcs_design(
         covariate_names.append(column_name)
 
     meta["status"] = "ok"
-    meta["knots"] = [float(k) for k in knots.tolist()]
-    meta["n_spline_terms"] = int(len(covariate_names) - 1)
+    meta["knots"] = knots.tolist()
+    meta["n_spline_terms"] = len(covariate_names) - 1
     return output_dataframe, covariate_names, meta
 
 

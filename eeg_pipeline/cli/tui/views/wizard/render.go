@@ -10,14 +10,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-///////////////////////////////////////////////////////////////////
-// Layout Constants
-///////////////////////////////////////////////////////////////////
-
 const (
 	narrowWidthThreshold  = 100
 	shortHeightThreshold  = 25
-	minMainContentHeight  = 10
+	minMainContentHeight = 10
 	headerSpacingLines    = 3
 	footerSpacingLines    = 2
 	footerHintSeparator   = "  "
@@ -32,9 +28,25 @@ const (
 	defaultHeight         = 40
 )
 
-///////////////////////////////////////////////////////////////////
-// View Entry Point
-///////////////////////////////////////////////////////////////////
+var stepDisplayNames = map[types.WizardStep]string{
+	types.StepSelectMode:                "Mode",
+	types.StepSelectComputations:        "Analyses",
+	types.StepSelectFeatureFiles:        "Files",
+	types.StepConfigureOptions:          "Features",
+	types.StepSelectBands:               "Bands",
+	types.StepSelectSpatial:             "Spatial",
+	types.StepTimeRange:                 "Time",
+	types.StepAdvancedConfig:            "Advanced",
+	types.StepSelectPlots:               "Plots",
+	types.StepSelectFeaturePlotters:     "Feature Plots",
+	types.StepSelectPlotCategories:      "Categories",
+	types.StepPlotConfig:                "Output",
+	types.StepSelectSubjects:            "Subjects",
+	types.StepSelectPreprocessingStages: "Stages",
+	types.StepPreprocessingFiltering:    "Filtering",
+	types.StepPreprocessingICA:          "ICA",
+	types.StepPreprocessingEpochs:       "Epochs",
+}
 
 func (m Model) View() string {
 	if m.showHelp {
@@ -94,10 +106,6 @@ func (m Model) renderHelpOverlay() string {
 	w, h := m.effectiveDimensions()
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, m.helpOverlay.View())
 }
-
-///////////////////////////////////////////////////////////////////
-// Main Content Routing
-///////////////////////////////////////////////////////////////////
 
 func (m Model) renderMainContent(isNarrow, isShort bool) string {
 	if m.ConfirmingExecute {
@@ -164,34 +172,9 @@ func (m Model) renderValidationErrors() string {
 	return b.String()
 }
 
-///////////////////////////////////////////////////////////////////
-// Header Rendering
-///////////////////////////////////////////////////////////////////
-
-var stepDisplayNames = map[types.WizardStep]string{
-	types.StepSelectMode:                "Mode",
-	types.StepSelectComputations:        "Analyses",
-	types.StepSelectFeatureFiles:        "Files",
-	types.StepConfigureOptions:          "Features",
-	types.StepSelectBands:               "Bands",
-	types.StepSelectSpatial:             "Spatial",
-	types.StepTimeRange:                 "Time",
-	types.StepAdvancedConfig:            "Advanced",
-	types.StepSelectPlots:               "Plots",
-	types.StepSelectFeaturePlotters:     "Feature Plots",
-	types.StepSelectPlotCategories:      "Categories",
-	types.StepPlotConfig:                "Output",
-	types.StepSelectSubjects:            "Subjects",
-	types.StepSelectPreprocessingStages: "Stages",
-	types.StepPreprocessingFiltering:    "Filtering",
-	types.StepPreprocessingICA:          "ICA",
-	types.StepPreprocessingEpochs:       "Epochs",
-}
-
 func (m Model) renderHeader(width int) string {
 	title := m.buildTitleRow()
 	breadcrumb := m.buildBreadcrumbRow()
-
 	centerStyle := lipgloss.NewStyle().Width(width).Align(lipgloss.Center)
 	return centerStyle.Render(title) + "\n" + centerStyle.Render(breadcrumb)
 }
@@ -211,12 +194,7 @@ func (m Model) buildTitleRow() string {
 }
 
 func (m Model) buildSubjectBadge() string {
-	count := 0
-	for _, sel := range m.subjectSelected {
-		if sel {
-			count++
-		}
-	}
+	count := countSelectedStringItems(m.subjectSelected)
 	if count > 0 {
 		return m.badge(fmt.Sprintf("%d subjects", count), styles.Accent)
 	}
@@ -285,10 +263,6 @@ func (m Model) breadcrumbStep(idx int, step types.WizardStep) (icon, text string
 	return
 }
 
-///////////////////////////////////////////////////////////////////
-// Footer Rendering
-///////////////////////////////////////////////////////////////////
-
 func (m Model) renderFooter(width int) string {
 	var hints []string
 
@@ -330,10 +304,6 @@ func (m Model) renderToast(width int) string {
 	return styles.FooterStyle.Width(width).Align(lipgloss.Center).
 		Render(toastStyle.Render("✓ " + m.toastMessage))
 }
-
-///////////////////////////////////////////////////////////////////
-// Step Hints
-///////////////////////////////////////////////////////////////////
 
 func (m Model) getStepHints() []string {
 	switch m.CurrentStep {

@@ -16,9 +16,8 @@ import warnings
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, ConstantInputWarning
-import scipy.stats
-from sklearn.model_selection import GroupKFold, StratifiedKFold, LeaveOneGroupOut, GridSearchCV
-from sklearn.metrics import r2_score
+from sklearn.model_selection import GroupKFold, LeaveOneGroupOut, GridSearchCV
+from sklearn.metrics import r2_score, explained_variance_score
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.base import clone
 from sklearn.pipeline import Pipeline
@@ -86,7 +85,7 @@ def apply_fold_specific_hygiene(
     if config is None:
         return None
     
-    cv_hygiene_enabled = bool(config.get("machine_learning.cv.hygiene_enabled", True) if hasattr(config, "get") else True)
+    cv_hygiene_enabled = bool(get_config_value(config, "machine_learning.cv.hygiene_enabled", True))
     if not cv_hygiene_enabled:
         return None
     
@@ -113,30 +112,6 @@ def apply_fold_specific_hygiene(
         if log:
             log.warning("CV hygiene: failed to create fold context (%s)", exc)
         return None
-
-
-def get_fold_frequency_bands(
-    fold_params: Optional[FoldSpecificParams],
-    config: Optional[Any] = None,
-) -> Optional[Dict[str, Tuple[float, float]]]:
-    """
-    Get frequency bands for a fold, using fold-specific IAF if available.
-    
-    Parameters
-    ----------
-    fold_params : FoldSpecificParams or None
-        Fold-specific parameters from apply_fold_specific_hygiene
-    config : Any, optional
-        Configuration object (fallback)
-        
-    Returns
-    -------
-    dict or None
-        Frequency band definitions, or None to use defaults
-    """
-    if fold_params is not None and fold_params.frequency_bands is not None:
-        return fold_params.frequency_bands
-    return None
 
 
 ###################################################################
@@ -169,24 +144,6 @@ def create_inner_cv(train_groups: np.ndarray, inner_cv_splits: int) -> GroupKFol
     n_unique = len(np.unique(train_groups))
     n_splits = min(inner_cv_splits, n_unique)
     return GroupKFold(n_splits=n_splits)
-
-
-def create_stratified_cv_by_binned_targets(
-    y: np.ndarray,
-    n_splits: Optional[int] = None,
-    n_bins: Optional[int] = None,
-    random_state: int = 42,
-    config: Optional[Any] = None,
-) -> Tuple[StratifiedKFold, np.ndarray]:
-    """Create stratified CV by binning continuous targets."""
-    if n_splits is None:
-        n_splits = int(get_config_value(config, "machine_learning.cv.default_n_splits", 5))
-    if n_bins is None:
-        n_bins = int(get_config_value(config, "machine_learning.cv.default_n_bins", 5))
-    y_binned = pd.qcut(y, q=n_bins, labels=False, duplicates="drop")
-    if pd.isna(y_binned).all():
-        y_binned = np.zeros_like(y, dtype=int)
-    return StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state), y_binned
 
 
 def create_block_aware_cv(
@@ -247,16 +204,6 @@ def execute_folds_parallel(
 ###################################################################
 
 
-def _log_warning(warning, fold_info: str, context: str) -> None:
-    """Log sklearn warnings with context."""
-    warning_types = {
-        ConvergenceWarning: "ConvergenceWarning",
-        ConstantInputWarning: "ConstantInputWarning",
-    }
-    warning_type = warning_types.get(type(warning.message), "Warning")
-    logger.warning(f"Fold {fold_info}: {warning_type} {context} - {warning.message}")
-
-
 def fit_with_warning_logging(
     estimator,
     X: np.ndarray,
@@ -265,12 +212,14 @@ def fit_with_warning_logging(
     log: Optional[logging.Logger] = None,
 ):
     """Fit estimator with warning logging."""
+    log = log or logger
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         estimator.fit(X, y)
         for warning in w:
             if isinstance(warning.message, (ConvergenceWarning, ConstantInputWarning)):
-                _log_warning(warning, fold_info, "")
+                warning_type = type(warning.message).__name__
+                log.warning(f"Fold {fold_info}: {warning_type} - {warning.message}")
     return estimator
 
 
@@ -283,12 +232,14 @@ def grid_search_with_warning_logging(
     **fit_params,
 ) -> GridSearchCV:
     """Fit GridSearchCV with warning logging."""
+    log = log or logger
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         grid.fit(X, y, **fit_params)
         for warning in w:
             if isinstance(warning.message, (ConvergenceWarning, ConstantInputWarning)):
-                _log_warning(warning, fold_info, "during GridSearchCV")
+                warning_type = type(warning.message).__name__
+                log.warning(f"Fold {fold_info}: {warning_type} during GridSearchCV - {warning.message}")
     return grid
 
 
@@ -414,7 +365,7 @@ def compute_subject_level_r(
             continue
 
         try:
-            r_subj, _ = scipy.stats.pearsonr(yt[finite], yp[finite])
+            r_subj, _ = pearsonr(yt[finite], yp[finite])
         except Exception:
             continue
 
@@ -706,8 +657,6 @@ def compute_metrics(
     
     Returns (pooled_metrics, per_subject_metrics).
     """
-    from sklearn.metrics import r2_score, explained_variance_score
-
     mask = np.isfinite(y_true) & np.isfinite(y_pred)
     if mask.sum() < 2:
         empty = {"pearson_r": np.nan, "r2": np.nan, "explained_variance": np.nan, "avg_subject_r_fisher_z": np.nan, "n": 0}

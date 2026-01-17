@@ -62,9 +62,7 @@ def get_direction_color(
 
     if p_value is not None:
         p_value_float = _to_float(p_value)
-        if p_value_float is None:
-            return nonsig_color
-        if p_value_float >= alpha:
+        if p_value_float is None or p_value_float >= alpha:
             return nonsig_color
 
     value_float = _to_float(value)
@@ -77,11 +75,6 @@ def get_direction_color(
 def get_band_color(band: str, config: Any = None) -> str:
     """Get color for a frequency band."""
     normalized_band = (band or "").lower()
-
-    if config is not None and hasattr(config, "get"):
-        band_colors = config.get("visualization.band_colors", None)
-        if isinstance(band_colors, dict) and normalized_band in band_colors:
-            return str(band_colors[normalized_band])
 
     if normalized_band in DEFAULT_BAND_COLORS:
         return DEFAULT_BAND_COLORS[normalized_band]

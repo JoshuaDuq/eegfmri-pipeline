@@ -15,7 +15,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.plotting.io.figures import save_fig
+from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from eeg_pipeline.plotting.features.utils import (
     get_named_segments,
     get_named_bands,
@@ -47,8 +47,8 @@ _COLUMN_FIGURE_WIDTH_PER_BAND = 3.0
 _COLUMN_FIGURE_HEIGHT = 5.0
 
 # Color constants
-_COLUMN_COMPARISON_COLOR_V1 = "#5a7d9a"
-_COLUMN_COMPARISON_COLOR_V2 = "#c44e52"
+_COLUMN_COMPARISON_COLOR_COND1 = "#5a7d9a"
+_COLUMN_COMPARISON_COLOR_COND2 = "#c44e52"
 _SIGNIFICANT_COLOR = "#d62728"
 _NON_SIGNIFICANT_COLOR = "#333333"
 
@@ -122,18 +122,6 @@ def _get_burst_columns(
                 if _match_roi_name(roi_id, roi_name):
                     matching_columns.append(col)
     
-    # Fallback: if "all" requested but no global columns, use all ROI columns
-    if roi_name == "all" and not matching_columns:
-        for col in features_df.columns:
-            parsed = NamingSchema.parse(str(col))
-            if (parsed.get("valid") and 
-                parsed.get("group") == "bursts" and
-                str(parsed.get("segment")) == segment and
-                str(parsed.get("band")) == band and
-                str(parsed.get("stat")) == metric and
-                parsed.get("scope") == "roi"):
-                matching_columns.append(col)
-    
     return matching_columns
 
 
@@ -190,7 +178,6 @@ def _get_comparison_segments(
     if len(detected) >= 2:
         segments = detected[:2]
         if logger:
-            from eeg_pipeline.plotting.io.figures import log_if_present
             log_if_present(logger, "info", 
                           f"Auto-detected segments for burst comparison: {segments}")
     
@@ -203,13 +190,11 @@ def _get_burst_metrics(config: Any) -> List[str]:
         config,
         "plotting.plots.features.bursts.comparison_metrics",
         None,
+    ) or get_config_value(
+        config,
+        "plotting.plots.features.bursts.metrics",
+        ["rate", "duration_mean", "amp_mean", "fraction"],
     )
-    if not metrics:
-        metrics = get_config_value(
-            config,
-            "plotting.plots.features.bursts.metrics",
-            ["rate", "duration_mean", "amp_mean", "fraction"],
-        )
     return list(metrics) if metrics else ["rate"]
 
 
@@ -264,8 +249,8 @@ def _create_column_comparison_plot(
     label1, label2 = labels
     
     segment_colors = {
-        "v1": _COLUMN_COMPARISON_COLOR_V1,
-        "v2": _COLUMN_COMPARISON_COLOR_V2,
+        "v1": _COLUMN_COMPARISON_COLOR_COND1,
+        "v2": _COLUMN_COMPARISON_COLOR_COND2,
     }
     band_colors = {band: get_band_color(band, config) for band in bands}
     
@@ -539,7 +524,6 @@ def _plot_column_comparison(
 ) -> None:
     """Plot column comparison (unpaired) for burst metrics."""
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-    from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
     
     comp_mask_info = extract_comparison_mask(events_df, config)
     if not comp_mask_info:
@@ -633,7 +617,6 @@ def plot_bursts_by_condition(
     """
     from eeg_pipeline.infra.paths import ensure_dir
     from eeg_pipeline.plotting.features.roi import get_roi_definitions
-    from eeg_pipeline.plotting.io.figures import log_if_present
     
     if features_df is None or features_df.empty or events_df is None:
         return
@@ -699,7 +682,6 @@ def plot_bursts_by_condition(
                 logger=logger,
                 stats_dir=stats_dir,
             )
-
 
 
 __all__ = [

@@ -43,20 +43,16 @@ def _matches_complexity_criteria(
     roi_set: Set[str],
 ) -> bool:
     """Check if parsed column name matches complexity feature criteria."""
-    if not parsed.get("valid"):
-        return False
-    if parsed.get("group") != "comp":
-        return False
-    if parsed.get("segment") != segment:
-        return False
-    if parsed.get("band") != band:
-        return False
-    if parsed.get("scope") != "ch":
-        return False
-    if parsed.get("stat") != metric:
-        return False
-    channel = parsed.get("identifier") or ""
-    return bool(channel and channel in roi_set)
+    return (
+        parsed.get("valid")
+        and parsed.get("group") == "comp"
+        and parsed.get("segment") == segment
+        and parsed.get("band") == band
+        and parsed.get("scope") == "ch"
+        and parsed.get("stat") == metric
+        and (channel := parsed.get("identifier"))
+        and channel in roi_set
+    )
 
 
 def _extract_complexity_columns(
@@ -142,8 +138,6 @@ def _load_complexity_features(
     """Load complexity features table for the subject."""
     features_dir = deriv_features_path(deriv_root, subject)
     comp_path = features_dir / "complexity" / feature_file
-    if not comp_path.exists():
-        comp_path = features_dir / feature_file
     if not comp_path.exists():
         logger.warning("Complexity features not found at %s", comp_path)
         return None
@@ -252,9 +246,8 @@ def plot_complexity_roi_scatter(
         _extract_complexity_values, segment=segment
     )
 
-    bands = (
-        config.get("power.bands_to_use")
-        or list(config.get("frequency_bands", {}).keys())
+    bands = config.get("power.bands_to_use") or list(
+        config.get("frequency_bands", {}).keys()
     )
     metrics = _get_complexity_metrics(config)
 

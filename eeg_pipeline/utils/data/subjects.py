@@ -72,7 +72,7 @@ def _collect_subjects_from_derivatives_epochs(
             if epo_path is not None and epo_path.exists():
                 subjects.add(sub_id)
     
-    return sorted(list(subjects))
+    return sorted(subjects)
 
 
 def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
@@ -98,7 +98,7 @@ def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
             if sub_id:
                 subjects.add(sub_id)
     
-    return sorted(list(subjects))
+    return sorted(subjects)
 
 
 def _has_feature_files(directory: Path) -> bool:
@@ -106,7 +106,7 @@ def _has_feature_files(directory: Path) -> bool:
     if not directory.is_dir():
         return False
     return any(
-        f.suffix in {".tsv", ".parquet"} and f.name.startswith("features_")
+        f.suffix in {".tsv", ".parquet"}
         for f in directory.rglob("features_*")
     )
 
@@ -122,9 +122,6 @@ def _extract_subject_id_from_features_path(features_path: Path) -> Optional[str]
 
 def _resolve_source_root(config: EEGConfig, bids_root: Optional[Path]) -> Optional[Path]:
     """Resolve source data root from config or infer from bids_root."""
-    if hasattr(config, "source_root"):
-        return config.source_root
-    
     source_data_path = config.get("paths.source_data")
     if source_data_path:
         return Path(source_data_path)
@@ -194,7 +191,7 @@ def _apply_intersection_policy(
     ]
     
     if subjects_from_config:
-        final_subjects = sorted(list(set(all_discovered) & set(subjects_from_config)))
+        final_subjects = sorted(set(all_discovered) & set(subjects_from_config))
         logger.info(
             f"Using intersection: {len(final_subjects)} subjects "
             f"(discovered={len(set(all_discovered))}, config={len(subjects_from_config)})"
@@ -203,14 +200,14 @@ def _apply_intersection_policy(
     
     if len(discovered_by_source) > 1:
         subject_sets = [set(subjects) for _, subjects in discovered_by_source]
-        final_subjects = sorted(list(set.intersection(*subject_sets)))
+        final_subjects = sorted(set.intersection(*subject_sets))
         logger.info(
             f"Using intersection of discovery sources: {len(final_subjects)} subjects "
             f"(from {len(discovered_by_source)} sources)"
         )
         return final_subjects
     
-    final_subjects = sorted(list(set(all_discovered)))
+    final_subjects = sorted(set(all_discovered))
     source_name = discovered_by_source[0][0] if discovered_by_source else "unknown"
     logger.info(f"Using discovered subjects: {len(final_subjects)} subjects (from {source_name})")
     return final_subjects
@@ -225,7 +222,7 @@ def _apply_union_policy(
     all_discovered = [
         subject for _, subjects in discovered_by_source for subject in subjects
     ]
-    final_subjects = sorted(list(set(all_discovered) | set(subjects_from_config)))
+    final_subjects = sorted(set(all_discovered) | set(subjects_from_config))
     logger.info(
         f"Using union: {len(final_subjects)} subjects "
         f"(discovered={len(set(all_discovered))}, config={len(subjects_from_config)})"
@@ -282,7 +279,7 @@ def get_available_subjects(
     if discovery_sources is None:
         discovery_sources = ["derivatives_epochs", "features"]
     
-    subjects_from_config = getattr(config, "subjects", None) or []
+    subjects_from_config = config.get("project.subject_list") or []
     
     discovered_by_source = _discover_subjects_from_sources(
         discovery_sources=discovery_sources,
@@ -382,7 +379,7 @@ def parse_subject_args(
         )
     
     if not subjects:
-        subjects = getattr(config, "subjects", None) or []
+        subjects = config.get("project.subject_list") or []
         if not subjects:
             subjects = get_available_subjects(
                 config=config,

@@ -179,11 +179,11 @@ def _get_line_color(p_value: float, plot_cfg: PlotConfig) -> str:
 
 
 def _extract_band_info(title_prefix: str) -> str:
-    if "power" not in title_prefix.lower():
+    title_lower = title_prefix.lower()
+    if "power" not in title_lower:
         return ""
     
     frequency_bands = ["delta", "theta", "alpha", "beta", "gamma"]
-    title_lower = title_prefix.lower()
     for band in frequency_bands:
         if band in title_lower:
             return f" ({band.upper()})"
@@ -353,7 +353,6 @@ def generate_correlation_scatter(
     *,
     method_code: str = "spearman",
     Z_covars: Optional[pd.DataFrame] = None,
-    covar_names: Optional[List[str]] = None,
     bootstrap_ci: int = 0,
     rng: Optional[np.random.Generator] = None,
     is_partial_residuals: bool = False,
@@ -460,6 +459,26 @@ def generate_correlation_scatter(
 ###################################################################
 
 
+def _validate_residual_data(
+    x_data: pd.Series,
+    y_data: pd.Series,
+    plot_cfg: PlotConfig,
+    logger: logging.Logger,
+    context: str,
+) -> Optional[Tuple[pd.Series, pd.Series, int]]:
+    x_series = pd.to_numeric(x_data, errors="coerce")
+    y_series = pd.to_numeric(y_data, errors="coerce")
+    valid_mask = x_series.notna() & y_series.notna()
+    n_observations = int(valid_mask.sum())
+    
+    min_samples = plot_cfg.validation.get("min_samples_for_plot", 5)
+    if n_observations < min_samples:
+        logger.warning(f"{context} skipped: insufficient paired samples (<{min_samples}).")
+        return None
+    
+    return x_series, y_series, n_observations
+
+
 def _plot_residuals_vs_fitted(
     ax: plt.Axes,
     fitted: np.ndarray,
@@ -535,19 +554,14 @@ def plot_residual_qc(
     logger = logger or _get_default_logger()
     plot_cfg = get_plot_config(config)
 
-    x_series = pd.to_numeric(x_data, errors="coerce")
-    y_series = pd.to_numeric(y_data, errors="coerce")
-    valid_mask = x_series.notna() & y_series.notna()
-    n_observations = int(valid_mask.sum())
-    
-    min_samples = plot_cfg.validation.get("min_samples_for_plot", 5)
-    if n_observations < min_samples:
-        logger.warning(
-            f"Residual QC skipped: insufficient paired samples (<{min_samples})."
-        )
+    validation_result = _validate_residual_data(
+        x_data, y_data, plot_cfg, logger, "Residual QC"
+    )
+    if validation_result is None:
         return
-
-    fitted, residuals, _ = compute_linear_residuals(x_data, y_data)
+    
+    x_series, y_series, _ = validation_result
+    fitted, residuals, _ = compute_linear_residuals(x_series, y_series)
 
     behavioral_config = plot_cfg.get_behavioral_config()
     figure_size = tuple(behavioral_config.get("residual_qc_figsize", [12, 5]))
@@ -628,19 +642,14 @@ def plot_regression_residual_diagnostics(
     logger = logger or _get_default_logger()
     plot_cfg = get_plot_config(config)
 
-    x_series = pd.to_numeric(x_data, errors="coerce")
-    y_series = pd.to_numeric(y_data, errors="coerce")
-    valid_mask = x_series.notna() & y_series.notna()
-    n_observations = int(valid_mask.sum())
-    
-    min_samples = plot_cfg.validation.get("min_samples_for_plot", 5)
-    if n_observations < min_samples:
-        logger.warning(
-            f"Residual diagnostics skipped: insufficient paired samples (<{min_samples})."
-        )
+    validation_result = _validate_residual_data(
+        x_data, y_data, plot_cfg, logger, "Residual diagnostics"
+    )
+    if validation_result is None:
         return
-
-    fitted, residuals, x_clean = compute_linear_residuals(x_data, y_data)
+    
+    x_series, y_series, _ = validation_result
+    fitted, residuals, x_clean = compute_linear_residuals(x_series, y_series)
 
     behavioral_config = plot_cfg.get_behavioral_config()
     figure_size = tuple(behavioral_config.get("diagnostics_figsize", [10, 8]))
@@ -671,4 +680,3 @@ def plot_regression_residual_diagnostics(
         logger=logger,
     )
     plt.close(fig)
-    logger.info(f"Residual diagnostics saved to {output_path}")

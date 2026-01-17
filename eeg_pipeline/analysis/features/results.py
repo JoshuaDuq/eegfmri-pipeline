@@ -83,19 +83,16 @@ class ExtractionResult:
         pd.DataFrame
             Combined features with one row per epoch.
         """
-        if not self.features:
-            return pd.DataFrame()
-        
-        non_empty_feature_sets = [
-            feature_set.df 
-            for feature_set in self.features.values() 
+        non_empty_dfs = [
+            feature_set.df
+            for feature_set in self.features.values()
             if not feature_set.df.empty
         ]
         
-        if not non_empty_feature_sets:
+        if not non_empty_dfs:
             return pd.DataFrame()
         
-        combined = pd.concat(non_empty_feature_sets, axis=1)
+        combined = pd.concat(non_empty_dfs, axis=1)
         
         if include_condition and self.condition is not None:
             combined.insert(0, CONDITION_COLUMN_NAME, self.condition)
@@ -104,16 +101,11 @@ class ExtractionResult:
     
     def _reorder_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Reorder columns: condition first (if present), then sorted feature columns."""
-        has_condition = CONDITION_COLUMN_NAME in df.columns
-        if not has_condition:
+        if CONDITION_COLUMN_NAME not in df.columns:
             return df[sorted(df.columns)]
         
-        condition_column = [CONDITION_COLUMN_NAME]
-        feature_columns = sorted([
-            col for col in df.columns 
-            if col != CONDITION_COLUMN_NAME
-        ])
-        return df[condition_column + feature_columns]
+        feature_columns = sorted([col for col in df.columns if col != CONDITION_COLUMN_NAME])
+        return df[[CONDITION_COLUMN_NAME] + feature_columns]
     
     def get_feature_group_df(self, group: str, include_condition: bool = True) -> pd.DataFrame:
         """
@@ -230,29 +222,20 @@ class ExtractionResult:
     def _add_qc_status_to_summary(self, summary: Dict[str, Any]) -> None:
         """Add QC status information for each feature group."""
         for group_name, qc_data in self.qc.items():
-            if group_name == "precomputed":
+            if group_name == "precomputed" or not isinstance(qc_data, dict):
                 continue
             
-            if not isinstance(qc_data, dict):
-                continue
+            if "skipped_reason" in qc_data:
+                status = f"skipped: {qc_data['skipped_reason']}"
+            elif "error" in qc_data:
+                status = f"error: {qc_data['error']}"
+            else:
+                status = "ok"
             
-            status = self._determine_group_status(qc_data)
             summary["per_group_status"][group_name] = status
             
-            if self._has_issues(status):
+            if status.startswith("skipped:") or status.startswith("error:"):
                 summary["groups_with_issues"].append(group_name)
-    
-    def _determine_group_status(self, qc_data: Dict[str, Any]) -> str:
-        """Determine status string for a feature group based on QC data."""
-        if "skipped_reason" in qc_data:
-            return f"skipped: {qc_data['skipped_reason']}"
-        if "error" in qc_data:
-            return f"error: {qc_data['error']}"
-        return "ok"
-    
-    def _has_issues(self, status: str) -> bool:
-        """Check if a status string indicates issues."""
-        return status.startswith("skipped:") or status.startswith("error:")
     
     def _add_condition_summary_to_summary(self, summary: Dict[str, Any]) -> None:
         """Add condition label summary if available."""
@@ -285,14 +268,13 @@ class ExtractionResult:
         """
         feature_dataframe = self.get_combined_df(include_condition=False)
         feature_columns = list(feature_dataframe.columns)
-        qc_data = self.qc if self.qc else None
         
         return generate_manifest(
             feature_columns,
             config=config,
             subject=subject,
             task=task,
-            qc=qc_data,
+            qc=self.qc,
             df_attrs=dict(getattr(feature_dataframe, "attrs", {}) or {}),
         )
 
@@ -327,15 +309,14 @@ class ExtractionResult:
         """
         feature_dataframe = self.get_combined_df(include_condition=include_condition)
         output_path = Path(output_dir)
-        qc_data = self.qc if self.qc else None
         
         return save_features_organized(
-            feature_dataframe, 
-            output_path, 
-            subject, 
-            task, 
-            config=config, 
-            qc=qc_data
+            feature_dataframe,
+            output_path,
+            subject,
+            task,
+            config=config,
+            qc=self.qc,
         )
 
 
@@ -394,47 +375,3 @@ class FeatureExtractionResult:
     # Source localization features (LCMV, eLORETA)
     source_df: Optional[pd.DataFrame] = None
     source_cols: List[str] = field(default_factory=list)
-
-
-
-
-def combine_feature_groups(
-    result: ExtractionResult, 
-    groups: List[str]
-) -> tuple[pd.DataFrame, List[str]]:
-    """
-    Combine specific feature groups from an ExtractionResult.
-    
-    Parameters
-    ----------
-    result : ExtractionResult
-        Container with feature groups.
-    groups : List[str]
-        Names of groups to combine.
-        
-    Returns
-    -------
-    tuple[pd.DataFrame, List[str]]
-        Combined DataFrame and column list matching DataFrame columns exactly.
-    """
-    dataframes: List[pd.DataFrame] = []
-    column_names: List[str] = []
-    
-    for group_name in groups:
-        feature_set = result.features.get(group_name)
-        if feature_set is None or feature_set.df.empty:
-            continue
-        
-        dataframes.append(feature_set.df)
-        column_names.extend(feature_set.columns)
-    
-    if not dataframes:
-        return pd.DataFrame(), []
-    
-    combined_dataframe = pd.concat(dataframes, axis=1)
-    
-    if result.condition is not None:
-        combined_dataframe.insert(0, CONDITION_COLUMN_NAME, result.condition)
-        column_names = [CONDITION_COLUMN_NAME] + column_names
-    
-    return combined_dataframe, column_names

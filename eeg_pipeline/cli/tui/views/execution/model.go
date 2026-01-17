@@ -71,7 +71,6 @@ type Model struct {
 	StartTime      time.Time
 	EndTime        time.Time
 	ExitCode       int
-	Error          error
 	IsCloud        bool
 	CloudStage     CloudStage
 	RepoRoot       string
@@ -99,26 +98,22 @@ type Model struct {
 	EpochInfo     string
 
 	// Log filtering
-	ShowDebug     bool
-	ShowInfo      bool
-	ShowWarning   bool
-	ShowError     bool
-	FilterSubject string
+	ShowDebug   bool
+	ShowInfo    bool
+	ShowWarning bool
+	ShowError   bool
 
 	// Error tracking
 	ErrorLines         []string
 	LogTruncated       bool
 	LogTruncatedCount  int
 	MalformedJSONCount int
-	LastModule         string
 
 	// Scrollable log viewport
 	logViewport viewport.Model
-	logReady    bool
 
 	// Copy mode - disables mouse capture for text selection
-	copyMode       bool
-	copyModeNotice string
+	copyMode bool
 
 	// Search/filter mode
 	searchMode    bool
@@ -164,8 +159,7 @@ func New(command string) Model {
 		width:            80,
 		height:           24,
 		logViewport:      vp,
-		logReady:         false,
-		RepoRoot:         "",
+		RepoRoot:          "",
 		ShowInfo:         true,
 		ShowWarning:      true,
 		ShowError:        true,
@@ -252,12 +246,11 @@ func (m *Model) Start() tea.Cmd {
 		cmd := exec.CommandContext(ctx, pyCmd, args...)
 		cmd.Dir = m.RepoRoot
 		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-
-		// Use process group to ensure all sub-processes are killed
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
+			// Fallback to python3 if primary command fails
 			cmd = exec.CommandContext(ctx, "python3", args...)
 			cmd.Dir = m.RepoRoot
 			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
@@ -485,8 +478,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case messages.LogCopiedMsg:
-		// Show a brief notice that log was copied
-		m.copyModeNotice = "✓ Log copied to clipboard!"
 		m.addLog(lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Log copied to clipboard"))
 		return m, nil
 
@@ -557,16 +548,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.copyMode {
 			switch msg.String() {
 			case "m", "esc", "q":
-				// Exit copy mode, re-enable mouse
 				m.copyMode = false
-				m.copyModeNotice = ""
 				m.updateViewportSize()
 				return m, tea.EnableMouseCellMotion
 			case "c":
-				// Copy while in copy mode
 				return m, m.copyLogToClipboard()
 			}
-			// In copy mode, don't handle other keys to allow selection
 			return m, nil
 		}
 
@@ -578,9 +565,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateViewportSize()
 			return m, nil
 		case "m":
-			// Toggle copy mode - disable mouse to allow text selection
 			m.copyMode = true
-			m.copyModeNotice = "COPY MODE: Select text with mouse, then Cmd+C to copy. Press M or Esc to exit."
 			m.updateViewportSize()
 			return m, tea.DisableMouse
 		case "ctrl+c":
@@ -832,7 +817,6 @@ func (m *Model) updateViewportSize() {
 
 	m.logViewport.Width = logWidth
 	m.logViewport.Height = logHeight
-	m.logReady = true
 }
 
 ///////////////////////////////////////////////////////////////////

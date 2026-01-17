@@ -25,7 +25,6 @@ from eeg_pipeline.plotting.io.figures import (
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
-from ...utils.config.loader import get_config_value, ensure_config
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
     create_tfr_subset,
@@ -163,40 +162,6 @@ def _get_baseline_window(config, baseline: Optional[Tuple[Optional[float], Optio
     return tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
 
 
-def _create_pain_masks_from_vector(pain_vec) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """Create pain and non-pain masks from pain vector.
-    
-    Args:
-        pain_vec: Condition indicator vector (pandas Series or numpy array)
-        
-    Returns:
-        Tuple of (pain_mask, non_mask)
-    """
-    if pain_vec is None:
-        return None, None
-    if hasattr(pain_vec, 'fillna'):
-        pain_vec = pain_vec.fillna(0).astype(int).values
-    pain_mask = np.asarray(pain_vec == 1, dtype=bool)
-    non_mask = np.asarray(pain_vec == 0, dtype=bool)
-    return pain_mask, non_mask
-
-
-def _create_pain_masks_from_events(events_df: Optional[pd.DataFrame], pain_col: Optional[str]) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """Create pain and non-pain masks from events DataFrame.
-    
-    Args:
-        events_df: Events DataFrame
-        pain_col: Condition indicator column name
-        
-    Returns:
-        Tuple of (pain_mask, non_mask)
-    """
-    if events_df is None or pain_col is None or pain_col not in events_df.columns:
-        return None, None
-    vals = pd.to_numeric(events_df[pain_col], errors="coerce").fillna(0).astype(int)
-    return _create_pain_masks_from_vector(vals)
-
-
 def _plot_topomap_with_label(
     ax: plt.Axes,
     data: np.ndarray,
@@ -293,7 +258,6 @@ def _plot_topomap_with_diff_label(
         sig_mask=sig_mask,
         cluster_p_min=cluster_info.get("cluster_p_min"),
         cluster_k=cluster_info.get("cluster_k"),
-        cluster_mass=cluster_info.get("cluster_mass"),
         is_cluster=is_cluster,
         data_group_a=data_group_a,
         data_group_b=data_group_b,
@@ -309,7 +273,8 @@ def _plot_topomap_with_diff_label(
         viz_params,
         paired=paired
     )
-    font_sizes = get_font_sizes()
+    plot_cfg = get_plot_config(config) if config else None
+    font_sizes = get_font_sizes(plot_cfg)
     x_position, y_position = _get_label_position(config)
     ax.text(x_position, y_position, label, transform=ax.transAxes, ha="center", va="top", fontsize=font_sizes["title"])
 
@@ -387,14 +352,16 @@ def _plot_diff_topomap_with_label(
     add_roi_annotations(
         ax, diff_data, info, config=config,
         sig_mask=(sig_mask if viz_params["diff_annotation_enabled"] else None),
-        cluster_p_min=cluster_p_min, cluster_k=cluster_k, cluster_mass=cluster_mass,
+        cluster_p_min=cluster_p_min,
+        cluster_k=cluster_k,
         is_cluster=(sig_mask is not None and cluster_p_min is not None),
         data_group_a=data_group_a,
         data_group_b=data_group_b,
         paired=paired
     )
     label = build_topomap_diff_label(diff_data, cluster_p_min, cluster_k, cluster_mass, config, viz_params, paired=paired)
-    font_sizes = get_font_sizes()
+    plot_cfg = get_plot_config(config) if config else None
+    font_sizes = get_font_sizes(plot_cfg)
     x_position, y_position = _get_label_position(config)
     ax.text(x_position, y_position, label, transform=ax.transAxes, ha="center", va="top", fontsize=font_sizes["title"])
 
@@ -495,206 +462,6 @@ def _align_and_trim_masks(
     except ValueError as e:
         log(f"{e}. Skipping alignment.", logger, "error")
         return None
-
-
-
-
-def _extract_subject_means(
-    tfr1_list: List["mne.time_frequency.EpochsTFR"],
-    tfr2_list: List["mne.time_frequency.EpochsTFR"],
-    fmin: float,
-    fmax_effective: float,
-    tmin: float,
-    tmax: float,
-) -> Tuple[List[np.ndarray], List[np.ndarray], List["mne.time_frequency.EpochsTFR"], List["mne.time_frequency.EpochsTFR"], Optional[mne.Info]]:
-    """Extract subject-level means from TFR lists.
-    
-    Args:
-        tfr1_list: List of EpochsTFR objects for condition 1
-        tfr2_list: List of EpochsTFR objects for condition 2
-        fmin: Minimum frequency
-        fmax_effective: Effective maximum frequency
-        tmin: Minimum time
-        tmax: Maximum time
-        
-    Returns:
-        Tuple of (subject_1_means, subject_2_means, valid_tfr1_list, valid_tfr2_list, reference_info)
-    """
-    subject_1_means = []
-    subject_2_means = []
-    valid_tfr1_list = []
-    valid_tfr2_list = []
-    reference_info = None
-    
-    for tfr_1, tfr_2 in zip(tfr1_list, tfr2_list):
-        if not isinstance(tfr_1, mne.time_frequency.EpochsTFR) or not isinstance(tfr_2, mne.time_frequency.EpochsTFR):
-            continue
-        
-        data_1 = extract_trial_band_power(tfr_1, fmin, fmax_effective, tmin, tmax)
-        data_2 = extract_trial_band_power(tfr_2, fmin, fmax_effective, tmin, tmax)
-        
-        if data_1 is None or data_2 is None:
-            continue
-        
-        if data_1.shape[0] == 0 or data_2.shape[0] == 0:
-            continue
-        
-        mean_1 = np.nanmean(data_1, axis=0)
-        mean_2 = np.nanmean(data_2, axis=0)
-        
-        if mean_1.ndim == 0:
-            mean_1 = mean_1.reshape(1)
-        if mean_2.ndim == 0:
-            mean_2 = mean_2.reshape(1)
-        
-        if reference_info is None:
-            reference_info = tfr_1.info
-        
-        subject_1_means.append(mean_1)
-        subject_2_means.append(mean_2)
-        valid_tfr1_list.append(tfr_1)
-        valid_tfr2_list.append(tfr_2)
-    
-    return subject_1_means, subject_2_means, valid_tfr1_list, valid_tfr2_list, reference_info
-
-
-def _find_common_channels(tfr_list: List["mne.time_frequency.EpochsTFR"]) -> List[str]:
-    """Find common channels across TFR objects.
-    
-    Args:
-        tfr_list: List of EpochsTFR objects
-        
-    Returns:
-        List of common channel names
-    """
-    if not tfr_list:
-        return []
-    
-    ch_sets = [set(tfr.info["ch_names"]) for tfr in tfr_list]
-    common_chs = list(sorted(set.intersection(*ch_sets))) if ch_sets else []
-    return common_chs
-
-
-def _align_subject_data_to_common_channels(
-    subject_1_means: List[np.ndarray],
-    subject_2_means: List[np.ndarray],
-    valid_tfr1_list: List["mne.time_frequency.EpochsTFR"],
-    valid_tfr2_list: List["mne.time_frequency.EpochsTFR"],
-    common_channels: List[str],
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """Align subject data to common channels.
-    
-    Args:
-        subject_1_means: List of mean arrays for condition 1
-        subject_2_means: List of mean arrays for condition 2
-        valid_tfr1_list: List of valid TFR objects for condition 1
-        valid_tfr2_list: List of valid TFR objects for condition 2
-        common_channels: List of common channel names
-        
-    Returns:
-        Tuple of (group_1_array, group_2_array) or (None, None) on failure
-    """
-    group_1_array = []
-    group_2_array = []
-    
-    for mean_1, mean_2, tfr_1, tfr_2 in zip(subject_1_means, subject_2_means, valid_tfr1_list, valid_tfr2_list):
-        ch_indices_1 = [tfr_1.info["ch_names"].index(ch) for ch in common_channels if ch in tfr_1.info["ch_names"]]
-        ch_indices_2 = [tfr_2.info["ch_names"].index(ch) for ch in common_channels if ch in tfr_2.info["ch_names"]]
-        
-        if len(ch_indices_1) != len(common_channels) or len(ch_indices_2) != len(common_channels):
-            continue
-        
-        group_1_array.append(mean_1[ch_indices_1])
-        group_2_array.append(mean_2[ch_indices_2])
-    
-    if not group_1_array or not group_2_array:
-        return None, None
-    
-    return np.stack(group_1_array, axis=0), np.stack(group_2_array, axis=0)
-
-
-def _compute_cluster_significance_from_combined(
-    tfr1_list: List["mne.time_frequency.EpochsTFR"],
-    tfr2_list: List["mne.time_frequency.EpochsTFR"],
-    fmin: float,
-    fmax_effective: float,
-    tmin: float,
-    tmax: float,
-    config,
-    diff_data_len: Optional[int],
-    logger: Optional[logging.Logger] = None,
-) -> Tuple[Optional[np.ndarray], Optional[float], Optional[int], Optional[float]]:
-    """Compute cluster significance from combined subject-level TFRs.
-    
-    Args:
-        tfr1_list: List of EpochsTFR objects for condition 1 (one per subject)
-        tfr2_list: List of EpochsTFR objects for condition 2 (one per subject)
-        fmin: Minimum frequency
-        fmax_effective: Effective maximum frequency
-        tmin: Minimum time
-        tmax: Maximum time
-        config: Configuration object
-        diff_data_len: Expected length of difference data (for validation)
-        logger: Optional logger instance
-        
-    Returns:
-        Tuple of (sig_mask, cluster_p_min, cluster_k, cluster_mass)
-    """
-    from ...utils.analysis.stats import cluster_test_two_sample_arrays as _cluster_test_two_sample_arrays
-    
-    min_subjects_required = 2
-    if not tfr1_list or not tfr2_list:
-        return None, None, None, None
-    
-    if len(tfr1_list) < min_subjects_required or len(tfr2_list) < min_subjects_required:
-        log("Cluster test requires at least 2 subjects per condition; skipping", logger, "warning")
-        return None, None, None, None
-    
-    subject_1_means, subject_2_means, valid_tfr1_list, valid_tfr2_list, reference_info = _extract_subject_means(
-        tfr1_list, tfr2_list, fmin, fmax_effective, tmin, tmax
-    )
-    
-    if len(subject_1_means) < min_subjects_required:
-        log("Insufficient subjects with valid data for cluster test; skipping", logger, "warning")
-        return None, None, None, None
-    
-    all_tfr_list = valid_tfr1_list + valid_tfr2_list
-    common_channels = _find_common_channels(all_tfr_list)
-    
-    if len(common_channels) == 0:
-        log("No common channels across subjects for cluster test; skipping", logger, "warning")
-        return None, None, None, None
-    
-    group_1_array, group_2_array = _align_subject_data_to_common_channels(
-        subject_1_means, subject_2_means, valid_tfr1_list, valid_tfr2_list, common_channels
-    )
-    
-    if group_1_array is None or group_2_array is None:
-        log("Insufficient subjects after channel alignment for cluster test; skipping", logger, "warning")
-        return None, None, None, None
-    
-    if len(group_1_array) < min_subjects_required or len(group_2_array) < min_subjects_required:
-        log("Insufficient subjects after channel alignment for cluster test; skipping", logger, "warning")
-        return None, None, None, None
-    
-    info_common = mne.pick_info(reference_info, [reference_info["ch_names"].index(ch) for ch in common_channels])
-    
-    sig_mask_full, cluster_p_min, cluster_k, cluster_mass = _cluster_test_two_sample_arrays(
-        group_1_array, group_2_array, info_common,
-        alpha=get_config_value(ensure_config(config), "statistics.sig_alpha", 0.05),
-        paired=False,
-        n_permutations=get_config_value(ensure_config(config), "statistics.cluster_n_perm", 100),
-        config=config
-    )
-    
-    if sig_mask_full is None:
-        return None, None, None, None
-    
-    if diff_data_len is not None and len(sig_mask_full) != diff_data_len:
-        log(f"Cluster significance mask length mismatch: sig_mask length={len(sig_mask_full)}, diff_data_len={diff_data_len}. Discarding results.", logger, "warning")
-        return None, None, None, None
-    
-    return sig_mask_full, cluster_p_min, cluster_k, cluster_mass
 
 
 def _save_fig(
@@ -912,7 +679,8 @@ def contrast_maxmin_temperature(
             sig_mask, cluster_info, config
         )
 
-        font_sizes = get_font_sizes()
+        plot_cfg = get_plot_config(config) if config else None
+        font_sizes = get_font_sizes(plot_cfg)
         if r == 0:
             title_pad = 4
             title_y = 1.04
@@ -925,7 +693,8 @@ def contrast_maxmin_temperature(
         add_diff_colorbar(fig, axes[r, 3], diff_abs, viz_params["topo_cmap"], config)
 
     sig_text = get_sig_marker_text(config)
-    font_sizes = get_font_sizes()
+    plot_cfg = get_plot_config(config) if config else None
+    font_sizes = get_font_sizes(plot_cfg)
     fig.suptitle(
         f"Topomaps: Max vs Min temperature (baseline: logratio; t=[{tmin:.1f}, {tmax:.1f}] s){sig_text}",
         fontsize=font_sizes["figure_title"],
@@ -1138,7 +907,8 @@ def plot_bands_pain_temp_contrasts(
     add_diff_colorbar(fig, axes[0, :].ravel().tolist(), cond_diff_abs, viz_params["topo_cmap"], config)
     add_diff_colorbar(fig, axes[1, :].ravel().tolist(), temp_diff_abs, viz_params["topo_cmap"], config)
 
-    font_sizes = get_font_sizes()
+    plot_cfg = get_plot_config(config) if config else None
+    font_sizes = get_font_sizes(plot_cfg)
     axes[0, 0].set_ylabel(f"{label2} - {label1} (n={n_2}-{n_1})", fontsize=font_sizes["ylabel"])
     axes[1, 0].set_ylabel(f"Max - Min temp ({t_max:.1f}-{t_min:.1f}°C, n={n_max}-{n_min})", fontsize=font_sizes["ylabel"])
     sig_text = get_sig_marker_text(config)
@@ -1257,31 +1027,6 @@ def contrast_pain_nonpain(
         for r in range(n_rows):
             axes[r, column_idx].axis('off')
     
-    def _compute_diff_vlims(diff_data, diff_abs):
-        """Compute vmin and vmax for difference plot.
-        
-        Args:
-            diff_data: Difference data array
-            diff_abs: Absolute value for symmetric range
-            
-        Returns:
-            Tuple of (vmin, vmax) or (None, None) if no valid data
-        """
-        if diff_abs > 0:
-            return -diff_abs, +diff_abs
-        
-        if diff_data is not None:
-            diff_data_arr = np.asarray(diff_data)
-            diff_finite = diff_data_arr[np.isfinite(diff_data_arr)]
-            has_nonzero = diff_finite.size > 0 and np.any(np.abs(diff_finite) > 0)
-        else:
-            has_nonzero = False
-        
-        if has_nonzero:
-            diff_abs_effective = robust_sym_vlim(diff_data)
-            return -diff_abs_effective, +diff_abs_effective
-        
-        return None, None
     
     def _plot_pain_nonpain_topomaps(
         axes, column_idx, condition_2_data, condition_1_data, diff_data, info,
@@ -1302,7 +1047,7 @@ def contrast_pain_nonpain(
             f"%Δ={condition_1_pct:+.1f}%", config
         )
 
-        diff_vmin, diff_vmax = _compute_diff_vlims(diff_data, diff_abs)
+        diff_vmin, diff_vmax = _compute_diff_vlims_from_vabs(diff_data, diff_abs)
         _plot_topomap_with_diff_label(
             axes[2, column_idx], diff_data, info, diff_vmin, diff_vmax,
             sig_mask, cluster_info, config,
@@ -1312,17 +1057,16 @@ def contrast_pain_nonpain(
         )
     
     def _add_colorbars_for_column(fig, axes, column_idx, vabs_symmetric, diff_abs, viz_params, config=None):
-        from ..core.colorbars import add_normalized_colorbar, add_diff_colorbar
         add_normalized_colorbar(fig, [axes[0, column_idx], axes[1, column_idx]], -vabs_symmetric, +vabs_symmetric, viz_params["topo_cmap"], config)
         if diff_abs > 0:
             add_diff_colorbar(fig, axes[2, column_idx], diff_abs, viz_params["topo_cmap"], config)
     
     def _finalize_topomap_figure(fig, axes, row_labels, tmin, tmax, config):
-        font_sizes = get_font_sizes()
+        plot_cfg = get_plot_config(config) if config else None
+        font_sizes = get_font_sizes(plot_cfg)
         axes[0, 0].set_ylabel(row_labels[0], fontsize=font_sizes["ylabel"])
         axes[1, 0].set_ylabel(row_labels[1], fontsize=font_sizes["ylabel"])
         axes[2, 0].set_ylabel(row_labels[2], fontsize=font_sizes["ylabel"])
-        from ..core.annotations import get_sig_marker_text
         sig_text = get_sig_marker_text(config)
         fig.suptitle(
             f"Topomaps (baseline: logratio; t=[{tmin:.1f}, {tmax:.1f}] s){sig_text}",
@@ -1370,7 +1114,8 @@ def contrast_pain_nonpain(
             data_group_a, data_group_b
         )
 
-        font_sizes = get_font_sizes()
+        plot_cfg = get_plot_config(config) if config else None
+        font_sizes = get_font_sizes(plot_cfg)
         axes[0, c].set_title(
             f"{band} ({fmin:.0f}-{fmax_effective:.0f} Hz)",
             fontsize=font_sizes["title"], pad=topomap_config.get("title_pad", 4), y=topomap_config.get("title_y", 1.04)

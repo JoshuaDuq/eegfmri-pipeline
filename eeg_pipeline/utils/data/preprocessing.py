@@ -16,7 +16,6 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import mne
 
@@ -57,25 +56,23 @@ def extract_run_number(path: Path) -> Optional[int]:
     return None
 
 
-def infer_run_number(vhdr_path: Path) -> Optional[int]:
-    all_runs = sorted(vhdr_path.parent.glob("*.vhdr"))
+def get_run_index(path: Path) -> Optional[int]:
+    run_index = extract_run_number(path)
+    if run_index is not None:
+        return run_index
+    
+    all_runs = sorted(path.parent.glob("*.vhdr"))
     if len(all_runs) <= 1:
         return None
-    inferred_run = all_runs.index(vhdr_path) + 1
+    
+    inferred_run = all_runs.index(path) + 1
     logger.warning(
         "No explicit run found in filename '%s'. "
         "Inferring run=%d by alphabetical order among %d files. "
         "Prefer 'run-01' style filenames to guarantee correct run IDs.",
-        vhdr_path.name, inferred_run, len(all_runs)
+        path.name, inferred_run, len(all_runs)
     )
     return inferred_run
-
-
-def get_run_index(path: Path) -> Optional[int]:
-    run_index = extract_run_number(path)
-    if run_index is None:
-        run_index = infer_run_number(path)
-    return run_index
 
 
 ###################################################################
@@ -181,23 +178,14 @@ def update_sample_indices(dataframe: pd.DataFrame, cumulative_offset: int) -> in
         return cumulative_offset
     
     sample_numeric = pd.to_numeric(dataframe["sample"], errors="coerce")
-    if sample_numeric.notna().any():
-        if cumulative_offset > 0:
-            dataframe["sample"] = sample_numeric + cumulative_offset
-        max_sample = int(sample_numeric.max()) if cumulative_offset == 0 else int((sample_numeric + cumulative_offset).max())
-        return max_sample + 1
+    if not sample_numeric.notna().any():
+        return cumulative_offset
     
-    if "onset" in dataframe.columns:
-        onset_numeric = pd.to_numeric(dataframe["onset"], errors="coerce")
-        if onset_numeric.notna().any():
-            max_onset = float(onset_numeric.max())
-            sample_numeric = pd.to_numeric(dataframe["sample"], errors="coerce")
-            if sample_numeric.notna().any() and onset_numeric.notna().any() and max_onset > 0:
-                sampling_rate_estimate = float(sample_numeric.max() / max_onset)
-                if sampling_rate_estimate > 0:
-                    return int(max_onset * sampling_rate_estimate) + 1
+    if cumulative_offset > 0:
+        dataframe["sample"] = sample_numeric + cumulative_offset
     
-    return cumulative_offset
+    max_sample = int((sample_numeric + cumulative_offset).max())
+    return max_sample + 1
 
 
 def get_sort_columns(combined_df: pd.DataFrame) -> List[str]:
@@ -264,62 +252,33 @@ def combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
 ###################################################################
 
 
-def find_first_volume_trigger(annotations: mne.Annotations) -> Optional[float]:
-    if len(annotations) == 0:
-        return None
+
+
+def trim_to_first_volume(raw: mne.io.BaseRaw) -> bool:
+    if len(raw.annotations) == 0:
+        return False
     
     volume_pattern = re.compile(r"(^|[/,])V\s*1(\D|$)")
     volume_indices = [
         idx
-        for idx, description in enumerate(annotations.description)
+        for idx, description in enumerate(raw.annotations.description)
         if normalize_string(description).startswith("Volume/V") 
         or volume_pattern.search(normalize_string(description)) is not None
     ]
     
     if not volume_indices:
-        return None
+        return False
     
-    first_onset = min(annotations.onset[idx] for idx in volume_indices)
-    if isinstance(first_onset, (int, float)) and first_onset > 0:
-        return float(first_onset)
-    return None
-
-
-def trim_to_first_volume(raw: mne.io.BaseRaw) -> bool:
-    first_volume_time = find_first_volume_trigger(raw.annotations)
-    if first_volume_time is None:
+    first_onset = min(raw.annotations.onset[idx] for idx in volume_indices)
+    if not isinstance(first_onset, (int, float)) or first_onset <= 0:
         return False
     
     logger.info(
         "Trimming raw to first volume trigger at %.3fs relative to recording start.",
-        first_volume_time
+        first_onset
     )
-    raw.crop(tmin=first_volume_time, tmax=None)
+    raw.crop(tmin=float(first_onset), tmax=None)
     return True
-
-
-def normalize_event_prefixes(prefixes: Optional[List[str]]) -> List[str]:
-    if prefixes is None:
-        return ["Trig_therm"]
-    return [normalize_string(p) for p in prefixes if str(p).strip() != ""]
-
-
-def filter_annotations_by_prefixes(
-    annotations: mne.Annotations,
-    normalized_prefixes: List[str]
-) -> List[int]:
-    return [
-        idx
-        for idx, description in enumerate(annotations.description)
-        if any(normalize_string(description).startswith(prefix) for prefix in normalized_prefixes)
-    ]
-
-
-def zero_base_onsets(onsets: List[float]) -> List[float]:
-    if not onsets:
-        return onsets
-    base = onsets[0]
-    return [onset - base for onset in onsets]
 
 
 def filter_annotations(
@@ -331,8 +290,16 @@ def filter_annotations(
     if len(raw.annotations) == 0 or keep_all:
         return
     
-    normalized_prefixes = normalize_event_prefixes(event_prefixes)
-    keep_indices = filter_annotations_by_prefixes(raw.annotations, normalized_prefixes)
+    if event_prefixes is None:
+        normalized_prefixes = ["Trig_therm"]
+    else:
+        normalized_prefixes = [normalize_string(p) for p in event_prefixes if str(p).strip() != ""]
+    
+    keep_indices = [
+        idx
+        for idx, description in enumerate(raw.annotations.description)
+        if any(normalize_string(description).startswith(prefix) for prefix in normalized_prefixes)
+    ]
     
     if not keep_indices:
         logger.warning(
@@ -348,8 +315,9 @@ def filter_annotations(
     new_durations = [raw.annotations.duration[idx] for idx in keep_indices]
     new_descriptions = [raw.annotations.description[idx] for idx in keep_indices]
     
-    if zero_base:
-        new_onsets = zero_base_onsets(new_onsets)
+    if zero_base and new_onsets:
+        base = new_onsets[0]
+        new_onsets = [onset - base for onset in new_onsets]
     
     filtered_annotations = mne.Annotations(
         onset=new_onsets,
@@ -378,13 +346,6 @@ def set_montage(raw: mne.io.BaseRaw, montage_name: str) -> None:
     raw.set_montage(montage, on_missing="warn")
 
 
-def events_from_raw_annotations(raw: mne.io.BaseRaw) -> Tuple[Optional[np.ndarray], Optional[dict]]:
-    events, event_id = mne.events_from_annotations(raw, event_id=None)
-    if events is None or len(events) == 0 or not event_id:
-        return None, None
-    return events, event_id
-
-
 def ensure_dataset_description(bids_root: Path, name: str = "EEG BIDS dataset") -> None:
     from mne_bids import make_dataset_description
     bids_root.mkdir(parents=True, exist_ok=True)
@@ -400,7 +361,6 @@ __all__ = [
     "find_brainvision_vhdrs",
     "parse_subject_id",
     "extract_run_number",
-    "infer_run_number",
     "get_run_index",
     "normalize_string",
     "normalize_event_filters",
@@ -412,14 +372,9 @@ __all__ = [
     "update_sample_indices",
     "get_sort_columns",
     "combine_runs_for_subject",
-    "find_first_volume_trigger",
     "trim_to_first_volume",
-    "normalize_event_prefixes",
-    "filter_annotations_by_prefixes",
-    "zero_base_onsets",
     "filter_annotations",
     "set_channel_types",
     "set_montage",
-    "events_from_raw_annotations",
     "ensure_dataset_description",
 ]

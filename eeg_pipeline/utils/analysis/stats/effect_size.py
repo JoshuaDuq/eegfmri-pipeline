@@ -80,56 +80,6 @@ def hedges_g(
     return float(d * correction_factor)
 
 
-def glass_delta_control_group1(
-    group1: np.ndarray,
-    group2: np.ndarray,
-    config: Optional[Any] = None,
-) -> float:
-    """Glass' delta using group1 SD as control."""
-    group1_clean = np.asarray(group1).ravel()
-    group2_clean = np.asarray(group2).ravel()
-
-    group1_clean = group1_clean[np.isfinite(group1_clean)]
-    group2_clean = group2_clean[np.isfinite(group2_clean)]
-
-    if len(group1_clean) < 2 or len(group2_clean) < 2:
-        return np.nan
-
-    mean1, mean2 = np.mean(group1_clean), np.mean(group2_clean)
-    control_std = np.std(group1_clean, ddof=1)
-
-    epsilon = get_epsilon_std(config)
-    if control_std < epsilon:
-        return np.nan
-
-    return float((mean1 - mean2) / control_std)
-
-
-def glass_delta_control_group2(
-    group1: np.ndarray,
-    group2: np.ndarray,
-    config: Optional[Any] = None,
-) -> float:
-    """Glass' delta using group2 SD as control."""
-    group1_clean = np.asarray(group1).ravel()
-    group2_clean = np.asarray(group2).ravel()
-
-    group1_clean = group1_clean[np.isfinite(group1_clean)]
-    group2_clean = group2_clean[np.isfinite(group2_clean)]
-
-    if len(group1_clean) < 2 or len(group2_clean) < 2:
-        return np.nan
-
-    mean1, mean2 = np.mean(group1_clean), np.mean(group2_clean)
-    control_std = np.std(group2_clean, ddof=1)
-
-    epsilon = get_epsilon_std(config)
-    if control_std < epsilon:
-        return np.nan
-
-    return float((mean1 - mean2) / control_std)
-
-
 def fisher_z_test(
     r1: float,
     r2: float,
@@ -193,62 +143,12 @@ def correlation_difference_effect(
     }
 
 
-def r_to_d(r: float) -> float:
-    """Convert correlation to Cohen's d approximation."""
-    if not np.isfinite(r) or np.abs(r) >= 1:
-        return np.nan
-    return 2 * r / np.sqrt(1 - r**2)
-
-
-def d_to_r(d: float) -> float:
-    """Convert Cohen's d to correlation approximation."""
-    if not np.isfinite(d):
-        return np.nan
-    return d / np.sqrt(d**2 + 4)
-
-
-def compute_effect_sizes(
-    r_val: float,
-    p_val: float,
-    n_samples: int,
-    group1_data: Optional[np.ndarray] = None,
-    group2_data: Optional[np.ndarray] = None,
-    effect_size_metrics: Optional[List[str]] = None,
-    config: Optional[Any] = None,
-) -> Dict[str, float]:
-    """
-    Compute multiple effect size metrics.
-    
-    Supported metrics: r, r_squared, d_from_r, cohens_d, hedges_g.
-    """
-    if effect_size_metrics is None:
-        effect_size_metrics = ["r", "r_squared", "d_from_r"]
-
-    results = {}
-
-    if "r" in effect_size_metrics:
-        results["r"] = float(r_val) if np.isfinite(r_val) else np.nan
-
-    if "r_squared" in effect_size_metrics:
-        results["r_squared"] = float(r_val**2) if np.isfinite(r_val) else np.nan
-
-    if "d_from_r" in effect_size_metrics:
-        results["d_from_r"] = r_to_d(r_val)
-
-    if group1_data is not None and group2_data is not None:
-        if "cohens_d" in effect_size_metrics:
-            results["cohens_d"] = cohens_d(group1_data, group2_data, config=config)
-        if "hedges_g" in effect_size_metrics:
-            results["hedges_g"] = hedges_g(group1_data, group2_data, config=config)
-
-    return results
-
-
 def compute_cohens_d_with_bootstrap_ci(
     group_a_data: np.ndarray,
     group_b_data: np.ndarray,
     random_seed: int,
     n_bootstrap: int = 1000,
+    config: Optional[Any] = None,
 ) -> Tuple[float, float, float]:
     """Compute Cohen's d with bootstrap confidence intervals.
 
@@ -257,58 +157,68 @@ def compute_cohens_d_with_bootstrap_ci(
         group_b_data: Data for group B (1D array)
         random_seed: Random seed for reproducibility
         n_bootstrap: Number of bootstrap samples
+        config: Optional configuration object
 
     Returns:
         Tuple of (cohens_d, ci_low, ci_high)
     """
-    n_group_a = len(group_a_data)
-    n_group_b = len(group_b_data)
+    group_a_clean = np.asarray(group_a_data).ravel()
+    group_b_clean = np.asarray(group_b_data).ravel()
 
-    mean_diff = group_a_data.mean() - group_b_data.mean()
+    group_a_clean = group_a_clean[np.isfinite(group_a_clean)]
+    group_b_clean = group_b_clean[np.isfinite(group_b_clean)]
+
+    if len(group_a_clean) < 2 or len(group_b_clean) < 2:
+        return np.nan, np.nan, np.nan
+
+    n_group_a = len(group_a_clean)
+    n_group_b = len(group_b_clean)
+
+    mean_diff = np.mean(group_a_clean) - np.mean(group_b_clean)
     pooled_std = np.sqrt(
-        ((n_group_a - 1) * group_a_data.std() ** 2 + (n_group_b - 1) * group_b_data.std() ** 2)
+        ((n_group_a - 1) * np.std(group_a_clean, ddof=1) ** 2
+         + (n_group_b - 1) * np.std(group_b_clean, ddof=1) ** 2)
         / (n_group_a + n_group_b - 2)
     )
-    cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+
+    epsilon = get_epsilon_std(config)
+    if pooled_std < epsilon:
+        return np.nan, np.nan, np.nan
+
+    cohens_d = mean_diff / pooled_std
 
     rng = np.random.default_rng(random_seed)
     boot_indices_a = rng.integers(0, n_group_a, size=(n_bootstrap, n_group_a))
     boot_indices_b = rng.integers(0, n_group_b, size=(n_bootstrap, n_group_b))
 
-    boot_samples_a = group_a_data[boot_indices_a]
-    boot_samples_b = group_b_data[boot_indices_b]
+    boot_samples_a = group_a_clean[boot_indices_a]
+    boot_samples_b = group_b_clean[boot_indices_b]
 
-    boot_means_a = boot_samples_a.mean(axis=1)
-    boot_means_b = boot_samples_b.mean(axis=1)
-    boot_vars_a = boot_samples_a.var(axis=1, ddof=1)
-    boot_vars_b = boot_samples_b.var(axis=1, ddof=1)
+    boot_means_a = np.mean(boot_samples_a, axis=1)
+    boot_means_b = np.mean(boot_samples_b, axis=1)
+    boot_vars_a = np.var(boot_samples_a, axis=1, ddof=1)
+    boot_vars_b = np.var(boot_samples_b, axis=1, ddof=1)
 
     boot_pooled_std = np.sqrt(
         ((n_group_a - 1) * boot_vars_a + (n_group_b - 1) * boot_vars_b)
         / (n_group_a + n_group_b - 2)
     )
     boot_ds = np.where(
-        boot_pooled_std > 0,
+        boot_pooled_std > epsilon,
         (boot_means_a - boot_means_b) / boot_pooled_std,
         np.nan,
     )
     boot_ds_valid = boot_ds[np.isfinite(boot_ds)]
 
-    ci_low = (
-        np.percentile(boot_ds_valid, 2.5) if len(boot_ds_valid) > 0 else np.nan
-    )
-    ci_high = (
-        np.percentile(boot_ds_valid, 97.5) if len(boot_ds_valid) > 0 else np.nan
-    )
+    if len(boot_ds_valid) == 0:
+        return float(cohens_d), np.nan, np.nan
 
-    return float(cohens_d), float(ci_low), float(ci_high)
+    ci_low = float(np.percentile(boot_ds_valid, 2.5))
+    ci_high = float(np.percentile(boot_ds_valid, 97.5))
+
+    return float(cohens_d), ci_low, ci_high
 
 
-###################################################################
-# Condition Effects (Pain vs Non-Pain)
-###################################################################
-
-# Numeric tolerance for zero-variance detection
 _NUMERIC_TOLERANCE = 1e-12
 
 

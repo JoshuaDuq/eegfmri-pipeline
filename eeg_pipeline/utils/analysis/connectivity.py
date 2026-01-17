@@ -43,29 +43,10 @@ def _extract_chpair_edge(column: str) -> Optional[Tuple[str, str]]:
 def _extract_global_or_roi_edge(column: str) -> Optional[Tuple[str, str]]:
     """Extract edge label for global or ROI columns."""
     column_lower = column.lower()
-    global_tokens = ["_global_", "-global-"]
-    roi_tokens = ["_roi_", "-roi-"]
-
-    if any(token in column_lower for token in global_tokens):
+    if "_global_" in column_lower or "-global-" in column_lower:
         return ("Global", "Global")
-    if any(token in column_lower for token in roi_tokens):
+    if "_roi_" in column_lower or "-roi-" in column_lower:
         return ("ROI", "ROI")
-    return None
-
-
-def _extract_old_schema_edge(column: str, prefix: str) -> Optional[Tuple[str, str]]:
-    """Extract edge from old schema: {measure}_{band}_{ch1}-{ch2} variants."""
-    if not column.lower().startswith(prefix.lower()):
-        return None
-
-    remainder = column[len(prefix):]
-    separators = ["__", "-", "_"]
-
-    for sep in separators:
-        if sep in remainder:
-            parts = remainder.split(sep)
-            if len(parts) == 2:
-                return (parts[0], parts[1])
     return None
 
 
@@ -77,9 +58,7 @@ def parse_connectivity_columns(
 ) -> Tuple[List[str], List[Tuple[str, str]], List[int]]:
     """Parse connectivity feature column names to recover edges.
 
-    Supports:
-    - New schema: conn_{segment}_{band}_chpair_{ch1}-{ch2}_{stat}
-    - Older schema: {measure}_{band}_{ch1}-{ch2} (and variants)
+    Supports schema: conn_{segment}_{band}_chpair_{ch1}-{ch2}_{stat}
     """
     relevant_cols: List[str] = []
     edges: List[Tuple[str, str]] = []
@@ -92,7 +71,6 @@ def parse_connectivity_columns(
     measure_pattern = _compile_token_pattern(measure_lower)
     band_pattern = _compile_token_pattern(band_lower)
     segment_pattern = _compile_token_pattern(segment_lower) if segment_lower else None
-    old_schema_prefix = f"{measure_lower}_{band_lower}_"
 
     for index, column in enumerate(columns):
         column_lower = column.lower()
@@ -111,13 +89,6 @@ def parse_connectivity_columns(
             continue
 
         edge = _extract_global_or_roi_edge(column)
-        if edge:
-            relevant_cols.append(column)
-            edges.append(edge)
-            indices.append(index)
-            continue
-
-        edge = _extract_old_schema_edge(column, old_schema_prefix)
         if edge:
             relevant_cols.append(column)
             edges.append(edge)
@@ -151,47 +122,22 @@ def build_matrix_from_edges(
     return matrix, nodes
 
 
-def _parse_edge_from_column(column: str) -> Optional[Tuple[str, str]]:
-    """Parse edge from column name as fallback when edges list not provided."""
-    edge = _extract_chpair_edge(column)
-    if edge:
-        return edge
-
-    if "__" in column:
-        try:
-            nodes_str = column.split("_")[-1]
-            if "__" in nodes_str:
-                channel1, channel2 = nodes_str.split("__")
-                return (channel1, channel2)
-        except ValueError:
-            pass
-    return None
-
-
 def build_adjacency_from_edges(
     features_df: pd.DataFrame,
     edge_cols: List[str],
     channel_order: List[str],
-    edges: Optional[List[Tuple[str, str]]] = None,
+    edges: List[Tuple[str, str]],
 ) -> np.ndarray:
-    """Build an adjacency matrix by averaging edge columns across trials.
-    
-    If 'edges' is provided (List of (ch1, ch2) tuples matching edge_cols),
-    it uses those directly. Otherwise, it falls back to parsing column names.
-    """
+    """Build an adjacency matrix by averaging edge columns across trials."""
     num_channels = len(channel_order)
     adjacency_matrix = np.zeros((num_channels, num_channels), dtype=float)
     channel_to_index = {channel: index for index, channel in enumerate(channel_order)}
 
     for column_index, column in enumerate(edge_cols):
-        if edges is not None and column_index < len(edges):
-            channel1, channel2 = edges[column_index]
-        else:
-            parsed_edge = _parse_edge_from_column(column)
-            if parsed_edge is None:
-                continue
-            channel1, channel2 = parsed_edge
+        if column_index >= len(edges):
+            continue
 
+        channel1, channel2 = edges[column_index]
         if channel1 not in channel_to_index or channel2 not in channel_to_index:
             continue
 

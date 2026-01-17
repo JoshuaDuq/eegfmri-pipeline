@@ -18,7 +18,7 @@ Scientific notes
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -43,21 +43,18 @@ class ComplexityParams:
     zscore: bool
     min_segment_sec: float
     min_samples: int
-    skip_invalid_segments: bool
 
 
 def _extract_params(config: Any) -> ComplexityParams:
-    cfg = config.get("feature_engineering.complexity", {}) if hasattr(config, "get") else {}
-    signal_basis = str(cfg.get("signal_basis", "filtered")).strip().lower()
+    signal_basis = str(get_config_value(config, "feature_engineering.complexity.signal_basis", "filtered")).strip().lower()
     if signal_basis not in {"filtered", "envelope"}:
         signal_basis = "filtered"
 
-    pe_order = int(cfg.get("pe_order", 3))
-    pe_delay = int(cfg.get("pe_delay", 1))
-    zscore = bool(cfg.get("zscore", True))
-    min_segment_sec = float(cfg.get("min_segment_sec", 2.0))
-    min_samples = int(cfg.get("min_samples", 200))
-    skip_invalid = bool(cfg.get("skip_invalid_segments", True))
+    pe_order = int(get_config_value(config, "feature_engineering.complexity.pe_order", 3))
+    pe_delay = int(get_config_value(config, "feature_engineering.complexity.pe_delay", 1))
+    zscore = bool(get_config_value(config, "feature_engineering.complexity.zscore", True))
+    min_segment_sec = float(get_config_value(config, "feature_engineering.complexity.min_segment_sec", 2.0))
+    min_samples = int(get_config_value(config, "feature_engineering.complexity.min_samples", 200))
 
     # PE needs enough samples for ordinal patterns
     min_needed_for_pe = max(1, (pe_order - 1) * pe_delay + 2)
@@ -70,7 +67,6 @@ def _extract_params(config: Any) -> ComplexityParams:
         zscore=zscore,
         min_segment_sec=min_segment_sec,
         min_samples=min_samples,
-        skip_invalid_segments=skip_invalid,
     )
 
 
@@ -210,9 +206,7 @@ def extract_complexity_from_precomputed(
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
     allow_full_epoch_fallback = bool(
-        cfg.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(cfg, "get")
-        else False
+        get_config_value(cfg, "feature_engineering.windows.allow_full_epoch_fallback", False)
     )
 
     # Get segment masks with proper targeted window handling

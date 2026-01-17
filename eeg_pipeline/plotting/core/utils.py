@@ -8,11 +8,9 @@ These utilities have no dependencies on sibling plotting modules.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional
 
 from ..config import get_plot_config
-from .colors import get_band_colors as _get_band_colors
-from .colors import get_significance_colors as _get_significance_colors
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,7 +59,6 @@ def log(
     
     Raises:
         ValueError: If level is not a valid log level.
-        AttributeError: If logger does not have the requested log method.
     """
     if logger is None:
         logger = _LOGGER
@@ -75,25 +72,3 @@ def log(
     log_method(msg)
 
 
-def get_significance_colors(config: Optional[Any] = None) -> Tuple[str, str]:
-    """Get significant and non-significant color pair from config.
-    
-    Args:
-        config: Optional configuration object. If None, uses default config.
-    
-    Returns:
-        Tuple of (significant_color, nonsignificant_color).
-    """
-    return _get_significance_colors(config)
-
-
-def get_band_colors(config: Optional[Any] = None) -> Dict[str, str]:
-    """Get color mapping for all frequency bands.
-    
-    Args:
-        config: Optional configuration object. If None, uses default config.
-    
-    Returns:
-        Dictionary mapping band names to their colors.
-    """
-    return _get_band_colors(config)

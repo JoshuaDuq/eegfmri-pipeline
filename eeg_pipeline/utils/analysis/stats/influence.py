@@ -33,7 +33,6 @@ _COOKS_THRESHOLD_NUMERATOR = 4.0
 _LEVERAGE_THRESHOLD_MULTIPLIER = 2.0
 _NUMERICAL_STABILITY_EPSILON = 1e-12
 _MIN_DOF = 1
-_MAX_DUMMY_LEVELS = 20
 _MIN_FEATURES_FOR_PARALLEL = 5
 _DEFAULT_COOKS_THRESHOLD_DIVISOR = 1
 
@@ -85,7 +84,7 @@ def _compute_cooks_distance(
 @dataclass
 class InfluenceConfig:
     enabled: bool = True
-    outcomes: List[str] = None  # type: ignore[assignment]
+    outcomes: Optional[List[str]] = None
     max_features: int = 20
     include_trial_order: bool = True
     include_run_block: bool = True
@@ -283,16 +282,16 @@ def _compute_thresholds(
         config, "behavior_analysis.influence.leverage_threshold", None
     )
     
+    n_samples_safe = max(int(n_samples), _DEFAULT_COOKS_THRESHOLD_DIVISOR)
+    
     if cooks_threshold_config is not None:
         cooks_threshold = float(cooks_threshold_config)
     else:
-        n_samples_safe = max(int(n_samples), _DEFAULT_COOKS_THRESHOLD_DIVISOR)
         cooks_threshold = float(_COOKS_THRESHOLD_NUMERATOR / n_samples_safe)
     
     if leverage_threshold_config is not None:
         leverage_threshold = float(leverage_threshold_config)
     else:
-        n_samples_safe = max(int(n_samples), _DEFAULT_COOKS_THRESHOLD_DIVISOR)
         leverage_threshold = float(_LEVERAGE_THRESHOLD_MULTIPLIER * n_parameters / n_samples_safe)
     
     return cooks_threshold, leverage_threshold
@@ -410,28 +409,6 @@ def _process_single_influence_feature(
     }
 
 
-# _add_temperature_covariates is now imported from _regression_utils
-# Wrapper to maintain backward compatibility with existing interface
-def _add_temperature_covariates(
-    trial_df: pd.DataFrame,
-    outcome: str,
-    temperature_control_type: str,
-    config: Optional[Any],
-) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
-    """Add temperature control covariates based on configuration.
-    
-    Wrapper around consolidated _build_temperature_covariates.
-    """
-    return _build_temp_cov_shared(
-        trial_df=trial_df,
-        outcome=outcome,
-        temperature_control=temperature_control_type,
-        include_temperature=True,
-        config=config,
-        key_prefix="behavior_analysis.influence.temperature_spline",
-    )
-
-
 def _add_trial_order_covariate(trial_df: pd.DataFrame) -> Optional[str]:
     """Add trial order covariate if available."""
     trial_order_columns = ["trial_index_within_group", "trial_index"]
@@ -490,8 +467,13 @@ def _process_outcome_influence(
     temperature_control_type = str(config.temperature_control or "linear").strip().lower()
     
     if config.include_temperature:
-        temp_covariates, temp_design_df, temp_metadata = _add_temperature_covariates(
-            trial_df, outcome, temperature_control_type, global_config
+        temp_covariates, temp_design_df, temp_metadata = _build_temp_cov_shared(
+            trial_df=trial_df,
+            outcome=outcome,
+            temperature_control=temperature_control_type,
+            include_temperature=True,
+            config=global_config,
+            key_prefix="behavior_analysis.influence.temperature_spline",
         )
         covariates.extend(temp_covariates)
     else:
@@ -531,7 +513,6 @@ def _process_outcome_influence(
 def compute_influence_diagnostics(
     trial_df: pd.DataFrame,
     *,
-    feature_cols: List[str],
     corr_df: Optional[pd.DataFrame] = None,
     regression_df: Optional[pd.DataFrame] = None,
     models_df: Optional[pd.DataFrame] = None,

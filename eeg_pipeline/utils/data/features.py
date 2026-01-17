@@ -52,13 +52,8 @@ def _get_columns_by_band_and_group(
     bands_to_check = bands or _DEFAULT_BANDS
     columns_by_band: Dict[str, List[str]] = {}
 
-    bands_normalized = {str(band).lower() for band in bands_to_check}
-
     for band in bands_to_check:
         band_normalized = str(band).lower()
-        if band_normalized not in bands_normalized:
-            continue
-
         matching_columns: List[str] = []
         for column in df.columns:
             parsed = NamingSchema.parse(str(column))
@@ -111,11 +106,9 @@ def get_aperiodic_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
                 matching_columns.append(str(column))
 
         if matching_columns:
-            columns_by_metric[metric] = list(dict.fromkeys(matching_columns))
+            columns_by_metric[metric] = matching_columns
 
     return columns_by_metric
-
-
 
 
 ###################################################################
@@ -234,7 +227,6 @@ def validate_feature_block_lengths(
 # Feature Alignment
 ###################################################################
 
-
 def _get_block_length(block: Optional[Union[pd.DataFrame, pd.Series]]) -> Optional[int]:
     """Get length of a feature block, returning None if empty or invalid."""
     if block is None or getattr(block, "empty", False):
@@ -343,22 +335,15 @@ def _register_all_blocks(
     lengths: Dict[str, int],
 ) -> None:
     """Register all feature blocks in the registry."""
-    def _is_valid_block(block: Optional[Union[pd.DataFrame, pd.Series]]) -> Optional[Union[pd.DataFrame, pd.Series]]:
-        if block is None:
-            return None
-        if hasattr(block, "empty") and block.empty:
-            return None
-        return block
-
-    register_feature_block("power", _is_valid_block(pow_df), registry, lengths)
-    register_feature_block("baseline", _is_valid_block(baseline_df), registry, lengths)
-    register_feature_block("connectivity", _is_valid_block(conn_df), registry, lengths)
-    register_feature_block("aperiodic", _is_valid_block(aper_df), registry, lengths)
+    register_feature_block("power", pow_df, registry, lengths)
+    register_feature_block("baseline", baseline_df, registry, lengths)
+    register_feature_block("connectivity", conn_df, registry, lengths)
+    register_feature_block("aperiodic", aper_df, registry, lengths)
     register_feature_block("target", y, registry, lengths)
 
     if extra_blocks:
         for block_name, block_df in extra_blocks.items():
-            register_feature_block(block_name, _is_valid_block(block_df), registry, lengths)
+            register_feature_block(block_name, block_df, registry, lengths)
 
 
 def _extract_aligned_blocks(
@@ -382,7 +367,7 @@ def _extract_aligned_blocks(
     if baseline_df_aligned is not None:
         baseline_df_aligned = baseline_df_aligned.reset_index(drop=True)
     else:
-        baseline_df_aligned = baseline_df if baseline_df is not None else pd.DataFrame()
+        baseline_df_aligned = pd.DataFrame()
 
     conn_df_aligned = registry.get("connectivity")
     if conn_df_aligned is not None:
@@ -396,7 +381,7 @@ def _extract_aligned_blocks(
     if target_block is not None:
         y_aligned = target_block.iloc[:, 0] if target_block.shape[1] == 1 else target_block
     else:
-        y_aligned = y if y is not None else pd.Series(dtype=float)
+        y_aligned = pd.Series(dtype=float)
 
     return pow_df_aligned, baseline_df_aligned, conn_df_aligned, aper_df_aligned, y_aligned
 
@@ -411,25 +396,18 @@ def _compute_after_lengths(
     registry: Dict[str, pd.DataFrame],
 ) -> Dict[str, int]:
     """Compute lengths of aligned blocks."""
-    def _get_length(block: Optional[Union[pd.DataFrame, pd.Series]]) -> int:
-        if block is None:
-            return 0
-        if hasattr(block, "empty") and block.empty:
-            return 0
-        return len(block) if hasattr(block, "__len__") else 0
-
     after_lengths = {
-        "power": _get_length(pow_df),
-        "baseline": _get_length(baseline_df),
-        "connectivity": _get_length(conn_df),
-        "aperiodic": _get_length(aper_df),
-        "target": _get_length(y),
+        "power": len(pow_df) if pow_df is not None and not pow_df.empty else 0,
+        "baseline": len(baseline_df) if not baseline_df.empty else 0,
+        "connectivity": len(conn_df) if conn_df is not None and not conn_df.empty else 0,
+        "aperiodic": len(aper_df) if aper_df is not None and not aper_df.empty else 0,
+        "target": len(y) if not y.empty else 0,
     }
 
     if extra_blocks:
         for block_name in extra_blocks.keys():
             block = registry.get(block_name)
-            after_lengths[block_name] = _get_length(block)
+            after_lengths[block_name] = len(block) if block is not None and not block.empty else 0
 
     return after_lengths
 
@@ -478,8 +456,7 @@ def align_feature_dataframes(
         combined_mask &= _create_finite_mask(aper_df, n_trials)
         combined_mask &= _create_finite_mask(y, n_trials)
 
-        if not np.all(combined_mask):
-            drop_mask = combined_mask
+        drop_mask = combined_mask if not np.all(combined_mask) else None
 
     if drop_mask is not None:
         pow_df = _apply_drop_mask(pow_df, drop_mask, "power", logger)

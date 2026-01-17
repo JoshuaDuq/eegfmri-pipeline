@@ -12,18 +12,12 @@ import (
 )
 
 const (
-	ansiDisableMouseClick    = "\033[?1000l"
-	ansiDisableMouseButton   = "\033[?1002l"
-	ansiDisableMouseTracking = "\033[?1003l"
-	ansiDisableSGRMouse      = "\033[?1006l"
+	ansiDisableMouseTracking = "\033[?1000l\033[?1002l\033[?1003l\033[?1006l"
 	ansiExitAlternateScreen  = "\033[?1049l"
 )
 
 func disableMouseTracking() {
-	fmt.Print(ansiDisableMouseClick)
-	fmt.Print(ansiDisableMouseButton)
 	fmt.Print(ansiDisableMouseTracking)
-	fmt.Print(ansiDisableSGRMouse)
 }
 
 func exitAlternateScreen() {
@@ -86,8 +80,6 @@ func main() {
 	)
 
 	finalModel, err := program.Run()
-
-	// Reset terminal FIRST so messages are visible
 	resetTerminal()
 
 	if err != nil {
@@ -95,6 +87,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Stop VM on exit if using cloud environment
 	stopVMIfNeeded(finalModel)
 }

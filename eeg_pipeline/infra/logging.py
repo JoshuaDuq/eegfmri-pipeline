@@ -92,22 +92,8 @@ def get_pipeline_logger(module_name: Optional[str] = None) -> logging.Logger:
     return get_logger(logger_name)
 
 
-def setup_pipeline_logger() -> logging.Logger:
-    return get_pipeline_logger()
-
-
-def setup_subject_logger(subject: str) -> logging.Logger:
-    return get_subject_logger("pipeline", subject)
-
-
-def setup_logger(subject: Optional[str] = None) -> logging.Logger:
-    if subject:
-        return setup_subject_logger(subject)
-    return setup_pipeline_logger()
-
-
 def get_default_logger() -> logging.Logger:
-    return logging.getLogger(__name__)
+    return get_logger(DEFAULT_LOGGER_NAME)
 
 
 def get_group_logger(
@@ -121,7 +107,6 @@ def get_group_logger(
 
 
 __all__ = [
-    "_configure_logger_handlers",
     "get_logger",
     "get_module_logger",
     "log_and_raise_error",
@@ -129,8 +114,5 @@ __all__ = [
     "get_subject_logger",
     "get_group_logger",
     "get_pipeline_logger",
-    "setup_logger",
-    "setup_pipeline_logger",
-    "setup_subject_logger",
     "get_default_logger",
 ]

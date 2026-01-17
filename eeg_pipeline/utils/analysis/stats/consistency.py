@@ -32,30 +32,12 @@ def _sign(x: Any) -> float:
     return float(np.sign(value))
 
 
-def _pick_corr_r(df: pd.DataFrame) -> pd.Series:
-    """Extract correlation coefficient column from dataframe."""
-    column_names = ["r_primary", "r", "rho", "correlation"]
-    for col in column_names:
-        if col in df.columns:
-            return pd.to_numeric(df[col], errors="coerce")
-    return pd.Series(np.nan, index=df.index, dtype=float)
-
-
-def _pick_corr_p(df: pd.DataFrame) -> pd.Series:
-    """Extract p-value column from correlation dataframe."""
-    column_names = ["p_primary", "p_raw", "p_value", "p"]
-    for col in column_names:
-        if col in df.columns:
-            return pd.to_numeric(df[col], errors="coerce")
-    return pd.Series(np.nan, index=df.index, dtype=float)
-
-
-def _pick_beta(df: pd.DataFrame) -> pd.Series:
-    """Extract beta coefficient column from dataframe."""
-    column_names = ["beta_feature", "beta", "coef", "coefficient"]
-    for col in column_names:
-        if col in df.columns:
-            return pd.to_numeric(df[col], errors="coerce")
+def _extract_column(df: pd.DataFrame, primary: str, fallback: str) -> pd.Series:
+    """Extract column from dataframe with primary and fallback names."""
+    if primary in df.columns:
+        return pd.to_numeric(df[primary], errors="coerce")
+    if fallback in df.columns:
+        return pd.to_numeric(df[fallback], errors="coerce")
     return pd.Series(np.nan, index=df.index, dtype=float)
 
 
@@ -110,19 +92,20 @@ def _add_regression_columns(
     if filtered.empty:
         return
     
-    has_p_primary = "p_primary" in filtered.columns
-    if has_p_primary:
-        sorted_df = filtered.sort_values(
-            ["feature", "p_primary"], ascending=[True, True]
-        )
+    sort_col = "p_primary" if "p_primary" in filtered.columns else "p_feature"
+    if sort_col in filtered.columns:
+        sorted_df = filtered.sort_values(["feature", sort_col], ascending=[True, True])
     else:
         sorted_df = filtered
     
     best = sorted_df.groupby("feature", sort=False).head(1).set_index("feature")
     out[f"{prefix}_beta"] = out["feature"].map(best["beta"]).astype(float)
     
-    p_column = best.get("p_primary", best.get("p_feature", np.nan))
-    p_values = pd.to_numeric(p_column, errors="coerce")
+    p_col_name = "p_primary" if "p_primary" in best.columns else "p_feature"
+    if p_col_name in best.columns:
+        p_values = pd.to_numeric(best[p_col_name], errors="coerce")
+    else:
+        p_values = pd.Series(np.nan, index=best.index)
     out[f"{prefix}_p"] = out["feature"].map(p_values).astype(float)
     out[f"{prefix}_sign"] = out[f"{prefix}_beta"].map(_sign)
 
@@ -144,23 +127,17 @@ def _add_model_columns(
     prefix: str,
 ) -> None:
     """Add model beta columns for a specific family and target."""
-    if "model_family" not in models_df.columns:
+    required_cols = ["model_family", "target"]
+    if not all(col in models_df.columns for col in required_cols):
         return
     
-    family_filtered = models_df[models_df["model_family"] == family]
-    if family_filtered.empty:
+    filtered = models_df[
+        (models_df["model_family"] == family) & (models_df["target"] == target)
+    ]
+    if filtered.empty:
         return
     
-    if "target" not in family_filtered.columns:
-        return
-    
-    target_filtered = family_filtered[family_filtered["target"] == target]
-    if target_filtered.empty:
-        return
-    
-    sorted_df = target_filtered.sort_values(
-        ["feature", "p_val"], ascending=[True, True]
-    )
+    sorted_df = filtered.sort_values(["feature", "p_val"], ascending=[True, True])
     best = sorted_df.groupby("feature", sort=False).head(1).set_index("feature")
     out[f"{prefix}_beta"] = out["feature"].map(best["beta"]).astype(float)
     out[f"{prefix}_p"] = out["feature"].map(best["p_val"]).astype(float)
@@ -260,8 +237,8 @@ def _process_correlations(out: pd.DataFrame, corr_df: pd.DataFrame) -> None:
     """Process correlation data and add columns to output dataframe."""
     corr_processed = corr_df.copy()
     corr_processed["target"] = corr_processed["target"].astype(str)
-    corr_processed["r_val"] = _pick_corr_r(corr_processed)
-    corr_processed["p_val"] = _pick_corr_p(corr_processed)
+    corr_processed["r_val"] = _extract_column(corr_processed, "r_primary", "r")
+    corr_processed["p_val"] = _extract_column(corr_processed, "p_primary", "p")
 
     _add_correlation_columns(out, corr_processed, "rating", "corr_rating")
     _add_correlation_columns(out, corr_processed, "temperature", "corr_temperature")
@@ -271,7 +248,7 @@ def _process_regressions(out: pd.DataFrame, regression_df: pd.DataFrame) -> None
     """Process regression data and add columns to output dataframe."""
     reg_processed = regression_df.copy()
     reg_processed["target"] = reg_processed["target"].astype(str)
-    reg_processed["beta"] = _pick_beta(reg_processed)
+    reg_processed["beta"] = _extract_column(reg_processed, "beta_feature", "beta")
 
     regression_targets = [
         ("rating", "reg_rating"),
@@ -289,7 +266,7 @@ def _process_models(out: pd.DataFrame, models_df: pd.DataFrame) -> None:
         if col in models_processed.columns:
             models_processed[col] = models_processed[col].astype(str)
     
-    models_processed["beta"] = _pick_beta(models_processed)
+    models_processed["beta"] = _extract_column(models_processed, "beta_feature", "beta")
     
     p_column_name = _get_p_value_column(models_processed)
     if p_column_name is not None:

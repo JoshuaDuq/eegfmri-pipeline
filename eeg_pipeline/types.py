@@ -37,31 +37,11 @@ PathLike = Union[str, Path]
 ArrayLike = Union[np.ndarray, List[float], pd.Series]
 FrequencyBand = Tuple[float, float]
 CorrelationMethod = Literal["spearman", "pearson"]
-AlignMode = Literal["strict", "warn", "none"]
 
 
 ###################################################################
 # Configuration Protocol
 ###################################################################
-
-
-@runtime_checkable
-class EEGConfig(Protocol):
-    """Protocol for configuration objects."""
-
-    def get(self, key: str, default: Any = None) -> Any:
-        """Get nested config value using dot notation."""
-        ...
-
-    @property
-    def deriv_root(self) -> Path:
-        """Path to derivatives directory."""
-        ...
-
-    @property
-    def bids_root(self) -> Path:
-        """Path to BIDS root directory."""
-        ...
 
 
 @runtime_checkable
@@ -214,7 +194,6 @@ class BatchResult:
 ###################################################################
 
 ProgressCallback = Callable[[str, float], None]
-LoggerType = Any  # Avoids circular import; represents logging.Logger
 
 
 def null_progress(stage: str, fraction: float) -> None:
@@ -330,20 +309,6 @@ class TimeWindows:
 
         return self._empty_mask()
 
-    def _compute_ramp_mask(self) -> Optional[np.ndarray]:
-        """Compute ramp mask between baseline and active ranges."""
-        if self.times is None:
-            return None
-        if not np.isfinite(self.baseline_range[1]):
-            return None
-        if not np.isfinite(self.active_range[0]):
-            return None
-
-        ramp_mask = (self.times >= self.baseline_range[1]) & (
-            self.times < self.active_range[0]
-        )
-        return ramp_mask if np.any(ramp_mask) else None
-
 
 @dataclass
 class PrecomputedQC:
@@ -411,6 +376,8 @@ class PrecomputedData:
     qc: PrecomputedQC = field(default_factory=PrecomputedQC)
     spatial_modes: Optional[List[str]] = None
     frequency_bands: Optional[Dict[str, List[float]]] = None
+    feature_family: Optional[str] = None
+    spatial_transform: Optional[str] = None
 
     def crop(self, tmin: float, tmax: float) -> PrecomputedData:
         """Create a new PrecomputedData object cropped to the time range."""
@@ -455,6 +422,8 @@ class PrecomputedData:
             logger=self.logger,
             spatial_modes=self.spatial_modes,
             frequency_bands=self.frequency_bands,
+            feature_family=self.feature_family,
+            spatial_transform=self.spatial_transform,
         )
 
     def _crop_band_data(
@@ -531,4 +500,6 @@ class PrecomputedData:
             qc=self.qc,
             spatial_modes=self.spatial_modes,
             frequency_bands=self.frequency_bands,
+            feature_family=self.feature_family,
+            spatial_transform=self.spatial_transform,
         )

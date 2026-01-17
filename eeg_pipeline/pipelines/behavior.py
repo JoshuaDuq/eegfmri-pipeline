@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -198,7 +197,13 @@ class BehaviorPipelineConfig:
             compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
             compute_bayes_factors=bool(get_config_value(config, "behavior_analysis.correlations.compute_bayes_factors", False)),
             compute_loso_stability=bool(get_config_value(config, "behavior_analysis.correlations.loso_stability", True)),
-            bootstrap=int(get_config_value(config, "behavior_analysis.bootstrap", get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))),
+            bootstrap=int(
+                get_config_value(
+                    config,
+                    "behavior_analysis.bootstrap",
+                    get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000),
+                )
+            ),
             robust_method=robust_method,
             method_label=method_label,
             correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_temp"]),
@@ -213,13 +218,13 @@ class BehaviorPipelineConfig:
             run_consistency=bool(get_config_value(config, "behavior_analysis.consistency.enabled", True)),
             run_influence=bool(get_config_value(config, "behavior_analysis.influence.enabled", True)),
             run_report=bool(get_config_value(config, "behavior_analysis.report.enabled", True)),
-            run_correlations=get_config_value(config, "behavior_analysis.correlations.enabled", True),
-            run_condition_comparison=get_config_value(config, "behavior_analysis.condition.enabled", True),
-            run_temporal_correlations=get_config_value(config, "behavior_analysis.temporal.enabled", True),
-            run_cluster_tests=get_config_value(config, "behavior_analysis.cluster.enabled", False),
-            run_mediation=get_config_value(config, "behavior_analysis.mediation.enabled", False),
-            run_moderation=get_config_value(config, "behavior_analysis.moderation.enabled", False),
-            run_mixed_effects=get_config_value(config, "behavior_analysis.mixed_effects.enabled", False),
+            run_correlations=bool(get_config_value(config, "behavior_analysis.correlations.enabled", True)),
+            run_condition_comparison=bool(get_config_value(config, "behavior_analysis.condition.enabled", True)),
+            run_temporal_correlations=bool(get_config_value(config, "behavior_analysis.temporal.enabled", True)),
+            run_cluster_tests=bool(get_config_value(config, "behavior_analysis.cluster.enabled", False)),
+            run_mediation=bool(get_config_value(config, "behavior_analysis.mediation.enabled", False)),
+            run_moderation=bool(get_config_value(config, "behavior_analysis.moderation.enabled", False)),
+            run_mixed_effects=bool(get_config_value(config, "behavior_analysis.mixed_effects.enabled", False)),
             fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
             n_permutations=int(
                 get_config_value(
@@ -258,7 +263,7 @@ def _extract_p_value_column(df: pd.DataFrame, primary_cols: List[str], fallback_
             return df[col]
     for col in fallback_cols:
         if col in df.columns:
-            return df.get(col)
+            return df[col]
     return None
 
 
@@ -413,7 +418,7 @@ class BehaviorPipelineResults:
                     cluster_records = res.get("cluster_records", [])
                     n_clusters += len(cluster_records)
                     for record in cluster_records:
-                        p_value = record.get("q_global") if "q_global" in record else record.get("p_value", 1.0)
+                        p_value = record.get("q_global", record.get("p_value", 1.0))
                         if p_value < SIGNIFICANCE_THRESHOLD:
                             n_sig_clusters += 1
             
@@ -449,8 +454,6 @@ class BehaviorPipeline(PipelineBase):
         self.feature_files = feature_files
         self.computation_features = computation_features or {}
         
-        self._run_validation = True
-        
         comp_flags = _resolve_behavior_computation_flags(computations, logger=self.logger)
         if comp_flags is not None:
             any_requested = any(comp_flags.values())
@@ -481,35 +484,10 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_moderation = comp_flags["moderation"]
             self.pipeline_config.run_mixed_effects = comp_flags["mixed_effects"]
             self.pipeline_config.compute_pain_sensitivity = comp_flags["pain_sensitivity"]
-            self._run_validation = any(
-                comp_flags[key] for key in BEHAVIOR_COMPUTATION_FLAGS
-            )
             
             selected_computations = [k for k, v in comp_flags.items() if v]
             selected_text = ", ".join(selected_computations) if selected_computations else "none"
             self.logger.info("Behavior computations (override): %s", selected_text)
-        else:
-            self._run_validation = any(
-                [
-                    self.pipeline_config.run_lag_features,
-                    self.pipeline_config.run_pain_residual,
-                    self.pipeline_config.run_temperature_models,
-                    self.pipeline_config.run_regression,
-                    self.pipeline_config.run_models,
-                    self.pipeline_config.run_stability,
-                    self.pipeline_config.run_consistency,
-                    self.pipeline_config.run_influence,
-                    self.pipeline_config.run_report,
-                    self.pipeline_config.run_correlations,
-                    self.pipeline_config.run_condition_comparison,
-                    self.pipeline_config.run_temporal_correlations,
-                    self.pipeline_config.run_cluster_tests,
-                    self.pipeline_config.run_mediation,
-                    self.pipeline_config.run_moderation,
-                    self.pipeline_config.run_mixed_effects,
-                    self.pipeline_config.compute_pain_sensitivity,
-                ]
-            )
 
         if self.feature_categories:
             self.logger.info("Feature categories filter: %s", ", ".join(self.feature_categories))

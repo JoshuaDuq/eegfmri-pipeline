@@ -12,16 +12,9 @@ from pathlib import Path
 from typing import Optional
 
 import mne
-import numpy as np
 import pandas as pd
 
 from eeg_pipeline.infra.paths import load_events_df
-from eeg_pipeline.infra.tsv import read_tsv
-
-
-###################################################################
-# Event / Epoch Alignment
-###################################################################
 
 
 def _align_by_selection(
@@ -130,17 +123,6 @@ def trim_behavioral_to_events_strict(
     return behavioral_df.reindex(range(n_event_rows))
 
 
-def _handle_validation_error(
-    message: str,
-    strict: bool,
-    logger: logging.Logger,
-) -> None:
-    """Handle validation error by raising or logging based on strict mode."""
-    if strict:
-        raise ValueError(message)
-    logger.warning(message)
-
-
 def validate_alignment(
     aligned_events: Optional[pd.DataFrame],
     epochs: mne.Epochs,
@@ -152,9 +134,10 @@ def validate_alignment(
         logger = logging.getLogger(__name__)
 
     if aligned_events is None:
-        _handle_validation_error(
-            "Aligned events DataFrame is None", strict, logger
-        )
+        message = "Aligned events DataFrame is None"
+        if strict:
+            raise ValueError(message)
+        logger.warning(message)
         return False
 
     n_events = len(aligned_events)
@@ -163,22 +146,12 @@ def validate_alignment(
         message = (
             f"Length mismatch: events ({n_events}) != epochs ({n_epochs})"
         )
-        _handle_validation_error(message, strict, logger)
+        if strict:
+            raise ValueError(message)
+        logger.warning(message)
         return False
 
     return True
-
-
-def align_or_raise(
-    events_df: Optional[pd.DataFrame],
-    epochs: mne.Epochs,
-    config,
-    logger: Optional[logging.Logger] = None,
-) -> pd.DataFrame:
-    """Align events and raise error if validation fails."""
-    aligned = align_events_to_epochs(events_df, epochs, logger)
-    validate_alignment(aligned, epochs, logger=logger, strict=True)
-    return aligned
 
 
 def get_aligned_events(
@@ -194,7 +167,7 @@ def get_aligned_events(
 ) -> Optional[pd.DataFrame]:
     """
     Load and align events for a subject/task.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
@@ -207,7 +180,13 @@ def get_aligned_events(
         If True, raise error on failure
     logger : Logger
         Logger
-        
+    bids_root : Path
+        BIDS root directory
+    config
+        Configuration object
+    constants
+        Constants object
+
     Returns
     -------
     pd.DataFrame or None
@@ -223,11 +202,11 @@ def get_aligned_events(
         subject, task, bids_root=bids_root, config=config, constants=constants
     )
     if events_df is None:
+        message = (
+            f"Events TSV not found for sub-{subject}, task-{task}. "
+            "Required when strict=True"
+        )
         if strict:
-            message = (
-                f"Events TSV not found for sub-{subject}, task-{task}. "
-                "Required when strict=True"
-            )
             raise ValueError(message)
         logger.warning(
             f"Events TSV not found for sub-{subject}, task-{task}"
@@ -239,78 +218,24 @@ def get_aligned_events(
             events_df, epochs, logger=logger
         )
     except ValueError as err:
+        message = (
+            f"Alignment failed for sub-{subject}, task-{task} "
+            f"in strict mode: {err}"
+        )
         if strict:
-            message = (
-                f"Alignment failed for sub-{subject}, task-{task} "
-                f"in strict mode: {err}"
-            )
             raise ValueError(message) from err
         logger.warning(
             f"Alignment failed for sub-{subject}, task-{task}: {err}"
         )
         return None
 
-    if aligned_events is None:
-        if strict:
-            message = (
-                f"Could not align events to epochs for sub-{subject}, "
-                f"task-{task}. This is required when strict=True."
-            )
-            raise ValueError(message)
-        return None
-
-    n_aligned = len(aligned_events)
-    n_epochs = len(epochs)
-    if n_aligned != n_epochs:
-        message = (
-            f"Alignment length mismatch for sub-{subject}, task-{task}: "
-            f"aligned_events ({n_aligned} rows) != epochs ({n_epochs} epochs)"
-        )
-        if strict:
-            raise ValueError(message)
-        logger.warning(message)
-
     validate_alignment(aligned_events, epochs, logger, strict=strict)
-
     return aligned_events
-
-
-###################################################################
-# Index Reconstruction (migrated from general.py)
-###################################################################
-
-
-def reconstruct_kept_indices(
-    dropped_trials_path: Path,
-    n_events: int,
-) -> np.ndarray:
-    """Reconstruct which trial indices were kept after artifact rejection."""
-    if not dropped_trials_path.exists():
-        return np.arange(n_events)
-
-    dropped_df = read_tsv(dropped_trials_path)
-    has_original_index = "original_index" in dropped_df.columns
-    if not has_original_index or len(dropped_df) == 0:
-        return np.arange(n_events)
-
-    dropped_indices_raw = pd.to_numeric(
-        dropped_df["original_index"], errors="coerce"
-    ).dropna()
-    if len(dropped_indices_raw) == 0:
-        return np.arange(n_events)
-
-    dropped_indices = set(dropped_indices_raw.astype(int).tolist())
-    kept_indices = np.array([
-        idx for idx in range(n_events) if idx not in dropped_indices
-    ])
-    return kept_indices
 
 
 __all__ = [
     "align_events_to_epochs",
     "trim_behavioral_to_events_strict",
     "validate_alignment",
-    "align_or_raise",
     "get_aligned_events",
-    "reconstruct_kept_indices",
 ]

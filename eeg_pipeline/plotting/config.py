@@ -139,7 +139,6 @@ class TextPosition:
     residual_qc_title_y: float = 1.02
 
 
-
 @dataclass
 class PlotConfig:
     """Complete plotting configuration.
@@ -374,12 +373,8 @@ class PlotConfig:
     def _build_color_palette(styling: Dict[str, Any]) -> ColorPalette:
         """Build color palette from styling dict."""
         colors_dict = styling.get("colors", {})
-        condition_1 = colors_dict.get(
-            "condition_1", colors_dict.get("nonpain", "navy")
-        )
-        condition_2 = colors_dict.get(
-            "condition_2", colors_dict.get("pain", "crimson")
-        )
+        condition_1 = colors_dict.get("condition_1", "navy")
+        condition_2 = colors_dict.get("condition_2", "crimson")
         return ColorPalette(
             gray=colors_dict.get("gray", "#555555"),
             light_gray=colors_dict.get("light_gray", "#999999"),
@@ -563,8 +558,7 @@ class PlotConfig:
         Returns:
             List [left, bottom, right, top]
         """
-        default_tight = [0, 0.03, 1, 1]
-        default_rect = default_tight
+        default_rect = [0, 0.03, 1, 1]
         return self.layout_rects.get(rect_name, default_rect)
     
     def get_gridspec_params(self) -> Dict[str, Any]:
@@ -620,39 +614,22 @@ def get_plot_config(config: Optional[Any] = None) -> PlotConfig:
 
 
 def _extract_config_dict(config: Any) -> Dict[str, Any]:
-    """Extract plotting config dictionary from various config types."""
+    """Extract plotting config dictionary from config object.
+    
+    ConfigDict is a dict subclass, so isinstance check handles it.
+    """
     if isinstance(config, dict):
         return config
     
     if hasattr(config, "get"):
-        return _extract_from_dict_like(config)
+        try:
+            plotting_dict = config.get("plotting", {})
+            if isinstance(plotting_dict, dict):
+                return {"plotting": plotting_dict}
+        except (TypeError, AttributeError):
+            pass
     
-    return _extract_from_object_like(config)
-
-
-def _extract_from_dict_like(config: Any) -> Dict[str, Any]:
-    """Extract config from dict-like object."""
-    try:
-        plotting_dict = config.get("plotting", {})
-        if isinstance(plotting_dict, dict):
-            return {"plotting": plotting_dict}
-        return {}
-    except (TypeError, AttributeError):
-        logger.warning("Could not extract plotting config, using defaults")
-        return {}
-
-
-def _extract_from_object_like(config: Any) -> Dict[str, Any]:
-    """Extract config from object-like structure."""
-    try:
-        if hasattr(config, "__dict__"):
-            return dict(config)
-        if hasattr(config, "items"):
-            return dict(config)
-        return {}
-    except (TypeError, AttributeError):
-        logger.warning("Could not convert config to dict, using defaults")
-        return {}
+    return {}
 
 
 def reset_plot_config_cache() -> None:

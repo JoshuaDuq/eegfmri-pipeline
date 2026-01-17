@@ -6,7 +6,7 @@ Colorbar creation and styling functions for plotting.
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
@@ -24,7 +24,10 @@ def _get_tfr_colorbar_config(config: Optional[Any] = None) -> dict:
     Returns:
         Dictionary with colorbar configuration values
     """
-    plot_cfg = get_plot_config(config) if config else None
+    if config is None:
+        return {}
+    
+    plot_cfg = get_plot_config(config)
     if plot_cfg is None:
         return {}
     
@@ -51,18 +54,16 @@ def _get_colorbar_params(
     """
     colorbar_config = _get_tfr_colorbar_config(config)
     
-    default_fraction = colorbar_config.get("fraction", 0.045)
-    default_pad = colorbar_config.get("pad", 0.06)
-    default_shrink = colorbar_config.get("shrink", 0.9)
-    
     return (
-        fraction if fraction is not None else default_fraction,
-        pad if pad is not None else default_pad,
-        shrink if shrink is not None else default_shrink,
+        fraction if fraction is not None else colorbar_config.get("fraction", 0.045),
+        pad if pad is not None else colorbar_config.get("pad", 0.06),
+        shrink if shrink is not None else colorbar_config.get("shrink", 0.9),
     )
 
 
-def _normalize_axes_to_list(axes: Union[plt.Axes, List[plt.Axes]]) -> List[plt.Axes]:
+def _normalize_axes_to_list(
+    axes: Union[plt.Axes, list[plt.Axes], Any]
+) -> list[plt.Axes]:
     """Convert axes input to a list of axes objects.
     
     Handles single axes, lists, and numpy arrays.
@@ -109,7 +110,7 @@ def _create_scalar_mappable(
 
 def add_normalized_colorbar(
     fig: plt.Figure,
-    axes_list: Union[plt.Axes, List[plt.Axes]],
+    axes_list: Union[plt.Axes, list[plt.Axes]],
     vmin: float,
     vmax: float,
     cmap: Colormap,
@@ -132,7 +133,7 @@ def add_normalized_colorbar(
 
 def create_difference_colorbar(
     fig: plt.Figure,
-    axes: Union[plt.Axes, List[plt.Axes]],
+    axes: Union[plt.Axes, list[plt.Axes]],
     vabs: float,
     cmap: Colormap,
     label: Optional[str] = None,
@@ -200,82 +201,4 @@ def add_diff_colorbar(
     fraction, pad, shrink = _get_colorbar_params(config)
     sm = _create_scalar_mappable(-vabs, vabs, cmap, vcenter=0.0)
     fig.colorbar(sm, ax=ax, fraction=fraction, pad=pad, shrink=shrink)
-
-
-def create_colorbar_for_topomaps(
-    fig: plt.Figure,
-    axes: Union[plt.Axes, List[plt.Axes]],
-    vmin: float,
-    vmax: float,
-    cmap: Colormap,
-    colorbar_pad: float,
-    colorbar_fraction: float,
-    config: Optional[Any] = None,
-) -> None:
-    """Create colorbar for topomap plots with symmetric range.
-    
-    Args:
-        fig: Matplotlib figure
-        axes: Single axes or list of axes to attach colorbar to
-        vmin: Minimum value for colorbar
-        vmax: Maximum value for colorbar
-        cmap: Colormap to use
-        colorbar_pad: Base padding for colorbar
-        colorbar_fraction: Fraction for colorbar
-        config: Optional config dictionary
-    """
-    sm = _create_scalar_mappable(vmin, vmax, cmap, vcenter=0.0)
-    
-    colorbar_config = _get_tfr_colorbar_config(config)
-    colorbar_multiplier = colorbar_config.get("multiplier", 8.0)
-    pad = colorbar_pad * colorbar_multiplier
-    
-    fig.colorbar(sm, ax=axes, fraction=colorbar_fraction, pad=pad)
-
-
-def add_colorbar(
-    fig: plt.Figure,
-    axes: List[plt.Axes],
-    successful_plots: List,
-    config: Optional[Any] = None,
-) -> None:
-    """Add colorbar for behavioral correlation plots.
-    
-    Args:
-        fig: Matplotlib figure
-        axes: List of axes to position colorbar relative to
-        successful_plots: List of plot objects (last one used for colorbar)
-        config: Optional config dictionary
-    """
-    if not successful_plots:
-        return
-    
-    if not axes:
-        return
-    
-    plot_cfg = get_plot_config(config)
-    behavioral_config = plot_cfg.get_behavioral_config()
-    colorbar_config = behavioral_config.get("colorbar", {})
-    
-    width_fraction = colorbar_config.get("width_fraction", 0.55)
-    left_offset_fraction = colorbar_config.get("left_offset_fraction", 0.225)
-    bottom_offset = colorbar_config.get("bottom_offset", 0.12)
-    min_bottom = colorbar_config.get("min_bottom", 0.04)
-    height = colorbar_config.get("height", 0.028)
-    label_fontsize = colorbar_config.get("label_fontsize", 11)
-    tick_fontsize = colorbar_config.get("tick_fontsize", 9)
-    tick_pad = colorbar_config.get("tick_pad", 2)
-    
-    left = min(ax.get_position().x0 for ax in axes)
-    right = max(ax.get_position().x1 for ax in axes)
-    bottom = min(ax.get_position().y0 for ax in axes)
-    span = right - left
-    cb_width = width_fraction * span
-    cb_left = left + left_offset_fraction * span
-    cb_bottom = max(min_bottom, bottom - bottom_offset)
-    
-    cax = fig.add_axes([cb_left, cb_bottom, cb_width, height])
-    cbar = fig.colorbar(successful_plots[-1], cax=cax, orientation="horizontal")
-    cbar.set_label("Spearman correlation (ρ)", fontweight="bold", fontsize=label_fontsize)
-    cbar.ax.tick_params(pad=tick_pad, labelsize=tick_fontsize)
 

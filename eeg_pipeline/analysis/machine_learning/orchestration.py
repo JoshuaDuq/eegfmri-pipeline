@@ -14,7 +14,6 @@ This module handles epoch-based and matrix-based cross-validation strategies:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 import json
 from typing import Any, Dict, Optional, List, Tuple
@@ -41,7 +40,6 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     grid_search_with_warning_logging,
     _save_best_params,
     create_inner_cv,
-    fit_with_warning_logging,
     _fit_with_inner_cv,
     _fit_default_pipeline,
     _predict_and_log,
@@ -207,8 +205,6 @@ def nested_loso_predictions(
 
     if results_dir is not None and len(best_param_records) > 0:
         results_dir.mkdir(parents=True, exist_ok=True)
-        if config_dict is None:
-            config_dict = {}
         best_params_path = config_dict.get("paths", {}).get("best_params", {}).get("elasticnet_loso", "machine_learning/best_params/elasticnet_loso.jsonl")
         path = results_dir / best_params_path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,8 +253,6 @@ def nested_loso_predictions(
 
     if results_dir is not None:
         results_dir.mkdir(parents=True, exist_ok=True)
-        if config_dict is None:
-            config_dict = {}
         paths = config_dict.get("paths", {})
         predictions_path = paths.get("predictions", {}).get("elasticnet_loso", "machine_learning/predictions/elasticnet_loso.parquet")
         metrics_path = paths.get("per_subject_metrics", {}).get("elasticnet_loso", "machine_learning/per_subject_metrics/elasticnet_loso.parquet")
@@ -545,8 +539,6 @@ def within_subject_kfold_predictions(
 
     if results_dir is not None:
         results_dir.mkdir(parents=True, exist_ok=True)
-        if config_dict is None:
-            config_dict = {}
         paths = config_dict.get("paths", {})
         predictions_path = paths.get("predictions", {}).get("within_subject_kfold", "machine_learning/predictions/within_subject_kfold.parquet")
         metrics_path = paths.get("per_subject_metrics", {}).get("within_subject_kfold", "machine_learning/per_subject_metrics/within_subject_kfold.parquet")
@@ -603,8 +595,6 @@ def loso_baseline_predictions(
 
     if results_dir is not None:
         results_dir.mkdir(parents=True, exist_ok=True)
-        if config_dict is None:
-            config_dict = {}
         paths = config_dict.get("paths", {})
         predictions_path = paths.get("predictions", {}).get("baseline_loso", "machine_learning/predictions/baseline_loso.parquet")
         metrics_path = paths.get("per_subject_metrics", {}).get("baseline_loso", "machine_learning/per_subject_metrics/baseline_loso.parquet")
@@ -1640,428 +1630,6 @@ def run_incremental_validity_ml(
     return results_dir
 
 
-###################################################################
-# Riemann ML Compute Stage
-###################################################################
-
-
-def run_riemann_ml(
-    subjects: List[str],
-    task: str,
-    deriv_root: Path,
-    config: Any,
-    n_perm: int,
-    inner_splits: int,
-    rng_seed: int,
-    results_root: Path,
-    logger: logging.Logger,
-) -> Path:
-    """Run Riemannian-geometry based ML pipeline.
-    
-    Uses covariance matrices in tangent space for classification/regression.
-    Requires pyriemann library.
-    
-    Outputs:
-        riemann_predictions.tsv: LOSO predictions
-        riemann_metrics.json: Performance metrics
-        riemann_band_comparison.tsv: Per-band performance (if multi-band)
-    """
-    try:
-        from pyriemann.estimation import Covariances
-        from pyriemann.tangentspace import TangentSpace
-    except ImportError:
-        logger.error("pyriemann not installed; skipping Riemannian ML")
-        return results_root / "riemann"
-    
-    results_dir = results_root / "riemann"
-    ensure_dir(results_dir)
-    
-    # Load epochs for covariance estimation
-    tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
-    if not tuples:
-        logger.warning("No epochs found for Riemannian ML")
-        return results_dir
-    
-    # Collect covariance matrices
-    all_covs = []
-    all_y = []
-    all_groups = []
-    
-    for subj, epochs, y_vals in tuples:
-        if epochs is None or len(epochs) == 0:
-            continue
-        
-        # Get epoch data
-        data = epochs.get_data()
-        n_epochs, n_channels, n_times = data.shape
-        
-        # Compute covariance matrices
-        cov_est = Covariances(estimator="lwf")
-        covs = cov_est.fit_transform(data)
-        
-        all_covs.append(covs)
-        all_y.extend(y_vals[:len(covs)])
-        all_groups.extend([subj] * len(covs))
-    
-    if not all_covs:
-        logger.warning("No covariance matrices computed")
-        return results_dir
-    
-    X_cov = np.concatenate(all_covs, axis=0)
-    y = np.array(all_y)
-    groups = np.array(all_groups)
-    
-    # Filter valid samples
-    valid_mask = np.isfinite(y)
-    X_cov = X_cov[valid_mask]
-    y = y[valid_mask]
-    groups = groups[valid_mask]
-    
-    logger.info(f"Riemannian ML: {len(y)} samples, {X_cov.shape[1]} channels")
-    
-    # LOSO CV with tangent space projection
-    from sklearn.model_selection import LeaveOneGroupOut
-    from sklearn.linear_model import Ridge
-    from sklearn.metrics import r2_score
-    
-    outer_cv = LeaveOneGroupOut()
-    y_pred = np.zeros(len(y))
-    
-    for fold_idx, (train_idx, test_idx) in enumerate(outer_cv.split(X_cov, y, groups)):
-        # Project to tangent space (fit on train only)
-        ts = TangentSpace()
-        X_train_ts = ts.fit_transform(X_cov[train_idx])
-        X_test_ts = ts.transform(X_cov[test_idx])
-        
-        # Ridge regression in tangent space
-        model = Ridge(alpha=1.0)
-        model.fit(X_train_ts, y[train_idx])
-        y_pred[test_idx] = model.predict(X_test_ts)
-    
-    # Metrics
-    r2 = r2_score(y, y_pred)
-    
-    pred_df = pd.DataFrame({
-        "subject_id": groups,
-        "y_true": y,
-        "y_pred": y_pred,
-    })
-    pred_df.to_csv(results_dir / "riemann_predictions.tsv", sep="\t", index=False)
-    
-    metrics = {
-        "r2": r2,
-        "n_samples": len(y),
-        "n_subjects": len(np.unique(groups)),
-        "n_channels": X_cov.shape[1],
-    }
-    
-    with open(results_dir / "riemann_metrics.json", "w") as f:
-        json.dump(metrics, f, indent=2)
-    
-    write_reproducibility_info(results_dir, subjects, config, rng_seed)
-    logger.info(f"Riemannian ML: R² = {r2:.4f}")
-    logger.info(f"Saved to {results_dir}")
-    
-    return results_dir
-
-
-###################################################################
-# Compute vs Export Stage Separation (Stable Contract)
-###################################################################
-
-
-@dataclass
-class RegressionComputeResult:
-    """Stable contract for regression compute stage output.
-    
-    This dataclass defines the intermediate results that can be
-    passed between compute and export stages.
-    """
-    y_true: np.ndarray
-    y_pred: np.ndarray
-    groups: np.ndarray
-    test_indices: np.ndarray
-    fold_ids: np.ndarray
-    metrics: Dict[str, Any]
-    best_params: Optional[List[Dict]] = None
-    null_r: Optional[np.ndarray] = None
-    feature_names: Optional[List[str]] = None
-    meta: Optional[pd.DataFrame] = None
-    model_name: str = "elasticnet"
-
-
-def compute_regression_loso(
-    X: np.ndarray,
-    y: np.ndarray,
-    groups: np.ndarray,
-    blocks: Optional[np.ndarray],
-    config: Any,
-    inner_splits: int,
-    rng_seed: int,
-    n_perm: int,
-    model: str = "elasticnet",
-    logger: Optional[logging.Logger] = None,
-) -> RegressionComputeResult:
-    """Pure compute stage for LOSO regression.
-    
-    Separates computation from I/O for testability and composability.
-    """
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    if model == "ridge":
-        pipe = create_ridge_pipeline(seed=rng_seed, config=config)
-        param_grid = build_ridge_param_grid(config)
-    elif model == "rf":
-        pipe = create_rf_pipeline(seed=rng_seed, config=config)
-        param_grid = build_rf_param_grid(config)
-    else:
-        pipe = create_elasticnet_pipeline(seed=rng_seed, config=config)
-        param_grid = build_elasticnet_param_grid(config)
-    
-    y_true, y_pred, groups_ordered, test_indices, fold_ids = nested_loso_predictions_matrix(
-        X=X,
-        y=y,
-        groups=groups,
-        blocks=blocks,
-        pipe=pipe,
-        param_grid=param_grid,
-        inner_cv_splits=inner_splits,
-        n_jobs=-1,
-        seed=rng_seed,
-        config=config,
-        logger=logger,
-    )
-    
-    r_subj, per_subj_r, ci_low, ci_high = compute_subject_level_r(
-        pd.DataFrame({"subject_id": groups_ordered, "y_true": y_true, "y_pred": y_pred}),
-        config
-    )
-    
-    from sklearn.metrics import r2_score, mean_absolute_error
-    r2 = r2_score(y_true, y_pred) if len(y_true) > 0 else np.nan
-    mae = mean_absolute_error(y_true, y_pred) if len(y_true) > 0 else np.nan
-    
-    null_r = None
-    p_value = np.nan
-    if n_perm > 0:
-        null_r = _compute_permutation_null(
-            X, y, groups, blocks, pipe, param_grid, inner_splits, rng_seed, n_perm, config, logger
-        )
-        if null_r is not None and len(null_r) > 0:
-            p_value = float(((np.abs(null_r) >= np.abs(r_subj)).sum() + 1) / (len(null_r) + 1))
-    
-    metrics = {
-        "pearson_r": r_subj,
-        "r_subject_ci_low": ci_low,
-        "r_subject_ci_high": ci_high,
-        "r2": r2,
-        "mae": mae,
-        "p_value": p_value,
-        "n_perm": n_perm,
-        "n_samples": len(y_true),
-        "n_subjects": len(np.unique(groups_ordered)),
-    }
-    
-    return RegressionComputeResult(
-        y_true=y_true,
-        y_pred=y_pred,
-        groups=groups_ordered,
-        test_indices=test_indices,
-        fold_ids=fold_ids,
-        metrics=metrics,
-        null_r=null_r,
-        model_name=model,
-    )
-
-
-def export_regression_results(
-    result: RegressionComputeResult,
-    results_dir: Path,
-    subjects: List[str],
-    config: Any,
-    rng_seed: int,
-    meta: Optional[pd.DataFrame] = None,
-    logger: Optional[logging.Logger] = None,
-) -> Dict[str, Path]:
-    """Export stage for regression results.
-    
-    Writes stable contract artifacts:
-    - predictions.tsv: y_true, y_pred, subject_id
-    - cv_indices.tsv: test indices and fold assignments
-    - metrics.json: performance metrics
-    - null.npz: permutation null distribution (if computed)
-    - manifest.json: pipeline metadata
-    """
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    ensure_dir(results_dir)
-    outputs: Dict[str, Path] = {}
-    
-    pred_df = pd.DataFrame({
-        "subject_id": result.groups,
-        "y_true": result.y_true,
-        "y_pred": result.y_pred,
-    })
-    pred_path = results_dir / "predictions.tsv"
-    pred_df.to_csv(pred_path, sep="\t", index=False)
-    outputs["predictions"] = pred_path
-    
-    indices_df = pd.DataFrame({
-        "test_index": result.test_indices,
-        "fold_id": result.fold_ids,
-        "subject_id": result.groups,
-    })
-    indices_path = results_dir / "cv_indices.tsv"
-    indices_df.to_csv(indices_path, sep="\t", index=False)
-    outputs["indices"] = indices_path
-    
-    metrics_path = results_dir / "metrics.json"
-    with open(metrics_path, "w") as f:
-        json.dump(result.metrics, f, indent=2, default=str)
-    outputs["metrics"] = metrics_path
-    
-    if result.null_r is not None:
-        null_path = results_dir / f"null_{result.model_name}.npz"
-        np.savez(null_path, null_r=result.null_r, empirical_r=result.metrics["pearson_r"])
-        outputs["null"] = null_path
-    
-    if result.best_params:
-        params_path = results_dir / f"best_params_{result.model_name}.jsonl"
-        with open(params_path, "w") as f:
-            for p in result.best_params:
-                f.write(json.dumps(p, default=str) + "\n")
-        outputs["best_params"] = params_path
-    
-    manifest = {
-        "pipeline": "regression",
-        "model": result.model_name,
-        "n_subjects": len(subjects),
-        "subjects": subjects,
-        "seed": rng_seed,
-        "artifacts": {k: str(v) for k, v in outputs.items()},
-    }
-    manifest_path = results_dir / "manifest.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
-    outputs["manifest"] = manifest_path
-    
-    write_reproducibility_info(results_dir, subjects, config, rng_seed)
-    
-    logger.info(f"Exported regression results to {results_dir}")
-    return outputs
-
-
-def _compute_permutation_null(
-    X: np.ndarray,
-    y: np.ndarray,
-    groups: np.ndarray,
-    blocks: Optional[np.ndarray],
-    pipe: Any,
-    param_grid: Dict,
-    inner_splits: int,
-    seed: int,
-    n_perm: int,
-    config: Any,
-    logger: logging.Logger,
-) -> Optional[np.ndarray]:
-    """Compute permutation null distribution for regression."""
-    from sklearn.model_selection import LeaveOneGroupOut
-    
-    rng = np.random.default_rng(seed)
-    null_rs = []
-    
-    for perm_idx in range(n_perm):
-        y_perm = y.copy()
-        for subj in np.unique(groups):
-            mask = groups == subj
-            y_perm[mask] = rng.permutation(y_perm[mask])
-        
-        try:
-            y_true_p, y_pred_p, groups_p, _, _ = nested_loso_predictions_matrix(
-                X=X,
-                y=y_perm,
-                groups=groups,
-                blocks=blocks,
-                pipe=clone(pipe),
-                param_grid=param_grid,
-                inner_cv_splits=inner_splits,
-                n_jobs=-1,
-                seed=seed + perm_idx + 1,
-                config=config,
-                logger=None,
-            )
-            r_perm, _ = safe_pearsonr(y_true_p, y_pred_p)
-            if np.isfinite(r_perm):
-                null_rs.append(r_perm)
-        except Exception:
-            continue
-        
-        if (perm_idx + 1) % 10 == 0:
-            logger.info(f"Permutation {perm_idx + 1}/{n_perm}")
-    
-    return np.array(null_rs) if null_rs else None
-
-
-###################################################################
-# Interpretation Module Integration (Optional Stages)
-###################################################################
-
-
-def run_interpretation_stages(
-    subjects: List[str],
-    task: str,
-    deriv_root: Path,
-    config: Any,
-    rng_seed: int,
-    results_root: Path,
-    logger: logging.Logger,
-    run_permutation: bool = False,
-    run_shap: bool = False,
-    run_uncertainty: bool = False,
-    n_perm_importance: int = 10,
-    alpha: float = 0.1,
-) -> Dict[str, Path]:
-    """Run optional interpretation stages for ML pipeline.
-    
-    Computed leakage-safe (per-fold, then aggregated) producing standardized
-    artifacts under machine_learning/interpretation/.
-    """
-    from eeg_pipeline.utils.data.machine_learning import load_active_matrix
-    
-    X, y, groups, feature_names, meta = load_active_matrix(subjects, task, deriv_root, config, logger)
-    
-    results_dir = results_root / "interpretation"
-    ensure_dir(results_dir)
-    
-    outputs: Dict[str, Path] = {}
-    
-    if run_permutation:
-        logger.info("Running permutation importance...")
-        perm_path = _run_permutation_importance_stage(
-            X, y, groups, feature_names, config, rng_seed, n_perm_importance, results_dir, logger
-        )
-        if perm_path:
-            outputs["permutation_importance"] = perm_path
-    
-    if run_shap:
-        logger.info("Running SHAP importance...")
-        shap_path = _run_shap_importance_stage(
-            X, y, groups, feature_names, config, rng_seed, results_dir, logger
-        )
-        if shap_path:
-            outputs["shap_importance"] = shap_path
-    
-    if run_uncertainty:
-        logger.info("Running uncertainty quantification...")
-        uncertainty_path = _run_uncertainty_stage(
-            X, y, groups, config, rng_seed, alpha, results_dir, logger
-        )
-        if uncertainty_path:
-            outputs["uncertainty"] = uncertainty_path
-    
-    return outputs
 
 
 def _run_permutation_importance_stage(

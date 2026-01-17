@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import glob
 import json
 import re
 from pathlib import Path
@@ -41,15 +40,9 @@ def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
-def find_first(pattern: str) -> Optional[Path]:
-    """Find first file matching pattern, sorted alphabetically."""
-    candidates = sorted(glob.glob(pattern))
-    return Path(candidates[0]) if candidates else None
-
-
 def bids_sub_eeg_path(bids_root: Path, subject: str) -> Path:
     subject_label = _normalize_subject_label(subject)
-    return Path(bids_root) / subject_label / "eeg"
+    return bids_root / subject_label / "eeg"
 
 
 def bids_events_path(bids_root: Path, subject: str, task: str) -> Path:
@@ -60,7 +53,7 @@ def bids_events_path(bids_root: Path, subject: str, task: str) -> Path:
 
 def deriv_sub_eeg_path(deriv_root: Path, subject: str) -> Path:
     subject_label = _normalize_subject_label(subject)
-    return Path(deriv_root) / subject_label / "eeg"
+    return deriv_root / subject_label / "eeg"
 
 
 def deriv_features_path(deriv_root: Path, subject: str) -> Path:
@@ -79,7 +72,7 @@ def deriv_plots_path(deriv_root: Path, subject: str, subdir: Optional[str] = Non
 
 
 def deriv_group_eeg_path(deriv_root: Path) -> Path:
-    return Path(deriv_root) / "group" / "eeg"
+    return deriv_root / "group" / "eeg"
 
 
 def deriv_group_stats_path(deriv_root: Path) -> Path:
@@ -95,7 +88,7 @@ def deriv_group_plots_path(deriv_root: Path, subdir: Optional[str] = None) -> Pa
 
 def find_connectivity_features_path(deriv_root: Path, subject: str) -> Path:
     sub = _normalize_subject_label(subject)
-    base = Path(deriv_root) / sub / "eeg" / "features"
+    base = deriv_root / sub / "eeg" / "features"
     return base / "connectivity" / "features_connectivity.parquet"
 
 
@@ -117,7 +110,6 @@ def _resolve_path_from_config(
             config_path = getattr(config, config_attr, None)
             if config_path is not None:
                 return Path(config_path)
-
         if config_key is not None:
             config_path = config.get(config_key)
             if config_path is not None:
@@ -174,7 +166,7 @@ def _search_standard_bids_paths(root: Path, subject_id: str, task: str) -> Optio
         root=root,
         check=False,
     )
-    if bids_path.fpath and bids_path.fpath.exists():
+    if bids_path.fpath is not None and bids_path.fpath.exists():
         return bids_path.fpath
 
     subject_label = f"{SUBJECT_PREFIX}{subject_id}"
@@ -374,10 +366,7 @@ def ensure_derivatives_dataset_description(
 
 
 __all__ = [
-    "_normalize_subject_label",
-    "_extract_subject_id",
     "ensure_dir",
-    "find_first",
     "bids_sub_eeg_path",
     "bids_events_path",
     "deriv_sub_eeg_path",
@@ -388,16 +377,8 @@ __all__ = [
     "deriv_group_stats_path",
     "deriv_group_plots_path",
     "find_connectivity_features_path",
-    "_resolve_deriv_root",
     "resolve_deriv_root",
-    "_check_clean_tokens",
-    "_search_standard_bids_paths",
-    "_search_directory_for_epochs",
     "find_clean_epochs_path",
-    "_find_clean_epochs_path",
-    "_resolve_bids_root",
-    "_find_events_path",
-    "_load_events_df",
     "load_events_df",
     "extract_subject_id_from_path",
     "ensure_derivatives_dataset_description",

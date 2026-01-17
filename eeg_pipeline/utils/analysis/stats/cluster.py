@@ -35,47 +35,6 @@ from eeg_pipeline.utils.analysis.stats.effect_size import compute_cohens_d_with_
 
 
 ###################################################################
-# EEG Domain Helpers
-###################################################################
-
-
-def align_epochs_to_pivot_chs(
-    epochs: "mne.Epochs",
-    pivot_channels: List[str],
-    logger: Optional[logging.Logger] = None,
-) -> "mne.Epochs":
-    """Align epochs to subset of pivot channels.
-    
-    Parameters
-    ----------
-    epochs : mne.Epochs
-        MNE Epochs object
-    pivot_channels : List[str]
-        List of channel names to keep
-    logger : logging.Logger, optional
-        Logger for warnings
-        
-    Returns
-    -------
-    mne.Epochs
-        Epochs with only pivot channels
-    """
-    import mne
-    
-    available_channels = set(epochs.ch_names)
-    valid_pivot_channels = [
-        channel for channel in pivot_channels if channel in available_channels
-    ]
-    
-    if not valid_pivot_channels:
-        if logger:
-            logger.warning("No pivot channels found in epochs")
-        return epochs
-    
-    return epochs.pick_channels(valid_pivot_channels)
-
-
-###################################################################
 # Cluster Test Configuration and Utilities
 ###################################################################
 
@@ -286,10 +245,7 @@ def get_eeg_adjacency(
         return _EEG_ADJ_CACHE[cache_key], eeg_picks, info_eeg
 
     try:
-        try:
-            adjacency, _ = mne.channels.find_ch_adjacency(info_eeg, ch_type="eeg", verbose="ERROR")
-        except TypeError:
-            adjacency, _ = mne.channels.find_ch_adjacency(info_eeg, ch_type="eeg")
+        adjacency, _ = mne.channels.find_ch_adjacency(info_eeg, ch_type="eeg")
     except (RuntimeError, ValueError) as e:
         logger.warning(f"Delaunay adjacency failed ({type(e).__name__}), using distance fallback")
         adjacency, _ = build_distance_adjacency(info_eeg, logger)
@@ -394,7 +350,7 @@ def cluster_test_two_sample(
     if alpha is None:
         alpha = get_fdr_alpha(config)
     if n_permutations is None:
-        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", get_config_value(config, "statistics.cluster_n_perm", 100)))
+        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", 100))
 
     adjacency, eeg_picks, info_eeg = get_eeg_adjacency(info, restrict_picks=restrict_picks)
     if eeg_picks is None:
@@ -569,8 +525,6 @@ def _create_band_summary_record(
         ),
         "n_condition_a_trials": n_condition_a_trials,
         "n_condition_b_trials": n_condition_b_trials,
-        "n_pain_trials": n_condition_a_trials,
-        "n_nonpain_trials": n_condition_b_trials,
         "n_permutations": n_permutations,
         "alpha": alpha,
         "n_channels": n_channels,
@@ -600,10 +554,7 @@ def compute_pain_nonpain_time_cluster_test(
     condition_values: Optional[Tuple[Any, Any]] = None,
     condition_labels: Optional[Tuple[str, str]] = None,
 ) -> dict:
-    """Time-domain cluster permutation test for two trial groups.
-
-    Backward-compatible entry point (historically "pain vs non-pain").
-    """
+    """Time-domain cluster permutation test for two trial groups."""
     logger = logging.getLogger(__name__)
     ensure_dir(output_dir)
 
@@ -905,9 +856,6 @@ def compute_pain_nonpain_time_cluster_test(
                     "condition_b_value": str(condition_values[1]) if condition_values is not None else "",
                     "n_condition_a_trials": int(band_power_pain.shape[0]),
                     "n_condition_b_trials": int(band_power_nonpain.shape[0]),
-                    # Backward-compatible aliases
-                    "n_pain_trials": int(band_power_pain.shape[0]),
-                    "n_nonpain_trials": int(band_power_nonpain.shape[0]),
                 },
             }
         else:

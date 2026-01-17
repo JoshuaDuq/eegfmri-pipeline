@@ -42,11 +42,6 @@ def extract_aligned_column_vector(
     return None
 
 
-def _convert_to_pain_series(series: pd.Series) -> pd.Series:
-    """Convert series to integer pain values, filling NaN with 0."""
-    return pd.to_numeric(series, errors="coerce").fillna(0).astype(int)
-
-
 def extract_pain_vector(
     tfr,
     events_df: Optional[pd.DataFrame],
@@ -69,7 +64,7 @@ def extract_pain_vector(
     pain_vec = extract_aligned_column_vector(tfr, events_df, pain_col, n_samples)
     if pain_vec is None:
         return None
-    return _convert_to_pain_series(pain_vec)
+    return pd.to_numeric(pain_vec, errors="coerce").fillna(0).astype(int)
 
 
 def extract_pain_vector_array(
@@ -121,15 +116,15 @@ def extract_time_frequency_grid(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarra
     """Extract unique frequency and time values from DataFrame.
     
     Args:
-        df: DataFrame with 'frequency' and 'time' columns
+        df: DataFrame with 'freq' and 'time_start' columns
         
     Returns:
         Tuple of (frequencies, times) arrays, or empty arrays if columns missing
     """
-    if "frequency" not in df.columns or "time" not in df.columns:
+    if "freq" not in df.columns or "time_start" not in df.columns:
         return np.array([]), np.array([])
-    freqs = np.unique(np.round(df["frequency"].to_numpy(dtype=float), 6))
-    times = np.unique(np.round(df["time"].to_numpy(dtype=float), 6))
+    freqs = np.unique(np.round(df["freq"].to_numpy(dtype=float), 6))
+    times = np.unique(np.round(df["time_start"].to_numpy(dtype=float), 6))
     return freqs, times
 
 

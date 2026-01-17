@@ -82,7 +82,7 @@ def _compute_single_band(
         
         qc_entry = _create_band_qc_entry(band_power, fmin, fmax)
         return band_name, band_data, gfp_band, qc_entry
-    except Exception as exc:
+    except Exception:
         return None
 
 
@@ -153,17 +153,19 @@ def _get_spatial_transform_type(config: Any, feature_family: Optional[str] = Non
     """Extract and validate spatial transform type from config.
     
     If feature_family is provided, looks up per-family transform first.
-    Falls back to global spatial_transform for backward compatibility.
+    Falls back to global spatial_transform if per-family setting not found.
     """
-    # Per-family transform takes precedence
-    if feature_family:
+    family = str(feature_family or "").strip().lower() or None
+    if family in {"directedconnectivity", "directed_connectivity", "dconn"}:
+        family = "connectivity"
+
+    if family:
         per_family = config.get("feature_engineering.spatial_transform_per_family", {})
-        if isinstance(per_family, dict) and feature_family in per_family:
-            transform = str(per_family[feature_family]).strip().lower()
+        if isinstance(per_family, dict) and family in per_family:
+            transform = str(per_family[family]).strip().lower()
             if transform in {"none", "csd", "laplacian"}:
                 return transform
     
-    # Fallback to global setting (backward compatibility)
     transform = str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
     if transform not in {"none", "csd", "laplacian"}:
         return "none"
@@ -263,21 +265,20 @@ def _compute_time_windows(
             "errors": list(getattr(windows, "errors", [])),
         }
         
-        # Add sample counts for each window to QC
         for name, mask in windows.masks.items():
             qc_dict[f"{name}_samples"] = int(np.sum(mask))
             if name in windows.ranges:
                 qc_dict[f"{name}_range"] = windows.ranges[name]
 
         if logger and windows:
-            # Determine suitable descriptive names for logging
             target_name = getattr(windows, "name", None)
             available = ", ".join(windows.masks.keys())
+            clamped = getattr(windows, "clamped", False)
             logger.info(
                 "Computed time windows (target=%s). Available windows: %s (clamped=%s)",
                 target_name or "none",
                 available,
-                getattr(windows, "clamped", False),
+                clamped,
             )
         
         return windows, qc_dict
@@ -365,14 +366,8 @@ def _estimate_individual_alpha_frequency(
     if n_times < 2:
         return None
 
-    try:
-        min_baseline_sec = float(iaf_config.get("iaf_min_baseline_sec", 0.0))
-    except Exception:
-        min_baseline_sec = 0.0
-    try:
-        min_cycles_at_fmin = float(iaf_config.get("iaf_min_cycles_at_fmin", 5.0))
-    except Exception:
-        min_cycles_at_fmin = 5.0
+    min_baseline_sec = float(iaf_config.get("iaf_min_baseline_sec", 0.0))
+    min_cycles_at_fmin = float(iaf_config.get("iaf_min_cycles_at_fmin", 5.0))
 
     required_by_cycles = int(np.ceil((min_cycles_at_fmin / max(alpha_fmin, 1e-6)) * sfreq))
     required_by_sec = int(np.ceil(max(min_baseline_sec, 0.0) * sfreq))
@@ -518,19 +513,18 @@ def _find_alpha_peak(
         return np.nan
     
     alpha_residual = residual_psd[alpha_mask]
+    alpha_freqs = freqs[alpha_mask]
     peaks, properties = find_peaks(alpha_residual, prominence=min_prominence)
     
     if peaks.size > 0:
         prominences = properties.get("prominences", np.ones_like(peaks))
         best_peak_idx = int(peaks[np.argmax(prominences)])
-        alpha_freqs = freqs[alpha_mask]
         return float(alpha_freqs[best_peak_idx])
     
     positive_residual = np.maximum(alpha_residual, 0.0)
     residual_sum = float(np.sum(positive_residual))
     
     if residual_sum > 0:
-        alpha_freqs = freqs[alpha_mask]
         weighted_mean = float(np.sum(alpha_freqs * positive_residual) / residual_sum)
         return weighted_mean
     
@@ -559,15 +553,13 @@ def _adjust_frequency_bands_for_iaf(
     alpha_max = min(MAX_ALPHA_FMAX, iaf + alpha_width)
     adjusted_bands["alpha"] = [alpha_min, alpha_max]
     
-    adjusted_bands.setdefault("theta", [4.0, 8.0])
-    adjusted_bands.setdefault("beta", [DEFAULT_BETA_FMIN, DEFAULT_BETA_FMAX])
-    
     theta_max = max(MIN_THETA_FMAX, alpha_min)
     theta_min = max(MIN_THETA_FMIN, iaf - 6.0)
     adjusted_bands["theta"] = [theta_min, theta_max]
     
-    beta_min_default = float(adjusted_bands["beta"][0]) if len(adjusted_bands["beta"]) >= 2 else DEFAULT_BETA_FMIN
-    beta_max_default = float(adjusted_bands["beta"][1]) if len(adjusted_bands["beta"]) >= 2 else DEFAULT_BETA_FMAX
+    beta_range = adjusted_bands.get("beta", [DEFAULT_BETA_FMIN, DEFAULT_BETA_FMAX])
+    beta_min_default = float(beta_range[0]) if len(beta_range) >= 2 else DEFAULT_BETA_FMIN
+    beta_max_default = float(beta_range[1]) if len(beta_range) >= 2 else DEFAULT_BETA_FMAX
     beta_min = max(beta_min_default, alpha_max)
     adjusted_bands["beta"] = [beta_min, beta_max_default]
     
@@ -662,11 +654,6 @@ def _process_band_results(
         if result is None:
             continue
         
-        if len(result) == 2 and result[0] is None:
-            if logger:
-                logger.warning(f"Band computation failed: {result[1]}")
-            continue
-        
         band_name, band_data, gfp_band, qc_entry = result
         precomputed.band_data[band_name] = band_data
         precomputed.gfp_band[band_name] = gfp_band
@@ -686,18 +673,15 @@ def _compute_psd_with_qc(
     
     Returns (psd_data, qc_dict). psd_data is None on failure.
     """
-    psd_input = data
-    window_type = "full"
-    
-    # Try to use targeted window if provided, else baseline
-    if baseline_mask is not None and isinstance(baseline_mask, np.ndarray) and np.any(baseline_mask):
+    if baseline_mask is not None and np.any(baseline_mask):
         psd_input = data[:, :, baseline_mask]
-        
-        # Identify the name for tagging purposes
-        if hasattr(config, "get") and config.get("name"):
-            window_type = config.get("name")
-        else:
-            window_type = "baseline"
+        window_type = (
+            config.get("name") if hasattr(config, "get") and config.get("name")
+            else "baseline"
+        )
+    else:
+        psd_input = data
+        window_type = "full"
     
     psd_data = compute_psd(psd_input, sfreq, config=config, logger=logger)
     
@@ -814,6 +798,8 @@ def precompute_data(
         picks=picks,
         config=config,
         logger=logger,
+        feature_family=str(feature_family).strip().lower() if feature_family else None,
+        spatial_transform=str(transform_type),
     )
     
     _populate_basic_qc(precomputed, data, sfreq)

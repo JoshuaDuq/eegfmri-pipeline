@@ -10,7 +10,6 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Any, Dict
 
-import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 
@@ -30,8 +29,6 @@ from eeg_pipeline.plotting.erp.topomaps import plot_erp_topomaps
 def _normalize_condition_key(label: str) -> str:
     """Normalize condition label to a valid key format."""
     key = str(label).strip().lower().replace(" ", "_").replace("-", "_")
-    if key in {"non_pain", "nopain", "no_pain"}:
-        return "nonpain"
     return key or "condition"
 
 
@@ -51,14 +48,12 @@ def _build_epoch_query(column: str, value: Any) -> str:
         Query string in format `column` == value.
     """
     column_expr = f"`{column}`"
-    try:
-        numeric_value = pd.to_numeric(str(value), errors="coerce")
-        if not np.isnan(numeric_value):
-            if float(numeric_value).is_integer():
-                return f"{column_expr} == {int(numeric_value)}"
-            return f"{column_expr} == {float(numeric_value)}"
-    except (ValueError, TypeError):
-        pass
+    numeric_value = pd.to_numeric(str(value), errors="coerce")
+    if pd.notna(numeric_value):
+        float_value = float(numeric_value)
+        if float_value.is_integer():
+            return f"{column_expr} == {int(float_value)}"
+        return f"{column_expr} == {float_value}"
     return f"{column_expr} == {repr(str(value))}"
 
 
@@ -224,14 +219,13 @@ def visualize_subject_erp(
         return
     
     conditions = _resolve_available_conditions(epochs, events_df, config)
-    contrast_spec = None
-    if events_df is not None:
-        contrast_spec = resolve_comparison_spec(
-            events_df, config, require_enabled=False
-        )
+    contrast_spec = (
+        resolve_comparison_spec(events_df, config, require_enabled=False)
+        if events_df is not None
+        else None
+    )
     
-    default_plots = ["butterfly", "roi", "contrast", "topomaps"]
-    plots_to_run = plots if plots is not None else default_plots
+    plots_to_run = plots or ["butterfly", "roi", "contrast", "topomaps"]
     
     _execute_erp_plots(
         epochs,
@@ -392,11 +386,8 @@ def visualize_erp_for_subjects(
         deriv_root=deriv_root, config=config
     )
     
-    if logger is None:
-        logger = get_logger(__name__)
-    
-    if n_jobs is None:
-        n_jobs = get_n_jobs(config, config_path="erp_analysis.n_jobs")
+    logger = logger or get_logger(__name__)
+    n_jobs = n_jobs or get_n_jobs(config, config_path="erp_analysis.n_jobs")
     
     use_parallel = n_jobs > 1 and len(subjects) > 1
     if use_parallel:

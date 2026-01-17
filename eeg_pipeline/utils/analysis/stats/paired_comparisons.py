@@ -36,26 +36,17 @@ from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
 
 
 MIN_STD_FOR_COHENS_D = 1e-10
-DEFAULT_CI_LEVEL = 0.95
 DEFAULT_FDR_ALPHA = 0.05
 DEFAULT_N_BOOT = 1000
-DEFAULT_N_PERM = 0  # Default: no permutation testing (0 = skip)
+DEFAULT_N_PERM = 0
 DEFAULT_MIN_SAMPLES_PAIRED = 5
 DEFAULT_MIN_SAMPLES_UNPAIRED = 3
-MIN_PERM_SUCCESSES = 50
 
 FEATURE_TYPE_GROUPS = {
-    "power": "power",
-    "aperiodic": "aperiodic",
     "connectivity": "conn",
-    "spectral": "spectral",
-    "erds": "erds",
     "ratios": "ratio",
     "asymmetry": "asym",
-    "itpc": "itpc",
-    "pac": "pac",
     "complexity": "comp",
-    "bursts": "bursts",
 }
 
 

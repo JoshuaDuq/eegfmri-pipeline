@@ -10,20 +10,21 @@ import pandas as pd
 from eeg_pipeline.utils.config.loader import get_config_value
 
 
-def _resolve_comparison_column(events_df: pd.DataFrame, config: Any) -> str:
+def _resolve_comparison_column(config: Any) -> Optional[str]:
     """Resolve the comparison column name from config."""
     column = get_config_value(config, "plotting.comparisons.comparison_column", None)
     if column is None:
-        return ""
-    return str(column).strip()
+        return None
+    column_str = str(column).strip()
+    return column_str if column_str else None
 
 
 def _resolve_comparison_values(config: Any) -> tuple[Any, Any]:
     """Resolve the two comparison values from config."""
-    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", []) or []
-    if not isinstance(values_spec, (list, tuple)) or len(values_spec) < 2:
-        return 0, 1
-    return values_spec[0], values_spec[1]
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    if isinstance(values_spec, (list, tuple)) and len(values_spec) >= 2:
+        return values_spec[0], values_spec[1]
+    return 0, 1
 
 
 def _resolve_comparison_labels(config: Any, *, v1: Any, v2: Any) -> tuple[str, str]:
@@ -34,7 +35,6 @@ def _resolve_comparison_labels(config: Any, *, v1: Any, v2: Any) -> tuple[str, s
         label2 = str(labels_spec[1]).strip()
         if label1 and label2:
             return label1, label2
-
     return str(v1), str(v2)
 
 
@@ -53,8 +53,8 @@ def _validate_comparison_prerequisites(
     if require_enabled and not _is_comparison_enabled(config):
         return None
 
-    column = _resolve_comparison_column(events_df, config)
-    if not column or column not in events_df.columns:
+    column = _resolve_comparison_column(config)
+    if column is None or column not in events_df.columns:
         return None
 
     return column
@@ -72,15 +72,12 @@ def _create_numeric_masks(
         value1_numeric = pd.to_numeric(str(value1), errors='coerce')
         value2_numeric = pd.to_numeric(str(value2), errors='coerce')
 
-        both_are_numeric = not np.isnan(value1_numeric) and not np.isnan(value2_numeric)
-        if not both_are_numeric:
+        if np.isnan(value1_numeric) or np.isnan(value2_numeric):
             return None
 
         mask1 = (column_values == value1_numeric).values
         mask2 = (column_values == value2_numeric).values
-        has_matches = np.any(mask1) or np.any(mask2)
-
-        if has_matches:
+        if np.any(mask1) or np.any(mask2):
             return mask1, mask2
 
     except (ValueError, TypeError):

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional
 
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.infra.paths import (
@@ -36,27 +35,21 @@ from eeg_pipeline.utils.data.behavior import load_behavior_stats_files
 from eeg_pipeline.plotting.behavioral import registrations as _behavior_plotters  # noqa: F401
 
 
-def _resolve_correlation_method(config) -> tuple[str, bool]:
-    """Resolve correlation method from config and determine if Spearman.
+def _resolve_correlation_method(config) -> str:
+    """Resolve correlation method from config.
     
     Returns
     -------
-    tuple[str, bool]
-        Normalized method name and whether it is Spearman.
+    str
+        Normalized method name.
     """
     raw_method = get_config_value(
-        config, "behavior_analysis.statistics.correlation_method", None
+        config, "behavior_analysis.statistics.correlation_method", "spearman"
     )
-    if raw_method is None:
-        raw_method = get_config_value(
-            config, "behavior_analysis.correlation_method", "spearman"
-        )
-    method = normalize_correlation_method(raw_method, default="spearman")
-    use_spearman = method == "spearman"
-    return method, use_spearman
+    return normalize_correlation_method(raw_method, default="spearman")
 
 
-def _resolve_robust_method(config) -> Optional[str]:
+def _resolve_robust_method(config) -> str | None:
     """Resolve robust correlation method from config."""
     robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
     if robust_method is not None:
@@ -81,7 +74,7 @@ def _build_behavior_plot_context(
     ensure_dir(plots_dir)
     ensure_dir(stats_dir)
 
-    method, use_spearman = _resolve_correlation_method(config)
+    method = _resolve_correlation_method(config)
     robust_method = _resolve_robust_method(config)
     method_label = format_correlation_method_label(method, robust_method)
     rating_stats, temp_stats = load_behavior_stats_files(
@@ -96,23 +89,12 @@ def _build_behavior_plot_context(
         deriv_root=deriv_root,
         plots_dir=plots_dir,
         stats_dir=stats_dir,
-        use_spearman=use_spearman,
+        use_spearman=method == "spearman",
         rating_stats=rating_stats,
         temp_stats=temp_stats,
         all_results=[],
     )
 
-
-SCATTER_PLOTS = [
-    "psychometrics",
-    "power_roi_scatter",
-    "complexity_scatter",
-    "aperiodic_scatter",
-    "connectivity_scatter",
-    "itpc_scatter",
-]
-
-TEMPORAL_PLOTS = ["temporal_topomaps"]
 
 CATEGORY_TO_PLOTS = {
     "psychometrics": ["psychometrics"],
@@ -128,23 +110,15 @@ CATEGORY_TO_PLOTS = {
 }
 
 
-def _validate_plot_mode_flags(scatter_only: bool, temporal_only: bool) -> None:
-    """Validate that conflicting plot mode flags are not both set."""
-    if scatter_only and temporal_only:
-        raise ValueError("Cannot specify both scatter_only and temporal_only")
-
-
 def _select_plot_names(
-    visualize_categories: Optional[List[str]],
-    scatter_only: bool,
-    temporal_only: bool,
-    plots: Optional[List[str]],
-) -> Optional[List[str]]:
+    visualize_categories: list[str] | None,
+    plots: list[str] | None,
+) -> list[str] | None:
     """Select plot names based on provided options.
     
     Returns
     -------
-    Optional[List[str]]
+    list[str] | None
         List of plot names to run, or None to run all plots.
     """
     if visualize_categories:
@@ -153,36 +127,17 @@ def _select_plot_names(
             plot_names.extend(CATEGORY_TO_PLOTS.get(category, []))
         return plot_names
     
-    if scatter_only:
-        return SCATTER_PLOTS
-    
-    if temporal_only:
-        return TEMPORAL_PLOTS
-    
     return plots
 
 
 def _run_plots(
     manager: BehaviorPlotManager,
-    plot_names: Optional[List[str]],
-    visualize_categories: Optional[List[str]],
-    scatter_only: bool,
-    temporal_only: bool,
+    plot_names: list[str] | None,
     logger: logging.Logger,
 ) -> None:
     """Execute selected plots via the manager."""
     if plot_names is not None:
-        if visualize_categories:
-            logger.info(
-                f"Running category-specific behavioral plots: "
-                f"{', '.join(visualize_categories)}"
-            )
-        elif scatter_only:
-            logger.info("Running scatter-only behavioral plots via registry...")
-        elif temporal_only:
-            logger.info("Running temporal-only behavioral plots via registry...")
-        else:
-            logger.info("Running selected behavioral plots via registry...")
+        logger.info("Running selected behavioral plots via registry...")
         manager.run_selected(plot_names)
     else:
         logger.info("Running all behavioral plots via registry...")
@@ -194,11 +149,9 @@ def visualize_subject_behavior(
     task: str,
     config,
     logger: logging.Logger,
-    scatter_only: bool = False,
-    temporal_only: bool = False,
-    plots: Optional[List[str]] = None,
-    deriv_root: Optional[Path] = None,
-    visualize_categories: Optional[List[str]] = None,
+    plots: list[str] | None = None,
+    deriv_root: Path | None = None,
+    visualize_categories: list[str] | None = None,
 ) -> None:
     """Visualize behavioral correlations for a single subject.
     
@@ -212,12 +165,8 @@ def visualize_subject_behavior(
         Configuration object.
     logger : logging.Logger
         Logger instance.
-    scatter_only : bool, optional
-        If True, only generate scatter plots. Default is False.
-    temporal_only : bool, optional
-        If True, only generate temporal plots. Default is False.
     plots : list of str, optional
-        Specific plot names to generate. If None, uses mode flags or all plots.
+        Specific plot names to generate. If None, uses categories or all plots.
     deriv_root : Path, optional
         Derived data root directory. If None, resolved from config.
     visualize_categories : list of str, optional
@@ -227,16 +176,12 @@ def visualize_subject_behavior(
     """
     logger.info(f"Visualizing behavioral correlations for sub-{subject}...")
 
-    _validate_plot_mode_flags(scatter_only, temporal_only)
-
     deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
     ctx = _build_behavior_plot_context(subject, task, deriv_root, config, logger)
     manager = BehaviorPlotManager(ctx)
 
-    plot_names = _select_plot_names(
-        visualize_categories, scatter_only, temporal_only, plots
-    )
-    _run_plots(manager, plot_names, visualize_categories, scatter_only, temporal_only, logger)
+    plot_names = _select_plot_names(visualize_categories, plots)
+    _run_plots(manager, plot_names, logger)
 
     if ctx.all_results:
         logger.info("Collecting significant plots...")
@@ -245,31 +190,14 @@ def visualize_subject_behavior(
     logger.info(f"Behavioral visualizations saved to {ctx.plots_dir}")
 
 
-def _format_visualization_mode(
-    visualize_categories: Optional[List[str]],
-    scatter_only: bool,
-    temporal_only: bool,
-) -> str:
-    """Format a human-readable description of the visualization mode."""
-    if visualize_categories:
-        return f"categories: {', '.join(visualize_categories)}"
-    if scatter_only:
-        return "scatter-only"
-    if temporal_only:
-        return "temporal-only"
-    return "full"
-
-
 def visualize_behavior_for_subjects(
-    subjects: List[str],
-    task: Optional[str] = None,
-    deriv_root: Optional[Path] = None,
+    subjects: list[str],
+    task: str | None = None,
+    deriv_root: Path | None = None,
     config=None,
-    logger: Optional[logging.Logger] = None,
-    scatter_only: bool = False,
-    temporal_only: bool = False,
-    visualize_categories: Optional[List[str]] = None,
-    plots: Optional[List[str]] = None,
+    logger: logging.Logger | None = None,
+    visualize_categories: list[str] | None = None,
+    plots: list[str] | None = None,
 ) -> None:
     """Batch process behavioral visualizations for multiple subjects.
     
@@ -285,20 +213,14 @@ def visualize_behavior_for_subjects(
         Configuration object. If None, loaded from default location.
     logger : logging.Logger, optional
         Logger instance. If None, created for this module.
-    scatter_only : bool, optional
-        If True, only generate scatter plots. Default is False.
-    temporal_only : bool, optional
-        If True, only generate temporal plots. Default is False.
     visualize_categories : list of str, optional
         Specific categories to visualize (e.g., ["power", "connectivity"]).
         Maps to specific plot names. If None, all plots are generated.
     plots : list of str, optional
-        Specific plot names to generate. If None, uses mode flags or all plots.
+        Specific plot names to generate. If None, uses categories or all plots.
     """
     if not subjects:
         raise ValueError("No subjects specified")
-
-    _validate_plot_mode_flags(scatter_only, temporal_only)
 
     if config is None:
         from eeg_pipeline.utils.config.loader import load_config
@@ -313,7 +235,11 @@ def visualize_behavior_for_subjects(
     if logger is None:
         logger = get_logger(__name__)
 
-    mode_str = _format_visualization_mode(visualize_categories, scatter_only, temporal_only)
+    mode_str = (
+        f"categories: {', '.join(visualize_categories)}"
+        if visualize_categories
+        else "full"
+    )
     logger.info(
         f"Starting behavioral visualization ({mode_str}): "
         f"{len(subjects)} subject(s), task={task}"
@@ -326,8 +252,6 @@ def visualize_behavior_for_subjects(
             task,
             config,
             logger,
-            scatter_only=scatter_only,
-            temporal_only=temporal_only,
             plots=plots,
             deriv_root=deriv_root,
             visualize_categories=visualize_categories,

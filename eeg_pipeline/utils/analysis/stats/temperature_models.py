@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-
 from .base import safe_get_config_value as _get_config_value
 
 
@@ -56,25 +55,31 @@ def _validate_and_prepare_data(
     return data, meta
 
 
-def _check_statsmodels_availability() -> Tuple[bool, Any]:
-    """Check if statsmodels.formula.api is available."""
+def _check_statsmodels_module(module_name: str) -> Tuple[bool, Any]:
+    """Check if a statsmodels module is available."""
     try:
-        import statsmodels.formula.api as smf
-        return True, smf
+        if module_name == "formula":
+            import statsmodels.formula.api as module
+        elif module_name == "api":
+            import statsmodels.api as module
+        else:
+            return False, None
+        return True, module
     except ImportError:
         return False, None
 
 
 def _extract_model_metrics(model: Any, n_samples: int, data: pd.DataFrame, predictions: np.ndarray) -> Dict[str, Any]:
     """Extract model fit metrics from a fitted statsmodels model."""
-    n_params = int(getattr(model, "df_model", np.nan)) + 1 if hasattr(model, "df_model") else np.nan
+    df_model = getattr(model, "df_model", None)
+    n_params = int(df_model) + 1 if df_model is not None else np.nan
+    
     aic = float(model.aic) if np.isfinite(model.aic) else np.nan
     bic = float(model.bic) if np.isfinite(model.bic) else np.nan
     r_squared = float(model.rsquared) if hasattr(model, "rsquared") else np.nan
     
     observed = data["rating"].to_numpy()
-    all_predictions_finite = np.isfinite(predictions).all()
-    rmse = _calculate_rmse(observed, predictions) if all_predictions_finite else np.nan
+    rmse = _calculate_rmse(observed, predictions) if np.isfinite(predictions).all() else np.nan
     
     return {
         "n": n_samples,
@@ -90,13 +95,9 @@ def _fit_single_model(smf: Any, model_name: str, formula: str, data: pd.DataFram
     """Fit a single model and return its metrics, or None if fitting fails."""
     try:
         model = smf.ols(formula, data=data).fit()
+        predictions = np.asarray(model.predict(data), dtype=float)
     except (ValueError, AttributeError, TypeError):
         return None
-    
-    try:
-        predictions = np.asarray(model.predict(data), dtype=float)
-    except (ValueError, AttributeError):
-        predictions = np.full(n_samples, np.nan)
     
     metrics = _extract_model_metrics(model, n_samples, data, predictions)
     return {
@@ -120,14 +121,7 @@ def _get_polynomial_degrees(config: Any) -> List[int]:
     if not isinstance(degrees_raw, (list, tuple)) or not degrees_raw:
         return [2, 3]
     
-    valid_degrees = []
-    for degree_raw in degrees_raw:
-        try:
-            degree = int(degree_raw)
-            if 2 <= degree <= 5:
-                valid_degrees.append(degree)
-        except (ValueError, TypeError):
-            continue
+    valid_degrees = [int(d) for d in degrees_raw if isinstance(d, (int, float)) and 2 <= int(d) <= 5]
     return valid_degrees if valid_degrees else [2, 3]
 
 
@@ -137,14 +131,7 @@ def _get_spline_df_candidates(config: Any) -> List[int]:
     if not isinstance(df_candidates_raw, (list, tuple)) or not df_candidates_raw:
         return [3, 4, 5]
     
-    valid_df = []
-    for df_raw in df_candidates_raw:
-        try:
-            df = int(df_raw)
-            if df >= 3:
-                valid_df.append(df)
-        except (ValueError, TypeError):
-            continue
+    valid_df = [int(df) for df in df_candidates_raw if isinstance(df, (int, float)) and int(df) >= 3]
     return valid_df if valid_df else [3, 4, 5]
 
 
@@ -187,7 +174,7 @@ def compare_temperature_rating_models(
     if data is None:
         return pd.DataFrame(), meta
     
-    has_statsmodels, smf = _check_statsmodels_availability()
+    has_statsmodels, smf = _check_statsmodels_module("formula")
     meta["has_statsmodels"] = has_statsmodels
     if not has_statsmodels:
         return pd.DataFrame(), {**meta, "status": "missing_statsmodels"}
@@ -197,7 +184,7 @@ def compare_temperature_rating_models(
         return pd.DataFrame(), {**meta, "status": "empty"}
     
     results_df = pd.DataFrame(model_results).sort_values("aic", ascending=True)
-    best_model = results_df.iloc[0].to_dict() if len(results_df) > 0 else {}
+    best_model = results_df.iloc[0].to_dict()
     
     best_aic = best_model.get("aic")
     meta.update(
@@ -214,15 +201,6 @@ def compare_temperature_rating_models(
         results_df["delta_aic"] = np.nan
     
     return results_df, meta
-
-
-def _check_statsmodels_api_availability() -> Tuple[bool, Any]:
-    """Check if statsmodels.api is available."""
-    try:
-        import statsmodels.api as sm
-        return True, sm
-    except ImportError:
-        return False, None
 
 
 def _fit_linear_baseline(sm: Any, temperatures: np.ndarray, ratings: np.ndarray) -> Tuple[Any, Dict[str, Any]]:
@@ -254,8 +232,7 @@ def _get_breakpoint_search_range(temperatures: np.ndarray, config: Any) -> Tuple
 
 def _generate_breakpoint_candidates(temperature_low: float, temperature_high: float, config: Any) -> np.ndarray:
     """Generate candidate breakpoint values for search."""
-    n_candidates_raw = int(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.n_candidates", 15))
-    n_candidates = max(n_candidates_raw, 5)
+    n_candidates = max(int(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.n_candidates", 15)), 5)
     return np.linspace(temperature_low, temperature_high, num=n_candidates)
 
 
@@ -266,8 +243,7 @@ def _create_hinge_feature(temperatures: np.ndarray, breakpoint: float) -> np.nda
 
 def _build_hinge_design_matrix(temperatures: np.ndarray, hinge: np.ndarray) -> np.ndarray:
     """Build design matrix for hinge model: [intercept, temperature, hinge]."""
-    n_samples = len(temperatures)
-    intercept = np.ones(n_samples)
+    intercept = np.ones(len(temperatures))
     return np.column_stack([intercept, temperatures, hinge])
 
 
@@ -277,10 +253,12 @@ def _extract_hinge_model_metrics(model: Any, breakpoint: float) -> Dict[str, Any
     bic = float(model.bic) if np.isfinite(model.bic) else np.nan
     r_squared = float(model.rsquared) if hasattr(model, "rsquared") else np.nan
     
-    beta_temp = float(model.params[1]) if len(model.params) > 1 else np.nan
-    beta_hinge = float(model.params[2]) if len(model.params) > 2 else np.nan
+    params = model.params
+    beta_temp = float(params[1]) if len(params) > 1 else np.nan
+    beta_hinge = float(params[2]) if len(params) > 2 else np.nan
     
-    p_hinge = float(model.pvalues[2]) if hasattr(model, "pvalues") and len(model.pvalues) > 2 else np.nan
+    pvalues = getattr(model, "pvalues", None)
+    p_hinge = float(pvalues[2]) if pvalues is not None and len(pvalues) > 2 else np.nan
     
     return {
         "breakpoint_c": breakpoint,
@@ -312,7 +290,7 @@ def _find_best_breakpoint(sm: Any, temperatures: np.ndarray, ratings: np.ndarray
     best_result = None
     
     for breakpoint in candidates:
-        result = _fit_hinge_model(sm, temperatures, ratings, float(breakpoint))
+        result = _fit_hinge_model(sm, temperatures, ratings, breakpoint)
         if result is None:
             continue
         
@@ -327,19 +305,20 @@ def _find_best_breakpoint(sm: Any, temperatures: np.ndarray, ratings: np.ndarray
 
 def _calculate_f_test(linear_model: Any, hinge_model: Any, n_observations: int) -> Tuple[float, float]:
     """Calculate F-test comparing linear vs hinge model."""
+    from scipy.stats import f as f_distribution
+    
     residual_sum_squares_linear = float(np.sum(linear_model.resid ** 2))
     residual_sum_squares_hinge = float(np.sum(hinge_model.resid ** 2))
     
-    df_linear = int(linear_model.df_model) + 1 if hasattr(linear_model, "df_model") else 2
-    df_hinge = int(hinge_model.df_model) + 1 if hasattr(hinge_model, "df_model") else 3
+    df_linear = int(getattr(linear_model, "df_model", 1)) + 1
+    df_hinge = int(getattr(hinge_model, "df_model", 2)) + 1
     
     df_numerator = max(df_hinge - df_linear, 1)
     df_denominator = max(n_observations - df_hinge, 1)
     
-    if n_observations <= df_hinge or residual_sum_squares_hinge <= 0:
-        return np.nan, np.nan
-    
-    if residual_sum_squares_linear < residual_sum_squares_hinge:
+    if (n_observations <= df_hinge 
+        or residual_sum_squares_hinge <= 0 
+        or residual_sum_squares_linear < residual_sum_squares_hinge):
         return np.nan, np.nan
     
     numerator = (residual_sum_squares_linear - residual_sum_squares_hinge) / df_numerator
@@ -351,8 +330,6 @@ def _calculate_f_test(linear_model: Any, hinge_model: Any, n_observations: int) 
     f_statistic = numerator / denominator
     if not np.isfinite(f_statistic):
         return np.nan, np.nan
-    
-    from scipy.stats import f as f_distribution
     
     p_value = float(f_distribution.sf(f_statistic, dfn=df_numerator, dfd=df_denominator))
     return f_statistic, p_value
@@ -374,7 +351,7 @@ def fit_temperature_breakpoint_test(
     if data is None:
         return pd.DataFrame(), meta
     
-    has_statsmodels, sm = _check_statsmodels_api_availability()
+    has_statsmodels, sm = _check_statsmodels_module("api")
     meta["has_statsmodels"] = has_statsmodels
     if not has_statsmodels:
         return pd.DataFrame(), {**meta, "status": "missing_statsmodels"}

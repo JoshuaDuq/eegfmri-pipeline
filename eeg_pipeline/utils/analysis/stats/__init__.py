@@ -56,15 +56,9 @@ from .base import (
 from .fdr import (
     fdr_bh,
     fdr_bh_reject,
-    fdr_bh_mask,
     fdr_bh_values,
     bh_adjust,
-    select_p_values_for_fdr,
     filter_significant_predictors,
-    apply_fdr_correction_and_save,
-    get_pvalue_series,
-    extract_pvalue_from_dataframe,
-    should_apply_fisher_transform,
     get_cluster_correction_config,
     compute_fdr_rejections_for_heatmap,
     build_correlation_matrices_for_prefix,
@@ -80,7 +74,6 @@ from .cluster import (
     resolve_cluster_n_jobs,
     cluster_test_two_sample,
     cluster_test_epochs,
-    # 2D cluster correction (merged from cluster_2d)
     compute_cluster_masses_2d,
     compute_permutation_max_masses,
     compute_cluster_pvalues_2d as compute_cluster_pvalues,
@@ -91,7 +84,6 @@ from .cluster import (
 )
 
 from .correlation import (
-    get_correlation_method,
     compute_correlation,
     fisher_z,
     inverse_fisher_z,
@@ -115,7 +107,7 @@ from .bootstrap import (
     bootstrap_corr_ci,
     bootstrap_ci_bca,
     bootstrap_mean_diff_ci,
-    ensure_bootstrap_ci,
+    compute_bootstrap_ci,
 )
 
 from .effect_size import (
@@ -124,14 +116,7 @@ from .effect_size import (
     fisher_z_test,
     cohens_q,
     correlation_difference_effect,
-    r_to_d,
-    d_to_r,
-    compute_effect_sizes,
     compute_cohens_d_with_bootstrap_ci,
-)
-
-from .validation import (
-    validate_baseline_window_pre_stimulus,
 )
 
 from eeg_pipeline.utils.validation import (
@@ -149,8 +134,6 @@ from .formatting import (
     format_cluster_ann,
     format_fdr_ann,
     format_correlation_stats_text,
-    _compute_bf10_correlation,
-    _interpret_bayes_factor,
 )
 
 from .aggregation import (
@@ -166,9 +149,6 @@ from .aggregation import (
     count_trials_by_condition,
     compute_duration_p_value,
 )
-
-from .cluster import align_epochs_to_pivot_chs
-from .bootstrap import compute_bootstrap_ci
 
 from .transforms import (
     center_series,
@@ -189,6 +169,18 @@ from .transforms import (
 from .visualization import (
     compute_kde_scale,
     compute_correlation_vmax,
+    compute_permutation_distribution_data,
+    compute_cluster_mass_histogram_data,
+    compute_pp_plot_data,
+    compute_qq_plot_data,
+    compute_effect_size_distribution_data,
+    compute_bootstrap_distribution_data,
+    compute_raincloud_data,
+    compute_spaghetti_plot_data,
+    compute_correction_comparison_data,
+    create_provenance_block,
+    format_provenance_text,
+    save_stats_for_plot,
 )
 
 from .roi import (
@@ -220,7 +212,6 @@ from .permutation import (
     perm_pval_simple,
     perm_pval_partial_freedman_lane,
     compute_perm_and_partial_perm,
-    compute_permutation_pvalue_partial,
     compute_permutation_pvalues,
     compute_permutation_pvalues_with_cov_temp,
     compute_temp_permutation_pvalues,
@@ -236,7 +227,6 @@ from .partial import (
     compute_partial_correlation_with_covariates,
     compute_partial_correlations,
     compute_partial_correlations_with_cov_temp,
-    compute_partial_correlation_for_roi_pair,
     compute_partial_residuals_stats,
 )
 
@@ -305,6 +295,7 @@ from .validation import (
     compute_qq_data,
     check_variance_levene,
     check_variance_bartlett,
+    validate_baseline_window_pre_stimulus,
     validate_permutation_distribution,
     check_randomization_balance,
     compute_fwer_bonferroni,
@@ -314,20 +305,6 @@ from .validation import (
     validate_behavioral_contrast,
 )
 
-from .visualization import (
-    compute_permutation_distribution_data,
-    compute_cluster_mass_histogram_data,
-    compute_pp_plot_data,
-    compute_qq_plot_data,
-    compute_effect_size_distribution_data,
-    compute_bootstrap_distribution_data,
-    compute_raincloud_data,
-    compute_spaghetti_plot_data,
-    compute_correction_comparison_data,
-    create_provenance_block,
-    format_provenance_text,
-    save_stats_for_plot,
-)
 
 # Aliases
 cluster_test_two_sample_arrays = cluster_test_two_sample
@@ -347,15 +324,9 @@ __all__ = [
     # FDR
     "fdr_bh",
     "fdr_bh_reject",
-    "fdr_bh_mask",
     "fdr_bh_values",
     "bh_adjust",
-    "select_p_values_for_fdr",
     "filter_significant_predictors",
-    "apply_fdr_correction_and_save",
-    "get_pvalue_series",
-    "extract_pvalue_from_dataframe",
-    "should_apply_fisher_transform",
     "get_cluster_correction_config",
     "compute_fdr_rejections_for_heatmap",
     "build_correlation_matrices_for_prefix",
@@ -379,7 +350,6 @@ __all__ = [
     "compute_topomap_permutation_masses",
     "compute_cluster_pvalues_1d",
     # Correlation
-    "get_correlation_method",
     "compute_correlation",
     "fisher_z",
     "inverse_fisher_z",
@@ -402,16 +372,12 @@ __all__ = [
     "bootstrap_corr_ci",
     "bootstrap_ci_bca",
     "bootstrap_mean_diff_ci",
-    "ensure_bootstrap_ci",
     # Effect Size
     "cohens_d",
     "hedges_g",
     "fisher_z_test",
     "cohens_q",
     "correlation_difference_effect",
-    "r_to_d",
-    "d_to_r",
-    "compute_effect_sizes",
     "compute_cohens_d_with_bootstrap_ci",
     # Validation
     "validate_pain_binary_values",
@@ -441,8 +407,6 @@ __all__ = [
     "count_trials_by_condition",
     "compute_duration_p_value",
     # EEG Stats
-    "align_epochs_to_pivot_chs",
-    "compute_correlation_for_metric_state",
     "prepare_aligned_data",
     "compute_residuals",
     "compute_bootstrap_ci",
@@ -487,8 +451,8 @@ __all__ = [
     "perm_pval_simple",
     "perm_pval_partial_freedman_lane",
     "compute_perm_and_partial_perm",
-    "compute_permutation_pvalue_partial",
     "compute_permutation_pvalues",
+    "compute_permutation_pvalues_with_cov_temp",
     "compute_temp_permutation_pvalues",
     "compute_permutation_pvalues_for_roi_pair",
     "permutation_null_distribution",
@@ -498,7 +462,7 @@ __all__ = [
     "compute_partial_residuals",
     "compute_partial_correlation_with_covariates",
     "compute_partial_correlations",
-    "compute_partial_correlation_for_roi_pair",
+    "compute_partial_correlations_with_cov_temp",
     "compute_partial_residuals_stats",
     # Meta-analysis
     "MetaAnalysisResult",

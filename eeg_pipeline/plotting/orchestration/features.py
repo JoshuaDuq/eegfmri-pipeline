@@ -33,22 +33,22 @@ from eeg_pipeline.plotting.features.context import (
 
 
 # Known feature types for manifest generation
+# These must match the categories registered in VisualizationRegistry
 _KNOWN_FEATURE_TYPES = [
-    "power",
-    "connectivity",
     "aperiodic",
-    "erds",
-    "spectral",
-    "ratios",
-    "asymmetry",
     "bursts",
-    "temporal",
+    "complexity",
+    "connectivity",
+    "erds",
+    "erp",
     "itpc",
     "pac",
-    "complexity",
+    "power",
     "quality",
-    "erp",
-    "summary",
+    "ratios",
+    "spectral",
+    "asymmetry",
+    "temporal",
 ]
 
 _PLOT_FILE_EXTENSIONS = ["png", "svg", "pdf"]
@@ -73,10 +73,10 @@ def _parse_plotter_tokens(tokens: List[str]) -> Dict[str, Set[str]]:
     
     for token in tokens:
         token = str(token).strip()
-        if not token or "." not in token:
+        if "." not in token:
             continue
-            
-        category, name = token.split(".", 1)
+        
+        category, _, name = token.partition(".")
         category = category.strip()
         name = name.strip()
         
@@ -127,31 +127,27 @@ def _run_visualizations(
     -------
     dict mapping plot names to file paths.
     """
-    has_category_filter = visualize_categories is not None
     has_plotter_filter = bool(selected_by_category)
     
-    if has_category_filter:
+    if visualize_categories is not None:
         logger.info(f"Visualizing specific categories: {', '.join(visualize_categories)}")
-        
-        for category in visualize_categories:
-            if has_plotter_filter:
-                wanted_names = selected_by_category.get(category, set())
-                if not wanted_names:
-                    continue
-                plotters = _get_filtered_plotters(category, wanted_names)
-                manager.run_category(category, plotters=plotters)
-            else:
-                manager.run_category(category)
-        
-        return manager.saved_plots
+        categories_to_run = visualize_categories
+    elif has_plotter_filter:
+        categories_to_run = list(selected_by_category.keys())
+    else:
+        return manager.run_all()
     
-    if has_plotter_filter:
-        for category, wanted_names in selected_by_category.items():
+    for category in categories_to_run:
+        if has_plotter_filter:
+            wanted_names = selected_by_category.get(category)
+            if not wanted_names:
+                continue
             plotters = _get_filtered_plotters(category, wanted_names)
             manager.run_category(category, plotters=plotters)
-        return manager.saved_plots
+        else:
+            manager.run_category(category)
     
-    return manager.run_all()
+    return manager.saved_plots
 
 
 def _create_plot_context(
@@ -230,7 +226,7 @@ def _validate_context_has_data(context: FeaturePlotContext, subject: str, logger
     if not has_feature_data:
         logger.warning(f"No feature data found for subject {subject}")
         if context.epochs is None:
-            logger.warning("No epochs data found either.")
+            logger.warning("No epochs data found either")
             return False
     
     return True
@@ -280,7 +276,7 @@ def visualize_features(
     dict mapping plot names to file paths.
     """
     if logger is None:
-        logger = logging.getLogger(__name__)
+        logger = get_logger(__name__)
     
     context = _create_plot_context(
         subject=subject,
@@ -298,9 +294,7 @@ def visualize_features(
     
     manager = VisualizationManager(context)
     
-    selected_by_category = (
-        _parse_plotter_tokens(feature_plotters) if feature_plotters else {}
-    )
+    selected_by_category = _parse_plotter_tokens(feature_plotters) if feature_plotters else {}
     
     saved_plots = _run_visualizations(
         manager=manager,
@@ -330,12 +324,9 @@ def _detect_feature_type_from_path(path: Path) -> str:
     -------
     Feature type string, or "unknown" if not detected.
     """
-    path_str = str(path)
-    
     for feature_type in _KNOWN_FEATURE_TYPES:
-        if f"/{feature_type}/" in path_str or f"\\{feature_type}\\" in path_str:
+        if feature_type in path.parts:
             return feature_type
-    
     return "unknown"
 
 
@@ -351,9 +342,11 @@ def _collect_plot_files(plots_dir: Path) -> List[Path]:
     -------
     Sorted list of plot file paths.
     """
-    plot_files: List[Path] = []
-    for extension in _PLOT_FILE_EXTENSIONS:
-        plot_files.extend(plots_dir.rglob(f"*.{extension}"))
+    plot_files = [
+        path
+        for extension in _PLOT_FILE_EXTENSIONS
+        for path in plots_dir.rglob(f"*.{extension}")
+    ]
     return sorted(plot_files)
 
 
@@ -371,12 +364,10 @@ def _create_plot_entry(path: Path, plots_dir: Path) -> Dict[str, str]:
     -------
     Dictionary with plot metadata.
     """
-    feature_type = _detect_feature_type_from_path(path)
-    
     return {
         "name": path.stem,
         "path": str(path.relative_to(plots_dir)),
-        "feature_type": feature_type,
+        "feature_type": _detect_feature_type_from_path(path),
         "format": path.suffix[1:],
     }
 
@@ -425,10 +416,10 @@ def _load_config_if_needed(config: Any) -> Any:
     -------
     Configuration object.
     """
-    if config is None:
-        from eeg_pipeline.utils.config.loader import load_config
-        return load_config()
-    return config
+    if config is not None:
+        return config
+    from eeg_pipeline.utils.config.loader import load_config
+    return load_config()
 
 
 def _resolve_task(task: Optional[str], config: Any) -> str:
@@ -469,10 +460,7 @@ def _log_visualization_start(
     logger : logging.Logger
         Logger instance.
     """
-    category_suffix = ""
-    if visualize_categories:
-        category_suffix = f" ({', '.join(visualize_categories)})"
-    
+    category_suffix = f" ({', '.join(visualize_categories)})" if visualize_categories else ""
     logger.info(
         f"Starting feature visualization{category_suffix}: "
         f"{len(subjects)} subject(s), task={task}"

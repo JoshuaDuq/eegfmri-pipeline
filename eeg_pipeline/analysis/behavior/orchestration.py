@@ -374,16 +374,6 @@ class StageRegistry:
 
 
 @dataclass
-class TrialTableResult:
-    """Output contract for trial_table stage."""
-    df: pd.DataFrame
-    path: Optional[Path] = None
-    n_trials: int = 0
-    n_features: int = 0
-    metadata: Optional[Dict[str, Any]] = None
-
-
-@dataclass
 class CorrelationDesign:
     """Output contract for correlate_design stage."""
     targets: List[str]
@@ -818,12 +808,6 @@ def _is_stage_enabled_by_config(stage_name: str, config: Any) -> bool:
         return True
     
     return bool(config_value)
-
-
-###################################################################
-# Standardized Result Schema
-###################################################################
-
 
 
 ###################################################################
@@ -3144,7 +3128,6 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
 
     out_df, meta = compute_influence_diagnostics(
         df_trials,
-        feature_cols=feature_cols,
         corr_df=getattr(results, "correlations", None),
         regression_df=getattr(results, "regression", None),
         models_df=getattr(results, "models", None),
@@ -4777,39 +4760,6 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         ctx.logger.info("Moderation: no valid results.")
 
     return mod_df
-
-
-def _get_fdr_patterns(config: Any) -> List[str]:
-    """Get file patterns for FDR correction based on config flags."""
-    patterns = []
-    
-    if getattr(config, "run_condition_comparison", False):
-        patterns.append("condition_effects*.parquet")
-    if getattr(config, "run_regression", False):
-        patterns.append("regression_feature_effects*.parquet")
-    if getattr(config, "run_models", False):
-        patterns.append("models_feature_effects*.parquet")
-    if getattr(config, "run_mediation", False):
-        patterns.append("mediation*.parquet")
-    if getattr(config, "run_moderation", False):
-        patterns.append("moderation_results*.parquet")
-    if getattr(config, "run_mixed_effects", False):
-        patterns.append("mixed_effects*.parquet")
-    if getattr(config, "run_correlations", True):
-        patterns.append("correlations*.parquet")
-    if getattr(config, "compute_pain_sensitivity", False):
-        patterns.append("pain_sensitivity*.parquet")
-    if getattr(config, "run_temporal_correlations", False):
-        patterns.extend([
-            "temporal_correlations/*.parquet",
-        ])
-    if getattr(config, "run_cluster_tests", False):
-        patterns.append("cluster/*.parquet")
-
-    patterns = list(set(patterns))
-    if not patterns:
-        patterns = ["correlations*.parquet", "condition_effects*.parquet", "pain_sensitivity*.parquet"]
-    return patterns
 
 
 def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.DataFrame:

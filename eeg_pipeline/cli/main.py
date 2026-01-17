@@ -9,19 +9,6 @@ Usage:
     
     Or via console script (if installed):
     eeg-pipeline <command> [options]
-
-Commands:
-    utilities      Raw-to-BIDS conversion and behavior merge
-    behavior       Brain-behavior correlation analysis
-    features       Feature extraction from epochs
-    tfr            Time-frequency visualization
-    ml             Machine learning-based prediction
-
-Examples:
-    python -m eeg_pipeline.cli.main utilities raw-to-bids --source-root data/source_data
-    python -m eeg_pipeline.cli.main features compute --subject 0001
-    python -m eeg_pipeline.cli.main behavior compute --all-subjects
-    python -m eeg_pipeline.cli.main ml --subject 0001 --subject 0002
 """
 
 from __future__ import annotations
@@ -31,6 +18,7 @@ import sys
 import logging
 import argparse
 import warnings
+from pathlib import Path
 from typing import Any
 
 from eeg_pipeline.utils.config.loader import load_config
@@ -76,8 +64,8 @@ Examples:
   python -m eeg_pipeline.cli.main features compute --subject 0001
   python -m eeg_pipeline.cli.main features visualize --subject 0001
 
-  # TFR: visualize
-  python -m eeg_pipeline.cli.main tfr visualize --subject 0001
+  # Plotting: TFR visualization
+  python -m eeg_pipeline.cli.main plotting tfr --subject 0001
 
   # Machine Learning: run analysis
   python -m eeg_pipeline.cli.main ml --subject 0001 --subject 0002
@@ -112,23 +100,15 @@ def update_config_from_args(config: dict[str, Any], args: argparse.Namespace) ->
 def get_subjects_for_command(
     args: argparse.Namespace,
     config: dict[str, Any],
-    deriv_root: Any
+    deriv_root: Path
 ) -> list[str]:
     """Parse and validate subject arguments for commands that require them."""
-    subjects = parse_subject_args(
+    return parse_subject_args(
         args,
         config,
         task=getattr(args, "task", None),
         deriv_root=deriv_root
     )
-    
-    if not subjects:
-        logging.error(
-            "No subjects provided. Use --group all|A,B,C, "
-            "or --subject (repeatable), or --all-subjects."
-        )
-    
-    return subjects
 
 
 def execute_command(
@@ -171,6 +151,10 @@ def main() -> int:
     
     subjects = get_subjects_for_command(args, config, deriv_root)
     if not subjects:
+        logging.error(
+            "No subjects provided. Use --group all|A,B,C, "
+            "or --subject (repeatable), or --all-subjects."
+        )
         return EXIT_NO_SUBJECTS
     
     return execute_command(command, args, subjects, config)

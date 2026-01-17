@@ -32,13 +32,8 @@ type StatsData struct {
 	FmriPrepSubjects  int            `json:"fmri_prep_subjects"`
 	EpochsSubjects    int            `json:"epochs_subjects"`
 	FeaturesSubjects  int            `json:"features_subjects"`
-	EpochsPct         float64        `json:"epochs_pct"`
-	FeaturesPct       float64        `json:"features_pct"`
-	EegPrepPct        float64        `json:"eeg_prep_pct"`
-	FmriPrepPct       float64        `json:"fmri_prep_pct"`
 	FeatureCategories map[string]int `json:"feature_categories"`
 	Task              string         `json:"task"`
-	DerivRoot         string         `json:"deriv_root"`
 }
 
 type loadStatsMsg struct {
@@ -54,10 +49,7 @@ type Model struct {
 	loadError  error
 	repoRoot   string
 	lastUpdate time.Time
-
-	width  int
-	height int
-	ticker int
+	ticker     int
 }
 
 func New(repoRoot string) Model {
@@ -147,8 +139,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKeyMsg(msg)
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
 		return m, nil
 	}
 
@@ -293,35 +283,33 @@ func (m Model) renderSubjectProgress() string {
 	}
 
 	for _, item := range subjectItems {
-		b.WriteString(m.renderSubjectItem(item, totalSubjects))
+		b.WriteString(m.renderSubjectItem(item.label, item.count, item.color, totalSubjects))
 	}
 
 	return b.String()
 }
 
-func (m Model) renderSubjectItem(item struct {
-	label string
-	count int
-	color lipgloss.Color
-}, totalSubjects int) string {
-	label := lipgloss.NewStyle().
+func (m Model) renderSubjectItem(label string, count int, color lipgloss.Color, totalSubjects int) string {
+	isTotal := label == "Total"
+	percentage := m.calculatePercentage(count, totalSubjects, isTotal)
+
+	labelText := lipgloss.NewStyle().
 		Foreground(styles.TextDim).
 		Width(subjectLabelWidth).
-		Render("  " + item.label)
+		Render("  " + label)
 
-	percentage := m.calculatePercentage(item.count, totalSubjects, item.label == "Total")
-	progressBar := m.renderMiniBar(percentage, subjectBarWidth, item.color)
+	progressBar := m.renderMiniBar(percentage, subjectBarWidth, color)
 
 	countText := lipgloss.NewStyle().
-		Foreground(item.color).
+		Foreground(color).
 		Bold(true).
 		Width(5).
 		Align(lipgloss.Right).
-		Render(fmt.Sprintf("%d", item.count))
+		Render(fmt.Sprintf("%d", count))
 
-	percentageText := m.formatPercentageText(percentage, item.label == "Total")
+	percentageText := m.formatPercentageText(percentage, isTotal)
 
-	return label + countText + " " + progressBar + percentageText + "\n"
+	return labelText + countText + " " + progressBar + percentageText + "\n"
 }
 
 func (m Model) calculatePercentage(count, total int, isTotal bool) float64 {
@@ -346,9 +334,6 @@ func (m Model) formatPercentageText(percentage float64, isTotal bool) string {
 
 func (m Model) renderMiniBar(percentage float64, width int, color lipgloss.Color) string {
 	filledWidth := int(percentage * float64(width))
-	if filledWidth > width {
-		filledWidth = width
-	}
 	emptyWidth := width - filledWidth
 
 	filledBar := lipgloss.NewStyle().
@@ -433,14 +418,3 @@ func (m Model) renderFooter() string {
 	return styles.FooterStyle.Render(hintsText)
 }
 
-func (m Model) IsLoading() bool {
-	return m.loading
-}
-
-func (m Model) HasError() bool {
-	return m.loadError != nil
-}
-
-func (m Model) GetStats() StatsData {
-	return m.stats
-}

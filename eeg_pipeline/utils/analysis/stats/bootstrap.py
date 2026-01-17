@@ -10,13 +10,11 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 from scipy import stats
 
-from .base import get_n_bootstrap, get_n_permutations, get_ci_level
+from .base import get_n_bootstrap, get_ci_level
 
 # Minimum sample sizes for valid statistics
-MIN_SAMPLES_PERMUTATION = 3
 MIN_SAMPLES_BOOTSTRAP_CORR = 4
 MIN_SAMPLES_BOOTSTRAP_MEAN = 3
 MIN_SAMPLES_BCA = 5
@@ -48,16 +46,12 @@ def _get_bootstrap_config(
 def _filter_finite_pairs(
     x: np.ndarray,
     y: np.ndarray,
-    groups: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Filter out non-finite values from paired arrays."""
     x = np.asarray(x).ravel()
     y = np.asarray(y).ravel()
     valid = np.isfinite(x) & np.isfinite(y)
-    x_valid = x[valid]
-    y_valid = y[valid]
-    groups_valid = groups[valid] if groups is not None else None
-    return x_valid, y_valid, groups_valid
+    return x[valid], y[valid]
 
 
 def _compute_percentile_bounds(
@@ -124,7 +118,7 @@ def bootstrap_corr_ci(
     """
     n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
     ci_level = get_ci_level(config)
-    x_valid, y_valid, _ = _filter_finite_pairs(x, y)
+    x_valid, y_valid = _filter_finite_pairs(x, y)
     return _bootstrap_corr_ci_impl(x_valid, y_valid, method, n_boot, ci_level, rng)
 
 
@@ -278,7 +272,7 @@ def bootstrap_ci_bca(
     # Local import to avoid circular dependency
     from .correlation import compute_correlation
     
-    x_valid, y_valid, _ = _filter_finite_pairs(x, y)
+    x_valid, y_valid = _filter_finite_pairs(x, y)
     n_valid = len(x_valid)
     if n_valid < MIN_SAMPLES_BCA:
         return np.nan, np.nan
@@ -338,8 +332,7 @@ def compute_bootstrap_ci(
 ) -> Tuple[float, float]:
     """Compute bootstrap confidence interval for correlation.
     
-    This is a convenience wrapper around bootstrap_corr_ci that uses explicit
-    parameters instead of config object. Kept for backward compatibility.
+    Convenience wrapper that uses explicit parameters instead of config object.
     
     Parameters
     ----------
@@ -354,63 +347,15 @@ def compute_bootstrap_ci(
     rng : np.random.Generator, optional
         Random number generator
     config : Optional[Any]
-        Configuration object (unused, kept for compatibility)
+        Configuration object (overridden by explicit parameters)
         
     Returns
     -------
     Tuple[float, float]
         Lower and upper CI bounds
     """
-    return bootstrap_corr_ci(x, y, method=method, n_boot=n_bootstrap, rng=rng, config=config)
-
-
-def ensure_bootstrap_ci(
-    stats_df: pd.DataFrame,
-    x_data: Optional[np.ndarray] = None,
-    y_data: Optional[np.ndarray] = None,
-    n_boot: int = 2000,
-    method: str = "spearman",
-    config: Optional[Any] = None,
-) -> pd.DataFrame:
-    """
-    Ensure bootstrap CIs exist in stats dataframe, computing if missing.
-    
-    If ci_low/ci_high columns are missing or contain NaN, computes bootstrap CIs.
-    """
-    import pandas as pd
-    
-    if stats_df is None or stats_df.empty:
-        return stats_df
-    
-    df = stats_df.copy()
-    
-    has_ci_columns = "ci_low" in df.columns and "ci_high" in df.columns
-    if has_ci_columns:
-        missing_ci_mask = df["ci_low"].isna() | df["ci_high"].isna()
-        if not missing_ci_mask.any():
-            return df
-    
-    if "r" in df.columns and "n" in df.columns:
-        if "ci_low" not in df.columns:
-            df["ci_low"] = np.nan
-        if "ci_high" not in df.columns:
-            df["ci_high"] = np.nan
-        
-        from .correlation import fisher_ci
-        
-        for idx in df.index:
-            row = df.loc[idx]
-            has_missing_ci = pd.isna(row["ci_low"]) or pd.isna(row["ci_high"])
-            if has_missing_ci:
-                r_val = row.get("r")
-                n_val = row.get("n")
-                # Use fisher_ci directly (checks n < 4 internally)
-                if pd.notna(r_val) and pd.notna(n_val):
-                    ci_low, ci_high = fisher_ci(r_val, n_val, config=None)
-                else:
-                    ci_low, ci_high = np.nan, np.nan
-                df.loc[idx, "ci_low"] = ci_low
-                df.loc[idx, "ci_high"] = ci_high
-    
-    return df
+    if rng is None:
+        rng = np.random.default_rng()
+    x_valid, y_valid = _filter_finite_pairs(x, y)
+    return _bootstrap_corr_ci_impl(x_valid, y_valid, method, n_bootstrap, ci_level, rng)
 

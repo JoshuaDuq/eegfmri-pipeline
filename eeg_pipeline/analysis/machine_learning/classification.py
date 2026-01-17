@@ -47,16 +47,10 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import (
     GridSearchCV,
-    GroupKFold,
     LeaveOneGroupOut,
+    StratifiedGroupKFold,
     StratifiedKFold,
 )
-
-try:
-    from sklearn.model_selection import StratifiedGroupKFold
-    _HAS_STRATIFIED_GROUP_KFOLD = True
-except ImportError:
-    _HAS_STRATIFIED_GROUP_KFOLD = False
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
@@ -522,7 +516,7 @@ def nested_loso_classification(
         log.info(f"Fold {fold}: testing on subject {test_subject}")
         
         X_train, X_test = X[train_idx], X[test_idx]
-        y_train, y_test = y[train_idx], y[test_idx]
+        y_train = y[train_idx]
         train_groups = groups[train_idx]
         
         # Skip if only one class in training
@@ -545,12 +539,7 @@ def nested_loso_classification(
                 y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
             continue
         
-        if _HAS_STRATIFIED_GROUP_KFOLD:
-            inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
-        else:
-            # Fallback: GroupKFold (not stratified, but respects subject boundaries)
-            inner_cv = GroupKFold(n_splits=effective_splits)
-            log.debug(f"Fold {fold}: Using GroupKFold (StratifiedGroupKFold not available)")
+        inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
         
         # GridSearch with group-aware inner CV
         gs = GridSearchCV(
@@ -594,41 +583,6 @@ def nested_loso_classification(
 ###################################################################
 # Utilities
 ###################################################################
-
-
-def get_feature_importance_from_classifier(
-    pipe: Pipeline,
-    feature_names: List[str],
-) -> pd.DataFrame:
-    """
-    Extract feature importance from trained classifier.
-    
-    Works for LR (coefficients), RF (feature_importances_).
-    """
-    importances = []
-    
-    # Try to get the classifier step
-    for name, step in pipe.named_steps.items():
-        if hasattr(step, "coef_"):
-            # Logistic Regression
-            importances = np.abs(step.coef_).ravel()
-            break
-        elif hasattr(step, "feature_importances_"):
-            # Random Forest
-            importances = step.feature_importances_
-            break
-    
-    if len(importances) == 0:
-        return pd.DataFrame()
-    
-    # Handle case where imputation/scaling changed feature count
-    if len(importances) != len(feature_names):
-        feature_names = [f"feature_{i}" for i in range(len(importances))]
-    
-    return pd.DataFrame({
-        "feature": feature_names,
-        "importance": importances,
-    }).sort_values("importance", ascending=False)
 
 
 def save_classification_results(
@@ -675,20 +629,3 @@ def save_classification_results(
         saved["roc"] = roc_path
     
     return saved
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

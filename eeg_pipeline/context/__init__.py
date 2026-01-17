@@ -6,10 +6,9 @@ required for various stages of the pipeline (e.g., feature extraction, behavior 
 """
 
 from .features import FeatureContext
-from .behavior import BehaviorContext, AnalysisConfig
+from .behavior import BehaviorContext
 
 __all__ = [
     "FeatureContext",
     "BehaviorContext",
-    "AnalysisConfig",
 ]

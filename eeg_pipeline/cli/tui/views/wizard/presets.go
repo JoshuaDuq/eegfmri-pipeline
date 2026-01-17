@@ -27,10 +27,6 @@ func (m *Model) TickToast() {
 	}
 }
 
-func (m *Model) ApplyFeaturePreset(presetKey string) {
-	// Feature presets have been removed
-}
-
 func (m *Model) ApplyBehaviorPreset(presetKey string) {
 	m.computationSelected = make(map[int]bool)
 
@@ -48,10 +44,6 @@ func (m *Model) ApplyBehaviorPreset(presetKey string) {
 	m.selectComputationsByKeys(computationsToSelect)
 	presetName := m.getBehaviorPresetName(presetKey)
 	m.notifyPresetApplied(presetName)
-}
-
-func (m *Model) ClearPreset() {
-	m.activePreset = ""
 }
 
 func (m *Model) ToggleShowOnlyValid() {

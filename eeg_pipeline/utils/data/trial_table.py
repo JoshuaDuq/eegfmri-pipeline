@@ -237,8 +237,6 @@ def add_lag_and_delta_features(
     return result_df.reset_index(drop=True), meta
 
 
-
-
 def add_pain_residual(
     df: pd.DataFrame,
     config: Any,
@@ -250,7 +248,7 @@ def add_pain_residual(
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Add a flexible temperature→rating fit and define pain_residual = rating - f(temp)."""
     from eeg_pipeline.utils.config.loader import get_config_value
-    
+
     enabled = bool(
         get_config_value(config, "behavior_analysis.pain_residual.enabled", True)
     )
@@ -352,8 +350,8 @@ def add_pain_residual(
                         meta["crossfit"]["status"] = "skipped_insufficient_groups"
                     else:
                         n_splits = max(2, min(n_splits_required, n_groups))
-                        model = _build_crossfit_model(config, method)
-                        _update_crossfit_meta_for_method(meta, config, method)
+                        model, model_params = _build_crossfit_model(config, method)
+                        meta["crossfit"].update(model_params)
 
                         cv_predictions = np.full(len(valid_indices), np.nan, dtype=float)
                         splitter = GroupKFold(n_splits=n_splits)
@@ -375,8 +373,16 @@ def add_pain_residual(
     return result, meta
 
 
-def _build_crossfit_model(config: Any, method: str) -> Any:
-    """Build sklearn Pipeline model for crossfit based on method."""
+def _build_crossfit_model(config: Any, method: str) -> Tuple[Any, Dict[str, Any]]:
+    """Build sklearn Pipeline model for crossfit based on method.
+    
+    Returns
+    -------
+    model : sklearn Pipeline
+        The configured model.
+    params : dict
+        Method-specific parameters for metadata.
+    """
     from sklearn.pipeline import Pipeline
     from sklearn.linear_model import Ridge
     from sklearn.preprocessing import SplineTransformer, PolynomialFeatures
@@ -387,12 +393,13 @@ def _build_crossfit_model(config: Any, method: str) -> Any:
             get_config_value(config, "behavior_analysis.pain_residual.poly_degree", 2)
         )
         degree = max(1, min(degree, 5))
-        return Pipeline(
+        model = Pipeline(
             [
                 ("poly", PolynomialFeatures(degree=degree, include_bias=False)),
                 ("ridge", Ridge(alpha=1.0)),
             ]
         )
+        return model, {"poly_degree": int(degree)}
     else:
         n_knots = int(
             get_config_value(
@@ -400,32 +407,13 @@ def _build_crossfit_model(config: Any, method: str) -> Any:
             )
         )
         n_knots = max(3, min(n_knots, 12))
-        return Pipeline(
+        model = Pipeline(
             [
                 ("spline", SplineTransformer(n_knots=n_knots, degree=3, include_bias=False)),
                 ("ridge", Ridge(alpha=1.0)),
             ]
         )
-
-
-def _update_crossfit_meta_for_method(meta: Dict[str, Any], config: Any, method: str) -> None:
-    """Update crossfit metadata with method-specific parameters."""
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    if method == "poly":
-        degree = int(
-            get_config_value(config, "behavior_analysis.pain_residual.poly_degree", 2)
-        )
-        degree = max(1, min(degree, 5))
-        meta["crossfit"]["poly_degree"] = int(degree)
-    else:
-        n_knots = int(
-            get_config_value(
-                config, "behavior_analysis.pain_residual.crossfit.spline_n_knots", 5
-            )
-        )
-        n_knots = max(3, min(n_knots, 12))
-        meta["crossfit"]["spline_n_knots"] = int(n_knots)
+        return model, {"spline_n_knots": int(n_knots)}
 
 
 def save_trial_table(

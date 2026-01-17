@@ -2,158 +2,34 @@
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-from typing import Optional, List, Tuple, Dict, Any, Union
-
-import numpy as np
-import pandas as pd
-
-from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.utils.analysis.stats import _safe_float
+from typing import Optional, List, Tuple
 
 DEFAULT_MAX_CHANNELS_DISPLAY = 10
 
+
 def sanitize_label(label: str) -> str:
+    """Sanitize label string by replacing non-alphanumeric characters."""
     return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(label))
 
 
 def format_baseline_window_string(baseline_used: Tuple[float, float]) -> str:
+    """Format baseline window tuple as filename-safe string."""
     b_start, b_end = baseline_used
     return f"bl{abs(b_start):.1f}to{abs(b_end):.2f}"
-
-
-def format_baseline_string(baseline_window: Tuple[float, float]) -> str:
-    return f"[{baseline_window[0]:.2f}, {baseline_window[1]:.2f}]"
-
-
-def parse_analysis_type_from_filename(filename: str) -> str:
-    analysis_type_prefixes = {
-        "pow_roi": ("corr_stats_pow_roi", "corr_stats_power_roi"),
-        "conn_roi_summary": ("corr_stats_conn_roi_summary",),
-        "conn_edges": ("corr_stats_edges",),
-    }
-
-    for analysis_type, prefixes in analysis_type_prefixes.items():
-        if any(filename.startswith(prefix) for prefix in prefixes):
-            return analysis_type
-
-    return "other"
-
-
-def parse_target_from_filename(filename: str) -> str:
-    if "_vs_" not in filename:
-        return ""
-    return filename.split("_vs_", 1)[1].split(".", 1)[0]
-
-
-def parse_measure_band_from_filename(analysis_type: str, filename: str) -> str:
-    prefixes = {
-        "conn_edges": "corr_stats_edges_",
-        "conn_roi_summary": "corr_stats_conn_roi_summary_",
-    }
-    prefix = prefixes.get(analysis_type)
-    if prefix and filename.startswith(prefix):
-        return filename[len(prefix) :].split("_vs_", 1)[0]
-    return ""
-
-
-def format_band_range(band: str, freq_bands: Dict[str, List[float]]) -> str:
-    if not band or not freq_bands:
-        return ""
-
-    band_range = freq_bands.get(band)
-    if not band_range or len(band_range) < 2:
-        return ""
-
-    return f"{band_range[0]:g}–{band_range[1]:g} Hz"
-
-
-def build_partial_covars_string(covariates_df: Optional[pd.DataFrame]) -> str:
-    if covariates_df is None or covariates_df.empty:
-        return ""
-    return ",".join(covariates_df.columns.tolist())
-
-
-def format_band_label(band: str, config: Dict[str, Any]) -> str:
-    if not band:
-        return ""
-
-    freq_bands = config.get("time_frequency_analysis.bands", {})
-    band_range = freq_bands.get(band)
-    if band_range and len(band_range) >= 2:
-        return f"{band} ({band_range[0]:g}–{band_range[1]:g} Hz)"
-    return band
-
-
-def get_correlation_type_labels(correlation_type: str) -> Tuple[str, str]:
-    labels = {
-        "rating": ("Behavior", "behavior"),
-        "temperature": ("Temperature", "temperature"),
-    }
-    return labels.get(correlation_type, ("Temperature", "temperature"))
-
-
-def format_temperature_label(val: Union[float, str]) -> str:
-    try:
-        return f"{float(val):.1f}".replace(".", "p")
-    except (ValueError, TypeError):
-        return sanitize_label(str(val))
-
-
-def write_group_trial_counts(
-    subjects: List[str],
-    output_dir: Path,
-    counts_file_name: str,
-    pain_counts: Optional[List[Tuple[int, int]]] = None,
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    if pain_counts is None:
-        pain_counts = [(0, 0)] * len(subjects)
-
-    if len(subjects) != len(pain_counts):
-        raise ValueError(f"Length mismatch: {len(subjects)} subjects but {len(pain_counts)} count tuples")
-
-    rows = []
-    for subject, (n_pain, n_nonpain) in zip(subjects, pain_counts):
-        rows.append(
-            {
-                "subject": subject,
-                "n_pain": n_pain,
-                "n_nonpain": n_nonpain,
-                "n_total": n_pain + n_nonpain,
-            }
-        )
-
-    if not rows:
-        return
-
-    counts_df = pd.DataFrame(rows)
-    totals = counts_df[["n_pain", "n_nonpain", "n_total"]].sum()
-    total_row = {
-        "subject": "TOTAL",
-        **{key: int(value) for key, value in totals.to_dict().items()},
-    }
-    counts_df = pd.concat([counts_df, pd.DataFrame([total_row])], ignore_index=True)
-
-    ensure_dir(output_dir)
-    output_path = output_dir / counts_file_name
-    counts_df.to_csv(output_path, sep="\t", index=False)
-    if logger:
-        logger.info(f"Saved counts: {output_path}")
 
 
 def format_channel_list_for_display(
     channels: List[str], max_channels: Optional[int] = None
 ) -> str:
+    """Format channel list for display, limiting to max_channels."""
     if max_channels is None:
         max_channels = DEFAULT_MAX_CHANNELS_DISPLAY
-
     displayed = channels[:max_channels]
     return "Channels: " + ", ".join(displayed)
 
 
 def format_roi_description(roi_channels: Optional[List[str]]) -> str:
+    """Format ROI description string."""
     if not roi_channels:
         return "Overall"
     if len(roi_channels) == 1:
@@ -162,6 +38,7 @@ def format_roi_description(roi_channels: Optional[List[str]]) -> str:
 
 
 def get_residual_labels(method_code: str, target_type: str) -> Tuple[str, str]:
+    """Get axis labels for residual plots."""
     ranked_suffix = " (ranked)" if method_code == "spearman" else ""
     x_label = f"Partial residuals{ranked_suffix} of log10(power/baseline)"
 
@@ -169,12 +46,15 @@ def get_residual_labels(method_code: str, target_type: str) -> Tuple[str, str]:
         "rating": f"Partial residuals{ranked_suffix} of rating",
         "temperature": f"Partial residuals{ranked_suffix} of temperature (°C)",
     }
-    y_label = target_labels.get(target_type, f"Partial residuals{ranked_suffix} of {target_type}")
+    y_label = target_labels.get(
+        target_type, f"Partial residuals{ranked_suffix} of {target_type}"
+    )
 
     return x_label, y_label
 
 
 def get_target_labels(target_type: str) -> Tuple[str, str]:
+    """Get axis labels for target plots."""
     target_labels = {
         "rating": "Rating",
         "temperature": "Temperature (°C)",
@@ -195,191 +75,9 @@ def get_temporal_xlabel(time_label: str) -> str:
     return f"log10(power/baseline) — {time_label}"
 
 
-def build_file_updates_dict(
-    file_references: List[Tuple[Path, int]],
-    q_array: np.ndarray,
-    rejections_array: np.ndarray,
-    p_array: np.ndarray,
-) -> Dict[Path, List[Tuple[int, float, bool, float]]]:
-    file_updates: Dict[Path, List[Tuple[int, float, bool, float]]] = {}
-
-    for index, (file_path, row_index) in enumerate(file_references):
-        update_item = (
-            row_index,
-            _safe_float(q_array[index]),
-            bool(rejections_array[index]),
-            _safe_float(p_array[index]),
-        )
-        file_updates.setdefault(file_path, []).append(update_item)
-
-    return file_updates
-
-
-def build_predictor_column_mapping(predictor_type: str) -> Dict[str, str]:
-    base_cols = {
-        "predictor": "predictor",
-        "band": "band",
-        "r": "r",
-        "p": "p",
-        "n": "n",
-        "predictor_type": "type",
-        "target": "target",
-    }
-    region_col = "roi" if "roi" in str(predictor_type).lower() else "channel"
-    base_cols[region_col] = "region"
-    return base_cols
-
-
-def build_predictor_name(df: pd.DataFrame, predictor_type: str) -> pd.Series:
-    predictor_type_lower = str(predictor_type).lower()
-    region_col = "roi" if "roi" in predictor_type_lower else "channel"
-
-    if region_col not in df.columns:
-        if "roi" in df.columns:
-            region_col = "roi"
-        elif "channel" in df.columns:
-            region_col = "channel"
-        else:
-            region_col = df.columns[0]
-
-    region_str = df[region_col].astype(str)
-    band_str = df["band"].astype(str)
-    return region_str + " (" + band_str + ")"
-
-
-def build_connectivity_heatmap_records(
-    n_nodes: int,
-    node_names: List[str],
-    correlation_matrix: np.ndarray,
-    p_value_matrix: np.ndarray,
-    rejection_map: Dict[Tuple[int, int], bool],
-    critical_value: float,
-) -> List[Dict[str, Any]]:
-    records: List[Dict[str, Any]] = []
-    for i in range(n_nodes):
-        for j in range(i + 1, n_nodes):
-            pair_key = (i, j)
-            records.append(
-                {
-                    "node_i": node_names[i],
-                    "node_j": node_names[j],
-                    "r": correlation_matrix[i, j],
-                    "p": p_value_matrix[i, j],
-                    "fdr_reject": rejection_map.get(pair_key, False),
-                    "fdr_crit_p": critical_value,
-                }
-            )
-    return records
-
-
-def _get_df_value(df: pd.DataFrame, col: str, row_idx: int, default: str = "") -> str:
-    return df.get(col, pd.Series([default] * len(df))).iloc[row_idx]
-
-
-def _build_power_roi_meta(
-    df: pd.DataFrame, row_idx: int, target: str
-) -> Dict[str, Any]:
-    roi = _get_df_value(df, "roi", row_idx)
-    band = _get_df_value(df, "band", row_idx)
-    return {
-        "roi": roi,
-        "band": band,
-        "test_label": f"pow_{band}_ROI {roi} vs {target}",
-    }
-
-
-def _build_conn_roi_summary_meta(
-    df: pd.DataFrame, row_idx: int, measure_band: str, target: str
-) -> Dict[str, Any]:
-    roi_i = _get_df_value(df, "roi_i", row_idx)
-    roi_j = _get_df_value(df, "roi_j", row_idx)
-    return {
-        "roi_i": roi_i,
-        "roi_j": roi_j,
-        "test_label": f"conn_{measure_band}_ROI {roi_i}-{roi_j} vs {target}",
-    }
-
-
-def _build_power_channel_meta(
-    df: pd.DataFrame, row_idx: int, target: str
-) -> Dict[str, Any]:
-    channel = _get_df_value(df, "channel", row_idx)
-    band = _get_df_value(df, "band", row_idx)
-    return {
-        "channel": channel,
-        "band": band,
-        "test_label": f"pow_{band}_Channel {channel} vs {target}",
-    }
-
-
-def _build_conn_edges_meta(
-    df: pd.DataFrame, row_idx: int, measure_band: str, target: str
-) -> Dict[str, Any]:
-    node_i = _get_df_value(df, "node_i", row_idx)
-    node_j = _get_df_value(df, "node_j", row_idx)
-    return {
-        "node_i": node_i,
-        "node_j": node_j,
-        "test_label": f"conn_{measure_band}_Edge {node_i}-{node_j} vs {target}",
-    }
-
-
-def build_meta_for_row(
-    df: pd.DataFrame,
-    row_idx: int,
-    filename: str,
-    analysis_type: str,
-    target: str,
-    measure_band: str,
-    p_source: str,
-) -> Dict[str, Any]:
-    meta = {
-        "source_file": filename,
-        "analysis_type": analysis_type,
-        "target": target,
-        "measure_band": measure_band,
-        "row_index": int(row_idx),
-    }
-    if p_source:
-        meta["p_used_source"] = p_source
-
-    analysis_handlers = {
-        "pow_roi": lambda: _build_power_roi_meta(df, row_idx, target),
-        "conn_roi_summary": lambda: _build_conn_roi_summary_meta(
-            df, row_idx, measure_band, target
-        ),
-        "pow_channel": lambda: _build_power_channel_meta(df, row_idx, target),
-        "conn_edges": lambda: _build_conn_edges_meta(df, row_idx, measure_band, target),
-    }
-
-    handler = analysis_handlers.get(analysis_type)
-    if handler:
-        try:
-            meta.update(handler())
-        except (KeyError, IndexError):
-            pass
-
-    return meta
-
-
 __all__ = [
     "sanitize_label",
     "format_baseline_window_string",
-    "format_baseline_string",
-    "parse_analysis_type_from_filename",
-    "parse_target_from_filename",
-    "parse_measure_band_from_filename",
-    "format_band_range",
-    "build_partial_covars_string",
-    "format_band_label",
-    "build_file_updates_dict",
-    "build_predictor_column_mapping",
-    "build_predictor_name",
-    "build_connectivity_heatmap_records",
-    "build_meta_for_row",
-    "get_correlation_type_labels",
-    "format_temperature_label",
-    "write_group_trial_counts",
     "format_channel_list_for_display",
     "format_roi_description",
     "get_residual_labels",

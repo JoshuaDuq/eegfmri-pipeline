@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -105,38 +105,7 @@ def _parse_spectral_column(col: str) -> Optional[SpectralColumn]:
             scope=str(parsed.get("scope") or ""),
             stat=str(parsed.get("stat") or ""),
         )
-
-    name = str(col)
-    if not name.startswith("spectral_"):
-        return None
-
-    parts = name.split("_")
-    min_parts_required = 5
-    if len(parts) < min_parts_required:
-        return None
-
-    segment = parts[1]
-    band = parts[2]
-    scope = parts[3]
-    valid_scopes = {"ch", "roi", "global"}
-    if scope not in valid_scopes:
-        return None
-
-    if scope == "global":
-        stat = "_".join(parts[4:])
-    else:
-        min_parts_for_scope = 6
-        if len(parts) < min_parts_for_scope:
-            return None
-        stat = "_".join(parts[5:])
-    
-    return SpectralColumn(
-        name=name,
-        segment=segment,
-        band=band,
-        scope=scope,
-        stat=stat,
-    )
+    return None
 
 
 def _collect_spectral_columns(features_df: pd.DataFrame) -> List[SpectralColumn]:
@@ -391,17 +360,12 @@ def plot_spectral_edge_frequency(
     return fig
 
 
-def _get_roi_id_from_column_name(column_name: str, metric: str) -> Optional[str]:
+def _get_roi_id_from_column_name(column_name: str) -> Optional[str]:
     """Extract ROI identifier from spectral column name."""
-    name_parts = column_name.split("_")
-    try:
-        roi_idx = name_parts.index("roi")
-        stat_parts = metric.split("_")
-        stat_start_idx = len(name_parts) - len(stat_parts)
-        roi_id = "_".join(name_parts[roi_idx + 1:stat_start_idx])
-        return roi_id
-    except (ValueError, IndexError):
-        return None
+    parsed = NamingSchema.parse(str(column_name))
+    if parsed.get("valid") and parsed.get("scope") == "roi":
+        return parsed.get("identifier")
+    return None
 
 
 def _normalize_roi_name(name: str) -> str:
@@ -427,7 +391,7 @@ def _get_spectral_columns_for_roi(
             if entry.scope == "global":
                 columns.append(entry.name)
         elif entry.scope == "roi":
-            roi_id = _get_roi_id_from_column_name(entry.name, metric)
+            roi_id = _get_roi_id_from_column_name(entry.name)
             if roi_id and _normalize_roi_name(roi_id) == _normalize_roi_name(roi_name):
                 columns.append(entry.name)
     

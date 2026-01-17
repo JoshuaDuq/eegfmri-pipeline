@@ -44,55 +44,6 @@ _MAX_DUMMY_VARIABLES = 20
 _MIN_FEATURES_FOR_PARALLEL = 10
 
 
-# Alias for backward compatibility with existing code
-_hc3_se_for_beta = _hc3_se
-
-
-# Wrapper to maintain backward compatibility with return_design_df=True
-def _build_covariate_design_with_df(
-    df: pd.DataFrame,
-    covariate_cols: List[str],
-    *,
-    add_intercept: bool = True,
-    max_dummies: int = _MAX_DUMMY_VARIABLES,
-) -> Tuple[np.ndarray, List[str], pd.DataFrame]:
-    """Build covariate design matrix and return design DataFrame.
-    
-    Wrapper around consolidated _build_covariate_design that always returns
-    the design DataFrame for backward compatibility.
-    """
-    X, names, design_df = _build_covariate_design(
-        df, covariate_cols, add_intercept=add_intercept, max_dummies=max_dummies, return_design_df=True
-    )
-    return X, names, design_df
-
-
-# Wrapper to maintain backward compatibility with config object interface
-def _build_temperature_covariates(
-    trial_df: pd.DataFrame,
-    outcome: str,
-    cfg: "TrialwiseRegressionConfig",
-    config: Any,
-) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
-    """Build temperature-related covariates based on configuration.
-    
-    Wrapper around consolidated _build_temperature_covariates that uses config object.
-    
-    Returns
-    -------
-    Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]
-        Covariate column names, optional spline design DataFrame, metadata
-    """
-    return _build_temp_cov_shared(
-        trial_df=trial_df,
-        outcome=outcome,
-        temperature_control=cfg.temperature_control or "linear",
-        include_temperature=cfg.include_temperature,
-        config=config,
-        key_prefix="behavior_analysis.regression.temperature_spline",
-    )
-
-
 def _build_trial_order_covariates(
     trial_df: pd.DataFrame,
     cfg: "TrialwiseRegressionConfig",
@@ -129,7 +80,7 @@ def _build_run_block_covariates(
     """Build run/block grouping covariates."""
     covariates: List[str] = []
     if cfg.include_run_block:
-        run_col = str(_get(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+        run_col = str(_get(config, "behavior_analysis.run_adjustment.column", "run_id")).strip()
         candidates = [run_col, "run_id", "run", "block"]
         seen = set()
         for c in candidates:
@@ -186,8 +137,6 @@ def _prepare_base_dataframe(
     """Prepare base dataframe with outcome and covariates."""
     base_cols = list(dict.fromkeys([outcome, *covariates]))
     base_present = [c for c in base_cols if c in trial_df.columns]
-    if outcome not in base_present:
-        base_present = [outcome, *[c for c in base_present if c != outcome]]
     base = trial_df[base_present].copy()
     
     if temp_design_df is not None:
@@ -217,7 +166,9 @@ def _fit_reduced_model(
         - valid_mask: boolean mask for valid rows
         - Xz_names: column names for design matrix
     """
-    Xz, Xz_names, _ = _build_covariate_design_with_df(base, covariates, add_intercept=True)
+    Xz, Xz_names, _ = _build_covariate_design(
+        base, covariates, add_intercept=True, max_dummies=_MAX_DUMMY_VARIABLES, return_design_df=True
+    )
     y = pd.to_numeric(base[outcome], errors="coerce").to_numpy(dtype=float)
     
     valid_mask = np.isfinite(y) & np.all(np.isfinite(Xz), axis=1)
@@ -522,7 +473,14 @@ def run_trialwise_feature_regressions(
     if y_all.notna().sum() < cfg.min_samples:
         return pd.DataFrame(), {"status": "insufficient_samples", "n_valid": int(y_all.notna().sum()), **meta}
 
-    temp_covariates, temp_design_df, temp_meta = _build_temperature_covariates(trial_df, out_col, cfg, config)
+    temp_covariates, temp_design_df, temp_meta = _build_temp_cov_shared(
+        trial_df=trial_df,
+        outcome=out_col,
+        temperature_control=cfg.temperature_control or "linear",
+        include_temperature=cfg.include_temperature,
+        config=config,
+        key_prefix="behavior_analysis.regression.temperature_spline",
+    )
     meta.update(temp_meta)
     
     covariates = (
@@ -557,7 +515,7 @@ def run_trialwise_feature_regressions(
     if cfg.max_features is not None:
         try:
             max_features = int(cfg.max_features)
-        except Exception:
+        except (ValueError, TypeError):
             max_features = None
         if max_features is not None and max_features > 0 and len(candidates) > max_features:
             candidates = _select_top_variance_features(trial_df, candidates, valid_mask, max_features)

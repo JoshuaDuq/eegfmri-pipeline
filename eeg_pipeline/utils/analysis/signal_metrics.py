@@ -7,8 +7,8 @@ These are pure numpy functions with no EEG-specific dependencies.
 
 Categories:
 - Time-domain: zero crossings, RMS, peak-to-peak, line length
-- Complexity: permutation entropy, sample entropy, Hjorth, Lempel-Ziv
-- Statistical: MAD, nonlinear energy
+- Complexity: permutation entropy, Hjorth, Lempel-Ziv
+- Spectral: peak frequency, band power, spectral entropy
 """
 
 from __future__ import annotations
@@ -30,17 +30,14 @@ def compute_zero_crossings(x: np.ndarray) -> int:
     
     signs = np.sign(x)
     signs[signs == 0] = 1
-    sign_changes = np.diff(signs) != 0
-    return int(np.sum(sign_changes))
+    return int(np.sum(np.diff(signs) != 0))
 
 
 def compute_rms(x: np.ndarray) -> float:
     """Compute root mean square of a signal."""
     if len(x) == 0:
         return np.nan
-    
-    mean_squared = np.mean(x ** 2)
-    return float(np.sqrt(mean_squared))
+    return float(np.sqrt(np.mean(x ** 2)))
 
 
 def compute_peak_to_peak(x: np.ndarray) -> float:
@@ -55,24 +52,6 @@ def compute_line_length(x: np.ndarray) -> float:
     if len(x) < 2:
         return np.nan
     return float(np.sum(np.abs(np.diff(x))))
-
-
-def compute_mean_absolute_deviation(x: np.ndarray) -> float:
-    """Compute mean absolute deviation from the mean."""
-    if len(x) == 0:
-        return np.nan
-    return float(np.mean(np.abs(x - np.mean(x))))
-
-
-def compute_nonlinear_energy(x: np.ndarray) -> float:
-    """Compute Teager-Kaiser nonlinear energy operator."""
-    if len(x) < 3:
-        return np.nan
-    
-    current_squared = x[1:-1] ** 2
-    product_neighbors = x[:-2] * x[2:]
-    nonlinear_energy = current_squared - product_neighbors
-    return float(np.mean(nonlinear_energy))
 
 
 def compute_gfp(data: np.ndarray) -> np.ndarray:
@@ -95,7 +74,6 @@ def compute_gfp(data: np.ndarray) -> np.ndarray:
     """
     if data.size == 0:
         return np.array([])
-    # Standard deviation over the channel axis (assumed to be the second to last)
     return np.nanstd(data, axis=-2)
 
 
@@ -103,15 +81,13 @@ def compute_gfp(data: np.ndarray) -> np.ndarray:
 # Complexity Metrics
 # =============================================================================
 
-def embed_time_series(x: np.ndarray, order: int, delay: int) -> np.ndarray:
+def _embed_time_series(x: np.ndarray, order: int, delay: int) -> np.ndarray:
     """Create time-delay embedding of a signal using vectorized operations."""
     n = len(x)
     if n < (order - 1) * delay + 1:
         return np.array([])
     
     n_vectors = n - (order - 1) * delay
-    
-    # Vectorized embedding using advanced indexing
     indices = np.arange(order) * delay + np.arange(n_vectors)[:, np.newaxis]
     return x[indices]
 
@@ -144,7 +120,7 @@ def compute_permutation_entropy(
     if len(x) < (order - 1) * delay + 1:
         return np.nan
     
-    embedded = embed_time_series(x, order, delay)
+    embedded = _embed_time_series(x, order, delay)
     if embedded.size == 0:
         return np.nan
     
@@ -168,75 +144,6 @@ def compute_permutation_entropy(
     return float(entropy)
 
 
-def _count_template_matches(
-    x: np.ndarray,
-    template_length: int,
-    tolerance: float,
-) -> int:
-    """Count matching templates using Chebyshev distance."""
-    n = len(x)
-    n_templates = n - template_length
-    if n_templates < 2:
-        return 0
-    
-    templates = np.array([x[i:i + template_length] for i in range(n_templates)])
-    pairwise_diff = templates[:, np.newaxis, :] - templates[np.newaxis, :, :]
-    chebyshev_distances = np.max(np.abs(pairwise_diff), axis=2)
-    
-    upper_triangle_indices = np.triu_indices(n_templates, k=1)
-    distances_upper = chebyshev_distances[upper_triangle_indices]
-    matches = distances_upper < tolerance
-    return int(np.sum(matches))
-
-
-def compute_sample_entropy(
-    x: np.ndarray,
-    m: int = 2,
-    r: Optional[float] = None,
-    r_multiplier: float = 0.2,
-) -> float:
-    """
-    Compute sample entropy using vectorized Chebyshev distance.
-    
-    Parameters
-    ----------
-    x : np.ndarray
-        Input signal
-    m : int
-        Embedding dimension
-    r : float, optional
-        Tolerance threshold. If None, uses r_multiplier * std(x)
-    r_multiplier : float
-        Multiplier for automatic r calculation
-    
-    Returns
-    -------
-    float
-        Sample entropy value
-    """
-    n = len(x)
-    if n < m + 2:
-        return np.nan
-    
-    if r is None:
-        signal_std = np.std(x, ddof=1)
-        if signal_std == 0:
-            return np.nan
-        r = r_multiplier * signal_std
-    
-    matches_m_plus_1 = _count_template_matches(x, m + 1, r)
-    matches_m = _count_template_matches(x, m, r)
-    
-    if matches_m == 0:
-        return np.nan
-    
-    if matches_m_plus_1 == 0:
-        return np.nan
-    
-    ratio = matches_m_plus_1 / matches_m
-    return float(-np.log(ratio))
-
-
 def compute_hjorth_parameters(x: np.ndarray) -> Tuple[float, float, float]:
     """
     Compute Hjorth parameters: activity, mobility, complexity.
@@ -257,19 +164,15 @@ def compute_hjorth_parameters(x: np.ndarray) -> Tuple[float, float, float]:
     first_diff = np.diff(x)
     second_diff = np.diff(first_diff)
     
-    variance_signal = np.var(x, ddof=1) if len(x) > 1 else np.nan
-    variance_first_diff = np.var(first_diff, ddof=1) if len(first_diff) > 1 else np.nan
-    variance_second_diff = np.var(second_diff, ddof=1) if len(second_diff) > 1 else np.nan
+    variance_signal = np.var(x, ddof=1)
+    variance_first_diff = np.var(first_diff, ddof=1)
+    variance_second_diff = np.var(second_diff, ddof=1)
     
     if variance_signal == 0:
         return np.nan, np.nan, np.nan
     
     activity = float(variance_signal)
-    
-    if variance_signal > 0:
-        mobility = float(np.sqrt(variance_first_diff / variance_signal))
-    else:
-        mobility = np.nan
+    mobility = float(np.sqrt(variance_first_diff / variance_signal))
     
     if variance_first_diff > 0 and mobility > 0:
         mobility_first_diff = np.sqrt(variance_second_diff / variance_first_diff)
@@ -369,7 +272,7 @@ def compute_peak_frequency(
     band_freqs = freqs[band_mask]
     band_psd = psd[band_mask]
 
-    if band_psd.size == 0 or not np.any(np.isfinite(band_psd)):
+    if not np.any(np.isfinite(band_psd)):
         return np.nan, np.nan
 
     peak_idx = np.nanargmax(band_psd)
@@ -422,13 +325,13 @@ def compute_band_power(
     if not np.any(finite_mask):
         return np.nan
 
-    band_freqs = band_freqs[finite_mask]
-    band_psd = band_psd[finite_mask]
+    band_freqs_clean = band_freqs[finite_mask]
+    band_psd_clean = band_psd[finite_mask]
 
-    if band_freqs.size < 2:
+    if band_freqs_clean.size < 2:
         return np.nan
 
-    return float(np.trapz(band_psd, band_freqs))
+    return float(np.trapz(band_psd_clean, band_freqs_clean))
 
 
 def compute_spectral_entropy(
@@ -465,11 +368,6 @@ def compute_spectral_entropy(
         mask = (freqs >= fmin) & (freqs <= fmax)
         freqs = freqs[mask]
         psd = psd[mask]
-
-    if psd.size == 0 or not np.any(np.isfinite(psd)) or freqs.size == 0:
-        return np.nan
-    if freqs.size < 2:
-        return np.nan
 
     freqs_clean = np.asarray(freqs, dtype=float)
     psd_clean = np.asarray(psd, dtype=float)

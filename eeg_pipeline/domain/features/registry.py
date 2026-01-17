@@ -157,12 +157,10 @@ def _is_channel_pair(name: str) -> bool:
 
 def _matches_exclusion_criteria(column_lower: str, rule: FeatureRule) -> bool:
     """Check if column matches any exclusion criteria."""
-    if rule.exclude_startswith:
-        if any(column_lower.startswith(pattern.lower()) for pattern in rule.exclude_startswith):
-            return True
-    if rule.exclude_contains:
-        if any(pattern.lower() in column_lower for pattern in rule.exclude_contains):
-            return True
+    if rule.exclude_startswith and any(column_lower.startswith(pattern.lower()) for pattern in rule.exclude_startswith):
+        return True
+    if rule.exclude_contains and any(pattern.lower() in column_lower for pattern in rule.exclude_contains):
+        return True
     return False
 
 
@@ -172,27 +170,13 @@ def _matches_inclusion_criteria(column: str, column_lower: str, rule: FeatureRul
         return False
     if rule.channel_name and column.upper() not in _CHANNEL_NAMES:
         return False
-    if rule.startswith:
-        if not any(column_lower.startswith(pattern.lower()) for pattern in rule.startswith):
-            return False
-    if rule.contains:
-        if not any(pattern.lower() in column_lower for pattern in rule.contains):
-            return False
-    if rule.regex:
-        if not rule.regex.search(column):
-            return False
+    if rule.startswith and not any(column_lower.startswith(pattern.lower()) for pattern in rule.startswith):
+        return False
+    if rule.contains and not any(pattern.lower() in column_lower for pattern in rule.contains):
+        return False
+    if rule.regex and not rule.regex.search(column):
+        return False
     return True
-
-
-def _has_any_matching_criteria(rule: FeatureRule) -> bool:
-    """Check if rule has any matching criteria defined."""
-    return bool(
-        rule.startswith
-        or rule.contains
-        or rule.regex
-        or rule.channel_pair
-        or rule.channel_name
-    )
 
 
 def _rule_matches(column: str, rule: FeatureRule) -> bool:
@@ -205,7 +189,7 @@ def _rule_matches(column: str, rule: FeatureRule) -> bool:
     if _matches_exclusion_criteria(column_lower, rule):
         return False
 
-    if not _has_any_matching_criteria(rule):
+    if not (rule.startswith or rule.contains or rule.regex or rule.channel_pair or rule.channel_name):
         return False
 
     return _matches_inclusion_criteria(column, column_lower, rule)
@@ -229,8 +213,6 @@ def _classify_power_subtype(column_lower: str) -> str:
     if "roi" in column_lower:
         return "roi"
     return "direct"
-
-
 
 
 def _classify_pac_subtype(column_lower: str) -> str:
@@ -275,20 +257,12 @@ def _classify_subtype(
     if source_file_type and source_file_type in registry.source_to_type:
         return registry.source_to_type[source_file_type]
 
-    type_classifiers = {
-        "connectivity": lambda: _classify_connectivity_subtype(column, column_lower),
-        "power": lambda: _classify_power_subtype(column_lower),
-        "pac": lambda: _classify_pac_subtype(column_lower),
-    }
-
-    classifier = type_classifiers.get(feature_type)
-    if classifier:
-        return classifier()
-
-    hierarchy_subtypes = registry.type_hierarchy.get(feature_type, {}).get("subtypes", [])
-    for subtype in hierarchy_subtypes:
-        if subtype in column_lower:
-            return subtype
+    if feature_type == "connectivity":
+        return _classify_connectivity_subtype(column, column_lower)
+    if feature_type == "power":
+        return _classify_power_subtype(column_lower)
+    if feature_type == "pac":
+        return _classify_pac_subtype(column_lower)
 
     return "unknown"
 
@@ -527,26 +501,25 @@ def _parse_feature_metadata(column: str, feature_type: str) -> Dict[str, Any]:
     if band_candidates:
         meta["band"] = band_candidates[0]
 
-    type_handlers = {
-        "power": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
-        "connectivity": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
-        "graph": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
-        "itpc": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
-        "pac": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
-        "spectral": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
-        "roi": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
-        "aperiodic": lambda: ("aperiodic", "_".join(parts[1:]) if len(parts) > 1 else column),
-        "temporal": lambda: ("N/A", "_".join(parts[1:]) if len(parts) > 1 else column),
-        "complexity": lambda: ("N/A", "_".join(parts[1:]) if len(parts) > 1 else column),
-        "precomputed": lambda: _extract_band_from_any_position(parts, _FREQUENCY_BANDS),
-        "gfp": lambda: ("global", "_".join(parts[1:]) if len(parts) > 1 else column),
+    band_extractors = {
+        "power", "connectivity", "graph", "itpc", "pac", "spectral", "roi"
     }
-
-    handler = type_handlers.get(feature_type)
-    if handler:
-        band, identifier = handler()
+    if feature_type in band_extractors:
+        band, identifier = _extract_band_and_identifier(parts, _FREQUENCY_BANDS)
         meta["band"] = band
         meta["identifier"] = identifier
+    elif feature_type == "aperiodic":
+        meta["band"] = "aperiodic"
+        meta["identifier"] = "_".join(parts[1:]) if len(parts) > 1 else column
+    elif feature_type in ("temporal", "complexity"):
+        meta["identifier"] = "_".join(parts[1:]) if len(parts) > 1 else column
+    elif feature_type == "precomputed":
+        band, identifier = _extract_band_from_any_position(parts, _FREQUENCY_BANDS)
+        meta["band"] = band
+        meta["identifier"] = identifier
+    elif feature_type == "gfp":
+        meta["band"] = "global"
+        meta["identifier"] = "_".join(parts[1:]) if len(parts) > 1 else column
 
     return meta
 
@@ -582,6 +555,9 @@ def _classify_from_naming_schema(
     feature_type = _SCHEMA_GROUP_TO_FEATURE_TYPE.get(schema_group, schema_group)
     subtype = parsed.get("segment", "unknown")
 
+    if feature_type == "roi" and schema_group == "asymmetry":
+        subtype = "asymmetry"
+
     identifier = parsed.get("identifier") or parsed.get("stat") or column
     meta: Dict[str, Any] = {
         "identifier": identifier,
@@ -592,12 +568,6 @@ def _classify_from_naming_schema(
         "source": source_file_type or "inferred",
         "subtype": subtype,
     }
-
-    if feature_type == "power" and subtype in ("baseline", "active"):
-        meta["subtype"] = subtype
-    elif feature_type == "roi" and schema_group == "asymmetry":
-        meta["subtype"] = "asymmetry"
-        subtype = "asymmetry"
 
     return feature_type, subtype, meta
 
@@ -640,15 +610,6 @@ def _classify_from_rules(
     return feature_type, subtype, meta
 
 
-def _format_classification_result(
-    feature_type: str, subtype: str, meta: Dict[str, Any], include_subtype: bool
-) -> Tuple[str, str, Dict[str, Any]]:
-    """Format classification result based on include_subtype flag."""
-    if include_subtype:
-        return feature_type, subtype, meta
-    return feature_type, "", meta
-
-
 def classify_feature(
     column: str,
     source_file_type: Optional[str] = None,
@@ -658,22 +619,23 @@ def classify_feature(
     """Classify feature and extract metadata using config-driven registry."""
     if not column or not isinstance(column, str):
         meta = _create_unknown_feature_metadata(column, source_file_type)
-        return _format_classification_result("unknown", "unknown", meta, include_subtype)
+        subtype = "unknown" if include_subtype else ""
+        return "unknown", subtype, meta
 
     registry = registry or get_feature_registry()
 
     parsed = NamingSchema.parse(column)
     if parsed.get("valid"):
         feature_type, subtype, meta = _classify_from_naming_schema(column, parsed, source_file_type)
-        return _format_classification_result(feature_type, subtype, meta, include_subtype)
+        return feature_type, subtype if include_subtype else "", meta
 
     pattern_result = _classify_from_patterns(column, registry, source_file_type)
     if pattern_result:
         feature_type, subtype, meta = pattern_result
-        return _format_classification_result(feature_type, subtype, meta, include_subtype)
+        return feature_type, subtype if include_subtype else "", meta
 
     feature_type, subtype, meta = _classify_from_rules(column, registry, source_file_type)
-    return _format_classification_result(feature_type, subtype, meta, include_subtype)
+    return feature_type, subtype if include_subtype else "", meta
 
 
 __all__ = [
@@ -681,6 +643,4 @@ __all__ = [
     "FeatureRegistry",
     "classify_feature",
     "get_feature_registry",
-    "load_feature_registry",
-    "_CHANNEL_NAMES",
 ]

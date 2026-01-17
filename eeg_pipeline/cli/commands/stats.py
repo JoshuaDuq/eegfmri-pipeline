@@ -60,12 +60,15 @@ def get_dir_size(path: Path) -> int:
 
 def format_size(size_bytes: int) -> str:
     """Format byte size into human-readable string."""
-    remaining_bytes = size_bytes
+    if size_bytes == 0:
+        return "0.0 B"
+    
+    size = float(size_bytes)
     for unit in ["B", "KB", "MB", "GB"]:
-        if remaining_bytes < BYTES_PER_KB:
-            return f"{remaining_bytes:.1f} {unit}"
-        remaining_bytes /= BYTES_PER_KB
-    return f"{remaining_bytes:.1f} TB"
+        if size < BYTES_PER_KB:
+            return f"{size:.1f} {unit}"
+        size /= BYTES_PER_KB
+    return f"{size:.1f} TB"
 
 
 def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
@@ -75,7 +78,7 @@ def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set
         Tuple of (bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects)
     """
     try:
-        bids_root = config.bids_root if hasattr(config, "bids_root") else config.get("paths.bids_root")
+        bids_root = config.get("paths.bids_root")
         if bids_root:
             bids_subjects = set(_collect_subjects_from_bids(Path(bids_root)))
         else:
@@ -87,7 +90,7 @@ def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set
         _collect_subjects_from_derivatives_epochs(deriv_root, task, config)
     )
     features_subjects = set(_collect_subjects_from_features(deriv_root))
-    
+
     # Collect EEG preprocessing subjects (preprocessed directory)
     eeg_prep_subjects = set()
     eeg_prep_dir = deriv_root / "preprocessed"
@@ -100,7 +103,7 @@ def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set
                     if list(eeg_dir.glob("*ica.fif")) or list(eeg_dir.glob("*_components.tsv")):
                         subj_id = subj_dir.name.replace("sub-", "")
                         eeg_prep_subjects.add(subj_id)
-    
+
     # Collect fMRI preprocessing subjects (fMRIPrep output)
     fmri_prep_subjects = set()
     fmriprep_dir = deriv_root / "fmriprep"
@@ -112,9 +115,8 @@ def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set
                 if func_dir.exists() and list(func_dir.glob("*preproc_bold*")):
                     subj_id = subj_dir.name.replace("sub-", "")
                     fmri_prep_subjects.add(subj_id)
-    
-    return bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects
 
+    return bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects
 
 
 def _count_feature_categories(
@@ -174,9 +176,6 @@ def _print_subjects_text(
     bids_subjects: set[str],
     epochs_subjects: set[str],
     features_subjects: set[str],
-    n_bids: int,
-    n_epochs: int,
-    n_features: int,
 ) -> None:
     """Print subject breakdown by pipeline stage."""
     print("SUBJECTS BY PIPELINE STAGE")
@@ -273,19 +272,15 @@ def _handle_subjects_mode(
     features_subjects: set[str],
 ) -> None:
     """Handle subjects breakdown mode."""
-    n_bids = len(bids_subjects)
-    n_epochs = len(epochs_subjects)
-    n_features = len(features_subjects)
-
     if args.output_json:
         output = {
             "bids_only": list(bids_subjects - epochs_subjects),
             "epochs_only": list(epochs_subjects - features_subjects),
             "complete": list(features_subjects),
             "counts": {
-                "bids": n_bids,
-                "epochs": n_epochs,
-                "features": n_features,
+                "bids": len(bids_subjects),
+                "epochs": len(epochs_subjects),
+                "features": len(features_subjects),
             },
         }
         print(json.dumps(output, indent=INDENT_SIZE))
@@ -294,9 +289,6 @@ def _handle_subjects_mode(
             bids_subjects,
             epochs_subjects,
             features_subjects,
-            n_bids,
-            n_epochs,
-            n_features,
         )
 
 

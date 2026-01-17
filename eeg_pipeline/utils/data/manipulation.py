@@ -8,7 +8,6 @@ including connectivity matrix operations and topomap data preparation.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
-import logging
 
 import mne
 import numpy as np
@@ -80,7 +79,6 @@ def _find_power_column(
     candidates = [
         f"power_{period}_{band}_ch_{channel}_logratio",
         f"power_{period}_{band}_ch_{channel}_log10raw",
-        f"pow_{band}_{channel}_{period}",
     ]
     pow_cols_set = set(pow_cols)
     for candidate in candidates:
@@ -143,7 +141,6 @@ def _add_active_power_column(
 
 def _add_baseline_columns(
     baseline_df: pd.DataFrame,
-    baseline_cols: List[str],
     band: str,
     channel: str,
     col_name_to_series: Dict[str, pd.Series],
@@ -153,7 +150,6 @@ def _add_baseline_columns(
     
     Args:
         baseline_df: DataFrame containing baseline features
-        baseline_cols: List of baseline column names
         band: Power band name
         channel: Channel name
         col_name_to_series: Dictionary to populate with series
@@ -164,7 +160,6 @@ def _add_baseline_columns(
 
     candidates = [
         f"power_baseline_{band}_ch_{channel}_mean",
-        f"baseline_{band}_{channel}",
     ]
     baseline_col = find_column(baseline_df, candidates)
     
@@ -177,10 +172,8 @@ def build_active_features(
     pow_df: pd.DataFrame,
     pow_cols: List[str],
     baseline_df: pd.DataFrame,
-    baseline_cols: List[str],
     ch_names: List[str],
     power_bands: List[str],
-    logger: logging.Logger,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Construct active-averaged band power DataFrame.
     
@@ -188,10 +181,8 @@ def build_active_features(
         pow_df: DataFrame containing power features
         pow_cols: List of power column names
         baseline_df: DataFrame containing baseline features
-        baseline_cols: List of baseline column names
         ch_names: List of channel names
         power_bands: List of power band names
-        logger: Logger instance
     
     Returns:
         Tuple of (active DataFrame, list of active column names)
@@ -205,7 +196,7 @@ def build_active_features(
                 pow_df, pow_cols, band, channel, col_name_to_series, active_cols
             )
             _add_baseline_columns(
-                baseline_df, baseline_cols, band, channel, col_name_to_series, active_cols
+                baseline_df, band, channel, col_name_to_series, active_cols
             )
 
     active_df = pd.DataFrame(col_name_to_series)
@@ -322,17 +313,13 @@ def prepare_topomap_correlation_data(
 def extract_pain_masks(pain_vals: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
     """Extract boolean masks for pain and non-pain trials.
     
-    Parameters
-    ----------
-    pain_vals : pd.Series
-        Series containing pain binary values (0 or 1)
-        
-    Returns
-    -------
-    pain_mask : np.ndarray
-        Boolean mask where pain_vals == 1
-    nonpain_mask : np.ndarray
-        Boolean mask where pain_vals == 0
+    Args:
+        pain_vals: Series containing pain binary values (0 or 1)
+    
+    Returns:
+        Tuple of (pain_mask, nonpain_mask) where:
+        - pain_mask: Boolean mask where pain_vals == 1
+        - nonpain_mask: Boolean mask where pain_vals == 0
     """
     pain_arr = np.asarray(pain_vals)
     pain_mask = pain_arr == 1
@@ -343,16 +330,11 @@ def extract_pain_masks(pain_vals: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
 def extract_duration_data(durations: pd.Series, mask: np.ndarray) -> np.ndarray:
     """Extract duration data for masked trials.
     
-    Parameters
-    ----------
-    durations : pd.Series
-        Series containing duration values
-    mask : np.ndarray
-        Boolean mask to apply
-        
-    Returns
-    -------
-    np.ndarray
+    Args:
+        durations: Series containing duration values
+        mask: Boolean mask to apply
+    
+    Returns:
         Duration values for masked trials
     """
     return durations.values[mask]

@@ -156,7 +156,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     trial_table_group.add_argument("--trial-table-add-lag-features", action="store_true", default=None)
     trial_table_group.add_argument("--no-trial-table-add-lag-features", action="store_false", dest="trial_table_add_lag_features")
     trial_table_group.add_argument("--trial-table-extra-event-columns", nargs="+", default=None, metavar="COL")
-    trial_table_group.add_argument("--trial-table-high-missing-frac", type=float, default=None)
     trial_table_group.add_argument("--feature-summaries", action="store_true", default=None, dest="feature_summaries_enabled")
     trial_table_group.add_argument("--no-feature-summaries", action="store_false", dest="feature_summaries_enabled")
 
@@ -453,17 +452,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if getattr(args, "compute_bayes_factors", None) is not None:
         corr_cfg["compute_bayes_factors"] = bool(args.compute_bayes_factors)
 
-    if getattr(args, "correlations_primary_unit", None) is not None:
-        corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
-    if getattr(args, "correlations_prefer_pain_residual", None) is not None:
-        corr_cfg["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
-    if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
-        corr_cfg["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
-    if getattr(args, "correlations_permutation_primary", None) is not None:
-        enabled = bool(args.correlations_permutation_primary)
-        corr_cfg["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
-        corr_cfg.setdefault("permutation", {})["enabled"] = enabled
-
     if getattr(args, "consistency_enabled", None) is not None:
         ba.setdefault("consistency", {})["enabled"] = bool(args.consistency_enabled)
 
@@ -532,8 +520,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     # Regression
     reg = ba.setdefault("regression", {})
-    if getattr(args, "regression_feature_set", None) is not None:
-        reg["feature_set"] = str(args.regression_feature_set).strip().lower()
     if getattr(args, "regression_outcome", None) is not None:
         reg["outcome"] = str(args.regression_outcome).strip().lower()
     if getattr(args, "regression_include_temperature", None) is not None:
@@ -575,8 +561,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     # Models
     mdl = ba.setdefault("models", {})
-    if getattr(args, "models_feature_set", None) is not None:
-        mdl["feature_set"] = str(args.models_feature_set).strip().lower()
     if getattr(args, "models_outcomes", None) is not None:
         mdl["outcomes"] = [str(o).strip().lower() for o in (args.models_outcomes or [])]
     if getattr(args, "models_families", None) is not None:
@@ -620,8 +604,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     # Stability
     stab = ba.setdefault("stability", {})
-    if getattr(args, "stability_feature_set", None) is not None:
-        stab["feature_set"] = str(args.stability_feature_set).strip().lower()
     if getattr(args, "stability_method", None) is not None:
         stab["method"] = str(args.stability_method).strip().lower()
     if getattr(args, "stability_outcome", None) is not None:
@@ -642,8 +624,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     # Influence
     infl = ba.setdefault("influence", {})
-    if getattr(args, "influence_feature_set", None) is not None:
-        infl["feature_set"] = str(args.influence_feature_set).strip().lower()
     if getattr(args, "influence_outcomes", None) is not None:
         infl["outcomes"] = [str(o).strip().lower() for o in (args.influence_outcomes or [])]
     if getattr(args, "influence_max_features", None) is not None:
@@ -687,31 +667,24 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     # Pain sensitivity
     if getattr(args, "pain_sensitivity_min_trials", None) is not None:
         ba.setdefault("pain_sensitivity", {})["min_trials"] = int(args.pain_sensitivity_min_trials)
-    if getattr(args, "pain_sensitivity_feature_set", None) is not None:
-        ba.setdefault("pain_sensitivity", {})["feature_set"] = str(args.pain_sensitivity_feature_set).strip().lower()
 
     # Correlations (trial-table)
-    if getattr(args, "correlations_feature_set", None) is not None:
-        ba.setdefault("correlations", {})["feature_set"] = str(args.correlations_feature_set).strip().lower()
     if getattr(args, "correlations_targets", None) is not None:
-        ba.setdefault("correlations", {})["targets"] = [
+        corr_cfg["targets"] = [
             str(t).strip().lower() for t in (args.correlations_targets or [])
         ]
     if getattr(args, "correlations_primary_unit", None) is not None:
-        ba.setdefault("correlations", {})["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
+        corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
     if getattr(args, "correlations_prefer_pain_residual", None) is not None:
-        ba.setdefault("correlations", {})["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
+        corr_cfg["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
     if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
-        ba.setdefault("correlations", {})["use_crossfit_pain_residual"] = bool(
-            args.correlations_use_crossfit_pain_residual
-        )
+        corr_cfg["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
     if getattr(args, "correlations_permutation_primary", None) is not None:
         enabled = bool(args.correlations_permutation_primary)
-        corr = ba.setdefault("correlations", {})
-        corr["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
-        corr.setdefault("permutation", {})["enabled"] = enabled
+        corr_cfg["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
+        corr_cfg.setdefault("permutation", {})["enabled"] = enabled
     if getattr(args, "correlations_target_column", None) is not None:
-        ba.setdefault("correlations", {})["target_column"] = str(args.correlations_target_column).strip()
+        corr_cfg["target_column"] = str(args.correlations_target_column).strip()
 
     # Report
     if getattr(args, "report_top_n", None) is not None:
@@ -982,8 +955,6 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             subjects=subjects,
             task=task,
             config=config,
-            scatter_only=False,
-            temporal_only=False,
             visualize_categories=visualize_categories,
             plots=plots,
         )

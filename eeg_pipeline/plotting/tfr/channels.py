@@ -13,11 +13,9 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import mne
 
 from eeg_pipeline.plotting.io.figures import (
     unwrap_figure,
-    robust_sym_vlim,
     extract_eeg_picks,
     logratio_to_pct,
     build_footer,
@@ -143,8 +141,7 @@ def _build_filename_stem(
     Returns:
         Formatted filename stem
     """
-    name_parts = name.rsplit(".", 1)
-    stem = name_parts[0] if len(name_parts) > 1 else name
+    stem = Path(name).stem
     
     header_parts = []
     if subject:
@@ -175,9 +172,6 @@ def _build_footer_text(config, baseline_used: Tuple[float, float]) -> Optional[s
     """
     default_footer_template = "tfr_baseline"
     baseline_decimal_places = 2
-    
-    if not hasattr(config, "get"):
-        return None
     
     template_name = config.get("output.tfr_footer_template", default_footer_template)
     baseline_str = f"[{float(baseline_used[0]):.{baseline_decimal_places}f}, {float(baseline_used[1]):.{baseline_decimal_places}f}] s"
@@ -261,10 +255,8 @@ def _save_fig(
     footer_text = _build_footer_text(config, baseline_used)
 
     for i, f in enumerate(figs):
-        if i == 0:
-            out_name = f"{stem}.{exts[0]}"
-        else:
-            out_name = f"{stem}_{i+1}.{exts[0]}"
+        suffix = "" if i == 0 else f"_{i+1}"
+        out_name = f"{stem}{suffix}.{exts[0]}"
         out_path = out_dir / out_name
         central_save_fig(
             f,
@@ -330,79 +322,6 @@ def _plot_single_tfr_figure(
 ###################################################################
 # Channel-Level Plotting Functions
 ###################################################################
-
-
-def plot_cz_all_trials_raw(
-    tfr,
-    out_dir: Path,
-    config,
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    """Plot raw TFR for central channel (Cz) without baseline correction.
-    
-    Args:
-        tfr: MNE TFR object (EpochsTFR or AverageTFR)
-        out_dir: Output directory path
-        config: Configuration object
-        logger: Optional logger instance
-    """
-    if isinstance(tfr, mne.time_frequency.EpochsTFR):
-        tfr_avg = tfr.copy().average()
-    else:
-        tfr_avg = tfr.copy()
-    central_ch = _pick_central_channel(tfr_avg.info, preferred="Cz", logger=logger)
-    fig = unwrap_figure(tfr_avg.plot(picks=central_ch, show=False))
-    font_sizes = get_font_sizes()
-    fig.suptitle(f"{central_ch} TFR — all trials (raw, no baseline)", fontsize=font_sizes["figure_title"])
-    _save_fig(fig, out_dir, f"tfr_{central_ch}_all_trials_raw.png", config=config, logger=logger)
-
-
-def plot_cz_all_trials(
-    tfr,
-    out_dir: Path,
-    config,
-    baseline: Tuple[Optional[float], Optional[float]],
-    active_window: Tuple[float, float],
-    logger: Optional[logging.Logger] = None,
-    subject: Optional[str] = None,
-    task: Optional[str] = None,
-) -> None:
-    """Plot TFR for central channel (Cz) with baseline correction.
-    
-    Args:
-        tfr: MNE TFR object (EpochsTFR or AverageTFR)
-        out_dir: Output directory path
-        config: Configuration object
-        baseline: Baseline window tuple (tmin, tmax)
-        active_window: Active window tuple for statistics
-        logger: Optional logger instance
-        subject: Optional subject identifier
-        task: Optional task identifier
-    """
-    tfr_avg, baseline_used = apply_baseline_and_average(tfr, baseline, logger)
-
-    central_ch = _pick_central_channel(tfr_avg.info, preferred="Cz", logger=logger)
-    ch_idx = tfr_avg.info["ch_names"].index(central_ch)
-    arr = np.asarray(tfr_avg.data[ch_idx])
-    vabs = robust_sym_vlim(arr)
-    times = np.asarray(tfr_avg.times)
-    _, pct, _ = _compute_active_statistics(arr, times, active_window, config, logger)
-
-    title = (
-        f"{central_ch} TFR — all trials (baseline logratio)\n"
-        f"vlim ±{vabs:.2f}; mean %Δ vs BL={pct:+.0f}%"
-    )
-    _plot_single_tfr_figure(
-        tfr_avg,
-        central_ch,
-        (-vabs, +vabs),
-        title,
-        f"tfr_{central_ch}_all_trials.png",
-        out_dir,
-        config,
-        logger,
-        baseline_used,
-    )
 
 
 def plot_channels_all_trials(

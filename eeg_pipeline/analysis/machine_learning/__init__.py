@@ -6,7 +6,6 @@ Submodules:
 - pipelines: ML pipeline factories (ElasticNet, RF)
 - orchestration: High-level CV orchestration (LOSO, within-subject CV)
 - time_generalization: Temporal generalization analysis
-- permutation: Permutation importance
 
 Data loading utilities live in `eeg_pipeline.utils.data.machine_learning` (ML matrices)
 and `eeg_pipeline.utils.data.epochs_loading` / `eeg_pipeline.utils.data.features_io`.
@@ -16,7 +15,6 @@ and `eeg_pipeline.utils.data.epochs_loading` / `eeg_pipeline.utils.data.features
 from eeg_pipeline.analysis.machine_learning.cv import (
     create_loso_folds,
     create_inner_cv,
-    create_stratified_cv_by_binned_targets,
     create_block_aware_cv,
     create_within_subject_folds,
     create_block_aware_inner_cv,
@@ -104,7 +102,6 @@ __all__ = [
     # CV utilities
     "create_loso_folds",
     "create_inner_cv",
-    "create_stratified_cv_by_binned_targets",
     "create_block_aware_cv",
     "create_within_subject_folds",
     "create_block_aware_inner_cv",

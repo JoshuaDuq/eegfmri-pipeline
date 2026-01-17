@@ -35,6 +35,11 @@ from ..core.statistics import get_strict_mode
 from ..core.topomaps import create_scalpmean_tfr_from_existing
 
 
+DEFAULT_FOOTER_TEMPLATE = "tfr_baseline"
+BASELINE_DECIMAL_PLACES = 2
+DEFAULT_FORMAT = "png"
+
+
 ###################################################################
 # Helper Functions
 ###################################################################
@@ -123,14 +128,8 @@ def _build_footer_text(
         baseline_used: Baseline window tuple
         
     Returns:
-        Footer text string or None if config doesn't support it
+        Footer text string or None if config doesn't support footer templates
     """
-    if not hasattr(config, "get"):
-        return None
-    
-    DEFAULT_FOOTER_TEMPLATE = "tfr_baseline"
-    BASELINE_DECIMAL_PLACES = 2
-    
     template_name = config.get("output.tfr_footer_template", DEFAULT_FOOTER_TEMPLATE)
     baseline_min, baseline_max = baseline_used
     baseline_string = (
@@ -143,7 +142,10 @@ def _build_footer_text(
         "baseline": baseline_string,
     }
     
-    return build_footer(template_name, config, **footer_kwargs)
+    try:
+        return build_footer(template_name, config, **footer_kwargs)
+    except (ValueError, AttributeError):
+        return None
 
 
 def _save_fig(
@@ -178,7 +180,6 @@ def _save_fig(
     filename_stem = _build_filename_stem(name, baseline_used, subject, task, band)
     
     plot_config = get_plot_config(config)
-    DEFAULT_FORMAT = "png"
     file_extensions = (
         formats
         if formats
@@ -302,7 +303,7 @@ def plot_scalpmean_all_trials(
         f"Scalp-averaged TFR — all trials (baseline logratio)\n"
         f"vlim ±{absolute_vlim:.2f}; mean %Δ vs BL={percentage_change:+.0f}%"
     )
-    vlim = (-absolute_vlim, +absolute_vlim)
+    vlim = (-absolute_vlim, absolute_vlim)
     
     _plot_scalpmean_tfr(
         tfr_scalpmean,
@@ -367,8 +368,8 @@ def _create_scalpmean_contrast_plots(
         tfr_data_diff, times, active_window, config, logger
     )
     
-    vlim_conditions = (-absolute_vlim_conditions, +absolute_vlim_conditions)
-    vlim_difference = (-absolute_vlim_difference, +absolute_vlim_difference)
+    vlim_conditions = (-absolute_vlim_conditions, absolute_vlim_conditions)
+    vlim_difference = (-absolute_vlim_difference, absolute_vlim_difference)
     
     title_condition_2 = (
         f"Scalp-averaged TFR — {label_2} (baseline logratio)\n"

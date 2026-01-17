@@ -23,7 +23,7 @@ Johnson-Neyman Interval:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import numpy as np
 from scipy import stats
@@ -431,7 +431,6 @@ def permutation_moderation_pvalue(
     float
         Two-tailed permutation p-value
     """
-    from typing import Optional
     from joblib import Parallel, delayed, cpu_count
     
     if not np.isfinite(observed_b3) or n_perm <= 0:

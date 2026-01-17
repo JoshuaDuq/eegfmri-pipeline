@@ -7,6 +7,7 @@ Constants, config helpers, and core data structures for statistics.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -17,7 +18,6 @@ from eeg_pipeline.utils.config.loader import (
     ensure_config,
     get_config_value,
     get_constants,
-    load_config,
 )
 
 
@@ -44,28 +44,16 @@ def get_statistics_constants(config=None):
     """Load statistics constants from config."""
     try:
         constants = get_constants("statistics", config)
-        _normalize_cluster_structure(constants)
-        _ensure_min_samples_default(constants)
-        return constants
     except ValueError:
-        pass
-
-    config = ensure_config(config)
-    if config is None:
-        raise ValueError("Config required for statistics constants.")
-
-    constants = config.get("statistics.constants")
-    if constants is None:
-        return {
+        constants = {
             "min_samples_for_correlation": 5,
             "fisher_z_clip_min": -0.999999,
             "fisher_z_clip_max": 0.999999,
         }
-
-    result = dict(constants)
-    _normalize_cluster_structure(result)
-    _ensure_min_samples_default(result)
-    return result
+    
+    _normalize_cluster_structure(constants)
+    _ensure_min_samples_default(constants)
+    return constants
 
 
 def _normalize_cluster_structure(constants: dict) -> None:
@@ -186,7 +174,6 @@ def get_subject_seed(base_seed: int, subject: str) -> int:
     int
         Subject-specific seed
     """
-    import hashlib
     digest = hashlib.sha256(f"{base_seed}:{subject}".encode("utf-8")).digest()
     return int.from_bytes(digest[:8], byteorder="big") % (2**31)
 
@@ -211,18 +198,7 @@ def safe_get_config_value(config: Any, key: str, default: Any) -> Any:
     Any
         Configuration value or default
     """
-    if config is None:
-        return default
-    try:
-        if hasattr(config, "get"):
-            return config.get(key, default)
-    except (AttributeError, KeyError, TypeError):
-        pass
-    # Fallback to get_config_value from loader if available
-    try:
-        return get_config_value(config, key, default)
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return default
+    return get_config_value(config, key, default)
 
 
 def _safe_float(value: Any) -> float:

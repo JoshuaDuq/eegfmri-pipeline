@@ -30,7 +30,6 @@ const (
 // resetCursorsForStep resets all cursor positions when entering a new step
 // to prevent UI state from persisting incorrectly between steps
 func (m *Model) resetCursorsForStep() {
-	// Reset all step-specific cursors to 0
 	m.categoryIndex = 0
 	m.subjectCursor = 0
 	m.computationCursor = 0
@@ -45,7 +44,7 @@ func (m *Model) resetCursorsForStep() {
 	m.plotCursor = 0
 	m.plotOffset = 0
 	if m.CurrentStep == types.StepSelectPlots {
-		m.plotCursor = m.findNextVisiblePlot(-1, 1) // Start at first visible if possible
+		m.plotCursor = m.findNextVisiblePlot(-1, 1)
 	}
 	m.featurePlotterCursor = 0
 	m.featurePlotterOffset = 0
@@ -54,7 +53,6 @@ func (m *Model) resetCursorsForStep() {
 	}
 	m.plotConfigCursor = 0
 
-	// Reset any editing states
 	m.filteringSubject = false
 	m.subjectFilter = ""
 	m.editingNumber = false
@@ -126,7 +124,6 @@ func (m *Model) handleUp() {
 	case types.StepSelectComputations:
 		m.computationCursor = moveCursorInList(m.computationCursor, -1, len(m.computations))
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		// Features pipeline category selection or Plotting pipeline category selection
 		m.categoryIndex = moveCursorInList(m.categoryIndex, -1, len(m.categories))
 	case types.StepSelectSubjects:
 		if len(m.subjects) > 0 {
@@ -163,7 +160,6 @@ func (m *Model) handleUp() {
 	case types.StepPreprocessingFiltering, types.StepPreprocessingICA, types.StepPreprocessingEpochs:
 		m.advancedCursor = moveCursorInList(m.advancedCursor, -1, 5)
 	case types.StepAdvancedConfig:
-		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
 			listLen := m.getExpandedListLength()
 			if listLen > 0 {
@@ -171,7 +167,6 @@ func (m *Model) handleUp() {
 			}
 			m.UpdateAdvancedOffset()
 		} else {
-			// Navigate between main options
 			if m.Pipeline == types.PipelinePlotting {
 				m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, -1)
 			} else {
@@ -191,7 +186,6 @@ func (m *Model) handleDown() {
 	case types.StepSelectComputations:
 		m.computationCursor = moveCursorInList(m.computationCursor, 1, len(m.computations))
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		// Features pipeline category selection or Plotting pipeline category selection
 		m.categoryIndex = moveCursorInList(m.categoryIndex, 1, len(m.categories))
 	case types.StepSelectSubjects:
 		m.subjectCursor = moveCursorInList(m.subjectCursor, 1, len(m.subjects))
@@ -224,7 +218,6 @@ func (m *Model) handleDown() {
 	case types.StepPreprocessingFiltering, types.StepPreprocessingICA, types.StepPreprocessingEpochs:
 		m.advancedCursor = moveCursorInList(m.advancedCursor, 1, 5)
 	case types.StepAdvancedConfig:
-		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
 			listLen := m.getExpandedListLength()
 			if listLen > 0 {
@@ -232,7 +225,6 @@ func (m *Model) handleDown() {
 			}
 			m.UpdateAdvancedOffset()
 		} else {
-			// Navigate between main options
 			if m.Pipeline == types.PipelinePlotting {
 				m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, 1)
 			} else {
@@ -257,7 +249,6 @@ func (m *Model) handleTab() {
 		}
 	case types.StepAdvancedConfig:
 		if m.expandedOption >= 0 {
-			// Collapse and move to next primary option
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 			optCount := m.getAdvancedOptionCount()
@@ -275,16 +266,6 @@ func (m *Model) handleTab() {
 	}
 }
 
-func (m *Model) handleLeft() {
-	// Left/right navigation is no longer used for behavior advanced config
-	// since sections are now collapsible like the features pipeline
-}
-
-func (m *Model) handleRight() {
-	// Left/right navigation is no longer used for behavior advanced config
-	// since sections are now collapsible like the features pipeline
-}
-
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	// Per-step validation
 	errors := m.validateStep()
@@ -298,7 +279,6 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		m.stepIndex++
 		m.CurrentStep = m.steps[m.stepIndex]
 
-		// Dynamic step skipping based on pipeline and mode
 		for m.stepIndex < len(m.steps)-1 {
 			if !m.shouldSkipStep(m.CurrentStep) {
 				break
@@ -307,14 +287,12 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.CurrentStep = m.steps[m.stepIndex]
 		}
 
-		// Update feature availability when arriving on features page
 		if m.CurrentStep == types.StepConfigureOptions {
 			m.updateFeatureAvailability()
 		}
 
 		m.resetCursorsForStep()
 	} else {
-		// On the last step, trigger execution confirmation
 		m.validationErrors = m.validate()
 		if len(m.validationErrors) == 0 {
 			m.ConfirmingExecute = true
@@ -453,7 +431,6 @@ func (m *Model) handleSpace() {
 	case types.StepSelectComputations:
 		m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		// Features pipeline category selection or Plotting pipeline category selection
 		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
 			m.togglePlotCategory(m.categoryIndex)
 		} else {
@@ -536,7 +513,6 @@ func (m *Model) handleSpace() {
 		}
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
-			// Commit and move to next field, or exit if at end
 			if m.editingField < timeRangeFieldCount-1 {
 				m.editingField++
 			} else {
@@ -545,7 +521,7 @@ func (m *Model) handleSpace() {
 			}
 		} else {
 			m.editingRangeIdx = m.timeRangeCursor
-			m.editingField = 1 // Start at Tmin
+			m.editingField = 1
 		}
 	case types.StepAdvancedConfig:
 		m.toggleAdvancedOption()
@@ -659,7 +635,6 @@ func (m *Model) GoBack() bool {
 	}
 
 	if m.stepIndex > 0 {
-		// Clear subject filter when leaving subject step
 		if m.CurrentStep == types.StepSelectSubjects {
 			m.subjectFilter = ""
 			m.filteringSubject = false
@@ -668,7 +643,6 @@ func (m *Model) GoBack() bool {
 		m.stepIndex--
 		m.CurrentStep = m.steps[m.stepIndex]
 
-		// Dynamic step skipping (reverse)
 		for m.stepIndex > 0 {
 			if !m.shouldSkipStep(m.CurrentStep) {
 				break
@@ -677,7 +651,7 @@ func (m *Model) GoBack() bool {
 			m.CurrentStep = m.steps[m.stepIndex]
 		}
 
-		m.resetCursorsForStep() // Reset cursors when going back
+		m.resetCursorsForStep()
 		return true
 	}
 	return false
@@ -735,18 +709,15 @@ func (m *Model) validate() []string {
 			errors = append(errors, "No frequency bands selected")
 		}
 
-		// Validate time range selection
 		errors = append(errors, m.validateTimeRanges()...)
 	}
 
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
-		// Validate computations selection
 		computationCount := countSelectedItems(m.computationSelected)
 		if computationCount == 0 {
 			errors = append(errors, "No behavior computations selected")
 		}
 
-		// Validate feature files selection (consolidated)
 		featureFileCount := countSelectedStringItems(m.featureFileSelected)
 		if featureFileCount == 0 {
 			errors = append(errors, "No feature files selected")
@@ -786,7 +757,6 @@ func (m *Model) validateTimeRanges() []string {
 		}
 		names[tr.Name] = true
 
-		// Check if numeric values are valid (start < end)
 		if tr.Tmin != "" && tr.Tmax != "" {
 			tmin, errMin := strconv.ParseFloat(tr.Tmin, 64)
 			tmax, errMax := strconv.ParseFloat(tr.Tmax, 64)
@@ -953,13 +923,11 @@ func (m *Model) toggleAdvancedOption() {
 }
 
 func (m *Model) toggleFeaturesAdvancedOption() {
-	// Handle expanded list toggles first
 	if m.expandedOption >= 0 {
 		m.handleExpandedListToggle()
 		return
 	}
 
-	// Build dynamic option list to match cursor position to option type
 	options := m.getFeaturesOptions()
 
 	if m.advancedCursor >= len(options) {
@@ -1178,12 +1146,10 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.startTextEdit(textFieldSourceLocSubject)
 		m.useDefaultAdvanced = false
 	case optSourceLocTrans:
-		// Open file picker for trans file
 		m.browsingField = "sourceLocTrans"
 		m.pendingFileCmd = m.browseForFile("Select coregistration transform file", "sourceLocTrans", "FIF files", "fif")
 		m.useDefaultAdvanced = false
 	case optSourceLocBem:
-		// Open file picker for BEM solution file
 		m.browsingField = "sourceLocBem"
 		m.pendingFileCmd = m.browseForFile("Select BEM solution file", "sourceLocBem", "FIF files", "fif")
 		m.useDefaultAdvanced = false
@@ -1194,7 +1160,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.sourceLocFmriEnabled = !m.sourceLocFmriEnabled
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriStatsMap:
-		// Open file picker for fMRI stats map NIfTI file
 		m.browsingField = "sourceLocFmriStatsMap"
 		m.pendingFileCmd = m.browseForFile("Select fMRI statistical map", "sourceLocFmriStatsMap", "NIfTI files", "nii,nii.gz")
 		m.useDefaultAdvanced = false
@@ -1254,7 +1219,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.sourceLocFmriContrastType = (m.sourceLocFmriContrastType + 1) % 4 // 0: t-test, 1: paired, 2: F-test, 3: custom
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriCondAColumn:
-		// Show dropdown with fMRI-specific discovered columns
 		if len(m.fmriDiscoveredColumns) > 0 {
 			m.expandedOption = expandedFmriCondAColumn
 			m.subCursor = 0
@@ -1263,7 +1227,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriCondAValue:
-		// Show dropdown with values from selected fMRI column
 		colVals := m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn)
 		if len(colVals) > 0 {
 			m.expandedOption = expandedFmriCondAValue
@@ -1273,7 +1236,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriCondBColumn:
-		// Show dropdown with fMRI-specific discovered columns
 		if len(m.fmriDiscoveredColumns) > 0 {
 			m.expandedOption = expandedFmriCondBColumn
 			m.subCursor = 0
@@ -1282,7 +1244,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriCondBValue:
-		// Show dropdown with values from selected fMRI column
 		colVals := m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn)
 		if len(colVals) > 0 {
 			m.expandedOption = expandedFmriCondBValue
@@ -1376,7 +1337,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPACPhaseRange:
-		// Cycle through common phase ranges: theta(4-8) -> delta(2-4) -> alpha(8-13) -> theta
 		if m.pacPhaseMin == 4.0 && m.pacPhaseMax == 8.0 {
 			m.pacPhaseMin, m.pacPhaseMax = 2.0, 4.0 // delta
 		} else if m.pacPhaseMin == 2.0 && m.pacPhaseMax == 4.0 {
@@ -1386,7 +1346,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	case optPACAmpRange:
-		// Cycle through common amplitude ranges: gamma(30-80) -> broad-gamma(40-100) -> high-gamma(60-120) -> gamma
 		if m.pacAmpMin == 30.0 && m.pacAmpMax == 80.0 {
 			m.pacAmpMin, m.pacAmpMax = 40.0, 100.0 // broader gamma
 		} else if m.pacAmpMin == 40.0 && m.pacAmpMax == 100.0 {
@@ -1562,7 +1521,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	}
 
-	// Clamp cursor after expand/collapse changes.
 	options = m.getFeaturesOptions()
 	if len(options) > 0 {
 		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
@@ -1571,7 +1529,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 }
 
 func (m *Model) togglePlottingAdvancedOption() {
-	// Handle expanded list toggles first
 	if m.expandedOption >= 0 {
 		m.handleExpandedListToggle()
 		return
@@ -1997,7 +1954,6 @@ func (m *Model) togglePlottingAdvancedOption() {
 }
 
 func (m *Model) toggleBehaviorAdvancedOption() {
-	// Handle expanded list toggles first
 	if m.expandedOption >= 0 {
 		m.handleExpandedListToggle()
 		return
@@ -2464,21 +2420,18 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	// Temporal feature selection
 	case optTemporalFeaturePower:
 		m.temporalFeaturePowerEnabled = !m.temporalFeaturePowerEnabled
-		// Ensure at least one feature is enabled
 		if !m.temporalFeaturePowerEnabled && !m.temporalFeatureITPCEnabled && !m.temporalFeatureERDSEnabled {
 			m.temporalFeaturePowerEnabled = true
 		}
 		m.useDefaultAdvanced = false
 	case optTemporalFeatureITPC:
 		m.temporalFeatureITPCEnabled = !m.temporalFeatureITPCEnabled
-		// Ensure at least one feature is enabled
 		if !m.temporalFeaturePowerEnabled && !m.temporalFeatureITPCEnabled && !m.temporalFeatureERDSEnabled {
 			m.temporalFeatureITPCEnabled = true
 		}
 		m.useDefaultAdvanced = false
 	case optTemporalFeatureERDS:
 		m.temporalFeatureERDSEnabled = !m.temporalFeatureERDSEnabled
-		// Ensure at least one feature is enabled
 		if !m.temporalFeaturePowerEnabled && !m.temporalFeatureITPCEnabled && !m.temporalFeatureERDSEnabled {
 			m.temporalFeatureERDSEnabled = true
 		}
@@ -2628,7 +2581,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	}
 
-	// Clamp cursor to valid range after list might have shrunk (e.g., section collapsed)
 	options = m.getBehaviorOptions()
 	if len(options) > 0 {
 		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
@@ -4182,7 +4134,6 @@ func (m Model) findNextVisiblePlot(current int, delta int) int {
 		return 0
 	}
 
-	// Start from current position, wrapping if needed
 	next := current
 	if next < 0 {
 		next = len(m.plotItems) - 1
@@ -4352,11 +4303,8 @@ func (m *Model) removeBand() {
 		return // Keep at least one band
 	}
 	if m.bandCursor >= 0 && m.bandCursor < len(m.bands) {
-		// Remove from bands slice
 		m.bands = append(m.bands[:m.bandCursor], m.bands[m.bandCursor+1:]...)
-		// Update selection map
 		delete(m.bandSelected, m.bandCursor)
-		// Shift selection indices
 		newSelected := make(map[int]bool)
 		for i, sel := range m.bandSelected {
 			if i > m.bandCursor {
@@ -4366,7 +4314,6 @@ func (m *Model) removeBand() {
 			}
 		}
 		m.bandSelected = newSelected
-		// Adjust cursor
 		if m.bandCursor >= len(m.bands) {
 			m.bandCursor = len(m.bands) - 1
 		}
@@ -4440,11 +4387,8 @@ func (m *Model) removeROI() {
 		return // Keep at least one ROI
 	}
 	if m.roiCursor >= 0 && m.roiCursor < len(m.rois) {
-		// Remove from rois slice
 		m.rois = append(m.rois[:m.roiCursor], m.rois[m.roiCursor+1:]...)
-		// Update selection map
 		delete(m.roiSelected, m.roiCursor)
-		// Shift selection indices
 		newSelected := make(map[int]bool)
 		for i, sel := range m.roiSelected {
 			if i > m.roiCursor {
@@ -4454,7 +4398,6 @@ func (m *Model) removeROI() {
 			}
 		}
 		m.roiSelected = newSelected
-		// Adjust cursor
 		if m.roiCursor >= len(m.rois) {
 			m.roiCursor = len(m.rois) - 1
 		}

@@ -22,6 +22,7 @@ import pandas as pd
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
 from eeg_pipeline.plotting.io.figures import save_fig
+from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
 
 from ...utils.analysis.tfr import get_bands_for_tfr
@@ -271,12 +272,7 @@ def _create_condition_masks(
 
     label1 = "Condition 1"
     label2 = "Condition 2"
-    try:
-        from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-
-        comp = extract_comparison_mask(events_df, config, require_enabled=False)
-    except Exception:
-        comp = None
+    comp = extract_comparison_mask(events_df, config, require_enabled=False)
 
     if comp is not None:
         mask1, mask2, label1, label2 = comp
@@ -292,7 +288,7 @@ def _create_condition_masks(
             masks["high_temp"] = (temps >= median_temp).fillna(False).values
             masks["low_temp"] = (temps < median_temp).fillna(False).values
 
-    return masks, str(label1), str(label2)
+    return masks, label1, label2
 
 
 def _apply_baseline(

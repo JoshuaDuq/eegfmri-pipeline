@@ -3,12 +3,14 @@ from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 
 import numpy as np
+from scipy import ndimage
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.linear_model import Ridge, RidgeCV
 from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
+from statsmodels.stats.multitest import multipletests
 
 from eeg_pipeline.utils.analysis.tfr import (
     find_common_channels_train_test,
@@ -28,11 +30,6 @@ from eeg_pipeline.utils.config.loader import load_config, get_fisher_z_clip_valu
 from eeg_pipeline.infra.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-###################################################################
-# Time Generalization Analysis
-###################################################################
 
 
 def _extract_window_features(
@@ -145,7 +142,7 @@ def time_generalization_regression(
         available.
     """
     tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
-    trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y = prepare_trial_records_from_epochs(tuples)
+    trial_records, y_all_arr, groups_arr, subj_to_epochs, _ = prepare_trial_records_from_epochs(tuples)
 
     config = config_dict or load_config()
     min_subjects_for_loso = config.get("analysis.min_subjects_for_group", 2)
@@ -167,7 +164,6 @@ def time_generalization_regression(
     n_folds_total = len(list(logo.split(np.arange(len(trial_records)), groups=groups_arr)))
     
     def _run_time_gen(y_values: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        cfg = config
         fold_mats_r = []
         fold_mats_r2 = []
         fold_counts = []
@@ -182,7 +178,7 @@ def time_generalization_regression(
             if not common_chs:
                 continue
             
-            min_channels_required = get_min_channels_required(cfg)
+            min_channels_required = get_min_channels_required(config)
             if len(common_chs) < min_channels_required:
                 logger.warning(
                     f"Fold {fold}: Common channels ({len(common_chs)}) < minimum required "
@@ -217,8 +213,7 @@ def time_generalization_regression(
                 times = first_epochs.times
                 window_centers_out = np.array([(w_start + w_end) / 2 for w_start, w_end in windows])
             
-            # Minimum samples per window for reliable regression and correlation
-            min_samples_per_window = cfg.get(
+            min_samples_per_window = config.get(
                 "machine_learning.analysis.time_generalization.min_samples_per_window", 15
             )
             
@@ -237,13 +232,13 @@ def time_generalization_regression(
                 imputer = SimpleImputer(strategy='mean')
                 train_feat_i_clean = imputer.fit_transform(train_feat_i_clean)
                 
-                use_ridgecv = cfg.get("machine_learning.analysis.time_generalization.use_ridgecv", False)
-                alpha_grid = cfg.get("machine_learning.analysis.time_generalization.alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0])
+                use_ridgecv = config.get("machine_learning.analysis.time_generalization.use_ridgecv", False)
+                alpha_grid = config.get("machine_learning.analysis.time_generalization.alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0])
                 
                 if use_ridgecv and len(y_train[finite_mask_train]) >= 5:
                     ridge_model = RidgeCV(alphas=alpha_grid, cv=min(5, len(y_train[finite_mask_train])))
                 else:
-                    default_alpha = cfg.get("machine_learning.analysis.time_generalization.default_alpha", 1.0)
+                    default_alpha = config.get("machine_learning.analysis.time_generalization.default_alpha", 1.0)
                     ridge_model = Ridge(alpha=default_alpha)
                 
                 model = Pipeline([("scale", StandardScaler()), ("ridge", ridge_model)])
@@ -271,8 +266,7 @@ def time_generalization_regression(
                         y_pred_finite = y_pred[finite_mask_pred]
                         n_valid = len(y_test_finite)
                         
-                        # Configurable minimum samples for reliable correlation estimation
-                        min_samples_for_corr = cfg.get(
+                        min_samples_for_corr = config.get(
                             "machine_learning.analysis.time_generalization.min_samples_for_corr", 10
                         )
                         if n_valid >= min_samples_for_corr:
@@ -303,7 +297,6 @@ def time_generalization_regression(
                 f"Only {n_folds_successful}/{n_folds_total} folds ({coverage_pct:.1f}%) succeeded. "
                 f"Time-generalization matrices are based on a subset of folds."
             )
-            min_subjects_for_loso = config.get("analysis.min_subjects_for_group", 2)
             if n_folds_successful < min_subjects_for_loso:
                 raise RuntimeError(
                     f"Insufficient fold coverage ({n_folds_successful}/{n_folds_total}) "
@@ -320,8 +313,7 @@ def time_generalization_regression(
         tg_r2 = np.full_like(tg_r, np.nan)
         coverage_map = np.zeros_like(tg_r, dtype=int)
         
-        # Minimum total samples across folds for reliable Fisher z-averaging
-        min_count_per_cell = cfg.get(
+        min_count_per_cell = config.get(
             "machine_learning.analysis.time_generalization.min_count_per_cell", 15
         )
         
@@ -349,8 +341,6 @@ def time_generalization_regression(
                 clip_min, clip_max = get_fisher_z_clip_values(config)
                 r_clipped = np.clip(valid_r, clip_min, clip_max)
                 r_z = np.arctanh(r_clipped)
-                
-                # Use n-3 weighting for proper Fisher z variance (variance of z ~ 1/(n-3))
                 fisher_weights = np.maximum(valid_counts - 3.0, 1.0)
                 fisher_weights = fisher_weights / fisher_weights.sum()
                 weighted_z_mean = np.average(r_z, weights=fisher_weights)
@@ -418,8 +408,6 @@ def time_generalization_regression(
                     if len(finite_null) > 0:
                         p_matrix[i, j] = (np.sum(np.abs(finite_null) >= np.abs(tg_r[i, j])) + 1) / (len(finite_null) + 1)
         
-        # FDR correction
-        from statsmodels.stats.multitest import multipletests
         p_flat = p_matrix.flatten()
         valid_mask = np.isfinite(p_flat) & (p_flat < 1.0)
         if valid_mask.sum() > 0:
@@ -432,7 +420,6 @@ def time_generalization_regression(
             n_tests = valid_mask.sum()
             logger.info(f"Time-generalization FDR: {n_sig}/{n_tests} significant cells")
         
-        # Max-statistic correction (FWER control)
         null_max_abs = np.nanmax(np.abs(null_r), axis=(1, 2))
         empirical_max_abs = np.abs(tg_r)
         max_stat_threshold = np.percentile(null_max_abs[np.isfinite(null_max_abs)], 95) if np.any(np.isfinite(null_max_abs)) else np.inf
@@ -440,17 +427,12 @@ def time_generalization_regression(
         n_sig_maxstat = sig_maxstat.sum()
         logger.info(f"Time-generalization max-stat (FWER): {n_sig_maxstat}/{valid_mask.sum()} significant cells (threshold={max_stat_threshold:.3f})")
         
-        # Cluster-based correction
         cluster_threshold = config.get("machine_learning.analysis.time_generalization.cluster_threshold", 0.05)
-        from scipy import ndimage
-        
         uncorrected_sig = p_matrix < cluster_threshold
         labeled_clusters, n_clusters = ndimage.label(uncorrected_sig)
         
         if n_clusters > 0:
             observed_cluster_sizes = ndimage.sum(uncorrected_sig, labeled_clusters, range(1, n_clusters + 1))
-            max_observed_cluster = np.max(observed_cluster_sizes) if len(observed_cluster_sizes) > 0 else 0
-            
             null_max_clusters = []
             for perm_idx in range(n_perm_valid):
                 null_p_perm = np.ones_like(tg_r)
@@ -463,9 +445,9 @@ def time_generalization_regression(
                                 null_p_perm[i, j] = (np.sum(np.abs(finite_other) >= np.abs(null_r[perm_idx, i, j])) + 1) / (len(finite_other) + 1)
                 
                 null_sig = null_p_perm < cluster_threshold
-                _, n_null_clusters = ndimage.label(null_sig)
+                labeled_null, n_null_clusters = ndimage.label(null_sig)
                 if n_null_clusters > 0:
-                    null_cluster_sizes = ndimage.sum(null_sig, ndimage.label(null_sig)[0], range(1, n_null_clusters + 1))
+                    null_cluster_sizes = ndimage.sum(null_sig, labeled_null, range(1, n_null_clusters + 1))
                     null_max_clusters.append(np.max(null_cluster_sizes) if len(null_cluster_sizes) > 0 else 0)
                 else:
                     null_max_clusters.append(0)

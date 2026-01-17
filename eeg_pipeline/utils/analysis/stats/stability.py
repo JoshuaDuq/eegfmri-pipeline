@@ -14,24 +14,14 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
+from eeg_pipeline.utils.analysis.stats.partial import compute_partial_corr
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_stability_features
+from eeg_pipeline.utils.analysis.stats.base import safe_get_config_value as _get_config_value
 
 
 # Constants
 _MIN_TRIALS_FOR_ANALYSIS = 10
 _MIN_VARIANCE_THRESHOLD = 1e-12
-
-
-from .base import safe_get_config_value as _get_config_value
-
-
-def _try_import_partial_correlation() -> Tuple[bool, Optional[Any]]:
-    """Attempt to import partial correlation function."""
-    try:
-        from eeg_pipeline.utils.analysis.stats import compute_partial_corr
-        return True, compute_partial_corr
-    except (ImportError, AttributeError):
-        return False, None
 
 
 def _compute_group_correlation(
@@ -40,9 +30,9 @@ def _compute_group_correlation(
     method: str,
 ) -> Tuple[float, float]:
     """Compute correlation for a single group."""
-    correlation, p_value = compute_correlation(feature_values, outcome_values, method=method)
-    r_float = float(correlation) if np.isfinite(correlation) else np.nan
-    p_float = float(p_value) if np.isfinite(p_value) else np.nan
+    r, p = compute_correlation(feature_values, outcome_values, method=method)
+    r_float = float(r) if np.isfinite(r) else np.nan
+    p_float = float(p) if np.isfinite(p) else np.nan
     return r_float, p_float
 
 
@@ -51,7 +41,6 @@ def _compute_partial_correlation_for_group(
     outcome_values: pd.Series,
     temperature_values: pd.Series,
     method: str,
-    compute_partial_corr: Any,
 ) -> Tuple[float, float]:
     """Compute partial correlation controlling for temperature."""
     try:
@@ -130,16 +119,15 @@ def _process_single_stability_feature(
     
     valid_feature = feature_values[valid_mask].to_numpy(dtype=float)
     valid_outcome = outcome_series[valid_mask].to_numpy(dtype=float)
-    overall_correlation, overall_p_value = compute_correlation(
+    overall_r, overall_p = compute_correlation(
         valid_feature,
         valid_outcome,
         method=method,
     )
-    overall_r = float(overall_correlation) if np.isfinite(overall_correlation) else np.nan
-    overall_p = float(overall_p_value) if np.isfinite(overall_p_value) else np.nan
+    overall_r = float(overall_r) if np.isfinite(overall_r) else np.nan
+    overall_p = float(overall_p) if np.isfinite(overall_p) else np.nan
 
-    has_partial, compute_partial_corr = _try_import_partial_correlation()
-    use_partial = use_partial_temp and has_partial and has_temp
+    use_partial = use_partial_temp and has_temp
 
     group_correlations = []
     group_p_values = []
@@ -166,8 +154,9 @@ def _process_single_stability_feature(
             valid_temp_mask = temperature_values.notna()
             
             if int(valid_temp_mask.sum()) >= _MIN_TRIALS_FOR_ANALYSIS:
-                partial_feature = pd.Series(group_feature[valid_temp_mask])
-                partial_outcome = pd.Series(group_outcome[valid_temp_mask])
+                valid_temp_array = valid_temp_mask.values
+                partial_feature = pd.Series(group_feature[valid_temp_array])
+                partial_outcome = pd.Series(group_outcome[valid_temp_array])
                 partial_temp = temperature_values[valid_temp_mask]
                 
                 r_partial, p_partial = _compute_partial_correlation_for_group(
@@ -175,7 +164,6 @@ def _process_single_stability_feature(
                     partial_outcome,
                     partial_temp,
                     method,
-                    compute_partial_corr,
                 )
                 partial_correlations.append(r_partial)
                 partial_p_values.append(p_partial)
@@ -258,13 +246,9 @@ def _validate_inputs(
     trial_df: pd.DataFrame,
     outcome: str,
     group_col: str,
-) -> Tuple[bool, str]:
+) -> bool:
     """Validate input DataFrame and column names."""
-    if outcome not in trial_df.columns:
-        return False, "missing_columns"
-    if group_col not in trial_df.columns:
-        return False, "missing_columns"
-    return True, "ok"
+    return outcome in trial_df.columns and group_col in trial_df.columns
 
 
 def _select_candidate_features(
@@ -298,23 +282,20 @@ def _select_candidate_features(
             continue
         
         outcome_array = outcome_series.to_numpy(dtype=float)
-        correlation, p_value = compute_correlation(
+        r, _ = compute_correlation(
             feature_array,
             outcome_array,
             method=method,
         )
         
-        abs_correlation = abs(float(correlation)) if np.isfinite(correlation) else 0.0
-        r_float = float(correlation) if np.isfinite(correlation) else np.nan
-        p_float = float(p_value) if np.isfinite(p_value) else np.nan
-        
-        candidates.append((abs_correlation, r_float, p_float, col))
+        abs_r = abs(float(r)) if np.isfinite(r) else 0.0
+        candidates.append((abs_r, col))
 
     if not candidates:
         return [], 0
     
     candidates.sort(reverse=True)
-    selected = [col for _abs_r, _r, _p, col in candidates[:max_features]]
+    selected = [col for _abs_r, col in candidates[:max_features]]
     return selected, len(candidates)
 
 
@@ -348,9 +329,8 @@ def compute_groupwise_stability(
         "group_col": group_col,
     }
 
-    is_valid, status = _validate_inputs(trial_df, outcome, group_col)
-    if not is_valid:
-        return pd.DataFrame(), {**meta, "status": status}
+    if not _validate_inputs(trial_df, outcome, group_col):
+        return pd.DataFrame(), {**meta, "status": "missing_columns"}
 
     outcome_series = pd.to_numeric(trial_df[outcome], errors="coerce")
     group_series = trial_df[group_col]
@@ -368,13 +348,11 @@ def compute_groupwise_stability(
 
     meta["n_features_considered"] = n_candidates
     meta["n_features_selected"] = len(selected_features)
-
-    has_partial, _ = _try_import_partial_correlation()
-    meta["has_partial_corr"] = has_partial
+    meta["has_partial_corr"] = True
     has_temp = "temperature" in trial_df.columns
 
-    groups = list(pd.Series(group_series).dropna().unique())
-    meta["n_groups_total"] = int(len(groups))
+    groups = group_series.dropna().unique().tolist()
+    meta["n_groups_total"] = len(groups)
 
     feature_args = [
         (

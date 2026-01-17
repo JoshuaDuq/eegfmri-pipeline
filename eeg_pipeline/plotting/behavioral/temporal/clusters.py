@@ -21,7 +21,6 @@ from eeg_pipeline.infra.tsv import read_tsv
 
 DEFAULT_ALPHA = 0.05
 TIME_GRID_POINTS = 200
-CLUSTER_PREFIX = "pain_nonpain_time_clusters_"
 
 
 def _get_alpha_value(config: Any, alpha: Optional[float]) -> float:
@@ -78,16 +77,11 @@ def _load_cluster_dataframes(
     logger: logging.Logger,
 ) -> pd.DataFrame:
     """Load and combine all cluster statistics files."""
-    # Check cluster subdirectory first (new location)
     cluster_dir = stats_dir / "cluster"
-    files = sorted(cluster_dir.glob(f"{CLUSTER_PREFIX}*.tsv")) if cluster_dir.exists() else []
-    
-    # Also check for cluster_results_*.tsv in cluster subdirectory (current naming)
-    if not files:
-        files = sorted(cluster_dir.glob("cluster_results_*.tsv")) if cluster_dir.exists() else []
+    files = sorted(cluster_dir.glob("cluster_results_*.tsv")) if cluster_dir.exists() else []
     
     if not files:
-        _log_if_present(logger, "warning", f"No cluster stats found in {stats_dir} or {cluster_dir}")
+        _log_if_present(logger, "warning", f"No cluster stats found in {cluster_dir}")
         return pd.DataFrame()
 
     frames = []
@@ -213,7 +207,7 @@ def _plot_cluster_ribbons(
     band_order: list[str],
     subject: str,
     plot_cfg: Any,
-) -> None:
+) -> plt.Figure:
     """Create ribbon plot showing cluster time ranges across frequency bands."""
     fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("wide", plot_type="behavioral"))
 
@@ -282,7 +276,7 @@ def _plot_cluster_mask(
     band: str,
     subject: str,
     plot_cfg: Any,
-) -> None:
+) -> Optional[plt.Figure]:
     """Create heatmap showing cluster coverage across channels and time."""
     time_range = _extract_time_range(band_df)
     if time_range is None:

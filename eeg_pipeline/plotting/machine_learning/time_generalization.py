@@ -27,10 +27,10 @@ def _validate_time_generalization_inputs(
     window_centers: np.ndarray,
 ) -> bool:
     """Validate inputs for time-generalization plotting."""
-    if tg_matrix is None or tg_matrix.size == 0:
+    if tg_matrix.size == 0:
         logger.warning("Time-generalization matrix is empty; skipping plot")
         return False
-    if window_centers is None or len(window_centers) == 0:
+    if len(window_centers) == 0:
         logger.warning("Window centers missing for time-generalization plot")
         return False
     return True
@@ -49,11 +49,10 @@ def _compute_significance_mask(
         null_threshold = np.nanpercentile(max_null_per_permutation, SIGNIFICANCE_PERCENTILE)
         return np.abs(tg_matrix) > null_threshold
 
-    vmax_null = np.nanmax(np.abs(null_matrix))
-    if not np.isfinite(vmax_null) or vmax_null == 0:
+    null_threshold = np.nanpercentile(np.abs(null_matrix), SIGNIFICANCE_PERCENTILE, axis=0)
+    if not np.any(np.isfinite(null_threshold)):
         return None
 
-    null_threshold = np.nanpercentile(np.abs(null_matrix), SIGNIFICANCE_PERCENTILE, axis=0)
     return np.abs(tg_matrix) > null_threshold
 
 
@@ -63,7 +62,7 @@ def _compute_colormap_limits(
 ) -> tuple[float, float, str]:
     """Compute colormap limits and colormap name for time-generalization matrix."""
     vmax = np.nanmax(np.abs(tg_matrix))
-    if not np.isfinite(vmax) or vmax == 0:
+    if not np.isfinite(vmax) or vmax == 0.0:
         vmax = DEFAULT_VMAX
 
     is_correlation = metric.lower() == CORRELATION_METRIC
@@ -112,10 +111,10 @@ def _create_time_generalization_plot(
 
     fig, ax = plt.subplots(figsize=fig_size)
     extent = [
-        float(test_times[0]),
-        float(test_times[-1]),
-        float(train_times[0]),
-        float(train_times[-1]),
+        test_times[0],
+        test_times[-1],
+        train_times[0],
+        train_times[-1],
     ]
     im = ax.imshow(
         tg_matrix,
@@ -132,11 +131,10 @@ def _create_time_generalization_plot(
 
     if sig_mask is not None:
         test_grid, train_grid = np.meshgrid(test_times, train_times)
-        sig_mask_float = np.asarray(sig_mask, dtype=float)
         ax.contour(
             test_grid,
             train_grid,
-            sig_mask_float,
+            sig_mask,
             levels=[CONTOUR_LEVEL],
             colors="k",
             linewidths=0.6,

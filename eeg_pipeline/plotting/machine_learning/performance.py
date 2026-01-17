@@ -20,15 +20,9 @@ from eeg_pipeline.utils.analysis.stats import (
 logger = logging.getLogger(__name__)
 
 
-###################################################################
-# Helper Functions (imported from helpers module)
-###################################################################
-
 from eeg_pipeline.plotting.machine_learning.helpers import (
     despine,
-    calculate_axis_limits,
     calculate_shared_axis_limits,
-    add_zero_reference_line,
     create_bar_plot,
     _validate_prediction_dataframe,
 )
@@ -72,7 +66,7 @@ def _plot_bootstrap_metric(
     )
     ax.set_xlabel(metric_name)
     ax.set_ylabel('')
-    
+
     if model_name:
         ax.text(
             plot_cfg.text_position.bootstrap_x,
@@ -83,14 +77,10 @@ def _plot_bootstrap_metric(
             verticalalignment='top',
             weight='bold',
         )
-    
+
     ax.legend(fontsize=plot_cfg.font.small, loc='upper right', frameon=False)
     despine(ax)
 
-
-###################################################################
-# Performance Metric Plots
-###################################################################
 
 def plot_prediction_scatter(
     pred_df: pd.DataFrame,
@@ -284,8 +274,8 @@ def plot_calibration_curve(
     
     y_true = pred_df['y_true'].values
     y_pred = pred_df['y_pred'].values
-    y_true_finite, y_pred_finite, mask = extract_finite_mask(y_true, y_pred)
-    
+    y_true_finite, y_pred_finite, _ = extract_finite_mask(y_true, y_pred)
+
     min_samples = plot_cfg.validation.get("min_samples_for_calibration", 10)
     if len(y_true_finite) < min_samples:
         logger.warning(

@@ -39,7 +39,7 @@ def _compute_residuals(
     predicted_values: pd.Series,
 ) -> pd.Series:
     """Compute residuals as rating - predicted."""
-    return rating_values.to_numpy(dtype=float) - predicted_values.to_numpy(dtype=float)
+    return rating_values - predicted_values
 
 
 def _fit_spline_model(
@@ -50,17 +50,14 @@ def _fit_spline_model(
     """Fit spline model using statsmodels if available."""
     try:
         import statsmodels.formula.api as smf
-        import pandas as pd_statsmodels
     except ImportError:
         return None
 
     degrees_of_freedom_candidates = _get_config_value(
         config, "behavior_analysis.pain_residual.spline_df_candidates", [3, 4, 5]
     )
-    if not isinstance(degrees_of_freedom_candidates, (list, tuple)) or not degrees_of_freedom_candidates:
-        degrees_of_freedom_candidates = [3, 4, 5]
 
-    model_data = pd_statsmodels.DataFrame({
+    model_data = pd.DataFrame({
         "temp": temperature_values.to_numpy(dtype=float),
         "rating": rating_values.to_numpy(dtype=float),
     })
@@ -101,7 +98,7 @@ def _fit_spline_model(
         return None
 
     try:
-        prediction_data = pd_statsmodels.DataFrame({
+        prediction_data = pd.DataFrame({
             "temp": temperature_values.to_numpy(dtype=float),
         })
         predicted_values = best_model.predict(prediction_data)
@@ -196,7 +193,7 @@ def fit_temperature_rating_curve(
     temperature_valid = temperature_aligned[valid_mask]
     rating_valid = rating_aligned[valid_mask]
 
-    method = str(_get_config_value(config, "behavior_analysis.pain_residual.method", "spline")).strip().lower()
+    method = str(_get_config_value(config, "behavior_analysis.pain_residual.method", "spline")).lower()
 
     predicted_full = pd.Series(np.nan, index=common_index, dtype=float)
     residual_full = pd.Series(np.nan, index=common_index, dtype=float)

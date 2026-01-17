@@ -149,6 +149,38 @@ def compute_prediction_intervals(
         raise ValueError(f"Unknown method: {method}")
 
 
+def _compute_conformal_quantile(residuals: np.ndarray, alpha: float) -> float:
+    """Compute conformal quantile from residuals."""
+    n_cal = len(residuals)
+    q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
+    q_level = min(q_level, 1.0)
+    return float(np.quantile(residuals, q_level))
+
+
+def _get_cv_splitter(
+    cv_splits: int,
+    seed: int,
+    groups: Optional[np.ndarray],
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+):
+    """Get cross-validation splitter based on groups."""
+    from sklearn.model_selection import KFold, GroupKFold, LeaveOneGroupOut
+    
+    if groups is not None:
+        unique_groups = np.unique(groups)
+        n_groups = len(unique_groups)
+        if n_groups >= cv_splits:
+            cv = GroupKFold(n_splits=cv_splits)
+            return cv.split(X_train, y_train, groups)
+        else:
+            cv = LeaveOneGroupOut()
+            return cv.split(X_train, y_train, groups)
+    else:
+        cv = KFold(n_splits=cv_splits, shuffle=True, random_state=seed)
+        return cv.split(X_train)
+
+
 def _conformal_split(
     model: Any,
     X_train: np.ndarray,
@@ -178,15 +210,9 @@ def _conformal_split(
     model_fit = clone(model)
     model_fit.fit(X_proper, y_proper)
     
-    # Compute residuals on calibration set
     y_cal_pred = model_fit.predict(X_cal)
     residuals = np.abs(y_cal - y_cal_pred)
-    
-    # Compute conformal quantile
-    n_cal = len(residuals)
-    q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
-    q_level = min(q_level, 1.0)
-    q_hat = np.quantile(residuals, q_level)
+    q_hat = _compute_conformal_quantile(residuals, alpha)
     
     # Predict on test set
     y_test_pred = model_fit.predict(X_test)
@@ -215,44 +241,23 @@ def _conformal_cv_plus(
     Uses cross-validation residuals for more efficient calibration.
     Supports group-aware CV via GroupKFold or LeaveOneGroupOut.
     """
-    from sklearn.model_selection import KFold, GroupKFold, LeaveOneGroupOut
-    
     n = len(X_train)
+    split_iter = _get_cv_splitter(cv_splits, seed, groups, X_train, y_train)
     
-    # Select CV strategy based on groups
-    if groups is not None:
-        unique_groups = np.unique(groups)
-        n_groups = len(unique_groups)
-        if n_groups >= cv_splits:
-            cv = GroupKFold(n_splits=cv_splits)
-            split_iter = cv.split(X_train, y_train, groups)
-        else:
-            cv = LeaveOneGroupOut()
-            split_iter = cv.split(X_train, y_train, groups)
-    else:
-        cv = KFold(n_splits=cv_splits, shuffle=True, random_state=seed)
-        split_iter = cv.split(X_train)
-    
-    # Store residuals and which model was used for each point
     loo_residuals = np.zeros(n)
     
-    for fold_idx, (train_idx, val_idx) in enumerate(split_iter):
+    for train_idx, val_idx in split_iter:
         model_fold = clone(model)
         model_fold.fit(X_train[train_idx], y_train[train_idx])
         
         y_val_pred = model_fold.predict(X_train[val_idx])
         loo_residuals[val_idx] = np.abs(y_train[val_idx] - y_val_pred)
     
-    # Fit final model on all training data
     model_full = clone(model)
     model_full.fit(X_train, y_train)
     y_test_pred = model_full.predict(X_test)
     
-    # Compute conformal quantile
-    n_cal = len(loo_residuals)
-    q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
-    q_level = min(q_level, 1.0)
-    q_hat = np.quantile(loo_residuals, q_level)
+    q_hat = _compute_conformal_quantile(loo_residuals, alpha)
     
     return PredictionIntervalResult(
         y_pred=y_test_pred,
@@ -284,56 +289,32 @@ def _conformalized_quantile_regression(
     except ImportError:
         return _conformal_cv_plus(model, X_train, y_train, X_test, alpha, cv_splits, seed, groups)
     
-    from sklearn.model_selection import KFold, GroupKFold, LeaveOneGroupOut
-    
     n = len(X_train)
     alpha_lo = alpha / 2
     alpha_hi = 1 - alpha / 2
+    split_iter = _get_cv_splitter(cv_splits, seed, groups, X_train, y_train)
     
-    if groups is not None:
-        unique_groups = np.unique(groups)
-        n_groups = len(unique_groups)
-        if n_groups >= cv_splits:
-            cv = GroupKFold(n_splits=cv_splits)
-            split_iter = cv.split(X_train, y_train, groups)
-        else:
-            cv = LeaveOneGroupOut()
-            split_iter = cv.split(X_train, y_train, groups)
-    else:
-        cv = KFold(n_splits=cv_splits, shuffle=True, random_state=seed)
-        split_iter = cv.split(X_train)
-    
-    # Get out-of-fold quantile predictions
     loo_lower = np.zeros(n)
     loo_upper = np.zeros(n)
     
     for train_idx, val_idx in split_iter:
-        # Fit lower quantile model
         qr_low = GradientBoostingRegressor(
             loss="quantile", alpha=alpha_lo, random_state=seed
         )
         qr_low.fit(X_train[train_idx], y_train[train_idx])
         loo_lower[val_idx] = qr_low.predict(X_train[val_idx])
         
-        # Fit upper quantile model
         qr_high = GradientBoostingRegressor(
             loss="quantile", alpha=alpha_hi, random_state=seed
         )
         qr_high.fit(X_train[train_idx], y_train[train_idx])
         loo_upper[val_idx] = qr_high.predict(X_train[val_idx])
     
-    # Compute conformity scores
     E_lo = loo_lower - y_train
     E_hi = y_train - loo_upper
     scores = np.maximum(E_lo, E_hi)
+    Q_hat = _compute_conformal_quantile(scores, alpha)
     
-    # Compute conformal quantile
-    n_cal = len(scores)
-    q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
-    q_level = min(q_level, 1.0)
-    Q_hat = np.quantile(scores, q_level)
-    
-    # Fit final quantile models on all data
     qr_low_full = GradientBoostingRegressor(
         loss="quantile", alpha=alpha_lo, random_state=seed
     )
@@ -344,11 +325,9 @@ def _conformalized_quantile_regression(
     )
     qr_high_full.fit(X_train, y_train)
     
-    # Predict on test set
     lower_pred = qr_low_full.predict(X_test) - Q_hat
     upper_pred = qr_high_full.predict(X_test) + Q_hat
     
-    # Point prediction from main model
     model_full = clone(model)
     model_full.fit(X_train, y_train)
     y_test_pred = model_full.predict(X_test)
@@ -713,20 +692,3 @@ def save_prediction_intervals(
     saved["metrics"] = metrics_path
     
     return saved
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

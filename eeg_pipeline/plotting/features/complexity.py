@@ -565,11 +565,7 @@ def plot_complexity_by_condition(
         )
 
 
-# Alias for backward compatibility
-plot_complexity_by_band = plot_hjorth_by_band
-
 __all__ = [
     "plot_hjorth_by_band",
-    "plot_complexity_by_band",
     "plot_complexity_by_condition",
 ]

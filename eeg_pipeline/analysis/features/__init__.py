@@ -2,8 +2,7 @@
 EEG Feature Extraction Package
 ==============================
 
-Efficient feature extraction for EEG analysis, optimized for pain research
-and pain research.
+Efficient feature extraction for EEG analysis, optimized for pain research.
 
 Quick Start
 -----------
@@ -103,33 +102,23 @@ __all__ = [
 # Access via: from eeg_pipeline.analysis.features import <name>
 
 _LAZY_IMPORTS = {
-    # Naming utilities
-    "parse_feature_name": "eeg_pipeline.domain.features.naming",  # Authoritative parser with FeatureMetadata
-    
     # Constants and utilities (imported from their actual modules)
     "pick_eeg_channels": "eeg_pipeline.utils.analysis.channels",
-    
     # Normalization
     "normalize_train_test": "normalization",
     "zscore_normalize": "normalization",
     "robust_normalize": "normalization",
-    
     # Reliability (canonical: utils.analysis.stats.reliability)
     "ReliabilityResult": "eeg_pipeline.utils.analysis.stats.reliability",
     "compute_split_half_reliability": "eeg_pipeline.utils.analysis.stats.reliability",
     "compute_icc": "eeg_pipeline.utils.analysis.stats.reliability",
-    
     # Quality
     "compute_trial_quality_metrics": "quality",
-    
-
     # Connectivity
     "extract_connectivity_features": "connectivity",
     "extract_connectivity_from_precomputed": "connectivity",
-    
-    # Directed Connectivity
-    "extract_directed_connectivity_features": "directed_connectivity",
-    "extract_directed_connectivity_from_precomputed": "directed_connectivity",
+    "extract_directed_connectivity_features": "connectivity",
+    "extract_directed_connectivity_from_precomputed": "connectivity",
 
     # Source Localization
     "extract_source_localization_features": "source_localization",
@@ -137,7 +126,7 @@ _LAZY_IMPORTS = {
     "extract_source_localization_from_precomputed": "source_localization",
 
     # Power
-    "extract_power_features": "power",
+    "extract_power_features": "spectral",
     "extract_asymmetry_from_precomputed": "precomputed.extras",
 
     # Aperiodic
@@ -147,13 +136,8 @@ _LAZY_IMPORTS = {
     "extract_phase_features": "phase",
     "compute_pac_comodulograms": "phase",
     "extract_itpc_from_precomputed": "phase",
-    
-    
     # Complexity
     "extract_complexity_from_precomputed": "complexity",
-
-    # ML presets
-
     # Pipeline orchestrators (lazy to prevent circular imports)
     "FeaturePipeline": "eeg_pipeline.pipelines.features",
     "process_subject": "eeg_pipeline.pipelines.features",

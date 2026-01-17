@@ -15,10 +15,9 @@ from typing import Any, Optional, Tuple, Union, List, Dict, Callable
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from scipy import stats
 
-from .base import get_config_value, ensure_config, filter_finite_values
+from .base import filter_finite_values
 
 
 ###################################################################
@@ -37,8 +36,6 @@ MIN_PERMUTATIONS_FOR_ALPHA = 10
 MAX_SKEW_FOR_NULL_DISTRIBUTION = 2.0
 MAX_MONTE_CARLO_SE = 0.01
 MIN_P_VALUE_FOR_MC_WARNING = 0.1
-MIN_CORRELATION_FOR_POWER_CALC = 0.01
-EFFECTIVELY_INFINITE_SAMPLE_SIZE = 999999
 
 
 ###################################################################
@@ -111,57 +108,6 @@ class ValidationReport:
     def save(self, path: Path) -> None:
         with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
-
-
-def validate_sample_size_for_correlation(
-    n: int,
-    target_r: float = 0.3,
-    power: float = DEFAULT_POWER,
-    alpha: float = DEFAULT_ALPHA,
-) -> AssumptionCheckResult:
-    """Check if sample size is adequate for detecting target correlation.
-    
-    Uses Fisher z-transform power calculation.
-    
-    Parameters
-    ----------
-    n : int
-        Actual sample size
-    target_r : float
-        Target/expected correlation effect size
-    power : float
-        Desired statistical power
-    alpha : float
-        Significance level
-        
-    Returns
-    -------
-    AssumptionCheckResult
-        Result with passed=True if n >= required_n
-    """
-    if abs(target_r) < MIN_CORRELATION_FOR_POWER_CALC:
-        required_n = EFFECTIVELY_INFINITE_SAMPLE_SIZE
-    else:
-        correlation_clipped = np.clip(target_r, -0.999, 0.999)
-        z_correlation = np.arctanh(correlation_clipped)
-        z_alpha = stats.norm.ppf(1 - alpha / 2)
-        z_beta = stats.norm.ppf(power)
-        required_n = int(np.ceil(((z_alpha + z_beta) / z_correlation) ** 2 + 3))
-    
-    passed = n >= required_n
-    warning_message = (
-        "" if passed 
-        else f"Underpowered: n={n}, need n>={required_n} for power={power} to detect r={target_r}"
-    )
-    
-    return AssumptionCheckResult(
-        test_name="Sample Size Adequacy",
-        passed=passed,
-        statistic=float(n),
-        p_value=float(required_n),
-        warning_message=warning_message,
-        details={"target_r": target_r, "power": power, "alpha": alpha, "required_n": required_n},
-    )
 
 
 ###################################################################
@@ -496,16 +442,11 @@ def check_randomization_balance(
     deviation = abs(observed_ratio - expected_ratio)
     passed = deviation <= tolerance
     
-    # Binomial test for significant imbalance
     total_samples = len(cleaned_assignments)
     n_group1 = int(np.sum(cleaned_assignments))
     
-    # Use modern binomtest if available, fallback to binom_test
-    if hasattr(stats, 'binomtest'):
-        binom_result = stats.binomtest(n_group1, total_samples, expected_ratio)
-        binom_p_value = binom_result.pvalue
-    else:
-        binom_p_value = stats.binom_test(n_group1, total_samples, expected_ratio)
+    binom_result = stats.binomtest(n_group1, total_samples, expected_ratio)
+    binom_p_value = binom_result.pvalue
     
     warning_message = ""
     if not passed:
@@ -783,28 +724,24 @@ def validate_behavioral_contrast(
 
 
 ###################################################################
-# Original Validation Functions (preserved)
+# Baseline Window Validation
 ###################################################################
 
 
 def validate_baseline_window_pre_stimulus(
-    baseline_window: Union[Tuple[float, float], List[float], float],
-    baseline_end: Optional[float] = None,
+    baseline_window: Union[Tuple[float, float], List[float]],
     logger: Optional[logging.Logger] = None,
     *,
     strict: bool = False,
-) -> Union[bool, Tuple[float, float]]:
+) -> Tuple[float, float]:
     """Check baseline window ends before stimulus onset.
     
     Parameters
     ----------
-    baseline_window : tuple, list, or float
-        If tuple/list: (tmin, baseline_end). If float: baseline_end (tmin assumed to be before this).
-    baseline_end : float, optional
-        If baseline_window is a single float, this is ignored. If baseline_window is a tuple,
-        this parameter is ignored and baseline_end is extracted from the tuple.
+    baseline_window : tuple or list
+        Baseline window as (tmin, baseline_end)
     logger : Logger, optional
-        Logger for warnings.
+        Logger for warnings
     strict : bool, optional
         If True, raise ValueError when baseline extends past stimulus onset (t=0).
         If False (default), only log a warning. For scientifically valid baseline
@@ -812,48 +749,36 @@ def validate_baseline_window_pre_stimulus(
         
     Returns
     -------
-    bool or tuple
-        If baseline_window is a tuple/list, returns the validated tuple (tmin, baseline_end).
-        If baseline_window is a float, returns True if valid, False otherwise.
+    tuple
+        Validated tuple (tmin, baseline_end)
         
     Raises
     ------
     ValueError
-        If strict=True and baseline extends past stimulus onset.
+        If strict=True and baseline extends past stimulus onset, or if baseline_window
+        is not a tuple/list with at least 2 elements.
     """
     STIMULUS_ONSET = 0.0
     
-    def _handle_invalid_baseline(baseline_end_value: float) -> None:
-        """Handle baseline that extends past stimulus."""
-        if baseline_end_value > STIMULUS_ONSET:
-            msg = (
-                f"Baseline window extends past stimulus onset: baseline_end={baseline_end_value:.3f}s > 0. "
-                "This contaminates baseline with stimulus-evoked activity, invalidating "
-                "baseline normalization. Adjust baseline_window to end at or before t=0."
-            )
-            if strict:
-                raise ValueError(msg)
-            elif logger:
-                logger.warning(msg)
+    if not isinstance(baseline_window, (tuple, list)) or len(baseline_window) < 2:
+        raise ValueError(
+            f"baseline_window must be a tuple or list with at least 2 elements, "
+            f"got {type(baseline_window)}"
+        )
     
-    # Handle tuple/list input (new calling convention)
-    if isinstance(baseline_window, (tuple, list)) and len(baseline_window) >= 2:
-        tmin = float(baseline_window[0])
-        baseline_end_value = float(baseline_window[1])
-        _handle_invalid_baseline(baseline_end_value)
-        return (tmin, baseline_end_value)
+    tmin = float(baseline_window[0])
+    baseline_end_value = float(baseline_window[1])
     
-    # Handle old calling convention (two separate arguments)
-    if baseline_end is not None:
-        baseline_end_value = float(baseline_end)
-        _handle_invalid_baseline(baseline_end_value)
-        return baseline_end_value <= STIMULUS_ONSET
+    if baseline_end_value > STIMULUS_ONSET:
+        msg = (
+            f"Baseline window extends past stimulus onset: baseline_end={baseline_end_value:.3f}s > 0. "
+            "This contaminates baseline with stimulus-evoked activity, invalidating "
+            "baseline normalization. Adjust baseline_window to end at or before t=0."
+        )
+        if strict:
+            raise ValueError(msg)
+        elif logger:
+            logger.warning(msg)
     
-    # Handle single float input (treat as baseline_end)
-    if isinstance(baseline_window, (int, float)):
-        baseline_end_value = float(baseline_window)
-        _handle_invalid_baseline(baseline_end_value)
-        return baseline_end_value <= STIMULUS_ONSET
-    
-    raise ValueError(f"Invalid baseline_window type: {type(baseline_window)}")
+    return (tmin, baseline_end_value)
 

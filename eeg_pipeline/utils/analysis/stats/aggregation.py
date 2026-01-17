@@ -13,24 +13,13 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .base import get_ci_level
-from .correlation import fisher_z, inverse_fisher_z
-
+from .base import (
+    filter_finite_values,
+    get_ci_level,
+    get_z_critical_value,
+)
 
 _MIN_SAMPLES_FOR_STATISTICS = 2
-
-
-###################################################################
-# Internal Helpers
-###################################################################
-
-
-# Import consolidated z-critical value function from base
-from .base import get_z_critical_value as _get_z_critical_value
-
-
-# Import consolidated finite value filtering from base
-from .base import filter_finite_values as _filter_finite_values
 
 
 def _compute_mean_confidence_interval(
@@ -56,15 +45,7 @@ def _compute_mean_confidence_interval(
     standard_error = float(np.std(values, ddof=1) / np.sqrt(n))
     margin_of_error = z_critical * standard_error
     
-    ci_lower = mean - margin_of_error
-    ci_upper = mean + margin_of_error
-    
-    return mean, ci_lower, ci_upper
-
-
-###################################################################
-# Channel Statistics
-###################################################################
+    return mean, mean - margin_of_error, mean + margin_of_error
 
 
 def compute_group_channel_statistics(
@@ -86,20 +67,19 @@ def compute_group_channel_statistics(
         Dictionary mapping channel names to (mean, ci_lower, ci_upper)
     """
     ci_level = get_ci_level(config)
-    z_critical = _get_z_critical_value(ci_level)
+    z_critical = get_z_critical_value(ci_level)
     
     results = {}
     for channel_name, values in channel_data.items():
-        valid_values = _filter_finite_values(values)
+        valid_values = filter_finite_values(values)
         
         if len(valid_values) < _MIN_SAMPLES_FOR_STATISTICS:
             results[channel_name] = (np.nan, np.nan, np.nan)
             continue
         
-        mean, ci_lower, ci_upper = _compute_mean_confidence_interval(
+        results[channel_name] = _compute_mean_confidence_interval(
             valid_values, z_critical
         )
-        results[channel_name] = (mean, ci_lower, ci_upper)
     
     return results
 
@@ -122,23 +102,18 @@ def compute_channel_confidence_interval(
     Tuple[float, float]
         (ci_lower, ci_upper) in z-space
     """
-    ci_level = get_ci_level(config)
-    valid_z_scores = _filter_finite_values(z_scores)
+    valid_z_scores = filter_finite_values(z_scores)
     
     if len(valid_z_scores) < _MIN_SAMPLES_FOR_STATISTICS:
         return np.nan, np.nan
     
-    z_critical = _get_z_critical_value(ci_level)
+    ci_level = get_ci_level(config)
+    z_critical = get_z_critical_value(ci_level)
     _, ci_lower, ci_upper = _compute_mean_confidence_interval(
         valid_z_scores, z_critical
     )
     
     return ci_lower, ci_upper
-
-
-###################################################################
-# Data Pooling
-###################################################################
 
 
 def pool_data_by_strategy(
@@ -195,11 +170,6 @@ def _pool_by_mean(
     return np.array(x_means), np.array(y_means)
 
 
-###################################################################
-# Band Statistics
-###################################################################
-
-
 def compute_band_summary_statistics(
     band_data: pd.Series,
     config: Optional[Any] = None,
@@ -225,7 +195,7 @@ def compute_band_summary_statistics(
         return np.nan, np.nan, np.nan, n_samples
     
     ci_level = get_ci_level(config)
-    z_critical = _get_z_critical_value(ci_level)
+    z_critical = get_z_critical_value(ci_level)
     mean, ci_lower, ci_upper = _compute_mean_confidence_interval(
         valid_values, z_critical
     )
@@ -295,7 +265,7 @@ def compute_fisher_transformed_mean(
     
     def _fisher_mean_per_edge(values: pd.Series) -> float:
         """Compute Fisher-transformed mean for a single edge."""
-        valid_values = _filter_finite_values(values.values)
+        valid_values = filter_finite_values(values.values)
         if len(valid_values) == 0:
             return np.nan
         return fisher_z_transform_mean(valid_values, config)
@@ -329,7 +299,7 @@ def compute_group_band_statistics(
     """
     if ci_multiplier is None:
         ci_level = get_ci_level(config)
-        ci_multiplier = _get_z_critical_value(ci_level)
+        ci_multiplier = get_z_critical_value(ci_level)
     
     band_names = []
     means = []
@@ -360,11 +330,6 @@ def compute_group_band_statistics(
     return band_names, means, ci_lowers, ci_uppers, sample_sizes
 
 
-###################################################################
-# Error Bar Conversion
-###################################################################
-
-
 def compute_error_bars_from_ci_dicts(
     values: List[float],
     ci_dicts: List[Optional[Dict[str, List[float]]]],
@@ -387,7 +352,13 @@ def compute_error_bars_from_ci_dicts(
     upper_errors = []
     
     for mean_value, ci_dict in zip(values, ci_dicts):
-        if not _has_valid_ci_dict(ci_dict):
+        has_valid_ci = (
+            ci_dict is not None
+            and "low" in ci_dict
+            and "high" in ci_dict
+        )
+        
+        if not has_valid_ci:
             lower_errors.append(0.0)
             upper_errors.append(0.0)
             continue
@@ -399,11 +370,6 @@ def compute_error_bars_from_ci_dicts(
         upper_errors.append(ci_upper_value - mean_value)
     
     return lower_errors, upper_errors
-
-
-def _has_valid_ci_dict(ci_dict: Optional[Dict[str, List[float]]]) -> bool:
-    """Check if CI dictionary has required keys."""
-    return ci_dict is not None and "low" in ci_dict and "high" in ci_dict
 
 
 def compute_error_bars_from_arrays(
@@ -431,11 +397,6 @@ def compute_error_bars_from_arrays(
     lower_errors = [mean - lower for mean, lower in zip(means, ci_lower)]
     upper_errors = [upper - mean for mean, upper in zip(means, ci_upper)]
     return np.array([lower_errors, upper_errors])
-
-
-###################################################################
-# Domain-Specific Helpers
-###################################################################
 
 
 def count_trials_by_condition(
@@ -489,8 +450,8 @@ def compute_duration_p_value(
     float
         p-value from Mann-Whitney U test, or np.nan if insufficient data
     """
-    valid_nonpain = _filter_finite_values(nonpain_data)
-    valid_pain = _filter_finite_values(pain_data)
+    valid_nonpain = filter_finite_values(nonpain_data)
+    valid_pain = filter_finite_values(pain_data)
     
     if len(valid_nonpain) < _MIN_SAMPLES_FOR_STATISTICS:
         return np.nan

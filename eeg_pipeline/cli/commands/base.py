@@ -58,20 +58,24 @@ _FEATURE_AVAILABILITY_CATEGORIES = [
 ###################################################################
 
 
+def _read_parquet_columns_only(path: Path) -> List[str]:
+    """Read only column names from parquet file without loading data."""
+    import pyarrow.parquet as pq
+    parquet_file = pq.ParquetFile(path)
+    return [col for col in parquet_file.schema_arrow.names]
+
+
 def detect_available_bands(features_dir: Union[str, Path]) -> List[str]:
     """Detect available frequency bands from feature file columns."""
     bands = set(FREQUENCY_BANDS)
     found_bands: Set[str] = set()
 
     features_path = Path(features_dir)
-    # Only look in subfolders for new organized structure
-    for tsv_file in features_path.glob("*/features_*.tsv"):
+    for feature_file in features_path.rglob("features_*.parquet"):
         try:
-            with open(tsv_file, "r") as f:
-                header = f.readline().strip()
-            columns = header.split("\t")
+            columns = _read_parquet_columns_only(feature_file)
             found_bands.update(_find_bands_in_columns(columns, bands))
-        except Exception:
+        except (OSError, ValueError, ImportError):
             continue
 
     return sorted(found_bands)
@@ -110,21 +114,21 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     }
     
     category_patterns = {
-        "power": ["features_power*.tsv"],
-        "connectivity": ["features_connectivity*"],
-        "directedconnectivity": ["features_directedconnectivity*"],
-        "sourcelocalization": ["features_sourcelocalization*"],
-        "aperiodic": ["features_aperiodic*.tsv"],
-        "erp": ["features_erp*.tsv"],
-        "bursts": ["features_bursts*.tsv"],
-        "itpc": ["features_itpc*.tsv"],
-        "pac": ["features_pac*.tsv"],
-        "complexity": ["features_complexity*.tsv"],
-        "quality": ["features_quality*.tsv"],
-        "erds": ["features_erds*.tsv"],
-        "spectral": ["features_spectral*.tsv"],
-        "ratios": ["features_ratios*.tsv"],
-        "asymmetry": ["features_asymmetry*.tsv"],
+        "power": ["features_power*.parquet"],
+        "connectivity": ["features_connectivity*.parquet"],
+        "directedconnectivity": ["features_directedconnectivity*.parquet"],
+        "sourcelocalization": ["features_sourcelocalization*.parquet"],
+        "aperiodic": ["features_aperiodic*.parquet"],
+        "erp": ["features_erp*.parquet"],
+        "bursts": ["features_bursts*.parquet"],
+        "itpc": ["features_itpc*.parquet"],
+        "pac": ["features_pac*.parquet"],
+        "complexity": ["features_complexity*.parquet"],
+        "quality": ["features_quality*.parquet"],
+        "erds": ["features_erds*.parquet"],
+        "spectral": ["features_spectral*.parquet"],
+        "ratios": ["features_ratios*.parquet"],
+        "asymmetry": ["features_asymmetry*.parquet"],
     }
     
     bands = set(FREQUENCY_BANDS)
@@ -133,17 +137,15 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     for category, patterns in category_patterns.items():
         found_file = None
         if features_path.exists():
-            for pattern in patterns:
-                subfolder_path = features_path / category
-                if subfolder_path.exists():
-                    # Use rglob to find features in subfolders (e.g. fmri_informed/eeg_only)
+            subfolder_path = features_path / category
+            if subfolder_path.exists():
+                for pattern in patterns:
                     files = list(subfolder_path.rglob(pattern))
                     if files:
                         found_file = max(files, key=lambda f: f.stat().st_mtime)
                         break
-                # Legacy fallback removed
         
-        if found_file and found_file.exists():
+        if found_file:
             mtime_utc = datetime.utcfromtimestamp(found_file.stat().st_mtime)
             mtime_str = mtime_utc.isoformat() + "Z"
             
@@ -153,14 +155,12 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
             }
 
             try:
-                with open(found_file, "r") as f:
-                    header = f.readline().strip()
-                header_columns = header.split("\t")
+                header_columns = _read_parquet_columns_only(found_file)
                 bands_in_file = _find_bands_in_columns(header_columns, bands)
                 for band in bands_in_file:
                     if band not in band_times or mtime_str > band_times[band]:
                         band_times[band] = mtime_str
-            except Exception:
+            except (OSError, ValueError, ImportError):
                 pass
         else:
             result["features"][category] = {"available": False, "last_modified": None}
@@ -172,46 +172,23 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
             result["bands"][band] = {"available": False, "last_modified": None}
     
     stats_dir = features_path.parent / "stats"
-    # Patterns are searched via rglob within stats_dir, so they can match nested subfolders.
-    # Keep these aligned with outputs produced by eeg_pipeline.analysis.behavior.orchestration.
-    # Subfolder structure: stats/<computation_type>/<filename>.tsv
     computation_patterns = {
-        # trial_table/ subfolder
-        "trial_table": ["trial_table/trials*.tsv", "trial_table/trials*.parquet", "trials*.tsv", "trials*.parquet"],
-        # lag_features/ subfolder  
-        "lag_features": ["lag_features/trials_with_lags*.tsv", "lag_features/*.metadata.json", "trials_with_lags*.tsv"],
-        # pain_residual/ subfolder
-        "pain_residual": ["pain_residual/trials_with_residual*.tsv", "pain_residual/*.metadata.json", "trials_with_residual*.tsv"],
-        # temperature_models/ subfolder
+        "trial_table": ["trial_table/trials*.tsv", "trial_table/trials*.parquet"],
+        "lag_features": ["lag_features/trials_with_lags*.tsv", "lag_features/*.metadata.json"],
+        "pain_residual": ["pain_residual/trials_with_residual*.tsv", "pain_residual/*.metadata.json"],
         "temperature_models": [
             "temperature_models/model_comparison*.tsv",
             "temperature_models/breakpoint*.tsv",
-            "model_comparison*.tsv",
-            "breakpoint_candidates*.tsv",
         ],
-        # trialwise_regression/ subfolder
-        "regression": ["trialwise_regression/regression_feature_effects*.tsv", "regression_feature_effects*.tsv"],
-        # feature_models/ subfolder
-        "models": ["feature_models/models_feature_effects*.tsv", "models_feature_effects*.tsv"],
-        # stability_groupwise/ subfolder
-        "stability": ["stability_groupwise/stability_groupwise*.tsv", "stability_groupwise*.tsv"],
-        # consistency_summary/ subfolder
-        "consistency": ["consistency_summary/consistency_summary*.tsv", "consistency_summary*.tsv"],
-        # influence_diagnostics/ subfolder
-        "influence": ["influence_diagnostics/influence_diagnostics*.tsv", "influence_diagnostics*.tsv"],
-        # subject_report/ subfolder
-        "report": ["subject_report/subject_report*.md", "subject_report*.md", "subject_report*.html"],
-        # correlations/ subfolder
-        "correlations": [
-            "correlations/correlations*.tsv",
-            "correlations*.tsv",
-            "*_topomap_*_correlations_*.tsv",
-        ],
-        # pain_sensitivity/ subfolder
-        "pain_sensitivity": ["pain_sensitivity/pain_sensitivity*.tsv", "pain_sensitivity*.tsv"],
-        # condition_effects/ subfolder
-        "condition": ["condition_effects/condition_effects*.tsv", "condition_effects*.tsv"],
-        # temporal_correlations/ subfolder
+        "regression": ["trialwise_regression/regression_feature_effects*.tsv"],
+        "models": ["feature_models/models_feature_effects*.tsv"],
+        "stability": ["stability_groupwise/stability_groupwise*.tsv"],
+        "consistency": ["consistency_summary/consistency_summary*.tsv"],
+        "influence": ["influence_diagnostics/influence_diagnostics*.tsv"],
+        "report": ["subject_report/subject_report*.md", "subject_report/subject_report*.html"],
+        "correlations": ["correlations/correlations*.tsv", "*_topomap_*_correlations_*.tsv"],
+        "pain_sensitivity": ["pain_sensitivity/pain_sensitivity*.tsv"],
+        "condition": ["condition_effects/condition_effects*.tsv"],
         "temporal": [
             "temporal_correlations/temporal_correlations_*.tsv",
             "temporal_correlations/normalized_results*.tsv",
@@ -220,30 +197,29 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
             "corr_stats_temporal_combined*.tsv",
             "corr_stats_tf_*.tsv",
         ],
-        # cluster/ subfolder
-        "cluster": ["cluster/cluster_results_*.tsv", "cluster_results_*.tsv", "cluster_*.tsv", "null_distribution_*.json"],
-        # mediation/ subfolder
-        "mediation": ["mediation/mediation*.tsv", "mediation*.tsv"],
-        # moderation/ subfolder
-        "moderation": ["moderation/moderation_results*.tsv", "moderation_results*.tsv"],
-        # mixed_effects/ subfolder
-        "mixed_effects": ["mixed_effects/mixed_effects*.tsv", "mixed_effects*.tsv", "lme_*.tsv"],
+        "cluster": ["cluster/cluster_results_*.tsv", "cluster/null_distribution_*.json"],
+        "mediation": ["mediation/mediation*.tsv"],
+        "moderation": ["moderation/moderation_results*.tsv"],
+        "mixed_effects": ["mixed_effects/mixed_effects*.tsv"],
     }
     
     for comp, patterns in computation_patterns.items():
         found_file = None
         if stats_dir.exists():
             for pattern in patterns:
-                # Use rglob to search recursively in subdirectories
                 files = list(stats_dir.rglob(pattern))
-                # Filter out temporal correlation files from regular correlations check
                 if comp == "correlations":
-                    files = [f for f in files if "temporal" not in f.name.lower() and not f.name.startswith("corr_stats_temporal") and not f.name.startswith("temporal_correlations")]
+                    files = [
+                        f for f in files
+                        if "temporal" not in f.name.lower()
+                        and not f.name.startswith("corr_stats_temporal")
+                        and not f.name.startswith("temporal_correlations")
+                    ]
                 if files:
                     found_file = max(files, key=lambda f: f.stat().st_mtime)
                     break
         
-        if found_file and found_file.exists():
+        if found_file:
             mtime_utc = datetime.utcfromtimestamp(found_file.stat().st_mtime)
             mtime_str = mtime_utc.isoformat() + "Z"
             result["computations"][comp] = {
@@ -281,6 +257,7 @@ def discover_event_columns(
     result = {"columns": [], "values": {}, "source": None, "file": None}
     
     events_file = None
+    patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"] if task else ["*_events.tsv"]
     
     if subject:
         subj_id = subject.replace("sub-", "")
@@ -288,7 +265,6 @@ def discover_event_columns(
         if subj_dir.exists():
             eeg_dir = subj_dir / "eeg"
             if eeg_dir.exists():
-                patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"] if task else ["*_events.tsv"]
                 for pattern in patterns:
                     files = list(eeg_dir.glob(pattern))
                     if files:
@@ -300,7 +276,6 @@ def discover_event_columns(
             eeg_dir = subj_dir / "eeg"
             if not eeg_dir.exists():
                 continue
-            patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"] if task else ["*_events.tsv"]
             for pattern in patterns:
                 files = list(eeg_dir.glob(pattern))
                 if files:
@@ -309,7 +284,7 @@ def discover_event_columns(
             if events_file:
                 break
     
-    if not events_file or not events_file.exists():
+    if not events_file:
         return result
     
     try:
@@ -326,7 +301,7 @@ def discover_event_columns(
             if len(unique_vals) <= 50:
                 vals = [str(v) for v in unique_vals if pd.notna(v)]
                 result["values"][col] = sorted(set(vals))
-    except Exception:
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
         pass
     
     return result
@@ -344,12 +319,13 @@ def discover_trial_table_columns(
     result = {"columns": [], "values": {}, "source": None, "file": None}
     
     trial_file = None
+    patterns = ["trials*.tsv", "trial_table*.tsv"]
     
     if subject:
         subj_id = subject.replace("sub-", "")
         stats_dir = deriv_root / "stats" / f"sub-{subj_id}"
         if stats_dir.exists():
-            for pattern in ["trials*.tsv", "trial_table*.tsv"]:
+            for pattern in patterns:
                 files = list(stats_dir.glob(pattern))
                 if files:
                     trial_file = files[0]
@@ -357,7 +333,7 @@ def discover_trial_table_columns(
     
     if not trial_file:
         for stats_dir in sorted(deriv_root.glob("stats/sub-*"))[:5]:
-            for pattern in ["trials*.tsv", "trial_table*.tsv"]:
+            for pattern in patterns:
                 files = list(stats_dir.glob(pattern))
                 if files:
                     trial_file = files[0]
@@ -365,7 +341,7 @@ def discover_trial_table_columns(
             if trial_file:
                 break
     
-    if not trial_file or not trial_file.exists():
+    if not trial_file:
         return result
     
     try:
@@ -384,7 +360,7 @@ def discover_trial_table_columns(
             if len(unique_vals) <= 50:
                 vals = [str(v) for v in unique_vals if pd.notna(v)]
                 result["values"][col] = sorted(set(vals))
-    except Exception:
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
         pass
     
     return result
@@ -418,12 +394,12 @@ def discover_fmri_event_columns(
     result = {"columns": [], "values": {}, "source": "fmri_events", "file": None}
     
     events_file = None
+    patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"]
     
     if subject:
         subj_id = subject.replace("sub-", "")
         func_dir = fmri_root / f"sub-{subj_id}" / "func"
         if func_dir.exists():
-            patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"]
             for pattern in patterns:
                 files = list(func_dir.glob(pattern))
                 if files:
@@ -435,7 +411,6 @@ def discover_fmri_event_columns(
             func_dir = subj_dir / "func"
             if not func_dir.exists():
                 continue
-            patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"]
             for pattern in patterns:
                 files = list(func_dir.glob(pattern))
                 if files:
@@ -444,7 +419,7 @@ def discover_fmri_event_columns(
             if events_file:
                 break
     
-    if not events_file or not events_file.exists():
+    if not events_file:
         return result
     
     try:
@@ -460,7 +435,7 @@ def discover_fmri_event_columns(
             if len(unique_vals) <= 50:
                 vals = [str(v) for v in unique_vals if pd.notna(v)]
                 result["values"][col] = sorted(set(vals))
-    except Exception:
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
         pass
     
     return result

@@ -23,7 +23,6 @@ from eeg_pipeline.utils.analysis.stats._regression_utils import _ols_fit, _r2
 
 
 _MIN_SAMPLE_SIZE_FOR_REGRESSION = 2
-_MIN_VARIANCE_THRESHOLD = 1e-10
 _MAX_R_SQUARED_FOR_VIF = 0.9999
 _MIN_SAMPLE_SIZE_FOR_LEVERAGE = 4
 _MIN_SAMPLE_SIZE_FOR_MOMENTS = 8

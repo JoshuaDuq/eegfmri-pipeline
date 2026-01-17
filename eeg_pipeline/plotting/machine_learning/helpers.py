@@ -118,32 +118,6 @@ def create_bar_plot(
     despine(ax)
 
 
-def create_bar_plot_without_zero_line(
-    ax: Any,
-    x_positions: np.ndarray,
-    values: np.ndarray,
-    labels: list[str],
-    ylabel: str,
-    plot_cfg: Any,
-    color: Optional[str] = None,
-    alpha: Optional[float] = None,
-    width: Optional[float] = None,
-) -> None:
-    """Create a bar plot with standard styling without zero reference line."""
-    if color is None:
-        color = plot_cfg.style.colors.gray
-    if alpha is None:
-        alpha = plot_cfg.style.bar.alpha
-    if width is None:
-        width = plot_cfg.style.bar.width
-    
-    ax.bar(x_positions, values, color=color, alpha=alpha, width=width)
-    ax.set_ylabel(ylabel)
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels(labels, rotation=45, ha="right")
-    despine(ax)
-
-
 def _validate_prediction_dataframe(
     pred_df: pd.DataFrame,
     model_name: str,

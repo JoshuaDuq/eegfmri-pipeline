@@ -13,10 +13,9 @@ import numpy as np
 from scipy import stats as scipy_stats
 
 from .base import get_ci_level, get_fdr_alpha
-from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
 
-def format_p_value(p: float) -> str:
+def format_p_value(p: Optional[float]) -> str:
     """Format p-value for display."""
     if p is None or not isinstance(p, (int, float)):
         return "p=N/A"
@@ -39,7 +38,7 @@ def format_correlation_text(r_val: float, p_val: Optional[float] = None) -> str:
 
 
 def format_cluster_ann(
-    p: float,
+    p: Optional[float],
     k: Optional[int] = None,
     mass: Optional[float] = None,
     config: Optional[Any] = None,
@@ -128,11 +127,9 @@ def _extract_confidence_interval(
     ci: Optional[tuple[float, float]],
 ) -> tuple[Optional[float], Optional[float]]:
     """Extract confidence interval bounds from tuple."""
-    if ci is None:
+    if ci is None or not isinstance(ci, tuple) or len(ci) != 2:
         return None, None
-    if isinstance(ci, tuple) and len(ci) == 2:
-        return ci[0], ci[1]
-    return None, None
+    return ci[0], ci[1]
 
 
 def _format_correlation_main_text(
@@ -154,10 +151,11 @@ def _format_confidence_interval_text(
 ) -> str:
     """Format confidence interval text, computing Fisher Z CI if needed."""
     if ci_low is None or ci_high is None:
-        if np.isfinite(r) and n > 3:
-            from .correlation import fisher_ci
-            ci_level = get_ci_level(config)
-            ci_low, ci_high = fisher_ci(r, n, config=config, ci_level=ci_level)
+        if not (np.isfinite(r) and n > 3):
+            return ""
+        from .correlation import fisher_ci
+        ci_level = get_ci_level(config)
+        ci_low, ci_high = fisher_ci(r, n, config=config, ci_level=ci_level)
 
     if ci_low is None or ci_high is None:
         return ""
@@ -203,8 +201,6 @@ def _format_stats_tag(stats_tag: Optional[str]) -> str:
     if stats_tag:
         return f" [{stats_tag}]"
     return ""
-
-
 
 
 def _compute_bf10_correlation(r: float, n: int) -> float:
@@ -297,7 +293,3 @@ def _interpret_bayes_factor(bf10: float) -> str:
         return "strong H₀"
     else:
         return "very strong H₀"
-
-
-# _safe_float moved to base.py for better organization
-# Re-exported here for backward compatibility

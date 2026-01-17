@@ -5,11 +5,6 @@ import (
 	"time"
 )
 
-const (
-	minISOStringLength = 19 // Minimum length for "2006-01-02T15:04:05" format
-	hoursPerDay        = 24
-)
-
 // formatRelativeTime converts ISO timestamp to relative time string.
 // Returns empty string if timestamp cannot be parsed.
 func formatRelativeTime(isoTime string) string {
@@ -25,22 +20,16 @@ func formatRelativeTime(isoTime string) string {
 	return formatTimeAgo(time.Since(parsedTime))
 }
 
-// parseISOTimestamp attempts to parse ISO timestamp in multiple formats.
+// parseISOTimestamp parses ISO timestamp in RFC3339 formats.
 // Returns zero time if parsing fails.
 func parseISOTimestamp(isoTime string) time.Time {
-	parsedTime, err := time.Parse(time.RFC3339, isoTime)
-	if err == nil {
-		return parsedTime
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
 	}
 
-	parsedTime, err = time.Parse(time.RFC3339Nano, isoTime)
-	if err == nil {
-		return parsedTime
-	}
-
-	if len(isoTime) >= minISOStringLength {
-		parsedTime, err = time.Parse("2006-01-02T15:04:05", isoTime[:minISOStringLength])
-		if err == nil {
+	for _, format := range formats {
+		if parsedTime, err := time.Parse(format, isoTime); err == nil {
 			return parsedTime
 		}
 	}
@@ -55,7 +44,7 @@ func formatTimeAgo(duration time.Duration) string {
 		return "just now"
 	case duration < time.Hour:
 		return formatMinutes(duration)
-	case duration < hoursPerDay*time.Hour:
+	case duration < 24*time.Hour:
 		return formatHours(duration)
 	default:
 		return formatDays(duration)
@@ -82,7 +71,7 @@ func formatHours(duration time.Duration) string {
 
 // formatDays formats duration as days ago string.
 func formatDays(duration time.Duration) string {
-	days := int(duration.Hours() / hoursPerDay)
+	days := int(duration.Hours() / 24)
 	if days == 1 {
 		return "1 day ago"
 	}

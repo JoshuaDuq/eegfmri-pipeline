@@ -20,15 +20,8 @@ from eeg_pipeline.infra.logging import get_module_logger
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import read_tsv
 
-from eeg_pipeline.plotting.machine_learning.comparisons import (
-    plot_incremental_validity,
-    plot_model_comparison,
-    plot_riemann_band_comparison,
-    plot_riemann_sliding_window,
-)
 from eeg_pipeline.plotting.machine_learning.helpers import plot_residual_diagnostics
 from eeg_pipeline.plotting.machine_learning.performance import (
-    plot_bootstrap_distributions,
     plot_calibration_curve,
     plot_ml_null_hist,
     plot_per_subject_performance,
@@ -36,14 +29,8 @@ from eeg_pipeline.plotting.machine_learning.performance import (
     plot_prediction_scatter,
 )
 from eeg_pipeline.plotting.machine_learning.time_generalization import (
-    plot_time_generalization_matrix,
     plot_time_generalization_with_null,
 )
-
-
-###################################################################
-# Helper Functions
-###################################################################
 
 
 def _get_logger(logger: Optional[logging.Logger]) -> logging.Logger:
@@ -51,20 +38,12 @@ def _get_logger(logger: Optional[logging.Logger]) -> logging.Logger:
     return logger if logger is not None else get_module_logger()
 
 
-def _ensure_plots_directory(plots_dir: Path, logger: logging.Logger) -> None:
-    """Ensure plots directory exists."""
-    ensure_dir(plots_dir)
-
-
 def _load_predictions_file(results_dir: Path, logger: logging.Logger) -> Optional[Path]:
     """Find and return path to predictions file, or None if not found."""
-    pred_path = results_dir / "loso_predictions.tsv"
-    if pred_path.exists():
-        return pred_path
-    
-    alt_path = results_dir / "cv_predictions.tsv"
-    if alt_path.exists():
-        return alt_path
+    for filename in ["loso_predictions.tsv", "cv_predictions.tsv"]:
+        pred_path = results_dir / filename
+        if pred_path.exists():
+            return pred_path
     
     logger.warning(f"Predictions file not found in {results_dir}")
     return None
@@ -78,6 +57,14 @@ def _load_metrics_file(results_dir: Path) -> Dict[str, float]:
     
     with open(metrics_path) as f:
         return json.load(f)
+
+
+def _find_group_column(pred_df: pd.DataFrame) -> Optional[str]:
+    """Find the appropriate group column in predictions dataframe."""
+    for col in ["subject_id", "group"]:
+        if col in pred_df.columns:
+            return col
+    return None
 
 
 def _compute_per_subject_metrics(
@@ -106,10 +93,7 @@ def _compute_per_subject_metrics(
             "r2": r2_value,
         })
     
-    if not per_subject_records:
-        return None
-    
-    return pd.DataFrame(per_subject_records)
+    return pd.DataFrame(per_subject_records) if per_subject_records else None
 
 
 def _extract_model_prefix(pred_path: Path) -> str:
@@ -117,6 +101,13 @@ def _extract_model_prefix(pred_path: Path) -> str:
     if pred_path.name == "loso_predictions.tsv":
         return "loso"
     return pred_path.stem.replace("_predictions", "") or "cv"
+
+
+def _compute_p_value(null_distribution: np.ndarray, observed_value: float) -> float:
+    """Compute p-value from null distribution and observed value."""
+    if null_distribution.size == 0:
+        return 1.0
+    return (null_distribution >= observed_value).mean()
 
 
 def _plot_roc_curve(
@@ -165,218 +156,124 @@ def _plot_confusion_matrix(
         fig.tight_layout()
         fig.savefig(save_path, dpi=150)
         plt.close(fig)
+        logger.info(f"Saved confusion matrix to {save_path}")
     except (ValueError, KeyError) as exc:
         logger.warning(f"Confusion matrix plot failed: {exc}")
 
 
-###################################################################
-# Regression ML Visualization
-###################################################################
-
-
-def visualize_regression_results(
-    pred_df: pd.DataFrame,
-    per_subj_df: pd.DataFrame,
+def _plot_null_distribution_if_available(
+    results_dir: Path,
     pooled_metrics: Dict[str, float],
+    prefix: str,
+    config: Optional[Any],
+    logger: logging.Logger,
+) -> None:
+    """Plot null distribution histogram if available."""
+    null_path = results_dir / "loso_null_elasticnet.npz"
+    if not null_path.exists():
+        return
+
+    data = np.load(null_path)
+    null_rs = data.get("null_r")
+    empirical_r = pooled_metrics.get("pearson_r", np.nan)
+
+    if null_rs is None or null_rs.size == 0 or not np.isfinite(empirical_r):
+        return
+
+    plots_dir = results_dir / "plots"
+    plot_ml_null_hist(
+        null_r=null_rs,
+        empirical_r=empirical_r,
+        save_path=plots_dir / f"{prefix}_null_distribution",
+        config=config,
+    )
+
+
+def _plot_classification_roc_curve(
+    pred_df: pd.DataFrame,
     model_name: str,
     plots_dir: Path,
-    config: Optional[Any] = None,
-    null_r: Optional[np.ndarray] = None,
-    empirical_r: Optional[float] = None,
-    bootstrap_results: Optional[Dict[str, Any]] = None,
-    cal_metrics: Optional[Dict[str, float]] = None,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger,
 ) -> None:
-    """Generate regression machine learning visualizations from in-memory results."""
-    logger = _get_logger(logger)
-    _ensure_plots_directory(plots_dir, logger)
+    """Plot ROC curve for classification results."""
+    required_cols = ["y_true", "y_prob"]
+    if not all(col in pred_df.columns for col in required_cols):
+        return
 
-    logger.info(f"Creating regression ML visualizations for {model_name}...")
+    save_path = plots_dir / f"roc_curve_{model_name}.png"
+    _plot_roc_curve(pred_df["y_true"], pred_df["y_prob"], model_name, save_path, logger)
 
-    plot_prediction_scatter(
-        pred_df=pred_df,
-        model_name=model_name,
-        pooled_metrics=pooled_metrics,
-        save_path=plots_dir / f"{model_name}_prediction_scatter",
-        config=config,
-    )
 
-    plot_per_subject_performance(
-        per_subj_df=per_subj_df,
-        model_name=model_name,
-        save_path=plots_dir / f"{model_name}_per_subject_performance",
-        config=config,
-    )
+def _plot_classification_confusion_matrix(
+    pred_df: pd.DataFrame,
+    model_name: str,
+    plots_dir: Path,
+    logger: logging.Logger,
+) -> None:
+    """Plot confusion matrix for classification results."""
+    required_cols = ["y_true", "y_pred"]
+    if not all(col in pred_df.columns for col in required_cols):
+        return
 
-    plot_residual_diagnostics(
-        pred_df=pred_df,
-        model_name=model_name,
-        save_path=plots_dir / f"{model_name}_residual_diagnostics",
-        config=config,
-    )
+    save_path = plots_dir / f"confusion_matrix_{model_name}.png"
+    _plot_confusion_matrix(pred_df["y_true"], pred_df["y_pred"], model_name, save_path, logger)
 
-    if null_r is not None and empirical_r is not None:
-        plot_ml_null_hist(
-            null_r=null_r,
-            empirical_r=empirical_r,
-            save_path=plots_dir / f"{model_name}_null_histogram",
-            config=config,
-        )
 
-    if cal_metrics is not None:
+def _plot_classification_calibration(
+    pred_df: pd.DataFrame,
+    model_name: str,
+    plots_dir: Path,
+    config: Optional[Any],
+    logger: logging.Logger,
+) -> None:
+    """Plot calibration curve for classification results."""
+    required_cols = ["y_true", "y_prob"]
+    if not all(col in pred_df.columns for col in required_cols):
+        return
+
+    try:
         plot_calibration_curve(
             pred_df=pred_df,
             model_name=model_name,
-            cal_metrics=cal_metrics,
-            save_path=plots_dir / f"{model_name}_calibration_curve",
+            cal_metrics={"model": model_name},
+            save_path=plots_dir / f"calibration_{model_name}",
             config=config,
         )
-
-    if bootstrap_results is not None:
-        plot_bootstrap_distributions(
-            bootstrap_results=bootstrap_results,
-            save_path=plots_dir / f"{model_name}_bootstrap_distributions",
-            config=config,
-        )
-
-    logger.info(f"Regression machine learning visualizations saved to {plots_dir}")
+    except (ValueError, KeyError) as exc:
+        logger.warning(f"Calibration curve failed: {exc}")
 
 
-###################################################################
-# Time Generalization Visualization
-###################################################################
-
-
-def visualize_time_generalization(
-    tg_matrix: np.ndarray,
-    window_centers: np.ndarray,
+def _plot_classification_null_distribution(
+    results_dir: Path,
+    pooled_metrics: Dict[str, Any],
+    model_name: str,
     plots_dir: Path,
-    metric: str = "r",
-    null_matrix: Optional[np.ndarray] = None,
-    config: Optional[Any] = None,
-    logger: Optional[logging.Logger] = None,
+    config: Optional[Any],
+    logger: logging.Logger,
 ) -> None:
-    """Generate time-generalization visualizations from in-memory results."""
-    logger = _get_logger(logger)
-    _ensure_plots_directory(plots_dir, logger)
-
-    logger.info("Creating time-generalization visualizations...")
-
-    if null_matrix is not None:
-        plot_time_generalization_with_null(
-            tg_matrix=tg_matrix,
-            null_matrix=null_matrix,
-            window_centers=window_centers,
-            save_path=plots_dir / "time_generalization_with_null",
-            metric=metric,
-            config=config,
-        )
-    else:
-        plot_time_generalization_matrix(
-            tg_matrix=tg_matrix,
-            window_centers=window_centers,
-            save_path=plots_dir / "time_generalization_matrix",
-            metric=metric,
-            config=config,
-        )
-
-    logger.info(f"Time-generalization visualizations saved to {plots_dir}")
-
-
-###################################################################
-# Model Comparison Visualization
-###################################################################
-
-
-def visualize_model_comparisons(
-    models_dict: Dict[str, Dict[str, float]],
-    plots_dir: Path,
-    config: Optional[Any] = None,
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    """Generate model comparison visualizations."""
-    logger = _get_logger(logger)
-    _ensure_plots_directory(plots_dir, logger)
-
-    logger.info("Creating model comparison visualizations...")
-
-    plot_model_comparison(
-        models_dict=models_dict,
-        save_path=plots_dir / "model_comparison",
-        config=config,
-    )
-
-    logger.info(f"Model comparison visualizations saved to {plots_dir}")
-
-
-###################################################################
-# Riemann Analysis Visualization
-###################################################################
-
-
-def visualize_riemann_analysis(
-    band_results: Optional[Dict[str, Dict[str, float]]] = None,
-    sliding_df: Optional[pd.DataFrame] = None,
-    plots_dir: Optional[Path] = None,
-    config: Optional[Any] = None,
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    """Generate Riemann analysis visualizations."""
-    logger = _get_logger(logger)
-
-    if plots_dir is None:
-        logger.warning("No plots directory provided for Riemann visualizations")
+    """Plot null distribution for classification results if available."""
+    null_paths = list(results_dir.glob("loso_null_*.npz"))
+    if not null_paths:
         return
 
-    _ensure_plots_directory(plots_dir, logger)
-    logger.info("Creating Riemann analysis visualizations...")
+    try:
+        data = np.load(null_paths[0])
+        null_auc = data.get("null_auc")
+        if null_auc is None or null_auc.size == 0:
+            return
 
-    if band_results is not None:
-        plot_riemann_band_comparison(
-            band_results=band_results,
-            save_path=plots_dir / "riemann_band_comparison",
+        observed_auc = pooled_metrics.get("auc", 0.0)
+        p_value = _compute_p_value(null_auc, observed_auc)
+
+        plot_permutation_null(
+            null_rs=null_auc,
+            observed_r=observed_auc,
+            p_value=p_value,
+            save_path=plots_dir / f"null_distribution_{model_name}.png",
             config=config,
         )
-
-    if sliding_df is not None:
-        plot_riemann_sliding_window(
-            sliding_df=sliding_df,
-            save_path=plots_dir / "riemann_sliding_window",
-            config=config,
-        )
-
-    logger.info(f"Riemann analysis visualizations saved to {plots_dir}")
-
-
-###################################################################
-# Incremental Validity Visualization
-###################################################################
-
-
-def visualize_incremental_validity(
-    inc_summary: Dict[str, Any],
-    plots_dir: Path,
-    config: Optional[Any] = None,
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    """Generate incremental validity visualizations."""
-    logger = _get_logger(logger)
-    _ensure_plots_directory(plots_dir, logger)
-
-    logger.info("Creating incremental validity visualizations...")
-
-    plot_incremental_validity(
-        inc_summary=inc_summary,
-        save_path=plots_dir / "incremental_validity",
-        config=config,
-    )
-
-    logger.info(f"Incremental validity visualizations saved to {plots_dir}")
-
-
-###################################################################
-# Post-Analysis Visualization (reads saved results)
-###################################################################
+    except (ValueError, KeyError, OSError) as exc:
+        logger.warning(f"Null distribution plot failed: {exc}")
 
 
 def visualize_regression_from_disk(
@@ -391,7 +288,7 @@ def visualize_regression_from_disk(
     """
     logger = _get_logger(logger)
     plots_dir = results_dir / "plots"
-    _ensure_plots_directory(plots_dir, logger)
+    ensure_dir(plots_dir)
 
     pred_path = _load_predictions_file(results_dir, logger)
     if pred_path is None:
@@ -435,45 +332,6 @@ def visualize_regression_from_disk(
     logger.info(f"Regression machine learning visualizations saved to {plots_dir}")
 
 
-def _find_group_column(pred_df: pd.DataFrame) -> Optional[str]:
-    """Find the appropriate group column in predictions dataframe."""
-    if "subject_id" in pred_df.columns:
-        return "subject_id"
-    if "group" in pred_df.columns:
-        return "group"
-    return None
-
-
-def _plot_null_distribution_if_available(
-    results_dir: Path,
-    pooled_metrics: Dict[str, float],
-    prefix: str,
-    config: Optional[Any],
-    logger: logging.Logger,
-) -> None:
-    """Plot null distribution histogram if available."""
-    null_path = results_dir / "loso_null_elasticnet.npz"
-    if not null_path.exists():
-        return
-
-    data = np.load(null_path)
-    null_rs = data.get("null_r")
-    empirical_r = pooled_metrics.get("pearson_r", np.nan)
-
-    if null_rs is None or null_rs.size == 0:
-        return
-
-    if not np.isfinite(empirical_r):
-        return
-
-    plot_ml_null_hist(
-        null_r=null_rs,
-        empirical_r=empirical_r,
-        save_path=results_dir / "plots" / f"{prefix}_null_distribution",
-        config=config,
-    )
-
-
 def visualize_time_generalization_from_disk(
     results_dir: Path,
     config: Optional[Any] = None,
@@ -481,6 +339,8 @@ def visualize_time_generalization_from_disk(
 ) -> None:
     """Generate time-generalization plots from saved results on disk."""
     logger = _get_logger(logger)
+    plots_dir = results_dir / "plots"
+    ensure_dir(plots_dir)
 
     tg_path = results_dir / "time_generalization_regression.npz"
     if not tg_path.exists():
@@ -502,7 +362,7 @@ def visualize_time_generalization_from_disk(
         tg_matrix=tg_r,
         null_matrix=null_r,
         window_centers=window_centers,
-        save_path=results_dir / "time_generalization_r",
+        save_path=plots_dir / "time_generalization_r",
         metric="r",
         config=config,
     )
@@ -512,17 +372,12 @@ def visualize_time_generalization_from_disk(
             tg_matrix=tg_r2,
             null_matrix=null_r2,
             window_centers=window_centers,
-            save_path=results_dir / "time_generalization_r2",
+            save_path=plots_dir / "time_generalization_r2",
             metric="r2",
             config=config,
         )
 
-    logger.info(f"Time-generalization visualizations saved to {results_dir}")
-
-
-###################################################################
-# Classification ML Visualization
-###################################################################
+    logger.info(f"Time-generalization visualizations saved to {plots_dir}")
 
 
 def visualize_classification_from_disk(
@@ -535,16 +390,15 @@ def visualize_classification_from_disk(
     Single responsibility: Read classification results contract and create plots.
     """
     logger = _get_logger(logger)
-    results_dir = Path(results_dir)
     plots_dir = results_dir / "plots"
-    _ensure_plots_directory(plots_dir, logger)
+    ensure_dir(plots_dir)
 
     pred_path = results_dir / "loso_predictions.tsv"
     if not pred_path.exists():
         logger.warning(f"Classification predictions not found: {pred_path}")
         return
 
-    pred_df = pd.read_csv(pred_path, sep="\t")
+    pred_df = read_tsv(pred_path)
     pooled_metrics = _load_metrics_file(results_dir)
     model_name = pooled_metrics.get("model", "classification")
 
@@ -552,109 +406,13 @@ def visualize_classification_from_disk(
     _plot_classification_confusion_matrix(pred_df, model_name, plots_dir, logger)
     _plot_classification_calibration(pred_df, model_name, plots_dir, config, logger)
     _plot_classification_null_distribution(
-        results_dir, pooled_metrics, model_name, plots_dir, logger
+        results_dir, pooled_metrics, model_name, plots_dir, config, logger
     )
 
     logger.info(f"Classification visualizations saved to {plots_dir}")
 
 
-def _plot_classification_roc_curve(
-    pred_df: pd.DataFrame,
-    model_name: str,
-    plots_dir: Path,
-    logger: logging.Logger,
-) -> None:
-    """Plot ROC curve for classification results."""
-    if "y_true" not in pred_df.columns or "y_prob" not in pred_df.columns:
-        return
-
-    save_path = plots_dir / f"roc_curve_{model_name}.png"
-    _plot_roc_curve(pred_df["y_true"], pred_df["y_prob"], model_name, save_path, logger)
-
-
-def _plot_classification_confusion_matrix(
-    pred_df: pd.DataFrame,
-    model_name: str,
-    plots_dir: Path,
-    logger: logging.Logger,
-) -> None:
-    """Plot confusion matrix for classification results."""
-    if "y_true" not in pred_df.columns or "y_pred" not in pred_df.columns:
-        return
-
-    save_path = plots_dir / f"confusion_matrix_{model_name}.png"
-    _plot_confusion_matrix(pred_df["y_true"], pred_df["y_pred"], model_name, save_path, logger)
-
-
-def _plot_classification_calibration(
-    pred_df: pd.DataFrame,
-    model_name: str,
-    plots_dir: Path,
-    config: Optional[Any],
-    logger: logging.Logger,
-) -> None:
-    """Plot calibration curve for classification results."""
-    if "y_true" not in pred_df.columns or "y_prob" not in pred_df.columns:
-        return
-
-    try:
-        cal_metrics = {"model": model_name}
-        plot_calibration_curve(
-            pred_df=pred_df,
-            model_name=model_name,
-            cal_metrics=cal_metrics,
-            save_path=plots_dir / f"calibration_{model_name}",
-            config=config,
-        )
-    except (ValueError, KeyError) as exc:
-        logger.warning(f"Calibration curve failed: {exc}")
-
-
-def _plot_classification_null_distribution(
-    results_dir: Path,
-    pooled_metrics: Dict[str, Any],
-    model_name: str,
-    plots_dir: Path,
-    logger: logging.Logger,
-) -> None:
-    """Plot null distribution for classification results if available."""
-    null_paths = list(results_dir.glob("loso_null_*.npz"))
-    if not null_paths:
-        return
-
-    try:
-        data = np.load(null_paths[0])
-        null_auc = data.get("null_auc")
-        if null_auc is None or null_auc.size == 0:
-            return
-
-        observed_auc = pooled_metrics.get("auc", 0.0)
-        p_value = _compute_p_value(null_auc, observed_auc)
-
-        plot_permutation_null(
-            null_rs=null_auc,
-            observed_r=observed_auc,
-            p_value=p_value,
-            save_path=plots_dir / f"null_distribution_{model_name}.png",
-            config=None,
-        )
-    except (ValueError, KeyError, OSError) as exc:
-        logger.warning(f"Null distribution plot failed: {exc}")
-
-
-def _compute_p_value(null_distribution: np.ndarray, observed_value: float) -> float:
-    """Compute p-value from null distribution and observed value."""
-    if null_distribution.size == 0:
-        return 1.0
-    return (null_distribution >= observed_value).mean()
-
-
 __all__ = [
-    "visualize_regression_results",
-    "visualize_time_generalization",
-    "visualize_model_comparisons",
-    "visualize_riemann_analysis",
-    "visualize_incremental_validity",
     "visualize_regression_from_disk",
     "visualize_time_generalization_from_disk",
     "visualize_classification_from_disk",

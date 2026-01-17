@@ -17,7 +17,7 @@ from joblib import Parallel, delayed
 
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.domain.features.constants import get_segment_mask, validate_precomputed
+from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.utils.config.loader import get_config_value, get_feature_constant, get_frequency_bands
 
 
@@ -49,14 +49,12 @@ def validate_window_masks(
             return False
 
     if require_active:
-        # Check if a targeted window is set and exists
         target_name = getattr(windows, "name", None)
         if target_name and target_name in windows.masks:
             mask = windows.get_mask(target_name)
             if mask is not None and np.any(mask):
                 return True
         
-        # Otherwise check if there's at least one non-baseline mask
         has_active = any(
             name.lower() != "baseline" and np.any(mask) 
             for name, mask in windows.masks.items()
@@ -72,6 +70,43 @@ def validate_window_masks(
 ###################################################################
 # BAND RATIO FEATURES
 ###################################################################
+
+def _get_psd_config(config: Any, sfreq: float) -> Dict[str, Any]:
+    """Extract PSD configuration from config."""
+    psd_method = get_config_value(config, "feature_engineering.spectral.psd_method", "multitaper")
+    psd_method = str(psd_method).strip().lower()
+    if psd_method not in {"welch", "multitaper"}:
+        psd_method = "multitaper"
+    
+    fmin_psd = float(get_config_value(config, "feature_engineering.spectral.fmin", 1.0))
+    fmax_psd = float(get_config_value(config, "feature_engineering.spectral.fmax", min(80.0, sfreq / 2.0 - 0.5)))
+    
+    multitaper_adaptive = bool(
+        get_config_value(config, "feature_engineering.spectral.multitaper_adaptive", False) or
+        get_config_value(config, "feature_engineering.spectral.psd_adaptive", False)
+    )
+    
+    exclude_line = bool(get_config_value(config, "feature_engineering.spectral.exclude_line_noise", True))
+    line_freqs_raw = get_config_value(config, "feature_engineering.spectral.line_noise_freqs", [50.0])
+    try:
+        line_freqs = [float(f) for f in line_freqs_raw] if isinstance(line_freqs_raw, (list, tuple)) else [50.0]
+    except (ValueError, TypeError):
+        line_freqs = [50.0]
+    
+    line_width = float(get_config_value(config, "feature_engineering.spectral.line_noise_width_hz", 1.0))
+    n_harm = int(get_config_value(config, "feature_engineering.spectral.line_noise_harmonics", 3))
+    
+    return {
+        "psd_method": psd_method,
+        "fmin": fmin_psd,
+        "fmax": fmax_psd,
+        "adaptive": multitaper_adaptive,
+        "exclude_line": exclude_line,
+        "line_freqs": line_freqs,
+        "line_width": line_width,
+        "n_harmonics": n_harm,
+    }
+
 
 def _compute_psd_band_power_for_segment(
     data: np.ndarray,
@@ -89,28 +124,8 @@ def _compute_psd_band_power_for_segment(
     """
     from eeg_pipeline.utils.analysis.spectral import compute_psd_bandpower
     
-    # Get PSD settings from config
-    spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
-    psd_method = str(spec_cfg.get("psd_method", "multitaper")).strip().lower()
-    if psd_method not in {"welch", "multitaper"}:
-        psd_method = "multitaper"
+    psd_cfg = _get_psd_config(config, sfreq)
     
-    fmin_psd = float(spec_cfg.get("fmin", 1.0))
-    fmax_psd = float(spec_cfg.get("fmax", min(80.0, sfreq / 2.0 - 0.5)))
-
-    multitaper_adaptive = bool(spec_cfg.get("multitaper_adaptive", spec_cfg.get("psd_adaptive", False)))
-    
-    # Line noise exclusion
-    exclude_line = bool(spec_cfg.get("exclude_line_noise", True))
-    line_freqs = spec_cfg.get("line_noise_freqs", [50.0])
-    try:
-        line_freqs = [float(f) for f in line_freqs]
-    except Exception:
-        line_freqs = [50.0]
-    line_width = float(spec_cfg.get("line_noise_width_hz", 1.0))
-    n_harm = int(spec_cfg.get("line_noise_harmonics", 3))
-    
-    # Reshape to (1, n_channels, n_times) for compute_psd_bandpower
     if data.ndim == 2:
         data_3d = data[np.newaxis, :, :]
     else:
@@ -120,25 +135,65 @@ def _compute_psd_band_power_for_segment(
         data_3d,
         sfreq,
         band_ranges,
-        psd_method=psd_method,
-        fmin=fmin_psd,
-        fmax=fmax_psd,
+        psd_method=psd_cfg["psd_method"],
+        fmin=psd_cfg["fmin"],
+        fmax=psd_cfg["fmax"],
         normalize_by_bandwidth=True,
-        adaptive=multitaper_adaptive,
-        exclude_line_noise=exclude_line,
-        line_freqs=line_freqs if exclude_line else None,
-        line_width=line_width if exclude_line else None,
-        n_harmonics=n_harm if exclude_line else None,
+        adaptive=psd_cfg["adaptive"],
+        exclude_line_noise=psd_cfg["exclude_line"],
+        line_freqs=psd_cfg["line_freqs"] if psd_cfg["exclude_line"] else None,
+        line_width=psd_cfg["line_width"] if psd_cfg["exclude_line"] else None,
+        n_harmonics=psd_cfg["n_harmonics"] if psd_cfg["exclude_line"] else None,
         logger=logger,
     )
     
     if result is None:
         return None
     
-    # Squeeze out epoch dimension for single-epoch 2D input
     if data.ndim == 2:
         return {band: arr[0] for band, arr in result.items()}
     return result
+
+
+def _get_segment_masks_with_fallback(
+    precomputed: PrecomputedData,
+    config: Any,
+    logger: Optional[logging.Logger],
+    feature_name: str,
+) -> Dict[str, np.ndarray]:
+    """Get segment masks with fallback handling."""
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    
+    windows = precomputed.windows
+    target_name = getattr(windows, "name", None) if windows else None
+    allow_full_epoch_fallback = bool(
+        get_config_value(config, "feature_engineering.windows.allow_full_epoch_fallback", False)
+    )
+    
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            return {target_name: mask}
+        
+        if logger:
+            if allow_full_epoch_fallback:
+                logger.warning(
+                    "%s: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                    feature_name,
+                    target_name,
+                )
+            else:
+                logger.error(
+                    "%s: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                    feature_name,
+                    target_name,
+                )
+        
+        if allow_full_epoch_fallback:
+            return {target_name: np.ones(len(precomputed.times), dtype=bool)}
+        return {}
+    
+    return get_segment_masks(precomputed.times, windows, config)
 
 
 def extract_band_ratios_from_precomputed(
@@ -165,41 +220,8 @@ def extract_band_ratios_from_precomputed(
     if not pairs:
         return pd.DataFrame(), []
 
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    
     logger = getattr(precomputed, "logger", None)
-    windows = precomputed.windows
-    target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
-    )
-    
-    # Always derive mask from windows - never use np.ones() blindly
-    # If data is pre-cropped, the mask will naturally be all-True
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            segment_masks = {target_name: mask}
-        else:
-            if logger:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "Band ratios: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "Band ratios: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
-            else:
-                return pd.DataFrame(), []
-    else:
-        segment_masks = get_segment_masks(precomputed.times, windows, config)
+    segment_masks = _get_segment_masks_with_fallback(precomputed, config, logger, "Band ratios")
     
     if not segment_masks:
         return pd.DataFrame(), []
@@ -216,21 +238,16 @@ def extract_band_ratios_from_precomputed(
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
     include_log = bool(get_config_value(config, "feature_engineering.spectral.include_log_ratios", True))
     
-    # Get frequency bands for PSD computation
     freq_bands = get_frequency_bands(config)
-    needed_bands = set()
-    for num, den in pairs:
-        needed_bands.add(num)
-        needed_bands.add(den)
+    needed_bands = {band for pair in pairs for band in pair}
     band_ranges = {b: tuple(freq_bands[b]) for b in needed_bands if b in freq_bands}
     
     n_epochs = precomputed.data.shape[0]
     sfreq = precomputed.sfreq
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
 
-    spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
-    min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))
-    min_segment_samples = max(0, int(round(min_segment_sec * float(sfreq))))
+    min_segment_sec = float(get_config_value(config, "feature_engineering.spectral.min_segment_sec", 2.0))
+    min_segment_samples = max(0, int(round(min_segment_sec * sfreq)))
     warned_short: set[str] = set()
     
     for seg_label, seg_mask in segment_masks.items():
@@ -243,7 +260,7 @@ def extract_band_ratios_from_precomputed(
                 logger.warning(
                     "Band ratios: segment '%s' is too short for PSD ratios (%.3fs, %d samples < %d); skipping.",
                     seg_label,
-                    float(seg_n) / float(sfreq),
+                    seg_n / sfreq,
                     seg_n,
                     min_segment_samples,
                 )
@@ -414,44 +431,11 @@ def extract_asymmetry_from_precomputed(
     if not valid_pairs:
         return pd.DataFrame(), []
 
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    
-    windows = precomputed.windows
-    target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
-    )
-    
-    # Always derive mask from windows - never use np.ones() blindly
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            segment_masks = {target_name: mask}
-        else:
-            if logger:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "Asymmetry: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "Asymmetry: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
-            else:
-                return pd.DataFrame(), []
-    else:
-        segment_masks = get_segment_masks(precomputed.times, windows, config)
+    segment_masks = _get_segment_masks_with_fallback(precomputed, config, logger, "Asymmetry")
     
     if not segment_masks:
         return pd.DataFrame(), []
 
-    # Get frequency bands for PSD computation
     freq_bands = get_frequency_bands(config)
     band_ranges = {b: tuple(freq_bands[b]) for b in freq_bands}
 
@@ -459,9 +443,8 @@ def extract_asymmetry_from_precomputed(
     sfreq = precomputed.sfreq
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
 
-    spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
-    min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))
-    min_segment_samples = max(0, int(round(min_segment_sec * float(sfreq))))
+    min_segment_sec = float(get_config_value(config, "feature_engineering.spectral.min_segment_sec", 2.0))
+    min_segment_samples = max(0, int(round(min_segment_sec * sfreq)))
     warned_short: set[str] = set()
     
     for seg_label, seg_mask in segment_masks.items():
@@ -474,7 +457,7 @@ def extract_asymmetry_from_precomputed(
                 logger.warning(
                     "Asymmetry: segment '%s' is too short for PSD asymmetry (%.3fs, %d samples < %d); skipping.",
                     seg_label,
-                    float(seg_n) / float(sfreq),
+                    seg_n / sfreq,
                     seg_n,
                     min_segment_samples,
                 )
@@ -490,26 +473,20 @@ def extract_asymmetry_from_precomputed(
                 b: np.full((n_epochs, len(precomputed.ch_names)), np.nan) for b in band_ranges
             }
         
-        # Process asymmetry (parallelizable)
+        epoch_band_power = [
+            {band: arr[ep_idx] for band, arr in band_power_all.items()}
+            for ep_idx in range(n_epochs)
+        ]
+        
         if n_jobs != 1:
             seg_records = Parallel(n_jobs=n_jobs)(
-                delayed(_process_asymmetry_epoch)(
-                    ep_idx,
-                    {band: arr[ep_idx] for band, arr in band_power_all.items()},
-                    valid_pairs,
-                    seg_label,
-                )
-                for ep_idx in range(n_epochs)
+                delayed(_process_asymmetry_epoch)(ep_idx, power, valid_pairs, seg_label)
+                for ep_idx, power in enumerate(epoch_band_power)
             )
         else:
             seg_records = [
-                _process_asymmetry_epoch(
-                    ep_idx,
-                    {band: arr[ep_idx] for band, arr in band_power_all.items()},
-                    valid_pairs,
-                    seg_label,
-                )
-                for ep_idx in range(n_epochs)
+                _process_asymmetry_epoch(ep_idx, power, valid_pairs, seg_label)
+                for ep_idx, power in enumerate(epoch_band_power)
             ]
         
         for ep_idx, seg_rec in enumerate(seg_records):

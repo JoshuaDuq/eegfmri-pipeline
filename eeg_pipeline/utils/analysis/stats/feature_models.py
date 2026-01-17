@@ -35,7 +35,6 @@ _LOGIT_MAX_ITERATIONS = 200
 _QUANTILE_MEDIAN = 0.5
 _DEFAULT_FDR_ALPHA = 0.05
 _MIN_FEATURES_FOR_PARALLEL = 10
-_MAX_DUMMY_LEVELS = 20
 _MIN_BINARY_LEVELS = 2
 
 
@@ -508,29 +507,6 @@ def _select_valid_features(
     return candidates, meta
 
 
-# _build_temperature_covariates is now imported from _regression_utils
-# Wrapper to maintain backward compatibility with existing interface
-def _build_temperature_covariates(
-    trial_df: pd.DataFrame,
-    outcome_name: str,
-    temperature_control: str,
-    include_temperature: bool,
-    config: Any,
-) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
-    """Build temperature-related covariates based on control strategy.
-    
-    Wrapper around consolidated _build_temperature_covariates.
-    """
-    return _build_temp_cov_shared(
-        trial_df=trial_df,
-        outcome=outcome_name,
-        temperature_control=temperature_control,
-        include_temperature=include_temperature,
-        config=config,
-        key_prefix="behavior_analysis.models.temperature_spline",
-    )
-
-
 def _build_additional_covariates(
     trial_df: pd.DataFrame,
     cfg: "FeatureModelsConfig",
@@ -611,8 +587,7 @@ def run_feature_model_families(
     if not cfg.enabled:
         return pd.DataFrame(), {**meta, "status": "disabled"}
 
-    random_seed = int(_get(config, "project.random_state", 42))
-    meta["random_state"] = random_seed
+    meta["random_state"] = int(_get(config, "project.random_state", 42))
     n_jobs_actual = get_n_jobs(config, cfg.n_jobs)
 
     candidates, feature_selection_meta = _select_valid_features(
@@ -622,7 +597,6 @@ def run_feature_model_families(
 
     try:
         import statsmodels.api as sm
-        import statsmodels.formula.api as smf  # noqa: F401
         has_statsmodels = True
     except ImportError:
         has_statsmodels = False
@@ -636,8 +610,13 @@ def run_feature_model_families(
         
         meta.setdefault("binary_outcome", {}).update(outcome_meta)
 
-        temp_covariates, temp_design_df, temp_meta = _build_temperature_covariates(
-            trial_df, outcome_name, cfg.temperature_control, cfg.include_temperature, config
+        temp_covariates, temp_design_df, temp_meta = _build_temp_cov_shared(
+            trial_df=trial_df,
+            outcome=outcome_name,
+            temperature_control=cfg.temperature_control,
+            include_temperature=cfg.include_temperature,
+            config=config,
+            key_prefix="behavior_analysis.models.temperature_spline",
         )
         additional_covariates = _build_additional_covariates(trial_df, cfg, config)
         
@@ -667,10 +646,7 @@ def run_feature_model_families(
             min_features_for_parallel=_MIN_FEATURES_FOR_PARALLEL,
         )
         for record_list in outcome_records:
-            if isinstance(record_list, list):
-                records.extend(record_list)
-            elif record_list is not None:
-                records.append(record_list)
+            records.extend(record_list)
 
     if not records:
         return pd.DataFrame(), {**meta, "status": "empty"}

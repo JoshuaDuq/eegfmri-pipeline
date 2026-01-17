@@ -77,9 +77,9 @@ _TOPOMAP_PLOTS = [_PLOT_TOPOMAPS]
 def _get_tfr_windows(config, logger: logging.Logger) -> tuple[tuple[float, float], tuple[float, float]]:
     """Extract and validate baseline and active windows from config."""
     tfr_analysis = config.get(_CONFIG_KEY_TFR_ANALYSIS, {})
-    baseline_window_raw = tuple(tfr_analysis.get(_CONFIG_KEY_BASELINE_WINDOW, list(_DEFAULT_BASELINE_WINDOW)))
-    baseline_window = validate_baseline_window_pre_stimulus(baseline_window_raw, logger=logger)
-    active_window = tuple(tfr_analysis.get(_CONFIG_KEY_ACTIVE_WINDOW, list(_DEFAULT_ACTIVE_WINDOW)))
+    baseline_window_raw = tfr_analysis.get(_CONFIG_KEY_BASELINE_WINDOW, _DEFAULT_BASELINE_WINDOW)
+    baseline_window = validate_baseline_window_pre_stimulus(tuple(baseline_window_raw), logger=logger)
+    active_window = tuple(tfr_analysis.get(_CONFIG_KEY_ACTIVE_WINDOW, _DEFAULT_ACTIVE_WINDOW))
     return baseline_window, active_window
 
 
@@ -186,7 +186,7 @@ def _load_subject_data(
 
     if events_df is None:
         logger.warning("No events available; limited visualizations")
-        events_df = epochs.metadata if hasattr(epochs, "metadata") else None
+        events_df = epochs.metadata
 
     return epochs, events_df
 
@@ -373,10 +373,7 @@ def visualize_subject_tfr(
         if events_df is None:
             logger.warning("Topomaps require events_df; skipping.")
             return
-
-        if _PLOT_TOPOMAPS in plots_to_run:
-            _plot_topomaps(power, events_df, plots_dir, config, baseline_window, active_window, logger)
-
+        _plot_topomaps(power, events_df, plots_dir, config, baseline_window, active_window, logger)
         logger.info(f"TFR topomap visualizations saved to {plots_dir}")
         return
 
@@ -471,12 +468,12 @@ def _process_subjects_parallel(
     task: str,
     config,
     effective_deriv_root: Path,
+    logger: logging.Logger,
     tfr_roi_only: bool,
     tfr_topomaps_only: bool,
     plots: Optional[List[str]],
     n_jobs: int,
     mode_str: str,
-    logger: logging.Logger,
 ) -> None:
     """Process subjects in parallel."""
     logger.info(
@@ -541,7 +538,7 @@ def visualize_tfr_for_subjects(
 
     if use_parallel:
         _process_subjects_parallel(
-            subjects, task, config, effective_deriv_root, tfr_roi_only, tfr_topomaps_only, plots, n_jobs, mode_str, logger
+            subjects, task, config, effective_deriv_root, logger, tfr_roi_only, tfr_topomaps_only, plots, n_jobs, mode_str
         )
     else:
         _process_subjects_sequentially(

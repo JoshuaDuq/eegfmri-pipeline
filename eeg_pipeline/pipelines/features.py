@@ -3,12 +3,6 @@ Feature Extraction Pipeline (Canonical)
 ========================================
 
 Single source of truth for feature extraction orchestration.
-This module consolidates all feature extraction entry points:
-- FeaturePipeline: PipelineBase subclass for batch processing
-- extract_all_features: TFR-based feature extraction
-- extract_precomputed_features: Precomputed-based feature extraction
-
-The pipeline class selects TFR vs precomputed mode internally based on config.
 
 Usage:
     # Single subject
@@ -17,10 +11,6 @@ Usage:
 
     # Multiple subjects
     pipeline.run_batch(["0001", "0002"])
-
-    # Direct function calls
-    from eeg_pipeline.pipelines.features import extract_all_features
-    result = extract_all_features(ctx)
 """
 
 from __future__ import annotations
@@ -53,7 +43,7 @@ from eeg_pipeline.infra.paths import (
     deriv_features_path,
     ensure_dir,
 )
-from eeg_pipeline.infra.tsv import write_parquet, write_tsv
+from eeg_pipeline.infra.tsv import write_parquet
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.types import PrecomputedData
@@ -276,11 +266,8 @@ def _build_feature_qc(features: FeatureExtractionResult, ctx: FeatureContext) ->
     qc: Dict[str, Any] = {}
     if features.aper_qc is not None:
         qc["aperiodic"] = features.aper_qc
-    if ctx.precomputed is not None and getattr(ctx.precomputed, "qc", None) is not None:
-        try:
-            qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
-        except TypeError:
-            qc["precomputed_intermediates"] = getattr(ctx.precomputed, "qc", None)
+    if ctx.precomputed is not None and hasattr(ctx.precomputed, "qc") and ctx.precomputed.qc is not None:
+        qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
     return qc
 
 
@@ -316,6 +303,11 @@ def _accumulate_features(
             accumulated[key].append(df)
 
 
+def _get_df_cols(df: Optional[pd.DataFrame]) -> int:
+    """Get number of columns from DataFrame, returning 0 if None or empty."""
+    return df.shape[1] if df is not None and not df.empty else 0
+
+
 def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
     """Merge DataFrames by concatenating columns, avoiding duplicates."""
     valid_dfs = [df for df in dfs if df is not None and not df.empty]
@@ -325,8 +317,7 @@ def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
         return valid_dfs[0]
     
     merged = pd.concat(valid_dfs, axis=1)
-    merged = merged.loc[:, ~merged.columns.duplicated(keep="first")]
-    return merged
+    return merged.loc[:, ~merged.columns.duplicated(keep="first")]
 
 
 def _save_merged_features(
@@ -368,28 +359,24 @@ def _save_merged_features(
             folder = _get_folder_for_feature(base_name, config)
             save_path = features_dir / folder / filename
             write_parquet(merged_df, save_path)
-            try:
-                subject_str = (
-                    features_dir.parts[-3].replace("sub-", "")
-                    if len(features_dir.parts) > 3
-                    else "unknown"
-                )
-                metadata_dir = save_path.parent / "metadata"
-                ensure_dir(metadata_dir)
-                meta_path = metadata_dir / filename.replace(".parquet", ".json")
-                manifest = generate_manifest(
-                    feature_columns=list(merged_df.columns),
-                    config=config,
-                    subject=subject_str,
-                    task=config.get("project.task") if config is not None else None,
-                    qc=None,
-                    df_attrs=dict(getattr(merged_df, "attrs", {}) or {}),
-                )
-                meta_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-            except Exception as exc:
-                logger.warning(
-                    "Failed to write merged feature metadata for %s: %s", save_path, exc
-                )
+            subject_str = (
+                features_dir.parts[-3].replace("sub-", "")
+                if len(features_dir.parts) > 3
+                else "unknown"
+            )
+            metadata_dir = save_path.parent / "metadata"
+            ensure_dir(metadata_dir)
+            meta_path = metadata_dir / filename.replace(".parquet", ".json")
+            df_attrs = getattr(merged_df, "attrs", None) or {}
+            manifest = generate_manifest(
+                feature_columns=list(merged_df.columns),
+                config=config,
+                subject=subject_str,
+                task=config.get("project.task") if config is not None else None,
+                qc=None,
+                df_attrs=dict(df_attrs),
+            )
+            meta_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
             feature_name = filename.replace("features_", "").replace(".parquet", "")
             logger.info(
                 "Saved merged %s features: %d columns",
@@ -405,19 +392,12 @@ def _save_extraction_config(
     logger: Any,
     feature_categories: Optional[List[str]] = None,
 ) -> None:
-    """Save extraction configuration to JSON file in each feature category's metadata folder.
-    
-    Instead of a centralized metadata folder, save config to each category's own metadata folder
-    so users can see exactly what config was used for each specific computation.
-    """
+    """Save extraction configuration to JSON file in each feature category's metadata folder."""
     from eeg_pipeline.utils.data.feature_io import _get_folder_for_feature
     
     config_name = f"extraction_config_{suffix}.json" if suffix else "extraction_config.json"
-    
-    # Get list of feature categories to save config for
     categories = feature_categories or config.get("feature_categories", [])
     
-    # Save config to each category's metadata folder
     saved_to = []
     for category in categories:
         folder = _get_folder_for_feature(f"features_{category}")
@@ -425,8 +405,7 @@ def _save_extraction_config(
             category_metadata_dir = features_dir / folder / "metadata"
             ensure_dir(category_metadata_dir)
             save_path = category_metadata_dir / config_name
-            with open(save_path, "w") as f:
-                json.dump(config, f, indent=2)
+            save_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
             saved_to.append(str(save_path))
     
     if saved_to:
@@ -704,39 +683,14 @@ class FeaturePipeline(PipelineBase):
                     accumulated_y = y_aligned
 
             n_trials = len(y_aligned)
-            n_pow = pow_df_aligned.shape[1] if pow_df_aligned is not None else 0
-            n_conn = (
-                conn_df_aligned.shape[1]
-                if conn_df_aligned is not None and not conn_df_aligned.empty
-                else 0
-            )
-            n_dconn = (
-                unpacked["dconn_df"].shape[1]
-                if unpacked["dconn_df"] is not None and not unpacked["dconn_df"].empty
-                else 0
-            )
-            n_source = (
-                unpacked["source_df"].shape[1]
-                if unpacked["source_df"] is not None and not unpacked["source_df"].empty
-                else 0
-            )
-            n_aper = (
-                aper_df_aligned.shape[1]
-                if aper_df_aligned is not None and not aper_df_aligned.empty
-                else 0
-            )
-            n_spectral = (
-                unpacked["spectral_df"].shape[1]
-                if unpacked["spectral_df"] is not None
-                and not unpacked["spectral_df"].empty
-                else 0
-            )
-            n_comp = (
-                unpacked["comp_df"].shape[1]
-                if unpacked["comp_df"] is not None and not unpacked["comp_df"].empty
-                else 0
-            )
-            n_total = combined_df.shape[1] if combined_df is not None else 0
+            n_pow = _get_df_cols(pow_df_aligned)
+            n_conn = _get_df_cols(conn_df_aligned)
+            n_dconn = _get_df_cols(unpacked["dconn_df"])
+            n_source = _get_df_cols(unpacked["source_df"])
+            n_aper = _get_df_cols(aper_df_aligned)
+            n_spectral = _get_df_cols(unpacked["spectral_df"])
+            n_comp = _get_df_cols(unpacked["comp_df"])
+            n_total = _get_df_cols(combined_df)
 
             extraction_config = {
                 "cli_command": kwargs.get("cli_command"),

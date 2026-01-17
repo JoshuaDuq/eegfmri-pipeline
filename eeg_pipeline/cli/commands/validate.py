@@ -47,11 +47,6 @@ def setup_validate(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="output_json",
         help="Output in JSON format",
     )
-    parser.add_argument(
-        "--fix",
-        action="store_true",
-        help="Attempt to fix minor issues (e.g., missing metadata)",
-    )
     return parser
 
 
@@ -216,7 +211,7 @@ def _validate_features(
                     passed.append(f"sub-{subject}: {tsv_file.name} valid")
 
             except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError) as exc:
-                error_message = str(exc)[:40]
+                error_message = str(exc)[:_MAX_READ_ERROR_LENGTH]
                 issues.append({
                     "type": "features",
                     "subject": subject,

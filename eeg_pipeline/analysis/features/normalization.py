@@ -37,7 +37,10 @@ def _get_epsilon(config: Optional[Any] = None) -> float:
         except Exception:
             return DEFAULT_EPSILON
     
-    return float(get_feature_constant(config, "EPSILON_STD", DEFAULT_EPSILON))
+    try:
+        return float(get_feature_constant(config, "EPSILON_STD", DEFAULT_EPSILON))
+    except Exception:
+        return DEFAULT_EPSILON
 
 
 def _extract_finite_values(
@@ -303,7 +306,6 @@ def _normalize_column_by_group(
     col: str,
     group_column: str,
     norm_fn,
-    method: NormMethod,
     config: Optional[Any] = None,
 ) -> np.ndarray:
     """Normalize a column within each group."""
@@ -313,12 +315,7 @@ def _normalize_column_by_group(
     for group in groups:
         mask = df[group_column] == group
         group_values = df.loc[mask, col].to_numpy(dtype=float)
-        
-        if method in ("rank", "log"):
-            normalized = norm_fn(group_values, config=config)
-        else:
-            normalized = norm_fn(group_values, config=config)
-        
+        normalized = norm_fn(group_values, config=config)
         result[mask] = normalized
     
     return result
@@ -384,23 +381,20 @@ def normalize_features(
             result[col] = _normalize_column_all_data(
                 df, col, norm_fn, method, reference_df, config
             )
-    
     elif reference == "condition" and condition_column and condition_column in df.columns:
         for col in numeric_columns:
             result[col] = _normalize_column_by_group(
-                df, col, condition_column, norm_fn, method, config
+                df, col, condition_column, norm_fn, config
             )
-    
     elif reference == "run" and run_column and run_column in df.columns:
         for col in numeric_columns:
             result[col] = _normalize_column_by_group(
-                df, col, run_column, norm_fn, method, config
+                df, col, run_column, norm_fn, config
             )
-    
     else:
         for col in numeric_columns:
             result[col] = _normalize_column_all_data(
-                df, col, norm_fn, method, None, config
+                df, col, norm_fn, method, reference_df, config
             )
     
     return result

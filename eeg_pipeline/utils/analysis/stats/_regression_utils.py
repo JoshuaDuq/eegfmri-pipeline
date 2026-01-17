@@ -56,7 +56,7 @@ def _ols_regression(
     X : np.ndarray
         Design matrix including intercept (n_samples, n_features)
     compute_r2 : bool
-        Whether to compute R² (default: False for backward compatibility)
+        Whether to compute R² (default: False)
         
     Returns
     -------
@@ -75,27 +75,27 @@ def _ols_regression(
         XtX_inv = np.linalg.inv(X.T @ X)
     except np.linalg.LinAlgError:
         nan_array = np.full(p, np.nan)
-        return nan_array, nan_array, np.nan, None if not compute_r2 else np.nan
+        r_squared = np.nan if compute_r2 else None
+        return nan_array, nan_array, np.nan, r_squared
     
     beta = XtX_inv @ X.T @ y
     residuals = y - X @ beta
     
     df = n - p
     if df <= 0:
-        return beta, np.full(p, np.nan), np.nan, None if not compute_r2 else np.nan
+        r_squared = np.nan if compute_r2 else None
+        return beta, np.full(p, np.nan), np.nan, r_squared
     
     sigma_squared = np.sum(residuals**2) / df
     var_beta = sigma_squared * np.diag(XtX_inv)
     se = np.sqrt(var_beta)
     
-    r_squared = None
     if compute_r2:
-        y_mean = np.mean(y)
-        ss_tot = np.sum((y - y_mean) ** 2)
-        if ss_tot > 0:
-            r_squared = 1.0 - (np.sum(residuals**2) / ss_tot)
-        else:
-            r_squared = np.nan
+        ss_res = np.sum(residuals**2)
+        ss_tot = np.sum((y - np.mean(y)) ** 2)
+        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else np.nan
+    else:
+        r_squared = None
     
     return beta, se, sigma_squared, r_squared
 
@@ -208,10 +208,13 @@ def _build_covariate_design(
     
     for col in covariate_cols:
         s = use[col]
-        is_categorical = s.dtype == object or str(s.dtype).startswith("category")
+        is_categorical = (
+            pd.api.types.is_categorical_dtype(s) or 
+            pd.api.types.is_object_dtype(s)
+        )
         
         if is_categorical:
-            n_levels = int(pd.Series(s).nunique(dropna=True))
+            n_levels = int(s.nunique(dropna=True))
             if n_levels <= 1 or n_levels > max_dummies:
                 continue
             dummies = pd.get_dummies(s.astype("category"), prefix=str(col), drop_first=True)
@@ -242,7 +245,7 @@ def _build_temperature_covariates(
     config: Optional[Any] = None,
     *,
     key_prefix: str = "behavior_analysis.regression.temperature_spline",
-    exclude_outcomes: Optional[Tuple[str, ...]] = None,
+    exclude_outcomes: Tuple[str, ...] = ("pain_residual",),
 ) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
     """Build temperature-related covariates based on control strategy.
     
@@ -262,7 +265,7 @@ def _build_temperature_covariates(
         Configuration object for spline parameters
     key_prefix : str
         Config key prefix for spline configuration (default: "behavior_analysis.regression.temperature_spline")
-    exclude_outcomes : Optional[Tuple[str, ...]]
+    exclude_outcomes : Tuple[str, ...]
         Outcomes that should not use rating_hat fallback (default: ("pain_residual",))
         
     Returns
@@ -273,9 +276,6 @@ def _build_temperature_covariates(
     covariates: List[str] = []
     temp_design_df: Optional[pd.DataFrame] = None
     meta: Dict[str, Any] = {"temperature_control_requested": temperature_control}
-    
-    if exclude_outcomes is None:
-        exclude_outcomes = ("pain_residual",)
     
     if not include_temperature or outcome == "temperature":
         return covariates, temp_design_df, meta

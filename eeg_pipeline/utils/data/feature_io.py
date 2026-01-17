@@ -23,10 +23,9 @@ from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.paths import (
     deriv_features_path,
-    deriv_stats_path,
     find_connectivity_features_path,
 )
-from eeg_pipeline.infra.tsv import read_table, read_tsv, write_parquet, write_tsv
+from eeg_pipeline.infra.tsv import read_table, write_parquet, write_tsv
 
 
 ###################################################################
@@ -42,71 +41,10 @@ def _safe_read_table(
     if not path.exists():
         return None
     try:
-        from eeg_pipeline.infra.tsv import read_table
         return read_table(path)
     except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
         logger.warning("Failed to read %s: %s", path, exc)
         return None
-
-
-def _safe_read_feature_table(
-    features_dir: Path,
-    base_name: str,
-    logger: logging.Logger,
-    extension: str = ".parquet",
-    config: Optional[Any] = None,
-) -> Optional[pd.DataFrame]:
-    """Read feature table from subfolder.
-    
-    For source localization features, checks both fmri_informed/ and eeg_only/
-    subdirectories to ensure features are found regardless of config mode changes.
-    """
-    folder = _get_folder_for_feature(base_name, config)
-    filename = f"{base_name}{extension}"
-    
-    candidates: List[Path] = []
-    if folder:
-        candidates.append(features_dir / folder / filename)
-    
-    name = base_name.replace("features_", "") if base_name.startswith("features_") else base_name
-    if name in ("sourcelocalization", "source_localization"):
-        candidates.append(features_dir / "sourcelocalization" / "fmri_informed" / filename)
-        candidates.append(features_dir / "sourcelocalization" / "eeg_only" / filename)
-        candidates.append(features_dir / "sourcelocalization" / filename)
-    
-    seen: set[Path] = set()
-    for c in candidates:
-        if c in seen:
-            continue
-        seen.add(c)
-        if c.exists():
-            return _safe_read_table(c, logger)
-            
-    return None
-
-
-def load_subject_features(
-    subjects: List[str],
-    deriv_root: Path,
-    logger: Optional[logging.Logger] = None,
-) -> Dict[str, pd.DataFrame]:
-    """Load power features for multiple subjects."""
-    if logger is None:
-        logger = logging.getLogger(__name__)
-
-    if not subjects:
-        return {}
-
-    subject_features: Dict[str, pd.DataFrame] = {}
-    for subject in subjects:
-        features_dir = deriv_features_path(deriv_root, subject)
-        feature_path = features_dir / "power" / "features_power.parquet"
-        if not feature_path.exists():
-            logger.warning("Missing features for sub-%s: %s", subject, feature_path)
-            continue
-        subject_features[subject] = read_table(feature_path)
-
-    return subject_features
 
 
 def _extract_target_series(target_df: pd.DataFrame, target_path: Path) -> pd.Series:
@@ -289,16 +227,6 @@ def _safe_read_feature_table_with_path(
             return None, candidate
 
     return None, None
-
-    @property
-    def n_trials(self) -> int:
-        if self.power_df is not None:
-            return len(self.power_df)
-        return 0
-
-    @property
-    def empty(self) -> bool:
-        return self.power_df is None
 
 
 def _extract_targets_from_dataframe(
@@ -754,7 +682,6 @@ def _save_aperiodic_qc(
         # Save metadata sidecar
         metadata_path = save_path.with_suffix(".json")
         try:
-            import json
             with open(metadata_path, "w") as f:
                 json.dump(metadata, f, indent=2)
         except (OSError, IOError) as meta_exc:
@@ -926,13 +853,10 @@ def save_all_features(
     return direct_df
 
 
-
-
-
-
 ###################################################################
 # TRIAL MANAGEMENT
 ###################################################################
+
 
 def save_trial_alignment_manifest(
     aligned_events: pd.DataFrame,
@@ -1009,7 +933,6 @@ __all__ = [
     "FeatureBundle",
     "load_feature_bundle",
     "load_feature_dfs_for_subjects",
-    "load_subject_features",
     "_load_features_and_targets",
     "iterate_feature_columns",
     "save_all_features",

@@ -2,6 +2,7 @@ package history
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -56,10 +57,7 @@ type Model struct {
 	historyPath string
 	loading     bool
 	loadError   error
-
-	width  int
-	height int
-	ticker int
+	ticker      int
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -96,13 +94,11 @@ func loadHistory(path string) ([]ExecutionRecord, error) {
 }
 
 func saveHistory(path string, records []ExecutionRecord) error {
-	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	// Keep only last 50 records
 	if len(records) > historyMaxEntries {
 		records = records[len(records)-historyMaxEntries:]
 	}
@@ -171,7 +167,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loadError = msg.Error
 		} else {
 			m.records = msg.Records
-			// Sort by most recent first
 			sort.Slice(m.records, func(i, j int) bool {
 				return m.records[i].StartTime.After(m.records[j].StartTime)
 			})
@@ -189,7 +184,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case "d":
-			// Delete selected record
 			if len(m.records) > 0 && m.cursor < len(m.records) {
 				m.records = append(m.records[:m.cursor], m.records[m.cursor+1:]...)
 				saveHistory(m.historyPath, m.records)
@@ -198,15 +192,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "c":
-			// Clear all history
 			m.records = []ExecutionRecord{}
 			saveHistory(m.historyPath, m.records)
 			m.cursor = 0
 		}
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
 	}
 
 	return m, nil
@@ -219,7 +210,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Header
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n\n")
 
@@ -247,13 +237,7 @@ func (m Model) renderHeader() string {
 
 	count := lipgloss.NewStyle().
 		Foreground(styles.Muted).
-		Render(strings.Repeat(" ", 2) + "(" + string(rune('0'+len(m.records)%10)) + " records)")
-
-	if len(m.records) >= 10 {
-		count = lipgloss.NewStyle().
-			Foreground(styles.Muted).
-			Render("  (" + strings.TrimLeft(string(rune('0'+len(m.records)/10))+string(rune('0'+len(m.records)%10)), "0") + " records)")
-	}
+		Render(fmt.Sprintf("  (%d records)", len(m.records)))
 
 	separator := lipgloss.NewStyle().
 		Foreground(styles.Secondary).
@@ -279,7 +263,6 @@ func (m Model) renderEmpty() string {
 func (m Model) renderHistory() string {
 	var b strings.Builder
 
-	// Show at most 10 records
 	maxShow := maxVisibleHistoryRecords
 	if maxShow > len(m.records) {
 		maxShow = len(m.records)
@@ -295,7 +278,7 @@ func (m Model) renderHistory() string {
 
 	if len(m.records) > maxShow {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(
-			"  ... and " + string(rune('0'+(len(m.records)-maxShow)%10)) + " more"))
+			fmt.Sprintf("  ... and %d more", len(m.records)-maxShow)))
 	}
 
 	return b.String()
@@ -304,13 +287,11 @@ func (m Model) renderHistory() string {
 func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
 	var b strings.Builder
 
-	// Cursor indicator
 	cursor := "  "
 	if isCursor {
 		cursor = lipgloss.NewStyle().Foreground(styles.Primary).Render("▸ ")
 	}
 
-	// Status icon
 	var statusIcon string
 	if record.Success {
 		statusIcon = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
@@ -318,22 +299,18 @@ func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
 		statusIcon = lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark)
 	}
 
-	// Pipeline name
 	pipelineStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(14)
 	if isCursor {
 		pipelineStyle = pipelineStyle.Foreground(styles.Primary).Bold(true)
 	}
 	pipeline := pipelineStyle.Render(record.Pipeline)
 
-	// Mode
 	modeStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10)
 	mode := modeStyle.Render(record.Mode)
 
-	// Duration
 	durationStyle := lipgloss.NewStyle().Foreground(styles.Muted).Width(10)
 	duration := durationStyle.Render(formatDuration(record.Duration))
 
-	// Time ago
 	timeAgo := formatTimeAgo(record.StartTime)
 	timeStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true)
 
@@ -344,13 +321,13 @@ func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
 
 func formatDuration(secs float64) string {
 	if secs < 60 {
-		return string(rune('0'+int(secs)%10)) + "s"
+		return fmt.Sprintf("%.0fs", secs)
 	} else if secs < 3600 {
 		mins := int(secs) / 60
-		return string(rune('0'+mins%10)) + "m"
+		return fmt.Sprintf("%dm", mins)
 	}
 	hours := int(secs) / 3600
-	return string(rune('0'+hours%10)) + "h"
+	return fmt.Sprintf("%dh", hours)
 }
 
 func formatTimeAgo(t time.Time) string {
@@ -360,13 +337,13 @@ func formatTimeAgo(t time.Time) string {
 		return "just now"
 	} else if diff < time.Hour {
 		mins := int(diff.Minutes())
-		return string(rune('0'+mins%10)) + " min ago"
+		return fmt.Sprintf("%d min ago", mins)
 	} else if diff < 24*time.Hour {
 		hours := int(diff.Hours())
-		return string(rune('0'+hours%10)) + " hr ago"
+		return fmt.Sprintf("%d hr ago", hours)
 	} else if diff < 7*24*time.Hour {
 		days := int(diff.Hours() / 24)
-		return string(rune('0'+days%10)) + " days ago"
+		return fmt.Sprintf("%d days ago", days)
 	}
 	return t.Format("Jan 2")
 }
@@ -381,16 +358,4 @@ func (m Model) renderFooter() string {
 
 	separator := lipgloss.NewStyle().Foreground(styles.Secondary).Render("  │  ")
 	return styles.FooterStyle.Render(strings.Join(hints, separator))
-}
-
-///////////////////////////////////////////////////////////////////
-// Public Methods
-///////////////////////////////////////////////////////////////////
-
-func (m Model) GetRecords() []ExecutionRecord {
-	return m.records
-}
-
-func (m Model) HasRecords() bool {
-	return len(m.records) > 0
 }

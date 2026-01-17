@@ -27,7 +27,6 @@ from .graph_metrics import (
     compute_global_efficiency_weighted,
     compute_small_world_sigma,
     compute_participation_coefficient,
-    compute_clustering_coefficient,
 )
 from .arrays import (
     safe_nanmean,
@@ -65,7 +64,6 @@ __all__ = [
     "compute_global_efficiency_weighted",
     "compute_small_world_sigma",
     "compute_participation_coefficient",
-    "compute_clustering_coefficient",
     # Array utilities
     "safe_nanmean",
     "safe_nanstd",

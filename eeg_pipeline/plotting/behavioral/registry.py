@@ -3,7 +3,6 @@ Behavioral Visualization Registry
 ==================================
 
 Registry-based orchestration for behavioral correlation plots.
-Consolidates plotting functions from scatter.py, temporal.py, dose_response.py, etc.
 """
 
 from __future__ import annotations
@@ -16,19 +15,14 @@ from typing import Any, Dict, List, Optional
 from eeg_pipeline.plotting.core.registry import (
     CategorizedPlotManager,
     CategorizedPlotRegistry,
-    PlotterFunc,
 )
 from eeg_pipeline.plotting.style import use_style
 
-# Preferred execution order for plot categories
 CATEGORY_EXECUTION_ORDER = [
     "psychometrics",
     "scatter",
     "temporal",
     "dose_response",
-    "mediation",
-    "moderation",
-    "diagnostics",
     "summary",
 ]
 
@@ -48,7 +42,6 @@ class BehaviorPlotContext:
     plots_dir: Path
     stats_dir: Path
     use_spearman: bool = True
-    
     rating_stats: Optional[Any] = None
     temp_stats: Optional[Any] = None
     all_results: Optional[List[Any]] = None
@@ -73,15 +66,11 @@ class BehaviorPlotManager(CategorizedPlotManager["BehaviorPlotContext"]):
         categories = BehaviorPlotRegistry.get_categories()
         category_set = set(categories)
 
-        ordered_categories = [
-            cat for cat in CATEGORY_EXECUTION_ORDER if cat in category_set
-        ]
-        remaining_categories = [
-            cat for cat in categories if cat not in CATEGORY_EXECUTION_ORDER
-        ]
-        ordered_categories.extend(remaining_categories)
+        ordered = [cat for cat in CATEGORY_EXECUTION_ORDER if cat in category_set]
+        remaining = [cat for cat in categories if cat not in CATEGORY_EXECUTION_ORDER]
+        ordered.extend(remaining)
 
-        for category in ordered_categories:
+        for category in ordered:
             self.run_category(category)
 
         return self.saved_plots
@@ -96,5 +85,4 @@ __all__ = [
     "BehaviorPlotRegistry",
     "BehaviorPlotContext",
     "BehaviorPlotManager",
-    "PlotterFunc",
 ]

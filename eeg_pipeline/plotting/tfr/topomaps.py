@@ -26,7 +26,6 @@ from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
-    create_tfr_subset,
     get_bands_for_tfr,
     average_tfr_band,
     extract_trial_band_power,
@@ -46,7 +45,12 @@ from ..core.statistics import get_strict_mode, compute_cluster_significance, bui
 from ..core.colorbars import create_difference_colorbar
 from ..core.topomaps import build_topomap_diff_label, build_topomap_percentage_label
 from ..core.annotations import add_roi_annotations, get_sig_marker_text
-from .contrasts import _get_baseline_window, _align_and_trim_masks, _get_aligned_events_df_for_tfr
+from .contrasts import (
+    _get_baseline_window,
+    _align_and_trim_masks,
+    _get_aligned_events_df_for_tfr,
+    _prepare_comparison_contrast_data,
+)
 from .channels import _save_fig as _channels_save_fig
 
 
@@ -112,10 +116,6 @@ def _prepare_temperature_data(
             strict=get_strict_mode(config),
             logger=logger
         )
-        if len(mask_min) != len(tfr_sub) or len(mask_max) != len(tfr_sub):
-            mask_min = mask_min[:len(tfr_sub)]
-            mask_max = mask_max[:len(tfr_sub)]
-        
         tfr_min = tfr_sub[mask_min].average()
         tfr_max = tfr_sub[mask_max].average()
         apply_baseline_and_crop(tfr_min, baseline=baseline_used, mode="logratio", logger=logger)
@@ -197,11 +197,10 @@ def _compute_statistical_mask(
     if not viz_params["diff_annotation_enabled"] or tfr_sub is None:
         return None, None, None, None
     
-    diff_data_len = len(diff_data) if diff_data is not None else None
     return compute_cluster_significance(
         tfr_sub, condition_mask_a, condition_mask_b,
         fmin, fmax_eff, tmin_win, tmax_win,
-        config, diff_data_len=diff_data_len, logger=logger
+        config, diff_data_len=len(diff_data), logger=logger
     )
 
 
@@ -283,7 +282,6 @@ def _plot_single_topomap_window(
         sig_mask=annotation_mask,
         cluster_p_min=cluster_p_min,
         cluster_k=cluster_k,
-        cluster_mass=cluster_mass,
         is_cluster=is_cluster,
         data_group_a=data_group_a,
         data_group_b=data_group_b,
@@ -648,6 +646,84 @@ def plot_topomap_grid_baseline_temps(
     _channels_save_fig(fig, out_dir, "topomap_grid_bands_alltrials_plus_temperatures_baseline_percent.png", config=config, logger=logger, baseline_used=baseline_used)
 
 
+def _prepare_temporal_topomap_data(
+    tfr: "mne.time_frequency.EpochsTFR",
+    events_df: Optional[pd.DataFrame],
+    config,
+    baseline: Optional[Tuple[Optional[float], Optional[float]]],
+    active_window: Tuple[float, float],
+    logger: Optional[logging.Logger],
+    log_context: str,
+) -> Optional[Tuple[
+    mne.time_frequency.AverageTFR,
+    mne.time_frequency.AverageTFR,
+    mne.time_frequency.EpochsTFR,
+    TemperatureData,
+    np.ndarray,
+    np.ndarray,
+    Tuple[float, float],
+    float,
+    float,
+    str,
+    str,
+]]:
+    """Prepare common data for temporal topomap plotting.
+    
+    Returns:
+        Tuple of (tfr_condition_2, tfr_condition_1, tfr_sub_stats, temp_data,
+                 mask2, mask1, baseline_used, tmin_clip, tmax_clip, label2, label1)
+        or None if preparation fails
+    """
+    if not require_epochs_tfr(tfr, "Temporal topomaps", logger):
+        return None
+
+    baseline = _get_baseline_window(config, baseline)
+    tfr_sub, mask1, mask2, label1, label2, n = _prepare_comparison_contrast_data(
+        tfr, events_df, config, logger, context="Temporal topomaps"
+    )
+    if tfr_sub is None:
+        return None
+
+    log(f"{log_context}: {label2}={int(mask2.sum())}, {label1}={int(mask1.sum())} trials.", logger)
+
+    aligned = _align_and_trim_masks(
+        tfr_sub,
+        {"Condition contrast": (mask2, mask1)},
+        config,
+        logger,
+    )
+    if aligned is None:
+        return None
+
+    mask2, mask1 = aligned["Condition contrast"]
+
+    tfr_sub_stats = tfr_sub.copy()
+    baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
+
+    tfr_condition_2 = tfr_sub[mask2].average()
+    tfr_condition_1 = tfr_sub[mask1].average()
+    
+    apply_baseline_and_crop(tfr_condition_2, baseline=baseline_used, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_condition_1, baseline=baseline_used, mode="logratio", logger=logger)
+
+    temp_data = _prepare_temperature_data(
+        tfr_sub, tfr, events_df, int(n), baseline_used, config, logger
+    )
+
+    times = np.asarray(tfr_condition_2.times)
+    tmin_req, tmax_req = active_window
+    clipped = clip_time_range(times, tmin_req, tmax_req)
+    if clipped is None:
+        log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
+        return None
+    tmin_clip, tmax_clip = clipped
+
+    return (
+        tfr_condition_2, tfr_condition_1, tfr_sub_stats, temp_data,
+        mask2, mask1, baseline_used, tmin_clip, tmax_clip, str(label2), str(label1)
+    )
+
+
 def plot_pain_nonpain_temporal_topomaps_diff_allbands(
     tfr: "mne.time_frequency.EpochsTFR",
     events_df: Optional[pd.DataFrame],
@@ -673,60 +749,17 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
         window_size_ms: Size of each time window in milliseconds
         logger: Optional logger instance
     """
-    if not require_epochs_tfr(tfr, "Temporal topomaps", logger):
-        return
-
-    baseline = _get_baseline_window(config, baseline)
-    from .contrasts import _prepare_comparison_contrast_data, _get_aligned_events_df_for_tfr
-
-    tfr_sub, mask1, mask2, label1, label2, n = _prepare_comparison_contrast_data(
-        tfr, events_df, config, logger, context="Temporal topomaps"
+    prepared = _prepare_temporal_topomap_data(
+        tfr, events_df, config, baseline, active_window, logger,
+        "Temporal topomaps (diff, all bands)"
     )
-    if tfr_sub is None:
+    if prepared is None:
         return
 
-    log(f"Temporal topomaps (diff, all bands): {label2}={int(mask2.sum())}, {label1}={int(mask1.sum())} trials.", logger)
-
-    aligned = _align_and_trim_masks(
-        tfr_sub,
-        {"Condition contrast": (mask2, mask1)},
-        config,
-        logger,
-    )
-    if aligned is None:
-        return
-
-    mask2, mask1 = aligned["Condition contrast"]
-
-    tfr_sub_stats = tfr_sub.copy()
-    baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
-
-    tfr_condition_2 = tfr_sub[mask2].average()
-    tfr_condition_1 = tfr_sub[mask1].average()
-    
-    apply_baseline_and_crop(tfr_condition_2, baseline=baseline_used, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_condition_1, baseline=baseline_used, mode="logratio", logger=logger)
-
-    temp_data = _prepare_temperature_data(
-        tfr_sub, tfr, events_df, int(n), baseline_used, config, logger
-    )
-
-    times = np.asarray(tfr_condition_2.times)
-    tmin_req, tmax_req = active_window
-    clipped = clip_time_range(times, tmin_req, tmax_req)
-    if clipped is None:
-        log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
-        return
-    tmin_clip, tmax_clip = clipped
-    
-    if tmin_clip is None or tmax_clip is None:
-        log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
-        return
+    tfr_condition_2, tfr_condition_1, tfr_sub_stats, temp_data, mask2, mask1, baseline_used, tmin_clip, tmax_clip, label2, label1 = prepared
 
     window_starts, window_ends = build_time_windows_fixed_size_clamped(
-        tmin_clip,
-        tmax_clip,
-        window_size_ms / 1000.0,
+        tmin_clip, tmax_clip, window_size_ms / 1000.0
     )
     n_windows = len(window_starts)
     log(f"Creating temporal topomaps from {tmin_clip:.2f} to {tmax_clip:.2f} s using {n_windows} windows ({window_size_ms:.1f}ms each).", logger)
@@ -743,8 +776,8 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
         mask2, mask1, window_starts, window_ends,
         tmin_clip, tmax_clip, n_windows, baseline_used,
         window_label, filename_base, out_dir, config, logger,
-        condition_label_2=str(label2),
-        condition_label_1=str(label1),
+        condition_label_2=label2,
+        condition_label_1=label1,
     )
 
 
@@ -773,55 +806,14 @@ def plot_temporal_topomaps_allbands_active(
         window_count: Number of time windows to create
         logger: Optional logger instance
     """
-    if not require_epochs_tfr(tfr, "Temporal topomaps", logger):
-        return
-
-    baseline = _get_baseline_window(config, baseline)
-    from .contrasts import _prepare_comparison_contrast_data, _get_aligned_events_df_for_tfr
-
-    tfr_sub, mask1, mask2, label1, label2, n = _prepare_comparison_contrast_data(
-        tfr, events_df, config, logger, context="Temporal topomaps"
+    prepared = _prepare_temporal_topomap_data(
+        tfr, events_df, config, baseline, active_window, logger,
+        "Temporal topomaps (active, all bands)"
     )
-    if tfr_sub is None:
+    if prepared is None:
         return
 
-    log(f"Temporal topomaps (active, all bands): {label2}={int(mask2.sum())}, {label1}={int(mask1.sum())} trials.", logger)
-
-    aligned = _align_and_trim_masks(
-        tfr_sub,
-        {"Condition contrast": (mask2, mask1)},
-        config,
-        logger,
-    )
-    if aligned is None:
-        return
-
-    mask2, mask1 = aligned["Condition contrast"]
-
-    tfr_sub_stats = tfr_sub.copy()
-    baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
-
-    tfr_condition_2 = tfr_sub[mask2].average()
-    tfr_condition_1 = tfr_sub[mask1].average()
-    
-    apply_baseline_and_crop(tfr_condition_2, baseline=baseline_used, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_condition_1, baseline=baseline_used, mode="logratio", logger=logger)
-
-    temp_data = _prepare_temperature_data(
-        tfr_sub, tfr, events_df, int(n), baseline_used, config, logger
-    )
-
-    times = np.asarray(tfr_condition_2.times)
-    tmin_req, tmax_req = active_window
-    clipped = clip_time_range(times, tmin_req, tmax_req)
-    if clipped is None:
-        log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
-        return
-    tmin_clip, tmax_clip = clipped
-    
-    if tmin_clip is None or tmax_clip is None:
-        log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
-        return
+    tfr_condition_2, tfr_condition_1, tfr_sub_stats, temp_data, mask2, mask1, baseline_used, tmin_clip, tmax_clip, label2, label1 = prepared
 
     window_starts, window_ends = build_time_windows_fixed_count(tmin_clip, tmax_clip, window_count)
     n_windows = len(window_starts)
@@ -840,6 +832,6 @@ def plot_temporal_topomaps_allbands_active(
         mask2, mask1, window_starts, window_ends,
         tmin_clip, tmax_clip, n_windows, baseline_used,
         window_label, filename_base, out_dir, config, logger,
-        condition_label_2=str(label2),
-        condition_label_1=str(label1),
+        condition_label_2=label2,
+        condition_label_1=label1,
     )

@@ -46,7 +46,6 @@ const (
 	vmStatusStarting = "starting"
 	vmStatusRunning  = "running"
 	vmStatusStopped  = "stopped"
-	vmStatusError    = "error"
 )
 
 func (e Environment) String() string {
@@ -63,8 +62,6 @@ type envOption struct {
 	env         Environment
 	name        string
 	description string
-	icon        string
-	pros        []string
 }
 
 var environments = []envOption{
@@ -72,15 +69,11 @@ var environments = []envOption{
 		EnvLocal,
 		"Local Machine",
 		"Run pipelines on this computer",
-		"▸",
-		[]string{"No network required", "Full resource access", "Immediate start"},
 	},
 	{
 		EnvGoogleCloud,
 		"Google Cloud VM",
 		"Process on remote VM",
-		"▸",
-		[]string{"More compute power", "GPU acceleration", "Persistent storage"},
 	},
 }
 
@@ -159,14 +152,6 @@ func (m Model) moveCursorDown() Model {
 	return m
 }
 
-func (m Model) handleHelpToggle(key string) (Model, tea.Cmd) {
-	if key == "?" || key == "esc" {
-		m.showHelp = false
-		m.helpOverlay.Visible = false
-	}
-	return m, nil
-}
-
 func (m Model) handleNavigation(key string) (Model, tea.Cmd, bool) {
 	switch key {
 	case "up", "k":
@@ -177,7 +162,6 @@ func (m Model) handleNavigation(key string) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 
-	// Cancel confirmation if user navigates away from cloud
 	if m.showCloudConfirmation && !m.isCloudSelected() {
 		m.showCloudConfirmation = false
 	}
@@ -195,21 +179,16 @@ func (m Model) handleSelection(key string) (Model, tea.Cmd, bool) {
 	case "enter", " ":
 		if m.isCloudSelected() {
 			if m.VMStatus == vmStatusRunning {
-				// VM is running, proceed normally
 				m.Selected = EnvGoogleCloud
 				m.Done = true
 				return m, nil, true
-			} else {
-				// VM not running, show confirmation
-				m.showCloudConfirmation = true
-				return m, nil, true
 			}
-		} else {
-			// Local environment selected
-			m.Selected = environments[m.cursor].env
-			m.Done = true
+			m.showCloudConfirmation = true
 			return m, nil, true
 		}
+		m.Selected = environments[m.cursor].env
+		m.Done = true
+		return m, nil, true
 	}
 
 	return m, nil, false
@@ -218,11 +197,9 @@ func (m Model) handleSelection(key string) (Model, tea.Cmd, bool) {
 func (m Model) handleCloudConfirmation(key string) (Model, tea.Cmd, bool) {
 	switch key {
 	case "y", "Y":
-		// User confirmed, start VM (keep confirmation visible until VM is running)
 		m.VMStatus = vmStatusStarting
 		return m, cloud.StartVM(m.CloudConfig), true
 	case "n", "N", "esc":
-		// User cancelled
 		m.showCloudConfirmation = false
 		return m, nil, true
 	}
@@ -238,7 +215,6 @@ func (m Model) handleVMStatus(msg cloud.VMStatusMsg) Model {
 	} else if msg.Running {
 		m.VMStatus = vmStatusRunning
 		m.VMHostname = msg.IP
-		// If confirmation was showing and VM is now running, auto-select cloud
 		if m.showCloudConfirmation {
 			m.showCloudConfirmation = false
 			m.Selected = EnvGoogleCloud
@@ -257,18 +233,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.tick()
 
 	case tea.KeyMsg:
+		key := msg.String()
 		if m.showHelp {
-			return m.handleHelpToggle(msg.String())
+			if key == "?" || key == "esc" {
+				m.showHelp = false
+				m.helpOverlay.Visible = false
+				return m, nil
+			}
+			return m, nil
 		}
 
-		key := msg.String()
 		if key == "?" {
 			m.showHelp = true
 			m.helpOverlay.Visible = true
 			return m, nil
 		}
 
-		// Handle cloud confirmation first if it's showing
 		if m.showCloudConfirmation {
 			if updated, cmd, handled := m.handleCloudConfirmation(key); handled {
 				return updated, cmd
@@ -398,7 +378,7 @@ func (m Model) renderSystemInfo() string {
 	osArch := fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
 
 	var info []string
-	
+
 	envType := "Local"
 	if isRunningOnGCP() {
 		envType = "Virtual Machine"
@@ -485,8 +465,6 @@ func (m Model) renderVMStatusBadge() string {
 		return lipgloss.NewStyle().Foreground(styles.Success).Render("[" + styles.ActiveMark + " running]")
 	case vmStatusStopped:
 		return lipgloss.NewStyle().Foreground(styles.Warning).Render("[" + styles.PendingMark + " stopped]")
-	case vmStatusError:
-		return lipgloss.NewStyle().Foreground(styles.Error).Render("[" + styles.CrossMark + " error]")
 	default:
 		return lipgloss.NewStyle().Foreground(styles.Muted).Render("[? unknown]")
 	}
@@ -525,6 +503,16 @@ func (m Model) renderCloudStatusLine(statusLabel string, valueStyle, labelStyle 
 		return statusLabel + statusText + "\n"
 
 	case vmStatusStopped:
+		if m.VMError != nil {
+			statusText := lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark + " Connection failed")
+			result := statusLabel + statusText + "\n"
+			errMsg := m.VMError.Error()
+			if len(errMsg) > maxErrorMsgLength {
+				errMsg = errMsg[:maxErrorMsgLength] + "..."
+			}
+			result += labelStyle.Render("") + lipgloss.NewStyle().Foreground(styles.TextDim).Render(errMsg) + "\n"
+			return result
+		}
 		statusText := lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.PendingMark + " Stopped")
 		return statusLabel + statusText + "\n"
 
@@ -535,18 +523,6 @@ func (m Model) renderCloudStatusLine(statusLabel string, valueStyle, labelStyle 
 	case vmStatusStarting:
 		statusText := lipgloss.NewStyle().Foreground(styles.Accent).Render("Starting VM...")
 		return statusLabel + statusText + "\n"
-
-	case vmStatusError:
-		statusText := lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark + " Connection failed")
-		result := statusLabel + statusText + "\n"
-		if m.VMError != nil {
-			errMsg := m.VMError.Error()
-			if len(errMsg) > maxErrorMsgLength {
-				errMsg = errMsg[:maxErrorMsgLength] + "..."
-			}
-			result += labelStyle.Render("") + lipgloss.NewStyle().Foreground(styles.TextDim).Render(errMsg) + "\n"
-		}
-		return result
 
 	default:
 		statusText := lipgloss.NewStyle().Foreground(styles.Muted).Render("Unknown")

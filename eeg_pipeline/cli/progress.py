@@ -35,10 +35,8 @@ class ProgressEvent(str, Enum):
 class ProgressReporter:
     """Report progress events as JSON lines for TUI consumption."""
 
-    def __init__(self, enabled: bool = False, total_steps: int = 0):
+    def __init__(self, enabled: bool = False):
         self.enabled = enabled
-        self.total_steps = total_steps
-        self.current_step = 0
         self.current_subject = None
         self._start_wall_time = None
         self._start_cpu_time = None
@@ -65,7 +63,6 @@ class ProgressReporter:
     def step(self, step_name: str, current: int = None, total: int = None) -> None:
         if not self.enabled:
             return
-        self.current_step += 1
         msg = {
             "event": ProgressEvent.PROGRESS.value,
             "step": step_name,
@@ -119,9 +116,8 @@ class ProgressReporter:
         self._emit(msg)
 
     def _emit(self, data: Dict[str, Any]) -> None:
-        if "cpu" not in data or "memory" not in data:
-            usage = self._get_resource_usage()
-            data.update(usage)
+        usage = self._get_resource_usage()
+        data.update(usage)
         print(json.dumps(data), flush=True)
 
     def _get_resource_usage(self) -> Dict[str, float]:
@@ -164,15 +160,15 @@ class ProgressReporter:
         cpu_time_delta = current_cpu_time - self._start_cpu_time
         cpu_percent = (cpu_time_delta / elapsed_wall_time) * 100.0
         
-        max_cpu_percent = 100.0 * os.cpu_count()
+        cpu_count = os.cpu_count() or 1
+        max_cpu_percent = 100.0 * cpu_count
         cpu_percent = min(max(cpu_percent, 0.0), max_cpu_percent)
-        
         return cpu_percent
 
     def _get_current_cpu_time(self) -> float:
         """Get cumulative CPU time (user + system) in seconds."""
-        times = os.times()
-        return sum(times[:2])
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        return usage.ru_utime + usage.ru_stime
 
 
 def create_progress_reporter(args) -> ProgressReporter:

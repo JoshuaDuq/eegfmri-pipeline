@@ -21,12 +21,10 @@ from eeg_pipeline.infra.paths import (
     ensure_dir,
     find_clean_epochs_path,
 )
-from eeg_pipeline.infra.tsv import read_tsv, write_parquet
+from eeg_pipeline.infra.tsv import read_parquet, write_parquet
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 
 logger = get_logger(__name__)
-
-_BEST_PARAMS_LOGGED: set = set()
 
 
 ###################################################################
@@ -136,61 +134,11 @@ def prepare_best_params_path(
         )
     else:
         if mode == "truncate":
-            base_path.open("w", encoding="utf-8").close()
+            base_path.unlink(missing_ok=True)
         output_path = base_path
 
-    if base_path not in _BEST_PARAMS_LOGGED:
-        logger.info(f"Best-params mode='{mode}'; resolved path: {output_path}")
-        _BEST_PARAMS_LOGGED.add(base_path)
-
+    logger.info(f"Best-params mode='{mode}'; resolved path: {output_path}")
     return output_path
-
-
-def read_best_params_jsonl(path: Path) -> dict:
-    best = {}
-    if not path or not path.exists():
-        return best
-
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            rec = json.loads(line)
-            fold = rec.get("fold")
-            if fold is not None:
-                best[int(fold)] = rec.get("best_params", {})
-
-    return best
-
-
-def read_best_params_jsonl_combined(path: Path) -> dict:
-    """Read best parameters from JSONL, combining by fold and subject."""
-    combined: dict = {}
-    if not path or not path.exists():
-        return combined
-
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            record = json.loads(line)
-            params = (
-                record.get("best_params")
-                or record.get("best_params_by_r")
-                or {}
-            )
-            if not isinstance(params, dict):
-                continue
-
-            fold = record.get("fold")
-            subject = (
-                record.get("subject")
-                or record.get("heldout_subject")
-                or record.get("heldout_subject_id")
-            )
-
-            if fold is not None:
-                combined[int(fold)] = params
-            if subject is not None:
-                combined[str(subject)] = params
-
-    return combined
 
 
 ###################################################################
@@ -261,10 +209,11 @@ def export_indices(
 
 def _is_power_channel_feature(parsed: dict) -> bool:
     """Check if parsed feature is a power channel feature."""
-    is_valid = parsed.get("valid", False)
-    is_power = parsed.get("group") == "power"
-    is_channel = parsed.get("scope") == "ch"
-    return is_valid and is_power and is_channel
+    return (
+        parsed.get("valid", False)
+        and parsed.get("group") == "power"
+        and parsed.get("scope") == "ch"
+    )
 
 
 def _extract_power_channel_features(
@@ -365,10 +314,10 @@ def aggregate_group_feature_topomaps(
     config: Optional[Any] = None,
 ) -> Optional[Path]:
     if min_subjects is None:
-        if config is not None:
-            min_subjects = int(config.get("analysis.min_subjects_for_topomaps"))
-        else:
+        if config is None:
             raise ValueError("config is required when min_subjects is None")
+        min_subjects = int(config.get("analysis.min_subjects_for_topomaps"))
+    
     if stats_dir is None:
         stats_dir = deriv_root / "group" / "eeg" / "stats"
 
@@ -378,9 +327,9 @@ def aggregate_group_feature_topomaps(
     for subject in subjects:
         subj_stats_dir = deriv_stats_path(deriv_root, subject) / "05_decode_pain_experience"
         if method == "elasticnet":
-            pattern = f"feature_topomap_elasticnet_{aggregate}_*.tsv"
+            pattern = f"feature_topomap_elasticnet_{aggregate}_*.parquet"
         else:
-            pattern = "feature_topomap_rfperm_*.tsv"
+            pattern = "feature_topomap_rfperm_*.parquet"
 
         matches = list(subj_stats_dir.glob(pattern))
         if target is not None:
@@ -388,7 +337,7 @@ def aggregate_group_feature_topomaps(
 
         if matches:
             try:
-                df = read_tsv(matches[0])
+                df = read_parquet(matches[0])
                 df["subject"] = subject
                 tables.append(df)
             except (OSError, pd.errors.ParserError, UnicodeDecodeError) as e:
@@ -428,6 +377,10 @@ def aggregate_group_feature_topomaps(
     picks = mne.pick_channels(info_ref["ch_names"], include=keep_channels)
     ordered_channels = [info_ref["ch_names"][idx] for idx in picks]
 
+    if config is None:
+        raise ValueError("config is required for FDR correction")
+    fdr_alpha = float(config.get("statistics.fdr_alpha"))
+
     rows: List[dict] = []
 
     for band in bands:
@@ -454,9 +407,7 @@ def aggregate_group_feature_topomaps(
             denom_valid = sd[valid] / np.sqrt(n[valid])
             t[valid] = mean[valid] / denom_valid
             p[valid] = 2 * (1 - norm.cdf(np.abs(t[valid])))
-        if config is None:
-            raise ValueError("config is required for FDR correction")
-        fdr_alpha = float(config.get("statistics.fdr_alpha"))
+        
         q = fdr_bh(p, alpha=fdr_alpha)
         sig = q < fdr_alpha
 
@@ -493,8 +444,6 @@ def aggregate_group_feature_topomaps(
 __all__ = [
     "create_run_manifest",
     "prepare_best_params_path",
-    "read_best_params_jsonl",
-    "read_best_params_jsonl_combined",
     "export_predictions",
     "export_indices",
     "write_feature_importance",

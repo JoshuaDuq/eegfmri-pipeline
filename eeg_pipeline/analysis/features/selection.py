@@ -28,11 +28,10 @@ def resolve_feature_categories(config: Any, requested: Optional[List[str]]) -> L
         categories = list(requested)
     else:
         configured_categories = config.get("feature_engineering.feature_categories")
-        categories = (
-            list(configured_categories)
-            if configured_categories
-            else list(FEATURE_CATEGORIES)
-        )
+        if configured_categories:
+            categories = list(configured_categories)
+        else:
+            categories = list(FEATURE_CATEGORIES)
 
     categories = list(dict.fromkeys(str(cat) for cat in categories))
     if not categories:

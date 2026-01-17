@@ -18,13 +18,14 @@ from scipy import stats
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path
+from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from eeg_pipeline.infra.logging import get_logger
+from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
-from .utils import get_condition_colors, get_fdr_alpha
+from .utils import get_fdr_alpha
 
 
 # Constants
@@ -322,8 +323,6 @@ def _extract_condition_masks(
             )
         return None, None, None, None
     
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-    
     comp = extract_comparison_mask(events_df, config, require_enabled=False)
     if comp is None:
         return None, None, None, None
@@ -365,19 +364,20 @@ def _find_run_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
 
 
 def _get_aperiodic_column_name(channel: str, metric: str, features_df: pd.DataFrame) -> Optional[str]:
-    """Get aperiodic column name using new or old naming scheme.
+    """Get aperiodic column name using NamingSchema.
     
     Returns:
         Column name or None if not found
     """
-    col_new = f"aperiodic_active_broadband_ch_{channel}_{metric}"
-    col_old = f"aper_{metric}_{channel}"
-    
-    if col_new in features_df.columns:
-        return col_new
-    if col_old in features_df.columns:
-        return col_old
-    return None
+    col = NamingSchema.build(
+        "aperiodic",
+        "active",
+        "broadband",
+        "ch",
+        metric,
+        channel=channel,
+    )
+    return col if col in features_df.columns else None
 
 
 def _compute_channel_pvalues(
@@ -727,16 +727,21 @@ def _find_common_slope_columns(
     events_df: pd.DataFrame,
     config: Any,
 ) -> List[str]:
-    """Find slope columns common across conditions.
+    """Find slope columns common across conditions using NamingSchema.
     
     Returns:
         List of column names
     """
-    slope_cols = [c for c in features_df.columns if c.startswith("aper_slope_")]
+    slope_cols = []
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if (parsed.get("valid") and 
+            parsed.get("group") == "aperiodic" and 
+            parsed.get("stat") == "slope"):
+            slope_cols.append(col)
+    
     if not slope_cols:
         return []
-    
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     
     comp = extract_comparison_mask(events_df, config, require_enabled=False)
     if comp is None:
@@ -891,7 +896,12 @@ def plot_aperiodic_vs_pain(
     )
 
     p_perm_for_bh = [p_perm_slope]
-    offset_cols = [c for c in features_df.columns if c.startswith("aper_offset_")]
+    offset_cols = [
+        col for col in features_df.columns
+        if (parsed := NamingSchema.parse(str(col))).get("valid") and
+        parsed.get("group") == "aperiodic" and
+        parsed.get("stat") == "offset"
+    ]
     if offset_cols:
         mean_offset = features_df[offset_cols].mean(axis=1)[valid_mask]
         if len(mean_offset) == len(ratings_valid):
@@ -965,7 +975,6 @@ def plot_aperiodic_by_condition(
     if features_df is None or features_df.empty or events_df is None:
         return
 
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import (
         plot_paired_comparison,
         apply_fdr_correction,

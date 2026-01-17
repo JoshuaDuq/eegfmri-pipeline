@@ -16,7 +16,7 @@ import pandas as pd
 import mne
 import matplotlib.pyplot as plt
 
-from ...utils.config.loader import get_config_value, ensure_config
+from ...utils.config.loader import get_config_value, ensure_config, get_frequency_bands
 from ...utils.analysis.tfr import (
     validate_baseline_indices,
     average_tfr_band,
@@ -223,9 +223,8 @@ def _process_single_band(
     Returns:
         Dictionary with summary statistics, or None if processing fails
     """
-    frequency_mask = (freqs >= float(fmin)) & (
-        freqs <= (float(fmax) if fmax is not None else freqs.max())
-    )
+    fmax_effective = float(fmax) if fmax is not None else float(freqs.max())
+    frequency_mask = (freqs >= float(fmin)) & (freqs <= fmax_effective)
     if not np.any(frequency_mask):
         return None
     
@@ -264,7 +263,6 @@ def _process_single_band(
     topomap_percentage_change = None
     if tfr_avg is not None:
         fmin_effective = float(fmin)
-        fmax_effective = float(fmax) if fmax is not None else float(freqs.max())
         topomap_percentage_change = _compute_topomap_percentage_change(
             tfr_avg,
             band_name,
@@ -349,16 +347,13 @@ def qc_baseline_active_power(
     
     active_mask = (times >= active_window[0]) & (times < active_window[1])
     if not np.any(active_mask):
-        active_sample_count = int(active_mask.sum())
-        log(f"QC skipped: active samples={active_sample_count}", logger, "warning")
+        log(f"QC skipped: active samples={int(active_mask.sum())}", logger, "warning")
         return
 
     tfr_avg = tfr.average() if isinstance(tfr, mne.time_frequency.EpochsTFR) else tfr
     
-    band_bounds = config.get("time_frequency_analysis.bands") if config else None
-    if band_bounds is None and hasattr(config, "frequency_bands"):
-        band_bounds = config.frequency_bands
-    if band_bounds is None:
+    band_bounds = get_frequency_bands(config)
+    if not band_bounds:
         log("QC skipped: no frequency bands found in config", logger, "warning")
         return
     
@@ -366,8 +361,8 @@ def qc_baseline_active_power(
     baseline_window_tuple = (baseline_start, baseline_end)
     summary_rows = []
     
-    band_bounds_dict = {k: tuple(v) for k, v in band_bounds.items()}
-    for band_name, (fmin, fmax) in band_bounds_dict.items():
+    for band_name, band_range in band_bounds.items():
+        fmin, fmax = tuple(band_range)
         summary = _process_single_band(
             data,
             freqs,

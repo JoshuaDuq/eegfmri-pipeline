@@ -88,49 +88,39 @@ def _parse_erp_components(tokens: List[str]) -> List[dict]:
     return components
 
 
-def _apply_config_override(config: Any, path: str, value: Any) -> None:
-    """Set a config value at the given dot-separated path."""
-    config[path] = value
-
-
-def _get_arg_value(args: argparse.Namespace, attr_name: str) -> Any:
-    """Get argument value if present, otherwise None."""
-    return getattr(args, attr_name, None)
-
-
 def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply connectivity-related config overrides."""
-    if _get_arg_value(args, "connectivity_measures") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.measures", args.connectivity_measures)
-    if _get_arg_value(args, "conn_output_level") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.output_level", args.conn_output_level)
-    if _get_arg_value(args, "conn_graph_metrics") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.enable_graph_metrics", args.conn_graph_metrics)
-    if _get_arg_value(args, "conn_aec_mode") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.aec_mode", args.conn_aec_mode)
-    if _get_arg_value(args, "conn_graph_prop") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.graph_top_prop", args.conn_graph_prop)
-    if _get_arg_value(args, "conn_window_len") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.sliding_window_len", args.conn_window_len)
-    if _get_arg_value(args, "conn_window_step") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.sliding_window_step", args.conn_window_step)
-    if _get_arg_value(args, "aec_output") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.aec_output", args.aec_output)
-    if _get_arg_value(args, "conn_force_within_epoch_for_ml") is not None:
-        _apply_config_override(config, "feature_engineering.connectivity.force_within_epoch_for_ml", args.conn_force_within_epoch_for_ml)
+    if getattr(args, "connectivity_measures", None) is not None:
+        config["feature_engineering.connectivity.measures"] = args.connectivity_measures
+    if getattr(args, "conn_output_level", None) is not None:
+        config["feature_engineering.connectivity.output_level"] = args.conn_output_level
+    if getattr(args, "conn_graph_metrics", None) is not None:
+        config["feature_engineering.connectivity.enable_graph_metrics"] = args.conn_graph_metrics
+    if getattr(args, "conn_aec_mode", None) is not None:
+        config["feature_engineering.connectivity.aec_mode"] = args.conn_aec_mode
+    if getattr(args, "conn_graph_prop", None) is not None:
+        config["feature_engineering.connectivity.graph_top_prop"] = args.conn_graph_prop
+    if getattr(args, "conn_window_len", None) is not None:
+        config["feature_engineering.connectivity.sliding_window_len"] = args.conn_window_len
+    if getattr(args, "conn_window_step", None) is not None:
+        config["feature_engineering.connectivity.sliding_window_step"] = args.conn_window_step
+    if getattr(args, "aec_output", None) is not None:
+        config["feature_engineering.connectivity.aec_output"] = args.aec_output
+    if getattr(args, "conn_force_within_epoch_for_ml", None) is not None:
+        config["feature_engineering.connectivity.force_within_epoch_for_ml"] = args.conn_force_within_epoch_for_ml
     
     conn_cfg = config.setdefault("feature_engineering", {}).setdefault("connectivity", {})
-    if _get_arg_value(args, "conn_granularity") is not None:
+    if getattr(args, "conn_granularity", None) is not None:
         conn_cfg["granularity"] = args.conn_granularity
-    if _get_arg_value(args, "conn_min_epochs_per_group") is not None:
+    if getattr(args, "conn_min_epochs_per_group", None) is not None:
         conn_cfg["min_epochs_per_group"] = args.conn_min_epochs_per_group
-    if _get_arg_value(args, "conn_min_cycles_per_band") is not None:
+    if getattr(args, "conn_min_cycles_per_band", None) is not None:
         conn_cfg["min_cycles_per_band"] = args.conn_min_cycles_per_band
-    if _get_arg_value(args, "conn_warn_no_spatial_transform") is not None:
+    if getattr(args, "conn_warn_no_spatial_transform", None) is not None:
         conn_cfg["warn_if_no_spatial_transform"] = args.conn_warn_no_spatial_transform
-    if _get_arg_value(args, "conn_phase_estimator") is not None:
+    if getattr(args, "conn_phase_estimator", None) is not None:
         conn_cfg["phase_estimator"] = args.conn_phase_estimator
-    if _get_arg_value(args, "conn_min_segment_sec") is not None:
+    if getattr(args, "conn_min_segment_sec", None) is not None:
         conn_cfg["min_segment_sec"] = args.conn_min_segment_sec
 
 
@@ -138,18 +128,18 @@ def _apply_directedconnectivity_overrides(args: argparse.Namespace, config: Any)
     """Apply directed connectivity-related config overrides (PSI, DTF, PDC)."""
     dconn_cfg = config.setdefault("feature_engineering", {}).setdefault("directedconnectivity", {})
     
-    if _get_arg_value(args, "directed_connectivity_measures") is not None:
+    if getattr(args, "directed_connectivity_measures", None) is not None:
         measures = args.directed_connectivity_measures
         dconn_cfg["enable_psi"] = "psi" in measures
         dconn_cfg["enable_dtf"] = "dtf" in measures
         dconn_cfg["enable_pdc"] = "pdc" in measures
-    if _get_arg_value(args, "directed_conn_output_level") is not None:
+    if getattr(args, "directed_conn_output_level", None) is not None:
         dconn_cfg["output_level"] = args.directed_conn_output_level
-    if _get_arg_value(args, "directed_conn_mvar_order") is not None:
+    if getattr(args, "directed_conn_mvar_order", None) is not None:
         dconn_cfg["mvar_order"] = args.directed_conn_mvar_order
-    if _get_arg_value(args, "directed_conn_n_freqs") is not None:
+    if getattr(args, "directed_conn_n_freqs", None) is not None:
         dconn_cfg["n_freqs"] = args.directed_conn_n_freqs
-    if _get_arg_value(args, "directed_conn_min_segment_samples") is not None:
+    if getattr(args, "directed_conn_min_segment_samples", None) is not None:
         dconn_cfg["min_segment_samples"] = args.directed_conn_min_segment_samples
 
 
@@ -157,422 +147,414 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
     """Apply source localization-related config overrides (LCMV, eLORETA)."""
     src_cfg = config.setdefault("feature_engineering", {}).setdefault("sourcelocalization", {})
     
-    if _get_arg_value(args, "source_method") is not None:
+    if getattr(args, "source_method", None) is not None:
         src_cfg["method"] = args.source_method
-    if _get_arg_value(args, "source_spacing") is not None:
+    if getattr(args, "source_spacing", None) is not None:
         src_cfg["spacing"] = args.source_spacing
-    if _get_arg_value(args, "source_reg") is not None:
+    if getattr(args, "source_reg", None) is not None:
         src_cfg["reg"] = args.source_reg
-    if _get_arg_value(args, "source_snr") is not None:
+    if getattr(args, "source_snr", None) is not None:
         src_cfg["snr"] = args.source_snr
-    if _get_arg_value(args, "source_loose") is not None:
+    if getattr(args, "source_loose", None) is not None:
         src_cfg["loose"] = args.source_loose
-    if _get_arg_value(args, "source_depth") is not None:
+    if getattr(args, "source_depth", None) is not None:
         src_cfg["depth"] = args.source_depth
-    if _get_arg_value(args, "source_parc") is not None:
+    if getattr(args, "source_parc", None) is not None:
         src_cfg["parcellation"] = args.source_parc
-    if _get_arg_value(args, "source_connectivity_method") is not None:
+    if getattr(args, "source_connectivity_method", None) is not None:
         src_cfg["connectivity_method"] = args.source_connectivity_method
-    if _get_arg_value(args, "source_subject") is not None:
+    if getattr(args, "source_subject", None) is not None:
         src_cfg["subject"] = args.source_subject
-    if _get_arg_value(args, "source_subjects_dir") is not None:
+    if getattr(args, "source_subjects_dir", None) is not None:
         src_cfg["subjects_dir"] = args.source_subjects_dir
-    if _get_arg_value(args, "source_trans") is not None:
+    if getattr(args, "source_trans", None) is not None:
         src_cfg["trans"] = args.source_trans
-    if _get_arg_value(args, "source_bem") is not None:
+    if getattr(args, "source_bem", None) is not None:
         src_cfg["bem"] = args.source_bem
-    if _get_arg_value(args, "source_mindist_mm") is not None:
+    if getattr(args, "source_mindist_mm", None) is not None:
         src_cfg["mindist_mm"] = args.source_mindist_mm
 
-    # BEM/Trans generation options (Docker-based)
-    # Note: FS License path is in global config (paths.freesurfer_license)
-    # Default: eeg_pipeline/licenses/license_freesurfer.txt
     bem_cfg = src_cfg.setdefault("bem_generation", {})
-    if _get_arg_value(args, "source_create_trans") is not None:
+    if getattr(args, "source_create_trans", None) is not None:
         bem_cfg["create_trans"] = args.source_create_trans
-    if _get_arg_value(args, "source_create_bem_model") is not None:
+    if getattr(args, "source_create_bem_model", None) is not None:
         bem_cfg["create_model"] = args.source_create_bem_model
-    if _get_arg_value(args, "source_create_bem_solution") is not None:
+    if getattr(args, "source_create_bem_solution", None) is not None:
         bem_cfg["create_solution"] = args.source_create_bem_solution
-    if _get_arg_value(args, "source_allow_identity_trans") is not None:
+    if getattr(args, "source_allow_identity_trans", None) is not None:
         bem_cfg["allow_identity_trans"] = args.source_allow_identity_trans
 
     fmri_cfg = src_cfg.setdefault("fmri", {})
-    if _get_arg_value(args, "source_fmri_enabled") is not None:
+    if getattr(args, "source_fmri_enabled", None) is not None:
         fmri_cfg["enabled"] = args.source_fmri_enabled
-    if _get_arg_value(args, "source_fmri_stats_map") is not None:
+    if getattr(args, "source_fmri_stats_map", None) is not None:
         fmri_cfg["stats_map_path"] = args.source_fmri_stats_map
-    if _get_arg_value(args, "source_fmri_provenance") is not None:
+    if getattr(args, "source_fmri_provenance", None) is not None:
         fmri_cfg["provenance"] = args.source_fmri_provenance
-    if _get_arg_value(args, "source_fmri_require_provenance") is not None:
+    if getattr(args, "source_fmri_require_provenance", None) is not None:
         fmri_cfg["require_provenance"] = bool(args.source_fmri_require_provenance)
-    if _get_arg_value(args, "source_fmri_threshold") is not None:
+    if getattr(args, "source_fmri_threshold", None) is not None:
         fmri_cfg["threshold"] = args.source_fmri_threshold
-    if _get_arg_value(args, "source_fmri_tail") is not None:
+    if getattr(args, "source_fmri_tail", None) is not None:
         fmri_cfg["tail"] = args.source_fmri_tail
-    if _get_arg_value(args, "source_fmri_cluster_min_voxels") is not None:
+    if getattr(args, "source_fmri_cluster_min_voxels", None) is not None:
         fmri_cfg["cluster_min_voxels"] = args.source_fmri_cluster_min_voxels
-    if _get_arg_value(args, "source_fmri_max_clusters") is not None:
+    if getattr(args, "source_fmri_max_clusters", None) is not None:
         fmri_cfg["max_clusters"] = args.source_fmri_max_clusters
-    if _get_arg_value(args, "source_fmri_max_voxels_per_cluster") is not None:
+    if getattr(args, "source_fmri_max_voxels_per_cluster", None) is not None:
         fmri_cfg["max_voxels_per_cluster"] = args.source_fmri_max_voxels_per_cluster
-    if _get_arg_value(args, "source_fmri_max_total_voxels") is not None:
+    if getattr(args, "source_fmri_max_total_voxels", None) is not None:
         fmri_cfg["max_total_voxels"] = args.source_fmri_max_total_voxels
-    if _get_arg_value(args, "source_fmri_random_seed") is not None:
+    if getattr(args, "source_fmri_random_seed", None) is not None:
         fmri_cfg["random_seed"] = args.source_fmri_random_seed
-    # fMRI-specific time windows config
+    
     time_windows_cfg = fmri_cfg.setdefault("time_windows", {})
     window_a_cfg = time_windows_cfg.setdefault("window_a", {})
     window_b_cfg = time_windows_cfg.setdefault("window_b", {})
-    if _get_arg_value(args, "source_fmri_window_a_name") is not None:
+    if getattr(args, "source_fmri_window_a_name", None) is not None:
         window_a_cfg["name"] = args.source_fmri_window_a_name
-    if _get_arg_value(args, "source_fmri_window_a_tmin") is not None:
+    if getattr(args, "source_fmri_window_a_tmin", None) is not None:
         window_a_cfg["tmin"] = args.source_fmri_window_a_tmin
-    if _get_arg_value(args, "source_fmri_window_a_tmax") is not None:
+    if getattr(args, "source_fmri_window_a_tmax", None) is not None:
         window_a_cfg["tmax"] = args.source_fmri_window_a_tmax
-    if _get_arg_value(args, "source_fmri_window_b_name") is not None:
+    if getattr(args, "source_fmri_window_b_name", None) is not None:
         window_b_cfg["name"] = args.source_fmri_window_b_name
-    if _get_arg_value(args, "source_fmri_window_b_tmin") is not None:
+    if getattr(args, "source_fmri_window_b_tmin", None) is not None:
         window_b_cfg["tmin"] = args.source_fmri_window_b_tmin
-    if _get_arg_value(args, "source_fmri_window_b_tmax") is not None:
+    if getattr(args, "source_fmri_window_b_tmax", None) is not None:
         window_b_cfg["tmax"] = args.source_fmri_window_b_tmax
 
-    # fMRI contrast builder config
     contrast_cfg = fmri_cfg.setdefault("contrast", {})
-    if _get_arg_value(args, "source_fmri_contrast_enabled") is not None:
+    if getattr(args, "source_fmri_contrast_enabled", None) is not None:
         contrast_cfg["enabled"] = args.source_fmri_contrast_enabled
-    if _get_arg_value(args, "source_fmri_contrast_type") is not None:
+    if getattr(args, "source_fmri_contrast_type", None) is not None:
         contrast_cfg["type"] = args.source_fmri_contrast_type
-    # Condition A: column and value
+    
     cond_a_cfg = contrast_cfg.setdefault("condition_a", {})
-    if _get_arg_value(args, "source_fmri_cond_a_column") is not None:
+    if getattr(args, "source_fmri_cond_a_column", None) is not None:
         cond_a_cfg["column"] = args.source_fmri_cond_a_column
-    if _get_arg_value(args, "source_fmri_cond_a_value") is not None:
+    if getattr(args, "source_fmri_cond_a_value", None) is not None:
         cond_a_cfg["value"] = args.source_fmri_cond_a_value
-    # Condition B: column and value
+    
     cond_b_cfg = contrast_cfg.setdefault("condition_b", {})
-    if _get_arg_value(args, "source_fmri_cond_b_column") is not None:
+    if getattr(args, "source_fmri_cond_b_column", None) is not None:
         cond_b_cfg["column"] = args.source_fmri_cond_b_column
-    if _get_arg_value(args, "source_fmri_cond_b_value") is not None:
+    if getattr(args, "source_fmri_cond_b_value", None) is not None:
         cond_b_cfg["value"] = args.source_fmri_cond_b_value
-    # Legacy support for old condition1/condition2 args
-    if _get_arg_value(args, "source_fmri_contrast_cond1") is not None:
-        cond_a_cfg["value"] = args.source_fmri_contrast_cond1
-    if _get_arg_value(args, "source_fmri_contrast_cond2") is not None:
-        cond_b_cfg["value"] = args.source_fmri_contrast_cond2
-    if _get_arg_value(args, "source_fmri_contrast_formula") is not None:
+    
+    if getattr(args, "source_fmri_contrast_formula", None) is not None:
         contrast_cfg["formula"] = args.source_fmri_contrast_formula
-    if _get_arg_value(args, "source_fmri_contrast_name") is not None:
+    if getattr(args, "source_fmri_contrast_name", None) is not None:
         contrast_cfg["name"] = args.source_fmri_contrast_name
-    if _get_arg_value(args, "source_fmri_runs") is not None:
+    if getattr(args, "source_fmri_runs", None) is not None:
         contrast_cfg["runs"] = [int(r.strip()) for r in args.source_fmri_runs.split(",") if r.strip()]
-    if _get_arg_value(args, "source_fmri_hrf_model") is not None:
+    if getattr(args, "source_fmri_hrf_model", None) is not None:
         contrast_cfg["hrf_model"] = args.source_fmri_hrf_model
-    if _get_arg_value(args, "source_fmri_drift_model") is not None:
+    if getattr(args, "source_fmri_drift_model", None) is not None:
         contrast_cfg["drift_model"] = args.source_fmri_drift_model
-    if _get_arg_value(args, "source_fmri_high_pass") is not None:
+    if getattr(args, "source_fmri_high_pass", None) is not None:
         contrast_cfg["high_pass_hz"] = args.source_fmri_high_pass
-    if _get_arg_value(args, "source_fmri_low_pass") is not None:
+    if getattr(args, "source_fmri_low_pass", None) is not None:
         contrast_cfg["low_pass_hz"] = args.source_fmri_low_pass
-    if _get_arg_value(args, "source_fmri_cluster_correction") is not None:
+    if getattr(args, "source_fmri_cluster_correction", None) is not None:
         contrast_cfg["cluster_correction"] = args.source_fmri_cluster_correction
-    if _get_arg_value(args, "source_fmri_cluster_p_threshold") is not None:
+    if getattr(args, "source_fmri_cluster_p_threshold", None) is not None:
         contrast_cfg["cluster_p_threshold"] = args.source_fmri_cluster_p_threshold
-    if _get_arg_value(args, "source_fmri_output_type") is not None:
+    if getattr(args, "source_fmri_output_type", None) is not None:
         contrast_cfg["output_type"] = args.source_fmri_output_type
-    if _get_arg_value(args, "source_fmri_resample_to_fs") is not None:
+    if getattr(args, "source_fmri_resample_to_fs", None) is not None:
         contrast_cfg["resample_to_freesurfer"] = args.source_fmri_resample_to_fs
-    if _get_arg_value(args, "source_fmri_input_source") is not None:
+    if getattr(args, "source_fmri_input_source", None) is not None:
         contrast_cfg["input_source"] = args.source_fmri_input_source
-    if _get_arg_value(args, "source_fmri_require_fmriprep") is not None:
+    if getattr(args, "source_fmri_require_fmriprep", None) is not None:
         contrast_cfg["require_fmriprep"] = args.source_fmri_require_fmriprep
 
 
 def _apply_pac_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply PAC/CFC-related config overrides."""
-    if _get_arg_value(args, "pac_phase_range") is not None:
-        _apply_config_override(config, "feature_engineering.pac.phase_range", list(args.pac_phase_range))
-    if _get_arg_value(args, "pac_amp_range") is not None:
-        _apply_config_override(config, "feature_engineering.pac.amp_range", list(args.pac_amp_range))
-    if _get_arg_value(args, "pac_method") is not None:
-        _apply_config_override(config, "feature_engineering.pac.method", args.pac_method)
-    if _get_arg_value(args, "pac_min_epochs") is not None:
-        _apply_config_override(config, "feature_engineering.pac.min_epochs", args.pac_min_epochs)
-    if _get_arg_value(args, "pac_pairs") is not None:
-        _apply_config_override(config, "feature_engineering.pac.pairs", _parse_pair_tokens(args.pac_pairs, label="PAC"))
+    if getattr(args, "pac_phase_range", None) is not None:
+        config["feature_engineering.pac.phase_range"] = list(args.pac_phase_range)
+    if getattr(args, "pac_amp_range", None) is not None:
+        config["feature_engineering.pac.amp_range"] = list(args.pac_amp_range)
+    if getattr(args, "pac_method", None) is not None:
+        config["feature_engineering.pac.method"] = args.pac_method
+    if getattr(args, "pac_min_epochs", None) is not None:
+        config["feature_engineering.pac.min_epochs"] = args.pac_min_epochs
+    if getattr(args, "pac_pairs", None) is not None:
+        config["feature_engineering.pac.pairs"] = _parse_pair_tokens(args.pac_pairs, label="PAC")
     
     pac_cfg = config.setdefault("feature_engineering", {}).setdefault("pac", {})
-    if _get_arg_value(args, "pac_source") is not None:
+    if getattr(args, "pac_source", None) is not None:
         pac_cfg["source"] = args.pac_source
-    if _get_arg_value(args, "pac_normalize") is not None:
+    if getattr(args, "pac_normalize", None) is not None:
         pac_cfg["normalize"] = args.pac_normalize
-    if _get_arg_value(args, "pac_n_surrogates") is not None:
+    if getattr(args, "pac_n_surrogates", None) is not None:
         pac_cfg["n_surrogates"] = args.pac_n_surrogates
-    if _get_arg_value(args, "pac_allow_harmonic_overlap") is not None:
+    if getattr(args, "pac_allow_harmonic_overlap", None) is not None:
         pac_cfg["allow_harmonic_overlap"] = args.pac_allow_harmonic_overlap
-    if _get_arg_value(args, "pac_max_harmonic") is not None:
+    if getattr(args, "pac_max_harmonic", None) is not None:
         pac_cfg["max_harmonic"] = args.pac_max_harmonic
-    if _get_arg_value(args, "pac_harmonic_tolerance_hz") is not None:
+    if getattr(args, "pac_harmonic_tolerance_hz", None) is not None:
         pac_cfg["harmonic_tolerance_hz"] = args.pac_harmonic_tolerance_hz
-    if _get_arg_value(args, "pac_compute_waveform_qc") is not None:
+    if getattr(args, "pac_compute_waveform_qc", None) is not None:
         pac_cfg["compute_waveform_qc"] = args.pac_compute_waveform_qc
-    if _get_arg_value(args, "pac_waveform_offset_ms") is not None:
+    if getattr(args, "pac_waveform_offset_ms", None) is not None:
         pac_cfg["waveform_offset_ms"] = args.pac_waveform_offset_ms
-    if _get_arg_value(args, "pac_random_seed") is not None:
+    if getattr(args, "pac_random_seed", None) is not None:
         pac_cfg["random_seed"] = args.pac_random_seed
 
 
 def _apply_aperiodic_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply aperiodic-related config overrides."""
-    if _get_arg_value(args, "aperiodic_range") is not None:
+    if getattr(args, "aperiodic_range", None) is not None:
         config["feature_engineering.aperiodic.fmin"] = args.aperiodic_range[0]
         config["feature_engineering.aperiodic.fmax"] = args.aperiodic_range[1]
-    if _get_arg_value(args, "aperiodic_peak_z") is not None:
-        _apply_config_override(config, "feature_engineering.aperiodic.peak_rejection_z", args.aperiodic_peak_z)
-    if _get_arg_value(args, "aperiodic_min_r2") is not None:
-        _apply_config_override(config, "feature_engineering.aperiodic.min_r2", args.aperiodic_min_r2)
-    if _get_arg_value(args, "aperiodic_min_points") is not None:
-        _apply_config_override(config, "feature_engineering.aperiodic.min_fit_points", args.aperiodic_min_points)
-    if _get_arg_value(args, "aperiodic_min_segment_sec") is not None:
-        _apply_config_override(config, "feature_engineering.aperiodic.min_segment_sec", args.aperiodic_min_segment_sec)
+    if getattr(args, "aperiodic_peak_z", None) is not None:
+        config["feature_engineering.aperiodic.peak_rejection_z"] = args.aperiodic_peak_z
+    if getattr(args, "aperiodic_min_r2", None) is not None:
+        config["feature_engineering.aperiodic.min_r2"] = args.aperiodic_min_r2
+    if getattr(args, "aperiodic_min_points", None) is not None:
+        config["feature_engineering.aperiodic.min_fit_points"] = args.aperiodic_min_points
+    if getattr(args, "aperiodic_min_segment_sec", None) is not None:
+        config["feature_engineering.aperiodic.min_segment_sec"] = args.aperiodic_min_segment_sec
     
     # Scientific validity: induced spectra option
-    if _get_arg_value(args, "aperiodic_subtract_evoked") is not None:
-        _apply_config_override(config, "feature_engineering.aperiodic.subtract_evoked", args.aperiodic_subtract_evoked)
+    if getattr(args, "aperiodic_subtract_evoked", None) is not None:
+        config["feature_engineering.aperiodic.subtract_evoked"] = args.aperiodic_subtract_evoked
     
     aperiodic_cfg = config.setdefault("feature_engineering", {}).setdefault("aperiodic", {})
-    if _get_arg_value(args, "aperiodic_model") is not None:
+    if getattr(args, "aperiodic_model", None) is not None:
         aperiodic_cfg["model"] = args.aperiodic_model
-    if _get_arg_value(args, "aperiodic_psd_method") is not None:
+    if getattr(args, "aperiodic_psd_method", None) is not None:
         aperiodic_cfg["psd_method"] = args.aperiodic_psd_method
-    if _get_arg_value(args, "aperiodic_exclude_line_noise") is not None:
+    if getattr(args, "aperiodic_exclude_line_noise", None) is not None:
         aperiodic_cfg["exclude_line_noise"] = args.aperiodic_exclude_line_noise
-    if _get_arg_value(args, "aperiodic_line_noise_freq") is not None:
+    if getattr(args, "aperiodic_line_noise_freq", None) is not None:
         aperiodic_cfg["line_noise_freqs"] = [args.aperiodic_line_noise_freq]
-    if _get_arg_value(args, "aperiodic_line_noise_width_hz") is not None:
+    if getattr(args, "aperiodic_line_noise_width_hz", None) is not None:
         aperiodic_cfg["line_noise_width_hz"] = args.aperiodic_line_noise_width_hz
-    if _get_arg_value(args, "aperiodic_line_noise_harmonics") is not None:
+    if getattr(args, "aperiodic_line_noise_harmonics", None) is not None:
         aperiodic_cfg["line_noise_harmonics"] = args.aperiodic_line_noise_harmonics
 
 
 def _apply_complexity_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply complexity-related config overrides."""
-    if _get_arg_value(args, "pe_order") is not None:
-        _apply_config_override(config, "feature_engineering.complexity.pe_order", args.pe_order)
-    if _get_arg_value(args, "pe_delay") is not None:
-        _apply_config_override(config, "feature_engineering.complexity.pe_delay", args.pe_delay)
+    if getattr(args, "pe_order", None) is not None:
+        config["feature_engineering.complexity.pe_order"] = args.pe_order
+    if getattr(args, "pe_delay", None) is not None:
+        config["feature_engineering.complexity.pe_delay"] = args.pe_delay
     
     complexity_cfg = config.setdefault("feature_engineering", {}).setdefault("complexity", {})
-    if _get_arg_value(args, "complexity_signal_basis") is not None:
+    if getattr(args, "complexity_signal_basis", None) is not None:
         complexity_cfg["signal_basis"] = args.complexity_signal_basis
-    if _get_arg_value(args, "complexity_min_segment_sec") is not None:
+    if getattr(args, "complexity_min_segment_sec", None) is not None:
         complexity_cfg["min_segment_sec"] = args.complexity_min_segment_sec
-    if _get_arg_value(args, "complexity_min_samples") is not None:
+    if getattr(args, "complexity_min_samples", None) is not None:
         complexity_cfg["min_samples"] = args.complexity_min_samples
-    if _get_arg_value(args, "complexity_zscore") is not None:
+    if getattr(args, "complexity_zscore", None) is not None:
         complexity_cfg["zscore"] = args.complexity_zscore
 
 
 def _apply_erp_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply ERP-related config overrides."""
-    if _get_arg_value(args, "erp_baseline") is not None:
-        _apply_config_override(config, "feature_engineering.erp.baseline_correction", args.erp_baseline)
-    if _get_arg_value(args, "erp_allow_no_baseline") is not None:
-        _apply_config_override(config, "feature_engineering.erp.allow_no_baseline", args.erp_allow_no_baseline)
-    if _get_arg_value(args, "erp_components") is not None:
-        _apply_config_override(config, "feature_engineering.erp.components", _parse_erp_components(args.erp_components))
-    if _get_arg_value(args, "erp_lowpass_hz") is not None:
-        _apply_config_override(config, "feature_engineering.erp.lowpass_hz", args.erp_lowpass_hz)
+    if getattr(args, "erp_baseline", None) is not None:
+        config["feature_engineering.erp.baseline_correction"] = args.erp_baseline
+    if getattr(args, "erp_allow_no_baseline", None) is not None:
+        config["feature_engineering.erp.allow_no_baseline"] = args.erp_allow_no_baseline
+    if getattr(args, "erp_components", None) is not None:
+        config["feature_engineering.erp.components"] = _parse_erp_components(args.erp_components)
+    if getattr(args, "erp_lowpass_hz", None) is not None:
+        config["feature_engineering.erp.lowpass_hz"] = args.erp_lowpass_hz
 
 
 def _apply_burst_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply burst-related config overrides."""
-    if _get_arg_value(args, "burst_threshold") is not None:
-        _apply_config_override(config, "feature_engineering.bursts.threshold_z", args.burst_threshold)
-    if _get_arg_value(args, "burst_threshold_method") is not None:
-        _apply_config_override(config, "feature_engineering.bursts.threshold_method", args.burst_threshold_method)
-    if _get_arg_value(args, "burst_threshold_percentile") is not None:
-        _apply_config_override(config, "feature_engineering.bursts.threshold_percentile", args.burst_threshold_percentile)
-    if _get_arg_value(args, "burst_bands") is not None:
-        _apply_config_override(config, "feature_engineering.bursts.bands", list(_split_list_tokens(args.burst_bands)))
-    if _get_arg_value(args, "burst_min_duration") is not None:
-        _apply_config_override(config, "feature_engineering.bursts.min_duration_ms", args.burst_min_duration)
-    if _get_arg_value(args, "burst_min_cycles") is not None:
-        _apply_config_override(config, "feature_engineering.bursts.min_cycles", args.burst_min_cycles)
+    if getattr(args, "burst_threshold", None) is not None:
+        config["feature_engineering.bursts.threshold_z"] = args.burst_threshold
+    if getattr(args, "burst_threshold_method", None) is not None:
+        config["feature_engineering.bursts.threshold_method"] = args.burst_threshold_method
+    if getattr(args, "burst_threshold_percentile", None) is not None:
+        config["feature_engineering.bursts.threshold_percentile"] = args.burst_threshold_percentile
+    if getattr(args, "burst_bands", None) is not None:
+        config["feature_engineering.bursts.bands"] = list(_split_list_tokens(args.burst_bands))
+    if getattr(args, "burst_min_duration", None) is not None:
+        config["feature_engineering.bursts.min_duration_ms"] = args.burst_min_duration
+    if getattr(args, "burst_min_cycles", None) is not None:
+        config["feature_engineering.bursts.min_cycles"] = args.burst_min_cycles
 
 
 def _apply_power_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply power-related config overrides."""
-    if _get_arg_value(args, "power_baseline_mode") is not None:
-        _apply_config_override(config, "time_frequency_analysis.baseline_mode", args.power_baseline_mode)
-    if _get_arg_value(args, "power_require_baseline") is not None:
-        _apply_config_override(config, "feature_engineering.power.require_baseline", args.power_require_baseline)
+    if getattr(args, "power_baseline_mode", None) is not None:
+        config["time_frequency_analysis.baseline_mode"] = args.power_baseline_mode
+    if getattr(args, "power_require_baseline", None) is not None:
+        config["feature_engineering.power.require_baseline"] = args.power_require_baseline
 
 
 def _apply_spectral_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply spectral-related config overrides."""
-    if _get_arg_value(args, "spectral_edge_percentile") is not None:
-        _apply_config_override(config, "feature_engineering.spectral.edge_percentile", args.spectral_edge_percentile)
-    if _get_arg_value(args, "ratio_pairs") is not None:
-        _apply_config_override(config, "feature_engineering.spectral.ratio_pairs", _parse_pair_tokens(args.ratio_pairs, label="ratio"))
-    if _get_arg_value(args, "ratio_source") is not None:
-        _apply_config_override(config, "feature_engineering.spectral.ratio_source", args.ratio_source)
+    if getattr(args, "spectral_edge_percentile", None) is not None:
+        config["feature_engineering.spectral.edge_percentile"] = args.spectral_edge_percentile
+    if getattr(args, "ratio_pairs", None) is not None:
+        config["feature_engineering.spectral.ratio_pairs"] = _parse_pair_tokens(args.ratio_pairs, label="ratio")
+    if getattr(args, "ratio_source", None) is not None:
+        config["feature_engineering.spectral.ratio_source"] = args.ratio_source
     
     spectral_cfg = config.setdefault("feature_engineering", {}).setdefault("spectral", {})
-    if _get_arg_value(args, "spectral_include_log_ratios") is not None:
+    if getattr(args, "spectral_include_log_ratios", None) is not None:
         spectral_cfg["include_log_ratios"] = args.spectral_include_log_ratios
-    if _get_arg_value(args, "spectral_psd_method") is not None:
+    if getattr(args, "spectral_psd_method", None) is not None:
         spectral_cfg["psd_method"] = args.spectral_psd_method
-    if _get_arg_value(args, "spectral_fmin") is not None:
+    if getattr(args, "spectral_fmin", None) is not None:
         spectral_cfg["fmin"] = args.spectral_fmin
-    if _get_arg_value(args, "spectral_fmax") is not None:
+    if getattr(args, "spectral_fmax", None) is not None:
         spectral_cfg["fmax"] = args.spectral_fmax
-    if _get_arg_value(args, "spectral_exclude_line_noise") is not None:
+    if getattr(args, "spectral_exclude_line_noise", None) is not None:
         spectral_cfg["exclude_line_noise"] = args.spectral_exclude_line_noise
-    if _get_arg_value(args, "spectral_line_noise_freq") is not None:
+    if getattr(args, "spectral_line_noise_freq", None) is not None:
         spectral_cfg["line_noise_freqs"] = [args.spectral_line_noise_freq]
-    if _get_arg_value(args, "spectral_line_noise_width_hz") is not None:
+    if getattr(args, "spectral_line_noise_width_hz", None) is not None:
         spectral_cfg["line_noise_width_hz"] = args.spectral_line_noise_width_hz
-    if _get_arg_value(args, "spectral_line_noise_harmonics") is not None:
+    if getattr(args, "spectral_line_noise_harmonics", None) is not None:
         spectral_cfg["line_noise_harmonics"] = args.spectral_line_noise_harmonics
-    if _get_arg_value(args, "spectral_segments") is not None:
+    if getattr(args, "spectral_segments", None) is not None:
         spectral_cfg["segments"] = args.spectral_segments
-    if _get_arg_value(args, "spectral_min_segment_sec") is not None:
+    if getattr(args, "spectral_min_segment_sec", None) is not None:
         spectral_cfg["min_segment_sec"] = args.spectral_min_segment_sec
-    if _get_arg_value(args, "spectral_min_cycles_at_fmin") is not None:
+    if getattr(args, "spectral_min_cycles_at_fmin", None) is not None:
         spectral_cfg["min_cycles_at_fmin"] = args.spectral_min_cycles_at_fmin
 
 
 def _apply_asymmetry_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply asymmetry-related config overrides."""
-    if _get_arg_value(args, "asymmetry_channel_pairs") is not None:
-        _apply_config_override(config, "feature_engineering.asymmetry.channel_pairs", _parse_pair_tokens(args.asymmetry_channel_pairs, label="asymmetry"))
+    if getattr(args, "asymmetry_channel_pairs", None) is not None:
+        config["feature_engineering.asymmetry.channel_pairs"] = _parse_pair_tokens(args.asymmetry_channel_pairs, label="asymmetry")
 
 
 def _apply_tfr_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply TFR-related config overrides."""
     tfr_config = config.setdefault("time_frequency_analysis", {}).setdefault("tfr", {})
-    if _get_arg_value(args, "tfr_freq_min") is not None:
+    if getattr(args, "tfr_freq_min", None) is not None:
         tfr_config["freq_min"] = args.tfr_freq_min
-    if _get_arg_value(args, "tfr_freq_max") is not None:
+    if getattr(args, "tfr_freq_max", None) is not None:
         tfr_config["freq_max"] = args.tfr_freq_max
-    if _get_arg_value(args, "tfr_n_freqs") is not None:
+    if getattr(args, "tfr_n_freqs", None) is not None:
         tfr_config["n_freqs"] = args.tfr_n_freqs
-    if _get_arg_value(args, "tfr_min_cycles") is not None:
+    if getattr(args, "tfr_min_cycles", None) is not None:
         tfr_config["min_cycles"] = args.tfr_min_cycles
-    if _get_arg_value(args, "tfr_n_cycles_factor") is not None:
+    if getattr(args, "tfr_n_cycles_factor", None) is not None:
         tfr_config["n_cycles_factor"] = args.tfr_n_cycles_factor
-    if _get_arg_value(args, "tfr_decim") is not None:
+    if getattr(args, "tfr_decim", None) is not None:
         tfr_config["decim"] = args.tfr_decim
-    if _get_arg_value(args, "tfr_workers") is not None:
+    if getattr(args, "tfr_workers", None) is not None:
         tfr_config["workers"] = args.tfr_workers
-    if _get_arg_value(args, "tfr_max_cycles") is not None:
+    if getattr(args, "tfr_max_cycles", None) is not None:
         tfr_config["max_cycles"] = args.tfr_max_cycles
-    if _get_arg_value(args, "tfr_decim_power") is not None:
+    if getattr(args, "tfr_decim_power", None) is not None:
         tfr_config["decim_power"] = args.tfr_decim_power
-    if _get_arg_value(args, "tfr_decim_phase") is not None:
+    if getattr(args, "tfr_decim_phase", None) is not None:
         tfr_config["decim_phase"] = args.tfr_decim_phase
 
 
 def _apply_itpc_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply ITPC-related config overrides."""
-    if _get_arg_value(args, "itpc_method") is not None:
-        _apply_config_override(config, "feature_engineering.itpc.method", args.itpc_method)
-    if _get_arg_value(args, "itpc_allow_unsafe_loo") is not None:
-        _apply_config_override(config, "feature_engineering.itpc.allow_unsafe_loo", args.itpc_allow_unsafe_loo)
-    if _get_arg_value(args, "itpc_baseline_correction") is not None:
-        _apply_config_override(config, "feature_engineering.itpc.baseline_correction", args.itpc_baseline_correction)
-    if _get_arg_value(args, "itpc_condition_column") is not None:
-        _apply_config_override(config, "feature_engineering.itpc.condition_column", args.itpc_condition_column)
-    if _get_arg_value(args, "itpc_condition_values") is not None:
-        _apply_config_override(config, "feature_engineering.itpc.condition_values", args.itpc_condition_values)
-    if _get_arg_value(args, "itpc_min_trials_per_condition") is not None:
-        _apply_config_override(config, "feature_engineering.itpc.min_trials_per_condition", args.itpc_min_trials_per_condition)
+    if getattr(args, "itpc_method", None) is not None:
+        config["feature_engineering.itpc.method"] = args.itpc_method
+    if getattr(args, "itpc_allow_unsafe_loo", None) is not None:
+        config["feature_engineering.itpc.allow_unsafe_loo"] = args.itpc_allow_unsafe_loo
+    if getattr(args, "itpc_baseline_correction", None) is not None:
+        config["feature_engineering.itpc.baseline_correction"] = args.itpc_baseline_correction
+    if getattr(args, "itpc_condition_column", None) is not None:
+        config["feature_engineering.itpc.condition_column"] = args.itpc_condition_column
+    if getattr(args, "itpc_condition_values", None) is not None:
+        config["feature_engineering.itpc.condition_values"] = args.itpc_condition_values
+    if getattr(args, "itpc_min_trials_per_condition", None) is not None:
+        config["feature_engineering.itpc.min_trials_per_condition"] = args.itpc_min_trials_per_condition
 
 
 def _apply_band_envelope_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply band envelope-related config overrides."""
     band_env_cfg = config.setdefault("feature_engineering", {}).setdefault("band_envelope", {})
-    if _get_arg_value(args, "band_envelope_pad_sec") is not None:
+    if getattr(args, "band_envelope_pad_sec", None) is not None:
         band_env_cfg["pad_sec"] = args.band_envelope_pad_sec
-    if _get_arg_value(args, "band_envelope_pad_cycles") is not None:
+    if getattr(args, "band_envelope_pad_cycles", None) is not None:
         band_env_cfg["pad_cycles"] = args.band_envelope_pad_cycles
 
 
 def _apply_iaf_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply IAF-related config overrides."""
     bands_cfg = config.setdefault("feature_engineering", {}).setdefault("bands", {})
-    if _get_arg_value(args, "iaf_enabled") is not None:
+    if getattr(args, "iaf_enabled", None) is not None:
         bands_cfg["use_iaf"] = args.iaf_enabled
-    if _get_arg_value(args, "iaf_alpha_width_hz") is not None:
+    if getattr(args, "iaf_alpha_width_hz", None) is not None:
         bands_cfg["alpha_width_hz"] = args.iaf_alpha_width_hz
-    if _get_arg_value(args, "iaf_search_range") is not None:
+    if getattr(args, "iaf_search_range", None) is not None:
         bands_cfg["iaf_search_range_hz"] = list(args.iaf_search_range)
-    if _get_arg_value(args, "iaf_min_prominence") is not None:
+    if getattr(args, "iaf_min_prominence", None) is not None:
         bands_cfg["iaf_min_prominence"] = args.iaf_min_prominence
-    if _get_arg_value(args, "iaf_rois") is not None:
+    if getattr(args, "iaf_rois", None) is not None:
         bands_cfg["iaf_rois"] = args.iaf_rois
 
 
 def _apply_quality_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply quality-related config overrides."""
     quality_cfg = config.setdefault("feature_engineering", {}).setdefault("quality", {})
-    if _get_arg_value(args, "quality_psd_method") is not None:
+    if getattr(args, "quality_psd_method", None) is not None:
         quality_cfg["psd_method"] = args.quality_psd_method
-    if _get_arg_value(args, "quality_fmin") is not None:
+    if getattr(args, "quality_fmin", None) is not None:
         quality_cfg["fmin"] = args.quality_fmin
-    if _get_arg_value(args, "quality_fmax") is not None:
+    if getattr(args, "quality_fmax", None) is not None:
         quality_cfg["fmax"] = args.quality_fmax
-    if _get_arg_value(args, "quality_n_fft") is not None:
+    if getattr(args, "quality_n_fft", None) is not None:
         quality_cfg["n_fft"] = args.quality_n_fft
-    if _get_arg_value(args, "quality_exclude_line_noise") is not None:
+    if getattr(args, "quality_exclude_line_noise", None) is not None:
         quality_cfg["exclude_line_noise"] = args.quality_exclude_line_noise
-    if _get_arg_value(args, "quality_snr_signal_band") is not None:
+    if getattr(args, "quality_snr_signal_band", None) is not None:
         quality_cfg["snr_signal_band"] = list(args.quality_snr_signal_band)
-    if _get_arg_value(args, "quality_snr_noise_band") is not None:
+    if getattr(args, "quality_snr_noise_band", None) is not None:
         quality_cfg["snr_noise_band"] = list(args.quality_snr_noise_band)
-    if _get_arg_value(args, "quality_muscle_band") is not None:
+    if getattr(args, "quality_muscle_band", None) is not None:
         quality_cfg["muscle_band"] = list(args.quality_muscle_band)
 
 
 def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply ERDS-related config overrides."""
     erds_cfg = config.setdefault("feature_engineering", {}).setdefault("erds", {})
-    if _get_arg_value(args, "erds_use_log_ratio") is not None:
+    if getattr(args, "erds_use_log_ratio", None) is not None:
         erds_cfg["use_log_ratio"] = args.erds_use_log_ratio
-    if _get_arg_value(args, "erds_min_baseline_power") is not None:
+    if getattr(args, "erds_min_baseline_power", None) is not None:
         erds_cfg["min_baseline_power"] = args.erds_min_baseline_power
-    if _get_arg_value(args, "erds_min_active_power") is not None:
+    if getattr(args, "erds_min_active_power", None) is not None:
         erds_cfg["min_active_power"] = args.erds_min_active_power
-    if _get_arg_value(args, "erds_min_segment_sec") is not None:
+    if getattr(args, "erds_min_segment_sec", None) is not None:
         erds_cfg["min_segment_sec"] = args.erds_min_segment_sec
-    if _get_arg_value(args, "erds_bands") is not None:
+    if getattr(args, "erds_bands", None) is not None:
         erds_cfg["bands"] = args.erds_bands
 
 
 def _apply_validation_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply validation-related config overrides."""
-    if _get_arg_value(args, "fail_on_missing_windows") is not None:
-        _apply_config_override(config, "feature_engineering.validation.fail_on_missing_windows", args.fail_on_missing_windows)
-    if _get_arg_value(args, "fail_on_missing_named_window") is not None:
-        _apply_config_override(config, "feature_engineering.validation.fail_on_missing_named_window", args.fail_on_missing_named_window)
-    if _get_arg_value(args, "min_epochs") is not None:
-        _apply_config_override(config, "feature_engineering.constants.min_epochs_for_features", args.min_epochs)
+    if getattr(args, "fail_on_missing_windows", None) is not None:
+        config["feature_engineering.validation.fail_on_missing_windows"] = args.fail_on_missing_windows
+    if getattr(args, "fail_on_missing_named_window", None) is not None:
+        config["feature_engineering.validation.fail_on_missing_named_window"] = args.fail_on_missing_named_window
+    if getattr(args, "min_epochs", None) is not None:
+        config["feature_engineering.constants.min_epochs_for_features"] = args.min_epochs
 
 
 def _apply_output_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply output-related config overrides."""
-    if _get_arg_value(args, "save_subject_level_features") is not None:
-        _apply_config_override(config, "feature_engineering.output.save_subject_level_features", args.save_subject_level_features)
+    if getattr(args, "save_subject_level_features", None) is not None:
+        config["feature_engineering.output.save_subject_level_features"] = args.save_subject_level_features
 
 
 def _apply_spatial_transform_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply spatial transform-related config overrides."""
-    if _get_arg_value(args, "spatial_transform") is not None:
-        _apply_config_override(config, "feature_engineering.spatial_transform", args.spatial_transform)
-    if _get_arg_value(args, "spatial_transform_lambda2") is not None:
+    if getattr(args, "spatial_transform", None) is not None:
+        config["feature_engineering.spatial_transform"] = args.spatial_transform
+    if getattr(args, "spatial_transform_lambda2", None) is not None:
         config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["lambda2"] = args.spatial_transform_lambda2
-    if _get_arg_value(args, "spatial_transform_stiffness") is not None:
+    if getattr(args, "spatial_transform_stiffness", None) is not None:
         config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["stiffness"] = args.spatial_transform_stiffness
 
 
@@ -612,7 +594,7 @@ def _parse_roi_definitions(roi_defs: List[str]) -> dict:
 
 def _apply_frequency_bands_override(args: argparse.Namespace, config: Any) -> None:
     """Apply custom frequency band definitions to config."""
-    if _get_arg_value(args, "frequency_bands") is not None:
+    if getattr(args, "frequency_bands", None) is not None:
         custom_bands = _parse_frequency_band_definitions(args.frequency_bands)
         config["frequency_bands"] = custom_bands
         config.setdefault("time_frequency_analysis", {})["bands"] = custom_bands
@@ -620,7 +602,7 @@ def _apply_frequency_bands_override(args: argparse.Namespace, config: Any) -> No
 
 def _apply_rois_override(args: argparse.Namespace, config: Any) -> None:
     """Apply custom ROI definitions to config."""
-    if _get_arg_value(args, "rois") is not None:
+    if getattr(args, "rois", None) is not None:
         custom_rois = _parse_roi_definitions(args.rois)
         config.setdefault("time_frequency_analysis", {})["rois"] = custom_rois
 
@@ -750,8 +732,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-cond-b-column", default=None, help="Column for condition B in events.tsv.")
     parser.add_argument("--source-fmri-cond-b-value", default=None, help="Value for condition B.")
     parser.add_argument("--source-fmri-contrast-type", choices=["t-test", "paired-t-test", "f-test", "custom"], default=None, help="Type of statistical contrast to compute.")
-    parser.add_argument("--source-fmri-contrast-cond1", default=None, help="First condition name for contrast (e.g., 'pain_high').")
-    parser.add_argument("--source-fmri-contrast-cond2", default=None, help="Second condition name for contrast (e.g., 'pain_low').")
     parser.add_argument("--source-fmri-contrast-formula", default=None, help="Custom contrast formula (e.g., 'pain_high - pain_low').")
     parser.add_argument("--source-fmri-contrast-name", default=None, help="Name for the contrast output (default: 'pain_vs_baseline').")
     parser.add_argument("--source-fmri-runs", default=None, help="Comma-separated run numbers to include (e.g., '1,2,3').")

@@ -1,9 +1,6 @@
 """Parallel utilities.
 
 Centralized parallelization helpers (joblib-based) used across analysis modules.
-
-This module replaces the previous location `eeg_pipeline.analysis.behavior.parallel`.
-A compatibility wrapper remains at that import path.
 """
 
 from __future__ import annotations
@@ -521,11 +518,10 @@ def parallel_feature_types(
             results[name] = correlate_func(df, targets, corr_config, name)
         return results
 
+    normalized_jobs = _normalize_n_jobs(n_jobs)
     if logger:
-        normalized_jobs = _normalize_n_jobs(n_jobs)
         logger.debug(f"Parallel feature types: {len(items)} types, {normalized_jobs} jobs")
 
-    normalized_jobs = _normalize_n_jobs(n_jobs)
     parallel_results = Parallel(n_jobs=normalized_jobs, backend="loky")(
         delayed(correlate_func)(df, targets, corr_config, name) for name, df in items
     )
@@ -559,16 +555,33 @@ def parallel_subjects(
             results[subject] = result
         return results
 
+    normalized_jobs = _normalize_n_jobs(n_jobs)
     if logger:
-        normalized_jobs = _normalize_n_jobs(n_jobs)
         logger.info(f"Parallel processing: {len(subjects)} subjects, {normalized_jobs} jobs")
 
-    normalized_jobs = _normalize_n_jobs(n_jobs)
     parallel_results = Parallel(n_jobs=normalized_jobs, backend="loky")(
         delayed(_safe_process_subject)(subject, process_func, logger) for subject in subjects
     )
 
     return {subject: result for subject, result in parallel_results}
+
+
+def _parallel_features_generic(
+    feature_args: List[Tuple[Any, ...]],
+    process_func: Callable[..., Optional[Dict[str, Any]]],
+    n_jobs: int,
+    min_features_for_parallel: int,
+) -> List[Dict[str, Any]]:
+    """Generic parallel feature processing."""
+    if not _should_use_parallel(n_jobs, len(feature_args), min_features_for_parallel):
+        results = [process_func(*args) for args in feature_args]
+        return [result for result in results if result is not None]
+
+    normalized_jobs = _normalize_n_jobs(n_jobs)
+    results = Parallel(n_jobs=normalized_jobs, backend="loky")(
+        delayed(process_func)(*args) for args in feature_args
+    )
+    return [result for result in results if result is not None]
 
 
 def parallel_regression_features(
@@ -595,15 +608,7 @@ def parallel_regression_features(
     List[Dict]
         Results for each feature (excludes None results)
     """
-    if not _should_use_parallel(n_jobs, len(feature_args), min_features_for_parallel):
-        results = [process_func(*args) for args in feature_args]
-        return [result for result in results if result is not None]
-
-    normalized_jobs = _normalize_n_jobs(n_jobs)
-    results = Parallel(n_jobs=normalized_jobs, backend="loky")(
-        delayed(process_func)(*args) for args in feature_args
-    )
-    return [result for result in results if result is not None]
+    return _parallel_features_generic(feature_args, process_func, n_jobs, min_features_for_parallel)
 
 
 def parallel_stability_features(
@@ -613,15 +618,7 @@ def parallel_stability_features(
     min_features_for_parallel: int = _MIN_FEATURES_FOR_PARALLEL_STABILITY,
 ) -> List[Dict[str, Any]]:
     """Compute stability for multiple features in parallel."""
-    if not _should_use_parallel(n_jobs, len(feature_args), min_features_for_parallel):
-        results = [process_func(*args) for args in feature_args]
-        return [result for result in results if result is not None]
-
-    normalized_jobs = _normalize_n_jobs(n_jobs)
-    results = Parallel(n_jobs=normalized_jobs, backend="loky")(
-        delayed(process_func)(*args) for args in feature_args
-    )
-    return [result for result in results if result is not None]
+    return _parallel_features_generic(feature_args, process_func, n_jobs, min_features_for_parallel)
 
 
 def parallel_influence_features(
@@ -631,15 +628,7 @@ def parallel_influence_features(
     min_features_for_parallel: int = _MIN_FEATURES_FOR_PARALLEL_INFLUENCE,
 ) -> List[Dict[str, Any]]:
     """Compute influence diagnostics for multiple features in parallel."""
-    if not _should_use_parallel(n_jobs, len(feature_args), min_features_for_parallel):
-        results = [process_func(*args) for args in feature_args]
-        return [result for result in results if result is not None]
-
-    normalized_jobs = _normalize_n_jobs(n_jobs)
-    results = Parallel(n_jobs=normalized_jobs, backend="loky")(
-        delayed(process_func)(*args) for args in feature_args
-    )
-    return [result for result in results if result is not None]
+    return _parallel_features_generic(feature_args, process_func, n_jobs, min_features_for_parallel)
 
 
 __all__ = [
@@ -653,10 +642,3 @@ __all__ = [
     "parallel_stability_features",
     "parallel_influence_features",
 ]
-
-
-
-
-
-
-

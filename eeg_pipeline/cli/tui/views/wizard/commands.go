@@ -27,7 +27,6 @@ func (m Model) SelectedCategories() []string {
 	return result
 }
 
-// isCategorySelected checks if a specific category is currently selected
 func (m Model) isCategorySelected(category string) bool {
 	for i, sel := range m.selected {
 		if sel && i < len(m.categories) && m.categories[i] == category {
@@ -40,46 +39,30 @@ func (m Model) isCategorySelected(category string) bool {
 func (m Model) SelectedComputations() []string {
 	var result []string
 
-	// TUI-only bundle aliases that should NOT be passed to CLI
-	// (they get expanded to their underlying computations)
-	tuiOnlyBundles := map[string]bool{
-		"validation": true, // expands to: consistency, influence
-	}
-
 	for i, sel := range m.computationSelected {
 		if sel && i < len(m.computations) {
 			key := m.computations[i].Key
 
-			// Handle bundled computations
 			switch key {
 			case "pain_residual":
-				// pain_residual is a valid CLI flag, and also includes temperature_models
 				result = append(result, key, "temperature_models")
 			case "validation":
-				// validation is TUI-only; expand to consistency + influence
 				result = append(result, "consistency", "influence")
 			case "regression":
-				// regression is a valid CLI flag
 				result = append(result, key)
-				// Also include models if multi-family is enabled
 				if m.modelsFamilyRobust || m.modelsFamilyQuantile || m.modelsFamilyLogit {
 					result = append(result, "models")
 				}
 			default:
-				// For all other computations, only add if not a TUI-only bundle
-				if !tuiOnlyBundles[key] {
-					result = append(result, key)
-				}
+				result = append(result, key)
 			}
 		}
 	}
 
-	hasAnyComputation := len(result) > 0
-	if hasAnyComputation {
+	if len(result) > 0 {
 		result = append(result, "trial_table")
 	}
 
-	// Deduplicate
 	seen := make(map[string]bool)
 	unique := make([]string, 0, len(result))
 	for _, r := range result {
@@ -103,7 +86,6 @@ func (m Model) isComputationSelected(computation string) bool {
 			if key == computation {
 				return true
 			}
-			// Handle bundled computations
 			if key == "validation" && (computation == "consistency" || computation == "influence") {
 				return true
 			}
@@ -143,11 +125,7 @@ func (m Model) SelectedBands() []string {
 	return result
 }
 
-// GetFrequencyBandDefinitions returns custom frequency band definitions in CLI format.
-// Format: "name:low:high" for each band (e.g., "delta:1.0:3.9")
-// Returns empty slice if bands match defaults.
 func (m Model) GetFrequencyBandDefinitions() []string {
-	// Check if bands differ from defaults
 	if len(m.bands) == len(frequencyBands) {
 		allMatch := true
 		for i, band := range m.bands {
@@ -179,7 +157,6 @@ func (m Model) SelectedSpatialModes() []string {
 	return result
 }
 
-// SelectedROIs returns the keys of selected ROIs
 func (m Model) SelectedROIs() []string {
 	var result []string
 	for i, sel := range m.roiSelected {
@@ -190,11 +167,7 @@ func (m Model) SelectedROIs() []string {
 	return result
 }
 
-// GetROIDefinitions returns custom ROI definitions in CLI format.
-// Format: "name:ch1,ch2,..." for each ROI
-// Returns empty slice if ROIs match defaults.
 func (m Model) GetROIDefinitions() []string {
-	// Check if ROIs differ from defaults
 	if len(m.rois) == len(defaultROIs) {
 		allMatch := true
 		for i, roi := range m.rois {
@@ -228,10 +201,7 @@ func (m Model) SelectedFeatureFiles() []string {
 	return result
 }
 
-// GetApplicableFeatureFiles returns feature files that are applicable for the currently selected computations.
-// This is used to filter the feature selection UI to only show relevant features.
 func (m Model) GetApplicableFeatureFiles() []FeatureFile {
-	// Build a set of applicable feature keys based on selected computations
 	applicableKeys := make(map[string]bool)
 
 	for i, sel := range m.computationSelected {
@@ -246,7 +216,6 @@ func (m Model) GetApplicableFeatureFiles() []FeatureFile {
 		}
 	}
 
-	// If no computations selected, return all features
 	if len(applicableKeys) == 0 {
 		return featureFileOptions
 	}
@@ -294,7 +263,6 @@ func (m Model) SelectedPreprocessingStages() []string {
 	return result
 }
 
-// selectedConnectivityMeasures returns the list of selected connectivity measures
 func (m Model) selectedConnectivityMeasures() []string {
 	var result []string
 	for i, measure := range connectivityMeasures {
@@ -305,7 +273,6 @@ func (m Model) selectedConnectivityMeasures() []string {
 	return result
 }
 
-// selectedDirectedConnectivityMeasures returns the list of selected directed connectivity measures
 func (m Model) selectedDirectedConnectivityMeasures() []string {
 	var result []string
 	for i, measure := range directedConnectivityMeasures {
@@ -321,28 +288,23 @@ func (m Model) selectedDirectedConnectivityMeasures() []string {
 ///////////////////////////////////////////////////////////////////
 
 func (m Model) getFilteredSubjects() []types.SubjectStatus {
+	if m.subjectFilter == "" && !m.showOnlyValid {
+		return m.subjects
+	}
+
 	var filtered []types.SubjectStatus
 	filterLower := strings.ToLower(m.subjectFilter)
-	hasFilter := m.subjectFilter != ""
 
 	for _, s := range m.subjects {
-		if hasFilter && !strings.Contains(strings.ToLower(s.ID), filterLower) {
+		if m.subjectFilter != "" && !strings.Contains(strings.ToLower(s.ID), filterLower) {
 			continue
 		}
 
-		if m.showOnlyValid {
-			isValid := m.isSubjectValid(s)
-			if !isValid {
-				continue
-			}
+		if m.showOnlyValid && !m.isSubjectValid(s) {
+			continue
 		}
 
 		filtered = append(filtered, s)
-	}
-
-	noFiltersApplied := !hasFilter && !m.showOnlyValid
-	if len(filtered) == 0 && noFiltersApplied {
-		return m.subjects
 	}
 
 	return filtered
@@ -507,34 +469,28 @@ func (m Model) BuildCommand() string {
 		}
 	}
 
-	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
-		// Computations (analyses to run)
+		if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		comps := m.SelectedComputations()
 		if len(comps) > 0 {
 			parts = append(parts, "--computations")
 			parts = append(parts, comps...)
 		}
 
-		// Feature files (consolidated feature selection)
 		featureFiles := m.SelectedFeatureFiles()
 		if len(featureFiles) > 0 && len(featureFiles) < len(m.featureFiles) {
 			parts = append(parts, "--feature-files")
 			parts = append(parts, featureFiles...)
 		}
 	} else if m.Pipeline == types.PipelinePreprocessing {
-		// Handle preprocessing mode and stage selection
 		mode := m.modeOptions[m.modeIndex]
 		if mode == "partial" {
-			// Add selected stages as mode arguments
 			stages := m.SelectedPreprocessingStages()
 			if len(stages) > 0 {
 				parts = append(parts, stages...)
 			} else {
-				// Fall back to "full" if no stages selected
 				parts[len(parts)-1] = "full"
 			}
 		}
-		// For "full" mode, no additional arguments needed
 	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS {
 		mode := "merge-behavior"
 		if m.Pipeline == types.PipelineRawToBIDS {
@@ -555,17 +511,13 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--bands")
 			parts = append(parts, bands...)
 		}
-	}
 
-	// Pass custom frequency band definitions and ROIs (features pipeline only)
-	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		freqBandDefs := m.GetFrequencyBandDefinitions()
 		if len(freqBandDefs) > 0 {
 			parts = append(parts, "--frequency-bands")
 			parts = append(parts, freqBandDefs...)
 		}
 
-		// Pass custom ROI definitions
 		roiDefs := m.GetROIDefinitions()
 		if len(roiDefs) > 0 {
 			parts = append(parts, "--rois")
@@ -603,7 +555,6 @@ func (m Model) BuildCommand() string {
 		}
 	}
 
-	// Spatial modes (features pipeline)
 	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		spatial := m.SelectedSpatialModes()
 		if len(spatial) > 0 && len(spatial) < len(spatialModes) {
@@ -618,7 +569,6 @@ func (m Model) BuildCommand() string {
 		}
 	}
 
-	// Advanced configuration options (only when not using defaults)
 	if !m.useDefaultAdvanced {
 		switch m.Pipeline {
 		case types.PipelineFeatures:
@@ -656,7 +606,6 @@ func (m Model) BuildCommand() string {
 		parts = append(parts, "--subjects", strings.Join(subjs, ","))
 	}
 
-	// Add --dry-run flag if dry-run mode is enabled
 	if m.DryRunMode {
 		parts = append(parts, "--dry-run")
 	}
@@ -665,10 +614,6 @@ func (m Model) BuildCommand() string {
 }
 
 func (m Model) buildPlottingAdvancedArgs() []string {
-	if m.useDefaultAdvanced {
-		return []string{}
-	}
-
 	ab := newArgBuilder()
 
 	// Plot defaults / styling overrides (mirrors eeg_pipeline/cli/commands/plotting.py)
@@ -932,10 +877,6 @@ func (m Model) buildPlotItemConfigArgs() []string {
 func (m Model) buildFeaturesAdvancedArgs() []string {
 	var args []string
 
-	if m.useDefaultAdvanced {
-		return args
-	}
-
 	// Connectivity options
 	if m.isCategorySelected("connectivity") {
 		measures := m.selectedConnectivityMeasures()
@@ -992,26 +933,21 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.aperiodicMaxRms > 0 {
 			args = append(args, "--aperiodic-max-rms", fmt.Sprintf("%.3f", m.aperiodicMaxRms))
 		}
-		// Scientific validity: minimum segment duration for stable fits
 		if m.aperiodicMinSegmentSec != 2.0 {
 			args = append(args, "--aperiodic-min-segment-sec", fmt.Sprintf("%.1f", m.aperiodicMinSegmentSec))
 		}
-		// Scientific validity: induced spectra (subtract evoked)
 		if m.aperiodicSubtractEvoked {
 			args = append(args, "--aperiodic-subtract-evoked")
 		}
 	}
 
-	// ITPC options (scientific validity)
-	if m.isCategorySelected("itpc") {
+		if m.isCategorySelected("itpc") {
 		itpcMethods := []string{"global", "fold_global", "loo", "condition"}
 		if m.itpcMethod >= 0 && m.itpcMethod < len(itpcMethods) && m.itpcMethod != 0 {
 			args = append(args, "--itpc-method", itpcMethods[m.itpcMethod])
 		}
-		// Condition-based ITPC settings (avoids pseudo-replication)
-		if m.itpcMethod == 3 && strings.TrimSpace(m.itpcConditionColumn) != "" {
+			if m.itpcMethod == 3 && strings.TrimSpace(m.itpcConditionColumn) != "" {
 			args = append(args, "--itpc-condition-column", strings.TrimSpace(m.itpcConditionColumn))
-			// Add condition values if specified
 			if strings.TrimSpace(m.itpcConditionValues) != "" {
 				spec := strings.ReplaceAll(m.itpcConditionValues, ",", " ")
 				vals := strings.Fields(spec)
@@ -1026,8 +962,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// Spatial transform options (for volume conduction reduction)
-	if m.spatialTransform != 0 {
+		if m.spatialTransform != 0 {
 		transforms := []string{"none", "csd", "laplacian"}
 		args = append(args, "--spatial-transform", transforms[m.spatialTransform])
 		if m.spatialTransformLambda2 != 1e-5 {
@@ -1053,8 +988,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// Directed connectivity options (PSI, DTF, PDC)
-	if m.isCategorySelected("directedconnectivity") || m.directedConnEnabled {
+		if m.isCategorySelected("directedconnectivity") || m.directedConnEnabled {
 		directedMeasures := m.selectedDirectedConnectivityMeasures()
 		if len(directedMeasures) > 0 {
 			args = append(args, "--directed-connectivity-measures")
@@ -1110,18 +1044,13 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--source-connectivity-method", connMethods[m.sourceLocConnMethod])
 		}
 
-		// fMRI-informed mode (mode == 1) requires additional paths
 		if m.sourceLocMode == 1 {
 			if strings.TrimSpace(m.sourceLocSubject) != "" {
 				args = append(args, "--source-subject", strings.TrimSpace(m.sourceLocSubject))
 			}
-			// BEM/Trans generation options (Docker-based)
-			// Note: FS License is now in global config (paths.freesurfer_license)
 			if m.sourceLocCreateTrans {
 				args = append(args, "--source-create-trans")
-				// Allow identity transform when auto-creating (required for the transform to be created)
-				// This is debug-only functionality; proper coregistration should be done for production
-				if m.sourceLocAllowIdentityTrans || m.sourceLocCreateTrans {
+				if m.sourceLocAllowIdentityTrans {
 					args = append(args, "--source-allow-identity-trans")
 				}
 			}
@@ -1142,7 +1071,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 				args = append(args, "--source-mindist-mm", fmt.Sprintf("%.1f", m.sourceLocMindistMm))
 			}
 
-			// Optional fMRI-informed constraint (advanced)
 			fmriEnabled := m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != ""
 			if fmriEnabled {
 				args = append(args, "--source-fmri")
@@ -1178,7 +1106,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 					args = append(args, "--source-fmri-random-seed", fmt.Sprintf("%d", m.sourceLocFmriRandomSeed))
 				}
 
-				// fMRI-specific time windows
 				if strings.TrimSpace(m.sourceLocFmriWindowAName) != "" {
 					args = append(args, "--source-fmri-window-a-name", strings.TrimSpace(m.sourceLocFmriWindowAName))
 					args = append(args, "--source-fmri-window-a-tmin", fmt.Sprintf("%.3f", m.sourceLocFmriWindowATmin))
@@ -1200,14 +1127,12 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 							args = append(args, "--source-fmri-contrast-formula", strings.TrimSpace(m.sourceLocFmriContrastFormula))
 						}
 					} else {
-						// Condition A: column and value
 						if strings.TrimSpace(m.sourceLocFmriCondAColumn) != "" {
 							args = append(args, "--source-fmri-cond-a-column", strings.TrimSpace(m.sourceLocFmriCondAColumn))
 						}
 						if strings.TrimSpace(m.sourceLocFmriCondAValue) != "" {
 							args = append(args, "--source-fmri-cond-a-value", strings.TrimSpace(m.sourceLocFmriCondAValue))
 						}
-						// Condition B: column and value
 						if strings.TrimSpace(m.sourceLocFmriCondBColumn) != "" {
 							args = append(args, "--source-fmri-cond-b-column", strings.TrimSpace(m.sourceLocFmriCondBColumn))
 						}
@@ -1523,25 +1448,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// Spectral advanced options
-	if m.isCategorySelected("spectral") {
-		if m.spectralPsdMethod != 0 {
-			args = append(args, "--spectral-psd-method", "welch")
-		}
-		if m.spectralFmin != 1.0 {
-			args = append(args, "--spectral-fmin", fmt.Sprintf("%.1f", m.spectralFmin))
-		}
-		if m.spectralFmax != 100.0 {
-			args = append(args, "--spectral-fmax", fmt.Sprintf("%.1f", m.spectralFmax))
-		}
-		if m.spectralMinSegmentSec != 0.5 {
-			args = append(args, "--spectral-min-segment-sec", fmt.Sprintf("%.2f", m.spectralMinSegmentSec))
-		}
-		if m.spectralMinCyclesAtFmin != 3.0 {
-			args = append(args, "--spectral-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.spectralMinCyclesAtFmin))
-		}
-	}
-
 	// Ratios advanced options
 	if m.isCategorySelected("ratios") {
 		if m.ratiosMinSegmentSec != 0.5 {
@@ -1782,7 +1688,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--pain-residual-breakpoint-quantile-high", fmt.Sprintf("%.3f", m.painResidualBreakpointQhigh))
 		}
 
-		// Optional cross-fit residualization (out-of-run prediction)
 		if m.painResidualEnabled && m.painResidualCrossfitEnabled {
 			args = append(args, "--pain-residual-crossfit")
 			if strings.TrimSpace(m.painResidualCrossfitGroupColumn) != "" {
@@ -2425,9 +2330,6 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 	if m.prepTaskIsRest {
 		args = append(args, "--task-is-rest")
-	}
-	if m.prepNJobs != -1 {
-		args = append(args, "--n-jobs", fmt.Sprintf("%d", m.prepNJobs))
 	}
 
 	// Filtering

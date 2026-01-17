@@ -311,33 +311,6 @@ def compute_clustering_coefficient_binary(adj: np.ndarray) -> np.ndarray:
     )
 
 
-def compute_clustering_coefficient(adj: np.ndarray, weighted: bool = True) -> np.ndarray:
-    """
-    Compute clustering coefficient per node.
-    
-    Parameters
-    ----------
-    adj : np.ndarray
-        Adjacency matrix
-    weighted : bool
-        If True, use weighted clustering; if False, use binary
-    
-    Returns
-    -------
-    np.ndarray
-        Clustering coefficient for each node
-    
-    Note
-    ----
-    This function is maintained for backward compatibility.
-    Prefer using compute_clustering_coefficient_weighted or
-    compute_clustering_coefficient_binary for clarity.
-    """
-    if weighted:
-        return compute_clustering_coefficient_weighted(adj)
-    return compute_clustering_coefficient_binary(adj)
-
-
 def compute_betweenness_centrality(adj: np.ndarray) -> np.ndarray:
     """
     Compute betweenness centrality per node.
@@ -371,9 +344,7 @@ def compute_betweenness_centrality(adj: np.ndarray) -> np.ndarray:
         return np.full(adj.shape[0], np.nan)
 
 
-def compute_eigenvector_centrality(
-    adj: np.ndarray, max_iter: int = 100
-) -> np.ndarray:
+def compute_eigenvector_centrality(adj: np.ndarray) -> np.ndarray:
     """
     Compute eigenvector centrality per node.
     
@@ -384,8 +355,6 @@ def compute_eigenvector_centrality(
     ----------
     adj : np.ndarray
         Weighted adjacency matrix
-    max_iter : int
-        Maximum iterations (not used by numpy implementation)
     
     Returns
     -------
@@ -531,6 +500,4 @@ def compute_network_segregation_integration(
     segregation = float(within_community_sum / total_connection_sum)
     integration = float(between_community_sum / total_connection_sum)
     return segregation, integration
-
-
 

@@ -36,9 +36,8 @@ from eeg_pipeline.utils.analysis.tfr import (
 from eeg_pipeline.utils.analysis.stats import (
     compute_inter_band_coupling_matrix,
 )
-from eeg_pipeline.plotting.features.utils import compute_cohens_d
-from eeg_pipeline.plotting import utils as plot_utils
 from eeg_pipeline.utils.data.features import get_power_columns_by_band
+from eeg_pipeline.utils.config.loader import get_frequency_bands
 from scipy.stats import mannwhitneyu
 
 
@@ -211,11 +210,11 @@ def _extract_column_comparison_data(
             if str(parsed.get("segment") or "") == seg_name and str(parsed.get("band") or "") == band:
                 cols.append(c)
         
-    if not cols:
-        cell_data[col_idx] = None
-    else:
-        val_series = power_df[cols].mean(axis=1)
-        cell_data[col_idx] = val_series
+        if not cols:
+            cell_data[col_idx] = None
+        else:
+            val_series = power_df[cols].mean(axis=1)
+            cell_data[col_idx] = val_series
     
     return cell_data
 
@@ -706,17 +705,8 @@ def _get_band_frequency_mask(tfr: Any, band: str, config: Any, logger: logging.L
         logger.warning("Config is required to get band frequency mask")
         return None
         
-    freq_bands = config.get("time_frequency_analysis.bands")
-    if not freq_bands:
-        freq_bands = {
-            "delta": [1.0, 3.9],
-            "theta": [4.0, 7.9],
-            "alpha": [8.0, 12.9],
-            "beta": [13.0, 30.0],
-            "gamma": [30.1, 80.0],
-        }
-        
-    if band not in freq_bands:
+    freq_bands = get_frequency_bands(config)
+    if not freq_bands or band not in freq_bands:
         logger.warning(f"Band '{band}' not found in configuration")
         return None
         
@@ -850,7 +840,7 @@ def plot_power_time_courses(
         config: Configuration object
     """
     times = tfr_raw.times
-    features_freq_bands = config.get("time_frequency_analysis.bands") or config.frequency_bands
+    features_freq_bands = get_frequency_bands(config)
     tfr_baseline = _get_plotting_tfr_baseline_window(config)
     plot_cfg = get_plot_config(config)
     
@@ -1036,14 +1026,7 @@ def _plot_psd_overall(
     ax.plot(tfr_avg_win.freqs, psd_avg, color="0.2", linewidth=1.0)
     ax.axhline(0, color="0.7", linewidth=0.5, alpha=0.6)
     
-    default_freq_bands = {
-        "delta": [1.0, 3.9],
-        "theta": [4.0, 7.9],
-        "alpha": [8.0, 12.9],
-        "beta": [13.0, 30.0],
-        "gamma": [30.1, 80.0],
-    }
-    freq_bands = config.get("time_frequency_analysis.bands", default_freq_bands)
+    freq_bands = get_frequency_bands(config)
     features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
     
     for band, (fmin, fmax) in features_freq_bands.items():
@@ -1151,19 +1134,14 @@ def plot_power_spectral_density_by_pain(
     active_window = _get_active_window(config)
     tfr_baseline = _get_plotting_tfr_baseline_window(config)
 
-    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", True) # Default to True for this plot
-    comp_mask_info = None
-    if compare_cols:
-        comp_mask_info = extract_comparison_mask(events_df, config)
+    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", True)
+    comp_mask_info = extract_comparison_mask(events_df, config) if compare_cols else None
     
-    if comp_mask_info:
-        m1, m2, label1, label2 = comp_mask_info
-        v1_mask, v2_mask = m1, m2
-    else:
-        # Fallback for PSD might still want pain if nothing defined, 
-        # but let's be strict if that's what's requested
+    if not comp_mask_info:
         logger.warning("No valid comparison defined for PSD comparison")
         return
+    
+    m1, m2, label1, label2 = comp_mask_info
 
     if len(tfr) != len(events_df):
         raise ValueError(
@@ -1171,19 +1149,19 @@ def plot_power_spectral_density_by_pain(
             f"({len(events_df)} rows) length mismatch for subject {subject}"
         )
     
-    if v1_mask.sum() < 1 or v2_mask.sum() < 1:
+    if m1.sum() < 1 or m2.sum() < 1:
         logger.warning(f"Insufficient trials for {label1} vs {label2} comparison")
         return
     
-    n1, n2 = int(v1_mask.sum()), int(v2_mask.sum())
+    n1, n2 = int(m1.sum()), int(m2.sum())
     
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
     
     for mask, label, color, n_trials in [
-        (v1_mask, label1, 'steelblue', n1),
-        (v2_mask, label2, 'orangered', n2)
+        (m1, label1, 'steelblue', n1),
+        (m2, label2, 'orangered', n2)
     ]:
         if mask.sum() < 1:
             continue
@@ -1228,8 +1206,7 @@ def plot_power_spectral_density_by_pain(
         color='gray', alpha=0.8
     )
     
-    comp_type = "Window Comparison" if compare_cols else "Comparison"
-    fig.suptitle(f"PSD Comparison: {label1} vs {label2} ({comp_type})", fontsize=plot_cfg.font.figure_title, fontweight='bold')
+    fig.suptitle(f"PSD Comparison: {label1} vs {label2}", fontsize=plot_cfg.font.figure_title, fontweight='bold')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     output_path = save_dir / f'sub-{subject}_power_spectral_density_condition'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
@@ -1277,9 +1254,8 @@ def plot_power_time_course_by_temperature(
     fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
     
-    from eeg_pipeline.utils.config.loader import get_config_value
     tfr_baseline = _get_plotting_tfr_baseline_window(config)
-    freq_bands = get_config_value(config, "time_frequency_analysis.bands", {})
+    freq_bands = get_frequency_bands(config)
     band_range = freq_bands.get(band, [None, None])
     
     for idx, temp in enumerate(unique_temps):
@@ -1337,7 +1313,7 @@ def plot_inter_band_spatial_power_correlation(
     config: Any,
 ) -> None:
     """Plot inter-band spatial power correlation matrix."""
-    features_freq_bands = config.get("time_frequency_analysis.bands") or config.frequency_bands
+    features_freq_bands = get_frequency_bands(config)
     band_names = list(features_freq_bands.keys())
     n_bands = len(band_names)
     
@@ -1991,17 +1967,6 @@ def plot_feature_importance_ranking(
         parsed = NamingSchema.parse(str(name))
         if parsed.get("valid"):
             feature_types.append(group_map.get(parsed.get("group"), "other"))
-            continue
-        if name.startswith("power_"):
-            feature_types.append("power")
-        elif name.startswith("conn_") or "wpli_" in name or "aec_" in name:
-            feature_types.append("connectivity")
-        elif name.startswith("aper_") or "aperiodic" in name:
-            feature_types.append("aperiodic")
-        elif name.startswith("itpc_"):
-            feature_types.append("itpc")
-        elif name.startswith("pac_"):
-            feature_types.append("pac")
         else:
             feature_types.append("other")
     

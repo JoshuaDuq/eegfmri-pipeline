@@ -8,7 +8,7 @@ Helpers for channel selection and manipulation.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import mne
 import numpy as np
@@ -25,30 +25,6 @@ def pick_eeg_channels(epochs: mne.Epochs) -> Tuple[np.ndarray, List[str]]:
     )
     channel_names = [epochs.info["ch_names"][idx] for idx in picks]
     return picks, channel_names
-
-
-def get_eeg_data(
-    epochs: mne.Epochs, logger: Any = None, context: str = ""
-) -> Optional[Tuple[np.ndarray, List[str], np.ndarray]]:
-    """Get EEG data with channel picking and validation.
-
-    Args:
-        epochs: MNE Epochs object containing EEG data.
-        logger: Optional logger for warning messages.
-        context: Optional context string for warning messages.
-
-    Returns:
-        Tuple of (data array, channel names, channel indices) if channels found,
-        None otherwise.
-    """
-    picks, channel_names = pick_eeg_channels(epochs)
-    if len(picks) == 0:
-        if logger:
-            logger.warning(f"{context}: No EEG channels available")
-        return None
-
-    data = epochs.get_data(picks=picks)
-    return data, channel_names, picks
 
 
 def match_channels_to_pattern(

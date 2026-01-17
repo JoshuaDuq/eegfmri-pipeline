@@ -32,7 +32,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Optional, List
-from contextlib import contextmanager
 
 
 ###################################################################
@@ -71,7 +70,6 @@ class PipelineProgress:
     # State
     current: int = 0
     start_time: float = field(default_factory=time.time)
-    step_times: List[float] = field(default_factory=list)
     
     # Tracking
     _started: bool = False
@@ -88,7 +86,6 @@ class PipelineProgress:
         """Start the progress tracker."""
         self.start_time = time.time()
         self.current = 0
-        self.step_times = []
         self._started = True
         self._finished = False
         
@@ -108,7 +105,6 @@ class PipelineProgress:
             self.start()
         
         self.current += 1
-        self.step_times.append(time.time())
         
         should_log = (
             self.current % self.log_every == 0 or self.current == self.total
@@ -317,62 +313,4 @@ class BatchProgress:
     
     def __exit__(self, *args) -> None:
         self.finish()
-
-
-###################################################################
-# Convenience Functions
-###################################################################
-
-
-@contextmanager
-def track_progress(
-    total: int,
-    logger: logging.Logger,
-    desc: str = "Progress",
-    log_every: int = 1,
-):
-    """
-    Context manager for tracking progress.
-    
-    Usage
-    -----
-    ```python
-    with track_progress(100, logger, "Processing") as progress:
-        for item in items:
-            process(item)
-            progress.step()
-    ```
-    """
-    progress = PipelineProgress(
-        total=total,
-        logger=logger,
-        desc=desc,
-        log_every=log_every,
-    )
-    try:
-        yield progress.start()
-    finally:
-        progress.finish()
-
-
-def log_step_time(
-    logger: logging.Logger,
-    step_name: str,
-    start_time: float,
-) -> None:
-    """
-    Log the time taken for a step.
-    
-    Parameters
-    ----------
-    logger : logging.Logger
-        Logger instance
-    step_name : str
-        Name of the step
-    start_time : float
-        Start time from time.time()
-    """
-    duration = time.time() - start_time
-    formatted_duration = PipelineProgress._format_duration(duration)
-    logger.info(f"{step_name} completed in {formatted_duration}")
 

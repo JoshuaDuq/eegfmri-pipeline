@@ -140,8 +140,6 @@ class FeaturePlotContext:
                     config_entry = self._parse_extraction_config(path)
                     if config_entry:
                         configs.append(config_entry)
-        
-        # (Legacy fallback removed)
 
         name_to_suffix: Dict[str, Optional[str]] = {}
         for suffix, name, tmin, tmax in configs:
@@ -223,7 +221,6 @@ class FeaturePlotContext:
             return
         win = [float(window[0]), float(window[1])]
         self._set_config_value(f"time_frequency_analysis.{label}_window", win)
-        self._set_config_value(f"feature_engineering.windows.{label}_window", win)
         self._set_config_value(f"feature_engineering.features.{label}_window", win)
 
     def _set_config_value(self, key: str, value: Any) -> None:
@@ -362,12 +359,17 @@ class FeaturePlotContext:
             self.logger.warning("Failed to read %s: %s", path, exc)
             return None
 
+    def _is_metadata_file(self, path: Path) -> bool:
+        """Check if path points to a metadata file (not feature data)."""
+        stem_lower = path.stem.lower()
+        excluded_keywords = ["columns", "config", "qc", "manifest"]
+        return any(keyword in stem_lower for keyword in excluded_keywords)
+
     def _suffix_from_path(self, path: Path, stem: str) -> Optional[str]:
         """Extract time range suffix from feature file path."""
-        base = path.stem
-        excluded_keywords = ["_columns", "_qc", "_config"]
-        if any(keyword in base for keyword in excluded_keywords):
+        if self._is_metadata_file(path):
             return None
+        base = path.stem
         if base == stem:
             return None
         prefix = f"{stem}_"
@@ -377,13 +379,7 @@ class FeaturePlotContext:
 
     def _is_feature_payload(self, path: Path) -> bool:
         """Check if path points to a feature data file (not metadata)."""
-        stem = path.stem.lower()
-        excluded_keywords = ["columns", "config"]
-        if any(keyword in stem for keyword in excluded_keywords):
-            return False
-        if stem.endswith("_manifest"):
-            return False
-        return True
+        return not self._is_metadata_file(path)
 
     def _dedupe_paths(self, paths: Sequence[Path]) -> List[Path]:
         """Remove duplicate paths while preserving order."""

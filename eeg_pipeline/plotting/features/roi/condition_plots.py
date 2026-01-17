@@ -104,6 +104,17 @@ def _validate_masks(mask1: np.ndarray, mask2: np.ndarray) -> bool:
     return int(mask1.sum()) > 0 and int(mask2.sum()) > 0
 
 
+def _get_mask_counts(mask1: np.ndarray, mask2: np.ndarray) -> Tuple[int, int]:
+    """Convert masks to bool arrays and return sample counts.
+    
+    Returns:
+        Tuple of (count1, count2)
+    """
+    mask1_bool = np.asarray(mask1, dtype=bool)
+    mask2_bool = np.asarray(mask2, dtype=bool)
+    return int(mask1_bool.sum()), int(mask2_bool.sum())
+
+
 def _compute_statistics(
     vals_1: np.ndarray,
     vals_2: np.ndarray,
@@ -415,7 +426,7 @@ def plot_power_by_roi_band_condition(
     bands = [b for b in band_order if b in bands] + [b for b in bands if b not in band_order]
 
     rois = get_roi_definitions(config)
-    data_rois = _get_named_identifiers(features_df, group="itpc", segment=segment, scope="roi")
+    data_rois = _get_named_identifiers(features_df, group="power", segment=segment, scope="roi")
     if rois:
         roi_names = list(rois.keys())
     else:
@@ -524,10 +535,7 @@ def plot_power_by_roi_band_condition(
             if col_idx == 0:
                 ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    mask1_bool = np.asarray(mask1, dtype=bool)
-    mask2_bool = np.asarray(mask2, dtype=bool)
-    n_1 = int(mask1_bool.sum())
-    n_2 = int(mask2_bool.sum())
+    n_1, n_2 = _get_mask_counts(mask1, mask2)
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -696,10 +704,7 @@ def plot_complexity_by_roi_band_condition(
             if col_idx == 0:
                 ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    mask1_bool = np.asarray(mask1, dtype=bool)
-    mask2_bool = np.asarray(mask2, dtype=bool)
-    n_1 = int(mask1_bool.sum())
-    n_2 = int(mask2_bool.sum())
+    n_1, n_2 = _get_mask_counts(mask1, mask2)
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -850,10 +855,7 @@ def plot_aperiodic_by_roi_condition(
             if col_idx == 0:
                 ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    mask1_bool = np.asarray(mask1, dtype=bool)
-    mask2_bool = np.asarray(mask2, dtype=bool)
-    n_1 = int(mask1_bool.sum())
-    n_2 = int(mask2_bool.sum())
+    n_1, n_2 = _get_mask_counts(mask1, mask2)
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -949,8 +951,6 @@ def plot_connectivity_by_roi_band_condition(
                 ]
                 if measure_cols:
                     roi_measure_cols = []
-                    import re
-
                     for c in measure_cols:
                         match = re.search(r"_chpair_([A-Za-z0-9]+)-([A-Za-z0-9]+)_", c)
                         if match and match.group(1) in roi_channels and match.group(2) in roi_channels:
@@ -1002,10 +1002,7 @@ def plot_connectivity_by_roi_band_condition(
             if col_idx == 0:
                 ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    mask1_bool = np.asarray(mask1, dtype=bool)
-    mask2_bool = np.asarray(mask2, dtype=bool)
-    n_1 = int(mask1_bool.sum())
-    n_2 = int(mask2_bool.sum())
+    n_1, n_2 = _get_mask_counts(mask1, mask2)
     fig.suptitle(
         f"Within-ROI {measure_label} by Band: Active ({active_label}) (sub-{subject})\nN: {n_1} {label1}, {n_2} {label2}",
         fontsize=plot_cfg.font.figure_title,
@@ -1178,10 +1175,7 @@ def plot_itpc_by_roi_band_condition(
             if col_idx == 0:
                 ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    mask1_bool = np.asarray(mask1, dtype=bool)
-    mask2_bool = np.asarray(mask2, dtype=bool)
-    n_1 = int(mask1_bool.sum())
-    n_2 = int(mask2_bool.sum())
+    n_1, n_2 = _get_mask_counts(mask1, mask2)
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -1208,8 +1202,6 @@ def plot_itpc_by_roi_band_condition(
         logger.info(
             f"Saved ITPC ROI × band × condition plot ({n_sig}/{n_tests} FDR significant)"
         )
-
-
 
 
 def plot_pac_by_roi_condition(
@@ -1243,8 +1235,6 @@ def plot_pac_by_roi_condition(
     pairs = get_named_bands(features_df, group="pac", segment=segment)
     if not pairs:
         return
-
-    from eeg_pipeline.utils.config.loader import get_config_value
 
     cfg_pairs = get_config_value(config, "plotting.plots.features.pac_pairs", None)
     if cfg_pairs is None:
@@ -1368,10 +1358,7 @@ def plot_pac_by_roi_condition(
             if col_idx == 0:
                 ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    mask1_bool = np.asarray(mask1, dtype=bool)
-    mask2_bool = np.asarray(mask2, dtype=bool)
-    n_1 = int(mask1_bool.sum())
-    n_2 = int(mask2_bool.sum())
+    n_1, n_2 = _get_mask_counts(mask1, mask2)
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -1417,13 +1404,7 @@ def plot_band_segment_condition(
     Each cell shows Baseline vs Active comparison using paired Wilcoxon test.
     Uses the shared plot_paired_comparison helper for consistent styling.
     """
-    from eeg_pipeline.plotting.features.utils import (
-        plot_paired_comparison,
-        get_named_segments,
-        get_band_names,
-        collect_named_series,
-    )
-    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.plotting.features.utils import plot_paired_comparison
 
     if features_df is None or features_df.empty:
         return
@@ -1519,8 +1500,6 @@ def plot_band_segment_condition(
     )
 
 
-
-
 def plot_temporal_evolution(
     features_df: pd.DataFrame,
     events_df: pd.DataFrame,
@@ -1544,8 +1523,6 @@ def plot_temporal_evolution(
     mask2 = np.asarray(mask2, dtype=bool)
     if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
         return
-
-    from eeg_pipeline.utils.config.loader import get_config_value
 
     temporal_cfg = get_config_value(config, "plotting.plots.features.temporal", {})
     time_bins = temporal_cfg.get("time_bins", ["coarse_early", "coarse_mid", "coarse_late"])

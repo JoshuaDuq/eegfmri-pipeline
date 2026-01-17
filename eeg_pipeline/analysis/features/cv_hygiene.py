@@ -10,9 +10,6 @@ within training folds only, otherwise you get optimistic bias.
 
 Parameters that should be computed fold-specifically:
 - IAF (Individual Alpha Frequency) band overrides
-- Global/broadcast features (e.g., global ITPC)
-- Feature scaling (mean/std)
-- Feature selection thresholds
 """
 
 from __future__ import annotations
@@ -22,7 +19,6 @@ from dataclasses import dataclass, field
 
 import mne
 import numpy as np
-import pandas as pd
 from scipy.signal import find_peaks
 
 
@@ -37,13 +33,11 @@ FIT_FMIN_HZ = 2.0
 FIT_FMAX_HZ = 40.0
 EPSILON_FREQ = 1e-6
 EPSILON_PSD = 1e-20
-EPSILON_ITPC = 1e-12
 DEFAULT_ALPHA_MIN_HZ = 6.0
 DEFAULT_ALPHA_MAX_HZ = 14.0
 DEFAULT_ALPHA_WIDTH_HZ = 2.0
 DEFAULT_ALPHA_RANGE_HZ = (7.0, 13.0)
 DEFAULT_IAF_PROMINENCE = 0.05
-DEFAULT_STD_WHEN_ZERO = 1.0
 
 
 @dataclass
@@ -56,11 +50,6 @@ class FoldSpecificParams:
 
     iaf_hz: Optional[float] = None
     frequency_bands: Optional[Dict[str, Tuple[float, float]]] = None
-
-    feature_means: Optional[Dict[str, float]] = None
-    feature_stds: Optional[Dict[str, float]] = None
-
-    global_itpc: Optional[Dict[str, np.ndarray]] = None
 
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -275,143 +264,11 @@ def compute_iaf_for_fold(
     return iaf_hz, frequency_bands
 
 
-def compute_global_itpc_for_fold(
-    complex_tfr_data: np.ndarray,
-    train_mask: np.ndarray,
-    logger: Any = None,
-) -> np.ndarray:
-    """
-    Compute global ITPC using ONLY training fold trials.
-
-    ITPC is inherently a cross-trial measure, so it must be computed
-    within folds to avoid leakage.
-
-    Parameters
-    ----------
-    complex_tfr_data : np.ndarray
-        Complex TFR data (n_epochs, n_channels, n_freqs, n_times)
-    train_mask : np.ndarray
-        Boolean mask indicating training trials
-    logger : Any
-        Logger instance
-
-    Returns
-    -------
-    itpc_map : np.ndarray
-        ITPC values (n_channels, n_freqs, n_times) computed on training trials only
-    """
-    if not np.any(train_mask):
-        _log_warning(logger, "CV hygiene: No training trials for ITPC computation")
-        return np.full(complex_tfr_data.shape[1:], np.nan)
-
-    train_data = complex_tfr_data[train_mask]
-    unit_vectors = train_data / (np.abs(train_data) + EPSILON_ITPC)
-    itpc_map = np.abs(np.mean(unit_vectors, axis=0))
-
-    _log_debug(
-        logger,
-        "CV hygiene: Computed fold-specific ITPC from %d training trials",
-        train_data.shape[0],
-    )
-
-    return itpc_map
-
-
-def compute_feature_scaling_for_fold(
-    features_df: pd.DataFrame,
-    train_mask: np.ndarray,
-    logger: Any = None,
-) -> Tuple[Dict[str, float], Dict[str, float]]:
-    """
-    Compute feature scaling parameters (mean, std) using ONLY training fold trials.
-
-    Parameters
-    ----------
-    features_df : pd.DataFrame
-        Feature DataFrame (n_trials x n_features)
-    train_mask : np.ndarray
-        Boolean mask indicating training trials
-    logger : Any
-        Logger instance
-
-    Returns
-    -------
-    means : dict
-        Mean values per feature (computed on training data)
-    stds : dict
-        Standard deviation per feature (computed on training data)
-    """
-    if not np.any(train_mask):
-        _log_warning(logger, "CV hygiene: No training trials for feature scaling")
-        return {}, {}
-
-    train_df = features_df.iloc[train_mask]
-    train_numeric = train_df.apply(pd.to_numeric, errors="coerce")
-    
-    means = train_numeric.mean().to_dict()
-    stds = train_numeric.std().replace(0, DEFAULT_STD_WHEN_ZERO).replace([np.inf, -np.inf], DEFAULT_STD_WHEN_ZERO).to_dict()
-
-    _log_debug(
-        logger,
-        "CV hygiene: Computed fold-specific scaling from %d training trials",
-        int(np.sum(train_mask)),
-    )
-
-    return means, stds
-
-
-def apply_fold_specific_scaling(
-    features_df: pd.DataFrame,
-    means: Dict[str, float],
-    stds: Dict[str, float],
-) -> pd.DataFrame:
-    """
-    Apply fold-specific scaling parameters to a feature DataFrame.
-
-    Parameters
-    ----------
-    features_df : pd.DataFrame
-        Feature DataFrame to scale
-    means : dict
-        Mean values per feature
-    stds : dict
-        Standard deviation per feature
-
-    Returns
-    -------
-    scaled_df : pd.DataFrame
-        Scaled feature DataFrame
-    """
-    scaled_df = features_df.apply(pd.to_numeric, errors="coerce")
-    
-    for column in means:
-        if column in scaled_df.columns:
-            scaled_df[column] = (scaled_df[column] - means[column]) / stds[column]
-
-    return scaled_df
-
-
 def _should_compute_iaf(config: Any) -> bool:
     """Determine if IAF should be computed based on configuration."""
     if hasattr(config, "get"):
         return bool(config.get("feature_engineering.bands.use_iaf", False))
     return False
-
-
-def _compute_iaf_for_context(
-    epochs: Any,
-    train_mask: np.ndarray,
-    config: Any,
-    logger: Any,
-) -> Tuple[Optional[float], Optional[Dict[str, Tuple[float, float]]]]:
-    """Compute IAF parameters for fold context."""
-    picks = mne.pick_types(
-        epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
-    )
-    epochs_data = epochs.get_data(picks=picks)
-    sfreq = float(epochs.info["sfreq"])
-
-    return compute_iaf_for_fold(epochs_data, sfreq, train_mask, config, logger)
 
 
 def create_fold_specific_context(
@@ -459,8 +316,14 @@ def create_fold_specific_context(
     )
 
     if _should_compute_iaf(config):
-        iaf_hz, frequency_bands = _compute_iaf_for_context(
-            epochs, train_mask, config, logger
+        picks = mne.pick_types(
+            epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+        )
+        epochs_data = epochs.get_data(picks=picks)
+        sfreq = float(epochs.info["sfreq"])
+
+        iaf_hz, frequency_bands = compute_iaf_for_fold(
+            epochs_data, sfreq, train_mask, config, logger
         )
         params.iaf_hz = iaf_hz
         params.frequency_bands = frequency_bands
@@ -484,8 +347,5 @@ def create_fold_specific_context(
 __all__ = [
     "FoldSpecificParams",
     "compute_iaf_for_fold",
-    "compute_global_itpc_for_fold",
-    "compute_feature_scaling_for_fold",
-    "apply_fold_specific_scaling",
     "create_fold_specific_context",
 ]

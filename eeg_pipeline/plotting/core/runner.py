@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Protocol
 
@@ -15,18 +13,6 @@ class PlotContext(Protocol):
     def logger(self) -> Any:
         """Return a logger instance."""
         ...
-
-
-def _record_plot_result(
-    result: Any,
-    saved_files: Dict[str, Path],
-    plot_name: str,
-) -> None:
-    """Record plot result in saved_files dictionary."""
-    if isinstance(result, (str, Path)):
-        saved_files[plot_name] = Path(result)
-    elif isinstance(result, dict):
-        saved_files.update(result)
 
 
 def safe_plot(
@@ -64,7 +50,10 @@ def safe_plot(
         else:
             plot_result = plot_func(*args, **kwargs)
             if plot_result:
-                _record_plot_result(plot_result, saved_files, name)
+                if isinstance(plot_result, (str, Path)):
+                    saved_files[name] = Path(plot_result)
+                elif isinstance(plot_result, dict):
+                    saved_files.update(plot_result)
             ctx.logger.info(f"Executed: {name}")
     except Exception as exc:
         ctx.logger.warning(f"Failed to create {name}: {exc}")

@@ -7,15 +7,11 @@ Permutation tests for partial correlations and group comparisons.
 
 from __future__ import annotations
 
-import logging
-from typing import Any, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy import stats
-
-if TYPE_CHECKING:
-    import mne
 
 from .base import get_statistics_constants, get_n_permutations
 from eeg_pipeline.utils.config.loader import get_config_value
@@ -24,6 +20,14 @@ from eeg_pipeline.utils.config.loader import get_config_value
 _DESIGN_MATRIX_CONDITION_TOLERANCE = 1e8
 _DESIGN_MATRIX_RANK_TOLERANCE = 1e-10
 _RESIDUAL_VARIANCE_TOLERANCE_FACTOR = 1e-12
+
+
+def _get_permutation_scheme(config: Optional[Any]) -> str:
+    """Extract permutation scheme from config."""
+    if config is None:
+        return "shuffle"
+    scheme = str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
+    return scheme if scheme in {"shuffle", "circular_shift"} else "shuffle"
 
 
 def permute_within_groups(
@@ -374,34 +378,6 @@ def compute_perm_and_partial_perm(
     return p_perm, p_partial_perm
 
 
-def compute_permutation_pvalue_partial(
-    x_aligned: pd.Series,
-    y_aligned: pd.Series,
-    covariates_df: pd.DataFrame,
-    method: str,
-    n_perm: Optional[int],
-    rng: np.random.Generator,
-    context: str = "",
-    logger: Optional[logging.Logger] = None,
-    config: Optional[Any] = None,
-    groups: Optional[np.ndarray] = None,
-) -> float:
-    """Compute permutation p-value for partial correlation."""
-    return perm_pval_partial_freedman_lane(
-        x_aligned,
-        y_aligned,
-        covariates_df,
-        method,
-        n_perm,
-        rng,
-        groups=groups,
-        config=config,
-        scheme=str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
-        if config is not None
-        else "shuffle",
-    )
-
-
 def compute_permutation_pvalues(
     x_aligned: pd.Series,
     y_aligned: pd.Series,
@@ -411,11 +387,8 @@ def compute_permutation_pvalues(
     n_perm: Optional[int],
     n_eff: int,
     rng: np.random.Generator,
-    band: str = "",
-    roi: str = "",
     min_samples: Optional[int] = None,
     config: Optional[Any] = None,
-    logger: Optional[logging.Logger] = None,
     groups: Optional[np.ndarray] = None,
 ) -> Tuple[float, float, float]:
     """Compute all permutation p-values for ROI analysis."""
@@ -429,11 +402,7 @@ def compute_permutation_pvalues(
     if n_perm is None or n_perm <= 0 or n_eff < min_samples:
         return p_perm, p_partial_perm, p_temp_perm
 
-    scheme = (
-        str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
-        if config is not None
-        else "shuffle"
-    )
+    scheme = _get_permutation_scheme(config)
     p_perm = perm_pval_simple(
         x_aligned,
         y_aligned,
@@ -526,9 +495,7 @@ def _compute_combined_covariates_temp_pvalue(
             rng,
             groups=groups,
             config=config,
-            scheme=str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
-            if config is not None
-            else "shuffle",
+            scheme=_get_permutation_scheme(config),
         )
     except (ValueError, np.linalg.LinAlgError):
         return np.nan
@@ -586,7 +553,6 @@ def compute_permutation_pvalues_with_cov_temp(
     *,
     min_samples: Optional[int] = None,
     config: Optional[Any] = None,
-    logger: Optional[logging.Logger] = None,
     groups: Optional[np.ndarray] = None,
 ) -> Tuple[float, float, float, float]:
     """Compute permutation p-values including combined covariates+temp."""
@@ -601,7 +567,6 @@ def compute_permutation_pvalues_with_cov_temp(
         rng=rng,
         min_samples=min_samples,
         config=config,
-        logger=logger,
         groups=groups,
     )
 
@@ -629,9 +594,6 @@ def compute_temp_permutation_pvalues(
     method: str,
     n_perm: Optional[int],
     rng: np.random.Generator,
-    band: str = "",
-    roi: str = "",
-    logger: Optional[logging.Logger] = None,
     groups: Optional[np.ndarray] = None,
     config: Optional[Any] = None,
 ) -> Tuple[float, float]:

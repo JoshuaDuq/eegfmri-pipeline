@@ -34,7 +34,6 @@ const (
 	StateMainMenu
 	StatePipelineWizard
 	StateExecution
-	StateResults
 	StateGlobalSetup
 	StateDashboard
 	StateHistory
@@ -318,11 +317,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// For WindowSizeMsg, we've already handled it and propagated it in handleGlobalMessages
-	if _, ok := msg.(tea.WindowSizeMsg); ok {
-		return m, nil
-	}
-
 	// Delegate remaining messages to the current view
 	return m.delegateToCurrentView(msg)
 }
@@ -368,9 +362,7 @@ func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c":
-		return m, m.handleCtrlC()
-	case "q":
+	case "ctrl+c", "q":
 		return m, m.handleQuit()
 	case "esc":
 		return m.handleEscape()
@@ -390,27 +382,15 @@ func (m Model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleCtrlC() tea.Cmd {
-	// Don't allow quit during active execution
-	if m.state == StateExecution && !m.execution.IsDone() {
-		return nil
-	}
-	return tea.Quit
-}
-
 func (m Model) handleQuit() tea.Cmd {
-	// Don't allow quit during active execution
 	if m.state == StateExecution && !m.execution.IsDone() {
 		return nil
 	}
-
-	// Allow quit from any other state
 	return tea.Quit
 }
 
 func (m *Model) handleEnter() tea.Cmd {
 	if m.state == StateExecution && m.execution.IsDone() {
-		// History already recorded in handleExecutionUpdate when execution completed
 		m.state = StateMainMenu
 		return nil
 	}
@@ -706,17 +686,13 @@ func (m *Model) handleConfigKeysLoaded(msg messages.ConfigKeysLoadedMsg) {
 }
 
 func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
 	switch m.state {
 	case StateEnvSelect:
 		return m.handleEnvSelectUpdate(msg)
-
 	case StateMainMenu:
 		return m.handleMainMenuUpdate(msg)
-
 	case StatePipelineWizard:
 		return m.handleWizardUpdate(msg)
-
 	case StateGlobalSetup:
 		return m.handleGlobalSetupUpdate(msg)
 	case StateExecution:
@@ -732,7 +708,7 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleQuickActionsOverlay(msg)
 	}
 
-	return m, cmd
+	return m, nil
 }
 
 func (m Model) handleEnvSelectUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -999,9 +975,6 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 		return m, nil
 	case StateExecution:
 		if m.execution.IsDone() {
-			// History already recorded in handleExecutionUpdate when execution completed
-			// But record here too in case user presses Escape before Update processes completion
-			m.recordExecutionToHistory()
 			return m.popState()
 		}
 		return m, nil
@@ -1020,7 +993,10 @@ func (m *Model) recordExecutionToHistory() {
 
 	pipeline, mode := m.extractCommandParts(m.execCommand)
 	success := m.execution.Status == execution.StatusSuccess
-	exitCode := m.getExitCode(success)
+	exitCode := 0
+	if !success {
+		exitCode = 1
+	}
 
 	// Use execution model's StartTime if available (when command actually started),
 	// otherwise fall back to execStartTime (when execution view was created)
@@ -1070,13 +1046,6 @@ func (m *Model) extractCommandParts(command string) (pipeline, mode string) {
 	return pipeline, mode
 }
 
-func (m *Model) getExitCode(success bool) int {
-	if success {
-		return 0
-	}
-	return 1
-}
-
 // pushState pushes current state to nav stack
 func (m *Model) pushState(newState AppState) {
 	m.navStack = append(m.navStack, m.state)
@@ -1120,8 +1089,6 @@ func (m Model) View() string {
 		content = m.global.View()
 	case StateExecution:
 		content = m.execution.View()
-	case StateResults:
-		content = m.renderResults()
 	case StateDashboard:
 		content = m.dashboard.View()
 	case StateHistory:
@@ -1147,12 +1114,6 @@ func (m Model) View() string {
 		Width(m.width).
 		Height(m.height).
 		Render(content)
-}
-
-func (m Model) renderResults() string {
-	return styles.BrandStyle.Render("Results") + "\n\n" +
-		lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark+" Pipeline completed") + "\n\n" +
-		styles.HelpStyle.Render("[Enter] Return to menu")
 }
 
 // IsCloudMode returns true if the user selected cloud environment

@@ -16,8 +16,10 @@ from scipy import stats
 
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
-from .base import get_statistics_constants
-from .correlation import compute_correlation, fisher_z_transform_mean, compute_correlation_ci_fisher
+from .correlation import compute_correlation, fisher_z_transform_mean
+
+
+_EPSILON_STD = 1e-12
 
 
 def compute_band_spatial_correlation(
@@ -29,27 +31,25 @@ def compute_band_spatial_correlation(
         return np.nan
     
     correlation_matrix = np.corrcoef(band1_channels, band2_channels)
-    correlation_coefficient = correlation_matrix[0, 1]
-    return float(correlation_coefficient)
+    return float(correlation_matrix[0, 1])
 
 
 def compute_band_pair_correlation(
-    vec_i: Optional[Dict[str, float]],
-    vec_j: Optional[Dict[str, float]],
+    band_vector_i: Optional[Dict[str, float]],
+    band_vector_j: Optional[Dict[str, float]],
 ) -> float:
     """Compute correlation between band topographies."""
-    if vec_i is None or vec_j is None:
+    if band_vector_i is None or band_vector_j is None:
         return np.nan
     
-    common_channels = sorted(set(vec_i.keys()) & set(vec_j.keys()))
+    common_channels = sorted(set(band_vector_i.keys()) & set(band_vector_j.keys()))
     if len(common_channels) < 2:
         return np.nan
     
-    values_i = np.array([vec_i[ch] for ch in common_channels])
-    values_j = np.array([vec_j[ch] for ch in common_channels])
+    values_i = np.array([band_vector_i[ch] for ch in common_channels])
+    values_j = np.array([band_vector_j[ch] for ch in common_channels])
     
-    epsilon_std = 1e-12
-    if np.std(values_i) < epsilon_std or np.std(values_j) < epsilon_std:
+    if np.std(values_i) < _EPSILON_STD or np.std(values_j) < _EPSILON_STD:
         return np.nan
     
     correlation_matrix = np.corrcoef(values_i, values_j)
@@ -103,7 +103,6 @@ def compute_group_band_correlation_matrix(
 def compute_band_statistics_array(
     values: np.ndarray,
     ci_multiplier: float = 1.96,
-    config: Optional[Any] = None,
 ) -> Tuple[float, float, float, int]:
     """Compute band statistics from array."""
     clean_values = values[np.isfinite(values)]
@@ -185,16 +184,13 @@ def compute_band_correlations(
     pow_df: pd.DataFrame,
     y: pd.Series,
     band: str,
-    power_prefix: str = "pow_",
     min_samples: int = 3,
 ) -> Tuple[List[str], np.ndarray, np.ndarray]:
     """Compute channel-wise correlations for a band."""
     band_lower = str(band).lower()
-    
-    # Canonical NamingSchema columns:
-    # power_{segment}_{band}_ch_{channel}_{stat}
     prefix = "power_"
     token = f"_{band_lower}_ch_"
+    
     candidate_columns = [
         col
         for col in pow_df.columns
@@ -204,7 +200,6 @@ def compute_band_correlations(
     if not candidate_columns:
         return [], np.array([]), np.array([])
     
-    # Example: power_active_alpha_ch_Fz_logratio
     pattern = re.compile(
         rf"^power_[^_]+_{re.escape(band_lower)}_ch_(.+?)_",
         re.IGNORECASE
@@ -229,21 +224,19 @@ def compute_band_correlations(
         x_values = pow_df[col].to_numpy()
         y_values = y.to_numpy()
         
-        # Use centralized correlation function
         valid_mask = np.isfinite(x_values) & np.isfinite(y_values)
         x_valid = x_values[valid_mask]
         y_valid = y_values[valid_mask]
         
-        if len(x_valid) >= min_samples:
+        if len(x_valid) < min_samples:
+            correlation = np.nan
+            p_value = 1.0
+        else:
             correlation, _ = compute_correlation(x_valid, y_valid, method="spearman")
-            # Compute p-value using scipy for compatibility
-            if np.isfinite(correlation) and len(x_valid) >= 3:
+            if np.isfinite(correlation):
                 _, p_value = stats.spearmanr(x_valid, y_valid)
             else:
                 p_value = 1.0
-        else:
-            correlation = np.nan
-            p_value = 1.0
         
         correlations.append(correlation)
         p_values.append(p_value)
@@ -265,7 +258,6 @@ def compute_connectivity_correlations(
     correlations = []
     connections = []
     prefix = f"{measure}_{band}_"
-    epsilon_std = 1e-12
     
     for col in measure_cols:
         x_values = conn_df[col].to_numpy()
@@ -278,14 +270,12 @@ def compute_connectivity_correlations(
         if len(x_valid) < min_samples:
             continue
         
-        if np.std(x_valid) < epsilon_std or np.std(y_valid) < epsilon_std:
+        if np.std(x_valid) < _EPSILON_STD or np.std(y_valid) < _EPSILON_STD:
             continue
         
-        # Use centralized correlation function
         correlation, _ = compute_correlation(x_valid, y_valid, method="spearman")
         
-        # Compute p-value using scipy for compatibility
-        if np.isfinite(correlation) and len(x_valid) >= 3:
+        if np.isfinite(correlation):
             _, p_value = stats.spearmanr(x_valid, y_valid)
         else:
             p_value = 1.0
@@ -397,18 +387,17 @@ def compute_group_channel_power_statistics(
     heatmap_rows, stats_rows = [], []
     
     for band in bands:
-        band_name = str(band)
         subject_means = []
         
         for dataframe in subj_pow.values():
             channel_values = _extract_channel_power_values(
-                dataframe, band_name, all_channels
+                dataframe, band, all_channels
             )
             subject_means.append(channel_values)
         
         subject_arrays = np.asarray(subject_means, dtype=float)
         mean_per_channel, band_statistics = _compute_band_statistics(
-            subject_arrays, band_name, all_channels
+            subject_arrays, band, all_channels
         )
         
         heatmap_rows.append(mean_per_channel)

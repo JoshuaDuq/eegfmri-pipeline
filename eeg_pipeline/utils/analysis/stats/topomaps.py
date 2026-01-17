@@ -12,7 +12,6 @@ import pandas as pd
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.stats import (
-    get_correlation_method,
     compute_correlation,
     get_fdr_alpha,
     get_eeg_adjacency,
@@ -328,28 +327,6 @@ def _validate_inputs(
     return True
 
 
-def _save_results(
-    results_df: pd.DataFrame,
-    subject: str,
-    task: Optional[str],
-    correlation_method: str,
-    bands: List[str],
-    stats_dir: Path,
-    use_spearman: bool,
-    bootstrap: int,
-    n_perm: int,
-) -> None:
-    """
-    Save correlation results and metadata to disk.
-    
-    DEPRECATED: This function is no longer called. ROI-averaged correlations 
-    are now included in the unified temporal_correlations output via 
-    _build_roi_averaged_records() in temporal.py.
-    """
-    # No-op: file generation removed to consolidate outputs
-    pass
-
-
 def run_power_topomap_correlations(
     subject: str,
     task: Optional[str],
@@ -361,8 +338,6 @@ def run_power_topomap_correlations(
     logger,
     use_spearman: bool = True,
     rng: Optional[np.random.Generator] = None,
-    bootstrap: int = 0,
-    n_perm: int = 0,
 ) -> Optional[pd.DataFrame]:
     """
     Correlate power topomaps with temperature using pre-loaded data.
@@ -389,10 +364,6 @@ def run_power_topomap_correlations(
         Whether to use Spearman correlations (default True).
     rng : np.random.Generator, optional
         Random generator for cluster permutations.
-    bootstrap : int
-        Bootstrap iterations (retained for API compatibility).
-    n_perm : int
-        Permutation count (retained for API compatibility).
 
     Returns
     -------
@@ -419,7 +390,6 @@ def run_power_topomap_correlations(
         if config is not None
         else 5
     )
-    correlation_method = get_correlation_method(use_spearman)
 
     eeg_info = {"info": epochs_info, "adjacency": adjacency, "picks": picks}
     records: List[Dict[str, Any]] = []
@@ -440,19 +410,7 @@ def run_power_topomap_correlations(
         return None
 
     results_df = pd.DataFrame(records)
-    _save_results(
-        results_df,
-        subject,
-        task,
-        correlation_method,
-        bands,
-        stats_dir,
-        use_spearman,
-        bootstrap,
-        n_perm,
-    )
-
-    logger.info(f"Saved {len(results_df)} topomap correlations to {stats_dir}")
+    logger.info(f"Computed {len(results_df)} topomap correlations for sub-{subject}")
     return results_df
 
 

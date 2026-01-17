@@ -25,22 +25,14 @@ def _matches_connectivity_criteria(
     metric: str,
 ) -> bool:
     """Check if parsed column name matches connectivity feature criteria."""
-    if not parsed.get("valid"):
-        return False
-
-    group = str(parsed.get("group") or "")
-    if group not in {"conn", "connectivity"}:
-        return False
-    if str(parsed.get("segment") or "") != str(segment):
-        return False
-    if str(parsed.get("band") or "") != str(band):
-        return False
-    if str(parsed.get("scope") or "") != "global":
-        return False
-    if str(parsed.get("stat") or "") != str(metric):
-        return False
-
-    return True
+    return (
+        parsed.get("valid")
+        and parsed.get("group") in {"conn", "connectivity"}
+        and parsed.get("segment") == segment
+        and parsed.get("band") == band
+        and parsed.get("scope") == "global"
+        and parsed.get("stat") == metric
+    )
 
 
 def _extract_connectivity_values_for_segment(
@@ -119,12 +111,11 @@ def _format_connectivity_metric_label(metric: Optional[str]) -> str:
     """Get display label for a connectivity metric."""
     if metric is None:
         return "Connectivity"
-    metric_str = str(metric)
-    if metric_str.startswith("wpli"):
+    if metric.startswith("wpli"):
         return "wPLI"
-    if metric_str.startswith("aec"):
+    if metric.startswith("aec"):
         return "AEC"
-    return metric_str
+    return metric
 
 
 def _format_connectivity_title(
@@ -143,13 +134,13 @@ def _format_connectivity_x_label(band_title: str, metric: Optional[str]) -> str:
 
 def _format_connectivity_filename(band: str, target: str, metric: Optional[str]) -> str:
     """Format output filename for connectivity scatter plot."""
-    metric_safe = str(metric) if metric is not None else "connectivity"
+    metric_safe = metric if metric else "connectivity"
     return f"scatter_conn_{metric_safe}_{band}_vs_{target}"
 
 
 def _format_connectivity_feature_name(band: str, metric: Optional[str]) -> str:
     """Format feature name for connectivity metric."""
-    metric_safe = str(metric) if metric is not None else "connectivity"
+    metric_safe = metric if metric else "connectivity"
     return f"conn_{metric_safe}_{band}"
 
 
@@ -182,7 +173,7 @@ def plot_connectivity_roi_scatter(
     method_code = "spearman" if use_spearman else "pearson"
 
     conn_plot_cfg = behavioral_config.get("connectivity", {})
-    segment = str(conn_plot_cfg.get("segment", "active"))
+    segment = conn_plot_cfg.get("segment", "active")
     metrics = conn_plot_cfg.get("metrics", ["wpli_mean", "aec_mean"])
     if not isinstance(metrics, list) or not metrics:
         raise ValueError(
@@ -216,11 +207,13 @@ def plot_connectivity_roi_scatter(
         data.stats_dir, logger, method_label, do_temp
     )
 
-    column_extractor = (
-        lambda df, band, roi_channels, metric=None: _extract_connectivity_values_for_segment(
+    def column_extractor(
+        df: pd.DataFrame, band: str, roi_channels: List[str], metric: Optional[str] = None
+    ) -> Tuple[pd.Series, bool]:
+        """Extract connectivity values for given band and metric."""
+        return _extract_connectivity_values_for_segment(
             df, segment=segment, band=band, metric=metric
         )
-    )
 
     results = create_roi_scatter_plots(
         data=data,
@@ -230,7 +223,7 @@ def plot_connectivity_roi_scatter(
         x_label_formatter=_format_connectivity_x_label,
         filename_formatter=_format_connectivity_filename,
         feature_name_formatter=_format_connectivity_feature_name,
-        bands=[str(b) for b in bands],
+        bands=bands,
         metrics=metrics,
         method_code=method_code,
         bootstrap_ci=bootstrap_ci,

@@ -9,7 +9,6 @@ import mne
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.infra.logging import get_default_logger as _get_default_logger
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.plotting.config import get_plot_config
@@ -225,16 +224,10 @@ def _load_global_fdr_for_temporal_correlations(
 ) -> Optional[Dict[Tuple[str, str, float, float, str], bool]]:
     """Load global FDR correction map from temporal correlations TSV file."""
     suffix = _get_correlation_suffix(use_spearman)
-    
-    # Try new naming convention first
     tsv_path = stats_dir / "temporal_correlations" / f"temporal_correlations{suffix}.tsv"
     
-    # Fall back to old naming for backward compatibility
     if not tsv_path.exists():
-        tsv_path = stats_dir / f"corr_stats_temporal_all{suffix}.tsv"
-    
-    if not tsv_path.exists():
-        logger.debug(f"TSV file not found for global FDR: tried temporal_correlations{suffix}.tsv and corr_stats_temporal_all{suffix}.tsv")
+        logger.debug(f"TSV file not found for global FDR: {tsv_path.name}")
         return None
 
     try:
@@ -443,8 +436,9 @@ def _plot_single_band_topomaps(
     band_ranges: List[Tuple[float, float]],
     window_starts: np.ndarray,
     window_ends: np.ndarray,
-    result_pain: Dict[str, Any],
-    result_non: Dict[str, Any],
+    result_row1: Dict[str, Any],
+    result_row2: Dict[str, Any],
+    condition_names: List[str],
     info: mne.Info,
     ch_names: List[str],
     row_labels: List[str],
@@ -472,14 +466,14 @@ def _plot_single_band_topomaps(
         gridspec_kw={"hspace": layout_config["hspace"], "wspace": layout_config["wspace"]},
     )
 
-    results = [result_non, result_pain]
+    results = [result_row1, result_row2]
     fdr_alpha = get_fdr_alpha(config, DEFAULT_ALPHA)
 
     for row_idx, (row_label, result) in enumerate(zip(row_labels, results)):
         correlations = result["correlations"][band_idx]
         p_values = result["p_values"][band_idx]
         p_corrected = result["p_corrected"][band_idx]
-        condition_name = "non_pain" if row_idx == 0 else "pain"
+        condition_name = condition_names[row_idx] if row_idx < len(condition_names) else condition_names[0]
 
         axes[row_idx, 0].set_ylabel(
             f"{row_label}\n{freq_label}",
@@ -590,20 +584,22 @@ def _extract_condition_results(
     data: Dict[str, Any],
     logger: logging.Logger,
 ) -> Dict[str, Dict[str, Any]]:
-    """Extract condition results from NPZ data, handling both new and legacy formats."""
+    """Extract condition results from NPZ data."""
     condition_results = {}
     
-    # New format: has condition_names key
-    if "condition_names" in data:
-        condition_names = data["condition_names"]
-        if isinstance(condition_names, np.ndarray):
-            condition_names = condition_names.tolist()
-        for cond_name in condition_names:
-            if cond_name in data:
-                result = data[cond_name]
-                if isinstance(result, np.ndarray) and result.dtype == object:
-                    result = result.item()
-                condition_results[cond_name] = result
+    if "condition_names" not in data:
+        return condition_results
+    
+    condition_names = data["condition_names"]
+    if isinstance(condition_names, np.ndarray):
+        condition_names = condition_names.tolist()
+    
+    for cond_name in condition_names:
+        if cond_name in data:
+            result = data[cond_name]
+            if isinstance(result, np.ndarray) and result.dtype == object:
+                result = result.item()
+            condition_results[cond_name] = result
     
     return condition_results
 
@@ -640,7 +636,6 @@ def plot_temporal_correlation_topomaps_by_pain(
     if isinstance(ch_names, np.ndarray):
         ch_names = ch_names.tolist()
 
-    # Extract condition results (handles both new and legacy formats)
     condition_results = _extract_condition_results(data, logger)
     if not condition_results:
         logger.warning("No condition results found in data file")
@@ -657,11 +652,8 @@ def plot_temporal_correlation_topomaps_by_pain(
     font_sizes = get_font_sizes()
     sig_text = get_sig_marker_text(config)
 
-    # Determine data path for validation error message
     suffix = _get_correlation_suffix(use_spearman)
-    new_path = stats_dir / "temporal_correlations" / f"temporal_correlations_by_condition{suffix}.npz"
-    legacy_path = stats_dir / f"temporal_correlations_by_pain{suffix}.npz"
-    data_path = new_path if new_path.exists() else legacy_path
+    data_path = stats_dir / "temporal_correlations" / f"temporal_correlations_by_condition{suffix}.npz"
     
     if not _validate_temporal_results(condition_results, data_path, subject, logger):
         return
@@ -684,8 +676,6 @@ def plot_temporal_correlation_topomaps_by_pain(
     if row_labels is None or len(row_labels) != len(condition_names):
         row_labels = condition_names
 
-    # For now, use first two conditions for the two-row layout (backward compatible)
-    # Future: Support arbitrary number of conditions with dynamic layouts
     if len(condition_results) >= 2:
         result_row1 = condition_results[condition_names[0]]
         result_row2 = condition_results[condition_names[1]]
@@ -703,6 +693,7 @@ def plot_temporal_correlation_topomaps_by_pain(
             window_ends,
             result_row1,
             result_row2,
+            condition_names,
             info,
             ch_names,
             row_labels,
@@ -802,7 +793,6 @@ def _compute_bands_with_significant_correlations(
             pow_df,
             y,
             band,
-            power_prefix=power_prefix,
             min_samples=min_samples,
         )
         if len(ch_names) == 0:

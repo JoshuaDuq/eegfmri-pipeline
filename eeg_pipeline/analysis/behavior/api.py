@@ -19,12 +19,12 @@ from eeg_pipeline.domain.features.registry import (
     get_feature_registry,
 )
 from eeg_pipeline.utils.analysis.stats.correlation import (
-    CorrelationResult,
     compute_pain_sensitivity_index,
     interpret_correlation,
     interpret_effect_size,
     run_pain_sensitivity_correlations,
 )
+from eeg_pipeline.types import CorrelationResult
 from eeg_pipeline.utils.analysis.stats.transforms import compute_change_features
 from eeg_pipeline.utils.analysis.stats.effect_size import (
     compute_condition_effects,
@@ -63,12 +63,13 @@ def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
     if ctx.computation_features and "cluster" in ctx.computation_features:
         allowed = ctx.computation_features["cluster"]
         if "power" not in allowed and "spectral" not in allowed:
-            ctx.logger.info("Skipping cluster test: feature filter %s excludes 'power'/'spectral'", allowed)
+            ctx.logger.info(
+                "Skipping cluster test: feature filter %s excludes 'power'/'spectral'", allowed
+            )
             return None
 
     from eeg_pipeline.infra.paths import ensure_dir
-    
-    # Create cluster subdirectory for organized output
+
     cluster_dir = ctx.stats_dir / "cluster"
     ensure_dir(cluster_dir)
 
@@ -91,14 +92,17 @@ __all__ = [
     "interpret_effect_size",
     "interpret_correlation",
     "CorrelationResult",
+    "run_pain_sensitivity_correlations",
     # Feature correlator
     "FeatureBehaviorCorrelator",
     "CorrelationConfig",
     "FeatureCorrelationResult",
     "run_unified_feature_correlations",
-    # Feature registry (backward-compatible re-exports)
+    # Feature registry
     "FeatureRegistry",
     "FeatureRule",
+    "classify_feature",
+    "get_feature_registry",
     # Cluster tests
     "compute_pain_nonpain_time_cluster_test",
     "run_cluster_test_from_context",
@@ -119,6 +123,3 @@ __all__ = [
     # Topomaps
     "run_power_topomap_correlations",
 ]
-
-
-

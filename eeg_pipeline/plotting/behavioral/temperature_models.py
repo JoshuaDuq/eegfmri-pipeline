@@ -33,21 +33,14 @@ def _find_first(stats_dir: Path, pattern: str) -> Optional[Path]:
 
 def _find_trials_file(stats_dir: Path) -> Optional[Path]:
     tsv_path = _find_first(stats_dir, "trials*.tsv")
-    if tsv_path is not None and tsv_path.exists():
+    if tsv_path is not None:
         return tsv_path
-    parquet_path = _find_first(stats_dir, "trials*.parquet")
-    if parquet_path is not None and parquet_path.exists():
-        return parquet_path
-    return None
+    return _find_first(stats_dir, "trials*.parquet")
 
 
 def _find_column_in_dataframe(
     df: pd.DataFrame, config: Any, config_key: str, default_candidates: List[str]
 ) -> Optional[str]:
-    """Find column from config candidates or default candidates.
-    
-    Uses the canonical find_column function from data.manipulation.
-    """
     from eeg_pipeline.utils.data.manipulation import find_column
     config_candidates = list(config.get(config_key, []) or [])
     all_candidates = config_candidates + default_candidates
@@ -83,35 +76,29 @@ def _prepare_temperature_rating_data(
 
 
 def _plot_binned_means(ax: plt.Axes, temperature: pd.Series, rating: pd.Series) -> None:
-    try:
-        quantiles = np.linspace(0, 1, _NUM_BIN_QUANTILES)
-        bin_edges = np.unique(np.quantile(temperature, quantiles))
-        if bin_edges.size < _MIN_BINS_FOR_PLOT:
-            return
+    quantiles = np.linspace(0, 1, _NUM_BIN_QUANTILES)
+    bin_edges = np.unique(np.quantile(temperature, quantiles))
+    if bin_edges.size < _MIN_BINS_FOR_PLOT:
+        return
 
-        temperature_array = temperature.to_numpy()
-        rating_array = rating.to_numpy()
-        binned_data = pd.DataFrame(
-            {"temperature": temperature_array, "rating": rating_array}
-        )
-        binned_data["bin"] = pd.cut(
-            binned_data["temperature"],
-            bins=bin_edges,
-            include_lowest=True,
-            duplicates="drop",
-        )
-        binned_means = (
-            binned_data.groupby("bin", observed=True)
-            .agg(temperature_mean=("temperature", "mean"), rating_mean=("rating", "mean"))
-            .dropna()
-        )
+    binned_data = pd.DataFrame({"temperature": temperature, "rating": rating})
+    binned_data["bin"] = pd.cut(
+        binned_data["temperature"],
+        bins=bin_edges,
+        include_lowest=True,
+        duplicates="drop",
+    )
+    binned_means = (
+        binned_data.groupby("bin", observed=True)
+        .agg(temperature_mean=("temperature", "mean"), rating_mean=("rating", "mean"))
+        .dropna()
+    )
+    if not binned_means.empty:
         ax.plot(
             binned_means["temperature_mean"],
             binned_means["rating_mean"],
             linewidth=_BINNED_LINE_WIDTH,
         )
-    except (ValueError, KeyError):
-        pass
 
 
 def _create_temperature_plot(
@@ -134,7 +121,7 @@ def _create_temperature_plot(
     _plot_binned_means(ax, valid_temperature, valid_rating)
 
     if best_breakpoint is not None and np.isfinite(best_breakpoint):
-        ax.axvline(float(best_breakpoint), linestyle="--", linewidth=_BREAKPOINT_LINE_WIDTH)
+        ax.axvline(best_breakpoint, linestyle="--", linewidth=_BREAKPOINT_LINE_WIDTH)
 
     title = f"sub-{subject} {task}: {rating_col} vs {temp_col}"
     if best_model:

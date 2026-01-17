@@ -73,24 +73,24 @@ def _extract_aperiodic_values(
 
 
 def _format_aperiodic_title(
-    band_title: str, roi: str, target: str, metric: Optional[str]
+    _band_title: str, roi: str, target: str, metric: Optional[str]
 ) -> str:
     metric_title = f"1/f {metric.capitalize()}" if metric else "1/f"
     return f"{metric_title} vs {target} — {roi}"
 
 
-def _format_aperiodic_x_label(band_title: str, metric: Optional[str]) -> str:
+def _format_aperiodic_x_label(_band_title: str, metric: Optional[str]) -> str:
     if metric:
         return f"1/f {metric.capitalize()}"
     return "1/f"
 
 
-def _format_aperiodic_filename(band: str, target: str, metric: Optional[str]) -> str:
+def _format_aperiodic_filename(_band: str, target: str, metric: Optional[str]) -> str:
     metric_safe = metric if metric else "aperiodic"
     return f"scatter_aperiodic_{metric_safe}_vs_{target}"
 
 
-def _format_aperiodic_feature_name(band: str, metric: Optional[str]) -> str:
+def _format_aperiodic_feature_name(_band: str, metric: Optional[str]) -> str:
     if metric:
         return f"aperiodic_{metric}"
     return "aperiodic"
@@ -102,8 +102,7 @@ def _load_aperiodic_features(
     """Load aperiodic features table for the subject."""
     features_dir = deriv_features_path(deriv_root, subject)
     aperiodic_path = features_dir / "aperiodic" / "features_aperiodic.tsv"
-    if not aperiodic_path.exists():
-        aperiodic_path = features_dir / "features_aperiodic.tsv"
+    
     if not aperiodic_path.exists():
         logger.warning("Aperiodic features not found at %s", aperiodic_path)
         return None
@@ -127,9 +126,7 @@ def _validate_feature_target_length(
         )
 
 
-def _get_correlation_method_label(
-    use_spearman: bool, config: Any
-) -> str:
+def _get_correlation_method_label(use_spearman: bool, config: Any) -> str:
     """Get formatted correlation method label from config."""
     robust_method = get_config_value(
         config, "behavior_analysis.robust_correlation", None

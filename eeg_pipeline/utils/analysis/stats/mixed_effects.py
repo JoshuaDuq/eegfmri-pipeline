@@ -10,7 +10,6 @@ import pandas as pd
 from scipy import stats
 
 from eeg_pipeline.utils.analysis.stats.reliability import (
-    compute_icc as _compute_icc_array,
     compute_icc_from_dataframe,
 )
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
@@ -22,10 +21,7 @@ from eeg_pipeline.utils.analysis.stats.mediation import analyze_mediation_for_fe
 EPSILON = 1e-12
 MIN_GROUPS_FOR_MIXED_EFFECTS = 3
 MIN_OBSERVATIONS_FOR_MIXED_EFFECTS = 10
-MIN_GROUPS_FOR_ICC = 2
 MIN_OBSERVATIONS_FOR_ANALYSIS = 10
-MIN_PIVOT_ROWS_FOR_ICC = 2
-MIN_PIVOT_COLS_FOR_ICC = 2
 
 
 @dataclass
@@ -194,7 +190,6 @@ def fit_mixed_effects_model(
     feature_col: str,
     behavior_col: str,
     subject_col: str = "subject",
-    random_effects: str = "intercept",
     covariates: list[str] | None = None,
 ) -> dict[str, Any]:
     """Fit linear mixed-effects model for repeated measures."""
@@ -247,7 +242,6 @@ def fit_mixed_effects_model(
     }
 
 
-# Alias for backward compatibility - delegates to reliability module
 compute_icc = compute_icc_from_dataframe
 
 
@@ -275,7 +269,6 @@ def run_multilevel_correlation_analysis(
                 feature,
                 behavior_col,
                 subject_col,
-                random_effects="intercept",
                 covariates=covariates,
             )
             result["feature"] = feature
@@ -358,14 +351,9 @@ def run_mediation_analysis(
 
 __all__ = [
     "MixedEffectsResult",
-    "_fit_lmer_manual",
     "fit_mixed_effects_model",
     "compute_icc",
     "run_multilevel_correlation_analysis",
     "run_mediation_analysis",
 ]
-
-
-
-
 

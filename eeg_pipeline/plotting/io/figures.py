@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,85 +20,6 @@ import seaborn as sns
 
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.utils.config.loader import get_nested_value, load_config
-
-
-class _PlotDefaults:
-    """Encapsulates default plotting parameters to avoid global mutable state."""
-
-    def __init__(self):
-        self.dpi: Optional[int] = None
-        self.formats: Optional[Tuple[str, ...]] = None
-        self.bbox_inches: Optional[str] = None
-        self.pad_inches: Optional[float] = None
-
-    def initialize_from_constants(self, constants: Dict[str, Any]) -> None:
-        """Initialize defaults from constants dictionary."""
-        plot_config = SaveFigConfig.from_constants(constants)
-        self.dpi = plot_config.dpi
-        self.formats = plot_config.formats
-        self.bbox_inches = plot_config.bbox_inches
-        self.pad_inches = plot_config.pad_inches
-
-    def get_dpi(self, fallback: int = 150) -> int:
-        """Get DPI with fallback."""
-        return self.dpi if self.dpi is not None else fallback
-
-    def get_formats(self, fallback: Tuple[str, ...] = ("png",)) -> Tuple[str, ...]:
-        """Get formats with fallback."""
-        return self.formats if self.formats is not None else fallback
-
-    def get_bbox_inches(self, fallback: str = "tight") -> str:
-        """Get bbox_inches with fallback."""
-        return self.bbox_inches if self.bbox_inches is not None else fallback
-
-    def get_pad_inches(self, fallback: float = 0.1) -> float:
-        """Get pad_inches with fallback."""
-        return self.pad_inches if self.pad_inches is not None else fallback
-
-
-_plot_defaults = _PlotDefaults()
-
-
-@dataclass
-class SaveFigConfig:
-    """Configuration for saving figures (dpi, formats, etc.)."""
-
-    dpi: int = 300
-    formats: Tuple[str, ...] = ("png",)
-    bbox_inches: str = "tight"
-    pad_inches: float = 0.02
-
-    @classmethod
-    def from_constants(cls, constants: Dict[str, Any]) -> "SaveFigConfig":
-        if "FIG_DPI" not in constants:
-            raise ValueError("FIG_DPI not found in constants")
-        if "SAVE_FORMATS" not in constants:
-            raise ValueError("SAVE_FORMATS not found in constants")
-        if "output.bbox_inches" not in constants:
-            raise ValueError("output.bbox_inches not found in constants")
-        if "output.pad_inches" not in constants:
-            raise ValueError("output.pad_inches not found in constants")
-
-        return cls(
-            dpi=constants["FIG_DPI"],
-            formats=tuple(constants["SAVE_FORMATS"]),
-            bbox_inches=constants["output.bbox_inches"],
-            pad_inches=float(constants["output.pad_inches"]),
-        )
-
-    @classmethod
-    def get_defaults(cls) -> "SaveFigConfig":
-        return cls()
-
-
-PlotConfig = SaveFigConfig
-
-
-def _initialize_plot_defaults(constants: Dict[str, Any]) -> None:
-    """Initialize plot defaults from constants dictionary."""
-    if constants is None:
-        raise ValueError("constants is required for _initialize_plot_defaults")
-    _plot_defaults.initialize_from_constants(constants)
 
 
 def build_footer(template_name: str, config: Dict[str, Any], **kwargs) -> str:
@@ -458,38 +378,6 @@ def setup_matplotlib(config: Optional[Dict[str, Any]] = None) -> None:
     plt.rcParams.update(rc_params)
 
 
-def extract_plotting_constants(
-    config: Dict[str, Any],
-    save_formats: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    """Extract plotting constants from configuration.
-    
-    Args:
-        config: Configuration dictionary.
-        save_formats: Optional list of formats to override config.
-        
-    Returns:
-        Dictionary of plotting constants.
-        
-    Raises:
-        ValueError: If config is None.
-    """
-    if config is None:
-        raise ValueError("config is required for extract_plotting_constants")
-
-    default_dpi = 300
-    default_formats = ["svg"]
-    default_bbox = "tight"
-    default_pad = 0.02
-
-    return {
-        "FIG_DPI": int(config.get("plotting.defaults.savefig_dpi", default_dpi)),
-        "SAVE_FORMATS": save_formats or list(config.get("plotting.defaults.formats", default_formats)),
-        "output.bbox_inches": config.get("plotting.defaults.bbox_inches", default_bbox),
-        "output.pad_inches": float(config.get("plotting.defaults.pad_inches", default_pad)),
-    }
-
-
 def extract_eeg_picks(
     epochs_or_info: Any,
     exclude_bads: bool = True,
@@ -526,22 +414,6 @@ def log_if_present(logger: Optional[logging.Logger], level: str, message: str) -
         getattr(logger, level)(message)
 
 
-def validate_picks(picks: np.ndarray, logger: Optional[logging.Logger]) -> bool:
-    """Validate that picks array is not empty.
-    
-    Args:
-        picks: Array of channel picks.
-        logger: Optional logger for warnings.
-        
-    Returns:
-        True if picks are valid, False otherwise.
-    """
-    if len(picks) == 0:
-        log_if_present(logger, "warning", "No valid EEG channels found")
-        return False
-    return True
-
-
 def get_default_config() -> Dict[str, Any]:
     """Load and return default configuration.
     
@@ -555,7 +427,6 @@ def _prepare_figure_footer(
     footer: Optional[str],
     footer_template_name: Optional[str],
     footer_kwargs: Optional[Dict[str, Any]],
-    constants: Optional[Dict[str, Any]],
 ) -> Optional[str]:
     """Prepare figure footer from template or use provided footer.
     
@@ -563,7 +434,6 @@ def _prepare_figure_footer(
         footer: Optional pre-formatted footer string.
         footer_template_name: Optional template name to use.
         footer_kwargs: Optional keyword arguments for template.
-        constants: Optional constants dictionary (unused, kept for compatibility).
         
     Returns:
         Footer string or None.
@@ -748,7 +618,6 @@ def save_fig(
     bbox_inches: Optional[str] = None,
     pad_inches: Optional[float] = None,
     tight_layout_rect: Optional[Tuple[float, float, float, float]] = None,
-    constants: Optional[Dict[str, Any]] = None,
     footer_template_name: Optional[str] = None,
     footer_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -764,7 +633,6 @@ def save_fig(
         bbox_inches: Optional bounding box setting (default from config).
         pad_inches: Optional padding in inches (default from config).
         tight_layout_rect: Optional rectangle tuple for tight_layout.
-        constants: Optional constants dictionary for initialization.
         footer_template_name: Optional footer template name.
         footer_kwargs: Optional keyword arguments for footer template.
     """
@@ -772,20 +640,17 @@ def save_fig(
     ensure_dir(output_path.parent)
     base_path = output_path.with_suffix("") if output_path.suffix else output_path
 
-    if constants is not None:
-        _initialize_plot_defaults(constants)
-
     default_formats = ("png",)
     default_dpi = 150
     default_bbox = "tight"
     default_pad = 0.1
 
-    save_formats = formats or _plot_defaults.get_formats(default_formats)
-    save_dpi = dpi if dpi is not None else _plot_defaults.get_dpi(default_dpi)
-    save_bbox = bbox_inches or _plot_defaults.get_bbox_inches(default_bbox)
-    save_pad = pad_inches if pad_inches is not None else _plot_defaults.get_pad_inches(default_pad)
+    save_formats = formats or default_formats
+    save_dpi = dpi if dpi is not None else default_dpi
+    save_bbox = bbox_inches or default_bbox
+    save_pad = pad_inches if pad_inches is not None else default_pad
 
-    prepared_footer = _prepare_figure_footer(footer, footer_template_name, footer_kwargs, constants)
+    prepared_footer = _prepare_figure_footer(footer, footer_template_name, footer_kwargs)
     _prepare_figure_layout(fig, prepared_footer, tight_layout_rect)
 
     saved_paths = _save_figure_to_formats(fig, base_path, save_formats, save_dpi, save_bbox, save_pad)
@@ -798,9 +663,6 @@ def save_fig(
 
 
 __all__ = [
-    "SaveFigConfig",
-    "PlotConfig",
-    "_initialize_plot_defaults",
     "build_footer",
     "unwrap_figure",
     "get_behavior_footer",
@@ -811,17 +673,8 @@ __all__ = [
     "plot_topomap_on_ax",
     "robust_sym_vlim",
     "setup_matplotlib",
-    "extract_plotting_constants",
     "extract_eeg_picks",
     "log_if_present",
-    "validate_picks",
     "get_default_config",
-    "_prepare_figure_footer",
-    "_should_add_footer",
-    "_apply_tight_layout",
-    "_prepare_figure_layout",
-    "_save_figure_with_fallback",
-    "_save_figure_with_agg_backend",
-    "_save_figure_to_formats",
     "save_fig",
 ]

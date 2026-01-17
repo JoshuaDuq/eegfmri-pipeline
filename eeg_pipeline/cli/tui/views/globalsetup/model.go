@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -52,17 +51,6 @@ type fieldDef struct {
 	label       string
 	description string
 	isPath      bool
-}
-
-type BandEntry struct {
-	Name string
-	Low  float64
-	High float64
-}
-
-type RoiEntry struct {
-	Name     string
-	Patterns []string
 }
 
 type pathPickedMsg struct {
@@ -220,14 +208,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusIsError = true
 		}
 		return m, nil
-	case messages.ConfigLoadedMsg:
-		// Also handle summary if it comes
-		m.isLoading = false
-		if msg.Error != nil {
-			m.statusMessage = "Discovery failed"
-			m.statusIsError = true
-		}
-		return m, nil
 	case overridesSavedMsg:
 		m.isSaving = false
 		if msg.err != nil {
@@ -263,10 +243,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveCursor(1)
 		case "enter", " ":
 			return m.activateSelection()
-		case "a", "A":
-			return m.addEntry()
-		case "d", "D", "x":
-			return m.deleteEntry()
 		case "b", "B":
 			return m.browseCurrentPath()
 		case "r", "R":
@@ -427,14 +403,6 @@ func (m *Model) activateSelection() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) addEntry() (tea.Model, tea.Cmd) {
-	return m, nil
-}
-
-func (m *Model) deleteEntry() (tea.Model, tea.Cmd) {
-	return m, nil
-}
-
 func (m *Model) browseCurrentPath() (tea.Model, tea.Cmd) {
 	section := m.sections[m.sectionIndex].key
 	fields := m.sectionFields(section)
@@ -451,10 +419,6 @@ func (m *Model) browseCurrentPath() (tea.Model, tea.Cmd) {
 
 func (m Model) browseForPath(field fieldKey) tea.Cmd {
 	return func() tea.Msg {
-		if runtime.GOOS != "darwin" {
-			return pathPickedMsg{field: field, err: fmt.Errorf("file picker not supported on %s", runtime.GOOS)}
-		}
-
 		prompt := "Select folder"
 		switch field {
 		case fieldBidsRoot:
@@ -467,7 +431,6 @@ func (m Model) browseForPath(field fieldKey) tea.Cmd {
 			prompt = "Select source data folder"
 		}
 
-		// Cross-platform folder picker
 		result := executor.PickFolder(prompt, fmt.Sprintf("%d", field))()
 		if msg, ok := result.(executor.PickFolderMsg); ok {
 			return pathPickedMsg{field: field, path: msg.Path, err: msg.Error}
@@ -612,9 +575,6 @@ func (m *Model) commitTextEdit() tea.Cmd {
 func (m *Model) saveOverridesBatch() tea.Cmd {
 	m.isSaving = true
 	return func() tea.Msg {
-		if err := m.validate(); err != nil {
-			return overridesSavedMsg{err: err}
-		}
 		overrides := m.buildOverrides()
 		data, err := json.MarshalIndent(overrides, "", "  ")
 		if err != nil {
@@ -705,10 +665,6 @@ func (m *Model) buildOverrides() map[string]interface{} {
 	}
 
 	return overrides
-}
-
-func (m *Model) validate() error {
-	return nil
 }
 
 func splitList(value string) []string {

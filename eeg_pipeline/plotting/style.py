@@ -8,7 +8,7 @@ Centralizes aesthetic configuration for publication-quality figures.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -19,27 +19,12 @@ import seaborn as sns
 
 DEFAULT_COLOR = "#333333"
 
-COLORS: Dict[str, Any] = {
+COLORS: Dict[str, str] = {
     "pain": "#E31A1C",
     "nopain": "#1F78B4",
     "baseline": DEFAULT_COLOR,
     "grid": "#E0E0E0",
     "text": "#212121",
-    "bands": {
-        "delta": "#1f77b4",
-        "theta": "#2ca02c",
-        "alpha": "#ff7f0e",
-        "beta": "#d62728",
-        "gamma": "#9467bd",
-    },
-}
-
-FIG_SIZES: Dict[str, Tuple[int, int]] = {
-    "scatter": (6, 5),
-    "time_series": (10, 4),
-    "topomap": (4, 4),
-    "heatmap": (8, 6),
-    "panel": (12, 8),
 }
 
 _PUBLICATION_RCPARAMS: Dict[str, Any] = {
@@ -103,18 +88,3 @@ def get_color(key: str, default: str = DEFAULT_COLOR) -> str:
     if not isinstance(key, str):
         raise TypeError(f"key must be str, got {type(key).__name__}")
     return COLORS.get(key, default)
-
-
-def get_band_color(band: str) -> str:
-    """
-    Retrieve color for frequency band.
-
-    Args:
-        band: Frequency band name (e.g., 'alpha', 'beta', 'gamma')
-
-    Returns:
-        Hex color string, or default color if band not found
-    """
-    if not isinstance(band, str):
-        raise TypeError(f"band must be str, got {type(band).__name__}")
-    return COLORS["bands"].get(band, DEFAULT_COLOR)

@@ -39,9 +39,7 @@ def _infer_peak_mode(
     name = name_raw.lower()
 
     if peak_mode_by_segment:
-        direct = peak_mode_by_segment.get(name_raw)
-        if direct is None:
-            direct = peak_mode_by_segment.get(name)
+        direct = peak_mode_by_segment.get(name_raw) or peak_mode_by_segment.get(name)
         if direct is not None:
             mode = str(direct).strip().lower()
             if mode in {"neg", "pos", "abs"}:
@@ -75,24 +73,21 @@ def _apply_smoothing(
     data: np.ndarray,
     smooth_samples: int,
 ) -> np.ndarray:
-    window_length = int(smooth_samples)
     n_times = data.shape[2]
     
-    if window_length < _MIN_SMOOTH_WINDOW_LENGTH or window_length >= n_times:
+    if smooth_samples < _MIN_SMOOTH_WINDOW_LENGTH or smooth_samples >= n_times:
         return data
     
-    if window_length % 2 == 0:
-        window_length += 1
+    window_length = smooth_samples if smooth_samples % 2 == 1 else smooth_samples + 1
     
     try:
-        smoothed_data = savgol_filter(
+        return savgol_filter(
             data,
             window_length=window_length,
             polyorder=_SAVGOL_POLYORDER,
             axis=2,
             mode="interp",
         )
-        return smoothed_data
     except (ValueError, TypeError):
         return data
 
@@ -119,18 +114,14 @@ def _find_peak_in_signal(
     )
     
     if has_valid_prominence:
-        peaks, properties = find_peaks(search_signal, prominence=float(prominence))
+        peaks, properties = find_peaks(search_signal, prominence=prominence)
         if peaks.size > 0:
             prominences = properties.get("prominences", np.ones_like(peaks))
-            best_peak_idx = int(peaks[np.argmax(prominences)])
-            peak_value = float(cleaned_signal[best_peak_idx])
-            peak_time = float(times[best_peak_idx])
-            return peak_value, peak_time
+            best_peak_idx = peaks[np.argmax(prominences)]
+            return float(cleaned_signal[best_peak_idx]), float(times[best_peak_idx])
     
-    best_peak_idx = int(np.nanargmax(search_signal))
-    peak_value = float(cleaned_signal[best_peak_idx])
-    peak_time = float(times[best_peak_idx])
-    return peak_value, peak_time
+    best_peak_idx = np.nanargmax(search_signal)
+    return float(cleaned_signal[best_peak_idx]), float(times[best_peak_idx])
 
 
 def _compute_peaks(
@@ -141,19 +132,19 @@ def _compute_peaks(
     smooth_samples: int = 0,
     prominence: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    has_finite = np.isfinite(data).any(axis=2)
     n_epochs, n_series, _ = data.shape
     peak_vals = np.full((n_epochs, n_series), np.nan)
     peak_times = np.full((n_epochs, n_series), np.nan)
     
     smoothed_data = _apply_smoothing(data, smooth_samples)
+    has_finite = np.isfinite(smoothed_data).any(axis=2)
     
     for epoch_idx in range(n_epochs):
         for series_idx in range(n_series):
-            signal = smoothed_data[epoch_idx, series_idx]
-            if not np.isfinite(signal).any():
+            if not has_finite[epoch_idx, series_idx]:
                 continue
             
+            signal = smoothed_data[epoch_idx, series_idx]
             peak_value, peak_time = _find_peak_in_signal(
                 signal,
                 times,
@@ -163,8 +154,6 @@ def _compute_peaks(
             peak_vals[epoch_idx, series_idx] = peak_value
             peak_times[epoch_idx, series_idx] = peak_time
     
-    peak_vals[~has_finite] = np.nan
-    peak_times[~has_finite] = np.nan
     return peak_vals, peak_times
 
 
@@ -218,7 +207,7 @@ def _append_series_features(
         data,
         times,
         peak_mode,
-        smooth_samples=int(smooth_samples),
+        smooth_samples=smooth_samples,
         prominence=prominence,
     )
     auc_vals = _compute_auc(data, times)
@@ -277,10 +266,10 @@ def _build_component_masks(
     erp_cfg: Dict[str, Any],
 ) -> Dict[str, np.ndarray]:
     components = erp_cfg.get("components", [])
-    masks: Dict[str, np.ndarray] = {}
     if not isinstance(components, list):
-        return masks
+        return {}
     
+    masks: Dict[str, np.ndarray] = {}
     for comp in components:
         if not isinstance(comp, dict):
             continue
@@ -313,8 +302,6 @@ def _build_component_masks(
 def _parse_erp_config(
     config: Any,
 ) -> Dict[str, Any]:
-    if not hasattr(config, "get"):
-        return {}
     return config.get("feature_engineering.erp", {})
 
 
@@ -365,13 +352,12 @@ def _parse_smoothing_config(
     try:
         smooth_ms = float(smooth_ms)
     except (TypeError, ValueError):
-        smooth_ms = 0.0
+        return 0
     
     if smooth_ms <= 0:
         return 0
     
-    smooth_samples = int(round(sampling_rate * smooth_ms / _MILLISECONDS_PER_SECOND))
-    return smooth_samples
+    return int(round(sampling_rate * smooth_ms / _MILLISECONDS_PER_SECOND))
 
 
 def _parse_peak_prominence(
@@ -617,30 +603,24 @@ def extract_erp_features(
     target_name = getattr(ctx, "name", None)
     allow_full_epoch_fallback = bool(
         ctx.config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(ctx.config, "get")
-        else False
     )
     
-    # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
         mask = windows.get_mask(target_name)
         if mask is not None and np.any(mask):
             segment_masks = {target_name: mask}
         else:
-            if ctx.logger:
-                if allow_full_epoch_fallback:
-                    ctx.logger.warning(
-                        "ERP: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    ctx.logger.error(
-                        "ERP: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
             if allow_full_epoch_fallback:
+                ctx.logger.warning(
+                    "ERP: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                    target_name,
+                )
                 segment_masks = {target_name: np.ones_like(times, dtype=bool)}
             else:
+                ctx.logger.error(
+                    "ERP: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                    target_name,
+                )
                 return pd.DataFrame(), []
     else:
         segment_masks = get_segment_masks(times, windows, ctx.config)
@@ -670,7 +650,7 @@ def extract_erp_features(
     for seg_name, mask in segment_masks.items():
         if seg_name == "baseline":
             continue
-        if mask is None or np.sum(mask) < min_samples:
+        if mask is None or np.count_nonzero(mask) < min_samples:
             continue
         
         seg_times = times[mask]
@@ -732,7 +712,7 @@ def extract_erp_features(
             pair_label = f"{neg_segment}{pos_segment}".replace("_", "")
             ptp_vals = pos_vals - neg_vals
             latency_diff = pos_times - neg_times
-            channel_names = ["global"] if scope == "global" else pos_names
+            channel_names = pos_names if scope != "global" else ["global"]
             
             _append_peak_pair_features(
                 output,
@@ -746,8 +726,7 @@ def extract_erp_features(
     if not output:
         return pd.DataFrame(), []
 
-    df = pd.DataFrame(output)
-    return df, list(df.columns)
+    return pd.DataFrame(output), list(output.keys())
 
 
 __all__ = ["extract_erp_features"]

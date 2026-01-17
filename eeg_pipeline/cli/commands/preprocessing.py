@@ -94,11 +94,10 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
 
 def _validate_epoch_parameters(args: argparse.Namespace) -> None:
     """Validate epoch parameter constraints."""
-    if args.tmin is not None and args.tmax is not None:
-        if args.tmin >= args.tmax:
-            raise ValueError(
-                f"Epoch start time ({args.tmin}s) must be less than end time ({args.tmax}s)"
-            )
+    if args.tmin is not None and args.tmax is not None and args.tmin >= args.tmax:
+        raise ValueError(
+            f"Epoch start time ({args.tmin}s) must be less than end time ({args.tmax}s)"
+        )
     
     if args.baseline is not None:
         baseline_start, baseline_end = args.baseline
@@ -114,24 +113,26 @@ def _validate_epoch_parameters(args: argparse.Namespace) -> None:
 
 def _update_path_config(args: argparse.Namespace, config: Any) -> None:
     """Update config with path overrides from arguments."""
+    paths_config = config.setdefault("paths", {})
     if args.bids_root:
-        config.setdefault("paths", {})["bids_root"] = args.bids_root
+        paths_config["bids_root"] = args.bids_root
     if args.deriv_root:
-        config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+        paths_config["deriv_root"] = args.deriv_root
 
 
 def _update_preprocessing_config(args: argparse.Namespace, config: Any) -> None:
     """Update config with preprocessing parameter overrides."""
+    eeg_config = config.setdefault("eeg", {})
     preprocessing_config = config.setdefault("preprocessing", {})
     
     if args.montage:
-        config.setdefault("eeg", {})["montage"] = args.montage
+        eeg_config["montage"] = args.montage
     if args.ch_types:
-        config.setdefault("eeg", {})["ch_types"] = args.ch_types
+        eeg_config["ch_types"] = args.ch_types
     if args.eeg_reference:
-        config.setdefault("eeg", {})["reference"] = args.eeg_reference
+        eeg_config["reference"] = args.eeg_reference
     if args.eog_channels:
-        config.setdefault("eeg", {})["eog_channels"] = args.eog_channels
+        eeg_config["eog_channels"] = args.eog_channels
     if args.random_state is not None:
         preprocessing_config["random_state"] = args.random_state
     if args.task_is_rest:
@@ -168,10 +169,6 @@ def _update_ica_config(args: argparse.Namespace, config: Any) -> None:
         ica_config["l_freq"] = args.ica_l_freq
     if args.ica_reject is not None:
         ica_config["reject"] = args.ica_reject
-    if args.prob_threshold:
-        ica_config["probability_threshold"] = args.prob_threshold
-    if args.ica_labels_to_keep:
-        ica_config["labels_to_keep"] = args.ica_labels_to_keep
 
 
 def _update_epochs_config(args: argparse.Namespace, config: Any) -> None:
@@ -184,13 +181,12 @@ def _update_epochs_config(args: argparse.Namespace, config: Any) -> None:
         epochs_config["tmin"] = args.tmin
     if args.tmax is not None:
         epochs_config["tmax"] = args.tmax
-    if args.baseline:
-        epochs_config["baseline"] = tuple(args.baseline)
     if args.no_baseline:
         epochs_config["baseline"] = None
+    elif args.baseline:
+        epochs_config["baseline"] = tuple(args.baseline)
     if args.reject is not None:
-        microvolts_to_volts = 1e-6
-        epochs_config["reject"] = {"eeg": args.reject * microvolts_to_volts}
+        epochs_config["reject"] = {"eeg": args.reject * 1e-6}
     if args.reject_method:
         epochs_config["reject_method"] = args.reject_method
 

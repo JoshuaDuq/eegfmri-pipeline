@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy import stats
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.infra.paths import ensure_dir
@@ -127,11 +126,15 @@ def plot_asymmetry_by_band(
     segment = _select_segment(segments, preferred="active")
     
     if segment is None:
-        return _create_empty_plot("No asymmetry data")
+        fig = _create_empty_plot("No asymmetry data")
+        _save_empty_plot(fig, save_path, plot_cfg)
+        return fig
     
     bands = get_named_bands(features_df, group="asymmetry", segment=segment)
     if not bands:
-        return _create_empty_plot("No asymmetry data")
+        fig = _create_empty_plot("No asymmetry data")
+        _save_empty_plot(fig, save_path, plot_cfg)
+        return fig
     
     stat = _get_statistic_name(stat, config)
     bands = _order_bands_by_config(bands, config)
@@ -174,6 +177,19 @@ def _create_empty_plot(message: str) -> plt.Figure:
     fig, ax = plt.subplots()
     ax.text(0.5, 0.5, message, ha="center", va="center")
     return fig
+
+
+def _save_empty_plot(fig: plt.Figure, save_path: Path, plot_cfg: Any) -> None:
+    """Save an empty plot figure."""
+    plt.tight_layout()
+    save_fig(
+        fig, save_path,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+    )
+    plt.close(fig)
 
 
 def _get_statistic_name(stat: Optional[str], config: Any) -> str:
@@ -413,6 +429,7 @@ def _match_roi_name(requested: str, available: List[str]) -> Optional[str]:
     
     return None
 
+
 def _plot_window_comparison(
     features_df: pd.DataFrame,
     subject: str,
@@ -527,7 +544,6 @@ def _plot_column_comparison(
     )
     
     plot_cfg = get_plot_config(config)
-    n_bands = len(bands)
     n_trials = len(features_df)
     
     for roi_name in roi_names:
@@ -746,7 +762,6 @@ def _add_column_comparison_title(
         fontweight="bold",
         y=1.02,
     )
-
 
 
 __all__ = [

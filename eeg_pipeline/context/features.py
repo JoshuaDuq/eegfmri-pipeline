@@ -59,7 +59,7 @@ class FeatureContext:
     train_mask: Optional[np.ndarray] = None
     analysis_mode: str = ANALYSIS_MODE_GROUP_STATS
     precomputed: Optional[PrecomputedData] = None
-    _precomputed_ready: bool = False
+    precomputed_by_family: Dict[str, PrecomputedData] = field(default_factory=dict)
     tfr: Optional[Any] = None
     tfr_complex: Optional[Any] = None
     baseline_df: Optional[pd.DataFrame] = None
@@ -76,13 +76,17 @@ class FeatureContext:
         self._validate_windows()
 
     def _resolve_analysis_mode(self) -> None:
-        """Resolve and validate analysis mode from config or explicit setting."""
-        if self.analysis_mode not in VALID_ANALYSIS_MODES:
+        """Resolve analysis mode from config if using default, then validate."""
+        if self.analysis_mode == ANALYSIS_MODE_GROUP_STATS:
             config_mode = self.config.get("feature_engineering.analysis_mode")
             if config_mode and str(config_mode).strip().lower() in VALID_ANALYSIS_MODES:
                 self.analysis_mode = str(config_mode).strip().lower()
-            else:
-                self.analysis_mode = ANALYSIS_MODE_GROUP_STATS
+        
+        if self.analysis_mode not in VALID_ANALYSIS_MODES:
+            raise ValueError(
+                f"Invalid analysis_mode: {self.analysis_mode}. "
+                f"Must be one of {VALID_ANALYSIS_MODES}"
+            )
         
         self._validate_analysis_mode()
     
@@ -112,8 +116,6 @@ class FeatureContext:
             config_modes = self.config.get("feature_engineering.spatial_modes")
             if config_modes and isinstance(config_modes, (list, tuple)):
                 self.spatial_modes = list(config_modes)
-            else:
-                self.spatial_modes = ["roi", "channels", "global"]
 
     def _initialize_windows(self) -> None:
         """Lazily initialize time windows from epochs."""
@@ -199,7 +201,6 @@ class FeatureContext:
     def set_precomputed(self, precomputed: Optional[PrecomputedData]) -> None:
         """Set precomputed data and sync spatial modes and frequency bands."""
         self.precomputed = precomputed
-        self._precomputed_ready = precomputed is not None
 
         if precomputed is not None:
             precomputed.spatial_modes = (
@@ -207,6 +208,23 @@ class FeatureContext:
             )
             if precomputed.frequency_bands is not None:
                 self.frequency_bands = dict(precomputed.frequency_bands)
+
+    def set_precomputed_for_family(self, family: str, precomputed: Optional[PrecomputedData]) -> None:
+        if not family:
+            return
+        if precomputed is None:
+            self.precomputed_by_family.pop(family, None)
+            return
+        self.precomputed_by_family[family] = precomputed
+        try:
+            self.set_precomputed(precomputed)
+        except Exception:
+            pass
+
+    def get_precomputed_for_family(self, family: str) -> Optional[PrecomputedData]:
+        if not family:
+            return None
+        return self.precomputed_by_family.get(family)
 
     @property
     def n_epochs(self) -> int:

@@ -91,15 +91,6 @@ def _matches_erds_criteria(
     return True
 
 
-def _extract_base_stat_name(stat: str) -> str:
-    """Remove _mean or _std suffix from stat name."""
-    if stat.endswith("_mean"):
-        return stat[:-5]
-    if stat.endswith("_std"):
-        return stat[:-4]
-    return stat
-
-
 def _collect_erds_values(
     features_df: pd.DataFrame,
     *,
@@ -108,43 +99,28 @@ def _collect_erds_values(
     stat: str,
     scope: str = "global",
 ) -> np.ndarray:
-    """Collect ERDS values matching specified criteria.
-
-    If no values found with global scope, attempts fallback to channel scope
-    by removing _mean or _std suffix from stat name.
-    """
+    """Collect ERDS values matching specified criteria."""
     matching_columns = []
     for col in features_df.columns:
         parsed = NamingSchema.parse(str(col))
         if _matches_erds_criteria(parsed, segment, band, stat, scope):
             matching_columns.append(str(col))
 
-    if matching_columns:
-        if len(matching_columns) == 1:
-            series = pd.to_numeric(
-                features_df[matching_columns[0]], errors="coerce"
-            )
-        else:
-            series = (
-                features_df[matching_columns]
-                .apply(pd.to_numeric, errors="coerce")
-                .mean(axis=1)
-            )
-        values = series.dropna().values
-        return values[np.isfinite(values)]
+    if not matching_columns:
+        return np.array([])
 
-    if scope == "global":
-        base_stat = _extract_base_stat_name(stat)
-        if base_stat != stat:
-            return _collect_erds_values(
-                features_df,
-                band=band,
-                segment=segment,
-                stat=base_stat,
-                scope="ch",
-            )
-
-    return np.array([])
+    if len(matching_columns) == 1:
+        series = pd.to_numeric(
+            features_df[matching_columns[0]], errors="coerce"
+        )
+    else:
+        series = (
+            features_df[matching_columns]
+            .apply(pd.to_numeric, errors="coerce")
+            .mean(axis=1)
+        )
+    values = series.dropna().values
+    return values[np.isfinite(values)]
 
 
 def _collect_band_data(
@@ -545,7 +521,7 @@ def _determine_roi_names(
                     roi_names.append("all")
             elif roi in rois:
                 roi_names.append(roi)
-        return roi_names
+        return roi_names if roi_names else ["all"]
 
     roi_names = ["all"]
     if rois:
@@ -570,7 +546,7 @@ def _get_erds_columns_for_roi(
         roi_channels = get_roi_channels(
             rois.get(roi_name, []), all_channels
         )
-    roi_channel_set = set(roi_channels) if roi_channels else set(all_channels)
+    roi_channel_set = set(roi_channels) if roi_channels else set()
 
     matching_columns = []
     for col in features_df.columns:
