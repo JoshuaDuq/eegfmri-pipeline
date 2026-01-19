@@ -27,7 +27,7 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
     )
     parser.add_argument(
         "mode",
-        choices=["raw-to-bids", "merge-behavior", "clean"],
+        choices=["raw-to-bids", "fmri-raw-to-bids", "merge-behavior", "clean"],
         help="Utility operation mode"
     )
     add_common_subject_args(parser)
@@ -46,6 +46,12 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
         default=None,
         help="Override BIDS root path (default from config)"
     )
+    parser.add_argument(
+        "--bids-fmri-root",
+        type=str,
+        default=None,
+        help="Override BIDS fMRI root path (default from config)"
+    )
 
     raw_group = parser.add_argument_group("raw-to-bids options")
     raw_group.add_argument("--montage", type=str, default="easycap-M1")
@@ -55,6 +61,61 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
     raw_group.add_argument("--trim-to-first-volume", action="store_true")
     raw_group.add_argument("--event-prefix", action="append")
     raw_group.add_argument("--keep-all-annotations", action="store_true")
+
+    fmri_group = parser.add_argument_group("fmri-raw-to-bids options")
+    fmri_group.add_argument("--session", type=str, default=None, help="Optional BIDS session label (without 'ses-')")
+    fmri_group.add_argument("--rest-task", type=str, default="rest", help="Task label to use for resting-state BOLD")
+    fmri_group.add_argument(
+        "--no-rest",
+        action="store_true",
+        help="Do not convert resting-state series (if present)",
+    )
+    fmri_group.add_argument(
+        "--no-fieldmaps",
+        action="store_true",
+        help="Do not convert fieldmaps (if present)",
+    )
+    fmri_group.add_argument(
+        "--dicom-mode",
+        choices=["symlink", "copy", "skip"],
+        default="symlink",
+        help="How to store original DICOMs under <bids_fmri_root>/sourcedata (default: symlink)",
+    )
+    fmri_group.add_argument(
+        "--no-events",
+        action="store_true",
+        help="Do not generate BIDS *_events.tsv from PsychoPy TrialSummary.csv",
+    )
+    fmri_group.add_argument(
+        "--event-granularity",
+        choices=["trial", "phases"],
+        default="phases",
+        help="Events granularity for stimulation (default: phases)",
+    )
+    fmri_group.add_argument(
+        "--onset-reference",
+        choices=["as_is", "first_iti_start", "first_stim_start"],
+        default="as_is",
+        help="How to zero event onsets within each run (default: as_is)",
+    )
+    fmri_group.add_argument(
+        "--onset-offset-s",
+        type=float,
+        default=0.0,
+        help="Additive offset applied after onset-reference (seconds)",
+    )
+    fmri_group.add_argument(
+        "--dcm2niix-path",
+        type=str,
+        default=None,
+        help="Path to dcm2niix binary (defaults to PATH lookup)",
+    )
+    fmri_group.add_argument(
+        "--dcm2niix-arg",
+        action="append",
+        default=None,
+        help="Extra argument passed to dcm2niix (repeatable, inserted after executable)",
+    )
 
     merge_group = parser.add_argument_group("merge-behavior options")
     merge_group.add_argument("--event-type", action="append")
@@ -94,6 +155,11 @@ def _update_config_paths(config: Any, source_root: str | None, bids_root: str | 
         config.setdefault("paths", {})["source_data"] = source_root
     if bids_root:
         config.setdefault("paths", {})["bids_root"] = bids_root
+
+
+def _update_config_fmri_paths(config: Any, bids_fmri_root: str | None) -> None:
+    if bids_fmri_root:
+        config.setdefault("paths", {})["bids_fmri_root"] = bids_fmri_root
 
 
 def _run_raw_to_bids_mode(
@@ -149,19 +215,63 @@ def run_utilities(args: argparse.Namespace, subjects: List[str], config: Any) ->
     """Execute the utilities command."""
     if args.mode == "clean":
         return _run_clean_mode(args, subjects, config)
-
-    from eeg_pipeline.pipelines.utilities import UtilityPipeline
-
     progress = create_progress_reporter(args)
     task = resolve_task(args.task, config)
 
     _update_config_paths(config, args.source_root, args.bids_root)
+    _update_config_fmri_paths(config, getattr(args, "bids_fmri_root", None))
+
+    if args.mode == "fmri-raw-to-bids":
+        return _run_fmri_raw_to_bids_mode(task, subjects, args, config, progress)
+
+    from eeg_pipeline.pipelines.utilities import UtilityPipeline
+
     pipeline = UtilityPipeline(config=config)
 
     if args.mode == "raw-to-bids":
         _run_raw_to_bids_mode(pipeline, task, subjects, args, progress)
     elif args.mode == "merge-behavior":
         _run_merge_behavior_mode(pipeline, task, subjects, args, progress)
+
+
+def _run_fmri_raw_to_bids_mode(
+    task: str,
+    subjects: List[str],
+    args: argparse.Namespace,
+    config: Any,
+    progress: Any,
+) -> None:
+    """Execute fMRI raw-to-bids conversion mode."""
+    from fmri_pipeline.analysis.raw_to_bids import run_fmri_raw_to_bids
+
+    source_root = Path(config.get("paths.source_data", "data/source_data"))
+    bids_fmri_root = Path(config.get("paths.bids_fmri_root", "data/fMRI_data"))
+
+    progress.start("utilities_fmri_raw_to_bids", subjects)
+    progress.step("Converting DICOM to BIDS (fMRI)", current=1, total=2)
+
+    run_fmri_raw_to_bids(
+        source_root=source_root,
+        bids_fmri_root=bids_fmri_root,
+        task=task,
+        subjects=subjects,
+        session=args.session,
+        rest_task=args.rest_task,
+        include_rest=not args.no_rest,
+        include_fieldmaps=not args.no_fieldmaps,
+        dicom_mode=args.dicom_mode,
+        overwrite=args.overwrite,
+        create_events=not args.no_events,
+        event_granularity=args.event_granularity,
+        onset_reference=args.onset_reference,
+        onset_offset_s=args.onset_offset_s,
+        dcm2niix_path=args.dcm2niix_path,
+        dcm2niix_extra_args=args.dcm2niix_arg,
+        _logger=None,
+    )
+
+    progress.step("Finalizing", current=2, total=2)
+    progress.complete(success=True)
 
 
 def get_dir_size(root: Path) -> int:

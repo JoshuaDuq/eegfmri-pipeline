@@ -525,10 +525,14 @@ def _plot_column_comparison(
     """Plot column comparison (unpaired) for burst metrics."""
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     
-    comp_mask_info = extract_comparison_mask(events_df, config)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comp_mask_info:
         if logger:
-            log_if_present(logger, "debug", "Column comparison requested but config incomplete")
+            log_if_present(
+                logger, "warning",
+                "Column comparison enabled but config incomplete. "
+                "Set plotting.comparisons.comparison_column and comparison_values."
+            )
         return
     
     mask1, mask2, label1, label2 = comp_mask_info

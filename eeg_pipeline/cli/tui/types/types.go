@@ -12,6 +12,7 @@ const (
 	PipelineFmri
 	PipelineMergePsychoPyData
 	PipelineRawToBIDS
+	PipelineFmriRawToBIDS
 	pipelineCount // Sentinel for bounds checking
 )
 
@@ -32,6 +33,7 @@ var pipelineNames = [pipelineCount]string{
 	PipelineFmri:              "fMRI",
 	PipelineMergePsychoPyData: "Merge PsychoPy Data",
 	PipelineRawToBIDS:         "Raw to BIDS",
+	PipelineFmriRawToBIDS:     "fMRI Raw to BIDS",
 }
 
 // pipelineCommands maps pipeline types to their CLI subcommand names
@@ -44,6 +46,7 @@ var pipelineCommands = [pipelineCount]string{
 	PipelineFmri:              "fmri",
 	PipelineMergePsychoPyData: "utilities",
 	PipelineRawToBIDS:         "utilities",
+	PipelineFmriRawToBIDS:     "utilities",
 }
 
 // pipelineDescriptions maps pipeline types to their descriptions
@@ -56,6 +59,7 @@ var pipelineDescriptions = [pipelineCount]string{
 	PipelineFmri:              "Preprocess fMRI (fMRIPrep-style)",
 	PipelineMergePsychoPyData: "Merge PsychoPy data into BIDS events files",
 	PipelineRawToBIDS:         "Convert raw BrainVision data to BIDS",
+	PipelineFmriRawToBIDS:     "Convert raw fMRI DICOM series to BIDS",
 }
 
 // String returns the display name for the pipeline
@@ -201,6 +205,8 @@ func (p Pipeline) GetDataSource() string {
 	case PipelinePreprocessing, PipelineMergePsychoPyData:
 		return "bids"
 	case PipelineRawToBIDS:
+		return "source_data"
+	case PipelineFmriRawToBIDS:
 		return "source_data"
 	case PipelineFeatures, PipelineBehavior:
 		return "epochs"

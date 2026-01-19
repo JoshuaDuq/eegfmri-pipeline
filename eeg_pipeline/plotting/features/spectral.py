@@ -471,9 +471,10 @@ def _get_roi_names(config: Any) -> List[str]:
 
 def _create_roi_suffix(roi_name: str) -> str:
     """Create filename suffix for ROI."""
+    from eeg_pipeline.utils.formatting import sanitize_label
     if roi_name.lower() == "all":
         return ""
-    roi_safe = roi_name.replace(" ", "_").lower()
+    roi_safe = sanitize_label(roi_name).lower()
     return f"_roi-{roi_safe}"
 
 
@@ -633,10 +634,14 @@ def _plot_column_comparison(
     )
     from eeg_pipeline.plotting.io.figures import log_if_present
     
-    comp_mask_info = extract_comparison_mask(events_df, config)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comp_mask_info:
         if logger:
-            log_if_present(logger, "debug", "Column comparison requested but config incomplete")
+            log_if_present(
+                logger, "warning",
+                "Column comparison enabled but config incomplete. "
+                "Set plotting.comparisons.comparison_column and comparison_values."
+            )
         return
     
     mask1, mask2, label1, label2 = comp_mask_info

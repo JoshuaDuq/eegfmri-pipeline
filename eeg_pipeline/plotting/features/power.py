@@ -302,7 +302,8 @@ def _plot_window_comparison(
         if not data_by_band:
             continue
         
-        roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+        from eeg_pipeline.utils.formatting import sanitize_label
+        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
         suffix = f"_roi-{roi_safe}" if roi_safe else ""
         save_path = save_dir / f"sub-{subject}_power_by_condition{suffix}_window"
         
@@ -338,10 +339,13 @@ def _plot_column_comparison(
     from eeg_pipeline.utils.config.loader import get_config_value
     from .utils import load_precomputed_paired_stats, get_precomputed_qvalues, apply_fdr_correction
     
-    comp_mask_info = extract_comparison_mask(events_df, config)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comp_mask_info:
         if logger:
-            logger.debug("Column comparison requested but config incomplete")
+            logger.warning(
+                "Column comparison enabled but config incomplete. "
+                "Set plotting.comparisons.comparison_column and comparison_values."
+            )
         return
     
     m1, m2, label1, label2 = comp_mask_info
@@ -460,7 +464,8 @@ def _plot_column_comparison(
         
         plt.tight_layout()
         
-        roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+        from eeg_pipeline.utils.formatting import sanitize_label
+        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
         suffix = f"_roi-{roi_safe}" if roi_safe else ""
         filename = f"sub-{subject}_power_by_condition{suffix}_column"
         

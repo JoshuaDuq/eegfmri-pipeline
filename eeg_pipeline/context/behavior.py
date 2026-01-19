@@ -315,11 +315,23 @@ class BehaviorContext:
             df = read_table(path)
             self.feature_paths[key] = path
             try:
-                meta_path = path.parent / "metadata" / f"{path.stem}.json"
-                if meta_path.exists():
-                    self.feature_manifests[key] = json.loads(
-                        meta_path.read_text(encoding="utf-8")
-                    )
+                meta_dir = path.parent / "metadata"
+                candidates = [
+                    meta_dir / f"{path.stem}.json",
+                    # Backward-compat: older runs wrote JSON manifests with a .parquet suffix by mistake.
+                    meta_dir / f"{path.stem}.parquet",
+                ]
+                for meta_path in candidates:
+                    if not meta_path.exists():
+                        continue
+                    try:
+                        text = meta_path.read_text(encoding="utf-8")
+                    except Exception:
+                        continue
+                    if not text.lstrip().startswith("{"):
+                        continue
+                    self.feature_manifests[key] = json.loads(text)
+                    break
             except (OSError, json.JSONDecodeError) as exc:
                 self.logger.warning("Failed to load feature metadata for %s: %s", path, exc)
             current_df = getattr(self, attr_name)

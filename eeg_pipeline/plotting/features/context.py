@@ -37,23 +37,24 @@ class VisualizationRegistry(CategorizedPlotRegistry["FeaturePlotContext"]):
 
 
 # Feature table specifications: (attribute_name, file_stem, extensions, mode)
+# Extensions are tried in order - .parquet first (preferred), then .tsv as fallback
 _FEATURE_TABLE_SPECS: List[Tuple[str, str, List[str], str]] = [
-    ("power_df", "features_power", [".tsv"], "wide"),
-    ("connectivity_df", "features_connectivity", [".tsv"], "wide"),
-    ("aperiodic_df", "features_aperiodic", [".tsv"], "wide"),
-    ("erds_df", "features_erds", [".tsv"], "wide"),
-    ("bursts_df", "features_bursts", [".tsv"], "wide"),
-    ("quality_df", "features_quality", [".tsv"], "wide"),
-    ("spectral_df", "features_spectral", [".tsv"], "wide"),
-    ("ratios_df", "features_ratios", [".tsv"], "wide"),
-    ("asymmetry_df", "features_asymmetry", [".tsv"], "wide"),
-    ("complexity_df", "features_complexity", [".tsv"], "wide"),
-    ("pac_df", "features_pac", [".tsv"], "wide"),
-    ("pac_trials_df", "features_pac_trials", [".tsv"], "wide"),
-    ("pac_time_df", "features_pac_time", [".tsv"], "long"),
-    ("itpc_df", "features_itpc", [".tsv"], "wide"),
-    ("temporal_df", "features_temporal", [".tsv"], "wide"),
-    ("erp_df", "features_erp", [".tsv"], "wide"),
+    ("power_df", "features_power", [".parquet", ".tsv"], "wide"),
+    ("connectivity_df", "features_connectivity", [".parquet", ".tsv"], "wide"),
+    ("aperiodic_df", "features_aperiodic", [".parquet", ".tsv"], "wide"),
+    ("erds_df", "features_erds", [".parquet", ".tsv"], "wide"),
+    ("bursts_df", "features_bursts", [".parquet", ".tsv"], "wide"),
+    ("quality_df", "features_quality", [".parquet", ".tsv"], "wide"),
+    ("spectral_df", "features_spectral", [".parquet", ".tsv"], "wide"),
+    ("ratios_df", "features_ratios", [".parquet", ".tsv"], "wide"),
+    ("asymmetry_df", "features_asymmetry", [".parquet", ".tsv"], "wide"),
+    ("complexity_df", "features_complexity", [".parquet", ".tsv"], "wide"),
+    ("pac_df", "features_pac", [".parquet", ".tsv"], "wide"),
+    ("pac_trials_df", "features_pac_trials", [".parquet", ".tsv"], "wide"),
+    ("pac_time_df", "features_pac_time", [".parquet", ".tsv"], "long"),
+    ("itpc_df", "features_itpc", [".parquet", ".tsv"], "wide"),
+    ("temporal_df", "features_temporal", [".parquet", ".tsv"], "wide"),
+    ("erp_df", "features_erp", [".parquet", ".tsv"], "wide"),
 ]
 
 
@@ -65,6 +66,10 @@ class FeaturePlotContext:
     features_dir: Path
     config: Any = None
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger("eeg_pipeline.plotting"))
+    # Optional allow-list (supports fnmatch patterns) used by safe_plot() to
+    # selectively run plot primitives within category suites.
+    plot_name_patterns: Optional[List[str]] = None
+    stats_dir: Optional[Path] = None
     n_trials: int = 0
     epochs_info: Optional[mne.Info] = None
     aligned_events: Optional[pd.DataFrame] = None
@@ -85,6 +90,7 @@ class FeaturePlotContext:
     pac_time_df: Optional[pd.DataFrame] = None
     itpc_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
+    all_features: Optional[pd.DataFrame] = None
 
     window_ranges: Dict[str, Tuple[float, float]] = field(default_factory=dict)
     time_range_suffixes: List[str] = field(default_factory=list)
@@ -113,6 +119,7 @@ class FeaturePlotContext:
         self._load_extraction_configs()
         self._apply_window_overrides()
         self._load_feature_tables()
+        self._build_all_features()
 
         self.n_trials = self._infer_trial_count()
         if self.n_trials > 0:
@@ -253,33 +260,54 @@ class FeaturePlotContext:
                 setattr(self, attr_name, df)
 
     def _collect_feature_paths(self, stem: str, exts: Sequence[str]) -> List[Path]:
-        """Collect feature file paths, prioritizing base files and known suffixes."""
-        paths: List[Path] = []
+        """Collect feature file paths using deterministic logic.
+        
+        File structure:
+        - Suffix-specific files (e.g., features_power_baseline.parquet) contain window-specific features
+        - Base files (e.g., features_power.parquet) contain merged features from all windows
+        
+        Strategy:
+        - If suffix-specific files exist, use ONLY those (they are authoritative for window data)
+        - Otherwise, use base file if it exists
+        - Never mix base and suffix files (they contain overlapping columns)
+        
+        Searches in both the base features directory and category subdirectories
+        (e.g., features/power/ for features_power files).
+        """
         suffixes = self.time_range_suffixes
+        
+        # Derive category subdirectory from stem (e.g., "features_power" -> "power")
+        category = stem.replace("features_", "", 1) if stem.startswith("features_") else None
+        
+        # Directories to search: base features dir + category subdir if applicable
+        search_dirs = [self.features_dir]
+        if category:
+            category_dir = self.features_dir / category
+            if category_dir.is_dir():
+                search_dirs.insert(0, category_dir)  # Prefer category subdir
 
-        # First, try base files and known suffix variants
-        for ext in exts:
-            base_path = self.features_dir / f"{stem}{ext}"
-            if base_path.exists():
-                paths.append(base_path)
+        # Collect suffix-specific files (authoritative source for window-specific data)
+        suffix_paths: List[Path] = []
+        if suffixes:
+            for search_dir in search_dirs:
+                for ext in exts:
+                    for suffix in suffixes:
+                        candidate_path = search_dir / f"{stem}_{suffix}{ext}"
+                        if candidate_path.exists():
+                            suffix_paths.append(candidate_path)
 
-            for suffix in suffixes:
-                candidate_path = self.features_dir / f"{stem}_{suffix}{ext}"
-                if candidate_path.exists():
-                    paths.append(candidate_path)
+        # If suffix-specific files exist, use only those (base file would duplicate columns)
+        if suffix_paths:
+            return self._dedupe_paths(suffix_paths)
 
-        if paths:
-            return self._dedupe_paths(paths)
+        # Otherwise, use base file (contains merged features from all windows)
+        for search_dir in search_dirs:
+            for ext in exts:
+                base_path = search_dir / f"{stem}{ext}"
+                if base_path.exists():
+                    return [base_path]
 
-        # Fallback: glob for any matching pattern
-        for ext in exts:
-            pattern = f"{stem}_*{ext}"
-            for path in sorted(self.features_dir.glob(pattern)):
-                if not self._is_feature_payload(path):
-                    continue
-                paths.append(path)
-
-        return self._dedupe_paths(paths)
+        return []
 
     def _load_feature_set(
         self,
@@ -337,14 +365,8 @@ class FeaturePlotContext:
         else:
             combined = pd.concat(data_frames, axis=1)
 
+        # Silently deduplicate columns (should be rare after path collection fix)
         if combined.columns.duplicated().any():
-            dupes = combined.columns[combined.columns.duplicated()].unique().tolist()
-            dupe_preview = ", ".join(map(str, dupes[:6]))
-            self.logger.warning(
-                "Dropping %d duplicate columns (%s)",
-                len(dupes),
-                dupe_preview,
-            )
             combined = combined.loc[:, ~combined.columns.duplicated()]
 
         return combined
@@ -413,6 +435,36 @@ class FeaturePlotContext:
             if df is not None and not df.empty:
                 return len(df)
         return 0
+
+    def _build_all_features(self) -> None:
+        """Merge individual feature dataframes into all_features."""
+        merge_candidates = [
+            self.power_df,
+            self.connectivity_df,
+            self.aperiodic_df,
+            self.erds_df,
+            self.spectral_df,
+            self.ratios_df,
+            self.asymmetry_df,
+            self.complexity_df,
+            self.bursts_df,
+            self.itpc_df,
+            self.quality_df,
+        ]
+        frames = [df for df in merge_candidates if df is not None and not df.empty]
+        if not frames:
+            return
+
+        base_len = len(frames[0])
+        valid_frames = [df for df in frames if len(df) == base_len]
+
+        if not valid_frames:
+            return
+
+        combined = pd.concat(valid_frames, axis=1)
+        if combined.columns.duplicated().any():
+            combined = combined.loc[:, ~combined.columns.duplicated()]
+        self.all_features = combined
     
     def get_or_compute_tfr(self) -> Optional[mne.time_frequency.EpochsTFR]:
         """Get cached TFR or compute if not available."""

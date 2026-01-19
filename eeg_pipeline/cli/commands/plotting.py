@@ -18,6 +18,7 @@ from eeg_pipeline.cli.common import (
     resolve_task,
     get_deriv_root,
 )
+from eeg_pipeline.utils.config.loader import ConfigDict
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class PlotDefinition:
     description: str
     required_files: List[str]
     feature_categories: Optional[List[str]] = None
+    feature_plot_patterns: Optional[List[str]] = None
     behavior_plots: Optional[List[str]] = None
     tfr_plots: Optional[List[str]] = None
     erp_plots: Optional[List[str]] = None
@@ -50,6 +52,7 @@ def _load_plot_catalog() -> List[PlotDefinition]:
                 description=str(entry.get("description", "")),
                 required_files=list(entry.get("required_files", [])),
                 feature_categories=entry.get("feature_categories"),
+                feature_plot_patterns=entry.get("feature_plot_patterns"),
                 behavior_plots=entry.get("behavior_plots"),
                 tfr_plots=entry.get("tfr_plots"),
                 erp_plots=entry.get("erp_plots"),
@@ -411,13 +414,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Topomaps only",
     )
     tfr_group.add_argument(
-        "--bands",
-        nargs="+",
-        choices=["delta", "theta", "alpha", "beta", "gamma"],
-        default=None,
-        help="Frequency bands to visualize (default: all)",
-    )
-    tfr_group.add_argument(
         "--tmin",
         type=float,
         default=None,
@@ -434,6 +430,31 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         type=int,
         default=None,
         help="Number of parallel jobs (default: from config)",
+    )
+
+    roi_group = parser.add_argument_group("ROI configuration")
+    roi_group.add_argument(
+        "--rois",
+        nargs="+",
+        default=None,
+        metavar="ROI_DEF",
+        help="Custom ROI definitions in format 'name:ch1,ch2,...' (e.g., 'Frontal:Fp1,Fp2,F3,F4'). These ROIs will be used for all ROI-based visualizations.",
+    )
+
+    band_group = parser.add_argument_group("Band configuration")
+    band_group.add_argument(
+        "--bands",
+        nargs="+",
+        default=None,
+        metavar="BAND",
+        help="Select specific frequency bands to use (e.g., 'theta alpha beta'). Default: all bands.",
+    )
+    band_group.add_argument(
+        "--frequency-bands",
+        nargs="+",
+        default=None,
+        metavar="BAND_DEF",
+        help="Custom frequency band definitions in format 'name:low:high' (e.g., 'theta:4.0:8.0 alpha:8.0:13.0'). Overrides default band frequencies.",
     )
 
     return parser
@@ -998,6 +1019,74 @@ def _apply_comparison_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "plotting.comparisons.comparison_rois", list(args.comparison_rois))
 
 
+def _parse_roi_definitions(roi_defs: List[str]) -> Dict[str, List[str]]:
+    """Parse ROI definitions from CLI format 'name:ch1,ch2,...'.
+    
+    Returns a dict mapping ROI name to list of regex patterns for matching channels.
+    """
+    rois: Dict[str, List[str]] = {}
+    for roi_def in roi_defs:
+        if ":" not in roi_def:
+            raise ValueError(f"Invalid ROI definition '{roi_def}'; expected 'name:ch1,ch2,...'")
+        name, channels_str = roi_def.split(":", 1)
+        name = name.strip()
+        channels = [ch.strip() for ch in channels_str.split(",") if ch.strip()]
+        if not channels:
+            raise ValueError(f"Invalid ROI definition '{roi_def}'; no channels specified")
+        # Convert channel list to regex patterns (matches exact channel names)
+        rois[name] = [f"^({'|'.join(channels)})$"]
+    return rois
+
+
+def _apply_roi_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply custom ROI definitions to config for plotting.
+
+    Sets ROIs in both locations used by different plotting subsystems:
+    - Top-level 'rois': Used by get_roi_definitions() in feature plots
+    - 'time_frequency_analysis.rois': Used by get_rois() in TFR plots
+    """
+    if _get_arg_value(args, "rois"):
+        custom_rois = _parse_roi_definitions(args.rois)
+        # Apply to top-level rois (used by get_roi_definitions in plotting/features)
+        config["rois"] = custom_rois
+        # Apply to TFR-specific rois (used by get_rois in TFR extraction)
+        config["time_frequency_analysis.rois"] = custom_rois
+
+
+def _parse_frequency_band_definitions(band_defs: List[str]) -> Dict[str, List[float]]:
+    """Parse frequency band definitions from CLI format 'name:low:high'."""
+    bands: Dict[str, List[float]] = {}
+    for band_def in band_defs:
+        parts = band_def.split(":")
+        if len(parts) != 3:
+            raise ValueError(f"Invalid frequency band definition '{band_def}'; expected 'name:low:high'")
+        name = parts[0].strip().lower()
+        try:
+            low = float(parts[1].strip())
+            high = float(parts[2].strip())
+        except ValueError:
+            raise ValueError(f"Invalid frequency values in '{band_def}'; expected numeric low:high")
+        if low >= high:
+            raise ValueError(f"Invalid frequency range in '{band_def}'; low must be < high")
+        bands[name] = [low, high]
+    return bands
+
+
+def _apply_band_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply custom frequency band definitions to config for plotting.
+
+    Sets bands in both locations used by different plotting subsystems:
+    - Top-level 'frequency_bands': Used by get_frequency_bands() in feature plots
+    - 'time_frequency_analysis.bands': Used by TFR analysis
+    """
+    if _get_arg_value(args, "frequency_bands"):
+        custom_bands = _parse_frequency_band_definitions(args.frequency_bands)
+        # Apply to top-level frequency_bands (used by get_frequency_bands)
+        config["frequency_bands"] = custom_bands
+        # Apply to TFR-specific bands (used by TFR analysis)
+        config["time_frequency_analysis.bands"] = custom_bands
+
+
 def _apply_all_config_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply all config overrides from CLI arguments."""
     _apply_defaults_overrides(args, config)
@@ -1019,11 +1108,16 @@ def _apply_all_config_overrides(args: argparse.Namespace, config: Any) -> None:
     _apply_plot_sizing_overrides(args, config)
     _apply_feature_selection_overrides(args, config)
     _apply_comparison_overrides(args, config)
+    _apply_roi_overrides(args, config)
+    _apply_band_overrides(args, config)
 
 
-def _collect_plot_definitions(plot_ids: List[str]) -> tuple[Set[str], List[str], List[str], List[str], Set[str]]:
+def _collect_plot_definitions(
+    plot_ids: List[str],
+) -> tuple[Set[str], Set[str], List[str], List[str], List[str], Set[str]]:
     """Collect plot definitions and extract categories, plots, and modes."""
     feature_categories: Set[str] = set()
+    feature_plot_patterns: Set[str] = set()
     behavior_plots: List[str] = []
     tfr_plots: List[str] = []
     erp_plots: List[Any] = []
@@ -1035,6 +1129,10 @@ def _collect_plot_definitions(plot_ids: List[str]) -> tuple[Set[str], List[str],
             continue
         if definition.feature_categories:
             feature_categories.update(definition.feature_categories)
+            if definition.feature_plot_patterns:
+                feature_plot_patterns.update(str(p) for p in definition.feature_plot_patterns)
+            else:
+                feature_plot_patterns.add(plot_id)
         if definition.behavior_plots:
             behavior_plots.extend(definition.behavior_plots)
         if definition.tfr_plots:
@@ -1053,6 +1151,7 @@ def _collect_plot_definitions(plot_ids: List[str]) -> tuple[Set[str], List[str],
 
     return (
         feature_categories,
+        feature_plot_patterns,
         _unique_in_order(behavior_plots),
         _unique_in_order(tfr_plots),
         _unique_in_order(flat_erp_plots),
@@ -1086,7 +1185,7 @@ def _render_plots_with_per_plot_config(
         if definition is None:
             continue
 
-        plot_config = copy.deepcopy(config)
+        plot_config = ConfigDict(copy.deepcopy(dict(config)))
         overrides = plot_item_configs.get(plot_id, {})
         if overrides:
             _apply_plot_item_overrides(plot_config, overrides)
@@ -1094,12 +1193,18 @@ def _render_plots_with_per_plot_config(
         progress.step(f"Rendering {definition.label or plot_id}", current=idx, total=total)
 
         if definition.feature_categories:
+            patterns = (
+                list(definition.feature_plot_patterns)
+                if definition.feature_plot_patterns
+                else [plot_id]
+            )
             visualize_features_for_subjects(
                 subjects=subjects,
                 task=task,
                 config=plot_config,
                 visualize_categories=sorted(definition.feature_categories),
                 feature_plotters=selected_feature_plotters,
+                plot_name_patterns=patterns,
             )
         if definition.behavior_plots:
             visualize_behavior_for_subjects(
@@ -1138,6 +1243,7 @@ def _render_plots_with_per_plot_config(
 
 def _render_plots_without_per_plot_config(
     feature_categories: Set[str],
+    feature_plot_patterns: Set[str],
     behavior_plots: List[str],
     tfr_plots: List[str],
     erp_plots: List[str],
@@ -1177,6 +1283,7 @@ def _render_plots_without_per_plot_config(
             config=config,
             visualize_categories=sorted(feature_categories),
             feature_plotters=selected_feature_plotters,
+            plot_name_patterns=sorted(feature_plot_patterns) if feature_plot_patterns else None,
         )
 
     if behavior_plots:
@@ -1262,7 +1369,14 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         progress.complete(success=True)
         return
 
-    feature_categories, behavior_plots, tfr_plots, erp_plots, ml_modes = _collect_plot_definitions(plot_ids)
+    (
+        feature_categories,
+        feature_plot_patterns,
+        behavior_plots,
+        tfr_plots,
+        erp_plots,
+        ml_modes,
+    ) = _collect_plot_definitions(plot_ids)
 
     if not any([feature_categories, behavior_plots, tfr_plots, erp_plots, ml_modes]):
         raise ValueError("No plots resolved from selection")
@@ -1270,6 +1384,7 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     progress.start("plotting", subjects)
     _render_plots_without_per_plot_config(
         feature_categories=feature_categories,
+        feature_plot_patterns=feature_plot_patterns,
         behavior_plots=behavior_plots,
         tfr_plots=tfr_plots,
         erp_plots=erp_plots,
@@ -1312,15 +1427,33 @@ def _run_tfr_mode(args: argparse.Namespace, subjects: List[str], config: Any) ->
     _validate_time_range(args.tmin, args.tmax)
     _update_tfr_config(config, args.bands, args.tmin, args.tmax)
 
+    # Apply per-plot config overrides for TFR mode
+    plot_item_configs = _parse_plot_item_configs(args.plot_item_config)
+    if plot_item_configs:
+        _validate_plot_item_configs(plot_item_configs)
+        # Apply all overrides from matched plot IDs to the config
+        for plot_id, overrides in plot_item_configs.items():
+            # Only apply if this is a TFR-related plot or if --plots matches
+            definition = PLOT_BY_ID.get(plot_id)
+            if definition and definition.tfr_plots:
+                _apply_plot_item_overrides(config, overrides)
+
     progress = create_progress_reporter(args)
     progress.start("tfr_visualize", subjects)
     progress.step("Rendering TFR plots", current=1, total=2)
+
+    # Extract TFR-specific plots from --plots argument if provided
+    tfr_plots = None
+    if args.plots:
+        _, _, _, tfr_plots, _, _ = _collect_plot_definitions(args.plots)
+        tfr_plots = tfr_plots if tfr_plots else None
 
     visualize_tfr_for_subjects(
         subjects=subjects,
         task=args.task,
         tfr_roi_only=args.tfr_roi,
         tfr_topomaps_only=args.tfr_topomaps_only,
+        plots=tfr_plots,
         n_jobs=args.n_jobs,
         config=config,
     )

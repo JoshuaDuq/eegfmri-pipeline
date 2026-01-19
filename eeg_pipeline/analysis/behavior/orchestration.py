@@ -2472,17 +2472,29 @@ def _filter_feature_cols_by_band(
         return feature_cols
     
     from eeg_pipeline.domain.features.naming import NamingSchema
+    prefixes = sorted(FEATURE_COLUMN_PREFIXES, key=len, reverse=True)
     
     selected = set(b.lower() for b in ctx.selected_bands)
     filtered: List[str] = []
     
     for col in feature_cols:
+        col_str = str(col)
         try:
-            parsed = NamingSchema.parse(str(col))
+            parsed = NamingSchema.parse(col_str)
             if not parsed.get("valid"):
-                # Keep unparseable columns (might be summary or derived features)
-                filtered.append(col)
-                continue
+                # Try stripping the feature-table prefix used in the trial table
+                matched_prefix = next((p for p in prefixes if col_str.startswith(p)), None)
+                if matched_prefix:
+                    candidate = col_str[len(matched_prefix):]
+                    parsed2 = NamingSchema.parse(candidate)
+                    if parsed2.get("valid"):
+                        parsed = parsed2
+                    else:
+                        filtered.append(col)
+                        continue
+                else:
+                    filtered.append(col)
+                    continue
             
             band = parsed.get("band")
             if not band:

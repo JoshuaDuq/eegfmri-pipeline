@@ -722,6 +722,7 @@ def precompute_data(
     windows_spec: Any = None,
     frequency_bands_override: Any = None,
     feature_family: Optional[str] = None,
+    train_mask: Optional[np.ndarray] = None,
 ) -> PrecomputedData:
     """
     Precompute all intermediate data needed by feature extraction modules.
@@ -800,6 +801,7 @@ def precompute_data(
         logger=logger,
         feature_family=str(feature_family).strip().lower() if feature_family else None,
         spatial_transform=str(transform_type),
+        train_mask=train_mask,
     )
     
     _populate_basic_qc(precomputed, data, sfreq)

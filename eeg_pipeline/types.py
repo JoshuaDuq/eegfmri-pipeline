@@ -359,6 +359,10 @@ class PrecomputedData:
     metadata: Optional[pd.DataFrame] = None
     condition_labels: Optional[np.ndarray] = None
     train_mask: Optional[np.ndarray] = None
+
+    # Provenance flags (important for scientific interpretation)
+    evoked_subtracted: bool = False
+    evoked_subtracted_conditionwise: bool = False
     
     # Band-filtered data (computed on demand)
     band_data: Dict[str, BandData] = field(default_factory=dict)
@@ -418,6 +422,8 @@ class PrecomputedData:
             metadata=self.metadata,
             condition_labels=self.condition_labels,
             train_mask=self.train_mask,
+            evoked_subtracted=self.evoked_subtracted,
+            evoked_subtracted_conditionwise=self.evoked_subtracted_conditionwise,
             config=self.config,
             logger=self.logger,
             spatial_modes=self.spatial_modes,
@@ -502,4 +508,6 @@ class PrecomputedData:
             frequency_bands=self.frequency_bands,
             feature_family=self.feature_family,
             spatial_transform=self.spatial_transform,
+            evoked_subtracted=self.evoked_subtracted,
+            evoked_subtracted_conditionwise=self.evoked_subtracted_conditionwise,
         )

@@ -487,8 +487,8 @@ def _save_feature_metadata(
             else "unknown"
         )
 
-        json_filename = _build_filename(base_filename, suffix).replace(".tsv", ".json")
-        metadata_path = metadata_dir / json_filename
+        base_out = Path(_build_filename(base_filename, suffix))
+        metadata_path = metadata_dir / base_out.with_suffix(".json").name
 
         manifest = generate_manifest(
             feature_columns=list(df.columns),

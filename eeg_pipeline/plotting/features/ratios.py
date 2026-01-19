@@ -111,9 +111,10 @@ def _get_ratio_columns_for_segment_pair_roi(
 
 def _normalize_roi_name_for_filename(roi_name: str) -> str:
     """Convert ROI name to safe filename suffix."""
+    from eeg_pipeline.utils.formatting import sanitize_label
     if roi_name.lower() == "all":
         return ""
-    return roi_name.replace(" ", "_").lower()
+    return sanitize_label(roi_name).lower()
 
 
 def _get_comparison_segments(config: Any, features_df: pd.DataFrame, logger: Any) -> List[str]:
@@ -307,9 +308,13 @@ def _plot_column_comparison_ratios(
     stats_dir: Optional[Path],
 ) -> None:
     """Plot unpaired column comparison for ratios."""
-    comparison_info = extract_comparison_mask(events_df, config)
+    comparison_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comparison_info:
-        log_if_present(logger, "debug", "Column comparison requested but config incomplete")
+        log_if_present(
+            logger, "warning",
+            "Column comparison enabled but config incomplete. "
+            "Set plotting.comparisons.comparison_column and comparison_values."
+        )
         return
     
     mask1, mask2, label1, label2 = comparison_info

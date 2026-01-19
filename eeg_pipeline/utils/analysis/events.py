@@ -54,7 +54,17 @@ def _validate_comparison_prerequisites(
         return None
 
     column = _resolve_comparison_column(config)
+    
+    # Debug: Log config resolution
+    import logging
+    _debug_logger = logging.getLogger(__name__)
+    raw_value = get_config_value(config, "plotting.comparisons.comparison_column", "<<NOT SET>>")
+    _debug_logger.warning(f"[DEBUG] comparison_column raw value: {raw_value!r}, resolved: {column!r}")
+    _debug_logger.warning(f"[DEBUG] config type: {type(config).__name__}")
+    
     if column is None or column not in events_df.columns:
+        if column is not None:
+            _debug_logger.warning(f"[DEBUG] Column '{column}' not found in events_df columns: {list(events_df.columns)[:5]}...")
         return None
 
     return column

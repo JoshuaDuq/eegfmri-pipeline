@@ -237,6 +237,9 @@ def extract_band_ratios_from_precomputed(
 
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
     include_log = bool(get_config_value(config, "feature_engineering.spectral.include_log_ratios", True))
+    min_segment_sec = float(get_config_value(config, "feature_engineering.ratios.min_segment_sec", 1.0))
+    min_cycles = float(get_config_value(config, "feature_engineering.ratios.min_cycles_at_fmin", 3.0))
+    skip_invalid = bool(get_config_value(config, "feature_engineering.ratios.skip_invalid_segments", True))
     
     freq_bands = get_frequency_bands(config)
     needed_bands = {band for pair in pairs for band in pair}
@@ -246,9 +249,9 @@ def extract_band_ratios_from_precomputed(
     sfreq = precomputed.sfreq
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
 
-    min_segment_sec = float(get_config_value(config, "feature_engineering.spectral.min_segment_sec", 2.0))
     min_segment_samples = max(0, int(round(min_segment_sec * sfreq)))
     warned_short: set[str] = set()
+    warned_cycles: set[tuple[str, str]] = set()
     
     for seg_label, seg_mask in segment_masks.items():
         if seg_mask is None or not np.any(seg_mask):
@@ -265,7 +268,8 @@ def extract_band_ratios_from_precomputed(
                     min_segment_samples,
                 )
                 warned_short.add(seg_label)
-            continue
+            if skip_invalid:
+                continue
         
         seg_data_all = precomputed.data[:, :, seg_mask]  # (epochs, ch, time)
         band_power = _compute_psd_band_power_for_segment(
@@ -274,9 +278,35 @@ def extract_band_ratios_from_precomputed(
         if band_power is None:
             continue
 
+        seg_sec = float(seg_n) / float(sfreq) if sfreq > 0 else 0.0
+
         for num, den in pairs:
             if num not in band_power or den not in band_power:
                 continue
+
+            try:
+                fmin_num = float(band_ranges.get(num, (np.nan, np.nan))[0])
+                fmin_den = float(band_ranges.get(den, (np.nan, np.nan))[0])
+            except Exception:
+                fmin_num = np.nan
+                fmin_den = np.nan
+            fmin_pair = np.nanmin([fmin_num, fmin_den])
+            req_sec = max(float(min_segment_sec), (float(min_cycles) / float(fmin_pair)) if np.isfinite(fmin_pair) and fmin_pair > 0 else np.inf)
+            if seg_sec < req_sec:
+                if logger and (seg_label, f"{num}/{den}") not in warned_cycles:
+                    logger.warning(
+                        "Band ratios: segment '%s' too short for '%s/%s' (%.3fs < %.3fs; min_cycles=%s at fmin=%.2f).",
+                        seg_label,
+                        num,
+                        den,
+                        seg_sec,
+                        req_sec,
+                        min_cycles,
+                        float(fmin_pair) if np.isfinite(fmin_pair) else np.nan,
+                    )
+                    warned_cycles.add((seg_label, f"{num}/{den}"))
+                if skip_invalid:
+                    continue
 
             p_num = band_power[num]  # (epochs, ch)
             p_den = band_power[den]  # (epochs, ch)
@@ -337,6 +367,12 @@ def extract_band_ratios_from_precomputed(
     if not records or all(len(r) == 0 for r in records):
         return pd.DataFrame(), []
     df = pd.DataFrame(records)
+    df.attrs["precomputed_feature_family"] = str(getattr(precomputed, "feature_family", "") or "")
+    df.attrs["precomputed_spatial_transform"] = str(getattr(precomputed, "spatial_transform", "") or "")
+    df.attrs["precomputed_evoked_subtracted"] = bool(getattr(precomputed, "evoked_subtracted", False))
+    df.attrs["precomputed_evoked_subtracted_conditionwise"] = bool(
+        getattr(precomputed, "evoked_subtracted_conditionwise", False)
+    )
     return df, list(df.columns)
 
 
@@ -349,6 +385,10 @@ def _process_asymmetry_epoch(
     band_power: Dict[str, np.ndarray],
     valid_pairs: List[Tuple[str, str, int, int]],
     segment_label: str,
+    *,
+    eps: float,
+    emit_activation_convention: bool,
+    activation_bands: set[str],
 ) -> Dict[str, float]:
     """Process asymmetry for a single epoch using pre-computed band power.
     
@@ -361,13 +401,14 @@ def _process_asymmetry_epoch(
     record: Dict[str, float] = {}
     
     for band, p_mean in band_power.items():
+        band_lc = str(band).strip().lower()
         for l_name, r_name, l_idx, r_idx in valid_pairs:
             pl, pr = p_mean[l_idx], p_mean[r_idx]
             pair = f"{l_name}-{r_name}"
             
             # Use NaN when asymmetry is undefined (tiny denominator)
             denom = pr + pl
-            if denom > 1e-12 and np.isfinite(pl) and np.isfinite(pr):
+            if denom > eps and np.isfinite(pl) and np.isfinite(pr):
                 asym = (pr - pl) / denom
             else:
                 asym = np.nan
@@ -384,7 +425,7 @@ def _process_asymmetry_epoch(
             ] = float(asym)
             
             # Log-difference (ln(R) - ln(L)) - primary metric for frontal alpha asymmetry
-            if pr > 1e-12 and pl > 1e-12 and np.isfinite(pl) and np.isfinite(pr):
+            if pr > eps and pl > eps and np.isfinite(pl) and np.isfinite(pr):
                 logdiff = float(np.log(pr) - np.log(pl))
             else:
                 logdiff = np.nan
@@ -399,6 +440,18 @@ def _process_asymmetry_epoch(
                     channel_pair=pair,
                 )
             ] = logdiff
+
+            if emit_activation_convention and band_lc in activation_bands:
+                record[
+                    NamingSchema.build(
+                        "asymmetry",
+                        segment_label,
+                        band,
+                        "chpair",
+                        "logdiff_activation",
+                        channel_pair=pair,
+                    )
+                ] = float(-logdiff) if np.isfinite(logdiff) else np.nan
     return record
 
 
@@ -443,9 +496,25 @@ def extract_asymmetry_from_precomputed(
     sfreq = precomputed.sfreq
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
 
-    min_segment_sec = float(get_config_value(config, "feature_engineering.spectral.min_segment_sec", 2.0))
+    min_segment_sec = float(get_config_value(config, "feature_engineering.asymmetry.min_segment_sec", 1.0))
+    min_cycles = float(get_config_value(config, "feature_engineering.asymmetry.min_cycles_at_fmin", 3.0))
+    skip_invalid = bool(get_config_value(config, "feature_engineering.asymmetry.skip_invalid_segments", True))
+    eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
     min_segment_samples = max(0, int(round(min_segment_sec * sfreq)))
     warned_short: set[str] = set()
+    warned_cycles: set[tuple[str, str]] = set()
+
+    emit_activation_convention = bool(
+        get_config_value(config, "feature_engineering.asymmetry.emit_activation_convention", False)
+    )
+    activation_bands_cfg = get_config_value(
+        config, "feature_engineering.asymmetry.activation_bands", ["alpha"]
+    )
+    activation_bands = (
+        {str(b).strip().lower() for b in activation_bands_cfg}
+        if isinstance(activation_bands_cfg, (list, tuple))
+        else {"alpha"}
+    )
     
     for seg_label, seg_mask in segment_masks.items():
         if seg_mask is None or not np.any(seg_mask):
@@ -462,15 +531,43 @@ def extract_asymmetry_from_precomputed(
                     min_segment_samples,
                 )
                 warned_short.add(seg_label)
-            continue
+            if skip_invalid:
+                continue
         
         seg_data_all = precomputed.data[:, :, seg_mask]
+
+        seg_sec = float(seg_n) / float(sfreq) if sfreq > 0 else 0.0
+        eligible_bands: Dict[str, Tuple[float, float]] = {}
+        for band, (fmin, fmax) in band_ranges.items():
+            try:
+                fmin_f = float(fmin)
+            except Exception:
+                continue
+            req_sec = max(float(min_segment_sec), (float(min_cycles) / fmin_f) if fmin_f > 0 else np.inf)
+            if seg_sec >= req_sec:
+                eligible_bands[band] = (fmin, fmax)
+            else:
+                if logger and (seg_label, str(band)) not in warned_cycles:
+                    logger.warning(
+                        "Asymmetry: segment '%s' too short for '%s' (%.3fs < %.3fs; min_cycles=%s at fmin=%.2f).",
+                        seg_label,
+                        band,
+                        seg_sec,
+                        req_sec,
+                        min_cycles,
+                        fmin_f,
+                    )
+                    warned_cycles.add((seg_label, str(band)))
+
+        if not eligible_bands and skip_invalid:
+            continue
+
         band_power_all = _compute_psd_band_power_for_segment(
-            seg_data_all, sfreq, band_ranges, config, logger
+            seg_data_all, sfreq, eligible_bands if eligible_bands else band_ranges, config, logger
         )
         if band_power_all is None:
             band_power_all = {
-                b: np.full((n_epochs, len(precomputed.ch_names)), np.nan) for b in band_ranges
+                b: np.full((n_epochs, len(precomputed.ch_names)), np.nan) for b in (eligible_bands if eligible_bands else band_ranges)
             }
         
         epoch_band_power = [
@@ -480,12 +577,28 @@ def extract_asymmetry_from_precomputed(
         
         if n_jobs != 1:
             seg_records = Parallel(n_jobs=n_jobs)(
-                delayed(_process_asymmetry_epoch)(ep_idx, power, valid_pairs, seg_label)
+                delayed(_process_asymmetry_epoch)(
+                    ep_idx,
+                    power,
+                    valid_pairs,
+                    seg_label,
+                    eps=eps,
+                    emit_activation_convention=emit_activation_convention,
+                    activation_bands=activation_bands,
+                )
                 for ep_idx, power in enumerate(epoch_band_power)
             )
         else:
             seg_records = [
-                _process_asymmetry_epoch(ep_idx, power, valid_pairs, seg_label)
+                _process_asymmetry_epoch(
+                    ep_idx,
+                    power,
+                    valid_pairs,
+                    seg_label,
+                    eps=eps,
+                    emit_activation_convention=emit_activation_convention,
+                    activation_bands=activation_bands,
+                )
                 for ep_idx, power in enumerate(epoch_band_power)
             ]
         
@@ -496,6 +609,12 @@ def extract_asymmetry_from_precomputed(
         return pd.DataFrame(), []
 
     df = pd.DataFrame(records)
+    df.attrs["precomputed_feature_family"] = str(getattr(precomputed, "feature_family", "") or "")
+    df.attrs["precomputed_spatial_transform"] = str(getattr(precomputed, "spatial_transform", "") or "")
+    df.attrs["precomputed_evoked_subtracted"] = bool(getattr(precomputed, "evoked_subtracted", False))
+    df.attrs["precomputed_evoked_subtracted_conditionwise"] = bool(
+        getattr(precomputed, "evoked_subtracted_conditionwise", False)
+    )
     return df, list(df.columns)
 
 

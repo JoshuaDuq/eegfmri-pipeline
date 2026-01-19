@@ -64,9 +64,10 @@ def _select_segment(segments: List[str], preferred: str = "active") -> Optional[
 
 def _sanitize_roi_name_for_path(roi_name: str) -> str:
     """Convert ROI name to filesystem-safe string."""
+    from eeg_pipeline.utils.formatting import sanitize_label
     if roi_name.lower() == "all":
         return ""
-    return roi_name.replace(" ", "_").lower()
+    return sanitize_label(roi_name).lower()
 
 
 def _get_asymmetry_columns(
@@ -528,13 +529,14 @@ def _plot_column_comparison(
     stats_dir: Optional[Path],
 ) -> None:
     """Plot column comparison (unpaired) for asymmetry."""
-    comparison_mask_info = extract_comparison_mask(events_df, config)
+    comparison_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     
     if not comparison_mask_info:
         if logger:
             log_if_present(
-                logger, "debug",
-                "Column comparison requested but config incomplete"
+                logger, "warning",
+                "Column comparison enabled but config incomplete. "
+                "Set plotting.comparisons.comparison_column and comparison_values."
             )
         return
     

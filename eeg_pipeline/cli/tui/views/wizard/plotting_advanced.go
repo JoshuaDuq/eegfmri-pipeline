@@ -645,29 +645,121 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 	case plotItemConfigFieldComparisonWindows:
 		value := m.getPlotFieldTextValue(cfg.ComparisonWindowsSpec, "baseline active", row, plotItemConfigFieldComparisonWindows)
 		hint := m.buildComparisonWindowsHint()
-		return []renderLine{m.renderPlotValueLine("windows", value, hint, focused, labelWidth)}
+		// When dropdown is expanded for this field, treat as focused
+		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonWindows
+		lines := []renderLine{m.renderPlotValueLine("windows", value, hint, focused || isEditing, labelWidth)}
+		// Show dropdown if expanded for this field
+		if isEditing && len(m.availableWindows) > 0 {
+			expandedLines := m.renderExpandedListItems(m.availableWindows, m.isPlotFieldWindowSelected(cfg.ComparisonWindowsSpec))
+			lines = append(lines, expandedLines...)
+		}
+		return lines
 	case plotItemConfigFieldCompareColumns:
 		value := formatTriState(cfg.CompareColumns)
 		return []renderLine{m.renderPlotValueLine("compare_columns", value, "default/ON/OFF", focused, labelWidth)}
 	case plotItemConfigFieldComparisonSegment:
 		value := m.getPlotFieldTextValue(cfg.ComparisonSegment, "active", row, plotItemConfigFieldComparisonSegment)
 		hint := m.buildComparisonSegmentHint()
-		return []renderLine{m.renderPlotValueLine("segment", value, hint, focused, labelWidth)}
+		// When dropdown is expanded for this field, treat as focused
+		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonSegment
+		lines := []renderLine{m.renderPlotValueLine("segment", value, hint, focused || isEditing, labelWidth)}
+		// Show dropdown if expanded for this field
+		if isEditing && len(m.availableWindows) > 0 {
+			expandedLines := m.renderExpandedListItems(m.availableWindows, func(w string) bool {
+				return cfg.ComparisonSegment == w
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
 	case plotItemConfigFieldComparisonColumn:
 		value := m.getPlotFieldTextValue(cfg.ComparisonColumn, "(unset)", row, plotItemConfigFieldComparisonColumn)
 		hint := m.buildComparisonColumnHint()
-		return []renderLine{m.renderPlotValueLine("column", value, hint, focused, labelWidth)}
+		// When dropdown is expanded for this field, treat as focused
+		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonColumn
+		lines := []renderLine{m.renderPlotValueLine("column", value, hint, focused || isEditing, labelWidth)}
+		// Show dropdown if expanded for this field
+		if isEditing && len(m.discoveredColumns) > 0 {
+			expandedLines := m.renderExpandedListItems(m.discoveredColumns, func(col string) bool {
+				return cfg.ComparisonColumn == col
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
 	case plotItemConfigFieldComparisonValues:
 		value := m.getPlotFieldTextValue(cfg.ComparisonValuesSpec, "0 1", row, plotItemConfigFieldComparisonValues)
-		return []renderLine{m.renderPlotValueLine("values", value, "e.g. 0 1", focused, labelWidth)}
+		col := cfg.ComparisonColumn
+		if col == "" {
+			col = m.plotComparisonColumn
+		}
+		hint := "e.g. 0 1"
+		vals := m.GetDiscoveredColumnValues(col)
+		if len(vals) > 0 {
+			hint = fmt.Sprintf("Space to select · %d values", len(vals))
+		}
+		// When dropdown is expanded for this field, treat as focused
+		isEditing := m.expandedOption == expandedPlotComparisonValues && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonValues
+		lines := []renderLine{m.renderPlotValueLine("values", value, hint, focused || isEditing, labelWidth)}
+		// Show dropdown if expanded for this field
+		if isEditing && len(vals) > 0 {
+			expandedLines := m.renderExpandedListItems(vals, m.isPlotFieldValueSelected(cfg.ComparisonValuesSpec))
+			lines = append(lines, expandedLines...)
+		}
+		return lines
 	case plotItemConfigFieldComparisonLabels:
 		value := m.getPlotFieldTextValue(cfg.ComparisonLabelsSpec, "(from values)", row, plotItemConfigFieldComparisonLabels)
 		return []renderLine{m.renderPlotValueLine("labels", value, "e.g. condA condB or \"High\" \"Low\"", focused, labelWidth)}
 	case plotItemConfigFieldComparisonROIs:
 		value := m.getPlotFieldTextValue(cfg.ComparisonROIsSpec, "(all)", row, plotItemConfigFieldComparisonROIs)
-		return []renderLine{m.renderPlotValueLine("rois", value, "e.g. all Frontal Midline_ACC_MCC", focused, labelWidth)}
+		hint := "e.g. all Frontal Midline_FrontalCentral"
+		if len(m.discoveredROIs) > 0 {
+			hint = fmt.Sprintf("Space to select · %d ROIs available", len(m.discoveredROIs))
+		}
+		// When dropdown is expanded for this field, treat as focused
+		isEditing := m.expandedOption == expandedPlotComparisonROIs && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonROIs
+		lines := []renderLine{m.renderPlotValueLine("rois", value, hint, focused || isEditing, labelWidth)}
+		// Show dropdown if expanded for this field
+		if isEditing && len(m.discoveredROIs) > 0 {
+			expandedLines := m.renderExpandedListItems(m.discoveredROIs, m.isPlotFieldValueSelected(cfg.ComparisonROIsSpec))
+			lines = append(lines, expandedLines...)
+		}
+		return lines
 	default:
 		return []renderLine{{text: fmt.Sprintf("Unknown plot field: %d", row.plotField)}}
+	}
+}
+
+// isPlotFieldWindowSelected returns a function that checks if a window is selected in the given spec
+func (m Model) isPlotFieldWindowSelected(spec string) func(string) bool {
+	return func(w string) bool {
+		if spec == "" {
+			return false
+		}
+		for _, v := range strings.Fields(spec) {
+			if v == w {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// isPlotFieldValueSelected returns a function that checks if a value is selected in the given spec
+func (m Model) isPlotFieldValueSelected(spec string) func(string) bool {
+	return func(v string) bool {
+		if spec == "" {
+			return false
+		}
+		for _, val := range strings.Fields(spec) {
+			if val == v {
+				return true
+			}
+		}
+		for _, val := range strings.Split(spec, ",") {
+			if strings.TrimSpace(val) == v {
+				return true
+			}
+		}
+		return false
 	}
 }
 
@@ -697,7 +789,7 @@ func (m Model) buildComparisonSegmentHint() string {
 
 func (m Model) buildComparisonColumnHint() string {
 	hint := "events.tsv column"
-	if avail := buildAvailableHint("available", m.availableColumns); avail != "" {
+	if avail := buildAvailableHint("available", m.discoveredColumns); avail != "" {
 		hint = hint + " · " + avail
 	}
 	return hint

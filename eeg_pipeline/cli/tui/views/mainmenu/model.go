@@ -46,12 +46,14 @@ const (
 	UtilityGlobalSetup = iota
 	UtilityMergePsychopy
 	UtilityRawToBids
+	UtilityFmriRawToBids
 )
 
 var utilities = []utilityItem{
 	{"Global Setup", "Configure project paths and settings"},
 	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files"},
 	{"Raw to BIDS", "Convert raw EEG data to BIDS format"},
+	{"fMRI Raw to BIDS", "Convert raw fMRI DICOM series to BIDS format"},
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -272,6 +274,8 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.SelectedPipeline = int(types.PipelineMergePsychoPyData)
 		case UtilityRawToBids:
 			m.SelectedPipeline = int(types.PipelineRawToBIDS)
+		case UtilityFmriRawToBids:
+			m.SelectedPipeline = int(types.PipelineFmriRawToBIDS)
 		}
 	}
 	return m, nil

@@ -124,7 +124,14 @@ func (m *Model) handleUp() {
 	case types.StepSelectComputations:
 		m.computationCursor = moveCursorInList(m.computationCursor, -1, len(m.computations))
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		m.categoryIndex = moveCursorInList(m.categoryIndex, -1, len(m.categories))
+		if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
+			options := m.getGlobalStylingOptions()
+			if len(options) > 0 {
+				m.globalStylingCursor = moveCursorInList(m.globalStylingCursor, -1, len(options))
+			}
+		} else {
+			m.categoryIndex = moveCursorInList(m.categoryIndex, -1, len(m.categories))
+		}
 	case types.StepSelectSubjects:
 		if len(m.subjects) > 0 {
 			m.subjectCursor = moveCursorInList(m.subjectCursor, -1, len(m.subjects))
@@ -186,7 +193,14 @@ func (m *Model) handleDown() {
 	case types.StepSelectComputations:
 		m.computationCursor = moveCursorInList(m.computationCursor, 1, len(m.computations))
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		m.categoryIndex = moveCursorInList(m.categoryIndex, 1, len(m.categories))
+		if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
+			options := m.getGlobalStylingOptions()
+			if len(options) > 0 {
+				m.globalStylingCursor = moveCursorInList(m.globalStylingCursor, 1, len(options))
+			}
+		} else {
+			m.categoryIndex = moveCursorInList(m.categoryIndex, 1, len(m.categories))
+		}
 	case types.StepSelectSubjects:
 		m.subjectCursor = moveCursorInList(m.subjectCursor, 1, len(m.subjects))
 	case types.StepSelectBands:
@@ -251,6 +265,8 @@ func (m *Model) handleTab() {
 		if m.expandedOption >= 0 {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
+			m.editingPlotID = ""
+			m.editingPlotField = plotItemConfigFieldNone
 			optCount := m.getAdvancedOptionCount()
 			if m.advancedCursor < optCount-1 {
 				m.advancedCursor++
@@ -431,7 +447,15 @@ func (m *Model) handleSpace() {
 	case types.StepSelectComputations:
 		m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
+		if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
+			// Handle space in global styling panel - toggle group expansion
+			options := m.getGlobalStylingOptions()
+			if m.globalStylingCursor < len(options) {
+				opt := options[m.globalStylingCursor]
+				m.togglePlotGroupExpansion(opt)
+				m.globalStylingOptions = m.getGlobalStylingOptions()
+			}
+		} else if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
 			m.togglePlotCategory(m.categoryIndex)
 		} else {
 			m.selected[m.categoryIndex] = !m.selected[m.categoryIndex]
@@ -630,6 +654,8 @@ func (m *Model) GoBack() bool {
 	if m.CurrentStep == types.StepAdvancedConfig && m.expandedOption >= 0 {
 		m.expandedOption = expandedNone
 		m.subCursor = 0
+		m.editingPlotID = ""
+		m.editingPlotField = plotItemConfigFieldNone
 		m.UpdateAdvancedOffset()
 		return true
 	}
@@ -840,6 +866,15 @@ func (m Model) plotRequirements() (requiresEpochs bool, requiresFeatures bool, r
 }
 
 func (m Model) validatePlottingSubject(s types.SubjectStatus) (bool, string) {
+	// During subject selection (the first plotting step), keep validation permissive
+	// so users can choose subjects before narrowing the plot set.
+	if m.CurrentStep == types.StepSelectSubjects {
+		if !s.HasEpochs && !s.HasFeatures && !s.HasStats {
+			return false, "no derivatives"
+		}
+		return true, ""
+	}
+
 	requiresEpochs, requiresFeatures, requiresStats := m.plotRequirements()
 	if requiresEpochs && !s.HasEpochs {
 		return false, "missing epochs"
@@ -875,6 +910,8 @@ func (m *Model) getAdvancedOptionCount() int {
 		return len(m.getFmriPreprocessingOptions())
 	case types.PipelineRawToBIDS:
 		return len(m.getRawToBidsOptions())
+	case types.PipelineFmriRawToBIDS:
+		return len(m.getFmriRawToBidsOptions())
 	case types.PipelineMergePsychoPyData:
 		return len(m.getMergeBehaviorOptions())
 	default:
@@ -917,6 +954,8 @@ func (m *Model) toggleAdvancedOption() {
 		m.toggleFmriAdvancedOption()
 	case types.PipelineRawToBIDS:
 		m.toggleRawToBidsAdvancedOption()
+	case types.PipelineFmriRawToBIDS:
+		m.toggleFmriRawToBidsAdvancedOption()
 	case types.PipelineMergePsychoPyData:
 		m.toggleMergeBehaviorAdvancedOption()
 	}
@@ -1568,13 +1607,57 @@ func (m *Model) togglePlottingAdvancedOption() {
 			cfg.CompareColumns = cycleTriState(cfg.CompareColumns)
 			m.plotItemConfigs[row.plotID] = cfg
 			m.useDefaultAdvanced = false
+		case plotItemConfigFieldComparisonWindows, plotItemConfigFieldComparisonSegment:
+			// Open dropdown if windows available, otherwise text edit
+			if len(m.availableWindows) > 0 {
+				m.expandedOption = expandedPlotComparisonWindows
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldComparisonColumn:
+			// Open dropdown if columns available, otherwise text edit
+			if len(m.discoveredColumns) > 0 {
+				m.expandedOption = expandedPlotComparisonColumn
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldComparisonValues:
+			// Open dropdown if column selected and values available
+			cfg := m.plotItemConfigs[row.plotID]
+			col := cfg.ComparisonColumn
+			if col == "" {
+				col = m.plotComparisonColumn // fallback to global
+			}
+			if vals := m.GetDiscoveredColumnValues(col); len(vals) > 0 {
+				m.expandedOption = expandedPlotComparisonValues
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldComparisonROIs:
+			// Open dropdown if ROIs available, otherwise text edit
+			if len(m.discoveredROIs) > 0 {
+				m.expandedOption = expandedPlotComparisonROIs
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
 		case plotItemConfigFieldTfrDefaultBaselineWindow,
-			plotItemConfigFieldComparisonWindows,
-			plotItemConfigFieldComparisonSegment,
-			plotItemConfigFieldComparisonColumn,
-			plotItemConfigFieldComparisonValues,
-			plotItemConfigFieldComparisonLabels,
-			plotItemConfigFieldComparisonROIs:
+			plotItemConfigFieldComparisonLabels:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
 		}
@@ -1595,62 +1678,12 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.UpdateAdvancedOffset()
 		return
 
-	case optPlotGroupDefaults:
-		m.plotGroupDefaultsExpanded = !m.plotGroupDefaultsExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupFonts:
-		m.plotGroupFontsExpanded = !m.plotGroupFontsExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupLayout:
-		m.plotGroupLayoutExpanded = !m.plotGroupLayoutExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupFigureSizes:
-		m.plotGroupFigureSizesExpanded = !m.plotGroupFigureSizesExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupColors:
-		m.plotGroupColorsExpanded = !m.plotGroupColorsExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupAlpha:
-		m.plotGroupAlphaExpanded = !m.plotGroupAlphaExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupScatter:
-		m.plotGroupScatterExpanded = !m.plotGroupScatterExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupBar:
-		m.plotGroupBarExpanded = !m.plotGroupBarExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupLine:
-		m.plotGroupLineExpanded = !m.plotGroupLineExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupHistogram:
-		m.plotGroupHistogramExpanded = !m.plotGroupHistogramExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupKDE:
-		m.plotGroupKDEExpanded = !m.plotGroupKDEExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupErrorbar:
-		m.plotGroupErrorbarExpanded = !m.plotGroupErrorbarExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupText:
-		m.plotGroupTextExpanded = !m.plotGroupTextExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupValidation:
-		m.plotGroupValidationExpanded = !m.plotGroupValidationExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupTopomap:
-		m.plotGroupTopomapExpanded = !m.plotGroupTopomapExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupTFR:
-		m.plotGroupTFRExpanded = !m.plotGroupTFRExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupSizing:
-		m.plotGroupSizingExpanded = !m.plotGroupSizingExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupSelection:
-		m.plotGroupSelectionExpanded = !m.plotGroupSelectionExpanded
-		m.useDefaultAdvanced = false
-	case optPlotGroupComparisons:
-		m.plotGroupComparisonsExpanded = !m.plotGroupComparisonsExpanded
+	case optPlotGroupDefaults, optPlotGroupFonts, optPlotGroupLayout, optPlotGroupFigureSizes,
+		optPlotGroupColors, optPlotGroupAlpha, optPlotGroupScatter, optPlotGroupBar,
+		optPlotGroupLine, optPlotGroupHistogram, optPlotGroupKDE, optPlotGroupErrorbar,
+		optPlotGroupText, optPlotGroupValidation, optPlotGroupTopomap, optPlotGroupTFR,
+		optPlotGroupSizing, optPlotGroupSelection, optPlotGroupComparisons, optPlotGroupTFRMisc:
+		m.togglePlotGroupExpansion(opt)
 		m.useDefaultAdvanced = false
 
 	case optPlotBboxInches:
@@ -2936,6 +2969,55 @@ func (m *Model) toggleRawToBidsAdvancedOption() {
 	}
 }
 
+func (m *Model) toggleFmriRawToBidsAdvancedOption() {
+	options := m.getFmriRawToBidsOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optFmriRawSession:
+		m.startTextEdit(textFieldFmriRawSession)
+		m.useDefaultAdvanced = false
+	case optFmriRawRestTask:
+		m.startTextEdit(textFieldFmriRawRestTask)
+		m.useDefaultAdvanced = false
+	case optFmriRawIncludeRest:
+		m.fmriRawIncludeRest = !m.fmriRawIncludeRest
+		m.useDefaultAdvanced = false
+	case optFmriRawIncludeFieldmaps:
+		m.fmriRawIncludeFieldmaps = !m.fmriRawIncludeFieldmaps
+		m.useDefaultAdvanced = false
+	case optFmriRawDicomMode:
+		m.fmriRawDicomModeIndex = (m.fmriRawDicomModeIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriRawOverwrite:
+		m.fmriRawOverwrite = !m.fmriRawOverwrite
+		m.useDefaultAdvanced = false
+	case optFmriRawCreateEvents:
+		m.fmriRawCreateEvents = !m.fmriRawCreateEvents
+		m.useDefaultAdvanced = false
+	case optFmriRawEventGranularity:
+		m.fmriRawEventGranularity = (m.fmriRawEventGranularity + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriRawOnsetReference:
+		m.fmriRawOnsetRefIndex = (m.fmriRawOnsetRefIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriRawOnsetOffsetS:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriRawDcm2niixPath:
+		m.startTextEdit(textFieldFmriRawDcm2niixPath)
+		m.useDefaultAdvanced = false
+	case optFmriRawDcm2niixArgs:
+		m.startTextEdit(textFieldFmriRawDcm2niixArgs)
+		m.useDefaultAdvanced = false
+	}
+}
+
 func (m *Model) toggleMergeBehaviorAdvancedOption() {
 	options := m.getMergeBehaviorOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
@@ -2952,6 +3034,18 @@ func (m *Model) toggleMergeBehaviorAdvancedOption() {
 	case optMergeEventTypes:
 		m.startTextEdit(textFieldMergeEventTypes)
 		m.useDefaultAdvanced = false
+	}
+}
+
+func (m *Model) commitFmriRawToBidsNumber(val float64) {
+	options := m.getFmriRawToBidsOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optFmriRawOnsetOffsetS:
+		m.fmriRawOnsetOffsetS = val
 	}
 }
 
@@ -2985,6 +3079,8 @@ func (m *Model) commitNumberInput() {
 		m.commitFmriNumber(val)
 	case types.PipelineRawToBIDS:
 		m.commitRawToBidsNumber(val)
+	case types.PipelineFmriRawToBIDS:
+		m.commitFmriRawToBidsNumber(val)
 	}
 	m.useDefaultAdvanced = false
 }
@@ -4404,5 +4500,51 @@ func (m *Model) removeROI() {
 		if m.roiCursor < 0 {
 			m.roiCursor = 0
 		}
+	}
+}
+
+// togglePlotGroupExpansion toggles the expansion state of a plot group option
+func (m *Model) togglePlotGroupExpansion(opt optionType) {
+	switch opt {
+	case optPlotGroupDefaults:
+		m.plotGroupDefaultsExpanded = !m.plotGroupDefaultsExpanded
+	case optPlotGroupFonts:
+		m.plotGroupFontsExpanded = !m.plotGroupFontsExpanded
+	case optPlotGroupLayout:
+		m.plotGroupLayoutExpanded = !m.plotGroupLayoutExpanded
+	case optPlotGroupFigureSizes:
+		m.plotGroupFigureSizesExpanded = !m.plotGroupFigureSizesExpanded
+	case optPlotGroupColors:
+		m.plotGroupColorsExpanded = !m.plotGroupColorsExpanded
+	case optPlotGroupAlpha:
+		m.plotGroupAlphaExpanded = !m.plotGroupAlphaExpanded
+	case optPlotGroupScatter:
+		m.plotGroupScatterExpanded = !m.plotGroupScatterExpanded
+	case optPlotGroupBar:
+		m.plotGroupBarExpanded = !m.plotGroupBarExpanded
+	case optPlotGroupLine:
+		m.plotGroupLineExpanded = !m.plotGroupLineExpanded
+	case optPlotGroupHistogram:
+		m.plotGroupHistogramExpanded = !m.plotGroupHistogramExpanded
+	case optPlotGroupKDE:
+		m.plotGroupKDEExpanded = !m.plotGroupKDEExpanded
+	case optPlotGroupErrorbar:
+		m.plotGroupErrorbarExpanded = !m.plotGroupErrorbarExpanded
+	case optPlotGroupText:
+		m.plotGroupTextExpanded = !m.plotGroupTextExpanded
+	case optPlotGroupValidation:
+		m.plotGroupValidationExpanded = !m.plotGroupValidationExpanded
+	case optPlotGroupTopomap:
+		m.plotGroupTopomapExpanded = !m.plotGroupTopomapExpanded
+	case optPlotGroupTFR:
+		m.plotGroupTFRExpanded = !m.plotGroupTFRExpanded
+	case optPlotGroupTFRMisc:
+		m.plotGroupTFRMiscExpanded = !m.plotGroupTFRMiscExpanded
+	case optPlotGroupSizing:
+		m.plotGroupSizingExpanded = !m.plotGroupSizingExpanded
+	case optPlotGroupSelection:
+		m.plotGroupSelectionExpanded = !m.plotGroupSelectionExpanded
+	case optPlotGroupComparisons:
+		m.plotGroupComparisonsExpanded = !m.plotGroupComparisonsExpanded
 	}
 }

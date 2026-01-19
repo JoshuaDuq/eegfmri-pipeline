@@ -337,6 +337,9 @@ func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case messages.ColumnsDiscoveredMsg:
 		m.handleColumnsDiscovered(msg)
 		return m, nil
+	case messages.ROIsDiscoveredMsg:
+		m.handleROIsDiscovered(msg)
+		return m, nil
 	case messages.FmriColumnsDiscoveredMsg:
 		m.handleFmriColumnsDiscovered(msg)
 		return m, nil
@@ -577,6 +580,14 @@ func (m *Model) handleFmriColumnsDiscovered(msg messages.FmriColumnsDiscoveredMs
 	m.wizard.SetFmriDiscoveredColumns(msg.Columns, msg.Values, msg.Source)
 }
 
+func (m *Model) handleROIsDiscovered(msg messages.ROIsDiscoveredMsg) {
+	if msg.Error != nil {
+		m.wizard.SetROIDiscoveryError(msg.Error)
+		return
+	}
+	m.wizard.SetDiscoveredROIs(msg.ROIs)
+}
+
 func (m Model) handleCloudSyncComplete(msg cloud.SyncCompleteMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
 		m.execution.AddOutput("Sync failed: " + msg.Error.Error())
@@ -791,6 +802,7 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 		executor.LoadConfigKeys(m.repoRoot, configKeys),
 		executor.DiscoverColumns(m.repoRoot, m.task),
 		executor.DiscoverFmriColumns(m.repoRoot, m.task),
+		executor.DiscoverROIs(m.repoRoot, m.task),
 	)
 }
 

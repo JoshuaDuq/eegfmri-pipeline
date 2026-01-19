@@ -72,6 +72,14 @@ type DiscoverFmriConditionsResponse struct {
 	Error      string   `json:"error,omitempty"`
 }
 
+// DiscoverROIsResponse from eeg-pipeline info rois --json
+type DiscoverROIsResponse struct {
+	ROIs    []string `json:"rois"`
+	Subject string   `json:"subject"`
+	Source  string   `json:"source,omitempty"`
+	Error   string   `json:"error,omitempty"`
+}
+
 // DiscoverFmriConditions runs a Python command to discover available fMRI trial_type conditions
 func DiscoverFmriConditions(repoRoot string, subject string, task string) tea.Cmd {
 	return func() tea.Msg {
@@ -187,6 +195,44 @@ func DiscoverColumns(repoRoot string, task string) tea.Cmd {
 			Values:  response.Values,
 			Source:  response.Source,
 			Error:   nil,
+		}
+	}
+}
+
+// DiscoverROIs runs eeg-pipeline info rois --json to find available ROIs from feature data
+func DiscoverROIs(repoRoot string, task string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "rois", "--json"}
+		if task != "" {
+			args = append(args, "--task", task)
+		}
+
+		output, err := runPythonJSONCommand(repoRoot, args)
+		if err != nil {
+			return messages.ROIsDiscoveredMsg{
+				ROIs:  nil,
+				Error: err,
+			}
+		}
+
+		var response DiscoverROIsResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.ROIsDiscoveredMsg{
+				ROIs:  nil,
+				Error: err,
+			}
+		}
+
+		if response.Error != "" {
+			return messages.ROIsDiscoveredMsg{
+				ROIs:  nil,
+				Error: fmt.Errorf("%s", response.Error),
+			}
+		}
+
+		return messages.ROIsDiscoveredMsg{
+			ROIs:  response.ROIs,
+			Error: nil,
 		}
 	}
 }

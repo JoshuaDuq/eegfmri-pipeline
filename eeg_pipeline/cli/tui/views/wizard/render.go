@@ -13,7 +13,7 @@ import (
 const (
 	narrowWidthThreshold  = 100
 	shortHeightThreshold  = 25
-	minMainContentHeight = 10
+	minMainContentHeight  = 10
 	headerSpacingLines    = 3
 	footerSpacingLines    = 2
 	footerHintSeparator   = "  "
@@ -34,6 +34,7 @@ var stepDisplayNames = map[types.WizardStep]string{
 	types.StepSelectFeatureFiles:        "Files",
 	types.StepConfigureOptions:          "Features",
 	types.StepSelectBands:               "Bands",
+	types.StepSelectROIs:                "ROIs",
 	types.StepSelectSpatial:             "Spatial",
 	types.StepTimeRange:                 "Time",
 	types.StepAdvancedConfig:            "Advanced",

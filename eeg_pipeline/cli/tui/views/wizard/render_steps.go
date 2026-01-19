@@ -314,8 +314,16 @@ func (m Model) renderCategorySelection() string {
 
 	if m.CurrentStep == types.StepSelectPlotCategories {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2).Render(
-			"Toggle a category to include or exclude all plots in that group.\n\n",
+			"Toggle a category to include or exclude all plots in that group.\n",
 		))
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2).Render(
+			"Press 'g' to configure global styling options.\n\n",
+		))
+	}
+
+	// If showing global styling panel, render that instead
+	if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
+		return m.renderGlobalStylingPanel()
 	}
 
 	count := 0
@@ -386,6 +394,37 @@ func (m Model) renderCategorySelection() string {
 		}
 
 		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderGlobalStylingPanel() string {
+	var b strings.Builder
+
+	accent := m.renderAnimatedAccent()
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" GLOBAL STYLING") + "\n\n")
+
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2).Render(
+		"Configure styling options that apply to ALL plots.\n",
+	))
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2).Render(
+		"Press 'g' or Escape to return to categories.\n\n",
+	))
+
+	options := m.getGlobalStylingOptions()
+	labelWidth := 24
+	for i, opt := range options {
+		isFocused := i == m.globalStylingCursor
+		lines := m.renderOption(opt, labelWidth, isFocused)
+		for _, line := range lines {
+			b.WriteString(line.text)
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()
@@ -792,14 +831,15 @@ func (m Model) renderFeatureFileSelection() string {
 
 func (m Model) renderPlotSelection() string {
 	var b strings.Builder
-	title := " PLOT SELECTION "
-	b.WriteString(styles.SectionTitleStyle.Render(title) + "\n\n")
 
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Select the plots to generate. Details for the focused item are shown below.\n") +
-		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  Use ↑/↓ to navigate, Space to toggle, and A/N to select all/none.\n\n"))
+	accent := m.renderAnimatedAccent()
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" PLOTS") + "\n\n")
 
+	// Build visible items list
 	visibleItems := []int{}
 	for i, plot := range m.plotItems {
 		if !m.IsPlotCategorySelected(plot.Group) {
@@ -816,6 +856,7 @@ func (m Model) renderPlotSelection() string {
 		}
 	}
 
+	// Inline validation indicator
 	var statusIndicator string
 	if count >= 1 {
 		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
@@ -830,115 +871,79 @@ func (m Model) renderPlotSelection() string {
 	}
 	b.WriteString("\n\n")
 
-	// Group-aware rendering
+	// Simple checkbox list grouped by category
 	currentGroup := ""
 	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-	// Collect all lines to render for the list
-	type listLine struct {
-		isHeader bool
-		text     string
-		itemIdx  int // -1 if header
-	}
-	var lines []listLine
-	cursorLineIdx := 0 // Track which line the cursor is on
 
 	for i, plot := range m.plotItems {
 		if !m.IsPlotCategorySelected(plot.Group) {
 			continue
 		}
 
+		// Group header
 		if plot.Group != currentGroup {
-			lines = append(lines, listLine{true, groupStyle.Render(" " + strings.ToUpper(plot.Group) + " "), -1})
+			if currentGroup != "" {
+				b.WriteString("\n")
+			}
+			b.WriteString(groupStyle.Render("◆ "+strings.ToUpper(plot.Group)) + "\n")
 			currentGroup = plot.Group
 		}
 
 		isSelected := m.plotSelected[i]
 		isFocused := i == m.plotCursor
-		if isFocused {
-			cursorLineIdx = len(lines)
-		}
+
 		checkbox := styles.RenderCheckbox(isSelected, isFocused)
 
-		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+		idStyle := lipgloss.NewStyle().Foreground(styles.TextDim).PaddingLeft(1)
+		nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
 		if isFocused {
-			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+			idStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		}
 
-		lines = append(lines, listLine{false, checkbox + nameStyle.Render(plot.Name), i})
-	}
+		// Show plot ID and name for clarity
+		b.WriteString(checkbox + idStyle.Render(plot.ID) + nameStyle.Render(" — "+plot.Name))
 
-	// Calculate layout using centralized function
-	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), 14) // header + title + details pane
-
-	// Show scroll up indicator
-	if layout.ShowScrollUp {
-		b.WriteString(styles.RenderScrollUpIndicator(layout.StartIdx) + "\n")
-	}
-
-	for i := layout.StartIdx; i < layout.EndIdx; i++ {
-		b.WriteString(" " + lines[i].text + "\n")
-	}
-
-	// Show scroll down indicator
-	if layout.ShowScrollDn {
-		remaining := len(lines) - layout.EndIdx
-		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
-	} else {
 		b.WriteString("\n")
 	}
 
-	// Details Pane (for focused item)
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Render(strings.Repeat("─", 60)) + "\n")
+	// Data requirements section below the list
+	if m.plotCursor >= 0 && m.plotCursor < len(m.plotItems) {
+		plot := m.plotItems[m.plotCursor]
 
-	plot := m.plotItems[m.plotCursor]
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(" Plot Details: ") +
-		lipgloss.NewStyle().Foreground(styles.Text).Render(plot.Name) + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).PaddingLeft(2).Render(plot.Description) + "\n")
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Render(strings.Repeat("─", 50)) + "\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render("Data Requirements:") + "\n")
 
-	if len(plot.RequiredFiles) > 0 {
-		reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-		b.WriteString(reqStyle.Render("Requires: "+strings.Join(plot.RequiredFiles, ", ")) + "\n")
-	}
-
-	reqs := []string{}
-	if plot.RequiresEpochs {
-		reqs = append(reqs, "epochs")
-	}
-	if plot.RequiresFeatures {
-		reqs = append(reqs, "features")
-	}
-	if plot.RequiresStats {
-		reqs = append(reqs, "stats")
-	}
-	if len(reqs) > 0 {
-		reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-		b.WriteString(reqStyle.Render("Needs: "+strings.Join(reqs, ", ")) + "\n")
-	}
-
-	readyCount, totalCount, missing := m.plotAvailabilitySummary(plot)
-	if totalCount > 0 {
-		statusStyle := lipgloss.NewStyle().Foreground(styles.Warning).PaddingLeft(2)
-		if readyCount == totalCount {
-			statusStyle = statusStyle.Foreground(styles.Success)
+		reqs := []string{}
+		if plot.RequiresEpochs {
+			reqs = append(reqs, "epochs")
 		}
-		b.WriteString(statusStyle.Render(fmt.Sprintf("Ready for %d/%d selected subjects", readyCount, totalCount)) + "\n")
+		if plot.RequiresFeatures {
+			reqs = append(reqs, "features")
+		}
+		if plot.RequiresStats {
+			reqs = append(reqs, "stats")
+		}
+		if len(plot.RequiredFiles) > 0 {
+			reqs = append(reqs, plot.RequiredFiles...)
+		}
 
-		if readyCount < totalCount {
-			missingParts := []string{}
-			if missing["epochs"] > 0 {
-				missingParts = append(missingParts, fmt.Sprintf("epochs=%d", missing["epochs"]))
+		if len(reqs) > 0 {
+			reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+			b.WriteString(reqStyle.Render(strings.Join(reqs, ", ")) + "\n")
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(2).Render("Base epochs only") + "\n")
+		}
+
+		// Availability status
+		readyCount, totalCount, _ := m.plotAvailabilitySummary(plot)
+		if totalCount > 0 {
+			statusColor := styles.Success
+			if readyCount < totalCount {
+				statusColor = styles.Warning
 			}
-			if missing["features"] > 0 {
-				missingParts = append(missingParts, fmt.Sprintf("features=%d", missing["features"]))
-			}
-			if missing["stats"] > 0 {
-				missingParts = append(missingParts, fmt.Sprintf("stats=%d", missing["stats"]))
-			}
-			if len(missingParts) > 0 {
-				reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-				b.WriteString(reqStyle.Render("Missing: "+strings.Join(missingParts, ", ")) + "\n")
-			}
+			statusStyle := lipgloss.NewStyle().Foreground(statusColor).PaddingLeft(2)
+			b.WriteString(statusStyle.Render(fmt.Sprintf("%d/%d subjects ready", readyCount, totalCount)) + "\n")
 		}
 	}
 
@@ -1161,172 +1166,9 @@ func parseFloat(s string, defaultVal float64) float64 {
 }
 
 func (m Model) renderPlotSelectionSplit() string {
-	var b strings.Builder
-	title := " PLOT SELECTION "
-	b.WriteString(styles.SectionTitleStyle.Render(title) + "\n\n")
-
-	// Left Side: List
-	var left strings.Builder
-	visibleItems := []int{}
-	for i, plot := range m.plotItems {
-		if !m.IsPlotCategorySelected(plot.Group) {
-			continue
-		}
-		visibleItems = append(visibleItems, i)
-	}
-
-	count := 0
-	for _, idx := range visibleItems {
-		if m.plotSelected[idx] {
-			count++
-		}
-	}
-
-	statusIndicator := " "
-	if count >= 1 {
-		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
-	} else {
-		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
-	}
-	left.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-		fmt.Sprintf("%d/%d selected", count, len(visibleItems))) + "\n\n")
-
-	// List of plots
-	currentGroup := ""
-	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-	type listLine struct {
-		isHeader bool
-		text     string
-		itemIdx  int
-	}
-	var lines []listLine
-	cursorLineIdx := 0 // Track which line the cursor is on
-
-	for i, plot := range m.plotItems {
-		if !m.IsPlotCategorySelected(plot.Group) {
-			continue
-		}
-		if plot.Group != currentGroup {
-			lines = append(lines, listLine{true, groupStyle.Render(" " + strings.ToUpper(plot.Group)), -1})
-			currentGroup = plot.Group
-		}
-		isSelected := m.plotSelected[i]
-		isFocused := i == m.plotCursor
-		if isFocused {
-			cursorLineIdx = len(lines)
-		}
-		checkbox := styles.RenderCheckbox(isSelected, isFocused)
-		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
-		if isFocused {
-			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
-		}
-		lines = append(lines, listLine{false, checkbox + nameStyle.Render(plot.Name), i})
-	}
-
-	// Calculate layout using centralized function
-	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), 10)
-
-	// Show scroll up indicator
-	if layout.ShowScrollUp {
-		left.WriteString(styles.RenderScrollUpIndicator(layout.StartIdx) + "\n")
-	}
-
-	for i := layout.StartIdx; i < layout.EndIdx; i++ {
-		left.WriteString(lines[i].text + "\n")
-	}
-
-	// Show scroll down indicator
-	if layout.ShowScrollDn {
-		remaining := len(lines) - layout.EndIdx
-		left.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
-	}
-
-	// Right Side: Details
-	var right strings.Builder
-	plot := m.plotItems[m.plotCursor]
-
-	detailBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Secondary).
-		Padding(1, 2).
-		Width(m.width / 2)
-
-	right.WriteString(lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("Plot: ") + plot.Name + "\n")
-
-	categoryBadge := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#000000")).
-		Background(styles.Secondary).
-		Padding(0, 1).
-		Render(plot.Group)
-	right.WriteString(categoryBadge + "\n\n")
-
-	right.WriteString(lipgloss.NewStyle().Foreground(styles.Text).Render(plot.Description) + "\n\n")
-
-	right.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render("Data Requirements:\n"))
-	if len(plot.RequiredFiles) > 0 {
-		for _, file := range plot.RequiredFiles {
-			icon := "  ○ "
-			fileStyle := lipgloss.NewStyle().Foreground(styles.Text)
-			if strings.Contains(file, "features") {
-				icon = "  [F] "
-			} else if strings.Contains(file, "epochs") {
-				icon = "  [E] "
-			} else if strings.Contains(file, "stats") {
-				icon = "  [S] "
-			}
-			right.WriteString(icon + fileStyle.Render(file) + "\n")
-		}
-	} else {
-		right.WriteString("  " + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("Base epochs only") + "\n")
-	}
-
-	readyCount, totalCount, missing := m.plotAvailabilitySummary(plot)
-	if totalCount > 0 {
-		right.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render("Availability:\n"))
-
-		readyPct := float64(readyCount) / float64(totalCount) * 100
-		statusColor := styles.Success
-		statusIcon := "✓"
-		if readyPct < 100 {
-			statusColor = styles.Warning
-			statusIcon = "⚠"
-		}
-		if readyPct < 50 {
-			statusColor = styles.Error
-			statusIcon = "⚠"
-		}
-
-		statusLine := fmt.Sprintf("  %s %d/%d subjects ready (%.0f%%)",
-			statusIcon, readyCount, totalCount, readyPct)
-		right.WriteString(lipgloss.NewStyle().Foreground(statusColor).Render(statusLine) + "\n")
-
-		if len(missing) > 0 {
-			var mLines []string
-			for k, v := range missing {
-				if v > 0 {
-					mLines = append(mLines, fmt.Sprintf("%s: %d missing", k, v))
-				}
-			}
-			if len(mLines) > 0 {
-				right.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-					"  "+strings.Join(mLines, ", ")) + "\n")
-			}
-		}
-	}
-
-	if len(plot.Dependencies) > 0 {
-		right.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render("Dependencies:\n"))
-		for _, dep := range plot.Dependencies {
-			depIcon := "  → "
-			right.WriteString(depIcon + lipgloss.NewStyle().Foreground(styles.Accent).Render(dep) + "\n")
-		}
-	}
-
-	leftView := lipgloss.NewStyle().Width(m.width / 2).Render(left.String())
-	rightView := detailBox.Render(right.String())
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
+	// For wide screens, just use the same simple layout as narrow
+	// This keeps the interface consistent
+	return m.renderPlotSelection()
 }
 
 func (m Model) renderFeaturePlotterSelection() string {
@@ -1655,6 +1497,8 @@ func (m Model) renderAdvancedConfig() string {
 		return m.renderFmriAdvancedConfig()
 	case types.PipelineRawToBIDS:
 		return m.renderRawToBidsAdvancedConfig()
+	case types.PipelineFmriRawToBIDS:
+		return m.renderFmriRawToBidsAdvancedConfig()
 	case types.PipelineMergePsychoPyData:
 		return m.renderMergeBehaviorAdvancedConfig()
 	default:
@@ -5677,6 +5521,119 @@ func (m Model) renderRawToBidsAdvancedConfig() string {
 
 		displayVal := opt.value
 		if displayVal == "" {
+			displayVal = "(none)"
+		}
+
+		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(displayVal))
+		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderFmriRawToBidsAdvancedConfig() string {
+	var b strings.Builder
+	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+	if m.editingNumber || m.editingText {
+		b.WriteString(infoStyle.Render("  Press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else {
+		b.WriteString(infoStyle.Render("  Customize fMRI DICOM → BIDS conversion options.") + "\n")
+		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
+	}
+
+	labelWidth := defaultLabelWidth
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	sessionVal := m.fmriRawSession
+	if m.editingText && m.editingTextField == textFieldFmriRawSession {
+		sessionVal = m.textBuffer + "█"
+	}
+
+	restTaskVal := m.fmriRawRestTask
+	if m.editingText && m.editingTextField == textFieldFmriRawRestTask {
+		restTaskVal = m.textBuffer + "█"
+	}
+
+	dcm2niixPathVal := m.fmriRawDcm2niixPath
+	if m.editingText && m.editingTextField == textFieldFmriRawDcm2niixPath {
+		dcm2niixPathVal = m.textBuffer + "█"
+	}
+
+	dcm2niixArgsVal := m.fmriRawDcm2niixArgs
+	if m.editingText && m.editingTextField == textFieldFmriRawDcm2niixArgs {
+		dcm2niixArgsVal = m.textBuffer + "█"
+	}
+
+	onsetOffsetVal := fmt.Sprintf("%.3f", m.fmriRawOnsetOffsetS)
+	if m.editingNumber && m.isCurrentlyEditing(optFmriRawOnsetOffsetS) {
+		onsetOffsetVal = m.numberBuffer + "█"
+	}
+
+	dicomMode := "symlink"
+	if m.fmriRawDicomModeIndex == 1 {
+		dicomMode = "copy"
+	} else if m.fmriRawDicomModeIndex == 2 {
+		dicomMode = "skip"
+	}
+
+	granularity := "phases"
+	if m.fmriRawEventGranularity == 1 {
+		granularity = "trial"
+	}
+
+	onsetRef := "as_is"
+	if m.fmriRawOnsetRefIndex == 1 {
+		onsetRef = "first_iti_start"
+	} else if m.fmriRawOnsetRefIndex == 2 {
+		onsetRef = "first_stim_start"
+	}
+
+	options := []struct {
+		label string
+		value string
+		hint  string
+	}{
+		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
+		{"Session", sessionVal, "Optional (e.g., 01)"},
+		{"Rest Task", restTaskVal, "Task label for resting-state"},
+		{"Include Rest", m.boolToOnOff(m.fmriRawIncludeRest), "Convert resting-state series"},
+		{"Include Fieldmaps", m.boolToOnOff(m.fmriRawIncludeFieldmaps), "Convert fieldmaps and set IntendedFor"},
+		{"DICOM Mode", dicomMode, "sourcedata handling"},
+		{"Overwrite", m.boolToOnOff(m.fmriRawOverwrite), "Replace existing BIDS files"},
+		{"Create Events", m.boolToOnOff(m.fmriRawCreateEvents), "From PsychoPy TrialSummary.csv"},
+		{"Event Granularity", granularity, "stimulation: phases vs trial"},
+		{"Onset Reference", onsetRef, "zero onsets within each run"},
+		{"Onset Offset (s)", onsetOffsetVal, "additive shift"},
+		{"dcm2niix Path", dcm2niixPathVal, "Optional override"},
+		{"dcm2niix Args", dcm2niixArgsVal, "Comma-separated extra args"},
+	}
+
+	for i, opt := range options {
+		isFocused := i == m.advancedCursor
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+
+		if m.useDefaultAdvanced && i > 0 {
+			labelStyle = labelStyle.Faint(true)
+			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+		} else {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		}
+
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		}
+
+		displayVal := opt.value
+		if strings.TrimSpace(displayVal) == "" {
 			displayVal = "(none)"
 		}
 

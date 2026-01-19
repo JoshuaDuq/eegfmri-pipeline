@@ -1079,7 +1079,8 @@ def plot_aperiodic_by_condition(
                     data_by_band[metric] = (v1, v2)
             
             if data_by_band:
-                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                from eeg_pipeline.utils.formatting import sanitize_label
+                roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
                 suffix = f"_roi-{roi_safe}" if roi_safe else ""
                 save_path = save_dir / f"sub-{subject}_aperiodic_by_condition{suffix}_window"
                 
@@ -1100,10 +1101,13 @@ def plot_aperiodic_by_condition(
 
     # Column comparison (unpaired)
     if compare_cols:
-        comp_mask_info = extract_comparison_mask(events_df, config)
+        comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
         if not comp_mask_info:
             if logger:
-                logger.debug("Column comparison requested but config incomplete")
+                logger.warning(
+                    "Column comparison enabled but config incomplete. "
+                    "Set plotting.comparisons.comparison_column and comparison_values."
+                )
         else:
             m1, m2, label1, label2 = comp_mask_info
             seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
@@ -1238,8 +1242,9 @@ def plot_aperiodic_by_condition(
                 
                 plt.tight_layout()
                 
+                from eeg_pipeline.utils.formatting import sanitize_label
                 roi_safe = (
-                    roi_name.replace(" ", "_").lower()
+                    sanitize_label(roi_name).lower()
                     if roi_name != "all"
                     else ""
                 )

@@ -90,6 +90,7 @@ def _prepare_precomputed_data(
     # Categories that use precomputed band data (ensures IAF-adjusted bands apply consistently)
     precompute_categories = {
         "connectivity",
+        "directedconnectivity",
         "directed_connectivity",
         "erds",
         "ratios",
@@ -135,6 +136,52 @@ def _prepare_precomputed_data(
     if has_time_range and needs_baseline:
         epochs_for_precompute = getattr(ctx, "_original_epochs", None) or working_epochs
 
+    precomputed_evoked_subtracted = False
+    precomputed_evoked_subtracted_conditionwise = False
+    try:
+        pre_cfg = ctx.config.get("feature_engineering.precomputed", {}) if hasattr(ctx.config, "get") else {}
+        subtract_evoked_cfg = pre_cfg.get("subtract_evoked", None)
+        if subtract_evoked_cfg is None:
+            subtract_evoked_cfg = ctx.config.get("feature_engineering.power.subtract_evoked", False)
+        want_induced_precomputed = bool(subtract_evoked_cfg)
+    except Exception:
+        want_induced_precomputed = False
+
+    if want_induced_precomputed:
+        analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
+        train_mask = getattr(ctx, "train_mask", None)
+        if analysis_mode == "trial_ml_safe" and train_mask is None:
+            ctx.logger.warning(
+                "Precomputed: subtract_evoked requested in trial_ml_safe mode without train_mask; disabling to avoid CV leakage."
+            )
+        else:
+            from eeg_pipeline.utils.analysis.spectral import subtract_evoked
+
+            condition_labels = None
+            if isinstance(ctx.aligned_events, pd.DataFrame):
+                for candidate in ("condition", "trial_type"):
+                    if candidate in ctx.aligned_events.columns:
+                        condition_labels = ctx.aligned_events[candidate].to_numpy()
+                        break
+
+            induced_epochs = epochs_for_precompute.copy()
+            data = induced_epochs.get_data()
+            min_trials = int(
+                ctx.config.get("feature_engineering.power.min_trials_per_condition", 2)
+                if hasattr(ctx.config, "get")
+                else 2
+            )
+            induced = subtract_evoked(
+                data,
+                condition_labels=condition_labels,
+                train_mask=train_mask,
+                min_trials_per_condition=min_trials,
+            )
+            induced_epochs._data = induced
+            epochs_for_precompute = induced_epochs
+            precomputed_evoked_subtracted = True
+            precomputed_evoked_subtracted_conditionwise = condition_labels is not None
+
     if not epochs_for_precompute.preload:
         ctx.logger.info("Preloading epochs data...")
         epochs_for_precompute.load_data()
@@ -156,7 +203,13 @@ def _prepare_precomputed_data(
         compute_psd_data=needs_psd,
         frequency_bands_override=getattr(ctx, "frequency_bands", None),
         feature_family="spectral",
+        train_mask=getattr(ctx, "train_mask", None),
     )
+    try:
+        precomputed_data.evoked_subtracted = bool(precomputed_evoked_subtracted)
+        precomputed_data.evoked_subtracted_conditionwise = bool(precomputed_evoked_subtracted_conditionwise)
+    except Exception:
+        pass
     setter = getattr(ctx, "set_precomputed_for_family", None)
     if callable(setter):
         setter("spectral", precomputed_data)
@@ -424,6 +477,7 @@ def _extract_pac_features(
                 ctx.logger,
                 windows_spec=ctx.windows,
                 feature_family="pac",
+                train_mask=getattr(ctx, "train_mask", None),
             )
             setter = getattr(ctx, "set_precomputed_for_family", None)
             if callable(setter):

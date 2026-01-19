@@ -407,8 +407,27 @@ func (m Model) BuildCommand() string {
 		m.Pipeline == types.PipelineFmri
 
 	hasValidModeIndex := len(m.modeOptions) > m.modeIndex
+	modeToUse := ""
 	if needsMode && hasValidModeIndex {
-		parts = append(parts, m.modeOptions[m.modeIndex])
+		modeToUse = m.modeOptions[m.modeIndex]
+
+		// Auto-switch to "tfr" mode if TFR plots are selected
+		if m.Pipeline == types.PipelinePlotting {
+			selectedPlots := m.SelectedPlotIDs()
+			for _, plotID := range selectedPlots {
+				for _, plot := range m.plotItems {
+					if plot.ID == plotID && plot.Group == "tfr" {
+						modeToUse = "tfr"
+						break
+					}
+				}
+				if modeToUse == "tfr" {
+					break
+				}
+			}
+		}
+
+		parts = append(parts, modeToUse)
 	}
 
 	if m.Pipeline == types.PipelineML {
@@ -428,6 +447,7 @@ func (m Model) BuildCommand() string {
 	}
 
 	if m.Pipeline == types.PipelinePlotting {
+		// Always pass --plots to enable independent plot execution
 		selectedPlots := m.SelectedPlotIDs()
 		if len(selectedPlots) > 0 && len(selectedPlots) < len(m.plotItems) {
 			parts = append(parts, "--plots")
@@ -467,9 +487,29 @@ func (m Model) BuildCommand() string {
 		if !m.plotSharedColorbar {
 			parts = append(parts, "--no-shared-colorbar")
 		}
+
+		// Pass ROI definitions to plotting command
+		roiDefs := m.GetROIDefinitions()
+		if len(roiDefs) > 0 {
+			parts = append(parts, "--rois")
+			parts = append(parts, roiDefs...)
+		}
+
+		// Pass band selection and definitions to plotting command
+		bands := m.SelectedBands()
+		if len(bands) > 0 && len(bands) < len(m.bands) {
+			parts = append(parts, "--bands")
+			parts = append(parts, bands...)
+		}
+
+		freqBandDefs := m.GetFrequencyBandDefinitions()
+		if len(freqBandDefs) > 0 {
+			parts = append(parts, "--frequency-bands")
+			parts = append(parts, freqBandDefs...)
+		}
 	}
 
-		if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
+	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		comps := m.SelectedComputations()
 		if len(comps) > 0 {
 			parts = append(parts, "--computations")
@@ -491,10 +531,12 @@ func (m Model) BuildCommand() string {
 				parts[len(parts)-1] = "full"
 			}
 		}
-	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS {
+	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS || m.Pipeline == types.PipelineFmriRawToBIDS {
 		mode := "merge-behavior"
 		if m.Pipeline == types.PipelineRawToBIDS {
 			mode = "raw-to-bids"
+		} else if m.Pipeline == types.PipelineFmriRawToBIDS {
+			mode = "fmri-raw-to-bids"
 		}
 		parts = []string{"eeg-pipeline", "utilities", mode}
 	} else if m.Pipeline != types.PipelinePlotting {
@@ -546,11 +588,15 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--deriv-root", expandUserPath(m.derivRoot))
 		}
 	}
-	if m.Pipeline == types.PipelineRawToBIDS || m.Pipeline == types.PipelineMergePsychoPyData {
+	if m.Pipeline == types.PipelineRawToBIDS || m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineFmriRawToBIDS {
 		if m.sourceRoot != "" {
 			parts = append(parts, "--source-root", expandUserPath(m.sourceRoot))
 		}
-		if m.bidsRoot != "" {
+		if m.Pipeline == types.PipelineFmriRawToBIDS {
+			if m.bidsFmriRoot != "" {
+				parts = append(parts, "--bids-fmri-root", expandUserPath(m.bidsFmriRoot))
+			}
+		} else if m.bidsRoot != "" {
 			parts = append(parts, "--bids-root", expandUserPath(m.bidsRoot))
 		}
 	}
@@ -585,6 +631,8 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, m.buildFmriAdvancedArgs()...)
 		case types.PipelineRawToBIDS:
 			parts = append(parts, m.buildRawToBidsAdvancedArgs()...)
+		case types.PipelineFmriRawToBIDS:
+			parts = append(parts, m.buildFmriRawToBidsAdvancedArgs()...)
 		case types.PipelineMergePsychoPyData:
 			parts = append(parts, m.buildMergeBehaviorAdvancedArgs()...)
 		}
@@ -941,12 +989,12 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-		if m.isCategorySelected("itpc") {
+	if m.isCategorySelected("itpc") {
 		itpcMethods := []string{"global", "fold_global", "loo", "condition"}
 		if m.itpcMethod >= 0 && m.itpcMethod < len(itpcMethods) && m.itpcMethod != 0 {
 			args = append(args, "--itpc-method", itpcMethods[m.itpcMethod])
 		}
-			if m.itpcMethod == 3 && strings.TrimSpace(m.itpcConditionColumn) != "" {
+		if m.itpcMethod == 3 && strings.TrimSpace(m.itpcConditionColumn) != "" {
 			args = append(args, "--itpc-condition-column", strings.TrimSpace(m.itpcConditionColumn))
 			if strings.TrimSpace(m.itpcConditionValues) != "" {
 				spec := strings.ReplaceAll(m.itpcConditionValues, ",", " ")
@@ -962,7 +1010,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-		if m.spatialTransform != 0 {
+	if m.spatialTransform != 0 {
 		transforms := []string{"none", "csd", "laplacian"}
 		args = append(args, "--spatial-transform", transforms[m.spatialTransform])
 		if m.spatialTransformLambda2 != 1e-5 {
@@ -988,7 +1036,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-		if m.isCategorySelected("directedconnectivity") || m.directedConnEnabled {
+	if m.isCategorySelected("directedconnectivity") || m.directedConnEnabled {
 		directedMeasures := m.selectedDirectedConnectivityMeasures()
 		if len(directedMeasures) > 0 {
 			args = append(args, "--directed-connectivity-measures")
@@ -2594,6 +2642,73 @@ func (m Model) buildRawToBidsAdvancedArgs() []string {
 	}
 	if m.rawKeepAnnotations {
 		args = append(args, "--keep-all-annotations")
+	}
+
+	return args
+}
+
+func (m Model) buildFmriRawToBidsAdvancedArgs() []string {
+	var args []string
+
+	if strings.TrimSpace(m.fmriRawSession) != "" {
+		args = append(args, "--session", strings.TrimSpace(m.fmriRawSession))
+	}
+	if strings.TrimSpace(m.fmriRawRestTask) != "" && strings.TrimSpace(m.fmriRawRestTask) != "rest" {
+		args = append(args, "--rest-task", strings.TrimSpace(m.fmriRawRestTask))
+	}
+	if !m.fmriRawIncludeRest {
+		args = append(args, "--no-rest")
+	}
+	if !m.fmriRawIncludeFieldmaps {
+		args = append(args, "--no-fieldmaps")
+	}
+
+	dicomMode := "symlink"
+	switch m.fmriRawDicomModeIndex {
+	case 1:
+		dicomMode = "copy"
+	case 2:
+		dicomMode = "skip"
+	}
+	if dicomMode != "symlink" {
+		args = append(args, "--dicom-mode", dicomMode)
+	}
+
+	if m.fmriRawOverwrite {
+		args = append(args, "--overwrite")
+	}
+	if !m.fmriRawCreateEvents {
+		args = append(args, "--no-events")
+	}
+
+	granularity := "phases"
+	if m.fmriRawEventGranularity == 1 {
+		granularity = "trial"
+	}
+	if granularity != "phases" {
+		args = append(args, "--event-granularity", granularity)
+	}
+
+	onsetRef := "as_is"
+	switch m.fmriRawOnsetRefIndex {
+	case 1:
+		onsetRef = "first_iti_start"
+	case 2:
+		onsetRef = "first_stim_start"
+	}
+	if onsetRef != "as_is" {
+		args = append(args, "--onset-reference", onsetRef)
+	}
+	if m.fmriRawOnsetOffsetS != 0 {
+		args = append(args, "--onset-offset-s", fmt.Sprintf("%.3f", m.fmriRawOnsetOffsetS))
+	}
+	if strings.TrimSpace(m.fmriRawDcm2niixPath) != "" {
+		args = append(args, "--dcm2niix-path", strings.TrimSpace(m.fmriRawDcm2niixPath))
+	}
+	if strings.TrimSpace(m.fmriRawDcm2niixArgs) != "" {
+		for _, tok := range splitListInput(m.fmriRawDcm2niixArgs) {
+			args = append(args, "--dcm2niix-arg", tok)
+		}
 	}
 
 	return args

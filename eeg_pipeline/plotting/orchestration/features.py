@@ -17,6 +17,7 @@ from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.infra.paths import (
     deriv_features_path,
     deriv_plots_path,
+    deriv_stats_path,
     ensure_dir,
     resolve_deriv_root,
 )
@@ -159,6 +160,7 @@ def _create_plot_context(
     aligned_events: Optional[Any],
     epochs: Optional[Any],
     tfr: Optional[Any],
+    plot_name_patterns: Optional[List[str]] = None,
 ) -> FeaturePlotContext:
     """Create and initialize feature plot context.
     
@@ -187,6 +189,7 @@ def _create_plot_context(
     """
     features_dir = deriv_features_path(deriv_root, subject)
     plots_dir = deriv_plots_path(deriv_root, subject, subdir="features")
+    stats_dir = deriv_stats_path(deriv_root, subject)
     ensure_dir(plots_dir)
     
     context = FeaturePlotContext(
@@ -195,6 +198,8 @@ def _create_plot_context(
         features_dir=features_dir,
         config=config,
         logger=logger,
+        plot_name_patterns=plot_name_patterns,
+        stats_dir=stats_dir,
         epochs_info=epochs_info,
         aligned_events=aligned_events,
         epochs=epochs,
@@ -243,6 +248,7 @@ def visualize_features(
     tfr: Optional[Any] = None,
     visualize_categories: Optional[List[str]] = None,
     feature_plotters: Optional[List[str]] = None,
+    plot_name_patterns: Optional[List[str]] = None,
 ) -> Dict[str, Path]:
     """Generate descriptive feature visualizations using registered plotters.
     
@@ -287,6 +293,7 @@ def visualize_features(
         aligned_events=aligned_events,
         epochs=epochs,
         tfr=tfr,
+        plot_name_patterns=plot_name_patterns,
     )
     
     if not _validate_context_has_data(context, subject, logger):
@@ -475,6 +482,7 @@ def _visualize_single_subject(
     logger: logging.Logger,
     visualize_categories: Optional[List[str]],
     feature_plotters: Optional[List[str]],
+    plot_name_patterns: Optional[List[str]],
     subject_index: int,
     total_subjects: int,
 ) -> None:
@@ -526,6 +534,7 @@ def _visualize_single_subject(
         epochs=epochs,
         visualize_categories=visualize_categories,
         feature_plotters=feature_plotters,
+        plot_name_patterns=plot_name_patterns,
     )
 
 
@@ -537,6 +546,7 @@ def visualize_features_for_subjects(
     logger: Optional[logging.Logger] = None,
     visualize_categories: Optional[List[str]] = None,
     feature_plotters: Optional[List[str]] = None,
+    plot_name_patterns: Optional[List[str]] = None,
 ) -> None:
     """Visualize features for multiple subjects.
     
@@ -582,6 +592,7 @@ def visualize_features_for_subjects(
             logger=logger,
             visualize_categories=visualize_categories,
             feature_plotters=feature_plotters,
+            plot_name_patterns=plot_name_patterns,
             subject_index=index,
             total_subjects=len(subjects),
         )

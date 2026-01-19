@@ -75,11 +75,25 @@ def _get_label_position(config) -> Tuple[float, float]:
 
 
 def _get_aligned_events_df_for_tfr(tfr, events_df: Optional[pd.DataFrame], n: int) -> Optional[pd.DataFrame]:
+    """Get aligned events DataFrame for TFR, preferring fuller data sources.
+    
+    Prefers events_df if it has more columns than TFR metadata, since
+    full events.tsv typically contains behavioral columns the TFR metadata lacks.
+    """
     meta = getattr(tfr, "metadata", None)
-    if isinstance(meta, pd.DataFrame) and not meta.empty:
+    has_meta = isinstance(meta, pd.DataFrame) and not meta.empty
+    has_events = events_df is not None and not events_df.empty
+    
+    if has_events and has_meta:
+        # Prefer whichever has more columns (usually events_df has behavioral data)
+        if len(events_df.columns) >= len(meta.columns):
+            return events_df.iloc[:n]
         return meta.iloc[:n]
-    if events_df is not None and not events_df.empty:
+    
+    if has_events:
         return events_df.iloc[:n]
+    if has_meta:
+        return meta.iloc[:n]
     return None
 
 

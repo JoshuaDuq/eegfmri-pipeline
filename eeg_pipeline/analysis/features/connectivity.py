@@ -561,7 +561,7 @@ def extract_connectivity_features(
     getter = getattr(ctx, "get_precomputed_for_family", None)
     if callable(getter):
         precomputed = getter("connectivity")
-    if precomputed is None:
+    else:
         precomputed = getattr(ctx, "precomputed", None)
 
     if precomputed is None:
@@ -577,6 +577,7 @@ def extract_connectivity_features(
             ctx.logger,
             windows_spec=ctx.windows,
             feature_family="connectivity",
+            train_mask=getattr(ctx, "train_mask", None),
         )
         try:
             setter = getattr(ctx, "set_precomputed_for_family", None)
@@ -1948,7 +1949,7 @@ def extract_directed_connectivity_features(
     getter = getattr(ctx, "get_precomputed_for_family", None)
     if callable(getter):
         precomputed = getter("connectivity")
-    if precomputed is None:
+    else:
         precomputed = getattr(ctx, "precomputed", None)
     if precomputed is None:
         if getattr(ctx, "epochs", None) is None:
@@ -1965,6 +1966,7 @@ def extract_directed_connectivity_features(
             ctx.logger,
             windows_spec=ctx.windows,
             feature_family="directedconnectivity",
+            train_mask=getattr(ctx, "train_mask", None),
         )
         try:
             setter = getattr(ctx, "set_precomputed_for_family", None)

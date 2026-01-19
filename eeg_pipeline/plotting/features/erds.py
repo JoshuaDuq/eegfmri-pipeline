@@ -629,8 +629,9 @@ def _create_window_comparison_plots(
                 data_by_band[band] = (values1, values2)
 
         if data_by_band:
+            from eeg_pipeline.utils.formatting import sanitize_label
             roi_safe = (
-                roi_name.replace(" ", "_").lower()
+                sanitize_label(roi_name).lower()
                 if roi_name != "all"
                 else ""
             )
@@ -679,13 +680,14 @@ def _create_column_comparison_plots(
     from eeg_pipeline.plotting.io.figures import log_if_present
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    comp_mask_info = extract_comparison_mask(events_df, config)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comp_mask_info:
         if logger:
             log_if_present(
                 logger,
-                "debug",
-                "Column comparison requested but config incomplete",
+                "warning",
+                "Column comparison enabled but config incomplete. "
+                "Set plotting.comparisons.comparison_column and comparison_values.",
             )
         return
 
@@ -846,8 +848,9 @@ def _create_column_comparison_plots(
 
         plt.tight_layout()
 
+        from eeg_pipeline.utils.formatting import sanitize_label
         roi_safe = (
-            roi_name.replace(" ", "_").lower()
+            sanitize_label(roi_name).lower()
             if roi_name != "all"
             else ""
         )

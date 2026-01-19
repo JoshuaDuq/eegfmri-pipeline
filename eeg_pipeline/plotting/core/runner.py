@@ -1,3 +1,4 @@
+import fnmatch
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Protocol
 
@@ -42,6 +43,13 @@ def safe_plot(
         **kwargs: Keyword arguments to pass to plot_func.
     """
     try:
+        patterns = getattr(ctx, "plot_name_patterns", None)
+        if patterns:
+            should_run = any(fnmatch.fnmatch(name, str(pat)) for pat in patterns)
+            if not should_run:
+                ctx.logger.debug(f"Skipped: {name}")
+                return
+
         if filename is not None:
             output_path = ctx.subdir(subdir) / filename
             plot_func(output_path, *args, **kwargs)

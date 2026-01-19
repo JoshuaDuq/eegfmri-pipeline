@@ -83,20 +83,10 @@
       "label": "Condition Comparison",
       "description": "Power differences between conditions",
       "required_files": [
-        "features_power*.tsv",
+        "features_power*.parquet",
         "events.tsv"
       ],
-      "requires_features": true
-    },
-    {
-      "id": "power_band_segment_condition",
-      "group": "power",
-      "label": "Band × Segment × Condition",
-      "description": "Power across bands and time segments by condition",
-      "required_files": [
-        "features_power*.tsv",
-        "events.tsv"
-      ],
+      "feature_categories": ["power"],
       "requires_features": true
     },
     {
@@ -105,9 +95,10 @@
       "label": "Topomaps (Baseline)",
       "description": "Band power topographic maps for baseline period",
       "required_files": [
-        "features_power*.tsv",
+        "features_power*.parquet",
         "epochs/*.fif"
       ],
+      "feature_categories": ["power"],
       "requires_features": true,
       "requires_epochs": true
     },
@@ -117,9 +108,10 @@
       "label": "Topomaps (Active)",
       "description": "Band power topographic maps for active period",
       "required_files": [
-        "features_power*.tsv",
+        "features_power*.parquet",
         "epochs/*.fif"
       ],
+      "feature_categories": ["power"],
       "requires_features": true,
       "requires_epochs": true
     },
@@ -129,8 +121,9 @@
       "label": "Variability Analysis",
       "description": "Comprehensive power variability diagnostics",
       "required_files": [
-        "features_power*.tsv"
+        "features_power*.parquet"
       ],
+      "feature_categories": ["power"],
       "requires_features": true
     },
     {
@@ -139,8 +132,9 @@
       "label": "Cross-Frequency Correlation",
       "description": "Correlation matrix between frequency bands",
       "required_files": [
-        "features_power*.tsv"
+        "features_power*.parquet"
       ],
+      "feature_categories": ["power"],
       "requires_features": true
     },
     {
@@ -151,6 +145,7 @@
       "required_files": [
         "epochs/*.fif"
       ],
+      "feature_categories": ["power"],
       "requires_epochs": true
     },
     {
@@ -159,9 +154,10 @@
       "label": "Topomaps from Features",
       "description": "Power topomaps generated from feature DataFrame",
       "required_files": [
-        "features_power*.tsv",
+        "features_power*.parquet",
         "epochs/*.fif"
       ],
+      "feature_categories": ["power"],
       "requires_features": true,
       "requires_epochs": true
     },
@@ -171,9 +167,10 @@
       "label": "Spectral Slope Topomap",
       "description": "Topographic map of 1/f spectral slope",
       "required_files": [
-        "features_aperiodic*.tsv",
+        "features_aperiodic*.parquet",
         "epochs/*.fif"
       ],
+      "feature_categories": ["aperiodic"],
       "requires_features": true,
       "requires_epochs": true
     },
@@ -183,9 +180,10 @@
       "label": "Condition Comparison",
       "description": "Connectivity differences between conditions",
       "required_files": [
-        "features_connectivity*.tsv",
+        "features_connectivity*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["connectivity"],
       "requires_features": true
     },
     {
@@ -194,9 +192,53 @@
       "label": "Sliding Window Dynamics",
       "description": "Connectivity trajectories over time windows",
       "required_files": [
-        "features_connectivity*.tsv"
+        "features_connectivity*.parquet"
       ],
+      "feature_categories": ["connectivity"],
       "requires_features": true
+    },
+    {
+      "id": "connectivity_circle_condition",
+      "group": "connectivity",
+      "label": "Circle by Condition",
+      "description": "Connectivity circles per measure and band by condition",
+      "required_files": [
+        "features_connectivity*.parquet",
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "feature_categories": ["connectivity"],
+      "feature_plot_patterns": ["*_circle_condition"],
+      "requires_features": true,
+      "requires_epochs": true
+    },
+    {
+      "id": "connectivity_heatmap",
+      "group": "connectivity",
+      "label": "Heatmaps",
+      "description": "Connectivity heatmaps per measure and band",
+      "required_files": [
+        "features_connectivity*.parquet",
+        "epochs/*.fif"
+      ],
+      "feature_categories": ["connectivity"],
+      "feature_plot_patterns": ["*_heatmap"],
+      "requires_features": true,
+      "requires_epochs": true
+    },
+    {
+      "id": "connectivity_network",
+      "group": "connectivity",
+      "label": "Networks",
+      "description": "Connectivity network visualizations per measure and band",
+      "required_files": [
+        "features_connectivity*.parquet",
+        "epochs/*.fif"
+      ],
+      "feature_categories": ["connectivity"],
+      "feature_plot_patterns": ["*_network"],
+      "requires_features": true,
+      "requires_epochs": true
     },
     {
       "id": "aperiodic_topomaps",
@@ -204,9 +246,10 @@
       "label": "Topomaps",
       "description": "Topographic maps of slope and offset",
       "required_files": [
-        "features_aperiodic*.tsv",
+        "features_aperiodic*.parquet",
         "epochs/*.fif"
       ],
+      "feature_categories": ["aperiodic"],
       "requires_features": true,
       "requires_epochs": true
     },
@@ -216,20 +259,10 @@
       "label": "Condition Comparison",
       "description": "Aperiodic differences between conditions",
       "required_files": [
-        "features_aperiodic*.tsv",
+        "features_aperiodic*.parquet",
         "events.tsv"
       ],
-      "requires_features": true
-    },
-    {
-      "id": "aperiodic_band_segment_condition",
-      "group": "aperiodic",
-      "label": "Band × Segment × Condition",
-      "description": "Aperiodic features across segments by condition",
-      "required_files": [
-        "features_aperiodic*.tsv",
-        "events.tsv"
-      ],
+      "feature_categories": ["aperiodic"],
       "requires_features": true
     },
     {
@@ -238,9 +271,10 @@
       "label": "Temporal Evolution",
       "description": "Aperiodic features over time bins",
       "required_files": [
-        "features_aperiodic*.tsv",
+        "features_aperiodic*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["aperiodic"],
       "requires_features": true
     },
     {
@@ -249,8 +283,9 @@
       "label": "ITPC Heatmap",
       "description": "Inter-trial phase coherence heatmaps",
       "required_files": [
-        "features_itpc*.tsv"
+        "features_itpc*.parquet"
       ],
+      "feature_categories": ["itpc"],
       "requires_features": true
     },
     {
@@ -259,9 +294,10 @@
       "label": "ITPC Topomaps",
       "description": "Topographic maps of phase coherence",
       "required_files": [
-        "features_itpc*.tsv",
+        "features_itpc*.parquet",
         "epochs/*.fif"
       ],
+      "feature_categories": ["itpc"],
       "requires_features": true,
       "requires_epochs": true
     },
@@ -271,20 +307,10 @@
       "label": "ITPC Condition Comparison",
       "description": "Phase coherence differences between conditions",
       "required_files": [
-        "features_itpc*.tsv",
+        "features_itpc*.parquet",
         "events.tsv"
       ],
-      "requires_features": true
-    },
-    {
-      "id": "itpc_band_segment_condition",
-      "group": "phase",
-      "label": "ITPC Band × Segment × Condition",
-      "description": "ITPC across bands and segments by condition",
-      "required_files": [
-        "features_itpc*.tsv",
-        "events.tsv"
-      ],
+      "feature_categories": ["itpc"],
       "requires_features": true
     },
     {
@@ -293,9 +319,10 @@
       "label": "ITPC Temporal Evolution",
       "description": "Phase coherence over time bins",
       "required_files": [
-        "features_itpc*.tsv",
+        "features_itpc*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["itpc"],
       "requires_features": true
     },
     {
@@ -304,8 +331,9 @@
       "label": "PAC Summary",
       "description": "Phase-amplitude coupling overview",
       "required_files": [
-        "features_pac*.tsv"
+        "features_pac*.parquet"
       ],
+      "feature_categories": ["pac"],
       "requires_features": true
     },
     {
@@ -314,8 +342,9 @@
       "label": "PAC Comodulograms",
       "description": "Phase-amplitude coupling frequency matrices",
       "required_files": [
-        "features_pac*.tsv"
+        "features_pac*.parquet"
       ],
+      "feature_categories": ["pac"],
       "requires_features": true
     },
     {
@@ -324,9 +353,10 @@
       "label": "PAC Condition Comparison",
       "description": "PAC differences between conditions",
       "required_files": [
-        "features_pac*.tsv",
+        "features_pac*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["pac"],
       "requires_features": true
     },
     {
@@ -335,8 +365,9 @@
       "label": "PAC Time Ribbons",
       "description": "PAC temporal dynamics ribbon plots",
       "required_files": [
-        "features_pac*.tsv"
+        "features_pac*.parquet"
       ],
+      "feature_categories": ["pac"],
       "requires_features": true
     },
     {
@@ -345,8 +376,9 @@
       "label": "Temporal Evolution",
       "description": "ERD/ERS time course plots",
       "required_files": [
-        "features_erds*.tsv"
+        "features_erds*.parquet"
       ],
+      "feature_categories": ["erds"],
       "requires_features": true
     },
     {
@@ -355,8 +387,9 @@
       "label": "Latency Distribution",
       "description": "Distribution of ERD/ERS onset and peak latencies",
       "required_files": [
-        "features_erds*.tsv"
+        "features_erds*.parquet"
       ],
+      "feature_categories": ["erds"],
       "requires_features": true
     },
     {
@@ -365,8 +398,9 @@
       "label": "ERD/ERS Separation",
       "description": "Separate ERD and ERS magnitude/duration",
       "required_files": [
-        "features_erds*.tsv"
+        "features_erds*.parquet"
       ],
+      "feature_categories": ["erds"],
       "requires_features": true
     },
     {
@@ -375,8 +409,9 @@
       "label": "Global Summary",
       "description": "Summary statistics across channels",
       "required_files": [
-        "features_erds*.tsv"
+        "features_erds*.parquet"
       ],
+      "feature_categories": ["erds"],
       "requires_features": true
     },
     {
@@ -385,9 +420,10 @@
       "label": "Condition Comparison",
       "description": "ERDS differences between conditions",
       "required_files": [
-        "features_erds*.tsv",
+        "features_erds*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["erds"],
       "requires_features": true
     },
     {
@@ -396,8 +432,9 @@
       "label": "By Band",
       "description": "Complexity metrics per frequency band",
       "required_files": [
-        "features_complexity*.tsv"
+        "features_complexity*.parquet"
       ],
+      "feature_categories": ["complexity"],
       "requires_features": true
     },
     {
@@ -406,20 +443,10 @@
       "label": "Condition Comparison",
       "description": "Complexity differences between conditions",
       "required_files": [
-        "features_complexity*.tsv",
+        "features_complexity*.parquet",
         "events.tsv"
       ],
-      "requires_features": true
-    },
-    {
-      "id": "complexity_band_segment_condition",
-      "group": "complexity",
-      "label": "Band × Segment × Condition",
-      "description": "Complexity across bands and segments by condition",
-      "required_files": [
-        "features_complexity*.tsv",
-        "events.tsv"
-      ],
+      "feature_categories": ["complexity"],
       "requires_features": true
     },
     {
@@ -428,9 +455,10 @@
       "label": "Temporal Evolution",
       "description": "Complexity over time bins",
       "required_files": [
-        "features_complexity*.tsv",
+        "features_complexity*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["complexity"],
       "requires_features": true
     },
     {
@@ -439,8 +467,9 @@
       "label": "Summary",
       "description": "Peak frequency and spectral features overview",
       "required_files": [
-        "features_spectral*.tsv"
+        "features_spectral*.parquet"
       ],
+      "feature_categories": ["spectral"],
       "requires_features": true
     },
     {
@@ -449,8 +478,9 @@
       "label": "Edge Frequency",
       "description": "Spectral edge frequency (95%) distributions",
       "required_files": [
-        "features_spectral*.tsv"
+        "features_spectral*.parquet"
       ],
+      "feature_categories": ["spectral"],
       "requires_features": true
     },
     {
@@ -459,20 +489,10 @@
       "label": "Condition Comparison",
       "description": "Spectral differences between conditions",
       "required_files": [
-        "features_spectral*.tsv",
+        "features_spectral*.parquet",
         "events.tsv"
       ],
-      "requires_features": true
-    },
-    {
-      "id": "spectral_band_segment_condition",
-      "group": "spectral",
-      "label": "Band × Segment × Condition",
-      "description": "Spectral features across bands and segments",
-      "required_files": [
-        "features_spectral*.tsv",
-        "events.tsv"
-      ],
+      "feature_categories": ["spectral"],
       "requires_features": true
     },
     {
@@ -481,9 +501,10 @@
       "label": "Temporal Evolution",
       "description": "Spectral features over time bins",
       "required_files": [
-        "features_spectral*.tsv",
+        "features_spectral*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["spectral"],
       "requires_features": true
     },
     {
@@ -492,8 +513,9 @@
       "label": "By Pair",
       "description": "Ratio values for each band pair",
       "required_files": [
-        "features_ratios*.tsv"
+        "features_ratios*.parquet"
       ],
+      "feature_categories": ["ratios"],
       "requires_features": true
     },
     {
@@ -502,20 +524,10 @@
       "label": "Condition Comparison",
       "description": "Ratio differences between conditions",
       "required_files": [
-        "features_ratios*.tsv",
+        "features_ratios*.parquet",
         "events.tsv"
       ],
-      "requires_features": true
-    },
-    {
-      "id": "ratios_band_segment_condition",
-      "group": "ratios",
-      "label": "Band × Segment × Condition",
-      "description": "Ratios across segments by condition",
-      "required_files": [
-        "features_ratios*.tsv",
-        "events.tsv"
-      ],
+      "feature_categories": ["ratios"],
       "requires_features": true
     },
     {
@@ -524,9 +536,10 @@
       "label": "Temporal Evolution",
       "description": "Ratios over time bins",
       "required_files": [
-        "features_ratios*.tsv",
+        "features_ratios*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["ratios"],
       "requires_features": true
     },
     {
@@ -535,8 +548,9 @@
       "label": "By Band",
       "description": "Asymmetry indices per frequency band",
       "required_files": [
-        "features_asymmetry*.tsv"
+        "features_asymmetry*.parquet"
       ],
+      "feature_categories": ["asymmetry"],
       "requires_features": true
     },
     {
@@ -545,20 +559,10 @@
       "label": "Condition Comparison",
       "description": "Asymmetry differences between conditions",
       "required_files": [
-        "features_asymmetry*.tsv",
+        "features_asymmetry*.parquet",
         "events.tsv"
       ],
-      "requires_features": true
-    },
-    {
-      "id": "asymmetry_band_segment_condition",
-      "group": "asymmetry",
-      "label": "Band × Segment × Condition",
-      "description": "Asymmetry across bands and segments",
-      "required_files": [
-        "features_asymmetry*.tsv",
-        "events.tsv"
-      ],
+      "feature_categories": ["asymmetry"],
       "requires_features": true
     },
     {
@@ -567,9 +571,10 @@
       "label": "Temporal Evolution",
       "description": "Asymmetry over time bins",
       "required_files": [
-        "features_asymmetry*.tsv",
+        "features_asymmetry*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["asymmetry"],
       "requires_features": true
     },
     {
@@ -578,8 +583,9 @@
       "label": "By Band",
       "description": "Burst metrics per frequency band",
       "required_files": [
-        "features_bursts*.tsv"
+        "features_bursts*.parquet"
       ],
+      "feature_categories": ["bursts"],
       "requires_features": true
     },
     {
@@ -588,20 +594,10 @@
       "label": "Condition Comparison",
       "description": "Burst differences between conditions",
       "required_files": [
-        "features_bursts*.tsv",
+        "features_bursts*.parquet",
         "events.tsv"
       ],
-      "requires_features": true
-    },
-    {
-      "id": "burst_band_segment_condition",
-      "group": "bursts",
-      "label": "Band × Segment × Condition",
-      "description": "Burst metrics across bands and segments",
-      "required_files": [
-        "features_bursts*.tsv",
-        "events.tsv"
-      ],
+      "feature_categories": ["bursts"],
       "requires_features": true
     },
     {
@@ -610,9 +606,10 @@
       "label": "Temporal Evolution",
       "description": "Burst dynamics over time bins",
       "required_files": [
-        "features_bursts*.tsv",
+        "features_bursts*.parquet",
         "events.tsv"
       ],
+      "feature_categories": ["bursts"],
       "requires_features": true
     },
     {
@@ -621,8 +618,9 @@
       "label": "Feature Distributions",
       "description": "Distribution of quality metrics across trials",
       "required_files": [
-        "features_quality*.tsv"
+        "features_quality*.parquet"
       ],
+      "feature_categories": ["quality"],
       "requires_features": true
     },
     {
@@ -631,8 +629,9 @@
       "label": "Outlier Heatmap",
       "description": "Heatmap of outlier trials and features",
       "required_files": [
-        "features_quality*.tsv"
+        "features_quality*.parquet"
       ],
+      "feature_categories": ["quality"],
       "requires_features": true
     },
     {
@@ -641,8 +640,9 @@
       "label": "SNR Distribution",
       "description": "Signal-to-noise ratio distributions",
       "required_files": [
-        "features_quality*.tsv"
+        "features_quality*.parquet"
       ],
+      "feature_categories": ["quality"],
       "requires_features": true
     },
     {
@@ -653,6 +653,7 @@
       "required_files": [
         "epochs/*.fif"
       ],
+      "erp_plots": ["butterfly"],
       "requires_epochs": true
     },
     {
@@ -663,6 +664,7 @@
       "required_files": [
         "epochs/*.fif"
       ],
+      "erp_plots": ["roi"],
       "requires_epochs": true
     },
     {
@@ -674,6 +676,7 @@
         "epochs/*.fif",
         "events.tsv"
       ],
+      "erp_plots": ["contrast"],
       "requires_epochs": true
     },
     {
@@ -684,16 +687,98 @@
       "required_files": [
         "epochs/*.fif"
       ],
+      "erp_plots": ["topomaps"],
       "requires_epochs": true
     },
     {
-      "id": "TFR",
+      "id": "tfr_scalpmean",
       "group": "tfr",
       "label": "Scalp-Mean TFR",
       "description": "Scalp-mean time-frequency representation",
       "required_files": [
         "epochs/*.fif"
       ],
+      "tfr_plots": ["scalpmean"],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_scalpmean_contrast",
+      "group": "tfr",
+      "label": "Scalp-Mean Contrast",
+      "description": "Pain vs non-pain scalp-mean TFR contrast",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "tfr_plots": ["scalpmean_contrast"],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_channels",
+      "group": "tfr",
+      "label": "Channel TFRs",
+      "description": "Time-frequency per channel",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "tfr_plots": ["channels"],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_channels_contrast",
+      "group": "tfr",
+      "label": "Channel Contrasts",
+      "description": "Pain vs non-pain channel TFR contrasts",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "tfr_plots": ["channels_contrast"],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_rois",
+      "group": "tfr",
+      "label": "ROI TFRs",
+      "description": "Time-frequency per ROI",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "tfr_plots": ["rois"],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_rois_contrast",
+      "group": "tfr",
+      "label": "ROI Contrasts",
+      "description": "Pain vs non-pain ROI TFR contrasts",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "tfr_plots": ["rois_contrast"],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_topomaps",
+      "group": "tfr",
+      "label": "TFR Topomaps",
+      "description": "Time-frequency topographic maps",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "tfr_plots": ["topomaps"],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_band_evolution",
+      "group": "tfr",
+      "label": "Band Evolution",
+      "description": "Frequency band power evolution over time",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "tfr_plots": ["band_evolution"],
       "requires_epochs": true
     },
     {
@@ -705,6 +790,7 @@
         "features_*.tsv",
         "events.tsv"
       ],
+      "feature_categories": ["temporal"],
       "requires_features": true
     },
     {
@@ -714,7 +800,8 @@
       "description": "Rating distributions and psychometrics",
       "required_files": [
         "events.tsv"
-      ]
+      ],
+      "behavior_plots": ["psychometrics"]
     },
     {
       "id": "behavior_power_scatter",
@@ -725,6 +812,7 @@
         "features_power*.tsv",
         "epochs/*.fif"
       ],
+      "behavior_plots": ["power_roi_scatter"],
       "requires_epochs": true,
       "requires_features": true
     },
@@ -737,6 +825,7 @@
         "features_complexity*.tsv",
         "epochs/*.fif"
       ],
+      "behavior_plots": ["complexity_scatter"],
       "requires_epochs": true,
       "requires_features": true
     },
@@ -749,6 +838,7 @@
         "features_aperiodic*.tsv",
         "epochs/*.fif"
       ],
+      "behavior_plots": ["aperiodic_scatter"],
       "requires_epochs": true,
       "requires_features": true
     },
@@ -761,6 +851,7 @@
         "features_connectivity*.tsv",
         "epochs/*.fif"
       ],
+      "behavior_plots": ["connectivity_scatter"],
       "requires_epochs": true,
       "requires_features": true
     },
@@ -773,6 +864,7 @@
         "features_itpc*.tsv",
         "epochs/*.fif"
       ],
+      "behavior_plots": ["itpc_scatter"],
       "requires_epochs": true,
       "requires_features": true
     },
@@ -784,6 +876,7 @@
       "required_files": [
         "stats/temporal_correlations/temporal_correlations_by_condition*.npz"
       ],
+      "behavior_plots": ["temporal_topomaps"],
       "requires_stats": true
     },
     {
@@ -794,6 +887,7 @@
       "required_files": [
         "stats/pain_nonpain_time_clusters_*.tsv"
       ],
+      "behavior_plots": ["pain_clusters"],
       "requires_stats": true
     },
     {
@@ -805,6 +899,7 @@
         "features_power*.tsv",
         "epochs/*.fif"
       ],
+      "behavior_plots": ["dose_response"],
       "requires_epochs": true,
       "requires_features": true
     },
@@ -816,6 +911,7 @@
       "required_files": [
         "stats/correlations*.tsv"
       ],
+      "behavior_plots": ["top_predictors"],
       "requires_stats": true
     },
     {
@@ -827,6 +923,7 @@
         "stats/trials*.tsv",
         "stats/temperature_model_comparison*.tsv"
       ],
+      "behavior_plots": ["temperature_models"],
       "requires_stats": true
     },
     {
@@ -837,6 +934,7 @@
       "required_files": [
         "stats/stability_groupwise*.tsv"
       ],
+      "behavior_plots": ["stability_groupwise"],
       "requires_stats": true
     },
     {
@@ -846,7 +944,8 @@
       "description": "LOSO regression diagnostics",
       "required_files": [
         "machine_learning/regression/loso_predictions.tsv"
-      ]
+      ],
+      "ml_mode": "regression"
     },
     {
       "id": "ml_timegen_plots",
@@ -855,7 +954,8 @@
       "description": "Time-generalization matrices",
       "required_files": [
         "machine_learning/time_generalization/time_generalization_regression.npz"
-      ]
+      ],
+      "ml_mode": "timegen"
     }
   ]
 }

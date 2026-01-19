@@ -16,10 +16,7 @@ import mne
 from eeg_pipeline.plotting.features.context import FeaturePlotContext, VisualizationRegistry
 from eeg_pipeline.plotting.core.runner import safe_plot
 from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
-from eeg_pipeline.utils.analysis.tfr import (
-    compute_tfr_for_visualization,
-    compute_tfr_morlet,
-)
+from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
 from eeg_pipeline.utils.analysis.windowing import sliding_window_centers
 from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
@@ -88,7 +85,6 @@ from eeg_pipeline.plotting.features.power import (
     plot_power_spectral_density,
 )
 from eeg_pipeline.plotting.features.roi import (
-    plot_band_segment_condition,
     plot_temporal_evolution,
 )
 
@@ -140,26 +136,8 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
             aper_dir,
             ctx.logger,
             ctx.config,
+            stats_dir=ctx.stats_dir,
         )
-
-        if ctx.all_features is not None:
-            safe_plot(
-                ctx,
-                saved_files,
-                "aperiodic_band_segment_condition",
-                "aperiodic",
-                None,
-                plot_band_segment_condition,
-                ctx.all_features,
-                ctx.aligned_events,
-                ctx.subject,
-                aper_dir,
-                ctx.logger,
-                ctx.config,
-                "aperiodic",
-                "Aperiodic",
-                ["baseline", "active"],
-            )
 
         if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
             safe_plot(
@@ -313,6 +291,7 @@ def plot_connectivity_condition(ctx: FeaturePlotContext, saved_files):
         save_dir=ctx.subdir("connectivity"),
         logger=ctx.logger,
         config=ctx.config,
+        stats_dir=ctx.stats_dir,
     )
 
 
@@ -390,6 +369,7 @@ def plot_erds(ctx: FeaturePlotContext, saved_files):
             save_dir=erds_dir,
             logger=ctx.logger,
             config=ctx.config,
+            stats_dir=ctx.stats_dir,
         )
 
 
@@ -431,25 +411,7 @@ def plot_complexity(ctx: FeaturePlotContext, saved_files):
             save_dir=comp_dir,
             logger=ctx.logger,
             config=ctx.config,
-        )
-
-    if ctx.all_features is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "complexity_band_segment_condition",
-            "complexity",
-            None,
-            plot_band_segment_condition,
-            ctx.all_features,
-            ctx.aligned_events,
-            ctx.subject,
-            comp_dir,
-            ctx.logger,
-            ctx.config,
-            "comp",
-            "Complexity",
-            ["baseline", "active"],
+            stats_dir=ctx.stats_dir,
         )
 
     if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
@@ -520,25 +482,7 @@ def plot_spectral(ctx: FeaturePlotContext, saved_files):
             save_dir=spectral_dir,
             logger=ctx.logger,
             config=ctx.config,
-        )
-
-    if ctx.all_features is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "spectral_band_segment_condition",
-            "spectral",
-            None,
-            plot_band_segment_condition,
-            ctx.all_features,
-            ctx.aligned_events,
-            ctx.subject,
-            spectral_dir,
-            ctx.logger,
-            ctx.config,
-            "spectral",
-            "Spectral Peak",
-            ["baseline", "active"],
+            stats_dir=ctx.stats_dir,
         )
 
     if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
@@ -598,25 +542,7 @@ def plot_ratios(ctx: FeaturePlotContext, saved_files):
             save_dir=ratios_dir,
             logger=ctx.logger,
             config=ctx.config,
-        )
-
-    if ctx.all_features is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "ratios_band_segment_condition",
-            "ratios",
-            None,
-            plot_band_segment_condition,
-            ctx.all_features,
-            ctx.aligned_events,
-            ctx.subject,
-            ratios_dir,
-            ctx.logger,
-            ctx.config,
-            "ratios",
-            "Band Ratios",
-            ["baseline", "active"],
+            stats_dir=ctx.stats_dir,
         )
 
     if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
@@ -676,25 +602,7 @@ def plot_asymmetry(ctx: FeaturePlotContext, saved_files):
             save_dir=asym_dir,
             logger=ctx.logger,
             config=ctx.config,
-        )
-
-    if ctx.all_features is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "asymmetry_band_segment_condition",
-            "asymmetry",
-            None,
-            plot_band_segment_condition,
-            ctx.all_features,
-            ctx.aligned_events,
-            ctx.subject,
-            asym_dir,
-            ctx.logger,
-            ctx.config,
-            "asymmetry",
-            "Hemispheric Asymmetry",
-            ["baseline", "active"],
+            stats_dir=ctx.stats_dir,
         )
 
     if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
@@ -754,25 +662,7 @@ def plot_bursts(ctx: FeaturePlotContext, saved_files):
             save_dir=bursts_dir,
             logger=ctx.logger,
             config=ctx.config,
-        )
-
-    if ctx.all_features is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "burst_band_segment_condition",
-            "bursts",
-            None,
-            plot_band_segment_condition,
-            ctx.all_features,
-            ctx.aligned_events,
-            ctx.subject,
-            bursts_dir,
-            ctx.logger,
-            ctx.config,
-            "bursts",
-            "Burst Dynamics",
-            ["baseline", "active"],
+            stats_dir=ctx.stats_dir,
         )
 
     if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
@@ -898,25 +788,9 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
             itpc_dir,
             ctx.logger,
             ctx.config,
+            stats_dir=ctx.stats_dir,
         )
 
-        safe_plot(
-            ctx,
-            saved_files,
-            "itpc_band_segment_condition",
-            "itpc",
-            None,
-            plot_band_segment_condition,
-            ctx.itpc_df,
-            ctx.aligned_events,
-            ctx.subject,
-            itpc_dir,
-            ctx.logger,
-            ctx.config,
-            "itpc",
-            "ITPC",
-            ["baseline", "active"],
-        )
 
     if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
         safe_plot(
@@ -1003,9 +877,11 @@ def pac_suite(ctx: FeaturePlotContext, saved_files):
 
 
 @VisualizationRegistry.register("power")
-def plot_tfr(ctx: FeaturePlotContext, saved_files):
+def plot_tfr_visualization(ctx: FeaturePlotContext, saved_files):
+    """Generate time-frequency representation visualization."""
     if ctx.epochs is None:
         return
+
     safe_plot(
         ctx,
         saved_files,
@@ -1018,9 +894,17 @@ def plot_tfr(ctx: FeaturePlotContext, saved_files):
         ctx.logger,
     )
 
-    tfr = compute_tfr_morlet(ctx.epochs, ctx.config, ctx.logger)
+
+@VisualizationRegistry.register("power")
+def plot_psd_visualization(ctx: FeaturePlotContext, saved_files):
+    """Generate power spectral density visualization."""
+    if ctx.epochs is None:
+        return
+
+    tfr = ctx.get_or_compute_tfr()
     if tfr is None:
         return
+
     safe_plot(
         ctx,
         saved_files,
@@ -1055,26 +939,8 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
         save_dir=ctx.subdir("power"),
         logger=ctx.logger,
         config=ctx.config,
+        stats_dir=ctx.stats_dir,
     )
-
-    if ctx.all_features is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "power_band_segment_condition",
-            "power",
-            None,
-            plot_band_segment_condition,
-            ctx.all_features,
-            ctx.aligned_events,
-            ctx.subject,
-            ctx.subdir("power"),
-            ctx.logger,
-            ctx.config,
-            "power",
-            "Band Power",
-            ["baseline", "active"],
-        )
 
 
 @VisualizationRegistry.register("power")

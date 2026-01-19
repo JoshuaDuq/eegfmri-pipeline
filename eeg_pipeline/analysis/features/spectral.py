@@ -487,12 +487,6 @@ def extract_power_features(
 
     n_epochs = len(tfr_data)
     
-    baseline_df = getattr(ctx, "baseline_df", None)
-    baseline_arrays = _build_baseline_arrays(baseline_df, channel_names)
-    
-    require_baseline = bool(ctx.config.get("feature_engineering.power.require_baseline", True))
-    _validate_baseline_requirements(baseline_df, n_epochs, is_tfr_baselined, require_baseline)
-    
     segment_name = getattr(ctx, "name", None)
     ctx.logger.info(f"Computing power features for segment: {segment_name or 'unnamed'}")
     
@@ -507,6 +501,55 @@ def extract_power_features(
     
     epsilon_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", EPSILON_PSD))
     output_features = {}
+
+    # Scientifically valid baseline export:
+    # - For baseline segment, emit raw mean power (not logratio≈0).
+    # - For other segments, emit baseline-normalized power (logratio) unless TFR is already baselined.
+    if str(segment_name or "").strip().lower() == "baseline" and not is_tfr_baselined:
+        for band, frequency_mask in band_frequency_masks.items():
+            try:
+                raw_power = _compute_frequency_weighted_power(
+                    tfr_data, frequency_mask, time_mask, freqs
+                )
+
+                if "channels" in spatial_modes:
+                    for channel_idx, channel_name in enumerate(channel_names):
+                        output_features[
+                            NamingSchema.build("power", "baseline", band, "ch", "mean", channel=channel_name)
+                        ] = raw_power[:, channel_idx]
+
+                if "global" in spatial_modes:
+                    output_features[
+                        NamingSchema.build("power", "baseline", band, "global", "mean")
+                    ] = np.nanmean(raw_power, axis=1)
+
+                if "roi" in spatial_modes and roi_map:
+                    for roi_name, channel_indices in roi_map.items():
+                        if not channel_indices:
+                            continue
+                        output_features[
+                            NamingSchema.build("power", "baseline", band, "roi", "mean", channel=roi_name)
+                        ] = np.nanmean(raw_power[:, channel_indices], axis=1)
+
+            except Exception as e:
+                ctx.logger.error(f"Error computing baseline power features for {band}: {e}")
+
+        if not output_features:
+            return pd.DataFrame(), []
+
+        features_df = pd.DataFrame(output_features)
+        features_df.attrs["baseline_mode"] = "raw_mean"
+        features_df.attrs["evoked_subtracted"] = bool(getattr(ctx, "power_evoked_subtracted", False))
+        features_df.attrs["evoked_subtracted_conditionwise"] = bool(
+            getattr(ctx, "power_evoked_subtracted_conditionwise", False)
+        )
+        return features_df, list(features_df.columns)
+
+    baseline_df = getattr(ctx, "baseline_df", None)
+    baseline_arrays = _build_baseline_arrays(baseline_df, channel_names)
+
+    require_baseline = bool(ctx.config.get("feature_engineering.power.require_baseline", True))
+    _validate_baseline_requirements(baseline_df, n_epochs, is_tfr_baselined, require_baseline)
     
     for band, frequency_mask in band_frequency_masks.items():
         try:

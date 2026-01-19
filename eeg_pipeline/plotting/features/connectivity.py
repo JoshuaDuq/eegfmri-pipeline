@@ -233,8 +233,9 @@ def _plot_window_comparison_connectivity(
                     data_by_band[band] = (values1, values2)
             
             if data_by_band:
+                from eeg_pipeline.utils.formatting import sanitize_label
                 measure_safe = measure.lower()
-                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
                 suffix = f"_roi-{roi_safe}" if roi_safe else ""
                 save_path = save_dir / (
                     f"sub-{subject}_connectivity_{measure_safe}_by_condition{suffix}_window"
@@ -923,10 +924,13 @@ def _plot_column_comparison_connectivity(
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats, get_band_color
     
-    comparison_info = extract_comparison_mask(events_df, config)
+    comparison_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comparison_info:
         if logger:
-            logger.debug("Column comparison requested but config incomplete")
+            logger.warning(
+                "Column comparison enabled but config incomplete. "
+                "Set plotting.comparisons.comparison_column and comparison_values."
+            )
         return
     
     mask1, mask2, label1, label2 = comparison_info
@@ -1032,8 +1036,9 @@ def _plot_column_comparison_connectivity(
             
             plt.tight_layout()
             
+            from eeg_pipeline.utils.formatting import sanitize_label
             measure_safe = measure.lower()
-            roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+            roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
             suffix = f"_roi-{roi_safe}" if roi_safe else ""
             filename = f"sub-{subject}_connectivity_{measure_safe}_by_condition{suffix}_column"
             

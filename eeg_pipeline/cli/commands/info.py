@@ -22,6 +22,7 @@ MODE_CONFIG = "config"
 MODE_VERSION = "version"
 MODE_PLOTTERS = "plotters"
 MODE_DISCOVER = "discover"
+MODE_ROIS = "rois"
 MODE_FMRI_CONDITIONS = "fmri-conditions"
 MODE_FMRI_COLUMNS = "fmri-columns"
 
@@ -122,8 +123,8 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS],
-        help="What to show: subjects, features, config, version, discover columns, fmri-conditions, or fmri-columns",
+        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER, MODE_ROIS, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS],
+        help="What to show: subjects, features, config, version, discover columns, rois, fmri-conditions, or fmri-columns",
     )
     parser.add_argument(
         "target",
@@ -779,6 +780,88 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
         _print_discovery_report(result)
 
 
+def _handle_rois_mode(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
+    """Handle rois mode: discover available ROIs from feature parquet files."""
+    import re
+    import pandas as pd
+    from eeg_pipeline.infra.paths import resolve_deriv_root, deriv_features_path
+
+    deriv_root = resolve_deriv_root(config=config)
+
+    subject = args.subject
+    if not subject and subjects:
+        subject = subjects[0]
+
+    if not subject:
+        # Try to find first available subject
+        for sub_dir in sorted(deriv_root.glob("sub-*")):
+            if sub_dir.is_dir():
+                subject = sub_dir.name.replace("sub-", "")
+                break
+
+    result = {
+        "rois": [],
+        "subject": subject,
+        "source": None,
+    }
+
+    if not subject:
+        result["error"] = "No subject found"
+        if args.output_json:
+            _print_json_output(result)
+        else:
+            print("Error: No subject found for ROI discovery")
+        return
+
+    features_dir = deriv_features_path(deriv_root, subject)
+    if not features_dir.exists():
+        result["error"] = f"Features directory not found: {features_dir}"
+        if args.output_json:
+            _print_json_output(result)
+        else:
+            print(f"Error: Features directory not found: {features_dir}")
+        return
+
+    # Search for parquet files in category subdirectories
+    rois = set()
+    source_file = None
+
+    for category_dir in sorted(features_dir.iterdir()):
+        if not category_dir.is_dir():
+            continue
+
+        for fpath in category_dir.glob("features_*.parquet"):
+            if source_file is None:
+                source_file = str(fpath)
+
+            try:
+                df = pd.read_parquet(fpath)
+                roi_cols = [c for c in df.columns if "_roi_" in c]
+
+                for col in roi_cols:
+                    # Pattern: ..._roi_ROIName_metric_...
+                    # ROI names are like: Frontal, Sensorimotor_Left, ParOccipital_Midline, Midline_FrontalCentral
+                    match = re.search(r"_roi_([A-Za-z]+(?:_(?:Left|Right|Midline|FrontalCentral))?)_", col)
+                    if match:
+                        rois.add(match.group(1))
+            except Exception:
+                continue
+
+    result["rois"] = sorted(rois)
+    result["source"] = source_file
+
+    if args.output_json:
+        _print_json_output(result)
+    else:
+        if rois:
+            print(f"Available ROIs for sub-{subject}:")
+            for roi in sorted(rois):
+                print(f"  - {roi}")
+            print(f"\nTotal: {len(rois)} ROIs")
+        else:
+            print(f"No ROIs found for sub-{subject}")
+
+
 def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
     """Handle fmri-columns mode: discover columns from fMRI events files."""
     from eeg_pipeline.cli.commands.base import discover_fmri_event_columns
@@ -833,6 +916,8 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
         _handle_fmri_conditions_mode(args, config)
     elif args.mode == MODE_FMRI_COLUMNS:
         _handle_fmri_columns_mode(args, config)
+    elif args.mode == MODE_ROIS:
+        _handle_rois_mode(args, subjects, config)
     elif args.mode == MODE_DISCOVER:
         _handle_discover_mode(args, subjects, config)
     elif args.mode == MODE_SUBJECTS:
