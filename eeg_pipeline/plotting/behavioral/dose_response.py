@@ -274,6 +274,7 @@ def _plot_dose_response_curves(
     output_dir: Path,
     saved_files: Dict[str, Path],
     logger: logging.Logger,
+    config: Any = None,
 ) -> None:
     """Plot dose-response curves for each frequency band."""
     fig, axes = plt.subplots(2, 3, figsize=(14, 9))
@@ -345,7 +346,7 @@ def _plot_dose_response_curves(
     
     feature_key = plot_config.feature_type.lower().replace(" ", "_")
     path = output_dir / f"sub-{subject}_{feature_key}_dose_response_curves.png"
-    save_fig(fig, path)
+    save_fig(fig, path, config=config)
     plt.close(fig)
     saved_files[f"{feature_key}_dose_response_curves"] = path
     logger.info(f"Created {plot_config.feature_type} dose-response curves plot")
@@ -360,6 +361,7 @@ def _plot_nonlinearity_test(
     output_dir: Path,
     saved_files: Dict[str, Path],
     logger: logging.Logger,
+    config: Any = None,
 ) -> None:
     """Test for nonlinear dose-response relationships."""
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -455,7 +457,7 @@ def _plot_nonlinearity_test(
     plt.tight_layout()
     feature_key = plot_config.feature_type.lower()
     path = output_dir / f"sub-{subject}_{feature_key}_nonlinearity_test.png"
-    save_fig(fig, path)
+    save_fig(fig, path, config=config)
     plt.close(fig)
     saved_files[f"{feature_key}_nonlinearity_test"] = path
     logger.info(f"Created {plot_config.feature_type} nonlinearity test plot")
@@ -580,6 +582,7 @@ def _plot_threshold_detection(
     output_dir: Path,
     saved_files: Dict[str, Path],
     logger: logging.Logger,
+    config: Any = None,
 ) -> None:
     """Detect response thresholds via derivative and normalized response analysis."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -604,7 +607,7 @@ def _plot_threshold_detection(
     
     feature_key = plot_config.feature_type.lower()
     path = output_dir / f"sub-{subject}_{feature_key}_threshold_detection.png"
-    save_fig(fig, path)
+    save_fig(fig, path, config=config)
     plt.close(fig)
     saved_files[f"{feature_key}_threshold_detection"] = path
     logger.info(f"Created {plot_config.feature_type} threshold detection plot")
@@ -618,6 +621,7 @@ def _plot_aperiodic_dose_response(
     output_dir: Path,
     saved_files: Dict[str, Path],
     logger: logging.Logger,
+    config: Any = None,
 ) -> None:
     """Plot dose-response curves for aperiodic parameters (slope, offset)."""
     n_metrics = len(aper_cols)
@@ -694,7 +698,7 @@ def _plot_aperiodic_dose_response(
     plt.tight_layout()
     
     path = output_dir / f"sub-{subject}_aperiodic_dose_response.png"
-    save_fig(fig, path)
+    save_fig(fig, path, config=config)
     plt.close(fig)
     saved_files["aperiodic_dose_response"] = path
     logger.info("Created aperiodic dose-response plot")
@@ -727,13 +731,13 @@ def _plot_feature_dose_response(
 ) -> None:
     """Create all dose-response plots for a feature type."""
     _plot_dose_response_curves(
-        df, temp_col, feature_cols, plot_config, subject, output_dir, saved_files, logger
+        df, temp_col, feature_cols, plot_config, subject, output_dir, saved_files, logger, config=config
     )
     _plot_nonlinearity_test(
-        df, temp_col, feature_cols, plot_config, subject, output_dir, saved_files, logger
+        df, temp_col, feature_cols, plot_config, subject, output_dir, saved_files, logger, config=config
     )
     _plot_threshold_detection(
-        df, temp_col, feature_cols, plot_config, subject, output_dir, saved_files, logger
+        df, temp_col, feature_cols, plot_config, subject, output_dir, saved_files, logger, config=config
     )
 
 
@@ -858,6 +862,7 @@ def visualize_dose_response(
                     aper_dir,
                     saved_files,
                     logger,
+                    config,
                 )
     
     if "itpc" in additional_features:

@@ -90,41 +90,18 @@
       "requires_features": true
     },
     {
-      "id": "band_power_topomaps_baseline",
+      "id": "band_power_topomaps",
       "group": "power",
-      "label": "Topomaps (Baseline)",
-      "description": "Band power topographic maps for baseline period",
+      "label": "Topomaps",
+      "description": "Band power topographic maps for selected time window",
       "required_files": [
         "features_power*.parquet",
         "epochs/*.fif"
       ],
       "feature_categories": ["power"],
+      "feature_plot_patterns": ["band_power_topomaps*"],
       "requires_features": true,
       "requires_epochs": true
-    },
-    {
-      "id": "band_power_topomaps_active",
-      "group": "power",
-      "label": "Topomaps (Active)",
-      "description": "Band power topographic maps for active period",
-      "required_files": [
-        "features_power*.parquet",
-        "epochs/*.fif"
-      ],
-      "feature_categories": ["power"],
-      "requires_features": true,
-      "requires_epochs": true
-    },
-    {
-      "id": "power_variability_comprehensive",
-      "group": "power",
-      "label": "Variability Analysis",
-      "description": "Comprehensive power variability diagnostics",
-      "required_files": [
-        "features_power*.parquet"
-      ],
-      "feature_categories": ["power"],
-      "requires_features": true
     },
     {
       "id": "cross_frequency_power_correlation",
@@ -146,32 +123,6 @@
         "epochs/*.fif"
       ],
       "feature_categories": ["power"],
-      "requires_epochs": true
-    },
-    {
-      "id": "power_topomaps_from_df",
-      "group": "power",
-      "label": "Topomaps from Features",
-      "description": "Power topomaps generated from feature DataFrame",
-      "required_files": [
-        "features_power*.parquet",
-        "epochs/*.fif"
-      ],
-      "feature_categories": ["power"],
-      "requires_features": true,
-      "requires_epochs": true
-    },
-    {
-      "id": "spectral_slope_topomap",
-      "group": "power",
-      "label": "Spectral Slope Topomap",
-      "description": "Topographic map of 1/f spectral slope",
-      "required_files": [
-        "features_aperiodic*.parquet",
-        "epochs/*.fif"
-      ],
-      "feature_categories": ["aperiodic"],
-      "requires_features": true,
       "requires_epochs": true
     },
     {

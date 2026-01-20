@@ -48,9 +48,6 @@ from scipy.stats import mannwhitneyu
 FDR_ALPHA_DEFAULT = 0.05
 MIN_TRIALS_FOR_STATISTICS = 3
 MIN_CHANNELS_FOR_TOPO = 3
-CV_MODERATE_THRESHOLD = 0.5
-CV_HIGH_THRESHOLD = 1.0
-FANO_POISSON_THRESHOLD = 1.0
 HEATMAP_TEXT_THRESHOLD = 200
 MIN_TRIALS_FOR_VARIABILITY = 5
 MIN_EPOCHS_FOR_SEM = 2
@@ -58,7 +55,6 @@ BAR_LABEL_OFFSET = 0.02
 HISTOGRAM_BINS = 15
 MIN_FONT_SIZE = 6
 MAX_FONT_SIZE = 10
-NORMALITY_ALPHA = 0.05
 
 
 ###################################################################
@@ -153,6 +149,30 @@ def _get_comparison_rois(
     return roi_names
 
 
+def _get_power_columns_for_roi(
+    power_df: pd.DataFrame,
+    segment: str,
+    band: str,
+    roi_channels: List[str],
+) -> List[str]:
+    """Get power columns for a specific segment, band, and ROI channels."""
+    roi_set = set(roi_channels)
+    cols = []
+    for c in power_df.columns:
+        parsed = NamingSchema.parse(str(c))
+        if not (parsed.get("valid") and parsed.get("group") == "power"):
+            continue
+        if str(parsed.get("segment") or "") != segment:
+            continue
+        if str(parsed.get("band") or "") != band:
+            continue
+        channel_id = str(parsed.get("identifier") or "")
+        if channel_id and channel_id not in roi_set:
+            continue
+        cols.append(c)
+    return cols
+
+
 def _extract_band_data_for_roi(
     power_df: pd.DataFrame,
     bands: List[str],
@@ -186,6 +206,27 @@ def _extract_band_data_for_roi(
                 data_by_band[band] = (v1, v2)
     
     return data_by_band
+
+
+def _extract_multi_segment_data_for_roi(
+    power_df: pd.DataFrame,
+    bands: List[str],
+    segments: List[str],
+    roi_channels: List[str],
+) -> Dict[str, Dict[str, np.ndarray]]:
+    """Extract power data by band for multiple segments within an ROI.
+    
+    Returns:
+        Dict mapping band -> {segment_name -> values array}
+    """
+    from .utils import extract_multi_segment_data
+    return extract_multi_segment_data(
+        df=power_df,
+        group="power",
+        bands=bands,
+        segments=segments,
+        identifiers=roi_channels,
+    )
 
 
 def _extract_column_comparison_data(
@@ -281,10 +322,15 @@ def _plot_window_comparison(
     all_channels: List[str],
     stats_dir: Optional[Path],
 ) -> None:
-    """Plot window comparison (paired) for power by condition."""
-    from .utils import plot_paired_comparison
+    """Plot window comparison (paired) for power by condition.
     
-    seg1, seg2 = segments[0], segments[1]
+    Supports both 2-window comparison (simple paired) and multi-window comparison
+    (3+ windows with all pairwise brackets and significance asterisks).
+    """
+    from .utils import plot_paired_comparison, plot_multi_window_comparison
+    from eeg_pipeline.utils.formatting import sanitize_label
+    
+    use_multi_window = len(segments) > 2
     
     for roi_name in roi_names:
         if roi_name == "all":
@@ -295,30 +341,53 @@ def _plot_window_comparison(
         if not roi_channels:
             continue
         
-        data_by_band = _extract_band_data_for_roi(
-            power_df, bands, [seg1, seg2], roi_channels
-        )
-        
-        if not data_by_band:
-            continue
-        
-        from eeg_pipeline.utils.formatting import sanitize_label
         roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
         suffix = f"_roi-{roi_safe}" if roi_safe else ""
-        save_path = save_dir / f"sub-{subject}_power_by_condition{suffix}_window"
         
-        plot_paired_comparison(
-            data_by_band=data_by_band,
-            subject=subject,
-            save_path=save_path,
-            feature_label="Band Power",
-            config=config,
-            logger=logger,
-            label1=seg1.capitalize(),
-            label2=seg2.capitalize(),
-            roi_name=roi_name,
-            stats_dir=stats_dir,
-        )
+        if use_multi_window:
+            data_by_band = _extract_multi_segment_data_for_roi(
+                power_df, bands, segments, roi_channels
+            )
+            
+            if not data_by_band:
+                continue
+            
+            save_path = save_dir / f"sub-{subject}_power_by_condition{suffix}_multiwindow"
+            
+            plot_multi_window_comparison(
+                data_by_band=data_by_band,
+                subject=subject,
+                save_path=save_path,
+                feature_label="Band Power",
+                segments=segments,
+                config=config,
+                logger=logger,
+                roi_name=roi_name,
+                stats_dir=stats_dir,
+            )
+        else:
+            seg1, seg2 = segments[0], segments[1]
+            data_by_band = _extract_band_data_for_roi(
+                power_df, bands, [seg1, seg2], roi_channels
+            )
+            
+            if not data_by_band:
+                continue
+            
+            save_path = save_dir / f"sub-{subject}_power_by_condition{suffix}_window"
+            
+            plot_paired_comparison(
+                data_by_band=data_by_band,
+                subject=subject,
+                save_path=save_path,
+                feature_label="Band Power",
+                config=config,
+                logger=logger,
+                label1=seg1.capitalize(),
+                label2=seg2.capitalize(),
+                roi_name=roi_name,
+                stats_dir=stats_dir,
+            )
 
 
 def _plot_column_comparison(
@@ -334,10 +403,79 @@ def _plot_column_comparison(
     all_channels: List[str],
     stats_dir: Optional[Path],
 ) -> None:
-    """Plot column comparison (unpaired) for power by condition."""
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    """Plot column comparison (unpaired) for power by condition.
+    
+    Supports both 2-group comparison (simple unpaired) and multi-group comparison
+    (3+ groups with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
     from eeg_pipeline.utils.config.loader import get_config_value
-    from .utils import load_precomputed_paired_stats, get_precomputed_qvalues, apply_fdr_correction
+    from .utils import load_precomputed_paired_stats, get_precomputed_qvalues, apply_fdr_correction, plot_multi_group_column_comparison, get_named_segments
+    
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
+    
+    if use_multi_group:
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        if not multi_group_info:
+            if logger:
+                logger.warning("Multi-group column comparison enabled but config incomplete.")
+            return
+        
+        masks_dict, group_labels = multi_group_info
+        seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", None)
+        if not seg_name:
+            if logger:
+                logger.error("Column comparison requires plotting.comparisons.comparison_segment.")
+            return
+        
+        for roi_name in roi_names:
+            if roi_name == "all":
+                roi_channels = all_channels
+            else:
+                roi_channels = get_roi_channels(rois[roi_name], all_channels)
+            
+            if not roi_channels:
+                continue
+            
+            data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+            for band in bands:
+                cols = _get_power_columns_for_roi(power_df, seg_name, band, roi_channels)
+                if not cols:
+                    continue
+                
+                val_series = power_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                
+                group_values = {}
+                for label, mask in masks_dict.items():
+                    vals = val_series[mask].dropna().values
+                    if len(vals) > 0:
+                        group_values[label] = vals
+                
+                if len(group_values) >= 2:
+                    data_by_band[band] = group_values
+            
+            if data_by_band:
+                from eeg_pipeline.utils.formatting import sanitize_label
+                roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+                suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                save_path = save_dir / f"sub-{subject}_power_by_condition{suffix}_multigroup"
+                
+                plot_multi_group_column_comparison(
+                    data_by_band=data_by_band,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label="Band Power",
+                    groups=group_labels,
+                    config=config,
+                    logger=logger,
+                    roi_name=roi_name,
+                    stats_dir=stats_dir,
+                )
+        
+        if logger:
+            logger.info(f"Saved power multi-group column comparison for {len(roi_names)} ROIs")
+        return
     
     comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comp_mask_info:
@@ -349,7 +487,26 @@ def _plot_column_comparison(
         return
     
     m1, m2, label1, label2 = comp_mask_info
-    seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+    
+    seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", None)
+    if not seg_name or seg_name.strip() == "":
+        if logger:
+            logger.error(
+                "Column comparison requires plotting.comparisons.comparison_segment to be set. "
+                "No fallback will be used."
+            )
+        return
+    
+    available_segments = get_named_segments(power_df, group="power")
+    if seg_name not in available_segments:
+        if logger:
+            logger.error(
+                f"Configured segment '{seg_name}' not found in data. "
+                f"Available segments: {available_segments}. "
+                "Column comparison will not be performed."
+            )
+        return
+    
     plot_cfg = get_plot_config(config)
     segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
     band_colors = {band: get_band_color(band, config) for band in bands}
@@ -383,6 +540,15 @@ def _plot_column_comparison(
             power_df, bands, seg_name, roi_channels
         )
         
+        bands_with_data = [band for col_idx, band in enumerate(bands) if cell_data.get(col_idx) is not None]
+        if not bands_with_data:
+            if logger:
+                logger.error(
+                    f"No power data found for segment '{seg_name}' in ROI {roi_name}. "
+                    f"Skipping column comparison plot for this ROI."
+                )
+            continue
+        
         plot_data = {}
         for col_idx, band in enumerate(bands):
             val_series = cell_data.get(col_idx)
@@ -391,6 +557,14 @@ def _plot_column_comparison(
                 continue
             v1 = val_series[m1].dropna().values
             v2 = val_series[m2].dropna().values
+            if len(v1) == 0 or len(v2) == 0:
+                if logger:
+                    logger.warning(
+                        f"No data for band {band} after filtering by conditions. "
+                        f"v1: {len(v1)} trials, v2: {len(v2)} trials"
+                    )
+                plot_data[col_idx] = None
+                continue
             plot_data[col_idx] = {"v1": v1, "v2": v2}
         
         if use_precomputed:
@@ -470,7 +644,7 @@ def _plot_column_comparison(
         filename = f"sub-{subject}_power_by_condition{suffix}_column"
         
         save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                 bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                 bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
         plt.close(fig)
         
         if logger:
@@ -820,7 +994,7 @@ def plot_channel_power_heatmap(
         fig,
         save_dir / f'sub-{subject}_channel_power_heatmap',
         formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches
+        bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config
     )
     plt.close(fig)
     logger.info("Saved channel power heatmap")
@@ -905,7 +1079,7 @@ def plot_power_time_courses(
     plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_power_time_courses_all_bands'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     logger.info("Saved combined power time courses for all bands")
 
@@ -1003,7 +1177,7 @@ def _plot_psd_by_temperature(
     plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_power_spectral_density_by_temperature'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     logger.info("Saved PSD by temperature (Induced)")
     return True
@@ -1054,7 +1228,7 @@ def _plot_psd_overall(
     
     output_path = save_dir / f'sub-{subject}_power_spectral_density'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     logger.info("Saved PSD (Induced)")
 
@@ -1215,7 +1389,7 @@ def plot_power_spectral_density_by_pain(
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     output_path = save_dir / f'sub-{subject}_power_spectral_density_condition'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     logger.info(f"Saved PSD comparison plot ({label1} vs {label2})")
 
@@ -1305,7 +1479,7 @@ def plot_power_time_course_by_temperature(
     plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_time_course_by_temperature_{band}'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     logger.info("Saved band time course by temperature (Induced)")
 
@@ -1373,198 +1547,9 @@ def plot_inter_band_spatial_power_correlation(
     plt.tight_layout()
     output_path = save_dir / f'sub-{subject}_inter_band_spatial_power_correlation'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     logger.info("Saved inter-band spatial power correlation")
-
-
-def plot_power_variability_comprehensive(
-    pow_df: pd.DataFrame,
-    bands: List[str],
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Trial-to-trial power variability with CV, Fano factor, and normality tests.
-    
-    Creates a comprehensive variability dashboard showing:
-    - CV (Coefficient of Variation) per band
-    - Fano factor per band (for positive-shifted data)
-    - Normality test results (Shapiro-Wilk)
-    - Distribution shapes with normality indicators
-    """
-    if pow_df is None or pow_df.empty:
-        return
-    
-    from .utils import compute_variability_metrics, test_normality
-    
-    plot_cfg = get_plot_config(config)
-    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
-    
-    variability_data = []
-    for band in bands:
-        band_str = str(band)
-        cols = power_cols_by_band.get(band_str, [])
-        if not cols:
-            continue
-        
-        trial_means = pow_df[cols].mean(axis=1).dropna().values
-        if len(trial_means) < MIN_TRIALS_FOR_VARIABILITY:
-            continue
-        
-        metrics = compute_variability_metrics(trial_means)
-        is_normal, p_norm, norm_interp = test_normality(trial_means)
-        
-        variability_data.append({
-            "band": band_str,
-            "cv": metrics["cv"],
-            "fano": metrics["fano"],
-            "std": metrics["std"],
-            "iqr": metrics["iqr"],
-            "mad": metrics["mad"],
-            "is_normal": is_normal,
-            "p_norm": p_norm,
-            "norm_interp": norm_interp,
-            "n_trials": len(trial_means),
-            "values": trial_means,
-        })
-    
-    if not variability_data:
-        return
-    
-    n_bands = len(variability_data)
-    fig = plt.figure(figsize=(14, 10))
-    gs = fig.add_gridspec(3, n_bands, height_ratios=[1.5, 1, 1], hspace=0.35, wspace=0.3)
-    
-    ax_cv = fig.add_subplot(gs[0, :len(variability_data)//2])
-    ax_fano = fig.add_subplot(gs[0, len(variability_data)//2:])
-    
-    band_names = [d["band"] for d in variability_data]
-    cvs = [d["cv"] for d in variability_data]
-    fanos = [d["fano"] for d in variability_data]
-    colors = [get_band_color(b, config) for b in band_names]
-    
-    x = np.arange(len(band_names))
-    bars_cv = ax_cv.bar(x, cvs, color=colors, alpha=0.8, edgecolor="white", linewidth=1.5)
-    ax_cv.set_xticks(x)
-    ax_cv.set_xticklabels([b.upper() for b in band_names], fontsize=plot_cfg.font.medium)
-    ax_cv.set_ylabel("Coefficient of Variation\n(std / |mean|)", fontsize=plot_cfg.font.label)
-    ax_cv.set_title("Trial-to-Trial Variability: CV", fontsize=plot_cfg.font.title, fontweight="bold")
-    ax_cv.spines["top"].set_visible(False)
-    ax_cv.spines["right"].set_visible(False)
-    ax_cv.axhline(CV_MODERATE_THRESHOLD, color="gray", linestyle="--", alpha=0.5, label=f"CV={CV_MODERATE_THRESHOLD} (moderate)")
-    ax_cv.axhline(CV_HIGH_THRESHOLD, color="gray", linestyle=":", alpha=0.5, label=f"CV={CV_HIGH_THRESHOLD} (high)")
-    ax_cv.legend(fontsize=plot_cfg.font.small, loc="upper right")
-    
-    for j, (bar, cv_val) in enumerate(zip(bars_cv, cvs)):
-        if np.isfinite(cv_val):
-            bar_center_x = bar.get_x() + bar.get_width() / 2
-            bar_top_y = bar.get_height() + BAR_LABEL_OFFSET
-            ax_cv.text(bar_center_x, bar_top_y, f"{cv_val:.2f}", 
-                      ha="center", va="bottom", fontsize=plot_cfg.font.small)
-    
-    valid_fanos = [(i, f) for i, f in enumerate(fanos) if np.isfinite(f) and f > 0]
-    if valid_fanos:
-        fano_x = [v[0] for v in valid_fanos]
-        fano_y = [v[1] for v in valid_fanos]
-        fano_colors = [colors[i] for i in fano_x]
-        bars_fano = ax_fano.bar(range(len(fano_x)), fano_y, color=fano_colors, alpha=0.8, 
-                                edgecolor="white", linewidth=1.5)
-        ax_fano.set_xticks(range(len(fano_x)))
-        ax_fano.set_xticklabels([band_names[i].upper() for i in fano_x], fontsize=plot_cfg.font.medium)
-        ax_fano.axhline(FANO_POISSON_THRESHOLD, color="gray", linestyle="--", alpha=0.5, label=f"Fano={FANO_POISSON_THRESHOLD} (Poisson)")
-        ax_fano.legend(fontsize=plot_cfg.font.small, loc="upper right")
-        
-        for bar, fano_val in zip(bars_fano, fano_y):
-            bar_center_x = bar.get_x() + bar.get_width() / 2
-            bar_top_y = bar.get_height() + BAR_LABEL_OFFSET
-            ax_fano.text(bar_center_x, bar_top_y, f"{fano_val:.2f}", 
-                        ha="center", va="bottom", fontsize=plot_cfg.font.small)
-    else:
-        ax_fano.text(0.5, 0.5, "Fano factor requires\npositive mean values", 
-                    ha="center", va="center", transform=ax_fano.transAxes, fontsize=plot_cfg.font.medium)
-    
-    ax_fano.set_ylabel("Fano Factor\n(var / mean)", fontsize=plot_cfg.font.label)
-    ax_fano.set_title("Trial-to-Trial Variability: Fano Factor", fontsize=plot_cfg.font.title, fontweight="bold")
-    ax_fano.spines["top"].set_visible(False)
-    ax_fano.spines["right"].set_visible(False)
-    
-    for i, d in enumerate(variability_data):
-        ax_dist = fig.add_subplot(gs[1, i])
-        
-        vals = d["values"]
-        color = get_band_color(d["band"], config)
-        norm_color = "#22C55E" if d["is_normal"] else "#EF4444"
-        
-        ax_dist.hist(vals, bins=HISTOGRAM_BINS, color=color, alpha=0.7, edgecolor="white", density=True)
-        ax_dist.axvline(np.mean(vals), color="black", linestyle="--", linewidth=1.5, label="Mean")
-        ax_dist.axvline(np.median(vals), color="blue", linestyle=":", linewidth=1.5, label="Median")
-        
-        ax_dist.set_xlabel("Power (dB)", fontsize=plot_cfg.font.small)
-        if i == 0:
-            ax_dist.set_ylabel("Density", fontsize=plot_cfg.font.small)
-        
-        norm_symbol = "✓" if d["is_normal"] else "✗"
-        ax_dist.set_title(f"{d['band'].upper()} {norm_symbol}", fontsize=plot_cfg.font.medium, 
-                         fontweight="bold", color=norm_color)
-        
-        ax_dist.text(0.95, 0.95, f"W p={d['p_norm']:.3f}" if np.isfinite(d['p_norm']) else "W p=N/A",
-                    transform=ax_dist.transAxes, ha="right", va="top", fontsize=plot_cfg.font.small,
-                    color=norm_color, bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
-        
-        ax_dist.spines["top"].set_visible(False)
-        ax_dist.spines["right"].set_visible(False)
-    
-    ax_table = fig.add_subplot(gs[2, :])
-    ax_table.axis("off")
-    
-    table_data = []
-    for d in variability_data:
-        norm_status = "Normal" if d["is_normal"] else "Non-normal"
-        table_data.append([
-            d["band"].upper(),
-            f"{d['n_trials']}",
-            f"{d['cv']:.3f}" if np.isfinite(d['cv']) else "N/A",
-            f"{d['fano']:.3f}" if np.isfinite(d['fano']) else "N/A",
-            f"{d['std']:.3f}" if np.isfinite(d['std']) else "N/A",
-            f"{d['iqr']:.3f}" if np.isfinite(d['iqr']) else "N/A",
-            f"{d['mad']:.3f}" if np.isfinite(d['mad']) else "N/A",
-            norm_status,
-        ])
-    
-    col_labels = ["Band", "N", "CV", "Fano", "SD", "IQR", "MAD", "Normality"]
-    table = ax_table.table(
-        cellText=table_data,
-        colLabels=col_labels,
-        loc="center",
-        cellLoc="center",
-        colColours=["#f0f0f0"] * len(col_labels),
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(plot_cfg.font.small)
-    table.scale(1.2, 1.5)
-    
-    for i, d in enumerate(variability_data):
-        cell = table[(i + 1, 7)]
-        cell.set_facecolor("#d4edda" if d["is_normal"] else "#f8d7da")
-    
-    fig.suptitle(f"Power Variability Analysis (sub-{subject})", 
-                fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.98)
-    
-    footer = f"n={len(pow_df)} trials | Shapiro-Wilk normality test α={NORMALITY_ALPHA} | ✓=Normal, ✗=Non-normal"
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    save_fig(fig, save_dir / f"sub-{subject}_power_variability_comprehensive",
-             formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
-    plt.close(fig)
-    
-    if logger:
-        logger.info("Saved comprehensive power variability plot")
-
-
 def plot_cross_frequency_power_correlation(
     pow_df: pd.DataFrame,
     bands: List[str],
@@ -1671,6 +1656,7 @@ def plot_cross_frequency_power_correlation(
                 text = f"{correlation:.2f}{sig_marker}"
             else:
                 text = "1.00"
+                is_fdr_significant = False
             
             fontweight = "bold" if is_fdr_significant else "normal"
             ax1.text(j, i, text, ha="center", va="center", color=text_color, 
@@ -1739,171 +1725,11 @@ def plot_cross_frequency_power_correlation(
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     save_fig(fig, save_dir / f"sub-{subject}_cross_frequency_power_correlation",
              formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     
     if logger:
         logger.info(f"Saved cross-frequency power correlation ({n_significant}/{n_tests} FDR significant)")
-
-
-def plot_power_topomaps_from_df(
-    pow_df: pd.DataFrame,
-    epochs_info: mne.Info,
-    bands: List[str],
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> None:
-    """Plot spatial distribution of power using DataFrame values (aggregated)."""
-    if pow_df is None or epochs_info is None:
-        return
-
-    plot_cfg = get_plot_config(config)
-    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
-    bands_to_plot = [b for b in bands if power_cols_by_band.get(str(b))]
-    if not bands_to_plot:
-        return
-    
-    n_cols = max(1, min(3, len(bands_to_plot)))
-    fig, axes = _setup_subplot_grid(len(bands_to_plot), n_cols=n_cols, config=config)
-    if not isinstance(axes, list):
-        axes = list(np.ravel(axes))
-    
-    features_found = False
-    
-    for i, band in enumerate(bands_to_plot):
-        ax = axes[i]
-        band_cols = []
-        for c in power_cols_by_band.get(str(band), []):
-            parsed = NamingSchema.parse(str(c))
-            if not (parsed.get("valid") and parsed.get("group") == "power"):
-                continue
-            if str(parsed.get("scope") or "") == "ch":
-                band_cols.append(c)
-        if not band_cols:
-            ax.axis('off')
-            continue
-            
-        mean_power = pow_df[band_cols].mean(axis=0)
-        data_map = _build_channel_data_map(mean_power)
-        
-        data_array = np.full(len(epochs_info.ch_names), np.nan)
-        mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
-        for ch_idx, ch_name in enumerate(epochs_info.ch_names):
-            if ch_name in data_map:
-                data_array[ch_idx] = data_map[ch_name]
-                mask[ch_idx] = True
-        
-        if mask.sum() > MIN_CHANNELS_FOR_TOPO:
-            im, _ = plot_topomap(
-                data_array[mask], 
-                mne.pick_info(epochs_info, np.where(mask)[0]),
-                axes=ax, show=False, cmap='viridis', contours=0
-            )
-            plt.colorbar(im, ax=ax, shrink=0.6)
-            features_found = True
-        ax.set_title(f"{band.upper()}")
-        
-    if features_found:
-        fig.suptitle(f"Spatial Distribution of Spectral Power (sub-{subject})", y=1.05, fontweight='bold')
-        plt.tight_layout()
-        save_fig(fig, save_dir / f"sub-{subject}_power_topomaps_agg", 
-                 formats=plot_cfg.formats, dpi=plot_cfg.dpi)
-    else:
-        plt.close(fig)
-        return
-
-    if logger:
-        logger.info("Saved aggregated power topomaps")
-
-
-def plot_spectral_slope_topomap(
-    aperiodic_df: pd.DataFrame,
-    epochs_info: mne.Info,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Spectral slope (1/f) topomap showing spatial distribution.
-    
-    Answers: "Where is the 1/f slope steepest/shallowest?"
-    """
-    if aperiodic_df is None or epochs_info is None:
-        return
-    
-    plot_cfg = get_plot_config(config)
-    
-    # Use current aperiodic_*_slope naming convention
-    slope_cols = [c for c in aperiodic_df.columns if c.startswith("aperiodic_") and "_slope" in c]
-    # Filter to only slope columns (not offset, r2, etc.)
-    slope_cols = [c for c in slope_cols if "slope" in c.lower() and "offset" not in c.lower()]
-    
-    if not slope_cols:
-        return
-    
-    ch_slopes = {}
-    for col in slope_cols:
-        parsed = NamingSchema.parse(col)
-        if parsed["valid"] and "identifier" in parsed:
-            ch_name = parsed["identifier"]
-            ch_slopes[ch_name] = aperiodic_df[col].mean()
-    
-    if not ch_slopes:
-        return
-    
-    data_array = np.full(len(epochs_info.ch_names), np.nan)
-    mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
-    
-    for ch_idx, ch_name in enumerate(epochs_info.ch_names):
-        if ch_name in ch_slopes:
-            data_array[ch_idx] = ch_slopes[ch_name]
-            mask[ch_idx] = True
-    
-    if mask.sum() < MIN_CHANNELS_FOR_TOPO:
-        return
-    
-    fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
-    fig, axes = plt.subplots(1, 2, figsize=fig_size)
-    
-    ax1 = axes[0]
-    valid_data = data_array[mask]
-    valid_info = mne.pick_info(epochs_info, np.where(mask)[0])
-    
-    im, _ = plot_topomap(
-        valid_data, valid_info,
-        axes=ax1, show=False, cmap="RdBu_r", contours=6
-    )
-    plt.colorbar(im, ax=ax1, shrink=0.6, label="Slope")
-    ax1.set_title("1/f Spectral Slope", fontweight="bold")
-    
-    ax2 = axes[1]
-    SLOPE_HISTOGRAM_BINS = 20
-    ax2.hist(valid_data, bins=SLOPE_HISTOGRAM_BINS, color=plot_cfg.style.colors.blue, alpha=0.7, edgecolor="white")
-    ax2.axvline(np.median(valid_data), color="red", linestyle="--", linewidth=2, 
-                label=f"Median: {np.median(valid_data):.2f}")
-    ax2.set_xlabel("Slope")
-    ax2.set_ylabel("Count")
-    ax2.set_title("Slope Distribution", fontweight="bold")
-    ax2.legend()
-    
-    fig.suptitle(f"Spectral Slope (1/f) Spatial Distribution (sub-{subject})", 
-                fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
-    
-    # Note: Slope is stored as negative (e.g., -1.5 means 1/f^1.5).
-    # More negative = steeper = stronger 1/f component.
-    footer = f"n={len(aperiodic_df)} trials | More negative slope = stronger 1/f (aperiodic) activity"
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
-    save_fig(fig, save_dir / f"sub-{subject}_spectral_slope_topomap",
-             formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
-    plt.close(fig)
-    
-    if logger:
-        logger.info("Saved spectral slope topomap")
 
 
 def plot_feature_importance_ranking(
@@ -2015,7 +1841,7 @@ def plot_feature_importance_ranking(
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     save_fig(fig, save_dir / f"sub-{subject}_feature_importance_ranking",
              formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     
     if logger:
@@ -2030,31 +1856,55 @@ def plot_band_power_topomaps(
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
-    segment: str = "active",
+    segment: str,
 ) -> None:
     """Band power topomaps showing spatial distribution per frequency band.
     
     Creates MNE topomaps for each frequency band.
+    
+    Args:
+        segment: Time window segment name (required, no fallback).
     """
     if pow_df is None or epochs_info is None:
+        return
+    
+    if not segment or segment.strip() == "":
+        if logger:
+            logger.error("plot_band_power_topomaps requires segment parameter. No fallback will be used.")
         return
     
     plot_cfg = get_plot_config(config)
     
     valid_bands = []
     band_data = {}
+    detected_stats = set()
     
     for band in bands:
-        cols = [c for c in pow_df.columns 
-                if c.startswith("power_") and f"_{segment}_" in c and f"_{band}_" in c and "_ch_" in c]
+        cols = []
+        for c in pow_df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "power":
+                continue
+            if parsed.get("segment") != segment:
+                continue
+            if parsed.get("band") != band:
+                continue
+            if parsed.get("scope") != "ch":
+                continue
+            cols.append(c)
+            stat = parsed.get("stat", "")
+            if stat:
+                detected_stats.add(stat)
         
         if not cols:
             continue
         
         ch_power = {}
         for col in cols:
-            parsed = NamingSchema.parse(col)
-            if parsed["valid"] and "identifier" in parsed:
+            parsed = NamingSchema.parse(str(col))
+            if parsed.get("valid") and parsed.get("identifier"):
                 ch_name = parsed["identifier"]
                 ch_power[ch_name] = pow_df[col].mean()
         
@@ -2063,7 +1913,47 @@ def plot_band_power_topomaps(
             band_data[band] = ch_power
     
     if not valid_bands:
+        if logger:
+            power_cols = [c for c in pow_df.columns if c.startswith("power_")]
+            sample_cols = power_cols[:5] if len(power_cols) > 0 else []
+            available_segments = set()
+            for c in power_cols:
+                parsed = NamingSchema.parse(str(c))
+                if parsed.get("valid") and parsed.get("group") == "power":
+                    seg = parsed.get("segment")
+                    if seg:
+                        available_segments.add(seg)
+            logger.warning(
+                f"No valid band power columns found for segment '{segment}'. "
+                f"Available segments: {sorted(available_segments)}. "
+                f"Available power columns: {len(power_cols)}. "
+                f"Sample columns: {sample_cols}"
+            )
         return
+    
+    # Determine unit label based on detected stat types
+    # Use LaTeX math mode for proper rendering of subscripts
+    STAT_TO_LABEL = {
+        "logratio": r"$\log_{10}$(ratio)",
+        "mean": r"power ($\mu$V²)",
+        "baselined": "power (baseline-corrected)",
+        "log10raw": r"$\log_{10}$(power)",
+    }
+    
+    # Use the most common stat, or default to logratio if multiple stats found
+    primary_stat = None
+    if detected_stats:
+        # Prefer logratio > mean > baselined > log10raw
+        priority_order = ["logratio", "mean", "baselined", "log10raw"]
+        for stat in priority_order:
+            if stat in detected_stats:
+                primary_stat = stat
+                break
+        if primary_stat is None:
+            primary_stat = sorted(detected_stats)[0]
+    
+    unit_label = STAT_TO_LABEL.get(primary_stat, "power")
+    value_label = f"mean {unit_label}" if primary_stat else "mean power"
     
     n_bands = len(valid_bands)
     width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
@@ -2091,7 +1981,7 @@ def plot_band_power_topomaps(
                 valid_data, valid_info,
                 axes=ax, show=False, cmap="RdBu_r", contours=6
             )
-            plt.colorbar(im, ax=ax, shrink=0.6, label="dB")
+            plt.colorbar(im, ax=ax, shrink=0.6, label=unit_label)
         
         band_color = get_band_color(band, config)
         ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
@@ -2099,13 +1989,13 @@ def plot_band_power_topomaps(
     fig.suptitle(f"Band Power Topomaps - {segment.capitalize()} (sub-{subject})", 
                 fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
     
-    footer = f"n={len(pow_df)} trials | Segment: {segment} | Values: mean dB (log ratio)"
+    footer = f"n={len(pow_df)} trials | Segment: {segment} | Values: {value_label}"
     fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
     
     plt.tight_layout(rect=[0, 0.03, 1, 0.98])
     save_fig(fig, save_dir / f"sub-{subject}_band_power_topomaps_{segment}",
              formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
     
     if logger:

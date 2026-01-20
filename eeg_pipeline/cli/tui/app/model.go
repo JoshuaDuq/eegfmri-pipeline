@@ -310,7 +310,12 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// First handle global messages (window size, subjects loaded, etc.)
 	newModel, cmd := m.handleGlobalMessages(msg)
-	m = newModel.(Model)
+	// Handle both pointer and value types
+	if ptrModel, ok := newModel.(*Model); ok {
+		m = *ptrModel
+	} else {
+		m = newModel.(Model)
+	}
 
 	// If there's a command, we prioritize it
 	if cmd != nil {
@@ -329,8 +334,7 @@ func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleWindowSize(msg)
 		return m, nil
 	case messages.SubjectsLoadedMsg:
-		m.handleSubjectsLoaded(msg)
-		return m, nil
+		return m.handleSubjectsLoaded(msg)
 	case messages.PlottersLoadedMsg:
 		m.handlePlottersLoaded(msg)
 		return m, nil
@@ -342,6 +346,9 @@ func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case messages.FmriColumnsDiscoveredMsg:
 		m.handleFmriColumnsDiscovered(msg)
+		return m, nil
+	case messages.MultigroupStatsDiscoveredMsg:
+		m.handleMultigroupStatsDiscovered(msg)
 		return m, nil
 	case cloud.SyncCompleteMsg:
 		return m.handleCloudSyncComplete(msg)
@@ -469,17 +476,32 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) {
 	m.global = *newGlobal.(*globalsetup.Model)
 }
 
-func (m *Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) {
+func (m Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
 		m.execution.AddOutput("Error loading subjects: " + msg.Error.Error())
 		m.wizard.SetSubjects(nil)
-		return
+		return m, nil
 	}
 
 	subjects := m.convertSubjects(msg.Subjects)
 	m.wizard.SetSubjects(subjects)
 	m.wizard.SetAvailableMetadata(msg.AvailableWindows, msg.AvailableEventColumns)
 	m.wizard.SetChannelInfo(msg.AvailableChannels, msg.UnavailableChannels)
+	
+	// Trigger condition effects discovery for plotting pipeline
+	if m.selectedPipeline == types.PipelinePlotting && len(subjects) > 0 {
+		// Use first subject for discovery
+		subjectID := ""
+		for _, subj := range subjects {
+			if subj.ID != "" {
+				subjectID = subj.ID
+				break
+			}
+		}
+		return m, executor.DiscoverConditionEffectsColumns(m.repoRoot, m.task, subjectID)
+	}
+	
+	return m, nil
 }
 
 func (m *Model) convertSubjects(sourceSubjects []messages.SubjectInfo) []types.SubjectStatus {
@@ -487,6 +509,9 @@ func (m *Model) convertSubjects(sourceSubjects []messages.SubjectInfo) []types.S
 	for i, s := range sourceSubjects {
 		subjects[i] = types.SubjectStatus{
 			ID:                  s.ID,
+			HasSourceData:       s.HasSourceData,
+			HasBids:             s.HasBids,
+			HasDerivatives:      s.HasDerivatives,
 			HasEpochs:           s.HasEpochs,
 			HasPreprocessing:    s.HasPreprocessing,
 			HasFeatures:         s.HasFeatures,
@@ -569,7 +594,17 @@ func (m *Model) handleColumnsDiscovered(msg messages.ColumnsDiscoveredMsg) {
 		m.wizard.SetColumnsDiscoveryError(msg.Error)
 		return
 	}
-	m.wizard.SetDiscoveredColumns(msg.Columns, msg.Values, msg.Source)
+	// Check if this is condition effects discovery (source will be "condition_effects")
+	if msg.Source == "condition_effects" {
+		// Extract windows from the response if available
+		windows := []string{}
+		if msg.Windows != nil {
+			windows = msg.Windows
+		}
+		m.wizard.SetConditionEffectsColumns(msg.Columns, msg.Values, windows)
+	} else {
+		m.wizard.SetDiscoveredColumns(msg.Columns, msg.Values, msg.Source)
+	}
 }
 
 func (m *Model) handleFmriColumnsDiscovered(msg messages.FmriColumnsDiscoveredMsg) {
@@ -586,6 +621,13 @@ func (m *Model) handleROIsDiscovered(msg messages.ROIsDiscoveredMsg) {
 		return
 	}
 	m.wizard.SetDiscoveredROIs(msg.ROIs)
+}
+
+func (m *Model) handleMultigroupStatsDiscovered(msg messages.MultigroupStatsDiscoveredMsg) {
+	if msg.Error != nil {
+		return
+	}
+	m.wizard.SetMultigroupStats(msg.Available, msg.Groups, msg.NFeatures, msg.NSignificant, msg.File)
 }
 
 func (m Model) handleCloudSyncComplete(msg cloud.SyncCompleteMsg) (tea.Model, tea.Cmd) {
@@ -794,7 +836,7 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 		)
 	}
 
-	return m, tea.Batch(
+	cmds := []tea.Cmd{
 		func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 		executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline),
 		executor.LoadPlotters(m.repoRoot),
@@ -803,7 +845,15 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 		executor.DiscoverColumns(m.repoRoot, m.task),
 		executor.DiscoverFmriColumns(m.repoRoot, m.task),
 		executor.DiscoverROIs(m.repoRoot, m.task),
-	)
+	}
+	
+	// Also discover condition effects columns for plotting (if subjects available)
+	if m.selectedPipeline == types.PipelinePlotting {
+		// Will be triggered when subjects are loaded
+		cmds = append(cmds, executor.DiscoverConditionEffectsColumns(m.repoRoot, m.task, ""))
+	}
+	
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) handleGlobalSetupSelected() (tea.Model, tea.Cmd) {

@@ -1,4 +1,4 @@
-from .alignment import align_events_to_epochs, get_aligned_events
+from .alignment import get_aligned_events
 from .behavior import (
     load_behavior_stats_files,
     load_stats_file_with_fallbacks,
@@ -13,7 +13,6 @@ from .feature_io import (
     load_feature_bundle,
     save_all_features,
     save_dropped_trials_log,
-    save_trial_alignment_manifest,
 )
 from .features import align_feature_dataframes
 from .machine_learning import (
@@ -50,7 +49,6 @@ from .subjects import get_available_subjects, parse_subject_args
 from .tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
 
 __all__ = [
-    "align_events_to_epochs",
     "align_feature_dataframes",
     "build_active_features",
     "combine_runs_for_subject",
@@ -85,7 +83,6 @@ __all__ = [
     "reorder_pivot",
     "save_all_features",
     "save_dropped_trials_log",
-    "save_trial_alignment_manifest",
     "set_channel_types",
     "set_montage",
     "_pick_first_column",

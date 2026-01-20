@@ -27,7 +27,7 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
     )
     parser.add_argument(
         "mode",
-        choices=["raw-to-bids", "fmri-raw-to-bids", "merge-behavior", "clean"],
+        choices=["raw-to-bids", "fmri-raw-to-bids", "merge-psychopy", "merge-behavior", "clean"],
         help="Utility operation mode"
     )
     add_common_subject_args(parser)
@@ -57,7 +57,6 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
     raw_group.add_argument("--montage", type=str, default="easycap-M1")
     raw_group.add_argument("--line-freq", type=float, default=60.0)
     raw_group.add_argument("--overwrite", action="store_true")
-    raw_group.add_argument("--zero-base-onsets", action="store_true")
     raw_group.add_argument("--trim-to-first-volume", action="store_true")
     raw_group.add_argument("--event-prefix", action="append")
     raw_group.add_argument("--keep-all-annotations", action="store_true")
@@ -117,8 +116,13 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
         help="Extra argument passed to dcm2niix (repeatable, inserted after executable)",
     )
 
-    merge_group = parser.add_argument_group("merge-behavior options")
+    merge_group = parser.add_argument_group("merge-psychopy options")
     merge_group.add_argument("--event-type", action="append")
+    merge_group.add_argument(
+        "--allow-misaligned-trim",
+        action="store_true",
+        help="Allow behavioral/events count mismatch (trims/pads). Not recommended.",
+    )
 
     clean_group = parser.add_argument_group("clean options")
     clean_group.add_argument(
@@ -163,23 +167,24 @@ def _update_config_fmri_paths(config: Any, bids_fmri_root: str | None) -> None:
 
 
 def _run_raw_to_bids_mode(
-    pipeline: Any,
     task: str,
     subjects: List[str],
     args: argparse.Namespace,
+    config: Any,
     progress: Any,
 ) -> None:
     """Execute raw-to-bids conversion mode."""
     progress.start("utilities_raw_to_bids", subjects)
     progress.step("Converting to BIDS", current=1, total=2)
-    
-    pipeline.run_raw_to_bids(
+
+    from eeg_pipeline.pipelines.eeg_raw_to_bids import EEGRawToBidsPipeline
+
+    EEGRawToBidsPipeline(config=config).run_batch(
+        subjects,
         task=task,
-        subjects=subjects,
         montage=args.montage,
         line_freq=args.line_freq,
         overwrite=args.overwrite,
-        zero_base_onsets=args.zero_base_onsets,
         do_trim_to_first_volume=args.trim_to_first_volume,
         event_prefixes=args.event_prefix,
         keep_all_annotations=args.keep_all_annotations,
@@ -189,22 +194,26 @@ def _run_raw_to_bids_mode(
     progress.complete(success=True)
 
 
-def _run_merge_behavior_mode(
-    pipeline: Any,
+def _run_merge_psychopy_mode(
     task: str,
     subjects: List[str],
     args: argparse.Namespace,
+    config: Any,
     progress: Any,
 ) -> None:
-    """Execute merge-behavior mode."""
-    progress.start("utilities_merge_behavior", subjects)
-    progress.step("Merging behavior", current=1, total=2)
-    
-    pipeline.run_merge_behavior(
+    """Execute merge-psychopy mode."""
+    progress.start("utilities_merge_psychopy", subjects)
+    progress.step("Merging PsychoPy into events.tsv", current=1, total=2)
+
+    from eeg_pipeline.pipelines.merge_psychopy import MergePsychopyPipeline
+
+    MergePsychopyPipeline(config=config).run_batch(
+        subjects,
         task=task,
         event_prefixes=args.event_prefix,
         event_types=args.event_type,
         dry_run=args.dry_run,
+        allow_misaligned_trim=bool(getattr(args, "allow_misaligned_trim", False)),
     )
     
     progress.step("Finalizing", current=2, total=2)
@@ -223,15 +232,10 @@ def run_utilities(args: argparse.Namespace, subjects: List[str], config: Any) ->
 
     if args.mode == "fmri-raw-to-bids":
         return _run_fmri_raw_to_bids_mode(task, subjects, args, config, progress)
-
-    from eeg_pipeline.pipelines.utilities import UtilityPipeline
-
-    pipeline = UtilityPipeline(config=config)
-
     if args.mode == "raw-to-bids":
-        _run_raw_to_bids_mode(pipeline, task, subjects, args, progress)
-    elif args.mode == "merge-behavior":
-        _run_merge_behavior_mode(pipeline, task, subjects, args, progress)
+        return _run_raw_to_bids_mode(task, subjects, args, config, progress)
+    if args.mode in ("merge-psychopy", "merge-behavior"):
+        return _run_merge_psychopy_mode(task, subjects, args, config, progress)
 
 
 def _run_fmri_raw_to_bids_mode(

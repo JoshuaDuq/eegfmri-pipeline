@@ -517,7 +517,6 @@ def _visualize_single_subject(
         align="strict",
         preload=False,
         deriv_root=effective_deriv_root,
-        bids_root=config.bids_root,
         config=config,
         logger=logger,
     )

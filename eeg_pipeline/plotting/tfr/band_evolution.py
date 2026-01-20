@@ -413,6 +413,7 @@ def plot_band_power_evolution_all_conditions(
         dpi=plot_cfg.savefig_dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
 
     saved["band_power_evolution"] = path
@@ -636,6 +637,7 @@ def plot_condition_comparison_per_band(
         dpi=plot_cfg.savefig_dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
 
     saved["condition_comparison"] = path
@@ -751,6 +753,7 @@ def plot_roi_condition_comparison(
         dpi=plot_cfg.savefig_dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
 
     saved["roi_condition_comparison"] = path
@@ -926,6 +929,7 @@ def plot_band_power_summary(
         dpi=plot_cfg.savefig_dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
 
     saved["band_power_summary"] = path

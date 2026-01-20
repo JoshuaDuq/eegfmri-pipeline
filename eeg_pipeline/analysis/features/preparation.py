@@ -340,7 +340,7 @@ def _estimate_individual_alpha_frequency(
     
     roi_names = iaf_config.get(
         "iaf_rois",
-        ["ParOccipital_Midline", "ParOccipital_Ipsi_L", "ParOccipital_Contra_R"]
+        ["ParOccipital_Midline", "ParOccipital_Left", "ParOccipital_Right"]
     )
     roi_definitions = get_roi_definitions(config)
     roi_map = build_roi_map(ch_names, roi_definitions) if roi_definitions else {}

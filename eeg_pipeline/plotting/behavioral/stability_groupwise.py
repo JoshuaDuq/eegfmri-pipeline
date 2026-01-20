@@ -163,7 +163,7 @@ def plot_stability_groupwise(
 
     fig.tight_layout()
     out_path = out_dir / f"sub-{subject}_stability_groupwise.png"
-    save_fig(fig, out_path, logger=logger)
+    save_fig(fig, out_path, logger=logger, config=config)
     plt.close(fig)
     logger.info("Saved stability plot: %s", out_path.name)
     return {"stability_groupwise": out_path}

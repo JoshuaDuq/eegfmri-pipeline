@@ -52,7 +52,7 @@ const (
 var utilities = []utilityItem{
 	{"Global Setup", "Configure project paths and settings"},
 	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files"},
-	{"Raw to BIDS", "Convert raw EEG data to BIDS format"},
+	{"EEG Raw to BIDS", "Convert raw EEG data to BIDS format"},
 	{"fMRI Raw to BIDS", "Convert raw fMRI DICOM series to BIDS format"},
 }
 

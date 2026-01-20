@@ -32,7 +32,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["featGroupERDSExpanded"] = m.featGroupERDSExpanded
 	cfg["featGroupStorageExpanded"] = m.featGroupStorageExpanded
 	cfg["featGroupExecutionExpanded"] = m.featGroupExecutionExpanded
-	cfg["featGroupValidationExpanded"] = m.featGroupValidationExpanded
 	cfg["featGroupDirectedConnExpanded"] = m.featGroupDirectedConnExpanded
 	cfg["featGroupSourceLocExpanded"] = m.featGroupSourceLocExpanded
 	cfg["featGroupSourceLocFmriExpanded"] = m.featGroupSourceLocFmriExpanded
@@ -236,8 +235,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["aggregationMethod"] = m.aggregationMethod
 	cfg["minEpochsForFeatures"] = m.minEpochsForFeatures
 	cfg["saveSubjectLevelFeatures"] = m.saveSubjectLevelFeatures
-	cfg["failOnMissingWindows"] = m.failOnMissingWindows
-	cfg["failOnMissingNamedWindow"] = m.failOnMissingNamedWindow
+	cfg["featAlsoSaveCsv"] = m.featAlsoSaveCsv
 
 	// Spatial transform
 	cfg["spatialTransform"] = m.spatialTransform
@@ -322,6 +320,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["conditionCompareWindows"] = m.conditionCompareWindows
 	cfg["conditionFailFast"] = m.conditionFailFast
 	cfg["conditionEffectThreshold"] = m.conditionEffectThreshold
+	cfg["conditionOverwrite"] = m.conditionOverwrite
 	cfg["temporalConditionColumn"] = m.temporalConditionColumn
 	cfg["temporalConditionValues"] = m.temporalConditionValues
 	cfg["temporalSplitByCondition"] = m.temporalSplitByCondition
@@ -508,6 +507,9 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["prepEpochsBaselineEnd"] = m.prepEpochsBaselineEnd
 	cfg["prepEpochsNoBaseline"] = m.prepEpochsNoBaseline
 	cfg["prepEpochsReject"] = m.prepEpochsReject
+	cfg["prepWriteCleanEvents"] = m.prepWriteCleanEvents
+	cfg["prepOverwriteCleanEvents"] = m.prepOverwriteCleanEvents
+	cfg["prepCleanEventsStrict"] = m.prepCleanEventsStrict
 	cfg["prepRejectMethod"] = m.prepRejectMethod
 	cfg["prepRunSourceEstimation"] = m.prepRunSourceEstimation
 	cfg["icaLabelsToKeep"] = m.icaLabelsToKeep
@@ -731,6 +733,9 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["plotComparisonValuesSpec"] = m.plotComparisonValuesSpec
 	cfg["plotComparisonLabelsSpec"] = m.plotComparisonLabelsSpec
 	cfg["plotComparisonROIsSpec"] = m.plotComparisonROIsSpec
+	if m.plotOverwrite != nil {
+		cfg["plotOverwrite"] = *m.plotOverwrite
+	}
 
 	// System
 	cfg["systemNJobs"] = m.systemNJobs
@@ -827,7 +832,6 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.featGroupERDSExpanded = getBool("featGroupERDSExpanded", m.featGroupERDSExpanded)
 	m.featGroupStorageExpanded = getBool("featGroupStorageExpanded", m.featGroupStorageExpanded)
 	m.featGroupExecutionExpanded = getBool("featGroupExecutionExpanded", m.featGroupExecutionExpanded)
-	m.featGroupValidationExpanded = getBool("featGroupValidationExpanded", m.featGroupValidationExpanded)
 	m.featGroupDirectedConnExpanded = getBool("featGroupDirectedConnExpanded", m.featGroupDirectedConnExpanded)
 	m.featGroupSourceLocExpanded = getBool("featGroupSourceLocExpanded", m.featGroupSourceLocExpanded)
 	m.featGroupSourceLocFmriExpanded = getBool("featGroupSourceLocFmriExpanded", m.featGroupSourceLocFmriExpanded)
@@ -1031,8 +1035,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.aggregationMethod = getInt("aggregationMethod", m.aggregationMethod)
 	m.minEpochsForFeatures = getInt("minEpochsForFeatures", m.minEpochsForFeatures)
 	m.saveSubjectLevelFeatures = getBool("saveSubjectLevelFeatures", m.saveSubjectLevelFeatures)
-	m.failOnMissingWindows = getBool("failOnMissingWindows", m.failOnMissingWindows)
-	m.failOnMissingNamedWindow = getBool("failOnMissingNamedWindow", m.failOnMissingNamedWindow)
+	m.featAlsoSaveCsv = getBool("featAlsoSaveCsv", m.featAlsoSaveCsv)
 
 	// Spatial transform
 	m.spatialTransform = getInt("spatialTransform", m.spatialTransform)
@@ -1117,6 +1120,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.conditionCompareWindows = getString("conditionCompareWindows", m.conditionCompareWindows)
 	m.conditionFailFast = getBool("conditionFailFast", m.conditionFailFast)
 	m.conditionEffectThreshold = getFloat("conditionEffectThreshold", m.conditionEffectThreshold)
+	m.conditionOverwrite = getBool("conditionOverwrite", m.conditionOverwrite)
 	m.temporalConditionColumn = getString("temporalConditionColumn", m.temporalConditionColumn)
 	m.temporalConditionValues = getString("temporalConditionValues", m.temporalConditionValues)
 	m.temporalSplitByCondition = getBool("temporalSplitByCondition", m.temporalSplitByCondition)
@@ -1303,6 +1307,9 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.prepEpochsBaselineEnd = getFloat("prepEpochsBaselineEnd", m.prepEpochsBaselineEnd)
 	m.prepEpochsNoBaseline = getBool("prepEpochsNoBaseline", m.prepEpochsNoBaseline)
 	m.prepEpochsReject = getFloat("prepEpochsReject", m.prepEpochsReject)
+	m.prepWriteCleanEvents = getBool("prepWriteCleanEvents", m.prepWriteCleanEvents)
+	m.prepOverwriteCleanEvents = getBool("prepOverwriteCleanEvents", m.prepOverwriteCleanEvents)
+	m.prepCleanEventsStrict = getBool("prepCleanEventsStrict", m.prepCleanEventsStrict)
 	m.prepRejectMethod = getInt("prepRejectMethod", m.prepRejectMethod)
 	m.prepRunSourceEstimation = getBool("prepRunSourceEstimation", m.prepRunSourceEstimation)
 	m.icaLabelsToKeep = getString("icaLabelsToKeep", m.icaLabelsToKeep)
@@ -1534,6 +1541,9 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.plotComparisonValuesSpec = getString("plotComparisonValuesSpec", m.plotComparisonValuesSpec)
 	m.plotComparisonLabelsSpec = getString("plotComparisonLabelsSpec", m.plotComparisonLabelsSpec)
 	m.plotComparisonROIsSpec = getString("plotComparisonROIsSpec", m.plotComparisonROIsSpec)
+	if v, ok := cfg["plotOverwrite"].(bool); ok {
+		m.plotOverwrite = &v
+	}
 
 	// System
 	m.systemNJobs = getInt("systemNJobs", m.systemNJobs)

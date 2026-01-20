@@ -22,7 +22,7 @@ fmri_preprocessing:
   engine: "docker"              # "docker" or "apptainer"
   fmriprep:
     image: "nipreps/fmriprep:23.2.1"
-    output_dir: null            # Default: <deriv_root>/preprocessed
+    output_dir: null            # Default: <deriv_root>/preprocessed/fmri
     work_dir: null              # Default: <deriv_root>/work/fmriprep
     fs_license_file: null       # Default: paths.freesurfer_license
     fs_subjects_dir: null       # Optional: FreeSurfer SUBJECTS_DIR

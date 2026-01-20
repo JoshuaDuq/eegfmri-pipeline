@@ -110,14 +110,14 @@ type ROIDefinition struct {
 
 var defaultROIs = []ROIDefinition{
 	{"Frontal", "Frontal", "Fp1,Fp2,Fpz,AF3,AF4,AF7,AF8,F1,F2,F3,F4,F5,F6,F7,F8"},
-	{"Sensorimotor_Contra_R", "Sensorimotor Contra R", "FC2,FC4,FC6,C2,C4,C6,CP2,CP4,CP6"},
-	{"Sensorimotor_Ipsi_L", "Sensorimotor Ipsi L", "FC1,FC3,FC5,C1,C3,C5,CP1,CP3,CP5"},
-	{"Temporal_Contra_R", "Temporal Contra R", "FT8,FT10,T8,TP8,TP10"},
-	{"Temporal_Ipsi_L", "Temporal Ipsi L", "FT7,FT9,T7,TP7,TP9"},
-	{"ParOccipital_Contra_R", "ParOccipital Contra R", "P2,P4,P6,P8,PO4,PO8,O2"},
-	{"ParOccipital_Ipsi_L", "ParOccipital Ipsi L", "P1,P3,P5,P7,PO3,PO7,O1"},
+	{"Sensorimotor_Right", "Sensorimotor Right", "FC2,FC4,FC6,C2,C4,C6,CP2,CP4,CP6"},
+	{"Sensorimotor_Left", "Sensorimotor Left", "FC1,FC3,FC5,C1,C3,C5,CP1,CP3,CP5"},
+	{"Temporal_Right", "Temporal Right", "FT8,FT10,T8,TP8,TP10"},
+	{"Temporal_Left", "Temporal Left", "FT7,FT9,T7,TP7,TP9"},
+	{"ParOccipital_Right", "ParOccipital Right", "P2,P4,P6,P8,PO4,PO8,O2"},
+	{"ParOccipital_Left", "ParOccipital Left", "P1,P3,P5,P7,PO3,PO7,O1"},
 	{"ParOccipital_Midline", "ParOccipital Midline", "Pz,POz,Oz"},
-	{"Midline_ACC_MCC", "Midline ACC/MCC", "Fz,Cz,CPz"},
+	{"Midline_FrontalCentral", "Midline Frontal-Central", "Fz,Cz,CPz"},
 }
 
 // PreprocessingStage represents a preprocessing stage
@@ -313,6 +313,16 @@ type PlotItemConfig struct {
 	ComparisonValuesSpec  string
 	ComparisonLabelsSpec  string
 	ComparisonROIsSpec    string
+
+	// Topomaps
+	TopomapWindowsSpec string
+
+	// Connectivity
+	ConnectivityCircleTopFraction string
+	ConnectivityCircleMinLines    string
+
+	// ITPC
+	ItpcSharedColorbar *bool
 }
 
 type plotItemConfigField int
@@ -328,6 +338,10 @@ const (
 	plotItemConfigFieldComparisonValues
 	plotItemConfigFieldComparisonLabels
 	plotItemConfigFieldComparisonROIs
+	plotItemConfigFieldTopomapWindow
+	plotItemConfigFieldConnectivityCircleTopFraction
+	plotItemConfigFieldConnectivityCircleMinLines
+	plotItemConfigFieldItpcSharedColorbar
 )
 
 type textField int
@@ -470,13 +484,9 @@ const (
 var defaultPlotItems = []PlotItem{
 	// Power
 	{ID: "power_by_condition", Group: "power", Name: "Condition Comparison", Description: "Power differences between conditions", RequiredFiles: []string{"features_power*.tsv", "events.tsv"}, RequiresFeatures: true},
-	{ID: "band_power_topomaps_baseline", Group: "power", Name: "Topomaps (Baseline)", Description: "Band power topographic maps for baseline period", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
-	{ID: "band_power_topomaps_active", Group: "power", Name: "Topomaps (Active)", Description: "Band power topographic maps for active period", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
-	{ID: "power_variability_comprehensive", Group: "power", Name: "Variability Analysis", Description: "Comprehensive power variability diagnostics", RequiredFiles: []string{"features_power*.tsv"}, RequiresFeatures: true},
+	{ID: "band_power_topomaps", Group: "power", Name: "Topomaps", Description: "Band power topographic maps for selected time window", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "cross_frequency_power_correlation", Group: "power", Name: "Cross-Frequency Correlation", Description: "Correlation matrix between frequency bands", RequiredFiles: []string{"features_power*.tsv"}, RequiresFeatures: true},
 	{ID: "power_spectral_density", Group: "power", Name: "PSD Summary", Description: "Power spectral density curves", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "power_topomaps_from_df", Group: "power", Name: "Topomaps from Features", Description: "Power topomaps generated from feature DataFrame", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
-	{ID: "spectral_slope_topomap", Group: "power", Name: "Spectral Slope Topomap", Description: "Topographic map of 1/f spectral slope", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
 	// Connectivity
 	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.tsv", "events.tsv"}, RequiresFeatures: true},
 	{ID: "connectivity_dynamics", Group: "connectivity", Name: "Sliding Window Dynamics", Description: "Connectivity trajectories over time windows", RequiredFiles: []string{"features_connectivity*.tsv"}, RequiresFeatures: true},
@@ -1012,6 +1022,7 @@ type Model struct {
 	plotComparisonValuesSpec  string
 	plotComparisonLabelsSpec  string
 	plotComparisonROIsSpec    string
+	plotOverwrite             *bool // Overwrite existing plot files
 
 	// Subject selection
 	subjects            []types.SubjectStatus
@@ -1084,7 +1095,6 @@ type Model struct {
 	featGroupSpatialTransformExpanded bool
 	featGroupStorageExpanded          bool
 	featGroupExecutionExpanded        bool
-	featGroupValidationExpanded       bool
 	featGroupTFRExpanded              bool
 
 	// PAC/CFC configuration
@@ -1134,14 +1144,12 @@ type Model struct {
 	// Aggregation
 	aggregationMethod int // 0: mean, 1: median
 
-	// Validation & Generic
+	// Generic
 	minEpochsForFeatures int
-
-	failOnMissingWindows     bool
-	failOnMissingNamedWindow bool
 
 	// Storage configuration
 	saveSubjectLevelFeatures bool
+	featAlsoSaveCsv          bool // Also save feature tables as CSV files
 
 	// Asymmetry
 	asymmetryChannelPairsSpec    string  // e.g. F3:F4,C3:C4
@@ -1571,6 +1579,7 @@ type Model struct {
 	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.pain_binary)
 	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
+	conditionOverwrite       bool    // Overwrite existing condition effects files
 
 	// Column discovery (populated from events files)
 	discoveredColumns       []string            // Available columns from events/trial table
@@ -1582,11 +1591,26 @@ type Model struct {
 	selectedValueCursors    map[string]int      // Cursor for value selection per column
 	expandedColumnSelection string              // Currently expanded column for value selection
 
+	// Condition effects discovery (populated from condition effects files for plotting)
+	conditionEffectsColumns      []string            // Available columns from condition effects files
+	conditionEffectsColumnValues map[string][]string // Values for each condition effects column
+	conditionEffectsWindows      []string            // Available windows from condition effects files
+	conditionEffectsDiscoveryDone bool                // Whether condition effects discovery has been completed
+	conditionEffectsDiscoveryError string             // Error message if condition effects discovery failed
+
 	// fMRI column discovery (separate from EEG events - for fMRI contrast builder)
 	fmriDiscoveredColumns      []string            // Available columns from fMRI events files
 	fmriDiscoveredColumnValues map[string][]string // Values for each fMRI column
 	fmriColumnDiscoveryDone    bool                // Whether fMRI discovery has been completed
 	fmriColumnDiscoveryError   string              // Error message if fMRI discovery failed
+
+	// Multigroup stats discovery (populated from precomputed stats)
+	multigroupStatsAvailable     bool     // Whether multigroup stats are available
+	multigroupStatsGroups        []string // Group labels from precomputed stats
+	multigroupStatsNFeatures     int      // Number of features with stats
+	multigroupStatsNSignificant  int      // Number of FDR-significant comparisons
+	multigroupStatsFile          string   // Path to stats file
+	multigroupStatsDiscoveryDone bool     // Whether discovery has been completed
 
 	// ROI discovery (populated from feature data)
 	discoveredROIs    []string // Available ROIs from feature parquet files
@@ -1670,6 +1694,10 @@ type Model struct {
 	prepEpochsReject        float64 // Peak-to-peak rejection threshold (µV)
 	prepRejectMethod        int     // 0: none, 1: autoreject_local, 2: autoreject_global
 	prepRunSourceEstimation bool    // Run source estimation
+	// Clean events.tsv options
+	prepWriteCleanEvents     bool // Write clean events.tsv aligned to kept epochs
+	prepOverwriteCleanEvents bool // Overwrite existing clean events.tsv
+	prepCleanEventsStrict    bool // Fail if clean events.tsv cannot be written
 
 	// Preprocessing UI group expansion states (for collapsible sections)
 	prepGroupStagesExpanded    bool
@@ -1683,7 +1711,6 @@ type Model struct {
 	rawMontage           string
 	rawLineFreq          int
 	rawOverwrite         bool
-	rawZeroBaseOnsets    bool
 	rawTrimToFirstVolume bool
 	rawEventPrefixes     string
 	rawKeepAnnotations   bool
@@ -1694,7 +1721,7 @@ type Model struct {
 	fmriRawRestTask         string
 	fmriRawIncludeRest      bool
 	fmriRawIncludeFieldmaps bool
-	fmriRawDicomModeIndex   int     // 0=symlink, 1=copy, 2=skip
+	fmriRawDicomModeIndex   int // 0=symlink, 1=copy, 2=skip
 	fmriRawOverwrite        bool
 	fmriRawCreateEvents     bool
 	fmriRawEventGranularity int     // 0=phases, 1=trial
@@ -1780,7 +1807,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		featGroupSpatialTransformExpanded: false,
 		featGroupStorageExpanded:          true,
 		featGroupExecutionExpanded:        true,
-		featGroupValidationExpanded:       true,
 		plotItemConfigs:                   make(map[string]PlotItemConfig),
 		plotItemConfigExpanded:            make(map[string]bool),
 		// PAC/CFC defaults (from config)
@@ -1863,7 +1889,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		iafSearchRangeMin: 7.0,
 		iafSearchRangeMax: 13.0,
 		iafMinProminence:  0.05,
-		iafRoisSpec:       "ParOccipital_Midline,ParOccipital_Ipsi_L,ParOccipital_Contra_R",
+		iafRoisSpec:       "ParOccipital_Midline,ParOccipital_Left,ParOccipital_Right",
 
 		// Aperiodic advanced defaults
 		aperiodicModel:              0,   // 0: fixed
@@ -2009,10 +2035,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		tfrDecimPhase: 1,
 
 		// Validation & Generic
-		minEpochsForFeatures: 10,
-
-		failOnMissingWindows:     false,
-		failOnMissingNamedWindow: true,
+		minEpochsForFeatures:     10,
+		featAlsoSaveCsv:          false,
 		saveSubjectLevelFeatures: true,
 
 		// Asymmetry defaults
@@ -2185,7 +2209,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionPermutationPrimary: false,
 		conditionWindowPrimaryUnit:  0,
 		// Column discovery defaults
-		discoveredColumns:      []string{},
+		discoveredColumns:                []string{},
+		conditionEffectsColumns:          []string{},
+		conditionEffectsColumnValues:      make(map[string][]string),
+		conditionEffectsWindows:           []string{},
+		conditionEffectsDiscoveryDone:     false,
+		conditionEffectsDiscoveryError:    "",
 		discoveredColumnValues: make(map[string][]string),
 		selectedValueCursors:   make(map[string]int),
 		// Machine Learning defaults
@@ -2228,27 +2257,27 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		prepNJobs:        -1,
 		prepMontage:      "easycap-M1",
 		prepResample:     500,
-		prepLFreq:        1.0,
+		prepLFreq:        0.1,
 		prepHFreq:        100.0,
 		prepNotch:        60,
 		prepLineFreq:     60,
 		prepChTypes:      "eeg",
 		prepEegReference: "average",
-		prepEogChannels:  "Fp1,Fp2",
+		prepEogChannels:  "",
 		prepRandomState:  42,
 		prepTaskIsRest:   false,
 		prepZaplineFline: 60.0,
-		prepFindBreaks:   false,
+		prepFindBreaks:   true,
 		// PyPREP advanced defaults
-		prepRansac:               false,
+		prepRansac:               true,
 		prepRepeats:              3,
 		prepAverageReref:         false,
 		prepFileExtension:        ".vhdr",
-		prepConsiderPreviousBads: false,
+		prepConsiderPreviousBads: true,
 		prepOverwriteChansTsv:    true,
 		prepDeleteBreaks:         false,
 		prepBreaksMinLength:      20,
-		prepTStartAfterPrevious:  10,
+		prepTStartAfterPrevious:  2,
 		prepTStopBeforeNext:      2,
 		prepRenameAnotDict:       "",
 		prepCustomBadDict:        "",
@@ -2258,18 +2287,21 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		prepICAComp:         0.99,
 		prepICALFreq:        1.0,
 		prepICARejThresh:    500.0,
-		prepProbThresh:      0.7,
+		prepProbThresh:      0.8,
 		prepKeepMnebidsBads: false,
 		// Epoching defaults
-		prepConditions:          "",
-		prepEpochsTmin:          -5.0,
-		prepEpochsTmax:          10.5,
-		prepEpochsBaselineStart: 0,
-		prepEpochsBaselineEnd:   0,
-		prepEpochsNoBaseline:    true,
-		prepEpochsReject:        0,
-		prepRejectMethod:        1,
-		prepRunSourceEstimation: false,
+		prepConditions:           "",
+		prepEpochsTmin:           -5.0,
+		prepEpochsTmax:           15.0,
+		prepEpochsBaselineStart:  -2.0,
+		prepEpochsBaselineEnd:    0.0,
+		prepEpochsNoBaseline:     false,
+		prepEpochsReject:         0.0,
+		prepRejectMethod:         1,
+		prepRunSourceEstimation:  false,
+		prepWriteCleanEvents:     true,
+		prepOverwriteCleanEvents: true,
+		prepCleanEventsStrict:    true,
 
 		// Preprocessing group expansion defaults (all collapsed for compact view)
 		prepGroupStagesExpanded:    false,
@@ -2283,7 +2315,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		rawMontage:           "easycap-M1",
 		rawLineFreq:          60,
 		rawOverwrite:         false,
-		rawZeroBaseOnsets:    false,
 		rawTrimToFirstVolume: false,
 		rawEventPrefixes:     "",
 		rawKeepAnnotations:   false,
@@ -2498,8 +2529,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriGroupAdvancedExpanded = false
 
 	case types.PipelineMergePsychoPyData:
-		m.modeOptions = []string{"merge-behavior"}
-		m.modeDescriptions = []string{"Merge PsychoPy data into BIDS events files"}
+		m.modeOptions = []string{"merge-psychopy"}
+		m.modeDescriptions = []string{"Merge PsychoPy TrialSummary into BIDS events.tsv"}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepAdvancedConfig,
@@ -2902,6 +2933,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 		case "enter":
+			// If an expanded list is open, toggle the current item (like Space does)
+			// This allows multi-select fields to work properly
+			if m.CurrentStep == types.StepAdvancedConfig && m.expandedOption >= 0 {
+				m.handleExpandedListToggle()
+				return m, nil
+			}
 			return m.handleEnter()
 		case "tab":
 			m.handleTab()
@@ -3568,6 +3605,89 @@ func (m Model) GetDiscoveredColumnValues(column string) []string {
 	return m.discoveredColumnValues[column]
 }
 
+// SetConditionEffectsColumns sets the columns, values, and windows discovered from condition effects files
+func (m *Model) SetConditionEffectsColumns(columns []string, values map[string][]string, windows []string) {
+	m.conditionEffectsColumns = columns
+	m.conditionEffectsColumnValues = values
+	m.conditionEffectsWindows = windows
+	m.conditionEffectsDiscoveryDone = true
+	m.conditionEffectsDiscoveryError = ""
+}
+
+// SetConditionEffectsDiscoveryError sets the error from condition effects discovery
+func (m *Model) SetConditionEffectsDiscoveryError(err error) {
+	if err == nil {
+		return
+	}
+	m.conditionEffectsDiscoveryError = err.Error()
+	m.conditionEffectsDiscoveryDone = true
+}
+
+// GetConditionEffectsColumnValues returns the unique values for a condition effects column
+func (m Model) GetConditionEffectsColumnValues(column string) []string {
+	if m.conditionEffectsColumnValues == nil {
+		return nil
+	}
+	return m.conditionEffectsColumnValues[column]
+}
+
+// isTfrPlot checks if a plot ID belongs to a TFR plot group
+func (m Model) isTfrPlot(plotID string) bool {
+	for _, plot := range m.plotItems {
+		if plot.ID == plotID {
+			return plot.Group == "tfr"
+		}
+	}
+	return false
+}
+
+// hasSelectedTfrPlots checks if any selected plots are TFR plots
+func (m Model) hasSelectedTfrPlots() bool {
+	for i, plot := range m.plotItems {
+		if i < len(m.plotSelected) && m.plotSelected[i] && plot.Group == "tfr" {
+			return true
+		}
+	}
+	return false
+}
+
+// GetPlottingComparisonColumns returns columns for plotting comparison.
+// For TFR plots: returns columns from events/trial tables (discoveredColumns).
+// For feature plots: returns columns from condition effects files.
+func (m Model) GetPlottingComparisonColumns() []string {
+	// Check if we're editing a TFR plot
+	if m.editingPlotID != "" && m.isTfrPlot(m.editingPlotID) {
+		return m.discoveredColumns
+	}
+	// Check if any selected plots are TFR plots (for global comparison column)
+	if m.hasSelectedTfrPlots() {
+		return m.discoveredColumns
+	}
+	// Default: use condition effects columns for feature plots
+	return m.conditionEffectsColumns
+}
+
+// GetPlottingComparisonWindows returns windows for plotting comparison from computed feature data
+func (m Model) GetPlottingComparisonWindows() []string {
+	return m.availableWindows
+}
+
+// GetPlottingComparisonColumnValues returns values for a column in plotting comparison.
+// For TFR plots: returns values from events/trial tables (discoveredColumnValues).
+// For feature plots: returns values from condition effects files.
+func (m Model) GetPlottingComparisonColumnValues(column string) []string {
+	// Check if we're editing a TFR plot
+	if m.editingPlotID != "" && m.isTfrPlot(m.editingPlotID) {
+		return m.GetDiscoveredColumnValues(column)
+	}
+	// Check if any selected plots are TFR plots (for global comparison column)
+	if m.hasSelectedTfrPlots() {
+		return m.GetDiscoveredColumnValues(column)
+	}
+	// Default: use condition effects column values for feature plots
+	return m.GetConditionEffectsColumnValues(column)
+}
+
 // SetFmriDiscoveredColumns sets the columns and values discovered from fMRI events files
 func (m *Model) SetFmriDiscoveredColumns(columns []string, values map[string][]string, source string) {
 	m.fmriDiscoveredColumns = columns
@@ -3591,6 +3711,26 @@ func (m Model) GetFmriDiscoveredColumnValues(column string) []string {
 		return nil
 	}
 	return m.fmriDiscoveredColumnValues[column]
+}
+
+// SetMultigroupStats sets the multigroup stats discovered from precomputed stats
+func (m *Model) SetMultigroupStats(available bool, groups []string, nFeatures int, nSignificant int, file string) {
+	m.multigroupStatsAvailable = available
+	m.multigroupStatsGroups = groups
+	m.multigroupStatsNFeatures = nFeatures
+	m.multigroupStatsNSignificant = nSignificant
+	m.multigroupStatsFile = file
+	m.multigroupStatsDiscoveryDone = true
+}
+
+// HasMultigroupStats returns whether multigroup stats are available
+func (m Model) HasMultigroupStats() bool {
+	return m.multigroupStatsAvailable && len(m.multigroupStatsGroups) > 0
+}
+
+// GetMultigroupStatsGroups returns the group labels from precomputed multigroup stats
+func (m Model) GetMultigroupStatsGroups() []string {
+	return m.multigroupStatsGroups
 }
 
 // SetDiscoveredROIs sets the ROIs discovered from feature parquet files
@@ -3634,7 +3774,7 @@ func (m Model) getExpandedListLength() int {
 		}
 		return len(m.GetDiscoveredColumnValues(m.clusterConditionColumn))
 	case expandedPlotComparisonColumn:
-		return len(m.discoveredColumns)
+		return len(m.GetPlottingComparisonColumns())
 	case expandedPlotComparisonValues:
 		// Check plot-specific column first, then fall back to global
 		col := ""
@@ -3649,9 +3789,11 @@ func (m Model) getExpandedListLength() int {
 		if col == "" {
 			return 0
 		}
-		return len(m.GetDiscoveredColumnValues(col))
-	case expandedConditionCompareWindows, expandedPlotComparisonWindows:
+		return len(m.GetPlottingComparisonColumnValues(col))
+	case expandedConditionCompareWindows:
 		return len(m.availableWindows)
+	case expandedPlotComparisonWindows:
+		return len(m.GetPlottingComparisonWindows())
 	case expandedPlotComparisonROIs:
 		return len(m.discoveredROIs)
 	case expandedRunAdjustmentColumn:
@@ -3708,7 +3850,7 @@ func (m Model) getExpandedListItems() []string {
 		}
 		return m.GetDiscoveredColumnValues(m.clusterConditionColumn)
 	case expandedPlotComparisonColumn:
-		return m.discoveredColumns
+		return m.GetPlottingComparisonColumns()
 	case expandedPlotComparisonValues:
 		// Check plot-specific column first, then fall back to global
 		col := ""
@@ -3723,9 +3865,11 @@ func (m Model) getExpandedListItems() []string {
 		if col == "" {
 			return nil
 		}
-		return m.GetDiscoveredColumnValues(col)
-	case expandedConditionCompareWindows, expandedPlotComparisonWindows:
+		return m.GetPlottingComparisonColumnValues(col)
+	case expandedConditionCompareWindows:
 		return m.availableWindows
+	case expandedPlotComparisonWindows:
+		return m.GetPlottingComparisonWindows()
 	case expandedPlotComparisonROIs:
 		return m.discoveredROIs
 	case expandedRunAdjustmentColumn:
@@ -3777,6 +3921,8 @@ func (m Model) isColumnValueSelected(value string) bool {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
 				if m.editingPlotField == plotItemConfigFieldComparisonSegment {
 					selectedValues = cfg.ComparisonSegment
+				} else if m.editingPlotField == plotItemConfigFieldTopomapWindow {
+					selectedValues = cfg.TopomapWindowsSpec
 				} else {
 					selectedValues = cfg.ComparisonWindowsSpec
 				}
@@ -3801,6 +3947,26 @@ func (m Model) isColumnValueSelected(value string) bool {
 		return false
 	}
 	// Check if value is in space or comma-separated list
+	for _, v := range strings.Fields(selectedValues) {
+		if v == value {
+			return true
+		}
+	}
+	for _, v := range strings.Split(selectedValues, ",") {
+		if strings.TrimSpace(v) == value {
+			return true
+		}
+	}
+	return false
+}
+
+// isColumnValue2Selected checks if a value is selected for the secondary column context
+func (m Model) isColumnValue2Selected(value string) bool {
+	var selectedValues string
+	switch m.expandedOption {
+	default:
+		return false
+	}
 	for _, v := range strings.Fields(selectedValues) {
 		if v == value {
 			return true
@@ -3889,19 +4055,25 @@ func (m *Model) handleExpandedListToggle() {
 	case expandedPlotComparisonWindows:
 		// Update plot-specific config if editing a plot field, otherwise global
 		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
+			plotID := m.editingPlotID
+			cfg := m.ensurePlotItemConfig(plotID)
 			if m.editingPlotField == plotItemConfigFieldComparisonSegment {
 				// Segment is single-select
 				cfg.ComparisonSegment = selectedItem
+				m.plotItemConfigs[plotID] = cfg
 				m.editingPlotID = ""
 				m.editingPlotField = plotItemConfigFieldNone
 				m.expandedOption = expandedNone
 				m.subCursor = 0
+			} else if m.editingPlotField == plotItemConfigFieldTopomapWindow {
+				// TopomapWindowsSpec is multi-select
+				m.toggleSpaceValue(selectedItem, &cfg.TopomapWindowsSpec)
+				m.plotItemConfigs[plotID] = cfg
 			} else {
 				// Windows is multi-select
 				m.toggleSpaceValue(selectedItem, &cfg.ComparisonWindowsSpec)
+				m.plotItemConfigs[plotID] = cfg
 			}
-			m.plotItemConfigs[m.editingPlotID] = cfg
 		} else {
 			m.toggleSpaceValue(selectedItem, &m.plotComparisonWindowsSpec)
 		}
@@ -4408,6 +4580,12 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.ComparisonLabelsSpec
 	case plotItemConfigFieldComparisonROIs:
 		return cfg.ComparisonROIsSpec
+	case plotItemConfigFieldTopomapWindow:
+		return cfg.TopomapWindowsSpec
+	case plotItemConfigFieldConnectivityCircleTopFraction:
+		return cfg.ConnectivityCircleTopFraction
+	case plotItemConfigFieldConnectivityCircleMinLines:
+		return cfg.ConnectivityCircleMinLines
 	default:
 		return ""
 	}
@@ -4943,6 +5121,18 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 		cfg.ComparisonLabelsSpec = strings.TrimSpace(value)
 	case plotItemConfigFieldComparisonROIs:
 		cfg.ComparisonROIsSpec = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldTopomapWindow:
+		cfg.TopomapWindowsSpec = strings.Join(strings.Fields(value), " ")
+		if cfg.TopomapWindowsSpec != "" && len(m.availableWindows) > 0 {
+			unknown := unknownFromList(strings.Fields(cfg.TopomapWindowsSpec), m.availableWindows)
+			if len(unknown) > 0 {
+				m.ShowToast("Unknown window: "+unknown[0], "warning")
+			}
+		}
+	case plotItemConfigFieldConnectivityCircleTopFraction:
+		cfg.ConnectivityCircleTopFraction = strings.TrimSpace(value)
+	case plotItemConfigFieldConnectivityCircleMinLines:
+		cfg.ConnectivityCircleMinLines = strings.TrimSpace(value)
 	default:
 		return
 	}
@@ -4993,7 +5183,6 @@ const (
 	optFeatGroupSpatialTransform
 	optFeatGroupStorage
 	optFeatGroupExecution
-	optFeatGroupValidation
 	optFeatGroupSourceLoc
 	optFeatGroupITPC
 	// Behavior section headers (expand/collapse)
@@ -5176,10 +5365,9 @@ const (
 	optItpcConditionValues
 	optItpcMinTrialsPerCondition
 
-	optFailOnMissingWindows
-	optFailOnMissingNamedWindow
 	// Storage options
 	optSaveSubjectLevelFeatures
+	optFeatAlsoSaveCsv
 	// Behavior options - General
 	optCorrMethod
 	optBootstrap
@@ -5212,6 +5400,7 @@ const (
 	// Behavior options - Condition
 	optConditionEffectThreshold
 	optConditionFailFast
+	optConditionOverwrite
 	optConditionCompareColumn
 	optConditionCompareWindows
 	optConditionCompareValues
@@ -5420,11 +5609,13 @@ const (
 	optPrepEpochsBaseline
 	optPrepEpochsNoBaseline
 	optPrepEpochsReject
+	optPrepWriteCleanEvents
+	optPrepOverwriteCleanEvents
+	optPrepCleanEventsStrict
 	// Raw-to-BIDS options
 	optRawMontage
 	optRawLineFreq
 	optRawOverwrite
-	optRawZeroBaseOnsets
 	optRawTrimToFirstVolume
 	optRawEventPrefixes
 	optRawKeepAnnotations
@@ -5626,6 +5817,7 @@ const (
 	optPlotComparisonValues
 	optPlotComparisonLabels
 	optPlotComparisonROIs
+	optPlotOverwrite
 	// TFR parameters (features pipeline)
 	optFeatGroupTFR
 	optTfrFreqMin
@@ -5912,17 +6104,12 @@ func (m Model) getFeaturesOptions() []optionType {
 
 	options = append(options, optFeatGroupStorage)
 	if m.featGroupStorageExpanded {
-		options = append(options, optSaveSubjectLevelFeatures)
+		options = append(options, optSaveSubjectLevelFeatures, optFeatAlsoSaveCsv)
 	}
 
 	options = append(options, optFeatGroupExecution)
 	if m.featGroupExecutionExpanded {
 		options = append(options, optMinEpochs)
-	}
-
-	options = append(options, optFeatGroupValidation)
-	if m.featGroupValidationExpanded {
-		options = append(options, optFailOnMissingWindows, optFailOnMissingNamedWindow)
 	}
 
 	return options
@@ -6029,6 +6216,9 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepEpochsReject,
 				optPrepRejectMethod,
 				optPrepRunSourceEstimation,
+				optPrepWriteCleanEvents,
+				optPrepOverwriteCleanEvents,
+				optPrepCleanEventsStrict,
 			)
 		}
 	}
@@ -6121,7 +6311,6 @@ func (m Model) getRawToBidsOptions() []optionType {
 		optRawMontage,
 		optRawLineFreq,
 		optRawOverwrite,
-		optRawZeroBaseOnsets,
 		optRawTrimToFirstVolume,
 		optRawEventPrefixes,
 		optRawKeepAnnotations,
@@ -6232,8 +6421,6 @@ func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 		"pac_by_condition",
 		// Power - uses aligned_events
 		"power_by_condition",
-		"power_spectral_density",
-		"power_topomaps_from_df",
 		// ERP - all use conditions
 		"erp_butterfly",
 		"erp_roi",
@@ -6255,13 +6442,25 @@ func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 
 func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 	fields := make([]plotItemConfigField, 0, 8)
-	if plot.Group == "tfr" {
+	if plot.Group == "tfr" || plot.ID == "power_spectral_density" {
 		fields = append(fields, plotItemConfigFieldTfrDefaultBaselineWindow)
+	}
+	if plot.ID == "band_power_topomaps" {
+		fields = append(fields, plotItemConfigFieldTopomapWindow)
+	}
+	if plot.ID == "connectivity_circle_condition" {
+		fields = append(fields,
+			plotItemConfigFieldConnectivityCircleTopFraction,
+			plotItemConfigFieldConnectivityCircleMinLines,
+		)
+	}
+	if plot.ID == "itpc_topomaps" {
+		fields = append(fields, plotItemConfigFieldItpcSharedColorbar)
 	}
 	if m.plotSupportsComparisons(plot) {
 		// TFR plots only use column comparisons, not window comparisons
 		isTfrPlot := plot.Group == "tfr"
-		
+
 		if !isTfrPlot {
 			// Feature plots can use window comparisons
 			fields = append(fields,
@@ -6271,7 +6470,7 @@ func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 			// Feature plots use comparison_segment to specify which time window to compare
 			fields = append(fields, plotItemConfigFieldComparisonSegment)
 		}
-		
+
 		// Column comparison fields (used by both TFR and feature plots)
 		fields = append(fields,
 			plotItemConfigFieldCompareColumns,
@@ -6279,7 +6478,7 @@ func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 			plotItemConfigFieldComparisonValues,
 			plotItemConfigFieldComparisonLabels,
 		)
-		
+
 		// ROI field only for feature plots that use ROIs in comparisons
 		// TFR topomaps are already spatial, so ROIs don't apply
 		if !isTfrPlot && plot.ID != "tfr_rois" && plot.ID != "tfr_channels_contrast" && plot.ID != "tfr_scalpmean_contrast" {
@@ -6428,7 +6627,7 @@ func (m Model) getPlottingOptions() []optionType {
 	// Defaults & Output - always available
 	options = append(options, optPlotGroupDefaults)
 	if m.plotGroupDefaultsExpanded {
-		options = append(options, optPlotBboxInches, optPlotPadInches)
+		options = append(options, optPlotBboxInches, optPlotPadInches, optPlotOverwrite)
 	}
 
 	// Fonts - always available
@@ -7038,6 +7237,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optConditionPermutationPrimary,
 				optConditionFailFast,
 				optConditionEffectThreshold,
+				optConditionOverwrite,
 			)
 		}
 	}
@@ -7143,6 +7343,7 @@ func (m Model) getPlotConfigOptions() []optionType {
 		optPlotPDF,
 		optPlotDPI,
 		optPlotSaveDPI,
+		optPlotOverwrite,
 	}
 
 	// Dynamic options based on selected plots/categories

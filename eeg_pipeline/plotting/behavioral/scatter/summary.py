@@ -95,6 +95,7 @@ def plot_behavioral_response_patterns(
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
         footer=_get_behavior_footer(config),
+        config=config,
     )
     plt.close(fig)
 
@@ -501,6 +502,7 @@ def plot_top_behavioral_predictors(
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
         footer=_get_behavior_footer(config),
+        config=config,
     )
     plt.close(fig)
 

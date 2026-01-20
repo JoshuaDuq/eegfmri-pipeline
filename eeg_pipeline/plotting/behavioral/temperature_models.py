@@ -188,7 +188,7 @@ def plot_temperature_models(
     )
 
     out_path = out_dir / f"sub-{subject}_temperature_models.png"
-    save_fig(fig, out_path, logger=logger)
+    save_fig(fig, out_path, logger=logger, config=config)
     plt.close(fig)
     logger.info("Saved temperature model plot: %s", out_path.name)
     return {"temperature_models": out_path}

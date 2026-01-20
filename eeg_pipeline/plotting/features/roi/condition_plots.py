@@ -555,6 +555,7 @@ def plot_power_by_roi_band_condition(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
 
@@ -724,6 +725,7 @@ def plot_complexity_by_roi_band_condition(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
 
@@ -875,6 +877,7 @@ def plot_aperiodic_by_roi_condition(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
 
@@ -1018,6 +1021,7 @@ def plot_connectivity_by_roi_band_condition(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
 
@@ -1195,6 +1199,7 @@ def plot_itpc_by_roi_band_condition(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
 
@@ -1378,6 +1383,7 @@ def plot_pac_by_roi_condition(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
 
@@ -1638,6 +1644,7 @@ def plot_temporal_evolution(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
 

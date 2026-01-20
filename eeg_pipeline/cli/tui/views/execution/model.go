@@ -663,7 +663,7 @@ func (m Model) GetOutputPaths() []string {
 	switch {
 	case strings.Contains(cmd, "preprocess"):
 		paths = []string{
-			filepath.Join(base, "preprocessed"),
+			filepath.Join(base, "preprocessed", "eeg"),
 			filepath.Join(base, "epochs"),
 		}
 	case strings.Contains(cmd, "features"):
@@ -673,6 +673,15 @@ func (m Model) GetOutputPaths() []string {
 			filepath.Join(base, "behavior"),
 			filepath.Join(base, "stats"),
 		}
+	case strings.Contains(cmd, "fmri") && strings.Contains(cmd, "preprocess"):
+		paths = []string{filepath.Join(base, "preprocessed", "fmri", "fmriprep")}
+	case strings.Contains(cmd, "fmri-raw-to-bids"):
+		// Extract bids-fmri-root from command or use default
+		bidsFmriRoot := m.extractBidsFmriRoot()
+		if bidsFmriRoot == "" {
+			bidsFmriRoot = filepath.Join(m.RepoRoot, "eeg_pipeline", "data", "bids_output", "fmri")
+		}
+		paths = []string{bidsFmriRoot}
 	case strings.Contains(cmd, " ml "):
 		paths = []string{filepath.Join(base, "machine_learning")}
 	case strings.Contains(cmd, "plot"):
@@ -732,6 +741,39 @@ func (m Model) extractDerivRoot() string {
 		return filepath.Clean(path)
 	}
 
+	return ""
+}
+
+// extractBidsFmriRoot extracts the --bids-fmri-root argument from the command string
+func (m Model) extractBidsFmriRoot() string {
+	if m.Command == "" {
+		return ""
+	}
+
+	// Pattern to match --bids-fmri-root with optional equals sign
+	pattern := regexp.MustCompile(`--bids-fmri-root(?:=|\s+)(?:"([^"]+)"|'([^']+)'|([^\s]+))`)
+	matches := pattern.FindStringSubmatch(m.Command)
+	if len(matches) > 1 {
+		var path string
+		if matches[1] != "" {
+			path = matches[1]
+		} else if matches[2] != "" {
+			path = matches[2]
+		} else {
+			path = matches[3]
+		}
+
+		if strings.HasPrefix(path, "~") {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+			}
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(m.RepoRoot, path)
+		}
+		return filepath.Clean(path)
+	}
 	return ""
 }
 

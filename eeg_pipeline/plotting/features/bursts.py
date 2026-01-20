@@ -205,7 +205,7 @@ def _prepare_window_comparison_data(
     metric: str,
     roi_name: str,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
-    """Prepare data for window comparison (paired)."""
+    """Prepare data for window comparison (paired, 2 segments)."""
     data_by_band = {}
     seg1, seg2 = segments[0], segments[1]
     
@@ -225,6 +225,42 @@ def _prepare_window_comparison_data(
         
         if len(values1) > 0:
             data_by_band[band] = (values1, values2)
+    
+    return data_by_band
+
+
+def _prepare_multi_window_comparison_data(
+    features_df: pd.DataFrame,
+    segments: List[str],
+    bands: List[str],
+    metric: str,
+    roi_name: str,
+) -> Dict[str, Dict[str, np.ndarray]]:
+    """Prepare data for multi-window comparison (3+ segments)."""
+    data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+    
+    for band in bands:
+        segment_series = {}
+        for seg in segments:
+            cols = _get_burst_columns(features_df, seg, band, metric, roi_name)
+            if cols:
+                segment_series[seg] = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+        
+        if len(segment_series) < 2:
+            continue
+        
+        valid_mask = pd.Series(True, index=features_df.index)
+        for series in segment_series.values():
+            valid_mask &= series.notna()
+        
+        segment_values = {}
+        for seg, series in segment_series.items():
+            vals = series[valid_mask].values
+            if len(vals) > 0:
+                segment_values[seg] = vals
+        
+        if len(segment_values) >= 2:
+            data_by_band[band] = segment_values
     
     return data_by_band
 
@@ -464,6 +500,7 @@ def plot_bursts_by_band(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
     return fig
@@ -481,33 +518,57 @@ def _plot_window_comparison(
     logger: Any,
     stats_dir: Optional[Path],
 ) -> None:
-    """Plot window comparison (paired) for burst metrics."""
+    """Plot window comparison (paired) for burst metrics.
+    
+    Supports both 2-window comparison (simple paired) and multi-window comparison
+    (3+ windows with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.plotting.features.utils import plot_multi_window_comparison
+    
     metric_label = _format_metric_label(metric)
-    seg1, seg2 = segments[0], segments[1]
+    use_multi_window = len(segments) > 2
     
     for roi_name in roi_names:
-        data_by_band = _prepare_window_comparison_data(
-            features_df, segments, bands, metric, roi_name,
-        )
-        
-        if not data_by_band:
-            continue
-        
         suffix = _format_roi_filename_suffix(roi_name)
-        save_path = save_dir / f"sub-{subject}_bursts_{metric}_by_condition{suffix}_window"
         
-        plot_paired_comparison(
-            data_by_band=data_by_band,
-            subject=subject,
-            save_path=save_path,
-            feature_label=f"Bursts ({metric_label})",
-            config=config,
-            logger=logger,
-            label1=seg1.capitalize(),
-            label2=seg2.capitalize(),
-            roi_name=roi_name,
-            stats_dir=stats_dir,
-        )
+        if use_multi_window:
+            data_by_band_multi = _prepare_multi_window_comparison_data(
+                features_df, segments, bands, metric, roi_name,
+            )
+            
+            if data_by_band_multi:
+                save_path = save_dir / f"sub-{subject}_bursts_{metric}_by_condition{suffix}_multiwindow"
+                plot_multi_window_comparison(
+                    data_by_band=data_by_band_multi,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label=f"Bursts ({metric_label})",
+                    segments=segments,
+                    config=config,
+                    logger=logger,
+                    roi_name=roi_name,
+                    stats_dir=stats_dir,
+                )
+        else:
+            seg1, seg2 = segments[0], segments[1]
+            data_by_band = _prepare_window_comparison_data(
+                features_df, segments, bands, metric, roi_name,
+            )
+            
+            if data_by_band:
+                save_path = save_dir / f"sub-{subject}_bursts_{metric}_by_condition{suffix}_window"
+                plot_paired_comparison(
+                    data_by_band=data_by_band,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label=f"Bursts ({metric_label})",
+                    config=config,
+                    logger=logger,
+                    label1=seg1.capitalize(),
+                    label2=seg2.capitalize(),
+                    roi_name=roi_name,
+                    stats_dir=stats_dir,
+                )
 
 
 def _plot_column_comparison(
@@ -522,8 +583,63 @@ def _plot_column_comparison(
     logger: Any,
     stats_dir: Optional[Path],
 ) -> None:
-    """Plot column comparison (unpaired) for burst metrics."""
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    """Plot column comparison (unpaired) for burst metrics.
+    
+    Supports both 2-group comparison (simple unpaired) and multi-group comparison
+    (3+ groups with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+    from eeg_pipeline.plotting.features.utils import plot_multi_group_column_comparison
+    
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
+    
+    if use_multi_group:
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        if not multi_group_info:
+            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
+            return
+        
+        masks_dict, group_labels = multi_group_info
+        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        metric_label = _format_metric_label(metric)
+        
+        for roi_name in roi_names:
+            data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+            for band in bands:
+                cols = _get_burst_columns(features_df, segment_name, band, metric, roi_name)
+                if not cols:
+                    continue
+                
+                val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                
+                group_values = {}
+                for label, mask in masks_dict.items():
+                    vals = val_series[mask].dropna().values
+                    if len(vals) > 0:
+                        group_values[label] = vals
+                
+                if len(group_values) >= 2:
+                    data_by_band[band] = group_values
+            
+            if data_by_band:
+                suffix = _format_roi_filename_suffix(roi_name)
+                save_path = save_dir / f"sub-{subject}_bursts_{metric}_by_condition{suffix}_multigroup"
+                
+                plot_multi_group_column_comparison(
+                    data_by_band=data_by_band,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label=f"Bursts ({metric_label})",
+                    groups=group_labels,
+                    config=config,
+                    logger=logger,
+                    roi_name=roi_name,
+                    stats_dir=stats_dir,
+                )
+        
+        log_if_present(logger, "info", f"Saved bursts multi-group column comparison for {len(roi_names)} ROIs")
+        return
     
     comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comp_mask_info:
@@ -598,6 +714,7 @@ def _plot_column_comparison(
             dpi=plot_cfg.dpi,
             bbox_inches=plot_cfg.bbox_inches,
             pad_inches=plot_cfg.pad_inches,
+            config=config,
         )
         plt.close(fig)
 

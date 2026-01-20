@@ -6,7 +6,7 @@ import argparse
 import json as json_module
 import logging
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 from eeg_pipeline.cli.common import add_task_arg, resolve_task
 from eeg_pipeline.cli.commands.base import (
@@ -25,6 +25,7 @@ MODE_DISCOVER = "discover"
 MODE_ROIS = "rois"
 MODE_FMRI_CONDITIONS = "fmri-conditions"
 MODE_FMRI_COLUMNS = "fmri-columns"
+MODE_MULTIGROUP_STATS = "multigroup-stats"
 
 SOURCE_BIDS = "bids"
 SOURCE_BIDS_FMRI = "bids_fmri"
@@ -91,7 +92,7 @@ def _get_unavailable_channels(deriv_root: Path, task: str) -> List[str]:
     import ast
     import pandas as pd
 
-    log_path = deriv_root / "preprocessed" / f"pyprep_task_{task}_log.csv"
+    log_path = deriv_root / "preprocessed" / "eeg" / f"pyprep_task_{task}_log.csv"
     if not log_path.exists():
         return []
 
@@ -123,8 +124,8 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER, MODE_ROIS, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS],
-        help="What to show: subjects, features, config, version, discover columns, rois, fmri-conditions, or fmri-columns",
+        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER, MODE_ROIS, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS, MODE_MULTIGROUP_STATS],
+        help="What to show: subjects, features, config, version, discover columns, rois, fmri-conditions, fmri-columns, or multigroup-stats",
     )
     parser.add_argument(
         "target",
@@ -160,7 +161,7 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     discover_group = parser.add_argument_group("Discover options (mode: discover)")
     discover_group.add_argument(
         "--discover-source",
-        choices=["events", "trial-table", "all"],
+        choices=["events", "trial-table", "condition-effects", "all"],
         default="all",
         help="Where to discover columns from (default: all)",
     )
@@ -310,14 +311,70 @@ def _process_single_subject(
     task: str,
     config: Any,
     global_epoch_metadata: dict,
+    bids_root: Optional[Path] = None,
+    source_root: Optional[Path] = None,
 ) -> dict:
     """Process a single subject to build status information."""
-    from eeg_pipeline.utils.data.subjects import get_epoch_metadata
+    from eeg_pipeline.utils.data.subjects import get_epoch_metadata, _resolve_source_root
     from eeg_pipeline.infra.paths import deriv_features_path, deriv_stats_path
     
     available_bands = []
     has_stats = False
     has_preprocessing = False
+
+    # Detect source data
+    has_source_data = False
+    if source_root:
+        source_subj_dir = source_root / f"sub-{subj_id}"
+        if not source_subj_dir.exists():
+            # Try without sub- prefix
+            source_subj_dir = source_root / subj_id
+        has_source_data = source_subj_dir.exists() and source_subj_dir.is_dir()
+
+    # Detect BIDS
+    has_bids = False
+    if bids_root:
+        bids_subj_dir = bids_root / f"sub-{subj_id}"
+        has_bids = bids_subj_dir.exists() and bids_subj_dir.is_dir()
+
+    # Detect derivatives (any processed data)
+    has_derivatives = False
+    if deriv_root.exists():
+        # Check for epochs
+        from eeg_pipeline.infra.paths import find_clean_epochs_path
+        epoch_path = find_clean_epochs_path(subj_id, task, deriv_root=deriv_root, config=config)
+        if epoch_path and epoch_path.exists():
+            has_derivatives = True
+        
+        # Check for features
+        features_dir = deriv_features_path(deriv_root, subj_id)
+        if features_dir.exists() and any(features_dir.rglob("features_*")):
+            has_derivatives = True
+        
+        # Check for EEG preprocessing
+        eeg_prep_dir = deriv_root / "preprocessed" / "eeg" / f"sub-{subj_id}"
+        if eeg_prep_dir.exists():
+            for pattern in PREPROCESSING_EEG_PATTERNS:
+                if any(eeg_prep_dir.glob(pattern)):
+                    has_derivatives = True
+                    has_preprocessing = True
+                    break
+        
+        # Check for fMRI preprocessing
+        fmriprep_dir = deriv_root / "fmriprep" / f"sub-{subj_id}"
+        if fmriprep_dir.exists():
+            func_dir = fmriprep_dir / "func"
+            if func_dir.exists() and any(func_dir.glob("*preproc_bold*")):
+                has_derivatives = True
+        
+        # Check for stats
+        stats_dir = deriv_stats_path(deriv_root, subj_id)
+        if stats_dir.exists():
+            for pattern in STATS_FILE_PATTERNS:
+                if any(stats_dir.glob(pattern)):
+                    has_derivatives = True
+                    has_stats = True
+                    break
 
     if has_features or has_epochs:
         features_dir = deriv_features_path(deriv_root, subj_id)
@@ -327,21 +384,6 @@ def _process_single_subject(
     else:
         feature_availability = _empty_feature_availability()
 
-    # Check for EEG preprocessing (ICA files in preprocessed directory)
-    eeg_prep_dir = deriv_root / "preprocessed" / f"sub-{subj_id}" / "eeg"
-    if eeg_prep_dir.exists():
-        for pattern in PREPROCESSING_EEG_PATTERNS:
-            if any(eeg_prep_dir.glob(pattern)):
-                has_preprocessing = True
-                break
-
-    stats_dir = deriv_stats_path(deriv_root, subj_id)
-    if stats_dir.exists():
-        for pattern in STATS_FILE_PATTERNS:
-            if any(stats_dir.glob(pattern)):
-                has_stats = True
-                break
-
     metadata = {}
     if has_epochs:
         metadata = get_epoch_metadata(subj_id, task, deriv_root, config=config)
@@ -350,6 +392,9 @@ def _process_single_subject(
 
     return {
         "id": subj_id,
+        "has_source_data": has_source_data,
+        "has_bids": has_bids,
+        "has_derivatives": has_derivatives,
         "has_epochs": has_epochs,
         "has_preprocessing": has_preprocessing,
         "has_features": has_features,
@@ -367,10 +412,11 @@ def _build_subject_status_json(
     deriv_root: Path,
     task: str,
     config: Any,
+    bids_root_override: Optional[Path] = None,
 ) -> dict:
     """Build JSON output for subject status mode."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from eeg_pipeline.utils.data.subjects import get_epoch_metadata
+    from eeg_pipeline.utils.data.subjects import get_epoch_metadata, _resolve_source_root
     from eeg_pipeline.infra.paths import deriv_features_path
 
     results = []
@@ -381,6 +427,14 @@ def _build_subject_status_json(
             "features": subj in features_subjects,
         }
         results.append(status)
+
+    # Resolve BIDS root
+    bids_root = bids_root_override
+    if bids_root is None:
+        bids_root = Path(config.bids_root) if hasattr(config, "bids_root") else None
+
+    # Resolve source root
+    source_root = _resolve_source_root(config, bids_root)
 
     # Get global epoch metadata from first subject with epochs
     global_epoch_metadata = {}
@@ -404,10 +458,11 @@ def _build_subject_status_json(
     available_columns = []
     for result in results:
         subj_id = _extract_subject_id(result["subject"])
-        columns = _get_available_event_columns(config.bids_root, subj_id, task)
-        if columns:
-            available_columns = columns
-            break
+        if bids_root:
+            columns = _get_available_event_columns(bids_root, subj_id, task)
+            if columns:
+                available_columns = columns
+                break
 
     # Process subjects in parallel (I/O bound operations)
     json_results = []
@@ -424,6 +479,8 @@ def _build_subject_status_json(
                 task,
                 config,
                 global_epoch_metadata,
+                bids_root,
+                source_root,
             )
             futures.append(future)
         
@@ -438,7 +495,6 @@ def _build_subject_status_json(
     json_results.sort(key=lambda x: x["id"])
 
     # Discover available and unavailable channels (global for study)
-    bids_root = Path(config.bids_root) if hasattr(config, "bids_root") else None
     first_subject = discovered_subjects[0] if discovered_subjects else ""
     available_channels = _get_available_channels(bids_root, first_subject) if bids_root else []
     unavailable_channels = _get_unavailable_channels(deriv_root, task)
@@ -499,6 +555,7 @@ def _handle_subjects_mode(
                 deriv_root,
                 task,
                 config,
+                bids_root_override,
             )
             _print_json_output(output)
         else:
@@ -722,6 +779,7 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
     from eeg_pipeline.cli.commands.base import (
         discover_event_columns,
         discover_trial_table_columns,
+        discover_condition_effects_columns,
     )
     from eeg_pipeline.infra.paths import resolve_deriv_root
 
@@ -732,6 +790,7 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
     result = {
         "columns": [],
         "values": {},
+        "windows": [],
         "source": None,
         "sources_checked": [],
     }
@@ -741,7 +800,7 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
         subject = subjects[0]
 
     if args.discover_source in ["events", "all"] and bids_root:
-        events_data = discover_event_columns(bids_root, task=task, subject=subject)
+        events_data = discover_event_columns(bids_root, task=task, subject=subject, deriv_root=deriv_root)
         if events_data["columns"]:
             result["sources_checked"].append("events")
             if not result["columns"]:
@@ -767,6 +826,26 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
                 for col, vals in trial_data["values"].items():
                     if col not in result["values"]:
                         result["values"][col] = vals
+
+    if args.discover_source in ["condition-effects", "all"]:
+        cond_effects_data = discover_condition_effects_columns(deriv_root, subject=subject)
+        if cond_effects_data["columns"] or cond_effects_data.get("windows"):
+            result["sources_checked"].append("condition_effects")
+            if not result["columns"] or args.discover_source == "condition-effects":
+                result["columns"] = cond_effects_data["columns"]
+                result["values"] = cond_effects_data["values"]
+                result["windows"] = cond_effects_data.get("windows", [])
+                result["source"] = cond_effects_data["source"]
+                result["files"] = cond_effects_data.get("files", [])
+            else:
+                for col, vals in cond_effects_data["values"].items():
+                    if col not in result["values"]:
+                        result["values"][col] = vals
+                # Merge windows
+                if cond_effects_data.get("windows"):
+                    existing_windows = set(result.get("windows", []))
+                    existing_windows.update(cond_effects_data["windows"])
+                    result["windows"] = sorted(existing_windows)
 
     if args.column:
         if args.column in result["values"]:
@@ -902,6 +981,93 @@ def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
         _print_discovery_report(result)
 
 
+def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
+    """Handle multigroup-stats mode: discover available multigroup comparisons from precomputed stats."""
+    import pandas as pd
+    from eeg_pipeline.infra.paths import resolve_deriv_root
+    from eeg_pipeline.infra.tsv import read_tsv
+    
+    deriv_root = resolve_deriv_root(config=config)
+    
+    subject = args.subject
+    if not subject and subjects:
+        subject = subjects[0]
+    
+    result = {
+        "available": False,
+        "groups": [],
+        "n_features": 0,
+        "n_significant": 0,
+        "file": None,
+        "subject": subject,
+    }
+    
+    if not subject:
+        for sub_dir in sorted(deriv_root.glob("sub-*")):
+            if sub_dir.is_dir():
+                subject = sub_dir.name.replace("sub-", "")
+                result["subject"] = subject
+                break
+    
+    if not subject:
+        result["error"] = "No subject found"
+        if args.output_json:
+            _print_json_output(result)
+        else:
+            print("Error: No subject found for multigroup stats discovery")
+        return
+    
+    stats_dir = deriv_root / f"sub-{subject}" / "stats" / "condition_effects"
+    if not stats_dir.exists():
+        stats_dir = deriv_root / f"sub-{subject}" / "stats"
+    
+    multigroup_files = list(stats_dir.glob("condition_effects_multigroup*.tsv")) if stats_dir.exists() else []
+    
+    if not multigroup_files:
+        result["error"] = "No multigroup stats found. Run behavior pipeline with 3+ comparison values first."
+        if args.output_json:
+            _print_json_output(result)
+        else:
+            print("No multigroup stats found.")
+            print("Run behavior pipeline with 3+ comparison values to generate multigroup stats.")
+        return
+    
+    stats_file = multigroup_files[0]
+    df = read_tsv(stats_file)
+    
+    if df is None or df.empty:
+        result["error"] = f"Could not read stats file: {stats_file}"
+        if args.output_json:
+            _print_json_output(result)
+        else:
+            print(f"Error reading stats file: {stats_file}")
+        return
+    
+    groups = set()
+    if "group1" in df.columns:
+        groups.update(df["group1"].dropna().unique())
+    if "group2" in df.columns:
+        groups.update(df["group2"].dropna().unique())
+    
+    result["available"] = True
+    result["groups"] = sorted(list(groups))
+    result["n_features"] = df["feature"].nunique() if "feature" in df.columns else len(df)
+    result["n_significant"] = int(df["significant_fdr"].sum()) if "significant_fdr" in df.columns else 0
+    result["file"] = str(stats_file)
+    
+    if args.output_json:
+        _print_json_output(result)
+    else:
+        print("=" * 50)
+        print("    MULTIGROUP STATS DISCOVERY")
+        print("=" * 50)
+        print(f"Subject: {subject}")
+        print(f"File: {stats_file.name}")
+        print(f"Groups: {', '.join(result['groups'])}")
+        print(f"Features: {result['n_features']}")
+        print(f"Significant (FDR): {result['n_significant']}")
+
+
 def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the info command."""
     from eeg_pipeline.infra.paths import resolve_deriv_root
@@ -920,6 +1086,8 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
         _handle_rois_mode(args, subjects, config)
     elif args.mode == MODE_DISCOVER:
         _handle_discover_mode(args, subjects, config)
+    elif args.mode == MODE_MULTIGROUP_STATS:
+        _handle_multigroup_stats_mode(args, subjects, config)
     elif args.mode == MODE_SUBJECTS:
         _handle_subjects_mode(args, deriv_root, task, config, logger)
     elif args.mode == MODE_FEATURES:

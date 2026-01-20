@@ -143,49 +143,6 @@ class FeatureContext:
         if self._windows is None:
             return
 
-        self._validate_required_windows()
-        self._validate_named_window()
-
-    def _validate_required_windows(self) -> None:
-        """Validate that at least one valid time window exists from Step 5 input."""
-        fail_on_missing = bool(
-            self.config.get("feature_engineering.validation.fail_on_missing_windows", False)
-        )
-        if not fail_on_missing:
-            return
-
-        # Check for at least one non-empty mask
-        has_valid_window = any(
-            np.any(mask) for name, mask in self._windows.masks.items()
-        )
-
-        if not has_valid_window:
-            raise ValueError(
-                "No valid time windows found for feature extraction. "
-                "Please define at least one time range in Step 5 of the TUI "
-                "(e.g., 'baseline', 'active', or a custom segment)."
-            )
-
-    def _validate_named_window(self) -> None:
-        """Validate that named window exists if specified."""
-        fail_on_missing_named = bool(
-            self.config.get(
-                "feature_engineering.validation.fail_on_missing_named_window", True
-            )
-        )
-        if not fail_on_missing_named or not self.name:
-            return
-
-        named_mask = self._windows.get_mask(self.name)
-        named_exists = named_mask is not None and np.any(named_mask)
-
-        if not named_exists:
-            raise ValueError(
-                f"Named time window '{self.name}' is missing or empty. "
-                "Define it in feature_engineering.windows/custom windows "
-                "or pass explicit ranges."
-            )
-
     @property
     def windows(self) -> Any:
         """Access centralized time windows."""

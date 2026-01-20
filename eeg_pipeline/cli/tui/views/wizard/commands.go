@@ -182,10 +182,27 @@ func (m Model) GetROIDefinitions() []string {
 		}
 	}
 
+	// Build set of unavailable channels (case-insensitive) for filtering
+	unavailableSet := make(map[string]bool)
+	for _, ch := range m.unavailableChannels {
+		unavailableSet[strings.ToUpper(strings.TrimSpace(ch))] = true
+	}
+
 	var result []string
 	for i, roi := range m.rois {
 		if m.roiSelected[i] {
-			result = append(result, fmt.Sprintf("%s:%s", roi.Key, roi.Channels))
+			// Filter unavailable channels from ROI channels for CLI
+			var filteredChannels []string
+			for _, ch := range strings.Split(roi.Channels, ",") {
+				ch = strings.TrimSpace(ch)
+				if ch != "" && !unavailableSet[strings.ToUpper(ch)] {
+					filteredChannels = append(filteredChannels, ch)
+				}
+			}
+			filteredChannelsStr := strings.Join(filteredChannels, ",")
+			if filteredChannelsStr != "" {
+				result = append(result, fmt.Sprintf("%s:%s", roi.Key, filteredChannelsStr))
+			}
 		}
 	}
 	return result
@@ -532,7 +549,7 @@ func (m Model) BuildCommand() string {
 			}
 		}
 	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS || m.Pipeline == types.PipelineFmriRawToBIDS {
-		mode := "merge-behavior"
+		mode := "merge-psychopy"
 		if m.Pipeline == types.PipelineRawToBIDS {
 			mode = "raw-to-bids"
 		} else if m.Pipeline == types.PipelineFmriRawToBIDS {
@@ -861,6 +878,7 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	ab.addSpaceListFlag("--comparison-values", m.plotComparisonValuesSpec)
 	ab.addSpaceListFlagWithLengthCheck("--comparison-labels", m.plotComparisonLabelsSpec, 2)
 	ab.addSpaceListFlag("--comparison-rois", m.plotComparisonROIsSpec)
+	ab.addOptionalBoolFlag("--overwrite", m.plotOverwrite)
 
 	// Per-plot overrides
 	ab.args = append(ab.args, m.buildPlotItemConfigArgs()...)
@@ -916,6 +934,19 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		if strings.TrimSpace(cfg.ComparisonROIsSpec) != "" {
 			args = append(args, "--plot-item-config", plotID, "comparison_rois")
 			args = append(args, splitSpaceList(cfg.ComparisonROIsSpec)...)
+		}
+		if strings.TrimSpace(cfg.TopomapWindowsSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "topomap_windows")
+			args = append(args, splitSpaceList(cfg.TopomapWindowsSpec)...)
+		}
+		if strings.TrimSpace(cfg.ConnectivityCircleTopFraction) != "" {
+			args = append(args, "--plot-item-config", plotID, "connectivity_circle_top_fraction", strings.TrimSpace(cfg.ConnectivityCircleTopFraction))
+		}
+		if strings.TrimSpace(cfg.ConnectivityCircleMinLines) != "" {
+			args = append(args, "--plot-item-config", plotID, "connectivity_circle_min_lines", strings.TrimSpace(cfg.ConnectivityCircleMinLines))
+		}
+		if cfg.ItpcSharedColorbar != nil {
+			args = append(args, "--plot-item-config", plotID, "itpc_shared_colorbar", strconv.FormatBool(*cfg.ItpcSharedColorbar))
 		}
 	}
 	return args
@@ -1402,7 +1433,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.iafMinProminence != 0.05 {
 			args = append(args, "--iaf-min-prominence", fmt.Sprintf("%.3f", m.iafMinProminence))
 		}
-		if strings.TrimSpace(m.iafRoisSpec) != "" && m.iafRoisSpec != "ParOccipital_Midline,ParOccipital_Ipsi_L,ParOccipital_Contra_R" {
+		if strings.TrimSpace(m.iafRoisSpec) != "" && m.iafRoisSpec != "ParOccipital_Midline,ParOccipital_Left,ParOccipital_Right" {
 			args = append(args, "--iaf-rois")
 			args = append(args, splitCSVList(m.iafRoisSpec)...)
 		}
@@ -1582,22 +1613,17 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	// Generic & Validation
 
 	args = append(args, "--min-epochs", fmt.Sprintf("%d", m.minEpochsForFeatures))
-	if m.failOnMissingWindows {
-		args = append(args, "--fail-on-missing-windows")
-	} else {
-		args = append(args, "--no-fail-on-missing-windows")
-	}
-	if m.failOnMissingNamedWindow {
-		args = append(args, "--fail-on-missing-named-window")
-	} else {
-		args = append(args, "--no-fail-on-missing-named-window")
-	}
 
 	// Storage options
 	if m.saveSubjectLevelFeatures {
 		args = append(args, "--save-subject-level-features")
 	} else {
 		args = append(args, "--no-save-subject-level-features")
+	}
+	if m.featAlsoSaveCsv {
+		args = append(args, "--also-save-csv")
+	} else {
+		args = append(args, "--no-also-save-csv")
 	}
 
 	return args
@@ -2013,6 +2039,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.conditionEffectThreshold != 0.5 {
 			args = append(args, "--condition-effect-threshold", fmt.Sprintf("%.4f", m.conditionEffectThreshold))
 		}
+		if m.conditionOverwrite {
+			args = append(args, "--condition-overwrite")
+		} else {
+			args = append(args, "--no-condition-overwrite")
+		}
 	}
 
 	// Temporal
@@ -2370,7 +2401,7 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if strings.TrimSpace(m.prepEegReference) != "" && m.prepEegReference != "average" {
 		args = append(args, "--eeg-reference", m.prepEegReference)
 	}
-	if strings.TrimSpace(m.prepEogChannels) != "" && m.prepEogChannels != "Fp1,Fp2" {
+	if strings.TrimSpace(m.prepEogChannels) != "" {
 		args = append(args, "--eog-channels", m.prepEogChannels)
 	}
 	if m.prepRandomState != 42 {
@@ -2384,7 +2415,7 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepResample != 500 {
 		args = append(args, "--resample", fmt.Sprintf("%d", m.prepResample))
 	}
-	if m.prepLFreq != 1.0 {
+	if m.prepLFreq != 0.1 {
 		args = append(args, "--l-freq", fmt.Sprintf("%.1f", m.prepLFreq))
 	}
 	if m.prepHFreq != 100.0 {
@@ -2399,8 +2430,8 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepZaplineFline != 60.0 {
 		args = append(args, "--zapline-fline", fmt.Sprintf("%.1f", m.prepZaplineFline))
 	}
-	if m.prepFindBreaks {
-		args = append(args, "--find-breaks")
+	if !m.prepFindBreaks {
+		args = append(args, "--no-find-breaks")
 	}
 
 	// ICA
@@ -2421,7 +2452,7 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepICARejThresh != 500.0 {
 		args = append(args, "--ica-reject", fmt.Sprintf("%.0f", m.prepICARejThresh))
 	}
-	if m.prepProbThresh != 0.7 {
+	if m.prepProbThresh != 0.8 {
 		args = append(args, "--prob-threshold", fmt.Sprintf("%.1f", m.prepProbThresh))
 	}
 	if strings.TrimSpace(m.icaLabelsToKeep) != "" && m.icaLabelsToKeep != "brain,other" {
@@ -2433,8 +2464,8 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 
 	// PyPREP advanced options
-	if m.prepRansac {
-		args = append(args, "--ransac")
+	if !m.prepRansac {
+		args = append(args, "--no-ransac")
 	}
 	if m.prepRepeats != 3 {
 		args = append(args, "--repeats", fmt.Sprintf("%d", m.prepRepeats))
@@ -2447,6 +2478,8 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 	if m.prepConsiderPreviousBads {
 		args = append(args, "--consider-previous-bads")
+	} else {
+		args = append(args, "--no-consider-previous-bads")
 	}
 	if !m.prepOverwriteChansTsv {
 		args = append(args, "--no-overwrite-channels-tsv")
@@ -2471,12 +2504,12 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepEpochsTmin != -5.0 {
 		args = append(args, "--tmin", fmt.Sprintf("%.1f", m.prepEpochsTmin))
 	}
-	if m.prepEpochsTmax != 10.5 {
+	if m.prepEpochsTmax != 15.0 {
 		args = append(args, "--tmax", fmt.Sprintf("%.1f", m.prepEpochsTmax))
 	}
 	if m.prepEpochsNoBaseline {
 		args = append(args, "--no-baseline")
-	} else if m.prepEpochsBaselineStart != 0 || m.prepEpochsBaselineEnd != 0 {
+	} else if m.prepEpochsBaselineStart != -2.0 || m.prepEpochsBaselineEnd != 0.0 {
 		args = append(args, "--baseline", fmt.Sprintf("%.2f", m.prepEpochsBaselineStart), fmt.Sprintf("%.2f", m.prepEpochsBaselineEnd))
 	}
 	if m.prepEpochsReject > 0 {
@@ -2488,6 +2521,17 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 	if m.prepRunSourceEstimation {
 		args = append(args, "--run-source-estimation")
+	}
+
+	// Clean events.tsv options
+	if !m.prepWriteCleanEvents {
+		args = append(args, "--no-write-clean-events")
+	}
+	if !m.prepOverwriteCleanEvents {
+		args = append(args, "--no-overwrite-clean-events")
+	}
+	if !m.prepCleanEventsStrict {
+		args = append(args, "--no-clean-events-strict")
 	}
 
 	return args
@@ -2628,9 +2672,6 @@ func (m Model) buildRawToBidsAdvancedArgs() []string {
 	}
 	if m.rawOverwrite {
 		args = append(args, "--overwrite")
-	}
-	if m.rawZeroBaseOnsets {
-		args = append(args, "--zero-base-onsets")
 	}
 	if m.rawTrimToFirstVolume {
 		args = append(args, "--trim-to-first-volume")

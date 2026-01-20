@@ -196,66 +196,120 @@ def _plot_window_comparison_connectivity(
     logger: logging.Logger,
     stats_dir: Optional[Path],
 ) -> None:
-    """Plot paired window comparison for connectivity measures."""
-    from eeg_pipeline.plotting.features.utils import plot_paired_comparison
+    """Plot paired window comparison for connectivity measures.
     
-    segment1, segment2 = segments[0], segments[1]
+    Supports both 2-window comparison (simple paired) and multi-window comparison
+    (3+ windows with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.plotting.features.utils import plot_paired_comparison, plot_multi_window_comparison
+    from eeg_pipeline.utils.formatting import sanitize_label
+    
+    use_multi_window = len(segments) > 2
     
     for roi_name in roi_names:
         for measure in measures:
-            data_by_band = {}
-            for band in bands:
-                cols1, _, _ = parse_connectivity_columns(
-                    list(features_df.columns), measure, band, segment=segment1
-                )
-                cols2, _, _ = parse_connectivity_columns(
-                    list(features_df.columns), measure, band, segment=segment2
-                )
-                
-                cols1 = _filter_connectivity_columns_by_roi(
-                    cols1, roi_name, roi_definitions, list(features_df.columns)
-                )
-                cols2 = _filter_connectivity_columns_by_roi(
-                    cols2, roi_name, roi_definitions, list(features_df.columns)
-                )
-                
-                if not cols1 or not cols2:
-                    continue
-                
-                series1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                series2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                
-                valid_mask = series1.notna() & series2.notna()
-                values1 = series1[valid_mask].values
-                values2 = series2[valid_mask].values
-                
-                if len(values1) > 0:
-                    data_by_band[band] = (values1, values2)
+            measure_safe = measure.lower()
+            roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+            suffix = f"_roi-{roi_safe}" if roi_safe else ""
             
-            if data_by_band:
-                from eeg_pipeline.utils.formatting import sanitize_label
-                measure_safe = measure.lower()
-                roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
-                suffix = f"_roi-{roi_safe}" if roi_safe else ""
-                save_path = save_dir / (
-                    f"sub-{subject}_connectivity_{measure_safe}_by_condition{suffix}_window"
-                )
+            if use_multi_window:
+                # Multi-window comparison: extract data for all segments
+                data_by_band_multi: Dict[str, Dict[str, np.ndarray]] = {}
+                for band in bands:
+                    segment_series = {}
+                    for seg in segments:
+                        cols, _, _ = parse_connectivity_columns(
+                            list(features_df.columns), measure, band, segment=seg
+                        )
+                        cols = _filter_connectivity_columns_by_roi(
+                            cols, roi_name, roi_definitions, list(features_df.columns)
+                        )
+                        if cols:
+                            segment_series[seg] = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    
+                    if len(segment_series) < 2:
+                        continue
+                    
+                    valid_mask = pd.Series(True, index=features_df.index)
+                    for series in segment_series.values():
+                        valid_mask &= series.notna()
+                    
+                    segment_values = {}
+                    for seg, series in segment_series.items():
+                        vals = series[valid_mask].values
+                        if len(vals) > 0:
+                            segment_values[seg] = vals
+                    
+                    if len(segment_values) >= 2:
+                        data_by_band_multi[band] = segment_values
                 
-                plot_paired_comparison(
-                    data_by_band=data_by_band,
-                    subject=subject,
-                    save_path=save_path,
-                    feature_label=f"Connectivity ({measure.upper()})",
-                    config=config,
-                    logger=logger,
-                    label1=segment1.capitalize(),
-                    label2=segment2.capitalize(),
-                    roi_name=roi_name,
-                    stats_dir=stats_dir,
-                )
+                if data_by_band_multi:
+                    save_path = save_dir / (
+                        f"sub-{subject}_connectivity_{measure_safe}_by_condition{suffix}_multiwindow"
+                    )
+                    plot_multi_window_comparison(
+                        data_by_band=data_by_band_multi,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label=f"Connectivity ({measure.upper()})",
+                        segments=segments,
+                        config=config,
+                        logger=logger,
+                        roi_name=roi_name,
+                        stats_dir=stats_dir,
+                    )
+            else:
+                # 2-window comparison
+                segment1, segment2 = segments[0], segments[1]
+                data_by_band = {}
+                for band in bands:
+                    cols1, _, _ = parse_connectivity_columns(
+                        list(features_df.columns), measure, band, segment=segment1
+                    )
+                    cols2, _, _ = parse_connectivity_columns(
+                        list(features_df.columns), measure, band, segment=segment2
+                    )
+                    
+                    cols1 = _filter_connectivity_columns_by_roi(
+                        cols1, roi_name, roi_definitions, list(features_df.columns)
+                    )
+                    cols2 = _filter_connectivity_columns_by_roi(
+                        cols2, roi_name, roi_definitions, list(features_df.columns)
+                    )
+                    
+                    if not cols1 or not cols2:
+                        continue
+                    
+                    series1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    series2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    
+                    valid_mask = series1.notna() & series2.notna()
+                    values1 = series1[valid_mask].values
+                    values2 = series2[valid_mask].values
+                    
+                    if len(values1) > 0:
+                        data_by_band[band] = (values1, values2)
+                
+                if data_by_band:
+                    save_path = save_dir / (
+                        f"sub-{subject}_connectivity_{measure_safe}_by_condition{suffix}_window"
+                    )
+                    plot_paired_comparison(
+                        data_by_band=data_by_band,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label=f"Connectivity ({measure.upper()})",
+                        config=config,
+                        logger=logger,
+                        label1=segment1.capitalize(),
+                        label2=segment2.capitalize(),
+                        roi_name=roi_name,
+                        stats_dir=stats_dir,
+                    )
     
+    plot_type = "multi-window" if use_multi_window else "paired"
     log_if_present(logger, "info", 
-                  f"Saved connectivity paired comparison plots for "
+                  f"Saved connectivity {plot_type} comparison plots for "
                   f"{len(measures)} measures × {len(roi_names)} ROIs")
 
 
@@ -362,7 +416,8 @@ def plot_connectivity_circle_for_band(
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches
+        pad_inches=plot_cfg.pad_inches,
+        config=config
     )
     plt.close(fig)
     log_if_present(logger, "info", 
@@ -511,7 +566,7 @@ def plot_connectivity_circle_by_condition(
     save_fig(
         fig, save_dir / output_name,
         formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches
+        bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config
     )
     plt.close(fig)
     log_if_present(logger, "info", 
@@ -638,6 +693,7 @@ def plot_sliding_connectivity_trajectories(
         fig,
         plots_dir / f"sub-{subject}_sliding_connectivity_trajectories",
         formats=plot_cfg.formats,
+        config=config,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
@@ -698,6 +754,7 @@ def plot_sliding_degree_heatmap(
         plots_dir / f"sub-{subject}_sliding_degree_heatmap",
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
+        config=config,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
     )
@@ -777,7 +834,7 @@ def plot_edge_significance_circle_from_stats(
             )
 
     ensure_dir(save_dir)
-    save_fig(fig, save_dir / f"{prefix}_edge_significance")
+    save_fig(fig, save_dir / f"{prefix}_edge_significance", config=config)
     plt.close(fig)
     log_if_present(logger, "info", f"Saved edge significance circle for {prefix}")
 
@@ -829,7 +886,7 @@ def plot_graph_metric_distributions(
     
     fig.suptitle("Graph Metric Distributions", fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
     fig.tight_layout()
-    save_fig(fig, save_dir / "connectivity_graph_metrics_violin")
+    save_fig(fig, save_dir / "connectivity_graph_metrics_violin", config=config)
     plt.close(fig)
 
 
@@ -864,7 +921,7 @@ def plot_graph_metrics_bar(
     ax.set_title(f"{measure.upper()} {band}: Graph metrics")
     ensure_dir(save_dir)
     out = save_dir / f"connectivity_{measure}_{band}_graph_metrics"
-    save_fig(fig, out, formats=plot_cfg.formats)
+    save_fig(fig, out, formats=plot_cfg.formats, config=config)
     plt.close(fig)
 
 
@@ -902,7 +959,7 @@ def plot_rsn_radar(
 
     ensure_dir(save_dir)
     out = save_dir / f"connectivity_{measure}_{band}_rsn_radar"
-    save_fig(fig, out, formats=plot_cfg.formats)
+    save_fig(fig, out, formats=plot_cfg.formats, config=config)
     plt.close(fig)
     log_if_present(get_logger(__name__), "info", f"Saved RSN radar for {measure} {band}")
 
@@ -920,9 +977,71 @@ def _plot_column_comparison_connectivity(
     logger: logging.Logger,
     stats_dir: Optional[Path],
 ) -> None:
-    """Plot unpaired column comparison for connectivity measures."""
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-    from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats, get_band_color
+    """Plot unpaired column comparison for connectivity measures.
+    
+    Supports both 2-group comparison (simple unpaired) and multi-group comparison
+    (3+ groups with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+    from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats, get_band_color, plot_multi_group_column_comparison
+    from eeg_pipeline.utils.formatting import sanitize_label
+    
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
+    
+    if use_multi_group:
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        if not multi_group_info:
+            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
+            return
+        
+        masks_dict, group_labels = multi_group_info
+        segment = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        
+        for roi_name in roi_names:
+            for measure in measures:
+                data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+                for band in bands:
+                    columns, _, _ = parse_connectivity_columns(
+                        list(features_df.columns), measure, band, segment=segment
+                    )
+                    columns = _filter_connectivity_columns_by_roi(
+                        columns, roi_name, roi_definitions, list(features_df.columns)
+                    )
+                    
+                    if not columns:
+                        continue
+                    
+                    value_series = features_df[columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    
+                    group_values = {}
+                    for label, mask in masks_dict.items():
+                        vals = value_series[mask].dropna().values
+                        if len(vals) > 0:
+                            group_values[label] = vals
+                    
+                    if len(group_values) >= 2:
+                        data_by_band[band] = group_values
+                
+                if data_by_band:
+                    roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                    save_path = save_dir / f"sub-{subject}_connectivity_{measure}_by_condition{suffix}_multigroup"
+                    
+                    plot_multi_group_column_comparison(
+                        data_by_band=data_by_band,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label=f"Connectivity ({measure.upper()})",
+                        groups=group_labels,
+                        config=config,
+                        logger=logger,
+                        roi_name=roi_name,
+                        stats_dir=stats_dir,
+                    )
+        
+        log_if_present(logger, "info", f"Saved connectivity multi-group column comparison for {len(roi_names)} ROIs")
+        return
     
     comparison_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comparison_info:
@@ -1043,7 +1162,7 @@ def _plot_column_comparison_connectivity(
             filename = f"sub-{subject}_connectivity_{measure_safe}_by_condition{suffix}_column"
             
             save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                     bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                     bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
             plt.close(fig)
     
     log_if_present(logger, "info", 
@@ -1181,6 +1300,7 @@ def plot_connectivity_heatmap(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
     log_if_present(logger, "info", f"Saved connectivity heatmap for {measure} {band}")
@@ -1296,6 +1416,7 @@ def plot_connectivity_network(
         fig,
         output_name,
         formats=plot_cfg.formats,
+        config=config,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
@@ -1351,6 +1472,7 @@ def plot_sliding_state_centroids(
             formats=plot_cfg.formats,
             dpi=plot_cfg.dpi,
             bbox_inches=plot_cfg.bbox_inches,
+            config=config,
             pad_inches=plot_cfg.pad_inches,
         )
         plt.close(fig)
@@ -1377,7 +1499,7 @@ def plot_sliding_state_sequences(
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label("State")
     fig.tight_layout()
-    save_fig(fig, save_dir / "sliding_state_sequences", formats=plot_cfg.formats, dpi=plot_cfg.dpi)
+    save_fig(fig, save_dir / "sliding_state_sequences", formats=plot_cfg.formats, dpi=plot_cfg.dpi, config=config)
     plt.close(fig)
     log_if_present(logger, "info", "Saved sliding state sequence plot")
 
@@ -1406,7 +1528,7 @@ def plot_sliding_state_occupancy_boxplot(
     ax.set_title("Sliding-state occupancy (all trials)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    save_fig(fig, save_dir / "sliding_state_occupancy", formats=plot_cfg.formats, dpi=plot_cfg.dpi)
+    save_fig(fig, save_dir / "sliding_state_occupancy", formats=plot_cfg.formats, dpi=plot_cfg.dpi, config=config)
     plt.close(fig)
 
     if pain_col and pain_col in events_df.columns:
@@ -1430,7 +1552,7 @@ def plot_sliding_state_occupancy_boxplot(
             ax.set_title("Occupancy by pain group")
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
-            save_fig(fig, save_dir / "sliding_state_occupancy_by_pain", formats=plot_cfg.formats, dpi=plot_cfg.dpi)
+            save_fig(fig, save_dir / "sliding_state_occupancy_by_pain", formats=plot_cfg.formats, dpi=plot_cfg.dpi, config=config)
         plt.close(fig)
 
 
@@ -1476,6 +1598,7 @@ def plot_sliding_state_occupancy_ribbons(
         fig,
         save_dir / "sliding_state_occupancy_ribbons",
         formats=plot_cfg.formats,
+        config=config,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
@@ -1536,6 +1659,7 @@ def plot_sliding_state_lagged_correlation_surfaces(
         save_dir / f"sliding_state_corr_surface_{target_label.lower()}",
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
+        config=config,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
     )

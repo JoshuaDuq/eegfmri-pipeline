@@ -115,33 +115,6 @@ def get_aperiodic_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
 # Block Registration and Validation
 ###################################################################
 
-def validate_trial_alignment_manifest(
-    aligned_events: pd.DataFrame,
-    features_dir: Path,
-    logger: logging.Logger,
-) -> None:
-    """Validate that trial alignment manifest matches aligned events."""
-    manifest_path = features_dir / "metadata" / "trial_alignment.json"
-
-    if not manifest_path.exists():
-        raise FileNotFoundError(
-            f"Trial alignment manifest not found: {manifest_path}. "
-            f"Re-run feature extraction to generate aligned trial manifests."
-        )
-
-    with open(manifest_path, "r") as f:
-        manifest = json.load(f)
-
-    manifest_trial_count = manifest.get("n_epochs", 0)
-    events_trial_count = len(aligned_events)
-    if manifest_trial_count != events_trial_count:
-        raise ValueError(
-            f"Trial count mismatch: manifest has {manifest_trial_count} trials, "
-            f"aligned_events has {events_trial_count} trials"
-        )
-    logger.info(f"Trial alignment validated: {manifest_trial_count} trials")
-
-
 def register_feature_block(
     name: str,
     block: Optional[Union[pd.DataFrame, pd.Series]],
@@ -479,9 +452,15 @@ def align_feature_dataframes(
     validate_feature_block_lengths(
         before_lengths, logger, critical_features=critical_features, requested_categories=requested_categories
     )
-
+    
     if aligned_events is not None and len(aligned_events) > 0:
-        validate_trial_alignment_manifest(aligned_events, features_dir, logger)
+        n_events = len(aligned_events)
+        n_trials = next((length for length in block_lengths if length is not None), None)
+        if n_trials is not None and n_events != n_trials:
+            raise ValueError(
+                f"Events/features length mismatch: aligned_events has {n_events} rows "
+                f"but features have {n_trials} rows"
+            )
 
     logger.info(
         "Validated feature block lengths (%s)",
@@ -507,10 +486,10 @@ def align_feature_dataframes(
 
     retention_stats = {
         "initial_trial_count": initial_trial_count,
-        "before_alignment": before_lengths,
-        "after_alignment": after_lengths,
+        "before_filtering": before_lengths,
+        "after_filtering": after_lengths,
         "mask": drop_mask,
-        "extra_aligned": extra_aligned,
+        "extra_blocks": extra_aligned,
     }
 
     return (
@@ -531,7 +510,6 @@ __all__ = [
     "get_itpc_columns_by_band",
     "get_aperiodic_columns",
     # Block registration
-    "validate_trial_alignment_manifest",
     "register_feature_block",
     "validate_feature_block_lengths",
     # Alignment

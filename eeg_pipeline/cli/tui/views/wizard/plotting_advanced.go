@@ -649,8 +649,9 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonWindows
 		lines := []renderLine{m.renderPlotValueLine("windows", value, hint, focused || isEditing, labelWidth)}
 		// Show dropdown if expanded for this field
-		if isEditing && len(m.availableWindows) > 0 {
-			expandedLines := m.renderExpandedListItems(m.availableWindows, m.isPlotFieldWindowSelected(cfg.ComparisonWindowsSpec))
+		windows := m.GetPlottingComparisonWindows()
+		if isEditing && len(windows) > 0 {
+			expandedLines := m.renderExpandedListItems(windows, m.isPlotFieldWindowSelected(cfg.ComparisonWindowsSpec))
 			lines = append(lines, expandedLines...)
 		}
 		return lines
@@ -664,8 +665,9 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonSegment
 		lines := []renderLine{m.renderPlotValueLine("segment", value, hint, focused || isEditing, labelWidth)}
 		// Show dropdown if expanded for this field
-		if isEditing && len(m.availableWindows) > 0 {
-			expandedLines := m.renderExpandedListItems(m.availableWindows, func(w string) bool {
+		windows := m.GetPlottingComparisonWindows()
+		if isEditing && len(windows) > 0 {
+			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
 				return cfg.ComparisonSegment == w
 			})
 			lines = append(lines, expandedLines...)
@@ -678,8 +680,9 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonColumn
 		lines := []renderLine{m.renderPlotValueLine("column", value, hint, focused || isEditing, labelWidth)}
 		// Show dropdown if expanded for this field
-		if isEditing && len(m.discoveredColumns) > 0 {
-			expandedLines := m.renderExpandedListItems(m.discoveredColumns, func(col string) bool {
+		plotCols := m.GetPlottingComparisonColumns()
+		if isEditing && len(plotCols) > 0 {
+			expandedLines := m.renderExpandedListItems(plotCols, func(col string) bool {
 				return cfg.ComparisonColumn == col
 			})
 			lines = append(lines, expandedLines...)
@@ -692,7 +695,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 			col = m.plotComparisonColumn
 		}
 		hint := "e.g. 0 1"
-		vals := m.GetDiscoveredColumnValues(col)
+		vals := m.GetPlottingComparisonColumnValues(col)
 		if len(vals) > 0 {
 			hint = fmt.Sprintf("Space to select · %d values", len(vals))
 		}
@@ -708,6 +711,28 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 	case plotItemConfigFieldComparisonLabels:
 		value := m.getPlotFieldTextValue(cfg.ComparisonLabelsSpec, "(from values)", row, plotItemConfigFieldComparisonLabels)
 		return []renderLine{m.renderPlotValueLine("labels", value, "e.g. condA condB or \"High\" \"Low\"", focused, labelWidth)}
+	case plotItemConfigFieldTopomapWindow:
+		value := m.getPlotFieldTextValue(cfg.TopomapWindowsSpec, "baseline", row, plotItemConfigFieldTopomapWindow)
+		hint := m.buildComparisonSegmentHint()
+		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldTopomapWindow
+		lines := []renderLine{m.renderPlotValueLine("windows", value, hint, focused || isEditing, labelWidth)}
+		windows := m.GetPlottingComparisonWindows()
+		if isEditing && len(windows) > 0 {
+			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
+				return m.isColumnValueSelected(w)
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldConnectivityCircleTopFraction:
+		value := m.getPlotFieldTextValue(cfg.ConnectivityCircleTopFraction, "0.1", row, plotItemConfigFieldConnectivityCircleTopFraction)
+		return []renderLine{m.renderPlotValueLine("circle_top_fraction", value, "0.0-1.0 (default: 0.1)", focused, labelWidth)}
+	case plotItemConfigFieldConnectivityCircleMinLines:
+		value := m.getPlotFieldTextValue(cfg.ConnectivityCircleMinLines, "20", row, plotItemConfigFieldConnectivityCircleMinLines)
+		return []renderLine{m.renderPlotValueLine("circle_min_lines", value, "integer (default: 20)", focused, labelWidth)}
+	case plotItemConfigFieldItpcSharedColorbar:
+		value := formatTriState(cfg.ItpcSharedColorbar)
+		return []renderLine{m.renderPlotValueLine("shared_colorbar", value, "default/ON/OFF", focused, labelWidth)}
 	case plotItemConfigFieldComparisonROIs:
 		value := m.getPlotFieldTextValue(cfg.ComparisonROIsSpec, "(all)", row, plotItemConfigFieldComparisonROIs)
 		hint := "e.g. all Frontal Midline_FrontalCentral"
@@ -1350,6 +1375,12 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optPlotComparisonROIs:
 		value := m.formatTextFieldWithBuffer(textFieldPlotComparisonROIs, m.plotComparisonROIsSpec, plotDefaults.comparisonROIs)
 		return []renderLine{m.renderValueLine(opt, "comparison_rois", value, "space-separated (empty = all)", focused, labelWidth)}
+	case optPlotOverwrite:
+		val := "OFF"
+		if m.plotOverwrite != nil && *m.plotOverwrite {
+			val = "ON"
+		}
+		return []renderLine{m.renderValueLine(opt, "overwrite", val, "overwrite existing plot files", focused, labelWidth)}
 
 	default:
 		// Fallback: keep UI robust even if new options are added without
@@ -1441,14 +1472,15 @@ func (m Model) renderComparisonWindowsOption(opt optionType, focused bool, label
 	if m.editingText && m.editingTextField == textFieldPlotComparisonWindows {
 		value = m.textBuffer + "█"
 	}
+	windows := m.GetPlottingComparisonWindows()
 	hint := "Space to select"
-	if len(m.availableWindows) > 0 {
-		hint = fmt.Sprintf("Space to select · %d windows available", len(m.availableWindows))
+	if len(windows) > 0 {
+		hint = fmt.Sprintf("Space to select · %d windows available", len(windows))
 	}
 	lines := []renderLine{m.renderValueLine(opt, "comparison_windows", value, hint, focused, labelWidth)}
 
-	if m.expandedOption == expandedPlotComparisonWindows && focused && len(m.availableWindows) > 0 {
-		expandedLines := m.renderExpandedListItems(m.availableWindows, m.isColumnValueSelected)
+	if m.expandedOption == expandedPlotComparisonWindows && focused && len(windows) > 0 {
+		expandedLines := m.renderExpandedListItems(windows, m.isColumnValueSelected)
 		lines = append(lines, expandedLines...)
 	}
 	return lines
@@ -1490,7 +1522,7 @@ func (m Model) renderComparisonValuesOption(opt optionType, focused bool, labelW
 		value = m.textBuffer + "█"
 	}
 	hint := "Space to select"
-	vals := m.GetDiscoveredColumnValues(m.plotComparisonColumn)
+	vals := m.GetPlottingComparisonColumnValues(m.plotComparisonColumn)
 	if len(vals) > 0 {
 		hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.plotComparisonColumn)
 	}

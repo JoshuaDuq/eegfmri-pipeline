@@ -587,6 +587,7 @@ def plot_residual_qc(
         pad_inches=plot_cfg.pad_inches,
         footer=_get_behavior_footer(config, inference="Descriptive: regression residual QC"),
         logger=logger,
+        config=config,
     )
     plt.close(fig)
 
@@ -678,5 +679,6 @@ def plot_regression_residual_diagnostics(
             config, inference="Descriptive: regression residual diagnostics"
         ),
         logger=logger,
+        config=config,
     )
     plt.close(fig)

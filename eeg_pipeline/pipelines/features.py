@@ -56,7 +56,6 @@ from eeg_pipeline.utils.data.features import align_feature_dataframes
 from eeg_pipeline.utils.data.feature_io import (
     save_all_features,
     save_dropped_trials_log,
-    save_trial_alignment_manifest,
 )
 
 
@@ -241,24 +240,24 @@ def _build_extra_blocks(unpacked: Dict[str, Any], features: FeatureExtractionRes
 def _update_from_aligned_extra(
     unpacked: Dict[str, Any],
     features: FeatureExtractionResult,
-    extra_aligned: Dict[str, pd.DataFrame],
+    extra_blocks: Dict[str, pd.DataFrame],
 ) -> None:
-    """Update unpacked dict and features object with aligned extra blocks."""
-    unpacked["itpc_df"] = extra_aligned.get("itpc", unpacked["itpc_df"])
-    unpacked["itpc_trial_df"] = extra_aligned.get("itpc_trial", unpacked["itpc_trial_df"])
-    unpacked["pac_df"] = extra_aligned.get("pac", unpacked["pac_df"])
-    unpacked["pac_trials_df"] = extra_aligned.get("pac_trials", unpacked["pac_trials_df"])
-    unpacked["pac_time_df"] = extra_aligned.get("pac_time", unpacked["pac_time_df"])
-    unpacked["comp_df"] = extra_aligned.get("complexity", unpacked["comp_df"])
-    unpacked["spectral_df"] = extra_aligned.get("spectral", unpacked["spectral_df"])
-    unpacked["erp_df"] = extra_aligned.get("erp", unpacked["erp_df"])
-    unpacked["bursts_df"] = extra_aligned.get("bursts", unpacked["bursts_df"])
-    unpacked["erds_df"] = extra_aligned.get("erds", unpacked["erds_df"])
-    unpacked["dconn_df"] = extra_aligned.get("dconn", unpacked["dconn_df"])
-    unpacked["source_df"] = extra_aligned.get("source", unpacked["source_df"])
-    features.ratios_df = extra_aligned.get("ratios", features.ratios_df)
-    features.asymmetry_df = extra_aligned.get("asymmetry", features.asymmetry_df)
-    features.quality_df = extra_aligned.get("quality", features.quality_df)
+    """Update unpacked dict and features object with filtered extra blocks."""
+    unpacked["itpc_df"] = extra_blocks.get("itpc", unpacked["itpc_df"])
+    unpacked["itpc_trial_df"] = extra_blocks.get("itpc_trial", unpacked["itpc_trial_df"])
+    unpacked["pac_df"] = extra_blocks.get("pac", unpacked["pac_df"])
+    unpacked["pac_trials_df"] = extra_blocks.get("pac_trials", unpacked["pac_trials_df"])
+    unpacked["pac_time_df"] = extra_blocks.get("pac_time", unpacked["pac_time_df"])
+    unpacked["comp_df"] = extra_blocks.get("complexity", unpacked["comp_df"])
+    unpacked["spectral_df"] = extra_blocks.get("spectral", unpacked["spectral_df"])
+    unpacked["erp_df"] = extra_blocks.get("erp", unpacked["erp_df"])
+    unpacked["bursts_df"] = extra_blocks.get("bursts", unpacked["bursts_df"])
+    unpacked["erds_df"] = extra_blocks.get("erds", unpacked["erds_df"])
+    unpacked["dconn_df"] = extra_blocks.get("dconn", unpacked["dconn_df"])
+    unpacked["source_df"] = extra_blocks.get("source", unpacked["source_df"])
+    features.ratios_df = extra_blocks.get("ratios", features.ratios_df)
+    features.asymmetry_df = extra_blocks.get("asymmetry", features.asymmetry_df)
+    features.quality_df = extra_blocks.get("quality", features.quality_df)
 
 
 def _build_feature_qc(features: FeatureExtractionResult, ctx: FeatureContext) -> Dict[str, Any]:
@@ -466,20 +465,16 @@ class FeaturePipeline(PipelineBase):
             return
 
         original_events = _load_events_df(
-            subject, task, bids_root=self.config.bids_root, config=self.config
+            subject,
+            task,
+            bids_root=self.config.bids_root,
+            config=self.config,
+            prefer_clean=False,
         )
         if original_events is not None:
             save_dropped_trials_log(
                 epochs, original_events, features_dir / "metadata" / "dropped_trials.tsv", self.logger
             )
-
-        save_trial_alignment_manifest(
-            aligned_events,
-            epochs,
-            features_dir / "metadata" / "trial_alignment.json",
-            self.config,
-            self.logger,
-        )
 
         target_columns = list(self.config.get("event_columns.rating", []) or [])
         target_col = pick_target_column(aligned_events, target_columns=target_columns)
@@ -616,8 +611,8 @@ class FeaturePipeline(PipelineBase):
                 self.logger.error(f"Feature alignment failed for {range_info}. Skipping save.")
                 continue
 
-            extra_aligned = retention_stats.get("extra_aligned", {})
-            _update_from_aligned_extra(unpacked, features, extra_aligned)
+            extra_blocks = retention_stats.get("extra_blocks", {})
+            _update_from_aligned_extra(unpacked, features, extra_blocks)
 
             feature_qc = _build_feature_qc(features, ctx)
 
@@ -719,14 +714,6 @@ class FeaturePipeline(PipelineBase):
             )
             _save_merged_features(accumulated_features, features_dir, self.config, self.logger)
 
-            if accumulated_y is not None:
-                rating_columns = self.config.get("event_columns.rating", ["vas_rating"])
-                target_column_name = rating_columns[0] if rating_columns else "vas_rating"
-                write_parquet(
-                    accumulated_y.to_frame(name=target_column_name),
-                    features_dir / "behavior" / "target_vas_ratings.parquet",
-                )
-                self.logger.info(f"Saved merged targets: {len(accumulated_y)} trials")
 
             merged_extraction_config = {
                 "cli_command": kwargs.get("cli_command"),

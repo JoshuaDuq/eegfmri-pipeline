@@ -192,7 +192,6 @@ def _load_epochs_for_subject(
         align="strict",
         preload=False,
         deriv_root=deriv_root,
-        bids_root=config.bids_root,
         logger=logger,
         config=config,
     )
@@ -233,7 +232,6 @@ def _load_aligned_events_and_covariates(
         task,
         strict=True,
         logger=logger,
-        bids_root=config.bids_root,
         config=config,
     )
     

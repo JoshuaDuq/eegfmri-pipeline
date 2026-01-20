@@ -260,5 +260,5 @@ def plot_residual_diagnostics(
     _plot_qq_plot(axes[1], theoretical_quantiles, residuals_sorted, plot_cfg, marker_size)
     
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved {model_name} residual diagnostics: {save_path}")

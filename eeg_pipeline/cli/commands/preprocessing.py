@@ -43,6 +43,47 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--use-pyprep", action="store_true", default=True, help="Use PyPREP for bad channel detection (default: True)")
     prep_group.add_argument("--no-pyprep", dest="use_pyprep", action="store_false", help="Disable PyPREP bad channel detection")
 
+    # Clean events.tsv (post-rejection)
+    prep_group.add_argument(
+        "--write-clean-events",
+        dest="write_clean_events",
+        action="store_true",
+        default=None,
+        help="Write a clean events.tsv aligned to kept epochs (default from config)",
+    )
+    prep_group.add_argument(
+        "--no-write-clean-events",
+        dest="write_clean_events",
+        action="store_false",
+        help="Disable writing clean events.tsv aligned to kept epochs",
+    )
+    prep_group.add_argument(
+        "--overwrite-clean-events",
+        dest="overwrite_clean_events",
+        action="store_true",
+        default=None,
+        help="Overwrite existing clean events.tsv (default from config)",
+    )
+    prep_group.add_argument(
+        "--no-overwrite-clean-events",
+        dest="overwrite_clean_events",
+        action="store_false",
+        help="Do not overwrite existing clean events.tsv",
+    )
+    prep_group.add_argument(
+        "--clean-events-strict",
+        dest="clean_events_strict",
+        action="store_true",
+        default=None,
+        help="Fail preprocessing if clean events.tsv cannot be written (default from config)",
+    )
+    prep_group.add_argument(
+        "--no-clean-events-strict",
+        dest="clean_events_strict",
+        action="store_false",
+        help="Warn instead of failing when clean events.tsv cannot be written",
+    )
+
     # Filtering
     prep_group.add_argument("--resample", type=int, help="Resampling frequency (Hz)")
     prep_group.add_argument("--l-freq", type=float, help="High-pass filter frequency (Hz)")
@@ -62,11 +103,35 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--keep-mnebids-bads", action="store_true", default=False, help="Keep MNE-BIDS flagged bad ICA components")
 
     # PyPREP advanced options
-    prep_group.add_argument("--ransac", action="store_true", default=False, help="Use RANSAC for bad channel detection")
+    prep_group.add_argument(
+        "--ransac",
+        dest="ransac",
+        action="store_true",
+        default=None,
+        help="Enable RANSAC for bad channel detection (default from config)",
+    )
+    prep_group.add_argument(
+        "--no-ransac",
+        dest="ransac",
+        action="store_false",
+        help="Disable RANSAC for bad channel detection",
+    )
     prep_group.add_argument("--repeats", type=int, default=3, help="Number of bad channel detection iterations")
     prep_group.add_argument("--average-reref", action="store_true", default=False, help="Average re-reference before bad channel detection")
     prep_group.add_argument("--file-extension", type=str, default=".vhdr", help="File extension for EEG data")
-    prep_group.add_argument("--consider-previous-bads", action="store_true", default=False, help="Keep previously marked bad channels")
+    prep_group.add_argument(
+        "--consider-previous-bads",
+        dest="consider_previous_bads",
+        action="store_true",
+        default=None,
+        help="Keep previously marked bad channels (default from config)",
+    )
+    prep_group.add_argument(
+        "--no-consider-previous-bads",
+        dest="consider_previous_bads",
+        action="store_false",
+        help="Ignore/clear previously marked bad channels",
+    )
     prep_group.add_argument("--overwrite-channels-tsv", action="store_true", default=True, help="Overwrite channels.tsv file with detected bad channels")
     prep_group.add_argument("--no-overwrite-channels-tsv", dest="overwrite_channels_tsv", action="store_false", help="Do not overwrite channels.tsv file")
     prep_group.add_argument("--delete-breaks", action="store_true", default=False, help="Delete breaks in data during bad channel detection")
@@ -84,7 +149,19 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--no-baseline", action="store_true", help="Disable epoch baseline correction")
     prep_group.add_argument("--reject", type=float, help="Peak-to-peak amplitude rejection threshold (µV)")
     prep_group.add_argument("--reject-method", choices=["none", "autoreject_local", "autoreject_global"], help="Epoch rejection method")
-    prep_group.add_argument("--find-breaks", action="store_true", default=False, help="Find breaks in data")
+    prep_group.add_argument(
+        "--find-breaks",
+        dest="find_breaks",
+        action="store_true",
+        default=None,
+        help="Enable automatic break detection (default from config)",
+    )
+    prep_group.add_argument(
+        "--no-find-breaks",
+        dest="find_breaks",
+        action="store_false",
+        help="Disable automatic break detection",
+    )
     prep_group.add_argument("--run-source-estimation", action="store_true", default=False, help="Run source estimation")
 
     add_path_args(parser)
@@ -132,7 +209,10 @@ def _update_preprocessing_config(args: argparse.Namespace, config: Any) -> None:
     if args.eeg_reference:
         eeg_config["reference"] = args.eeg_reference
     if args.eog_channels:
-        eeg_config["eog_channels"] = args.eog_channels
+        # Split comma-separated string into list
+        eog_channels_list = [ch.strip() for ch in args.eog_channels.split(",") if ch.strip()]
+        if eog_channels_list:
+            eeg_config["eog_channels"] = eog_channels_list
     if args.random_state is not None:
         preprocessing_config["random_state"] = args.random_state
     if args.task_is_rest:
@@ -149,10 +229,16 @@ def _update_preprocessing_config(args: argparse.Namespace, config: Any) -> None:
         preprocessing_config["line_freq"] = args.line_freq
     if args.zapline_fline is not None:
         preprocessing_config["zapline_fline"] = args.zapline_fline
-    if args.find_breaks:
-        preprocessing_config["find_breaks"] = True
+    if args.find_breaks is not None:
+        preprocessing_config["find_breaks"] = bool(args.find_breaks)
     if args.run_source_estimation:
         preprocessing_config["run_source_estimation"] = True
+    if args.write_clean_events is not None:
+        preprocessing_config["write_clean_events"] = bool(args.write_clean_events)
+    if args.overwrite_clean_events is not None:
+        preprocessing_config["clean_events_overwrite"] = bool(args.overwrite_clean_events)
+    if args.clean_events_strict is not None:
+        preprocessing_config["clean_events_strict"] = bool(args.clean_events_strict)
 
 
 def _update_ica_config(args: argparse.Namespace, config: Any) -> None:
@@ -185,8 +271,11 @@ def _update_epochs_config(args: argparse.Namespace, config: Any) -> None:
         epochs_config["baseline"] = None
     elif args.baseline:
         epochs_config["baseline"] = tuple(args.baseline)
-    if args.reject is not None:
+    if args.reject is not None and args.reject > 0:
         epochs_config["reject"] = {"eeg": args.reject * 1e-6}
+    elif args.reject is not None and args.reject <= 0:
+        # Disable rejection when threshold is 0 or negative
+        epochs_config["reject"] = None
     if args.reject_method:
         epochs_config["reject_method"] = args.reject_method
 
@@ -202,16 +291,16 @@ def _update_pyprep_config(args: argparse.Namespace, config: Any) -> None:
     """Update config with PyPREP parameter overrides."""
     pyprep_config = config.setdefault("pyprep", {})
     
-    if args.ransac:
-        pyprep_config["ransac"] = True
+    if args.ransac is not None:
+        pyprep_config["ransac"] = bool(args.ransac)
     if args.repeats != 3:
         pyprep_config["repeats"] = args.repeats
     if args.average_reref:
         pyprep_config["average_reref"] = True
     if args.file_extension != ".vhdr":
         pyprep_config["file_extension"] = args.file_extension
-    if args.consider_previous_bads:
-        pyprep_config["consider_previous_bads"] = True
+    if args.consider_previous_bads is not None:
+        pyprep_config["consider_previous_bads"] = bool(args.consider_previous_bads)
     if not args.overwrite_channels_tsv:
         pyprep_config["overwrite_chans_tsv"] = False
     if args.delete_breaks:

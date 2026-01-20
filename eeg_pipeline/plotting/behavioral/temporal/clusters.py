@@ -324,6 +324,7 @@ def _save_figure(fig: plt.Figure, filepath: Path, plot_cfg: Any) -> None:
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
 
@@ -366,7 +367,7 @@ def plot_pain_nonpain_clusters(
 
     ribbon_fig = _plot_cluster_ribbons(all_clusters, band_order, subject, plot_cfg)
     ribbon_path = topomap_dir / f"sub-{subject}_condition_cluster_ribbons"
-    _save_figure(ribbon_fig, ribbon_path, plot_cfg)
+    _save_figure(ribbon_fig, ribbon_path, plot_cfg, config=config)
 
     for band in band_order:
         band_df = significant_clusters[significant_clusters["band"] == band]
@@ -378,4 +379,4 @@ def plot_pain_nonpain_clusters(
             continue
 
         mask_path = topomap_dir / f"sub-{subject}_condition_cluster_mask_{band}"
-        _save_figure(mask_fig, mask_path, plot_cfg)
+        _save_figure(mask_fig, mask_path, plot_cfg, config=config)

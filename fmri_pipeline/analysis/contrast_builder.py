@@ -304,16 +304,15 @@ def discover_confounds(
 
     Searches multiple possible fMRIPrep output locations:
       1. derivatives/fmriprep/sub-*/func/ (standard fMRIPrep layout)
-      2. derivatives/preprocessed/sub-*/fmri/func/ (fmri_preprocessing pipeline default)
+      2. derivatives/preprocessed/fmri/sub-*/func/ (fmri_preprocessing pipeline default)
 
     Returns path to confounds TSV or None if not found.
     """
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
 
     search_dirs = [
+        bids_derivatives / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
         bids_derivatives / "fmriprep" / sub_label / "func",
-        bids_derivatives / "preprocessed" / sub_label / "fmri" / sub_label / "func",
-        bids_derivatives / "preprocessed" / sub_label / "fmri" / "func",
         bids_derivatives / sub_label / "func",
     ]
 
@@ -351,7 +350,7 @@ def _discover_fmriprep_preproc_bold(
 
     Searches multiple possible fMRIPrep output locations:
       1. derivatives/fmriprep/sub-*/func/ (standard fMRIPrep layout)
-      2. derivatives/preprocessed/sub-*/fmri/func/ (fmri_preprocessing pipeline default)
+      2. derivatives/preprocessed/fmri/sub-*/func/ (fmri_preprocessing pipeline default)
 
     We prefer `space-{space}` outputs if provided, but fall back to any
     `desc-preproc_bold` if needed.
@@ -359,9 +358,8 @@ def _discover_fmriprep_preproc_bold(
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
 
     search_dirs = [
+        bids_derivatives / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
         bids_derivatives / "fmriprep" / sub_label / "func",
-        bids_derivatives / "preprocessed" / sub_label / "fmri" / sub_label / "func",
-        bids_derivatives / "preprocessed" / sub_label / "fmri" / "func",
     ]
 
     run_tokens = [f"run-{run_num:02d}", f"run-{run_num}"]

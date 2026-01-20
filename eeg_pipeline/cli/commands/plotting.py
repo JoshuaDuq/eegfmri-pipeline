@@ -396,11 +396,17 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "Per-plot overrides; can be repeated. "
             "Example: --plot-item-config tfr_scalpmean tfr_default_baseline_window -5.0 -0.01. "
             "Keys: tfr_default_baseline_window, compare_windows, comparison_windows, compare_columns, "
-            "comparison_segment, comparison_column, comparison_values, comparison_labels, comparison_rois."
+            "comparison_segment, comparison_column, comparison_values, comparison_labels, comparison_rois, "
+            "topomap_windows (or topomap_window for single value), connectivity_circle_top_fraction, "
+            "connectivity_circle_min_lines, itpc_shared_colorbar."
         ),
     )
 
     add_path_args(parser)
+
+    output_group = parser.add_argument_group("Output options")
+    output_group.add_argument("--overwrite", action="store_true", default=None, help="Overwrite existing plot files (default from config)")
+    output_group.add_argument("--no-overwrite", dest="overwrite", action="store_false", help="Skip existing plot files")
 
     tfr_group = parser.add_argument_group("TFR visualization options (mode: tfr)")
     tfr_group.add_argument(
@@ -545,6 +551,24 @@ def _apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> 
             _apply_config_override(config, "plotting.comparisons.comparison_labels", [values[0], values[1]])
         elif key == "comparison_rois" and values:
             _apply_config_override(config, "plotting.comparisons.comparison_rois", list(values))
+        elif key == "topomap_windows" and values:
+            _apply_config_override(config, "plotting.plots.features.power.topomap_windows", list(values))
+        elif key == "topomap_window" and values:
+            _apply_config_override(config, "plotting.plots.features.power.topomap_windows", [values[0]])
+        elif key == "connectivity_circle_top_fraction" and values:
+            try:
+                _apply_config_override(config, "plotting.plots.features.connectivity.circle_top_fraction", float(values[0]))
+            except ValueError:
+                pass
+        elif key == "connectivity_circle_min_lines" and values:
+            try:
+                _apply_config_override(config, "plotting.plots.features.connectivity.circle_min_lines", int(values[0]))
+            except ValueError:
+                pass
+        elif key == "itpc_shared_colorbar" and values:
+            parsed = _parse_bool(values[0])
+            if parsed is not None:
+                _apply_config_override(config, "plotting.plots.itpc.shared_colorbar", parsed)
 
 
 _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
@@ -557,6 +581,11 @@ _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "comparison_values": "plotting.comparisons.comparison_values",
     "comparison_labels": "plotting.comparisons.comparison_labels",
     "comparison_rois": "plotting.comparisons.comparison_rois",
+    "topomap_windows": "plotting.plots.features.power.topomap_windows",
+    "topomap_window": "plotting.plots.features.power.topomap_windows",
+    "connectivity_circle_top_fraction": "plotting.plots.features.connectivity.circle_top_fraction",
+    "connectivity_circle_min_lines": "plotting.plots.features.connectivity.circle_min_lines",
+    "itpc_shared_colorbar": "plotting.plots.itpc.shared_colorbar",
 }
 
 
@@ -599,9 +628,46 @@ def _validate_plot_item_configs(configs: Dict[str, Dict[str, List[str]]]) -> Non
                     )
                 continue
 
-            if key in {"comparison_segment", "comparison_column"}:
+            if key in {"comparison_segment", "comparison_column", "connectivity_circle_top_fraction", "connectivity_circle_min_lines"}:
                 if not values or not str(values[0]).strip():
                     errors.append(f"plot_id '{plot_id}': {key} expects a non-empty value.")
+                continue
+
+            if key == "topomap_windows":
+                if not values:
+                    errors.append(f"plot_id '{plot_id}': {key} expects one or more values.")
+                continue
+
+            if key == "topomap_window":
+                if not values or not str(values[0]).strip():
+                    errors.append(f"plot_id '{plot_id}': {key} expects a non-empty value.")
+                continue
+
+            if key == "connectivity_circle_top_fraction":
+                try:
+                    val = float(values[0])
+                    if not (0.0 <= val <= 1.0):
+                        errors.append(f"plot_id '{plot_id}': {key} must be between 0.0 and 1.0.")
+                except (ValueError, IndexError):
+                    errors.append(f"plot_id '{plot_id}': {key} must be a number between 0.0 and 1.0.")
+                continue
+
+            if key == "connectivity_circle_min_lines":
+                try:
+                    val = int(values[0])
+                    if val < 0:
+                        errors.append(f"plot_id '{plot_id}': {key} must be a non-negative integer.")
+                except (ValueError, IndexError):
+                    errors.append(f"plot_id '{plot_id}': {key} must be a non-negative integer.")
+                continue
+
+            if key == "itpc_shared_colorbar":
+                if not values:
+                    errors.append(f"plot_id '{plot_id}': {key} expects a boolean value (true/false).")
+                else:
+                    val_str = str(values[0]).lower()
+                    if val_str not in {"true", "false"}:
+                        errors.append(f"plot_id '{plot_id}': {key} must be 'true' or 'false'.")
                 continue
 
             if key in {"comparison_windows", "comparison_values", "comparison_rois"}:
@@ -1019,6 +1085,12 @@ def _apply_comparison_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "plotting.comparisons.comparison_rois", list(args.comparison_rois))
 
 
+def _apply_output_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply output-related overrides."""
+    if _get_arg_value(args, "overwrite") is not None:
+        _apply_config_override(config, "plotting.overwrite", bool(args.overwrite))
+
+
 def _parse_roi_definitions(roi_defs: List[str]) -> Dict[str, List[str]]:
     """Parse ROI definitions from CLI format 'name:ch1,ch2,...'.
     
@@ -1110,6 +1182,61 @@ def _apply_all_config_overrides(args: argparse.Namespace, config: Any) -> None:
     _apply_comparison_overrides(args, config)
     _apply_roi_overrides(args, config)
     _apply_band_overrides(args, config)
+    _apply_output_overrides(args, config)
+
+
+def _map_plot_id_to_plotters(plot_id: str, feature_categories: List[str]) -> Optional[List[str]]:
+    """Map plot ID to specific plotter names for feature categories.
+    
+    When a specific plot is selected, only run the relevant plotters instead of all
+    plotters for the category.
+    
+    Parameters
+    ----------
+    plot_id : str
+        Plot ID from catalog (e.g., "power_by_condition")
+    feature_categories : list of str
+        Feature categories this plot belongs to
+        
+    Returns
+    -------
+    list of str or None
+        List of plotter tokens in "category.name" format, or None to run all plotters
+    """
+    # Mapping from plot IDs to plotter function names
+    # These are the registered plotter function names (not the plot IDs)
+    PLOT_ID_TO_PLOTTER = {
+        "power_by_condition": "plot_power_condition_comparison",
+        "power_spectral_density": "plot_psd_visualization",
+        "band_power_topomaps": "plot_power_summary",  # Handles topomaps conditionally
+        "cross_frequency_power_correlation": "plot_power_condition_comparison",  # Same plotter handles both
+        "connectivity_by_condition": "plot_connectivity_by_condition",
+        "connectivity_circle_condition": "plot_connectivity_circle_by_condition",
+        "connectivity_heatmap": "plot_connectivity_heatmap",
+        "connectivity_network": "plot_connectivity_network",
+        "connectivity_dynamics": "plot_sliding_connectivity_trajectories",
+        "aperiodic_by_condition": "plot_aperiodic_by_condition",
+        "aperiodic_topomaps": "plot_aperiodic_topomaps",
+        "complexity_by_condition": "plot_complexity_by_condition",
+        "erds_by_condition": "plot_erds_by_condition",
+        "spectral_by_condition": "plot_spectral_by_condition",
+        "ratios_by_condition": "plot_ratios_by_condition",
+        "asymmetry_by_condition": "plot_asymmetry_by_condition",
+        "bursts_by_condition": "plot_bursts_by_condition",
+        "itpc_by_condition": "plot_itpc_by_condition",
+        "pac_by_condition": "plot_pac_by_condition",
+    }
+    
+    plotter_name = PLOT_ID_TO_PLOTTER.get(plot_id)
+    if plotter_name is None:
+        return None  # Run all plotters for the category
+    
+    # Convert to "category.name" format
+    result = []
+    for category in feature_categories:
+        result.append(f"{category}.{plotter_name}")
+    
+    return result if result else None
 
 
 def _collect_plot_definitions(
@@ -1198,12 +1325,18 @@ def _render_plots_with_per_plot_config(
                 if definition.feature_plot_patterns
                 else [plot_id]
             )
+            
+            # Map plot ID to plotter names if feature_plotters not explicitly provided
+            plotter_names = selected_feature_plotters
+            if plotter_names is None:
+                plotter_names = _map_plot_id_to_plotters(plot_id, definition.feature_categories)
+            
             visualize_features_for_subjects(
                 subjects=subjects,
                 task=task,
                 config=plot_config,
                 visualize_categories=sorted(definition.feature_categories),
-                feature_plotters=selected_feature_plotters,
+                feature_plotters=plotter_names,
                 plot_name_patterns=patterns,
             )
         if definition.behavior_plots:

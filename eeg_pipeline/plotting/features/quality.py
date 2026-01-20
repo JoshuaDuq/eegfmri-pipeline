@@ -208,7 +208,7 @@ def plot_feature_distribution_grid(
     fig.legend(handles=legend_elements, loc="upper right", fontsize=plot_cfg.font.medium)
     
     plt.tight_layout()
-    save_fig(fig, save_path)
+    save_fig(fig, save_path, config=config)
     plt.close(fig)
     
     return fig
@@ -278,7 +278,7 @@ def plot_outlier_trials_heatmap(
     ax.set_xlabel(xlabel, fontsize=plot_cfg.font.title)
     
     plt.tight_layout()
-    save_fig(fig, save_path)
+    save_fig(fig, save_path, config=config)
     plt.close(fig)
     
     return fig
@@ -358,7 +358,7 @@ def plot_snr_distribution(
     )
     
     plt.tight_layout()
-    save_fig(fig, save_path)
+    save_fig(fig, save_path, config=config)
     plt.close(fig)
     
     return fig
@@ -410,7 +410,7 @@ def plot_reliability_summary(
         ax2.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax2.transAxes)
     
     plt.tight_layout()
-    save_fig(fig, save_path)
+    save_fig(fig, save_path, config=config)
     plt.close(fig)
     
     return fig

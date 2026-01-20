@@ -236,7 +236,7 @@ class PreprocessingPipeline(PipelineBase):
         pyprep_cfg = self.config.get("pyprep", {})
         run_bads_detection(
             bids_path=str(self.bids_root),
-            pipeline_path=str(self.deriv_root / "preprocessed"),
+            pipeline_path=str(self.deriv_root / "preprocessed" / "eeg"),
             task=task,
             subjects=normalized_subjects,
             n_jobs=n_jobs,
@@ -307,7 +307,7 @@ class PreprocessingPipeline(PipelineBase):
         
         icalabel_cfg = self.config.get("icalabel", {})
         run_ica_label(
-            pipeline_path=str(self.deriv_root / "preprocessed"),
+            pipeline_path=str(self.deriv_root / "preprocessed" / "eeg"),
             task=task,
             subjects=normalized_subjects,
             prob_threshold=icalabel_cfg.get("prob_threshold", self.config.get("ica.probability_threshold", 0.8)),
@@ -326,8 +326,56 @@ class PreprocessingPipeline(PipelineBase):
         steps = "preprocessing/_07_make_epochs,preprocessing/_08a_apply_ica,preprocessing/_09_ptp_reject"
         
         self._run_mne_bids_pipeline(steps, subjects=subjects)
+
+        if bool(self.config.get("preprocessing.write_clean_events", True)):
+            self._write_clean_events_tsv(subjects=subjects, task=task)
         
         self.logger.info("Epoch creation complete")
+
+    def _resolve_epoch_conditions(self) -> list[str] | None:
+        conditions = self.config.get("epochs.conditions")
+        if conditions:
+            return list(conditions)
+        detected = self._detect_conditions_from_bids()
+        return list(detected) if detected else None
+
+    def _write_clean_events_tsv(self, *, subjects: List[str], task: str) -> None:
+        from eeg_pipeline.infra.paths import find_clean_epochs_path
+        from eeg_pipeline.utils.data.preprocessing import write_clean_events_tsv_for_epochs
+
+        conditions = self._resolve_epoch_conditions()
+        overwrite = bool(self.config.get("preprocessing.clean_events_overwrite", True))
+        strict = bool(self.config.get("preprocessing.clean_events_strict", True))
+
+        for subj in subjects:
+            epochs_path = find_clean_epochs_path(
+                subj,
+                task,
+                deriv_root=self.deriv_root,
+                config=self.config,
+            )
+            if epochs_path is None or not epochs_path.exists():
+                msg = f"Clean epochs not found; cannot write clean events for sub-{subj}, task-{task}"
+                if strict:
+                    raise FileNotFoundError(msg)
+                self.logger.warning(msg)
+                continue
+
+            try:
+                write_clean_events_tsv_for_epochs(
+                    subject=subj,
+                    task=task,
+                    bids_root=self.bids_root,
+                    epochs_path=epochs_path,
+                    conditions=conditions,
+                    overwrite=overwrite,
+                    _logger=self.logger,
+                )
+            except Exception as exc:
+                msg = f"Failed writing clean events for sub-{subj}, task-{task}: {exc}"
+                if strict:
+                    raise RuntimeError(msg) from exc
+                self.logger.warning(msg)
     
     def _collect_stats(self, task: str) -> None:
         """Collect preprocessing statistics."""
@@ -337,7 +385,7 @@ class PreprocessingPipeline(PipelineBase):
         
         collect_preprocessing_stats(
             bids_path=str(self.bids_root),
-            pipeline_path=str(self.deriv_root / "preprocessed"),
+            pipeline_path=str(self.deriv_root / "preprocessed" / "eeg"),
             task=task,
         )
         
@@ -414,7 +462,7 @@ class PreprocessingPipeline(PipelineBase):
             '"""Auto-generated MNE-BIDS pipeline config."""',
             "",
             f'bids_root = "{self.bids_root}"',
-            f'deriv_root = "{self.deriv_root / "preprocessed"}"',
+            f'deriv_root = "{self.deriv_root / "preprocessed" / "eeg"}"',
             "",
         ]
         
@@ -438,8 +486,16 @@ class PreprocessingPipeline(PipelineBase):
         if eog_channels:
             if isinstance(eog_channels, list):
                 lines.append(f'eog_channels = {eog_channels}')
+            elif isinstance(eog_channels, str):
+                # Handle comma-separated string
+                eog_list = [ch.strip() for ch in eog_channels.split(",") if ch.strip()]
+                if eog_list:
+                    lines.append(f'eog_channels = {eog_list}')
             else:
                 lines.append(f'eog_channels = ["{eog_channels}"]')
+
+        # NOTE: mne-bids-pipeline does not accept an `ecg_channels` config variable.
+        # ECG channel typing is handled via BIDS channels.tsv (type=ECG) and MNE.
         
         # Random state
         random_state = self.config.get("preprocessing.random_state", 42)
@@ -484,7 +540,7 @@ class PreprocessingPipeline(PipelineBase):
             lines.append(f'spatial_filter = "{spatial_filter}"')
         
         # ICA algorithm
-        ica_algorithm = self.config.get("ica.algorithm", "extended_infomax")
+        ica_algorithm = self.config.get("ica.method") or self.config.get("ica.algorithm", "extended_infomax")
         if ica_algorithm:
             lines.append(f'ica_algorithm = "{ica_algorithm}"')
         
@@ -534,14 +590,42 @@ class PreprocessingPipeline(PipelineBase):
         # Baseline
         baseline = self.config.get("epochs.baseline")
         if baseline is not None:
+            # Convert list to tuple if needed (MNE-BIDS expects tuple)
+            if isinstance(baseline, list):
+                baseline = tuple(baseline)
             lines.append(f'baseline = {baseline}')
         else:
             lines.append('baseline = None')
         
         # Reject
         reject = self.config.get("epochs.reject")
+        reject_method = self.config.get("epochs.reject_method")
+        if reject is None and reject_method:
+            # CLI sets epochs.reject_method ("none"/"autoreject_local"/"autoreject_global")
+            rm = str(reject_method).strip().lower()
+            if rm == "none":
+                reject = None
+            elif rm in {"autoreject_local", "autoreject_global"}:
+                reject = rm
+
         if reject is not None:
-            lines.append(f'reject = {reject}')
+            if isinstance(reject, str):
+                lines.append(f'reject = "{reject}"')
+            else:
+                lines.append(f"reject = {reject}")
+
+        # Optional PTP reject time window (ignored by autoreject_local)
+        reject_tmin = self.config.get("epochs.reject_tmin")
+        if reject_tmin is not None:
+            lines.append(f"reject_tmin = {float(reject_tmin)}")
+        reject_tmax = self.config.get("epochs.reject_tmax")
+        if reject_tmax is not None:
+            lines.append(f"reject_tmax = {float(reject_tmax)}")
+
+        # Autoreject local configuration
+        ar_n_interp = self.config.get("epochs.autoreject_n_interpolate")
+        if ar_n_interp is not None:
+            lines.append(f"autoreject_n_interpolate = {ar_n_interp}")
         
         # Source estimation
         run_source_estimation = self.config.get("preprocessing.run_source_estimation", False)
@@ -585,11 +669,47 @@ class PreprocessingPipeline(PipelineBase):
                         trial_type = parts[trial_type_idx].strip()
                         if trial_type and trial_type != "n/a":
                             conditions.add(trial_type)
-                
-                if conditions:
-                    result = sorted(conditions)
-                    self.logger.info(f"Auto-detected conditions from BIDS: {result}")
-                    return result
+
+                if not conditions:
+                    return None
+
+                # Heuristic filtering:
+                # - Prefer task triggers (Trig_therm*) for thermal pain EEG-fMRI runs.
+                # - Avoid scanner/housekeeping markers (Volume, Pulse Artifact, SyncStatus, etc.)
+                preferred_prefixes = ("Trig_therm", "Trig_")
+                excluded_prefixes = (
+                    "Volume",
+                    "Pulse",
+                    "SyncStatus",
+                    "New Segment",
+                    "Bad",
+                    "EDGE",
+                    "Response",
+                )
+
+                preferred = sorted(
+                    t for t in conditions if any(t.startswith(p) for p in preferred_prefixes)
+                )
+                if preferred:
+                    self.logger.info(f"Auto-detected task conditions from BIDS: {preferred}")
+                    return preferred
+
+                filtered = sorted(
+                    t for t in conditions if not any(t.startswith(p) for p in excluded_prefixes)
+                )
+                if not filtered:
+                    return None
+
+                if len(filtered) > 50:
+                    self.logger.warning(
+                        "Auto-detected %d conditions from BIDS (too many). "
+                        "Set epochs.conditions explicitly in config to avoid ambiguity.",
+                        len(filtered),
+                    )
+                    return None
+
+                self.logger.info(f"Auto-detected filtered conditions from BIDS: {filtered}")
+                return filtered
                     
         except Exception as e:
             self.logger.debug(f"Failed to detect conditions: {e}")

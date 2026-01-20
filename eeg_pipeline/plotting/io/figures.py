@@ -620,6 +620,8 @@ def save_fig(
     tight_layout_rect: Optional[Tuple[float, float, float, float]] = None,
     footer_template_name: Optional[str] = None,
     footer_kwargs: Optional[Dict[str, Any]] = None,
+    overwrite: Optional[bool] = None,
+    config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Save figure to file(s) in specified format(s).
     
@@ -635,6 +637,8 @@ def save_fig(
         tight_layout_rect: Optional rectangle tuple for tight_layout.
         footer_template_name: Optional footer template name.
         footer_kwargs: Optional keyword arguments for footer template.
+        overwrite: Optional overwrite flag (default from config if config provided, else True).
+        config: Optional configuration dictionary to read overwrite setting from.
     """
     output_path = Path(path)
     ensure_dir(output_path.parent)
@@ -649,6 +653,27 @@ def save_fig(
     save_dpi = dpi if dpi is not None else default_dpi
     save_bbox = bbox_inches or default_bbox
     save_pad = pad_inches if pad_inches is not None else default_pad
+
+    # Determine overwrite setting: explicit > config > default (True)
+    if overwrite is None and config is not None:
+        overwrite = config.get("plotting.overwrite", True)
+    elif overwrite is None:
+        overwrite = True
+
+    # Check if files already exist
+    if not overwrite:
+        existing_paths = []
+        for extension in save_formats:
+            check_path = base_path.with_suffix(f".{extension}")
+            if check_path.exists():
+                existing_paths.append(check_path)
+        
+        if existing_paths:
+            if logger is not None:
+                filenames = ", ".join(p.name for p in existing_paths)
+                logger.info(f"  Skipped (exists): {filenames}")
+            plt.close(fig)
+            return
 
     prepared_footer = _prepare_figure_footer(footer, footer_template_name, footer_kwargs)
     _prepare_figure_layout(fig, prepared_footer, tight_layout_rect)

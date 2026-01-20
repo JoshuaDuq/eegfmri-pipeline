@@ -6,6 +6,7 @@ Each function registers with VisualizationRegistry to be called during feature v
 """
 from __future__ import annotations
 
+import fnmatch
 import re
 from typing import Any
 
@@ -77,11 +78,8 @@ from eeg_pipeline.plotting.features.phase import (
 )
 from eeg_pipeline.plotting.features.power import (
     plot_power_by_condition,
-    plot_power_variability_comprehensive,
     plot_cross_frequency_power_correlation,
     plot_band_power_topomaps,
-    plot_spectral_slope_topomap,
-    plot_power_topomaps_from_df,
     plot_power_spectral_density,
 )
 from eeg_pipeline.plotting.features.roi import (
@@ -926,6 +924,8 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
     if ctx.power_df is None or ctx.aligned_events is None:
         return
 
+    power_bands = get_frequency_band_names(ctx.config)
+
     safe_plot(
         ctx,
         saved_files,
@@ -942,28 +942,6 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
         stats_dir=ctx.stats_dir,
     )
 
-
-@VisualizationRegistry.register("power")
-def plot_power_variability(ctx: FeaturePlotContext, saved_files):
-    if ctx.power_df is None:
-        return
-
-    power_bands = get_frequency_band_names(ctx.config)
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "power_variability_comprehensive",
-        "power",
-        None,
-        plot_power_variability_comprehensive,
-        pow_df=ctx.power_df,
-        bands=power_bands,
-        subject=ctx.subject,
-        save_dir=ctx.subdir("power"),
-        logger=ctx.logger,
-        config=ctx.config,
-    )
 
     safe_plot(
         ctx,
@@ -986,72 +964,51 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
     power_bands = get_frequency_band_names(ctx.config)
 
     if ctx.power_df is not None and ctx.epochs_info is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "band_power_topomaps_active",
-            "power",
-            None,
-            plot_band_power_topomaps,
-            pow_df=ctx.power_df,
-            epochs_info=ctx.epochs_info,
-            bands=power_bands,
-            subject=ctx.subject,
-            save_dir=ctx.subdir("power"),
-            logger=ctx.logger,
-            config=ctx.config,
-            segment="active",
+        topomap_windows = get_config_value(
+            ctx.config, "plotting.plots.features.power.topomap_windows", None
         )
-
-        safe_plot(
-            ctx,
-            saved_files,
-            "power_topomaps_from_df",
-            "power",
-            None,
-            plot_power_topomaps_from_df,
-            pow_df=ctx.power_df,
-            epochs_info=ctx.epochs_info,
-            bands=power_bands,
-            subject=ctx.subject,
-            save_dir=ctx.subdir("power"),
-            logger=ctx.logger,
-            config=ctx.config,
-        )
-
-        safe_plot(
-            ctx,
-            saved_files,
-            "band_power_topomaps_baseline",
-            "power",
-            None,
-            plot_band_power_topomaps,
-            pow_df=ctx.power_df,
-            epochs_info=ctx.epochs_info,
-            bands=power_bands,
-            subject=ctx.subject,
-            save_dir=ctx.subdir("power"),
-            logger=ctx.logger,
-            config=ctx.config,
-            segment="baseline",
-        )
-
-    if ctx.aperiodic_df is not None and ctx.epochs_info is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "spectral_slope_topomap",
-            "aperiodic",
-            None,
-            plot_spectral_slope_topomap,
-            aperiodic_df=ctx.aperiodic_df,
-            epochs_info=ctx.epochs_info,
-            subject=ctx.subject,
-            save_dir=ctx.subdir("aperiodic"),
-            logger=ctx.logger,
-            config=ctx.config,
-        )
-
+        
+        ctx.logger.info(f"topomap_windows config value: {topomap_windows} (type: {type(topomap_windows)})")
+        
+        if topomap_windows:
+            if isinstance(topomap_windows, str):
+                windows_list = [w.strip() for w in topomap_windows.split() if w.strip()]
+            elif isinstance(topomap_windows, list):
+                windows_list = [str(w).strip() for w in topomap_windows if str(w).strip()]
+            else:
+                windows_list = []
+        else:
+            windows_list = []
+        
+        ctx.logger.info(f"windows_list after parsing: {windows_list}")
+        
+        if windows_list:
+            for window in windows_list:
+                plot_name = f"band_power_topomaps_{window}"
+                ctx.logger.info(f"Generating topomap plot for window: {window} (plot_name: {plot_name})")
+                safe_plot(
+                    ctx,
+                    saved_files,
+                    plot_name,
+                    "power",
+                    None,
+                    plot_band_power_topomaps,
+                    pow_df=ctx.power_df,
+                    epochs_info=ctx.epochs_info,
+                    bands=power_bands,
+                    subject=ctx.subject,
+                    save_dir=ctx.subdir("power"),
+                    logger=ctx.logger,
+                    config=ctx.config,
+                    segment=window,
+                )
+        else:
+            patterns = getattr(ctx, "plot_name_patterns", None)
+            if patterns and any(fnmatch.fnmatch("band_power_topomaps", str(pat)) for pat in patterns):
+                ctx.logger.error(
+                    "band_power_topomaps requires plotting.plots.features.power.topomap_windows to be set. "
+                    "No fallback will be used."
+                )
 
 ###################################################################
 # ERP

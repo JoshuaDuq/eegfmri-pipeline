@@ -97,6 +97,7 @@ def _create_and_save_topomap(
         dpi=plot_config.savefig_dpi,
         bbox_inches=plot_config.bbox_inches,
         pad_inches=plot_config.pad_inches,
+        config=config,
     )
     return save_path
 

@@ -94,7 +94,8 @@ class FmriPreprocessingPipeline(PipelineBase):
 
             output_dir = _resolve_path(fmriprep_cfg.get("output_dir"))
             if output_dir is None:
-                output_dir = self.deriv_root / "preprocessed" / subj_label / "fmri"
+                # fMRIPrep writes to <output_dir>/fmriprep/sub-XXXX/, so set parent directory
+                output_dir = self.deriv_root / "preprocessed" / "fmri"
             work_dir = _resolve_path(fmriprep_cfg.get("work_dir")) or (
                 self.deriv_root / "work" / "fmriprep"
             )

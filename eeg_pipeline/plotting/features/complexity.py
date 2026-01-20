@@ -217,7 +217,7 @@ def _prepare_window_comparison_data(
     metric: str,
     roi_name: str,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
-    """Prepare data for window comparison (paired)."""
+    """Prepare data for window comparison (paired, 2 segments)."""
     data_by_band = {}
     segment1, segment2 = segments[0], segments[1]
     
@@ -241,6 +241,42 @@ def _prepare_window_comparison_data(
     return data_by_band
 
 
+def _prepare_multi_window_comparison_data(
+    features_df: pd.DataFrame,
+    segments: List[str],
+    bands: List[str],
+    metric: str,
+    roi_name: str,
+) -> Dict[str, Dict[str, np.ndarray]]:
+    """Prepare data for multi-window comparison (3+ segments)."""
+    data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+    
+    for band in bands:
+        segment_series = {}
+        for seg in segments:
+            cols = _get_complexity_columns(features_df, seg, band, metric, roi_name)
+            if cols:
+                segment_series[seg] = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+        
+        if len(segment_series) < 2:
+            continue
+        
+        valid_mask = pd.Series(True, index=features_df.index)
+        for series in segment_series.values():
+            valid_mask &= series.notna()
+        
+        segment_values = {}
+        for seg, series in segment_series.items():
+            vals = series[valid_mask].values
+            if len(vals) > 0:
+                segment_values[seg] = vals
+        
+        if len(segment_values) >= 2:
+            data_by_band[band] = segment_values
+    
+    return data_by_band
+
+
 def _plot_window_comparison(
     features_df: pd.DataFrame,
     segments: List[str],
@@ -253,36 +289,62 @@ def _plot_window_comparison(
     logger: Any,
     stats_dir: Optional[Path],
 ) -> None:
-    """Create paired window comparison plots."""
+    """Create paired window comparison plots.
+    
+    Supports both 2-window comparison (simple paired) and multi-window comparison
+    (3+ windows with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.plotting.features.utils import plot_multi_window_comparison
+    
+    use_multi_window = len(segments) > 2
+    
     for metric in metrics:
         metric_label = METRIC_LABELS.get(metric, metric.upper())
         
         for roi_name in roi_names:
-            data_by_band = _prepare_window_comparison_data(
-                features_df, segments, bands, metric, roi_name
-            )
-            
-            if not data_by_band:
-                continue
-            
             suffix = _create_roi_suffix(roi_name)
-            save_path = save_dir / f"sub-{subject}_complexity_{metric}_by_condition{suffix}_window"
             
-            plot_paired_comparison(
-                data_by_band=data_by_band,
-                subject=subject,
-                save_path=save_path,
-                feature_label=f"Complexity ({metric_label})",
-                config=config,
-                logger=logger,
-                label1=segments[0].capitalize(),
-                label2=segments[1].capitalize(),
-                roi_name=roi_name,
-                stats_dir=stats_dir,
-            )
+            if use_multi_window:
+                data_by_band_multi = _prepare_multi_window_comparison_data(
+                    features_df, segments, bands, metric, roi_name
+                )
+                
+                if data_by_band_multi:
+                    save_path = save_dir / f"sub-{subject}_complexity_{metric}_by_condition{suffix}_multiwindow"
+                    plot_multi_window_comparison(
+                        data_by_band=data_by_band_multi,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label=f"Complexity ({metric_label})",
+                        segments=segments,
+                        config=config,
+                        logger=logger,
+                        roi_name=roi_name,
+                        stats_dir=stats_dir,
+                    )
+            else:
+                data_by_band = _prepare_window_comparison_data(
+                    features_df, segments, bands, metric, roi_name
+                )
+                
+                if data_by_band:
+                    save_path = save_dir / f"sub-{subject}_complexity_{metric}_by_condition{suffix}_window"
+                    plot_paired_comparison(
+                        data_by_band=data_by_band,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label=f"Complexity ({metric_label})",
+                        config=config,
+                        logger=logger,
+                        label1=segments[0].capitalize(),
+                        label2=segments[1].capitalize(),
+                        roi_name=roi_name,
+                        stats_dir=stats_dir,
+                    )
         
+        plot_type = "multi-window" if use_multi_window else "paired"
         if logger:
-            log_if_present(logger, "info", f"Saved complexity {metric_label} paired comparison plots for {len(roi_names)} ROIs")
+            log_if_present(logger, "info", f"Saved complexity {metric_label} {plot_type} comparison plots for {len(roi_names)} ROIs")
 
 
 def _prepare_column_comparison_data(
@@ -386,7 +448,68 @@ def _plot_column_comparison(
     logger: Any,
     stats_dir: Optional[Path],
 ) -> None:
-    """Create unpaired column comparison plots."""
+    """Create unpaired column comparison plots.
+    
+    Supports both 2-group comparison (simple unpaired) and multi-group comparison
+    (3+ groups with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
+    from eeg_pipeline.plotting.features.utils import plot_multi_group_column_comparison
+    from eeg_pipeline.utils.formatting import sanitize_label
+    
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
+    
+    if use_multi_group:
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        if not multi_group_info:
+            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
+            return
+        
+        masks_dict, group_labels = multi_group_info
+        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        
+        for metric in metrics:
+            metric_label = METRIC_LABELS.get(metric, metric.upper())
+            
+            for roi_name in roi_names:
+                data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+                for band in bands:
+                    cols = _get_complexity_columns(features_df, segment_name, band, metric, roi_name)
+                    if not cols:
+                        continue
+                    
+                    val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    
+                    group_values = {}
+                    for label, mask in masks_dict.items():
+                        vals = val_series[mask].dropna().values
+                        if len(vals) > 0:
+                            group_values[label] = vals
+                    
+                    if len(group_values) >= 2:
+                        data_by_band[band] = group_values
+                
+                if data_by_band:
+                    roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                    save_path = save_dir / f"sub-{subject}_complexity_{metric}_by_condition{suffix}_multigroup"
+                    
+                    plot_multi_group_column_comparison(
+                        data_by_band=data_by_band,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label=f"Complexity ({metric_label})",
+                        groups=group_labels,
+                        config=config,
+                        logger=logger,
+                        roi_name=roi_name,
+                        stats_dir=stats_dir,
+                    )
+        
+        log_if_present(logger, "info", f"Saved complexity multi-group column comparison for {len(roi_names)} ROIs")
+        return
+    
     comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comp_mask_info:
         if logger:
@@ -453,7 +576,7 @@ def _plot_column_comparison(
             filename = f"sub-{subject}_complexity_{metric}_by_condition{suffix}_column"
             
             save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                    bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                    bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
             plt.close(fig)
         
         if logger:
@@ -509,7 +632,7 @@ def plot_hjorth_by_band(
     ax.spines["right"].set_visible(False)
     
     plt.tight_layout()
-    save_fig(fig, save_path)
+    save_fig(fig, save_path, config=config)
     plt.close(fig)
     
     return fig

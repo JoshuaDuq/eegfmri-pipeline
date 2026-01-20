@@ -72,10 +72,13 @@ type FeatureAvailability struct {
 // SubjectInfo holds subject processing status
 type SubjectInfo struct {
 	ID                  string               `json:"id"`
-	HasEpochs           bool                 `json:"has_epochs"`
-	HasPreprocessing    bool                 `json:"has_preprocessing"`
-	HasFeatures         bool                 `json:"has_features"`
-	HasStats            bool                 `json:"has_stats"`
+	HasSourceData       bool                 `json:"has_source_data"`
+	HasBids             bool                 `json:"has_bids"`
+	HasDerivatives      bool                 `json:"has_derivatives"`
+	HasEpochs           bool                 `json:"has_epochs"`        // Deprecated: kept for backward compatibility
+	HasPreprocessing    bool                 `json:"has_preprocessing"` // Deprecated: kept for backward compatibility
+	HasFeatures         bool                 `json:"has_features"`      // Deprecated: kept for backward compatibility
+	HasStats            bool                 `json:"has_stats"`         // Deprecated: kept for backward compatibility
 	AvailableBands      []string             `json:"available_bands,omitempty"`
 	FeatureAvailability *FeatureAvailability `json:"feature_availability,omitempty"`
 	EpochMetadata       map[string]float64   `json:"epoch_metadata,omitempty"`
@@ -95,7 +98,8 @@ type SubjectsLoadedMsg struct {
 type ColumnsDiscoveredMsg struct {
 	Columns []string            // Available column names
 	Values  map[string][]string // Unique values for each column
-	Source  string              // "events" or "trial_table"
+	Windows []string             // Available windows (for condition effects discovery)
+	Source  string              // "events", "trial_table", or "condition_effects"
 	Error   error               // Error if discovery failed
 }
 
@@ -218,4 +222,14 @@ type FmriColumnsDiscoveredMsg struct {
 	Values  map[string][]string
 	Source  string
 	Error   error
+}
+
+// MultigroupStatsDiscoveredMsg contains discovered multigroup comparison stats
+type MultigroupStatsDiscoveredMsg struct {
+	Available    bool     // Whether multigroup stats are available
+	Groups       []string // Group labels from precomputed stats
+	NFeatures    int      // Number of features with stats
+	NSignificant int      // Number of FDR-significant comparisons
+	File         string   // Path to stats file
+	Error        error    // Error if discovery failed
 }

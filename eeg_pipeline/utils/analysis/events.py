@@ -171,3 +171,55 @@ def resolve_comparison_spec(
     value1, value2 = _resolve_comparison_values(config)
     label1, label2 = _resolve_comparison_labels(config, v1=value1, v2=value2)
     return column, value1, value2, label1, label2
+
+
+def extract_multi_group_masks(
+    events_df: pd.DataFrame,
+    config: Any,
+    *,
+    require_enabled: bool = True,
+) -> Optional[tuple[dict[str, np.ndarray], list[str]]]:
+    """Extract masks for multi-group comparison (3+ groups).
+
+    Args:
+        events_df: DataFrame containing event data.
+        config: Configuration object.
+        require_enabled: If True, return None when comparison is disabled.
+
+    Returns:
+        Tuple of (masks_dict, group_labels) where masks_dict maps group_label -> boolean mask,
+        or None if multi-group comparison cannot be extracted.
+    """
+    column = _validate_comparison_prerequisites(events_df, config, require_enabled=require_enabled)
+    if column is None:
+        return None
+
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
+    
+    if not isinstance(values_spec, (list, tuple)) or len(values_spec) < 2:
+        return None
+    
+    if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= len(values_spec):
+        labels = [str(l).strip() for l in labels_spec[:len(values_spec)]]
+    else:
+        labels = [str(v) for v in values_spec]
+    
+    masks_dict = {}
+    column_values = events_df[column]
+    
+    for val, label in zip(values_spec, labels):
+        try:
+            numeric_val = float(val)
+            mask = (pd.to_numeric(column_values, errors="coerce") == numeric_val).values
+        except (ValueError, TypeError):
+            val_str = str(val).strip().lower()
+            mask = (column_values.astype(str).str.strip().str.lower() == val_str).values
+        
+        if np.any(mask):
+            masks_dict[label] = mask
+    
+    if len(masks_dict) < 2:
+        return None
+    
+    return masks_dict, labels

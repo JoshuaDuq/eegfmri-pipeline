@@ -173,7 +173,7 @@ def _search_standard_bids_paths(root: Path, subject_id: str, task: str) -> Optio
     filename = f"{subject_label}_task-{task}_proc-clean_{EPOCHS_SUFFIX}"
     standard_paths = [
         root / subject_label / "eeg" / filename,
-        root / "preprocessed" / subject_label / "eeg" / filename,
+        root / "preprocessed" / "eeg" / subject_label / filename,
     ]
 
     for path in standard_paths:
@@ -197,7 +197,10 @@ def _search_directory_for_epochs(
     pattern = f"{subject_label}_task-{task}*{EPOCHS_SUFFIX}"
     candidates = sorted(directory.glob(pattern))
     if not candidates:
-        return None
+        # Common MNE-BIDS derivative layout nests files under datatype/session folders.
+        candidates = sorted(directory.rglob(pattern))
+        if not candidates:
+            return None
 
     if prefer_clean:
         for candidate in candidates:
@@ -225,7 +228,7 @@ def _find_clean_epochs_path(
     subject_label = f"{SUBJECT_PREFIX}{subject_id}"
     search_directories = [
         (root / subject_label / "eeg", True),
-        (root / "preprocessed" / subject_label / "eeg", True),
+        (root / "preprocessed" / "eeg" / subject_label, True),
         (root / subject_label, False),
         (root / "preprocessed", True),
     ]
@@ -238,6 +241,60 @@ def _find_clean_epochs_path(
     return None
 
 
+def _derive_clean_events_from_epochs_path(epochs_path: Path) -> Path:
+    name = epochs_path.name
+    if name.endswith("_proc-clean_epo.fif"):
+        return epochs_path.with_name(name.replace("_proc-clean_epo.fif", "_proc-clean_events.tsv"))
+    if name.endswith("_proc-cleaned_epo.fif"):
+        return epochs_path.with_name(name.replace("_proc-cleaned_epo.fif", "_proc-cleaned_events.tsv"))
+    if name.endswith("_clean_epo.fif"):
+        return epochs_path.with_name(name.replace("_clean_epo.fif", "_clean_events.tsv"))
+    if name.endswith("_epo.fif"):
+        # Best-effort fallback; prefer explicit proc-clean naming.
+        return epochs_path.with_name(name.replace("_epo.fif", "_events.tsv"))
+    return epochs_path.with_suffix(".tsv")
+
+
+def _find_clean_events_path(
+    subject: str,
+    task: str,
+    deriv_root: Optional[Path] = None,
+    constants: Optional[Dict[str, Any]] = None,
+    config: Optional[EEGConfig] = None,
+) -> Optional[Path]:
+    """Find path to clean (post-rejection) events.tsv for subject and task."""
+    epochs_path = _find_clean_epochs_path(
+        subject=subject,
+        task=task,
+        deriv_root=deriv_root,
+        constants=constants,
+        config=config,
+    )
+    if epochs_path is not None:
+        candidate = _derive_clean_events_from_epochs_path(epochs_path)
+        if candidate.exists():
+            return candidate
+
+    root = _resolve_deriv_root(deriv_root, config, constants)
+    subject_id = _extract_subject_id(subject)
+    subject_label = f"{SUBJECT_PREFIX}{subject_id}"
+    pattern = f"{subject_label}_task-{task}*proc-clean*_{EVENTS_SUFFIX}"
+
+    for base in (
+        root / subject_label,
+        root / subject_label / "eeg",
+        root / "preprocessed" / "eeg" / subject_label,
+        root / "preprocessed" / "eeg" / subject_label / "eeg",
+        root / "preprocessed" / "eeg",
+    ):
+        if not base.exists():
+            continue
+        matches = sorted(base.rglob(pattern))
+        if matches:
+            return matches[0]
+    return None
+
+
 def find_clean_epochs_path(
     subject: str,
     task: str,
@@ -247,6 +304,23 @@ def find_clean_epochs_path(
     config: Optional[EEGConfig] = None,
 ) -> Optional[Path]:
     return _find_clean_epochs_path(
+        subject=subject,
+        task=task,
+        deriv_root=deriv_root,
+        constants=constants,
+        config=config,
+    )
+
+
+def find_clean_events_path(
+    subject: str,
+    task: str,
+    deriv_root: Optional[Path] = None,
+    *,
+    constants: Optional[Dict[str, Any]] = None,
+    config: Optional[EEGConfig] = None,
+) -> Optional[Path]:
+    return _find_clean_events_path(
         subject=subject,
         task=task,
         deriv_root=deriv_root,
@@ -298,8 +372,26 @@ def _load_events_df(
     bids_root: Optional[Path] = None,
     constants: Optional[Dict[str, Any]] = None,
     config: Optional[EEGConfig] = None,
+    *,
+    prefer_clean: bool = True,
 ) -> Optional[pd.DataFrame]:
-    """Load events DataFrame from BIDS events file."""
+    """Load events DataFrame (prefer cleaned derivative events when available)."""
+    if prefer_clean:
+        try:
+            deriv_root = _resolve_deriv_root(None, config, constants)
+        except Exception:
+            deriv_root = None
+        if deriv_root is not None:
+            clean_path = _find_clean_events_path(
+                subject=subject,
+                task=task,
+                deriv_root=deriv_root,
+                constants=constants,
+                config=config,
+            )
+            if clean_path is not None and clean_path.exists():
+                return pd.read_csv(clean_path, sep="\t")
+
     root = _resolve_bids_root(bids_root, constants, config)
     subject_id = _extract_subject_id(subject)
 
@@ -317,6 +409,7 @@ def load_events_df(
     *,
     constants: Optional[Dict[str, Any]] = None,
     config: Optional[EEGConfig] = None,
+    prefer_clean: bool = True,
 ) -> Optional[pd.DataFrame]:
     """Load events DataFrame from BIDS events file (public API)."""
     return _load_events_df(
@@ -325,6 +418,7 @@ def load_events_df(
         bids_root=bids_root,
         constants=constants,
         config=config,
+        prefer_clean=prefer_clean,
     )
 
 
@@ -379,6 +473,7 @@ __all__ = [
     "find_connectivity_features_path",
     "resolve_deriv_root",
     "find_clean_epochs_path",
+    "find_clean_events_path",
     "load_events_df",
     "extract_subject_id_from_path",
     "ensure_derivatives_dataset_description",

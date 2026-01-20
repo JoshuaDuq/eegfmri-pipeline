@@ -1,42 +1,107 @@
-"""Preprocessing orchestration (analysis-layer).
-
-This module contains reusable, non-CLI orchestration for converting raw EEG to BIDS and
-merging behavioral data into BIDS events files.
-
-The pipeline layer (`eeg_pipeline.pipelines.utilities`) should delegate to these
-functions to keep pipeline modules thin.
-"""
+"""Merge PsychoPy TrialSummary.csv into BIDS *_events.tsv (analysis-layer)."""
 
 from __future__ import annotations
 
 import logging
 import re
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List, Optional
 
-import mne
 import pandas as pd
 
+from eeg_pipeline.analysis.utilities.bids_metadata import ensure_events_sidecar, ensure_task_events_json
 from eeg_pipeline.infra.tsv import read_tsv
-
 from eeg_pipeline.utils.data.preprocessing import (
     combine_runs_for_subject,
     create_event_mask,
-    ensure_dataset_description,
     extract_run_number,
-    filter_annotations,
     find_behavior_csv_for_run,
-    find_brainvision_vhdrs,
-    get_run_index,
     normalize_event_filters,
     normalize_string,
-    parse_subject_id,
-    set_channel_types,
-    set_montage,
-    trim_to_first_volume,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_and_trim_behavior(
+    behavioral_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    *,
+    allow_misaligned_trim: bool,
+    log: logging.Logger,
+) -> pd.DataFrame:
+    n_behavioral_rows = len(behavioral_df)
+    n_event_rows = len(events_df)
+
+    if n_behavioral_rows == n_event_rows:
+        return behavioral_df.reset_index(drop=True)
+
+    msg = (
+        f"Behavior/events count mismatch: behavioral={n_behavioral_rows} "
+        f"events={n_event_rows}. This can happen if trigger filtering "
+        "misses trials, triggers are duplicated, or the wrong behavioral file was selected."
+    )
+    if not allow_misaligned_trim:
+        raise ValueError(msg)
+
+    log.warning("%s Proceeding because allow_misaligned_trim=True.", msg)
+    if n_behavioral_rows > n_event_rows:
+        return behavioral_df.iloc[:n_event_rows].reset_index(drop=True)
+    return behavioral_df.reindex(range(n_event_rows)).reset_index(drop=True)
+
+
+def _qc_compare_trial_intervals(
+    target_events_df: pd.DataFrame,
+    behavioral_df: pd.DataFrame,
+    *,
+    log: logging.Logger,
+    warn_threshold_s: float = 0.25,
+) -> None:
+    """QC: compare inter-trial intervals between EEG triggers and PsychoPy times.
+
+    We cannot guarantee absolute onset alignment without an explicit shared sync signal,
+    but inter-trial intervals should match up to a constant offset if the trigger used
+    corresponds to the same trial marker.
+    """
+    if "onset" not in target_events_df.columns:
+        return
+    if "stim_start_time" not in behavioral_df.columns:
+        return
+
+    try:
+        eeg_onsets = pd.to_numeric(target_events_df["onset"], errors="coerce").to_numpy()
+        beh_onsets = pd.to_numeric(behavioral_df["stim_start_time"], errors="coerce").to_numpy()
+    except Exception:
+        return
+
+    if len(eeg_onsets) < 3 or len(beh_onsets) < 3:
+        return
+    if not (pd.notna(eeg_onsets).all() and pd.notna(beh_onsets).all()):
+        return
+
+    eeg_d = pd.Series(eeg_onsets).diff().dropna().to_numpy()
+    beh_d = pd.Series(beh_onsets).diff().dropna().to_numpy()
+    if len(eeg_d) != len(beh_d) or len(eeg_d) < 2:
+        return
+
+    abs_err = abs(eeg_d - beh_d)
+    median_abs_err = float(pd.Series(abs_err).median())
+    p95_abs_err = float(pd.Series(abs_err).quantile(0.95))
+
+    if median_abs_err > warn_threshold_s:
+        log.warning(
+            "QC: inter-trial interval mismatch (median abs err=%.3fs, p95=%.3fs). "
+            "This suggests the selected trigger may not correspond to PsychoPy stim_start_time, "
+            "or run synchronization differs.",
+            median_abs_err,
+            p95_abs_err,
+        )
+    else:
+        log.info(
+            "QC: inter-trial intervals match well (median abs err=%.3fs, p95=%.3fs).",
+            median_abs_err,
+            p95_abs_err,
+        )
 
 
 def merge_behavior_to_events(
@@ -45,13 +110,12 @@ def merge_behavior_to_events(
     event_prefixes: Optional[List[str]] = None,
     event_types: Optional[List[str]] = None,
     dry_run: bool = False,
+    allow_misaligned_trim: bool = False,
     *,
     _logger: Optional[logging.Logger] = None,
 ) -> bool:
     """Merge behavioral data into a single events.tsv file."""
     log = _logger or logger
-
-    from eeg_pipeline.utils.data.alignment import trim_behavioral_to_events_strict
 
     m = re.search(r"sub-([A-Za-z0-9]+)", str(events_tsv))
     if not m:
@@ -92,6 +156,15 @@ def merge_behavior_to_events(
         log.error("Failed reading behavior: %s -> %s", beh_csv, exc)
         return False
 
+    if run_num is not None and "run_id" in beh_df.columns:
+        unique_runs = sorted({int(r) for r in pd.to_numeric(beh_df["run_id"], errors="coerce").dropna().unique()})
+        if unique_runs and unique_runs != [int(run_num)]:
+            message = f"Behavior run_id mismatch for {beh_csv.name}: found {unique_runs}, expected {run_num}"
+            if not allow_misaligned_trim:
+                log.error(message)
+                return False
+            log.warning("%s (allow_misaligned_trim=True)", message)
+
     if "trial_type" not in ev_df.columns:
         log.warning("'trial_type' column missing in events: %s", events_tsv)
         return False
@@ -119,11 +192,18 @@ def merge_behavior_to_events(
 
     target_events_df = ev_df.iloc[target_indices].copy()
     try:
-        behavioral_subset = trim_behavioral_to_events_strict(beh_df, target_events_df)
+        behavioral_subset = _validate_and_trim_behavior(
+            beh_df,
+            target_events_df,
+            allow_misaligned_trim=allow_misaligned_trim,
+            log=log,
+        )
     except ValueError as exc:
         run_text = f"run-{run_num} " if run_num is not None else ""
         log.error("Behavioral/events mismatch for sub-%s %s: %s", sub_label, run_text, exc)
         return False
+
+    _qc_compare_trial_intervals(target_events_df, behavioral_subset, log=log)
 
     n_matched = len(behavioral_subset)
     event_rows_to_update = target_indices[:n_matched]
@@ -132,6 +212,20 @@ def merge_behavior_to_events(
         if column not in ev_df.columns:
             ev_df[column] = pd.NA
         ev_df.loc[event_rows_to_update, column] = behavioral_subset[column].values
+
+    # Populate run_id consistently for run-level events files.
+    if run_num is not None:
+        if "run_id" not in ev_df.columns:
+            ev_df["run_id"] = int(run_num)
+        else:
+            ev_df["run_id"] = pd.to_numeric(ev_df["run_id"], errors="coerce").fillna(int(run_num))
+
+    # Keep output stable and chronological.
+    if "onset" in ev_df.columns:
+        sort_cols = ["onset"]
+        if "sample" in ev_df.columns:
+            sort_cols.append("sample")
+        ev_df = ev_df.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
 
     if dry_run:
         log.info(
@@ -144,9 +238,10 @@ def merge_behavior_to_events(
 
     try:
         ev_df.to_csv(events_tsv, sep="\t", index=False)
+        ensure_events_sidecar(events_tsv, list(ev_df.columns))
         run_text = f" run-{run_num}" if run_num is not None else ""
         log.info(
-            "Merged behavior -> events for sub-%s%s: %s using %s",
+            "Merged PsychoPy -> events for sub-%s%s: %s using %s",
             sub_label,
             run_text,
             events_tsv,
@@ -158,87 +253,7 @@ def merge_behavior_to_events(
         return False
 
 
-def run_raw_to_bids(
-    source_root: Path,
-    bids_root: Path,
-    task: str,
-    subjects: Optional[List[str]] = None,
-    montage: str = "easycap-M1",
-    line_freq: float = 60.0,
-    overwrite: bool = False,
-    zero_base_onsets: bool = False,
-    do_trim_to_first_volume: bool = False,
-    event_prefixes: Optional[List[str]] = None,
-    keep_all_annotations: bool = False,
-    *,
-    _logger: Optional[logging.Logger] = None,
-) -> int:
-    """Convert raw BrainVision files to BIDS format."""
-    log = _logger or logger
-
-    from mne_bids import BIDSPath, write_raw_bids
-
-    log.info("Scanning for BrainVision files in: %s", source_root)
-    vhdrs = find_brainvision_vhdrs(source_root)
-    if not vhdrs:
-        log.error("No .vhdr files found under sub-*/eeg/. Nothing to convert.")
-        return 0
-
-    if subjects:
-        subj_set = set(subjects)
-        vhdrs = [p for p in vhdrs if parse_subject_id(p) in subj_set]
-        if not vhdrs:
-            log.error("No matching .vhdr files for subjects: %s", sorted(subj_set))
-            return 0
-
-    ensure_dataset_description(bids_root, name=f"{task} EEG")
-
-    for i, vhdr in enumerate(vhdrs, 1):
-        subject_label = parse_subject_id(vhdr)
-        run_index = get_run_index(vhdr)
-
-        raw = mne.io.read_raw_brainvision(vhdr, preload=False, verbose=False)
-        set_channel_types(raw)
-
-        if montage:
-            set_montage(raw, montage)
-
-        raw.info["line_freq"] = line_freq
-
-        was_trimmed = False
-        if do_trim_to_first_volume:
-            was_trimmed = trim_to_first_volume(raw)
-
-        if was_trimmed and not raw.preload:
-            raw.load_data()
-
-        filter_annotations(raw, event_prefixes, keep_all_annotations, zero_base_onsets)
-
-        bids_path = BIDSPath(
-            subject=subject_label,
-            task=task,
-            run=run_index,
-            datatype="eeg",
-            suffix="eeg",
-            root=bids_root,
-        )
-
-        write_raw_bids(
-            raw=raw,
-            bids_path=bids_path,
-            overwrite=overwrite,
-            allow_preload=raw.preload,
-            format="BrainVision",
-            verbose=False,
-        )
-
-        log.info("[%d/%d] Wrote: sub-%s", i, len(vhdrs), subject_label)
-
-    log.info("Done. Converted %d file(s) to BIDS in: %s", len(vhdrs), bids_root)
-    return len(vhdrs)
-
-
-def run_merge_behavior(
+def run_merge_psychopy(
     bids_root: Path,
     source_root: Path,
     task: str,
@@ -246,10 +261,11 @@ def run_merge_behavior(
     event_prefixes: Optional[List[str]] = None,
     event_types: Optional[List[str]] = None,
     dry_run: bool = False,
+    allow_misaligned_trim: bool = False,
     *,
     _logger: Optional[logging.Logger] = None,
 ) -> int:
-    """Merge behavioral data into BIDS events files."""
+    """Merge PsychoPy data into BIDS events files."""
     log = _logger or logger
 
     pattern_run = f"sub-*/eeg/*_task-{task}_run-*_events.tsv"
@@ -277,6 +293,7 @@ def run_merge_behavior(
             event_prefixes=event_prefixes,
             event_types=event_types,
             dry_run=dry_run,
+            allow_misaligned_trim=allow_misaligned_trim,
             _logger=log,
         )
         n_ok += int(ok)
@@ -288,7 +305,11 @@ def run_merge_behavior(
             if d in seen:
                 continue
             seen.add(d)
-            combine_runs_for_subject(d, task=task)
+            combined = combine_runs_for_subject(d, task=task)
+            if combined is not None:
+                ensure_events_sidecar(combined, list(read_tsv(combined).columns))
+
+        ensure_task_events_json(bids_root, task=task)
 
     log.info("Done. Processed %d event file(s), merged successfully: %d.", len(ev_paths), n_ok)
     return n_ok

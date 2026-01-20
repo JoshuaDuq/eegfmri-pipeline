@@ -62,13 +62,12 @@ from eeg_pipeline.utils.data.machine_learning import (
     filter_finite_targets,
     extract_epoch_data_block,
     prepare_trial_records_from_epochs,
-    load_kept_indices,
 )
 from eeg_pipeline.utils.data.machine_learning import load_epochs_with_targets
 from eeg_pipeline.utils.data.machine_learning import load_active_matrix
 from eeg_pipeline.utils.config.loader import load_config
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv, write_parquet, write_stats_table
-from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.infra.paths import ensure_dir, load_events_df
 from eeg_pipeline.infra.machine_learning import (
     export_predictions,
     export_indices,
@@ -399,41 +398,20 @@ def within_subject_kfold_predictions(
             continue
         
         blocks_subj = None
-        bids_root = Path(deriv_root).parent
-        subject_label = subject_id if subject_id.startswith("sub-") else f"sub-{subject_id}"
-        events_path = bids_root / subject_label / "eeg" / f"{subject_label}_task-{task}_events.tsv"
-        
-        if events_path.exists():
-            events = read_tsv(events_path)
-            if "block" in events.columns:
-                epochs_subj_obj = subj_to_epochs[subject_id]
-                if hasattr(epochs_subj_obj, 'metadata') and epochs_subj_obj.metadata is not None and 'block' in epochs_subj_obj.metadata.columns:
-                    epoch_indices = np.array([trial_records[idx][1] for idx in subject_indices_original])
-                    blocks_subj = epochs_subj_obj.metadata.loc[epoch_indices, 'block'].to_numpy() if len(epochs_subj_obj.metadata) > 0 else None
-                    if blocks_subj is not None:
-                        blocks_subj = blocks_subj[finite_mask]
-                else:
-                    kept_indices = load_kept_indices(subject_label, deriv_root, len(events), logger)
-                    if kept_indices is None or len(kept_indices) == 0:
-                        logger.error(
-                            f"Subject {subject_id}: No kept_indices file found and epochs.metadata['block'] unavailable. "
-                            f"Cannot safely map block labels. Skipping subject."
-                        )
-                        blocks_subj = None
-                    elif len(kept_indices) <= len(events):
-                        kept_indices_arr = np.asarray(kept_indices)
-                        if np.any(kept_indices_arr < 0) or np.any(kept_indices_arr >= len(events)):
-                            logger.error(
-                                f"Subject {subject_id}: kept_indices out of bounds for events TSV. "
-                                f"Skipping subject."
-                            )
-                            blocks_subj = None
-                        else:
-                            blocks_from_kept = events.iloc[kept_indices_arr]["block"].to_numpy()
-                            epoch_to_block = dict(enumerate(blocks_from_kept))
-                        blocks_subj = np.array([epoch_to_block.get(trial_records[idx][1], np.nan) for idx in subject_indices])
-                    else:
-                        blocks_subj = None
+        events = load_events_df(subject_id, task, config=config_local)
+        if events is not None and "block" in events.columns:
+            blocks_all_epochs = pd.to_numeric(events["block"], errors="coerce").to_numpy()
+            epoch_indices = np.array([trial_records[idx][1] for idx in subject_indices_original], dtype=int)
+            if np.any(epoch_indices < 0) or np.any(epoch_indices >= len(blocks_all_epochs)):
+                logger.warning(
+                    "Subject %s: epoch_indices out of bounds for events.tsv (n=%d); cannot use blocks.",
+                    subject_id,
+                    len(blocks_all_epochs),
+                )
+            else:
+                blocks_subj = blocks_all_epochs[epoch_indices]
+                if blocks_subj is not None:
+                    blocks_subj = blocks_subj[finite_mask]
                 
                 if blocks_subj is not None:
                     if np.all(np.isnan(blocks_subj)):
@@ -453,21 +431,19 @@ def within_subject_kfold_predictions(
                         X_subj = X_subj[finite_blocks_mask]
                         y_subj = y_subj[finite_blocks_mask]
                         blocks_subj = blocks_subj[finite_blocks_mask]
-                        
+
                         if len(y_subj) < n_splits:
                             logger.warning(
                                 f"Subject {subject_id}: Insufficient trials ({len(y_subj)}) after "
                                 f"removing missing blocks for {n_splits}-fold CV. Skipping."
                             )
                             continue
-            else:
-                blocks_subj = None
 
         if blocks_subj is None:
             logger.error(
                 f"Subject {subject_id}: Block/run labels unavailable. "
                 f"Within-subject CV requires block/run identifiers to prevent temporal data leakage. "
-                f"Ensure 'block' or 'run_id' column exists in {events_path} or skip within-subject analysis."
+                "Ensure a clean events.tsv exists with one of: block, run_id, run, session."
             )
             raise ValueError(f"Block/run labels required for within-subject CV (subject {subject_id})")
 

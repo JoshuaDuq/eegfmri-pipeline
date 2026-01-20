@@ -576,6 +576,7 @@ def _save_band_topomap(
         bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight",
         pad_inches=plot_cfg.pad_inches if plot_cfg else None,
         footer=_get_behavior_footer(config),
+        config=config,
     )
     plt.close(fig)
 
@@ -973,6 +974,7 @@ def plot_significant_correlations_topomap(
         pad_inches=plot_cfg.pad_inches,
         footer=_get_behavior_footer(config),
         tight_layout_rect=tight_layout_rect,
+        config=config,
     )
     plt.close(fig)
 

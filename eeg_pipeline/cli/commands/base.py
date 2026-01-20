@@ -236,8 +236,12 @@ def discover_event_columns(
     bids_root: Union[str, Path],
     task: Optional[str] = None,
     subject: Optional[str] = None,
+    deriv_root: Optional[Union[str, Path]] = None,
 ) -> dict:
-    """Discover available columns and their unique values from events files.
+    """Discover available columns and their unique values from clean events files.
+    
+    Only searches for clean events files (*proc-clean_events.tsv) in derivatives directory.
+    Does not fall back to regular events files from BIDS root.
     
     Returns
     -------
@@ -253,36 +257,44 @@ def discover_event_columns(
             "file": "path/to/file"
         }
     """
-    bids_root = Path(bids_root)
     result = {"columns": [], "values": {}, "source": None, "file": None}
     
+    if not deriv_root:
+        return result
+    
+    deriv_root = Path(deriv_root)
     events_file = None
-    patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"] if task else ["*_events.tsv"]
+    
+    clean_patterns = [
+        f"*task-{task}*proc-clean*_events.tsv",
+        f"*task-{task}*proc-clean_events.tsv",
+        "*proc-clean*_events.tsv",
+    ] if task else ["*proc-clean*_events.tsv"]
     
     if subject:
         subj_id = subject.replace("sub-", "")
-        subj_dir = bids_root / f"sub-{subj_id}"
-        if subj_dir.exists():
-            eeg_dir = subj_dir / "eeg"
-            if eeg_dir.exists():
-                for pattern in patterns:
-                    files = list(eeg_dir.glob(pattern))
-                    if files:
-                        events_file = files[0]
-                        break
+        search_dirs = [
+            deriv_root / "preprocessed" / "eeg" / f"sub-{subj_id}" / "eeg",
+            deriv_root / "preprocessed" / "eeg" / f"sub-{subj_id}",
+            deriv_root / f"sub-{subj_id}" / "eeg",
+            deriv_root / f"sub-{subj_id}",
+        ]
+    else:
+        search_dirs = [
+            deriv_root / "preprocessed" / "eeg",
+            deriv_root,
+        ]
     
-    if not events_file:
-        for subj_dir in sorted(bids_root.glob("sub-*"))[:5]:
-            eeg_dir = subj_dir / "eeg"
-            if not eeg_dir.exists():
-                continue
-            for pattern in patterns:
-                files = list(eeg_dir.glob(pattern))
-                if files:
-                    events_file = files[0]
-                    break
-            if events_file:
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for pattern in clean_patterns:
+            files = list(search_dir.rglob(pattern))
+            if files:
+                events_file = files[0]
                 break
+        if events_file:
+            break
     
     if not events_file:
         return result
@@ -363,6 +375,192 @@ def discover_trial_table_columns(
     except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
         pass
     
+    return result
+
+
+def discover_condition_effects_columns(
+    deriv_root: Union[str, Path],
+    subject: Optional[str] = None,
+) -> dict:
+    """Discover columns and values from condition effects files.
+    
+    Reads condition_effects_column*.parquet and condition_effects_window*.parquet files
+    to extract available condition columns and their values for plotting.
+    
+    Returns
+    -------
+    dict
+        {
+            "columns": ["condition_column1", "condition_column2", ...],
+            "values": {
+                "condition_column1": ["value1", "value2"],
+                "condition_column2": ["value1", "value2"],
+            },
+            "windows": ["window1", "window2", ...],  # Available windows from window files
+            "source": "condition_effects",
+            "files": ["path/to/file1.parquet", ...]
+        }
+    """
+    import pandas as pd
+    from eeg_pipeline.infra.tsv import read_parquet
+    
+    deriv_root = Path(deriv_root)
+    result = {"columns": [], "values": {}, "windows": [], "source": "condition_effects", "files": []}
+    
+    condition_effects_dirs = []
+    if subject:
+        subj_id = subject.replace("sub-", "")
+        # Try multiple possible paths
+        possible_paths = [
+            deriv_root / f"sub-{subj_id}" / "eeg" / "stats" / "condition_effects",
+            deriv_root / "stats" / f"sub-{subj_id}" / "eeg" / "condition_effects",
+            deriv_root / f"sub-{subj_id}" / "stats" / "condition_effects",
+        ]
+        for stats_dir in possible_paths:
+            if stats_dir.exists():
+                condition_effects_dirs.append(stats_dir)
+                break
+    
+    if not condition_effects_dirs:
+        # Try to find any condition_effects directories
+        for pattern in [
+            "sub-*/eeg/stats/condition_effects",
+            "stats/sub-*/eeg/condition_effects",
+            "sub-*/stats/condition_effects",
+        ]:
+            for subj_dir in sorted(deriv_root.glob(pattern))[:5]:
+                if subj_dir.exists():
+                    condition_effects_dirs.append(subj_dir)
+            if condition_effects_dirs:
+                break
+    
+    if not condition_effects_dirs:
+        return result
+    
+    seen_columns = set()
+    seen_windows = set()
+    
+    # Process column files (parquet)
+    for cond_dir in condition_effects_dirs:
+        for file_path in cond_dir.glob("condition_effects_column*.parquet"):
+            try:
+                df = read_parquet(file_path)
+                if df is None or df.empty:
+                    continue
+                
+                if "condition_column" in df.columns:
+                    cond_col = df["condition_column"].iloc[0]
+                    if pd.notna(cond_col):
+                        cond_col = str(cond_col).strip()
+                        if cond_col and cond_col not in seen_columns:
+                            seen_columns.add(cond_col)
+                            result["columns"].append(cond_col)
+                            
+                            # Extract condition values
+                            if "condition_value1" in df.columns and "condition_value2" in df.columns:
+                                val1 = df["condition_value1"].iloc[0]
+                                val2 = df["condition_value2"].iloc[0]
+                                if pd.notna(val1) and pd.notna(val2):
+                                    result["values"][cond_col] = [str(val1).strip(), str(val2).strip()]
+                            elif "mean_pain" in df.columns and "mean_nonpain" in df.columns:
+                                # Fallback: infer from column names
+                                result["values"][cond_col] = ["pain", "nonpain"]
+                            
+                            if file_path not in result["files"]:
+                                result["files"].append(str(file_path))
+                
+            except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError, Exception):
+                continue
+    
+    # Process multigroup parquet files - also contain condition columns
+    import re
+    for cond_dir in condition_effects_dirs:
+        for file_path in cond_dir.glob("condition_effects_multigroup*.parquet"):
+            try:
+                df = read_parquet(file_path)
+                if df is None or df.empty:
+                    continue
+                
+                # Multigroup files use "compare_column" instead of "condition_column"
+                # Also check filename: condition_effects_multigroup*_{column}.parquet
+                cond_col = None
+                if "compare_column" in df.columns:
+                    cond_col = df["compare_column"].iloc[0]
+                elif "condition_column" in df.columns:
+                    cond_col = df["condition_column"].iloc[0]
+                
+                # Extract from filename if not in data: condition_effects_multigroup*_{column}.parquet
+                if cond_col is None or pd.isna(cond_col):
+                    filename = file_path.stem
+                    match = re.search(r'condition_effects_multigroup[^_]*_(.+)$', filename)
+                    if match:
+                        cond_col = match.group(1)
+                
+                if cond_col is not None and pd.notna(cond_col):
+                    cond_col = str(cond_col).strip()
+                    if cond_col and cond_col not in seen_columns:
+                        seen_columns.add(cond_col)
+                        result["columns"].append(cond_col)
+                        
+                        # Extract condition values from group1 and group2 columns (multigroup files store pairwise comparisons)
+                        group_values = set()
+                        if "group1" in df.columns:
+                            group1_vals = df["group1"].dropna().unique()
+                            for val in group1_vals:
+                                if pd.notna(val):
+                                    val_str = str(val).strip()
+                                    if val_str:
+                                        group_values.add(val_str)
+                        if "group2" in df.columns:
+                            group2_vals = df["group2"].dropna().unique()
+                            for val in group2_vals:
+                                if pd.notna(val):
+                                    val_str = str(val).strip()
+                                    if val_str:
+                                        group_values.add(val_str)
+                        
+                        if group_values:
+                            result["values"][cond_col] = sorted(group_values)
+                        
+                        if file_path not in result["files"]:
+                            result["files"].append(str(file_path))
+                
+            except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError, Exception):
+                continue
+    
+    # Process window files to extract available windows
+    for cond_dir in condition_effects_dirs:
+        for file_path in cond_dir.glob("condition_effects_window*.parquet"):
+            try:
+                df = read_parquet(file_path)
+                if df is None or df.empty:
+                    continue
+                
+                # Extract windows from window1 and window2 columns
+                if "window1" in df.columns:
+                    windows1 = df["window1"].dropna().unique()
+                    for w in windows1:
+                        w_str = str(w).strip()
+                        if w_str and w_str not in seen_windows:
+                            seen_windows.add(w_str)
+                            result["windows"].append(w_str)
+                
+                if "window2" in df.columns:
+                    windows2 = df["window2"].dropna().unique()
+                    for w in windows2:
+                        w_str = str(w).strip()
+                        if w_str and w_str not in seen_windows:
+                            seen_windows.add(w_str)
+                            result["windows"].append(w_str)
+                
+                if file_path not in result["files"]:
+                    result["files"].append(str(file_path))
+                
+            except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError, Exception):
+                continue
+    
+    result["columns"] = sorted(set(result["columns"]))
+    result["windows"] = sorted(set(result["windows"]))
     return result
 
 

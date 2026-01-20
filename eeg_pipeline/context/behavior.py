@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.infra.paths import deriv_features_path, _find_clean_events_path
 from eeg_pipeline.utils.analysis.stats.correlation import (
     CorrelationRecord,
     compute_correlation,
@@ -52,8 +52,6 @@ _FEATURE_FILE_TO_ATTR = {
     "temporal": "temporal_df",
 }
 
-_TARGETS_FILENAME = "target_vas_ratings.parquet"
-_TRIAL_ALIGNMENT_MANIFEST = "trial_alignment.json"
 _MIN_VALID_SAMPLES_FOR_CORRELATION = 3
 _DEFAULT_TRIAL_ORDER_MAX_MISSING_FRACTION = 0.1
 
@@ -286,8 +284,6 @@ class BehaviorContext:
             self._load_single_feature_file(key, features_dir, STANDARD_FEATURE_FILES)
 
         self._load_targets_from_file(features_dir)
-        if self.targets is None and self.aligned_events is not None:
-            self._load_targets_from_events()
 
     def _load_single_feature_file(
         self, key: str, features_dir: Path, standard_files: Dict[str, str]
@@ -352,72 +348,65 @@ class BehaviorContext:
             self.logger.warning("Failed to load %s: %s", key, e)
 
     def _load_targets_from_file(self, features_dir: Path) -> None:
-        """Load targets from behavior/target_vas_ratings.parquet file."""
+        """Load targets from clean events.tsv file.
+        
+        Raises FileNotFoundError if clean events.tsv is not found.
+        Raises ValueError if no suitable target column is found.
+        """
         from eeg_pipeline.infra.tsv import read_table
         
-        targets_path = features_dir / "behavior" / _TARGETS_FILENAME
-        if not targets_path.exists():
-            return
-
-        targets_df = read_table(targets_path)
-        if targets_df.shape[1] == 1:
-            self.targets = pd.to_numeric(
-                targets_df.iloc[:, 0], errors="coerce"
+        clean_events_path = _find_clean_events_path(
+            subject=self.subject,
+            task=self.task,
+            deriv_root=self.deriv_root,
+            config=self.config,
+            constants=None,
+        )
+        
+        if clean_events_path is None or not clean_events_path.exists():
+            raise FileNotFoundError(
+                f"Clean events.tsv not found for sub-{self.subject}, task-{self.task}. "
+                f"Required for target loading."
             )
-            return
+
+        try:
+            events_df = read_table(clean_events_path)
+        except Exception as e:
+            raise IOError(
+                f"Failed to load clean events.tsv from {clean_events_path}: {e}"
+            ) from e
+
+        if events_df.empty:
+            raise ValueError(
+                f"Clean events.tsv is empty for sub-{self.subject}, task-{self.task}"
+            )
 
         rating_columns = (
             self.config.get("event_columns.rating", []) if self.config else []
         )
-        target_col = pick_target_column(targets_df, target_columns=rating_columns)
-        if target_col:
-            self.targets = pd.to_numeric(targets_df[target_col], errors="coerce")
-            return
-
-        numeric_columns = targets_df.select_dtypes(include=[np.number]).columns
-        if len(numeric_columns) > 0:
-            self.targets = pd.to_numeric(
-                targets_df[numeric_columns[0]], errors="coerce"
-            )
-
-    def _load_targets_from_events(self) -> None:
-        """Load targets from aligned_events DataFrame as fallback."""
-        if self.aligned_events is None:
-            return
-
-        rating_columns = (
-            list(self.config.get("event_columns.rating", []) or [])
-            if self.config is not None
-            else []
-        )
-        target_col = pick_target_column(
-            self.aligned_events, target_columns=rating_columns
+        target_col = pick_target_column(events_df, target_columns=rating_columns)
+        
+        if target_col is None:
+            numeric_columns = events_df.select_dtypes(include=[np.number]).columns
+            if len(numeric_columns) == 0:
+                raise ValueError(
+                    f"No numeric target columns found in clean events.tsv for sub-{self.subject}, task-{self.task}. "
+                    f"Available columns: {list(events_df.columns)}"
+                )
+            if len(numeric_columns) > 1:
+                self.logger.warning(
+                    "Multiple numeric target columns found in clean events.tsv; using '%s'. Candidates=%s",
+                    numeric_columns[0],
+                    ",".join(str(c) for c in numeric_columns),
+                )
+            target_col = str(numeric_columns[0])
+        
+        self.targets = pd.to_numeric(events_df[target_col], errors="coerce")
+        self.logger.info(
+            "Targets loaded from clean events.tsv (column: '%s')",
+            target_col,
         )
 
-        if target_col:
-            self.targets = pd.to_numeric(
-                self.aligned_events[target_col], errors="coerce"
-            )
-            self.logger.info(
-                "Targets loaded from events column '%s' (%s missing)",
-                target_col,
-                _TARGETS_FILENAME,
-            )
-            return
-
-        numeric_columns = self.aligned_events.select_dtypes(
-            include=[np.number]
-        ).columns
-        if len(numeric_columns) > 0:
-            fallback_col = numeric_columns[0]
-            self.targets = pd.to_numeric(
-                self.aligned_events[fallback_col], errors="coerce"
-            )
-            self.logger.info(
-                "Targets loaded from events numeric column '%s' (%s missing)",
-                fallback_col,
-                _TARGETS_FILENAME,
-            )
 
     def _load_all_features_from_bundle(self) -> None:
         """Load all features using feature bundle."""
@@ -461,10 +450,10 @@ class BehaviorContext:
         self.temporal_df = bundle.temporal_df
         self.targets = bundle.targets
 
-        if (self.targets is None or len(self.targets) == 0) and (
-            self.aligned_events is not None
-        ):
-            self._load_targets_from_events()
+        if self.targets is None or len(self.targets) == 0:
+            raise ValueError(
+                f"No targets loaded from clean events.tsv for sub-{self.subject}, task-{self.task}"
+            )
 
     def iter_feature_tables(self) -> List[Tuple[str, Optional[pd.DataFrame]]]:
         """Iterate over all feature tables as (name, dataframe) pairs.
@@ -552,14 +541,6 @@ class BehaviorContext:
         if not self._check_events_targets_length_match():
             return False
 
-        manifest = self._load_alignment_manifest()
-        if manifest is None:
-            return False
-
-        if not self._validate_manifest_length(manifest):
-            return False
-
-        self._record_alignment_manifest(manifest)
         self._validate_rating_consistency()
 
         return self._align_feature_tables()
@@ -580,44 +561,6 @@ class BehaviorContext:
             return False
         return True
 
-    def _load_alignment_manifest(self) -> Optional[Dict[str, Any]]:
-        """Load trial alignment manifest from disk."""
-        features_dir = deriv_features_path(self.deriv_root, self.subject)
-        manifest_path = features_dir / "metadata" / _TRIAL_ALIGNMENT_MANIFEST
-
-        if not manifest_path.exists():
-            raise FileNotFoundError(
-                f"Trial alignment manifest missing: {manifest_path}. "
-                f"Re-run feature extraction to generate aligned trial manifests."
-            )
-
-        with open(manifest_path, "r") as f:
-            return json.load(f)
-
-    def _validate_manifest_length(self, manifest: Dict[str, Any]) -> bool:
-        """Validate manifest length matches targets and events."""
-        manifest_n_epochs = manifest.get("n_epochs", 0)
-        n_targets = len(self.targets) if self.targets is not None else 0
-        n_events = len(self.aligned_events) if self.aligned_events is not None else 0
-
-        if manifest_n_epochs != n_targets or manifest_n_epochs != n_events:
-            raise ValueError(
-                f"Trial alignment manifest length mismatch for sub-{self.subject}: "
-                f"manifest={manifest_n_epochs}, targets={n_targets}, "
-                f"aligned_events={n_events}"
-            )
-        return True
-
-    def _record_alignment_manifest(self, manifest: Dict[str, Any]) -> None:
-        """Record alignment manifest information in data_qc."""
-        features_dir = deriv_features_path(self.deriv_root, self.subject)
-        manifest_path = features_dir / _TRIAL_ALIGNMENT_MANIFEST
-
-        self.data_qc["trial_alignment_manifest"] = {
-            "path": str(manifest_path),
-            "n_trials": manifest.get("n_epochs", 0),
-            "has_target_value": "events_trial_type" in manifest,
-        }
 
     def _validate_rating_consistency(self) -> None:
         """Validate consistency between events rating and targets."""

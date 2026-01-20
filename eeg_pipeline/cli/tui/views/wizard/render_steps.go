@@ -149,15 +149,21 @@ func (m Model) getExpectedOutputPaths() []string {
 	base := "derivatives/"
 	switch m.Pipeline {
 	case types.PipelinePreprocessing:
-		return []string{base + "preprocessed/sub-XX/eeg/"}
+		return []string{base + "preprocessed/eeg/sub-XX/"}
 	case types.PipelineFeatures:
 		return []string{base + "sub-XX/eeg/features/"}
 	case types.PipelineBehavior:
-		return []string{base + "sub-XX/eeg/stats/", base + "group/stats/"}
+		return []string{base + "sub-XX/eeg/stats/", base + "group/eeg/stats/"}
 	case types.PipelineML:
 		return []string{base + "machine_learning/"}
 	case types.PipelinePlotting:
 		return []string{base + "sub-XX/eeg/plots/"}
+	case types.PipelineFmri:
+		return []string{base + "preprocessed/fmri/fmriprep/sub-XX/"}
+	case types.PipelineFmriRawToBIDS:
+		return []string{"bids_output/fmri/sub-XX/"}
+	case types.PipelineRawToBIDS:
+		return []string{"bids_output/eeg/sub-XX/eeg/"}
 	default:
 		return []string{base}
 	}
@@ -579,12 +585,8 @@ func (m Model) renderROISelection() string {
 		if isEditing && m.editingROIField == 1 {
 			channelsDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditBuffer + "▌")
 		} else {
-			// Truncate channels if too long
-			channels := roi.Channels
-			if len(channels) > 40 {
-				channels = channels[:37] + "..."
-			}
-			channelsDisplay = channelStyle.Render(channels)
+			// Render channels with unavailable ones in red
+			channelsDisplay = m.renderChannelsWithUnavailable(roi.Channels, channelStyle, isFocused)
 		}
 
 		channelInfo := channelStyle.Render(" [") + channelsDisplay + channelStyle.Render("]")
@@ -666,6 +668,105 @@ func (m Model) computeChannelUsage() (used, unused []string) {
 	}
 
 	return used, unused
+}
+
+// isChannelUnavailable checks if a channel is in the unavailable channels list (case-insensitive)
+func (m Model) isChannelUnavailable(channel string) bool {
+	if len(m.unavailableChannels) == 0 {
+		return false
+	}
+	chUpper := strings.ToUpper(strings.TrimSpace(channel))
+	for _, unavail := range m.unavailableChannels {
+		if strings.ToUpper(strings.TrimSpace(unavail)) == chUpper {
+			return true
+		}
+	}
+	return false
+}
+
+// renderChannelsWithUnavailable renders channel list with unavailable channels in red
+func (m Model) renderChannelsWithUnavailable(channelsStr string, baseStyle lipgloss.Style, isFocused bool) string {
+	if channelsStr == "" {
+		return baseStyle.Render(channelsStr)
+	}
+
+	// Build unavailable set for quick lookup
+	unavailableSet := make(map[string]bool)
+	for _, ch := range m.unavailableChannels {
+		unavailableSet[strings.ToUpper(strings.TrimSpace(ch))] = true
+	}
+
+	// Split channels
+	parts := strings.Split(channelsStr, ",")
+	var channels []string
+	for _, ch := range parts {
+		ch = strings.TrimSpace(ch)
+		if ch != "" {
+			channels = append(channels, ch)
+		}
+	}
+
+	// Check if we need to truncate (check raw string length, not rendered)
+	rawLength := len(channelsStr)
+	needsTruncation := rawLength > 40
+
+	if needsTruncation {
+		// Truncate the raw channel list first
+		var truncatedChannels []string
+		var truncatedLength int
+		for _, ch := range channels {
+			// Account for comma separator
+			chLength := len(ch)
+			if len(truncatedChannels) > 0 {
+				chLength += 2 // ", " separator
+			}
+			if truncatedLength+chLength > 37 {
+				break
+			}
+			truncatedChannels = append(truncatedChannels, ch)
+			truncatedLength += chLength
+		}
+		channels = truncatedChannels
+	}
+
+	// Render each channel with appropriate styling
+	var renderedParts []string
+	for i, ch := range channels {
+		if i > 0 {
+			renderedParts = append(renderedParts, baseStyle.Render(", "))
+		}
+
+		// Check if this channel is unavailable
+		if unavailableSet[strings.ToUpper(ch)] {
+			// Render unavailable channel in red
+			unavailStyle := lipgloss.NewStyle().Foreground(styles.Error)
+			if isFocused {
+				unavailStyle = unavailStyle.Bold(true)
+			}
+			renderedParts = append(renderedParts, unavailStyle.Render(ch))
+		} else {
+			// Render available channel normally
+			renderedParts = append(renderedParts, baseStyle.Render(ch))
+		}
+	}
+
+	result := strings.Join(renderedParts, "")
+
+	// Add ellipsis if truncated
+	if needsTruncation {
+		// Count non-empty parts from original
+		originalCount := 0
+		for _, p := range parts {
+			if strings.TrimSpace(p) != "" {
+				originalCount++
+			}
+		}
+		if len(channels) < originalCount {
+			result += baseStyle.Render("...")
+		}
+	}
+
+	return result
 }
 
 // formatChannelList formats a list of channel names into wrapped lines
@@ -1005,6 +1106,13 @@ func (m Model) renderPlotConfig() string {
 		case optPlotSharedColorbar:
 			label = "Shared Colorbar"
 			value = m.boolToOnOff(m.plotSharedColorbar)
+		case optPlotOverwrite:
+			label = "Overwrite"
+			val := "OFF"
+			if m.plotOverwrite != nil && *m.plotOverwrite {
+				val = "ON"
+			}
+			value = val
 		}
 
 		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value) + "\n")
@@ -1424,23 +1532,18 @@ func (m Model) renderSubjectSelection() string {
 		}
 
 		var statusBadges []string
-		if s.HasEpochs {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("E"))
-		} else {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
-		}
-		if s.HasPreprocessing {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("P"))
-		} else {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
-		}
-		if s.HasFeatures {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("F"))
-		} else {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
-		}
-		if s.HasStats {
+		if s.HasSourceData {
 			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("S"))
+		} else {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
+		}
+		if s.HasBids {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("B"))
+		} else {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
+		}
+		if s.HasDerivatives {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("D"))
 		} else {
 			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
 		}
@@ -1472,7 +1575,7 @@ func (m Model) renderSubjectSelection() string {
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
-		Render("  Legend: [E]=Epochs [P]=Preprocessed [F]=Features [S]=Stats"))
+		Render("  Legend: [S]=Source Data [B]=BIDS [D]=Derivatives"))
 
 	return b.String()
 }
@@ -1580,8 +1683,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	aperiodicR2Val := fmt.Sprintf("%.2f", m.aperiodicMinR2)
 	aperiodicPointsVal := fmt.Sprintf("%d", m.aperiodicMinPoints)
 	minEpochsVal := fmt.Sprintf("%d", m.minEpochsForFeatures)
-	failOnMissingWindowsVal := m.boolToOnOff(m.failOnMissingWindows)
-	failOnMissingNamedVal := m.boolToOnOff(m.failOnMissingNamedWindow)
 
 	// Input overrides
 	if m.editingNumber {
@@ -1946,23 +2047,15 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Save Subject-Level"
 			value = m.boolToOnOff(m.saveSubjectLevelFeatures)
 			hint = "Space to toggle"
+		case optFeatAlsoSaveCsv:
+			label = "Also Save CSV"
+			value = m.boolToOnOff(m.featAlsoSaveCsv)
+			hint = "save feature tables as both parquet and CSV"
 		case optFeatGroupExecution:
 			label = "▸ Execution"
 			hint = "Space to toggle"
 			if m.featGroupExecutionExpanded {
 				label = "▾ Execution"
-			}
-			value, expandIndicator = "", ""
-			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
-			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
-			}
-		case optFeatGroupValidation:
-			label = "▸ Validation"
-			hint = "Space to toggle"
-			if m.featGroupValidationExpanded {
-				label = "▾ Validation"
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
@@ -3092,19 +3185,11 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = erdsBandsVal
 			hint = "e.g. alpha,beta"
 
-		// Generic / validation
+		// Generic
 		case optMinEpochs:
 			label = "Min Epochs"
 			value = minEpochsVal
 			hint = "global minimum required"
-		case optFailOnMissingWindows:
-			label = "Fail missing windows"
-			value = failOnMissingWindowsVal
-			hint = "require baseline+active windows"
-		case optFailOnMissingNamedWindow:
-			label = "Fail missing named"
-			value = failOnMissingNamedVal
-			hint = "require named window per range"
 
 		default:
 			label = "Unknown"
@@ -3950,6 +4035,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Permutation p-primary", m.boolToOnOff(m.conditionPermutationPrimary), "within-run/block when available"
 		case optConditionFailFast:
 			return "Fail Fast", m.boolToOnOff(m.conditionFailFast), "error if split fails"
+		case optConditionOverwrite:
+			return "Overwrite", m.boolToOnOff(m.conditionOverwrite), "overwrite existing condition effects files"
 		case optConditionEffectThreshold:
 			val := fmt.Sprintf("%.3f", m.conditionEffectThreshold)
 			if m.editingNumber && m.isCurrentlyEditing(optConditionEffectThreshold) {
@@ -4938,6 +5025,18 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			label = "Source Est"
 			value = m.boolToOnOff(m.prepRunSourceEstimation)
 			hint = "Run source localization after preprocessing"
+		case optPrepWriteCleanEvents:
+			label = "Write Clean Events"
+			value = m.boolToOnOff(m.prepWriteCleanEvents)
+			hint = "Write clean events.tsv aligned to kept epochs"
+		case optPrepOverwriteCleanEvents:
+			label = "Overwrite Clean Events"
+			value = m.boolToOnOff(m.prepOverwriteCleanEvents)
+			hint = "Overwrite existing clean events.tsv"
+		case optPrepCleanEventsStrict:
+			label = "Clean Events Strict"
+			value = m.boolToOnOff(m.prepCleanEventsStrict)
+			hint = "Fail if clean events.tsv cannot be written"
 		}
 
 		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
@@ -5491,7 +5590,6 @@ func (m Model) renderRawToBidsAdvancedConfig() string {
 		{"Montage", montageVal, "Type to edit"},
 		{"Line Freq", lineFreqVal, "Type a number (Hz)"},
 		{"Overwrite", m.boolToOnOff(m.rawOverwrite), "Replace existing BIDS files"},
-		{"Zero Base Onsets", m.boolToOnOff(m.rawZeroBaseOnsets), "Start events at t=0"},
 		{"Trim to First Volume", m.boolToOnOff(m.rawTrimToFirstVolume), "Trim EEG to fMRI start"},
 		{"Event Prefixes", prefixVal, "Comma-separated (optional)"},
 		{"Keep Annotations", m.boolToOnOff(m.rawKeepAnnotations), "Keep all raw annotations"},

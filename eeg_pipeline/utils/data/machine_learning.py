@@ -10,8 +10,10 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.infra.paths import _find_clean_events_path
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.columns import pick_target_column
+from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from ..config.loader import ConfigDict
 
 EEGConfig = ConfigDict
@@ -43,53 +45,6 @@ def _find_block_column(aligned_events: pd.DataFrame) -> Optional[pd.Series]:
     return None
 
 
-def _get_trial_alignment_manifest_path(deriv_root: Path, subject: str) -> Path:
-    sub = f"sub-{subject}" if not subject.startswith("sub-") else subject
-    base = deriv_root / sub / "eeg" / "features"
-    
-    return base / "metadata" / "trial_alignment.json"
-
-
-def _load_trial_alignment_manifest(
-    manifest_path: Path,
-    logger: Optional[logging.Logger] = None,
-) -> pd.DataFrame:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-
-    if not manifest_path.exists():
-        raise FileNotFoundError(
-            f"Trial alignment manifest missing: {manifest_path}\n"
-            f"This file is required and must be created by 03_feature_extraction.py. "
-            f"Run 03_feature_extraction.py first to generate features with proper alignment."
-        )
-
-    if manifest_path.suffix == ".json":
-        try:
-            with open(manifest_path, "r") as f:
-                content = f.read().strip()
-            if content.startswith("{"):
-                data = json.loads(content)
-                n_epochs = data.get("n_epochs", 0)
-                manifest = pd.DataFrame({"trial_index": list(range(n_epochs))})
-                logger.debug(
-                    f"Loaded JSON trial alignment manifest: {n_epochs} trials from {manifest_path}"
-                )
-                return manifest
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-    manifest = read_tsv(manifest_path)
-    if "trial_index" not in manifest.columns:
-        raise ValueError(
-            f"Invalid trial alignment manifest: missing 'trial_index' column in {manifest_path}"
-        )
-
-    if len(manifest) == 0:
-        raise ValueError(f"Trial alignment manifest is empty: {manifest_path}")
-
-    logger.debug(f"Loaded trial alignment manifest: {len(manifest)} trials from {manifest_path}")
-    return manifest
 
 
 def load_ml_data(
@@ -113,47 +68,46 @@ def load_ml_data(
     feat_dir = deriv_root / sub / "eeg" / "features"
     
     X_path = feat_dir / "power" / "features_power.parquet"
-    y_path = feat_dir / "behavior" / "target_vas_ratings.parquet"
-        
-    manifest_path = _get_trial_alignment_manifest_path(deriv_root, subject)
 
-    if not (X_path.exists() and y_path.exists()):
+    if not X_path.exists():
         raise FileNotFoundError(
-            f"Missing features/targets for {sub}: {X_path} or {y_path} not found"
+            f"Missing features for {sub}: {X_path} not found"
         )
 
-    manifest = _load_trial_alignment_manifest(manifest_path, logger)
-    expected_n_trials = len(manifest)
-
+    clean_events_path = _find_clean_events_path(
+        subject=subject,
+        task=task,
+        deriv_root=deriv_root,
+        config=config,
+        constants=None,
+    )
+    
+    if clean_events_path is None or not clean_events_path.exists():
+        raise FileNotFoundError(
+            f"Clean events.tsv not found for {sub}, task-{task}. "
+            f"Required to load target ratings."
+        )
+    
     from eeg_pipeline.infra.tsv import read_table
     X = read_table(X_path)
-    y_df = read_table(y_path)
-
-    if len(X) != expected_n_trials:
+    events_df = read_table(clean_events_path)
+    
+    if len(X) != len(events_df):
         raise ValueError(
-            f"Feature count mismatch for subject {sub}, task {task}: "
-            f"features have {len(X)} rows but trial_alignment.tsv specifies {expected_n_trials} trials. "
-            f"This indicates a misalignment between feature extraction and trial manifest. "
-            f"Re-run 03_feature_extraction.py to regenerate features with proper alignment."
-        )
-
-    if len(y_df) != expected_n_trials:
-        raise ValueError(
-            f"Target count mismatch for subject {sub}, task {task}: "
-            f"targets have {len(y_df)} rows but trial_alignment.tsv specifies {expected_n_trials} trials. "
-            f"This indicates a misalignment between target extraction and trial manifest. "
-            f"Re-run 03_feature_extraction.py to regenerate features with proper alignment."
+            f"Feature/events count mismatch for subject {sub}, task {task}: "
+            f"features have {len(X)} rows but clean events.tsv has {len(events_df)} rows. "
+            f"This indicates a misalignment. Re-run feature extraction to regenerate features."
         )
 
     rating_columns = config.get("event_columns.rating", [])
-    tgt_col = pick_target_column(y_df, target_columns=list(rating_columns) if rating_columns else [])
+    tgt_col = pick_target_column(events_df, target_columns=list(rating_columns) if rating_columns else [])
     if tgt_col is None:
         raise ValueError(
-            f"No suitable target column found in {y_path} for subject {sub}, task {task}. "
-            f"Available columns: {list(y_df.columns)}"
+            f"No suitable target column found in clean events.tsv for subject {sub}, task {task}. "
+            f"Available columns: {list(events_df.columns)}"
         )
 
-    y = pd.to_numeric(y_df[tgt_col], errors="coerce")
+    y = pd.to_numeric(events_df[tgt_col], errors="coerce")
 
     if len(X) != len(y) or len(X) == 0:
         raise ValueError(
@@ -170,8 +124,8 @@ def load_ml_data(
 
     groups = np.array([sub] * len(X))
 
-    if "trial_index" in manifest.columns and len(manifest) == len(mask_valid):
-        trial_index = pd.to_numeric(manifest["trial_index"], errors="coerce")
+    if "trial_index" in events_df.columns:
+        trial_index = pd.to_numeric(events_df["trial_index"], errors="coerce")
         trial_index_filtered = trial_index.loc[mask_valid].to_numpy(dtype=float)
     else:
         trial_index_filtered = np.arange(len(X), dtype=float)
@@ -347,27 +301,29 @@ def load_epochs_with_targets(
         if bad_channels:
             epochs.interpolate_bads(reset_bads=True)
 
-        manifest_path = _get_trial_alignment_manifest_path(deriv_root, str(s))
-        manifest = _load_trial_alignment_manifest(manifest_path, logger)
-        if len(epochs) != len(manifest):
-            raise ValueError(
-                f"Epoch count mismatch for subject {sub}, task {task}: "
-                f"epochs have {len(epochs)} trials but trial_alignment.tsv specifies {len(manifest)} trials. "
-                "Re-run feature extraction to regenerate features with the current epochs."
-            )
-
-        _, aligned = load_epochs_for_analysis(
-            str(s),
-            task,
-            align="strict",
-            preload=False,
+        clean_events_path = _find_clean_events_path(
+            subject=str(s),
+            task=task,
             deriv_root=deriv_root,
-            bids_root=bids_root,
             config=config,
-            logger=logger,
+            constants=None,
         )
-        if aligned is None or len(aligned) == 0:
-            logger.warning(f"No aligned events/targets for {sub}; skipping.")
+        
+        if clean_events_path is None or not clean_events_path.exists():
+            logger.warning(f"Clean events.tsv not found for {sub}; skipping.")
+            continue
+        
+        aligned = read_tsv(clean_events_path)
+        
+        if len(epochs) != len(aligned):
+            raise ValueError(
+                f"Epoch/events count mismatch for subject {sub}, task {task}: "
+                f"epochs have {len(epochs)} trials but clean events.tsv has {len(aligned)} rows. "
+                "Re-run preprocessing to regenerate clean events with the current epochs."
+            )
+        
+        if len(aligned) == 0:
+            logger.warning(f"Clean events.tsv is empty for {sub}; skipping.")
             continue
 
         rating_columns = config.get("event_columns.rating", [])
@@ -485,7 +441,17 @@ def load_active_matrix(
             log.warning(f"Baseline window empty for sub-{sub}; using zero baseline.")
 
         active_mean = np.nanmean(data[..., amask], axis=2)
-        if np.any(bmask):
+        epochs_baseline = getattr(epochs, "baseline", None)
+        epochs_already_baselined = epochs_baseline not in (None, (None, None))
+
+        if epochs_already_baselined:
+            log.debug(
+                "sub-%s: epochs already baseline-corrected (epochs.baseline=%s); skipping baseline subtraction in ML amplitude features.",
+                sub,
+                epochs_baseline,
+            )
+            baseline_mean = np.zeros_like(active_mean)
+        elif np.any(bmask):
             baseline_mean = np.nanmean(data[..., bmask], axis=2)
         else:
             baseline_mean = np.zeros_like(active_mean)
@@ -671,37 +637,6 @@ def prepare_trial_records_from_epochs(
     y_all_arr = np.asarray(y_all_list)
     groups_arr = np.asarray(groups_list)
     return trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y
-
-
-def load_kept_indices(
-    subject_label: str,
-    deriv_root: Path,
-    n_events: int,
-    logger: Optional[logging.Logger] = None,
-) -> Optional[np.ndarray]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-
-    base_dir = deriv_root / subject_label / "eeg" / "features"
-    dropped_path = base_dir / "metadata" / "dropped_trials.tsv"
-    
-    if not dropped_path.exists():
-        return None
-
-    dropped_df = read_tsv(dropped_path)
-    if "original_index" not in dropped_df.columns:
-        return None
-
-    dropped_indices_raw = pd.to_numeric(dropped_df["original_index"], errors="coerce").dropna()
-    if len(dropped_indices_raw) == 0:
-        return None
-
-    dropped_indices_set = set(dropped_indices_raw.astype(int).tolist())
-    kept_indices = np.array([i for i in range(n_events) if i not in dropped_indices_set])
-    logger.info(
-        f"{subject_label}: {len(dropped_indices_set)} trials dropped, {len(kept_indices)} kept"
-    )
-    return kept_indices
 
 
 def extract_channel_importance_from_coefficients(

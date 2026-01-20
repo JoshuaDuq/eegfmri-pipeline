@@ -28,6 +28,7 @@ from eeg_pipeline.types import CorrelationResult
 from eeg_pipeline.utils.analysis.stats.transforms import compute_change_features
 from eeg_pipeline.utils.analysis.stats.effect_size import (
     compute_condition_effects,
+    compute_multigroup_condition_effects,
     split_by_condition,
 )
 from eeg_pipeline.utils.analysis.stats.mixed_effects import (
@@ -115,6 +116,7 @@ __all__ = [
     # Condition
     "split_by_condition",
     "compute_condition_effects",
+    "compute_multigroup_condition_effects",
     # Temporal
     "compute_time_frequency_from_context",
     "compute_temporal_from_context",

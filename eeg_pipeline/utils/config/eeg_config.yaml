@@ -7,8 +7,8 @@ project:
   subject_list: null  # Optional list of subjects to process (null = all found)
 
 paths:
-  bids_root: "../../data/bids_output"  # BIDS-formatted raw data directory
-  bids_fmri_root: "../../data/fMRI_data"  # BIDS-formatted fMRI data directory (for contrast builder)
+  bids_root: "../../data/bids_output/eeg"  # BIDS-formatted EEG data directory
+  bids_fmri_root: "../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../data/derivatives"  # Processed derivatives output directory
   source_data: "../../data/source_data"  # Raw source data directory
   freesurfer_dir: "../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
@@ -21,7 +21,7 @@ fmri_preprocessing:
   engine: "docker"  # "docker" or "apptainer"
   fmriprep:
     image: "nipreps/fmriprep:23.2.1"  # Docker image tag or apptainer URI/path
-    output_dir: null  # BIDS derivatives root (null = paths.deriv_root)
+    output_dir: null  # BIDS derivatives root (null = <deriv_root>/preprocessed/fmri)
     work_dir: null  # Scratch/work directory (null = <deriv_root>/work/fmriprep)
     fs_license_file: "eeg_pipeline/licenses/license_freesurfer.txt"  # FreeSurfer license.txt (null = paths.freesurfer_license)
     fs_subjects_dir: null  # Optional FreeSurfer SUBJECTS_DIR
@@ -91,6 +91,13 @@ alignment:
   allow_misaligned_trim: false
   min_alignment_samples: 5
 
+eeg:
+  montage: "easycap-M1"
+  ch_types: "eeg"
+  reference: "average"
+  eog_channels: null
+  ecg_channels: ["ECG"]
+
 preprocessing:
   resample_freq: 500
   l_freq: 0.1
@@ -98,18 +105,39 @@ preprocessing:
   notch_freq: 60
   line_freq: 60
   n_jobs: 1
+  find_breaks: true
+  write_clean_events: true           # Write post-rejection (kept-epochs) *_proc-clean_events.tsv in derivatives
+  clean_events_overwrite: true       # Overwrite existing clean events.tsv
+  clean_events_strict: true          # Fail preprocessing if clean events.tsv cannot be written/aligned
+
+pyprep:
+  ransac: true
+  repeats: 3
+  average_reref: false
+  file_extension: ".vhdr"
+  consider_previous_bads: true
+  overwrite_chans_tsv: true
+  delete_breaks: false
+  breaks_min_length: 20
+  t_start_after_previous: 2
+  t_stop_before_next: 2
 
 ica:
-  method: "fastica"
+  algorithm: "extended_infomax"
+  method: "extended_infomax"
   n_components: 0.99
+  l_freq: 1.0
   probability_threshold: 0.8
   labels_to_keep: ["brain", "other"]
 
 epochs:
   tmin: -5.0
-  tmax: 12.0
-  baseline: null
-  reject: null
+  tmax: 15.0
+  baseline: [-2.0, 0.0]
+  # For long stimulus-locked epochs (-5..15s), fixed PTP thresholds are brittle and can
+  # reject nearly all trials due to slow drift/residual artifacts. Prefer autoreject.
+  reject: "autoreject_local"
+  autoreject_n_interpolate: [4, 8, 16]
 
 ###################################################################
 # 4. ANALYSIS PARAMETERS
@@ -176,9 +204,6 @@ feature_engineering:
   spatial_transform_params:
     lambda2: 1.0e-5
     stiffness: 4.0
-
-  validation:
-    fail_on_missing_named_window: true
 
   power:
     require_baseline: true

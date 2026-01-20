@@ -209,8 +209,8 @@ def compute_tfr_morlet(
     )
     
     workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
-    
-    power = epochs.compute_tfr(
+
+    compute_kwargs = dict(
         method="morlet",
         freqs=freqs,
         n_cycles=n_cycles,
@@ -218,8 +218,20 @@ def compute_tfr_morlet(
         picks=picks,
         use_fft=True,
         return_itc=False,
-        n_jobs=workers,
     )
+
+    try:
+        power = epochs.compute_tfr(**compute_kwargs, n_jobs=workers)
+    except PermissionError as exc:
+        if workers not in (None, 1):
+            logger.warning(
+                "TFR computation failed with PermissionError using n_jobs=%s; retrying with n_jobs=1. Error=%s",
+                str(workers),
+                str(exc),
+            )
+            power = epochs.compute_tfr(**compute_kwargs, n_jobs=1)
+        else:
+            raise
     
     return power
 
@@ -280,7 +292,7 @@ def compute_complex_tfr(
     workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
     
     logger.info("Computing complex TFR for phase-based metrics (decim=%d, %d freqs)...", decim_phase, len(freqs))
-    return epochs.compute_tfr(
+    compute_kwargs = dict(
         method="morlet",
         freqs=freqs,
         n_cycles=n_cycles,
@@ -290,8 +302,19 @@ def compute_complex_tfr(
         return_itc=False,
         average=False,
         output="complex",
-        n_jobs=workers,
     )
+
+    try:
+        return epochs.compute_tfr(**compute_kwargs, n_jobs=workers)
+    except PermissionError as exc:
+        if workers not in (None, 1):
+            logger.warning(
+                "Complex TFR computation failed with PermissionError using n_jobs=%s; retrying with n_jobs=1. Error=%s",
+                str(workers),
+                str(exc),
+            )
+            return epochs.compute_tfr(**compute_kwargs, n_jobs=1)
+        raise
 
 
 def _extract_baseline_power_features(
@@ -1833,7 +1856,7 @@ def compute_subject_tfr(
     freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
     workers_default = resolve_tfr_workers(workers_default=workers if workers is not None else -1)
-    power = epochs.compute_tfr(
+    compute_kwargs = dict(
         method="morlet",
         freqs=freqs,
         n_cycles=n_cycles,
@@ -1842,8 +1865,20 @@ def compute_subject_tfr(
         use_fft=True,
         return_itc=False,
         average=False,
-        n_jobs=workers_default,
     )
+
+    try:
+        power = epochs.compute_tfr(**compute_kwargs, n_jobs=workers_default)
+    except PermissionError as exc:
+        if workers_default not in (None, 1) and logger is not None:
+            logger.warning(
+                "Subject TFR computation failed with PermissionError using n_jobs=%s; retrying with n_jobs=1. Error=%s",
+                str(workers_default),
+                str(exc),
+            )
+            power = epochs.compute_tfr(**compute_kwargs, n_jobs=1)
+        else:
+            raise
     
     return power, events_df
 

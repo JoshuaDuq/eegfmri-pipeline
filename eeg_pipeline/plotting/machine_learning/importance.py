@@ -94,7 +94,7 @@ def plot_feature_importance_top_n(
     ax.invert_yaxis()
     despine(ax)
     
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved {model_name} top {top_n} features: {save_path}")
 
 
@@ -452,7 +452,7 @@ def plot_feature_importance_stability_violin(
         return
     
     fig = _plot_violin_stability(df, channels_ordered, model_name, plot_cfg)
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved {model_name} feature importance stability (violin): {save_path}")
 
 
@@ -476,6 +476,6 @@ def plot_feature_importance_stability_ridge(
         return
     
     fig = _plot_ridge_stability(df, channels_ordered, model_name, plot_cfg)
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved {model_name} feature importance stability (ridge): {save_path}")
 

@@ -93,7 +93,7 @@ def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set
 
     # Collect EEG preprocessing subjects (preprocessed directory)
     eeg_prep_subjects = set()
-    eeg_prep_dir = deriv_root / "preprocessed"
+    eeg_prep_dir = deriv_root / "preprocessed" / "eeg"
     if eeg_prep_dir.exists():
         for subj_dir in eeg_prep_dir.glob("sub-*"):
             if subj_dir.is_dir():

@@ -20,9 +20,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.analysis.preprocessing.orchestration import (
-    run_merge_behavior as _run_merge_behavior,
+from eeg_pipeline.analysis.utilities.eeg_raw_to_bids import (
     run_raw_to_bids as _run_raw_to_bids,
+)
+from eeg_pipeline.analysis.utilities.merge_psychopy import (
+    run_merge_psychopy as _run_merge_psychopy,
 )
 
 
@@ -37,7 +39,6 @@ def run_raw_to_bids(
     montage: str = "easycap-M1",
     line_freq: float = 60.0,
     overwrite: bool = False,
-    zero_base_onsets: bool = False,
     do_trim_to_first_volume: bool = False,
     event_prefixes: Optional[List[str]] = None,
     keep_all_annotations: bool = False,
@@ -51,7 +52,6 @@ def run_raw_to_bids(
         montage=montage,
         line_freq=line_freq,
         overwrite=overwrite,
-        zero_base_onsets=zero_base_onsets,
         do_trim_to_first_volume=do_trim_to_first_volume,
         event_prefixes=event_prefixes,
         keep_all_annotations=keep_all_annotations,
@@ -67,9 +67,10 @@ def run_merge_behavior(
     event_prefixes: Optional[List[str]] = None,
     event_types: Optional[List[str]] = None,
     dry_run: bool = False,
+    allow_misaligned_trim: bool = False,
 ) -> int:
     """Merge behavioral data into BIDS events files."""
-    return _run_merge_behavior(
+    return _run_merge_psychopy(
         bids_root=bids_root,
         source_root=source_root,
         task=task,
@@ -77,6 +78,7 @@ def run_merge_behavior(
         event_prefixes=event_prefixes,
         event_types=event_types,
         dry_run=dry_run,
+        allow_misaligned_trim=allow_misaligned_trim,
         _logger=logger,
     )
 
@@ -112,7 +114,6 @@ class UtilityPipeline(PipelineBase):
             "montage": montage,
             "line_freq": line_freq,
             "overwrite": kwargs.get("overwrite", False),
-            "zero_base_onsets": kwargs.get("zero_base_onsets", False),
             "do_trim_to_first_volume": kwargs.get("do_trim_to_first_volume", False),
             "event_prefixes": kwargs.get("event_prefixes"),
             "keep_all_annotations": kwargs.get("keep_all_annotations", False),
@@ -126,6 +127,10 @@ class UtilityPipeline(PipelineBase):
             "event_prefixes": kwargs.get("event_prefixes"),
             "event_types": kwargs.get("event_types"),
             "dry_run": kwargs.get("dry_run", False),
+            "allow_misaligned_trim": kwargs.get(
+                "allow_misaligned_trim",
+                bool(self.config.get("alignment.allow_misaligned_trim", False)),
+            ),
         }
 
     def _resolve_task(self, task: Optional[str]) -> str:
@@ -220,7 +225,6 @@ class UtilityPipeline(PipelineBase):
         montage: Optional[str] = None,
         line_freq: Optional[float] = None,
         overwrite: bool = False,
-        zero_base_onsets: bool = False,
         do_trim_to_first_volume: bool = False,
         event_prefixes: Optional[List[str]] = None,
         keep_all_annotations: bool = False,
@@ -231,7 +235,6 @@ class UtilityPipeline(PipelineBase):
             "montage": montage,
             "line_freq": line_freq,
             "overwrite": overwrite,
-            "zero_base_onsets": zero_base_onsets,
             "do_trim_to_first_volume": do_trim_to_first_volume,
             "event_prefixes": event_prefixes,
             "keep_all_annotations": keep_all_annotations,

@@ -15,6 +15,7 @@ from eeg_pipeline.analysis.behavior.api import (
     classify_feature,
     compute_change_features,
     compute_condition_effects,
+    compute_multigroup_condition_effects,
     compute_icc,
     compute_pain_nonpain_time_cluster_test,
     compute_pain_sensitivity_index,
@@ -72,6 +73,7 @@ __all__ = [
     # Condition and temporal stats
     "split_by_condition",
     "compute_condition_effects",
+    "compute_multigroup_condition_effects",
     "compute_time_frequency_from_context",
     "compute_temporal_from_context",
     "compute_time_frequency_correlations",

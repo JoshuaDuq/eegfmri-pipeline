@@ -167,7 +167,7 @@ def plot_prediction_scatter(
     ax.set_aspect('equal')
     despine(ax)
     
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved {model_name} prediction scatter: {save_path}")
 
 
@@ -211,7 +211,7 @@ def plot_per_subject_performance(
     create_bar_plot(axes[1], x_positions, r2, subject_labels, 'R²', plot_cfg)
     
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved {model_name} per-subject performance: {save_path}")
 
 
@@ -254,7 +254,7 @@ def plot_ml_null_hist(
     despine(ax)
     
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info("Saved machine learning null histogram to %s", save_path)
 
 
@@ -363,7 +363,7 @@ def plot_calibration_curve(
     ax.legend(fontsize=plot_cfg.font.small, loc='lower right', frameon=False)
     despine(ax)
     
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved {model_name} calibration curve: {save_path}")
 
 
@@ -409,7 +409,7 @@ def plot_bootstrap_distributions(
         _plot_bootstrap_metric(axes[row, 1], r2_point, r2_ci, 'R²', plot_cfg)
     
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved bootstrap distributions: {save_path}")
 
 
@@ -474,6 +474,6 @@ def plot_permutation_null(
     ax.legend(fontsize=plot_cfg.font.small, loc='upper left', frameon=False)
     despine(ax)
     
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info("Saved permutation null distribution: %s", save_path)
 

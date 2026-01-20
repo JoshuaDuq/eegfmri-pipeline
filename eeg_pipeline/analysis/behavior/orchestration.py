@@ -46,7 +46,9 @@ class _ResultCache:
         if self._trial_table_df is not None:
             return self._trial_table_df
 
-        trial_table_path = ctx.stats_dir / "trial_table" / "trials.parquet"
+        suffix = _feature_suffix_from_context(ctx)
+        fname = f"trials{suffix}"
+        trial_table_path = ctx.stats_dir / "trial_table" / f"{fname}.parquet"
         if not trial_table_path.exists():
             return None
 
@@ -1305,7 +1307,15 @@ def _write_stats_table(
         Actual path written
     """
     from eeg_pipeline.infra.tsv import write_stats_table
-    return write_stats_table(df, path, force_tsv=force_tsv)
+    actual_path = write_stats_table(df, path, force_tsv=force_tsv)
+    
+    if ctx.also_save_csv:
+        from eeg_pipeline.infra.tsv import write_csv
+        csv_path = actual_path.with_suffix(".csv")
+        write_csv(df, csv_path, index=False)
+        ctx.logger.info("Also saved stats table as CSV: %s", csv_path.name)
+    
+    return actual_path
 
 
 def _get_feature_columns(
@@ -2672,6 +2682,15 @@ def compute_trial_table(ctx: BehaviorContext, config: Any) -> Optional[TrialTabl
 
     extra_cols = get_config_value(ctx.config, "behavior_analysis.trial_table.extra_event_columns", None)
     extra_cols_list = [str(c) for c in extra_cols] if isinstance(extra_cols, (list, tuple)) else None
+    
+    # Automatically include condition compare_column if specified
+    compare_col = get_config_value(ctx.config, "behavior_analysis.condition.compare_column", None)
+    if compare_col:
+        compare_col = str(compare_col).strip()
+        if compare_col and extra_cols_list is not None and compare_col not in extra_cols_list:
+            extra_cols_list.append(compare_col)
+        elif compare_col and extra_cols_list is None:
+            extra_cols_list = [compare_col]
 
     result = build_subject_trial_table(
         ctx,
@@ -2705,9 +2724,18 @@ def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
 
     save_trial_table(_TableWrapper(result.df, result.metadata), out_path, format=fmt)
 
+    if ctx.also_save_csv:
+        from eeg_pipeline.infra.tsv import write_csv
+        csv_path = out_dir / f"{fname}.csv"
+        write_csv(result.df, csv_path, index=False)
+        ctx.logger.info("Also saved trial table as CSV: %s/%s", out_dir.name, csv_path.name)
+
     meta_path = out_dir / f"{fname}.metadata.json"
     _write_metadata_file(meta_path, result.metadata)
     ctx.logger.info("Saved trial table: %s/%s (%d rows, %d cols)", out_dir.name, out_path.name, len(result.df), result.df.shape[1])
+
+    _cache._trial_table_df = result.df
+    _cache._trial_table_path = out_path
 
     return out_path
 
@@ -3430,9 +3458,26 @@ def stage_condition_column(
     
     Single responsibility: Column contrast comparison.
     Supports primary_unit=trial|run to control unit of analysis.
+    
+    When overwrite=false, includes compare_column name in output filename to allow
+    multiple comparisons without overwriting previous results.
+    
+    If compare_values has 3+ values, delegates to multigroup comparison instead.
     """
     from eeg_pipeline.analysis.behavior.api import split_by_condition, compute_condition_effects
     from eeg_pipeline.infra.tsv import write_parquet
+
+    # Check if multigroup comparison is needed (3+ values)
+    compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
+    use_multigroup = isinstance(compare_values, (list, tuple)) and len(compare_values) > 2
+    
+    if use_multigroup:
+        # Delegate to multigroup comparison
+        ctx.logger.info(
+            f"Condition column: {len(compare_values)} values specified, "
+            "delegating to multigroup comparison"
+        )
+        return stage_condition_multigroup(ctx, config, df_trials=df_trials, feature_cols=feature_cols)
 
     fail_fast = get_config_value(ctx.config, "behavior_analysis.condition.fail_fast", True)
     primary_unit = str(get_config_value(
@@ -3464,6 +3509,7 @@ def stage_condition_column(
     
     # Aggregate to run-level if requested (avoids pseudo-replication)
     compare_col = str(get_config_value(ctx.config, "behavior_analysis.condition.compare_column", "pain") or "pain").strip()
+    overwrite = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
     if use_run_unit and run_col in df_trials.columns and compare_col in df_trials.columns:
         ctx.logger.info("Condition: aggregating to run-level (primary_unit=%s)", primary_unit)
         agg_cols = feature_cols + [compare_col]
@@ -3500,6 +3546,19 @@ def stage_condition_column(
             ctx.logger.warning(msg)
             return pd.DataFrame()
 
+        # Extract condition values from config or data
+        compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", None)
+        if compare_values and len(compare_values) >= 2:
+            condition_value1, condition_value2 = str(compare_values[0]), str(compare_values[1])
+        else:
+            # Fallback: extract from actual data values
+            condition_series = df_trials[compare_col]
+            unique_vals = condition_series.dropna().unique()
+            if len(unique_vals) >= 2:
+                condition_value1, condition_value2 = str(unique_vals[0]), str(unique_vals[1])
+            else:
+                condition_value1, condition_value2 = "1", "0"
+
         features = df_trials[feature_cols].copy()
         groups = None
         if getattr(ctx, "group_ids", None) is not None:
@@ -3535,6 +3594,9 @@ def stage_condition_column(
             column_df = column_df.copy()
             column_df["comparison_type"] = "column"
             column_df["analysis_kind"] = "condition_column"
+            column_df["condition_column"] = compare_col
+            column_df["condition_value1"] = condition_value1
+            column_df["condition_value2"] = condition_value2
 
             # Standardize p-value columns
             if "p_value" in column_df.columns and "p_raw" not in column_df.columns:
@@ -3554,7 +3616,8 @@ def stage_condition_column(
                 analysis_type="condition_column",
             )
 
-            col_path = out_dir / f"condition_effects_column{suffix}.parquet"
+            # Always include condition column name in filename
+            col_path = out_dir / f"condition_effects_column{suffix}_{compare_col}.parquet"
             write_parquet(column_df, col_path)
             ctx.logger.info(f"Condition column comparison: {len(column_df)} features saved to {col_path}")
             return column_df
@@ -3565,6 +3628,7 @@ def stage_condition_column(
         ctx.logger.warning(f"Condition column comparison failed: {exc}")
 
     return pd.DataFrame()
+
 
 
 def _compute_pairwise_effect_sizes(
@@ -3667,6 +3731,7 @@ def stage_condition_window(
         return pd.DataFrame()
 
     suffix = _feature_suffix_from_context(ctx)
+    compare_col = str(get_config_value(ctx.config, "behavior_analysis.condition.compare_column", "pain") or "pain").strip()
     out_dir = _get_stats_subfolder(ctx, "condition_effects")
 
     ctx.logger.info(f"Running window comparison: {compare_windows}")
@@ -3675,6 +3740,11 @@ def stage_condition_window(
     )
     
     if not window_df.empty:
+        # Store windows information in dataframe (windows are already stored as window1/window2)
+        # Store condition column name for reference but don't include in filename
+        window_df["condition_column"] = compare_col
+        
+        # Window files don't include condition column name in filename (windows are the comparison dimension)
         win_path = out_dir / f"condition_effects_window{suffix}.parquet"
         write_parquet(window_df, win_path)
         ctx.logger.info(f"Condition window comparison: {len(window_df)} features saved to {win_path}")
@@ -3683,12 +3753,13 @@ def stage_condition_window(
 
 
 def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Backward-compatible condition stage (column + optional window).
+    """Backward-compatible condition stage (column + optional window + optional multigroup).
     
     The pipeline wrapper historically called a single stage and expected a DataFrame.
     Internally, we keep single-responsibility sub-stages:
-    - stage_condition_column
-    - stage_condition_window
+    - stage_condition_column (2-group comparison)
+    - stage_condition_window (paired window comparison)
+    - stage_condition_multigroup (3+ group comparison)
     """
     df_trials = _load_trial_table_df(ctx)
     if not _is_dataframe_valid(df_trials):
@@ -3701,7 +3772,19 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         ctx.logger.info("Condition: no feature columns found; skipping.")
         return pd.DataFrame()
 
-    col_df = stage_condition_column(ctx, config, df_trials=df_trials, feature_cols=feature_cols)
+    result_dfs = []
+    
+    compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
+    use_multigroup = isinstance(compare_values, (list, tuple)) and len(compare_values) > 2
+    
+    if use_multigroup:
+        multigroup_df = stage_condition_multigroup(ctx, config, df_trials=df_trials, feature_cols=feature_cols)
+        if multigroup_df is not None and not multigroup_df.empty:
+            result_dfs.append(multigroup_df)
+    else:
+        col_df = stage_condition_column(ctx, config, df_trials=df_trials, feature_cols=feature_cols)
+        if col_df is not None and not col_df.empty:
+            result_dfs.append(col_df)
 
     compare_windows = get_config_value(ctx.config, "behavior_analysis.condition.compare_windows", [])
     win_df = stage_condition_window(
@@ -3711,14 +3794,109 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         feature_cols=feature_cols,
         compare_windows=compare_windows if isinstance(compare_windows, list) else None,
     )
-
-    if col_df is not None and not col_df.empty and win_df is not None and not win_df.empty:
-        return pd.concat([col_df, win_df], ignore_index=True)
-    if col_df is not None and not col_df.empty:
-        return col_df
     if win_df is not None and not win_df.empty:
-        return win_df
+        result_dfs.append(win_df)
+
+    if result_dfs:
+        return pd.concat(result_dfs, ignore_index=True)
     return pd.DataFrame()
+
+
+def stage_condition_multigroup(
+    ctx: BehaviorContext,
+    config: Any,
+    df_trials: Optional[pd.DataFrame] = None,
+    feature_cols: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Run multi-group condition comparison (3+ groups).
+    
+    Computes all pairwise Mann-Whitney U tests between groups with FDR correction.
+    Results are saved to condition_effects_multigroup*.tsv.
+    
+    When overwrite=false, includes compare_column name in output filename to allow
+    multiple comparisons without overwriting previous results.
+    """
+    from eeg_pipeline.utils.analysis.stats.effect_size import compute_multigroup_condition_effects
+    
+    if df_trials is None:
+        df_trials = _load_trial_table_df(ctx)
+    if not _is_dataframe_valid(df_trials):
+        ctx.logger.warning("Condition multigroup: trial table missing; skipping.")
+        return pd.DataFrame()
+    
+    if feature_cols is None:
+        feature_cols = _get_feature_columns(df_trials, ctx, "condition")
+    if not feature_cols:
+        ctx.logger.info("Condition multigroup: no feature columns found; skipping.")
+        return pd.DataFrame()
+    
+    compare_column = str(get_config_value(
+        ctx.config, "behavior_analysis.condition.compare_column", "pain"
+    ) or "pain").strip()
+    compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
+    overwrite = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
+    
+    compare_labels = get_config_value(ctx.config, "behavior_analysis.condition.compare_labels", None)
+    
+    if not isinstance(compare_values, (list, tuple)) or len(compare_values) < 3:
+        ctx.logger.info("Condition multigroup: requires 3+ compare_values; skipping.")
+        return pd.DataFrame()
+    
+    if compare_column not in df_trials.columns:
+        ctx.logger.warning(f"Condition multigroup: column '{compare_column}' not found; skipping.")
+        return pd.DataFrame()
+    
+    if isinstance(compare_labels, (list, tuple)) and len(compare_labels) >= len(compare_values):
+        group_labels = [str(l).strip() for l in compare_labels[:len(compare_values)]]
+    else:
+        group_labels = [str(v) for v in compare_values]
+    
+    column_values = df_trials[compare_column]
+    group_masks = {}
+    
+    for val, label in zip(compare_values, group_labels):
+        try:
+            numeric_val = float(val)
+            mask = (pd.to_numeric(column_values, errors="coerce") == numeric_val).values
+        except (ValueError, TypeError):
+            val_str = str(val).strip().lower()
+            mask = (column_values.astype(str).str.strip().str.lower() == val_str).values
+        
+        if np.any(mask):
+            group_masks[label] = mask
+            ctx.logger.debug(f"  Group '{label}': {np.sum(mask)} trials")
+    
+    if len(group_masks) < 2:
+        ctx.logger.warning("Condition multigroup: fewer than 2 groups have data; skipping.")
+        return pd.DataFrame()
+    
+    ctx.logger.info(
+        f"Condition multigroup ({compare_column}): {len(group_masks)} groups, "
+        f"{len(feature_cols)} features"
+    )
+    
+    features_df = df_trials[feature_cols].copy()
+    
+    multigroup_df = compute_multigroup_condition_effects(
+        features_df=features_df,
+        group_masks=group_masks,
+        group_labels=group_labels,
+        fdr_alpha=config.fdr_alpha,
+        logger=ctx.logger,
+        config=ctx.config,
+    )
+    
+    if multigroup_df is not None and not multigroup_df.empty:
+        multigroup_df["compare_column"] = compare_column
+        suffix = _feature_suffix_from_context(ctx)
+        # Always include condition column name in filename
+        out_dir = _get_stats_subfolder(ctx, "condition_effects")
+        filename = f"condition_effects_multigroup{suffix}_{compare_column}.tsv"
+        path = out_dir / filename
+        _write_stats_table(ctx, multigroup_df, path)
+        ctx.logger.info(f"Saved multi-group condition effects to {path}")
+    
+    return multigroup_df
 
 
 def _run_window_comparison(
@@ -3780,13 +3958,31 @@ def _run_window_comparison(
             n_unparseable += 1
             continue
 
-        seg = str(parsed.get("segment") or "").strip().lower()
+        # When prefix is stripped, parse() shifts fields: segment becomes group, band becomes segment.
+        # Example: "power_baseline_alpha_ch_Fp1_mean" -> strip "power_" -> "baseline_alpha_ch_Fp1_mean"
+        # Parse interprets: group="baseline", segment="alpha", band=""
+        # Correct interpretation: group="power", segment="baseline", band="alpha"
+        parsed_group = str(parsed.get("group") or "").strip().lower()
+        parsed_segment = str(parsed.get("segment") or "").strip().lower()
+        parsed_band = str(parsed.get("band") or "").strip()
+        
+        if matched_prefix and parsed_group in {w1, w2}:
+            # Prefix was stripped: parsed.group is actually the segment
+            seg = parsed_group
+            band = parsed_segment if parsed_segment else parsed_band
+        else:
+            # No prefix or group doesn't match window: use parsed segment
+            seg = parsed_segment if parsed_segment else parsed_group
+            band = parsed_band if parsed_band else parsed_segment
+        
+        seg = seg.strip().lower()
         if seg not in {w1, w2}:
             continue
 
+        group_name = matched_prefix.rstrip("_") if matched_prefix else str(parsed.get("group") or "")
         key = (
-            str(parsed.get("group") or ""),
-            str(parsed.get("band") or ""),
+            group_name,
+            band,
             str(parsed.get("scope") or ""),
             str(parsed.get("identifier") or ""),
             str(parsed.get("stat") or ""),
@@ -3806,8 +4002,23 @@ def _run_window_comparison(
     common_bases = sorted(set(window1_features.keys()) & set(window2_features.keys()))
     
     if not common_bases:
-        ctx.logger.warning(f"No matching feature pairs found for windows {window1} and {window2}")
-        ctx.logger.info(f"Looking for patterns like '*_{window1}_*' and '*_{window2}_*' in feature columns")
+        # Diagnose why no matches: check if it's a stat mismatch
+        w1_stats = {k[4] for k in window1_features.keys()}
+        w2_stats = {k[4] for k in window2_features.keys()}
+        common_stats = w1_stats & w2_stats
+        
+        if not common_stats:
+            ctx.logger.warning(
+                f"No matching feature pairs found for windows {window1} and {window2}. "
+                f"Reason: different stat types ({window1} has {sorted(w1_stats)}, {window2} has {sorted(w2_stats)}). "
+                f"Window comparisons require features with matching (group, band, scope, identifier, stat)."
+            )
+        else:
+            ctx.logger.warning(
+                f"No matching feature pairs found for windows {window1} and {window2}. "
+                f"Found {len(window1_features)} {window1} features and {len(window2_features)} {window2} features, "
+                f"but none share the same (group, band, scope, identifier, stat) combination."
+            )
         return pd.DataFrame()
 
     n_pairs = len(common_bases)
@@ -4223,6 +4434,33 @@ def stage_mixed_effects(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 ###################################################################
 
 
+def _find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] = None) -> Optional[Path]:
+    """Find trial table file with feature suffix.
+    
+    If feature_files is provided, builds exact filename. Otherwise searches for trials_*.parquet.
+    No fallback to trials.parquet.
+    """
+    trial_table_dir = stats_dir / "trial_table"
+    if not trial_table_dir.exists():
+        return None
+    
+    if feature_files:
+        suffix = "_" + "_".join(sorted(str(x) for x in feature_files))
+        fname = f"trials{suffix}"
+        exact_path = trial_table_dir / f"{fname}.parquet"
+        return exact_path if exact_path.exists() else None
+    
+    pattern_paths = list(trial_table_dir.glob("trials_*.parquet"))
+    if len(pattern_paths) == 0:
+        return None
+    if len(pattern_paths) > 1:
+        raise ValueError(
+            f"Multiple trial table files found in {trial_table_dir}: {pattern_paths}. "
+            "Specify feature files to disambiguate."
+        )
+    return pattern_paths[0]
+
+
 def run_group_level_mixed_effects(
     subjects: List[str],
     deriv_root: Path,
@@ -4269,13 +4507,21 @@ def run_group_level_mixed_effects(
         logger.warning("statsmodels not available; skipping mixed-effects.")
         return MixedEffectsResult(df=pd.DataFrame(), metadata={"status": "statsmodels_unavailable"})
     
+    feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
+    if isinstance(feature_files, str):
+        feature_files = [feature_files]
+    elif feature_files is None:
+        feature_files = get_config_value(config, "behavior_analysis.feature_categories", None)
+        if isinstance(feature_files, str):
+            feature_files = [feature_files]
+    
     all_trials: List[pd.DataFrame] = []
     
     for sub in subjects:
         stats_dir = deriv_stats_path(deriv_root, sub)
-        trial_path = stats_dir / "trial_table" / "trials.parquet"
+        trial_path = _find_trial_table_path(stats_dir, feature_files=feature_files)
         
-        if not trial_path.exists():
+        if trial_path is None:
             logger.warning(f"No trial table for sub-{sub}; skipping.")
             continue
         
@@ -4303,6 +4549,14 @@ def run_group_level_mixed_effects(
         variances = combined[feature_cols].var()
         feature_cols = variances.nlargest(max_features).index.tolist()
         logger.info("Mixed-effects: limited to top %d features by variance", max_features)
+    
+    n_subjects = combined["subject_id"].nunique()
+    if n_subjects < 3:
+        logger.warning(
+            "Mixed-effects: only %d subjects. Convergence warnings are expected with small sample sizes. "
+            "Results may be unreliable.",
+            n_subjects
+        )
     
     records: List[Dict[str, Any]] = []
     family_records: List[Dict[str, Any]] = []
@@ -4430,13 +4684,21 @@ def run_group_level_correlations(
     from eeg_pipeline.infra.tsv import read_parquet
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
     
+    feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
+    if isinstance(feature_files, str):
+        feature_files = [feature_files]
+    elif feature_files is None:
+        feature_files = get_config_value(config, "behavior_analysis.feature_categories", None)
+        if isinstance(feature_files, str):
+            feature_files = [feature_files]
+    
     all_trials: List[pd.DataFrame] = []
     
     for sub in subjects:
         stats_dir = deriv_stats_path(deriv_root, sub)
-        trial_path = stats_dir / "trial_table" / "trials.parquet"
+        trial_path = _find_trial_table_path(stats_dir, feature_files=feature_files)
         
-        if not trial_path.exists():
+        if trial_path is None:
             continue
         
         df = read_parquet(trial_path)
@@ -5041,31 +5303,31 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
         out_dir = _get_stats_subfolder(ctx, "correlations")
         filename = _build_output_filename(ctx, pipeline_config, "correlations")
         path = out_dir / f"{filename}.tsv"
-        saved.extend(_write_stats_table(ctx, results.correlations, path))
+        saved.append(_write_stats_table(ctx, results.correlations, path))
 
     if _is_valid_df(getattr(results, "pain_sensitivity", None)):
         out_dir = _get_stats_subfolder(ctx, "pain_sensitivity")
         filename = _build_output_filename(ctx, pipeline_config, "pain_sensitivity")
         path = out_dir / f"{filename}.tsv"
-        saved.extend(_write_stats_table(ctx, results.pain_sensitivity, path))
+        saved.append(_write_stats_table(ctx, results.pain_sensitivity, path))
 
     if _is_valid_df(getattr(results, "condition_effects", None)):
         out_dir = _get_stats_subfolder(ctx, "condition_effects")
         filename = _build_output_filename(ctx, pipeline_config, "condition_effects")
         path = out_dir / f"{filename}.tsv"
-        saved.extend(_write_stats_table(ctx, results.condition_effects, path))
+        saved.append(_write_stats_table(ctx, results.condition_effects, path))
 
     if _is_valid_df(getattr(results, "mediation", None)):
         out_dir = _get_stats_subfolder(ctx, "mediation")
         filename = _build_output_filename(ctx, pipeline_config, "mediation")
         path = out_dir / f"{filename}.tsv"
-        saved.extend(_write_stats_table(ctx, results.mediation, path))
+        saved.append(_write_stats_table(ctx, results.mediation, path))
 
     if _is_valid_df(getattr(results, "mixed_effects", None)):
         out_dir = _get_stats_subfolder(ctx, "mixed_effects")
         filename = _build_output_filename(ctx, pipeline_config, "mixed_effects")
         path = out_dir / f"{filename}.tsv"
-        saved.extend(_write_stats_table(ctx, results.mixed_effects, path))
+        saved.append(_write_stats_table(ctx, results.mixed_effects, path))
 
     # NOTE: regression and models are already written by their respective stages.
     # The files already exist in trialwise_regression/ and feature_models/ folders.

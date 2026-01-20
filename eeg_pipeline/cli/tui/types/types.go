@@ -32,7 +32,7 @@ var pipelineNames = [pipelineCount]string{
 	PipelinePlotting:          "Plotting",
 	PipelineFmri:              "fMRI",
 	PipelineMergePsychoPyData: "Merge PsychoPy Data",
-	PipelineRawToBIDS:         "Raw to BIDS",
+	PipelineRawToBIDS:         "EEG Raw to BIDS",
 	PipelineFmriRawToBIDS:     "fMRI Raw to BIDS",
 }
 
@@ -168,10 +168,13 @@ type FeatureAvailability struct {
 // SubjectStatus represents processing status for a subject
 type SubjectStatus struct {
 	ID                  string
-	HasEpochs           bool
-	HasPreprocessing    bool
-	HasFeatures         bool
-	HasStats            bool
+	HasSourceData       bool
+	HasBids             bool
+	HasDerivatives      bool
+	HasEpochs           bool // Deprecated: kept for backward compatibility
+	HasPreprocessing    bool // Deprecated: kept for backward compatibility
+	HasFeatures         bool // Deprecated: kept for backward compatibility
+	HasStats            bool // Deprecated: kept for backward compatibility
 	AvailableBands      []string
 	FeatureAvailability *FeatureAvailability
 	EpochMetadata       map[string]float64 `json:"epoch_metadata"`

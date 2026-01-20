@@ -222,6 +222,7 @@ def plot_aperiodic_residual_spectra(
 
     output = save_dir / f"sub-{subject}_aperiodic_residual_spectra"
     save_fig(fig, output, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+             config=config,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
     plt.close(fig)
     log_if_present(logger, "info", "Saved aperiodic residual spectra")
@@ -298,6 +299,7 @@ def plot_aperiodic_run_trajectories(
     plt.tight_layout()
     output = save_dir / f"sub-{subject}_aperiodic_run_trajectories"
     save_fig(fig, output, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+             config=config,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
     plt.close(fig)
     log_if_present(logger, "info", "Saved aperiodic run-wise trajectories")
@@ -689,6 +691,7 @@ def plot_aperiodic_topomaps(
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
+        config=config,
         pad_inches=plot_cfg.pad_inches
     )
     plt.close(fig)
@@ -948,6 +951,7 @@ def plot_aperiodic_vs_pain(
         save_dir / output_name,
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
+        config=config,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches
     )
@@ -1055,214 +1059,305 @@ def plot_aperiodic_by_condition(
                     cols.append(col)
         return cols
     
-    # Window comparison (paired) - use unified helper
+    # Window comparison (paired) - supports both 2-window and multi-window
     if compare_wins and len(segments) >= 2:
-        seg1, seg2 = segments[0], segments[1]
+        from eeg_pipeline.plotting.features.utils import plot_multi_window_comparison
+        from eeg_pipeline.utils.formatting import sanitize_label
+        
+        use_multi_window = len(segments) > 2
         
         for roi_name in roi_names:
-            # For aperiodic, we use metrics instead of bands
-            data_by_band = {}  # Reusing the dict name for compatibility with helper
-            for metric in metrics:
-                cols1 = get_aperiodic_columns(seg1, metric, roi_name)
-                cols2 = get_aperiodic_columns(seg2, metric, roi_name)
-                
-                if not cols1 or not cols2:
-                    continue
-                
-                s1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                s2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                
-                valid_mask = s1.notna() & s2.notna()
-                v1, v2 = s1[valid_mask].values, s2[valid_mask].values
-                
-                if len(v1) > 0:
-                    data_by_band[metric] = (v1, v2)
+            roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+            suffix = f"_roi-{roi_safe}" if roi_safe else ""
             
-            if data_by_band:
-                from eeg_pipeline.utils.formatting import sanitize_label
-                roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
-                suffix = f"_roi-{roi_safe}" if roi_safe else ""
-                save_path = save_dir / f"sub-{subject}_aperiodic_by_condition{suffix}_window"
+            if use_multi_window:
+                # Multi-window comparison: extract data for all segments
+                data_by_band_multi: Dict[str, Dict[str, np.ndarray]] = {}
+                for metric in metrics:
+                    segment_series = {}
+                    for seg in segments:
+                        cols = get_aperiodic_columns(seg, metric, roi_name)
+                        if cols:
+                            segment_series[seg] = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    
+                    if len(segment_series) < 2:
+                        continue
+                    
+                    valid_mask = pd.Series(True, index=features_df.index)
+                    for series in segment_series.values():
+                        valid_mask &= series.notna()
+                    
+                    segment_values = {}
+                    for seg, series in segment_series.items():
+                        vals = series[valid_mask].values
+                        if len(vals) > 0:
+                            segment_values[seg] = vals
+                    
+                    if len(segment_values) >= 2:
+                        data_by_band_multi[metric] = segment_values
                 
-                plot_paired_comparison(
-                    data_by_band=data_by_band,
-                    subject=subject,
-                    save_path=save_path,
-                    feature_label="Aperiodic",
-                    config=config,
-                    logger=logger,
-                    label1=seg1.capitalize(),
-                    label2=seg2.capitalize(),
-                    roi_name=roi_name,
-                    stats_dir=stats_dir,
-                )
+                if data_by_band_multi:
+                    save_path = save_dir / f"sub-{subject}_aperiodic_by_condition{suffix}_multiwindow"
+                    plot_multi_window_comparison(
+                        data_by_band=data_by_band_multi,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label="Aperiodic",
+                        segments=segments,
+                        config=config,
+                        logger=logger,
+                        roi_name=roi_name,
+                        stats_dir=stats_dir,
+                    )
+            else:
+                # 2-window comparison
+                seg1, seg2 = segments[0], segments[1]
+                data_by_band = {}
+                for metric in metrics:
+                    cols1 = get_aperiodic_columns(seg1, metric, roi_name)
+                    cols2 = get_aperiodic_columns(seg2, metric, roi_name)
+                    
+                    if not cols1 or not cols2:
+                        continue
+                    
+                    s1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    s2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    
+                    valid_mask = s1.notna() & s2.notna()
+                    v1, v2 = s1[valid_mask].values, s2[valid_mask].values
+                    
+                    if len(v1) > 0:
+                        data_by_band[metric] = (v1, v2)
+                
+                if data_by_band:
+                    save_path = save_dir / f"sub-{subject}_aperiodic_by_condition{suffix}_window"
+                    plot_paired_comparison(
+                        data_by_band=data_by_band,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label="Aperiodic",
+                        config=config,
+                        logger=logger,
+                        label1=seg1.capitalize(),
+                        label2=seg2.capitalize(),
+                        roi_name=roi_name,
+                        stats_dir=stats_dir,
+                    )
         
-        log_if_present(logger, "info", f"Saved aperiodic paired comparison plots for {len(roi_names)} ROIs")
+        plot_type = "multi-window" if use_multi_window else "paired"
+        log_if_present(logger, "info", f"Saved aperiodic {plot_type} comparison plots for {len(roi_names)} ROIs")
 
     # Column comparison (unpaired)
     if compare_cols:
-        comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
-        if not comp_mask_info:
-            if logger:
-                logger.warning(
-                    "Column comparison enabled but config incomplete. "
-                    "Set plotting.comparisons.comparison_column and comparison_values."
-                )
+        from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
+        from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats, plot_multi_group_column_comparison
+        
+        values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+        use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
+        
+        if use_multi_group:
+            multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+            if not multi_group_info:
+                log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
+            else:
+                masks_dict, group_labels = multi_group_info
+                seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+                
+                for roi_name in roi_names:
+                    data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+                    for metric in metrics:
+                        cols = get_aperiodic_columns(seg_name, metric, roi_name)
+                        if not cols:
+                            continue
+                        
+                        val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                        
+                        group_values = {}
+                        for label, mask in masks_dict.items():
+                            vals = val_series[mask].dropna().values
+                            if len(vals) > 0:
+                                group_values[label] = vals
+                        
+                        if len(group_values) >= 2:
+                            data_by_band[metric] = group_values
+                    
+                    if data_by_band:
+                        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+                        suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                        save_path = save_dir / f"sub-{subject}_aperiodic_by_condition{suffix}_multigroup"
+                        
+                        plot_multi_group_column_comparison(
+                            data_by_band=data_by_band,
+                            subject=subject,
+                            save_path=save_path,
+                            feature_label="Aperiodic",
+                            groups=group_labels,
+                            config=config,
+                            logger=logger,
+                            roi_name=roi_name,
+                            stats_dir=stats_dir,
+                        )
+                
+                log_if_present(logger, "info", f"Saved aperiodic multi-group column comparison for {len(roi_names)} ROIs")
         else:
-            m1, m2, label1, label2 = comp_mask_info
-            seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
-            
-            from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats
-            
-            segment_colors = {"v1": CONDITION_COLOR_V1, "v2": CONDITION_COLOR_V2}
-            n_metrics = len(metrics)
-            n_trials = len(features_df)
-            
-            for roi_name in roi_names:
-                # Collect cell data first
-                cell_data = {}
-                for col_idx, metric in enumerate(metrics):
-                    cols = get_aperiodic_columns(seg_name, metric, roi_name)
-                    
-                    if not cols:
-                        cell_data[col_idx] = None
-                        continue
-                    
-                    val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                    v1 = val_series[m1].dropna().values
-                    v2 = val_series[m2].dropna().values
-                    
-                    cell_data[col_idx] = {"v1": v1, "v2": v2}
+            comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
+            if not comp_mask_info:
+                if logger:
+                    logger.warning(
+                        "Column comparison enabled but config incomplete. "
+                        "Set plotting.comparisons.comparison_column and comparison_values."
+                    )
+            else:
+                m1, m2, label1, label2 = comp_mask_info
+                seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
                 
-                # Compute or load column comparison stats
-                qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
-                    stats_dir=stats_dir,
-                    feature_type="aperiodic",
-                    feature_keys=metrics,
-                    cell_data=cell_data,
-                    config=config,
-                    logger=logger,
-                )
+                segment_colors = {"v1": CONDITION_COLOR_V1, "v2": CONDITION_COLOR_V2}
+                n_metrics = len(metrics)
+                n_trials = len(features_df)
                 
-                fig_width_per_metric = 4
-                fig_height = 5
-                fig, axes = plt.subplots(
-                    1, n_metrics,
-                    figsize=(fig_width_per_metric * n_metrics, fig_height),
-                    squeeze=False
-                )
-                
-                for col_idx, metric in enumerate(metrics):
-                    ax = axes.flatten()[col_idx]
-                    data = cell_data.get(col_idx)
+                for roi_name in roi_names:
+                    cell_data = {}
+                    for col_idx, metric in enumerate(metrics):
+                        cols = get_aperiodic_columns(seg_name, metric, roi_name)
+                        
+                        if not cols:
+                            cell_data[col_idx] = None
+                            continue
+                        
+                        val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                        v1 = val_series[m1].dropna().values
+                        v2 = val_series[m2].dropna().values
+                        
+                        cell_data[col_idx] = {"v1": v1, "v2": v2}
                     
-                    if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
-                        ax.text(
-                            0.5, 0.5, "No data", ha="center", va="center",
-                            transform=ax.transAxes, fontsize=plot_cfg.font.title,
-                            color="gray"
+                    qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
+                        stats_dir=stats_dir,
+                        feature_type="aperiodic",
+                        feature_keys=metrics,
+                        cell_data=cell_data,
+                        config=config,
+                        logger=logger,
+                    )
+                    
+                    fig_width_per_metric = 4
+                    fig_height = 5
+                    fig, axes = plt.subplots(
+                        1, n_metrics,
+                        figsize=(fig_width_per_metric * n_metrics, fig_height),
+                        squeeze=False
+                    )
+                    
+                    for col_idx, metric in enumerate(metrics):
+                        ax = axes.flatten()[col_idx]
+                        data = cell_data.get(col_idx)
+                        
+                        if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
+                            ax.text(
+                                0.5, 0.5, "No data", ha="center", va="center",
+                                transform=ax.transAxes, fontsize=plot_cfg.font.title,
+                                color="gray"
+                            )
+                            ax.set_xticks([])
+                            continue
+                        
+                        v1, v2 = data["v1"], data["v2"]
+                        
+                        bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+                        bp["boxes"][0].set_facecolor(segment_colors["v1"])
+                        bp["boxes"][0].set_alpha(BOX_ALPHA)
+                        bp["boxes"][1].set_facecolor(segment_colors["v2"])
+                        bp["boxes"][1].set_alpha(BOX_ALPHA)
+                        
+                        scatter_jitter = 0.08
+                        ax.scatter(
+                            np.random.uniform(-scatter_jitter, scatter_jitter, len(v1)),
+                            v1,
+                            c=segment_colors["v1"],
+                            alpha=0.3,
+                            s=SCATTER_SIZE
                         )
-                        ax.set_xticks([])
-                        continue
-                    
-                    v1, v2 = data["v1"], data["v2"]
-                    
-                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
-                    bp["boxes"][0].set_facecolor(segment_colors["v1"])
-                    bp["boxes"][0].set_alpha(BOX_ALPHA)
-                    bp["boxes"][1].set_facecolor(segment_colors["v2"])
-                    bp["boxes"][1].set_alpha(BOX_ALPHA)
-                    
-                    scatter_jitter = 0.08
-                    ax.scatter(
-                        np.random.uniform(-scatter_jitter, scatter_jitter, len(v1)),
-                        v1,
-                        c=segment_colors["v1"],
-                        alpha=0.3,
-                        s=SCATTER_SIZE
-                    )
-                    ax.scatter(
-                        1 + np.random.uniform(-scatter_jitter, scatter_jitter, len(v2)),
-                        v2,
-                        c=segment_colors["v2"],
-                        alpha=0.3,
-                        s=SCATTER_SIZE
-                    )
-                    
-                    all_vals = np.concatenate([v1, v2])
-                    ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
-                    yrange = ymax - ymin if ymax > ymin else 0.1
-                    ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
-                    
-                    if col_idx in qvalues:
-                        _, q, d, sig = qvalues[col_idx]
-                        sig_marker = "†" if sig else ""
-                        sig_color = SIGNIFICANT_COLOR if sig else NON_SIGNIFICANT_COLOR
-                        annotation_y = ymax + 0.05 * yrange
-                        ax.annotate(
-                            f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                            xy=(0.5, annotation_y),
-                            ha="center",
-                            fontsize=plot_cfg.font.medium,
-                            color=sig_color,
-                            fontweight="bold" if sig else "normal"
+                        ax.scatter(
+                            1 + np.random.uniform(-scatter_jitter, scatter_jitter, len(v2)),
+                            v2,
+                            c=segment_colors["v2"],
+                            alpha=0.3,
+                            s=SCATTER_SIZE
                         )
+                        
+                        all_vals = np.concatenate([v1, v2])
+                        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+                        yrange = ymax - ymin if ymax > ymin else 0.1
+                        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                        
+                        if col_idx in qvalues:
+                            _, q, d, sig = qvalues[col_idx]
+                            sig_marker = "†" if sig else ""
+                            sig_color = SIGNIFICANT_COLOR if sig else NON_SIGNIFICANT_COLOR
+                            annotation_y = ymax + 0.05 * yrange
+                            ax.annotate(
+                                f"q={q:.3f}{sig_marker}\nd={d:.2f}",
+                                xy=(0.5, annotation_y),
+                                ha="center",
+                                fontsize=plot_cfg.font.medium,
+                                color=sig_color,
+                                fontweight="bold" if sig else "normal"
+                            )
+                        
+                        ax.set_xticks([0, 1])
+                        ax.set_xticklabels([label1, label2], fontsize=9)
+                        metric_color = metric_colors.get(metric, "gray")
+                        ax.set_title(
+                            metric.capitalize(), fontweight="bold", color=metric_color
+                        )
+                        ax.spines["top"].set_visible(False)
+                        ax.spines["right"].set_visible(False)
                     
-                    ax.set_xticks([0, 1])
-                    ax.set_xticklabels([label1, label2], fontsize=9)
-                    metric_color = metric_colors.get(metric, "gray")
-                    ax.set_title(
-                        metric.capitalize(), fontweight="bold", color=metric_color
+                    n_tests = len(qvalues)
+                    roi_display = (
+                        roi_name.replace("_", " ").title()
+                        if roi_name != "all"
+                        else "All Channels"
                     )
-                    ax.spines["top"].set_visible(False)
-                    ax.spines["right"].set_visible(False)
+                    
+                    stats_source = (
+                        "pre-computed" if use_precomputed else "Mann-Whitney U"
+                    )
+                    title = (
+                        f"Aperiodic: {label1} vs {label2} (Column Comparison)\n"
+                        f"Subject: {subject} | ROI: {roi_display} | "
+                        f"N: {n_trials} trials | {stats_source} | "
+                        f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
+                    )
+                    fig.suptitle(
+                        title,
+                        fontsize=plot_cfg.font.suptitle,
+                        fontweight="bold",
+                        y=1.02
+                    )
+                    
+                    plt.tight_layout()
+                    
+                    roi_safe = (
+                        sanitize_label(roi_name).lower()
+                        if roi_name != "all"
+                        else ""
+                    )
+                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                    filename = f"sub-{subject}_aperiodic_by_condition{suffix}_column"
+                    
+                    save_fig(
+                        fig,
+                        save_dir / filename,
+                        formats=plot_cfg.formats,
+                        dpi=plot_cfg.dpi,
+                        bbox_inches=plot_cfg.bbox_inches,
+                        config=config,
+                        pad_inches=plot_cfg.pad_inches
+                    )
+                    plt.close(fig)
                 
-                n_tests = len(qvalues)
-                roi_display = (
-                    roi_name.replace("_", " ").title()
-                    if roi_name != "all"
-                    else "All Channels"
+                log_if_present(
+                    logger,
+                    "info",
+                    f"Saved aperiodic column comparison plots for {len(roi_names)} ROIs"
                 )
-                
-                stats_source = (
-                    "pre-computed" if use_precomputed else "Mann-Whitney U"
-                )
-                title = (
-                    f"Aperiodic: {label1} vs {label2} (Column Comparison)\n"
-                    f"Subject: {subject} | ROI: {roi_display} | "
-                    f"N: {n_trials} trials | {stats_source} | "
-                    f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
-                )
-                fig.suptitle(
-                    title,
-                    fontsize=plot_cfg.font.suptitle,
-                    fontweight="bold",
-                    y=1.02
-                )
-                
-                plt.tight_layout()
-                
-                from eeg_pipeline.utils.formatting import sanitize_label
-                roi_safe = (
-                    sanitize_label(roi_name).lower()
-                    if roi_name != "all"
-                    else ""
-                )
-                suffix = f"_roi-{roi_safe}" if roi_safe else ""
-                filename = f"sub-{subject}_aperiodic_by_condition{suffix}_column"
-                
-                save_fig(
-                    fig,
-                    save_dir / filename,
-                    formats=plot_cfg.formats,
-                    dpi=plot_cfg.dpi,
-                    bbox_inches=plot_cfg.bbox_inches,
-                    pad_inches=plot_cfg.pad_inches
-                )
-                plt.close(fig)
-            
-            log_if_present(
-                logger,
-                "info",
-                f"Saved aperiodic column comparison plots for {len(roi_names)} ROIs"
-            )

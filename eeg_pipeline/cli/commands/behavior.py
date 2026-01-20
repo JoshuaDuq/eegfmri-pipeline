@@ -361,6 +361,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--condition-min-trials", type=int, default=None, help="Minimum trials per condition")
     condition_group.add_argument("--condition-compare-column", type=str, default=None, help="events.tsv column to use for condition split (default: event_columns.pain_binary)")
     condition_group.add_argument("--condition-compare-values", nargs="+", default=None, metavar="VALUE", help="Values in the column to compare (e.g., 0 1 or pain nonpain)")
+    condition_group.add_argument("--condition-overwrite", action="store_true", default=None, dest="condition_overwrite", help="Overwrite existing condition effects files (default)")
+    condition_group.add_argument("--no-condition-overwrite", action="store_false", dest="condition_overwrite", help="Include compare_column in filename to avoid overwriting")
     condition_group.add_argument("--condition-compare-windows", nargs="+", default=None, metavar="WINDOW", help="Time windows to compare (e.g., baseline active)")
     condition_group.add_argument("--condition-window-primary-unit", choices=["trial", "run_mean"], default=None)
     condition_group.add_argument("--condition-permutation-primary", action="store_true", default=None, dest="condition_permutation_primary")
@@ -702,6 +704,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if getattr(args, "condition_compare_values", None) is not None:
         values = [str(v).strip() for v in (args.condition_compare_values or [])]
         ba.setdefault("condition", {})["compare_values"] = values
+    if getattr(args, "condition_overwrite", None) is not None:
+        ba.setdefault("condition", {})["overwrite"] = bool(args.condition_overwrite)
     if getattr(args, "condition_compare_windows", None) is not None:
         windows = [str(w).strip() for w in (args.condition_compare_windows or [])]
         ba.setdefault("condition", {})["compare_windows"] = windows

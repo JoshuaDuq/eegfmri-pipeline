@@ -527,6 +527,14 @@ func (m *Model) handleSpace() {
 			}
 		case optPlotSharedColorbar:
 			m.plotSharedColorbar = !m.plotSharedColorbar
+		case optPlotOverwrite:
+			if m.plotOverwrite == nil {
+				val := true
+				m.plotOverwrite = &val
+			} else {
+				val := !*m.plotOverwrite
+				m.plotOverwrite = &val
+			}
 		}
 
 	case types.StepSelectSpatial:
@@ -1124,11 +1132,11 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSaveSubjectLevelFeatures:
 		m.saveSubjectLevelFeatures = !m.saveSubjectLevelFeatures
 		m.useDefaultAdvanced = false
+	case optFeatAlsoSaveCsv:
+		m.featAlsoSaveCsv = !m.featAlsoSaveCsv
+		m.useDefaultAdvanced = false
 	case optFeatGroupExecution:
 		m.featGroupExecutionExpanded = !m.featGroupExecutionExpanded
-		m.useDefaultAdvanced = false
-	case optFeatGroupValidation:
-		m.featGroupValidationExpanded = !m.featGroupValidationExpanded
 		m.useDefaultAdvanced = false
 	case optFeatGroupSourceLoc:
 		m.featGroupSourceLocExpanded = !m.featGroupSourceLocExpanded
@@ -1536,12 +1544,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optAsymmetryChannelPairs:
 		m.startTextEdit(textFieldAsymmetryChannelPairs)
 		m.useDefaultAdvanced = false
-	case optFailOnMissingWindows:
-		m.failOnMissingWindows = !m.failOnMissingWindows
-		m.useDefaultAdvanced = false
-	case optFailOnMissingNamedWindow:
-		m.failOnMissingNamedWindow = !m.failOnMissingNamedWindow
-		m.useDefaultAdvanced = false
 	// Spatial transform section
 	case optFeatGroupSpatialTransform:
 		m.featGroupSpatialTransformExpanded = !m.featGroupSpatialTransformExpanded
@@ -1607,7 +1609,11 @@ func (m *Model) togglePlottingAdvancedOption() {
 			cfg.CompareColumns = cycleTriState(cfg.CompareColumns)
 			m.plotItemConfigs[row.plotID] = cfg
 			m.useDefaultAdvanced = false
-		case plotItemConfigFieldComparisonWindows, plotItemConfigFieldComparisonSegment:
+		case plotItemConfigFieldItpcSharedColorbar:
+			cfg.ItpcSharedColorbar = cycleTriState(cfg.ItpcSharedColorbar)
+			m.plotItemConfigs[row.plotID] = cfg
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldComparisonWindows, plotItemConfigFieldComparisonSegment, plotItemConfigFieldTopomapWindow:
 			// Open dropdown if windows available, otherwise text edit
 			if len(m.availableWindows) > 0 {
 				m.expandedOption = expandedPlotComparisonWindows
@@ -1620,7 +1626,8 @@ func (m *Model) togglePlottingAdvancedOption() {
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonColumn:
 			// Open dropdown if columns available, otherwise text edit
-			if len(m.discoveredColumns) > 0 {
+			plotCols := m.GetPlottingComparisonColumns()
+			if len(plotCols) > 0 {
 				m.expandedOption = expandedPlotComparisonColumn
 				m.subCursor = 0
 				m.editingPlotID = row.plotID
@@ -1629,6 +1636,9 @@ func (m *Model) togglePlottingAdvancedOption() {
 				m.startPlotTextEdit(row.plotID, row.plotField)
 			}
 			m.useDefaultAdvanced = false
+		case plotItemConfigFieldConnectivityCircleTopFraction, plotItemConfigFieldConnectivityCircleMinLines:
+			m.startPlotTextEdit(row.plotID, row.plotField)
+			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonValues:
 			// Open dropdown if column selected and values available
 			cfg := m.plotItemConfigs[row.plotID]
@@ -1636,7 +1646,7 @@ func (m *Model) togglePlottingAdvancedOption() {
 			if col == "" {
 				col = m.plotComparisonColumn // fallback to global
 			}
-			if vals := m.GetDiscoveredColumnValues(col); len(vals) > 0 {
+			if vals := m.GetPlottingComparisonColumnValues(col); len(vals) > 0 {
 				m.expandedOption = expandedPlotComparisonValues
 				m.subCursor = 0
 				m.editingPlotID = row.plotID
@@ -1958,7 +1968,7 @@ func (m *Model) togglePlottingAdvancedOption() {
 			m.ShowToast("Select a column first", "warning")
 			return
 		}
-		if vals := m.GetDiscoveredColumnValues(m.plotComparisonColumn); len(vals) > 0 {
+		if vals := m.GetPlottingComparisonColumnValues(m.plotComparisonColumn); len(vals) > 0 {
 			m.expandedOption = expandedPlotComparisonValues
 			m.subCursor = 0
 		} else {
@@ -1970,6 +1980,15 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPlotComparisonROIs:
 		m.startTextEdit(textFieldPlotComparisonROIs)
+		m.useDefaultAdvanced = false
+	case optPlotOverwrite:
+		if m.plotOverwrite == nil {
+			val := true
+			m.plotOverwrite = &val
+		} else {
+			val := !*m.plotOverwrite
+			m.plotOverwrite = &val
+		}
 		m.useDefaultAdvanced = false
 	}
 
@@ -2604,6 +2623,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optConditionFailFast:
 		m.conditionFailFast = !m.conditionFailFast
 		m.useDefaultAdvanced = false
+	case optConditionOverwrite:
+		m.conditionOverwrite = !m.conditionOverwrite
+		m.useDefaultAdvanced = false
 
 	// Output section
 	case optBehaviorGroupOutput:
@@ -2764,6 +2786,12 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPrepRunSourceEstimation:
 		m.prepRunSourceEstimation = !m.prepRunSourceEstimation
+	case optPrepWriteCleanEvents:
+		m.prepWriteCleanEvents = !m.prepWriteCleanEvents
+	case optPrepOverwriteCleanEvents:
+		m.prepOverwriteCleanEvents = !m.prepOverwriteCleanEvents
+	case optPrepCleanEventsStrict:
+		m.prepCleanEventsStrict = !m.prepCleanEventsStrict
 		m.useDefaultAdvanced = false
 	}
 
@@ -2953,9 +2981,6 @@ func (m *Model) toggleRawToBidsAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optRawOverwrite:
 		m.rawOverwrite = !m.rawOverwrite
-		m.useDefaultAdvanced = false
-	case optRawZeroBaseOnsets:
-		m.rawZeroBaseOnsets = !m.rawZeroBaseOnsets
 		m.useDefaultAdvanced = false
 	case optRawTrimToFirstVolume:
 		m.rawTrimToFirstVolume = !m.rawTrimToFirstVolume

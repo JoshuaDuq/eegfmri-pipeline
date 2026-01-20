@@ -26,7 +26,6 @@ from eeg_pipeline.utils.analysis.stats.paired_comparisons import (
     compute_paired_cohens_d,
     safe_mannwhitneyu,
 )
-from eeg_pipeline.utils.analysis.stats.validation import check_normality_shapiro
 from eeg_pipeline.domain.features.naming import NamingSchema
 
 
@@ -210,6 +209,79 @@ def collect_named_series(
     return series, matched_scope, matched_stat
 
 
+def extract_multi_segment_data(
+    df: pd.DataFrame,
+    group: str,
+    bands: List[str],
+    segments: List[str],
+    identifiers: Optional[List[str]] = None,
+    stat_preference: Optional[List[str]] = None,
+    scope_preference: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, np.ndarray]]:
+    """Extract feature data by band for multiple segments.
+    
+    Generic function that works for any feature type (power, aperiodic, connectivity, etc.).
+    
+    Args:
+        df: Feature DataFrame with NamingSchema columns
+        group: Feature group (e.g., 'power', 'aperiodic', 'connectivity')
+        bands: List of frequency bands to extract
+        segments: List of segment names (e.g., ['baseline', 'plateau', 'rampdown', 'rampup'])
+        identifiers: Optional list of channel/ROI identifiers to filter by
+        stat_preference: Preferred stat types (e.g., ['mean', 'median'])
+        scope_preference: Preferred scope types (e.g., ['ch', 'roi', 'global'])
+    
+    Returns:
+        Dict mapping band -> {segment_name -> values array}
+    """
+    data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+    identifier_set = set(identifiers) if identifiers else None
+    
+    for band in bands:
+        segment_cols: Dict[str, List[str]] = {seg: [] for seg in segments}
+        
+        for col in df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != group:
+                continue
+            col_band = str(parsed.get("band") or "")
+            if col_band != band:
+                continue
+            col_segment = str(parsed.get("segment") or "")
+            if col_segment not in segment_cols:
+                continue
+            if identifier_set:
+                col_id = str(parsed.get("identifier") or "")
+                if col_id and col_id not in identifier_set:
+                    continue
+            segment_cols[col_segment].append(col)
+        
+        segment_series = {}
+        for seg, cols in segment_cols.items():
+            if cols:
+                segment_series[seg] = df[cols].mean(axis=1)
+        
+        if len(segment_series) < 2:
+            continue
+        
+        valid_mask = pd.Series(True, index=df.index)
+        for series in segment_series.values():
+            valid_mask &= series.notna()
+        
+        segment_values = {}
+        for seg, series in segment_series.items():
+            vals = series[valid_mask].values
+            if len(vals) > 0:
+                segment_values[seg] = vals
+        
+        if len(segment_values) >= 2:
+            data_by_band[band] = segment_values
+    
+    return data_by_band
+
+
 ###################################################################
 # FDR CORRECTION
 ###################################################################
@@ -275,109 +347,6 @@ def get_significance_color(significant: bool, config: Any = None) -> str:
         return sig_color if significant else nonsig_color
     
     return default_sig_color if significant else default_nonsig_color
-
-
-###################################################################
-# NORMALITY TESTING
-###################################################################
-
-def test_normality(
-    data: np.ndarray,
-    alpha: float = 0.05,
-    max_n: int = 5000,
-) -> Tuple[bool, float, str]:
-    """Test normality using Shapiro-Wilk test.
-    
-    Uses random subset if sample size exceeds max_n.
-    
-    Returns:
-        Tuple of (is_normal, p_value, interpretation)
-    """
-    data = np.asarray(data).ravel()
-    data = data[np.isfinite(data)]
-    
-    if len(data) < 3:
-        return True, np.nan, "Insufficient data (n<3)"
-    
-    if len(data) > max_n:
-        rng = np.random.default_rng(42)
-        data = rng.choice(data, size=max_n, replace=False)
-    
-    try:
-        result = check_normality_shapiro(data, alpha=alpha)
-    except (ValueError, RuntimeError) as e:
-        return True, np.nan, f"Test failed: {type(e).__name__}"
-
-    if not np.isfinite(result.p_value):
-        return True, np.nan, "Test failed: invalid p-value"
-
-    p_value = float(result.p_value)
-    is_normal = p_value > alpha
-
-    if p_value < 0.001:
-        interpretation = "Strongly non-normal (p<.001)"
-    elif p_value < 0.01:
-        interpretation = "Non-normal (p<.01)"
-    elif p_value < 0.05:
-        interpretation = "Marginally non-normal (p<.05)"
-    elif p_value < 0.10:
-        interpretation = "Approximately normal (p>.05)"
-    else:
-        interpretation = "Normal (p>.10)"
-
-    return is_normal, p_value, interpretation
-
-
-###################################################################
-# VARIABILITY METRICS
-###################################################################
-
-def compute_variability_metrics(
-    data: np.ndarray,
-) -> Dict[str, float]:
-    """Compute variability metrics for trial-to-trial analysis.
-    
-    Args:
-        data: 1D array of values (e.g., power per trial)
-    
-    Returns:
-        Dict with:
-        - cv: Coefficient of variation (std/|mean|)
-        - fano: Fano factor (var/mean) - meaningful for positive data
-        - std: Standard deviation
-        - iqr: Interquartile range
-        - mad: Median absolute deviation
-    """
-    data_clean = np.asarray(data).ravel()
-    data_clean = data_clean[np.isfinite(data_clean)]
-    
-    if len(data_clean) < 2:
-        return {
-            "cv": np.nan,
-            "fano": np.nan,
-            "std": np.nan,
-            "iqr": np.nan,
-            "mad": np.nan,
-        }
-    
-    mean_value = np.mean(data_clean)
-    std_value = np.std(data_clean, ddof=1)
-    variance_value = np.var(data_clean, ddof=1)
-    
-    min_denominator = 1e-10
-    cv = std_value / np.abs(mean_value) if np.abs(mean_value) > min_denominator else np.nan
-    fano = variance_value / mean_value if mean_value > min_denominator else np.nan
-    
-    q75, q25 = np.percentile(data_clean, [75, 25])
-    median_value = np.median(data_clean)
-    
-    return {
-        "cv": float(cv),
-        "fano": float(fano),
-        "std": float(std_value),
-        "iqr": float(q75 - q25),
-        "mad": float(np.median(np.abs(data_clean - median_value))),
-    }
 
 
 ###################################################################
@@ -516,14 +485,16 @@ def _load_condition_effects_files(
     suffix: str,
 ) -> List[pd.DataFrame]:
     """Load condition effects files for a specific comparison type."""
-    from eeg_pipeline.infra.tsv import read_tsv
+    from eeg_pipeline.infra.tsv import read_tsv, read_table
     
     result_dfs = []
-    condition_subdir = stats_dir / "condition"
+    condition_subdir = stats_dir / "condition_effects"
     search_dirs = [condition_subdir, stats_dir]
     
     base_filename = f"condition_effects_{comparison_type}"
     patterns = [
+        f"{base_filename}{suffix}.parquet",
+        f"{base_filename}*.parquet",
         f"{base_filename}{suffix}.tsv",
         f"{base_filename}*.tsv"
     ]
@@ -534,7 +505,10 @@ def _load_condition_effects_files(
         for pattern in patterns:
             for path in search_dir.glob(pattern):
                 if path.is_file():
-                    df = read_tsv(path)
+                    if path.suffix.lower() == ".parquet":
+                        df = read_table(path)
+                    else:
+                        df = read_tsv(path)
                     if df is not None and not df.empty:
                         normalized_df = _normalize_condition_effects_df(df, comparison_type)
                         if normalized_df is not None and not normalized_df.empty:
@@ -554,14 +528,15 @@ def load_precomputed_paired_stats(
 ) -> Optional[pd.DataFrame]:
     """Load pre-computed paired comparison statistics from behavior pipeline.
     
-    Loads condition_effects_window*.tsv or condition_effects_column*.tsv files.
+    Loads condition_effects_window*.tsv, condition_effects_column*.tsv,
+    or condition_effects_multigroup*.tsv files.
     """
     stats_dir_path = Path(stats_dir)
     result_dfs = []
     
     if comparison_type is None:
-        comparison_types_to_try = ["window", "column"]
-    elif comparison_type in ("window", "column"):
+        comparison_types_to_try = ["window", "column", "multigroup"]
+    elif comparison_type in ("window", "column", "multigroup"):
         comparison_types_to_try = [comparison_type]
     else:
         comparison_types_to_try = []
@@ -769,6 +744,280 @@ def compute_or_load_column_stats(
     return qvalues, n_significant, use_precomputed
 
 
+def _get_significance_stars(q_value: float) -> str:
+    """Return significance stars based on q-value thresholds."""
+    if q_value < 0.001:
+        return "***"
+    elif q_value < 0.01:
+        return "**"
+    elif q_value < 0.05:
+        return "*"
+    return "ns"
+
+
+def _draw_significance_bracket(
+    ax: Any,
+    x1: float,
+    x2: float,
+    y: float,
+    text: str,
+    is_significant: bool,
+    bracket_height: float = 0.02,
+    text_offset: float = 0.01,
+) -> float:
+    """Draw a significance bracket with text annotation.
+    
+    Returns the y position of the top of the bracket for stacking.
+    """
+    color = "#d62728" if is_significant else "#666666"
+    fontweight = "bold" if is_significant else "normal"
+    
+    ax.plot([x1, x1, x2, x2], [y, y + bracket_height, y + bracket_height, y],
+            color=color, linewidth=1.2)
+    ax.text((x1 + x2) / 2, y + bracket_height + text_offset, text,
+            ha="center", va="bottom", fontsize=8, color=color, fontweight=fontweight)
+    
+    return y + bracket_height + text_offset + 0.03
+
+
+def plot_window_comparison_auto(
+    data_by_band_2: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]],
+    data_by_band_multi: Optional[Dict[str, Dict[str, np.ndarray]]],
+    subject: str,
+    save_path: Union[Path, str],
+    feature_label: str,
+    segments: List[str],
+    config: Any = None,
+    logger: Any = None,
+    *,
+    roi_name: Optional[str] = None,
+    stats_dir: Optional[Union[Path, str]] = None,
+) -> None:
+    """Automatically choose between 2-window and multi-window comparison.
+    
+    Args:
+        data_by_band_2: Data for 2-window comparison (band -> (v1, v2))
+        data_by_band_multi: Data for multi-window comparison (band -> {segment -> values})
+        subject: Subject identifier
+        save_path: Path to save figure
+        feature_label: Label for the feature type
+        segments: List of segment names
+        config: Configuration object
+        logger: Logger instance
+        roi_name: ROI name for title
+        stats_dir: Directory containing pre-computed statistics
+    """
+    if len(segments) > 2 and data_by_band_multi:
+        plot_multi_window_comparison(
+            data_by_band=data_by_band_multi,
+            subject=subject,
+            save_path=save_path,
+            feature_label=feature_label,
+            segments=segments,
+            config=config,
+            logger=logger,
+            roi_name=roi_name,
+            stats_dir=stats_dir,
+        )
+    elif data_by_band_2:
+        plot_paired_comparison(
+            data_by_band=data_by_band_2,
+            subject=subject,
+            save_path=save_path,
+            feature_label=feature_label,
+            config=config,
+            logger=logger,
+            label1=segments[0].capitalize() if segments else "Condition 1",
+            label2=segments[1].capitalize() if len(segments) > 1 else "Condition 2",
+            roi_name=roi_name,
+            stats_dir=stats_dir,
+        )
+
+
+def plot_multi_window_comparison(
+    data_by_band: Dict[str, Dict[str, np.ndarray]],
+    subject: str,
+    save_path: Union[Path, str],
+    feature_label: str,
+    segments: List[str],
+    config: Any = None,
+    logger: Any = None,
+    *,
+    roi_name: Optional[str] = None,
+    stats_dir: Optional[Union[Path, str]] = None,
+) -> None:
+    """Multi-window paired comparison plot with significance brackets.
+    
+    Creates a figure with one subplot per frequency band, showing all windows
+    as grouped boxplots with pairwise comparison brackets and significance asterisks.
+    
+    Args:
+        data_by_band: Dict mapping band -> {segment_name -> values array}
+        subject: Subject identifier
+        save_path: Path to save figure
+        feature_label: Label for the feature type (e.g., "Band Power")
+        segments: List of segment names in display order
+        config: Configuration object
+        logger: Logger instance
+        roi_name: ROI name for title
+        stats_dir: Directory containing pre-computed statistics
+    """
+    import matplotlib.pyplot as plt
+    from itertools import combinations
+    from scipy.stats import wilcoxon
+    from eeg_pipeline.plotting.io.figures import save_fig
+    
+    if not data_by_band:
+        if logger:
+            logger.warning(f"No data provided for {feature_label} multi-window comparison")
+        return
+    
+    band_order = get_band_names(config)
+    bands_in_order = [b for b in band_order if b in data_by_band]
+    bands_in_order += [b for b in data_by_band if b not in bands_in_order]
+    
+    if not bands_in_order:
+        return
+    
+    n_bands = len(bands_in_order)
+    n_segments = len(segments)
+    n_pairs = n_segments * (n_segments - 1) // 2
+    
+    plot_cfg = get_plot_config(config)
+    band_colors = get_band_colors(config)
+    
+    segment_colors = plt.cm.Set2(np.linspace(0, 1, max(n_segments, 3)))
+    segment_color_map = {seg: segment_colors[i] for i, seg in enumerate(segments)}
+    
+    all_pvalues = []
+    pvalue_keys = []
+    min_samples = int(get_config_value(config, "behavior_analysis.min_samples.default", 5))
+    
+    for band in bands_in_order:
+        segment_data = data_by_band[band]
+        for seg1, seg2 in combinations(segments, 2):
+            if seg1 not in segment_data or seg2 not in segment_data:
+                continue
+            v1, v2 = segment_data[seg1], segment_data[seg2]
+            if len(v1) >= min_samples and len(v2) >= min_samples and len(v1) == len(v2):
+                try:
+                    _, p_value = wilcoxon(v2, v1)
+                    effect_size = compute_paired_cohens_d(v1, v2)
+                    all_pvalues.append(p_value)
+                    pvalue_keys.append((band, seg1, seg2, p_value, effect_size))
+                except (ValueError, RuntimeError):
+                    pass
+    
+    qvalues: Dict[Tuple[str, str, str], Tuple[float, float, float, bool]] = {}
+    n_significant = 0
+    if all_pvalues:
+        rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
+        for i, (band, seg1, seg2, p_value, effect_size) in enumerate(pvalue_keys):
+            qvalues[(band, seg1, seg2)] = (p_value, qvals[i], effect_size, rejected[i])
+        n_significant = int(np.sum(rejected))
+    
+    fig_width_per_band = 2.5 + 0.5 * n_segments
+    fig_height = 5 + 0.4 * n_pairs
+    fig, axes = plt.subplots(
+        1, n_bands, figsize=(fig_width_per_band * n_bands, fig_height), squeeze=False
+    )
+    
+    for band_idx, band in enumerate(bands_in_order):
+        ax = axes.flatten()[band_idx]
+        segment_data = data_by_band[band]
+        
+        available_segments = [s for s in segments if s in segment_data]
+        if not available_segments:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                    transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+            ax.set_xticks([])
+            continue
+        
+        positions = list(range(len(available_segments)))
+        box_width = 0.6
+        
+        box_data = [segment_data[seg] for seg in available_segments]
+        boxplot = ax.boxplot(box_data, positions=positions, widths=box_width, patch_artist=True)
+        
+        for i, seg in enumerate(available_segments):
+            boxplot["boxes"][i].set_facecolor(segment_color_map[seg])
+            boxplot["boxes"][i].set_alpha(0.6)
+            
+            jitter = np.random.default_rng(42).uniform(-0.15, 0.15, len(segment_data[seg]))
+            ax.scatter(positions[i] + jitter, segment_data[seg],
+                      c=[segment_color_map[seg]], alpha=0.3, s=8)
+        
+        all_values = np.concatenate([segment_data[seg] for seg in available_segments])
+        y_min = np.nanmin(all_values)
+        y_max = np.nanmax(all_values)
+        y_range = y_max - y_min if y_max > y_min else 0.1
+        
+        bracket_y = y_max + 0.08 * y_range
+        bracket_spacing = 0.12 * y_range
+        
+        pair_list = list(combinations(range(len(available_segments)), 2))
+        for pair_idx, (i, j) in enumerate(pair_list):
+            seg1, seg2 = available_segments[i], available_segments[j]
+            key = (band, seg1, seg2)
+            if key not in qvalues:
+                key = (band, seg2, seg1)
+            
+            if key in qvalues:
+                _, q_val, d, is_sig = qvalues[key]
+                stars = _get_significance_stars(q_val)
+                text = f"{stars}" if is_sig else "ns"
+                
+                current_y = bracket_y + pair_idx * bracket_spacing
+                _draw_significance_bracket(
+                    ax, positions[i], positions[j], current_y, text, is_sig,
+                    bracket_height=0.02 * y_range, text_offset=0.01 * y_range
+                )
+        
+        top_bracket_y = bracket_y + len(pair_list) * bracket_spacing
+        ax.set_ylim(y_min - 0.1 * y_range, top_bracket_y + 0.1 * y_range)
+        
+        ax.set_xticks(positions)
+        ax.set_xticklabels([s.capitalize() for s in available_segments], fontsize=9, rotation=30, ha="right")
+        ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, "gray"))
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+    
+    first_band = bands_in_order[0]
+    n_trials = len(data_by_band[first_band][segments[0]]) if segments[0] in data_by_band[first_band] else 0
+    n_tests = len(qvalues)
+    
+    roi_display = roi_name.replace("_", " ").title() if roi_name and roi_name != "all" else "All Channels"
+    
+    title_parts = [f"{feature_label}: Multi-Window Comparison ({n_segments} windows, {n_pairs} pairs)"]
+    info_parts = [
+        f"Subject: {subject}",
+        f"ROI: {roi_display}",
+        f"N: {n_trials} trials",
+        "Wilcoxon signed-rank",
+        f"FDR: {n_significant}/{n_tests} significant (*p<.05, **p<.01, ***p<.001)"
+    ]
+    title_parts.append(" | ".join(info_parts))
+    
+    fig.suptitle("\n".join(title_parts), fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
+    
+    plt.tight_layout()
+    save_fig(
+        fig, save_path,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        config=config
+    )
+    plt.close(fig)
+    
+    if logger:
+        logger.info(
+            f"Saved {feature_label} multi-window comparison "
+            f"({n_significant}/{n_tests} FDR significant)"
+        )
+
+
 def plot_paired_comparison(
     data_by_band: Dict[str, Tuple[np.ndarray, np.ndarray]],
     subject: str,
@@ -938,7 +1187,8 @@ def plot_paired_comparison(
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches
+        pad_inches=plot_cfg.pad_inches,
+        config=config
     )
     plt.close(fig)
     
@@ -947,3 +1197,314 @@ def plot_paired_comparison(
             f"Saved {feature_label} paired comparison "
             f"({n_significant}/{n_tests} FDR significant)"
         )
+
+
+def load_multigroup_stats(
+    stats_dir: Union[Path, str],
+    feature_type: Optional[str] = None,
+) -> Optional[pd.DataFrame]:
+    """Load pre-computed multi-group comparison statistics.
+    
+    Args:
+        stats_dir: Directory containing pre-computed statistics
+        feature_type: Optional filter by feature type
+        
+    Returns:
+        DataFrame with multi-group stats or None if not found
+    """
+    stats = load_precomputed_paired_stats(
+        stats_dir=stats_dir,
+        feature_type=feature_type,
+        comparison_type="multigroup",
+    )
+    
+    if stats is None or stats.empty:
+        return None
+    
+    required_cols = {"feature", "group1", "group2", "q_value", "significant_fdr"}
+    if not required_cols.issubset(set(stats.columns)):
+        return None
+    
+    return stats
+
+
+def plot_multi_group_column_comparison(
+    data_by_band: Dict[str, Dict[str, np.ndarray]],
+    subject: str,
+    save_path: Union[Path, str],
+    feature_label: str,
+    groups: List[str],
+    config: Any = None,
+    logger: Any = None,
+    *,
+    roi_name: Optional[str] = None,
+    stats_dir: Optional[Union[Path, str]] = None,
+) -> None:
+    """Multi-group unpaired comparison plot with significance brackets.
+    
+    Requires pre-computed statistics from the behavior pipeline. Will not plot
+    if stats_dir is not provided or stats are not found. Run the behavior
+    pipeline with 3+ comparison values to generate multi-group stats.
+    
+    Args:
+        data_by_band: Dict mapping band -> {group_name -> values array}
+        subject: Subject identifier
+        save_path: Path to save figure
+        feature_label: Label for the feature type (e.g., "Band Power")
+        groups: List of group names in display order
+        config: Configuration object
+        logger: Logger instance
+        roi_name: ROI name for title
+        stats_dir: Directory containing pre-computed statistics (required)
+    """
+    import matplotlib.pyplot as plt
+    from itertools import combinations
+    from eeg_pipeline.plotting.io.figures import save_fig
+    
+    if not data_by_band:
+        return
+    
+    if stats_dir is None:
+        if logger:
+            logger.warning(
+                f"Multi-group comparison for {feature_label} requires pre-computed stats. "
+                "Run behavior pipeline with 3+ comparison values first."
+            )
+        return
+    
+    multigroup_stats = load_multigroup_stats(stats_dir)
+    if multigroup_stats is None or multigroup_stats.empty:
+        if logger:
+            logger.warning(
+                f"No pre-computed multi-group stats found for {feature_label}. "
+                "Run behavior pipeline with 3+ comparison values first."
+            )
+        return
+    
+    plot_cfg = get_plot_config(config)
+    bands_in_order = list(data_by_band.keys())
+    n_bands = len(bands_in_order)
+    
+    if n_bands == 0:
+        return
+    
+    n_groups = len(groups)
+    group_colors = plt.cm.Set2(np.linspace(0, 1, max(n_groups, 3)))
+    
+    qvalues_map = {}
+    n_significant = 0
+    n_tests = 0
+    
+    for _, row in multigroup_stats.iterrows():
+        feature = str(row.get("feature", ""))
+        g1 = str(row.get("group1", ""))
+        g2 = str(row.get("group2", ""))
+        q_value = float(row.get("q_value", 1.0))
+        is_sig = bool(row.get("significant_fdr", False))
+        
+        for band_idx, band in enumerate(bands_in_order):
+            if band.lower() in feature.lower():
+                qvalues_map[(band_idx, g1, g2)] = (q_value, is_sig)
+                n_tests += 1
+                if is_sig:
+                    n_significant += 1
+                break
+    
+    save_path_base = Path(save_path)
+    
+    if n_groups > 3:
+        for band_idx, band in enumerate(bands_in_order):
+            band_data = data_by_band[band]
+            band_color = get_band_color(band, config)
+            
+            available_groups = [g for g in groups if g in band_data and len(band_data[g]) > 0]
+            
+            if not available_groups:
+                continue
+            
+            fig, ax = plt.subplots(1, 1, figsize=(max(3 * len(available_groups), 8), 5))
+            
+            positions = list(range(len(available_groups)))
+            box_data = [band_data[g] for g in available_groups]
+            
+            bp = ax.boxplot(box_data, positions=positions, widths=0.6, patch_artist=True)
+            
+            for i, (box, g) in enumerate(zip(bp["boxes"], available_groups)):
+                box.set_facecolor(group_colors[groups.index(g) % len(group_colors)])
+                box.set_alpha(0.7)
+            
+            for i, g in enumerate(available_groups):
+                vals = band_data[g]
+                jitter = np.random.uniform(-0.15, 0.15, len(vals))
+                ax.scatter(i + jitter, vals, 
+                          c=[group_colors[groups.index(g) % len(group_colors)]], 
+                          alpha=0.5, s=15, zorder=3)
+            
+            all_vals = np.concatenate([band_data[g] for g in available_groups])
+            y_min, y_max = np.nanmin(all_vals), np.nanmax(all_vals)
+            y_range = y_max - y_min if y_max > y_min else 0.1
+            ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.5 * y_range)
+            
+            bracket_y = y_max + 0.05 * y_range
+            bracket_step = 0.12 * y_range
+            
+            for g1, g2 in combinations(available_groups, 2):
+                key = (band_idx, g1, g2)
+                if key not in qvalues_map:
+                    key = (band_idx, g2, g1)
+                
+                if key in qvalues_map:
+                    qval, is_sig = qvalues_map[key]
+                    
+                    if qval < 0.001:
+                        text = "***"
+                    elif qval < 0.01:
+                        text = "**"
+                    elif qval < 0.05:
+                        text = "*"
+                    else:
+                        text = "ns"
+                    
+                    x1 = available_groups.index(g1)
+                    x2 = available_groups.index(g2)
+                    
+                    bracket_y = _draw_significance_bracket(
+                        ax, x1, x2, bracket_y, text, is_sig,
+                        bracket_height=0.02 * y_range
+                    )
+                    bracket_y += bracket_step * 0.3
+            
+            ax.set_title(band.capitalize(), fontsize=plot_cfg.font.title, fontweight="bold",
+                        color=band_color)
+            ax.set_xticks(positions)
+            ax.set_xticklabels([g.capitalize() for g in available_groups], 
+                              fontsize=plot_cfg.font.small, rotation=45, ha="right")
+            ax.set_ylabel(feature_label, fontsize=plot_cfg.font.label)
+            ax.tick_params(axis="y", labelsize=plot_cfg.font.small)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            
+            title_parts = [f"{feature_label}: Multi-Group Comparison (Unpaired)"]
+            info_parts = [f"Subject: {subject}"]
+            if roi_name:
+                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+                info_parts.append(f"ROI: {roi_display}")
+            info_parts.extend([
+                f"Band: {band.capitalize()}",
+                f"Groups: {', '.join(g.capitalize() for g in groups)}",
+                "Pre-computed stats",
+                f"FDR: {n_significant}/{n_tests} significant (*=q<0.05)"
+            ])
+            title_parts.append(" | ".join(info_parts))
+            
+            fig.suptitle("\n".join(title_parts), fontsize=plot_cfg.font.suptitle,
+                        fontweight="bold", y=1.02)
+            
+            plt.tight_layout()
+            band_save_path = save_path_base.parent / f"{save_path_base.stem}_band-{band}{save_path_base.suffix}"
+            save_fig(fig, band_save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                    bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
+            plt.close(fig)
+    else:
+        fig_width = max(3 * n_bands, 8)
+        fig, axes = plt.subplots(1, n_bands, figsize=(fig_width, 5), squeeze=False)
+        axes = axes.flatten()
+        
+        for band_idx, band in enumerate(bands_in_order):
+            ax = axes[band_idx]
+            band_data = data_by_band[band]
+            band_color = get_band_color(band, config)
+            
+            available_groups = [g for g in groups if g in band_data and len(band_data[g]) > 0]
+            
+            if not available_groups:
+                ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                       transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+                ax.set_title(band.capitalize(), fontsize=plot_cfg.font.title, fontweight="bold")
+                ax.set_xticks([])
+                continue
+            
+            positions = list(range(len(available_groups)))
+            box_data = [band_data[g] for g in available_groups]
+            
+            bp = ax.boxplot(box_data, positions=positions, widths=0.6, patch_artist=True)
+            
+            for i, (box, g) in enumerate(zip(bp["boxes"], available_groups)):
+                box.set_facecolor(group_colors[groups.index(g) % len(group_colors)])
+                box.set_alpha(0.7)
+            
+            for i, g in enumerate(available_groups):
+                vals = band_data[g]
+                jitter = np.random.uniform(-0.15, 0.15, len(vals))
+                ax.scatter(i + jitter, vals, 
+                          c=[group_colors[groups.index(g) % len(group_colors)]], 
+                          alpha=0.5, s=15, zorder=3)
+            
+            all_vals = np.concatenate([band_data[g] for g in available_groups])
+            y_min, y_max = np.nanmin(all_vals), np.nanmax(all_vals)
+            y_range = y_max - y_min if y_max > y_min else 0.1
+            ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.5 * y_range)
+            
+            bracket_y = y_max + 0.05 * y_range
+            bracket_step = 0.12 * y_range
+            
+            for g1, g2 in combinations(available_groups, 2):
+                key = (band_idx, g1, g2)
+                if key not in qvalues_map:
+                    key = (band_idx, g2, g1)
+                
+                if key in qvalues_map:
+                    qval, is_sig = qvalues_map[key]
+                    
+                    if qval < 0.001:
+                        text = "***"
+                    elif qval < 0.01:
+                        text = "**"
+                    elif qval < 0.05:
+                        text = "*"
+                    else:
+                        text = "ns"
+                    
+                    x1 = available_groups.index(g1)
+                    x2 = available_groups.index(g2)
+                    
+                    bracket_y = _draw_significance_bracket(
+                        ax, x1, x2, bracket_y, text, is_sig,
+                        bracket_height=0.02 * y_range
+                    )
+                    bracket_y += bracket_step * 0.3
+            
+            ax.set_title(band.capitalize(), fontsize=plot_cfg.font.title, fontweight="bold",
+                        color=band_color)
+            ax.set_xticks(positions)
+            ax.set_xticklabels([g.capitalize() for g in available_groups], 
+                              fontsize=plot_cfg.font.small, rotation=45, ha="right")
+            ax.set_ylabel(feature_label if band_idx == 0 else "", fontsize=plot_cfg.font.label)
+            ax.tick_params(axis="y", labelsize=plot_cfg.font.small)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+        
+        title_parts = [f"{feature_label}: Multi-Group Comparison (Unpaired)"]
+        
+        info_parts = [f"Subject: {subject}"]
+        if roi_name:
+            roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+            info_parts.append(f"ROI: {roi_display}")
+        info_parts.extend([
+            f"Groups: {', '.join(g.capitalize() for g in groups)}",
+            "Pre-computed stats",
+            f"FDR: {n_significant}/{n_tests} significant (*=q<0.05)"
+        ])
+        title_parts.append(" | ".join(info_parts))
+        
+        fig.suptitle("\n".join(title_parts), fontsize=plot_cfg.font.suptitle,
+                    fontweight="bold", y=1.02)
+        
+        plt.tight_layout()
+        save_fig(fig, save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
+        plt.close(fig)
+    
+    if logger:
+        logger.info(f"Saved {feature_label} multi-group column comparison "
+                   f"({n_significant}/{n_tests} FDR significant, pre-computed)")

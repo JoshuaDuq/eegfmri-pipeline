@@ -74,7 +74,7 @@ def plot_model_comparison(
     axes[1].set_ylim([r2_min, r2_max])
 
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved model comparison: {save_path}")
 
 
@@ -102,7 +102,7 @@ def plot_riemann_band_comparison(
     create_bar_plot(axes[1], x_positions, r2_values, bands, "R²", plot_cfg)
 
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved Riemann band comparison: {save_path}")
 
 
@@ -165,7 +165,7 @@ def plot_riemann_sliding_window(
     axes[1].set_xlabel("Time (s)")
 
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved Riemann sliding window: {save_path}")
 
 
@@ -233,6 +233,6 @@ def plot_incremental_validity(
     despine(ax)
 
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved incremental validity: {save_path}")
 

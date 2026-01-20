@@ -534,10 +534,6 @@ def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
 
 def _apply_validation_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply validation-related config overrides."""
-    if getattr(args, "fail_on_missing_windows", None) is not None:
-        config["feature_engineering.validation.fail_on_missing_windows"] = args.fail_on_missing_windows
-    if getattr(args, "fail_on_missing_named_window", None) is not None:
-        config["feature_engineering.validation.fail_on_missing_named_window"] = args.fail_on_missing_named_window
     if getattr(args, "min_epochs", None) is not None:
         config["feature_engineering.constants.min_epochs_for_features"] = args.min_epochs
 
@@ -546,6 +542,9 @@ def _apply_output_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply output-related config overrides."""
     if getattr(args, "save_subject_level_features", None) is not None:
         config["feature_engineering.output.save_subject_level_features"] = args.save_subject_level_features
+    if getattr(args, "also_save_csv", None) is not None:
+        output_cfg = config.setdefault("feature_engineering", {}).setdefault("output", {})
+        output_cfg["also_save_csv"] = bool(args.also_save_csv)
 
 
 def _apply_spatial_transform_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -601,9 +600,17 @@ def _apply_frequency_bands_override(args: argparse.Namespace, config: Any) -> No
 
 
 def _apply_rois_override(args: argparse.Namespace, config: Any) -> None:
-    """Apply custom ROI definitions to config."""
+    """Apply custom ROI definitions to config.
+    
+    Sets ROIs in both locations used by different subsystems:
+    - Top-level 'rois': Used by get_roi_definitions() in feature extraction
+    - 'time_frequency_analysis.rois': Used by get_rois() in TFR analysis
+    """
     if getattr(args, "rois", None) is not None:
         custom_rois = _parse_roi_definitions(args.rois)
+        # Apply to top-level rois (used by get_roi_definitions in feature extraction)
+        config["rois"] = custom_rois
+        # Apply to TFR-specific rois (used by get_rois in TFR extraction)
         config.setdefault("time_frequency_analysis", {})["rois"] = custom_rois
 
 
@@ -887,12 +894,22 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     # Validation and output
     parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")
-    parser.add_argument("--fail-on-missing-windows", action="store_true", default=None, help="Fail if baseline/active windows are missing")
-    parser.add_argument("--no-fail-on-missing-windows", action="store_false", dest="fail_on_missing_windows", help="Do not fail if baseline/active windows are missing")
-    parser.add_argument("--fail-on-missing-named-window", action="store_true", default=None, help="Fail if a named time window is missing")
-    parser.add_argument("--no-fail-on-missing-named-window", action="store_false", dest="fail_on_missing_named_window", help="Do not fail if a named time window is missing")
     parser.add_argument("--save-subject-level-features", action="store_true", default=None, help="Save subject-level features for constant values")
     parser.add_argument("--no-save-subject-level-features", action="store_false", dest="save_subject_level_features", help="Do not save subject-level features")
+    
+    output_group = parser.add_argument_group("Output options")
+    output_group.add_argument(
+        "--also-save-csv",
+        action="store_true",
+        default=None,
+        dest="also_save_csv",
+        help="Also save feature tables as CSV files (in addition to parquet)",
+    )
+    output_group.add_argument(
+        "--no-also-save-csv",
+        action="store_false",
+        dest="also_save_csv",
+    )
 
     add_path_args(parser)
 

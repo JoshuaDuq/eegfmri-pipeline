@@ -181,7 +181,7 @@ def plot_time_generalization_matrix(
     despine(ax)
 
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info("Saved time-generalization matrix to %s", save_path)
 
 
@@ -225,6 +225,6 @@ def plot_time_generalization_with_null(
     despine(ax)
 
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats)
+    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info("Saved time-generalization (with null) to %s", save_path)
 

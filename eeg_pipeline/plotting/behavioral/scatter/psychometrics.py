@@ -137,6 +137,7 @@ def _plot_distribution_histogram(
         pad_inches=plot_config.pad_inches,
         footer=_get_behavior_footer(config),
         logger=logger,
+        config=config,
     )
     plt.close(fig)
 

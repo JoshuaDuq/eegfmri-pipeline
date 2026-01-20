@@ -56,9 +56,9 @@ def _collect_subjects_from_derivatives_epochs(
         deriv_root.glob("sub-*"),
     ]
     
-    preprocessed_dir = deriv_root / "preprocessed"
-    if preprocessed_dir.exists():
-        search_locations.append(preprocessed_dir.glob("sub-*"))
+    preprocessed_eeg_dir = deriv_root / "preprocessed" / "eeg"
+    if preprocessed_eeg_dir.exists():
+        search_locations.append(preprocessed_eeg_dir.glob("sub-*"))
     
     for location in search_locations:
         for sub_dir in sorted(location):
@@ -85,9 +85,9 @@ def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
         deriv_root.glob("sub-*/eeg/features"),
     ]
     
-    preprocessed_dir = deriv_root / "preprocessed"
-    if preprocessed_dir.exists():
-        search_locations.append(preprocessed_dir.glob("sub-*/eeg/features"))
+    preprocessed_eeg_dir = deriv_root / "preprocessed" / "eeg"
+    if preprocessed_eeg_dir.exists():
+        search_locations.append(preprocessed_eeg_dir.glob("sub-*/features"))
     
     for location in search_locations:
         for features_dir in sorted(location):
@@ -309,11 +309,15 @@ def _determine_discovery_sources(args: Any) -> List[str]:
         else:
             return [args.source]
     
+    # Preprocessing needs to discover from BIDS (epochs don't exist yet)
+    if hasattr(args, "command") and args.command == "preprocessing":
+        return ["bids"]
+    
     if hasattr(args, "mode"):
-        if args.mode == "raw-to-bids":
+        if args.mode in {"raw-to-bids", "fmri-raw-to-bids"}:
             return ["source_data"]
-        elif args.mode in {"combine", "merge-behavior", "visualize"}:
-            return ["features", "bids"]
+        elif args.mode in {"combine", "merge-behavior", "merge-psychopy", "visualize"}:
+            return ["bids"]
     
     return ["derivatives_epochs"]
 

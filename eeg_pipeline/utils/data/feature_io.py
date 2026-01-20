@@ -24,6 +24,7 @@ from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.paths import (
     deriv_features_path,
     find_connectivity_features_path,
+    _find_clean_events_path,
 )
 from eeg_pipeline.infra.tsv import read_table, write_parquet, write_tsv
 
@@ -105,23 +106,20 @@ def _load_features_and_targets(
     active_path = _find_power_feature_path(feats_dir, "features_power_active")
         
     conn_path = find_connectivity_features_path(deriv_root, subject)
-    
-    target_path = feats_dir / "behavior" / "target_vas_ratings.tsv"
-    if not target_path.exists():
-        target_path = feats_dir / "target_vas_ratings.tsv"
 
     power_path = active_path if active_path.exists() else temporal_path
-    if not power_path.exists() or not target_path.exists():
+    if not power_path.exists():
         raise FileNotFoundError(
-            f"Missing features or targets for sub-{subject}. Expected at {feats_dir}"
+            f"Missing features for sub-{subject}. Expected at {feats_dir}"
         )
 
     temporal_df = read_table(temporal_path) if temporal_path.exists() else None
     active_df = read_table(power_path)
     conn_df = read_table(conn_path) if conn_path.exists() else None
-    target_df = read_table(target_path)
-
-    target_series = _extract_target_series(target_df, target_path)
+    
+    target_series = _load_targets_from_clean_events(
+        subject, task, deriv_root, config, logging.getLogger(__name__)
+    )
 
     if epochs is None:
         epochs, _ = load_epochs_for_analysis(
@@ -130,7 +128,6 @@ def _load_features_and_targets(
             align="strict",
             preload=False,
             deriv_root=deriv_root,
-            bids_root=getattr(config, "bids_root", None),
             config=config,
         )
         if epochs is None:
@@ -229,6 +226,75 @@ def _safe_read_feature_table_with_path(
     return None, None
 
 
+def _load_targets_from_clean_events(
+    subject: str,
+    task: str,
+    deriv_root: Path,
+    config: Optional[Any],
+    logger: logging.Logger,
+) -> pd.Series:
+    """Load target ratings from clean events.tsv file.
+    
+    Raises FileNotFoundError if clean events.tsv is not found.
+    Raises ValueError if no suitable target column is found.
+    """
+    clean_events_path = _find_clean_events_path(
+        subject=subject,
+        task=task,
+        deriv_root=deriv_root,
+        config=config,
+        constants=None,
+    )
+    
+    if clean_events_path is None or not clean_events_path.exists():
+        raise FileNotFoundError(
+            f"Clean events.tsv not found for sub-{subject}, task-{task}. "
+            f"Required for target loading."
+        )
+    
+    try:
+        events_df = read_table(clean_events_path)
+    except Exception as e:
+        raise IOError(
+            f"Failed to load clean events.tsv from {clean_events_path}: {e}"
+        ) from e
+    
+    if events_df.empty:
+        raise ValueError(
+            f"Clean events.tsv is empty for sub-{subject}, task-{task}"
+        )
+    
+    rating_columns = (
+        config.get("event_columns.rating", [])
+        if config is not None and hasattr(config, "get")
+        else []
+    )
+    target_col = pick_target_column(events_df, target_columns=rating_columns)
+    
+    if target_col is None:
+        numeric_cols = events_df.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) == 0:
+            raise ValueError(
+                f"No numeric target columns found in clean events.tsv for sub-{subject}, task-{task}. "
+                f"Available columns: {list(events_df.columns)}"
+            )
+        if len(numeric_cols) > 1:
+            logger.warning(
+                "Multiple numeric target columns found in clean events.tsv; using '%s'. Candidates=%s",
+                str(numeric_cols[0]),
+                ",".join(str(c) for c in numeric_cols),
+            )
+        target_col = str(numeric_cols[0])
+    
+    targets = pd.to_numeric(events_df[target_col], errors="coerce")
+    logger.info(
+        "Loaded targets from clean events.tsv (column: %s, n_trials: %d)",
+        target_col,
+        len(targets),
+    )
+    return targets
+
+
 def _extract_targets_from_dataframe(
     targets_df: pd.DataFrame,
     config: Optional[Any],
@@ -238,25 +304,23 @@ def _extract_targets_from_dataframe(
     if targets_df.shape[1] == 1:
         return pd.to_numeric(targets_df.iloc[:, 0], errors="coerce")
     
-    constants = {
-        "TARGET_COLUMNS": (
-            config.get("event_columns.rating", [])
-            if config is not None and hasattr(config, "get")
-            else []
-        )
-    }
-    target_col = pick_target_column(targets_df, constants=constants)
+    rating_columns = (
+        config.get("event_columns.rating", [])
+        if config is not None and hasattr(config, "get")
+        else []
+    )
+    target_col = pick_target_column(targets_df, target_columns=rating_columns)
     
     if target_col is None:
         numeric_cols = targets_df.select_dtypes(include=[np.number]).columns
         if len(numeric_cols) == 0:
             raise ValueError(
-                "No numeric target columns found in target_vas_ratings.tsv. "
+                "No numeric target columns found. "
                 f"Available columns: {list(targets_df.columns)}"
             )
         if len(numeric_cols) > 1:
             logger.warning(
-                "Multiple numeric target columns found in target_vas_ratings.tsv; using '%s'. Candidates=%s",
+                "Multiple numeric target columns found; using '%s'. Candidates=%s",
                 str(numeric_cols[0]),
                 ",".join(str(c) for c in numeric_cols),
             )
@@ -318,13 +382,22 @@ def load_feature_bundle(
     bundle.temporal_df = _load("features_temporal", "temporal")
 
     if include_targets:
-        targets_df, targets_path = _safe_read_feature_table_with_path(
-            features_dir, "target_vas_ratings", logger, config=config
+        task = config.get("project.task") if config is not None else None
+        if task is None:
+            raise ValueError("Cannot load targets: task not specified in config")
+        
+        bundle.targets = _load_targets_from_clean_events(
+            subject, task, deriv_root, config, logger
         )
-        if targets_path is not None:
-            bundle.paths["targets"] = targets_path
-        if targets_df is not None:
-            bundle.targets = _extract_targets_from_dataframe(targets_df, config, logger)
+        clean_events_path = _find_clean_events_path(
+            subject=subject,
+            task=task,
+            deriv_root=deriv_root,
+            config=config,
+            constants=None,
+        )
+        if clean_events_path is not None:
+            bundle.paths["targets"] = clean_events_path
 
     return bundle
 
@@ -451,6 +524,8 @@ def _save_feature_dataframe(
     config: Optional[Any] = None,
 ) -> None:
     """Save a feature dataframe with column assignment and logging."""
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
     df = _assign_columns_safely(df, column_names, feature_type, logger)
     folder_name = _get_folder_for_feature(base_filename, config)
     filename = _build_filename(base_filename, suffix)
@@ -460,6 +535,14 @@ def _save_feature_dataframe(
     
     logger.info("Saving %s: %s", feature_type, file_path)
     write_parquet(df, file_path)
+    
+    also_save_csv = bool(get_config_value(config, "feature_engineering.output.also_save_csv", False))
+    if also_save_csv:
+        from eeg_pipeline.infra.tsv import write_csv
+        csv_filename = _build_filename(base_filename, suffix).replace(".parquet", ".csv")
+        csv_path = features_dir / folder_name / csv_filename
+        write_csv(df, csv_path, index=False)
+        logger.info("Also saved %s as CSV: %s", feature_type, csv_path)
 
 
 def _save_feature_metadata(
@@ -753,9 +836,26 @@ def save_all_features(
         # Only include baseline columns in the specific baseline file.
         # This keeps the outputs window-specific as requested by the user.
         if isinstance(suffix, str) and suffix.lower() == "baseline":
-            baseline_df = _assign_columns_safely(baseline_df, baseline_cols, "Baseline", logger)
-            logger.debug("Adding Baseline block to direct features: %d columns", len(baseline_df.columns))
-            direct_blocks.append(baseline_df)
+            # Avoid double-computing/exporting baseline power features:
+            # `extract_power_features()` emits raw baseline mean power for the "baseline" segment
+            # using the same NamingSchema keys (power_baseline_*). The baseline_df returned by
+            # compute_tfr_for_subject() is an internal normalization reference and may differ
+            # depending on the exact TFR object used (e.g., evoked subtraction strategy).
+            # Exporting both blocks can create duplicate columns with conflicting values and
+            # should be avoided.
+            has_baseline_cols_in_power = False
+            if pow_df is not None and not pow_df.empty:
+                has_baseline_cols_in_power = any(str(c).startswith("power_baseline_") for c in pow_df.columns)
+
+            if has_baseline_cols_in_power:
+                logger.info(
+                    "Skipping baseline_df export for suffix='baseline' because power features already contain "
+                    "power_baseline_* columns."
+                )
+            else:
+                baseline_df = _assign_columns_safely(baseline_df, baseline_cols, "Baseline", logger)
+                logger.debug("Adding Baseline block to direct features: %d columns", len(baseline_df.columns))
+                direct_blocks.append(baseline_df)
 
 
     feature_save_configs = [
@@ -796,12 +896,20 @@ def save_all_features(
     else:
         direct_df = pd.DataFrame()
 
+    from eeg_pipeline.utils.config.loader import get_config_value
+    also_save_csv = bool(get_config_value(config, "feature_engineering.output.also_save_csv", False))
+    
     if not direct_df.empty:
         folder_name = _get_folder_for_feature("features_power")
         direct_filename = _build_filename("features_power", suffix)
         direct_path = features_dir / folder_name / direct_filename
         logger.info("Saving power features: %s", direct_path)
         write_parquet(direct_df, direct_path)
+        if also_save_csv:
+            from eeg_pipeline.infra.tsv import write_csv
+            csv_path = features_dir / folder_name / direct_filename.replace(".parquet", ".csv")
+            write_csv(direct_df, csv_path, index=False)
+            logger.info("Also saved power features as CSV: %s", csv_path)
         _save_feature_metadata(
             direct_df, "features_power", features_dir, config, logger, suffix
         )
@@ -812,6 +920,11 @@ def save_all_features(
         active_path = features_dir / folder_name / active_filename
         logger.info("Saving active-averaged EEG features: %s", active_path)
         write_parquet(active_df, active_path)
+        if also_save_csv:
+            from eeg_pipeline.infra.tsv import write_csv
+            csv_path = features_dir / folder_name / active_filename.replace(".parquet", ".csv")
+            write_csv(active_df, csv_path, index=False)
+            logger.info("Also saved active-averaged features as CSV: %s", csv_path)
         _save_feature_metadata(
             active_df, "features_power_active", features_dir, config, logger, suffix
         )
@@ -830,25 +943,15 @@ def save_all_features(
             len(conn_df),
             len(conn_df.columns),
         )
+        if also_save_csv:
+            from eeg_pipeline.infra.tsv import write_csv
+            csv_path = features_dir / folder_name / conn_filename.replace(".parquet", ".csv")
+            write_csv(conn_df, csv_path, index=False)
+            logger.info("Also saved connectivity features as CSV: %s", csv_path)
         _save_feature_metadata(
             conn_df, "features_connectivity", features_dir, config, logger, suffix
         )
 
-
-    if y is not None:
-        target_path = features_dir / "behavior" / "target_vas_ratings.parquet"
-        rating_columns = (
-            config.get("event_columns.rating", ["vas_rating"])
-            if config is not None and hasattr(config, "get")
-            else ["vas_rating"]
-        )
-        target_column_name = rating_columns[0] if rating_columns else "vas_rating"
-        logger.info(
-            "Saving behavioral target vector: %s (column: %s)",
-            target_path,
-            target_column_name,
-        )
-        write_parquet(y.to_frame(name=target_column_name), target_path)
 
     return direct_df
 
@@ -856,36 +959,6 @@ def save_all_features(
 ###################################################################
 # TRIAL MANAGEMENT
 ###################################################################
-
-
-def save_trial_alignment_manifest(
-    aligned_events: pd.DataFrame,
-    epochs: mne.Epochs,
-    manifest_path: Path,
-    config: Any,
-    logger: logging.Logger,
-) -> None:
-    """Save trial alignment manifest with epoch and event metadata."""
-    manifest: Dict[str, Any] = {
-        "n_epochs": int(len(epochs)) if epochs is not None else None,
-        "n_events": int(len(aligned_events)) if aligned_events is not None else None,
-        "epoch_times": {
-            "tmin": float(epochs.tmin) if epochs is not None else None,
-            "tmax": float(epochs.tmax) if epochs is not None else None,
-        },
-        "config_task": (
-            config.get("project.task") if config is not None and hasattr(config, "get") else None
-        ),
-    }
-
-    if aligned_events is not None:
-        for col in ["trial_type", "condition", "run", "block"]:
-            if col in aligned_events.columns:
-                manifest[f"events_{col}"] = aligned_events[col].astype(str).tolist()
-
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
 
 
 def save_dropped_trials_log(
@@ -937,5 +1010,4 @@ __all__ = [
     "iterate_feature_columns",
     "save_all_features",
     "save_dropped_trials_log",
-    "save_trial_alignment_manifest",
 ]

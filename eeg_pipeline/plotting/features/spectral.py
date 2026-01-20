@@ -284,6 +284,7 @@ def plot_spectral_summary(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
     return fig
@@ -355,6 +356,7 @@ def plot_spectral_edge_frequency(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        config=config,
     )
     plt.close(fig)
     return fig
@@ -492,54 +494,99 @@ def _plot_window_comparison(
     logger: Any,
     stats_dir: Optional[Path],
 ) -> None:
-    """Create paired window comparison plots."""
-    from eeg_pipeline.plotting.features.utils import plot_paired_comparison
+    """Create paired window comparison plots.
+    
+    Supports both 2-window comparison (simple paired) and multi-window comparison
+    (3+ windows with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.plotting.features.utils import plot_paired_comparison, plot_multi_window_comparison
     from eeg_pipeline.plotting.io.figures import log_if_present
     
-    seg1, seg2 = segments[0], segments[1]
+    use_multi_window = len(segments) > 2
     
     for roi_name in roi_names:
-        data_by_band = {}
+        suffix = _create_roi_suffix(roi_name)
         
-        for band in bands:
-            cols1 = _get_spectral_columns_for_roi(entries, seg1, band, metric, roi_name)
-            cols2 = _get_spectral_columns_for_roi(entries, seg2, band, metric, roi_name)
+        if use_multi_window:
+            data_by_band_multi: Dict[str, Dict[str, np.ndarray]] = {}
+            for band in bands:
+                segment_series = {}
+                for seg in segments:
+                    cols = _get_spectral_columns_for_roi(entries, seg, band, metric, roi_name)
+                    if cols:
+                        segment_series[seg] = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                
+                if len(segment_series) < 2:
+                    continue
+                
+                valid_mask = pd.Series(True, index=features_df.index)
+                for series in segment_series.values():
+                    valid_mask &= series.notna()
+                
+                segment_values = {}
+                for seg, series in segment_series.items():
+                    vals = series[valid_mask].values
+                    if len(vals) > 0:
+                        segment_values[seg] = vals
+                
+                if len(segment_values) >= 2:
+                    data_by_band_multi[band] = segment_values
             
-            if not cols1 or not cols2:
-                continue
+            if data_by_band_multi:
+                save_path = save_dir / f"sub-{subject}_spectral_{metric}_by_condition{suffix}_multiwindow"
+                plot_multi_window_comparison(
+                    data_by_band=data_by_band_multi,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label=f"Spectral ({metric_label})",
+                    segments=segments,
+                    config=config,
+                    logger=logger,
+                    roi_name=roi_name,
+                    stats_dir=stats_dir,
+                )
+        else:
+            seg1, seg2 = segments[0], segments[1]
+            data_by_band = {}
             
-            series1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-            series2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+            for band in bands:
+                cols1 = _get_spectral_columns_for_roi(entries, seg1, band, metric, roi_name)
+                cols2 = _get_spectral_columns_for_roi(entries, seg2, band, metric, roi_name)
+                
+                if not cols1 or not cols2:
+                    continue
+                
+                series1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                series2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                
+                valid_mask = series1.notna() & series2.notna()
+                values1 = series1[valid_mask].values
+                values2 = series2[valid_mask].values
+                
+                if len(values1) > 0:
+                    data_by_band[band] = (values1, values2)
             
-            valid_mask = series1.notna() & series2.notna()
-            values1 = series1[valid_mask].values
-            values2 = series2[valid_mask].values
-            
-            if len(values1) > 0:
-                data_by_band[band] = (values1, values2)
-        
-        if data_by_band:
-            suffix = _create_roi_suffix(roi_name)
-            save_path = save_dir / f"sub-{subject}_spectral_{metric}_by_condition{suffix}_window"
-            
-            plot_paired_comparison(
-                data_by_band=data_by_band,
-                subject=subject,
-                save_path=save_path,
-                feature_label=f"Spectral ({metric_label})",
-                config=config,
-                logger=logger,
-                label1=seg1.capitalize(),
-                label2=seg2.capitalize(),
-                roi_name=roi_name,
-                stats_dir=stats_dir,
-            )
+            if data_by_band:
+                save_path = save_dir / f"sub-{subject}_spectral_{metric}_by_condition{suffix}_window"
+                plot_paired_comparison(
+                    data_by_band=data_by_band,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label=f"Spectral ({metric_label})",
+                    config=config,
+                    logger=logger,
+                    label1=seg1.capitalize(),
+                    label2=seg2.capitalize(),
+                    roi_name=roi_name,
+                    stats_dir=stats_dir,
+                )
     
+    plot_type = "multi-window" if use_multi_window else "paired"
     if logger:
         log_if_present(
             logger,
             "info",
-            f"Saved spectral {metric_label} paired comparison plots for {len(roi_names)} ROIs",
+            f"Saved spectral {metric_label} {plot_type} comparison plots for {len(roi_names)} ROIs",
         )
 
 
@@ -626,13 +673,69 @@ def _plot_column_comparison(
     logger: Any,
     stats_dir: Optional[Path],
 ) -> None:
-    """Create unpaired column comparison plots."""
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    """Create unpaired column comparison plots.
+    
+    Supports both 2-group comparison (simple unpaired) and multi-group comparison
+    (3+ groups with all pairwise brackets and significance asterisks).
+    """
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
     from eeg_pipeline.plotting.features.utils import (
         compute_or_load_column_stats,
         get_band_color,
+        plot_multi_group_column_comparison,
     )
     from eeg_pipeline.plotting.io.figures import log_if_present
+    from eeg_pipeline.utils.formatting import sanitize_label
+    
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
+    
+    if use_multi_group:
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        if not multi_group_info:
+            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
+            return
+        
+        masks_dict, group_labels = multi_group_info
+        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        
+        for roi_name in roi_names:
+            data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+            for band in bands:
+                cols = _get_spectral_columns_for_roi(entries, segment_name, band, metric, roi_name)
+                if not cols:
+                    continue
+                
+                val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                
+                group_values = {}
+                for label, mask in masks_dict.items():
+                    vals = val_series[mask].dropna().values
+                    if len(vals) > 0:
+                        group_values[label] = vals
+                
+                if len(group_values) >= 2:
+                    data_by_band[band] = group_values
+            
+            if data_by_band:
+                roi_safe = sanitize_label(roi_name).lower() if roi_name.lower() != "all" else ""
+                suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                save_path = save_dir / f"sub-{subject}_spectral_{metric}_by_condition{suffix}_multigroup"
+                
+                plot_multi_group_column_comparison(
+                    data_by_band=data_by_band,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label=f"Spectral ({metric_label})",
+                    groups=group_labels,
+                    config=config,
+                    logger=logger,
+                    roi_name=roi_name,
+                    stats_dir=stats_dir,
+                )
+        
+        log_if_present(logger, "info", f"Saved spectral {metric_label} multi-group column comparison for {len(roi_names)} ROIs")
+        return
     
     comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
     if not comp_mask_info:
@@ -741,6 +844,7 @@ def _plot_column_comparison(
             dpi=plot_cfg.dpi,
             bbox_inches=plot_cfg.bbox_inches,
             pad_inches=plot_cfg.pad_inches,
+            config=config,
         )
         plt.close(fig)
     

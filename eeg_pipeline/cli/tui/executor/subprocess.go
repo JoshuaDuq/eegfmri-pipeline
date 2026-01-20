@@ -60,6 +60,7 @@ type PlottersResponse struct {
 type DiscoverColumnsResponse struct {
 	Columns []string            `json:"columns"`
 	Values  map[string][]string `json:"values"`
+	Windows []string            `json:"windows,omitempty"`
 	Source  string              `json:"source"`
 	File    string              `json:"file,omitempty"`
 }
@@ -78,6 +79,17 @@ type DiscoverROIsResponse struct {
 	Subject string   `json:"subject"`
 	Source  string   `json:"source,omitempty"`
 	Error   string   `json:"error,omitempty"`
+}
+
+// DiscoverMultigroupStatsResponse from eeg-pipeline info multigroup-stats --json
+type DiscoverMultigroupStatsResponse struct {
+	Available    bool     `json:"available"`
+	Groups       []string `json:"groups"`
+	NFeatures    int      `json:"n_features"`
+	NSignificant int      `json:"n_significant"`
+	File         string   `json:"file,omitempty"`
+	Subject      string   `json:"subject,omitempty"`
+	Error        string   `json:"error,omitempty"`
 }
 
 // DiscoverFmriConditions runs a Python command to discover available fMRI trial_type conditions
@@ -193,8 +205,94 @@ func DiscoverColumns(repoRoot string, task string) tea.Cmd {
 		return messages.ColumnsDiscoveredMsg{
 			Columns: response.Columns,
 			Values:  response.Values,
+			Windows: response.Windows,
 			Source:  response.Source,
 			Error:   nil,
+		}
+	}
+}
+
+// DiscoverConditionEffectsColumns runs eeg-pipeline info discover --discover-source condition-effects --json
+// to find available condition columns and values from condition effects files
+func DiscoverConditionEffectsColumns(repoRoot string, task string, subject string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "discover", "--discover-source", "condition-effects", "--json"}
+		if task != "" {
+			args = append(args, "--task", task)
+		}
+		if subject != "" {
+			args = append(args, "--subject", subject)
+		}
+
+		output, err := runPythonJSONCommand(repoRoot, args)
+		if err != nil {
+			return messages.ColumnsDiscoveredMsg{
+				Columns: nil,
+				Values:  nil,
+				Error:   err,
+			}
+		}
+
+		var response DiscoverColumnsResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.ColumnsDiscoveredMsg{
+				Columns: nil,
+				Values:  nil,
+				Error:   err,
+			}
+		}
+
+		return messages.ColumnsDiscoveredMsg{
+			Columns: response.Columns,
+			Values:  response.Values,
+			Windows: response.Windows,
+			Source:  response.Source,
+			Error:   nil,
+		}
+	}
+}
+
+// DiscoverMultigroupStats runs eeg-pipeline info multigroup-stats --json to find available multigroup comparisons
+func DiscoverMultigroupStats(repoRoot string, subject string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "multigroup-stats", "--json"}
+		if subject != "" {
+			args = append(args, "--subject", subject)
+		}
+
+		output, err := runPythonJSONCommand(repoRoot, args)
+		if err != nil {
+			return messages.MultigroupStatsDiscoveredMsg{
+				Available: false,
+				Groups:    nil,
+				Error:     err,
+			}
+		}
+
+		var response DiscoverMultigroupStatsResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.MultigroupStatsDiscoveredMsg{
+				Available: false,
+				Groups:    nil,
+				Error:     err,
+			}
+		}
+
+		if response.Error != "" {
+			return messages.MultigroupStatsDiscoveredMsg{
+				Available: false,
+				Groups:    nil,
+				Error:     fmt.Errorf("%s", response.Error),
+			}
+		}
+
+		return messages.MultigroupStatsDiscoveredMsg{
+			Available:    response.Available,
+			Groups:       response.Groups,
+			NFeatures:    response.NFeatures,
+			NSignificant: response.NSignificant,
+			File:         response.File,
+			Error:        nil,
 		}
 	}
 }

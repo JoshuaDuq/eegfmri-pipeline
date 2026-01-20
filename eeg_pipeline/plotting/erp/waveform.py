@@ -224,6 +224,7 @@ def plot_butterfly_erp(
             dpi=plot_cfg.savefig_dpi,
             bbox_inches=plot_cfg.bbox_inches,
             pad_inches=plot_cfg.pad_inches,
+            config=config,
         )
         saved_paths.append(path)
         

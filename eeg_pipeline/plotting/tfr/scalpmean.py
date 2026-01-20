@@ -204,6 +204,7 @@ def _save_fig(
             dpi=plot_config.dpi,
             bbox_inches=plot_config.bbox_inches,
             pad_inches=plot_config.pad_inches,
+            config=config,
         )
 
 

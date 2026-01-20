@@ -725,3 +725,120 @@ def compute_condition_effects(
         )
 
     return df
+
+
+def compute_multigroup_condition_effects(
+    features_df: pd.DataFrame,
+    group_masks: Dict[str, np.ndarray],
+    group_labels: List[str],
+    fdr_alpha: float = 0.05,
+    logger: Optional[logging.Logger] = None,
+    config: Optional[Any] = None,
+) -> pd.DataFrame:
+    """Compute pairwise effect sizes for multi-group comparison (3+ groups).
+    
+    Performs all pairwise Mann-Whitney U tests between groups with FDR correction
+    across all tests. This is the canonical computation for multi-group comparisons;
+    plotting code should only read from precomputed results.
+    
+    Args:
+        features_df: DataFrame with feature columns
+        group_masks: Dict mapping group_label -> boolean mask array
+        group_labels: Ordered list of group labels for consistent pair ordering
+        fdr_alpha: FDR significance threshold
+        logger: Optional logger
+        config: Optional config object
+        
+    Returns:
+        DataFrame with columns: feature, group1, group2, n1, n2, mean1, mean2,
+        cohens_d, hedges_g, p_value, q_value, significant_fdr
+    """
+    from itertools import combinations
+    from scipy.stats import mannwhitneyu
+    
+    if len(group_labels) < 2:
+        if logger:
+            logger.warning("Multi-group comparison requires at least 2 groups")
+        return pd.DataFrame()
+    
+    available_groups = [g for g in group_labels if g in group_masks and np.any(group_masks[g])]
+    if len(available_groups) < 2:
+        if logger:
+            logger.warning(f"Only {len(available_groups)} groups have data; need at least 2")
+        return pd.DataFrame()
+    
+    feature_columns = list(features_df.columns)
+    n_features = len(feature_columns)
+    n_pairs = len(list(combinations(available_groups, 2)))
+    
+    if logger:
+        logger.info(
+            f"Computing multi-group condition effects: {n_features} features × "
+            f"{n_pairs} group pairs ({len(available_groups)} groups)"
+        )
+    
+    records = []
+    
+    for feature in feature_columns:
+        values = pd.to_numeric(features_df[feature], errors="coerce").values
+        
+        for g1, g2 in combinations(available_groups, 2):
+            mask1, mask2 = group_masks[g1], group_masks[g2]
+            v1 = values[mask1]
+            v2 = values[mask2]
+            
+            v1_clean = v1[np.isfinite(v1)]
+            v2_clean = v2[np.isfinite(v2)]
+            
+            n1, n2 = len(v1_clean), len(v2_clean)
+            
+            if n1 < 3 or n2 < 3:
+                continue
+            
+            mean1, mean2 = np.mean(v1_clean), np.mean(v2_clean)
+            
+            d = cohens_d(v1_clean, v2_clean, pooled=True, config=config)
+            g = hedges_g(v1_clean, v2_clean, config=config)
+            
+            try:
+                _, p_value = mannwhitneyu(v1_clean, v2_clean, alternative="two-sided")
+            except (ValueError, RuntimeError):
+                p_value = np.nan
+            
+            records.append({
+                "feature": feature,
+                "group1": g1,
+                "group2": g2,
+                "n1": n1,
+                "n2": n2,
+                "mean1": mean1,
+                "mean2": mean2,
+                "cohens_d": d,
+                "hedges_g": g,
+                "p_value": p_value,
+            })
+    
+    if not records:
+        if logger:
+            logger.warning("No valid comparisons computed for multi-group analysis")
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(records)
+    
+    p_values = pd.to_numeric(df["p_value"], errors="coerce").values
+    df["q_value"] = fdr_bh(p_values, alpha=fdr_alpha, config=config)
+    df["significant_fdr"] = df["q_value"] < fdr_alpha
+    
+    df["comparison_type"] = "multigroup"
+    df["analysis_kind"] = "condition_multigroup"
+    
+    df = df.sort_values("hedges_g", key=abs, ascending=False)
+    
+    if logger:
+        n_significant = df["significant_fdr"].sum()
+        n_tests = len(df)
+        logger.info(
+            f"Multi-group condition effects: {n_significant}/{n_tests} FDR significant"
+        )
+    
+    return df

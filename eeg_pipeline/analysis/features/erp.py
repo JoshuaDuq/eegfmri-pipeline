@@ -591,7 +591,17 @@ def extract_erp_features(
     
     baseline_correction = bool(erp_cfg.get("baseline_correction", True))
     allow_no_baseline = bool(erp_cfg.get("allow_no_baseline", False))
-    
+
+    # Avoid double baseline correction: epochs created by the preprocessing pipeline may
+    # already have baseline correction applied (mne.Epochs.baseline != None).
+    already_baselined = getattr(epochs, "baseline", None)
+    if baseline_correction and already_baselined not in (None, (None, None)):
+        ctx.logger.info(
+            "ERP: skipping baseline correction because epochs are already baseline-corrected (epochs.baseline=%s).",
+            already_baselined,
+        )
+        baseline_correction = False
+
     if baseline_correction:
         original_epochs = getattr(ctx, "_original_epochs", None)
         data = _apply_baseline_correction(
