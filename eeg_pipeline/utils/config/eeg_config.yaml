@@ -993,9 +993,6 @@ plotting:
     aperiodic:
       width_per_column: 5.0
       height_per_row: 4.5
-    quality:
-      width_per_plot: 3.0
-      height_per_plot: 2.5
     complexity:
       width_per_measure: 4.5
       height_per_segment: 4.0

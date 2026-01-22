@@ -524,7 +524,6 @@ var defaultPlotItems = []PlotItem{
 	// Aperiodic
 	{ID: "aperiodic_topomaps", Group: "aperiodic", Name: "Topomaps", Description: "Topographic maps of slope and offset", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "aperiodic_by_condition", Group: "aperiodic", Name: "Condition Comparison", Description: "Aperiodic differences between conditions", RequiredFiles: []string{"features_aperiodic*.tsv", "events.tsv"}, RequiresFeatures: true},
-	{ID: "aperiodic_temporal_evolution", Group: "aperiodic", Name: "Temporal Evolution", Description: "Aperiodic features over time bins", RequiredFiles: []string{"features_aperiodic*.tsv", "events.tsv"}, RequiresFeatures: true},
 	// Phase (ITPC/PAC)
 	{ID: "itpc_heatmap", Group: "phase", Name: "ITPC Heatmap", Description: "Inter-trial phase coherence heatmaps", RequiredFiles: []string{"features_itpc*.tsv"}, RequiresFeatures: true},
 	{ID: "itpc_topomaps", Group: "phase", Name: "ITPC Topomaps", Description: "Topographic maps of phase coherence", RequiredFiles: []string{"features_itpc*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
@@ -561,15 +560,10 @@ var defaultPlotItems = []PlotItem{
 	{ID: "bursts_by_band", Group: "bursts", Name: "By Band", Description: "Burst metrics per frequency band", RequiredFiles: []string{"features_bursts*.tsv"}, RequiresFeatures: true},
 	{ID: "bursts_by_condition", Group: "bursts", Name: "Condition Comparison", Description: "Burst differences between conditions", RequiredFiles: []string{"features_bursts*.tsv", "events.tsv"}, RequiresFeatures: true},
 	{ID: "burst_temporal_evolution", Group: "bursts", Name: "Temporal Evolution", Description: "Burst dynamics over time bins", RequiredFiles: []string{"features_bursts*.tsv", "events.tsv"}, RequiresFeatures: true},
-	// Quality
-	{ID: "quality_feature_distributions", Group: "quality", Name: "Feature Distributions", Description: "Distribution of quality metrics across trials", RequiredFiles: []string{"features_quality*.tsv"}, RequiresFeatures: true},
-	{ID: "quality_outlier_heatmap", Group: "quality", Name: "Outlier Heatmap", Description: "Heatmap of outlier trials and features", RequiredFiles: []string{"features_quality*.tsv"}, RequiresFeatures: true},
-	{ID: "quality_snr_distribution", Group: "quality", Name: "SNR Distribution", Description: "Signal-to-noise ratio distributions", RequiredFiles: []string{"features_quality*.tsv"}, RequiresFeatures: true},
 	// ERP
 	{ID: "erp_butterfly", Group: "erp", Name: "Butterfly", Description: "Butterfly ERP plots (all channels)", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	{ID: "erp_roi", Group: "erp", Name: "ROI Waveforms", Description: "ROI-based ERP waveforms with error bars", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	{ID: "erp_contrast", Group: "erp", Name: "Contrast", Description: "ERP condition contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
-	{ID: "erp_topomaps", Group: "erp", Name: "Topomaps", Description: "ERP spatial distributions", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	// TFR
 	{ID: "tfr_scalpmean", Group: "tfr", Name: "Scalp-Mean TFR", Description: "Scalp-mean time-frequency representation", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	{ID: "tfr_scalpmean_contrast", Group: "tfr", Name: "Scalp-Mean Contrast", Description: "Pain vs non-pain scalp-mean TFR contrast", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
@@ -1026,15 +1020,6 @@ type Model struct {
 	plotAperiodicWidthPerColumn float64
 	plotAperiodicHeightPerRow   float64
 	plotAperiodicNPerm          int
-
-	plotQualityWidthPerPlot            float64
-	plotQualityHeightPerPlot           float64
-	plotQualityDistributionNCols       int
-	plotQualityDistributionMaxFeatures int
-	plotQualityOutlierZThreshold       float64
-	plotQualityOutlierMaxFeatures      int
-	plotQualityOutlierMaxTrials        int
-	plotQualitySnrThresholdDb          float64
 
 	plotComplexityWidthPerMeasure  float64
 	plotComplexityHeightPerSegment float64
@@ -5830,14 +5815,6 @@ const (
 	optPlotAperiodicWidthPerColumn
 	optPlotAperiodicHeightPerRow
 	optPlotAperiodicNPerm
-	optPlotQualityWidthPerPlot
-	optPlotQualityHeightPerPlot
-	optPlotQualityDistributionNCols
-	optPlotQualityDistributionMaxFeatures
-	optPlotQualityOutlierZThreshold
-	optPlotQualityOutlierMaxFeatures
-	optPlotQualityOutlierMaxTrials
-	optPlotQualitySnrThresholdDb
 	optPlotComplexityWidthPerMeasure
 	optPlotComplexityHeightPerSegment
 	optPlotConnectivityWidthPerCircle
@@ -6436,7 +6413,6 @@ func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 	// Aperiodic - uses aligned_events
 	case "aperiodic_topomaps",
 		"aperiodic_by_condition",
-		"aperiodic_temporal_evolution",
 		// Connectivity - uses aligned_events
 		"connectivity_by_condition",
 		"connectivity_circle_condition",
@@ -6471,7 +6447,6 @@ func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 		"erp_butterfly",
 		"erp_roi",
 		"erp_contrast",
-		"erp_topomaps",
 		// TFR contrast plots - use conditions (column comparisons only, no window comparisons)
 		"tfr_scalpmean_contrast",
 		"tfr_channels_contrast",
@@ -6512,6 +6487,39 @@ func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 		fields = append(fields,
 			plotItemConfigFieldConnectivityNetworkTopFraction,
 			plotItemConfigFieldComparisonSegment,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
+		)
+	} else if plot.ID == "erp_butterfly" {
+		// erp_butterfly only uses column comparisons, not window/segment/ROI comparisons
+		fields = append(fields,
+			plotItemConfigFieldCompareColumns,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
+		)
+	} else if plot.ID == "erp_roi" {
+		// erp_roi uses column comparisons and ROI filtering, but not window/segment comparisons
+		fields = append(fields,
+			plotItemConfigFieldCompareColumns,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
+			plotItemConfigFieldComparisonROIs,
+		)
+	} else if plot.ID == "erp_contrast" {
+		// erp_contrast only uses column comparisons, not window/segment/ROI comparisons
+		fields = append(fields,
+			plotItemConfigFieldCompareColumns,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
+		)
+	} else if plot.ID == "aperiodic_topomaps" {
+		// aperiodic_topomaps only uses column comparisons, not window/segment comparisons
+		fields = append(fields,
+			plotItemConfigFieldCompareColumns,
 			plotItemConfigFieldComparisonColumn,
 			plotItemConfigFieldComparisonValues,
 			plotItemConfigFieldComparisonLabels,

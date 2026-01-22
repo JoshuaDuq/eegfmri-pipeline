@@ -1891,14 +1891,6 @@ func (m *Model) togglePlottingAdvancedOption() {
 		optPlotAperiodicWidthPerColumn,
 		optPlotAperiodicHeightPerRow,
 		optPlotAperiodicNPerm,
-		optPlotQualityWidthPerPlot,
-		optPlotQualityHeightPerPlot,
-		optPlotQualityDistributionNCols,
-		optPlotQualityDistributionMaxFeatures,
-		optPlotQualityOutlierZThreshold,
-		optPlotQualityOutlierMaxFeatures,
-		optPlotQualityOutlierMaxTrials,
-		optPlotQualitySnrThresholdDb,
 		optPlotComplexityWidthPerMeasure,
 		optPlotComplexityHeightPerSegment,
 		optPlotConnectivityWidthPerCircle,
@@ -3578,37 +3570,6 @@ func (m *Model) commitPlottingNumber(val float64) {
 		if val >= 0 {
 			m.plotAperiodicNPerm = int(val)
 		}
-
-	case optPlotQualityWidthPerPlot:
-		if val >= 0 {
-			m.plotQualityWidthPerPlot = val
-		}
-	case optPlotQualityHeightPerPlot:
-		if val >= 0 {
-			m.plotQualityHeightPerPlot = val
-		}
-	case optPlotQualityDistributionNCols:
-		if val >= 0 {
-			m.plotQualityDistributionNCols = int(val)
-		}
-	case optPlotQualityDistributionMaxFeatures:
-		if val >= 0 {
-			m.plotQualityDistributionMaxFeatures = int(val)
-		}
-	case optPlotQualityOutlierZThreshold:
-		if val >= 0 {
-			m.plotQualityOutlierZThreshold = val
-		}
-	case optPlotQualityOutlierMaxFeatures:
-		if val >= 0 {
-			m.plotQualityOutlierMaxFeatures = int(val)
-		}
-	case optPlotQualityOutlierMaxTrials:
-		if val >= 0 {
-			m.plotQualityOutlierMaxTrials = int(val)
-		}
-	case optPlotQualitySnrThresholdDb:
-		m.plotQualitySnrThresholdDb = val
 
 	case optPlotComplexityWidthPerMeasure:
 		if val >= 0 {

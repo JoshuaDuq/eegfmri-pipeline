@@ -39,11 +39,6 @@ from eeg_pipeline.plotting.features.erds import (
     plot_erds_global_summary,
     plot_erds_by_condition,
 )
-from eeg_pipeline.plotting.features.quality import (
-    plot_feature_distribution_grid,
-    plot_outlier_trials_heatmap,
-    plot_snr_distribution,
-)
 from eeg_pipeline.plotting.features.complexity import (
     plot_complexity_by_condition,
     plot_hjorth_by_band,
@@ -89,7 +84,6 @@ from eeg_pipeline.plotting.erp import (
     plot_butterfly_erp,
     plot_roi_erp,
     plot_erp_contrast,
-    plot_erp_topomaps,
 )
 
 
@@ -101,6 +95,13 @@ from eeg_pipeline.plotting.erp import (
 @VisualizationRegistry.register("aperiodic")
 def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
     aper_dir = ctx.subdir("aperiodic")
+
+    if ctx.aperiodic_df is None:
+        ctx.logger.warning("aperiodic_df is None; skipping aperiodic plots")
+        return
+    if ctx.aperiodic_df.empty:
+        ctx.logger.warning("aperiodic_df is empty; skipping aperiodic plots")
+        return
 
     if ctx.aperiodic_df is not None and ctx.epochs_info is not None:
         safe_plot(
@@ -135,24 +136,6 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
             stats_dir=ctx.stats_dir,
         )
-
-        if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
-            safe_plot(
-                ctx,
-                saved_files,
-                "aperiodic_temporal_evolution",
-                "aperiodic",
-                None,
-                plot_temporal_evolution,
-                ctx.all_features,
-                ctx.aligned_events,
-                ctx.subject,
-                aper_dir,
-                ctx.logger,
-                ctx.config,
-                "aperiodic",
-                "Aperiodic",
-            )
 
 
 ###################################################################
@@ -1106,86 +1089,4 @@ def erp_suite(ctx: FeaturePlotContext, saved_files):
             ctx.logger,
         )
 
-    safe_plot(
-        ctx,
-        saved_files,
-        "erp_topomaps",
-        "erp",
-        None,
-        plot_erp_topomaps,
-        ctx.epochs,
-        ctx.subject,
-        erp_dir,
-        ctx.config,
-        ctx.logger,
-        conditions=conditions,
-    )
 
-
-def _find_snr_column(quality_df: pd.DataFrame) -> str | None:
-    """Find SNR column from quality dataframe using naming schema."""
-    for col in quality_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if parsed.get("group") != "quality":
-            continue
-        if parsed.get("scope") != "global":
-            continue
-        if parsed.get("stat") == "snr":
-            return str(col)
-    return None
-
-
-###################################################################
-# Summary / Quality
-###################################################################
-
-
-@VisualizationRegistry.register("quality")
-def quality_suite(ctx: FeaturePlotContext, saved_files):
-    if ctx.quality_df is None:
-        return
-
-    quality_dir = ctx.subdir("quality")
-    ensure_dir(quality_dir)
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "quality_feature_distributions",
-        "quality",
-        None,
-        plot_feature_distribution_grid,
-        ctx.quality_df,
-        quality_dir / f"sub-{ctx.subject}_quality_feature_distributions",
-        config=ctx.config,
-    )
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "quality_outlier_heatmap",
-        "quality",
-        None,
-        plot_outlier_trials_heatmap,
-        ctx.quality_df,
-        quality_dir / f"sub-{ctx.subject}_quality_outlier_heatmap",
-        config=ctx.config,
-    )
-
-    snr_col = _find_snr_column(ctx.quality_df)
-
-    if snr_col is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "quality_snr_distribution",
-            "quality",
-            None,
-            plot_snr_distribution,
-            ctx.quality_df,
-            quality_dir / f"sub-{ctx.subject}_quality_snr_distribution",
-            snr_col=snr_col,
-            config=ctx.config,
-        )

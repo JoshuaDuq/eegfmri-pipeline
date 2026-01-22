@@ -57,6 +57,7 @@ def _extract_aperiodic_data(
     metric: str,
     info: mne.Info,
     mask: Optional[pd.Series] = None,
+    segment: Optional[str] = None,
 ) -> Tuple[np.ndarray, List[str]]:
     """Extract aperiodic metric values for channels in info.
     
@@ -65,6 +66,7 @@ def _extract_aperiodic_data(
         metric: Metric name ("slope" or "offset")
         info: MNE Info object
         mask: Optional boolean mask to subset trials
+        segment: Optional segment name. If None, searches across all segments.
     
     Returns:
         Tuple of (array of values, list of channel names found)
@@ -73,10 +75,17 @@ def _extract_aperiodic_data(
     found_chs = []
     df_masked = features_df if mask is None else features_df[mask]
     
+    if segment is None:
+        from eeg_pipeline.plotting.features.utils import get_named_segments
+        available_segments = get_named_segments(features_df, group="aperiodic")
+        if not available_segments:
+            return np.array([]), []
+        segment = available_segments[0]
+    
     for ch_name in info.ch_names:
         col = NamingSchema.build(
             "aperiodic",
-            "active",
+            segment,
             "broadband",
             "ch",
             metric,
@@ -365,21 +374,45 @@ def _find_run_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
     return None
 
 
-def _get_aperiodic_column_name(channel: str, metric: str, features_df: pd.DataFrame) -> Optional[str]:
+def _get_aperiodic_column_name(channel: str, metric: str, features_df: pd.DataFrame, segment: Optional[str] = None) -> Optional[str]:
     """Get aperiodic column name using NamingSchema.
+    
+    Args:
+        channel: Channel name
+        metric: Metric name ("slope" or "offset")
+        features_df: Features DataFrame
+        segment: Optional segment name. If None, searches across all segments.
     
     Returns:
         Column name or None if not found
     """
-    col = NamingSchema.build(
-        "aperiodic",
-        "active",
-        "broadband",
-        "ch",
-        metric,
-        channel=channel,
-    )
-    return col if col in features_df.columns else None
+    if segment is None:
+        from eeg_pipeline.plotting.features.utils import get_named_segments
+        available_segments = get_named_segments(features_df, group="aperiodic")
+        if not available_segments:
+            return None
+        for seg in available_segments:
+            col = NamingSchema.build(
+                "aperiodic",
+                seg,
+                "broadband",
+                "ch",
+                metric,
+                channel=channel,
+            )
+            if col in features_df.columns:
+                return col
+        return None
+    else:
+        col = NamingSchema.build(
+            "aperiodic",
+            segment,
+            "broadband",
+            "ch",
+            metric,
+            channel=channel,
+        )
+        return col if col in features_df.columns else None
 
 
 def _compute_channel_pvalues(
@@ -391,8 +424,20 @@ def _compute_channel_pvalues(
     nonpain_mask: np.ndarray,
     run_col: Optional[str],
     config: Any,
+    segment: Optional[str] = None,
 ) -> List[float]:
     """Compute p-values for each channel comparing pain vs nonpain.
+    
+    Args:
+        features_df: Features DataFrame
+        events_df: Events DataFrame
+        common_channels: List of channel names
+        metric: Metric name ("slope" or "offset")
+        pain_mask: Boolean mask for pain condition
+        nonpain_mask: Boolean mask for nonpain condition
+        run_col: Optional run column name
+        config: Configuration object
+        segment: Optional segment name. If None, searches across all segments.
     
     Returns:
         List of p-values (may contain NaN)
@@ -405,7 +450,7 @@ def _compute_channel_pvalues(
     p_values = []
     
     for channel in common_channels:
-        col = _get_aperiodic_column_name(channel, metric, features_df)
+        col = _get_aperiodic_column_name(channel, metric, features_df, segment=segment)
         if col is None:
             p_values.append(np.nan)
             continue
@@ -441,8 +486,17 @@ def _extract_pair_data(
     metric: str,
     pain_mask: np.ndarray,
     nonpain_mask: np.ndarray,
+    segment: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Extract mean values for pain and nonpain conditions.
+    
+    Args:
+        features_df: Features DataFrame
+        common_channels: List of channel names
+        metric: Metric name ("slope" or "offset")
+        pain_mask: Boolean mask for pain condition
+        nonpain_mask: Boolean mask for nonpain condition
+        segment: Optional segment name. If None, searches across all segments.
     
     Returns:
         Tuple of (data_nonpain, data_pain) arrays
@@ -451,7 +505,7 @@ def _extract_pair_data(
     data_pain = []
     
     for channel in common_channels:
-        col = _get_aperiodic_column_name(channel, metric, features_df)
+        col = _get_aperiodic_column_name(channel, metric, features_df, segment=segment)
         if col is None:
             continue
         data_nonpain.append(features_df.loc[nonpain_mask, col].mean())
@@ -489,6 +543,18 @@ def plot_aperiodic_topomaps(
 
     plot_cfg = get_plot_config(config)
     
+    from eeg_pipeline.plotting.features.utils import get_named_segments
+    available_segments = get_named_segments(features_df, group="aperiodic")
+    if not available_segments:
+        log_if_present(logger, "warning", "No aperiodic segments found in data")
+        return
+    
+    segment = get_config_value(config, "plotting.comparisons.comparison_segment", None)
+    if segment is None or segment not in available_segments:
+        segment = available_segments[0]
+        if logger:
+            logger.info(f"Using segment '{segment}' for aperiodic topomaps")
+    
     nonpain_mask, pain_mask, label1, label2 = _extract_condition_masks(
         features_df, events_df, config, logger
     )
@@ -498,9 +564,9 @@ def plot_aperiodic_topomaps(
     per_metric_common: Dict[str, Dict[str, Any]] = {}
 
     for metric in APERIODIC_METRICS:
-        data_overall, found_chs_overall = _extract_aperiodic_data(features_df, metric, info)
+        data_overall, found_chs_overall = _extract_aperiodic_data(features_df, metric, info, segment=segment)
         if len(data_overall) == 0:
-            log_if_present(logger, "warning", f"No {metric} data found for topomap")
+            log_if_present(logger, "warning", f"No {metric} data found for topomap (segment: {segment}, found {len(found_chs_overall)} channels)")
             continue
         per_metric_pvals[metric] = []
 
@@ -524,10 +590,10 @@ def plot_aperiodic_topomaps(
 
         if pain_mask is not None and nonpain_mask is not None:
             data_nonpain, ch_nonpain = _extract_aperiodic_data(
-                features_df, metric, info, mask=nonpain_mask
+                features_df, metric, info, mask=nonpain_mask, segment=segment
             )
             data_pain, ch_pain = _extract_aperiodic_data(
-                features_df, metric, info, mask=pain_mask
+                features_df, metric, info, mask=pain_mask, segment=segment
             )
             common_chs = [
                 ch for ch in found_chs_overall
@@ -553,13 +619,14 @@ def plot_aperiodic_topomaps(
                         nonpain_mask,
                         run_col,
                         config,
+                        segment=segment,
                     )
                     
                     per_metric_pvals[metric] = p_vals
                     all_pvals.extend([p for p in p_vals if np.isfinite(p)])
                     
                     data_nonpain_arr, data_pain_arr = _extract_pair_data(
-                        features_df, common_chs, metric, pain_mask, nonpain_mask
+                        features_df, common_chs, metric, pain_mask, nonpain_mask, segment=segment
                     )
                     
                     per_metric_common[metric]["pair_data"] = {
@@ -586,7 +653,7 @@ def plot_aperiodic_topomaps(
     
     metrics = list(per_metric_common.keys())
     if not metrics:
-        log_if_present(logger, "warning", "No aperiodic metrics available for topomap grid")
+        log_if_present(logger, "warning", f"No aperiodic metrics available for topomap grid (tried segments: {available_segments}, found data for: {list(per_metric_common.keys())})")
         return
     
     has_pain_data = any(

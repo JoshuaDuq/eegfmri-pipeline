@@ -122,7 +122,7 @@ def compute_roi_tfrs(
             freqs=freqs,
             n_cycles=n_cycles,
             decim=decim_power,
-            picks="eeg",
+            picks="data",
             use_fft=True,
             return_itc=False,
             average=False,

@@ -196,8 +196,6 @@ var plotDefaults = struct {
 	pacHeightBox                 float64
 	aperiodicWidthPerColumn      float64
 	aperiodicHeightPerRow        float64
-	qualityWidthPerPlot          float64
-	qualityHeightPerPlot         float64
 	complexityWidthPerMeasure    float64
 	complexityHeightPerSegment   float64
 	connectivityWidthPerCircle   float64
@@ -377,8 +375,6 @@ var plotDefaults = struct {
 	pacHeightBox:                 5.0,
 	aperiodicWidthPerColumn:      5.0,
 	aperiodicHeightPerRow:        4.5,
-	qualityWidthPerPlot:          3.0,
-	qualityHeightPerPlot:         2.5,
 	complexityWidthPerMeasure:    4.5,
 	complexityHeightPerSegment:   4.0,
 	connectivityWidthPerCircle:   3.5,
@@ -1370,30 +1366,6 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optPlotAperiodicNPerm:
 		value := m.getIntFieldValue(optPlotAperiodicNPerm, m.plotAperiodicNPerm, 0)
 		return []renderLine{m.renderValueLine(opt, "aper_n_perm", value, "int", focused, labelWidth)}
-	case optPlotQualityWidthPerPlot:
-		value := m.getFloatFieldValue(optPlotQualityWidthPerPlot, m.plotQualityWidthPerPlot, plotDefaults.qualityWidthPerPlot, "%.4f")
-		return []renderLine{m.renderValueLine(opt, "quality_w", value, "float", focused, labelWidth)}
-	case optPlotQualityHeightPerPlot:
-		value := m.getFloatFieldValue(optPlotQualityHeightPerPlot, m.plotQualityHeightPerPlot, plotDefaults.qualityHeightPerPlot, "%.4f")
-		return []renderLine{m.renderValueLine(opt, "quality_h", value, "float", focused, labelWidth)}
-	case optPlotQualityDistributionNCols:
-		value := m.getIntFieldValue(optPlotQualityDistributionNCols, m.plotQualityDistributionNCols, 0)
-		return []renderLine{m.renderValueLine(opt, "quality_n_cols", value, "int", focused, labelWidth)}
-	case optPlotQualityDistributionMaxFeatures:
-		value := m.getIntFieldValue(optPlotQualityDistributionMaxFeatures, m.plotQualityDistributionMaxFeatures, 0)
-		return []renderLine{m.renderValueLine(opt, "quality_max_feat", value, "int", focused, labelWidth)}
-	case optPlotQualityOutlierZThreshold:
-		value := m.getFloatFieldValue(optPlotQualityOutlierZThreshold, m.plotQualityOutlierZThreshold, 0, "%.4f")
-		return []renderLine{m.renderValueLine(opt, "quality_z_thr", value, "float", focused, labelWidth)}
-	case optPlotQualityOutlierMaxFeatures:
-		value := m.getIntFieldValue(optPlotQualityOutlierMaxFeatures, m.plotQualityOutlierMaxFeatures, 0)
-		return []renderLine{m.renderValueLine(opt, "quality_out_max_feat", value, "int", focused, labelWidth)}
-	case optPlotQualityOutlierMaxTrials:
-		value := m.getIntFieldValue(optPlotQualityOutlierMaxTrials, m.plotQualityOutlierMaxTrials, 0)
-		return []renderLine{m.renderValueLine(opt, "quality_out_max_trials", value, "int", focused, labelWidth)}
-	case optPlotQualitySnrThresholdDb:
-		value := m.getFloatFieldValue(optPlotQualitySnrThresholdDb, m.plotQualitySnrThresholdDb, 0, "%.4f")
-		return []renderLine{m.renderValueLine(opt, "quality_snr_db", value, "float", focused, labelWidth)}
 	case optPlotComplexityWidthPerMeasure:
 		value := m.getFloatFieldValue(optPlotComplexityWidthPerMeasure, m.plotComplexityWidthPerMeasure, plotDefaults.complexityWidthPerMeasure, "%.4f")
 		return []renderLine{m.renderValueLine(opt, "comp_w_per_meas", value, "float", focused, labelWidth)}

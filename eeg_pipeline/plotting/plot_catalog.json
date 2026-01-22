@@ -51,11 +51,6 @@
       "description": "Oscillatory burst dynamics"
     },
     {
-      "key": "quality",
-      "label": "Quality",
-      "description": "Data quality diagnostics and outlier detection"
-    },
-    {
       "key": "erp",
       "label": "ERP",
       "description": "Event-related potential waveforms and topographies"
@@ -225,20 +220,6 @@
       "group": "aperiodic",
       "label": "Condition Comparison",
       "description": "Aperiodic differences between conditions",
-      "required_files": [
-        "features_aperiodic*.parquet",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "aperiodic"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "aperiodic_temporal_evolution",
-      "group": "aperiodic",
-      "label": "Temporal Evolution",
-      "description": "Aperiodic features over time bins",
       "required_files": [
         "features_aperiodic*.parquet",
         "events.tsv"
@@ -642,45 +623,6 @@
       "requires_features": true
     },
     {
-      "id": "quality_feature_distributions",
-      "group": "quality",
-      "label": "Feature Distributions",
-      "description": "Distribution of quality metrics across trials",
-      "required_files": [
-        "features_quality*.parquet"
-      ],
-      "feature_categories": [
-        "quality"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "quality_outlier_heatmap",
-      "group": "quality",
-      "label": "Outlier Heatmap",
-      "description": "Heatmap of outlier trials and features",
-      "required_files": [
-        "features_quality*.parquet"
-      ],
-      "feature_categories": [
-        "quality"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "quality_snr_distribution",
-      "group": "quality",
-      "label": "SNR Distribution",
-      "description": "Signal-to-noise ratio distributions",
-      "required_files": [
-        "features_quality*.parquet"
-      ],
-      "feature_categories": [
-        "quality"
-      ],
-      "requires_features": true
-    },
-    {
       "id": "erp_butterfly",
       "group": "erp",
       "label": "Butterfly",
@@ -717,19 +659,6 @@
       ],
       "erp_plots": [
         "contrast"
-      ],
-      "requires_epochs": true
-    },
-    {
-      "id": "erp_topomaps",
-      "group": "erp",
-      "label": "Topomaps",
-      "description": "ERP spatial distributions",
-      "required_files": [
-        "epochs/*.fif"
-      ],
-      "erp_plots": [
-        "topomaps"
       ],
       "requires_epochs": true
     },

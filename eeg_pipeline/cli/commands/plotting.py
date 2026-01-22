@@ -324,14 +324,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     overrides.add_argument("--aperiodic-height-per-row", type=float, default=None, help="Aperiodic plot height per row (default from config)")
     overrides.add_argument("--aperiodic-n-perm", type=int, default=None, help="Aperiodic permutation count for comparisons (default from config)")
 
-    overrides.add_argument("--quality-width-per-plot", type=float, default=None, help="Quality plot width per subplot (default from config)")
-    overrides.add_argument("--quality-height-per-plot", type=float, default=None, help="Quality plot height per subplot (default from config)")
-    overrides.add_argument("--quality-distribution-n-cols", type=int, default=None, help="Quality distribution grid columns (default from config)")
-    overrides.add_argument("--quality-distribution-max-features", type=int, default=None, help="Max features for quality distribution grid (default from config)")
-    overrides.add_argument("--quality-outlier-z-threshold", type=float, default=None, help="Outlier robust z-threshold (default from config)")
-    overrides.add_argument("--quality-outlier-max-features", type=int, default=None, help="Max features in outlier heatmap (default from config)")
-    overrides.add_argument("--quality-outlier-max-trials", type=int, default=None, help="Max trials in outlier heatmap (default from config)")
-    overrides.add_argument("--quality-snr-threshold-db", type=float, default=None, help="SNR threshold in dB (default from config)")
 
     overrides.add_argument("--complexity-width-per-measure", type=float, default=None, help="Complexity plot width per measure (default from config)")
     overrides.add_argument("--complexity-height-per-segment", type=float, default=None, help="Complexity plot height per segment (default from config)")
@@ -1174,22 +1166,6 @@ def _apply_plot_sizing_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "plotting.plots.aperiodic.height_per_row", float(args.aperiodic_height_per_row))
     if _get_arg_value(args, "aperiodic_n_perm") is not None:
         _apply_config_override(config, "plotting.plots.aperiodic.n_perm", int(args.aperiodic_n_perm))
-    if _get_arg_value(args, "quality_width_per_plot") is not None:
-        _apply_config_override(config, "plotting.plots.quality.width_per_plot", float(args.quality_width_per_plot))
-    if _get_arg_value(args, "quality_height_per_plot") is not None:
-        _apply_config_override(config, "plotting.plots.quality.height_per_plot", float(args.quality_height_per_plot))
-    if _get_arg_value(args, "quality_distribution_n_cols") is not None:
-        _apply_config_override(config, "plotting.plots.features.quality.distribution.n_cols", int(args.quality_distribution_n_cols))
-    if _get_arg_value(args, "quality_distribution_max_features") is not None:
-        _apply_config_override(config, "plotting.plots.features.quality.distribution.max_features", int(args.quality_distribution_max_features))
-    if _get_arg_value(args, "quality_outlier_z_threshold") is not None:
-        _apply_config_override(config, "plotting.plots.features.quality.outlier.z_threshold", float(args.quality_outlier_z_threshold))
-    if _get_arg_value(args, "quality_outlier_max_features") is not None:
-        _apply_config_override(config, "plotting.plots.features.quality.outlier.max_features", int(args.quality_outlier_max_features))
-    if _get_arg_value(args, "quality_outlier_max_trials") is not None:
-        _apply_config_override(config, "plotting.plots.features.quality.outlier.max_trials", int(args.quality_outlier_max_trials))
-    if _get_arg_value(args, "quality_snr_threshold_db") is not None:
-        _apply_config_override(config, "plotting.plots.features.quality.snr.threshold_db", float(args.quality_snr_threshold_db))
     if _get_arg_value(args, "complexity_width_per_measure") is not None:
         _apply_config_override(config, "plotting.plots.complexity.width_per_measure", float(args.complexity_width_per_measure))
     if _get_arg_value(args, "complexity_height_per_segment") is not None:
@@ -1391,7 +1367,6 @@ def _map_plot_id_to_plotters(plot_id: str, feature_categories: List[str]) -> Opt
         # Aperiodic plots -> 1 registered: aperiodic_suite
         "aperiodic_topomaps": "aperiodic_suite",
         "aperiodic_by_condition": "aperiodic_suite",
-        "aperiodic_temporal_evolution": "aperiodic_suite",
         
         # ITPC plots -> 1 registered: itpc_suite
         "itpc_heatmap": "itpc_suite",
@@ -1438,16 +1413,11 @@ def _map_plot_id_to_plotters(plot_id: str, feature_categories: List[str]) -> Opt
         "bursts_by_condition": "plot_bursts",
         "burst_temporal_evolution": "plot_bursts",
         
-        # Quality plots -> 1 registered: quality_suite
-        "quality_feature_distributions": "quality_suite",
-        "quality_outlier_heatmap": "quality_suite",
-        "quality_snr_distribution": "quality_suite",
         
         # ERP plots -> 1 registered: erp_suite
         "erp_butterfly": "erp_suite",
         "erp_roi": "erp_suite",
         "erp_contrast": "erp_suite",
-        "erp_topomaps": "erp_suite",
         
         # Temporal plots -> 1 registered: plot_temporal
         "temporal_evolution": "plot_temporal",

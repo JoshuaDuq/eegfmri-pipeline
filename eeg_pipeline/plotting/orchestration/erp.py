@@ -23,7 +23,6 @@ from eeg_pipeline.plotting.erp.waveform import (
     plot_roi_erp,
     plot_erp_contrast,
 )
-from eeg_pipeline.plotting.erp.topomaps import plot_erp_topomaps
 
 
 def _normalize_condition_key(label: str) -> str:
@@ -61,6 +60,7 @@ def _resolve_available_conditions(
     epochs: Any,
     events_df: Optional[pd.DataFrame],
     config: Any,
+    logger: logging.Logger,
 ) -> Optional[Dict[str, str]]:
     """Resolve available ERP conditions from comparison specification.
     
@@ -72,6 +72,8 @@ def _resolve_available_conditions(
         Events dataframe. If None, returns None.
     config : Any
         Configuration object.
+    logger : logging.Logger
+        Logger instance for warnings and debug messages.
     
     Returns
     -------
@@ -89,20 +91,45 @@ def _resolve_available_conditions(
         return None
     
     column, value1, value2, label1, label2 = contrast_spec
+    
+    if column not in events_df.columns:
+        logger.error(
+            f"Comparison column '{column}' not found in events_df. "
+            f"Available: {list(events_df.columns)}"
+        )
+        return None
+    
     condition_queries = {
         _normalize_condition_key(label1): _build_epoch_query(column, value1),
         _normalize_condition_key(label2): _build_epoch_query(column, value2),
     }
     
+    metadata = getattr(epochs, "metadata", None)
+    column_in_metadata = metadata is not None and column in metadata.columns
+    
+    if not column_in_metadata:
+        if metadata is None:
+            metadata = pd.DataFrame(index=range(len(epochs)))
+        metadata[column] = events_df[column].values
+        epochs.metadata = metadata
+    
     available_conditions = {}
     for condition_name, query in condition_queries.items():
         try:
-            if len(epochs[query]) > 0:
+            matched_epochs = epochs[query]
+            if len(matched_epochs) > 0:
                 available_conditions[condition_name] = query
-        except (KeyError, ValueError, IndexError):
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning(f"Condition '{condition_name}' query '{query}' failed: {e}")
             continue
     
-    return available_conditions if available_conditions else None
+    if not available_conditions:
+        logger.error(
+            f"No valid conditions found. Queries: {list(condition_queries.values())}"
+        )
+        return None
+    
+    return available_conditions
 
 
 def _execute_erp_plots(
@@ -149,24 +176,39 @@ def _execute_erp_plots(
         )
     
     if "contrast" in plots_to_run and contrast_spec is not None:
+        if conditions is None or len(conditions) < 2:
+            logger.warning(
+                "Cannot plot ERP contrast: insufficient validated conditions. "
+                f"Required: 2, Available: {len(conditions) if conditions else 0}"
+            )
+            return
+        
         logger.info("Plotting ERP contrasts...")
         column, value1, value2, label1, label2 = contrast_spec
+        
+        # Map contrast spec labels to normalized condition keys
+        norm_label1 = _normalize_condition_key(label1)
+        norm_label2 = _normalize_condition_key(label2)
+        
+        # Use validated queries from conditions dict
+        if norm_label1 not in conditions or norm_label2 not in conditions:
+            logger.warning(
+                f"Cannot plot ERP contrast: conditions not found in validated set. "
+                f"Required: {norm_label1}, {norm_label2}. "
+                f"Available: {list(conditions.keys())}"
+            )
+            return
+        
         plot_erp_contrast(
             epochs,
             subject,
             plots_dir,
             config,
             logger,
-            cond_a=_build_epoch_query(column, value2),
-            cond_b=_build_epoch_query(column, value1),
+            cond_a=conditions[norm_label2],
+            cond_b=conditions[norm_label1],
             label_a=label2,
             label_b=label1,
-        )
-    
-    if "topomaps" in plots_to_run:
-        logger.info("Plotting ERP topomaps...")
-        plot_erp_topomaps(
-            epochs, subject, plots_dir, config, logger, conditions=conditions
         )
 
 
@@ -209,7 +251,6 @@ def visualize_subject_erp(
         align="strict",
         preload=True,
         deriv_root=effective_deriv_root,
-        bids_root=config.bids_root,
         config=config,
         logger=logger,
     )
@@ -218,14 +259,14 @@ def visualize_subject_erp(
         logger.error(f"Failed to load epochs for sub-{subject}")
         return
     
-    conditions = _resolve_available_conditions(epochs, events_df, config)
+    conditions = _resolve_available_conditions(epochs, events_df, config, logger)
     contrast_spec = (
         resolve_comparison_spec(events_df, config, require_enabled=False)
         if events_df is not None
         else None
     )
     
-    plots_to_run = plots or ["butterfly", "roi", "contrast", "topomaps"]
+    plots_to_run = plots or ["butterfly", "roi", "contrast"]
     
     _execute_erp_plots(
         epochs,

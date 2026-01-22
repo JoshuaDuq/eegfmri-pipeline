@@ -210,12 +210,14 @@ def compute_tfr_morlet(
     
     workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
 
+    resolved_picks = _resolve_picks(epochs, picks) if isinstance(picks, str) else picks
+
     compute_kwargs = dict(
         method="morlet",
         freqs=freqs,
         n_cycles=n_cycles,
         decim=decim,
-        picks=picks,
+        picks=resolved_picks,
         use_fft=True,
         return_itc=False,
     )
@@ -243,6 +245,43 @@ def compute_tfr_for_visualization(
 ) -> mne.time_frequency.EpochsTFR:
     logger.info("Computing TFR for visualization...")
     return compute_tfr_morlet(epochs, config, logger=logger)
+
+
+def _resolve_picks(epochs: mne.Epochs, config_picks: str) -> str:
+    """
+    Resolve channel picks based on what's available in epochs.
+    
+    After CSD transform, channels become type 'csd' instead of 'eeg'.
+    This function detects the actual channel types and returns appropriate picks.
+    
+    Parameters
+    ----------
+    epochs : mne.Epochs
+        Epochs object to check
+    config_picks : str
+        Configured picks (e.g., 'eeg')
+        
+    Returns
+    -------
+    str
+        Resolved picks that will work with the actual channel types
+    """
+    if config_picks == "data":
+        return "data"
+    
+    ch_types = set(epochs.get_channel_types())
+    
+    if config_picks == "eeg":
+        if "eeg" in ch_types:
+            return "eeg"
+        if "csd" in ch_types:
+            return "csd"
+        return "data"
+    
+    if config_picks in ch_types:
+        return config_picks
+    
+    return "data"
 
 
 def compute_complex_tfr(
@@ -291,13 +330,15 @@ def compute_complex_tfr(
     
     workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
     
+    resolved_picks = _resolve_picks(epochs, tfr_picks)
+    
     logger.info("Computing complex TFR for phase-based metrics (decim=%d, %d freqs)...", decim_phase, len(freqs))
     compute_kwargs = dict(
         method="morlet",
         freqs=freqs,
         n_cycles=n_cycles,
         decim=decim_phase,
-        picks=tfr_picks,
+        picks=resolved_picks,
         use_fft=True,
         return_itc=False,
         average=False,
@@ -1862,12 +1903,15 @@ def compute_subject_tfr(
     freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
     workers_default = resolve_tfr_workers(workers_default=workers if workers is not None else -1)
+    
+    resolved_picks = _resolve_picks(epochs, tfr_picks) if isinstance(tfr_picks, str) else tfr_picks
+    
     compute_kwargs = dict(
         method="morlet",
         freqs=freqs,
         n_cycles=n_cycles,
         decim=tfr_decim,
-        picks=tfr_picks,
+        picks=resolved_picks,
         use_fft=True,
         return_itc=False,
         average=False,

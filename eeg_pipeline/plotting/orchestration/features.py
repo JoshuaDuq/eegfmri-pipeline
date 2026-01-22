@@ -45,7 +45,6 @@ _KNOWN_FEATURE_TYPES = [
     "itpc",
     "pac",
     "power",
-    "quality",
     "ratios",
     "spectral",
     "asymmetry",
