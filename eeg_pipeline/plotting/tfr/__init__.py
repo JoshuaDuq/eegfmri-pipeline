@@ -34,13 +34,11 @@ __all__ = [
     # Contrast plotting
     "contrast_maxmin_temperature",
     "contrast_pain_nonpain",
-    "plot_bands_pain_temp_contrasts",
     # ROI TFR plotting
     "compute_roi_tfrs",
     "plot_rois_all_trials",
     "contrast_pain_nonpain_rois",
     # Topomap plotting
-    "plot_topomap_grid_baseline_temps",
     "plot_pain_nonpain_temporal_topomaps_diff_allbands",
     "plot_temporal_topomaps_allbands_active",
     # Quality control
@@ -69,13 +67,11 @@ def __getattr__(name: str):
         # Contrast plotting
         "contrast_maxmin_temperature": "contrasts",
         "contrast_pain_nonpain": "contrasts",
-        "plot_bands_pain_temp_contrasts": "contrasts",
         # ROI TFR plotting
         "compute_roi_tfrs": "rois",
         "plot_rois_all_trials": "rois",
         "contrast_pain_nonpain_rois": "rois",
         # Topomap plotting
-        "plot_topomap_grid_baseline_temps": "topomaps",
         "plot_pain_nonpain_temporal_topomaps_diff_allbands": "topomaps",
         "plot_temporal_topomaps_allbands_active": "topomaps",
         # Quality control

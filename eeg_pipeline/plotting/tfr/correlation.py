@@ -104,10 +104,7 @@ def _get_baseline_window(config) -> List[float]:
     """
     if not config:
         return [-0.5, -0.01]
-    return config.get(
-        "plotting.tfr.default_baseline_window",
-        config.get("time_frequency_analysis.baseline_window", [-0.5, -0.01]),
-    )
+    return config.get("time_frequency_analysis.baseline_window", [-0.5, -0.01])
 
 
 def _annotate_correlation_figure(

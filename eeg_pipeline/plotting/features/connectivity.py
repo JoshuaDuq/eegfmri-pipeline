@@ -356,7 +356,7 @@ def plot_connectivity_circle_for_band(
     n_nodes = len(node_names)
     n_edges = len(edges)
     
-    connectivity_matrix, n_significant = _build_connectivity_matrix(
+    connectivity_matrix, n_edges_shown = _build_connectivity_matrix(
         mean_connectivity, edges, node_names, threshold
     )
 
@@ -368,7 +368,7 @@ def plot_connectivity_circle_for_band(
     min_lines_config = int(get_config_value(
         config, "plotting.plots.features.connectivity.circle_min_lines", 20
     ))
-    n_lines_to_show = n_lines if n_lines is not None else max(min_lines_config, n_significant)
+    n_lines_to_show = n_lines if n_lines is not None else max(min_lines_config, n_edges_shown)
     
     try:
         plot_connectivity_circle(
@@ -398,10 +398,10 @@ def plot_connectivity_circle_for_band(
     fig.suptitle(title_text, fontsize=plot_cfg.font.figure_title, 
                  fontweight="bold", y=0.98)
     
-    percentage_significant = (n_significant / n_edges * 100) if n_edges > 0 else 0.0
+    percentage_edges_shown = (n_edges_shown / n_edges * 100) if n_edges > 0 else 0.0
     footer_text = (
         f"n = {n_trials} trials | {n_nodes} nodes | "
-        f"{n_significant}/{n_edges} significant edges ({percentage_significant:.1f}%)"
+        f"{n_edges_shown}/{n_edges} edges shown ({percentage_edges_shown:.1f}%)"
     )
     fig.text(
         0.5, 0.02, footer_text,
@@ -421,7 +421,7 @@ def plot_connectivity_circle_for_band(
     )
     plt.close(fig)
     log_if_present(logger, "info", 
-                  f"Saved {measure} {band} connectivity circle ({n_significant} significant edges)")
+                  f"Saved {measure} {band} connectivity circle ({n_edges_shown} edges shown)")
 
 
 def plot_connectivity_circle_by_condition(
@@ -437,32 +437,24 @@ def plot_connectivity_circle_by_condition(
     n_lines: Optional[int] = None,
     significance_threshold: Optional[float] = None,
 ) -> None:
-    """Plot connectivity circle diagrams comparing two conditions."""
+    """Plot connectivity circle diagrams for conditions (supports 2+ groups)."""
     if features_df is None or features_df.empty or events_df is None:
         log_if_present(logger, "warning", "No feature data for connectivity plot")
         return
 
-    comparison_info = extract_comparison_mask(events_df, config, require_enabled=False)
-    if comparison_info is None:
+    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
+    
+    multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+    if not multi_group_info:
+        log_if_present(logger, "warning", 
+                      "Multi-group comparison failed for connectivity circle")
         return
-    mask1, mask2, label1, label2 = comparison_info
-
-    n_samples = min(len(features_df), len(mask1))
-    if n_samples <= 0:
-        return
-    if n_samples != len(features_df):
-        features_df = features_df.iloc[:n_samples].copy()
-    mask1 = np.asarray(mask1[:n_samples], dtype=bool)
-    mask2 = np.asarray(mask2[:n_samples], dtype=bool)
-
-    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
-        return
+    masks_dict, group_labels = multi_group_info
+    conditions = [(label, mask) for label, mask in masks_dict.items()]
     
     plot_cfg = get_plot_config(config)
-    condition_colors = {
-        "c1": plot_cfg.get_color("condition_1"),
-        "c2": plot_cfg.get_color("condition_2"),
-    }
+    group_colors = plt.cm.Set2(np.linspace(0, 1, max(len(conditions), 3)))
+    condition_colors = {label: group_colors[i] for i, (label, _) in enumerate(conditions)}
 
     columns_tuple, edges_tuple = _parse_connectivity_columns_cached(
         tuple(features_df.columns), measure, band
@@ -493,12 +485,6 @@ def plot_connectivity_circle_by_condition(
         mean_connectivity = features_df.loc[condition_mask, columns].mean(axis=0).values
         return _build_connectivity_matrix(mean_connectivity, edges, node_names, threshold)
     
-    matrix_condition1, n_sig_condition1 = build_matrix_for_condition(mask1)
-    matrix_condition2, n_sig_condition2 = build_matrix_for_condition(mask2)
-    
-    n_trials_condition1 = int(mask1.sum())
-    n_trials_condition2 = int(mask2.sum())
-    
     colormap, vmin, vmax = _get_connectivity_colormap_and_range(measure)
     if vmin is None:
         vmin, vmax = 0.0, 1.0
@@ -507,259 +493,83 @@ def plot_connectivity_circle_by_condition(
     min_lines_config = int(get_config_value(
         config, "plotting.plots.features.connectivity.circle_min_lines", 20
     ))
-    n_lines_to_show = (n_lines if n_lines is not None 
-                       else max(min_lines_config, max(n_sig_condition1, n_sig_condition2)))
     
     width_per_circle = float(plot_cfg.plot_type_configs.get("connectivity", {})
                              .get("width_per_circle", 9.0))
-    fig, axes = plt.subplots(
-        1, 2, figsize=(width_per_circle * 2, width_per_circle), 
-        subplot_kw=dict(polar=True)
-    )
     
-    try:
-        plot_connectivity_circle(
-            matrix_condition1, node_names, n_lines=n_lines_to_show, ax=axes[0],
-            title="", show=False,
-            vmin=vmin, vmax=vmax, colorbar=False, colormap=colormap
-        )
-        axes[0].set_title(
-            f"{label1}\n(n={n_trials_condition1} trials, {n_sig_condition1} edges)",
-            fontsize=plot_cfg.font.suptitle,
-            fontweight="bold",
-            color=condition_colors["c1"],
-        )
-        
-        plot_connectivity_circle(
-            matrix_condition2, node_names, n_lines=n_lines_to_show, ax=axes[1],
-            title="", show=False,
-            vmin=vmin, vmax=vmax, colorbar=True, colormap=colormap
-        )
-        axes[1].set_title(
-            f"{label2}\n(n={n_trials_condition2} trials, {n_sig_condition2} edges)",
-            fontsize=plot_cfg.font.suptitle,
-            fontweight="bold",
-            color=condition_colors["c2"],
-        )
-    except Exception as e:
-        log_if_present(logger, "error", f"Failed to plot: {e}")
-        plt.close(fig)
-        return
-    
-    title_text = (
+    title_base = (
         f"{measure.upper()} Connectivity: {band.capitalize()} Band\n"
         f"Subject: {subject} | Top {int(top_fraction*100)}% connections "
         f"(threshold ≥ {threshold:.3f})"
     )
-    fig.suptitle(title_text, fontsize=plot_cfg.font.figure_title, 
-                 fontweight="bold", y=0.98)
     
     footer_text = (
         f"{n_nodes} nodes | {n_edges} total edges | "
         f"Showing connections ≥ {threshold:.3f}"
     )
-    fig.text(0.5, 0.02, footer_text, ha='center', va='bottom', 
-             fontsize=plot_cfg.font.large, color='gray')
     
-    plt.tight_layout(rect=[0, 0.05, 1, 0.93])
-    output_name = f"sub-{subject}_connectivity_{measure}_{band}_circle_by_condition"
-    save_fig(
-        fig, save_dir / output_name,
-        formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config
-    )
-    plt.close(fig)
-    log_if_present(logger, "info", 
-                  f"Saved {measure} {band} connectivity circle by condition")
-
-
-def plot_sliding_connectivity_trajectories(
-    conn_df: pd.DataFrame,
-    window_indices: List[int],
-    window_centers: np.ndarray,
-    aligned_events: Optional[pd.DataFrame],
-    subject: str,
-    plots_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Plot sliding window connectivity trajectories over time."""
-    if conn_df is None or conn_df.empty or not window_indices:
-        return
+    from eeg_pipeline.utils.formatting import sanitize_label
     
-    plot_cfg = get_plot_config(config)
-    mean_traces = []
-    labels = []
-
-    for window_idx in window_indices:
-        prefix = f"sw{window_idx}corr_all_"
-        window_columns = [
-            col for col in conn_df.columns 
-            if str(col).startswith(prefix) and "__" in str(col)
-        ]
-        if not window_columns:
-            continue
-        mean_trace = conn_df[window_columns].apply(
-            pd.to_numeric, errors="coerce"
-        ).mean(axis=1)
-        mean_traces.append(mean_trace)
-        labels.append(window_idx)
-
-    if not mean_traces:
-        log_if_present(logger, "warning", 
-                      "No sliding connectivity columns found for trajectories.")
-        return
-
-    trajectory_matrix = np.vstack([np.asarray(trace) for trace in mean_traces])
-    fig, ax = plt.subplots(
-        figsize=plot_cfg.get_figure_size("sliding", plot_type="connectivity")
-    )
-    
-    mean_all = np.nanmean(trajectory_matrix, axis=1)
-    n_finite = np.maximum(1, np.sum(np.isfinite(trajectory_matrix), axis=1))
-    sem_all = np.nanstd(trajectory_matrix, axis=1) / np.sqrt(n_finite)
-    
-    blue_color = plot_cfg.get_color("blue")
-    ax.plot(window_centers[:len(mean_all)], mean_all, 
-           color=blue_color, label="All trials")
-    ax.fill_between(
-        window_centers[:len(mean_all)],
-        mean_all - sem_all,
-        mean_all + sem_all,
-        color=blue_color,
-        alpha=0.2,
-    )
-
-    n_trials = trajectory_matrix.shape[1]
-    n_windows = len(window_indices)
-    
-    if aligned_events is not None:
-        comparison_info = extract_comparison_mask(
-            aligned_events, config, require_enabled=False
+    def save_condition_circle(condition_matrix, condition_label, condition_color, n_trials, n_sig_edges):
+        """Create and save a single connectivity circle for one condition."""
+        n_lines_to_show = (n_lines if n_lines is not None 
+                           else max(min_lines_config, n_sig_edges))
+        
+        fig, ax = plt.subplots(figsize=(width_per_circle, width_per_circle), 
+                              subplot_kw=dict(polar=True))
+        
+        try:
+            plot_connectivity_circle(
+                condition_matrix, node_names, n_lines=n_lines_to_show, ax=ax,
+                title="", show=False,
+                vmin=vmin, vmax=vmax, colorbar=True, colormap=colormap
+            )
+            ax.set_title(
+                f"{condition_label}\n(n={n_trials} trials, {n_sig_edges} edges)",
+                fontsize=plot_cfg.font.suptitle,
+                fontweight="bold",
+                color=condition_color,
+            )
+        except Exception as e:
+            log_if_present(logger, "error", f"Failed to plot {condition_label}: {e}")
+            plt.close(fig)
+            return
+        
+        fig.suptitle(title_base, fontsize=plot_cfg.font.figure_title, 
+                    fontweight="bold", y=0.98)
+        fig.text(0.5, 0.02, footer_text, ha='center', va='bottom', 
+                fontsize=plot_cfg.font.large, color='gray')
+        
+        condition_safe = sanitize_label(condition_label).lower().replace(" ", "_")
+        output_name = f"sub-{subject}_connectivity_{measure}_{band}_circle_{condition_safe}"
+        save_fig(
+            fig, save_dir / output_name,
+            formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config
         )
-        if comparison_info is not None:
-            mask1, mask2, label1, label2 = comparison_info
-            n_samples = min(trajectory_matrix.shape[1], len(mask1))
-            if n_samples > 0:
-                matrix_aligned = trajectory_matrix[:, :n_samples]
-                mask1_array = np.asarray(mask1[:n_samples], dtype=bool)
-                mask2_array = np.asarray(mask2[:n_samples], dtype=bool)
-                
-                for condition_mask, condition_label, condition_color in [
-                    (mask1_array, label1, plot_cfg.get_color("blue")),
-                    (mask2_array, label2, plot_cfg.get_color("red")),
-                ]:
-                    if int(condition_mask.sum()) == 0:
-                        continue
-                    
-                    condition_data = matrix_aligned[:, condition_mask]
-                    n_condition = condition_data.shape[1]
-                    if condition_data.size == 0:
-                        continue
-                    
-                    mean_condition = np.nanmean(condition_data, axis=1)
-                    n_finite_cond = np.maximum(
-                        1, np.sum(np.isfinite(condition_data), axis=1)
-                    )
-                    sem_condition = np.nanstd(condition_data, axis=1) / np.sqrt(n_finite_cond)
-                    
-                    ax.plot(window_centers[:len(mean_condition)], mean_condition, 
-                           label=f"{condition_label} (n={n_condition})", 
-                           color=condition_color)
-                    ax.fill_between(
-                        window_centers[:len(mean_condition)],
-                        mean_condition - sem_condition,
-                        mean_condition + sem_condition,
-                        color=condition_color,
-                        alpha=0.2,
-                    )
-
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Mean sliding connectivity")
-    ax.set_title(f"Sliding connectivity trajectories (sub-{subject})")
-    ax.grid(alpha=0.3)
-    ax.legend(frameon=False)
+        plt.close(fig)
     
-    footer_text = f"n={n_trials} trials | {n_windows} time windows"
-    fig.text(
-        0.99, 0.01, footer_text,
-        ha='right', va='bottom',
-        fontsize=plot_cfg.font.small,
-        color='gray', alpha=0.8
-    )
+    for condition_label, condition_mask in conditions:
+        n_samples = min(len(features_df), len(condition_mask))
+        if n_samples <= 0:
+            continue
+        
+        condition_mask_array = np.asarray(condition_mask[:n_samples], dtype=bool)
+        
+        if int(condition_mask_array.sum()) == 0:
+            continue
+        
+        condition_matrix, n_sig_edges = build_matrix_for_condition(condition_mask_array)
+        n_trials = int(condition_mask_array.sum())
+        condition_color = condition_colors.get(condition_label, plot_cfg.get_color("blue"))
+        
+        save_condition_circle(
+            condition_matrix, condition_label, condition_color,
+            n_trials, n_sig_edges
+        )
     
-    plt.tight_layout(rect=[0, 0.03, 1, 1])
-    save_fig(
-        fig,
-        plots_dir / f"sub-{subject}_sliding_connectivity_trajectories",
-        formats=plot_cfg.formats,
-        config=config,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-    log_if_present(logger, "info", "Saved sliding connectivity trajectories")
-
-
-def plot_sliding_degree_heatmap(
-    conn_df: pd.DataFrame,
-    window_indices: List[int],
-    window_centers: np.ndarray,
-    subject: str,
-    plots_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    deg_cols = [c for c in conn_df.columns if "corr_all_deg_" in str(c)]
-    if not deg_cols:
-        return
-    channels = sorted({c.split("deg_")[-1] for c in deg_cols if "deg_" in c})
-    if not channels:
-        return
-    data = np.full((len(channels), len(window_indices)), np.nan, dtype=float)
-    for win_pos, win in enumerate(window_indices):
-        for ch_idx, ch in enumerate(channels):
-            col = f"sw{win}corr_all_deg_{ch}"
-            if col in conn_df.columns:
-                vals = pd.to_numeric(conn_df[col], errors="coerce")
-                data[ch_idx, win_pos] = np.nanmean(vals)
-
-    if not np.isfinite(data).any():
-        log_if_present(logger, "warning", "Sliding degree heatmap has no finite values.")
-        return
-
-    plot_cfg = get_plot_config(config)
-    fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("wide", plot_type="connectivity"))
-    vmax = np.nanmax(np.abs(data))
-    im = ax.imshow(
-        data,
-        aspect="auto",
-        origin="lower",
-        cmap="magma",
-        extent=[window_centers[0], window_centers[len(window_indices)-1], -0.5, len(channels)-0.5],
-        vmin=0,
-        vmax=vmax if np.isfinite(vmax) and vmax > 0 else None,
-    )
-    ax.set_yticks(range(len(channels)))
-    ax.set_yticklabels(channels)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Channel")
-    ax.set_title(f"Sliding degree (mean across trials) - sub-{subject}")
-    cbar = plt.colorbar(im, ax=ax, pad=0.02)
-    cbar.set_label("Mean degree")
-    plt.tight_layout()
-    save_fig(
-        fig,
-        plots_dir / f"sub-{subject}_sliding_degree_heatmap",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        config=config,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-    log_if_present(logger, "info", "Saved sliding degree heatmap")
+    log_if_present(logger, "info", 
+                  f"Saved {measure} {band} connectivity circles by condition")
 
 
 def plot_edge_significance_circle_from_stats(
@@ -790,11 +600,14 @@ def plot_edge_significance_circle_from_stats(
     fig_size = plot_cfg.get_figure_size("standard", plot_type="connectivity")
     fig, ax = plt.subplots(figsize=fig_size, subplot_kw=dict(polar=True))
     vmax = np.nanmax(np.abs(mat)) if np.isfinite(mat).any() else 1.0
+    title_text = f"{prefix} edge effects"
+    if sig_edges:
+        title_text = f"{prefix} edge effects (highlighted significant edges)"
     plot_connectivity_circle(
         mat,
         nodes,
         n_lines=None,
-        title=f"{prefix} significant edges",
+        title=title_text,
         ax=ax,
         show=False,
         vmin=-vmax,
@@ -992,11 +805,22 @@ def _plot_column_comparison_connectivity(
     if use_multi_group:
         multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
         if not multi_group_info:
-            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
+            column = get_config_value(config, "plotting.comparisons.comparison_column", None)
+            values = get_config_value(config, "plotting.comparisons.comparison_values", [])
+            available_cols = list(events_df.columns) if events_df is not None else []
+            log_if_present(
+                logger, "warning",
+                f"Multi-group column comparison failed. "
+                f"Column: {column!r}, Values: {values}, "
+                f"Available columns: {available_cols[:10]}{'...' if len(available_cols) > 10 else ''}"
+            )
             return
         
         masks_dict, group_labels = multi_group_info
         segment = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        
+        from eeg_pipeline.plotting.features.utils import load_multigroup_stats
+        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
         
         for roi_name in roi_names:
             for measure in measures:
@@ -1038,6 +862,7 @@ def _plot_column_comparison_connectivity(
                         logger=logger,
                         roi_name=roi_name,
                         stats_dir=stats_dir,
+                        multigroup_stats=multigroup_stats,
                     )
         
         log_if_present(logger, "info", f"Saved connectivity multi-group column comparison for {len(roi_names)} ROIs")
@@ -1318,6 +1143,13 @@ def plot_connectivity_network(
     events_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """Plot connectivity network graph for a given measure and band."""
+    if events_df is not None:
+        plot_connectivity_network_by_condition(
+            features_df, events_df, info, subject, save_dir, logger, config,
+            measure=measure, band=band
+        )
+        return
+    
     columns_all, edges_all, _ = parse_connectivity_columns(
         list(features_df.columns), measure, band
     )
@@ -1340,6 +1172,20 @@ def plot_connectivity_network(
     if not np.any(np.isfinite(adjacency_matrix)):
         return
 
+    default_top_fraction = float(get_config_value(
+        config, "plotting.plots.features.connectivity.network_top_fraction", 0.0
+    ))
+    if default_top_fraction > 0:
+        absolute_weights = np.abs(adjacency_matrix)
+        upper_triangle = np.triu(absolute_weights, k=1)
+        finite_weights = upper_triangle[np.isfinite(upper_triangle)]
+        if len(finite_weights) > 0:
+            threshold = np.percentile(finite_weights, (1 - default_top_fraction) * 100)
+        else:
+            threshold = 0.0
+    else:
+        threshold = 0.0
+
     significant_edges = compute_significant_edges(features_df, columns, events_df, config)
     significant_set = significant_edges if isinstance(significant_edges, set) else set()
 
@@ -1349,7 +1195,7 @@ def plot_connectivity_network(
         graph.add_node(channel_i)
         for j in range(i + 1, len(channel_order)):
             weight = adjacency_matrix[i, j]
-            if np.isfinite(weight) and np.abs(weight) > 0:
+            if np.isfinite(weight) and np.abs(weight) >= threshold:
                 graph.add_edge(channel_i, channel_order[j], weight=float(weight))
 
     if graph.number_of_edges() == 0:
@@ -1405,9 +1251,11 @@ def plot_connectivity_network(
     scalar_mappable.set_array([])
     cbar = plt.colorbar(scalar_mappable, ax=ax)
     cbar.set_label("Connectivity")
-    ax.set_title(
-        f"Connectivity network ({measure.upper()} {band.capitalize()}, sub-{subject})"
-    )
+    
+    title_text = f"Connectivity network ({measure.upper()} {band.capitalize()}, sub-{subject})"
+    if default_top_fraction > 0:
+        title_text += f" | Top {int(default_top_fraction*100)}% (threshold ≥ {threshold:.3f})"
+    ax.set_title(title_text)
     ax.axis("off")
 
     ensure_dir(save_dir)
@@ -1425,243 +1273,163 @@ def plot_connectivity_network(
     log_if_present(logger, "info", f"Saved connectivity network for {measure} {band}")
 
 
-def plot_sliding_state_centroids(
-    centroids: np.ndarray,
-    edge_pairs: List[Tuple[str, str]],
-    ch_names: Optional[List[str]],
+def plot_connectivity_network_by_condition(
+    features_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    info: mne.Info,
+    subject: str,
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
+    measure: str = "wpli",
+    band: str = "alpha",
 ) -> None:
-    if centroids is None or centroids.size == 0 or not edge_pairs:
+    """Plot connectivity network graphs for conditions (supports 2+ groups)."""
+    if features_df is None or features_df.empty or events_df is None:
+        log_if_present(logger, "warning", "No feature data for connectivity network plot")
         return
-    ensure_dir(save_dir)
-    plot_cfg = get_plot_config(config)
-    n_states = centroids.shape[0]
-    nodes = sorted({n for pair in edge_pairs for n in pair})
-    node_idx = {n: i for i, n in enumerate(nodes)}
 
-    for s_idx in range(n_states):
-        adj = np.zeros((len(nodes), len(nodes)), dtype=float)
-        for val, (u, v) in zip(centroids[s_idx], edge_pairs):
-            if u in node_idx and v in node_idx:
-                i, j = node_idx[u], node_idx[v]
-                adj[i, j] = val
-                adj[j, i] = val
-        fig_size = plot_cfg.get_figure_size("standard", plot_type="connectivity")
-        fig, ax = plt.subplots(figsize=fig_size, subplot_kw=dict(polar=True))
-        vmax = np.nanmax(np.abs(adj)) if np.isfinite(adj).any() else 1.0
-        plot_connectivity_circle(
-            adj,
-            nodes,
-            n_lines=None,
-            node_angles=None,
-            node_colors=None,
-            title=f"Sliding state {s_idx}",
+    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
+    
+    multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+    if not multi_group_info:
+        log_if_present(logger, "warning", 
+                      "Multi-group comparison failed for connectivity network")
+        return
+    masks_dict, group_labels = multi_group_info
+    conditions = [(label, mask) for label, mask in masks_dict.items()]
+    
+    plot_cfg = get_plot_config(config)
+    group_colors = plt.cm.Set2(np.linspace(0, 1, max(len(conditions), 3)))
+    condition_colors = {label: group_colors[i] for i, (label, _) in enumerate(conditions)}
+
+    columns_all, edges_all, _ = parse_connectivity_columns(
+        list(features_df.columns), measure, band
+    )
+    columns, edges = _filter_non_self_edges(columns_all, edges_all)
+    
+    if not columns:
+        log_if_present(logger, "debug", 
+                      f"No channel-pair connectivity columns for {measure} {band} network")
+        return
+
+    channel_order = _get_channel_order(edges, info)
+    if not channel_order:
+        log_if_present(logger, "debug", 
+                      f"No channel names found for {measure} {band}")
+        return
+    
+    default_top_fraction = float(get_config_value(
+        config, "plotting.plots.features.connectivity.network_top_fraction", 0.0
+    ))
+    
+    pooled_connectivity = features_df[columns].mean(axis=0).values
+    absolute_connectivity = np.abs(pooled_connectivity)
+    if default_top_fraction > 0:
+        threshold = np.percentile(absolute_connectivity, (1 - default_top_fraction) * 100)
+    else:
+        threshold = 0.0
+    
+    def build_network_for_condition(condition_mask: np.ndarray) -> Optional[nx.Graph]:
+        """Build network graph for a specific condition."""
+        condition_features = features_df.loc[condition_mask]
+        if len(condition_features) == 0:
+            return None
+            
+        adjacency_matrix = build_adjacency_from_edges(
+            condition_features, columns, channel_order, edges=edges
+        )
+        if not np.any(np.isfinite(adjacency_matrix)):
+            return None
+
+        graph = nx.Graph()
+        for i, channel_i in enumerate(channel_order):
+            graph.add_node(channel_i)
+            for j in range(i + 1, len(channel_order)):
+                weight = adjacency_matrix[i, j]
+                if np.isfinite(weight) and np.abs(weight) >= threshold:
+                    graph.add_edge(channel_i, channel_order[j], weight=float(weight))
+        
+        return graph if graph.number_of_edges() > 0 else None
+    
+    from eeg_pipeline.utils.formatting import sanitize_label
+    
+    def save_condition_network(condition_graph, condition_label, condition_color, n_trials):
+        """Create and save a single connectivity network for one condition."""
+        if condition_graph is None:
+            return
+        
+        node_positions = nx.spring_layout(condition_graph, seed=42)
+        edge_weights = np.array(
+            [data["weight"] for _, _, data in condition_graph.edges(data=True)], dtype=float
+        )
+        vmax = float(np.nanmax(np.abs(edge_weights))) if edge_weights.size else 1.0
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        graph_edges = list(condition_graph.edges())
+        edge_colors = [condition_graph[u][v]["weight"] for u, v in graph_edges]
+        node_color = plot_cfg.get_color("network_node")
+        
+        nx.draw_networkx_nodes(condition_graph, node_positions, node_size=120, 
+                              node_color=node_color, alpha=0.8, ax=ax)
+        nx.draw_networkx_edges(
+            condition_graph,
+            node_positions,
+            edgelist=graph_edges,
+            edge_color=edge_colors,
+            edge_cmap=plt.cm.RdBu_r,
+            edge_vmin=-vmax,
+            edge_vmax=vmax,
+            width=2.0,
+            alpha=0.7,
             ax=ax,
-            show=False,
-            vmin=-vmax,
-            vmax=vmax,
-            colorbar=True,
-            colormap="RdBu_r",
         )
-        out_path = save_dir / f"sliding_state_centroid_{s_idx}"
+        nx.draw_networkx_labels(condition_graph, node_positions, font_size=7, 
+                               font_weight="bold", ax=ax)
+
+        scalar_mappable = plt.cm.ScalarMappable(
+            cmap="RdBu_r", norm=plt.Normalize(vmin=-vmax, vmax=vmax)
+        )
+        scalar_mappable.set_array([])
+        cbar = plt.colorbar(scalar_mappable, ax=ax)
+        cbar.set_label("Connectivity")
+        
+        title_text = (
+            f"Connectivity Network ({measure.upper()} {band.capitalize()})\n"
+            f"Subject: {subject} | {condition_label} (n={n_trials} trials)"
+        )
+        if default_top_fraction > 0:
+            title_text += f" | Top {int(default_top_fraction*100)}% (threshold ≥ {threshold:.3f})"
+        ax.set_title(title_text, fontsize=plot_cfg.font.figure_title, 
+                    fontweight="bold", color=condition_color)
+        ax.axis("off")
+
+        condition_safe = sanitize_label(condition_label).lower().replace(" ", "_")
+        output_name = f"sub-{subject}_connectivity_network_{measure}_{band}_{condition_safe}"
         save_fig(
-            fig,
-            out_path,
-            formats=plot_cfg.formats,
-            dpi=plot_cfg.dpi,
-            bbox_inches=plot_cfg.bbox_inches,
-            config=config,
-            pad_inches=plot_cfg.pad_inches,
+            fig, save_dir / output_name,
+            formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config
         )
         plt.close(fig)
-        log_if_present(logger, "info", f"Saved sliding centroid for state {s_idx}")
-
-
-def plot_sliding_state_sequences(
-    state_matrix: np.ndarray,
-    window_indices: List[int],
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    if state_matrix is None or state_matrix.size == 0:
-        return
-    ensure_dir(save_dir)
-    plot_cfg = get_plot_config(config)
-    fig, ax = plt.subplots(figsize=(10, 6))
-    im = ax.imshow(state_matrix, aspect="auto", interpolation="nearest", cmap="tab20")
-    ax.set_xlabel("Sliding window")
-    ax.set_ylabel("Trial")
-    ax.set_xticks(range(len(window_indices)))
-    ax.set_xticklabels(window_indices)
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label("State")
-    fig.tight_layout()
-    save_fig(fig, save_dir / "sliding_state_sequences", formats=plot_cfg.formats, dpi=plot_cfg.dpi, config=config)
-    plt.close(fig)
-    log_if_present(logger, "info", "Saved sliding state sequence plot")
-
-
-def plot_sliding_state_occupancy_boxplot(
-    occupancy: np.ndarray,
-    events_df: Optional[pd.DataFrame],
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    if occupancy is None or occupancy.size == 0:
-        return
-    ensure_dir(save_dir)
-    plot_cfg = get_plot_config(config)
-    n_states = occupancy.shape[1]
-
-    pain_col = None
-    if events_df is not None:
-        pain_col = find_column_in_events(events_df, "pain") or find_pain_column_in_events(events_df)
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-    data = [occupancy[:, s] for s in range(n_states)]
-    ax.boxplot(data, labels=[f"S{s}" for s in range(n_states)], patch_artist=True)
-    ax.set_ylabel("Occupancy fraction")
-    ax.set_title("Sliding-state occupancy (all trials)")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    save_fig(fig, save_dir / "sliding_state_occupancy", formats=plot_cfg.formats, dpi=plot_cfg.dpi, config=config)
-    plt.close(fig)
-
-    if pain_col and pain_col in events_df.columns:
-        fig, ax = plt.subplots(figsize=(7, 4))
-        pain_vals = pd.to_numeric(events_df[pain_col], errors="coerce")
-        groups = ["nonpain", "pain"]
-        positions = []
-        vals = []
-        for s in range(n_states):
-            for g_idx, g_val in enumerate([0, 1]):
-                mask = (pain_vals == g_val) & np.isfinite(occupancy[:, s])
-                if mask.sum() == 0:
-                    continue
-                vals.append(occupancy[:, s][mask])
-                positions.append(s + (0.15 if g_idx == 1 else -0.15))
-        if vals:
-            ax.boxplot(vals, positions=positions, widths=0.25, patch_artist=True)
-            ax.set_xticks(range(n_states))
-            ax.set_xticklabels([f"S{s}" for s in range(n_states)])
-            ax.set_ylabel("Occupancy fraction")
-            ax.set_title("Occupancy by pain group")
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            save_fig(fig, save_dir / "sliding_state_occupancy_by_pain", formats=plot_cfg.formats, dpi=plot_cfg.dpi, config=config)
-        plt.close(fig)
-
-
-def plot_sliding_state_occupancy_ribbons(
-    occupancy_mean: np.ndarray,
-    occupancy_sem: np.ndarray,
-    window_centers: np.ndarray,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-    state_labels: Optional[List[str]] = None,
-) -> None:
-    if occupancy_mean is None or occupancy_mean.size == 0 or window_centers is None or window_centers.size == 0:
-        log_if_present(logger, "warning", "No occupancy data for ribbons; skipping plot")
-        return
-    ensure_dir(save_dir)
-    plot_cfg = get_plot_config(config)
-    n_states, _ = occupancy_mean.shape
-    state_labels = state_labels or [f"S{idx}" for idx in range(n_states)]
-
-    fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("sliding", plot_type="connectivity"))
-    colors = plt.cm.get_cmap("tab10", n_states)
-    for s_idx in range(n_states):
-        mean_vals = occupancy_mean[s_idx, :]
-        sem_vals = occupancy_sem[s_idx, :] if occupancy_sem is not None else None
-        ax.plot(window_centers, mean_vals, label=state_labels[s_idx], color=colors(s_idx))
-        if sem_vals is not None and sem_vals.size == mean_vals.size:
-            ax.fill_between(
-                window_centers,
-                mean_vals - sem_vals,
-                mean_vals + sem_vals,
-                color=colors(s_idx),
-                alpha=0.2,
-            )
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Occupancy (fraction)")
-    ax.set_title("Sliding-state occupancy trajectories")
-    ax.set_ylim(0, 1)
-    ax.grid(alpha=0.3)
-    ax.legend(loc="upper right", frameon=False)
-
-    save_fig(
-        fig,
-        save_dir / "sliding_state_occupancy_ribbons",
-        formats=plot_cfg.formats,
-        config=config,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-    log_if_present(logger, "info", "Saved sliding state occupancy ribbons")
-
-
-def plot_sliding_state_lagged_correlation_surfaces(
-    window_centers: np.ndarray,
-    corr_r: np.ndarray,
-    corr_p: np.ndarray,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-    target_label: str = "VAS",
-    state_labels: Optional[List[str]] = None,
-) -> None:
-    if corr_r is None or corr_r.size == 0 or window_centers is None or window_centers.size == 0:
-        log_if_present(logger, "warning", "No lagged correlation data; skipping plot")
-        return
-
-    ensure_dir(save_dir)
-    plot_cfg = get_plot_config(config)
-    n_states, _ = corr_r.shape
-    state_labels = state_labels or [f"S{idx}" for idx in range(n_states)]
-    vmax = float(np.nanmax(np.abs(corr_r))) if np.isfinite(corr_r).any() else 1.0
-    vmax = vmax if vmax > 0 else 1.0
-    alpha = get_fdr_alpha(config)
-
-    fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("sliding", plot_type="connectivity"))
-    im = ax.imshow(
-        corr_r,
-        aspect="auto",
-        origin="lower",
-        cmap="RdBu_r",
-        vmin=-vmax,
-        vmax=vmax,
-        extent=[window_centers[0], window_centers[-1], -0.5, n_states - 0.5],
-    )
-    ax.set_yticks(range(n_states))
-    ax.set_yticklabels(state_labels)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("State")
-    ax.set_title(f"Sliding-state correlation vs {target_label}")
-
-    if corr_p is not None and corr_p.shape == corr_r.shape:
-        sig_mask = (corr_p < alpha) & np.isfinite(corr_p)
-        if np.any(sig_mask):
-            y_idx, x_idx = np.where(sig_mask)
-            ax.scatter(window_centers[x_idx], y_idx, marker="o", color="k", s=12, linewidths=0.5)
-
-    cbar = plt.colorbar(im, ax=ax, pad=0.02)
-    cbar.set_label("Spearman r")
-
-    save_fig(
-        fig,
-        save_dir / f"sliding_state_corr_surface_{target_label.lower()}",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        config=config,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-    log_if_present(logger, "info", f"Saved sliding state correlation surface for {target_label}")
+    
+    for condition_label, condition_mask in conditions:
+        n_samples = min(len(features_df), len(condition_mask))
+        if n_samples <= 0:
+            continue
+        
+        condition_mask_array = np.asarray(condition_mask[:n_samples], dtype=bool)
+        
+        if int(condition_mask_array.sum()) == 0:
+            continue
+        
+        condition_graph = build_network_for_condition(condition_mask_array)
+        n_trials = int(condition_mask_array.sum())
+        condition_color = condition_colors.get(condition_label, plot_cfg.get_color("blue"))
+        
+        save_condition_network(
+            condition_graph, condition_label, condition_color, n_trials
+        )
+    
+    log_if_present(logger, "info", 
+                  f"Saved {measure} {band} connectivity networks by condition")

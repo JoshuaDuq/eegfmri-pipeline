@@ -281,15 +281,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     defaults_overrides.add_argument("--validation-min-rois-for-fdr", type=int, default=None, help="Min ROIs for FDR correction (default from config)")
     defaults_overrides.add_argument("--validation-min-pvalues-for-fdr", type=int, default=None, help="Min p-values for FDR correction (default from config)")
 
-    # TFR misc (plotting.tfr.*)
-    defaults_overrides.add_argument(
-        "--tfr-default-baseline-window",
-        nargs=2,
-        type=float,
-        default=None,
-        metavar=("TMIN", "TMAX"),
-        help="Default baseline window used by TF plotting when missing (default from config)",
-    )
 
     overrides = parser.add_argument_group("Plot overrides")
 
@@ -394,11 +385,15 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         metavar=("PLOT_ID", "KEY", "VALUE"),
         help=(
             "Per-plot overrides; can be repeated. "
-            "Example: --plot-item-config tfr_scalpmean tfr_default_baseline_window -5.0 -0.01. "
-            "Keys: tfr_default_baseline_window, compare_windows, comparison_windows, compare_columns, "
+            "Example: --plot-item-config tfr_scalpmean compare_windows true. "
+            "Keys: compare_windows, comparison_windows, compare_columns, "
             "comparison_segment, comparison_column, comparison_values, comparison_labels, comparison_rois, "
-            "topomap_windows (or topomap_window for single value), connectivity_circle_top_fraction, "
-            "connectivity_circle_min_lines, itpc_shared_colorbar."
+            "topomap_windows (or topomap_window for single value), tfr_topomap_active_window, "
+            "tfr_topomap_window_size_ms, tfr_topomap_window_count, tfr_topomap_label_x_position, tfr_topomap_label_y_position_bottom, "
+            "tfr_topomap_label_y_position, tfr_topomap_title_y, tfr_topomap_title_pad, "
+            "tfr_topomap_subplots_right, tfr_topomap_temporal_hspace, tfr_topomap_temporal_wspace, "
+            "connectivity_circle_top_fraction, connectivity_circle_min_lines, "
+            "connectivity_network_top_fraction, itpc_shared_colorbar."
         ),
     )
 
@@ -524,14 +519,7 @@ def _parse_plot_item_configs(raw: Optional[List[List[str]]]) -> Dict[str, Dict[s
 
 def _apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> None:
     for key, values in overrides.items():
-        if key == "tfr_default_baseline_window" and len(values) == 2:
-            try:
-                _apply_config_override(
-                    config, "plotting.tfr.default_baseline_window", [float(values[0]), float(values[1])]
-                )
-            except ValueError:
-                pass
-        elif key == "compare_windows" and values:
+        if key == "compare_windows" and values:
             parsed = _parse_bool(values[0])
             if parsed is not None:
                 _apply_config_override(config, "plotting.comparisons.compare_windows", parsed)
@@ -565,14 +553,121 @@ def _apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> 
                 _apply_config_override(config, "plotting.plots.features.connectivity.circle_min_lines", int(values[0]))
             except ValueError:
                 pass
+        elif key == "connectivity_network_top_fraction" and values:
+            try:
+                _apply_config_override(config, "plotting.plots.features.connectivity.network_top_fraction", float(values[0]))
+            except ValueError:
+                pass
         elif key == "itpc_shared_colorbar" and values:
             parsed = _parse_bool(values[0])
             if parsed is not None:
                 _apply_config_override(config, "plotting.plots.itpc.shared_colorbar", parsed)
+        elif key == "tfr_topomap_active_window" and values:
+            try:
+                parts = values[0].split()
+                if len(parts) == 2:
+                    tmin = float(parts[0])
+                    tmax = float(parts[1])
+                    _apply_config_override(
+                        config,
+                        "time_frequency_analysis.active_window",
+                        [tmin, tmax]
+                    )
+            except (ValueError, IndexError):
+                pass
+        elif key == "tfr_topomap_window_size_ms" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "time_frequency_analysis.topomap.temporal.window_size_ms",
+                    float(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_window_count" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "time_frequency_analysis.topomap.temporal.window_count",
+                    int(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_label_x_position" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "plotting.plots.tfr.topomap.label_x_position",
+                    float(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_label_y_position_bottom" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "plotting.plots.tfr.topomap.label_y_position_bottom",
+                    float(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_label_y_position" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "plotting.plots.tfr.topomap.label_y_position",
+                    float(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_title_y" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "plotting.plots.tfr.topomap.title_y",
+                    float(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_title_pad" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "plotting.plots.tfr.topomap.title_pad",
+                    int(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_subplots_right" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "plotting.plots.tfr.topomap.subplots_right",
+                    float(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_temporal_hspace" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "time_frequency_analysis.topomap.temporal.single_subject.hspace",
+                    float(values[0])
+                )
+            except ValueError:
+                pass
+        elif key == "tfr_topomap_temporal_wspace" and values:
+            try:
+                _apply_config_override(
+                    config,
+                    "time_frequency_analysis.topomap.temporal.single_subject.wspace",
+                    float(values[0])
+                )
+            except ValueError:
+                pass
 
 
 _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
-    "tfr_default_baseline_window": "plotting.tfr.default_baseline_window",
     "compare_windows": "plotting.comparisons.compare_windows",
     "comparison_windows": "plotting.comparisons.comparison_windows",
     "compare_columns": "plotting.comparisons.compare_columns",
@@ -583,8 +678,20 @@ _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "comparison_rois": "plotting.comparisons.comparison_rois",
     "topomap_windows": "plotting.plots.features.power.topomap_windows",
     "topomap_window": "plotting.plots.features.power.topomap_windows",
+    "tfr_topomap_active_window": "time_frequency_analysis.active_window",
+    "tfr_topomap_window_size_ms": "time_frequency_analysis.topomap.temporal.window_size_ms",
+    "tfr_topomap_window_count": "time_frequency_analysis.topomap.temporal.window_count",
+    "tfr_topomap_label_x_position": "plotting.plots.tfr.topomap.label_x_position",
+    "tfr_topomap_label_y_position_bottom": "plotting.plots.tfr.topomap.label_y_position_bottom",
+    "tfr_topomap_label_y_position": "plotting.plots.tfr.topomap.label_y_position",
+    "tfr_topomap_title_y": "plotting.plots.tfr.topomap.title_y",
+    "tfr_topomap_title_pad": "plotting.plots.tfr.topomap.title_pad",
+    "tfr_topomap_subplots_right": "plotting.plots.tfr.topomap.subplots_right",
+    "tfr_topomap_temporal_hspace": "time_frequency_analysis.topomap.temporal.single_subject.hspace",
+    "tfr_topomap_temporal_wspace": "time_frequency_analysis.topomap.temporal.single_subject.wspace",
     "connectivity_circle_top_fraction": "plotting.plots.features.connectivity.circle_top_fraction",
     "connectivity_circle_min_lines": "plotting.plots.features.connectivity.circle_min_lines",
+    "connectivity_network_top_fraction": "plotting.plots.features.connectivity.network_top_fraction",
     "itpc_shared_colorbar": "plotting.plots.itpc.shared_colorbar",
 }
 
@@ -602,21 +709,6 @@ def _validate_plot_item_configs(configs: Dict[str, Dict[str, List[str]]]) -> Non
                 errors.append(f"Unknown key '{key}' for plot_id '{plot_id}'. Allowed keys: {allowed}.")
                 continue
 
-            if key == "tfr_default_baseline_window":
-                if len(values) != 2:
-                    errors.append(
-                        f"plot_id '{plot_id}': {key} expects 2 values (tmin tmax), got {len(values)}."
-                    )
-                    continue
-                try:
-                    float(values[0])
-                    float(values[1])
-                except ValueError:
-                    errors.append(
-                        f"plot_id '{plot_id}': {key} values must be numeric (tmin tmax), got: {values!r}."
-                    )
-                continue
-
             if key in {"compare_windows", "compare_columns"}:
                 if not values:
                     errors.append(f"plot_id '{plot_id}': {key} expects a boolean value (true/false).")
@@ -628,7 +720,7 @@ def _validate_plot_item_configs(configs: Dict[str, Dict[str, List[str]]]) -> Non
                     )
                 continue
 
-            if key in {"comparison_segment", "comparison_column", "connectivity_circle_top_fraction", "connectivity_circle_min_lines"}:
+            if key in {"comparison_segment", "comparison_column", "connectivity_circle_top_fraction", "connectivity_circle_min_lines", "connectivity_network_top_fraction"}:
                 if not values or not str(values[0]).strip():
                     errors.append(f"plot_id '{plot_id}': {key} expects a non-empty value.")
                 continue
@@ -659,6 +751,15 @@ def _validate_plot_item_configs(configs: Dict[str, Dict[str, List[str]]]) -> Non
                         errors.append(f"plot_id '{plot_id}': {key} must be a non-negative integer.")
                 except (ValueError, IndexError):
                     errors.append(f"plot_id '{plot_id}': {key} must be a non-negative integer.")
+                continue
+
+            if key == "connectivity_network_top_fraction":
+                try:
+                    val = float(values[0])
+                    if not (0.0 <= val <= 1.0):
+                        errors.append(f"plot_id '{plot_id}': {key} must be between 0.0 and 1.0.")
+                except (ValueError, IndexError):
+                    errors.append(f"plot_id '{plot_id}': {key} must be a number between 0.0 and 1.0.")
                 continue
 
             if key == "itpc_shared_colorbar":
@@ -947,8 +1048,66 @@ def _apply_validation_overrides(args: argparse.Namespace, config: Any) -> None:
 
 def _apply_tfr_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply TFR-related overrides."""
-    if _get_arg_value(args, "tfr_default_baseline_window"):
-        _apply_config_override(config, "plotting.tfr.default_baseline_window", list(args.tfr_default_baseline_window))
+    if _get_arg_value(args, "tfr_topomap_window_size_ms") is not None:
+        _apply_config_override(
+            config,
+            "time_frequency_analysis.topomap.temporal.window_size_ms",
+            float(args.tfr_topomap_window_size_ms),
+        )
+    if _get_arg_value(args, "tfr_topomap_window_count") is not None:
+        _apply_config_override(
+            config,
+            "time_frequency_analysis.topomap.temporal.window_count",
+            int(args.tfr_topomap_window_count),
+        )
+    if _get_arg_value(args, "tfr_topomap_label_x_position") is not None:
+        _apply_config_override(
+            config,
+            "plotting.plots.tfr.topomap.label_x_position",
+            float(args.tfr_topomap_label_x_position),
+        )
+    if _get_arg_value(args, "tfr_topomap_label_y_position_bottom") is not None:
+        _apply_config_override(
+            config,
+            "plotting.plots.tfr.topomap.label_y_position_bottom",
+            float(args.tfr_topomap_label_y_position_bottom),
+        )
+    if _get_arg_value(args, "tfr_topomap_label_y_position") is not None:
+        _apply_config_override(
+            config,
+            "plotting.plots.tfr.topomap.label_y_position",
+            float(args.tfr_topomap_label_y_position),
+        )
+    if _get_arg_value(args, "tfr_topomap_title_y") is not None:
+        _apply_config_override(
+            config,
+            "plotting.plots.tfr.topomap.title_y",
+            float(args.tfr_topomap_title_y),
+        )
+    if _get_arg_value(args, "tfr_topomap_title_pad") is not None:
+        _apply_config_override(
+            config,
+            "plotting.plots.tfr.topomap.title_pad",
+            int(args.tfr_topomap_title_pad),
+        )
+    if _get_arg_value(args, "tfr_topomap_subplots_right") is not None:
+        _apply_config_override(
+            config,
+            "plotting.plots.tfr.topomap.subplots_right",
+            float(args.tfr_topomap_subplots_right),
+        )
+    if _get_arg_value(args, "tfr_topomap_temporal_hspace") is not None:
+        _apply_config_override(
+            config,
+            "time_frequency_analysis.topomap.temporal.single_subject.hspace",
+            float(args.tfr_topomap_temporal_hspace),
+        )
+    if _get_arg_value(args, "tfr_topomap_temporal_wspace") is not None:
+        _apply_config_override(
+            config,
+            "time_frequency_analysis.topomap.temporal.single_subject.wspace",
+            float(args.tfr_topomap_temporal_wspace),
+        )
     if _get_arg_value(args, "shared_colorbar") is not None:
         config.setdefault("plotting", {}).setdefault("plots", {}).setdefault("itpc", {})["shared_colorbar"] = args.shared_colorbar
     if _get_arg_value(args, "tfr_log_base") is not None:
@@ -1147,12 +1306,22 @@ def _parse_frequency_band_definitions(band_defs: List[str]) -> Dict[str, List[fl
 def _apply_band_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply custom frequency band definitions to config for plotting.
 
+    If --frequency-bands is specified, uses only those definitions.
+    If --bands is also specified, filters to only selected bands.
+    
     Sets bands in both locations used by different plotting subsystems:
     - Top-level 'frequency_bands': Used by get_frequency_bands() in feature plots
     - 'time_frequency_analysis.bands': Used by TFR analysis
     """
     if _get_arg_value(args, "frequency_bands"):
         custom_bands = _parse_frequency_band_definitions(args.frequency_bands)
+        
+        selected_bands = getattr(args, "bands", None)
+        if selected_bands:
+            selected_lower = [b.lower() for b in selected_bands]
+            filtered_bands = {k: v for k, v in custom_bands.items() if k.lower() in selected_lower}
+            custom_bands = filtered_bands
+        
         # Apply to top-level frequency_bands (used by get_frequency_bands)
         config["frequency_bands"] = custom_bands
         # Apply to TFR-specific bands (used by TFR analysis)
@@ -1204,27 +1373,84 @@ def _map_plot_id_to_plotters(plot_id: str, feature_categories: List[str]) -> Opt
         List of plotter tokens in "category.name" format, or None to run all plotters
     """
     # Mapping from plot IDs to plotter function names
-    # These are the registered plotter function names (not the plot IDs)
+    # These MUST match the exact registered plotter function names in registrations.py
     PLOT_ID_TO_PLOTTER = {
+        # Power plots -> 4 registered: plot_tfr_visualization, plot_psd_visualization, 
+        #                              plot_power_condition_comparison, plot_power_summary
         "power_by_condition": "plot_power_condition_comparison",
         "power_spectral_density": "plot_psd_visualization",
-        "band_power_topomaps": "plot_power_summary",  # Handles topomaps conditionally
-        "cross_frequency_power_correlation": "plot_power_condition_comparison",  # Same plotter handles both
-        "connectivity_by_condition": "plot_connectivity_by_condition",
-        "connectivity_circle_condition": "plot_connectivity_circle_by_condition",
-        "connectivity_heatmap": "plot_connectivity_heatmap",
-        "connectivity_network": "plot_connectivity_network",
-        "connectivity_dynamics": "plot_sliding_connectivity_trajectories",
-        "aperiodic_by_condition": "plot_aperiodic_by_condition",
-        "aperiodic_topomaps": "plot_aperiodic_topomaps",
-        "complexity_by_condition": "plot_complexity_by_condition",
-        "erds_by_condition": "plot_erds_by_condition",
-        "spectral_by_condition": "plot_spectral_by_condition",
-        "ratios_by_condition": "plot_ratios_by_condition",
-        "asymmetry_by_condition": "plot_asymmetry_by_condition",
-        "bursts_by_condition": "plot_bursts_by_condition",
-        "itpc_by_condition": "plot_itpc_by_condition",
-        "pac_by_condition": "plot_pac_by_condition",
+        "band_power_topomaps": "plot_power_summary",
+        "cross_frequency_power_correlation": "plot_power_condition_comparison",
+        
+        # Connectivity plots -> 2 registered: plot_connectivity_mne_suite, plot_connectivity_condition
+        "connectivity_by_condition": "plot_connectivity_condition",
+        "connectivity_circle_condition": "plot_connectivity_mne_suite",
+        "connectivity_heatmap": "plot_connectivity_mne_suite",
+        "connectivity_network": "plot_connectivity_mne_suite",
+        
+        # Aperiodic plots -> 1 registered: aperiodic_suite
+        "aperiodic_topomaps": "aperiodic_suite",
+        "aperiodic_by_condition": "aperiodic_suite",
+        "aperiodic_temporal_evolution": "aperiodic_suite",
+        
+        # ITPC plots -> 1 registered: itpc_suite
+        "itpc_heatmap": "itpc_suite",
+        "itpc_topomaps": "itpc_suite",
+        "itpc_by_condition": "itpc_suite",
+        "itpc_temporal_evolution": "itpc_suite",
+        
+        # PAC plots -> 2 registered: pac_summary, pac_suite
+        "pac_summary": "pac_summary",
+        "pac_comodulograms": "pac_suite",
+        "pac_by_condition": "pac_suite",
+        "pac_time_ribbons": "pac_suite",
+        
+        # ERDS plots -> 1 registered: plot_erds
+        "erds_temporal_evolution": "plot_erds",
+        "erds_latency_distribution": "plot_erds",
+        "erds_erd_ers_separation": "plot_erds",
+        "erds_global_summary": "plot_erds",
+        "erds_by_condition": "plot_erds",
+        
+        # Complexity plots -> 1 registered: plot_complexity
+        "complexity_by_band": "plot_complexity",
+        "complexity_by_condition": "plot_complexity",
+        "complexity_temporal_evolution": "plot_complexity",
+        
+        # Spectral plots -> 1 registered: plot_spectral
+        "spectral_summary": "plot_spectral",
+        "spectral_edge_frequency": "plot_spectral",
+        "spectral_by_condition": "plot_spectral",
+        "spectral_temporal_evolution": "plot_spectral",
+        
+        # Ratios plots -> 1 registered: plot_ratios
+        "ratios_by_pair": "plot_ratios",
+        "ratios_by_condition": "plot_ratios",
+        "ratios_temporal_evolution": "plot_ratios",
+        
+        # Asymmetry plots -> 1 registered: plot_asymmetry
+        "asymmetry_by_band": "plot_asymmetry",
+        "asymmetry_by_condition": "plot_asymmetry",
+        "asymmetry_temporal_evolution": "plot_asymmetry",
+        
+        # Bursts plots -> 1 registered: plot_bursts
+        "bursts_by_band": "plot_bursts",
+        "bursts_by_condition": "plot_bursts",
+        "burst_temporal_evolution": "plot_bursts",
+        
+        # Quality plots -> 1 registered: quality_suite
+        "quality_feature_distributions": "quality_suite",
+        "quality_outlier_heatmap": "quality_suite",
+        "quality_snr_distribution": "quality_suite",
+        
+        # ERP plots -> 1 registered: erp_suite
+        "erp_butterfly": "erp_suite",
+        "erp_roi": "erp_suite",
+        "erp_contrast": "erp_suite",
+        "erp_topomaps": "erp_suite",
+        
+        # Temporal plots -> 1 registered: plot_temporal
+        "temporal_evolution": "plot_temporal",
     }
     
     plotter_name = PLOT_ID_TO_PLOTTER.get(plot_id)
@@ -1241,10 +1467,11 @@ def _map_plot_id_to_plotters(plot_id: str, feature_categories: List[str]) -> Opt
 
 def _collect_plot_definitions(
     plot_ids: List[str],
-) -> tuple[Set[str], Set[str], List[str], List[str], List[str], Set[str]]:
+) -> tuple[Set[str], Set[str], List[str], List[str], List[str], List[str], Set[str]]:
     """Collect plot definitions and extract categories, plots, and modes."""
     feature_categories: Set[str] = set()
     feature_plot_patterns: Set[str] = set()
+    feature_plotters: Set[str] = set()
     behavior_plots: List[str] = []
     tfr_plots: List[str] = []
     erp_plots: List[Any] = []
@@ -1260,6 +1487,10 @@ def _collect_plot_definitions(
                 feature_plot_patterns.update(str(p) for p in definition.feature_plot_patterns)
             else:
                 feature_plot_patterns.add(plot_id)
+            # Map plot ID to specific plotter function names
+            plotter_names = _map_plot_id_to_plotters(plot_id, list(definition.feature_categories))
+            if plotter_names:
+                feature_plotters.update(plotter_names)
         if definition.behavior_plots:
             behavior_plots.extend(definition.behavior_plots)
         if definition.tfr_plots:
@@ -1282,6 +1513,7 @@ def _collect_plot_definitions(
         _unique_in_order(behavior_plots),
         _unique_in_order(tfr_plots),
         _unique_in_order(flat_erp_plots),
+        sorted(feature_plotters) if feature_plotters else [],
         ml_modes,
     )
 
@@ -1508,11 +1740,18 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         behavior_plots,
         tfr_plots,
         erp_plots,
+        computed_feature_plotters,
         ml_modes,
     ) = _collect_plot_definitions(plot_ids)
 
     if not any([feature_categories, behavior_plots, tfr_plots, erp_plots, ml_modes]):
         raise ValueError("No plots resolved from selection")
+
+    # Use computed plotters if available, otherwise fall back to CLI argument
+    effective_feature_plotters = (
+        computed_feature_plotters if computed_feature_plotters 
+        else selected_feature_plotters
+    )
 
     progress.start("plotting", subjects)
     _render_plots_without_per_plot_config(
@@ -1525,7 +1764,7 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         subjects=subjects,
         task=task,
         config=config,
-        selected_feature_plotters=selected_feature_plotters,
+        selected_feature_plotters=effective_feature_plotters,
         progress=progress,
     )
     progress.complete(success=True)
@@ -1560,6 +1799,9 @@ def _run_tfr_mode(args: argparse.Namespace, subjects: List[str], config: Any) ->
     _validate_time_range(args.tmin, args.tmax)
     _update_tfr_config(config, args.bands, args.tmin, args.tmax)
 
+    # Apply all config overrides (including formats, dpi, etc.)
+    _apply_all_config_overrides(args, config)
+
     # Apply per-plot config overrides for TFR mode
     plot_item_configs = _parse_plot_item_configs(args.plot_item_config)
     if plot_item_configs:
@@ -1578,7 +1820,7 @@ def _run_tfr_mode(args: argparse.Namespace, subjects: List[str], config: Any) ->
     # Extract TFR-specific plots from --plots argument if provided
     tfr_plots = None
     if args.plots:
-        _, _, _, tfr_plots, _, _ = _collect_plot_definitions(args.plots)
+        _, _, _, tfr_plots, _, _, _ = _collect_plot_definitions(args.plots)
         tfr_plots = tfr_plots if tfr_plots else None
 
     visualize_tfr_for_subjects(

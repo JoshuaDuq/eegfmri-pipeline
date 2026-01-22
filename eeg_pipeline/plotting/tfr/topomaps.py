@@ -51,7 +51,7 @@ from .contrasts import (
     _get_aligned_events_df_for_tfr,
     _prepare_comparison_contrast_data,
 )
-from .channels import _save_fig as _channels_save_fig
+from .channels import _save_fig as _channels_save_fig, _sanitize_label_for_filename
 
 
 TEMPERATURE_TOLERANCE = 0.05
@@ -116,10 +116,9 @@ def _prepare_temperature_data(
             strict=get_strict_mode(config),
             logger=logger
         )
+        # tfr_sub is expected to be baseline-corrected at the epoch level.
         tfr_min = tfr_sub[mask_min].average()
         tfr_max = tfr_sub[mask_max].average()
-        apply_baseline_and_crop(tfr_min, baseline=baseline_used, mode="logratio", logger=logger)
-        apply_baseline_and_crop(tfr_max, baseline=baseline_used, mode="logratio", logger=logger)
         
         log(f"Temperature contrast: max temp={int(mask_max.sum())}, min temp={int(mask_min.sum())} trials.", logger)
         return TemperatureData(True, tfr_max, tfr_min, mask_max, mask_min, t_min, t_max)
@@ -316,8 +315,14 @@ def _collect_valid_bands(
     Returns:
         Tuple of (valid_bands dict, all_diff_data list)
     """
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
     fmax_available = float(np.max(tfr_condition_2.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
+    
+    selected_bands = get_config_value(config, "time_frequency_analysis.selected_bands", None)
+    if selected_bands and isinstance(selected_bands, (list, tuple)) and len(selected_bands) > 0:
+        bands = {k: v for k, v in bands.items() if k in selected_bands}
 
     valid_bands = {}
     all_diff_data = []
@@ -361,11 +366,8 @@ def _build_figure_title(
 ) -> str:
     """Build figure title with statistical information."""
     title_parts = [
-        f"Temporal topomaps: {condition_label_2} - {condition_label_1} difference ({band_name}, {window_label})"
+        f"{condition_label_2} - {condition_label_1} ({band_name}, {window_label})"
     ]
-    
-    if temp_data.has_temperature and temp_data.t_min is not None and temp_data.t_max is not None:
-        title_parts.append(f"Max - Min temp ({temp_data.t_min:.1f}-{temp_data.t_max:.1f}°C)")
     
     title_parts.append(f"log10(power/baseline) difference, vlim ±{vabs_diff:.2f}")
     
@@ -439,7 +441,7 @@ def _plot_temporal_topomaps_for_bands(
     
     for band_name, (fmin, fmax_eff, condition_diff_windows, temp_diff_windows) in valid_bands.items():
         freq_label = f"{band_name} ({fmin:.0f}-{fmax_eff:.0f}Hz)"
-        n_rows = 2 if (temp_data.has_temperature and temp_diff_windows is not None) else 1
+        n_rows = 1
         
         fig, axes = plt.subplots(
             n_rows, n_windows,
@@ -448,10 +450,7 @@ def _plot_temporal_topomaps_for_bands(
             gridspec_kw={"hspace": hspace, "wspace": wspace}
         )
         
-        row_condition = 0
-        row_temperature = 1 if n_rows == 2 else None
-        
-        axes[row_condition, 0].set_ylabel(
+        axes[0, 0].set_ylabel(
             f"{condition_label_2} - {condition_label_1}\n{freq_label}",
             fontsize=font_sizes["ylabel"],
             labelpad=10
@@ -459,29 +458,14 @@ def _plot_temporal_topomaps_for_bands(
 
         for col, (tmin_win, tmax_win) in enumerate(zip(window_starts, window_ends)):
             time_label = f"{tmin_win:.2f}s"
-            axes[row_condition, col].set_title(time_label, fontsize=9, pad=12, y=1.07)
+            axes[0, col].set_title(time_label, fontsize=9, pad=12, y=1.07)
 
             condition_diff_data = condition_diff_windows[col]
             _plot_single_topomap_window(
-                axes[row_condition, col], condition_diff_data, tfr_condition_2.info, tfr_sub,
+                axes[0, col], condition_diff_data, tfr_condition_2.info, tfr_sub,
                 condition_mask_2, condition_mask_1, fmin, fmax_eff, tmin_win, tmax_win,
                 vabs_diff, config, viz_params, paired=False, logger=logger
             )
-
-            if n_rows == 2 and temp_diff_windows is not None:
-                temp_diff_data = temp_diff_windows[col]
-                _plot_single_topomap_window(
-                    axes[row_temperature, col], temp_diff_data, temp_data.tfr_max.info, tfr_sub,
-                    temp_data.mask_max, temp_data.mask_min, fmin, fmax_eff, tmin_win, tmax_win,
-                    vabs_diff, config, viz_params, paired=False, logger=logger
-                )
-                
-                if col == 0:
-                    axes[row_temperature, 0].set_ylabel(
-                        f"Max - Min temp\n{freq_label}",
-                        fontsize=font_sizes["ylabel"],
-                        labelpad=10
-                    )
 
         create_difference_colorbar(
             fig, axes, vabs_diff, viz_params["topo_cmap"],
@@ -497,153 +481,16 @@ def _plot_temporal_topomaps_for_bands(
         
         fig.suptitle(full_title, fontsize=font_sizes["figure_title"], y=0.995)
 
+        from .channels import _sanitize_label_for_filename
+        label_2_sanitized = _sanitize_label_for_filename(condition_label_2)
+        label_1_sanitized = _sanitize_label_for_filename(condition_label_1)
         filename = filename_base.format(
+            label_2=label_2_sanitized, label_1=label_1_sanitized,
             band_name=band_name, tmin=tmin_clip, tmax=tmax_clip,
             n_windows=n_windows, baseline_str=baseline_str
         )
         _channels_save_fig(fig, out_dir, filename, config=config, logger=logger)
         plt.close(fig)
-
-
-def plot_topomap_grid_baseline_temps(
-    tfr: "mne.time_frequency.EpochsTFR | mne.time_frequency.AverageTFR",
-    events_df: Optional[pd.DataFrame],
-    out_dir: Path,
-    config,
-    baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    active_window: Tuple[float, float] = (3.0, 10.5),
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    """Plot topomap grid showing baseline percent change by temperature.
-    
-    Creates a grid of topomaps showing percent change from baseline across
-    frequency bands and temperature conditions.
-    
-    Args:
-        tfr: MNE TFR object (EpochsTFR or AverageTFR)
-        events_df: Optional events DataFrame with temperature column
-        out_dir: Output directory path
-        config: Configuration object
-        baseline: Optional baseline window tuple (defaults to config)
-        active_window: Active window tuple for statistics
-        logger: Optional logger instance
-    """
-    baseline = _get_baseline_window(config, baseline)
-    if events_df is None:
-        log("Temperature grid: events_df is None; skipping.", logger)
-        return
-    temp_col = get_temperature_column_from_config(config, events_df)
-    if temp_col is None:
-        log("Temperature grid: no temperature column found; skipping.", logger)
-        return
-
-    tfr_corr = tfr.copy()
-    baseline_used = apply_baseline_and_crop(tfr_corr, baseline=baseline, mode="percent", logger=logger)
-    tfr_avg_all_corr = tfr_corr.average() if isinstance(tfr_corr, mne.time_frequency.EpochsTFR) else tfr_corr
-
-    temps = (
-        pd.to_numeric(events_df[temp_col], errors="coerce")
-        .round(1)
-        .dropna()
-        .unique()
-    )
-    temps = sorted(map(float, temps))
-    if len(temps) == 0:
-        log("Temperature grid: no temperature levels; skipping.", logger)
-        return
-
-    times_corr = np.asarray(tfr_avg_all_corr.times)
-    tmin_req, tmax_req = active_window
-    tmin = float(max(times_corr.min(), tmin_req))
-    tmax = float(min(times_corr.max(), tmax_req))
-
-    fmax_available = float(np.max(tfr_avg_all_corr.freqs))
-    bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
-
-    cond_tfrs: List[Tuple[str, mne.time_frequency.AverageTFR, int, float]] = []
-    n_all = len(tfr_corr) if isinstance(tfr_corr, mne.time_frequency.EpochsTFR) else 1
-    cond_tfrs.append(("All trials", tfr_avg_all_corr, n_all, np.nan))
-
-    if isinstance(tfr_corr, mne.time_frequency.EpochsTFR):
-        for temp_value in temps:
-            temp_values = pd.to_numeric(events_df[temp_col], errors="coerce")
-            mask = np.abs(temp_values - float(temp_value)) < TEMPERATURE_TOLERANCE
-            mask = np.asarray(mask, dtype=bool)
-            if mask.sum() == 0:
-                continue
-            tfr_temp = tfr_corr.copy()[mask].average()
-            cond_tfrs.append((f"{temp_value:.1f}°C", tfr_temp, int(mask.sum()), float(temp_value)))
-    else:
-        log("Temperature grid: input is AverageTFR; cannot split by temperature; showing only All trials.", logger)
-
-    plot_cfg = get_plot_config(config)
-    tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
-    topomap_config = tfr_config.get("topomap", {})
-    fig_size_per_col_large = plot_cfg.get_figure_size("tfr_per_col_large", plot_type="tfr")[0]
-    fig_size_per_row_large = plot_cfg.get_figure_size("tfr_per_row_large", plot_type="tfr")[1]
-
-    n_cols, n_rows = len(cond_tfrs), len(bands)
-    fig, axes = plt.subplots(
-        n_rows, n_cols, 
-        figsize=(fig_size_per_col_large * n_cols, fig_size_per_row_large * n_rows), 
-        squeeze=False,
-        gridspec_kw={"wspace": 1.2, "hspace": 0.25},
-    )
-
-    for r, (band, (fmin, fmax)) in enumerate(bands.items()):
-        fmax_eff = min(fmax, fmax_available)
-        if fmin >= fmax_eff:
-            for c in range(n_cols):
-                axes[r, c].axis("off")
-            continue
-
-        diff_datas: List[Optional[np.ndarray]] = []
-        for _, tfr_cond, _, _ in cond_tfrs:
-            d = average_tfr_band(tfr_cond, fmin=fmin, fmax=fmax_eff, tmin=tmin, tmax=tmax)
-            diff_datas.append(d)
-
-        vals = [v for v in diff_datas if v is not None and np.isfinite(v).any()]
-        if len(vals) == 0:
-            for c in range(n_cols):
-                axes[r, c].axis("off")
-            continue
-
-        diff_abs = robust_sym_vlim(vals, cap=PERCENT_CAP)
-        if not np.isfinite(diff_abs) or diff_abs == 0:
-            diff_abs = DEFAULT_VLIM_FALLBACK
-
-        for idx, (label, tfr_cond, n_cond, _tval) in enumerate(cond_tfrs, start=0):
-            ax = axes[r, idx]
-            data = diff_datas[idx]
-            if data is None:
-                ax.axis("off")
-                continue
-
-            plot_topomap_on_ax(ax, data, tfr_cond.info, vmin=-diff_abs, vmax=+diff_abs)
-            add_roi_annotations(ax, data, tfr_cond.info, config=config, data_format="percent")
-            eeg_picks = extract_eeg_picks(tfr_cond, exclude_bads=False)
-            data_for_label = data[eeg_picks] if len(eeg_picks) > 0 else data
-            label_text = build_topomap_percentage_label(data_for_label)
-            title_y = topomap_config.get("title_y", 1.04)
-            title_pad = topomap_config.get("title_pad", 4)
-            ax.text(0.5, 1.02, label_text, transform=ax.transAxes, ha="center", va="top", fontsize=plot_cfg.font.title)
-            if r == 0:
-                ax.set_title(f"{label} (n={n_cond})", fontsize=plot_cfg.font.title, pad=title_pad, y=title_y)
-
-        axes[r, 0].set_ylabel(f"{band} ({fmin:.0f}-{fmax_eff:.0f} Hz)", fontsize=plot_cfg.font.ylabel)
-
-        create_difference_colorbar(
-            fig, axes[r, :].ravel().tolist(), diff_abs, get_viz_params(config)["topo_cmap"],
-            label="Percent change from baseline (%)",
-            fontsize=plot_cfg.font.title,
-            config=config
-        )
-
-    fig.suptitle(
-        f"Topomaps by temperature: % change from baseline over active window t=[{tmin:.1f}, {tmax:.1f}] s",
-        fontsize=plot_cfg.font.figure_title,
-    )
-    _channels_save_fig(fig, out_dir, "topomap_grid_bands_alltrials_plus_temperatures_baseline_percent.png", config=config, logger=logger, baseline_used=baseline_used)
 
 
 def _prepare_temporal_topomap_data(
@@ -700,14 +547,11 @@ def _prepare_temporal_topomap_data(
     tfr_sub_stats = tfr_sub.copy()
     baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
 
-    tfr_condition_2 = tfr_sub[mask2].average()
-    tfr_condition_1 = tfr_sub[mask1].average()
-    
-    apply_baseline_and_crop(tfr_condition_2, baseline=baseline_used, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_condition_1, baseline=baseline_used, mode="logratio", logger=logger)
+    tfr_condition_2 = tfr_sub_stats[mask2].average()
+    tfr_condition_1 = tfr_sub_stats[mask1].average()
 
     temp_data = _prepare_temperature_data(
-        tfr_sub, tfr, events_df, int(n), baseline_used, config, logger
+        tfr_sub_stats, tfr, events_df, int(n), baseline_used, config, logger
     )
 
     times = np.asarray(tfr_condition_2.times)
@@ -730,25 +574,32 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    active_window: Tuple[float, float] = (3.0, 10.5),
-    window_size_ms: float = 100.0,
+    active_window: Optional[Tuple[float, float]] = None,
+    window_size_ms: Optional[float] = None,
     logger: Optional[logging.Logger] = None,
 ) -> None:
-    """Plot temporal topomaps showing pain-nonpain difference across time windows.
+    """Plot temporal topomaps showing condition difference across time windows.
     
-    Creates temporal topomap sequences showing pain-nonpain differences across
+    Creates temporal topomap sequences showing condition differences across
     multiple time windows for each frequency band.
     
     Args:
         tfr: MNE EpochsTFR object
-        events_df: Optional events DataFrame with pain column
+        events_df: Optional events DataFrame with condition column
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
-        active_window: Active window tuple for statistics
-        window_size_ms: Size of each time window in milliseconds
+        active_window: Optional active window tuple (defaults to config: time_frequency_analysis.active_window)
+        window_size_ms: Optional size of each time window in milliseconds (defaults to config: time_frequency_analysis.topomap.temporal.window_size_ms)
         logger: Optional logger instance
     """
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
+    if active_window is None:
+        active_window = tuple(get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5]))
+    if window_size_ms is None:
+        window_size_ms = float(get_config_value(config, "time_frequency_analysis.topomap.temporal.window_size_ms", 100.0))
+    
     prepared = _prepare_temporal_topomap_data(
         tfr, events_df, config, baseline, active_window, logger,
         "Temporal topomaps (diff, all bands)"
@@ -769,7 +620,10 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
         return
 
     window_label = f"{tmin_clip:.1f}–{tmax_clip:.1f}s; {n_windows} windows @ {window_size_ms:.1f}ms"
-    filename_base = "temporal_topomaps_pain_minus_nonpain_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
+    from .channels import _sanitize_label_for_filename
+    label_2_sanitized = _sanitize_label_for_filename(label2)
+    label_1_sanitized = _sanitize_label_for_filename(label1)
+    filename_base = "temporal_topomaps_{label_2}_minus_{label_1}_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
     
     _plot_temporal_topomaps_for_bands(
         tfr_condition_2, tfr_condition_1, tfr_sub_stats, temp_data,
@@ -787,25 +641,32 @@ def plot_temporal_topomaps_allbands_active(
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    active_window: Tuple[float, float] = (3.0, 10.5),
-    window_count: int = 5,
+    active_window: Optional[Tuple[float, float]] = None,
+    window_count: Optional[int] = None,
     logger: Optional[logging.Logger] = None,
 ) -> None:
     """Plot temporal topomaps over active window with fixed window count.
     
-    Creates temporal topomap sequences showing pain-nonpain differences across
+    Creates temporal topomap sequences showing condition differences across
     a fixed number of time windows over the active period.
     
     Args:
         tfr: MNE EpochsTFR object
-        events_df: Optional events DataFrame with pain column
+        events_df: Optional events DataFrame with condition column
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
-        active_window: Active window tuple for statistics
-        window_count: Number of time windows to create
+        active_window: Optional active window tuple (defaults to config: time_frequency_analysis.active_window)
+        window_count: Optional number of time windows to create (defaults to config: time_frequency_analysis.topomap.temporal.window_count)
         logger: Optional logger instance
     """
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
+    if active_window is None:
+        active_window = tuple(get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5]))
+    if window_count is None:
+        window_count = int(get_config_value(config, "time_frequency_analysis.topomap.temporal.window_count", 5))
+    
     prepared = _prepare_temporal_topomap_data(
         tfr, events_df, config, baseline, active_window, logger,
         "Temporal topomaps (active, all bands)"
@@ -825,7 +686,10 @@ def plot_temporal_topomaps_allbands_active(
         return
 
     window_label = f"active {tmin_clip:.0f}–{tmax_clip:.0f}s; {n_windows} windows @ {window_size_eff:.2f}s"
-    filename_base = "temporal_topomaps_active_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
+    from .channels import _sanitize_label_for_filename
+    label_2_sanitized = _sanitize_label_for_filename(label2)
+    label_1_sanitized = _sanitize_label_for_filename(label1)
+    filename_base = "temporal_topomaps_{label_2}_minus_{label_1}_active_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
     
     _plot_temporal_topomaps_for_bands(
         tfr_condition_2, tfr_condition_1, tfr_sub_stats, temp_data,

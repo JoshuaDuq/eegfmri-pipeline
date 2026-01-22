@@ -1211,21 +1211,21 @@ def _apply_baseline_if_needed(
     tfr_path: Union[str, "os.PathLike[str]"],
     config: Optional[Any] = None,
 ) -> Optional["mne.time_frequency.AverageTFR"]:
-    times = np.asarray(tfr_obj.times)
-    
     try:
-        baseline_start, baseline_end, baseline_indices = validate_baseline_indices(
-            times, baseline_window, min_samples=min_baseline_samples, logger=logger, config=config
+        # Use canonical baseline application so the baseline sentinel is recorded,
+        # preventing accidental double-baselining downstream.
+        apply_baseline_safe(
+            tfr_obj,
+            baseline=baseline_window,
+            mode="logratio",
+            logger=logger,
+            min_samples=min_baseline_samples,
+            config=config,
         )
     except ValueError as e:
         logger.warning(f"Baseline validation failed for {tfr_path}: {e}")
         return None
-    
-    tfr_obj.apply_baseline(baseline=(baseline_start, baseline_end), mode="logratio")
-    if hasattr(tfr_obj, "comment"):
-        comment = tfr_obj.comment or ""
-        tfr_obj.comment = f"{comment} | baseline(logratio) applied"
-    
+
     return tfr_obj
 
 
@@ -1378,9 +1378,15 @@ def apply_baseline_to_tfr(
             tuple(baseline_window),
             min_samples=min_baseline_samples,
         )
-        tfr.apply_baseline(baseline=(b_start, b_end), mode="logratio")
-        baseline_applied = True
-        baseline_window_used = (b_start, b_end)
+        baseline_applied = apply_baseline_safe(
+            tfr,
+            baseline=(b_start, b_end),
+            mode="logratio",
+            logger=logger,
+            min_samples=min_baseline_samples,
+            config=config,
+        )
+        baseline_window_used = _extract_baseline_from_comment(tfr, (b_start, b_end))
     except (ValueError, RuntimeError) as err:
         logger.error(
             f"Baseline validation failed ({err}); raising error"
@@ -2476,14 +2482,18 @@ def apply_baseline_and_average(
 ):
     tfr_copy = tfr.copy()
     if isinstance(tfr_copy, mne.time_frequency.EpochsTFR):
+        # Apply baseline at the epoch level before averaging.
+        # For nonlinear baseline modes (e.g., logratio), baseline(average(x)) != average(baseline(x)).
+        baseline_used = apply_baseline_and_crop(
+            tfr_copy, baseline=baseline, mode="logratio", logger=logger
+        )
         tfr_avg = tfr_copy.average()
     else:
         tfr_avg = tfr_copy
-        
-    baseline_used = apply_baseline_and_crop(
-        tfr_avg, baseline=baseline, mode="logratio", logger=logger
-    )
-    
+        baseline_used = apply_baseline_and_crop(
+            tfr_avg, baseline=baseline, mode="logratio", logger=logger
+        )
+
     return tfr_avg, baseline_used
 
 

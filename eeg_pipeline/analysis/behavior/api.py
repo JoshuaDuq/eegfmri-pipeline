@@ -48,7 +48,7 @@ from eeg_pipeline.utils.analysis.stats.temporal import (
     compute_temporal_from_context,
 )
 from eeg_pipeline.utils.analysis.stats.cluster import (
-    compute_pain_nonpain_time_cluster_test,
+    compute_two_condition_time_cluster_test,
     _run_cluster_test_core,
 )
 from eeg_pipeline.utils.analysis.stats.topomaps import run_power_topomap_correlations
@@ -69,10 +69,9 @@ def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
             )
             return None
 
-    from eeg_pipeline.infra.paths import ensure_dir
+    from eeg_pipeline.analysis.behavior.orchestration import _get_stats_subfolder
 
-    cluster_dir = ctx.stats_dir / "cluster"
-    ensure_dir(cluster_dir)
+    cluster_dir = _get_stats_subfolder(ctx, "cluster")
 
     return _run_cluster_test_core(
         ctx.subject,
@@ -105,7 +104,7 @@ __all__ = [
     "classify_feature",
     "get_feature_registry",
     # Cluster tests
-    "compute_pain_nonpain_time_cluster_test",
+    "compute_two_condition_time_cluster_test",
     "run_cluster_test_from_context",
     # Mixed-effects
     "MixedEffectsResult",

@@ -20,10 +20,9 @@ from eeg_pipeline.plotting.io.figures import (
     robust_sym_vlim,
     extract_eeg_picks,
     logratio_to_pct,
-    build_footer,
     save_fig as central_save_fig,
 )
-from eeg_pipeline.utils.formatting import format_baseline_window_string
+from eeg_pipeline.utils.formatting import format_baseline_window_string, sanitize_label
 from ...utils.analysis.windowing import time_mask_loose, time_mask_strict
 from ...utils.analysis.tfr import (
     apply_baseline_and_average,
@@ -35,8 +34,6 @@ from ..core.statistics import get_strict_mode
 from ..core.topomaps import create_scalpmean_tfr_from_existing
 
 
-DEFAULT_FOOTER_TEMPLATE = "tfr_baseline"
-BASELINE_DECIMAL_PLACES = 2
 DEFAULT_FORMAT = "png"
 
 
@@ -78,6 +75,20 @@ def _compute_active_statistics(
     return mean_logratio, percentage_change, time_mask
 
 
+def _sanitize_label_for_filename(label: str) -> str:
+    """Sanitize label for use in filenames.
+    
+    Args:
+        label: Label string (e.g., "Condition 1", "pain", "non-pain")
+        
+    Returns:
+        Sanitized, lowercase label suitable for filenames
+    """
+    sanitized = sanitize_label(label).lower()
+    sanitized = sanitized.replace(" ", "_")
+    return sanitized
+
+
 def _build_filename_stem(
     name: str,
     baseline_used: Tuple[float, float],
@@ -117,35 +128,6 @@ def _build_filename_stem(
     return stem
 
 
-def _build_footer_text(
-    config,
-    baseline_used: Tuple[float, float],
-) -> Optional[str]:
-    """Build footer text for TFR plots with baseline information.
-    
-    Args:
-        config: Configuration object
-        baseline_used: Baseline window tuple
-        
-    Returns:
-        Footer text string or None if config doesn't support footer templates
-    """
-    template_name = config.get("output.tfr_footer_template", DEFAULT_FOOTER_TEMPLATE)
-    baseline_min, baseline_max = baseline_used
-    baseline_string = (
-        f"[{float(baseline_min):.{BASELINE_DECIMAL_PLACES}f}, "
-        f"{float(baseline_max):.{BASELINE_DECIMAL_PLACES}f}] s"
-    )
-    
-    footer_kwargs = {
-        "baseline_window": baseline_used,
-        "baseline": baseline_string,
-    }
-    
-    try:
-        return build_footer(template_name, config, **footer_kwargs)
-    except (ValueError, AttributeError):
-        return None
 
 
 def _save_fig(
@@ -159,6 +141,8 @@ def _save_fig(
     task: Optional[str] = None,
     band: Optional[str] = None,
     formats: Optional[list] = None,
+    label_1: Optional[str] = None,
+    label_2: Optional[str] = None,
 ) -> None:
     """Save figure with proper formatting and footer.
     
@@ -173,6 +157,8 @@ def _save_fig(
         task: Optional task identifier
         band: Optional frequency band identifier
         formats: Optional list of file formats (defaults to config formats)
+        label_1: Optional condition label 1 (for contrast plots)
+        label_2: Optional condition label 2 (for contrast plots)
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -186,7 +172,7 @@ def _save_fig(
         else list(plot_config.formats) if plot_config.formats else [DEFAULT_FORMAT]
     )
     
-    footer_text = _build_footer_text(config, baseline_used)
+    footer_text = None
 
     for index, figure in enumerate(figures):
         if index == 0:
@@ -219,6 +205,8 @@ def _plot_scalpmean_tfr(
     logger: Optional[logging.Logger] = None,
     subject: Optional[str] = None,
     task: Optional[str] = None,
+    label_1: Optional[str] = None,
+    label_2: Optional[str] = None,
 ) -> None:
     """Plot a scalp-mean TFR figure.
     
@@ -233,6 +221,8 @@ def _plot_scalpmean_tfr(
         logger: Optional logger instance
         subject: Optional subject identifier
         task: Optional task identifier
+        label_1: Optional condition label 1 (for contrast plots)
+        label_2: Optional condition label 2 (for contrast plots)
     """
     font_sizes = get_font_sizes()
     channel_name = tfr_scalpmean.info["ch_names"][0]
@@ -253,6 +243,8 @@ def _plot_scalpmean_tfr(
         logger=logger,
         subject=subject,
         task=task,
+        label_1=label_1,
+        label_2=label_2,
     )
 
 
@@ -285,7 +277,7 @@ def plot_scalpmean_all_trials(
     """
     tfr_averaged, baseline_used = apply_baseline_and_average(tfr, baseline, logger)
     
-    eeg_picks = extract_eeg_picks(tfr_averaged, exclude_bads=False)
+    eeg_picks = extract_eeg_picks(tfr_averaged, exclude_bads=True)
     if len(eeg_picks) == 0:
         log("No EEG channels found for scalp-averaged plot", logger, "warning")
         return
@@ -381,14 +373,17 @@ def _create_scalpmean_contrast_plots(
         f"vlim ±{absolute_vlim_conditions:.2f}; mean %Δ vs BL={percentage_change_1:+.0f}%"
     )
     title_difference = (
-        f"Scalp-averaged TFR — {label_2} minus {label_1} (baseline logratio)\n"
-        f"vlim ±{absolute_vlim_difference:.2f}; mean %Δ vs BL={percentage_change_diff:+.0f}%"
+        f"Scalp-averaged TFR — {label_2} vs {label_1} (logratio difference)\n"
+        f"vlim ±{absolute_vlim_difference:.2f}; mean %Δ {label_2} vs {label_1}={percentage_change_diff:+.0f}%"
     )
+    
+    label_2_sanitized = _sanitize_label_for_filename(label_2)
+    label_1_sanitized = _sanitize_label_for_filename(label_1)
     
     _plot_scalpmean_tfr(
         tfr_condition_2,
         title_condition_2,
-        "tfr_scalpmean_pain_bl.png",
+        f"tfr_scalpmean_{label_2_sanitized}.png",
         vlim_conditions,
         out_dir,
         config,
@@ -396,11 +391,13 @@ def _create_scalpmean_contrast_plots(
         logger=logger,
         subject=subject,
         task=task,
+        label_1=label_1,
+        label_2=label_2,
     )
     _plot_scalpmean_tfr(
         tfr_condition_1,
         title_condition_1,
-        "tfr_scalpmean_nonpain_bl.png",
+        f"tfr_scalpmean_{label_1_sanitized}.png",
         vlim_conditions,
         out_dir,
         config,
@@ -408,11 +405,13 @@ def _create_scalpmean_contrast_plots(
         logger=logger,
         subject=subject,
         task=task,
+        label_1=label_1,
+        label_2=label_2,
     )
     _plot_scalpmean_tfr(
         tfr_difference,
         title_difference,
-        "tfr_scalpmean_pain_minus_non_bl.png",
+        f"tfr_scalpmean_{label_2_sanitized}_minus_{label_1_sanitized}.png",
         vlim_difference,
         out_dir,
         config,
@@ -420,6 +419,8 @@ def _create_scalpmean_contrast_plots(
         logger=logger,
         subject=subject,
         task=task,
+        label_1=label_1,
+        label_2=label_2,
     )
 
 
@@ -457,18 +458,22 @@ def contrast_scalpmean_pain_nonpain(
     if tfr_subset is None:
         return
 
-    tfr_condition_1 = tfr_subset[mask_1].average()
-    tfr_condition_2 = tfr_subset[mask_2].average()
+    # Baseline at the epoch level before averaging to avoid bias with nonlinear baseline modes.
+    tfr_epochs_1 = tfr_subset[mask_1].copy()
+    tfr_epochs_2 = tfr_subset[mask_2].copy()
 
     baseline_used = apply_baseline_and_crop(
-        tfr_condition_1, baseline=baseline, mode="logratio", logger=logger
+        tfr_epochs_1, baseline=baseline, mode="logratio", logger=logger
     )
     apply_baseline_and_crop(
-        tfr_condition_2, baseline=baseline, mode="logratio", logger=logger
+        tfr_epochs_2, baseline=baseline_used, mode="logratio", logger=logger
     )
 
-    eeg_picks_1 = extract_eeg_picks(tfr_condition_1, exclude_bads=False)
-    eeg_picks_2 = extract_eeg_picks(tfr_condition_2, exclude_bads=False)
+    tfr_condition_1 = tfr_epochs_1.average()
+    tfr_condition_2 = tfr_epochs_2.average()
+
+    eeg_picks_1 = extract_eeg_picks(tfr_condition_1, exclude_bads=True)
+    eeg_picks_2 = extract_eeg_picks(tfr_condition_2, exclude_bads=True)
     
     if len(eeg_picks_1) == 0 or len(eeg_picks_2) == 0:
         log("No EEG channels found for scalp-averaged contrast", logger, "warning")

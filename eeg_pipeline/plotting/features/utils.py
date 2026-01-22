@@ -1239,12 +1239,15 @@ def plot_multi_group_column_comparison(
     *,
     roi_name: Optional[str] = None,
     stats_dir: Optional[Union[Path, str]] = None,
+    multigroup_stats: Optional[pd.DataFrame] = None,
 ) -> None:
     """Multi-group unpaired comparison plot with significance brackets.
     
     Requires pre-computed statistics from the behavior pipeline. Will not plot
     if stats_dir is not provided or stats are not found. Run the behavior
     pipeline with 3+ comparison values to generate multi-group stats.
+    
+    When more than 3 groups, creates one plot per band to avoid overcrowding.
     
     Args:
         data_by_band: Dict mapping band -> {group_name -> values array}
@@ -1255,7 +1258,8 @@ def plot_multi_group_column_comparison(
         config: Configuration object
         logger: Logger instance
         roi_name: ROI name for title
-        stats_dir: Directory containing pre-computed statistics (required)
+        stats_dir: Directory containing pre-computed statistics (required if multigroup_stats not provided)
+        multigroup_stats: Pre-loaded multigroup stats DataFrame (optional, avoids reloading)
     """
     import matplotlib.pyplot as plt
     from itertools import combinations
@@ -1264,15 +1268,17 @@ def plot_multi_group_column_comparison(
     if not data_by_band:
         return
     
-    if stats_dir is None:
-        if logger:
-            logger.warning(
-                f"Multi-group comparison for {feature_label} requires pre-computed stats. "
-                "Run behavior pipeline with 3+ comparison values first."
-            )
-        return
+    if multigroup_stats is None:
+        if stats_dir is None:
+            if logger:
+                logger.warning(
+                    f"Multi-group comparison for {feature_label} requires pre-computed stats. "
+                    "Run behavior pipeline with 3+ comparison values first."
+                )
+            return
+        
+        multigroup_stats = load_multigroup_stats(stats_dir)
     
-    multigroup_stats = load_multigroup_stats(stats_dir)
     if multigroup_stats is None or multigroup_stats.empty:
         if logger:
             logger.warning(
@@ -1291,9 +1297,10 @@ def plot_multi_group_column_comparison(
     n_groups = len(groups)
     group_colors = plt.cm.Set2(np.linspace(0, 1, max(n_groups, 3)))
     
-    qvalues_map = {}
-    n_significant = 0
-    n_tests = 0
+    # Build qvalues map for all bands
+    qvalues_map: Dict[Tuple[int, str, str], Tuple[float, bool]] = {}
+    total_significant = 0
+    total_tests = 0
     
     for _, row in multigroup_stats.iterrows():
         feature = str(row.get("feature", ""))
@@ -1305,195 +1312,167 @@ def plot_multi_group_column_comparison(
         for band_idx, band in enumerate(bands_in_order):
             if band.lower() in feature.lower():
                 qvalues_map[(band_idx, g1, g2)] = (q_value, is_sig)
-                n_tests += 1
+                total_tests += 1
                 if is_sig:
-                    n_significant += 1
+                    total_significant += 1
                 break
     
-    save_path_base = Path(save_path)
+    # Decide layout: separate plots per band if more than 3 groups
+    separate_plots_per_band = n_groups > 3
     
-    if n_groups > 3:
-        for band_idx, band in enumerate(bands_in_order):
-            band_data = data_by_band[band]
-            band_color = get_band_color(band, config)
-            
-            available_groups = [g for g in groups if g in band_data and len(band_data[g]) > 0]
-            
-            if not available_groups:
-                continue
-            
-            fig, ax = plt.subplots(1, 1, figsize=(max(3 * len(available_groups), 8), 5))
-            
-            positions = list(range(len(available_groups)))
-            box_data = [band_data[g] for g in available_groups]
-            
-            bp = ax.boxplot(box_data, positions=positions, widths=0.6, patch_artist=True)
-            
-            for i, (box, g) in enumerate(zip(bp["boxes"], available_groups)):
-                box.set_facecolor(group_colors[groups.index(g) % len(group_colors)])
-                box.set_alpha(0.7)
-            
-            for i, g in enumerate(available_groups):
-                vals = band_data[g]
-                jitter = np.random.uniform(-0.15, 0.15, len(vals))
-                ax.scatter(i + jitter, vals, 
-                          c=[group_colors[groups.index(g) % len(group_colors)]], 
-                          alpha=0.5, s=15, zorder=3)
-            
-            all_vals = np.concatenate([band_data[g] for g in available_groups])
-            y_min, y_max = np.nanmin(all_vals), np.nanmax(all_vals)
-            y_range = y_max - y_min if y_max > y_min else 0.1
-            ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.5 * y_range)
-            
-            bracket_y = y_max + 0.05 * y_range
-            bracket_step = 0.12 * y_range
-            
-            for g1, g2 in combinations(available_groups, 2):
-                key = (band_idx, g1, g2)
-                if key not in qvalues_map:
-                    key = (band_idx, g2, g1)
-                
-                if key in qvalues_map:
-                    qval, is_sig = qvalues_map[key]
-                    
-                    if qval < 0.001:
-                        text = "***"
-                    elif qval < 0.01:
-                        text = "**"
-                    elif qval < 0.05:
-                        text = "*"
-                    else:
-                        text = "ns"
-                    
-                    x1 = available_groups.index(g1)
-                    x2 = available_groups.index(g2)
-                    
-                    bracket_y = _draw_significance_bracket(
-                        ax, x1, x2, bracket_y, text, is_sig,
-                        bracket_height=0.02 * y_range
-                    )
-                    bracket_y += bracket_step * 0.3
-            
-            ax.set_title(band.capitalize(), fontsize=plot_cfg.font.title, fontweight="bold",
-                        color=band_color)
-            ax.set_xticks(positions)
-            ax.set_xticklabels([g.capitalize() for g in available_groups], 
-                              fontsize=plot_cfg.font.small, rotation=45, ha="right")
-            ax.set_ylabel(feature_label, fontsize=plot_cfg.font.label)
-            ax.tick_params(axis="y", labelsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            
-            title_parts = [f"{feature_label}: Multi-Group Comparison (Unpaired)"]
-            info_parts = [f"Subject: {subject}"]
-            if roi_name:
-                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
-                info_parts.append(f"ROI: {roi_display}")
-            info_parts.extend([
-                f"Band: {band.capitalize()}",
-                f"Groups: {', '.join(g.capitalize() for g in groups)}",
-                "Pre-computed stats",
-                f"FDR: {n_significant}/{n_tests} significant (*=q<0.05)"
-            ])
-            title_parts.append(" | ".join(info_parts))
-            
-            fig.suptitle("\n".join(title_parts), fontsize=plot_cfg.font.suptitle,
-                        fontweight="bold", y=1.02)
-            
-            plt.tight_layout()
-            band_save_path = save_path_base.parent / f"{save_path_base.stem}_band-{band}{save_path_base.suffix}"
-            save_fig(fig, band_save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                    bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-            plt.close(fig)
+    if separate_plots_per_band:
+        _plot_multi_group_separate_bands(
+            data_by_band=data_by_band,
+            bands_in_order=bands_in_order,
+            groups=groups,
+            group_colors=group_colors,
+            qvalues_map=qvalues_map,
+            subject=subject,
+            save_path=save_path,
+            feature_label=feature_label,
+            plot_cfg=plot_cfg,
+            config=config,
+            logger=logger,
+            roi_name=roi_name,
+            total_significant=total_significant,
+            total_tests=total_tests,
+        )
     else:
-        fig_width = max(3 * n_bands, 8)
-        fig, axes = plt.subplots(1, n_bands, figsize=(fig_width, 5), squeeze=False)
-        axes = axes.flatten()
+        _plot_multi_group_combined(
+            data_by_band=data_by_band,
+            bands_in_order=bands_in_order,
+            groups=groups,
+            group_colors=group_colors,
+            qvalues_map=qvalues_map,
+            subject=subject,
+            save_path=save_path,
+            feature_label=feature_label,
+            plot_cfg=plot_cfg,
+            config=config,
+            logger=logger,
+            roi_name=roi_name,
+            total_significant=total_significant,
+            total_tests=total_tests,
+        )
+
+
+def _plot_multi_group_separate_bands(
+    data_by_band: Dict[str, Dict[str, np.ndarray]],
+    bands_in_order: List[str],
+    groups: List[str],
+    group_colors: np.ndarray,
+    qvalues_map: Dict[Tuple[int, str, str], Tuple[float, bool]],
+    subject: str,
+    save_path: Union[Path, str],
+    feature_label: str,
+    plot_cfg: Any,
+    config: Any,
+    logger: Any,
+    roi_name: Optional[str],
+    total_significant: int,
+    total_tests: int,
+) -> None:
+    """Plot each band as a separate figure (for >3 groups).
+    
+    Only draws brackets for significant comparisons to avoid clutter.
+    """
+    import matplotlib.pyplot as plt
+    from itertools import combinations
+    from eeg_pipeline.plotting.io.figures import save_fig
+    
+    save_path = Path(save_path)
+    base_stem = save_path.stem
+    save_dir = save_path.parent
+    
+    for band_idx, band in enumerate(bands_in_order):
+        band_data = data_by_band[band]
+        band_color = get_band_color(band, config)
         
-        for band_idx, band in enumerate(bands_in_order):
-            ax = axes[band_idx]
-            band_data = data_by_band[band]
-            band_color = get_band_color(band, config)
-            
-            available_groups = [g for g in groups if g in band_data and len(band_data[g]) > 0]
-            
-            if not available_groups:
-                ax.text(0.5, 0.5, "No data", ha="center", va="center",
-                       transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
-                ax.set_title(band.capitalize(), fontsize=plot_cfg.font.title, fontweight="bold")
-                ax.set_xticks([])
-                continue
-            
-            positions = list(range(len(available_groups)))
-            box_data = [band_data[g] for g in available_groups]
-            
-            bp = ax.boxplot(box_data, positions=positions, widths=0.6, patch_artist=True)
-            
-            for i, (box, g) in enumerate(zip(bp["boxes"], available_groups)):
-                box.set_facecolor(group_colors[groups.index(g) % len(group_colors)])
-                box.set_alpha(0.7)
-            
-            for i, g in enumerate(available_groups):
-                vals = band_data[g]
-                jitter = np.random.uniform(-0.15, 0.15, len(vals))
-                ax.scatter(i + jitter, vals, 
-                          c=[group_colors[groups.index(g) % len(group_colors)]], 
-                          alpha=0.5, s=15, zorder=3)
-            
-            all_vals = np.concatenate([band_data[g] for g in available_groups])
-            y_min, y_max = np.nanmin(all_vals), np.nanmax(all_vals)
-            y_range = y_max - y_min if y_max > y_min else 0.1
-            ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.5 * y_range)
-            
-            bracket_y = y_max + 0.05 * y_range
-            bracket_step = 0.12 * y_range
-            
-            for g1, g2 in combinations(available_groups, 2):
-                key = (band_idx, g1, g2)
-                if key not in qvalues_map:
-                    key = (band_idx, g2, g1)
-                
-                if key in qvalues_map:
-                    qval, is_sig = qvalues_map[key]
-                    
-                    if qval < 0.001:
-                        text = "***"
-                    elif qval < 0.01:
-                        text = "**"
-                    elif qval < 0.05:
-                        text = "*"
-                    else:
-                        text = "ns"
-                    
-                    x1 = available_groups.index(g1)
-                    x2 = available_groups.index(g2)
-                    
-                    bracket_y = _draw_significance_bracket(
-                        ax, x1, x2, bracket_y, text, is_sig,
-                        bracket_height=0.02 * y_range
-                    )
-                    bracket_y += bracket_step * 0.3
-            
-            ax.set_title(band.capitalize(), fontsize=plot_cfg.font.title, fontweight="bold",
-                        color=band_color)
-            ax.set_xticks(positions)
-            ax.set_xticklabels([g.capitalize() for g in available_groups], 
-                              fontsize=plot_cfg.font.small, rotation=45, ha="right")
-            ax.set_ylabel(feature_label if band_idx == 0 else "", fontsize=plot_cfg.font.label)
-            ax.tick_params(axis="y", labelsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
+        available_groups = [g for g in groups if g in band_data and len(band_data[g]) > 0]
         
-        title_parts = [f"{feature_label}: Multi-Group Comparison (Unpaired)"]
+        if not available_groups:
+            continue
         
+        # Collect significant pairs for this band
+        sig_pairs = []
+        band_sig = 0
+        band_tests = 0
+        for g1, g2 in combinations(available_groups, 2):
+            key = (band_idx, g1, g2)
+            if key not in qvalues_map:
+                key = (band_idx, g2, g1)
+            
+            if key in qvalues_map:
+                qval, is_sig = qvalues_map[key]
+                band_tests += 1
+                if is_sig:
+                    band_sig += 1
+                    sig_pairs.append((g1, g2, qval))
+        
+        # Figure size based on number of significant brackets (not all pairs)
+        n_sig_brackets = len(sig_pairs)
+        fig_width = max(1.2 * len(available_groups), 6)
+        fig_height = 5 + 0.25 * n_sig_brackets
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        
+        positions = list(range(len(available_groups)))
+        box_data = [band_data[g] for g in available_groups]
+        
+        bp = ax.boxplot(box_data, positions=positions, widths=0.6, patch_artist=True)
+        
+        for i, (box, g) in enumerate(zip(bp["boxes"], available_groups)):
+            box.set_facecolor(group_colors[groups.index(g) % len(group_colors)])
+            box.set_alpha(0.7)
+        
+        rng = np.random.default_rng(42)
+        for i, g in enumerate(available_groups):
+            vals = band_data[g]
+            jitter = rng.uniform(-0.15, 0.15, len(vals))
+            ax.scatter(i + jitter, vals, 
+                      c=[group_colors[groups.index(g) % len(group_colors)]], 
+                      alpha=0.5, s=15, zorder=3)
+        
+        all_vals = np.concatenate([band_data[g] for g in available_groups])
+        y_min, y_max = np.nanmin(all_vals), np.nanmax(all_vals)
+        y_range = y_max - y_min if y_max > y_min else 0.1
+        
+        # Only draw significant brackets
+        bracket_y = y_max + 0.05 * y_range
+        bracket_step = 0.08 * y_range
+        
+        for g1, g2, qval in sig_pairs:
+            text = _get_significance_stars(qval)
+            x1 = available_groups.index(g1)
+            x2 = available_groups.index(g2)
+            
+            bracket_y = _draw_significance_bracket(
+                ax, x1, x2, bracket_y, text, is_significant=True,
+                bracket_height=0.02 * y_range
+            )
+            bracket_y += bracket_step * 0.3
+        
+        # Set y limits based on actual bracket extent
+        top_margin = 0.15 * y_range if not sig_pairs else 0.05 * y_range
+        ax.set_ylim(y_min - 0.1 * y_range, bracket_y + top_margin)
+        
+        ax.set_title(f"{band.capitalize()} Band", fontsize=plot_cfg.font.title, 
+                    fontweight="bold", color=band_color)
+        ax.set_xticks(positions)
+        ax.set_xticklabels([str(g) for g in available_groups], 
+                          fontsize=plot_cfg.font.small, rotation=45, ha="right")
+        ax.set_ylabel(feature_label, fontsize=plot_cfg.font.label)
+        ax.tick_params(axis="y", labelsize=plot_cfg.font.small)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        
+        title_parts = [f"{feature_label}: Multi-Group Comparison"]
         info_parts = [f"Subject: {subject}"]
         if roi_name:
             roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
             info_parts.append(f"ROI: {roi_display}")
         info_parts.extend([
-            f"Groups: {', '.join(g.capitalize() for g in groups)}",
-            "Pre-computed stats",
-            f"FDR: {n_significant}/{n_tests} significant (*=q<0.05)"
+            f"{len(groups)} groups",
+            f"FDR: {band_sig}/{band_tests} sig (*p<.05)"
         ])
         title_parts.append(" | ".join(info_parts))
         
@@ -1501,10 +1480,131 @@ def plot_multi_group_column_comparison(
                     fontweight="bold", y=1.02)
         
         plt.tight_layout()
-        save_fig(fig, save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+        band_save_path = save_dir / f"{base_stem}_band-{band}"
+        save_fig(fig, band_save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
                 bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
         plt.close(fig)
     
     if logger:
+        logger.info(f"Saved {feature_label} multi-group comparison per band "
+                   f"({total_significant}/{total_tests} total FDR significant)")
+
+
+def _plot_multi_group_combined(
+    data_by_band: Dict[str, Dict[str, np.ndarray]],
+    bands_in_order: List[str],
+    groups: List[str],
+    group_colors: np.ndarray,
+    qvalues_map: Dict[Tuple[int, str, str], Tuple[float, bool]],
+    subject: str,
+    save_path: Union[Path, str],
+    feature_label: str,
+    plot_cfg: Any,
+    config: Any,
+    logger: Any,
+    roi_name: Optional[str],
+    total_significant: int,
+    total_tests: int,
+) -> None:
+    """Plot all bands in a single row (for <=3 groups)."""
+    import matplotlib.pyplot as plt
+    from itertools import combinations
+    from eeg_pipeline.plotting.io.figures import save_fig
+    
+    n_bands = len(bands_in_order)
+    
+    fig_width = max(3 * n_bands, 8)
+    fig, axes = plt.subplots(1, n_bands, figsize=(fig_width, 5), squeeze=False)
+    axes = axes.flatten()
+    
+    for band_idx, band in enumerate(bands_in_order):
+        ax = axes[band_idx]
+        band_data = data_by_band[band]
+        band_color = get_band_color(band, config)
+        
+        available_groups = [g for g in groups if g in band_data and len(band_data[g]) > 0]
+        
+        if not available_groups:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                   transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+            ax.set_title(band.capitalize(), fontsize=plot_cfg.font.title, fontweight="bold")
+            ax.set_xticks([])
+            continue
+        
+        positions = list(range(len(available_groups)))
+        box_data = [band_data[g] for g in available_groups]
+        
+        bp = ax.boxplot(box_data, positions=positions, widths=0.6, patch_artist=True)
+        
+        for i, (box, g) in enumerate(zip(bp["boxes"], available_groups)):
+            box.set_facecolor(group_colors[groups.index(g) % len(group_colors)])
+            box.set_alpha(0.7)
+        
+        rng = np.random.default_rng(42)
+        for i, g in enumerate(available_groups):
+            vals = band_data[g]
+            jitter = rng.uniform(-0.15, 0.15, len(vals))
+            ax.scatter(i + jitter, vals, 
+                      c=[group_colors[groups.index(g) % len(group_colors)]], 
+                      alpha=0.5, s=15, zorder=3)
+        
+        all_vals = np.concatenate([band_data[g] for g in available_groups])
+        y_min, y_max = np.nanmin(all_vals), np.nanmax(all_vals)
+        y_range = y_max - y_min if y_max > y_min else 0.1
+        ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.5 * y_range)
+        
+        bracket_y = y_max + 0.05 * y_range
+        bracket_step = 0.12 * y_range
+        
+        for g1, g2 in combinations(available_groups, 2):
+            key = (band_idx, g1, g2)
+            if key not in qvalues_map:
+                key = (band_idx, g2, g1)
+            
+            if key in qvalues_map:
+                qval, is_sig = qvalues_map[key]
+                text = _get_significance_stars(qval)
+                
+                x1 = available_groups.index(g1)
+                x2 = available_groups.index(g2)
+                
+                bracket_y = _draw_significance_bracket(
+                    ax, x1, x2, bracket_y, text, is_sig,
+                    bracket_height=0.02 * y_range
+                )
+                bracket_y += bracket_step * 0.3
+        
+        ax.set_title(band.capitalize(), fontsize=plot_cfg.font.title, fontweight="bold",
+                    color=band_color)
+        ax.set_xticks(positions)
+        ax.set_xticklabels([str(g) for g in available_groups], 
+                          fontsize=plot_cfg.font.small, rotation=45, ha="right")
+        ax.set_ylabel(feature_label if band_idx == 0 else "", fontsize=plot_cfg.font.label)
+        ax.tick_params(axis="y", labelsize=plot_cfg.font.small)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+    
+    title_parts = [f"{feature_label}: Multi-Group Comparison (Unpaired)"]
+    
+    info_parts = [f"Subject: {subject}"]
+    if roi_name:
+        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+        info_parts.append(f"ROI: {roi_display}")
+    info_parts.extend([
+        f"Groups: {', '.join(str(g) for g in groups)}",
+        "Pre-computed stats",
+        f"FDR: {total_significant}/{total_tests} significant (*=q<0.05)"
+    ])
+    title_parts.append(" | ".join(info_parts))
+    
+    fig.suptitle("\n".join(title_parts), fontsize=plot_cfg.font.suptitle,
+                fontweight="bold", y=1.02)
+    
+    plt.tight_layout()
+    save_fig(fig, save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
+    plt.close(fig)
+    
+    if logger:
         logger.info(f"Saved {feature_label} multi-group column comparison "
-                   f"({n_significant}/{n_tests} FDR significant, pre-computed)")
+                   f"({total_significant}/{total_tests} FDR significant, pre-computed)")

@@ -1147,11 +1147,18 @@ def compute_time_frequency_from_context(ctx: "BehaviorContext") -> Optional[Dict
             ctx.logger.info("Skipping time-frequency correlations: feature filter %s excludes 'power'/'spectral'", allowed)
             return None
 
+    # Get rating from aligned_events using event_columns.rating config
+    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    if rating_col is None or ctx.aligned_events is None:
+        ctx.logger.warning("No rating column available for time-frequency correlations")
+        return None
+    targets = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+
     return _run_tf_correlations_core(
         ctx.subject,
         ctx.epochs,
         ctx.aligned_events,
-        ctx.targets,
+        targets,
         ctx.stats_dir,
         ctx.config,
         ctx.use_spearman,
@@ -1168,10 +1175,17 @@ def compute_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
             ctx.logger.info("Skipping temporal correlations: feature filter %s excludes 'power'/'spectral'", allowed)
             return None
 
+    # Get rating from aligned_events using event_columns.rating config
+    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    if rating_col is None or ctx.aligned_events is None:
+        ctx.logger.warning("No rating column available for temporal correlations")
+        return None
+    targets = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+
     return _run_temporal_by_condition_core(
         ctx.epochs,
         ctx.aligned_events,
-        ctx.targets,
+        targets,
         ctx.stats_dir,
         ctx.config,
         ctx.use_spearman,
@@ -1430,10 +1444,17 @@ def compute_itpc_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[
     Note: Feature selection is handled by the orchestration layer based on
     which feature files the user selected in step 3 (feature selection).
     """
+    # Get rating from aligned_events using event_columns.rating config
+    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    if rating_col is None or ctx.aligned_events is None:
+        ctx.logger.warning("No rating column available for ITPC temporal correlations")
+        return None
+    targets = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+
     return _run_itpc_temporal_by_condition_core(
         ctx.epochs,
         ctx.aligned_events,
-        ctx.targets,
+        targets,
         ctx.stats_dir,
         ctx.config,
         ctx.use_spearman,
@@ -1671,7 +1692,14 @@ def compute_erds_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[
     Note: Feature selection is handled by the orchestration layer based on
     which feature files the user selected in step 3 (feature selection).
     """
+    # Get rating from aligned_events using event_columns.rating config
+    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    if rating_col is None or ctx.aligned_events is None:
+        ctx.logger.warning("No rating column available for ERDS temporal correlations")
+        return None
+    targets = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+
     return _run_erds_temporal_by_condition_core(
-        ctx.epochs, ctx.aligned_events, ctx.targets, ctx.stats_dir, ctx.config,
+        ctx.epochs, ctx.aligned_events, targets, ctx.stats_dir, ctx.config,
         ctx.use_spearman, ctx.covariates_df, ctx.logger, selected_bands=ctx.selected_bands,
     )

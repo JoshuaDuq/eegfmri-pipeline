@@ -24,7 +24,6 @@ from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.paths import (
     deriv_features_path,
     find_connectivity_features_path,
-    _find_clean_events_path,
 )
 from eeg_pipeline.infra.tsv import read_table, write_parquet, write_tsv
 
@@ -99,8 +98,14 @@ def _load_features_and_targets(
     config: Any,
     epochs: Optional[Any] = None,
 ) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame], pd.Series, Any]:
-    """Load features and targets for a subject, validating alignment."""
+    """Load features and targets for a subject, validating alignment.
+    
+    Targets are extracted from aligned_events using the event_columns.rating config.
+    """
+    from eeg_pipeline.utils.data.alignment import get_aligned_events
+    
     feats_dir = deriv_features_path(deriv_root, subject)
+    logger = logging.getLogger(__name__)
     
     temporal_path = _find_power_feature_path(feats_dir, "features_power")
     active_path = _find_power_feature_path(feats_dir, "features_power_active")
@@ -116,10 +121,6 @@ def _load_features_and_targets(
     temporal_df = read_table(temporal_path) if temporal_path.exists() else None
     active_df = read_table(power_path)
     conn_df = read_table(conn_path) if conn_path.exists() else None
-    
-    target_series = _load_targets_from_clean_events(
-        subject, task, deriv_root, config, logging.getLogger(__name__)
-    )
 
     if epochs is None:
         epochs, _ = load_epochs_for_analysis(
@@ -134,6 +135,26 @@ def _load_features_and_targets(
             raise FileNotFoundError(
                 f"Could not locate clean epochs for sub-{subject}, task-{task}"
             )
+    
+    # Load targets from aligned_events using event_columns.rating config
+    aligned_events = get_aligned_events(
+        epochs, subject, task, strict=True, logger=logger, config=config
+    )
+    if aligned_events is None:
+        raise ValueError(f"Failed to load aligned events for sub-{subject}, task-{task}")
+    
+    rating_columns = (
+        config.get("event_columns.rating", [])
+        if config is not None and hasattr(config, "get")
+        else []
+    )
+    target_col = pick_target_column(aligned_events, target_columns=rating_columns)
+    if target_col is None:
+        raise ValueError(
+            f"No rating column found in aligned_events for sub-{subject}, task-{task}. "
+            f"Available columns: {list(aligned_events.columns)}"
+        )
+    target_series = pd.to_numeric(aligned_events[target_col], errors="coerce")
 
     _validate_feature_lengths(
         subject, task, len(target_series), active_df, temporal_df, conn_df
@@ -170,7 +191,6 @@ class FeatureBundle:
     ratios_df: Optional[pd.DataFrame] = None
     asymmetry_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
-    targets: Optional[pd.Series] = None
 
 
 def _load_feature_metadata_sidecar(
@@ -226,75 +246,6 @@ def _safe_read_feature_table_with_path(
     return None, None
 
 
-def _load_targets_from_clean_events(
-    subject: str,
-    task: str,
-    deriv_root: Path,
-    config: Optional[Any],
-    logger: logging.Logger,
-) -> pd.Series:
-    """Load target ratings from clean events.tsv file.
-    
-    Raises FileNotFoundError if clean events.tsv is not found.
-    Raises ValueError if no suitable target column is found.
-    """
-    clean_events_path = _find_clean_events_path(
-        subject=subject,
-        task=task,
-        deriv_root=deriv_root,
-        config=config,
-        constants=None,
-    )
-    
-    if clean_events_path is None or not clean_events_path.exists():
-        raise FileNotFoundError(
-            f"Clean events.tsv not found for sub-{subject}, task-{task}. "
-            f"Required for target loading."
-        )
-    
-    try:
-        events_df = read_table(clean_events_path)
-    except Exception as e:
-        raise IOError(
-            f"Failed to load clean events.tsv from {clean_events_path}: {e}"
-        ) from e
-    
-    if events_df.empty:
-        raise ValueError(
-            f"Clean events.tsv is empty for sub-{subject}, task-{task}"
-        )
-    
-    rating_columns = (
-        config.get("event_columns.rating", [])
-        if config is not None and hasattr(config, "get")
-        else []
-    )
-    target_col = pick_target_column(events_df, target_columns=rating_columns)
-    
-    if target_col is None:
-        numeric_cols = events_df.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) == 0:
-            raise ValueError(
-                f"No numeric target columns found in clean events.tsv for sub-{subject}, task-{task}. "
-                f"Available columns: {list(events_df.columns)}"
-            )
-        if len(numeric_cols) > 1:
-            logger.warning(
-                "Multiple numeric target columns found in clean events.tsv; using '%s'. Candidates=%s",
-                str(numeric_cols[0]),
-                ",".join(str(c) for c in numeric_cols),
-            )
-        target_col = str(numeric_cols[0])
-    
-    targets = pd.to_numeric(events_df[target_col], errors="coerce")
-    logger.info(
-        "Loaded targets from clean events.tsv (column: %s, n_trials: %d)",
-        target_col,
-        len(targets),
-    )
-    return targets
-
-
 def _extract_targets_from_dataframe(
     targets_df: pd.DataFrame,
     config: Optional[Any],
@@ -333,7 +284,6 @@ def load_feature_bundle(
     subject: str,
     deriv_root: Path,
     logger: Optional[logging.Logger] = None,
-    include_targets: bool = False,
     config: Optional[Any] = None,
 ) -> FeatureBundle:
     """Canonical loader for all feature tables for a subject."""
@@ -380,24 +330,6 @@ def load_feature_bundle(
     bundle.ratios_df = _load("features_ratios", "ratios")
     bundle.asymmetry_df = _load("features_asymmetry", "asymmetry")
     bundle.temporal_df = _load("features_temporal", "temporal")
-
-    if include_targets:
-        task = config.get("project.task") if config is not None else None
-        if task is None:
-            raise ValueError("Cannot load targets: task not specified in config")
-        
-        bundle.targets = _load_targets_from_clean_events(
-            subject, task, deriv_root, config, logger
-        )
-        clean_events_path = _find_clean_events_path(
-            subject=subject,
-            task=task,
-            deriv_root=deriv_root,
-            config=config,
-            constants=None,
-        )
-        if clean_events_path is not None:
-            bundle.paths["targets"] = clean_events_path
 
     return bundle
 

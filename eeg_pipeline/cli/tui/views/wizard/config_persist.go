@@ -311,6 +311,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fdrAlpha"] = m.fdrAlpha
 	cfg["behaviorNJobs"] = m.behaviorNJobs
 	cfg["alsoSaveCsv"] = m.alsoSaveCsv
+	cfg["behaviorOverwrite"] = m.behaviorOverwrite
 	cfg["runAdjustmentColumn"] = m.runAdjustmentColumn
 	cfg["runAdjustmentEnabled"] = m.runAdjustmentEnabled
 	cfg["runAdjustmentIncludeInCorrelations"] = m.runAdjustmentIncludeInCorrelations
@@ -689,6 +690,16 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["plotTopomapSigMaskMarkerSize"] = m.plotTopomapSigMaskMarkerSize
 	cfg["plotTFRLogBase"] = m.plotTFRLogBase
 	cfg["plotTFRPercentageMultiplier"] = m.plotTFRPercentageMultiplier
+	cfg["plotTFRTopomapWindowSizeMs"] = m.plotTFRTopomapWindowSizeMs
+	cfg["plotTFRTopomapWindowCount"] = m.plotTFRTopomapWindowCount
+	cfg["plotTFRTopomapLabelXPosition"] = m.plotTFRTopomapLabelXPosition
+	cfg["plotTFRTopomapLabelYPositionBottom"] = m.plotTFRTopomapLabelYPositionBottom
+	cfg["plotTFRTopomapLabelYPosition"] = m.plotTFRTopomapLabelYPosition
+	cfg["plotTFRTopomapTitleY"] = m.plotTFRTopomapTitleY
+	cfg["plotTFRTopomapTitlePad"] = m.plotTFRTopomapTitlePad
+	cfg["plotTFRTopomapSubplotsRight"] = m.plotTFRTopomapSubplotsRight
+	cfg["plotTFRTopomapTemporalHspace"] = m.plotTFRTopomapTemporalHspace
+	cfg["plotTFRTopomapTemporalWspace"] = m.plotTFRTopomapTemporalWspace
 	cfg["plotRoiWidthPerBand"] = m.plotRoiWidthPerBand
 	cfg["plotRoiWidthPerMetric"] = m.plotRoiWidthPerMetric
 	cfg["plotRoiHeightPerRoi"] = m.plotRoiHeightPerRoi
@@ -719,6 +730,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["plotConnectivityHeightPerMeasure"] = m.plotConnectivityHeightPerMeasure
 	cfg["plotConnectivityCircleTopFraction"] = m.plotConnectivityCircleTopFraction
 	cfg["plotConnectivityCircleMinLines"] = m.plotConnectivityCircleMinLines
+	cfg["plotConnectivityNetworkTopFraction"] = m.plotConnectivityNetworkTopFraction
 	cfg["plotPacPairsSpec"] = m.plotPacPairsSpec
 	cfg["plotSpectralMetricsSpec"] = m.plotSpectralMetricsSpec
 	cfg["plotBurstsMetricsSpec"] = m.plotBurstsMetricsSpec
@@ -1111,6 +1123,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fdrAlpha = getFloat("fdrAlpha", m.fdrAlpha)
 	m.behaviorNJobs = getInt("behaviorNJobs", m.behaviorNJobs)
 	m.alsoSaveCsv = getBool("alsoSaveCsv", m.alsoSaveCsv)
+	m.behaviorOverwrite = getBool("behaviorOverwrite", m.behaviorOverwrite)
 	m.runAdjustmentColumn = getString("runAdjustmentColumn", m.runAdjustmentColumn)
 	m.runAdjustmentEnabled = getBool("runAdjustmentEnabled", m.runAdjustmentEnabled)
 	m.runAdjustmentIncludeInCorrelations = getBool("runAdjustmentIncludeInCorrelations", m.runAdjustmentIncludeInCorrelations)
@@ -1493,6 +1506,16 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.plotTopomapSigMaskMarkerSize = getFloat("plotTopomapSigMaskMarkerSize", m.plotTopomapSigMaskMarkerSize)
 	m.plotTFRLogBase = getFloat("plotTFRLogBase", m.plotTFRLogBase)
 	m.plotTFRPercentageMultiplier = getFloat("plotTFRPercentageMultiplier", m.plotTFRPercentageMultiplier)
+	m.plotTFRTopomapWindowSizeMs = getFloat("plotTFRTopomapWindowSizeMs", m.plotTFRTopomapWindowSizeMs)
+	m.plotTFRTopomapWindowCount = getInt("plotTFRTopomapWindowCount", m.plotTFRTopomapWindowCount)
+	m.plotTFRTopomapLabelXPosition = getFloat("plotTFRTopomapLabelXPosition", m.plotTFRTopomapLabelXPosition)
+	m.plotTFRTopomapLabelYPositionBottom = getFloat("plotTFRTopomapLabelYPositionBottom", m.plotTFRTopomapLabelYPositionBottom)
+	m.plotTFRTopomapLabelYPosition = getFloat("plotTFRTopomapLabelYPosition", m.plotTFRTopomapLabelYPosition)
+	m.plotTFRTopomapTitleY = getFloat("plotTFRTopomapTitleY", m.plotTFRTopomapTitleY)
+	m.plotTFRTopomapTitlePad = getInt("plotTFRTopomapTitlePad", m.plotTFRTopomapTitlePad)
+	m.plotTFRTopomapSubplotsRight = getFloat("plotTFRTopomapSubplotsRight", m.plotTFRTopomapSubplotsRight)
+	m.plotTFRTopomapTemporalHspace = getFloat("plotTFRTopomapTemporalHspace", m.plotTFRTopomapTemporalHspace)
+	m.plotTFRTopomapTemporalWspace = getFloat("plotTFRTopomapTemporalWspace", m.plotTFRTopomapTemporalWspace)
 	m.plotRoiWidthPerBand = getFloat("plotRoiWidthPerBand", m.plotRoiWidthPerBand)
 	m.plotRoiWidthPerMetric = getFloat("plotRoiWidthPerMetric", m.plotRoiWidthPerMetric)
 	m.plotRoiHeightPerRoi = getFloat("plotRoiHeightPerRoi", m.plotRoiHeightPerRoi)
@@ -1523,6 +1546,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.plotConnectivityHeightPerMeasure = getFloat("plotConnectivityHeightPerMeasure", m.plotConnectivityHeightPerMeasure)
 	m.plotConnectivityCircleTopFraction = getFloat("plotConnectivityCircleTopFraction", m.plotConnectivityCircleTopFraction)
 	m.plotConnectivityCircleMinLines = getInt("plotConnectivityCircleMinLines", m.plotConnectivityCircleMinLines)
+	m.plotConnectivityNetworkTopFraction = getFloat("plotConnectivityNetworkTopFraction", m.plotConnectivityNetworkTopFraction)
 	m.plotPacPairsSpec = getString("plotPacPairsSpec", m.plotPacPairsSpec)
 	m.plotSpectralMetricsSpec = getString("plotSpectralMetricsSpec", m.plotSpectralMetricsSpec)
 	m.plotBurstsMetricsSpec = getString("plotBurstsMetricsSpec", m.plotBurstsMetricsSpec)

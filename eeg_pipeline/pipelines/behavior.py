@@ -53,6 +53,7 @@ BEHAVIOR_COMPUTATION_FLAGS = [
     "influence",
     "report",
     "correlations",
+    "multilevel_correlations",
     "pain_sensitivity",
     "condition",
     "temporal",
@@ -140,6 +141,7 @@ class BehaviorPipelineConfig:
     run_influence: bool = True
     run_report: bool = True
     run_correlations: bool = True
+    run_multilevel_correlations: bool = False
     run_condition_comparison: bool = True
     run_temporal_correlations: bool = True
     run_cluster_tests: bool = False
@@ -477,6 +479,7 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_influence = comp_flags["influence"]
             self.pipeline_config.run_report = comp_flags["report"]
             self.pipeline_config.run_correlations = comp_flags["correlations"]
+            self.pipeline_config.run_multilevel_correlations = comp_flags["multilevel_correlations"]
             self.pipeline_config.run_condition_comparison = comp_flags["condition"]
             self.pipeline_config.run_temporal_correlations = comp_flags["temporal"]
             self.pipeline_config.run_cluster_tests = comp_flags["cluster"]
@@ -534,6 +537,7 @@ class BehaviorPipeline(PipelineBase):
         
         output_cfg = self.config.get("behavior_analysis.output", {})
         also_save_csv = bool(output_cfg.get("also_save_csv", False))
+        overwrite = bool(output_cfg.get("overwrite", True))
 
         # Build context (step 1)
         ctx = BehaviorContext(
@@ -558,6 +562,7 @@ class BehaviorPipeline(PipelineBase):
             selected_bands=kwargs.get("bands"),
             computation_features=self.computation_features,
             also_save_csv=also_save_csv,
+            overwrite=overwrite,
         )
         
         results = BehaviorPipelineResults(subject=subject)
@@ -650,10 +655,10 @@ class BehaviorPipeline(PipelineBase):
         subjects : List[str]
             List of subject IDs to include
         **kwargs : dict
-            run_mixed_effects : bool, default True
-                Run mixed-effects models
-            run_multilevel_correlations : bool, default True
-                Run multilevel correlations with block-restricted permutations
+            run_mixed_effects : bool, default False
+                Run mixed-effects models (only runs if explicitly requested)
+            run_multilevel_correlations : bool, default False
+                Run multilevel correlations with block-restricted permutations (opt-in)
             output_dir : Path, optional
                 Custom output directory (default: deriv_root/group/stats)
         
@@ -667,6 +672,18 @@ class BehaviorPipeline(PipelineBase):
             GroupLevelResult,
         )
         from eeg_pipeline.infra.paths import ensure_dir
+        
+        run_mixed_effects = kwargs.get("run_mixed_effects")
+        if run_mixed_effects is None:
+            run_mixed_effects = getattr(self.pipeline_config, "run_mixed_effects", False)
+        
+        run_multilevel_correlations = kwargs.get("run_multilevel_correlations")
+        if run_multilevel_correlations is None:
+            run_multilevel_correlations = getattr(self.pipeline_config, "run_multilevel_correlations", False)
+        
+        # Only run group-level analysis if at least one computation is enabled
+        if not run_mixed_effects and not run_multilevel_correlations:
+            return None
         
         output_dir = kwargs.get("output_dir")
         if output_dir is None:
@@ -684,8 +701,8 @@ class BehaviorPipeline(PipelineBase):
             deriv_root=self.deriv_root,
             config=self.config,
             logger=self.logger,
-            run_mixed_effects=kwargs.get("run_mixed_effects", True),
-            run_multilevel_correlations=kwargs.get("run_multilevel_correlations", True),
+            run_mixed_effects=run_mixed_effects,
+            run_multilevel_correlations=run_multilevel_correlations,
             output_dir=output_dir,
         )
         

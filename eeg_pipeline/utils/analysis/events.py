@@ -208,6 +208,12 @@ def extract_multi_group_masks(
     masks_dict = {}
     column_values = events_df[column]
     
+    import logging
+    _debug_logger = logging.getLogger(__name__)
+    
+    unique_values = column_values.unique()
+    _debug_logger.debug(f"Multi-group comparison: column '{column}' has {len(unique_values)} unique values: {sorted(unique_values)[:10]}")
+    
     for val, label in zip(values_spec, labels):
         try:
             numeric_val = float(val)
@@ -216,10 +222,20 @@ def extract_multi_group_masks(
             val_str = str(val).strip().lower()
             mask = (column_values.astype(str).str.strip().str.lower() == val_str).values
         
-        if np.any(mask):
+        n_matches = int(mask.sum())
+        if n_matches > 0:
             masks_dict[label] = mask
+            _debug_logger.debug(f"Multi-group: value {val!r} (label '{label}') matched {n_matches} trials")
+        else:
+            _debug_logger.debug(f"Multi-group: value {val!r} (label '{label}') matched 0 trials")
     
     if len(masks_dict) < 2:
+        unique_vals = sorted(pd.to_numeric(column_values, errors="coerce").dropna().unique())
+        _debug_logger.warning(
+            f"Multi-group comparison failed: only {len(masks_dict)} groups matched "
+            f"(need at least 2). Column: {column}, Requested values: {values_spec}, "
+            f"Available numeric values in column: {unique_vals[:20]}{'...' if len(unique_vals) > 20 else ''}"
+        )
         return None
     
     return masks_dict, labels

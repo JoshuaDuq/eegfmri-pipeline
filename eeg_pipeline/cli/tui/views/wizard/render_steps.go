@@ -670,20 +670,6 @@ func (m Model) computeChannelUsage() (used, unused []string) {
 	return used, unused
 }
 
-// isChannelUnavailable checks if a channel is in the unavailable channels list (case-insensitive)
-func (m Model) isChannelUnavailable(channel string) bool {
-	if len(m.unavailableChannels) == 0 {
-		return false
-	}
-	chUpper := strings.ToUpper(strings.TrimSpace(channel))
-	for _, unavail := range m.unavailableChannels {
-		if strings.ToUpper(strings.TrimSpace(unavail)) == chUpper {
-			return true
-		}
-	}
-	return false
-}
-
 // renderChannelsWithUnavailable renders channel list with unavailable channels in red
 func (m Model) renderChannelsWithUnavailable(channelsStr string, baseStyle lipgloss.Style, isFocused bool) string {
 	if channelsStr == "" {
@@ -1063,7 +1049,7 @@ func (m Model) renderPlotConfig() string {
 
 	for i, opt := range options {
 		isFocused := i == m.plotConfigCursor
-		cursor := "  "
+		cursor := ""
 		if isFocused {
 			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
 		}
@@ -4214,6 +4200,13 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
 			}
 			return "Custom Target Column", val, hint
+		case optCorrelationsMultilevel:
+			enabled := m.isComputationSelected("multilevel_correlations")
+			val := "No"
+			if enabled {
+				val = "Yes"
+			}
+			return "Group Multilevel Correlations", val, "Space to toggle"
 
 		// Cluster
 		case optClusterThreshold:
@@ -4340,6 +4333,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return label, "", "Space to toggle"
 		case optAlsoSaveCsv:
 			return "Also Save CSV", m.boolToOnOff(m.alsoSaveCsv), "save tables as both TSV and CSV"
+		case optBehaviorOverwrite:
+			return "Overwrite Outputs", m.boolToOnOff(m.behaviorOverwrite), "if off, append timestamp to output folders"
 
 		default:
 			return "", "", ""

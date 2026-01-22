@@ -162,6 +162,18 @@ var plotDefaults = struct {
 	tfrPercentageMultiplier  float64
 	tfrDefaultBaselineWindow string
 
+	// TFR Topomap
+	tfrTopomapWindowSizeMs         float64
+	tfrTopomapWindowCount          int
+	tfrTopomapLabelXPosition       float64
+	tfrTopomapLabelYPositionBottom float64
+	tfrTopomapLabelYPosition       float64
+	tfrTopomapTitleY               float64
+	tfrTopomapTitlePad             int
+	tfrTopomapSubplotsRight        float64
+	tfrTopomapTemporalHspace       float64
+	tfrTopomapTemporalWspace       float64
+
 	// Comparisons
 	comparisonWindows string
 	comparisonSegment string
@@ -330,6 +342,18 @@ var plotDefaults = struct {
 	tfrLogBase:               10.0,
 	tfrPercentageMultiplier:  100.0,
 	tfrDefaultBaselineWindow: "-5.0 -0.01",
+
+	// TFR Topomap
+	tfrTopomapWindowSizeMs:         100.0,
+	tfrTopomapWindowCount:          5,
+	tfrTopomapLabelXPosition:       0.5,
+	tfrTopomapLabelYPositionBottom: 1.08,
+	tfrTopomapLabelYPosition:       1.02,
+	tfrTopomapTitleY:               1.04,
+	tfrTopomapTitlePad:             4,
+	tfrTopomapSubplotsRight:        0.75,
+	tfrTopomapTemporalHspace:       0.15,
+	tfrTopomapTemporalWspace:       0.8,
 
 	// Comparisons
 	comparisonWindows: "baseline active",
@@ -636,9 +660,6 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 	cfg := m.plotItemConfigs[row.plotID]
 
 	switch row.plotField {
-	case plotItemConfigFieldTfrDefaultBaselineWindow:
-		value := m.getPlotFieldTextValue(cfg.TfrDefaultBaselineWindowSpec, plotDefaults.tfrDefaultBaselineWindow, row, plotItemConfigFieldTfrDefaultBaselineWindow)
-		return []renderLine{m.renderPlotValueLine("tfr_baseline", value, "tmin tmax", focused, labelWidth)}
 	case plotItemConfigFieldCompareWindows:
 		value := formatTriState(cfg.CompareWindows)
 		return []renderLine{m.renderPlotValueLine("compare_windows", value, "default/ON/OFF", focused, labelWidth)}
@@ -730,9 +751,45 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 	case plotItemConfigFieldConnectivityCircleMinLines:
 		value := m.getPlotFieldTextValue(cfg.ConnectivityCircleMinLines, "20", row, plotItemConfigFieldConnectivityCircleMinLines)
 		return []renderLine{m.renderPlotValueLine("circle_min_lines", value, "integer (default: 20)", focused, labelWidth)}
+	case plotItemConfigFieldConnectivityNetworkTopFraction:
+		value := m.getPlotFieldTextValue(cfg.ConnectivityNetworkTopFraction, "0.0", row, plotItemConfigFieldConnectivityNetworkTopFraction)
+		return []renderLine{m.renderPlotValueLine("network_top_fraction", value, "0.0-1.0 (default: 0.0 = all edges)", focused, labelWidth)}
 	case plotItemConfigFieldItpcSharedColorbar:
 		value := formatTriState(cfg.ItpcSharedColorbar)
 		return []renderLine{m.renderPlotValueLine("shared_colorbar", value, "default/ON/OFF", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapActiveWindow:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapActiveWindow, "3.0 10.5", row, plotItemConfigFieldTfrTopomapActiveWindow)
+		return []renderLine{m.renderPlotValueLine("active_window", value, "tmin tmax (default: 3.0 10.5)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapWindowSizeMs:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapWindowSizeMs, "100.0", row, plotItemConfigFieldTfrTopomapWindowSizeMs)
+		return []renderLine{m.renderPlotValueLine("window_size_ms", value, "float ms (default: 100.0)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapWindowCount:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapWindowCount, "5", row, plotItemConfigFieldTfrTopomapWindowCount)
+		return []renderLine{m.renderPlotValueLine("window_count", value, "int (default: 5)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapLabelXPosition:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapLabelXPosition, "0.5", row, plotItemConfigFieldTfrTopomapLabelXPosition)
+		return []renderLine{m.renderPlotValueLine("label_x_position", value, "float (default: 0.5)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapLabelYPositionBottom:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapLabelYPositionBottom, "1.08", row, plotItemConfigFieldTfrTopomapLabelYPositionBottom)
+		return []renderLine{m.renderPlotValueLine("label_y_position_bottom", value, "float (default: 1.08)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapLabelYPosition:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapLabelYPosition, "1.02", row, plotItemConfigFieldTfrTopomapLabelYPosition)
+		return []renderLine{m.renderPlotValueLine("label_y_position", value, "float (default: 1.02)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapTitleY:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapTitleY, "1.04", row, plotItemConfigFieldTfrTopomapTitleY)
+		return []renderLine{m.renderPlotValueLine("title_y", value, "float (default: 1.04)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapTitlePad:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapTitlePad, "4", row, plotItemConfigFieldTfrTopomapTitlePad)
+		return []renderLine{m.renderPlotValueLine("title_pad", value, "int (default: 4)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapSubplotsRight:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapSubplotsRight, "0.75", row, plotItemConfigFieldTfrTopomapSubplotsRight)
+		return []renderLine{m.renderPlotValueLine("subplots_right", value, "float (default: 0.75)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapTemporalHspace:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapTemporalHspace, "0.15", row, plotItemConfigFieldTfrTopomapTemporalHspace)
+		return []renderLine{m.renderPlotValueLine("temporal_hspace", value, "float (default: 0.15)", focused, labelWidth)}
+	case plotItemConfigFieldTfrTopomapTemporalWspace:
+		value := m.getPlotFieldTextValue(cfg.TfrTopomapTemporalWspace, "0.8", row, plotItemConfigFieldTfrTopomapTemporalWspace)
+		return []renderLine{m.renderPlotValueLine("temporal_wspace", value, "float (default: 0.8)", focused, labelWidth)}
 	case plotItemConfigFieldComparisonROIs:
 		value := m.getPlotFieldTextValue(cfg.ComparisonROIsSpec, "(all)", row, plotItemConfigFieldComparisonROIs)
 		hint := "e.g. all Frontal Midline_FrontalCentral"
@@ -984,9 +1041,6 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optPlotTopomapSigMaskMarkerEdgeColor:
 		value := m.formatTextFieldWithBuffer(textFieldPlotTopomapSigMaskMarkerEdgeColor, m.plotTopomapSigMaskMarkerEdgeColor, plotDefaults.topomapSigMaskMarkerEdgeColor)
 		return []renderLine{m.renderValueLine(opt, "sig_mask_edge", value, "hex or named color", focused, labelWidth)}
-	case optPlotTfrDefaultBaselineWindow:
-		value := m.formatTextFieldWithBuffer(textFieldPlotTfrDefaultBaselineWindow, m.plotTfrDefaultBaselineWindowSpec, plotDefaults.tfrDefaultBaselineWindow)
-		return []renderLine{m.renderValueLine(opt, "tfr_baseline", value, "tmin tmax", focused, labelWidth)}
 	case optPlotPacCmap:
 		value := m.formatTextFieldWithBuffer(textFieldPlotPacCmap, m.plotPacCmap, "magma")
 		return []renderLine{m.renderValueLine(opt, "pac_cmap", value, "matplotlib cmap", focused, labelWidth)}
@@ -1243,6 +1297,36 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optPlotTFRPercentageMultiplier:
 		value := m.getFloatFieldValue(optPlotTFRPercentageMultiplier, m.plotTFRPercentageMultiplier, plotDefaults.tfrPercentageMultiplier, "%.4f")
 		return []renderLine{m.renderValueLine(opt, "tfr_pct_mult", value, "float", focused, labelWidth)}
+	case optPlotTFRTopomapWindowSizeMs:
+		value := m.getFloatFieldValue(optPlotTFRTopomapWindowSizeMs, m.plotTFRTopomapWindowSizeMs, plotDefaults.tfrTopomapWindowSizeMs, "%.1f")
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_win_ms", value, "float ms", focused, labelWidth)}
+	case optPlotTFRTopomapWindowCount:
+		value := m.getIntFieldValue(optPlotTFRTopomapWindowCount, m.plotTFRTopomapWindowCount, plotDefaults.tfrTopomapWindowCount)
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_win_cnt", value, "int", focused, labelWidth)}
+	case optPlotTFRTopomapLabelXPosition:
+		value := m.getFloatFieldValue(optPlotTFRTopomapLabelXPosition, m.plotTFRTopomapLabelXPosition, plotDefaults.tfrTopomapLabelXPosition, "%.2f")
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_lbl_x", value, "float", focused, labelWidth)}
+	case optPlotTFRTopomapLabelYPositionBottom:
+		value := m.getFloatFieldValue(optPlotTFRTopomapLabelYPositionBottom, m.plotTFRTopomapLabelYPositionBottom, plotDefaults.tfrTopomapLabelYPositionBottom, "%.2f")
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_lbl_y_bot", value, "float", focused, labelWidth)}
+	case optPlotTFRTopomapLabelYPosition:
+		value := m.getFloatFieldValue(optPlotTFRTopomapLabelYPosition, m.plotTFRTopomapLabelYPosition, plotDefaults.tfrTopomapLabelYPosition, "%.2f")
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_lbl_y", value, "float", focused, labelWidth)}
+	case optPlotTFRTopomapTitleY:
+		value := m.getFloatFieldValue(optPlotTFRTopomapTitleY, m.plotTFRTopomapTitleY, plotDefaults.tfrTopomapTitleY, "%.2f")
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_title_y", value, "float", focused, labelWidth)}
+	case optPlotTFRTopomapTitlePad:
+		value := m.getIntFieldValue(optPlotTFRTopomapTitlePad, m.plotTFRTopomapTitlePad, plotDefaults.tfrTopomapTitlePad)
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_title_pad", value, "int", focused, labelWidth)}
+	case optPlotTFRTopomapSubplotsRight:
+		value := m.getFloatFieldValue(optPlotTFRTopomapSubplotsRight, m.plotTFRTopomapSubplotsRight, plotDefaults.tfrTopomapSubplotsRight, "%.2f")
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_sub_r", value, "float", focused, labelWidth)}
+	case optPlotTFRTopomapTemporalHspace:
+		value := m.getFloatFieldValue(optPlotTFRTopomapTemporalHspace, m.plotTFRTopomapTemporalHspace, plotDefaults.tfrTopomapTemporalHspace, "%.2f")
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_tmp_h", value, "float", focused, labelWidth)}
+	case optPlotTFRTopomapTemporalWspace:
+		value := m.getFloatFieldValue(optPlotTFRTopomapTemporalWspace, m.plotTFRTopomapTemporalWspace, plotDefaults.tfrTopomapTemporalWspace, "%.2f")
+		return []renderLine{m.renderValueLine(opt, "tfr_topomap_tmp_w", value, "float", focused, labelWidth)}
 
 	case optPlotRoiWidthPerBand:
 		value := m.getFloatFieldValue(optPlotRoiWidthPerBand, m.plotRoiWidthPerBand, plotDefaults.roiWidthPerBand, "%.4f")
@@ -1331,6 +1415,9 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optPlotConnectivityCircleMinLines:
 		value := m.getIntFieldValue(optPlotConnectivityCircleMinLines, m.plotConnectivityCircleMinLines, plotDefaults.connectivityCircleMinLines)
 		return []renderLine{m.renderValueLine(opt, "conn_min_lines", value, "int", focused, labelWidth)}
+	case optPlotConnectivityNetworkTopFraction:
+		value := m.getFloatFieldValue(optPlotConnectivityNetworkTopFraction, m.plotConnectivityNetworkTopFraction, 0, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "conn_net_top_frac", value, "float [0..1]", focused, labelWidth)}
 
 	case optPlotConnectivityMeasures:
 		value := m.formatTextFieldWithBuffer(textFieldPlotConnectivityMeasures, m.getTextFieldValue(textFieldPlotConnectivityMeasures), "")

@@ -56,6 +56,21 @@ def _pick_event_columns(events: pd.DataFrame, candidates: List[str]) -> Dict[str
     return selected_columns
 
 
+def _get_rating_column_from_events(config: Any, events: pd.DataFrame) -> Optional[str]:
+    """Extract rating column name from config and events, returning None on failure."""
+    from eeg_pipeline.utils.data.columns import pick_target_column
+    
+    try:
+        rating_columns = (
+            list(config.get("event_columns.rating", []) or [])
+            if config is not None
+            else []
+        )
+        return pick_target_column(events, target_columns=rating_columns)
+    except (AttributeError, KeyError, ValueError):
+        return None
+
+
 def build_subject_trial_table(
     ctx: Any,  # BehaviorContext
     *,
@@ -71,18 +86,13 @@ def build_subject_trial_table(
     -----
     - Assumes ctx.load_data() already ran and alignment is validated.
     - Uses ctx.epochs.selection as the original event index when available.
+    - Rating column is extracted from aligned_events using event_columns.rating config.
     """
     if ctx.aligned_events is None:
         raise ValueError("ctx.aligned_events is required")
-    if ctx.targets is None:
-        raise ValueError("ctx.targets is required")
 
-    n_trials = int(len(ctx.targets))
     events = ctx.aligned_events.reset_index(drop=True)
-    if len(events) != n_trials:
-        raise ValueError(
-            f"Trial table requires aligned events length {len(events)} == targets length {n_trials}"
-        )
+    n_trials = int(len(events))
 
     subject = getattr(ctx, "subject", None)
     task = getattr(ctx, "task", None)
@@ -114,7 +124,16 @@ def build_subject_trial_table(
             meta["has_original_event_index"] = False
             meta["selection_error"] = str(exc)
 
-    df["rating"] = _safe_numeric(ctx.targets).reset_index(drop=True)
+    # Extract rating from aligned_events using event_columns.rating config
+    rating_col = _get_rating_column_from_events(ctx.config, events)
+    if rating_col is not None and rating_col in events.columns:
+        df["rating"] = pd.to_numeric(events[rating_col], errors="coerce").reset_index(drop=True)
+        meta["rating_column"] = str(rating_col)
+    else:
+        # Rating column not found - leave as NaN
+        df["rating"] = np.nan
+        meta["rating_column"] = None
+    
     temperature = getattr(ctx, "temperature", None)
     if temperature is not None:
         df["temperature"] = _safe_numeric(temperature).reset_index(drop=True)

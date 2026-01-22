@@ -616,11 +616,9 @@ def get_plot_config(config: Optional[Any] = None) -> PlotConfig:
 def _extract_config_dict(config: Any) -> Dict[str, Any]:
     """Extract plotting config dictionary from config object.
     
-    ConfigDict is a dict subclass, so isinstance check handles it.
+    ConfigDict is a dict subclass, so we need to check for it specifically
+    to use its get() method which supports dot notation.
     """
-    if isinstance(config, dict):
-        return config
-    
     if hasattr(config, "get"):
         try:
             plotting_dict = config.get("plotting", {})
@@ -628,6 +626,12 @@ def _extract_config_dict(config: Any) -> Dict[str, Any]:
                 return {"plotting": plotting_dict}
         except (TypeError, AttributeError):
             pass
+    
+    if isinstance(config, dict):
+        plotting_dict = config.get("plotting", {}) if "plotting" in config else {}
+        if plotting_dict:
+            return {"plotting": plotting_dict}
+        return config
     
     return {}
 

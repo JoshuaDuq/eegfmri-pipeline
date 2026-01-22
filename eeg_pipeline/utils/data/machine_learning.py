@@ -760,6 +760,9 @@ def ml_build_feature_matrix(
         return load_active_matrix(subjects, task, deriv_root, config, log)
     
     from eeg_pipeline.utils.data.feature_io import load_feature_bundle
+    from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
+    from eeg_pipeline.utils.data.alignment import get_aligned_events
+    from eeg_pipeline.utils.data.columns import pick_target_column
     from eeg_pipeline.infra.paths import deriv_features_path
     
     X_blocks: List[np.ndarray] = []
@@ -769,13 +772,37 @@ def ml_build_feature_matrix(
     feature_cols: Optional[List[str]] = None
     
     for sub in subjects:
-        bundle = load_feature_bundle(sub, deriv_root, log, include_targets=True, config=config)
+        bundle = load_feature_bundle(sub, deriv_root, log, config=config)
         
-        if bundle.empty or bundle.targets is None:
-            log.warning(f"No features or targets for sub-{sub}; skipping")
+        if bundle.empty:
+            log.warning(f"No features for sub-{sub}; skipping")
             continue
         
-        y_sub = bundle.targets.to_numpy()
+        # Load targets from aligned_events using event_columns.rating config
+        epochs, _ = load_epochs_for_analysis(
+            sub, task, align="strict", preload=False,
+            deriv_root=deriv_root, config=config, logger=log,
+        )
+        if epochs is None:
+            log.warning(f"No epochs for sub-{sub}; skipping")
+            continue
+        
+        aligned_events = get_aligned_events(epochs, sub, task, strict=True, logger=log, config=config)
+        if aligned_events is None:
+            log.warning(f"No aligned events for sub-{sub}; skipping")
+            continue
+        
+        rating_columns = (
+            config.get("event_columns.rating", [])
+            if config is not None and hasattr(config, "get")
+            else []
+        )
+        rating_col = pick_target_column(aligned_events, target_columns=rating_columns)
+        if rating_col is None:
+            log.warning(f"No rating column for sub-{sub}; skipping")
+            continue
+        
+        y_sub = pd.to_numeric(aligned_events[rating_col], errors="coerce").to_numpy()
 
         feature_dfs = []
         include_all = feature_set == "combined"

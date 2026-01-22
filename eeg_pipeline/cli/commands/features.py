@@ -100,10 +100,6 @@ def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None
         config["feature_engineering.connectivity.aec_mode"] = args.conn_aec_mode
     if getattr(args, "conn_graph_prop", None) is not None:
         config["feature_engineering.connectivity.graph_top_prop"] = args.conn_graph_prop
-    if getattr(args, "conn_window_len", None) is not None:
-        config["feature_engineering.connectivity.sliding_window_len"] = args.conn_window_len
-    if getattr(args, "conn_window_step", None) is not None:
-        config["feature_engineering.connectivity.sliding_window_step"] = args.conn_window_step
     if getattr(args, "aec_output", None) is not None:
         config["feature_engineering.connectivity.aec_output"] = args.aec_output
     if getattr(args, "conn_force_within_epoch_for_ml", None) is not None:
@@ -674,8 +670,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-conn-graph-metrics", action="store_false", dest="conn_graph_metrics", help="Disable graph metrics for connectivity")
     parser.add_argument("--conn-aec-mode", choices=["orth", "sym", "none"], default=None, help="AEC orthogonalization mode")
     parser.add_argument("--conn-graph-prop", type=float, default=None, help="Proportion of top edges to keep for graph metrics")
-    parser.add_argument("--conn-window-len", type=float, default=None, help="Sliding window length (s) for connectivity")
-    parser.add_argument("--conn-window-step", type=float, default=None, help="Sliding window step (s) for connectivity")
     parser.add_argument("--aec-output", nargs="+", choices=["r", "z"], default=None, help="AEC output format: r (raw), z (Fisher-z transform), or both")
     parser.add_argument("--conn-force-within-epoch-for-ml", action="store_true", default=None, help="Force within_epoch phase estimator when train_mask detected (CV-safe)")
     parser.add_argument("--no-conn-force-within-epoch-for-ml", action="store_false", dest="conn_force_within_epoch_for_ml", help="Allow across_epochs phase estimator even in CV/machine learning mode")

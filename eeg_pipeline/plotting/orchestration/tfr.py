@@ -24,9 +24,7 @@ from eeg_pipeline.plotting.tfr.scalpmean import (
 )
 from eeg_pipeline.plotting.tfr.channels import plot_channels_all_trials, contrast_channels_pain_nonpain
 from eeg_pipeline.plotting.tfr.rois import plot_rois_all_trials, contrast_pain_nonpain_rois
-from eeg_pipeline.plotting.tfr.contrasts import plot_bands_pain_temp_contrasts
 from eeg_pipeline.plotting.tfr.topomaps import (
-    plot_topomap_grid_baseline_temps,
     plot_pain_nonpain_temporal_topomaps_diff_allbands,
     plot_temporal_topomaps_allbands_active,
 )
@@ -39,8 +37,8 @@ _CONFIG_KEY_BASELINE_WINDOW = "baseline_window"
 _CONFIG_KEY_ACTIVE_WINDOW = "active_window"
 _CONFIG_KEY_PROJECT_TASK = "project.task"
 _CONFIG_KEY_N_JOBS = "time_frequency_analysis.n_jobs"
-_CONFIG_KEY_TOPOMAP_WINDOW_SIZE = "erp_analysis.topomap_windows.pain_nonpain_temporal_diff_allbands.window_size_ms"
-_CONFIG_KEY_TOPOMAP_WINDOW_COUNT = "erp_analysis.topomap_windows.temporal_allbands_active.window_count"
+_CONFIG_KEY_TOPOMAP_WINDOW_SIZE = "time_frequency_analysis.topomap.temporal.window_size_ms"
+_CONFIG_KEY_TOPOMAP_WINDOW_COUNT = "time_frequency_analysis.topomap.temporal.window_count"
 
 # Default values
 _DEFAULT_BASELINE_WINDOW = (-2.0, 0.0)
@@ -111,26 +109,6 @@ def _plot_topomaps(
     logger: logging.Logger,
 ) -> None:
     """Plot all topomap visualizations."""
-    plot_bands_pain_temp_contrasts(
-        power,
-        events_df,
-        plots_dir,
-        config=config,
-        baseline=baseline_window,
-        active_window=active_window,
-        logger=logger,
-    )
-
-    plot_topomap_grid_baseline_temps(
-        power,
-        events_df,
-        plots_dir,
-        config=config,
-        baseline=baseline_window,
-        active_window=active_window,
-        logger=logger,
-    )
-
     window_size_ms = config.get(_CONFIG_KEY_TOPOMAP_WINDOW_SIZE, _DEFAULT_TOPOMAP_WINDOW_SIZE_MS)
     plot_pain_nonpain_temporal_topomaps_diff_allbands(
         power,
@@ -175,7 +153,6 @@ def _load_subject_data(
         align="strict",
         preload=True,
         deriv_root=effective_deriv_root,
-        bids_root=config.bids_root,
         config=config,
         logger=logger,
     )

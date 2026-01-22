@@ -162,6 +162,14 @@ time_frequency_analysis:
     workers: -1
   rois: *roi_definitions
   
+  topomap:
+    temporal:
+      single_subject:
+        hspace: 0.15
+        wspace: 0.8
+      window_size_ms: 100.0  # Size of each time window in milliseconds (for fixed-size windows)
+      window_count: 5        # Number of time windows (for fixed-count windows)
+  
   constants:
     # Baseline processing
     epsilon_baseline: 1.0e-10
@@ -866,7 +874,6 @@ visualization:
     cap: 0.25
   
   footer_templates:
-    tfr_baseline: "Baseline: {baseline}"
     behavior: "Method: {method} | FDR α={fdr_alpha:.2f}"
     preprocessing: "Pipeline: {pipeline} | Reference: {reference}"
 
@@ -943,9 +950,7 @@ plotting:
     comparison_rois: []              # ROIs to include (empty = all available)
 
   # Plotting-specific TFR settings (do not affect analysis computation)
-  tfr:
-    # Baseline window used by plotting functions (can be overridden per-plot in the TUI/CLI)
-    default_baseline_window: [-0.5, -0.01]
+  tfr: {}
 
   plots:
     topomap:
@@ -964,6 +969,14 @@ plotting:
     tfr:
       log_base: *log_base
       percentage_multiplier: *percentage_multiplier
+      topomap:
+        label_x_position: 0.5
+        label_y_position_bottom: 1.08
+        label_y_position: 1.02
+        title_y: 1.04
+        title_pad: 4
+        subplots_right: 0.75
+        default_diff_abs: 0.0
     power:
       width_per_band: 3.5
       height_per_segment: 4.0

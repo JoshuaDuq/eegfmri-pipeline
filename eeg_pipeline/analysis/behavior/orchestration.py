@@ -318,8 +318,11 @@ class StageRegistry:
             available_resources.add(cls.RESOURCE_FEATURES)
         if ctx.temperature is not None:
             available_resources.add(cls.RESOURCE_TEMPERATURE)
-        if ctx.targets is not None:
-            available_resources.add(cls.RESOURCE_RATING)
+        # Check if rating column is available in aligned_events
+        if ctx.aligned_events is not None:
+            rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+            if rating_col is not None:
+                available_resources.add(cls.RESOURCE_RATING)
         if ctx.epochs_info is not None:
             available_resources.add(cls.RESOURCE_EPOCHS)
         
@@ -1280,8 +1283,26 @@ def _require_trial_table(stage_name: str):
 
 
 def _get_stats_subfolder(ctx: BehaviorContext, kind: str) -> Path:
-    """Helper to get a subfolder within stats_dir and ensure it exists."""
-    path = ctx.stats_dir / kind
+    """Helper to get a subfolder within stats_dir and ensure it exists.
+    
+    If ctx.overwrite is False, appends a timestamp to the folder name
+    (e.g., 'trial_table_20260120_143022') to preserve previous outputs.
+    """
+    return _get_stats_subfolder_with_overwrite(ctx.stats_dir, kind, ctx.overwrite)
+
+
+def _get_stats_subfolder_with_overwrite(stats_dir: Path, kind: str, overwrite: bool) -> Path:
+    """Helper to get a subfolder within stats_dir with overwrite control.
+    
+    If overwrite is False, appends a timestamp to the folder name
+    (e.g., 'trial_table_20260120_143022') to preserve previous outputs.
+    """
+    if overwrite:
+        path = stats_dir / kind
+    else:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = stats_dir / f"{kind}_{timestamp}"
     ensure_dir(path)
     return path
 
@@ -3231,14 +3252,20 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
     if ctx.data_qc:
         qc["data_qc"] = ctx.data_qc
 
-    if ctx.targets is not None:
-        qc["rating"] = _compute_series_statistics(ctx.targets)
+    # Get rating from aligned_events
+    rating_series = None
+    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    if rating_col is not None and ctx.aligned_events is not None:
+        rating_series = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+
+    if rating_series is not None:
+        qc["rating"] = _compute_series_statistics(rating_series)
 
     if ctx.temperature is not None:
         qc["temperature"] = _compute_series_statistics(ctx.temperature)
 
-    if ctx.targets is not None and ctx.temperature is not None:
-        s = pd.to_numeric(ctx.targets, errors="coerce")
+    if rating_series is not None and ctx.temperature is not None:
+        s = pd.to_numeric(rating_series, errors="coerce")
         t = pd.to_numeric(ctx.temperature, errors="coerce")
         valid = s.notna() & t.notna()
         if int(valid.sum()) >= 3:
@@ -3250,7 +3277,7 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
                 "p": float(p) if np.isfinite(p) else np.nan,
             }
 
-    if ctx.aligned_events is not None and ctx.targets is not None:
+    if ctx.aligned_events is not None and rating_series is not None:
         from eeg_pipeline.analysis.behavior.api import split_by_condition
 
         try:
@@ -3264,7 +3291,7 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
             }
         else:
             if int(n_pain) > 0 or int(n_nonpain) > 0:
-                s = pd.to_numeric(ctx.targets, errors="coerce")
+                s = pd.to_numeric(rating_series, errors="coerce")
                 pain_ratings = s[pain_mask] if len(pain_mask) == len(s) else pd.Series(dtype=float)
                 nonpain_ratings = s[nonpain_mask] if len(nonpain_mask) == len(s) else pd.Series(dtype=float)
                 qc["pain_vs_nonpain"] = {
@@ -4239,8 +4266,7 @@ def stage_temporal_stats(
             all_temporal_records.extend(res["records"])
     
     if all_temporal_records:
-        out_dir = ctx.stats_dir / "temporal_correlations"
-        ensure_dir(out_dir)
+        out_dir = _get_stats_subfolder(ctx, "temporal_correlations")
         method_suffix = "_spearman" if ctx.use_spearman else "_pearson"
         
         # Apply family-wise correction across all temporal tests
@@ -4818,8 +4844,8 @@ def run_group_level_analysis(
     deriv_root: Path,
     config: Any,
     logger: Any,
-    run_mixed_effects: bool = True,
-    run_multilevel_correlations: bool = True,
+    run_mixed_effects: bool = False,
+    run_multilevel_correlations: bool = False,
     output_dir: Optional[Path] = None,
 ) -> GroupLevelResult:
     """Run all group-level analyses.
@@ -4838,10 +4864,10 @@ def run_group_level_analysis(
         Configuration object
     logger : Any
         Logger instance
-    run_mixed_effects : bool
-        Run mixed-effects models
-    run_multilevel_correlations : bool
-        Run multilevel correlations
+    run_mixed_effects : bool, default False
+        Run mixed-effects models (only runs if explicitly requested)
+    run_multilevel_correlations : bool, default False
+        Run multilevel correlations (opt-in, only runs if explicitly requested)
     output_dir : Path, optional
         Output directory for results
     
@@ -5443,7 +5469,7 @@ def write_outputs_manifest(
         "feature_categories": ctx.feature_categories or [],
         "feature_files": ctx.selected_feature_files or [],
         "targets": {
-            "rating": bool(ctx.targets is not None and ctx.targets.notna().any()) if ctx.targets is not None else False,
+            "rating": bool(ctx._find_rating_column() is not None) if hasattr(ctx, "_find_rating_column") else False,
             "temperature": bool(ctx.temperature is not None and ctx.temperature.notna().any()) if ctx.temperature is not None else False,
         },
         "covariates_qc": ctx.data_qc.get("covariates_qc", {}),

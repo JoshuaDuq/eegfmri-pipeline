@@ -18,10 +18,9 @@ from eeg_pipeline.plotting.io.figures import (
     unwrap_figure,
     extract_eeg_picks,
     logratio_to_pct,
-    build_footer,
     save_fig as central_save_fig,
 )
-from eeg_pipeline.utils.formatting import format_baseline_window_string
+from eeg_pipeline.utils.formatting import format_baseline_window_string, sanitize_label
 from ...utils.analysis.windowing import time_mask_loose, time_mask_strict
 from ...utils.analysis.tfr import (
     apply_baseline_and_average,
@@ -83,7 +82,7 @@ def _pick_central_channel(info, preferred: str = "Cz", logger: Optional[logging.
         if ch_name.lower() == preferred.lower():
             return ch_name
     
-    picks = extract_eeg_picks(info, exclude_bads=False)
+    picks = extract_eeg_picks(info, exclude_bads=True)
     if len(picks) == 0:
         raise RuntimeError("No EEG channels available for plotting.")
     
@@ -160,26 +159,18 @@ def _build_filename_stem(
     return stem
 
 
-def _build_footer_text(config, baseline_used: Tuple[float, float]) -> Optional[str]:
-    """Build footer text for TFR plots with baseline information.
+def _sanitize_label_for_filename(label: str) -> str:
+    """Sanitize label for use in filenames.
     
     Args:
-        config: Configuration object
-        baseline_used: Baseline window tuple
+        label: Label string (e.g., "Condition 1", "pain", "non-pain")
         
     Returns:
-        Footer text string or None if config doesn't support it
+        Sanitized, lowercase label suitable for filenames
     """
-    default_footer_template = "tfr_baseline"
-    baseline_decimal_places = 2
-    
-    template_name = config.get("output.tfr_footer_template", default_footer_template)
-    baseline_str = f"[{float(baseline_used[0]):.{baseline_decimal_places}f}, {float(baseline_used[1]):.{baseline_decimal_places}f}] s"
-    footer_kwargs = {
-        "baseline_window": baseline_used,
-        "baseline": baseline_str,
-    }
-    return build_footer(template_name, config, **footer_kwargs)
+    sanitized = sanitize_label(label).lower()
+    sanitized = sanitized.replace(" ", "_")
+    return sanitized
 
 
 def _get_baseline_window(config) -> Tuple[float, float]:
@@ -191,9 +182,6 @@ def _get_baseline_window(config) -> Tuple[float, float]:
     Returns:
         Baseline window tuple (tmin, tmax)
     """
-    override = config.get("plotting.tfr.default_baseline_window", None)
-    if isinstance(override, (list, tuple)) and len(override) == 2:
-        return tuple(override)
     default_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
     return tuple(default_window)
 
@@ -252,7 +240,7 @@ def _save_fig(
     
     plot_cfg = get_plot_config(config)
     exts = _get_output_formats(formats, config)
-    footer_text = _build_footer_text(config, baseline_used)
+    footer_text = None
 
     for i, f in enumerate(figs):
         suffix = "" if i == 0 else f"_{i+1}"
@@ -411,11 +399,12 @@ def contrast_channels_pain_nonpain(
     if tfr_sub is None:
         return
 
-    tfr_1 = tfr_sub[mask1].average()
-    tfr_2 = tfr_sub[mask2].average()
+    # Baseline at the epoch level before averaging to avoid bias with nonlinear modes.
+    tfr_sub_stats = tfr_sub.copy()
+    baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
 
-    baseline_used = apply_baseline_and_crop(tfr_2, baseline=baseline, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_1, baseline=baseline, mode="logratio", logger=logger)
+    tfr_1 = tfr_sub_stats[mask1].average()
+    tfr_2 = tfr_sub_stats[mask2].average()
 
     tfr_diff = tfr_2.copy()
     tfr_diff.data = tfr_2.data - tfr_1.data
@@ -429,13 +418,16 @@ def contrast_channels_pain_nonpain(
     ch_dir = out_dir / "channels"
     ch_dir.mkdir(parents=True, exist_ok=True)
 
+    label_2_sanitized = _sanitize_label_for_filename(label2)
+    label_1_sanitized = _sanitize_label_for_filename(label1)
+
     for ch in ch_names:
         _plot_single_tfr_figure(
             tfr_2,
             ch,
             None,
             f"{ch} — {label2} (baseline logratio)",
-            f"tfr_{ch}_painful_bl.png",
+            f"tfr_{ch}_{label_2_sanitized}.png",
             ch_dir,
             config,
             logger,
@@ -447,7 +439,7 @@ def contrast_channels_pain_nonpain(
             ch,
             None,
             f"{ch} — {label1} (baseline logratio)",
-            f"tfr_{ch}_nonpain_bl.png",
+            f"tfr_{ch}_{label_1_sanitized}.png",
             ch_dir,
             config,
             logger,
@@ -458,8 +450,8 @@ def contrast_channels_pain_nonpain(
             tfr_diff,
             ch,
             None,
-            f"{ch} — {label2} minus {label1} (baseline logratio)",
-            f"tfr_{ch}_pain_minus_nonpain_bl.png",
+            f"{ch} — {label2} vs {label1} (logratio difference)",
+            f"tfr_{ch}_{label_2_sanitized}_minus_{label_1_sanitized}.png",
             ch_dir,
             config,
             logger,

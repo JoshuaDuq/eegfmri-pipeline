@@ -18,7 +18,6 @@ from eeg_pipeline.plotting.features.context import FeaturePlotContext, Visualiza
 from eeg_pipeline.plotting.core.runner import safe_plot
 from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
-from eeg_pipeline.utils.analysis.windowing import sliding_window_centers
 from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
 from eeg_pipeline.domain.features.naming import NamingSchema
@@ -32,7 +31,6 @@ from eeg_pipeline.plotting.features.connectivity import (
     plot_connectivity_circle_by_condition,
     plot_connectivity_heatmap,
     plot_connectivity_network,
-    plot_sliding_connectivity_trajectories,
 )
 from eeg_pipeline.plotting.features.erds import (
     plot_erds_temporal_evolution,
@@ -80,6 +78,7 @@ from eeg_pipeline.plotting.features.power import (
     plot_power_by_condition,
     plot_cross_frequency_power_correlation,
     plot_band_power_topomaps,
+    plot_band_power_topomaps_window_contrast,
     plot_power_spectral_density,
 )
 from eeg_pipeline.plotting.features.roi import (
@@ -173,7 +172,6 @@ def plot_connectivity_mne_suite(ctx: FeaturePlotContext, saved_files):
 
     for measure in conn_measures:
         for band in power_bands:
-            prefix = f"{measure}_{band}"
             conn_dir = ctx.subdir("connectivity")
 
             if ctx.aligned_events is not None:
@@ -208,7 +206,8 @@ def plot_connectivity_mne_suite(ctx: FeaturePlotContext, saved_files):
                 conn_dir,
                 ctx.logger,
                 ctx.config,
-                prefix=prefix,
+                measure=measure,
+                band=band,
                 events_df=None,
             )
 
@@ -225,50 +224,10 @@ def plot_connectivity_mne_suite(ctx: FeaturePlotContext, saved_files):
                 conn_dir,
                 ctx.logger,
                 ctx.config,
-                prefix=prefix,
-                events_df=None,
+                measure=measure,
+                band=band,
+                events_df=ctx.aligned_events if ctx.aligned_events is not None else None,
             )
-
-
-@VisualizationRegistry.register("connectivity")
-def plot_connectivity_dynamics(ctx: FeaturePlotContext, saved_files):
-    if ctx.connectivity_df is None:
-        return
-
-    window_label_pattern = re.compile(r"^sw(\d+)corr_all_")
-    sw_labels = sorted(
-        {
-            match.group(1)
-            for col in ctx.connectivity_df.columns
-            for match in [window_label_pattern.match(col)]
-            if match
-        }
-    )
-    if not sw_labels:
-        return
-
-    window_indices = [int(lbl) for lbl in sw_labels if lbl.isdigit()]
-    if not window_indices:
-        return
-
-    window_centers = sliding_window_centers(ctx.config, max(window_indices) + 1)
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "connectivity_dynamics",
-        "connectivity",
-        None,
-        plot_sliding_connectivity_trajectories,
-        ctx.connectivity_df,
-        window_indices,
-        window_centers,
-        None,
-        ctx.subject,
-        ctx.subdir("connectivity"),
-        ctx.logger,
-        ctx.config,
-    )
 
 
 @VisualizationRegistry.register("connectivity")
@@ -1001,6 +960,32 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
                     logger=ctx.logger,
                     config=ctx.config,
                     segment=window,
+                    events_df=ctx.aligned_events if ctx.aligned_events is not None else None,
+                )
+
+            compare_windows = bool(get_config_value(ctx.config, "plotting.comparisons.compare_windows", True))
+            if compare_windows and len(windows_list) == 2:
+                window1, window2 = windows_list[0], windows_list[1]
+                plot_name = f"band_power_topomaps_contrast_{window2}_minus_{window1}"
+                ctx.logger.info(
+                    f"Generating topomap window contrast: {window2} - {window1} (plot_name: {plot_name})"
+                )
+                safe_plot(
+                    ctx,
+                    saved_files,
+                    plot_name,
+                    "power",
+                    None,
+                    plot_band_power_topomaps_window_contrast,
+                    pow_df=ctx.power_df,
+                    epochs_info=ctx.epochs_info,
+                    bands=power_bands,
+                    subject=ctx.subject,
+                    save_dir=ctx.subdir("power"),
+                    logger=ctx.logger,
+                    config=ctx.config,
+                    window1=window1,
+                    window2=window2,
                 )
         else:
             patterns = getattr(ctx, "plot_name_patterns", None)

@@ -827,6 +827,18 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	ab.addIfNonZero("--tfr-log-base", m.plotTFRLogBase, "%.4f")
 	ab.addIfNonZero("--tfr-percentage-multiplier", m.plotTFRPercentageMultiplier, "%.4f")
 
+	// TFR Topomap controls
+	ab.addIfNonZero("--tfr-topomap-window-size-ms", m.plotTFRTopomapWindowSizeMs, "%.1f")
+	ab.addIfNonZeroInt("--tfr-topomap-window-count", m.plotTFRTopomapWindowCount)
+	ab.addIfNonZero("--tfr-topomap-label-x-position", m.plotTFRTopomapLabelXPosition, "%.2f")
+	ab.addIfNonZero("--tfr-topomap-label-y-position-bottom", m.plotTFRTopomapLabelYPositionBottom, "%.2f")
+	ab.addIfNonZero("--tfr-topomap-label-y-position", m.plotTFRTopomapLabelYPosition, "%.2f")
+	ab.addIfNonZero("--tfr-topomap-title-y", m.plotTFRTopomapTitleY, "%.2f")
+	ab.addIfNonZeroInt("--tfr-topomap-title-pad", m.plotTFRTopomapTitlePad)
+	ab.addIfNonZero("--tfr-topomap-subplots-right", m.plotTFRTopomapSubplotsRight, "%.2f")
+	ab.addIfNonZero("--tfr-topomap-temporal-hspace", m.plotTFRTopomapTemporalHspace, "%.2f")
+	ab.addIfNonZero("--tfr-topomap-temporal-wspace", m.plotTFRTopomapTemporalWspace, "%.2f")
+
 	// Sizing controls
 	ab.addIfNonZero("--roi-width-per-band", m.plotRoiWidthPerBand, "%.4f")
 	ab.addIfNonZero("--roi-width-per-metric", m.plotRoiWidthPerMetric, "%.4f")
@@ -858,6 +870,8 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	ab.addIfNonZero("--connectivity-height-per-measure", m.plotConnectivityHeightPerMeasure, "%.4f")
 	ab.addIfNonZero("--connectivity-circle-top-fraction", m.plotConnectivityCircleTopFraction, "%.4f")
 	ab.addIfNonZeroInt("--connectivity-circle-min-lines", m.plotConnectivityCircleMinLines)
+	ab.addIfNonZero("--connectivity-network-top-fraction", m.plotConnectivityNetworkTopFraction, "%.4f")
+	ab.addIfNonZero("--connectivity-network-top-fraction", m.plotConnectivityNetworkTopFraction, "%.4f")
 
 	// Selection overrides
 	ab.addSpaceListFlag("--pac-pairs", m.plotPacPairsSpec)
@@ -893,14 +907,6 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		cfg, ok := m.plotItemConfigs[plotID]
 		if !ok {
 			continue
-		}
-
-		if strings.TrimSpace(cfg.TfrDefaultBaselineWindowSpec) != "" {
-			vals := splitSpaceList(cfg.TfrDefaultBaselineWindowSpec)
-			if len(vals) == 2 {
-				args = append(args, "--plot-item-config", plotID, "tfr_default_baseline_window")
-				args = append(args, vals...)
-			}
 		}
 
 		if cfg.CompareWindows != nil {
@@ -939,11 +945,47 @@ func (m Model) buildPlotItemConfigArgs() []string {
 			args = append(args, "--plot-item-config", plotID, "topomap_windows")
 			args = append(args, splitSpaceList(cfg.TopomapWindowsSpec)...)
 		}
+		if strings.TrimSpace(cfg.TfrTopomapActiveWindow) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_active_window", strings.TrimSpace(cfg.TfrTopomapActiveWindow))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapWindowSizeMs) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_window_size_ms", strings.TrimSpace(cfg.TfrTopomapWindowSizeMs))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapWindowCount) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_window_count", strings.TrimSpace(cfg.TfrTopomapWindowCount))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapLabelXPosition) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_label_x_position", strings.TrimSpace(cfg.TfrTopomapLabelXPosition))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapLabelYPositionBottom) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_label_y_position_bottom", strings.TrimSpace(cfg.TfrTopomapLabelYPositionBottom))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapLabelYPosition) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_label_y_position", strings.TrimSpace(cfg.TfrTopomapLabelYPosition))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapTitleY) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_title_y", strings.TrimSpace(cfg.TfrTopomapTitleY))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapTitlePad) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_title_pad", strings.TrimSpace(cfg.TfrTopomapTitlePad))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapSubplotsRight) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_subplots_right", strings.TrimSpace(cfg.TfrTopomapSubplotsRight))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapTemporalHspace) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_temporal_hspace", strings.TrimSpace(cfg.TfrTopomapTemporalHspace))
+		}
+		if strings.TrimSpace(cfg.TfrTopomapTemporalWspace) != "" {
+			args = append(args, "--plot-item-config", plotID, "tfr_topomap_temporal_wspace", strings.TrimSpace(cfg.TfrTopomapTemporalWspace))
+		}
 		if strings.TrimSpace(cfg.ConnectivityCircleTopFraction) != "" {
 			args = append(args, "--plot-item-config", plotID, "connectivity_circle_top_fraction", strings.TrimSpace(cfg.ConnectivityCircleTopFraction))
 		}
 		if strings.TrimSpace(cfg.ConnectivityCircleMinLines) != "" {
 			args = append(args, "--plot-item-config", plotID, "connectivity_circle_min_lines", strings.TrimSpace(cfg.ConnectivityCircleMinLines))
+		}
+		if strings.TrimSpace(cfg.ConnectivityNetworkTopFraction) != "" {
+			args = append(args, "--plot-item-config", plotID, "connectivity_network_top_fraction", strings.TrimSpace(cfg.ConnectivityNetworkTopFraction))
 		}
 		if cfg.ItpcSharedColorbar != nil {
 			args = append(args, "--plot-item-config", plotID, "itpc_shared_colorbar", strconv.FormatBool(*cfg.ItpcSharedColorbar))
@@ -1694,6 +1736,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 	if m.behaviorComputeBayesFactors {
 		args = append(args, "--compute-bayes-factors")
+	}
+
+	// Output options
+	if !m.behaviorOverwrite {
+		args = append(args, "--no-overwrite")
 	}
 
 	// Trial table / pain residual / diagnostics

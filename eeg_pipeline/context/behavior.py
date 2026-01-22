@@ -115,6 +115,7 @@ class BehaviorContext:
     selected_bands: Optional[List[str]] = None  # Specific bands to include (e.g., ["alpha", "beta"])
     computation_features: Optional[Dict[str, List[str]]] = None  # Per-computation feature category filters
     also_save_csv: bool = False  # Also save output tables as CSV files
+    overwrite: bool = True  # If False, append timestamp to output folders
     
     epochs: Any = None
     epochs_info: Any = None
@@ -135,7 +136,6 @@ class BehaviorContext:
     ratios_df: Optional[pd.DataFrame] = None
     asymmetry_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
-    targets: Optional[pd.Series] = None
     temperature: Optional[pd.Series] = None
     temperature_column: Optional[str] = None
     covariates_df: Optional[pd.DataFrame] = None
@@ -158,8 +158,8 @@ class BehaviorContext:
 
     @property
     def n_trials(self) -> int:
-        if self.targets is not None:
-            return len(self.targets)
+        if self.aligned_events is not None:
+            return len(self.aligned_events)
         if self.power_df is not None:
             return len(self.power_df)
         return 0
@@ -196,9 +196,9 @@ class BehaviorContext:
         return self.covariates_df is not None and not self.covariates_df.empty
 
     def load_data(self) -> bool:
-        """Load all features and targets. Returns True if successful."""
+        """Load all features. Returns True if successful."""
         if self._data_loaded:
-            return self.targets is not None
+            return self.aligned_events is not None
 
         self.logger.info("Loading data...")
         try:
@@ -254,10 +254,7 @@ class BehaviorContext:
         self.logger.info("Feature coverage loaded: %s", coverage_info)
 
         self._apply_category_filter(feature_counts)
-
-        if self.targets is None or len(self.targets) == 0:
-            self.logger.warning("No targets found")
-            return False
+        
         return True
 
     def _load_selected_feature_files(self) -> None:
@@ -282,8 +279,6 @@ class BehaviorContext:
                 continue
 
             self._load_single_feature_file(key, features_dir, STANDARD_FEATURE_FILES)
-
-        self._load_targets_from_file(features_dir)
 
     def _load_single_feature_file(
         self, key: str, features_dir: Path, standard_files: Dict[str, str]
@@ -347,67 +342,6 @@ class BehaviorContext:
         except (OSError, pd.errors.EmptyDataError, ValueError) as e:
             self.logger.warning("Failed to load %s: %s", key, e)
 
-    def _load_targets_from_file(self, features_dir: Path) -> None:
-        """Load targets from clean events.tsv file.
-        
-        Raises FileNotFoundError if clean events.tsv is not found.
-        Raises ValueError if no suitable target column is found.
-        """
-        from eeg_pipeline.infra.tsv import read_table
-        
-        clean_events_path = _find_clean_events_path(
-            subject=self.subject,
-            task=self.task,
-            deriv_root=self.deriv_root,
-            config=self.config,
-            constants=None,
-        )
-        
-        if clean_events_path is None or not clean_events_path.exists():
-            raise FileNotFoundError(
-                f"Clean events.tsv not found for sub-{self.subject}, task-{self.task}. "
-                f"Required for target loading."
-            )
-
-        try:
-            events_df = read_table(clean_events_path)
-        except Exception as e:
-            raise IOError(
-                f"Failed to load clean events.tsv from {clean_events_path}: {e}"
-            ) from e
-
-        if events_df.empty:
-            raise ValueError(
-                f"Clean events.tsv is empty for sub-{self.subject}, task-{self.task}"
-            )
-
-        rating_columns = (
-            self.config.get("event_columns.rating", []) if self.config else []
-        )
-        target_col = pick_target_column(events_df, target_columns=rating_columns)
-        
-        if target_col is None:
-            numeric_columns = events_df.select_dtypes(include=[np.number]).columns
-            if len(numeric_columns) == 0:
-                raise ValueError(
-                    f"No numeric target columns found in clean events.tsv for sub-{self.subject}, task-{self.task}. "
-                    f"Available columns: {list(events_df.columns)}"
-                )
-            if len(numeric_columns) > 1:
-                self.logger.warning(
-                    "Multiple numeric target columns found in clean events.tsv; using '%s'. Candidates=%s",
-                    numeric_columns[0],
-                    ",".join(str(c) for c in numeric_columns),
-                )
-            target_col = str(numeric_columns[0])
-        
-        self.targets = pd.to_numeric(events_df[target_col], errors="coerce")
-        self.logger.info(
-            "Targets loaded from clean events.tsv (column: '%s')",
-            target_col,
-        )
-
-
     def _load_all_features_from_bundle(self) -> None:
         """Load all features using feature bundle."""
         from eeg_pipeline.utils.data.feature_io import load_feature_bundle
@@ -416,7 +350,6 @@ class BehaviorContext:
             self.subject,
             self.deriv_root,
             self.logger,
-            include_targets=True,
             config=self.config,
         )
 
@@ -448,12 +381,6 @@ class BehaviorContext:
         self.ratios_df = bundle.ratios_df
         self.asymmetry_df = bundle.asymmetry_df
         self.temporal_df = bundle.temporal_df
-        self.targets = bundle.targets
-
-        if self.targets is None or len(self.targets) == 0:
-            raise ValueError(
-                f"No targets loaded from clean events.tsv for sub-{self.subject}, task-{self.task}"
-            )
 
     def iter_feature_tables(self) -> List[Tuple[str, Optional[pd.DataFrame]]]:
         """Iterate over all feature tables as (name, dataframe) pairs.
@@ -537,65 +464,12 @@ class BehaviorContext:
         self.logger.info("Filtered to categories: %s", categories_str)
 
     def _validate_alignment(self) -> bool:
-        """Validate trial alignment between features, events, and targets."""
-        if not self._check_events_targets_length_match():
+        """Validate trial alignment between features and events."""
+        if self.aligned_events is None:
+            self.logger.error("No aligned_events available for sub-%s", self.subject)
             return False
-
-        self._validate_rating_consistency()
 
         return self._align_feature_tables()
-
-    def _check_events_targets_length_match(self) -> bool:
-        """Check if aligned_events and targets have matching lengths."""
-        n_events = 0 if self.aligned_events is None else len(self.aligned_events)
-        n_targets = len(self.targets) if self.targets is not None else 0
-
-        if self.aligned_events is None or n_events != n_targets:
-            self.logger.error(
-                "Trial alignment mismatch for sub-%s: aligned_events=%d, "
-                "targets=%d",
-                self.subject,
-                n_events,
-                n_targets,
-            )
-            return False
-        return True
-
-
-    def _validate_rating_consistency(self) -> None:
-        """Validate consistency between events rating and targets."""
-        rating_col = self._find_rating_column()
-        if rating_col is None:
-            return
-
-        events_rating = pd.to_numeric(
-            self.aligned_events[rating_col], errors="coerce"
-        )
-        targets_rating = pd.to_numeric(self.targets, errors="coerce")
-        valid_mask = events_rating.notna() & targets_rating.notna()
-        n_valid = int(valid_mask.sum())
-
-        if n_valid < _MIN_VALID_SAMPLES_FOR_CORRELATION:
-            return
-
-        correlation_r, correlation_p = compute_correlation(
-            events_rating[valid_mask].values,
-            targets_rating[valid_mask].values,
-            method="spearman",
-        )
-        differences = (
-            events_rating[valid_mask].to_numpy(dtype=float)
-            - targets_rating[valid_mask].to_numpy(dtype=float)
-        )
-
-        self.data_qc["events_targets_rating_consistency"] = {
-            "events_rating_column": str(rating_col),
-            "n_valid": n_valid,
-            "spearman_r": float(correlation_r) if np.isfinite(correlation_r) else np.nan,
-            "spearman_p": float(correlation_p) if np.isfinite(correlation_p) else np.nan,
-            "mean_abs_error": float(np.mean(np.abs(differences))),
-            "max_abs_error": float(np.max(np.abs(differences))),
-        }
 
     def _find_rating_column(self) -> Optional[str]:
         """Find rating column in aligned_events."""
@@ -615,11 +489,11 @@ class BehaviorContext:
             return None
 
     def _align_feature_tables(self) -> bool:
-        """Align all feature tables to target index using iter_feature_tables."""
-        base_index = self.targets.index
+        """Align all feature tables to aligned_events index using iter_feature_tables."""
+        base_index = self.aligned_events.index
         if not base_index.is_unique:
             self.logger.error(
-                "Target index contains duplicates for sub-%s", self.subject
+                "Aligned events index contains duplicates for sub-%s", self.subject
             )
             return False
 

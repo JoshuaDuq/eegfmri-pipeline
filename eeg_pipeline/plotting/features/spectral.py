@@ -699,6 +699,9 @@ def _plot_column_comparison(
         masks_dict, group_labels = multi_group_info
         segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
         
+        from eeg_pipeline.plotting.features.utils import load_multigroup_stats
+        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+        
         for roi_name in roi_names:
             data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
             for band in bands:
@@ -728,6 +731,7 @@ def _plot_column_comparison(
                     save_path=save_path,
                     feature_label=f"Spectral ({metric_label})",
                     groups=group_labels,
+                    multigroup_stats=multigroup_stats,
                     config=config,
                     logger=logger,
                     roi_name=roi_name,

@@ -429,6 +429,9 @@ def _plot_column_comparison(
                 logger.error("Column comparison requires plotting.comparisons.comparison_segment.")
             return
         
+        from .utils import load_multigroup_stats
+        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+        
         for roi_name in roi_names:
             if roi_name == "all":
                 roi_channels = all_channels
@@ -471,6 +474,7 @@ def _plot_column_comparison(
                     logger=logger,
                     roi_name=roi_name,
                     stats_dir=stats_dir,
+                    multigroup_stats=multigroup_stats,
                 )
         
         if logger:
@@ -777,19 +781,8 @@ def _get_active_window(config: Any) -> List[float]:
 
 
 def _get_plotting_tfr_baseline_window(config: Any) -> tuple[float, float]:
-    """Resolve baseline window for plotting.
-
-    Plotting can override the baseline window without changing the analysis
-    baseline via `plotting.tfr.default_baseline_window`.
-    """
+    """Resolve baseline window for plotting."""
     from eeg_pipeline.utils.config.loader import get_config_value
-
-    override = get_config_value(config, "plotting.tfr.default_baseline_window", None)
-    if isinstance(override, (list, tuple)) and len(override) == 2:
-        try:
-            return float(override[0]), float(override[1])
-        except (TypeError, ValueError):
-            pass
 
     baseline = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
     if isinstance(baseline, (list, tuple)) and len(baseline) == 2:
@@ -1857,13 +1850,15 @@ def plot_band_power_topomaps(
     logger: logging.Logger,
     config: Any,
     segment: str,
+    events_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """Band power topomaps showing spatial distribution per frequency band.
     
-    Creates MNE topomaps for each frequency band.
+    Creates MNE topomaps for each frequency band. Supports condition-based filtering.
     
     Args:
         segment: Time window segment name (required, no fallback).
+        events_df: Optional events DataFrame for condition-based filtering.
     """
     if pow_df is None or epochs_info is None:
         return
@@ -1873,44 +1868,87 @@ def plot_band_power_topomaps(
             logger.error("plot_band_power_topomaps requires segment parameter. No fallback will be used.")
         return
     
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    compare_columns = bool(get_config_value(config, "plotting.comparisons.compare_columns", True))
+    comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
+    comparison_values = get_config_value(config, "plotting.comparisons.comparison_values", [])
+
+    has_column_spec = (
+        comparison_column != ""
+        and isinstance(comparison_values, (list, tuple))
+        and len(comparison_values) >= 2
+    )
+
+    if has_column_spec and len(comparison_values) != 2:
+        raise ValueError(
+            f"band_power_topomaps compare_columns requires exactly 2 comparison_values, "
+            f"got {len(comparison_values)}: {comparison_values}"
+        )
+
+    conditions: Optional[List[Tuple[str, np.ndarray]]] = None
+    if events_df is not None and has_column_spec:
+        comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
+        if not comp_mask_info:
+            raise ValueError(
+                "band_power_topomaps column comparison requested but could not resolve "
+                f"comparison masks for column={comparison_column!r}, values={comparison_values!r}"
+            )
+        mask1, mask2, label1, label2 = comp_mask_info
+        conditions = [(label1, mask1), (label2, mask2)]
+    
     plot_cfg = get_plot_config(config)
     
-    valid_bands = []
-    band_data = {}
-    detected_stats = set()
+    def extract_band_data(power_subset: pd.DataFrame) -> Tuple[List[str], Dict[str, Dict[str, float]], set]:
+        """Extract band power data from a power DataFrame subset."""
+        valid_bands = []
+        band_data = {}
+        detected_stats = set()
+        
+        for band in bands:
+            cols = []
+            for c in power_subset.columns:
+                parsed = NamingSchema.parse(str(c))
+                if not parsed.get("valid"):
+                    continue
+                if parsed.get("group") != "power":
+                    continue
+                if parsed.get("segment") != segment:
+                    continue
+                if parsed.get("band") != band:
+                    continue
+                if parsed.get("scope") != "ch":
+                    continue
+                cols.append(c)
+                stat = parsed.get("stat", "")
+                if stat:
+                    detected_stats.add(stat)
+            
+            if not cols:
+                continue
+            
+            ch_power = {}
+            for col in cols:
+                parsed = NamingSchema.parse(str(col))
+                if parsed.get("valid") and parsed.get("identifier"):
+                    ch_name = parsed["identifier"]
+                    ch_power[ch_name] = power_subset[col].mean()
+            
+            if ch_power:
+                valid_bands.append(band)
+                band_data[band] = ch_power
+        
+        return valid_bands, band_data, detected_stats
     
-    for band in bands:
-        cols = []
-        for c in pow_df.columns:
-            parsed = NamingSchema.parse(str(c))
-            if not parsed.get("valid"):
-                continue
-            if parsed.get("group") != "power":
-                continue
-            if parsed.get("segment") != segment:
-                continue
-            if parsed.get("band") != band:
-                continue
-            if parsed.get("scope") != "ch":
-                continue
-            cols.append(c)
-            stat = parsed.get("stat", "")
-            if stat:
-                detected_stats.add(stat)
-        
-        if not cols:
-            continue
-        
-        ch_power = {}
-        for col in cols:
-            parsed = NamingSchema.parse(str(col))
-            if parsed.get("valid") and parsed.get("identifier"):
-                ch_name = parsed["identifier"]
-                ch_power[ch_name] = pow_df[col].mean()
-        
-        if ch_power:
-            valid_bands.append(band)
-            band_data[band] = ch_power
+    if conditions:
+        valid_bands, band_data, detected_stats = extract_band_data(pow_df)
+        if not valid_bands:
+            if logger:
+                logger.warning("No valid band power columns found for condition-based topomaps")
+            return
+    else:
+        valid_bands, band_data, detected_stats = extract_band_data(pow_df)
     
     if not valid_bands:
         if logger:
@@ -1957,46 +1995,419 @@ def plot_band_power_topomaps(
     
     n_bands = len(valid_bands)
     width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
-    fig, axes = plt.subplots(1, n_bands, figsize=(width_per_band * n_bands, 4))
-    if n_bands == 1:
-        axes = [axes]
     
-    for i, band in enumerate(valid_bands):
-        ax = axes[i]
-        ch_power = band_data[band]
+    from eeg_pipeline.utils.formatting import sanitize_label
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_fdr_alpha
+    from scipy.stats import mannwhitneyu
+    
+    def save_topomap_plot(
+        condition_pow_df: pd.DataFrame,
+        condition_label: Optional[str],
+        condition_color: Optional[str],
+        n_trials: int,
+        unit: str,
+        value: str,
+    ) -> None:
+        """Create and save a topomap plot for a condition."""
+        cond_valid_bands, cond_band_data, _ = extract_band_data(condition_pow_df)
+        if not cond_valid_bands:
+            return
         
-        data_array = np.full(len(epochs_info.ch_names), np.nan)
-        mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
+        fig, axes = plt.subplots(1, len(cond_valid_bands), figsize=(width_per_band * len(cond_valid_bands), 4))
+        if len(cond_valid_bands) == 1:
+            axes = [axes]
         
-        for ch_idx, ch_name in enumerate(epochs_info.ch_names):
-            if ch_name in ch_power:
-                data_array[ch_idx] = ch_power[ch_name]
-                mask[ch_idx] = True
-        
-        if mask.sum() > MIN_CHANNELS_FOR_TOPO:
-            valid_data = data_array[mask]
-            valid_info = mne.pick_info(epochs_info, np.where(mask)[0])
+        for i, band in enumerate(cond_valid_bands):
+            ax = axes[i]
+            ch_power = cond_band_data[band]
             
+            data_array = np.full(len(epochs_info.ch_names), np.nan)
+            mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
+            
+            for ch_idx, ch_name in enumerate(epochs_info.ch_names):
+                if ch_name in ch_power:
+                    data_array[ch_idx] = ch_power[ch_name]
+                    mask[ch_idx] = True
+            
+            if mask.sum() > MIN_CHANNELS_FOR_TOPO:
+                valid_data = data_array[mask]
+                valid_info = mne.pick_info(epochs_info, np.where(mask)[0])
+                
+                im, _ = plot_topomap(
+                    valid_data, valid_info,
+                    axes=ax, show=False, cmap="RdBu_r", contours=6
+                )
+                plt.colorbar(im, ax=ax, shrink=0.6, label=unit)
+            
+            band_color = get_band_color(band, config)
+            ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
+        
+        title_text = f"Band Power Topomaps - {segment.capitalize()} (sub-{subject})"
+        if condition_label:
+            title_text += f" | {condition_label}"
+        fig.suptitle(title_text, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
+        
+        footer = f"n={n_trials} trials | Segment: {segment} | Values: {value}"
+        fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
+        
+        plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+        
+        if condition_label:
+            condition_safe = sanitize_label(condition_label).lower().replace(" ", "_")
+            filename = f"sub-{subject}_band_power_topomaps_{segment}_{condition_safe}"
+        else:
+            filename = f"sub-{subject}_band_power_topomaps_{segment}"
+        
+        save_fig(fig, save_dir / filename,
+                 formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                 bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
+        plt.close(fig)
+
+    def _band_channel_columns(df: pd.DataFrame) -> Dict[str, Dict[str, str]]:
+        """Map band -> channel -> column for this segment."""
+        mapping: Dict[str, Dict[str, str]] = {str(b): {} for b in bands}
+        for c in df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "power":
+                continue
+            if parsed.get("segment") != segment:
+                continue
+            if parsed.get("scope") != "ch":
+                continue
+            band = str(parsed.get("band") or "")
+            ch = str(parsed.get("identifier") or "")
+            if band in mapping and ch:
+                mapping[band][ch] = str(c)
+        return mapping
+
+    def save_column_comparison_topomaps() -> None:
+        """If compare_columns, save statistical contrast topomaps with significance masks."""
+        if not conditions:
+            return
+        if events_df is None:
+            raise ValueError("band_power_topomaps compare_columns requires events_df.")
+
+        band_to_ch_col = _band_channel_columns(pow_df)
+        alpha = float(get_fdr_alpha(config))
+
+        # Collect p-values across all band×channel tests for global FDR within this plot.
+        tests: List[Tuple[str, str, float]] = []  # (band, ch, p)
+        effect_map: Dict[Tuple[str, str], float] = {}
+
+        for band in [str(b) for b in bands]:
+            ch_to_col = band_to_ch_col.get(band, {})
+            for ch_name in epochs_info.ch_names:
+                col = ch_to_col.get(ch_name)
+                if not col:
+                    continue
+
+                group_arrays: List[np.ndarray] = []
+                group_means: List[float] = []
+                for label, mask in conditions:
+                    n_samples = min(len(pow_df), len(mask))
+                    mask_array = np.asarray(mask[:n_samples], dtype=bool)
+                    series = pd.to_numeric(pow_df.iloc[:n_samples][col], errors="coerce")
+                    vals = series[mask_array].dropna().values
+                    group_arrays.append(vals)
+                    group_means.append(float(np.nanmean(vals)) if len(vals) else np.nan)
+
+                if len(group_arrays) != 2:
+                    continue
+
+                v1, v2 = group_arrays[0], group_arrays[1]
+                if len(v1) < MIN_TRIALS_FOR_STATISTICS or len(v2) < MIN_TRIALS_FOR_STATISTICS:
+                    p = 1.0
+                else:
+                    p = float(mannwhitneyu(v1, v2, alternative="two-sided").pvalue)
+                tests.append((band, ch_name, p))
+                effect_map[(band, ch_name)] = (group_means[1] - group_means[0])
+
+        if not tests:
+            return
+
+        rejected, qvals, _ = apply_fdr_correction([p for _, _, p in tests], config=config)
+        q_map: Dict[Tuple[str, str], float] = {}
+        sig_map: Dict[Tuple[str, str], bool] = {}
+        for (band, ch, _), q, rej in zip(tests, qvals, rejected):
+            q_map[(band, ch)] = float(q)
+            sig_map[(band, ch)] = bool(rej) and float(q) < alpha
+
+        n_bands = len([str(b) for b in bands])
+        fig, axes = plt.subplots(1, n_bands, figsize=(width_per_band * n_bands, 4))
+        if n_bands == 1:
+            axes = [axes]
+
+        total_sig = 0
+        total_tests = 0
+
+        for i, band in enumerate([str(b) for b in bands]):
+            ax = axes[i]
+            data_array = np.full(len(epochs_info.ch_names), np.nan, dtype=float)
+            sig_mask_full = np.zeros(len(epochs_info.ch_names), dtype=bool)
+
+            for ch_idx, ch_name in enumerate(epochs_info.ch_names):
+                key = (band, ch_name)
+                if key not in effect_map:
+                    continue
+                data_array[ch_idx] = float(effect_map[key])
+                if sig_map.get(key, False):
+                    sig_mask_full[ch_idx] = True
+
+            present = np.isfinite(data_array)
+            if present.sum() <= MIN_CHANNELS_FOR_TOPO:
+                ax.set_axis_off()
+                continue
+
+            valid_data = data_array[present]
+            valid_info = mne.pick_info(epochs_info, np.where(present)[0])
+            valid_sig = sig_mask_full[present]
+
+            vmax = float(np.nanmax(np.abs(valid_data))) if np.isfinite(valid_data).any() else 1.0
+            vmin = -vmax
+
             im, _ = plot_topomap(
-                valid_data, valid_info,
-                axes=ax, show=False, cmap="RdBu_r", contours=6
+                valid_data,
+                valid_info,
+                axes=ax,
+                show=False,
+                cmap="RdBu_r",
+                contours=6,
+                vlim=(vmin, vmax),
+                mask=valid_sig,
+                mask_params=dict(markersize=2, markerfacecolor="none", markeredgecolor="k"),
             )
             plt.colorbar(im, ax=ax, shrink=0.6, label=unit_label)
+
+            band_color = get_band_color(band, config)
+            ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
+
+            # Count stats for footer
+            for ch_name in epochs_info.ch_names:
+                key = (band, ch_name)
+                if key in q_map:
+                    total_tests += 1
+                    if sig_map.get(key, False):
+                        total_sig += 1
+
+        label1 = str(conditions[0][0])
+        label2 = str(conditions[1][0])
+        title = f"Band Power Contrast - {segment.capitalize()} (sub-{subject}) | {label2} − {label1}"
+        fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
+        fig.text(
+            0.5,
+            0.01,
+            f"n={len(pow_df)} trials | FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests,1)}",
+            ha="center",
+            va="bottom",
+            fontsize=plot_cfg.font.small,
+            color="gray",
+        )
+        plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+
+        label1_safe = sanitize_label(str(conditions[0][0])).lower().replace(" ", "_")
+        label2_safe = sanitize_label(str(conditions[1][0])).lower().replace(" ", "_")
+        out = save_dir / f"sub-{subject}_band_power_topomaps_{segment}_contrast_{label2_safe}_minus_{label1_safe}"
+        save_fig(
+            fig,
+            out,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+            config=config,
+        )
+        plt.close(fig)
+    
+    if conditions:
+        group_colors = plt.cm.Set2(np.linspace(0, 1, max(len(conditions), 3)))
+        condition_colors = {label: group_colors[i] for i, (label, _) in enumerate(conditions)}
         
+        for condition_label, condition_mask in conditions:
+            n_samples = min(len(pow_df), len(condition_mask))
+            if n_samples <= 0:
+                continue
+            
+            condition_mask_array = np.asarray(condition_mask[:n_samples], dtype=bool)
+            if int(condition_mask_array.sum()) == 0:
+                continue
+            
+            condition_pow_df = pow_df.loc[condition_mask_array]
+            n_trials = int(condition_mask_array.sum())
+            condition_color = condition_colors.get(condition_label, plot_cfg.get_color("blue"))
+            
+            save_topomap_plot(condition_pow_df, condition_label, condition_color, n_trials, unit_label, value_label)
+        
+        if logger:
+            logger.info(f"Saved band power topomaps ({segment}) for {len(conditions)} conditions")
+        if compare_columns:
+            save_column_comparison_topomaps()
+    else:
+        save_topomap_plot(pow_df, None, None, len(pow_df), unit_label, value_label)
+        if logger:
+            logger.info(f"Saved band power topomaps ({segment})")
+
+
+def plot_band_power_topomaps_window_contrast(
+    pow_df: pd.DataFrame,
+    epochs_info: mne.Info,
+    bands: List[str],
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    *,
+    window1: str,
+    window2: str,
+) -> None:
+    """Paired window contrast topomaps (window2 − window1) with FDR significance marks."""
+    if pow_df is None or pow_df.empty or epochs_info is None:
+        return
+
+    if not window1 or not window2:
+        raise ValueError("plot_band_power_topomaps_window_contrast requires window1 and window2.")
+
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_fdr_alpha
+    from scipy.stats import wilcoxon
+
+    plot_cfg = get_plot_config(config)
+    alpha = float(get_fdr_alpha(config))
+
+    def _band_channel_columns(df: pd.DataFrame, segment_name: str) -> Dict[str, Dict[str, str]]:
+        mapping: Dict[str, Dict[str, str]] = {str(b): {} for b in bands}
+        for c in df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "power":
+                continue
+            if parsed.get("segment") != segment_name:
+                continue
+            if parsed.get("scope") != "ch":
+                continue
+            band = str(parsed.get("band") or "")
+            ch = str(parsed.get("identifier") or "")
+            if band in mapping and ch:
+                mapping[band][ch] = str(c)
+        return mapping
+
+    cols_w1 = _band_channel_columns(pow_df, window1)
+    cols_w2 = _band_channel_columns(pow_df, window2)
+
+    tests: List[Tuple[str, str, float]] = []  # (band, ch, p)
+    diff_map: Dict[Tuple[str, str], float] = {}
+
+    for band in [str(b) for b in bands]:
+        ch_to_col1 = cols_w1.get(band, {})
+        ch_to_col2 = cols_w2.get(band, {})
+        for ch_name in epochs_info.ch_names:
+            col1 = ch_to_col1.get(ch_name)
+            col2 = ch_to_col2.get(ch_name)
+            if not col1 or not col2:
+                continue
+            s1 = pd.to_numeric(pow_df[col1], errors="coerce")
+            s2 = pd.to_numeric(pow_df[col2], errors="coerce")
+            valid = s1.notna() & s2.notna()
+            if int(valid.sum()) < MIN_TRIALS_FOR_STATISTICS:
+                p = 1.0
+                mean_diff = float(np.nanmean((s2 - s1).values))
+            else:
+                diffs = (s2[valid] - s1[valid]).values
+                mean_diff = float(np.nanmean(diffs)) if diffs.size else np.nan
+                if diffs.size == 0 or not np.isfinite(diffs).any() or np.allclose(diffs, 0):
+                    p = 1.0
+                else:
+                    p = float(wilcoxon(diffs, zero_method="wilcox", alternative="two-sided").pvalue)
+            tests.append((band, ch_name, p))
+            diff_map[(band, ch_name)] = mean_diff
+
+    if not tests:
+        return
+
+    rejected, qvals, _ = apply_fdr_correction([p for _, _, p in tests], config=config)
+    q_map: Dict[Tuple[str, str], float] = {}
+    sig_map: Dict[Tuple[str, str], bool] = {}
+    for (band, ch, _), q, rej in zip(tests, qvals, rejected):
+        q_map[(band, ch)] = float(q)
+        sig_map[(band, ch)] = bool(rej) and float(q) < alpha
+
+    width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
+    fig, axes = plt.subplots(1, len(bands), figsize=(width_per_band * len(bands), 4))
+    if len(bands) == 1:
+        axes = [axes]
+
+    total_sig = 0
+    total_tests = 0
+
+    for i, band in enumerate([str(b) for b in bands]):
+        ax = axes[i]
+        data_array = np.full(len(epochs_info.ch_names), np.nan, dtype=float)
+        sig_mask_full = np.zeros(len(epochs_info.ch_names), dtype=bool)
+
+        for ch_idx, ch_name in enumerate(epochs_info.ch_names):
+            key = (band, ch_name)
+            if key not in diff_map:
+                continue
+            data_array[ch_idx] = float(diff_map[key])
+            if sig_map.get(key, False):
+                sig_mask_full[ch_idx] = True
+            if key in q_map:
+                total_tests += 1
+                if sig_map.get(key, False):
+                    total_sig += 1
+
+        present = np.isfinite(data_array)
+        if present.sum() <= MIN_CHANNELS_FOR_TOPO:
+            ax.set_axis_off()
+            continue
+
+        valid_data = data_array[present]
+        valid_info = mne.pick_info(epochs_info, np.where(present)[0])
+        valid_sig = sig_mask_full[present]
+
+        vmax = float(np.nanmax(np.abs(valid_data))) if np.isfinite(valid_data).any() else 1.0
+        vmin = -vmax
+
+        im, _ = plot_topomap(
+            valid_data,
+            valid_info,
+            axes=ax,
+            show=False,
+            cmap="RdBu_r",
+            contours=6,
+            vlim=(vmin, vmax),
+            mask=valid_sig,
+            mask_params=dict(markersize=2, markerfacecolor="none", markeredgecolor="k"),
+        )
+        plt.colorbar(im, ax=ax, shrink=0.6, label="Δ power")
+
         band_color = get_band_color(band, config)
         ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
-    
-    fig.suptitle(f"Band Power Topomaps - {segment.capitalize()} (sub-{subject})", 
-                fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
-    
-    footer = f"n={len(pow_df)} trials | Segment: {segment} | Values: {value_label}"
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
-    
+
+    fig.suptitle(
+        f"Band Power Window Contrast (sub-{subject}) | {window2} − {window1}",
+        fontsize=plot_cfg.font.figure_title,
+        fontweight="bold",
+        y=1.02,
+    )
+    fig.text(
+        0.5,
+        0.01,
+        f"n={len(pow_df)} trials | FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests,1)}",
+        ha="center",
+        va="bottom",
+        fontsize=plot_cfg.font.small,
+        color="gray",
+    )
     plt.tight_layout(rect=[0, 0.03, 1, 0.98])
-    save_fig(fig, save_dir / f"sub-{subject}_band_power_topomaps_{segment}",
-             formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
+    save_fig(
+        fig,
+        save_dir / f"sub-{subject}_band_power_topomaps_contrast_{window2}_minus_{window1}",
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        config=config,
+    )
     plt.close(fig)
-    
-    if logger:
-        logger.info(f"Saved band power topomaps ({segment})")

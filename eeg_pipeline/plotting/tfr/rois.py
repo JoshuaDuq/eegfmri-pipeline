@@ -22,6 +22,7 @@ from eeg_pipeline.utils.formatting import sanitize_label
 from eeg_pipeline.utils.config.loader import get_config_value
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
+    apply_baseline_and_average,
     build_rois_from_info,
     get_tfr_decim,
     resolve_tfr_workers,
@@ -156,10 +157,7 @@ def plot_rois_all_trials(
     font_sizes = get_font_sizes()
     
     for roi, tfr in roi_tfrs.items():
-        tfr_averaged = tfr.copy().average()
-        baseline_used = apply_baseline_and_crop(
-            tfr_averaged, baseline=baseline, mode="logratio", logger=logger
-        )
+        tfr_averaged, baseline_used = apply_baseline_and_average(tfr, baseline, logger)
         
         channel_name = tfr_averaged.info['ch_names'][0]
         roi_tag = sanitize_label(roi)
@@ -257,15 +255,18 @@ def contrast_pain_nonpain_rois(
             roi_tag = sanitize_label(roi)
             roi_dir = rois_dir / roi_tag
 
+            label_2_sanitized = sanitize_label(label2).lower().replace(" ", "_")
+            label_1_sanitized = sanitize_label(label1).lower().replace(" ", "_")
+
             _plot_roi_tfr_figure(
                 tfr_condition2, roi, label2, roi_dir,
-                "tfr_painful_bl.png", config, baseline_used,
+                f"tfr_{label_2_sanitized}.png", config, baseline_used,
                 font_sizes, logger
             )
 
             _plot_roi_tfr_figure(
                 tfr_condition1, roi, label1, roi_dir,
-                "tfr_nonpain_bl.png", config, baseline_used,
+                f"tfr_{label_1_sanitized}.png", config, baseline_used,
                 font_sizes, logger
             )
 
@@ -274,7 +275,7 @@ def contrast_pain_nonpain_rois(
             difference_title = f"{label2} minus {label1}"
             _plot_roi_tfr_figure(
                 tfr_difference, roi, difference_title, roi_dir,
-                "tfr_pain_minus_nonpain_bl.png", config, baseline_used,
+                f"tfr_{label_2_sanitized}_minus_{label_1_sanitized}.png", config, baseline_used,
                 font_sizes, logger
             )
         except (ValueError, RuntimeError, KeyError, IndexError) as exc:

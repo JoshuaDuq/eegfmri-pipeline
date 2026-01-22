@@ -350,7 +350,7 @@ def cluster_test_two_sample(
     if alpha is None:
         alpha = get_fdr_alpha(config)
     if n_permutations is None:
-        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", 100))
+        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", 1000))
 
     adjacency, eeg_picks, info_eeg = get_eeg_adjacency(info, restrict_picks=restrict_picks)
     if eeg_picks is None:
@@ -377,7 +377,7 @@ def cluster_test_two_sample(
             [group_a_eeg, group_b_eeg],
             n_permutations=n_permutations,
             adjacency=adjacency,
-            tail=1,
+            tail=0,
             out_type="mask",
             n_jobs=n_jobs,
         )
@@ -539,10 +539,10 @@ def _create_band_summary_record(
     }
 
 
-def compute_pain_nonpain_time_cluster_test(
+def compute_two_condition_time_cluster_test(
     subject: str,
-    pain_epochs: "mne.Epochs",
-    nonpain_epochs: "mne.Epochs",
+    group_a_epochs: "mne.Epochs",
+    group_b_epochs: "mne.Epochs",
     output_dir: Path,
     config,
     bands: Optional[dict] = None,
@@ -554,7 +554,12 @@ def compute_pain_nonpain_time_cluster_test(
     condition_values: Optional[Tuple[Any, Any]] = None,
     condition_labels: Optional[Tuple[str, str]] = None,
 ) -> dict:
-    """Time-domain cluster permutation test for two trial groups."""
+    """Time-domain cluster permutation test for two trial groups.
+    
+    Generic two-condition comparison that can work with any condition column
+    (not limited to pain/non-pain). Condition is specified via condition_column
+    and condition_values parameters.
+    """
     logger = logging.getLogger(__name__)
     ensure_dir(output_dir)
 
@@ -621,52 +626,52 @@ def compute_pain_nonpain_time_cluster_test(
 
         # Local import to avoid circular dependency
         from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet, apply_baseline_to_tfr
-        tfr_pain = compute_tfr_morlet(
-            pain_epochs,
+        tfr_group_a = compute_tfr_morlet(
+            group_a_epochs,
             config,
             logger=logger,
             freqs=freqs,
             picks=picks,
             decim=decim,
         )
-        tfr_nonpain = compute_tfr_morlet(
-            nonpain_epochs,
+        tfr_group_b = compute_tfr_morlet(
+            group_b_epochs,
             config,
             logger=logger,
             freqs=freqs,
             picks=picks,
             decim=decim,
         )
-        apply_baseline_to_tfr(tfr_pain, config, logger)
-        apply_baseline_to_tfr(tfr_nonpain, config, logger)
+        apply_baseline_to_tfr(tfr_group_a, config, logger)
+        apply_baseline_to_tfr(tfr_group_b, config, logger)
 
-        time_mask = tfr_pain.times >= 0.0
-        band_power_pain = tfr_pain.data[:, :, :, time_mask].mean(axis=2)
-        band_power_nonpain = tfr_nonpain.data[:, :, :, time_mask].mean(axis=2)
-        time_vec = tfr_pain.times[time_mask]
+        time_mask = tfr_group_a.times >= 0.0
+        band_power_group_a = tfr_group_a.data[:, :, :, time_mask].mean(axis=2)
+        band_power_group_b = tfr_group_b.data[:, :, :, time_mask].mean(axis=2)
+        time_vec = tfr_group_a.times[time_mask]
 
-        if band_power_pain.shape[0] < 2 or band_power_nonpain.shape[0] < 2:
+        if band_power_group_a.shape[0] < 2 or band_power_group_b.shape[0] < 2:
             logger.warning(
                 "Insufficient epochs for band %s (%s=%d, %s=%d); skipping cluster test.",
                 band_name,
                 condition_labels[0],
-                band_power_pain.shape[0],
+                band_power_group_a.shape[0],
                 condition_labels[1],
-                band_power_nonpain.shape[0],
+                band_power_group_b.shape[0],
             )
             results[band_name] = {"error": "insufficient_epochs"}
             continue
 
-        n_channels = band_power_pain.shape[1]
-        n_times = band_power_pain.shape[2]
+        n_channels = band_power_group_a.shape[1]
+        n_times = band_power_group_a.shape[2]
 
-        adjacency_eeg, _, _ = get_eeg_adjacency(tfr_pain.info, logger=logger)
+        adjacency_eeg, _, _ = get_eeg_adjacency(tfr_group_a.info, logger=logger)
         cluster_records = []
 
         if adjacency_eeg is not None:
             adjacency = combine_adjacency(n_times, adjacency_eeg)
-            band_power_group_a_flat = band_power_pain.reshape(band_power_pain.shape[0], -1)
-            band_power_group_b_flat = band_power_nonpain.reshape(band_power_nonpain.shape[0], -1)
+            band_power_group_a_flat = band_power_group_a.reshape(band_power_group_a.shape[0], -1)
+            band_power_group_b_flat = band_power_group_b.reshape(band_power_group_b.shape[0], -1)
 
             effect_size_map_flat = compute_effect_size_map(
                 band_power_group_a_flat, band_power_group_b_flat
@@ -676,7 +681,7 @@ def compute_pain_nonpain_time_cluster_test(
             cluster_test_result = permutation_cluster_test(
                 [band_power_group_a_flat, band_power_group_b_flat],
                 n_permutations=int(n_permutations),
-                tail=1,
+                tail=0,
                 n_jobs=n_jobs,
                 adjacency=adjacency,
                 out_type="mask",
@@ -756,10 +761,10 @@ def compute_pain_nonpain_time_cluster_test(
                 time_end = float(time_vec[time_indices[-1]])
 
                 cluster_group_a = (
-                    band_power_pain[:, channel_indices, :][:, :, time_indices].mean(axis=(1, 2))
+                    band_power_group_a[:, channel_indices, :][:, :, time_indices].mean(axis=(1, 2))
                 )
                 cluster_group_b = (
-                    band_power_nonpain[:, channel_indices, :][:, :, time_indices].mean(axis=(1, 2))
+                    band_power_group_b[:, channel_indices, :][:, :, time_indices].mean(axis=(1, 2))
                 )
 
                 cohens_d, d_ci_low, d_ci_high = compute_cohens_d_with_bootstrap_ci(
@@ -790,7 +795,7 @@ def compute_pain_nonpain_time_cluster_test(
                     "duration_ms": float((time_end - time_start) * 1000),
                     "n_timepoints": int(len(time_indices)),
                     "n_channels": int(len(channel_indices)),
-                    "channels": ",".join(np.array(tfr_pain.ch_names)[channel_indices]),
+                    "channels": ",".join(np.array(tfr_group_a.ch_names)[channel_indices]),
                     "t_stat_min": float(np.min(t_stat_grid[cluster_mask])),
                     "t_stat_max": float(np.max(t_stat_grid[cluster_mask])),
                     "t_stat_mean": float(np.mean(t_stat_grid[cluster_mask])),
@@ -821,8 +826,8 @@ def compute_pain_nonpain_time_cluster_test(
                     n_clusters_found=n_clusters_found,
                     n_significant=n_significant,
                     cluster_p_values=cluster_p_values,
-                    n_condition_a_trials=int(band_power_pain.shape[0]),
-                    n_condition_b_trials=int(band_power_nonpain.shape[0]),
+                    n_condition_a_trials=int(band_power_group_a.shape[0]),
+                    n_condition_b_trials=int(band_power_group_b.shape[0]),
                     n_permutations=n_permutations,
                     alpha=alpha,
                     n_channels=n_channels,
@@ -854,8 +859,8 @@ def compute_pain_nonpain_time_cluster_test(
                     "condition_b_label": str(condition_labels[1]),
                     "condition_a_value": str(condition_values[0]) if condition_values is not None else "",
                     "condition_b_value": str(condition_values[1]) if condition_values is not None else "",
-                    "n_condition_a_trials": int(band_power_pain.shape[0]),
-                    "n_condition_b_trials": int(band_power_nonpain.shape[0]),
+                    "n_condition_a_trials": int(band_power_group_a.shape[0]),
+                    "n_condition_b_trials": int(band_power_group_b.shape[0]),
                 },
             }
         else:
@@ -868,15 +873,15 @@ def compute_pain_nonpain_time_cluster_test(
             channel_cluster_records = []
             channel_pvals = []
 
-            for channel_idx, channel_name in enumerate(tfr_pain.ch_names):
-                band_power_group_a_ch = band_power_pain[:, channel_idx, :]
-                band_power_group_b_ch = band_power_nonpain[:, channel_idx, :]
+            for channel_idx, channel_name in enumerate(tfr_group_a.ch_names):
+                band_power_group_a_ch = band_power_group_a[:, channel_idx, :]
+                band_power_group_b_ch = band_power_group_b[:, channel_idx, :]
                 if band_power_group_a_ch.shape[0] < 2 or band_power_group_b_ch.shape[0] < 2:
                     continue
                 t_stat_ch, clusters_ch, cluster_p_values_ch, _ = permutation_cluster_test(
                     [band_power_group_a_ch, band_power_group_b_ch],
                     n_permutations=int(n_permutations),
-                    tail=1,
+                    tail=0,
                     n_jobs=n_jobs,
                     adjacency=time_adjacency,
                     out_type="mask",
@@ -960,8 +965,8 @@ def compute_pain_nonpain_time_cluster_test(
                         n_clusters_found=len(channel_cluster_records),
                         n_significant=n_significant_channels,
                         cluster_p_values=cluster_p_values_channel,
-                        n_condition_a_trials=int(band_power_pain.shape[0]),
-                        n_condition_b_trials=int(band_power_nonpain.shape[0]),
+                        n_condition_a_trials=int(band_power_group_a.shape[0]),
+                        n_condition_b_trials=int(band_power_group_b.shape[0]),
                         n_permutations=n_permutations,
                         alpha=alpha,
                         n_channels=n_channels,
@@ -989,8 +994,8 @@ def compute_pain_nonpain_time_cluster_test(
                         n_clusters_found=0,
                         n_significant=0,
                         cluster_p_values=np.array([]),
-                        n_condition_a_trials=int(band_power_pain.shape[0]),
-                        n_condition_b_trials=int(band_power_nonpain.shape[0]),
+                        n_condition_a_trials=int(band_power_group_a.shape[0]),
+                        n_condition_b_trials=int(band_power_group_b.shape[0]),
                         n_permutations=n_permutations,
                         alpha=alpha,
                         n_channels=n_channels,
@@ -1169,10 +1174,10 @@ def _run_cluster_test_core(
     _, max_freq_available, _, _, _, _ = get_tfr_config(config)
     bands = get_bands_for_tfr(max_freq_available=max_freq_available, config=config)
 
-    return compute_pain_nonpain_time_cluster_test(
+    return compute_two_condition_time_cluster_test(
         subject=subject,
-        pain_epochs=epochs_roi[mask_group_a.to_numpy()],
-        nonpain_epochs=epochs_roi[mask_group_b.to_numpy()],
+        group_a_epochs=epochs_roi[mask_group_a.to_numpy()],
+        group_b_epochs=epochs_roi[mask_group_b.to_numpy()],
         output_dir=output_dir,
         config=config,
         bands=bands,

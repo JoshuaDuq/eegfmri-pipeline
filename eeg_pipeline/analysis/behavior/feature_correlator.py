@@ -1171,9 +1171,11 @@ class FeatureBehaviorCorrelator:
                 )
 
         method_suffix = f"_{method_label}" if method_label else ""
-        from eeg_pipeline.infra.paths import ensure_dir
-        corr_dir = self.stats_dir / "correlations"
-        ensure_dir(corr_dir)
+        from eeg_pipeline.analysis.behavior.orchestration import _get_stats_subfolder_with_overwrite
+        from eeg_pipeline.utils.config.loader import get_config_bool
+        
+        overwrite = get_config_bool(self.config, "behavior_analysis.output.overwrite", True)
+        corr_dir = _get_stats_subfolder_with_overwrite(self.stats_dir, "correlations", overwrite)
         combined_rating_df = pd.DataFrame(rating_records) if rating_records else pd.DataFrame()
         if not combined_rating_df.empty:
             _apply_fdr_to_dataframe(combined_rating_df, corr_config, self.config)
@@ -1240,8 +1242,14 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True
     
+    # Get rating from aligned_events using event_columns.rating config
+    rating_series = None
+    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    if rating_col is not None and ctx.aligned_events is not None:
+        rating_series = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+    
     return correlator.run_complete_analysis(
-        rating_series=ctx.targets,
+        rating_series=rating_series,
         temperature_series=ctx.temperature,
         corr_config=CorrelationConfig.from_context(ctx),
     )

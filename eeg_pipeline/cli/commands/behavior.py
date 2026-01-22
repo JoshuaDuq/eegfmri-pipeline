@@ -381,6 +381,19 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         action="store_false",
         dest="also_save_csv",
     )
+    output_group.add_argument(
+        "--overwrite",
+        action="store_true",
+        default=None,
+        dest="overwrite",
+        help="Overwrite existing output folders (default: True)",
+    )
+    output_group.add_argument(
+        "--no-overwrite",
+        action="store_false",
+        dest="overwrite",
+        help="Append timestamp to output folders instead of overwriting",
+    )
 
     visualize_group = parser.add_argument_group("Visualize mode options")
     plot_group = visualize_group.add_mutually_exclusive_group()
@@ -834,6 +847,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     out = ba.setdefault("output", {})
     if getattr(args, "also_save_csv", None) is not None:
         out["also_save_csv"] = bool(args.also_save_csv)
+    if getattr(args, "overwrite", None) is not None:
+        out["overwrite"] = bool(args.overwrite)
 
 
 def _build_computation_features(args: argparse.Namespace) -> dict[str, list[str]] | None:

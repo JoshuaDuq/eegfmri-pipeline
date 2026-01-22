@@ -169,10 +169,6 @@ def _get_baseline_window(config, baseline: Optional[Tuple[Optional[float], Optio
     if not config:
         return -5.0, -0.01
 
-    override = config.get("plotting.tfr.default_baseline_window", None)
-    if isinstance(override, (list, tuple)) and len(override) == 2:
-        return tuple(override)
-
     return tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
 
 
@@ -498,17 +494,13 @@ def _save_fig(
         logger: Optional logger instance
         baseline_used: Optional baseline window tuple
     """
-    from eeg_pipeline.plotting.io.figures import save_fig as central_save_fig, build_footer
+    from eeg_pipeline.plotting.io.figures import save_fig as central_save_fig
     from eeg_pipeline.utils.formatting import format_baseline_window_string
     
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if baseline_used is None:
-        override = config.get("plotting.tfr.default_baseline_window", None)
-        if isinstance(override, (list, tuple)) and len(override) == 2:
-            baseline_used = tuple(override)
-        else:
-            baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
+        baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
 
     figs = fig_obj if isinstance(fig_obj, list) else [fig_obj]
     stem, _ = (name.rsplit(".", 1) + [""])[:2]
@@ -519,15 +511,7 @@ def _save_fig(
     plot_cfg = get_plot_config(config)
     exts = formats if formats else list(plot_cfg.formats) if plot_cfg.formats else ["png"]
     
-    default_footer_template = "tfr_baseline"
-    baseline_decimal_places = 2
     footer_text = None
-    template_name = config.get("output.tfr_footer_template", default_footer_template)
-    footer_kwargs = {
-        "baseline_window": baseline_used,
-        "baseline": f"[{float(baseline_used[0]):.{baseline_decimal_places}f}, {float(baseline_used[1]):.{baseline_decimal_places}f}] s",
-    }
-    footer_text = build_footer(template_name, config, **footer_kwargs)
 
     for i, f in enumerate(figs):
         out_name = f"{stem}.{exts[0]}" if i == 0 else f"{stem}_{i+1}.{exts[0]}"
@@ -620,11 +604,9 @@ def contrast_maxmin_temperature(
     tfr_sub_stats = tfr_sub.copy()
     baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
 
-    tfr_min = tfr_sub[mask_min].average()
-    tfr_max = tfr_sub[mask_max].average()
-
-    apply_baseline_and_crop(tfr_min, baseline=baseline_used, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_max, baseline=baseline_used, mode="logratio", logger=logger)
+    # Use epoch-level baseline correction before averaging to avoid bias with nonlinear modes.
+    tfr_min = tfr_sub_stats[mask_min].average()
+    tfr_max = tfr_sub_stats[mask_max].average()
 
     times = np.asarray(tfr_max.times)
     tmin_required, tmax_required = active_window
@@ -634,6 +616,11 @@ def contrast_maxmin_temperature(
 
     fmax_available = float(np.max(tfr_max.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
+    
+    from eeg_pipeline.utils.config.loader import get_config_value
+    selected_bands = get_config_value(config, "time_frequency_analysis.selected_bands", None)
+    if selected_bands and isinstance(selected_bands, (list, tuple)) and len(selected_bands) > 0:
+        bands = {k: v for k, v in bands.items() if k in selected_bands}
 
     n_rows = len(bands)
     n_cols = 4
@@ -711,227 +698,19 @@ def contrast_maxmin_temperature(
     plot_cfg = get_plot_config(config) if config else None
     font_sizes = get_font_sizes(plot_cfg)
     fig.suptitle(
-        f"Topomaps: Max vs Min temperature (baseline: logratio; t=[{tmin:.1f}, {tmax:.1f}] s){sig_text}",
+        f"Topomaps (baseline: logratio; t=[{tmin:.1f}, {tmax:.1f}] s){sig_text}",
         fontsize=font_sizes["figure_title"],
     )
     fig.supylabel("Frequency bands", fontsize=font_sizes["ylabel"])
+    filename = f"topomap_grid_bands_maxmin_temp_diff_t{tmin:.1f}-{tmax:.1f}s.png"
     _save_fig(
         fig,
         out_dir,
-        "topomap_grid_bands_maxmin_temp_diff_bl.png",
+        filename,
         config,
         baseline_used=baseline_used,
         logger=logger,
     )
-
-
-def plot_bands_pain_temp_contrasts(
-    tfr: "mne.time_frequency.EpochsTFR",
-    events_df: Optional[pd.DataFrame],
-    out_dir: Path,
-    config,
-    baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    active_window: Tuple[float, float] = (3.0, 10.5),
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    """Plot combined pain and temperature contrast topomaps.
-    
-    Creates topomap grid showing pain-nonpain and max-min temperature differences
-    across frequency bands.
-    
-    Args:
-        tfr: MNE EpochsTFR object
-        events_df: Optional events DataFrame with pain and temperature columns
-        out_dir: Output directory path
-        config: Configuration object
-        baseline: Optional baseline window tuple (defaults to config)
-        active_window: Active window tuple for statistics
-        logger: Optional logger instance
-    """
-    baseline = _get_baseline_window(config, baseline)
-    if not require_epochs_tfr(tfr, "Combined contrast", logger):
-        return
-    tfr_sub, mask1, mask2, label1, label2, n = _prepare_comparison_contrast_data(
-        tfr, events_df, config, logger, context="Combined contrast"
-    )
-    if tfr_sub is None:
-        return
-
-    aligned_events = _get_aligned_events_df_for_tfr(tfr, events_df, int(n))
-    if aligned_events is None:
-        log("Combined contrast: no events metadata found; skipping.", logger, "warning")
-        return
-
-    temp_col = get_temperature_column_from_config(config, aligned_events)
-    if temp_col is None:
-        log("Combined contrast: no temperature column found; skipping.", logger, "warning")
-        return
-
-    temp_series = extract_temperature_series(tfr, aligned_events, temp_col, int(n))
-    if temp_series is None:
-        log("Combined contrast: no temperature column found; skipping.", logger, "warning")
-        return
-
-    t_min, t_max = get_temperature_range(temp_series)
-    if t_min is None or t_max is None:
-        log("Combined contrast: need at least 2 temperature levels; skipping.", logger, "warning")
-        return
-
-    mask_min, mask_max = create_temperature_masks_from_range(temp_series, t_min, t_max)
-    
-    if mask_min.sum() == 0 or mask_max.sum() == 0:
-        log(f"Combined contrast: zero trials in one temp group (min n={int(mask_min.sum())}, max n={int(mask_max.sum())}); skipping.", logger, "warning")
-        return
-
-    aligned = _align_and_trim_masks(
-        tfr_sub,
-        {
-            "Condition contrast": (mask2, mask1),
-            "Temperature contrast": (mask_min, mask_max)
-        },
-        config, logger
-    )
-    if aligned is None:
-        return
-    
-    mask2, mask1 = aligned["Condition contrast"]
-    mask_min, mask_max = aligned["Temperature contrast"]
-
-    tfr_2 = tfr_sub[mask2].average()
-    tfr_1 = tfr_sub[mask1].average()
-    tfr_min = tfr_sub[mask_min].average()
-    tfr_max = tfr_sub[mask_max].average()
-
-    baseline_used = apply_baseline_and_crop(tfr_2, baseline=baseline, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_1, baseline=baseline, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_min, baseline=baseline, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_max, baseline=baseline, mode="logratio", logger=logger)
-
-    times = np.asarray(tfr_2.times)
-    tmin_required, tmax_required = active_window
-    tmin_effective = float(max(times.min(), tmin_required))
-    tmax_effective = float(min(times.max(), tmax_required))
-    tmin, tmax = tmin_effective, tmax_effective
-
-    fmax_available = float(np.max(tfr_2.freqs))
-    bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
-
-    n_rows = 2
-    n_cols = len(bands)
-    plot_cfg = get_plot_config(config)
-    fig_size_per_col = plot_cfg.get_figure_size("tfr_per_col_large", plot_type="tfr")[0]
-    fig_size_per_row = plot_cfg.get_figure_size("tfr_per_row_large", plot_type="tfr")[1]
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(fig_size_per_col * n_cols, fig_size_per_row * n_rows),
-        squeeze=False,
-        gridspec_kw={"wspace": 1.2, "hspace": 0.25},
-    )
-
-    viz_params = get_viz_params(config)
-    n_2 = int(mask2.sum())
-    n_1 = int(mask1.sum())
-    n_max = int(mask_max.sum())
-    n_min = int(mask_min.sum())
-
-    all_cond_diff = []
-    all_temp_diff = []
-    band_significance_data = {}
-    
-    for c, (band, (fmin, fmax)) in enumerate(bands.items()):
-        fmax_effective = min(fmax, fmax_available)
-        if fmin >= fmax_effective:
-            for r in range(n_rows):
-                axes[r, c].axis('off')
-            continue
-
-        cond_diff_data, temp_diff_data = _compute_band_diff_data(tfr_2, tfr_1, tfr_max, tfr_min, fmin, fmax_effective, tmin, tmax)
-        
-        if cond_diff_data is None or temp_diff_data is None:
-            for r in range(n_rows):
-                axes[r, c].axis('off')
-            continue
-        
-        all_cond_diff.append(cond_diff_data)
-        all_temp_diff.append(temp_diff_data)
-
-        cond_sig_mask = None
-        cond_cluster_p_min = cond_cluster_k = cond_cluster_mass = None
-        if viz_params["diff_annotation_enabled"]:
-            cond_diff_data_len = len(cond_diff_data) if cond_diff_data is not None else None
-            cond_sig_mask, cond_cluster_p_min, cond_cluster_k, cond_cluster_mass = compute_cluster_significance(
-                tfr_sub, mask2, mask1, fmin, fmax_effective, tmin, tmax, config, diff_data_len=cond_diff_data_len, logger=logger
-            )
-
-        temp_sig_mask = None
-        temp_cluster_p_min = temp_cluster_k = temp_cluster_mass = None
-        if viz_params["diff_annotation_enabled"]:
-            temp_diff_data_len = len(temp_diff_data) if temp_diff_data is not None else None
-            temp_sig_mask, temp_cluster_p_min, temp_cluster_k, temp_cluster_mass = compute_cluster_significance(
-                tfr_sub, mask_max, mask_min, fmin, fmax_effective, tmin, tmax, config, diff_data_len=temp_diff_data_len, logger=logger
-            )
-        
-        band_significance_data[band] = {
-            "cond": (cond_sig_mask, cond_cluster_p_min, cond_cluster_k, cond_cluster_mass),
-            "temp": (temp_sig_mask, temp_cluster_p_min, temp_cluster_k, temp_cluster_mass),
-            "cond_diff": cond_diff_data,
-            "temp_diff": temp_diff_data,
-        }
-
-    cond_diff_abs = robust_sym_vlim(all_cond_diff) if len(all_cond_diff) > 0 else 0.0
-    temp_diff_abs = robust_sym_vlim(all_temp_diff) if len(all_temp_diff) > 0 else 0.0
-    
-    for c, (band, (fmin, fmax)) in enumerate(bands.items()):
-        fmax_effective = min(fmax, fmax_available)
-        if fmin >= fmax_effective:
-            continue
-
-        if band not in band_significance_data:
-            continue
-
-        band_data = band_significance_data[band]
-        cond_diff_data = band_data["cond_diff"]
-        temp_diff_data = band_data["temp_diff"]
-        cond_sig_mask, cond_cluster_p_min, cond_cluster_k, cond_cluster_mass = band_data["cond"]
-        temp_sig_mask, temp_cluster_p_min, temp_cluster_k, temp_cluster_mass = band_data["temp"]
-
-        cond_data_group_a = extract_trial_band_power(tfr_sub[mask2], fmin, fmax_effective, tmin, tmax)
-        cond_data_group_b = extract_trial_band_power(tfr_sub[mask1], fmin, fmax_effective, tmin, tmax)
-        temp_data_group_a = extract_trial_band_power(tfr_sub[mask_max], fmin, fmax_effective, tmin, tmax)
-        temp_data_group_b = extract_trial_band_power(tfr_sub[mask_min], fmin, fmax_effective, tmin, tmax)
-
-        _plot_diff_topomap_with_label(
-            axes[0, c], cond_diff_data, tfr_2.info, cond_diff_abs,
-            cond_sig_mask, cond_cluster_p_min, cond_cluster_k, cond_cluster_mass, config, viz_params,
-            data_group_a=cond_data_group_a,
-            data_group_b=cond_data_group_b,
-            paired=False
-        )
-
-        _plot_diff_topomap_with_label(
-            axes[1, c], temp_diff_data, tfr_max.info, temp_diff_abs,
-            temp_sig_mask, temp_cluster_p_min, temp_cluster_k, temp_cluster_mass, config, viz_params,
-            data_group_a=temp_data_group_a,
-            data_group_b=temp_data_group_b,
-            paired=False
-        )
-
-        axes[0, c].set_title(f"{band} ({fmin:.0f}-{fmax_effective:.0f} Hz)", fontsize=9, pad=4, y=1.04)
-
-    add_diff_colorbar(fig, axes[0, :].ravel().tolist(), cond_diff_abs, viz_params["topo_cmap"], config)
-    add_diff_colorbar(fig, axes[1, :].ravel().tolist(), temp_diff_abs, viz_params["topo_cmap"], config)
-
-    plot_cfg = get_plot_config(config) if config else None
-    font_sizes = get_font_sizes(plot_cfg)
-    axes[0, 0].set_ylabel(f"{label2} - {label1} (n={n_2}-{n_1})", fontsize=font_sizes["ylabel"])
-    axes[1, 0].set_ylabel(f"Max - Min temp ({t_max:.1f}-{t_min:.1f}°C, n={n_max}-{n_min})", fontsize=font_sizes["ylabel"])
-    sig_text = get_sig_marker_text(config)
-    fig.suptitle(f"Topomaps (baseline: logratio; t=[{tmin:.1f}, {tmax:.1f}] s){sig_text}", fontsize=font_sizes["figure_title"])
-    fig.supxlabel("Frequency bands", fontsize=font_sizes["ylabel"])
-    _save_fig(fig, out_dir, "topomap_grid_bands_pain_temp_contrasts_bl.png", config=config, logger=logger, baseline_used=baseline_used)
-
-
 def contrast_pain_nonpain(
     tfr: "mne.time_frequency.EpochsTFR | mne.time_frequency.AverageTFR",
     events_df: Optional[pd.DataFrame],
@@ -942,15 +721,15 @@ def contrast_pain_nonpain(
     logger: Optional[logging.Logger] = None,
     subject: Optional[str] = None,
 ) -> None:
-    """Plot pain vs non-pain contrast with central channel and topomaps.
+    """Plot condition contrast with central channel and topomaps.
     
     Creates a comprehensive contrast visualization including:
-    - Central channel TFR plots (pain, non-pain, difference)
-    - Topomap grid showing pain, non-pain, and difference across frequency bands
+    - Central channel TFR plots (condition 2, condition 1, difference)
+    - Topomap grid showing condition 2, condition 1, and difference across frequency bands
     
     Args:
         tfr: MNE TFR object (EpochsTFR or AverageTFR)
-        events_df: Optional events DataFrame with pain column
+        events_df: Optional events DataFrame with condition column
         out_dir: Output directory path
         config: Configuration object
         baseline: Baseline window tuple (tmin, tmax)
@@ -969,11 +748,8 @@ def contrast_pain_nonpain(
     tfr_sub_stats = tfr_sub.copy()
     baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
 
-    tfr_1 = tfr_sub[mask1].average()
-    tfr_2 = tfr_sub[mask2].average()
-
-    apply_baseline_and_crop(tfr_2, baseline=baseline_used, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_1, baseline=baseline_used, mode="logratio", logger=logger)
+    tfr_1 = tfr_sub_stats[mask1].average()
+    tfr_2 = tfr_sub_stats[mask2].average()
 
     central_ch = _pick_central_channel(tfr_2.info, preferred="Cz", logger=logger)
     
@@ -986,16 +762,20 @@ def contrast_pain_nonpain(
     _, pct_condition_2, _ = _compute_active_statistics(arr_condition_2, times, active_window, config, logger)
     _, pct_condition_1, _ = _compute_active_statistics(arr_condition_1, times, active_window, config, logger)
     
+    from .channels import _sanitize_label_for_filename
+    label_2_sanitized = _sanitize_label_for_filename(label2)
+    label_1_sanitized = _sanitize_label_for_filename(label1)
+    
     _plot_single_tfr_figure(
         tfr_2, central_ch, (-vabs_symmetric, +vabs_symmetric),
         f"{central_ch} — {label2} (baseline logratio)\nvlim ±{vabs_symmetric:.2f}; mean %Δ vs BL={pct_condition_2:+.0f}%",
-        f"tfr_{central_ch}_pain_bl.png", out_dir, config, logger, baseline_used
+        f"tfr_{central_ch}_{label_2_sanitized}.png", out_dir, config, logger, baseline_used
     )
     
     _plot_single_tfr_figure(
         tfr_1, central_ch, (-vabs_symmetric, +vabs_symmetric),
         f"{central_ch} — {label1} (baseline logratio)\nvlim ±{vabs_symmetric:.2f}; mean %Δ vs BL={pct_condition_1:+.0f}%",
-        f"tfr_{central_ch}_nonpain_bl.png", out_dir, config, logger, baseline_used
+        f"tfr_{central_ch}_{label_1_sanitized}.png", out_dir, config, logger, baseline_used
     )
     
     tfr_diff = tfr_2.copy()
@@ -1008,8 +788,8 @@ def contrast_pain_nonpain(
     
     _plot_single_tfr_figure(
         tfr_diff, central_ch, (-vabs_diff, +vabs_diff),
-        f"{central_ch} — {label2} minus {label1} (baseline logratio)\nvlim ±{vabs_diff:.2f}; Δ% vs BL={pct_diff:+.0f}%",
-        f"tfr_{central_ch}_pain_minus_non_bl.png", out_dir, config, logger, baseline_used
+        f"{central_ch} — {label2} vs {label1} (logratio difference)\nvlim ±{vabs_diff:.2f}; %Δ {label2} vs {label1}={pct_diff:+.0f}%",
+        f"tfr_{central_ch}_{label_2_sanitized}_minus_{label_1_sanitized}.png", out_dir, config, logger, baseline_used
     )
 
     times = np.asarray(tfr_2.times)
@@ -1017,6 +797,12 @@ def contrast_pain_nonpain(
     tmax_effective = float(min(np.max(times), active_window[1]))
     fmax_available = float(np.max(tfr_2.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
+    
+    from eeg_pipeline.utils.config.loader import get_config_value
+    selected_bands = get_config_value(config, "time_frequency_analysis.selected_bands", None)
+    if selected_bands and isinstance(selected_bands, (list, tuple)) and len(selected_bands) > 0:
+        bands = {k: v for k, v in bands.items() if k in selected_bands}
+    
     tmin, tmax = tmin_effective, tmax_effective
 
     n_condition_2 = int(mask2.sum())
@@ -1144,4 +930,8 @@ def contrast_pain_nonpain(
     _finalize_topomap_figure(
         fig, axes, row_labels, tmin, tmax, config
     )
-    _save_fig(fig, out_dir, "topomap_grid_bands_pain_non_diff_bl.png", config=config, logger=logger, baseline_used=baseline_used)
+    from .channels import _sanitize_label_for_filename
+    label_2_sanitized = _sanitize_label_for_filename(label2)
+    label_1_sanitized = _sanitize_label_for_filename(label1)
+    filename = f"topomap_grid_bands_{label_2_sanitized}_minus_{label_1_sanitized}_diff_t{tmin:.1f}-{tmax:.1f}s.png"
+    _save_fig(fig, out_dir, filename, config=config, logger=logger, baseline_used=baseline_used)

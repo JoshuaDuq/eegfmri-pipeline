@@ -63,6 +63,7 @@ var behaviorComputations = []Computation{
 
 	// Core Analyses
 	{"correlations", "Correlations", "EEG-rating correlations with bootstrap CIs", "Core"},
+	{"multilevel_correlations", "Group Multilevel Correlations", "Group-level correlations with block-restricted permutations", "Core"},
 	{"regression", "Regression", "Feature regression with optional permutation + model sensitivity", "Core"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., pain vs non-pain)", "Core"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis", "Core"},
@@ -258,6 +259,8 @@ var featureFileOptions = []FeatureFile{
 var computationApplicableFeatures = map[string][]string{
 	// Correlations can use all standard EEG features
 	"correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	// Multilevel correlations uses the same features as correlations (group-level)
+	"multilevel_correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Pain sensitivity uses the same features as correlations
 	"pain_sensitivity": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Condition comparison uses trial-level features
@@ -317,9 +320,23 @@ type PlotItemConfig struct {
 	// Topomaps
 	TopomapWindowsSpec string
 
+	// TFR Topomap
+	TfrTopomapActiveWindow         string
+	TfrTopomapWindowSizeMs         string
+	TfrTopomapWindowCount          string
+	TfrTopomapLabelXPosition       string
+	TfrTopomapLabelYPositionBottom string
+	TfrTopomapLabelYPosition       string
+	TfrTopomapTitleY               string
+	TfrTopomapTitlePad              string
+	TfrTopomapSubplotsRight        string
+	TfrTopomapTemporalHspace       string
+	TfrTopomapTemporalWspace       string
+
 	// Connectivity
-	ConnectivityCircleTopFraction string
-	ConnectivityCircleMinLines    string
+	ConnectivityCircleTopFraction  string
+	ConnectivityCircleMinLines     string
+	ConnectivityNetworkTopFraction string
 
 	// ITPC
 	ItpcSharedColorbar *bool
@@ -339,8 +356,20 @@ const (
 	plotItemConfigFieldComparisonLabels
 	plotItemConfigFieldComparisonROIs
 	plotItemConfigFieldTopomapWindow
+	plotItemConfigFieldTfrTopomapActiveWindow
+	plotItemConfigFieldTfrTopomapWindowSizeMs
+	plotItemConfigFieldTfrTopomapWindowCount
+	plotItemConfigFieldTfrTopomapLabelXPosition
+	plotItemConfigFieldTfrTopomapLabelYPositionBottom
+	plotItemConfigFieldTfrTopomapLabelYPosition
+	plotItemConfigFieldTfrTopomapTitleY
+	plotItemConfigFieldTfrTopomapTitlePad
+	plotItemConfigFieldTfrTopomapSubplotsRight
+	plotItemConfigFieldTfrTopomapTemporalHspace
+	plotItemConfigFieldTfrTopomapTemporalWspace
 	plotItemConfigFieldConnectivityCircleTopFraction
 	plotItemConfigFieldConnectivityCircleMinLines
+	plotItemConfigFieldConnectivityNetworkTopFraction
 	plotItemConfigFieldItpcSharedColorbar
 )
 
@@ -484,12 +513,11 @@ const (
 var defaultPlotItems = []PlotItem{
 	// Power
 	{ID: "power_by_condition", Group: "power", Name: "Condition Comparison", Description: "Power differences between conditions", RequiredFiles: []string{"features_power*.tsv", "events.tsv"}, RequiresFeatures: true},
-	{ID: "band_power_topomaps", Group: "power", Name: "Topomaps", Description: "Band power topographic maps for selected time window", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
+	{ID: "band_power_topomaps", Group: "power", Name: "Topomaps", Description: "Band power topographic maps for selected time window", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "cross_frequency_power_correlation", Group: "power", Name: "Cross-Frequency Correlation", Description: "Correlation matrix between frequency bands", RequiredFiles: []string{"features_power*.tsv"}, RequiresFeatures: true},
 	{ID: "power_spectral_density", Group: "power", Name: "PSD Summary", Description: "Power spectral density curves", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	// Connectivity
 	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.tsv", "events.tsv"}, RequiresFeatures: true},
-	{ID: "connectivity_dynamics", Group: "connectivity", Name: "Sliding Window Dynamics", Description: "Connectivity trajectories over time windows", RequiredFiles: []string{"features_connectivity*.tsv"}, RequiresFeatures: true},
 	{ID: "connectivity_circle_condition", Group: "connectivity", Name: "Circle by Condition", Description: "Connectivity circles per measure and band by condition", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "connectivity_heatmap", Group: "connectivity", Name: "Heatmaps", Description: "Connectivity heatmaps per measure and band", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "connectivity_network", Group: "connectivity", Name: "Networks", Description: "Connectivity network visualizations per measure and band", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
@@ -968,6 +996,17 @@ type Model struct {
 	plotTFRLogBase              float64
 	plotTFRPercentageMultiplier float64
 
+	plotTFRTopomapWindowSizeMs         float64
+	plotTFRTopomapWindowCount          int
+	plotTFRTopomapLabelXPosition       float64
+	plotTFRTopomapLabelYPositionBottom float64
+	plotTFRTopomapLabelYPosition       float64
+	plotTFRTopomapTitleY               float64
+	plotTFRTopomapTitlePad             int
+	plotTFRTopomapSubplotsRight        float64
+	plotTFRTopomapTemporalHspace       float64
+	plotTFRTopomapTemporalWspace       float64
+
 	plotRoiWidthPerBand   float64
 	plotRoiWidthPerMetric float64
 	plotRoiHeightPerRoi   float64
@@ -1000,11 +1039,12 @@ type Model struct {
 	plotComplexityWidthPerMeasure  float64
 	plotComplexityHeightPerSegment float64
 
-	plotConnectivityWidthPerCircle    float64
-	plotConnectivityWidthPerBand      float64
-	plotConnectivityHeightPerMeasure  float64
-	plotConnectivityCircleTopFraction float64
-	plotConnectivityCircleMinLines    int
+	plotConnectivityWidthPerCircle     float64
+	plotConnectivityWidthPerBand       float64
+	plotConnectivityHeightPerMeasure   float64
+	plotConnectivityCircleTopFraction  float64
+	plotConnectivityCircleMinLines     int
+	plotConnectivityNetworkTopFraction float64
 
 	plotPacPairsSpec           string
 	plotSpectralMetricsSpec    string
@@ -1398,7 +1438,8 @@ type Model struct {
 	runAdjustmentMaxDummies            int
 
 	// Output options
-	alsoSaveCsv bool // Also save output tables as CSV files
+	alsoSaveCsv       bool // Also save output tables as CSV files
+	behaviorOverwrite bool // Overwrite existing output folders (if false, append timestamp)
 
 	// Behavior advanced config section expansion (collapsed by default for compact UI)
 	behaviorGroupGeneralExpanded      bool
@@ -1592,11 +1633,11 @@ type Model struct {
 	expandedColumnSelection string              // Currently expanded column for value selection
 
 	// Condition effects discovery (populated from condition effects files for plotting)
-	conditionEffectsColumns      []string            // Available columns from condition effects files
-	conditionEffectsColumnValues map[string][]string // Values for each condition effects column
-	conditionEffectsWindows      []string            // Available windows from condition effects files
-	conditionEffectsDiscoveryDone bool                // Whether condition effects discovery has been completed
-	conditionEffectsDiscoveryError string             // Error message if condition effects discovery failed
+	conditionEffectsColumns        []string            // Available columns from condition effects files
+	conditionEffectsColumnValues   map[string][]string // Values for each condition effects column
+	conditionEffectsWindows        []string            // Available windows from condition effects files
+	conditionEffectsDiscoveryDone  bool                // Whether condition effects discovery has been completed
+	conditionEffectsDiscoveryError string              // Error message if condition effects discovery failed
 
 	// fMRI column discovery (separate from EEG events - for fMRI contrast builder)
 	fmriDiscoveredColumns      []string            // Available columns from fMRI events files
@@ -2069,6 +2110,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorComputeChangeScores:        true,
 		behaviorComputeBayesFactors:        false,
 		behaviorComputeLosoStability:       true,
+		behaviorOverwrite:                  true, // Default: overwrite existing outputs
 		runAdjustmentEnabled:               false,
 		runAdjustmentColumn:                "run_id",
 		runAdjustmentIncludeInCorrelations: true,
@@ -2209,14 +2251,14 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionPermutationPrimary: false,
 		conditionWindowPrimaryUnit:  0,
 		// Column discovery defaults
-		discoveredColumns:                []string{},
-		conditionEffectsColumns:          []string{},
-		conditionEffectsColumnValues:      make(map[string][]string),
-		conditionEffectsWindows:           []string{},
-		conditionEffectsDiscoveryDone:     false,
-		conditionEffectsDiscoveryError:    "",
-		discoveredColumnValues: make(map[string][]string),
-		selectedValueCursors:   make(map[string]int),
+		discoveredColumns:              []string{},
+		conditionEffectsColumns:        []string{},
+		conditionEffectsColumnValues:   make(map[string][]string),
+		conditionEffectsWindows:        []string{},
+		conditionEffectsDiscoveryDone:  false,
+		conditionEffectsDiscoveryError: "",
+		discoveredColumnValues:         make(map[string][]string),
+		selectedValueCursors:           make(map[string]int),
 		// Machine Learning defaults
 		mlNPerm:               0,
 		innerSplits:           3,
@@ -2401,12 +2443,13 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"pain_residual": true,
 
 			// Core Analyses
-			"correlations":     true,
-			"regression":       false,
-			"condition":        true,
-			"temporal":         false,
-			"pain_sensitivity": true,
-			"cluster":          false,
+			"correlations":            true,
+			"multilevel_correlations": false,
+			"regression":              false,
+			"condition":               true,
+			"temporal":                false,
+			"pain_sensitivity":        true,
+			"cluster":                 false,
 
 			// Advanced/Causal Analyses
 			"mediation":     false,
@@ -3631,40 +3674,11 @@ func (m Model) GetConditionEffectsColumnValues(column string) []string {
 	return m.conditionEffectsColumnValues[column]
 }
 
-// isTfrPlot checks if a plot ID belongs to a TFR plot group
-func (m Model) isTfrPlot(plotID string) bool {
-	for _, plot := range m.plotItems {
-		if plot.ID == plotID {
-			return plot.Group == "tfr"
-		}
-	}
-	return false
-}
-
-// hasSelectedTfrPlots checks if any selected plots are TFR plots
-func (m Model) hasSelectedTfrPlots() bool {
-	for i, plot := range m.plotItems {
-		if i < len(m.plotSelected) && m.plotSelected[i] && plot.Group == "tfr" {
-			return true
-		}
-	}
-	return false
-}
-
-// GetPlottingComparisonColumns returns columns for plotting comparison.
-// For TFR plots: returns columns from events/trial tables (discoveredColumns).
-// For feature plots: returns columns from condition effects files.
+// GetPlottingComparisonColumns returns columns for plotting comparison from trial table (events.tsv).
+// Feature plots (connectivity, power, etc.) use trial-level columns for condition comparisons,
+// not condition effects stats columns.
 func (m Model) GetPlottingComparisonColumns() []string {
-	// Check if we're editing a TFR plot
-	if m.editingPlotID != "" && m.isTfrPlot(m.editingPlotID) {
-		return m.discoveredColumns
-	}
-	// Check if any selected plots are TFR plots (for global comparison column)
-	if m.hasSelectedTfrPlots() {
-		return m.discoveredColumns
-	}
-	// Default: use condition effects columns for feature plots
-	return m.conditionEffectsColumns
+	return m.discoveredColumns
 }
 
 // GetPlottingComparisonWindows returns windows for plotting comparison from computed feature data
@@ -3672,20 +3686,10 @@ func (m Model) GetPlottingComparisonWindows() []string {
 	return m.availableWindows
 }
 
-// GetPlottingComparisonColumnValues returns values for a column in plotting comparison.
-// For TFR plots: returns values from events/trial tables (discoveredColumnValues).
-// For feature plots: returns values from condition effects files.
+// GetPlottingComparisonColumnValues returns values for a column in plotting comparison from trial table.
+// Feature plots use trial-level columns from events.tsv for condition comparisons.
 func (m Model) GetPlottingComparisonColumnValues(column string) []string {
-	// Check if we're editing a TFR plot
-	if m.editingPlotID != "" && m.isTfrPlot(m.editingPlotID) {
-		return m.GetDiscoveredColumnValues(column)
-	}
-	// Check if any selected plots are TFR plots (for global comparison column)
-	if m.hasSelectedTfrPlots() {
-		return m.GetDiscoveredColumnValues(column)
-	}
-	// Default: use condition effects column values for feature plots
-	return m.GetConditionEffectsColumnValues(column)
+	return m.GetDiscoveredColumnValues(column)
 }
 
 // SetFmriDiscoveredColumns sets the columns and values discovered from fMRI events files
@@ -3947,26 +3951,6 @@ func (m Model) isColumnValueSelected(value string) bool {
 		return false
 	}
 	// Check if value is in space or comma-separated list
-	for _, v := range strings.Fields(selectedValues) {
-		if v == value {
-			return true
-		}
-	}
-	for _, v := range strings.Split(selectedValues, ",") {
-		if strings.TrimSpace(v) == value {
-			return true
-		}
-	}
-	return false
-}
-
-// isColumnValue2Selected checks if a value is selected for the secondary column context
-func (m Model) isColumnValue2Selected(value string) bool {
-	var selectedValues string
-	switch m.expandedOption {
-	default:
-		return false
-	}
 	for _, v := range strings.Fields(selectedValues) {
 		if v == value {
 			return true
@@ -4582,10 +4566,34 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.ComparisonROIsSpec
 	case plotItemConfigFieldTopomapWindow:
 		return cfg.TopomapWindowsSpec
+	case plotItemConfigFieldTfrTopomapActiveWindow:
+		return cfg.TfrTopomapActiveWindow
+	case plotItemConfigFieldTfrTopomapWindowSizeMs:
+		return cfg.TfrTopomapWindowSizeMs
+	case plotItemConfigFieldTfrTopomapWindowCount:
+		return cfg.TfrTopomapWindowCount
+	case plotItemConfigFieldTfrTopomapLabelXPosition:
+		return cfg.TfrTopomapLabelXPosition
+	case plotItemConfigFieldTfrTopomapLabelYPositionBottom:
+		return cfg.TfrTopomapLabelYPositionBottom
+	case plotItemConfigFieldTfrTopomapLabelYPosition:
+		return cfg.TfrTopomapLabelYPosition
+	case plotItemConfigFieldTfrTopomapTitleY:
+		return cfg.TfrTopomapTitleY
+	case plotItemConfigFieldTfrTopomapTitlePad:
+		return cfg.TfrTopomapTitlePad
+	case plotItemConfigFieldTfrTopomapSubplotsRight:
+		return cfg.TfrTopomapSubplotsRight
+	case plotItemConfigFieldTfrTopomapTemporalHspace:
+		return cfg.TfrTopomapTemporalHspace
+	case plotItemConfigFieldTfrTopomapTemporalWspace:
+		return cfg.TfrTopomapTemporalWspace
 	case plotItemConfigFieldConnectivityCircleTopFraction:
 		return cfg.ConnectivityCircleTopFraction
 	case plotItemConfigFieldConnectivityCircleMinLines:
 		return cfg.ConnectivityCircleMinLines
+	case plotItemConfigFieldConnectivityNetworkTopFraction:
+		return cfg.ConnectivityNetworkTopFraction
 	default:
 		return ""
 	}
@@ -5129,10 +5137,34 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 				m.ShowToast("Unknown window: "+unknown[0], "warning")
 			}
 		}
+	case plotItemConfigFieldTfrTopomapActiveWindow:
+		cfg.TfrTopomapActiveWindow = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldTfrTopomapWindowSizeMs:
+		cfg.TfrTopomapWindowSizeMs = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapWindowCount:
+		cfg.TfrTopomapWindowCount = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapLabelXPosition:
+		cfg.TfrTopomapLabelXPosition = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapLabelYPositionBottom:
+		cfg.TfrTopomapLabelYPositionBottom = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapLabelYPosition:
+		cfg.TfrTopomapLabelYPosition = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapTitleY:
+		cfg.TfrTopomapTitleY = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapTitlePad:
+		cfg.TfrTopomapTitlePad = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapSubplotsRight:
+		cfg.TfrTopomapSubplotsRight = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapTemporalHspace:
+		cfg.TfrTopomapTemporalHspace = strings.TrimSpace(value)
+	case plotItemConfigFieldTfrTopomapTemporalWspace:
+		cfg.TfrTopomapTemporalWspace = strings.TrimSpace(value)
 	case plotItemConfigFieldConnectivityCircleTopFraction:
 		cfg.ConnectivityCircleTopFraction = strings.TrimSpace(value)
 	case plotItemConfigFieldConnectivityCircleMinLines:
 		cfg.ConnectivityCircleMinLines = strings.TrimSpace(value)
+	case plotItemConfigFieldConnectivityNetworkTopFraction:
+		cfg.ConnectivityNetworkTopFraction = strings.TrimSpace(value)
 	default:
 		return
 	}
@@ -5503,6 +5535,7 @@ const (
 	optCorrelationsTargetPainResidual
 	optCorrelationsPreferPainResidual
 	optCorrelationsUseCrossfitPainResidual
+	optCorrelationsMultilevel
 	optCorrelationsPrimaryUnit
 	optCorrelationsPermutationPrimary
 	optCorrelationsTargetColumn
@@ -5538,6 +5571,7 @@ const (
 	// Behavior options - Output
 	optBehaviorGroupOutput
 	optAlsoSaveCsv
+	optBehaviorOverwrite
 	// Plotting options
 	optPlotPNG
 	optPlotSVG
@@ -5771,6 +5805,16 @@ const (
 	optPlotTopomapSigMaskMarkersize
 	optPlotTFRLogBase
 	optPlotTFRPercentageMultiplier
+	optPlotTFRTopomapWindowSizeMs
+	optPlotTFRTopomapWindowCount
+	optPlotTFRTopomapLabelXPosition
+	optPlotTFRTopomapLabelYPositionBottom
+	optPlotTFRTopomapLabelYPosition
+	optPlotTFRTopomapTitleY
+	optPlotTFRTopomapTitlePad
+	optPlotTFRTopomapSubplotsRight
+	optPlotTFRTopomapTemporalHspace
+	optPlotTFRTopomapTemporalWspace
 	optPlotRoiWidthPerBand
 	optPlotRoiWidthPerMetric
 	optPlotRoiHeightPerRoi
@@ -5801,6 +5845,7 @@ const (
 	optPlotConnectivityHeightPerMeasure
 	optPlotConnectivityCircleTopFraction
 	optPlotConnectivityCircleMinLines
+	optPlotConnectivityNetworkTopFraction
 	optPlotPacPairs
 	optPlotConnectivityMeasures
 	optPlotSpectralMetrics
@@ -6395,6 +6440,7 @@ func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 		// Connectivity - uses aligned_events
 		"connectivity_by_condition",
 		"connectivity_circle_condition",
+		"connectivity_network",
 		// ERDS - uses aligned_events
 		"erds_by_condition",
 		// Complexity - uses aligned_events
@@ -6442,22 +6488,35 @@ func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 
 func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 	fields := make([]plotItemConfigField, 0, 8)
-	if plot.Group == "tfr" || plot.ID == "power_spectral_density" {
-		fields = append(fields, plotItemConfigFieldTfrDefaultBaselineWindow)
-	}
 	if plot.ID == "band_power_topomaps" {
-		fields = append(fields, plotItemConfigFieldTopomapWindow)
+		fields = append(fields,
+			plotItemConfigFieldTopomapWindow,
+			plotItemConfigFieldCompareWindows,
+			plotItemConfigFieldCompareColumns,
+			plotItemConfigFieldComparisonWindows,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
+		)
 	}
 	if plot.ID == "connectivity_circle_condition" {
 		fields = append(fields,
 			plotItemConfigFieldConnectivityCircleTopFraction,
 			plotItemConfigFieldConnectivityCircleMinLines,
+			plotItemConfigFieldComparisonSegment,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
 		)
-	}
-	if plot.ID == "itpc_topomaps" {
-		fields = append(fields, plotItemConfigFieldItpcSharedColorbar)
-	}
-	if m.plotSupportsComparisons(plot) {
+	} else if plot.ID == "connectivity_network" {
+		fields = append(fields,
+			plotItemConfigFieldConnectivityNetworkTopFraction,
+			plotItemConfigFieldComparisonSegment,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
+		)
+	} else if m.plotSupportsComparisons(plot) {
 		// TFR plots only use column comparisons, not window comparisons
 		isTfrPlot := plot.Group == "tfr"
 
@@ -6484,6 +6543,24 @@ func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 		if !isTfrPlot && plot.ID != "tfr_rois" && plot.ID != "tfr_channels_contrast" && plot.ID != "tfr_scalpmean_contrast" {
 			fields = append(fields, plotItemConfigFieldComparisonROIs)
 		}
+	}
+	if plot.ID == "itpc_topomaps" {
+		fields = append(fields, plotItemConfigFieldItpcSharedColorbar)
+	}
+	if plot.ID == "tfr_topomaps" {
+		fields = append(fields,
+			plotItemConfigFieldTfrTopomapActiveWindow,
+			plotItemConfigFieldTfrTopomapWindowSizeMs,
+			plotItemConfigFieldTfrTopomapWindowCount,
+			plotItemConfigFieldTfrTopomapLabelXPosition,
+			plotItemConfigFieldTfrTopomapLabelYPositionBottom,
+			plotItemConfigFieldTfrTopomapLabelYPosition,
+			plotItemConfigFieldTfrTopomapTitleY,
+			plotItemConfigFieldTfrTopomapTitlePad,
+			plotItemConfigFieldTfrTopomapSubplotsRight,
+			plotItemConfigFieldTfrTopomapTemporalHspace,
+			plotItemConfigFieldTfrTopomapTemporalWspace,
+		)
 	}
 	return fields
 }
@@ -6618,370 +6695,41 @@ func (m Model) getGlobalStylingOptions() []optionType {
 		)
 	}
 
-	return options
-}
-
-func (m Model) getPlottingOptions() []optionType {
-	options := []optionType{optUseDefaults}
-
-	// Defaults & Output - always available
-	options = append(options, optPlotGroupDefaults)
-	if m.plotGroupDefaultsExpanded {
-		options = append(options, optPlotBboxInches, optPlotPadInches, optPlotOverwrite)
-	}
-
-	// Fonts - always available
-	options = append(options, optPlotGroupFonts)
-	if m.plotGroupFontsExpanded {
+	// Topomap
+	options = append(options, optPlotGroupTopomap)
+	if m.plotGroupTopomapExpanded {
 		options = append(options,
-			optPlotFontFamily,
-			optPlotFontWeight,
-			optPlotFontSizeSmall,
-			optPlotFontSizeMedium,
-			optPlotFontSizeLarge,
-			optPlotFontSizeTitle,
-			optPlotFontSizeAnnotation,
-			optPlotFontSizeLabel,
-			optPlotFontSizeYLabel,
-			optPlotFontSizeSuptitle,
-			optPlotFontSizeFigureTitle,
+			optPlotTopomapContours,
+			optPlotTopomapColormap,
+			optPlotTopomapColorbarFraction,
+			optPlotTopomapColorbarPad,
+			optPlotTopomapDiffAnnotation,
+			optPlotTopomapAnnotateDescriptive,
+			optPlotTopomapSigMaskMarker,
+			optPlotTopomapSigMaskMarkerFaceColor,
+			optPlotTopomapSigMaskMarkerEdgeColor,
+			optPlotTopomapSigMaskLinewidth,
+			optPlotTopomapSigMaskMarkersize,
 		)
 	}
 
-	// Layout - always available
-	options = append(options, optPlotGroupLayout)
-	if m.plotGroupLayoutExpanded {
+	// TFR
+	options = append(options, optPlotGroupTFR)
+	if m.plotGroupTFRExpanded {
 		options = append(options,
-			optPlotLayoutTightRect,
-			optPlotLayoutTightRectMicrostate,
-			optPlotGridSpecWidthRatios,
-			optPlotGridSpecHeightRatios,
-			optPlotGridSpecHspace,
-			optPlotGridSpecWspace,
-			optPlotGridSpecLeft,
-			optPlotGridSpecRight,
-			optPlotGridSpecTop,
-			optPlotGridSpecBottom,
+			optPlotTFRLogBase,
+			optPlotTFRPercentageMultiplier,
+			optPlotTFRTopomapWindowSizeMs,
+			optPlotTFRTopomapWindowCount,
+			optPlotTFRTopomapLabelXPosition,
+			optPlotTFRTopomapLabelYPositionBottom,
+			optPlotTFRTopomapLabelYPosition,
+			optPlotTFRTopomapTitleY,
+			optPlotTFRTopomapTitlePad,
+			optPlotTFRTopomapSubplotsRight,
+			optPlotTFRTopomapTemporalHspace,
+			optPlotTFRTopomapTemporalWspace,
 		)
-	}
-
-	// Figure Sizes - always available
-	options = append(options, optPlotGroupFigureSizes)
-	if m.plotGroupFigureSizesExpanded {
-		options = append(options,
-			optPlotFigureSizeStandard,
-			optPlotFigureSizeMedium,
-			optPlotFigureSizeSmall,
-			optPlotFigureSizeSquare,
-			optPlotFigureSizeWide,
-			optPlotFigureSizeTFR,
-			optPlotFigureSizeTopomap,
-		)
-	}
-
-	// Colors - always available
-	options = append(options, optPlotGroupColors)
-	if m.plotGroupColorsExpanded {
-		options = append(options,
-			optPlotColorPain,
-			optPlotColorNonpain,
-			optPlotColorSignificant,
-			optPlotColorNonsignificant,
-			optPlotColorGray,
-			optPlotColorLightGray,
-			optPlotColorBlack,
-			optPlotColorBlue,
-			optPlotColorRed,
-			optPlotColorNetworkNode,
-		)
-	}
-
-	// Alpha - always available
-	options = append(options, optPlotGroupAlpha)
-	if m.plotGroupAlphaExpanded {
-		options = append(options,
-			optPlotAlphaGrid,
-			optPlotAlphaFill,
-			optPlotAlphaCI,
-			optPlotAlphaCILine,
-			optPlotAlphaTextBox,
-			optPlotAlphaViolinBody,
-			optPlotAlphaRidgeFill,
-		)
-	}
-
-	// TFR Misc - always available (baseline defaults used by multiple plots)
-	options = append(options, optPlotGroupTFRMisc)
-	if m.plotGroupTFRMiscExpanded {
-		options = append(options, optPlotTfrDefaultBaselineWindow)
-	}
-
-	// Scatter - only for behavior scatter plots
-	if m.isPlotGroupSelected("behavior") {
-		options = append(options, optPlotGroupScatter)
-		if m.plotGroupScatterExpanded {
-			options = append(options,
-				optPlotScatterMarkerSizeSmall,
-				optPlotScatterMarkerSizeLarge,
-				optPlotScatterMarkerSizeDefault,
-				optPlotScatterAlpha,
-				optPlotScatterEdgecolor,
-				optPlotScatterEdgewidth,
-			)
-		}
-	}
-
-	// Bar - for bar/grouped feature comparisons
-	if m.isPlotGroupSelected("power", "connectivity", "aperiodic", "phase", "erds", "complexity", "spectral", "ratios", "asymmetry", "bursts") {
-		options = append(options, optPlotGroupBar)
-		if m.plotGroupBarExpanded {
-			options = append(options, optPlotBarAlpha, optPlotBarWidth, optPlotBarCapsize, optPlotBarCapsizeLarge)
-		}
-	}
-
-	// Line - for ERP, temporal evolution, time series
-	if m.isPlotGroupSelected("erp", "erds", "behavior", "phase") {
-		options = append(options, optPlotGroupLine)
-		if m.plotGroupLineExpanded {
-			options = append(options,
-				optPlotLineWidthThin,
-				optPlotLineWidthStandard,
-				optPlotLineWidthThick,
-				optPlotLineWidthBold,
-				optPlotLineAlphaStandard,
-				optPlotLineAlphaDim,
-				optPlotLineAlphaZeroLine,
-				optPlotLineAlphaFitLine,
-				optPlotLineAlphaDiagonal,
-				optPlotLineAlphaReference,
-				optPlotLineRegressionWidth,
-				optPlotLineResidualWidth,
-				optPlotLineQQWidth,
-			)
-		}
-	}
-
-	// Histogram - for distribution plots (quality, behavior)
-	if m.isPlotGroupSelected("quality", "behavior", "tfr") {
-		options = append(options, optPlotGroupHistogram)
-		if m.plotGroupHistogramExpanded {
-			options = append(options,
-				optPlotHistBins,
-				optPlotHistBinsBehavioral,
-				optPlotHistBinsResidual,
-			)
-			if m.isPlotGroupSelected("tfr") {
-				options = append(options, optPlotHistBinsTFR)
-			}
-			options = append(options,
-				optPlotHistEdgecolor,
-				optPlotHistEdgewidth,
-				optPlotHistAlpha,
-				optPlotHistAlphaResidual,
-			)
-			if m.isPlotGroupSelected("tfr") {
-				options = append(options, optPlotHistAlphaTFR)
-			}
-		}
-	}
-
-	// KDE - for density estimation plots
-	if m.isPlotGroupSelected("quality", "behavior") {
-		options = append(options, optPlotGroupKDE)
-		if m.plotGroupKDEExpanded {
-			options = append(options, optPlotKdePoints, optPlotKdeColor, optPlotKdeLinewidth, optPlotKdeAlpha)
-		}
-	}
-
-	// Errorbar - for plots with error bars
-	if m.isPlotGroupSelected("erp", "behavior", "power", "connectivity", "aperiodic", "phase", "erds", "complexity") {
-		options = append(options, optPlotGroupErrorbar)
-		if m.plotGroupErrorbarExpanded {
-			options = append(options, optPlotErrorbarMarkersize, optPlotErrorbarCapsize, optPlotErrorbarCapsizeLarge)
-		}
-	}
-
-	// Text Positions - for annotated plots (behavior, machine_learning)
-	if m.isPlotGroupSelected("behavior", "machine_learning") {
-		options = append(options, optPlotGroupText)
-		if m.plotGroupTextExpanded {
-			options = append(options,
-				optPlotTextStatsX,
-				optPlotTextStatsY,
-				optPlotTextPvalueX,
-				optPlotTextPvalueY,
-				optPlotTextBootstrapX,
-				optPlotTextBootstrapY,
-				optPlotTextChannelAnnotationX,
-				optPlotTextChannelAnnotationY,
-				optPlotTextTitleY,
-				optPlotTextResidualQcTitleY,
-			)
-		}
-	}
-
-	// Validation - only for behavior/machine_learning plots
-	if m.isPlotGroupSelected("behavior", "machine_learning") {
-		options = append(options, optPlotGroupValidation)
-		if m.plotGroupValidationExpanded {
-			options = append(options,
-				optPlotValidationMinBinsForCalibration,
-				optPlotValidationMaxBinsForCalibration,
-				optPlotValidationSamplesPerBin,
-				optPlotValidationMinRoisForFDR,
-				optPlotValidationMinPvaluesForFDR,
-			)
-		}
-	}
-
-	// Topomap settings - only when plots with topomaps are selected
-	if m.isPlotGroupSelected("power", "connectivity", "aperiodic", "phase", "erp") {
-		options = append(options, optPlotGroupTopomap)
-		if m.plotGroupTopomapExpanded {
-			options = append(options,
-				optPlotTopomapContours,
-				optPlotTopomapColormap,
-				optPlotTopomapColorbarFraction,
-				optPlotTopomapColorbarPad,
-				optPlotTopomapDiffAnnotation,
-				optPlotTopomapAnnotateDescriptive,
-				optPlotTopomapSigMaskMarker,
-				optPlotTopomapSigMaskMarkerFaceColor,
-				optPlotTopomapSigMaskMarkerEdgeColor,
-				optPlotTopomapSigMaskLinewidth,
-				optPlotTopomapSigMaskMarkersize,
-			)
-		}
-	}
-
-	// TFR settings - only when TFR plots are selected
-	if m.isPlotGroupSelected("tfr") {
-		options = append(options, optPlotGroupTFR)
-		if m.plotGroupTFRExpanded {
-			options = append(options, optPlotTFRLogBase, optPlotTFRPercentageMultiplier)
-		}
-	}
-
-	// Sizing options - conditionally show based on selected plot groups
-	hasSizingOptions := m.isPlotGroupSelected("power", "phase", "aperiodic", "quality", "complexity", "connectivity")
-	if hasSizingOptions {
-		options = append(options, optPlotGroupSizing)
-		if m.plotGroupSizingExpanded {
-			// ROI sizing - general for power/features
-			if m.isPlotGroupSelected("power", "aperiodic", "complexity", "spectral", "ratios", "asymmetry", "bursts") {
-				options = append(options,
-					optPlotRoiWidthPerBand,
-					optPlotRoiWidthPerMetric,
-					optPlotRoiHeightPerRoi,
-				)
-			}
-			// Power specific
-			if m.isPlotGroupSelected("power") {
-				options = append(options,
-					optPlotPowerWidthPerBand,
-					optPlotPowerHeightPerSegment,
-				)
-			}
-			// ITPC specific (phase group)
-			if m.isPlotGroupSelected("phase") {
-				options = append(options,
-					optPlotItpcWidthPerBin,
-					optPlotItpcHeightPerBand,
-					optPlotItpcWidthPerBandBox,
-					optPlotItpcHeightBox,
-				)
-			}
-			// PAC specific (phase group)
-			if m.isPlotGroupSelected("phase") {
-				options = append(options,
-					optPlotPacCmap,
-					optPlotPacWidthPerRoi,
-					optPlotPacHeightBox,
-				)
-			}
-			// Aperiodic specific
-			if m.isPlotGroupSelected("aperiodic") {
-				options = append(options,
-					optPlotAperiodicWidthPerColumn,
-					optPlotAperiodicHeightPerRow,
-					optPlotAperiodicNPerm,
-				)
-			}
-			// Quality specific
-			if m.isPlotGroupSelected("quality") {
-				options = append(options,
-					optPlotQualityWidthPerPlot,
-					optPlotQualityHeightPerPlot,
-					optPlotQualityDistributionNCols,
-					optPlotQualityDistributionMaxFeatures,
-					optPlotQualityOutlierZThreshold,
-					optPlotQualityOutlierMaxFeatures,
-					optPlotQualityOutlierMaxTrials,
-					optPlotQualitySnrThresholdDb,
-				)
-			}
-			// Complexity specific
-			if m.isPlotGroupSelected("complexity") {
-				options = append(options,
-					optPlotComplexityWidthPerMeasure,
-					optPlotComplexityHeightPerSegment,
-				)
-			}
-			// Connectivity specific
-			if m.isPlotGroupSelected("connectivity") {
-				options = append(options,
-					optPlotConnectivityWidthPerCircle,
-					optPlotConnectivityWidthPerBand,
-					optPlotConnectivityHeightPerMeasure,
-					optPlotConnectivityCircleTopFraction,
-					optPlotConnectivityCircleMinLines,
-				)
-			}
-		}
-	}
-
-	// Selection options - conditionally show based on selected plot groups
-	hasSelectionOptions := m.isPlotGroupSelected("phase", "connectivity", "spectral", "bursts", "asymmetry", "behavior")
-	if hasSelectionOptions {
-		options = append(options, optPlotGroupSelection)
-		if m.plotGroupSelectionExpanded {
-			if m.isPlotGroupSelected("phase") {
-				options = append(options, optPlotPacPairs)
-			}
-			if m.isPlotGroupSelected("connectivity") {
-				options = append(options, optPlotConnectivityMeasures)
-			}
-			if m.isPlotGroupSelected("spectral") {
-				options = append(options, optPlotSpectralMetrics)
-			}
-			if m.isPlotGroupSelected("bursts") {
-				options = append(options, optPlotBurstsMetrics)
-			}
-			if m.isPlotGroupSelected("asymmetry") {
-				options = append(options, optPlotAsymmetryStat)
-			}
-			if m.isPlotGroupSelected("behavior") {
-				options = append(options, optPlotTemporalTimeBins, optPlotTemporalTimeLabels)
-			}
-		}
-	}
-
-	// Comparison options - for all feature/condition plots (except machine_learning)
-	hasComparisonPlots := m.isPlotGroupSelected("power", "connectivity", "aperiodic", "phase", "erds", "complexity", "spectral", "ratios", "asymmetry", "bursts", "erp", "tfr", "behavior")
-	if hasComparisonPlots {
-		options = append(options, optPlotGroupComparisons)
-		if m.plotGroupComparisonsExpanded {
-			options = append(options,
-				optPlotCompareWindows,
-				optPlotComparisonWindows,
-				optPlotCompareColumns,
-				optPlotComparisonSegment,
-				optPlotComparisonColumn,
-				optPlotComparisonValues,
-				optPlotComparisonLabels,
-				optPlotComparisonROIs,
-			)
-		}
 	}
 
 	return options
@@ -7125,6 +6873,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optCorrelationsPrimaryUnit,
 				optCorrelationsPermutationPrimary,
 				optCorrelationsUseCrossfitPainResidual,
+				optCorrelationsMultilevel,
 			)
 		}
 	}
@@ -7329,7 +7078,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if hasAnyComputation {
 		options = append(options, optBehaviorGroupOutput)
 		if m.behaviorGroupOutputExpanded {
-			options = append(options, optAlsoSaveCsv)
+			options = append(options, optAlsoSaveCsv, optBehaviorOverwrite)
 		}
 	}
 

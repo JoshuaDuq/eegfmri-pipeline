@@ -3,7 +3,7 @@ TFR Band Power Evolution Plots
 ==============================
 
 Visualizations showing how power in each frequency band evolves across time,
-for different conditions (all trials, condition_1/condition_2, high/low temperature).
+for user-specified conditions (all trials, condition_1/condition_2).
 
 Each plot answers a specific scientific question about temporal dynamics.
 """
@@ -23,7 +23,6 @@ from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
 
 from ...utils.analysis.tfr import get_bands_for_tfr
 from ..config import get_plot_config
@@ -33,9 +32,8 @@ from ..config import get_plot_config
 # Constants
 # =============================================================================
 
-BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
-
-BAND_COLORS = {
+# Default band colors (fallback for user-defined bands)
+_DEFAULT_BAND_COLORS = {
     "delta": "#1f77b4",
     "theta": "#2ca02c",
     "alpha": "#ff7f0e",
@@ -43,20 +41,70 @@ BAND_COLORS = {
     "gamma": "#9467bd",
 }
 
-BAND_RANGES = {
-    "delta": "1-4 Hz",
-    "theta": "4-8 Hz",
-    "alpha": "8-13 Hz",
-    "beta": "13-30 Hz",
-    "gamma": "30-100 Hz",
-}
+def _get_bands_from_config(tfr: mne.time_frequency.EpochsTFR, config: Any) -> List[str]:
+    """Get frequency band names from config, respecting user selection.
+    
+    If selected_bands is specified, returns only those bands in that order.
+    Otherwise, returns all bands from config in sorted order.
+    
+    Args:
+        tfr: EpochsTFR object
+        config: Configuration object
+        
+    Returns:
+        List of band names
+    """
+    from eeg_pipeline.utils.config.loader import get_frequency_bands, get_config_value
+    
+    selected_bands = get_config_value(config, "time_frequency_analysis.selected_bands", None)
+    if selected_bands and isinstance(selected_bands, (list, tuple)) and len(selected_bands) > 0:
+        return [b for b in selected_bands if b]
+    
+    config_bands = get_frequency_bands(config)
+    if config_bands:
+        return sorted(config_bands.keys())
+    
+    bands_dict = get_bands_for_tfr(tfr=tfr, config=config)
+    return sorted(bands_dict.keys())
+
+
+def _get_band_color(band: str) -> str:
+    """Get color for a frequency band, with fallback for user-defined bands.
+    
+    Args:
+        band: Band name
+        
+    Returns:
+        Hex color code
+    """
+    return _DEFAULT_BAND_COLORS.get(band, "#666666")
+
+
+def _get_band_range_label(band: str, bands_dict: Dict[str, Tuple[float, float]]) -> str:
+    """Get frequency range label for a band.
+    
+    Args:
+        band: Band name
+        bands_dict: Dictionary mapping band names to (fmin, fmax) tuples or [fmin, fmax] lists
+        
+    Returns:
+        Formatted range string (e.g., "8.0-12.9 Hz")
+    """
+    if band in bands_dict:
+        band_range = bands_dict[band]
+        if isinstance(band_range, (list, tuple)) and len(band_range) >= 2:
+            fmin = float(band_range[0])
+            fmax = float(band_range[1])
+            return f"{fmin:.1f}-{fmax:.1f} Hz"
+        elif isinstance(band_range, tuple) and len(band_range) == 2:
+            fmin, fmax = band_range
+            return f"{fmin:.1f}-{fmax:.1f} Hz"
+    return f"{band} Hz"
 
 CONDITION_COLORS = {
     "all": "#333333",
     "condition_1": "#4C72B0",
     "condition_2": "#C42847",
-    "high_temp": "#D62728",
-    "low_temp": "#1F77B4",
 }
 
 # Plotting style constants
@@ -138,8 +186,6 @@ def _get_condition_title_labels(label1: str, label2: str) -> Dict[str, str]:
         "all": "All Trials",
         "condition_2": f"{label2} Trials",
         "condition_1": f"{label1} Trials",
-        "high_temp": "High Temperature",
-        "low_temp": "Low Temperature",
     }
 
 
@@ -158,8 +204,6 @@ def _get_condition_header_labels(label1: str, label2: str, n_trials: int) -> Dic
         "all": f"All Trials\n(n={n_trials})",
         "condition_2": f"{label2}\n(n={n_trials})",
         "condition_1": f"{label1}\n(n={n_trials})",
-        "high_temp": f"High Temp\n(n={n_trials})",
-        "low_temp": f"Low Temp\n(n={n_trials})",
     }
 
 
@@ -200,13 +244,22 @@ def _get_band_power_timecourse(
         times: Time array
         power: Power array (n_trials, n_times)
     """
-    bands = get_bands_for_tfr(tfr=tfr, config=config)
-    if band not in bands:
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+    
+    config_bands = get_frequency_bands(config)
+    if band not in config_bands:
         return np.array([]), np.array([])
     
-    fmin, fmax = bands[band]
+    band_range = config_bands[band]
+    if isinstance(band_range, (list, tuple)) and len(band_range) >= 2:
+        fmin = float(band_range[0])
+        fmax = float(band_range[1]) if band_range[1] is not None else float(np.max(tfr.freqs))
+    else:
+        return np.array([]), np.array([])
+    
+    fmax_effective = min(fmax, float(np.max(tfr.freqs)))
     freqs = tfr.freqs
-    freq_mask = (freqs >= fmin) & (freqs <= fmax)
+    freq_mask = (freqs >= fmin) & (freqs <= fmax_effective)
     
     if not np.any(freq_mask):
         return np.array([]), np.array([])
@@ -257,7 +310,11 @@ def _create_condition_masks(
     events_df: pd.DataFrame,
     config: Any,
 ) -> Tuple[Dict[str, np.ndarray], str, str]:
-    """Create masks for different conditions.
+    """Create masks for different conditions based on user-specified comparison.
+    
+    Only creates masks for what the user explicitly specifies in the comparison configuration.
+    No automatic temperature detection - only uses the comparison_column, comparison_values, 
+    and comparison_labels from the config.
     
     Args:
         events_df: Events DataFrame
@@ -265,7 +322,7 @@ def _create_condition_masks(
         
     Returns:
         Tuple of (masks dict, label1, label2)
-        Masks dict has keys: 'all', 'condition_1', 'condition_2', 'high_temp', 'low_temp'
+        Masks dict has keys: 'all', 'condition_1', 'condition_2'
     """
     n_trials = len(events_df)
     masks = {"all": np.ones(n_trials, dtype=bool)}
@@ -278,15 +335,6 @@ def _create_condition_masks(
         mask1, mask2, label1, label2 = comp
         masks["condition_1"] = np.asarray(mask1, dtype=bool)
         masks["condition_2"] = np.asarray(mask2, dtype=bool)
-
-    temp_col = get_temperature_column_from_config(config, events_df)
-    if temp_col:
-        temps = pd.to_numeric(events_df[temp_col], errors="coerce")
-        valid_temps = temps.dropna()
-        if len(valid_temps) > 0:
-            median_temp = valid_temps.median()
-            masks["high_temp"] = (temps >= median_temp).fillna(False).values
-            masks["low_temp"] = (temps < median_temp).fillna(False).values
 
     return masks, label1, label2
 
@@ -341,7 +389,7 @@ def plot_band_power_evolution_all_conditions(
     saved = {}
 
     masks, label1, label2 = _create_condition_masks(events_df, config)
-    condition_order = ["all", "condition_2", "condition_1", "high_temp", "low_temp"]
+    condition_order = ["all", "condition_2", "condition_1"]
     conditions = [c for c in condition_order if c in masks and masks[c].sum() > 0]
 
     if len(conditions) == 0:
@@ -351,11 +399,14 @@ def plot_band_power_evolution_all_conditions(
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
 
-    n_bands = len(BANDS)
+    bands = _get_bands_from_config(tfr, config)
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+    bands_dict = get_frequency_bands(config)
+    n_bands = len(bands)
     n_conds = len(conditions)
     fig, axes = plt.subplots(n_bands, n_conds, figsize=(4 * n_conds, 3 * n_bands), squeeze=False)
 
-    for i, band in enumerate(BANDS):
+    for i, band in enumerate(bands):
         times, power = _get_band_power_timecourse(tfr, band, config)
         if len(times) == 0:
             continue
@@ -372,7 +423,7 @@ def plot_band_power_evolution_all_conditions(
 
             cond_power = power_bl[mask]
             mean_power, sem_power = _compute_mean_sem(cond_power, mask.sum())
-            _plot_mean_sem_with_reference_lines(ax, times, mean_power, sem_power, BAND_COLORS[band])
+            _plot_mean_sem_with_reference_lines(ax, times, mean_power, sem_power, _get_band_color(band))
 
             if i == 0:
                 header_labels = _get_condition_header_labels(label1, label2, mask.sum())
@@ -384,10 +435,11 @@ def plot_band_power_evolution_all_conditions(
                 )
 
             if j == 0:
+                band_range = _get_band_range_label(band, bands_dict)
                 ax.set_ylabel(
-                    f"{band.upper()}\n({BAND_RANGES[band]})\n% change",
+                    f"{band.upper()}\n({band_range})\n% change",
                     fontsize=10,
-                    color=BAND_COLORS[band],
+                    color=_get_band_color(band),
                 )
 
             if i == n_bands - 1:
@@ -431,7 +483,8 @@ def plot_band_power_by_roi(
 ) -> Dict[str, Path]:
     """Plot power evolution for each band in each ROI.
     
-    Creates one figure per condition showing all bands × ROIs.
+    Creates one figure per ROI showing all bands × conditions.
+    Each ROI gets its own subfolder.
     Question: "How does power evolve in different brain regions?"
     
     Args:
@@ -460,55 +513,79 @@ def plot_band_power_by_roi(
         logger.warning("No ROIs found in TFR channels")
         return saved
 
-    for cond, mask in masks.items():
-        if mask.sum() < MIN_TRIALS_FOR_PLOT:
+    bands = _get_bands_from_config(tfr, config)
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+    bands_dict = get_frequency_bands(config)
+    cond_titles = _get_condition_title_labels(label1, label2)
+    condition_order = ["all", "condition_2", "condition_1"]
+    conditions = [c for c in condition_order if c in masks and masks[c].sum() > 0]
+
+    for roi_name in available_rois:
+        roi_indices = _get_roi_channel_indices(tfr, roi_name, config)
+        if len(roi_indices) == 0:
             continue
 
-        n_rois = len(available_rois)
-        n_bands = len(BANDS)
-        fig, axes = plt.subplots(n_rois, n_bands, figsize=(3 * n_bands, 2.5 * n_rois), squeeze=False)
+        roi_dir = save_dir / "evolution" / "rois" / roi_name
+        ensure_dir(roi_dir)
 
-        for i, roi_name in enumerate(available_rois):
-            roi_indices = _get_roi_channel_indices(tfr, roi_name, config)
+        n_bands = len(bands)
+        n_conds = len(conditions)
+        fig, axes = plt.subplots(n_bands, n_conds, figsize=(4 * n_conds, 3 * n_bands), squeeze=False)
 
-            for j, band in enumerate(BANDS):
+        for i, band in enumerate(bands):
+            times, power = _get_band_power_timecourse(tfr, band, config, roi_indices)
+            if len(times) == 0:
+                continue
+
+            power_bl = _apply_baseline(power, times, baseline)
+
+            for j, cond in enumerate(conditions):
                 ax = axes[i, j]
+                mask = masks[cond]
 
-                times, power = _get_band_power_timecourse(tfr, band, config, roi_indices)
-                if len(times) == 0:
+                if mask.sum() < MIN_TRIALS_FOR_PLOT:
                     ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
                     continue
 
-                power_bl = _apply_baseline(power, times, baseline)
                 cond_power = power_bl[mask]
                 mean_power, sem_power = _compute_mean_sem(cond_power, mask.sum())
                 _plot_mean_sem_with_reference_lines(
-                    ax, times, mean_power, sem_power, BAND_COLORS[band], SUBPLOT_LINE_WIDTH
+                    ax, times, mean_power, sem_power, _get_band_color(band), SUBPLOT_LINE_WIDTH
                 )
 
                 if i == 0:
-                    ax.set_title(f"{band.upper()}", fontsize=10, fontweight="bold", color=BAND_COLORS[band])
+                    header_labels = _get_condition_header_labels(label1, label2, mask.sum())
+                    ax.set_title(
+                        header_labels.get(cond, cond),
+                        fontsize=11,
+                        fontweight="bold",
+                        color=CONDITION_COLORS.get(cond, "black"),
+                    )
 
                 if j == 0:
-                    ax.set_ylabel(f"{roi_name}\n% change", fontsize=9)
+                    band_range = _get_band_range_label(band, bands_dict)
+                    ax.set_ylabel(
+                        f"{band.upper()}\n({band_range})\n% change",
+                        fontsize=10,
+                        color=_get_band_color(band),
+                    )
 
-                if i == n_rois - 1:
-                    ax.set_xlabel("Time (s)", fontsize=9)
+                if i == n_bands - 1:
+                    ax.set_xlabel("Time (s)", fontsize=10)
 
                 ax.tick_params(labelsize=8)
                 ax.set_xlim(times[0], times[-1])
 
-        cond_titles = _get_condition_title_labels(label1, label2)
         fig.suptitle(
-            f"How does power evolve in different brain regions?\n{cond_titles.get(cond, cond)} (n={mask.sum()})",
-            fontsize=12,
+            f"{roi_name} — Band Power Evolution Across Conditions",
+            fontsize=14,
             fontweight="bold",
             y=1.02,
         )
 
         plt.tight_layout()
 
-        path = save_dir / "evolution" / f"band_power_by_roi_{cond}.{primary_ext}"
+        path = roi_dir / f"band_power_evolution.{primary_ext}"
         save_fig(
             fig,
             path,
@@ -519,7 +596,7 @@ def plot_band_power_by_roi(
             pad_inches=plot_cfg.pad_inches,
         )
 
-        saved[f"band_power_roi_{cond}"] = path
+        saved[f"band_power_roi_{roi_name}"] = path
 
     return saved
 
@@ -591,9 +668,18 @@ def plot_condition_comparison_per_band(
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
 
-    fig, axes = plt.subplots(2, len(BANDS), figsize=(3 * len(BANDS), 6), squeeze=False)
+    has_conditions = "condition_1" in masks and "condition_2" in masks
+    
+    if not has_conditions:
+        logger.warning("No valid conditions found for comparison plots")
+        return saved
+    
+    bands = _get_bands_from_config(tfr, config)
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+    bands_dict = get_frequency_bands(config)
+    fig, axes = plt.subplots(1, len(bands), figsize=(3 * len(bands), 3), squeeze=False)
 
-    for j, band in enumerate(BANDS):
+    for j, band in enumerate(bands):
         times, power = _get_band_power_timecourse(tfr, band, config)
         if len(times) == 0:
             continue
@@ -606,22 +692,12 @@ def plot_condition_comparison_per_band(
             ("condition_1", CONDITION_COLORS["condition_1"], label1),
         ]
         _plot_condition_overlay(ax, times, power_bl, masks, condition_specs)
-        ax.set_title(f"{band.upper()}\n({BAND_RANGES[band]})", fontsize=10, fontweight="bold", color=BAND_COLORS[band])
+        band_range = _get_band_range_label(band, bands_dict)
+        ax.set_title(f"{band.upper()}\n({band_range})", fontsize=10, fontweight="bold", color=_get_band_color(band))
         if j == 0:
             ax.set_ylabel(f"{label2} vs {label1}\n% change", fontsize=10)
             ax.legend(fontsize=8, loc="upper right")
-        ax.set_xlim(times[0], times[-1])
-
-        ax = axes[1, j]
-        temp_specs = [
-            ("high_temp", CONDITION_COLORS["high_temp"], "High Temp"),
-            ("low_temp", CONDITION_COLORS["low_temp"], "Low Temp"),
-        ]
-        _plot_condition_overlay(ax, times, power_bl, masks, temp_specs)
         ax.set_xlabel("Time (s)", fontsize=10)
-        if j == 0:
-            ax.set_ylabel("High vs Low Temp\n% change", fontsize=10)
-            ax.legend(fontsize=8, loc="upper right")
         ax.set_xlim(times[0], times[-1])
 
     fig.suptitle("Do conditions differ in their power dynamics?", fontsize=12, fontweight="bold", y=1.02)
@@ -653,8 +729,9 @@ def plot_roi_condition_comparison(
     baseline: Tuple[float, float] = (-2.0, 0.0),
     logger: Optional[logging.Logger] = None,
 ) -> Dict[str, Path]:
-    """Plot condition comparisons for each ROI (focusing on alpha/beta).
+    """Plot condition comparisons for each ROI using all configured bands.
     
+    Creates one figure per ROI in its own subfolder.
     Question: "Which brain regions show the largest condition differences?"
     
     Args:
@@ -678,85 +755,86 @@ def plot_roi_condition_comparison(
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
 
-    focus_bands = ["alpha", "beta"]
+    bands = _get_bands_from_config(tfr, config)
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+    bands_dict = get_frequency_bands(config)
+    
     available_rois = _get_available_rois(tfr, config)
     if not available_rois:
         return saved
 
-    n_rois = len(available_rois)
-    n_bands = len(focus_bands)
-    fig, axes = plt.subplots(n_rois, n_bands * 2, figsize=(4 * n_bands * 2, 2.5 * n_rois), squeeze=False)
+    has_conditions = "condition_1" in masks and "condition_2" in masks
+    
+    if not has_conditions:
+        logger.warning("No valid conditions found for ROI comparison plots")
+        return saved
 
-    for i, roi_name in enumerate(available_rois):
+    n_bands = len(bands)
+    
+    for roi_name in available_rois:
         roi_indices = _get_roi_channel_indices(tfr, roi_name, config)
+        if len(roi_indices) == 0:
+            continue
+
+        roi_dir = save_dir / "evolution" / "rois" / roi_name
+        ensure_dir(roi_dir)
+
+        fig, axes = plt.subplots(1, n_bands, figsize=(4 * n_bands, 3), squeeze=False)
 
         col_idx = 0
-        for band in focus_bands:
+        for band in bands:
             times, power = _get_band_power_timecourse(tfr, band, config, roi_indices)
             if len(times) == 0:
-                col_idx += 2
+                col_idx += 1
                 continue
 
             power_bl = _apply_baseline(power, times, baseline)
-
-            ax = axes[i, col_idx]
+            
+            ax = axes[0, col_idx]
             condition_specs = [
                 ("condition_2", CONDITION_COLORS["condition_2"], label2),
                 ("condition_1", CONDITION_COLORS["condition_1"], label1),
             ]
             _plot_condition_overlay(ax, times, power_bl, masks, condition_specs)
 
-            if i == 0:
-                ax.set_title(
-                    f"{band.upper()} - {label2} vs {label1}",
-                    fontsize=10,
-                    fontweight="bold",
-                    color=BAND_COLORS[band],
-                )
+            band_range = _get_band_range_label(band, bands_dict)
+            ax.set_title(
+                f"{band.upper()} ({band_range}) - {label2} vs {label1}",
+                fontsize=10,
+                fontweight="bold",
+                color=_get_band_color(band),
+            )
             if col_idx == 0:
                 ax.set_ylabel(f"{roi_name}\n% change", fontsize=9)
-            if i == 0 and col_idx == 0:
                 ax.legend(fontsize=7, loc="upper right")
-            if i == n_rois - 1:
-                ax.set_xlabel("Time (s)", fontsize=9)
+            ax.set_xlabel("Time (s)", fontsize=9)
             ax.set_xlim(times[0], times[-1])
             ax.tick_params(labelsize=8)
+            col_idx += 1
 
-            ax = axes[i, col_idx + 1]
-            temp_specs = [
-                ("high_temp", CONDITION_COLORS["high_temp"], "High"),
-                ("low_temp", CONDITION_COLORS["low_temp"], "Low"),
-            ]
-            _plot_condition_overlay(ax, times, power_bl, masks, temp_specs)
+        band_names_str = "/".join([b.upper() for b in bands])
+        fig.suptitle(
+            f"{roi_name} — Condition Comparison ({band_names_str})",
+            fontsize=12,
+            fontweight="bold",
+            y=1.02,
+        )
 
-            if i == 0:
-                ax.set_title(f"{band.upper()} - Temp", fontsize=10, fontweight="bold", color=BAND_COLORS[band])
-            if i == 0 and col_idx == 0:
-                ax.legend(fontsize=7, loc="upper right")
-            if i == n_rois - 1:
-                ax.set_xlabel("Time (s)", fontsize=9)
-            ax.set_xlim(times[0], times[-1])
-            ax.tick_params(labelsize=8)
+        plt.tight_layout()
 
-            col_idx += 2
+        path = roi_dir / f"condition_comparison.{primary_ext}"
+        save_fig(
+            fig,
+            path,
+            logger=logger,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.savefig_dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+            config=config,
+        )
 
-    fig.suptitle("Which brain regions show the largest condition differences?", fontsize=12, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
-
-    path = save_dir / "evolution" / f"roi_condition_comparison.{primary_ext}"
-    save_fig(
-        fig,
-        path,
-        logger=logger,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.savefig_dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-        config=config,
-    )
-
-    saved["roi_condition_comparison"] = path
+        saved[f"roi_condition_comparison_{roi_name}"] = path
 
     return saved
 
@@ -798,7 +876,9 @@ def _plot_summary_bars(
     if len(filtered_df) == 0:
         return
 
-    x_positions = np.arange(len(BANDS))
+    bands = list(set(filtered_df["band"].unique()))
+    bands = sorted(bands)
+    x_positions = np.arange(len(bands))
     n_conditions = len(condition_keys)
 
     for i, cond in enumerate(condition_keys):
@@ -806,8 +886,8 @@ def _plot_summary_bars(
         if len(cond_data) == 0:
             continue
 
-        means = [_extract_band_values_from_dataframe(cond_data, band, "mean") for band in BANDS]
-        sems = [_extract_band_values_from_dataframe(cond_data, band, "sem") for band in BANDS]
+        means = [_extract_band_values_from_dataframe(cond_data, band, "mean") for band in bands]
+        sems = [_extract_band_values_from_dataframe(cond_data, band, "sem") for band in bands]
 
         offset = (i - 0.5 * (n_conditions - 1)) * BAR_WIDTH
         label = condition_labels.get(cond, cond.replace("_", " ").title())
@@ -823,7 +903,7 @@ def _plot_summary_bars(
         )
 
     ax.set_xticks(x_positions)
-    ax.set_xticklabels([b.upper() for b in BANDS], fontsize=10)
+    ax.set_xticklabels([b.upper() for b in bands], fontsize=10)
     ax.axhline(0, color="gray", linestyle="--", linewidth=REFERENCE_LINE_WIDTH)
     ax.set_ylabel("Mean Active Power (% change)", fontsize=10)
     ax.set_title(title, fontweight="bold", loc="left", fontsize=11)
@@ -865,9 +945,12 @@ def plot_band_power_summary(
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
 
+    bands = _get_bands_from_config(tfr, config)
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+    bands_dict = get_frequency_bands(config)
     summary_data = []
 
-    for band in BANDS:
+    for band in bands:
         times, power = _get_band_power_timecourse(tfr, band, config)
         if len(times) == 0:
             continue
@@ -901,15 +984,18 @@ def plot_band_power_summary(
 
     df = pd.DataFrame(summary_data)
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    has_conditions = "condition_1" in masks and "condition_2" in masks
+    
+    if not has_conditions:
+        logger.warning("No valid conditions found for summary plot")
+        return saved
+
+    fig, axes = plt.subplots(1, 1, figsize=(7, 5), squeeze=False)
+    ax = axes[0, 0]
 
     cond_keys = ["condition_2", "condition_1"]
     cond_labels = {"condition_2": label2, "condition_1": label1}
-    _plot_summary_bars(axes[0], df, cond_keys, cond_labels, f"A. {label2} vs {label1}")
-
-    temp_keys = ["high_temp", "low_temp"]
-    temp_labels = {key: key.replace("_", " ").title() for key in temp_keys}
-    _plot_summary_bars(axes[1], df, temp_keys, temp_labels, "B. High vs Low Temperature")
+    _plot_summary_bars(ax, df, cond_keys, cond_labels, f"{label2} vs {label1}")
 
     fig.suptitle(
         "What is the overall pattern of power changes across bands and conditions?",
@@ -989,7 +1075,7 @@ def visualize_band_evolution(
     )
     all_saved.update(saved)
     
-    # 4. ROI condition comparison (alpha/beta focus)
+    # 4. ROI condition comparison (all bands)
     saved = plot_roi_condition_comparison(
         tfr, events_df, save_dir, config, baseline, logger
     )

@@ -1636,7 +1636,14 @@ func (m *Model) togglePlottingAdvancedOption() {
 				m.startPlotTextEdit(row.plotID, row.plotField)
 			}
 			m.useDefaultAdvanced = false
-		case plotItemConfigFieldConnectivityCircleTopFraction, plotItemConfigFieldConnectivityCircleMinLines:
+		case plotItemConfigFieldConnectivityCircleTopFraction, plotItemConfigFieldConnectivityCircleMinLines, plotItemConfigFieldConnectivityNetworkTopFraction:
+			m.startPlotTextEdit(row.plotID, row.plotField)
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldTfrTopomapActiveWindow, plotItemConfigFieldTfrTopomapWindowSizeMs, plotItemConfigFieldTfrTopomapWindowCount,
+			plotItemConfigFieldTfrTopomapLabelXPosition, plotItemConfigFieldTfrTopomapLabelYPositionBottom,
+			plotItemConfigFieldTfrTopomapLabelYPosition, plotItemConfigFieldTfrTopomapTitleY,
+			plotItemConfigFieldTfrTopomapTitlePad, plotItemConfigFieldTfrTopomapSubplotsRight,
+			plotItemConfigFieldTfrTopomapTemporalHspace, plotItemConfigFieldTfrTopomapTemporalWspace:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonValues:
@@ -1666,8 +1673,7 @@ func (m *Model) togglePlottingAdvancedOption() {
 				m.startPlotTextEdit(row.plotID, row.plotField)
 			}
 			m.useDefaultAdvanced = false
-		case plotItemConfigFieldTfrDefaultBaselineWindow,
-			plotItemConfigFieldComparisonLabels:
+		case plotItemConfigFieldComparisonLabels:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
 		}
@@ -1861,6 +1867,16 @@ func (m *Model) togglePlottingAdvancedOption() {
 		optPlotTopomapSigMaskMarkersize,
 		optPlotTFRLogBase,
 		optPlotTFRPercentageMultiplier,
+		optPlotTFRTopomapWindowSizeMs,
+		optPlotTFRTopomapWindowCount,
+		optPlotTFRTopomapLabelXPosition,
+		optPlotTFRTopomapLabelYPositionBottom,
+		optPlotTFRTopomapLabelYPosition,
+		optPlotTFRTopomapTitleY,
+		optPlotTFRTopomapTitlePad,
+		optPlotTFRTopomapSubplotsRight,
+		optPlotTFRTopomapTemporalHspace,
+		optPlotTFRTopomapTemporalWspace,
 		optPlotRoiWidthPerBand,
 		optPlotRoiWidthPerMetric,
 		optPlotRoiHeightPerRoi,
@@ -1889,7 +1905,8 @@ func (m *Model) togglePlottingAdvancedOption() {
 		optPlotConnectivityWidthPerBand,
 		optPlotConnectivityHeightPerMeasure,
 		optPlotConnectivityCircleTopFraction,
-		optPlotConnectivityCircleMinLines:
+		optPlotConnectivityCircleMinLines,
+		optPlotConnectivityNetworkTopFraction:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -2435,6 +2452,15 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startTextEdit(textFieldCorrelationsTargetColumn)
 		}
 		m.useDefaultAdvanced = false
+	case optCorrelationsMultilevel:
+		// Toggle multilevel_correlations computation
+		for i, comp := range m.computations {
+			if comp.Key == "multilevel_correlations" {
+				m.computationSelected[i] = !m.computationSelected[i]
+				break
+			}
+		}
+		m.useDefaultAdvanced = false
 
 	// Temporal
 	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs:
@@ -2633,6 +2659,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optAlsoSaveCsv:
 		m.alsoSaveCsv = !m.alsoSaveCsv
+		m.useDefaultAdvanced = false
+	case optBehaviorOverwrite:
+		m.behaviorOverwrite = !m.behaviorOverwrite
 		m.useDefaultAdvanced = false
 	}
 
@@ -3444,6 +3473,50 @@ func (m *Model) commitPlottingNumber(val float64) {
 		} else {
 			m.plotTFRPercentageMultiplier = val
 		}
+	case optPlotTFRTopomapWindowSizeMs:
+		if val <= 0 {
+			m.plotTFRTopomapWindowSizeMs = 0
+		} else {
+			m.plotTFRTopomapWindowSizeMs = val
+		}
+	case optPlotTFRTopomapWindowCount:
+		if val <= 0 {
+			m.plotTFRTopomapWindowCount = 0
+		} else {
+			m.plotTFRTopomapWindowCount = int(val)
+		}
+	case optPlotTFRTopomapLabelXPosition:
+		m.plotTFRTopomapLabelXPosition = val
+	case optPlotTFRTopomapLabelYPositionBottom:
+		m.plotTFRTopomapLabelYPositionBottom = val
+	case optPlotTFRTopomapLabelYPosition:
+		m.plotTFRTopomapLabelYPosition = val
+	case optPlotTFRTopomapTitleY:
+		m.plotTFRTopomapTitleY = val
+	case optPlotTFRTopomapTitlePad:
+		if val <= 0 {
+			m.plotTFRTopomapTitlePad = 0
+		} else {
+			m.plotTFRTopomapTitlePad = int(val)
+		}
+	case optPlotTFRTopomapSubplotsRight:
+		if val <= 0 || val > 1 {
+			m.plotTFRTopomapSubplotsRight = 0.75
+		} else {
+			m.plotTFRTopomapSubplotsRight = val
+		}
+	case optPlotTFRTopomapTemporalHspace:
+		if val < 0 {
+			m.plotTFRTopomapTemporalHspace = 0
+		} else {
+			m.plotTFRTopomapTemporalHspace = val
+		}
+	case optPlotTFRTopomapTemporalWspace:
+		if val < 0 {
+			m.plotTFRTopomapTemporalWspace = 0
+		} else {
+			m.plotTFRTopomapTemporalWspace = val
+		}
 
 	case optPlotRoiWidthPerBand:
 		if val >= 0 {
@@ -3565,6 +3638,10 @@ func (m *Model) commitPlottingNumber(val float64) {
 	case optPlotConnectivityCircleMinLines:
 		if val >= 0 {
 			m.plotConnectivityCircleMinLines = int(val)
+		}
+	case optPlotConnectivityNetworkTopFraction:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotConnectivityNetworkTopFraction = val
 		}
 	}
 }
