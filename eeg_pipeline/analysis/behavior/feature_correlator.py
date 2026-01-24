@@ -462,21 +462,19 @@ def _save_screening_records(
     feature_type: str,
     target_name: str,
     stats_dir: Optional[Path],
-    logger: logging.Logger,
+    _logger: logging.Logger,
 ) -> None:
     """Save feature screening records to disk."""
     if not screening_records or stats_dir is None:
         return
-    
-    try:
-        from eeg_pipeline.infra.paths import ensure_dir
-        screen_dir = stats_dir / "feature_screening"
-        ensure_dir(screen_dir)
-        screen_df = pd.DataFrame(screening_records)
-        screen_path = screen_dir / f"feature_screening_{feature_type}_vs_{target_name}.tsv"
-        write_tsv(screen_df, screen_path)
-    except (OSError, ValueError) as exc:
-        logger.debug(f"Failed to write screening report: {exc}")
+
+    from eeg_pipeline.infra.paths import ensure_dir
+
+    screen_dir = stats_dir / "feature_screening"
+    ensure_dir(screen_dir)
+    screen_df = pd.DataFrame(screening_records)
+    screen_path = screen_dir / f"feature_screening_{feature_type}_vs_{target_name}.tsv"
+    write_tsv(screen_df, screen_path)
 
 
 def _apply_fdr_to_dataframe(
@@ -577,7 +575,10 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 random_generator,
             )
         except (ValueError, RuntimeError) as exc:
-            record["bootstrap_error"] = str(exc)
+            raise RuntimeError(
+                f"Bootstrap CI failed for feature '{params.column_name}' "
+                f"(type={params.feature_type}, target={params.target_name})"
+            ) from exc
 
     if params.compute_bayes_factor:
         try:
@@ -588,7 +589,10 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 params.correlation_method,
             )
         except (ValueError, RuntimeError) as exc:
-            record["bayes_factor_error"] = str(exc)
+            raise RuntimeError(
+                f"Bayes factor failed for feature '{params.column_name}' "
+                f"(type={params.feature_type}, target={params.target_name})"
+            ) from exc
 
     has_covariates = params.covariates_aligned is not None
     has_temperature = params.temperature_aligned is not None
@@ -605,7 +609,10 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 params.column_min_samples,
             )
         except (ValueError, RuntimeError) as exc:
-            record["partial_corr_error"] = str(exc)
+            raise RuntimeError(
+                f"Partial correlations failed for feature '{params.column_name}' "
+                f"(type={params.feature_type}, target={params.target_name})"
+            ) from exc
 
     if params.n_permutations > 0:
         try:
@@ -621,7 +628,10 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 params.permutation_groups,
             )
         except (ValueError, RuntimeError) as exc:
-            record["permutation_error"] = str(exc)
+            raise RuntimeError(
+                f"Permutation p-values failed for feature '{params.column_name}' "
+                f"(type={params.feature_type}, target={params.target_name})"
+            ) from exc
 
     _select_primary_correlation(record, params.control_temperature, params.control_trial_order)
 
@@ -639,7 +649,10 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 params.correlation_method,
             )
         except (ValueError, RuntimeError) as exc:
-            record["loso_error"] = str(exc)
+            raise RuntimeError(
+                f"LOSO stability failed for feature '{params.column_name}' "
+                f"(type={params.feature_type}, target={params.target_name})"
+            ) from exc
 
     if params.compute_reliability:
         try:
@@ -650,7 +663,10 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 params.correlation_method,
             )
         except (ValueError, RuntimeError) as exc:
-            record["reliability_error"] = str(exc)
+            raise RuntimeError(
+                f"Split-half reliability failed for feature '{params.column_name}' "
+                f"(type={params.feature_type}, target={params.target_name})"
+            ) from exc
 
     return record
 
@@ -785,19 +801,13 @@ class FeatureBehaviorCorrelator:
         loso_groups = None
         permutation_groups = None
         if subject_ids is not None:
-            try:
-                loso_groups = _align_groups_to_series(targets_aligned, subject_ids)
-                permutation_groups = loso_groups
-            except ValueError as exc:
-                self.logger.debug(f"Group alignment failed: {exc}")
+            loso_groups = _align_groups_to_series(targets_aligned, subject_ids)
+            permutation_groups = loso_groups
         
         if permutation_groups is None and config.groups is not None:
-            try:
-                permutation_groups = _align_groups_to_series(targets_aligned, config.groups)
-                if loso_groups is None:
-                    loso_groups = permutation_groups
-            except ValueError as exc:
-                self.logger.debug(f"Permutation group alignment failed: {exc}")
+            permutation_groups = _align_groups_to_series(targets_aligned, config.groups)
+            if loso_groups is None:
+                loso_groups = permutation_groups
         
         return covariates_aligned, temperature_aligned, loso_groups, permutation_groups
 

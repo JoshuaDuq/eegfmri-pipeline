@@ -385,7 +385,9 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "tfr_topomap_label_y_position, tfr_topomap_title_y, tfr_topomap_title_pad, "
             "tfr_topomap_subplots_right, tfr_topomap_temporal_hspace, tfr_topomap_temporal_wspace, "
             "connectivity_circle_top_fraction, connectivity_circle_min_lines, "
-            "connectivity_network_top_fraction, itpc_shared_colorbar."
+            "connectivity_network_top_fraction, itpc_shared_colorbar, "
+            "scatter_features, scatter_columns, scatter_aggregation_modes, scatter_segment, "
+            "temporal_stats_feature_folder."
         ),
     )
 
@@ -531,6 +533,12 @@ def _apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> 
             _apply_config_override(config, "plotting.comparisons.comparison_labels", [values[0], values[1]])
         elif key == "comparison_rois" and values:
             _apply_config_override(config, "plotting.comparisons.comparison_rois", list(values))
+        elif key == "temporal_stats_feature_folder" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.temporal_topomaps.stats_feature_folder",
+                values[0],
+            )
         elif key == "topomap_windows" and values:
             _apply_config_override(config, "plotting.plots.features.power.topomap_windows", list(values))
         elif key == "topomap_window" and values:
@@ -657,6 +665,40 @@ def _apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> 
                 )
             except ValueError:
                 pass
+        # Behavior scatter config
+        elif key == "scatter_features" and values:
+            _apply_config_override(config, "plotting.plots.behavior.scatter.features", list(values))
+        elif key == "scatter_columns" and values:
+            _apply_config_override(config, "plotting.plots.behavior.scatter.columns", list(values))
+        elif key == "scatter_aggregation_modes" and values:
+            _apply_config_override(config, "plotting.plots.behavior.scatter.aggregation_modes", list(values))
+        elif key == "scatter_segment" and values:
+            _apply_config_override(config, "plotting.plots.behavior.scatter.segment", values[0])
+        # Behavior dose-response config (plot-specific)
+        elif key == "dose_response_dose_column" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.dose_response.dose_column",
+                values[0],
+            )
+        elif key == "dose_response_response_column" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.dose_response.response_column",
+                list(values),
+            )
+        elif key == "dose_response_pain_column" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.dose_response.pain_column",
+                values[0],
+            )
+        elif key == "dose_response_segment" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.dose_response.segment",
+                values[0],
+            )
 
 
 _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
@@ -668,6 +710,7 @@ _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "comparison_values": "plotting.comparisons.comparison_values",
     "comparison_labels": "plotting.comparisons.comparison_labels",
     "comparison_rois": "plotting.comparisons.comparison_rois",
+    "temporal_stats_feature_folder": "plotting.plots.behavior.temporal_topomaps.stats_feature_folder",
     "topomap_windows": "plotting.plots.features.power.topomap_windows",
     "topomap_window": "plotting.plots.features.power.topomap_windows",
     "tfr_topomap_active_window": "time_frequency_analysis.active_window",
@@ -685,6 +728,16 @@ _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "connectivity_circle_min_lines": "plotting.plots.features.connectivity.circle_min_lines",
     "connectivity_network_top_fraction": "plotting.plots.features.connectivity.network_top_fraction",
     "itpc_shared_colorbar": "plotting.plots.itpc.shared_colorbar",
+    # Behavior scatter config
+    "scatter_features": "plotting.plots.behavior.scatter.features",
+    "scatter_columns": "plotting.plots.behavior.scatter.columns",
+    "scatter_aggregation_modes": "plotting.plots.behavior.scatter.aggregation_modes",
+    "scatter_segment": "plotting.plots.behavior.scatter.segment",
+    # Behavior dose-response config
+    "dose_response_dose_column": "plotting.plots.behavior.dose_response.dose_column",
+    "dose_response_response_column": "plotting.plots.behavior.dose_response.response_column",
+    "dose_response_pain_column": "plotting.plots.behavior.dose_response.pain_column",
+    "dose_response_segment": "plotting.plots.behavior.dose_response.segment",
 }
 
 
@@ -712,7 +765,19 @@ def _validate_plot_item_configs(configs: Dict[str, Dict[str, List[str]]]) -> Non
                     )
                 continue
 
-            if key in {"comparison_segment", "comparison_column", "connectivity_circle_top_fraction", "connectivity_circle_min_lines", "connectivity_network_top_fraction"}:
+            if key in {
+                "comparison_segment",
+                "comparison_column",
+                "scatter_segment",
+                "dose_response_dose_column",
+                "dose_response_response_column",
+                "dose_response_pain_column",
+                "dose_response_segment",
+                "connectivity_circle_top_fraction",
+                "connectivity_circle_min_lines",
+                "connectivity_network_top_fraction",
+                "temporal_stats_feature_folder",
+            }:
                 if not values or not str(values[0]).strip():
                     errors.append(f"plot_id '{plot_id}': {key} expects a non-empty value.")
                 continue
@@ -763,7 +828,8 @@ def _validate_plot_item_configs(configs: Dict[str, Dict[str, List[str]]]) -> Non
                         errors.append(f"plot_id '{plot_id}': {key} must be 'true' or 'false'.")
                 continue
 
-            if key in {"comparison_windows", "comparison_values", "comparison_rois"}:
+            if key in {"comparison_windows", "comparison_values", "comparison_rois",
+                       "scatter_features", "scatter_columns", "scatter_aggregation_modes"}:
                 if not values:
                     errors.append(f"plot_id '{plot_id}': {key} expects one or more values.")
 
@@ -1369,58 +1435,34 @@ def _map_plot_id_to_plotters(plot_id: str, feature_categories: List[str]) -> Opt
         "aperiodic_by_condition": "aperiodic_suite",
         
         # ITPC plots -> 1 registered: itpc_suite
-        "itpc_heatmap": "itpc_suite",
         "itpc_topomaps": "itpc_suite",
         "itpc_by_condition": "itpc_suite",
-        "itpc_temporal_evolution": "itpc_suite",
         
-        # PAC plots -> 2 registered: pac_summary, pac_suite
-        "pac_summary": "pac_summary",
-        "pac_comodulograms": "pac_suite",
+        # PAC plots -> 1 registered: pac_suite
         "pac_by_condition": "pac_suite",
-        "pac_time_ribbons": "pac_suite",
         
         # ERDS plots -> 1 registered: plot_erds
-        "erds_temporal_evolution": "plot_erds",
-        "erds_latency_distribution": "plot_erds",
-        "erds_erd_ers_separation": "plot_erds",
-        "erds_global_summary": "plot_erds",
         "erds_by_condition": "plot_erds",
         
         # Complexity plots -> 1 registered: plot_complexity
-        "complexity_by_band": "plot_complexity",
         "complexity_by_condition": "plot_complexity",
-        "complexity_temporal_evolution": "plot_complexity",
         
         # Spectral plots -> 1 registered: plot_spectral
-        "spectral_summary": "plot_spectral",
-        "spectral_edge_frequency": "plot_spectral",
         "spectral_by_condition": "plot_spectral",
-        "spectral_temporal_evolution": "plot_spectral",
         
         # Ratios plots -> 1 registered: plot_ratios
-        "ratios_by_pair": "plot_ratios",
         "ratios_by_condition": "plot_ratios",
-        "ratios_temporal_evolution": "plot_ratios",
         
         # Asymmetry plots -> 1 registered: plot_asymmetry
-        "asymmetry_by_band": "plot_asymmetry",
         "asymmetry_by_condition": "plot_asymmetry",
-        "asymmetry_temporal_evolution": "plot_asymmetry",
         
         # Bursts plots -> 1 registered: plot_bursts
-        "bursts_by_band": "plot_bursts",
         "bursts_by_condition": "plot_bursts",
-        "burst_temporal_evolution": "plot_bursts",
-        
         
         # ERP plots -> 1 registered: erp_suite
         "erp_butterfly": "erp_suite",
         "erp_roi": "erp_suite",
         "erp_contrast": "erp_suite",
-        
-        # Temporal plots -> 1 registered: plot_temporal
-        "temporal_evolution": "plot_temporal",
     }
     
     plotter_name = PLOT_ID_TO_PLOTTER.get(plot_id)

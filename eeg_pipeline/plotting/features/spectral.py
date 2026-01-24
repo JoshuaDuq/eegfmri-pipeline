@@ -19,24 +19,16 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.features.utils import get_band_names
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
 # Constants
 _VIOLIN_WIDTH = 0.7
 _VIOLIN_ALPHA = 0.6
 _VIOLIN_COLOR = "#7C3AED"
-_HISTOGRAM_BINS = 25
-_HISTOGRAM_ALPHA = 0.7
-_HISTOGRAM_EDGECOLOR = "white"
-_MEAN_LINEWIDTH = 1
-_MEAN_LINESTYLE = "--"
-_MEAN_COLOR = "black"
 
 _MIN_FIG_WIDTH = 8.0
 _MIN_FIG_HEIGHT = 4.5
-_BAND_WIDTH_FACTOR = 1.2
-_ROW_HEIGHT_FACTOR = 3.0
 
 _BOX_WIDTH = 0.4
 _BOX_ALPHA = 0.6
@@ -53,17 +45,6 @@ _SIGNIFICANT_COLOR = "#d62728"
 _NONSIGNIFICANT_COLOR = "#333333"
 _GRAY_COLOR = "gray"
 
-_DEFAULT_METRICS = [
-    "peak_freq",
-    "center_freq",
-    "bandwidth",
-    "entropy",
-    "peak_power",
-    "logratio_mean",
-    "logratio_std",
-    "slope",
-]
-
 _COMPARISON_METRICS_DEFAULT = [
     "peak_freq",
     "peak_power",
@@ -73,7 +54,6 @@ _COMPARISON_METRICS_DEFAULT = [
 ]
 
 _MIN_SEGMENTS_FOR_COMPARISON = 2
-_MAX_METRICS_FALLBACK = 4
 _MAX_METRICS_COMPARISON_FALLBACK = 3
 _SUBTITLE_Y_OFFSET = 1.02
 
@@ -159,209 +139,6 @@ def _format_metric_label(metric: str) -> str:
     return metric.replace("_", " ").title()
 
 
-def _plot_violin_for_metric(
-    ax: plt.Axes,
-    data_list: List[np.ndarray],
-    positions: List[int],
-    band_labels: List[str],
-) -> None:
-    """Plot violin plot for a single metric."""
-    if not data_list:
-        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-        ax.set_xticks([])
-        return
-
-    parts = ax.violinplot(
-        data_list,
-        positions=positions,
-        showmedians=True,
-        widths=_VIOLIN_WIDTH,
-    )
-    for pc in parts.get("bodies", []):
-        pc.set_facecolor(_VIOLIN_COLOR)
-        pc.set_alpha(_VIOLIN_ALPHA)
-    
-    ax.set_xticks(range(len(band_labels)))
-    ax.set_xticklabels([b.capitalize() for b in band_labels])
-
-
-def plot_spectral_summary(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    metrics: Optional[List[str]] = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot spectral feature distributions by band."""
-    plot_cfg = get_plot_config(config)
-    entries = _collect_spectral_columns(features_df)
-    
-    if not entries:
-        return _create_empty_plot("No spectral data")
-
-    segments = sorted({e.segment for e in entries if e.segment})
-    segment = _select_segment(segments, preferred="active")
-    
-    if segment is None:
-        return _create_empty_plot("No spectral data")
-
-    bands = sorted({e.band for e in entries if e.segment == segment and e.band})
-    if not bands:
-        return _create_empty_plot("No spectral data")
-
-    if metrics is None:
-        metrics = get_config_value(
-            config,
-            "plotting.plots.features.spectral.metrics",
-            _DEFAULT_METRICS,
-        )
-    
-    metrics = list(metrics or [])
-    available_metrics = [m for m in metrics if any(e.stat == m for e in entries)]
-    
-    if not available_metrics:
-        all_stats = sorted({e.stat for e in entries if e.stat})
-        available_metrics = all_stats[:_MAX_METRICS_FALLBACK]
-
-    band_order = get_band_names(config)
-    ordered_bands = [b for b in band_order if b in bands]
-    remaining_bands = [b for b in bands if b not in band_order]
-    bands = ordered_bands + remaining_bands
-
-    n_rows = len(available_metrics)
-    if figsize is None:
-        width = max(_MIN_FIG_WIDTH, len(bands) * _BAND_WIDTH_FACTOR)
-        height = max(_MIN_FIG_HEIGHT, n_rows * _ROW_HEIGHT_FACTOR)
-        figsize = (width, height)
-
-    fig, axes = plt.subplots(n_rows, 1, figsize=figsize, squeeze=False)
-    axes = axes.flatten()
-
-    scope_preference = ["global", "roi", "ch"]
-    
-    for ax, metric in zip(axes, available_metrics):
-        data_list = []
-        positions = []
-        
-        for i, band in enumerate(bands):
-            cols, _, _ = _select_columns(
-                entries,
-                segment=segment,
-                band=band,
-                stat_preference=[metric],
-                scope_preference=scope_preference,
-            )
-            if not cols:
-                continue
-            
-            values = _get_metric_values(features_df, cols)
-            if values.size == 0:
-                continue
-            
-            data_list.append(values)
-            positions.append(i)
-
-        _plot_violin_for_metric(ax, data_list, positions, bands)
-        
-        metric_label = _format_metric_label(metric)
-        ax.set_ylabel(metric_label)
-        ax.set_title(metric_label, fontweight="bold")
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    fig.suptitle(
-        f"Spectral Features by Band ({segment})",
-        fontsize=plot_cfg.font.figure_title,
-        fontweight="bold",
-        y=_SUBTITLE_Y_OFFSET,
-    )
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_path,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-        config=config,
-    )
-    plt.close(fig)
-    return fig
-
-
-def plot_spectral_edge_frequency(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot broadband spectral edge frequency distribution."""
-    plot_cfg = get_plot_config(config)
-    entries = _collect_spectral_columns(features_df)
-    
-    if not entries:
-        return _create_empty_plot("No spectral data")
-
-    edge_cols = [
-        e.name for e in entries
-        if e.band == "broadband" and "edge" in e.stat
-    ]
-    
-    if not edge_cols:
-        return _create_empty_plot("No edge frequency data")
-
-    values = _get_metric_values(features_df, edge_cols)
-    
-    if values.size == 0:
-        return _create_empty_plot("No edge frequency data")
-
-    if figsize is None:
-        figsize = (_MIN_FIG_WIDTH, _MIN_FIG_HEIGHT)
-
-    fig, ax = plt.subplots(figsize=figsize)
-    ax.hist(
-        values,
-        bins=_HISTOGRAM_BINS,
-        color=_VIOLIN_COLOR,
-        alpha=_HISTOGRAM_ALPHA,
-        edgecolor=_HISTOGRAM_EDGECOLOR,
-    )
-    ax.set_xlabel("Edge Frequency (Hz)")
-    ax.set_ylabel("Count")
-    ax.set_title("Spectral Edge Frequency", fontweight="bold")
-    
-    mean_value = np.nanmean(values)
-    ax.axvline(
-        mean_value,
-        color=_MEAN_COLOR,
-        linestyle=_MEAN_LINESTYLE,
-        linewidth=_MEAN_LINEWIDTH,
-    )
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-    fig.suptitle(
-        "Broadband Spectral Edge Frequency",
-        fontsize=plot_cfg.font.figure_title,
-        fontweight="bold",
-        y=_SUBTITLE_Y_OFFSET,
-    )
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_path,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-        config=config,
-    )
-    plt.close(fig)
-    return fig
-
-
 def _get_roi_id_from_column_name(column_name: str) -> Optional[str]:
     """Extract ROI identifier from spectral column name."""
     parsed = NamingSchema.parse(str(column_name))
@@ -410,13 +187,14 @@ def _get_comparison_configuration(
     entries: List[SpectralColumn],
     config: Any,
 ) -> Tuple[List[str], List[str], List[str]]:
-    """Extract segments, bands, and metrics from config or data."""
-    segment_set = sorted({e.segment for e in entries if e.segment})
-    
-    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
-    if not segments or len(segments) < _MIN_SEGMENTS_FOR_COMPARISON:
-        if len(segment_set) >= _MIN_SEGMENTS_FOR_COMPARISON:
-            segments = segment_set[:_MIN_SEGMENTS_FOR_COMPARISON]
+    """Extract segments, bands, and metrics from config (no fallbacks)."""
+    segments = require_config_value(config, "plotting.comparisons.comparison_windows")
+    if not isinstance(segments, (list, tuple)) or len(segments) < _MIN_SEGMENTS_FOR_COMPARISON:
+        raise ValueError(
+            "plotting.comparisons.comparison_windows must be a list/tuple with at least "
+            f"{_MIN_SEGMENTS_FOR_COMPARISON} window names (got {segments!r})"
+        )
+    segments = [str(s) for s in segments]
     
     bands = get_band_names(config)
     if not bands:
@@ -508,7 +286,7 @@ def _plot_window_comparison(
         suffix = _create_roi_suffix(roi_name)
         
         if use_multi_window:
-            data_by_band_multi: Dict[str, Dict[str, np.ndarray]] = {}
+            data_by_band_multi: dict[str, dict[str, np.ndarray]] = {}
             for band in bands:
                 segment_series = {}
                 for seg in segments:
@@ -691,19 +469,18 @@ def _plot_column_comparison(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
         if not multi_group_info:
-            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
-            return
+            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
         
         masks_dict, group_labels = multi_group_info
-        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
         multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
         
         for roi_name in roi_names:
-            data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+            data_by_band: dict[str, dict[str, np.ndarray]] = {}
             for band in bands:
                 cols = _get_spectral_columns_for_roi(entries, segment_name, band, metric, roi_name)
                 if not cols:
@@ -741,22 +518,12 @@ def _plot_column_comparison(
         log_if_present(logger, "info", f"Saved spectral {metric_label} multi-group column comparison for {len(roi_names)} ROIs")
         return
     
-    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
     if not comp_mask_info:
-        if logger:
-            log_if_present(
-                logger, "warning",
-                "Column comparison enabled but config incomplete. "
-                "Set plotting.comparisons.comparison_column and comparison_values."
-            )
-        return
+        raise ValueError("Column comparison requested but could not resolve comparison masks.")
     
     mask1, mask2, label1, label2 = comp_mask_info
-    segment_name = get_config_value(
-        config,
-        "plotting.comparisons.comparison_segment",
-        "active",
-    )
+    segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
     
     plot_cfg = get_plot_config(config)
     band_colors = {band: get_band_color(band, config) for band in bands}
@@ -907,7 +674,7 @@ def plot_spectral_by_condition(
         log_if_present(
             logger,
             "info",
-            f"Auto-detected segments for spectral comparison: {segments}",
+            f"Using configured segments for spectral comparison: {segments}",
         )
     
     metric_labels = {m: _format_metric_label(m) for m in metrics}
@@ -961,8 +728,6 @@ def plot_spectral_by_condition(
 
 
 __all__ = [
-    "plot_spectral_summary",
-    "plot_spectral_edge_frequency",
     "plot_spectral_by_condition",
 ]
 

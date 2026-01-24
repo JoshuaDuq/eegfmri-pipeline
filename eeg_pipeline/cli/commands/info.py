@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import json as json_module
 import logging
+import os
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from eeg_pipeline.cli.common import add_task_arg, resolve_task
 from eeg_pipeline.cli.commands.base import (
@@ -140,6 +141,18 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Show processing status for each subject (subjects mode only)",
     )
     parser.add_argument(
+        "--cache",
+        action="store_true",
+        dest="subjects_cache",
+        help="Cache subject discovery/status results on disk (subjects mode only; speeds up the TUI)",
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        dest="subjects_refresh",
+        help="Force refresh of cached subject discovery/status (subjects mode only)",
+    )
+    parser.add_argument(
         "--source",
         choices=[SOURCE_BIDS, SOURCE_BIDS_FMRI, SOURCE_EPOCHS, SOURCE_FEATURES, SOURCE_SOURCE_DATA, SOURCE_ALL],
         default=SOURCE_EPOCHS,
@@ -177,6 +190,128 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
 
     return parser
+
+
+def _subjects_cache_dir(deriv_root: Path) -> Path:
+    return Path(deriv_root) / ".cache" / "tui"
+
+
+def _subjects_cache_path(deriv_root: Path, *, task: str, source: str) -> Path:
+    safe_task = str(task or "unknown").strip().replace(os.sep, "_")
+    safe_source = str(source or "unknown").strip().replace(os.sep, "_")
+    return _subjects_cache_dir(deriv_root) / f"subjects_{safe_source}_{safe_task}.json"
+
+
+def _scan_subject_dir_mtimes(root: Optional[Path]) -> Dict[str, int]:
+    """Fast: list top-level sub-* dirs and their mtime_ns."""
+    if root is None:
+        return {}
+    root = Path(root)
+    if not root.exists():
+        return {}
+    out: Dict[str, int] = {}
+    with os.scandir(root) as it:
+        for entry in it:
+            if not entry.is_dir():
+                continue
+            name = entry.name
+            if not name.startswith("sub-"):
+                continue
+            try:
+                out[name[4:]] = int(entry.stat().st_mtime_ns)
+            except OSError:
+                continue
+    return out
+
+
+def _safe_mtime_ns(path: Path) -> Optional[int]:
+    try:
+        return int(path.stat().st_mtime_ns)
+    except OSError:
+        return None
+
+
+def _build_subjects_cache_stamp(
+    *,
+    deriv_root: Path,
+    bids_root: Optional[Path],
+) -> Dict[str, Any]:
+    """Conservative, fast cache invalidation stamp (directory mtimes only)."""
+    deriv_root = Path(deriv_root)
+    bids_root = Path(bids_root) if bids_root is not None else None
+
+    deriv_subject_dirs = _scan_subject_dir_mtimes(deriv_root)
+    preproc_dir = deriv_root / "preprocessed" / "eeg"
+    preproc_subject_dirs = _scan_subject_dir_mtimes(preproc_dir)
+
+    # Per-subject “hot” directories where outputs are created.
+    subjects = sorted(set(deriv_subject_dirs) | set(preproc_subject_dirs))
+    per_subject: Dict[str, Dict[str, Optional[int]]] = {}
+    for sid in subjects:
+        subject_dir = deriv_root / f"sub-{sid}"
+        per_subject[sid] = {
+            "deriv_sub_mtime_ns": deriv_subject_dirs.get(sid),
+            "preproc_sub_mtime_ns": preproc_subject_dirs.get(sid),
+            "eeg_dir_mtime_ns": _safe_mtime_ns(subject_dir / "eeg"),
+            "features_dir_mtime_ns": _safe_mtime_ns(subject_dir / "eeg" / "features"),
+            "stats_dir_mtime_ns": _safe_mtime_ns(subject_dir / "eeg" / "stats"),
+            "preprocessed_eeg_dir_mtime_ns": _safe_mtime_ns(preproc_dir / f"sub-{sid}"),
+        }
+
+    return {
+        "bids_root": str(bids_root) if bids_root is not None else None,
+        "deriv_root": str(deriv_root),
+        "bids_subject_dirs_mtime_ns": _scan_subject_dir_mtimes(bids_root),
+        "deriv_subject_dirs_mtime_ns": deriv_subject_dirs,
+        "preproc_subject_dirs_mtime_ns": preproc_subject_dirs,
+        "per_subject_dirs_mtime_ns": per_subject,
+    }
+
+
+def _read_subjects_cache(
+    *,
+    cache_path: Path,
+    stamp: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if not cache_path.exists():
+        return None
+    try:
+        payload = json_module.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json_module.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("schema_version") != 1:
+        return None
+    if payload.get("stamp") != stamp:
+        return None
+    out = payload.get("payload")
+    if not isinstance(out, dict):
+        return None
+    return out
+
+
+def _write_subjects_cache_atomic(
+    *,
+    cache_path: Path,
+    stamp: Dict[str, Any],
+    payload: Dict[str, Any],
+) -> None:
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        tmp_path.write_text(
+            json_module.dumps(
+                {"schema_version": 1, "stamp": stamp, "payload": payload},
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
+        tmp_path.replace(cache_path)
+    except OSError:
+        # Cache should never block subject discovery.
+        return
 
 
 def _configure_logging_for_json_output() -> logging.Logger:
@@ -258,31 +393,63 @@ def _handle_plotters_mode(output_json: bool) -> None:
                 print(f"  - {plotter['name']}")
 
 
-def _get_available_time_windows(features_dir: Path, config: Any) -> List[str]:
-    """Extract available time windows by scanning window-specific feature files.
+def _get_available_time_windows(features_dir: Path, config: Any, feature_group: Optional[str] = None) -> List[str]:
+    """Extract available time windows by scanning window-specific feature files and column names.
     
-    Detects windows from filenames matching pattern:
-    features/{category}/features_{category}_{window}.{tsv,parquet}
+    Detects windows from:
+    1. Filenames matching pattern: features/{category}/features_{category}_{window}.{tsv,parquet}
+    2. Column names in feature files using NamingSchema (e.g., itpc_plateau_alpha_ch_Fz_val)
+    
+    Args:
+        features_dir: Directory containing feature files
+        config: Configuration object
+        feature_group: Optional feature group to filter by (e.g., "itpc", "power", "connectivity")
+                      If provided, only returns windows/segments for this feature group.
     """
     if not features_dir.exists():
         return []
 
     windows = set()
     
-    try:
-        # Check window-specific files (both .tsv and .parquet) in all subdirectories
-        for ext in ["tsv", "parquet"]:
-            for fpath in features_dir.rglob(f"*/features_*.{ext}"):
-                category = fpath.parent.name
-                stem = fpath.stem
-                prefix = f"features_{category}_"
-                
-                if stem.startswith(prefix):
-                    window = stem[len(prefix):]
-                    if window:
+    # Method 1: Check window-specific files (both .tsv and .parquet) in all subdirectories
+    for ext in ["tsv", "parquet"]:
+        for fpath in features_dir.rglob(f"*/features_*.{ext}"):
+            category = fpath.parent.name
+            stem = fpath.stem
+            prefix = f"features_{category}_"
+            
+            if stem.startswith(prefix):
+                window = stem[len(prefix):]
+                if window:
+                    # If filtering by feature group, check if category matches
+                    if feature_group is None or category == feature_group:
                         windows.add(window)
-    except OSError:
-        pass
+    
+    # Method 2: Scan feature files and extract segments from column names
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    import pandas as pd
+    import pyarrow.parquet as pq
+    
+    for fpath in features_dir.rglob("features_*"):
+        # Read only column names, not full data
+        if fpath.suffix.lower() == ".parquet":
+            parquet_file = pq.ParquetFile(fpath)
+            columns = parquet_file.schema_arrow.names
+        else:
+            # For TSV, read just the header
+            df = pd.read_csv(fpath, sep="\t", nrows=0)
+            columns = df.columns.tolist()
+        
+        # Extract segments from column names
+        for col in columns:
+            parsed = NamingSchema.parse(str(col))
+            if parsed.get("valid"):
+                # If filtering by feature group, check if group matches
+                if feature_group is not None and parsed.get("group") != feature_group:
+                    continue
+                segment = parsed.get("segment")
+                if segment:
+                    windows.add(str(segment))
 
     return sorted(windows)
 
@@ -371,7 +538,7 @@ def _process_single_subject(
         stats_dir = deriv_stats_path(deriv_root, subj_id)
         if stats_dir.exists():
             for pattern in STATS_FILE_PATTERNS:
-                if any(stats_dir.glob(pattern)):
+                if any(stats_dir.rglob(pattern)):
                     has_derivatives = True
                     has_stats = True
                     break
@@ -446,12 +613,26 @@ def _build_subject_status_json(
 
     # Get available windows from first subject with features
     available_windows = []
+    available_windows_by_feature = {}
+    feature_groups = ["itpc", "power", "connectivity", "aperiodic", "pac", "complexity", 
+                      "ratios", "asymmetry", "erds", "spectral", "bursts", "erp"]
+    
     for result in results:
         subj_id = _extract_subject_id(result["subject"])
         features_dir = deriv_features_path(deriv_root, subj_id)
+        if not features_dir.exists():
+            continue
+            
         windows = _get_available_time_windows(features_dir, config)
         if windows:
             available_windows = windows
+        
+        for feature_group in feature_groups:
+            feature_windows = _get_available_time_windows(features_dir, config, feature_group=feature_group)
+            if feature_windows:
+                available_windows_by_feature[feature_group] = feature_windows
+        
+        if available_windows:
             break
 
     # Get available columns from first subject
@@ -503,6 +684,7 @@ def _build_subject_status_json(
         "subjects": json_results,
         "count": len(json_results),
         "available_windows": available_windows,
+        "available_windows_by_feature": available_windows_by_feature,
         "available_event_columns": available_columns,
         "available_channels": available_channels,
         "unavailable_channels": unavailable_channels,
@@ -533,6 +715,16 @@ def _handle_subjects_mode(
         if bids_fmri_root:
             bids_root_override = Path(str(bids_fmri_root))
 
+    # Fast path: serve cached TUI payload without scanning epochs/features trees.
+    if args.status and args.output_json and bool(getattr(args, "subjects_cache", False)) and not bool(getattr(args, "subjects_refresh", False)):
+        bids_root_for_stamp = bids_root_override if bids_root_override is not None else getattr(config, "bids_root", None)
+        cache_path = _subjects_cache_path(deriv_root, task=task, source=args.source)
+        stamp = _build_subjects_cache_stamp(deriv_root=deriv_root, bids_root=bids_root_for_stamp)
+        cached = _read_subjects_cache(cache_path=cache_path, stamp=stamp)
+        if cached is not None:
+            _print_json_output(cached)
+            return
+
     discovered = get_available_subjects(
         config=config,
         deriv_root=deriv_root,
@@ -544,10 +736,22 @@ def _handle_subjects_mode(
     )
 
     if args.status:
-        epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
-        features_subjects = set(_collect_subjects_from_features(deriv_root))
-
         if args.output_json:
+            epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
+            features_subjects = set(_collect_subjects_from_features(deriv_root))
+
+            bids_root_for_stamp = bids_root_override if bids_root_override is not None else getattr(config, "bids_root", None)
+            cache_enabled = bool(getattr(args, "subjects_cache", False))
+            refresh = bool(getattr(args, "subjects_refresh", False))
+            cache_path = _subjects_cache_path(deriv_root, task=task, source=args.source)
+
+            if cache_enabled and not refresh:
+                stamp = _build_subjects_cache_stamp(deriv_root=deriv_root, bids_root=bids_root_for_stamp)
+                cached = _read_subjects_cache(cache_path=cache_path, stamp=stamp)
+                if cached is not None:
+                    _print_json_output(cached)
+                    return
+
             output = _build_subject_status_json(
                 discovered,
                 epochs_subjects,
@@ -557,8 +761,13 @@ def _handle_subjects_mode(
                 config,
                 bids_root_override,
             )
+            if cache_enabled:
+                stamp = _build_subjects_cache_stamp(deriv_root=deriv_root, bids_root=bids_root_for_stamp)
+                _write_subjects_cache_atomic(cache_path=cache_path, stamp=stamp, payload=output)
             _print_json_output(output)
         else:
+            epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
+            features_subjects = set(_collect_subjects_from_features(deriv_root))
             for subj in discovered:
                 epoch_mark = "x" if subj in epochs_subjects else " "
                 feat_mark = "x" if subj in features_subjects else " "

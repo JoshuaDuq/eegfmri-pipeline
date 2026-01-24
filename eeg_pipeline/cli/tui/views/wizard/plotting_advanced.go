@@ -354,12 +354,12 @@ var plotDefaults = struct {
 	tfrTopomapTemporalWspace:       0.8,
 
 	// Comparisons
-	comparisonWindows: "baseline active",
-	comparisonSegment: "active",
-	comparisonColumn:  "(unset)",
-	comparisonValues:  "0 1",
-	comparisonLabels:  "(from values)",
-	comparisonROIs:    "(all)",
+	comparisonWindows: "",
+	comparisonSegment: "",
+	comparisonColumn:  "",
+	comparisonValues:  "",
+	comparisonLabels:  "",
+	comparisonROIs:    "",
 
 	// Plot Sizing
 	roiWidthPerBand:              3.5,
@@ -504,6 +504,9 @@ func formatIntValue(value int, defaultValue int) string {
 
 func formatStringValue(value string, defaultValue string) string {
 	if strings.TrimSpace(value) == "" {
+		if strings.TrimSpace(defaultValue) == "" {
+			return "(default)"
+		}
 		return fmt.Sprintf("(default: %s)", defaultValue)
 	}
 	return value
@@ -660,13 +663,14 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		value := formatTriState(cfg.CompareWindows)
 		return []renderLine{m.renderPlotValueLine("compare_windows", value, "default/ON/OFF", focused, labelWidth)}
 	case plotItemConfigFieldComparisonWindows:
-		value := m.getPlotFieldTextValue(cfg.ComparisonWindowsSpec, "baseline active", row, plotItemConfigFieldComparisonWindows)
+		value := m.getPlotFieldTextValue(cfg.ComparisonWindowsSpec, plotDefaults.comparisonWindows, row, plotItemConfigFieldComparisonWindows)
 		hint := m.buildComparisonWindowsHint()
 		// When dropdown is expanded for this field, treat as focused
 		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonWindows
 		lines := []renderLine{m.renderPlotValueLine("windows", value, hint, focused || isEditing, labelWidth)}
-		// Show dropdown if expanded for this field
-		windows := m.GetPlottingComparisonWindows()
+		// Show dropdown if expanded for this field - use feature-specific windows
+		featureGroup := m.getFeatureGroupForPlot(row.plotID)
+		windows := m.GetPlottingComparisonWindows(featureGroup)
 		if isEditing && len(windows) > 0 {
 			expandedLines := m.renderExpandedListItems(windows, m.isPlotFieldWindowSelected(cfg.ComparisonWindowsSpec))
 			lines = append(lines, expandedLines...)
@@ -676,13 +680,14 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		value := formatTriState(cfg.CompareColumns)
 		return []renderLine{m.renderPlotValueLine("compare_columns", value, "default/ON/OFF", focused, labelWidth)}
 	case plotItemConfigFieldComparisonSegment:
-		value := m.getPlotFieldTextValue(cfg.ComparisonSegment, "active", row, plotItemConfigFieldComparisonSegment)
+		value := m.getPlotFieldTextValue(cfg.ComparisonSegment, plotDefaults.comparisonSegment, row, plotItemConfigFieldComparisonSegment)
 		hint := m.buildComparisonSegmentHint()
 		// When dropdown is expanded for this field, treat as focused
 		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonSegment
 		lines := []renderLine{m.renderPlotValueLine("segment", value, hint, focused || isEditing, labelWidth)}
-		// Show dropdown if expanded for this field
-		windows := m.GetPlottingComparisonWindows()
+		// Show dropdown if expanded for this field - use feature-specific windows
+		featureGroup := m.getFeatureGroupForPlot(row.plotID)
+		windows := m.GetPlottingComparisonWindows(featureGroup)
 		if isEditing && len(windows) > 0 {
 			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
 				return cfg.ComparisonSegment == w
@@ -691,7 +696,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		}
 		return lines
 	case plotItemConfigFieldComparisonColumn:
-		value := m.getPlotFieldTextValue(cfg.ComparisonColumn, "(unset)", row, plotItemConfigFieldComparisonColumn)
+		value := m.getPlotFieldTextValue(cfg.ComparisonColumn, plotDefaults.comparisonColumn, row, plotItemConfigFieldComparisonColumn)
 		hint := m.buildComparisonColumnHint()
 		// When dropdown is expanded for this field, treat as focused
 		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonColumn
@@ -706,7 +711,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		}
 		return lines
 	case plotItemConfigFieldComparisonValues:
-		value := m.getPlotFieldTextValue(cfg.ComparisonValuesSpec, "0 1", row, plotItemConfigFieldComparisonValues)
+		value := m.getPlotFieldTextValue(cfg.ComparisonValuesSpec, plotDefaults.comparisonValues, row, plotItemConfigFieldComparisonValues)
 		col := cfg.ComparisonColumn
 		if col == "" {
 			col = m.plotComparisonColumn
@@ -726,14 +731,15 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		}
 		return lines
 	case plotItemConfigFieldComparisonLabels:
-		value := m.getPlotFieldTextValue(cfg.ComparisonLabelsSpec, "(from values)", row, plotItemConfigFieldComparisonLabels)
+		value := m.getPlotFieldTextValue(cfg.ComparisonLabelsSpec, plotDefaults.comparisonLabels, row, plotItemConfigFieldComparisonLabels)
 		return []renderLine{m.renderPlotValueLine("labels", value, "e.g. condA condB or \"High\" \"Low\"", focused, labelWidth)}
 	case plotItemConfigFieldTopomapWindow:
 		value := m.getPlotFieldTextValue(cfg.TopomapWindowsSpec, "baseline", row, plotItemConfigFieldTopomapWindow)
 		hint := m.buildComparisonSegmentHint()
 		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldTopomapWindow
 		lines := []renderLine{m.renderPlotValueLine("windows", value, hint, focused || isEditing, labelWidth)}
-		windows := m.GetPlottingComparisonWindows()
+		plot := m.getPlotByID(row.plotID)
+		windows := m.GetPlottingComparisonWindows(plot.Group)
 		if isEditing && len(windows) > 0 {
 			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
 				return m.isColumnValueSelected(w)
@@ -787,7 +793,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		value := m.getPlotFieldTextValue(cfg.TfrTopomapTemporalWspace, "0.8", row, plotItemConfigFieldTfrTopomapTemporalWspace)
 		return []renderLine{m.renderPlotValueLine("temporal_wspace", value, "float (default: 0.8)", focused, labelWidth)}
 	case plotItemConfigFieldComparisonROIs:
-		value := m.getPlotFieldTextValue(cfg.ComparisonROIsSpec, "(all)", row, plotItemConfigFieldComparisonROIs)
+		value := m.getPlotFieldTextValue(cfg.ComparisonROIsSpec, plotDefaults.comparisonROIs, row, plotItemConfigFieldComparisonROIs)
 		hint := "e.g. all Frontal Midline_FrontalCentral"
 		if len(m.discoveredROIs) > 0 {
 			hint = fmt.Sprintf("Space to select · %d ROIs available", len(m.discoveredROIs))
@@ -798,6 +804,140 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		// Show dropdown if expanded for this field
 		if isEditing && len(m.discoveredROIs) > 0 {
 			expandedLines := m.renderExpandedListItems(m.discoveredROIs, m.isPlotFieldValueSelected(cfg.ComparisonROIsSpec))
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldBehaviorScatterFeatures:
+		value := m.getPlotFieldTextValue(cfg.BehaviorScatterFeaturesSpec, "power", row, plotItemConfigFieldBehaviorScatterFeatures)
+		hint := fmt.Sprintf("Space to select · %d feature types", len(behaviorScatterFeatureTypes))
+		isEditing := m.expandedOption == expandedBehaviorScatterFeatures && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldBehaviorScatterFeatures
+		lines := []renderLine{m.renderPlotValueLine("features", value, hint, focused || isEditing, labelWidth)}
+		if isEditing {
+			expandedLines := m.renderExpandedListItems(behaviorScatterFeatureTypes, m.isPlotFieldValueSelected(cfg.BehaviorScatterFeaturesSpec))
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldBehaviorScatterColumns:
+		value := m.getPlotFieldTextValue(cfg.BehaviorScatterColumnsSpec, "rating", row, plotItemConfigFieldBehaviorScatterColumns)
+		hint := "Space to select behavioral columns"
+		plotCols := m.GetPlottingComparisonColumns()
+		if len(plotCols) > 0 {
+			hint = fmt.Sprintf("Space to select · %d columns", len(plotCols))
+		}
+		isEditing := m.expandedOption == expandedBehaviorScatterColumns && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldBehaviorScatterColumns
+		lines := []renderLine{m.renderPlotValueLine("columns", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(plotCols) > 0 {
+			expandedLines := m.renderExpandedListItems(plotCols, m.isPlotFieldValueSelected(cfg.BehaviorScatterColumnsSpec))
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldBehaviorScatterAggregationModes:
+		value := m.getPlotFieldTextValue(cfg.BehaviorScatterAggregationModesSpec, "roi global", row, plotItemConfigFieldBehaviorScatterAggregationModes)
+		hint := fmt.Sprintf("Space to select · %d modes", len(behaviorScatterAggregationModes))
+		isEditing := m.expandedOption == expandedBehaviorScatterAggregation && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldBehaviorScatterAggregationModes
+		lines := []renderLine{m.renderPlotValueLine("aggregation", value, hint, focused || isEditing, labelWidth)}
+		if isEditing {
+			expandedLines := m.renderExpandedListItems(behaviorScatterAggregationModes, m.isPlotFieldValueSelected(cfg.BehaviorScatterAggregationModesSpec))
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldBehaviorScatterSegment:
+		value := m.getPlotFieldTextValue(cfg.BehaviorScatterSegmentSpec, "", row, plotItemConfigFieldBehaviorScatterSegment)
+		hint := m.buildComparisonSegmentHint()
+		// When dropdown is expanded for this field, treat as focused
+		isEditing := m.expandedOption == expandedBehaviorScatterSegment && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldBehaviorScatterSegment
+		lines := []renderLine{m.renderPlotValueLine("segment", value, hint, focused || isEditing, labelWidth)}
+		// Show dropdown if expanded for this field - get all available segments
+		windows := m.GetPlottingComparisonWindows()
+		if isEditing && len(windows) > 0 {
+			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
+				return cfg.BehaviorScatterSegmentSpec == w
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
+		value := m.getPlotFieldTextValue(cfg.BehaviorTemporalStatsFeatureFolder, "(auto)", row, plotItemConfigFieldBehaviorTemporalStatsFeatureFolder)
+		isEditing := m.expandedOption == expandedTemporalTopomapsFeatureDir && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldBehaviorTemporalStatsFeatureFolder
+
+		hint := "Space to select"
+		if strings.TrimSpace(m.temporalTopomapsStatsFeatureFoldersError) != "" {
+			hint = "Error: " + strings.TrimSpace(m.temporalTopomapsStatsFeatureFoldersError)
+		} else if n := len(m.temporalTopomapsStatsFeatureFolders); n > 0 {
+			hint = fmt.Sprintf("Space to select · %d folders", n)
+		}
+
+		lines := []renderLine{m.renderPlotValueLine("stats_feature_folder", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(m.temporalTopomapsStatsFeatureFolders) > 0 {
+			expandedLines := m.renderExpandedListItems(m.temporalTopomapsStatsFeatureFolders, func(folder string) bool {
+				return cfg.BehaviorTemporalStatsFeatureFolder == folder
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldDoseResponseDoseColumn:
+		value := m.getPlotFieldTextValue(cfg.DoseResponseDoseColumn, "(auto)", row, plotItemConfigFieldDoseResponseDoseColumn)
+		plotCols := m.GetPlottingComparisonColumns()
+		hint := "Space to select (events.tsv) · or type manually"
+		if len(plotCols) > 0 {
+			hint = fmt.Sprintf("Space to select · %d columns", len(plotCols))
+		}
+		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponseDoseColumn
+		lines := []renderLine{m.renderPlotValueLine("dose_column", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(plotCols) > 0 {
+			expandedLines := m.renderExpandedListItems(plotCols, func(col string) bool {
+				return cfg.DoseResponseDoseColumn == col
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldDoseResponseResponseColumn:
+		value := m.getPlotFieldTextValue(cfg.DoseResponseResponseColumn, "(none)", row, plotItemConfigFieldDoseResponseResponseColumn)
+		categories := m.GetTrialTableFeatureCategories()
+		hint := "Space to select (trial table feature categories) · or type manually"
+		if len(categories) > 0 {
+			hint = fmt.Sprintf("Space to select · %d feature categories", len(categories))
+		} else if strings.TrimSpace(m.trialTableDiscoveryError) != "" {
+			hint = "Trial table discovery error: " + strings.TrimSpace(m.trialTableDiscoveryError)
+		} else if len(m.trialTableColumns) == 0 {
+			hint = "Trial table not discovered (run trial_table first)"
+		}
+		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponseResponseColumn
+		lines := []renderLine{m.renderPlotValueLine("feature_categories", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(categories) > 0 {
+			expandedLines := m.renderExpandedListItems(categories, m.isColumnValueSelected)
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldDoseResponsePainColumn:
+		value := m.getPlotFieldTextValue(cfg.DoseResponsePainColumn, "(auto)", row, plotItemConfigFieldDoseResponsePainColumn)
+		plotCols := m.GetPlottingComparisonColumns()
+		hint := "Space to select (events.tsv) · or type manually"
+		if len(plotCols) > 0 {
+			hint = fmt.Sprintf("Space to select · %d columns", len(plotCols))
+		}
+		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponsePainColumn
+		lines := []renderLine{m.renderPlotValueLine("pain_column", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(plotCols) > 0 {
+			expandedLines := m.renderExpandedListItems(plotCols, func(col string) bool {
+				return cfg.DoseResponsePainColumn == col
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldDoseResponseSegment:
+		value := m.getPlotFieldTextValue(cfg.DoseResponseSegment, "(default)", row, plotItemConfigFieldDoseResponseSegment)
+		windows := m.GetPlottingComparisonWindows()
+		hint := "Space to select · or type manually"
+		if len(windows) > 0 {
+			hint = fmt.Sprintf("Space to select · %d windows", len(windows))
+		}
+		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponseSegment
+		lines := []renderLine{m.renderPlotValueLine("segment", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(windows) > 0 {
+			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
+				return cfg.DoseResponseSegment == w
+			})
 			lines = append(lines, expandedLines...)
 		}
 		return lines

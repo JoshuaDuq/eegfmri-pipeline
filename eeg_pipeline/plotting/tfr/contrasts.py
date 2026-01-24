@@ -24,6 +24,7 @@ from eeg_pipeline.plotting.io.figures import (
 )
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
+from eeg_pipeline.utils.config.loader import require_config_value
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
@@ -166,10 +167,13 @@ def _get_baseline_window(config, baseline: Optional[Tuple[Optional[float], Optio
     """
     if baseline is not None:
         return baseline
-    if not config:
-        return -5.0, -0.01
-
-    return tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
+    baseline_window = require_config_value(config, "time_frequency_analysis.baseline_window")
+    if not isinstance(baseline_window, (list, tuple)) or len(baseline_window) < 2:
+        raise ValueError(
+            "time_frequency_analysis.baseline_window must be a list/tuple of length 2 "
+            f"(got {baseline_window!r})"
+        )
+    return (baseline_window[0], baseline_window[1])
 
 
 def _plot_topomap_with_label(
@@ -500,7 +504,13 @@ def _save_fig(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if baseline_used is None:
-        baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
+        baseline_window = require_config_value(config, "time_frequency_analysis.baseline_window")
+        if not isinstance(baseline_window, (list, tuple)) or len(baseline_window) < 2:
+            raise ValueError(
+                "time_frequency_analysis.baseline_window must be a list/tuple of length 2 "
+                f"(got {baseline_window!r})"
+            )
+        baseline_used = (float(baseline_window[0]), float(baseline_window[1]))
 
     figs = fig_obj if isinstance(fig_obj, list) else [fig_obj]
     stem, _ = (name.rsplit(".", 1) + [""])[:2]
@@ -540,7 +550,7 @@ def contrast_maxmin_temperature(
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    active_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Optional[Tuple[float, float]] = None,
     logger: Optional[logging.Logger] = None,
 ) -> None:
     """Plot max vs min temperature contrast topomaps.
@@ -558,6 +568,14 @@ def contrast_maxmin_temperature(
         logger: Optional logger instance
     """
     baseline = _get_baseline_window(config, baseline)
+    if active_window is None:
+        active_raw = require_config_value(config, "time_frequency_analysis.active_window")
+        if not isinstance(active_raw, (list, tuple)) or len(active_raw) < 2:
+            raise ValueError(
+                "time_frequency_analysis.active_window must be a list/tuple of length 2 "
+                f"(got {active_raw!r})"
+            )
+        active_window = (float(active_raw[0]), float(active_raw[1]))
     if not require_epochs_tfr(tfr, "Max-vs-min temperature contrast", logger):
         return
     if events_df is None:

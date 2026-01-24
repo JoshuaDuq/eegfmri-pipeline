@@ -21,10 +21,13 @@ def _resolve_comparison_column(config: Any) -> Optional[str]:
 
 def _resolve_comparison_values(config: Any) -> tuple[Any, Any]:
     """Resolve the two comparison values from config."""
-    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", None)
     if isinstance(values_spec, (list, tuple)) and len(values_spec) >= 2:
         return values_spec[0], values_spec[1]
-    return 0, 1
+    raise ValueError(
+        "Missing plotting.comparisons.comparison_values (need at least 2 values). "
+        "Set this via the plotting TUI (Comparison Values) or CLI (--comparison-values)."
+    )
 
 
 def _resolve_comparison_labels(config: Any, *, v1: Any, v2: Any) -> tuple[str, str]:
@@ -54,17 +57,16 @@ def _validate_comparison_prerequisites(
         return None
 
     column = _resolve_comparison_column(config)
-    
-    # Debug: Log config resolution
-    import logging
-    _debug_logger = logging.getLogger(__name__)
-    raw_value = get_config_value(config, "plotting.comparisons.comparison_column", "<<NOT SET>>")
-    _debug_logger.warning(f"[DEBUG] comparison_column raw value: {raw_value!r}, resolved: {column!r}")
-    _debug_logger.warning(f"[DEBUG] config type: {type(config).__name__}")
-    
-    if column is None or column not in events_df.columns:
-        if column is not None:
-            _debug_logger.warning(f"[DEBUG] Column '{column}' not found in events_df columns: {list(events_df.columns)[:5]}...")
+
+    if column is None:
+        return None
+
+    if column not in events_df.columns:
+        if require_enabled:
+            raise ValueError(
+                f"Comparison column '{column}' not found in events_df. "
+                "Set plotting.comparisons.comparison_column to an existing events.tsv column."
+            )
         return None
 
     return column
@@ -130,9 +132,18 @@ def extract_comparison_mask(
     """
     column = _validate_comparison_prerequisites(events_df, config, require_enabled=require_enabled)
     if column is None:
+        if require_enabled and _is_comparison_enabled(config):
+            raise ValueError(
+                "Comparison requested but plotting.comparisons.comparison_column is not set."
+            )
         return None
 
-    value1, value2 = _resolve_comparison_values(config)
+    try:
+        value1, value2 = _resolve_comparison_values(config)
+    except ValueError:
+        if require_enabled:
+            raise
+        return None
     label1, label2 = _resolve_comparison_labels(config, v1=value1, v2=value2)
 
     numeric_masks = _create_numeric_masks(events_df, column, value1, value2)
@@ -168,7 +179,12 @@ def resolve_comparison_spec(
     if column is None:
         return None
 
-    value1, value2 = _resolve_comparison_values(config)
+    try:
+        value1, value2 = _resolve_comparison_values(config)
+    except ValueError:
+        if require_enabled:
+            raise
+        return None
     label1, label2 = _resolve_comparison_labels(config, v1=value1, v2=value2)
     return column, value1, value2, label1, label2
 
@@ -194,10 +210,15 @@ def extract_multi_group_masks(
     if column is None:
         return None
 
-    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", None)
     labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
     
     if not isinstance(values_spec, (list, tuple)) or len(values_spec) < 2:
+        if require_enabled:
+            raise ValueError(
+                "Multi-group comparison requires plotting.comparisons.comparison_values with >=2 values. "
+                "Set this via the plotting TUI (Comparison Values) or CLI (--comparison-values)."
+            )
         return None
     
     if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= len(values_spec):
@@ -208,12 +229,6 @@ def extract_multi_group_masks(
     masks_dict = {}
     column_values = events_df[column]
     
-    import logging
-    _debug_logger = logging.getLogger(__name__)
-    
-    unique_values = column_values.unique()
-    _debug_logger.debug(f"Multi-group comparison: column '{column}' has {len(unique_values)} unique values: {sorted(unique_values)[:10]}")
-    
     for val, label in zip(values_spec, labels):
         try:
             numeric_val = float(val)
@@ -222,20 +237,15 @@ def extract_multi_group_masks(
             val_str = str(val).strip().lower()
             mask = (column_values.astype(str).str.strip().str.lower() == val_str).values
         
-        n_matches = int(mask.sum())
-        if n_matches > 0:
+        if int(mask.sum()) > 0:
             masks_dict[label] = mask
-            _debug_logger.debug(f"Multi-group: value {val!r} (label '{label}') matched {n_matches} trials")
-        else:
-            _debug_logger.debug(f"Multi-group: value {val!r} (label '{label}') matched 0 trials")
     
     if len(masks_dict) < 2:
-        unique_vals = sorted(pd.to_numeric(column_values, errors="coerce").dropna().unique())
-        _debug_logger.warning(
-            f"Multi-group comparison failed: only {len(masks_dict)} groups matched "
-            f"(need at least 2). Column: {column}, Requested values: {values_spec}, "
-            f"Available numeric values in column: {unique_vals[:20]}{'...' if len(unique_vals) > 20 else ''}"
-        )
+        if require_enabled:
+            raise ValueError(
+                "Multi-group comparison failed: fewer than 2 requested values matched any trials. "
+                f"Column: {column!r}, Requested values: {list(values_spec)!r}"
+            )
         return None
     
     return masks_dict, labels

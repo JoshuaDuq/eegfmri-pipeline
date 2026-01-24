@@ -173,34 +173,64 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     
     stats_dir = features_path.parent / "stats"
     computation_patterns = {
-        "trial_table": ["trial_table/trials*.tsv", "trial_table/trials*.parquet"],
-        "lag_features": ["lag_features/trials_with_lags*.tsv", "lag_features/*.metadata.json"],
-        "pain_residual": ["pain_residual/trials_with_residual*.tsv", "pain_residual/*.metadata.json"],
+        "trial_table": ["trial_table*/*/trials*.tsv", "trial_table*/*/trials*.parquet"],
+        "lag_features": ["lag_features*/*/trials_with_lags*.tsv", "lag_features*/*/*.metadata.json"],
+        "pain_residual": ["pain_residual*/*/trials_with_residual*.tsv", "pain_residual*/*/*.metadata.json"],
         "temperature_models": [
-            "temperature_models/model_comparison*.tsv",
-            "temperature_models/breakpoint*.tsv",
+            "temperature_models*/*/model_comparison*.parquet",
+            "temperature_models*/*/model_comparison*.tsv",
+            "temperature_models*/*/breakpoint_candidates*.parquet",
+            "temperature_models*/*/breakpoint_candidates*.tsv",
         ],
-        "regression": ["trialwise_regression/regression_feature_effects*.tsv"],
-        "models": ["feature_models/models_feature_effects*.tsv"],
-        "stability": ["stability_groupwise/stability_groupwise*.tsv"],
-        "consistency": ["consistency_summary/consistency_summary*.tsv"],
-        "influence": ["influence_diagnostics/influence_diagnostics*.tsv"],
-        "report": ["subject_report/subject_report*.md", "subject_report/subject_report*.html"],
-        "correlations": ["correlations/correlations*.tsv", "*_topomap_*_correlations_*.tsv"],
-        "pain_sensitivity": ["pain_sensitivity/pain_sensitivity*.tsv"],
-        "condition": ["condition_effects/condition_effects*.tsv"],
+        "regression": [
+            "trialwise_regression*/*/regression_feature_effects*.parquet",
+            "trialwise_regression*/*/regression_feature_effects*.tsv",
+        ],
+        "models": [
+            "feature_models*/*/models_feature_effects*.parquet",
+            "feature_models*/*/models_feature_effects*.tsv",
+        ],
+        "stability": [
+            "stability_groupwise*/*/stability_groupwise*.parquet",
+            "stability_groupwise*/*/stability_groupwise*.tsv",
+        ],
+        "consistency": [
+            "consistency_summary*/*/consistency_summary*.parquet",
+            "consistency_summary*/*/consistency_summary*.tsv",
+        ],
+        "influence": [
+            "influence_diagnostics*/*/influence_diagnostics*.parquet",
+            "influence_diagnostics*/*/influence_diagnostics*.tsv",
+        ],
+        "report": ["subject_report*/*/subject_report*.md", "subject_report*/*/subject_report*.html"],
+        "correlations": [
+            "correlations*/*/correlations*.parquet",
+            "correlations*/*/correlations*.tsv",
+            "*_topomap_*_correlations_*.tsv",
+        ],
+        "pain_sensitivity": [
+            "pain_sensitivity*/*/pain_sensitivity*.parquet",
+            "pain_sensitivity*/*/pain_sensitivity*.tsv",
+        ],
+        "condition": [
+            "condition_effects*/*/condition_effects*.parquet",
+            "condition_effects*/*/condition_effects*.tsv",
+        ],
         "temporal": [
-            "temporal_correlations/temporal_correlations_*.tsv",
-            "temporal_correlations/normalized_results*.tsv",
-            "temporal_correlations/corr_stats_temporal_*.tsv",
-            "corr_stats_temporal_*.tsv",
-            "corr_stats_temporal_combined*.tsv",
-            "corr_stats_tf_*.tsv",
+            "temporal_correlations*/*/temporal_correlations_*.parquet",
+            "temporal_correlations*/*/temporal_correlations_*.tsv",
+            "temporal_correlations*/*/normalized_results*.parquet",
+            "temporal_correlations*/*/normalized_results*.tsv",
+            "temporal_correlations*/*/corr_stats_temporal_*.tsv",
+            "temporal_correlations*/*/corr_stats_temporal_combined*.tsv",
+            "temporal_correlations*/*/corr_stats_tf_*.tsv",
+            "temporal_correlations*/*/tf_grid_*.tsv",
+            "temporal_correlations*/*/temporal_correlations_by_condition*.npz",
         ],
-        "cluster": ["cluster/cluster_results_*.tsv", "cluster/null_distribution_*.json"],
-        "mediation": ["mediation/mediation*.tsv"],
-        "moderation": ["moderation/moderation_results*.tsv"],
-        "mixed_effects": ["mixed_effects/mixed_effects*.tsv"],
+        "cluster": ["cluster*/*/cluster_results_*.tsv", "cluster*/*/null_distribution_*.json"],
+        "mediation": ["mediation*/*/mediation*.tsv", "mediation*/*/mediation*.parquet"],
+        "moderation": ["moderation*/*/moderation_results*.tsv", "moderation*/*/moderation_results*.parquet"],
+        "mixed_effects": ["mixed_effects*/*/mixed_effects*.tsv", "mixed_effects*/*/mixed_effects*.parquet"],
     }
     
     for comp, patterns in computation_patterns.items():
@@ -331,33 +361,36 @@ def discover_trial_table_columns(
     result = {"columns": [], "values": {}, "source": None, "file": None}
     
     trial_file = None
-    patterns = ["trials*.tsv", "trial_table*.tsv"]
+    patterns = ["trial_table*/*/trials*.tsv", "trial_table*/*/trials*.parquet"]
     
+    search_dirs = []
     if subject:
         subj_id = subject.replace("sub-", "")
-        stats_dir = deriv_root / "stats" / f"sub-{subj_id}"
-        if stats_dir.exists():
-            for pattern in patterns:
-                files = list(stats_dir.glob(pattern))
-                if files:
-                    trial_file = files[0]
-                    break
+        search_dirs.append(deriv_root / f"sub-{subj_id}" / "eeg" / "stats")
+    else:
+        search_dirs.extend(sorted(deriv_root.glob("sub-*/eeg/stats"))[:5])
     
-    if not trial_file:
-        for stats_dir in sorted(deriv_root.glob("stats/sub-*"))[:5]:
-            for pattern in patterns:
-                files = list(stats_dir.glob(pattern))
-                if files:
-                    trial_file = files[0]
-                    break
-            if trial_file:
+    for stats_dir in search_dirs:
+        if not stats_dir.exists():
+            continue
+        for pattern in patterns:
+            files = list(stats_dir.glob(pattern))
+            if files:
+                trial_file = files[0]
                 break
+        if trial_file:
+            break
     
     if not trial_file:
         return result
     
     try:
-        df = pd.read_csv(trial_file, sep="\t", nrows=500)
+        if trial_file.suffix == ".parquet":
+            from eeg_pipeline.infra.tsv import read_parquet
+            df = read_parquet(trial_file)
+            df = df.head(500) if df is not None else pd.DataFrame()
+        else:
+            df = pd.read_csv(trial_file, sep="\t", nrows=500)
         result["columns"] = df.columns.tolist()
         result["source"] = "trial_table"
         result["file"] = str(trial_file)
@@ -407,7 +440,7 @@ def discover_condition_effects_columns(
     deriv_root = Path(deriv_root)
     result = {"columns": [], "values": {}, "windows": [], "source": "condition_effects", "files": []}
     
-    condition_effects_dirs = []
+    condition_effects_dirs: List[Path] = []
     if subject:
         subj_id = subject.replace("sub-", "")
         # Try multiple possible paths
@@ -418,7 +451,12 @@ def discover_condition_effects_columns(
         ]
         for stats_dir in possible_paths:
             if stats_dir.exists():
-                condition_effects_dirs.append(stats_dir)
+                # New layout nests feature folders under condition_effects*/<feature>/...
+                subdirs = [p for p in stats_dir.glob("*") if p.is_dir()]
+                if subdirs:
+                    condition_effects_dirs.extend(subdirs)
+                else:
+                    condition_effects_dirs.append(stats_dir)
                 break
     
     if not condition_effects_dirs:
@@ -430,7 +468,11 @@ def discover_condition_effects_columns(
         ]:
             for subj_dir in sorted(deriv_root.glob(pattern))[:5]:
                 if subj_dir.exists():
-                    condition_effects_dirs.append(subj_dir)
+                    subdirs = [p for p in subj_dir.glob("*") if p.is_dir()]
+                    if subdirs:
+                        condition_effects_dirs.extend(subdirs)
+                    else:
+                        condition_effects_dirs.append(subj_dir)
             if condition_effects_dirs:
                 break
     

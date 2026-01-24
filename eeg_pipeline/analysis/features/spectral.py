@@ -507,32 +507,26 @@ def extract_power_features(
     # - For other segments, emit baseline-normalized power (logratio) unless TFR is already baselined.
     if str(segment_name or "").strip().lower() == "baseline" and not is_tfr_baselined:
         for band, frequency_mask in band_frequency_masks.items():
-            try:
-                raw_power = _compute_frequency_weighted_power(
-                    tfr_data, frequency_mask, time_mask, freqs
-                )
+            raw_power = _compute_frequency_weighted_power(tfr_data, frequency_mask, time_mask, freqs)
 
-                if "channels" in spatial_modes:
-                    for channel_idx, channel_name in enumerate(channel_names):
-                        output_features[
-                            NamingSchema.build("power", "baseline", band, "ch", "mean", channel=channel_name)
-                        ] = raw_power[:, channel_idx]
-
-                if "global" in spatial_modes:
+            if "channels" in spatial_modes:
+                for channel_idx, channel_name in enumerate(channel_names):
                     output_features[
-                        NamingSchema.build("power", "baseline", band, "global", "mean")
-                    ] = np.nanmean(raw_power, axis=1)
+                        NamingSchema.build("power", "baseline", band, "ch", "mean", channel=channel_name)
+                    ] = raw_power[:, channel_idx]
 
-                if "roi" in spatial_modes and roi_map:
-                    for roi_name, channel_indices in roi_map.items():
-                        if not channel_indices:
-                            continue
-                        output_features[
-                            NamingSchema.build("power", "baseline", band, "roi", "mean", channel=roi_name)
-                        ] = np.nanmean(raw_power[:, channel_indices], axis=1)
+            if "global" in spatial_modes:
+                output_features[
+                    NamingSchema.build("power", "baseline", band, "global", "mean")
+                ] = np.nanmean(raw_power, axis=1)
 
-            except Exception as e:
-                ctx.logger.error(f"Error computing baseline power features for {band}: {e}")
+            if "roi" in spatial_modes and roi_map:
+                for roi_name, channel_indices in roi_map.items():
+                    if not channel_indices:
+                        continue
+                    output_features[
+                        NamingSchema.build("power", "baseline", band, "roi", "mean", channel=roi_name)
+                    ] = np.nanmean(raw_power[:, channel_indices], axis=1)
 
         if not output_features:
             return pd.DataFrame(), []
@@ -552,40 +546,34 @@ def extract_power_features(
     _validate_baseline_requirements(baseline_df, n_epochs, is_tfr_baselined, require_baseline)
     
     for band, frequency_mask in band_frequency_masks.items():
-        try:
-            raw_power = _compute_frequency_weighted_power(
-                tfr_data, frequency_mask, time_mask, freqs
+        raw_power = _compute_frequency_weighted_power(tfr_data, frequency_mask, time_mask, freqs)
+        
+        normalized_power, statistic_name = _normalize_power(
+            raw_power,
+            band,
+            baseline_arrays,
+            is_tfr_baselined,
+            require_baseline,
+            epsilon_psd,
+        )
+        
+        if 'channels' in spatial_modes:
+            channel_features = _extract_channel_features(
+                normalized_power, segment_name, band, statistic_name, channel_names
             )
-            
-            normalized_power, statistic_name = _normalize_power(
-                raw_power,
-                band,
-                baseline_arrays,
-                is_tfr_baselined,
-                require_baseline,
-                epsilon_psd,
+            output_features.update(channel_features)
+        
+        if 'global' in spatial_modes:
+            global_features = _extract_global_features(
+                normalized_power, segment_name, band, statistic_name
             )
-            
-            if 'channels' in spatial_modes:
-                channel_features = _extract_channel_features(
-                    normalized_power, segment_name, band, statistic_name, channel_names
-                )
-                output_features.update(channel_features)
-            
-            if 'global' in spatial_modes:
-                global_features = _extract_global_features(
-                    normalized_power, segment_name, band, statistic_name
-                )
-                output_features.update(global_features)
-            
-            if 'roi' in spatial_modes and roi_map:
-                roi_features = _extract_roi_features(
-                    normalized_power, segment_name, band, statistic_name, roi_map
-                )
-                output_features.update(roi_features)
-                
-        except Exception as e:
-            ctx.logger.error(f"Error computing power features for {segment_name} {band}: {e}")
+            output_features.update(global_features)
+        
+        if 'roi' in spatial_modes and roi_map:
+            roi_features = _extract_roi_features(
+                normalized_power, segment_name, band, statistic_name, roi_map
+            )
+            output_features.update(roi_features)
 
     if not output_features:
         return pd.DataFrame(), []
@@ -852,10 +840,7 @@ def _robust_aperiodic_fit(
         if len(kept_indices) < min_fit_points:
             break
         
-        try:
-            slope, intercept = np.polyfit(log_f[kept_indices], log_p[kept_indices], 1)
-        except (np.linalg.LinAlgError, ValueError):
-            return None, None
+        slope, intercept = np.polyfit(log_f[kept_indices], log_p[kept_indices], 1)
         
         # Compute residuals
         predicted = intercept + slope * log_f
@@ -923,22 +908,18 @@ def remove_aperiodic_component(
     
     fit_mask = (freqs >= fit_range[0]) & (freqs <= fit_range[1]) & np.isfinite(log_p)
     if np.sum(fit_mask) < 5:
-        return psd.copy()
+        raise ValueError("Insufficient frequency points for aperiodic fit in requested range.")
     
-    try:
-        if robust:
-            slope, intercept = _robust_aperiodic_fit(log_f, log_p, fit_mask)
-            if slope is None or intercept is None:
-                # Fall back to simple fit
-                slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
-        else:
-            slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
-        
-        aperiodic_fit = intercept + slope * log_f
-        residual = log_p - aperiodic_fit
-        return 10 ** residual
-    except (np.linalg.LinAlgError, ValueError):
-        return psd.copy()
+    if robust:
+        slope, intercept = _robust_aperiodic_fit(log_f, log_p, fit_mask)
+        if slope is None or intercept is None:
+            raise ValueError("Robust aperiodic fit failed (insufficient points after peak rejection).")
+    else:
+        slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
+    
+    aperiodic_fit = intercept + slope * log_f
+    residual = log_p - aperiodic_fit
+    return 10 ** residual
 
 
 def compute_peak_frequency(
@@ -1009,13 +990,10 @@ def compute_peak_frequency(
     
     aperiodic_fit = None
     if np.sum(fit_mask) >= 5:
-        try:
-            slope, intercept = _robust_aperiodic_fit(log_f, log_p, fit_mask)
-            if slope is None or intercept is None:
-                slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
-            aperiodic_fit = 10 ** (intercept + slope * log_f)
-        except (np.linalg.LinAlgError, ValueError):
-            pass
+        slope, intercept = _robust_aperiodic_fit(log_f, log_p, fit_mask)
+        if slope is None or intercept is None:
+            slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
+        aperiodic_fit = 10 ** (intercept + slope * log_f)
     
     if aperiodic_adjusted and aperiodic_fit is not None:
         residual = log_p - np.log10(aperiodic_fit)
@@ -1303,10 +1281,14 @@ def extract_spectral_features(
 
     exclude_line = bool(spec_cfg.get("exclude_line_noise", True))
     line_freqs = spec_cfg.get("line_noise_freqs", [50.0])
-    try:
-        line_freqs = [float(f) for f in line_freqs]
-    except Exception:
-        line_freqs = [50.0]
+    if line_freqs is None:
+        line_freqs = []
+    if not isinstance(line_freqs, (list, tuple)):
+        raise TypeError(
+            "feature_engineering.spectral.line_noise_freqs must be a list/tuple of numbers "
+            f"(got {type(line_freqs).__name__})."
+        )
+    line_freqs = [float(f) for f in line_freqs]
     line_width = float(spec_cfg.get("line_noise_width_hz", 1.0))
     n_harm = int(spec_cfg.get("line_noise_harmonics", 3))
     
@@ -1421,38 +1403,34 @@ def extract_spectral_features(
         if seg_data.shape[2] < 2:
             continue
 
-        try:
-            import mne
-            if psd_method == "multitaper":
-                # Multitaper: preferred for short segments (lower variance)
-                psds, freqs = mne.time_frequency.psd_array_multitaper(
-                    seg_data,
-                    sfreq=float(sfreq),
-                    fmin=fmin_psd,
-                    fmax=fmax_psd,
-                    adaptive=multitaper_adaptive,
-                    normalization="full",
-                    verbose=False,
-                )
-            else:
-                # Welch: use 50% overlap for variance reduction (NOT n_overlap=0)
-                # n_overlap=0 inflates variance and makes peak/entropy features noisy
-                n_times = int(seg_data.shape[2])
-                n_per_seg = min(int(float(sfreq) * 2.0), n_times)
-                n_overlap = n_per_seg // 2  # 50% overlap for variance reduction
-                psds, freqs = mne.time_frequency.psd_array_welch(
-                    seg_data,
-                    sfreq=float(sfreq),
-                    fmin=fmin_psd,
-                    fmax=fmax_psd,
-                    n_fft=min(n_times, max(256, n_per_seg)),
-                    n_per_seg=n_per_seg,
-                    n_overlap=n_overlap,
-                    verbose=False,
-                )
-        except Exception as exc:
-            logger.warning("Spectral: PSD computation failed for segment '%s' (%s); skipping.", segment_name, exc)
-            continue
+        import mne
+        if psd_method == "multitaper":
+            # Multitaper: preferred for short segments (lower variance)
+            psds, freqs = mne.time_frequency.psd_array_multitaper(
+                seg_data,
+                sfreq=float(sfreq),
+                fmin=fmin_psd,
+                fmax=fmax_psd,
+                adaptive=multitaper_adaptive,
+                normalization="full",
+                verbose=False,
+            )
+        else:
+            # Welch: use 50% overlap for variance reduction (NOT n_overlap=0)
+            # n_overlap=0 inflates variance and makes peak/entropy features noisy
+            n_times = int(seg_data.shape[2])
+            n_per_seg = min(int(float(sfreq) * 2.0), n_times)
+            n_overlap = n_per_seg // 2  # 50% overlap for variance reduction
+            psds, freqs = mne.time_frequency.psd_array_welch(
+                seg_data,
+                sfreq=float(sfreq),
+                fmin=fmin_psd,
+                fmax=fmax_psd,
+                n_fft=min(n_times, max(256, n_per_seg)),
+                n_per_seg=n_per_seg,
+                n_overlap=n_overlap,
+                verbose=False,
+            )
 
         freqs = np.asarray(freqs, dtype=float)
         psds = np.asarray(psds, dtype=float)
@@ -1491,8 +1469,8 @@ def extract_spectral_features(
                 if min_cycles_at_fmin > 0:
                     try:
                         fmin_hz = float(fmin)
-                    except Exception:
-                        fmin_hz = np.nan
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(f"Invalid fmin for band '{band}': {fmin}") from exc
                     if np.isfinite(fmin_hz) and fmin_hz > 0:
                         min_req_sec = float(min_cycles_at_fmin) / fmin_hz
                         if seg_duration_sec < min_req_sec:

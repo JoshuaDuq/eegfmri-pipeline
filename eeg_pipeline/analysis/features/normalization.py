@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.config.loader import get_feature_constant, load_config
+from eeg_pipeline.utils.config.loader import get_feature_constant
 
 
 NormMethod = Literal["zscore", "robust", "minmax", "rank", "log", "none"]
@@ -30,17 +30,13 @@ DEFAULT_EXCLUDE_COLUMNS = ["condition", "epoch", "trial", "subject", "run", "run
 
 
 def _get_epsilon(config: Optional[Any] = None) -> float:
-    """Get epsilon constant from config with fallback."""
-    if config is None:
-        try:
-            config = load_config()
-        except Exception:
-            return DEFAULT_EPSILON
+    """Get epsilon constant.
     
-    try:
-        return float(get_feature_constant(config, "EPSILON_STD", DEFAULT_EPSILON))
-    except Exception:
+    If config is not provided, uses DEFAULT_EPSILON. No implicit config loading is performed.
+    """
+    if config is None:
         return DEFAULT_EPSILON
+    return float(get_feature_constant(config, "EPSILON_STD", DEFAULT_EPSILON))
 
 
 def _extract_finite_values(
@@ -277,7 +273,9 @@ def _get_normalization_function(method: NormMethod):
         "rank": rank_normalize,
         "log": log_normalize,
     }
-    return norm_functions.get(method, zscore_normalize)
+    if method not in norm_functions:
+        raise ValueError(f"Unknown normalization method: {method}")
+    return norm_functions[method]
 
 
 def _normalize_column_all_data(
@@ -365,6 +363,12 @@ def normalize_features(
     """
     if method == "none":
         return df.copy()
+
+    if method not in {"zscore", "robust", "minmax", "rank", "log"}:
+        raise ValueError(f"Unknown normalization method: {method}")
+
+    if reference not in {"all", "condition", "run"}:
+        raise ValueError(f"Unknown normalization reference: {reference}")
     
     if exclude_columns is None:
         exclude_columns = DEFAULT_EXCLUDE_COLUMNS.copy()

@@ -401,6 +401,38 @@ def get_config_value(config: Any, key: str, default: Any) -> Any:
     return default
 
 
+_MISSING = object()
+
+
+def require_config_value(config: Any, key: str) -> Any:
+    """Return a required config value or raise.
+
+    This is the strict counterpart to ``get_config_value``. Use it at
+    analysis/plotting entry points where missing configuration should surface
+    immediately (no silent fallbacks).
+    """
+    if config is None:
+        raise ConfigError(f"Missing required config '{key}': config is None")
+
+    if hasattr(config, "get"):
+        value = config.get(key, _MISSING)
+    elif isinstance(config, dict):
+        value = get_nested_value(config, key, _MISSING)
+    else:
+        value = _MISSING
+
+    if value is _MISSING:
+        raise ConfigError(f"Missing required config key: {key}")
+
+    if value is None:
+        raise ConfigError(f"Missing required config value (None): {key}")
+
+    if isinstance(value, str) and value.strip() == "":
+        raise ConfigError(f"Missing required config value (empty string): {key}")
+
+    return value
+
+
 def ensure_config(config: Optional[Any] = None) -> Any:
     if config is not None:
         return config

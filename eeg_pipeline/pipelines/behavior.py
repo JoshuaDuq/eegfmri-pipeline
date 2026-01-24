@@ -36,6 +36,7 @@ from eeg_pipeline.analysis.behavior.orchestration import (
     run_behavior_stages,
     write_analysis_metadata as _write_analysis_metadata_impl,
     write_outputs_manifest,
+    get_behavior_output_dir,
 )
 
 
@@ -599,7 +600,7 @@ class BehaviorPipeline(PipelineBase):
         logger.info(f"DAG execution completed in {elapsed:.1f}s")
         
         # Persist metadata (step 3)
-        outputs_manifest_path = ctx.stats_dir / "outputs_manifest.json"
+        outputs_manifest_path = write_outputs_manifest(ctx, self.pipeline_config, results, {})
         try:
             _write_analysis_metadata_impl(
                 ctx, self.pipeline_config, results,
@@ -609,10 +610,9 @@ class BehaviorPipeline(PipelineBase):
         except Exception as e:
             logger.warning(f"Failed to write analysis metadata: {e}")
         
-        write_outputs_manifest(ctx, self.pipeline_config, results, {})
-        
         summary = results.to_summary()
-        summary_path = ctx.stats_dir / "summary.json"
+        summary_dir = get_behavior_output_dir(ctx, "summary", ensure=True)
+        summary_path = summary_dir / "summary.json"
         summary_path.write_text(json.dumps(summary, indent=2, default=str))
 
         n_features = summary.get("n_features", 0)

@@ -86,12 +86,13 @@ type SubjectInfo struct {
 
 // SubjectsLoadedMsg is sent when subject discovery completes
 type SubjectsLoadedMsg struct {
-	Subjects              []SubjectInfo
-	AvailableWindows      []string
-	AvailableEventColumns []string
-	AvailableChannels     []string
-	UnavailableChannels   []string
-	Error                 error
+	Subjects                 []SubjectInfo
+	AvailableWindows         []string
+	AvailableWindowsByFeature map[string][]string
+	AvailableEventColumns    []string
+	AvailableChannels        []string
+	UnavailableChannels      []string
+	Error                    error
 }
 
 // ColumnsDiscoveredMsg is sent when column discovery from events/trial tables completes

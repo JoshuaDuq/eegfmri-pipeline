@@ -72,12 +72,17 @@ def _collect_subjects_to_validate(
     return list(epochs_subjects | features_subjects)
 
 
-def _validate_tsv_schema(
+def _validate_table_schema(
     path: Path, *, required: List[str], any_of: Optional[List[str]] = None
 ) -> Optional[str]:
-    """Validate TSV file has required columns and optionally one of any_of columns."""
+    """Validate table has required columns (TSV or parquet)."""
     try:
-        df = pd.read_csv(path, sep="\t", nrows=5)
+        if path.suffix == ".parquet":
+            from eeg_pipeline.infra.tsv import read_parquet
+            df = read_parquet(path)
+            df = df.head(5) if df is not None else pd.DataFrame()
+        else:
+            df = pd.read_csv(path, sep="\t", nrows=5)
     except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError) as exc:
         error_message = str(exc)[:_MAX_READ_ERROR_LENGTH]
         return f"Read error: {error_message}"
@@ -233,26 +238,37 @@ def _validate_behavior(
     behavior_checks = [
         (
             "correlations",
-            "correlations*.tsv",
+            ["correlations*/*/correlations*.tsv", "correlations*/*/correlations*.parquet"],
             ["feature", "target", "p_primary"],
             ["r_primary", "r"],
         ),
-        ("pain_sensitivity", "pain_sensitivity*.tsv", ["feature", "p_primary"], None),
+        (
+            "pain_sensitivity",
+            ["pain_sensitivity*/*/pain_sensitivity*.tsv", "pain_sensitivity*/*/pain_sensitivity*.parquet"],
+            ["feature", "p_primary"],
+            None,
+        ),
         (
             "regression",
-            "regression_feature_effects*.tsv",
+            [
+                "trialwise_regression*/*/regression_feature_effects*.tsv",
+                "trialwise_regression*/*/regression_feature_effects*.parquet",
+            ],
             ["feature", "target", "beta_feature", "p_primary"],
             None,
         ),
         (
             "models",
-            "models_feature_effects*.tsv",
+            [
+                "feature_models*/*/models_feature_effects*.tsv",
+                "feature_models*/*/models_feature_effects*.parquet",
+            ],
             ["feature", "target", "model_family", "beta_feature", "p_primary"],
             None,
         ),
         (
             "condition_effects",
-            "condition_effects*.tsv",
+            ["condition_effects*/*/condition_effects*.tsv", "condition_effects*/*/condition_effects*.parquet"],
             ["feature", "p_primary"],
             None,
         ),
@@ -270,8 +286,8 @@ def _validate_behavior(
             })
             continue
 
-        trials_files = list(stats_dir.glob("trials*.tsv")) or list(
-            stats_dir.glob("trials*.parquet")
+        trials_files = list(stats_dir.glob("trial_table*/*/trials*.tsv")) or list(
+            stats_dir.glob("trial_table*/*/trials*.parquet")
         )
         if trials_files:
             passed.append(
@@ -284,20 +300,21 @@ def _validate_behavior(
                 "message": "Missing trials*.tsv (trial table not found)",
             })
 
-        for check_name, pattern, required_cols, any_of_cols in behavior_checks:
-            for path in stats_dir.glob(pattern):
-                error = _validate_tsv_schema(
-                    path, required=required_cols, any_of=any_of_cols
-                )
-                if error:
-                    warnings.append({
-                        "type": "behavior",
-                        "subject": subject,
-                        "file": path.name,
-                        "message": f"{check_name}: {error}",
-                    })
-                else:
-                    passed.append(f"sub-{subject}: {path.name} schema OK")
+        for check_name, patterns, required_cols, any_of_cols in behavior_checks:
+            for pattern in patterns:
+                for path in stats_dir.glob(pattern):
+                    error = _validate_table_schema(
+                        path, required=required_cols, any_of=any_of_cols
+                    )
+                    if error:
+                        warnings.append({
+                            "type": "behavior",
+                            "subject": subject,
+                            "file": path.name,
+                            "message": f"{check_name}: {error}",
+                        })
+                    else:
+                        passed.append(f"sub-{subject}: {path.name} schema OK")
 
 
 def _validate_bids(

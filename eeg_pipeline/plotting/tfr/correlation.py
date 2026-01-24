@@ -23,7 +23,7 @@ from ...utils.data.tfr_alignment import extract_time_frequency_grid
 from ...utils.analysis.stats import (
     fdr_bh_values as _fdr_bh_values,
 )
-from ...utils.config.loader import get_fisher_z_clip_values, get_config_value
+from ...utils.config.loader import get_fisher_z_clip_values, get_config_value, require_config_value
 from ..config import get_plot_config
 from ..core.utils import log
 from .channels import _save_fig
@@ -53,14 +53,13 @@ def _discover_subjects_with_data(
         subject_id = subject_dir.name[4:]
         if allowed_subjects is not None and subject_id not in allowed_subjects:
             continue
-        unified_path = (
-            subject_dir
-            / "eeg"
-            / "stats"
-            / "temporal_correlations"
-            / f"tf_grid{roi_suffix}{method_suffix}.tsv"
+        stats_dir = subject_dir / "eeg" / "stats"
+        candidates = list(
+            stats_dir.glob(
+                f"temporal_correlations*/*/tf_grid{roi_suffix}{method_suffix}.tsv"
+            )
         )
-        if unified_path.exists():
+        if candidates:
             subject_ids.append(subject_id)
     return subject_ids
 
@@ -82,15 +81,18 @@ def _load_subject_correlation_data(
     Returns:
         DataFrame with correlation statistics, or None if file doesn't exist
     """
-    unified_path = (
-        config.deriv_root
-        / f"sub-{subject_id}"
-        / "eeg"
-        / "stats"
-        / "temporal_correlations"
-        / f"tf_grid{roi_suffix}{method_suffix}.tsv"
+    stats_dir = (
+        config.deriv_root / f"sub-{subject_id}" / "eeg" / "stats"
     )
-    return read_tsv(unified_path) if unified_path.exists() else None
+    candidates = list(
+        stats_dir.glob(
+            f"temporal_correlations*/*/tf_grid{roi_suffix}{method_suffix}.tsv"
+        )
+    )
+    if not candidates:
+        return None
+    chosen = max(candidates, key=lambda p: p.stat().st_mtime)
+    return read_tsv(chosen) if chosen.exists() else None
 
 
 def _get_baseline_window(config) -> List[float]:
@@ -102,9 +104,13 @@ def _get_baseline_window(config) -> List[float]:
     Returns:
         Baseline window as [start, end] in seconds
     """
-    if not config:
-        return [-0.5, -0.01]
-    return config.get("time_frequency_analysis.baseline_window", [-0.5, -0.01])
+    baseline_window = require_config_value(config, "time_frequency_analysis.baseline_window")
+    if not isinstance(baseline_window, (list, tuple)) or len(baseline_window) < 2:
+        raise ValueError(
+            "time_frequency_analysis.baseline_window must be a list/tuple of length 2 "
+            f"(got {baseline_window!r})"
+        )
+    return [float(baseline_window[0]), float(baseline_window[1])]
 
 
 def _annotate_correlation_figure(

@@ -119,11 +119,7 @@ from .effect_size import (
     compute_cohens_d_with_bootstrap_ci,
 )
 
-from eeg_pipeline.utils.validation import (
-    validate_pain_binary_values,
-    validate_temperature_values,
-    check_pyriemann,
-)
+from eeg_pipeline.utils.validation import check_pyriemann
 
 from eeg_pipeline.utils.analysis.arrays import extract_finite_mask
 from eeg_pipeline.utils.data.manipulation import extract_pain_masks, extract_duration_data
@@ -380,8 +376,6 @@ __all__ = [
     "correlation_difference_effect",
     "compute_cohens_d_with_bootstrap_ci",
     # Validation
-    "validate_pain_binary_values",
-    "validate_temperature_values",
     "validate_baseline_window_pre_stimulus",
     "check_pyriemann",
     "extract_finite_mask",

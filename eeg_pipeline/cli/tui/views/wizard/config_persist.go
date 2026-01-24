@@ -173,6 +173,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["itpcMinTrialsPerCondition"] = m.itpcMinTrialsPerCondition
 	cfg["itpcAllowUnsafeLoo"] = m.itpcAllowUnsafeLoo
 	cfg["itpcBaselineCorrection"] = m.itpcBaselineCorrection
+	cfg["itpcNJobs"] = m.itpcNJobs
 
 	// Source localization
 	cfg["sourceLocEnabled"] = m.sourceLocEnabled
@@ -322,6 +323,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["conditionFailFast"] = m.conditionFailFast
 	cfg["conditionEffectThreshold"] = m.conditionEffectThreshold
 	cfg["conditionOverwrite"] = m.conditionOverwrite
+	cfg["temporalTargetColumn"] = m.temporalTargetColumn
 	cfg["temporalConditionColumn"] = m.temporalConditionColumn
 	cfg["temporalConditionValues"] = m.temporalConditionValues
 	cfg["temporalSplitByCondition"] = m.temporalSplitByCondition
@@ -344,12 +346,9 @@ func (m Model) ExportConfig() map[string]interface{} {
 
 	// Trial table
 	cfg["trialTableFormat"] = m.trialTableFormat
-	cfg["trialTableIncludeFeatures"] = m.trialTableIncludeFeatures
-	cfg["trialTableIncludeCovars"] = m.trialTableIncludeCovars
-	cfg["trialTableIncludeEvents"] = m.trialTableIncludeEvents
 	cfg["trialTableAddLagFeatures"] = m.trialTableAddLagFeatures
-	cfg["trialTableExtraEventCols"] = m.trialTableExtraEventCols
-	cfg["trialTableHighMissingFrac"] = m.trialTableHighMissingFrac
+	// Note: older configs persisted include/extras/missing-frac, but these are no longer
+	// exposed in the CLI; we intentionally do not persist them anymore.
 
 	// Pain residual
 	cfg["painResidualEnabled"] = m.painResidualEnabled
@@ -977,6 +976,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.itpcMinTrialsPerCondition = getInt("itpcMinTrialsPerCondition", m.itpcMinTrialsPerCondition)
 	m.itpcAllowUnsafeLoo = getBool("itpcAllowUnsafeLoo", m.itpcAllowUnsafeLoo)
 	m.itpcBaselineCorrection = getInt("itpcBaselineCorrection", m.itpcBaselineCorrection)
+	m.itpcNJobs = getInt("itpcNJobs", m.itpcNJobs)
 
 	// Source localization
 	m.sourceLocEnabled = getBool("sourceLocEnabled", m.sourceLocEnabled)
@@ -1126,6 +1126,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.conditionFailFast = getBool("conditionFailFast", m.conditionFailFast)
 	m.conditionEffectThreshold = getFloat("conditionEffectThreshold", m.conditionEffectThreshold)
 	m.conditionOverwrite = getBool("conditionOverwrite", m.conditionOverwrite)
+	m.temporalTargetColumn = getString("temporalTargetColumn", m.temporalTargetColumn)
 	m.temporalConditionColumn = getString("temporalConditionColumn", m.temporalConditionColumn)
 	m.temporalConditionValues = getString("temporalConditionValues", m.temporalConditionValues)
 	m.temporalSplitByCondition = getBool("temporalSplitByCondition", m.temporalSplitByCondition)
@@ -1148,12 +1149,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 
 	// Trial table
 	m.trialTableFormat = getInt("trialTableFormat", m.trialTableFormat)
-	m.trialTableIncludeFeatures = getBool("trialTableIncludeFeatures", m.trialTableIncludeFeatures)
-	m.trialTableIncludeCovars = getBool("trialTableIncludeCovars", m.trialTableIncludeCovars)
-	m.trialTableIncludeEvents = getBool("trialTableIncludeEvents", m.trialTableIncludeEvents)
 	m.trialTableAddLagFeatures = getBool("trialTableAddLagFeatures", m.trialTableAddLagFeatures)
-	m.trialTableExtraEventCols = getString("trialTableExtraEventCols", m.trialTableExtraEventCols)
-	m.trialTableHighMissingFrac = getFloat("trialTableHighMissingFrac", m.trialTableHighMissingFrac)
+	// Backward-compat: we accept older persisted keys but ignore them.
+	_ = getBool("trialTableIncludeFeatures", true)
+	_ = getBool("trialTableIncludeCovars", true)
+	_ = getBool("trialTableIncludeEvents", true)
+	_ = getString("trialTableExtraEventCols", "")
+	_ = getFloat("trialTableHighMissingFrac", 0.5)
 
 	// Pain residual
 	m.painResidualEnabled = getBool("painResidualEnabled", m.painResidualEnabled)

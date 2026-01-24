@@ -52,6 +52,7 @@ from .contrasts import (
     _prepare_comparison_contrast_data,
 )
 from .channels import _save_fig as _channels_save_fig, _sanitize_label_for_filename
+from eeg_pipeline.utils.config.loader import require_config_value
 
 
 TEMPERATURE_TOLERANCE = 0.05
@@ -593,12 +594,16 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
         window_size_ms: Optional size of each time window in milliseconds (defaults to config: time_frequency_analysis.topomap.temporal.window_size_ms)
         logger: Optional logger instance
     """
-    from eeg_pipeline.utils.config.loader import get_config_value
-    
     if active_window is None:
-        active_window = tuple(get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5]))
+        active_raw = require_config_value(config, "time_frequency_analysis.active_window")
+        if not isinstance(active_raw, (list, tuple)) or len(active_raw) < 2:
+            raise ValueError(
+                "time_frequency_analysis.active_window must be a list/tuple of length 2 "
+                f"(got {active_raw!r})"
+            )
+        active_window = (float(active_raw[0]), float(active_raw[1]))
     if window_size_ms is None:
-        window_size_ms = float(get_config_value(config, "time_frequency_analysis.topomap.temporal.window_size_ms", 100.0))
+        window_size_ms = float(require_config_value(config, "time_frequency_analysis.topomap.temporal.window_size_ms"))
     
     prepared = _prepare_temporal_topomap_data(
         tfr, events_df, config, baseline, active_window, logger,
@@ -660,12 +665,16 @@ def plot_temporal_topomaps_allbands_active(
         window_count: Optional number of time windows to create (defaults to config: time_frequency_analysis.topomap.temporal.window_count)
         logger: Optional logger instance
     """
-    from eeg_pipeline.utils.config.loader import get_config_value
-    
     if active_window is None:
-        active_window = tuple(get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5]))
+        active_raw = require_config_value(config, "time_frequency_analysis.active_window")
+        if not isinstance(active_raw, (list, tuple)) or len(active_raw) < 2:
+            raise ValueError(
+                "time_frequency_analysis.active_window must be a list/tuple of length 2 "
+                f"(got {active_raw!r})"
+            )
+        active_window = (float(active_raw[0]), float(active_raw[1]))
     if window_count is None:
-        window_count = int(get_config_value(config, "time_frequency_analysis.topomap.temporal.window_count", 5))
+        window_count = int(require_config_value(config, "time_frequency_analysis.topomap.temporal.window_count"))
     
     prepared = _prepare_temporal_topomap_data(
         tfr, events_df, config, baseline, active_window, logger,

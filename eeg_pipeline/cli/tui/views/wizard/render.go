@@ -395,7 +395,7 @@ func (m Model) getStepHints() []string {
 			styles.RenderKeyHint("Space", "Toggle"),
 			styles.RenderKeyHint("A/N", "All/None"),
 			styles.RenderKeyHint("/", "Filter"),
-			styles.RenderKeyHint("F5", "Refresh"),
+			styles.RenderKeyHint("R", "Refresh"),
 			styles.RenderKeyHint("Enter", "Next"),
 		}
 	default:

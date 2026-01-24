@@ -19,7 +19,6 @@ from mne.viz import plot_topomap
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
 from eeg_pipeline.utils.data.columns import (
-    find_pain_column_in_events,
     find_temperature_column_in_events,
 )
 from eeg_pipeline.plotting.config import get_plot_config
@@ -31,13 +30,8 @@ from eeg_pipeline.plotting.features.roi import (
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_and_crop,
     validate_baseline_indices,
-    extract_band_channel_means,
 )
-from eeg_pipeline.utils.analysis.stats import (
-    compute_inter_band_coupling_matrix,
-)
-from eeg_pipeline.utils.data.features import get_power_columns_by_band
-from eeg_pipeline.utils.config.loader import get_frequency_bands
+from eeg_pipeline.utils.config.loader import get_frequency_bands, require_config_value
 from scipy.stats import mannwhitneyu
 
 
@@ -62,67 +56,19 @@ MAX_FONT_SIZE = 10
 ###################################################################
 
 
-def _extract_channel_names_from_columns(band_cols: List[str]) -> List[str]:
-    """Extract channel names from power column names."""
-    channel_names = []
-    for col in band_cols:
-        parsed = NamingSchema.parse(str(col))
-        if parsed.get("valid") and parsed.get("group") == "power":
-            ident = parsed.get("identifier")
-            if ident:
-                channel_names.append(str(ident))
-                continue
-        channel_names.append(str(col))
-    return channel_names
-
-
-def _build_channel_data_map(mean_power: pd.Series) -> Dict[str, float]:
-    """Build a mapping from channel names to power values."""
-    data_map = {}
-    for col, val in mean_power.items():
-        parsed = NamingSchema.parse(str(col))
-        if not (parsed.get("valid") and parsed.get("group") == "power"):
-            continue
-        ident = parsed.get("identifier")
-        if ident:
-            data_map[str(ident)] = val
-    return data_map
-
-
-def _compute_heatmap_color_limits(
-    heatmap_data: np.ndarray,
-    vmin: Optional[float],
-    vmax: Optional[float],
-) -> Tuple[float, float]:
-    """Compute color limits for heatmap display."""
-    if vmin is None or vmax is None:
-        data_min = float(np.nanmin(heatmap_data))
-        data_max = float(np.nanmax(heatmap_data))
-        vmax_abs = max(abs(data_min), abs(data_max))
-        if vmin is None:
-            vmin = -vmax_abs
-        if vmax is None:
-            vmax = vmax_abs
-    return vmin, vmax
-
-
 def _get_comparison_segments(
     power_df: pd.DataFrame,
     config: Any,
     logger: Optional[logging.Logger],
 ) -> List[str]:
-    """Extract comparison segments from config or auto-detect from data."""
-    from eeg_pipeline.utils.config.loader import get_config_value
-    from .utils import get_named_segments
-    
-    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
-    if not segments or len(segments) < 2:
-        detected = get_named_segments(power_df, group="power")
-        if len(detected) >= 2:
-            segments = detected[:2]
-            if logger:
-                logger.info(f"Auto-detected segments for comparison: {segments}")
-    return segments
+    """Extract comparison segments from config (no auto-detection)."""
+    segments = require_config_value(config, "plotting.comparisons.comparison_windows")
+    if not isinstance(segments, (list, tuple)) or len(segments) < 2:
+        raise ValueError(
+            "plotting.comparisons.comparison_windows must be a list/tuple with at least 2 window names "
+            f"(got {segments!r})"
+        )
+    return [str(s) for s in segments]
 
 
 def _get_comparison_rois(
@@ -416,18 +362,14 @@ def _plot_column_comparison(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
         if not multi_group_info:
-            if logger:
-                logger.warning("Multi-group column comparison enabled but config incomplete.")
-            return
+            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
         
         masks_dict, group_labels = multi_group_info
-        seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", None)
-        if not seg_name:
-            if logger:
-                logger.error("Column comparison requires plotting.comparisons.comparison_segment.")
-            return
+        seg_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
+        if seg_name == "":
+            raise ValueError("plotting.comparisons.comparison_segment must be a non-empty string")
         
         from .utils import load_multigroup_stats
         multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
@@ -481,35 +423,21 @@ def _plot_column_comparison(
             logger.info(f"Saved power multi-group column comparison for {len(roi_names)} ROIs")
         return
     
-    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
     if not comp_mask_info:
-        if logger:
-            logger.warning(
-                "Column comparison enabled but config incomplete. "
-                "Set plotting.comparisons.comparison_column and comparison_values."
-            )
-        return
+        raise ValueError("Column comparison requested but could not resolve comparison masks.")
     
     m1, m2, label1, label2 = comp_mask_info
     
-    seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", None)
-    if not seg_name or seg_name.strip() == "":
-        if logger:
-            logger.error(
-                "Column comparison requires plotting.comparisons.comparison_segment to be set. "
-                "No fallback will be used."
-            )
-        return
+    seg_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
+    if seg_name == "":
+        raise ValueError("plotting.comparisons.comparison_segment must be a non-empty string")
     
     available_segments = get_named_segments(power_df, group="power")
     if seg_name not in available_segments:
-        if logger:
-            logger.error(
-                f"Configured segment '{seg_name}' not found in data. "
-                f"Available segments: {available_segments}. "
-                "Column comparison will not be performed."
-            )
-        return
+        raise ValueError(
+            f"Configured segment '{seg_name}' not found in data. Available segments: {available_segments}"
+        )
     
     plot_cfg = get_plot_config(config)
     segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
@@ -776,22 +704,24 @@ def _validate_epochs_tfr(tfr: Any, function_name: str, logger: logging.Logger) -
 
 def _get_active_window(config: Any) -> List[float]:
     """Get active window from config."""
-    from eeg_pipeline.utils.config.loader import get_config_value
-    return get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    active_window = require_config_value(config, "time_frequency_analysis.active_window")
+    if not isinstance(active_window, (list, tuple)) or len(active_window) < 2:
+        raise ValueError(
+            "time_frequency_analysis.active_window must be a list/tuple of length 2 "
+            f"(got {active_window!r})"
+        )
+    return [float(active_window[0]), float(active_window[1])]
 
 
 def _get_plotting_tfr_baseline_window(config: Any) -> tuple[float, float]:
     """Resolve baseline window for plotting."""
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    baseline = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-    if isinstance(baseline, (list, tuple)) and len(baseline) == 2:
-        try:
-            return float(baseline[0]), float(baseline[1])
-        except (TypeError, ValueError):
-            pass
-
-    return -3.0, -0.5
+    baseline = require_config_value(config, "time_frequency_analysis.baseline_window")
+    if not isinstance(baseline, (list, tuple)) or len(baseline) < 2:
+        raise ValueError(
+            "time_frequency_analysis.baseline_window must be a list/tuple of length 2 "
+            f"(got {baseline!r})"
+        )
+    return float(baseline[0]), float(baseline[1])
 
 
 def _crop_tfr_to_active(tfr: Any, active_window: List[float], logger: logging.Logger) -> Optional[Any]:
@@ -890,191 +820,6 @@ def _get_band_frequency_mask(tfr: Any, band: str, config: Any, logger: logging.L
         return None
         
     return mask
-
-
-###################################################################
-# Power Distribution Plotting
-###################################################################
-
-
-def plot_channel_power_heatmap(
-    pow_df: pd.DataFrame,
-    bands: List[str],
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> None:
-    """Plot heatmap of mean power per channel and band.
-    
-    Args:
-        pow_df: DataFrame with power columns
-        bands: List of frequency band names
-        subject: Subject identifier
-        save_dir: Directory to save plots
-        logger: Logger instance
-        config: Configuration object
-    """
-    plot_cfg = get_plot_config(config)
-
-    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
-        
-    band_means = []
-    channel_names = []
-    valid_bands = []
-    
-    for band in bands:
-        band_str = str(band)
-        band_cols = [
-            c for c in power_cols_by_band.get(band_str, [])
-            if NamingSchema.parse(str(c)).get("scope") == "ch"
-        ]
-        if not band_cols:
-            continue
-        
-        band_data = pow_df[band_cols].mean(axis=0)
-        band_means.append(band_data.values)
-        valid_bands.append(band_str)
-        
-        if not channel_names:
-            channel_names = _extract_channel_names_from_columns(band_cols)
-    
-    if not band_means:
-        logger.warning("No valid band data for heatmap")
-        return
-    
-    features_config = plot_cfg.plot_type_configs.get("features", {})
-    power_config = features_config.get("power", {})
-    
-    heatmap_data = np.array(band_means)
-    fig_size = plot_cfg.get_figure_size("standard", plot_type="features")
-    fig, ax = plt.subplots(figsize=fig_size)
-    
-    vmin_config = power_config.get("vmin")
-    vmax_config = power_config.get("vmax")
-    vmin, vmax = _compute_heatmap_color_limits(heatmap_data, vmin_config, vmax_config)
-    im = ax.imshow(heatmap_data, cmap='RdBu_r', aspect='auto', vmin=vmin, vmax=vmax)
-    ax.set_xticks(range(len(channel_names)))
-    ax.set_xticklabels(channel_names, rotation=45, ha='right', fontsize=plot_cfg.font.small)
-    ax.set_yticks(range(len(valid_bands)))
-    ax.set_yticklabels([b.capitalize() for b in valid_bands], fontsize=plot_cfg.font.medium)
-    n_trials = int(len(pow_df))
-    ax.set_title(
-        f"Mean Power per Channel and Band (n={n_trials} trials)\n"
-        "Baseline-normalized log10(power/baseline)",
-        fontsize=plot_cfg.font.figure_title,
-    )
-    ax.set_xlabel('Channel', fontsize=plot_cfg.font.ylabel)
-    ax.set_ylabel('Frequency Band', fontsize=plot_cfg.font.ylabel)
-    plt.colorbar(im, ax=ax, label='log10(power/baseline)', shrink=0.8)
-    
-    heatmap_threshold = features_config.get("heatmap_text_threshold", HEATMAP_TEXT_THRESHOLD)
-    n_cells = len(channel_names) * len(valid_bands)
-    if n_cells <= heatmap_threshold:
-        std_threshold = np.std(heatmap_data)
-        fontsize_base = heatmap_threshold / len(channel_names)
-        fontsize = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, fontsize_base))
-        for i in range(len(valid_bands)):
-            for j in range(len(channel_names)):
-                value = heatmap_data[i, j]
-                text = f'{value:.2f}'
-                is_high_value = abs(value) > std_threshold
-                text_color = 'white' if is_high_value else 'black'
-                ax.text(j, i, text, ha='center', va='center', color=text_color, fontsize=fontsize)
-    
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_dir / f'sub-{subject}_channel_power_heatmap',
-        formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config
-    )
-    plt.close(fig)
-    logger.info("Saved channel power heatmap")
-
-
-def plot_power_time_courses(
-    tfr_raw: Any,
-    bands: List[str],
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> None:
-    """Plot power time courses for multiple bands.
-    
-    Args:
-        tfr_raw: TFR object (raw, not averaged)
-        bands: List of frequency band names
-        subject: Subject identifier
-        save_dir: Directory to save plots
-        logger: Logger instance
-        config: Configuration object
-    """
-    times = tfr_raw.times
-    features_freq_bands = get_frequency_bands(config)
-    tfr_baseline = _get_plotting_tfr_baseline_window(config)
-    plot_cfg = get_plot_config(config)
-    
-    n_epochs = int(tfr_raw.data.shape[0])
-    n_channels = int(tfr_raw.data.shape[1])
-    
-    fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
-    fig, ax = plt.subplots(figsize=fig_size)
-    
-    for band in bands:
-        if band not in features_freq_bands:
-            logger.warning(f"Band '{band}' not in config; skipping time course.")
-            continue
-        
-        fmin, fmax = features_freq_bands[band]
-        freq_mask = (tfr_raw.freqs >= fmin) & (tfr_raw.freqs <= fmax)
-        if not freq_mask.any():
-            logger.warning(f"No frequencies found for {band} band ({fmin}-{fmax} Hz)")
-            continue
-        
-        epoch_time_courses = tfr_raw.data[:, :, freq_mask, :].mean(axis=(1, 2))
-        mean_tc = np.nanmean(epoch_time_courses, axis=0)
-        if n_epochs >= MIN_EPOCHS_FOR_SEM:
-            sem_tc = np.nanstd(epoch_time_courses, axis=0, ddof=1) / np.sqrt(n_epochs)
-        else:
-            sem_tc = np.full_like(mean_tc, np.nan, dtype=float)
-
-        color = get_band_color(band, config)
-        ax.plot(times, mean_tc, linewidth=2, color=color, label=band.capitalize())
-        ax.fill_between(times, mean_tc - sem_tc, mean_tc + sem_tc, color=color, alpha=0.15, linewidth=0)
-    
-    b_start, b_end, _ = validate_baseline_indices(times, tfr_baseline)
-    bs = max(float(times.min()), float(b_start))
-    be = min(float(times.max()), float(b_end))
-    if be > bs:
-        ax.axvspan(bs, be, alpha=0.2, color='gray', label='Baseline')
-    ax.axvspan(0, times[-1], alpha=0.2, color='orange', label='Stimulus')
-    
-    ax.set_ylabel('log10(power/baseline)', fontsize=plot_cfg.font.ylabel)
-    ax.set_xlabel('Time (s)', fontsize=plot_cfg.font.label)
-    ax.set_title(f'Band Power Time Courses (sub-{subject})', fontsize=plot_cfg.font.title)
-    ax.grid(True, alpha=plot_cfg.style.alpha_grid)
-    ax.legend(fontsize=plot_cfg.font.small, loc='best')
-    
-    footer_text = (
-        f"n={n_epochs} trials, {n_channels} channels | "
-        f"Baseline: [{b_start:.2f}, {b_end:.2f}]s | "
-        "Shading: ±SEM across trials"
-    )
-    fig.text(
-        0.99, 0.01, footer_text,
-        ha='right', va='bottom',
-        fontsize=plot_cfg.font.small,
-        color='gray', alpha=0.8
-    )
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 1])
-    output_path = save_dir / f'sub-{subject}_power_time_courses_all_bands'
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    logger.info("Saved combined power time courses for all bands")
 
 
 ###################################################################
@@ -1276,273 +1021,6 @@ def plot_power_spectral_density(
         _plot_psd_overall(tfr_win, subject, save_dir, logger, config)
 
 
-def plot_power_spectral_density_by_pain(
-    tfr: Any,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    events_df: Optional[pd.DataFrame] = None,
-    config: Optional[Any] = None
-) -> None:
-    """Plot PSD by pain condition.
-    
-    Args:
-        tfr: EpochsTFR object
-        subject: Subject identifier
-        save_dir: Directory to save plots
-        logger: Logger instance
-        events_df: Events DataFrame with pain column
-        config: Configuration object
-    """
-    _validate_epochs_tfr(tfr, "plot_power_spectral_density_by_pain", logger)
-    
-    if events_df is None or events_df.empty:
-        logger.warning("No events for PSD by pain")
-        return
-    
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    active_window = _get_active_window(config)
-    tfr_baseline = _get_plotting_tfr_baseline_window(config)
-
-    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", True)
-    comp_mask_info = extract_comparison_mask(events_df, config) if compare_cols else None
-    
-    if not comp_mask_info:
-        logger.warning("No valid comparison defined for PSD comparison")
-        return
-    
-    m1, m2, label1, label2 = comp_mask_info
-
-    if len(tfr) != len(events_df):
-        raise ValueError(
-            f"TFR ({len(tfr)} epochs) and events "
-            f"({len(events_df)} rows) length mismatch for subject {subject}"
-        )
-    
-    if m1.sum() < 1 or m2.sum() < 1:
-        logger.warning(f"Insufficient trials for {label1} vs {label2} comparison")
-        return
-    
-    n1, n2 = int(m1.sum()), int(m2.sum())
-    
-    plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
-    fig, ax = plt.subplots(figsize=fig_size)
-    
-    for mask, label, color, n_trials in [
-        (m1, label1, 'steelblue', n1),
-        (m2, label2, 'orangered', n2)
-    ]:
-        if mask.sum() < 1:
-            continue
-            
-        tfr_cond_avg = tfr[mask].average()
-        apply_baseline_and_crop(tfr_cond_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-        tfr_cond_win = _crop_tfr_to_active(tfr_cond_avg, active_window, logger)
-        
-        if tfr_cond_win is None:
-            continue
-            
-        psd_mean = tfr_cond_win.data.mean(axis=(0, 2))
-        
-        if len(psd_mean) != len(tfr_cond_win.freqs):
-            logger.warning(f"Frequency dimension mismatch for {label}")
-            continue
-            
-        ax.plot(
-            tfr_cond_win.freqs, psd_mean,
-            color=color, linewidth=1.5, label=f'{label} (n={n_trials})', alpha=0.9
-        )
-    
-    ax.axhline(0, color=plot_cfg.style.colors.gray, 
-               linewidth=plot_cfg.style.line.width_standard, 
-               alpha=plot_cfg.style.line.alpha_dim, linestyle='--')
-    ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel)
-    ax.set_ylabel("Power spectral density (log10 ratio to baseline)", fontsize=plot_cfg.font.ylabel)
-    ax.legend(loc='upper left', fontsize=plot_cfg.font.title, frameon=False)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.grid(True, alpha=plot_cfg.style.alpha_grid, linestyle=':', linewidth=0.5)
-    
-    footer_text = (
-        f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
-        f"Active: [{active_window[0]:.1f}, {active_window[1]:.1f}]s | "
-        f"Total: n={len(tfr)} trials"
-    )
-    fig.text(
-        0.99, 0.01, footer_text,
-        ha='right', va='bottom',
-        fontsize=plot_cfg.font.small,
-        color='gray', alpha=0.8
-    )
-    
-    fig.suptitle(f"PSD Comparison: {label1} vs {label2}", fontsize=plot_cfg.font.figure_title, fontweight='bold')
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    output_path = save_dir / f'sub-{subject}_power_spectral_density_condition'
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    logger.info(f"Saved PSD comparison plot ({label1} vs {label2})")
-
-
-def plot_power_time_course_by_temperature(
-    tfr: Any,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    events_df: Optional[pd.DataFrame] = None,
-    band: str = 'alpha',
-    config: Optional[Any] = None
-) -> None:
-    """Plot power time course by temperature for a specific band.
-    
-    Args:
-        tfr: EpochsTFR object
-        subject: Subject identifier
-        save_dir: Directory to save plots
-        logger: Logger instance
-        events_df: Events DataFrame with temperature column
-        band: Frequency band name (default: 'alpha')
-        config: Configuration object
-    """
-    _validate_epochs_tfr(tfr, "plot_power_time_course_by_temperature", logger)
-    
-    band = str(band)
-    temps = _validate_temperature_data(tfr, events_df, config=config, subject=subject, logger=logger)
-    if temps is None:
-        return
-    
-    freq_mask = _get_band_frequency_mask(tfr, band, config, logger)
-    if freq_mask is None:
-        return
-    
-    COLOR_MAP_START = 0.15
-    COLOR_MAP_END = 0.85
-    unique_temps = sorted(temps.dropna().unique())
-    colors = plt.cm.coolwarm(np.linspace(COLOR_MAP_START, COLOR_MAP_END, len(unique_temps)))
-    plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
-    fig, ax = plt.subplots(figsize=fig_size)
-    
-    tfr_baseline = _get_plotting_tfr_baseline_window(config)
-    freq_bands = get_frequency_bands(config)
-    band_range = freq_bands.get(band, [None, None])
-    
-    for idx, temp in enumerate(unique_temps):
-        temp_mask = (temps == temp).to_numpy()
-        n_trials_temp = int(temp_mask.sum())
-        if n_trials_temp < 1:
-            continue
-        
-        tfr_temp_avg = tfr[temp_mask].average()
-        apply_baseline_and_crop(tfr_temp_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-        
-        band_power = tfr_temp_avg.data[:, freq_mask, :].mean(axis=(0, 1))
-        
-        ax.plot(
-            tfr_temp_avg.times, band_power,
-            color=colors[idx], linewidth=1.8, alpha=0.9,
-            label=f"{temp:.0f}°C (n={n_trials_temp})"
-        )
-    
-    ax.axhline(0, color=plot_cfg.style.colors.gray, 
-               linewidth=plot_cfg.style.line.width_standard, 
-               alpha=plot_cfg.style.line.alpha_dim, linestyle='--')
-    ax.set_xlabel("Time (s)", fontsize=plot_cfg.font.ylabel)
-    band_label = f"{band.capitalize()}"
-    if band_range[0] is not None and band_range[1] is not None:
-        band_label += f" ({band_range[0]:.0f}-{band_range[1]:.0f} Hz)"
-    ax.set_ylabel(f"{band_label} power (log10 ratio)", fontsize=plot_cfg.font.ylabel)
-    ax.legend(loc='upper left', fontsize=plot_cfg.font.title, frameon=False)
-    ax.grid(True, alpha=plot_cfg.style.alpha_grid, linestyle=':', linewidth=0.5)
-    
-    footer_text = (
-        f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
-        f"Total: n={len(tfr)} trials"
-    )
-    fig.text(
-        0.99, 0.01, footer_text,
-        ha='right', va='bottom',
-        fontsize=plot_cfg.font.small,
-        color='gray', alpha=0.8
-    )
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 1])
-    output_path = save_dir / f'sub-{subject}_time_course_by_temperature_{band}'
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    logger.info("Saved band time course by temperature (Induced)")
-
-
-def plot_inter_band_spatial_power_correlation(
-    tfr: Any,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Plot inter-band spatial power correlation matrix."""
-    features_freq_bands = get_frequency_bands(config)
-    band_names = list(features_freq_bands.keys())
-    n_bands = len(band_names)
-    
-    times = np.asarray(tfr.times)
-    active_window = config.get("time_frequency_analysis.active_window", [3.0, 10.5])
-    active_start = float(active_window[0])
-    active_end = float(active_window[1])
-    tmin_clip = float(max(times.min(), active_start))
-    tmax_clip = float(min(times.max(), active_end))
-    
-    is_valid_window = np.isfinite(tmin_clip) and np.isfinite(tmax_clip) and (tmax_clip > tmin_clip)
-    if not is_valid_window:
-        logger.warning(
-            f"Skipping inter-band spatial power correlation: invalid active within data range "
-            f"(requested [{active_start}, {active_end}] s, "
-            f"available [{times.min():.2f}, {times.max():.2f}] s)"
-        )
-        return
-    
-    tfr_windowed = tfr.copy().crop(tmin_clip, tmax_clip)
-    tfr_avg = tfr_windowed.average()
-    coupling_matrix = compute_inter_band_coupling_matrix(
-        tfr_avg,
-        band_names,
-        features_freq_bands,
-        extract_band_channel_means
-    )
-    
-    fig, ax = plt.subplots(figsize=(8, 6))
-    im = ax.imshow(coupling_matrix, cmap='RdBu_r', vmin=-1, vmax=1)
-    ax.set_xticks(range(n_bands))
-    ax.set_yticks(range(n_bands))
-    ax.set_xticklabels([band.capitalize() for band in band_names], rotation=45, ha='right')
-    ax.set_yticklabels([band.capitalize() for band in band_names])
-    
-    for i in range(n_bands):
-        for j in range(n_bands):
-            value = coupling_matrix[i, j]
-            text_color = "black" if abs(value) < 0.5 else "white"
-            ax.text(
-                j, i, f'{value:.2f}',
-                ha="center", va="center", color=text_color
-            )
-    
-    plot_cfg = get_plot_config(config)
-    ax.set_title('Inter Band Spatial Power Correlation', fontsize=plot_cfg.font.figure_title)
-    ax.set_xlabel('Frequency Band', fontsize=plot_cfg.font.ylabel)
-    ax.set_ylabel('Frequency Band', fontsize=plot_cfg.font.ylabel)
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label('Correlation (r)', fontsize=plot_cfg.font.title)
-    
-    plt.tight_layout()
-    output_path = save_dir / f'sub-{subject}_inter_band_spatial_power_correlation'
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    logger.info("Saved inter-band spatial power correlation")
 def plot_cross_frequency_power_correlation(
     pow_df: pd.DataFrame,
     bands: List[str],
@@ -1723,122 +1201,6 @@ def plot_cross_frequency_power_correlation(
     
     if logger:
         logger.info(f"Saved cross-frequency power correlation ({n_significant}/{n_tests} FDR significant)")
-
-
-def plot_feature_importance_ranking(
-    features_df: pd.DataFrame,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-    top_n: int = 30,
-) -> None:
-    """Feature importance ranking based on variance.
-    
-    Answers: "Which features have the most information content?"
-    """
-    if features_df is None or features_df.empty:
-        return
-    
-    plot_cfg = get_plot_config(config)
-    
-    numeric_cols = features_df.select_dtypes(include=[np.number]).columns.tolist()
-    
-    if len(numeric_cols) < 2:
-        return
-    
-    variances = {}
-    for col in numeric_cols:
-        vals = features_df[col].dropna().values
-        if len(vals) >= MIN_TRIALS_FOR_VARIABILITY:
-            variances[col] = np.var(vals)
-    
-    if not variances:
-        return
-    
-    sorted_features = sorted(variances.items(), key=lambda x: x[1], reverse=True)[:top_n]
-    
-    fig, ax = plt.subplots(figsize=(12, max(6, len(sorted_features) * 0.25)))
-    
-    MAX_FEATURE_NAME_LENGTH = 30
-    feature_names = [
-        f[0][:MAX_FEATURE_NAME_LENGTH] + "..." if len(f[0]) > MAX_FEATURE_NAME_LENGTH else f[0] 
-        for f in sorted_features
-    ]
-    feature_vars = [f[1] for f in sorted_features]
-    
-    from eeg_pipeline.domain.features.naming import NamingSchema
-
-    group_map = {
-        "power": "power",
-        "conn": "connectivity",
-        "aperiodic": "aperiodic",
-        "erds": "erds",
-        "itpc": "itpc",
-        "pac": "pac",
-        "comp": "complexity",
-        "quality": "quality",
-        "spectral": "spectral",
-        "temporal": "temporal",
-        "ratio": "ratios",
-        "asym": "asymmetry",
-        "bursts": "bursts",
-    }
-
-    feature_types = []
-    for f in sorted_features:
-        name = f[0]
-        parsed = NamingSchema.parse(str(name))
-        if parsed.get("valid"):
-            feature_types.append(group_map.get(parsed.get("group"), "other"))
-        else:
-            feature_types.append("other")
-    
-    type_colors = {
-        "power": "#3B82F6",
-        "connectivity": "#22C55E",
-        "aperiodic": "#8B5CF6",
-        "erds": "#F97316",
-        "itpc": "#EC4899",
-        "pac": "#14B8A6",
-        "complexity": "#F59E0B",
-        "quality": "#0EA5E9",
-        "spectral": "#10B981",
-        "temporal": "#6366F1",
-        "ratios": "#A855F7",
-        "asymmetry": "#F43F5E",
-        "bursts": "#D97706",
-        "other": "#6B7280",
-    }
-    colors = [type_colors.get(t, "#6B7280") for t in feature_types]
-    
-    y_pos = range(len(sorted_features))
-    ax.barh(y_pos, feature_vars, color=colors, alpha=0.8, edgecolor="white")
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(feature_names, fontsize=7)
-    ax.set_xlabel("Variance")
-    ax.set_title("Feature Importance (by Variance)", fontweight="bold")
-    ax.invert_yaxis()
-    
-    from matplotlib.patches import Patch
-    legend_elements = [Patch(facecolor=c, label=t.capitalize()) 
-                      for t, c in type_colors.items() if t in feature_types]
-    ax.legend(handles=legend_elements, loc="lower right", fontsize=8)
-    
-    fig.suptitle(f"Feature Importance Ranking (sub-{subject})", 
-                fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.98)
-    
-    footer = f"n={len(features_df)} trials | Top {len(sorted_features)} features by variance"
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    save_fig(fig, save_dir / f"sub-{subject}_feature_importance_ranking",
-             formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    
-    if logger:
-        logger.info(f"Saved feature importance ranking (top {len(sorted_features)})")
 
 
 def plot_band_power_topomaps(

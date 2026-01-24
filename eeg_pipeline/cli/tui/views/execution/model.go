@@ -859,6 +859,7 @@ func (m *Model) updateViewportSize() {
 
 	m.logViewport.Width = logWidth
 	m.logViewport.Height = logHeight
+	m.updateLogViewport()
 }
 
 ///////////////////////////////////////////////////////////////////

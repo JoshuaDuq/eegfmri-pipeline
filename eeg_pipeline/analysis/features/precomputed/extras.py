@@ -287,9 +287,11 @@ def extract_band_ratios_from_precomputed(
             try:
                 fmin_num = float(band_ranges.get(num, (np.nan, np.nan))[0])
                 fmin_den = float(band_ranges.get(den, (np.nan, np.nan))[0])
-            except Exception:
-                fmin_num = np.nan
-                fmin_den = np.nan
+            except (TypeError, ValueError, IndexError) as exc:
+                raise ValueError(
+                    f"Invalid frequency band definitions for ratio pair '{num}/{den}': "
+                    f"{band_ranges.get(num)} / {band_ranges.get(den)}"
+                ) from exc
             fmin_pair = np.nanmin([fmin_num, fmin_den])
             req_sec = max(float(min_segment_sec), (float(min_cycles) / float(fmin_pair)) if np.isfinite(fmin_pair) and fmin_pair > 0 else np.inf)
             if seg_sec < req_sec:
@@ -541,8 +543,8 @@ def extract_asymmetry_from_precomputed(
         for band, (fmin, fmax) in band_ranges.items():
             try:
                 fmin_f = float(fmin)
-            except Exception:
-                continue
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid fmin for band '{band}': {fmin}") from exc
             req_sec = max(float(min_segment_sec), (float(min_cycles) / fmin_f) if fmin_f > 0 else np.inf)
             if seg_sec >= req_sec:
                 eligible_bands[band] = (fmin, fmax)

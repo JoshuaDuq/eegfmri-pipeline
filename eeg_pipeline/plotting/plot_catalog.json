@@ -230,19 +230,6 @@
       "requires_features": true
     },
     {
-      "id": "itpc_heatmap",
-      "group": "phase",
-      "label": "ITPC Heatmap",
-      "description": "Inter-trial phase coherence heatmaps",
-      "required_files": [
-        "features_itpc*.parquet"
-      ],
-      "feature_categories": [
-        "itpc"
-      ],
-      "requires_features": true
-    },
-    {
       "id": "itpc_topomaps",
       "group": "phase",
       "label": "ITPC Topomaps",
@@ -272,46 +259,6 @@
       "requires_features": true
     },
     {
-      "id": "itpc_temporal_evolution",
-      "group": "phase",
-      "label": "ITPC Temporal Evolution",
-      "description": "Phase coherence over time bins",
-      "required_files": [
-        "features_itpc*.parquet",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "itpc"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "pac_summary",
-      "group": "phase",
-      "label": "PAC Summary",
-      "description": "Phase-amplitude coupling overview",
-      "required_files": [
-        "features_pac*.parquet"
-      ],
-      "feature_categories": [
-        "pac"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "pac_comodulograms",
-      "group": "phase",
-      "label": "PAC Comodulograms",
-      "description": "Phase-amplitude coupling frequency matrices",
-      "required_files": [
-        "features_pac*.parquet"
-      ],
-      "feature_categories": [
-        "pac"
-      ],
-      "requires_features": true
-    },
-    {
       "id": "pac_by_condition",
       "group": "phase",
       "label": "PAC Condition Comparison",
@@ -322,71 +269,6 @@
       ],
       "feature_categories": [
         "pac"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "pac_time_ribbons",
-      "group": "phase",
-      "label": "PAC Time Ribbons",
-      "description": "PAC temporal dynamics ribbon plots",
-      "required_files": [
-        "features_pac*.parquet"
-      ],
-      "feature_categories": [
-        "pac"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "erds_temporal_evolution",
-      "group": "erds",
-      "label": "Temporal Evolution",
-      "description": "ERD/ERS time course plots",
-      "required_files": [
-        "features_erds*.parquet"
-      ],
-      "feature_categories": [
-        "erds"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "erds_latency_distribution",
-      "group": "erds",
-      "label": "Latency Distribution",
-      "description": "Distribution of ERD/ERS onset and peak latencies",
-      "required_files": [
-        "features_erds*.parquet"
-      ],
-      "feature_categories": [
-        "erds"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "erds_erd_ers_separation",
-      "group": "erds",
-      "label": "ERD/ERS Separation",
-      "description": "Separate ERD and ERS magnitude/duration",
-      "required_files": [
-        "features_erds*.parquet"
-      ],
-      "feature_categories": [
-        "erds"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "erds_global_summary",
-      "group": "erds",
-      "label": "Global Summary",
-      "description": "Summary statistics across channels",
-      "required_files": [
-        "features_erds*.parquet"
-      ],
-      "feature_categories": [
-        "erds"
       ],
       "requires_features": true
     },
@@ -405,19 +287,6 @@
       "requires_features": true
     },
     {
-      "id": "complexity_by_band",
-      "group": "complexity",
-      "label": "By Band",
-      "description": "Complexity metrics per frequency band",
-      "required_files": [
-        "features_complexity*.parquet"
-      ],
-      "feature_categories": [
-        "complexity"
-      ],
-      "requires_features": true
-    },
-    {
       "id": "complexity_by_condition",
       "group": "complexity",
       "label": "Condition Comparison",
@@ -428,46 +297,6 @@
       ],
       "feature_categories": [
         "complexity"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "complexity_temporal_evolution",
-      "group": "complexity",
-      "label": "Temporal Evolution",
-      "description": "Complexity over time bins",
-      "required_files": [
-        "features_complexity*.parquet",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "complexity"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "spectral_summary",
-      "group": "spectral",
-      "label": "Summary",
-      "description": "Peak frequency and spectral features overview",
-      "required_files": [
-        "features_spectral*.parquet"
-      ],
-      "feature_categories": [
-        "spectral"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "spectral_edge_frequency",
-      "group": "spectral",
-      "label": "Edge Frequency",
-      "description": "Spectral edge frequency (95%) distributions",
-      "required_files": [
-        "features_spectral*.parquet"
-      ],
-      "feature_categories": [
-        "spectral"
       ],
       "requires_features": true
     },
@@ -486,33 +315,6 @@
       "requires_features": true
     },
     {
-      "id": "spectral_temporal_evolution",
-      "group": "spectral",
-      "label": "Temporal Evolution",
-      "description": "Spectral features over time bins",
-      "required_files": [
-        "features_spectral*.parquet",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "spectral"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "ratios_by_pair",
-      "group": "ratios",
-      "label": "By Pair",
-      "description": "Ratio values for each band pair",
-      "required_files": [
-        "features_ratios*.parquet"
-      ],
-      "feature_categories": [
-        "ratios"
-      ],
-      "requires_features": true
-    },
-    {
       "id": "ratios_by_condition",
       "group": "ratios",
       "label": "Condition Comparison",
@@ -527,33 +329,6 @@
       "requires_features": true
     },
     {
-      "id": "ratios_temporal_evolution",
-      "group": "ratios",
-      "label": "Temporal Evolution",
-      "description": "Ratios over time bins",
-      "required_files": [
-        "features_ratios*.parquet",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "ratios"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "asymmetry_by_band",
-      "group": "asymmetry",
-      "label": "By Band",
-      "description": "Asymmetry indices per frequency band",
-      "required_files": [
-        "features_asymmetry*.parquet"
-      ],
-      "feature_categories": [
-        "asymmetry"
-      ],
-      "requires_features": true
-    },
-    {
       "id": "asymmetry_by_condition",
       "group": "asymmetry",
       "label": "Condition Comparison",
@@ -564,61 +339,6 @@
       ],
       "feature_categories": [
         "asymmetry"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "asymmetry_temporal_evolution",
-      "group": "asymmetry",
-      "label": "Temporal Evolution",
-      "description": "Asymmetry over time bins",
-      "required_files": [
-        "features_asymmetry*.parquet",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "asymmetry"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "bursts_by_band",
-      "group": "bursts",
-      "label": "By Band",
-      "description": "Burst metrics per frequency band",
-      "required_files": [
-        "features_bursts*.parquet"
-      ],
-      "feature_categories": [
-        "bursts"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "bursts_by_condition",
-      "group": "bursts",
-      "label": "Condition Comparison",
-      "description": "Burst differences between conditions",
-      "required_files": [
-        "features_bursts*.parquet",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "bursts"
-      ],
-      "requires_features": true
-    },
-    {
-      "id": "burst_temporal_evolution",
-      "group": "bursts",
-      "label": "Temporal Evolution",
-      "description": "Burst dynamics over time bins",
-      "required_files": [
-        "features_bursts*.parquet",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "bursts"
       ],
       "requires_features": true
     },
@@ -770,20 +490,6 @@
       "requires_epochs": true
     },
     {
-      "id": "temporal_evolution",
-      "group": "behavior",
-      "label": "Temporal Evolution (All Features)",
-      "description": "Feature evolution over time bins",
-      "required_files": [
-        "features_*.tsv",
-        "events.tsv"
-      ],
-      "feature_categories": [
-        "temporal"
-      ],
-      "requires_features": true
-    },
-    {
       "id": "behavior_psychometrics",
       "group": "behavior",
       "label": "Psychometrics",
@@ -796,79 +502,41 @@
       ]
     },
     {
-      "id": "behavior_power_scatter",
+      "id": "behavior_scatter",
       "group": "behavior",
-      "label": "Power ROI Scatter",
-      "description": "Power vs behavior scatter plots",
+      "label": "Feature-Behavior Scatter",
+      "description": "Configurable scatter plots correlating any EEG feature with behavioral columns",
       "required_files": [
-        "features_power*.tsv",
-        "epochs/*.fif"
+        "features_*.tsv",
+        "events.tsv"
       ],
       "behavior_plots": [
-        "power_roi_scatter"
+        "behavior_scatter"
       ],
-      "requires_epochs": true,
-      "requires_features": true
-    },
-    {
-      "id": "behavior_complexity_scatter",
-      "group": "behavior",
-      "label": "Complexity Scatter",
-      "description": "Complexity vs behavior scatter plots",
-      "required_files": [
-        "features_complexity*.tsv",
-        "epochs/*.fif"
-      ],
-      "behavior_plots": [
-        "complexity_scatter"
-      ],
-      "requires_epochs": true,
-      "requires_features": true
-    },
-    {
-      "id": "behavior_aperiodic_scatter",
-      "group": "behavior",
-      "label": "Aperiodic Scatter",
-      "description": "Aperiodic vs behavior scatter plots",
-      "required_files": [
-        "features_aperiodic*.tsv",
-        "epochs/*.fif"
-      ],
-      "behavior_plots": [
-        "aperiodic_scatter"
-      ],
-      "requires_epochs": true,
-      "requires_features": true
-    },
-    {
-      "id": "behavior_connectivity_scatter",
-      "group": "behavior",
-      "label": "Connectivity Scatter",
-      "description": "Connectivity vs behavior scatter plots",
-      "required_files": [
-        "features_connectivity*.tsv",
-        "epochs/*.fif"
-      ],
-      "behavior_plots": [
-        "connectivity_scatter"
-      ],
-      "requires_epochs": true,
-      "requires_features": true
-    },
-    {
-      "id": "behavior_itpc_scatter",
-      "group": "behavior",
-      "label": "ITPC Scatter",
-      "description": "ITPC vs behavior scatter plots",
-      "required_files": [
-        "features_itpc*.tsv",
-        "epochs/*.fif"
-      ],
-      "behavior_plots": [
-        "itpc_scatter"
-      ],
-      "requires_epochs": true,
-      "requires_features": true
+      "requires_features": true,
+      "configurable": {
+        "features": {
+          "type": "multi_select",
+          "label": "Features",
+          "description": "EEG features to correlate",
+          "options": ["power", "connectivity", "aperiodic", "complexity", "itpc", "pac", "erds", "spectral", "ratios", "asymmetry"],
+          "default": ["power"]
+        },
+        "columns": {
+          "type": "multi_select_discovered",
+          "label": "Behavioral Columns",
+          "description": "Columns from events.tsv to correlate with",
+          "source": "events_columns",
+          "default": ["rating"]
+        },
+        "aggregation_modes": {
+          "type": "multi_select",
+          "label": "Aggregation",
+          "description": "How to aggregate features",
+          "options": ["roi", "global", "channel"],
+          "default": ["roi", "global"]
+        }
+      }
     },
     {
       "id": "behavior_temporal_topomaps",
@@ -876,23 +544,10 @@
       "label": "Temporal Topomaps",
       "description": "Temporal correlation topomaps",
       "required_files": [
-        "stats/temporal_correlations/temporal_correlations_by_condition*.npz"
+        "stats/temporal_correlations*/*/temporal_correlations_by_condition*.npz"
       ],
       "behavior_plots": [
         "temporal_topomaps"
-      ],
-      "requires_stats": true
-    },
-    {
-      "id": "behavior_pain_clusters",
-      "group": "behavior",
-      "label": "Condition Clusters",
-      "description": "Cluster-based temporal contrasts",
-      "required_files": [
-        "stats/pain_nonpain_time_clusters_*.tsv"
-      ],
-      "behavior_plots": [
-        "pain_clusters"
       ],
       "requires_stats": true
     },
@@ -902,54 +557,26 @@
       "label": "Dose Response",
       "description": "Dose-response curves and contrasts",
       "required_files": [
-        "features_power*.tsv",
-        "epochs/*.fif"
+        "stats/trial_table*/*/trials*.tsv",
+        "stats/trial_table*/*/trials*.parquet"
       ],
       "behavior_plots": [
         "dose_response"
       ],
-      "requires_epochs": true,
-      "requires_features": true
-    },
-    {
-      "id": "behavior_top_predictors",
-      "group": "behavior",
-      "label": "Top Predictors",
-      "description": "Top predictors summary",
-      "required_files": [
-        "stats/correlations*.tsv"
-      ],
-      "behavior_plots": [
-        "top_predictors"
-      ],
       "requires_stats": true
     },
     {
-      "id": "behavior_temperature_models",
+      "id": "behavior_pain_probability",
       "group": "behavior",
-      "label": "Temperature Models",
-      "description": "Subject-level temperature→rating dose-response diagnostics",
+      "label": "Pain Probability",
+      "description": "Pain probability vs dose (binary outcome vs temperature)",
       "required_files": [
-        "stats/trials*.tsv",
-        "stats/temperature_model_comparison*.tsv"
+        "epochs/*.fif"
       ],
       "behavior_plots": [
-        "temperature_models"
+        "pain_probability"
       ],
-      "requires_stats": true
-    },
-    {
-      "id": "behavior_stability_groupwise",
-      "group": "behavior",
-      "label": "Stability (Run/Block)",
-      "description": "Within-subject stability of feature→outcome associations",
-      "required_files": [
-        "stats/stability_groupwise*.tsv"
-      ],
-      "behavior_plots": [
-        "stability_groupwise"
-      ],
-      "requires_stats": true
+      "requires_epochs": true
     },
     {
       "id": "ml_regression_plots",

@@ -982,6 +982,45 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		if cfg.ItpcSharedColorbar != nil {
 			args = append(args, "--plot-item-config", plotID, "itpc_shared_colorbar", strconv.FormatBool(*cfg.ItpcSharedColorbar))
 		}
+		// Behavior scatter config
+		if strings.TrimSpace(cfg.BehaviorScatterFeaturesSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "scatter_features")
+			args = append(args, splitSpaceList(cfg.BehaviorScatterFeaturesSpec)...)
+		}
+		if strings.TrimSpace(cfg.BehaviorScatterColumnsSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "scatter_columns")
+			args = append(args, splitSpaceList(cfg.BehaviorScatterColumnsSpec)...)
+		}
+		if strings.TrimSpace(cfg.BehaviorScatterAggregationModesSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "scatter_aggregation_modes")
+			args = append(args, splitSpaceList(cfg.BehaviorScatterAggregationModesSpec)...)
+		}
+		if strings.TrimSpace(cfg.BehaviorScatterSegmentSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "scatter_segment", strings.TrimSpace(cfg.BehaviorScatterSegmentSpec))
+		}
+		// Behavior dose-response config
+		if strings.TrimSpace(cfg.DoseResponseDoseColumn) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_dose_column", strings.TrimSpace(cfg.DoseResponseDoseColumn))
+		}
+		if strings.TrimSpace(cfg.DoseResponseResponseColumn) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_response_column")
+			args = append(args, splitSpaceList(strings.TrimSpace(cfg.DoseResponseResponseColumn))...)
+		}
+		if strings.TrimSpace(cfg.DoseResponsePainColumn) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_pain_column", strings.TrimSpace(cfg.DoseResponsePainColumn))
+		}
+		if strings.TrimSpace(cfg.DoseResponseSegment) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_segment", strings.TrimSpace(cfg.DoseResponseSegment))
+		}
+		if strings.TrimSpace(cfg.BehaviorTemporalStatsFeatureFolder) != "" {
+			args = append(
+				args,
+				"--plot-item-config",
+				plotID,
+				"temporal_stats_feature_folder",
+				strings.TrimSpace(cfg.BehaviorTemporalStatsFeatureFolder),
+			)
+		}
 	}
 	return args
 }
@@ -1072,6 +1111,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 		if m.itpcMinTrialsPerCondition > 0 && m.itpcMinTrialsPerCondition != 10 {
 			args = append(args, "--itpc-min-trials-per-condition", fmt.Sprintf("%d", m.itpcMinTrialsPerCondition))
+		}
+		if m.itpcNJobs != -1 {
+			args = append(args, "--itpc-n-jobs", fmt.Sprintf("%d", m.itpcNJobs))
 		}
 	}
 
@@ -1741,24 +1783,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.trialTableFormat >= 0 && m.trialTableFormat < len(formats) && m.trialTableFormat != 0 {
 			args = append(args, "--trial-table-format", formats[m.trialTableFormat])
 		}
-		if !m.trialTableIncludeFeatures {
-			args = append(args, "--no-trial-table-include-features")
-		}
-		if !m.trialTableIncludeCovars {
-			args = append(args, "--no-trial-table-include-covariates")
-		}
-		if !m.trialTableIncludeEvents {
-			args = append(args, "--no-trial-table-include-events")
-		}
 		if !m.trialTableAddLagFeatures {
 			args = append(args, "--no-trial-table-add-lag-features")
-		}
-		if strings.TrimSpace(m.trialTableExtraEventCols) != "" {
-			args = append(args, "--trial-table-extra-event-columns")
-			args = append(args, splitCSVList(m.trialTableExtraEventCols)...)
-		}
-		if m.trialTableHighMissingFrac != 0.5 {
-			args = append(args, "--trial-table-high-missing-frac", fmt.Sprintf("%.2f", m.trialTableHighMissingFrac))
 		}
 
 		if !m.featureSummariesEnabled {
@@ -2098,6 +2124,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if m.temporalSmoothMs != 100 {
 			args = append(args, "--temporal-smooth-window-ms", fmt.Sprintf("%d", m.temporalSmoothMs))
+		}
+		if strings.TrimSpace(m.temporalTargetColumn) != "" {
+			args = append(args, "--temporal-target-column", strings.TrimSpace(m.temporalTargetColumn))
 		}
 		if !m.temporalSplitByCondition {
 			args = append(args, "--no-temporal-split-by-condition")

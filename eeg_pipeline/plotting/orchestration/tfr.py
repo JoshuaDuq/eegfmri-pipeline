@@ -17,6 +17,7 @@ from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir, resolve_deriv
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization, extract_roi_tfrs
 from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus
 from eeg_pipeline.utils.parallel import get_n_jobs
+from eeg_pipeline.utils.config.loader import require_config_value
 
 from eeg_pipeline.plotting.tfr.scalpmean import (
     plot_scalpmean_all_trials,
@@ -39,13 +40,6 @@ _CONFIG_KEY_PROJECT_TASK = "project.task"
 _CONFIG_KEY_N_JOBS = "time_frequency_analysis.n_jobs"
 _CONFIG_KEY_TOPOMAP_WINDOW_SIZE = "time_frequency_analysis.topomap.temporal.window_size_ms"
 _CONFIG_KEY_TOPOMAP_WINDOW_COUNT = "time_frequency_analysis.topomap.temporal.window_count"
-
-# Default values
-_DEFAULT_BASELINE_WINDOW = (-2.0, 0.0)
-_DEFAULT_ACTIVE_WINDOW = (3.0, 10.5)
-_DEFAULT_TASK = "thermalactive"
-_DEFAULT_TOPOMAP_WINDOW_SIZE_MS = 100.0
-_DEFAULT_TOPOMAP_WINDOW_COUNT = 5
 
 # Plot type constants
 _PLOT_SCALPMEAN = "scalpmean"
@@ -74,11 +68,17 @@ _TOPOMAP_PLOTS = [_PLOT_TOPOMAPS]
 
 def _get_tfr_windows(config, logger: logging.Logger) -> tuple[tuple[float, float], tuple[float, float]]:
     """Extract and validate baseline and active windows from config."""
-    tfr_analysis = config.get(_CONFIG_KEY_TFR_ANALYSIS, {})
-    baseline_window_raw = tfr_analysis.get(_CONFIG_KEY_BASELINE_WINDOW, _DEFAULT_BASELINE_WINDOW)
+    baseline_window_raw = require_config_value(config, f"{_CONFIG_KEY_TFR_ANALYSIS}.{_CONFIG_KEY_BASELINE_WINDOW}")
+    active_window_raw = require_config_value(config, f"{_CONFIG_KEY_TFR_ANALYSIS}.{_CONFIG_KEY_ACTIVE_WINDOW}")
+
     baseline_window = validate_baseline_window_pre_stimulus(tuple(baseline_window_raw), logger=logger)
-    active_window = tuple(tfr_analysis.get(_CONFIG_KEY_ACTIVE_WINDOW, _DEFAULT_ACTIVE_WINDOW))
-    return baseline_window, active_window
+    active_window = tuple(active_window_raw)
+    if len(active_window) != 2:
+        raise ValueError(
+            f"{_CONFIG_KEY_TFR_ANALYSIS}.{_CONFIG_KEY_ACTIVE_WINDOW} must have length 2, got {active_window_raw!r}"
+        )
+
+    return baseline_window, (float(active_window[0]), float(active_window[1]))
 
 
 def _determine_plots_to_run(
@@ -109,7 +109,7 @@ def _plot_topomaps(
     logger: logging.Logger,
 ) -> None:
     """Plot all topomap visualizations."""
-    window_size_ms = config.get(_CONFIG_KEY_TOPOMAP_WINDOW_SIZE, _DEFAULT_TOPOMAP_WINDOW_SIZE_MS)
+    window_size_ms = float(require_config_value(config, _CONFIG_KEY_TOPOMAP_WINDOW_SIZE))
     plot_pain_nonpain_temporal_topomaps_diff_allbands(
         power,
         events_df,
@@ -121,7 +121,7 @@ def _plot_topomaps(
         logger=logger,
     )
 
-    window_count = config.get(_CONFIG_KEY_TOPOMAP_WINDOW_COUNT, _DEFAULT_TOPOMAP_WINDOW_COUNT)
+    window_count = int(require_config_value(config, _CONFIG_KEY_TOPOMAP_WINDOW_COUNT))
     plot_temporal_topomaps_allbands_active(
         power,
         events_df,
@@ -501,7 +501,9 @@ def visualize_tfr_for_subjects(
 
     setup_matplotlib(config)
 
-    task = task or config.get(_CONFIG_KEY_PROJECT_TASK, _DEFAULT_TASK)
+    task = task or str(require_config_value(config, _CONFIG_KEY_PROJECT_TASK)).strip()
+    if task == "":
+        raise ValueError(f"{_CONFIG_KEY_PROJECT_TASK} must be a non-empty string")
     effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
 
     if logger is None:

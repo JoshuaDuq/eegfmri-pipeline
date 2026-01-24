@@ -47,6 +47,53 @@ MIN_OBSERVATIONS_FOR_CORRELATION = 10
 PARALLELIZATION_TASK_THRESHOLD = 50
 
 
+def _get_temporal_target_column(config: Any) -> Optional[str]:
+    """Return explicit temporal target column override (events column name) if configured."""
+    raw = get_config_value(config, "behavior_analysis.temporal.target_column", None)
+    if raw is None:
+        return None
+    col = str(raw).strip()
+    return col or None
+
+
+def _get_temporal_targets_from_events(
+    events: pd.DataFrame,
+    *,
+    config: Any,
+    logger: logging.Logger,
+    analysis_name: str,
+) -> pd.Series:
+    """Resolve and extract the behavioral target series for temporal analyses."""
+    if events is None or not isinstance(events, pd.DataFrame):
+        raise TypeError("events must be a pandas DataFrame")
+
+    target_col = _get_temporal_target_column(config)
+    if target_col is not None:
+        if target_col not in events.columns:
+            raise ValueError(
+                f"{analysis_name}: temporal target_column='{target_col}' not found in events. "
+                f"Available columns: {list(events.columns)}"
+            )
+        logger.info("%s: using temporal target column '%s'", analysis_name, target_col)
+        return pd.to_numeric(events[target_col], errors="coerce")
+
+    rating_columns = (
+        list(config.get("event_columns.rating", []) or [])
+        if config is not None and hasattr(config, "get")
+        else []
+    )
+    from eeg_pipeline.utils.data.columns import pick_target_column
+
+    rating_col = pick_target_column(events, target_columns=rating_columns)
+    if rating_col is None:
+        raise ValueError(
+            f"{analysis_name}: no rating column found. Configure event_columns.rating or set "
+            f"behavior_analysis.temporal.target_column. Available columns: {list(events.columns)}"
+        )
+    logger.info("%s: using rating column '%s'", analysis_name, rating_col)
+    return pd.to_numeric(events[rating_col], errors="coerce")
+
+
 def _to_numpy_array(y: Any) -> np.ndarray:
     """Convert y to numpy array, handling pandas Series."""
     return y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
@@ -699,7 +746,7 @@ def _run_tf_correlations_core(
         c_sig if n_perm > 0 else None,
     )
     
-    temporal_dir = stats_dir / "temporal_correlations"
+    temporal_dir = stats_dir
     ensure_dir(temporal_dir)
     if recs:
         tf_df = pd.DataFrame(recs)
@@ -728,7 +775,14 @@ def compute_time_frequency_correlations(
         deriv_root=deriv_root, bids_root=config.bids_root,
         config=config, logger=logger,
     )
-    _, _, _, y, _ = _load_features_and_targets(subject, task, deriv_root, config, epochs=epochs)
+    if events is None:
+        raise ValueError(f"Time-frequency correlations: events missing for sub-{subject}, task-{task}")
+    y = _get_temporal_targets_from_events(
+        events,
+        config=config,
+        logger=logger,
+        analysis_name="Time-frequency correlations",
+    )
 
     stats_cfg = config.get("behavior_analysis.statistics", {})
     partial_covars = stats_cfg.get("partial_covariates", [])
@@ -739,8 +793,15 @@ def compute_time_frequency_correlations(
             cov_df = events[avail].apply(pd.to_numeric, errors="coerce")
 
     return _run_tf_correlations_core(
-        subject, epochs, events, y, deriv_stats_path(deriv_root, subject),
-        config, use_spearman, cov_df, logger,
+        subject,
+        epochs,
+        events,
+        y,
+        deriv_stats_path(deriv_root, subject) / "temporal_correlations" / "all",
+        config,
+        use_spearman,
+        cov_df,
+        logger,
     )
 
 
@@ -1042,7 +1103,7 @@ def _run_temporal_by_condition_core(
     sfx = "_spearman" if use_spearman else "_pearson"
     method = "spearman" if use_spearman else "pearson"
     
-    out_dir = stats_dir / "temporal_correlations"
+    out_dir = stats_dir
     ensure_dir(out_dir)
 
     all_tsv_records = []
@@ -1126,7 +1187,14 @@ def compute_temporal_correlations_by_condition(
         deriv_root=deriv_root, bids_root=config.bids_root,
         config=config, logger=logger,
     )
-    _, _, _, y, _ = _load_features_and_targets(subject, task, deriv_root, config, epochs=epochs)
+    if events is None:
+        raise ValueError(f"Temporal correlations: events missing for sub-{subject}, task-{task}")
+    y = _get_temporal_targets_from_events(
+        events,
+        config=config,
+        logger=logger,
+        analysis_name="Temporal correlations",
+    )
     stats_cfg = config.get("behavior_analysis.statistics", {})
     partial_covars = stats_cfg.get("partial_covariates", [])
     cov_df = None
@@ -1135,7 +1203,14 @@ def compute_temporal_correlations_by_condition(
         if avail:
             cov_df = events[avail].apply(pd.to_numeric, errors="coerce")
     return _run_temporal_by_condition_core(
-        epochs, events, y, deriv_stats_path(deriv_root, subject), config, use_spearman, cov_df, logger
+        epochs,
+        events,
+        y,
+        deriv_stats_path(deriv_root, subject) / "temporal_correlations" / "all",
+        config,
+        use_spearman,
+        cov_df,
+        logger,
     )
 
 
@@ -1147,19 +1222,25 @@ def compute_time_frequency_from_context(ctx: "BehaviorContext") -> Optional[Dict
             ctx.logger.info("Skipping time-frequency correlations: feature filter %s excludes 'power'/'spectral'", allowed)
             return None
 
-    # Get rating from aligned_events using event_columns.rating config
-    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-    if rating_col is None or ctx.aligned_events is None:
-        ctx.logger.warning("No rating column available for time-frequency correlations")
+    if ctx.aligned_events is None:
+        ctx.logger.warning("No events available for time-frequency correlations")
         return None
-    targets = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+    targets = _get_temporal_targets_from_events(
+        ctx.aligned_events,
+        config=ctx.config,
+        logger=ctx.logger,
+        analysis_name="Time-frequency correlations",
+    )
+
+    from eeg_pipeline.analysis.behavior.orchestration import get_behavior_output_dir
+    out_dir = get_behavior_output_dir(ctx, "temporal_correlations", ensure=True)
 
     return _run_tf_correlations_core(
         ctx.subject,
         ctx.epochs,
         ctx.aligned_events,
         targets,
-        ctx.stats_dir,
+        out_dir,
         ctx.config,
         ctx.use_spearman,
         ctx.covariates_df,
@@ -1175,18 +1256,24 @@ def compute_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
             ctx.logger.info("Skipping temporal correlations: feature filter %s excludes 'power'/'spectral'", allowed)
             return None
 
-    # Get rating from aligned_events using event_columns.rating config
-    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-    if rating_col is None or ctx.aligned_events is None:
-        ctx.logger.warning("No rating column available for temporal correlations")
+    if ctx.aligned_events is None:
+        ctx.logger.warning("No events available for temporal correlations")
         return None
-    targets = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+    targets = _get_temporal_targets_from_events(
+        ctx.aligned_events,
+        config=ctx.config,
+        logger=ctx.logger,
+        analysis_name="Temporal correlations",
+    )
+
+    from eeg_pipeline.analysis.behavior.orchestration import get_behavior_output_dir
+    out_dir = get_behavior_output_dir(ctx, "temporal_correlations", ensure=True)
 
     return _run_temporal_by_condition_core(
         ctx.epochs,
         ctx.aligned_events,
         targets,
-        ctx.stats_dir,
+        out_dir,
         ctx.config,
         ctx.use_spearman,
         ctx.covariates_df,
@@ -1325,7 +1412,7 @@ def _run_itpc_temporal_by_condition_core(
     sfx = "_spearman" if use_spearman else "_pearson"
     method = "spearman" if use_spearman else "pearson"
     
-    out_dir = stats_dir / "temporal_correlations"
+    out_dir = stats_dir
     ensure_dir(out_dir)
     
     all_tsv_records = []
@@ -1444,18 +1531,24 @@ def compute_itpc_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[
     Note: Feature selection is handled by the orchestration layer based on
     which feature files the user selected in step 3 (feature selection).
     """
-    # Get rating from aligned_events using event_columns.rating config
-    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-    if rating_col is None or ctx.aligned_events is None:
-        ctx.logger.warning("No rating column available for ITPC temporal correlations")
+    if ctx.aligned_events is None:
+        ctx.logger.warning("No events available for ITPC temporal correlations")
         return None
-    targets = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+    targets = _get_temporal_targets_from_events(
+        ctx.aligned_events,
+        config=ctx.config,
+        logger=ctx.logger,
+        analysis_name="ITPC temporal correlations",
+    )
+
+    from eeg_pipeline.analysis.behavior.orchestration import get_behavior_output_dir
+    out_dir = get_behavior_output_dir(ctx, "temporal_correlations", ensure=True)
 
     return _run_itpc_temporal_by_condition_core(
         ctx.epochs,
         ctx.aligned_events,
         targets,
-        ctx.stats_dir,
+        out_dir,
         ctx.config,
         ctx.use_spearman,
         ctx.covariates_df,
@@ -1594,7 +1687,7 @@ def _run_erds_temporal_by_condition_core(
     sfx = "_spearman" if use_spearman else "_pearson"
     corr_method = "spearman" if use_spearman else "pearson"
     
-    out_dir = stats_dir / "temporal_correlations"
+    out_dir = stats_dir
     ensure_dir(out_dir)
     
     all_tsv_records = []
@@ -1692,14 +1785,20 @@ def compute_erds_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[
     Note: Feature selection is handled by the orchestration layer based on
     which feature files the user selected in step 3 (feature selection).
     """
-    # Get rating from aligned_events using event_columns.rating config
-    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-    if rating_col is None or ctx.aligned_events is None:
-        ctx.logger.warning("No rating column available for ERDS temporal correlations")
+    if ctx.aligned_events is None:
+        ctx.logger.warning("No events available for ERDS temporal correlations")
         return None
-    targets = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+    targets = _get_temporal_targets_from_events(
+        ctx.aligned_events,
+        config=ctx.config,
+        logger=ctx.logger,
+        analysis_name="ERDS temporal correlations",
+    )
+
+    from eeg_pipeline.analysis.behavior.orchestration import get_behavior_output_dir
+    out_dir = get_behavior_output_dir(ctx, "temporal_correlations", ensure=True)
 
     return _run_erds_temporal_by_condition_core(
-        ctx.epochs, ctx.aligned_events, targets, ctx.stats_dir, ctx.config,
+        ctx.epochs, ctx.aligned_events, targets, out_dir, ctx.config,
         ctx.use_spearman, ctx.covariates_df, ctx.logger, selected_bands=ctx.selected_bands,
     )

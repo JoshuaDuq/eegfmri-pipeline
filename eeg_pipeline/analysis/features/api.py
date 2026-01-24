@@ -14,6 +14,7 @@ from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
 from eeg_pipeline.utils.validation import validate_epochs
 from eeg_pipeline.utils.progress import PipelineProgress
+from eeg_pipeline.utils.parallel import get_n_jobs
 from eeg_pipeline.analysis.features.results import (
     FeatureSet,
     ExtractionResult,
@@ -138,21 +139,24 @@ def _prepare_precomputed_data(
 
     precomputed_evoked_subtracted = False
     precomputed_evoked_subtracted_conditionwise = False
-    try:
-        pre_cfg = ctx.config.get("feature_engineering.precomputed", {}) if hasattr(ctx.config, "get") else {}
-        subtract_evoked_cfg = pre_cfg.get("subtract_evoked", None)
-        if subtract_evoked_cfg is None:
-            subtract_evoked_cfg = ctx.config.get("feature_engineering.power.subtract_evoked", False)
-        want_induced_precomputed = bool(subtract_evoked_cfg)
-    except Exception:
-        want_induced_precomputed = False
+    pre_cfg = ctx.config.get("feature_engineering.precomputed", {}) if hasattr(ctx.config, "get") else {}
+    subtract_evoked_cfg = pre_cfg.get("subtract_evoked", None)
+    if subtract_evoked_cfg is None:
+        subtract_evoked_cfg = (
+            ctx.config.get("feature_engineering.power.subtract_evoked", False)
+            if hasattr(ctx.config, "get")
+            else False
+        )
+    want_induced_precomputed = bool(subtract_evoked_cfg)
 
     if want_induced_precomputed:
         analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
         train_mask = getattr(ctx, "train_mask", None)
         if analysis_mode == "trial_ml_safe" and train_mask is None:
-            ctx.logger.warning(
-                "Precomputed: subtract_evoked requested in trial_ml_safe mode without train_mask; disabling to avoid CV leakage."
+            raise ValueError(
+                "Precomputed subtract_evoked requested in trial_ml_safe mode without train_mask. "
+                "Evoked subtraction uses cross-trial averages and can leak in CV. "
+                "Provide train_mask or disable subtract_evoked."
             )
         else:
             from eeg_pipeline.utils.analysis.spectral import subtract_evoked
@@ -205,11 +209,8 @@ def _prepare_precomputed_data(
         feature_family="spectral",
         train_mask=getattr(ctx, "train_mask", None),
     )
-    try:
-        precomputed_data.evoked_subtracted = bool(precomputed_evoked_subtracted)
-        precomputed_data.evoked_subtracted_conditionwise = bool(precomputed_evoked_subtracted_conditionwise)
-    except Exception:
-        pass
+    precomputed_data.evoked_subtracted = bool(precomputed_evoked_subtracted)
+    precomputed_data.evoked_subtracted_conditionwise = bool(precomputed_evoked_subtracted_conditionwise)
     setter = getattr(ctx, "set_precomputed_for_family", None)
     if callable(setter):
         setter("spectral", precomputed_data)
@@ -226,49 +227,42 @@ def _align_precomputed_windows(
     if ctx.windows is None:
         return precomputed_data
 
-    try:
-        ctx_times = getattr(ctx.windows, "times", None)
-        if (
-            ctx_times is not None
-            and len(precomputed_data.times) == len(ctx_times)
-            and np.allclose(precomputed_data.times, ctx_times, atol=0, rtol=0)
-        ):
-            aligned_windows = ctx.windows
+    ctx_times = getattr(ctx.windows, "times", None)
+    if (
+        ctx_times is not None
+        and len(precomputed_data.times) == len(ctx_times)
+        and np.allclose(precomputed_data.times, ctx_times, atol=0, rtol=0)
+    ):
+        aligned_windows = ctx.windows
+    else:
+        ranges = getattr(ctx.windows, "ranges", None)
+        if ranges:
+            explicit = [
+                {"name": name, "tmin": rng[0], "tmax": rng[1]}
+                for name, rng in ranges.items()
+                if isinstance(rng, (list, tuple)) and len(rng) >= 2
+            ]
         else:
-            ranges = getattr(ctx.windows, "ranges", None)
-            if ranges:
-                explicit = [
-                    {"name": name, "tmin": rng[0], "tmax": rng[1]}
-                    for name, rng in ranges.items()
-                    if isinstance(rng, (list, tuple)) and len(rng) >= 2
-                ]
-            else:
-                explicit = None
+            explicit = None
 
-            if explicit:
-                from eeg_pipeline.utils.analysis.windowing import (
-                    TimeWindowSpec,
-                    time_windows_from_spec,
-                )
+        if explicit:
+            from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
 
-                spec = TimeWindowSpec(
-                    times=precomputed_data.times,
-                    config=ctx.config,
-                    sampling_rate=float(getattr(precomputed_data, "sfreq", 1.0)),
-                    logger=ctx.logger,
-                    name=ctx.name,
-                    explicit_windows=explicit,
-                )
-                aligned_windows = time_windows_from_spec(spec, logger=ctx.logger, strict=False)
-            else:
-                aligned_windows = None
+            spec = TimeWindowSpec(
+                times=precomputed_data.times,
+                config=ctx.config,
+                sampling_rate=float(getattr(precomputed_data, "sfreq", 1.0)),
+                logger=ctx.logger,
+                name=ctx.name,
+                explicit_windows=explicit,
+            )
+            aligned_windows = time_windows_from_spec(spec, logger=ctx.logger, strict=False)
+        else:
+            aligned_windows = None
 
-        if aligned_windows is not None:
-            precomputed_data = precomputed_data.with_windows(aligned_windows)
-            ctx.set_precomputed(precomputed_data)
-
-    except Exception as exc:
-        ctx.logger.warning("Failed to align precomputed windows with context: %s", exc)
+    if aligned_windows is not None:
+        precomputed_data = precomputed_data.with_windows(aligned_windows)
+        ctx.set_precomputed(precomputed_data)
 
     return precomputed_data
 
@@ -298,8 +292,10 @@ def _compute_tfr_for_features(
         analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
         train_mask = getattr(ctx, "train_mask", None)
         if analysis_mode == "trial_ml_safe" and train_mask is None:
-            ctx.logger.warning(
-                "Power: subtract_evoked=True in trial_ml_safe mode without train_mask; disabling to avoid CV leakage."
+            raise ValueError(
+                "Power subtract_evoked=True in trial_ml_safe mode without train_mask. "
+                "Evoked subtraction uses cross-trial averages and can leak in CV. "
+                "Provide train_mask or disable subtract_evoked."
             )
         else:
             from eeg_pipeline.utils.analysis.spectral import subtract_evoked
@@ -327,20 +323,20 @@ def _compute_tfr_for_features(
     needs_complex = any(category in ctx.feature_categories for category in ["itpc", "pac"])
     if needs_complex:
         epochs_for_complex = epochs_for_tfr
-        try:
-            from eeg_pipeline.analysis.features.preparation import _apply_spatial_transform, _get_spatial_transform_type
+        from eeg_pipeline.analysis.features.preparation import (
+            _apply_spatial_transform,
+            _get_spatial_transform_type,
+        )
 
-            phase_family = "itpc" if "itpc" in ctx.feature_categories else "pac"
-            phase_transform = _get_spatial_transform_type(ctx.config, feature_family=phase_family)
-            if phase_transform in {"csd", "laplacian"}:
-                epochs_for_complex = epochs_for_tfr.copy().pick_types(
-                    eeg=True, meg=False, eog=False, stim=False, exclude="bads"
-                )
-                epochs_for_complex = _apply_spatial_transform(
-                    epochs_for_complex, phase_transform, ctx.config, ctx.logger
-                )
-        except Exception:
-            pass
+        phase_family = "itpc" if "itpc" in ctx.feature_categories else "pac"
+        phase_transform = _get_spatial_transform_type(ctx.config, feature_family=phase_family)
+        if phase_transform in {"csd", "laplacian"}:
+            epochs_for_complex = epochs_for_tfr.copy().pick_types(
+                eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+            )
+            epochs_for_complex = _apply_spatial_transform(
+                epochs_for_complex, phase_transform, ctx.config, ctx.logger
+            )
 
         tfr_complex = compute_complex_tfr(epochs_for_complex, ctx.config, ctx.logger)
         if tfr_complex is not None:
@@ -419,29 +415,24 @@ def _save_tfr_with_sidecar(
     if tfr is None or baseline_start is None or baseline_end is None:
         return
 
-    try:
-        baseline_mode = str(ctx.config.get("time_frequency_analysis.baseline_mode", "logratio"))
-        tfr_to_save = tfr.copy()
-        tfr_to_save.apply_baseline(baseline=(baseline_start, baseline_end), mode=baseline_mode)
-        tfr_to_save.comment = (
-            f"BASELINED:mode={baseline_mode};win=({baseline_start:.3f},{baseline_end:.3f})"
-        )
-        tfr_output_path = (
-            ctx.deriv_root
-            / f"sub-{ctx.subject}"
-            / "eeg"
-            / f"sub-{ctx.subject}_task-{ctx.task}_power_epo-tfr.h5"
-        )
-        save_tfr_with_sidecar(
-            tfr_to_save,
-            tfr_output_path,
-            (baseline_start, baseline_end),
-            baseline_mode,
-            ctx.logger,
-            ctx.config,
-        )
-    except Exception as exc:
-        ctx.logger.warning("Failed to save baselined TFR with sidecar: %s", exc)
+    baseline_mode = str(ctx.config.get("time_frequency_analysis.baseline_mode", "logratio"))
+    tfr_to_save = tfr.copy()
+    tfr_to_save.apply_baseline(baseline=(baseline_start, baseline_end), mode=baseline_mode)
+    tfr_to_save.comment = f"BASELINED:mode={baseline_mode};win=({baseline_start:.3f},{baseline_end:.3f})"
+    tfr_output_path = (
+        ctx.deriv_root
+        / f"sub-{ctx.subject}"
+        / "eeg"
+        / f"sub-{ctx.subject}_task-{ctx.task}_power_epo-tfr.h5"
+    )
+    save_tfr_with_sidecar(
+        tfr_to_save,
+        tfr_output_path,
+        (baseline_start, baseline_end),
+        baseline_mode,
+        ctx.logger,
+        ctx.config,
+    )
 
 
 def _extract_pac_features(
@@ -494,11 +485,9 @@ def _extract_pac_features(
             if pac_trials_df is not None and not pac_trials_df.empty:
                 return None, None, None, pac_trials_df, None
             return None, None, None, None, None
-
-    if pac_source == "precomputed" and precomputed_data is None:
-        ctx.logger.warning(
-            "PAC source='precomputed' requested but no precomputed data available; "
-            "falling back to TFR-based PAC (less robust to spurious coupling)"
+        raise ValueError(
+            "PAC source='precomputed' requested but precomputed data is unavailable. "
+            "Compute precomputed intermediates first or change feature_engineering.pac.source."
         )
 
     if tfr_complex is None:
@@ -507,7 +496,7 @@ def _extract_pac_features(
             ctx.tfr_complex = tfr_complex
 
     if tfr_complex is None:
-        return None, None, None, None, None
+        raise ValueError("PAC requested but complex TFR computation failed.")
 
     freq_min, freq_max, n_freqs, *_ = get_tfr_config(ctx.config)
     frequencies = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
@@ -554,30 +543,22 @@ def _extract_feature_with_error_handling(
 ) -> tuple[Optional[pd.DataFrame], Optional[List[str]], Optional[Any]]:
     """Extract a feature category with standardized error handling and validation."""
     progress.step(message=f"Extracting {feature_name} features...")
-    try:
-        extraction_result = extractor_func(*args, **kwargs)
-        if isinstance(extraction_result, tuple):
-            if len(extraction_result) == 2:
-                df, cols = extraction_result
-                qc = None
-            elif len(extraction_result) == 3:
-                df, cols, qc = extraction_result
-            else:
-                raise ValueError(f"Unexpected return tuple length: {len(extraction_result)}")
+    extraction_result = extractor_func(*args, **kwargs)
+    if isinstance(extraction_result, tuple):
+        if len(extraction_result) == 2:
+            df, cols = extraction_result
+            qc = None
+        elif len(extraction_result) == 3:
+            df, cols, qc = extraction_result
         else:
-            df, cols, qc = extraction_result, [], None
+            raise ValueError(f"Unexpected return tuple length: {len(extraction_result)}")
+    else:
+        df, cols, qc = extraction_result, [], None
 
-        if df is not None and not df.empty and len(df) != expected_trials:
-            raise ValueError(
-                f"{feature_name} length mismatch: {len(df)} vs {expected_trials}"
-            )
+    if df is not None and not df.empty and len(df) != expected_trials:
+        raise ValueError(f"{feature_name} length mismatch: {len(df)} vs {expected_trials}")
 
-        return df, cols, qc
-    except Exception as exc:
-        ctx.logger.error(f"Failed to extract {feature_name} features: {exc}")
-        if ctx.config.get("feature_engineering.validation.fail_on_error", False):
-            raise
-        return None, [], None
+    return df, cols, qc
 
 
 def _apply_spatial_filtering_to_results(
@@ -690,7 +671,7 @@ def extract_all_features(
         for win_name, rng in ranges_full.items():
             try:
                 start, end = float(rng[0]), float(rng[1])
-            except Exception:
+            except (TypeError, ValueError, IndexError):
                 new_masks[win_name] = np.zeros_like(new_times, dtype=bool)
                 continue
             if not (np.isfinite(start) and np.isfinite(end) and end > start):
@@ -878,30 +859,25 @@ def extract_all_features(
 
     if "pac" in ctx.feature_categories:
         progress.step(message="Computing PAC features...")
-        try:
-            pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = (
-                _extract_pac_features(ctx, precomputed_data, tfr_complex)
-            )
+        pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = _extract_pac_features(
+            ctx, precomputed_data, tfr_complex
+        )
 
-            if pac_trials_df is not None:
-                if len(pac_trials_df) != expected_n_trials:
-                    raise ValueError(
-                        f"PAC trials length mismatch: {len(pac_trials_df)} vs {expected_n_trials}"
-                    )
-                results.pac_trials_df = pac_trials_df
-                results.pac_df = pac_df
-                results.pac_phase_freqs = pac_phase_freqs
-                results.pac_amp_freqs = pac_amp_freqs
-                results.pac_time_df = pac_time_df
+        if pac_trials_df is not None:
+            if len(pac_trials_df) != expected_n_trials:
+                raise ValueError(
+                    f"PAC trials length mismatch: {len(pac_trials_df)} vs {expected_n_trials}"
+                )
+            results.pac_trials_df = pac_trials_df
+            results.pac_df = pac_df
+            results.pac_phase_freqs = pac_phase_freqs
+            results.pac_amp_freqs = pac_amp_freqs
+            results.pac_time_df = pac_time_df
 
-                if pac_time_df is not None and len(pac_time_df) != expected_n_trials:
-                    raise ValueError(
-                        f"PAC time-resolved length mismatch: {len(pac_time_df)} vs {expected_n_trials}"
-                    )
-        except Exception as exc:
-            ctx.logger.error(f"Failed to compute PAC features: {exc}")
-            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
-                raise
+            if pac_time_df is not None and len(pac_time_df) != expected_n_trials:
+                raise ValueError(
+                    f"PAC time-resolved length mismatch: {len(pac_time_df)} vs {expected_n_trials}"
+                )
 
     if "erds" in ctx.feature_categories and precomputed_data is not None:
         erds_df, erds_cols, erds_qc = _extract_feature_with_error_handling(
@@ -1047,26 +1023,22 @@ def _extract_precomputed_feature_group(
 ) -> None:
     """Extract a feature group from precomputed data and add to result."""
     logger.info(f"Extracting {feature_name} features...")
-    try:
-        extraction_result = extractor_func(precomputed, *args, **kwargs)
-        if isinstance(extraction_result, tuple):
-            if len(extraction_result) == 2:
-                df, cols = extraction_result
-            elif len(extraction_result) == 3:
-                df, cols, qc = extraction_result
-                result.qc[feature_name] = qc
-            else:
-                raise ValueError(f"Unexpected return tuple length: {len(extraction_result)}")
+    extraction_result = extractor_func(precomputed, *args, **kwargs)
+    if isinstance(extraction_result, tuple):
+        if len(extraction_result) == 2:
+            df, cols = extraction_result
+        elif len(extraction_result) == 3:
+            df, cols, qc = extraction_result
+            result.qc[feature_name] = qc
         else:
-            df, cols = extraction_result, []
+            raise ValueError(f"Unexpected return tuple length: {len(extraction_result)}")
+    else:
+        df, cols = extraction_result, []
 
-        if not df.empty:
-            result.features[feature_name] = FeatureSet(df, cols, feature_name)
-        else:
-            result.qc[feature_name] = {"skipped_reason": "empty_result"}
-    except Exception as exc:
-        logger.error(f"Failed to extract {feature_name} features: {exc}")
-        result.qc[feature_name] = {"skipped_reason": f"error: {exc}"}
+    if not df.empty:
+        result.features[feature_name] = FeatureSet(df, cols, feature_name)
+    else:
+        result.qc[feature_name] = {"skipped_reason": "empty_result"}
 
 
 def extract_precomputed_features(
@@ -1168,8 +1140,9 @@ def extract_precomputed_features(
         )
 
     if "itpc" in feature_groups:
+        n_jobs_itpc = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_itpc")
         _extract_precomputed_feature_group(
-            "itpc", extract_itpc_from_precomputed, precomputed, logger, result
+            "itpc", extract_itpc_from_precomputed, precomputed, logger, result, n_jobs=n_jobs_itpc
         )
 
     if "asymmetry" in feature_groups:
@@ -1186,16 +1159,12 @@ def extract_precomputed_features(
 
     if "quality" in feature_groups:
         logger.info("Computing trial-level quality metrics...")
-        try:
-            qual_df = compute_trial_quality_metrics(epochs, config)
-            qual_cols = list(qual_df.columns)
-            if not qual_df.empty:
-                result.features["quality"] = FeatureSet(qual_df, qual_cols, "quality")
-            else:
-                result.qc["quality"] = {"skipped_reason": "empty_result"}
-        except Exception as exc:
-            logger.error(f"Failed to extract quality features: {exc}")
-            result.qc["quality"] = {"skipped_reason": f"error: {exc}"}
+        qual_df = compute_trial_quality_metrics(epochs, config)
+        qual_cols = list(qual_df.columns)
+        if not qual_df.empty:
+            result.features["quality"] = FeatureSet(qual_df, qual_cols, "quality")
+        else:
+            result.qc["quality"] = {"skipped_reason": "empty_result"}
 
     return result
 

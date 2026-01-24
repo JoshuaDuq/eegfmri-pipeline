@@ -23,7 +23,7 @@ from joblib import Parallel, delayed
 
 try:
     from mne_connectivity import envelope_correlation, spectral_connectivity_time
-except Exception:
+except ImportError:
     envelope_correlation = None
     spectral_connectivity_time = None
 
@@ -84,22 +84,38 @@ class ConnectivityConfig:
         conn_cfg = cfg.get("feature_engineering.connectivity", {}) if hasattr(cfg, "get") else {}
 
         measures_cfg = conn_cfg.get("measures", ["wpli2_debiased", "aec"])
-        if isinstance(measures_cfg, (list, tuple)):
-            measures = [str(m).strip().lower() for m in measures_cfg]
-        else:
-            measures = ["wpli2_debiased", "aec"]
+        if isinstance(measures_cfg, str):
+            measures_cfg = [measures_cfg]
+        if not isinstance(measures_cfg, (list, tuple)):
+            raise TypeError(
+                "feature_engineering.connectivity.measures must be a list/tuple of strings "
+                f"(got {type(measures_cfg).__name__})."
+            )
+        measures = [str(m).strip().lower() for m in measures_cfg]
 
         granularity = str(conn_cfg.get("granularity", "trial")).strip().lower()
         if granularity not in {"trial", "condition", "subject"}:
-            granularity = "trial"
+            raise ValueError(
+                "feature_engineering.connectivity.granularity must be one of "
+                "{'trial','condition','subject'} "
+                f"(got '{granularity}')."
+            )
 
         phase_estimator = str(conn_cfg.get("phase_estimator", "within_epoch")).strip().lower()
         if phase_estimator not in {"within_epoch", "across_epochs"}:
-            phase_estimator = "within_epoch"
+            raise ValueError(
+                "feature_engineering.connectivity.phase_estimator must be one of "
+                "{'within_epoch','across_epochs'} "
+                f"(got '{phase_estimator}')."
+            )
 
         output_level = str(conn_cfg.get("output_level", "full")).strip().lower()
         if output_level not in {"full", "global_only"}:
-            output_level = "full"
+            raise ValueError(
+                "feature_engineering.connectivity.output_level must be one of "
+                "{'full','global_only'} "
+                f"(got '{output_level}')."
+            )
 
         mode = str(conn_cfg.get("mode", "cwt_morlet")).strip().lower()
 
@@ -108,10 +124,7 @@ class ConnectivityConfig:
         n_freqs_per_band = int(conn_cfg.get("n_freqs_per_band", 8))
 
         n_cycles = conn_cfg.get("n_cycles", None)
-        try:
-            n_cycles = float(n_cycles) if n_cycles is not None else None
-        except Exception:
-            n_cycles = None
+        n_cycles = float(n_cycles) if n_cycles is not None else None
 
         decim = int(conn_cfg.get("decim", 1))
         min_segment_samples = int(conn_cfg.get("min_segment_samples", 50))
@@ -130,18 +143,15 @@ class ConnectivityConfig:
         enable_aec_z = "z" in aec_output_modes
 
         graph_top_prop = conn_cfg.get("graph_top_prop", 0.1)
-        try:
-            graph_top_prop = float(graph_top_prop)
-        except (ValueError, TypeError):
-            graph_top_prop = 0.1
+        graph_top_prop = float(graph_top_prop)
         if not np.isfinite(graph_top_prop) or graph_top_prop <= 0 or graph_top_prop > 1:
-            graph_top_prop = 0.1
+            raise ValueError(
+                "feature_engineering.connectivity.graph_top_prop must be finite and in (0, 1] "
+                f"(got {graph_top_prop})."
+            )
 
         small_world_n_rand = conn_cfg.get("small_world_n_rand", 100)
-        try:
-            small_world_n_rand = int(small_world_n_rand)
-        except (ValueError, TypeError):
-            small_world_n_rand = 100
+        small_world_n_rand = int(small_world_n_rand)
 
         force_within_epoch_for_ml = bool(conn_cfg.get("force_within_epoch_for_ml", True))
         warn_if_no_spatial_transform = bool(conn_cfg.get("warn_if_no_spatial_transform", True))
@@ -200,16 +210,9 @@ def _warn_if_phase_connectivity_without_spatial_transform(
     if not warn_enabled:
         return
     
-    try:
-        from eeg_pipeline.analysis.features.preparation import _get_spatial_transform_type
+    from eeg_pipeline.analysis.features.preparation import _get_spatial_transform_type
 
-        spatial_transform = _get_spatial_transform_type(config, feature_family="connectivity")
-    except Exception:
-        spatial_transform = (
-            str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
-            if hasattr(config, "get")
-            else "none"
-        )
+    spatial_transform = _get_spatial_transform_type(config, feature_family="connectivity")
     if spatial_transform in {"csd", "laplacian"}:
         return
     
@@ -284,9 +287,10 @@ def _apply_across_epochs_phase_estimates_inplace(
     if df is None or df.empty:
         return
     if spectral_connectivity_time is None:
-        if logger is not None:
-            logger.warning("Connectivity: mne-connectivity unavailable; cannot compute across-epochs phase estimates.")
-        return
+        raise ImportError(
+            "Connectivity across-epochs phase estimates require 'mne-connectivity'. "
+            "Install it with: pip install mne-connectivity"
+        )
 
     conn_cfg = config.get("feature_engineering.connectivity", {}) if hasattr(config, "get") else {}
     phase_measures = _resolve_phase_measures(conn_cfg)
@@ -301,21 +305,15 @@ def _apply_across_epochs_phase_estimates_inplace(
     n_freqs_per_band = int(conn_cfg.get("n_freqs_per_band", 8))
     conn_mode = str(conn_cfg.get("mode", "cwt_morlet"))
     n_cycles = conn_cfg.get("n_cycles", None)
-    try:
-        n_cycles = float(n_cycles) if n_cycles is not None else None
-    except Exception:
-        n_cycles = None
+    n_cycles = float(n_cycles) if n_cycles is not None else None
     decim = int(conn_cfg.get("decim", 1))
 
     min_cycles_per_band = float(conn_cfg.get("min_cycles_per_band", 3.0))
     min_segment_sec = float(conn_cfg.get("min_segment_sec", 0.0))
 
-    try:
-        sfreq = float(getattr(precomputed, "sfreq", None))
-    except Exception:
-        sfreq = np.nan
+    sfreq = float(getattr(precomputed, "sfreq", None))
     if not np.isfinite(sfreq) or sfreq <= 0:
-        return
+        raise ValueError("Connectivity across-epochs estimates require a valid precomputed.sfreq.")
 
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)
@@ -382,10 +380,10 @@ def _apply_across_epochs_phase_estimates_inplace(
                 try:
                     fmin = float(fmin)
                     fmax = float(fmax)
-                except Exception:
-                    continue
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Invalid frequency band range for '{band}': ({fmin}, {fmax})") from exc
                 if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
-                    continue
+                    raise ValueError(f"Invalid frequency band range for '{band}': ({fmin}, {fmax})")
                 if fmax < min_viable_freq:
                     continue
 
@@ -404,10 +402,7 @@ def _apply_across_epochs_phase_estimates_inplace(
                 for method in phase_measures:
                     method_use = method
                     method_label = method
-                    try:
-                        con = _run(method_use, seg_data, freqs, fmin, fmax, use_n_cycles)
-                    except Exception:
-                        continue
+                    con = _run(method_use, seg_data, freqs, fmin, fmax, use_n_cycles)
 
                     con_data = np.asarray(con.get_data())
                     if con_data.ndim == 3:
@@ -579,14 +574,11 @@ def extract_connectivity_features(
             feature_family="connectivity",
             train_mask=getattr(ctx, "train_mask", None),
         )
-        try:
-            setter = getattr(ctx, "set_precomputed_for_family", None)
-            if callable(setter):
-                setter("connectivity", precomputed)
-            else:
-                ctx.set_precomputed(precomputed)
-        except Exception:
-            pass
+        setter = getattr(ctx, "set_precomputed_for_family", None)
+        if callable(setter):
+            setter("connectivity", precomputed)
+        else:
+            ctx.set_precomputed(precomputed)
 
     ctx_name = getattr(ctx, "name", None)
     segments: List[str] = []
@@ -624,14 +616,12 @@ def extract_connectivity_features(
 
     if train_mask is not None and phase_estimator == "across_epochs":
         if conn_cfg.force_within_epoch_for_ml:
-            if ctx.logger is not None:
-                ctx.logger.warning(
-                    "Connectivity: train_mask detected (CV/machine learning mode) with phase_estimator='across_epochs'. "
-                    "Across-epochs estimates leak test-trial information. "
-                    "Forcing phase_estimator='within_epoch' for valid CV. "
-                    "Set feature_engineering.connectivity.force_within_epoch_for_ml=false to override."
-                )
-            phase_estimator = "within_epoch"
+            raise ValueError(
+                "Connectivity: train_mask detected (CV/machine learning mode) with phase_estimator='across_epochs'. "
+                "Across-epochs estimates leak test-trial information. "
+                "Set feature_engineering.connectivity.phase_estimator='within_epoch' (recommended) "
+                "or set feature_engineering.connectivity.force_within_epoch_for_ml=false to explicitly allow leakage."
+            )
         else:
             if ctx.logger is not None:
                 ctx.logger.warning(
@@ -677,10 +667,7 @@ def extract_connectivity_features(
         )
 
     if granularity == "trial":
-        try:
-            df.attrs["feature_granularity"] = "trial"
-        except Exception:
-            pass
+        df.attrs["feature_granularity"] = "trial"
         return df, cols
 
     n_epochs = int(df.shape[0])
@@ -706,10 +693,10 @@ def extract_connectivity_features(
     # condition-level: broadcast within each condition label
     events = getattr(ctx, "aligned_events", None)
     if events is None or getattr(events, "empty", True) or len(events) != n_epochs:
-        ctx.logger.warning("Connectivity granularity=condition requested but aligned_events missing/mismatched; falling back to subject-level.")
-        means = numeric.mean(axis=0)
-        out = pd.DataFrame([means.values] * n_epochs, columns=means.index)
-        return out, list(out.columns)
+        raise ValueError(
+            "Connectivity granularity='condition' requested but aligned_events is missing, empty, or length-mismatched "
+            f"(n_epochs={n_epochs}, aligned_events_len={len(events) if events is not None else 'None'})."
+        )
 
     cond_col = None
     for candidate in ("condition", "trial_type"):
@@ -725,24 +712,28 @@ def extract_connectivity_features(
                     break
 
     if cond_col is None:
-        ctx.logger.warning("Connectivity granularity=condition requested but no condition column found; falling back to subject-level.")
-        means = numeric.mean(axis=0)
-        out = pd.DataFrame([means.values] * n_epochs, columns=means.index)
-        return out, list(out.columns)
+        raise ValueError(
+            "Connectivity granularity='condition' requested but no condition column found in aligned_events. "
+            "Expected one of {'condition','trial_type'} or a column listed in event_columns.pain_binary."
+        )
 
     labels = events[cond_col].astype(str)
     out = numeric.copy()
 
     min_n = conn_cfg.min_epochs_per_group
+    counts = labels.value_counts()
+    too_small = counts[counts < int(min_n)]
+    if not too_small.empty:
+        details = ", ".join([f"{k}={int(v)}" for k, v in too_small.items()])
+        raise ValueError(
+            "Connectivity granularity='condition' requested but some condition groups have too few epochs "
+            f"(<{int(min_n)}): {details}."
+        )
+
     for lab in sorted(labels.unique()):
         mask = (labels == lab).to_numpy()
-        n = int(np.sum(mask))
-        if n < min_n:
-            ctx.logger.warning("Connectivity condition group '%s' has only %d epochs (<%d); using subject mean for this group.", lab, n, min_n)
-            grp_mean = numeric.mean(axis=0)
-        else:
-            grp_mean = numeric.loc[mask].mean(axis=0)
-        out.loc[mask] = [grp_mean.values] * n
+        grp_mean = numeric.loc[mask].mean(axis=0)
+        out.loc[mask] = [grp_mean.values] * int(np.sum(mask))
 
     out.columns = df.columns
     # Mark as broadcast feature to prevent pseudo-replication
@@ -895,8 +886,10 @@ def extract_connectivity_from_precomputed(
 
     try:
         sfreq = float(getattr(precomputed, "sfreq", None))
-    except Exception as exc:
-        raise ValueError("Connectivity extraction requires a valid precomputed.sfreq (sampling frequency).") from exc
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Connectivity extraction requires a valid precomputed.sfreq (sampling frequency)."
+        ) from exc
     if not np.isfinite(sfreq) or sfreq <= 0:
         raise ValueError("Connectivity extraction requires a valid precomputed.sfreq (sampling frequency).")
 
@@ -920,7 +913,7 @@ def extract_connectivity_from_precomputed(
         default_cycles = 7.0
         try:
             base = float(base_n_cycles) if base_n_cycles is not None else default_cycles
-        except Exception:
+        except (TypeError, ValueError):
             base = default_cycles
 
         # MNE requirement: n_cycles / freqs < duration (or equivalently: wavelet_length < n_times)
@@ -1024,21 +1017,12 @@ def extract_connectivity_from_precomputed(
             # Handle MNE's "wavelet longer than signal" and similar validation errors gracefully
             error_msg = str(e).lower()
             if "wavelet" in error_msg or "n_cycles" in error_msg or "longer than" in error_msg:
-                if logger is not None:
-                    logger.warning(
-                        f"Connectivity: {method_use} skipped for segment '{seg_name}' band '{band}' - "
-                        f"segment too short for wavelet-based connectivity. "
-                        f"Consider using longer epochs or excluding low-frequency bands for short segments."
-                    )
-                return pd.DataFrame()
+                raise ValueError(
+                    f"Connectivity: segment '{seg_name}' is too short for wavelet-based '{method_use}' "
+                    f"in band '{band}'. Consider longer epochs or higher fmin."
+                ) from e
             # Re-raise other ValueErrors
             raise
-        except Exception as e:
-            if logger is not None:
-                logger.warning(
-                    f"Connectivity: {method} failed for segment '{seg_name}' band '{band}': {e}"
-                )
-            return pd.DataFrame()
 
         con_data = np.asarray(con.get_data())
         
@@ -1050,7 +1034,10 @@ def extract_connectivity_from_precomputed(
             elif con_data.ndim == 2:
                 con_vals = np.tile(np.nanmean(con_data, axis=-1)[None, :], (n_epochs, 1))
             else:
-                return pd.DataFrame()
+                raise ValueError(
+                    f"Connectivity: unexpected across_epochs connectivity shape {con_data.shape} "
+                    f"for method='{method_use}', segment='{seg_name}', band='{band}'."
+                )
         else:
             # within_epoch mode: per-trial connectivity
             if con_data.ndim == 2:
@@ -1060,9 +1047,15 @@ def extract_connectivity_from_precomputed(
             elif con_data.ndim == 3:
                 con_vals = con_data[:, :, 0]
             else:
-                return pd.DataFrame()
+                raise ValueError(
+                    f"Connectivity: unexpected within_epoch connectivity shape {con_data.shape} "
+                    f"for method='{method_use}', segment='{seg_name}', band='{band}'."
+                )
             if con_vals.shape[0] != n_epochs:
-                return pd.DataFrame()
+                raise ValueError(
+                    f"Connectivity: connectivity epochs mismatch for method='{method_use}', segment='{seg_name}', "
+                    f"band='{band}' (got {con_vals.shape[0]} epochs, expected {n_epochs})."
+                )
 
         parts: List[pd.DataFrame] = []
         if output_level == "full":
@@ -1208,7 +1201,7 @@ def extract_connectivity_from_precomputed(
             try:
                 fmin = float(fmin)
                 fmax = float(fmax)
-            except Exception:
+            except (TypeError, ValueError):
                 continue
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
                 continue
@@ -1761,15 +1754,10 @@ def extract_directed_connectivity_from_precomputed(
     n_freqs = int(directed_cfg.get("n_freqs", 16))
     min_segment_samples = int(directed_cfg.get("min_segment_samples", 100))
     
-    try:
-        sfreq = float(getattr(precomputed, "sfreq", None))
-    except Exception:
-        if logger is not None:
-            logger.error("Directed connectivity: invalid sampling frequency.")
-        return pd.DataFrame(), []
+    sfreq = float(getattr(precomputed, "sfreq", None))
     
     if not np.isfinite(sfreq) or sfreq <= 0:
-        return pd.DataFrame(), []
+        raise ValueError("Directed connectivity extraction requires a valid precomputed.sfreq (sampling frequency).")
     
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)
@@ -1850,7 +1838,7 @@ def extract_directed_connectivity_from_precomputed(
             try:
                 fmin = float(fmin)
                 fmax = float(fmax)
-            except Exception:
+            except (TypeError, ValueError):
                 continue
             
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
@@ -1968,14 +1956,11 @@ def extract_directed_connectivity_features(
             feature_family="directedconnectivity",
             train_mask=getattr(ctx, "train_mask", None),
         )
-        try:
-            setter = getattr(ctx, "set_precomputed_for_family", None)
-            if callable(setter):
-                setter("connectivity", precomputed)
-            else:
-                ctx.set_precomputed(precomputed)
-        except Exception:
-            pass
+        setter = getattr(ctx, "set_precomputed_for_family", None)
+        if callable(setter):
+            setter("connectivity", precomputed)
+        else:
+            ctx.set_precomputed(precomputed)
     
     ctx_name = getattr(ctx, "name", None)
     segments: List[str] = []

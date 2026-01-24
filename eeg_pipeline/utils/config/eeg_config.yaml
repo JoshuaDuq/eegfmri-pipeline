@@ -493,18 +493,10 @@ behavior_analysis:
     include_in_correlations: true    # add run dummies to partial correlations
     max_dummies: 20                  # bounds dummy explosion for categorical run IDs
 
-  # Canonical per-trial table export (single source of truth for subject-level stats/plots)
+  # Canonical per-trial table export (clean events.tsv + feature columns)
   trial_table:
     enabled: true
     format: "parquet"   # "parquet" (default, recommended) or "tsv"
-    include_features: true
-    include_covariates: true
-    include_events: true
-    extra_event_columns: []
-    validate:
-      enabled: true
-      # Non-gating data contract checks (pain studies defaults; override per project)
-      high_missing_frac: 0.5
 
   # Lag features: temporal dynamics (prev_*, delta_*) for habituation analyses
   lag_features:

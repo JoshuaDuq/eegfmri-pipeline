@@ -135,20 +135,14 @@ def _compute_epoch_complexity(
             trace = _standardize_trace(trace_matrix[ch_idx], zscore=params.zscore)
             if np.isfinite(trace).sum() < params.min_samples:
                 continue
-            try:
-                lzc_per_channel[ch_idx] = float(_lempel_ziv_complexity(trace))
-            except Exception:
-                lzc_per_channel[ch_idx] = np.nan
-            try:
-                pe_per_channel[ch_idx] = float(
-                    _permutation_entropy(
-                        trace,
-                        order=params.pe_order,
-                        delay=params.pe_delay,
-                    )
+            lzc_per_channel[ch_idx] = float(_lempel_ziv_complexity(trace))
+            pe_per_channel[ch_idx] = float(
+                _permutation_entropy(
+                    trace,
+                    order=params.pe_order,
+                    delay=params.pe_delay,
                 )
-            except Exception:
-                pe_per_channel[ch_idx] = np.nan
+            )
 
             if "channels" in spatial_modes:
                 record[NamingSchema.build("comp", segment_name, band, "ch", "lzc", channel=ch_name)] = float(

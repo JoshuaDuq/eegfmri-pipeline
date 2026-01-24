@@ -147,15 +147,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     trial_table_group = parser.add_argument_group("Trial table options")
     trial_table_group.add_argument("--trial-table-format", choices=["parquet", "tsv"], default=None)
-    trial_table_group.add_argument("--trial-table-include-features", action="store_true", default=None)
-    trial_table_group.add_argument("--no-trial-table-include-features", action="store_false", dest="trial_table_include_features")
-    trial_table_group.add_argument("--trial-table-include-covariates", action="store_true", default=None)
-    trial_table_group.add_argument("--no-trial-table-include-covariates", action="store_false", dest="trial_table_include_covariates")
-    trial_table_group.add_argument("--trial-table-include-events", action="store_true", default=None)
-    trial_table_group.add_argument("--no-trial-table-include-events", action="store_false", dest="trial_table_include_events")
     trial_table_group.add_argument("--trial-table-add-lag-features", action="store_true", default=None)
     trial_table_group.add_argument("--no-trial-table-add-lag-features", action="store_false", dest="trial_table_add_lag_features")
-    trial_table_group.add_argument("--trial-table-extra-event-columns", nargs="+", default=None, metavar="COL")
     trial_table_group.add_argument("--feature-summaries", action="store_true", default=None, dest="feature_summaries_enabled")
     trial_table_group.add_argument("--no-feature-summaries", action="store_false", dest="feature_summaries_enabled")
 
@@ -290,6 +283,12 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     report_group.add_argument("--report-top-n", type=int, default=None, help="Top N rows per analysis table in subject_report*.md")
 
     temporal_group = parser.add_argument_group("Temporal options")
+    temporal_group.add_argument(
+        "--temporal-target-column",
+        type=str,
+        default=None,
+        help="events.tsv column to correlate against for temporal analyses (default: rating from event_columns.rating)",
+    )
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-max-ms", type=int, default=None)
@@ -474,20 +473,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     tt = ba.setdefault("trial_table", {})
     if getattr(args, "trial_table_format", None) is not None:
         tt["format"] = str(args.trial_table_format).strip().lower()
-    if getattr(args, "trial_table_include_features", None) is not None:
-        tt["include_features"] = bool(args.trial_table_include_features)
-    if getattr(args, "trial_table_include_covariates", None) is not None:
-        tt["include_covariates"] = bool(args.trial_table_include_covariates)
-    if getattr(args, "trial_table_include_events", None) is not None:
-        tt["include_events"] = bool(args.trial_table_include_events)
     if getattr(args, "trial_table_add_lag_features", None) is not None:
         tt["add_lag_features"] = bool(args.trial_table_add_lag_features)
-    if getattr(args, "trial_table_extra_event_columns", None) is not None:
-        cols = [str(c) for c in (args.trial_table_extra_event_columns or [])]
-        if len(cols) == 1 and cols[0].strip().lower() == "none":
-            tt["extra_event_columns"] = []
-        else:
-            tt["extra_event_columns"] = cols
 
     if getattr(args, "feature_summaries_enabled", None) is not None:
         ba.setdefault("feature_summaries", {})["enabled"] = bool(args.feature_summaries_enabled)
@@ -734,6 +721,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     # Temporal
     temporal_cfg = ba.setdefault("temporal", {})
+    if getattr(args, "temporal_target_column", None) is not None:
+        temporal_cfg["target_column"] = str(args.temporal_target_column).strip()
     if getattr(args, "temporal_split_by_condition", None) is not None:
         temporal_cfg["split_by_condition"] = bool(args.temporal_split_by_condition)
     if getattr(args, "temporal_condition_column", None) is not None:
@@ -960,7 +949,6 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             plots = [
                 "psychometrics",
                 "temporal_topomaps",
-                "pain_clusters",
                 "dose_response",
             ]
         elif run_all_plots:

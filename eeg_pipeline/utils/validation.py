@@ -557,64 +557,6 @@ def require_epochs_tfr(
 # Data Value Validation
 ###################################################################
 
-
-def validate_pain_binary_values(
-    values: pd.Series,
-    column_name: str,
-    logger: Optional[logging.Logger] = None,
-) -> tuple[np.ndarray, int]:
-    """Validate pain binary column contains only 0/1 values."""
-    logger = logger or logging.getLogger(__name__)
-
-    numeric_vals = pd.to_numeric(values, errors="coerce")
-    n_total = len(values)
-    n_nan = int(numeric_vals.isna().sum())
-    n_invalid = int(((numeric_vals != 0) & (numeric_vals != 1) & numeric_vals.notna()).sum())
-
-    if n_nan > 0 or n_invalid > 0:
-        error_msg = (
-            f"Invalid pain binary values in '{column_name}': "
-            f"{n_nan} NaN/missing, {n_invalid} non-binary out of {n_total}."
-        )
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-
-    validated = numeric_vals.fillna(0).astype(int).values
-    return validated, n_nan + n_invalid
-
-
-def validate_temperature_values(
-    values: pd.Series,
-    column_name: str,
-    min_temp: Optional[float] = None,
-    max_temp: Optional[float] = None,
-    logger: Optional[logging.Logger] = None,
-    config: Optional[Any] = None,
-) -> tuple[np.ndarray, int]:
-    """Validate temperature values are within expected range."""
-    from eeg_pipeline.utils.config.loader import get_constants
-    from eeg_pipeline.utils.analysis.stats.base import ensure_config
-
-    logger = logger or logging.getLogger(__name__)
-
-    if min_temp is None or max_temp is None:
-        config = ensure_config(config)
-        io_constants = get_constants("io", config)
-        min_temp = min_temp or float(io_constants.get("temperature_min", 35.0))
-        max_temp = max_temp or float(io_constants.get("temperature_max", 50.0))
-
-    numeric_vals = pd.to_numeric(values, errors="coerce")
-    n_nan = int(numeric_vals.isna().sum())
-    n_out_of_range = int(((numeric_vals < min_temp) | (numeric_vals > max_temp)).sum())
-
-    if n_nan > 0:
-        logger.warning(f"{column_name}: {n_nan} NaN values")
-    if n_out_of_range > 0:
-        logger.warning(f"{column_name}: {n_out_of_range} values outside [{min_temp}, {max_temp}]")
-
-    return numeric_vals.values, n_nan + n_out_of_range
-
-
 def check_pyriemann() -> bool:
     """Check if pyriemann package is available."""
     try:

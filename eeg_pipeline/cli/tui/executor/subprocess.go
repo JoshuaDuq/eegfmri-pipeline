@@ -34,12 +34,13 @@ type ProgressEvent struct {
 
 // SubjectsResponse from eeg-pipeline info subjects --json
 type SubjectsResponse struct {
-	Subjects              []messages.SubjectInfo `json:"subjects"`
-	Count                 int                    `json:"count"`
-	AvailableWindows      []string               `json:"available_windows"`
-	AvailableEventColumns []string               `json:"available_event_columns"`
-	AvailableChannels     []string               `json:"available_channels"`
-	UnavailableChannels   []string               `json:"unavailable_channels"`
+	Subjects                  []messages.SubjectInfo `json:"subjects"`
+	Count                     int                    `json:"count"`
+	AvailableWindows          []string               `json:"available_windows"`
+	AvailableWindowsByFeature map[string][]string    `json:"available_windows_by_feature"`
+	AvailableEventColumns     []string               `json:"available_event_columns"`
+	AvailableChannels         []string               `json:"available_channels"`
+	UnavailableChannels       []string               `json:"unavailable_channels"`
 }
 
 // ConfigSummaryResponse from eeg-pipeline info config --json
@@ -212,6 +213,47 @@ func DiscoverColumns(repoRoot string, task string) tea.Cmd {
 	}
 }
 
+// DiscoverTrialTableColumns runs eeg-pipeline info discover --discover-source trial-table --json
+// to find available trial-table columns (including feature columns when present).
+func DiscoverTrialTableColumns(repoRoot string, task string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "discover", "--discover-source", "trial-table", "--json"}
+		if task != "" {
+			args = append(args, "--task", task)
+		}
+
+		output, err := runPythonJSONCommand(repoRoot, args)
+		if err != nil {
+			return messages.ColumnsDiscoveredMsg{
+				Columns: nil,
+				Values:  nil,
+				Windows: nil,
+				Source:  "trial_table",
+				Error:   err,
+			}
+		}
+
+		var response DiscoverColumnsResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.ColumnsDiscoveredMsg{
+				Columns: nil,
+				Values:  nil,
+				Windows: nil,
+				Source:  "trial_table",
+				Error:   err,
+			}
+		}
+
+		return messages.ColumnsDiscoveredMsg{
+			Columns: response.Columns,
+			Values:  response.Values,
+			Windows: response.Windows,
+			Source:  response.Source,
+			Error:   nil,
+		}
+	}
+}
+
 // DiscoverConditionEffectsColumns runs eeg-pipeline info discover --discover-source condition-effects --json
 // to find available condition columns and values from condition effects files
 func DiscoverConditionEffectsColumns(repoRoot string, task string, subject string) tea.Cmd {
@@ -338,7 +380,7 @@ func DiscoverROIs(repoRoot string, task string) tea.Cmd {
 // LoadSubjects runs eeg-pipeline info subjects --json and returns subjects
 func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"-m", "eeg_pipeline", "info", "subjects", "--status", "--json"}
+		args := []string{"-m", "eeg_pipeline", "info", "subjects", "--status", "--json", "--cache"}
 		if task != "" {
 			args = append(args, "--task", task)
 		}
@@ -372,11 +414,49 @@ func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd
 		}
 
 		return messages.SubjectsLoadedMsg{
-			Subjects:              response.Subjects,
-			AvailableWindows:      response.AvailableWindows,
-			AvailableEventColumns: response.AvailableEventColumns,
-			AvailableChannels:     response.AvailableChannels,
-			UnavailableChannels:   response.UnavailableChannels,
+			Subjects:                  response.Subjects,
+			AvailableWindows:          response.AvailableWindows,
+			AvailableWindowsByFeature: response.AvailableWindowsByFeature,
+			AvailableEventColumns:     response.AvailableEventColumns,
+			AvailableChannels:         response.AvailableChannels,
+			UnavailableChannels:       response.UnavailableChannels,
+		}
+	}
+}
+
+// LoadSubjectsRefresh forces refresh of cached subject discovery/status.
+func LoadSubjectsRefresh(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "subjects", "--status", "--json", "--cache", "--refresh"}
+		if task != "" {
+			args = append(args, "--task", task)
+		}
+		source := pipeline.GetDataSource()
+		args = append(args, "--source", source)
+
+		output, err := runPythonJSONCommand(repoRoot, args)
+		if err != nil {
+			return messages.SubjectsLoadedMsg{
+				Subjects: nil,
+				Error:    err,
+			}
+		}
+
+		var response SubjectsResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.SubjectsLoadedMsg{
+				Subjects: nil,
+				Error:    err,
+			}
+		}
+
+		return messages.SubjectsLoadedMsg{
+			Subjects:                  response.Subjects,
+			AvailableWindows:          response.AvailableWindows,
+			AvailableWindowsByFeature: response.AvailableWindowsByFeature,
+			AvailableEventColumns:     response.AvailableEventColumns,
+			AvailableChannels:         response.AvailableChannels,
+			UnavailableChannels:       response.UnavailableChannels,
 		}
 	}
 }

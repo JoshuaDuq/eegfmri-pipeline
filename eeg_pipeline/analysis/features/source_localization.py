@@ -54,10 +54,7 @@ def _safe_int(value: Any, default: int) -> int:
 def _as_path(value: Any) -> Optional[Path]:
     if value is None:
         return None
-    try:
-        return Path(str(value)).expanduser()
-    except Exception:
-        return None
+    return Path(str(value)).expanduser()
 
 
 @dataclass(frozen=True)
@@ -78,7 +75,7 @@ class FMRIConstraintConfig:
     tail: str  # "pos" or "abs"
     threshold_mode: str  # "z" or "fdr"
     fdr_q: float
-    stat_type: str  # "z" (supported), others treated as "z" with warning
+    stat_type: str  # "z" only (required)
     cluster_min_voxels: int
     max_clusters: int
     max_voxels_per_cluster: int
@@ -114,7 +111,11 @@ def _load_fmri_constraint_config(
     stats_map_path = _as_path(fmri_cfg.get("stats_map_path") or fmri_cfg.get("stats_map"))
     provenance = str(fmri_cfg.get("provenance", "unknown")).strip().lower()
     if provenance not in {"independent", "same_dataset", "unknown"}:
-        provenance = "unknown"
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.provenance must be one of "
+            "{'independent','same_dataset','unknown'} "
+            f"(got '{provenance}')."
+        )
     require_provenance = bool(fmri_cfg.get("require_provenance", True))
 
     contrast_cfg = fmri_cfg.get("contrast", {}) or {}
@@ -133,52 +134,65 @@ def _load_fmri_constraint_config(
             missing_paths.append("subject")
 
         if missing_paths:
-            logging.getLogger(__name__).warning(
-                "Cannot build fMRI contrast: missing paths: %s. "
-                "Provide these paths or set --source-fmri-stats-map directly.",
-                ", ".join(missing_paths)
+            raise ValueError(
+                "Cannot build fMRI contrast: missing required inputs: "
+                + ", ".join(missing_paths)
             )
-        else:
-            try:
-                from fmri_pipeline.analysis.contrast_builder import ensure_fmri_stats_map
-                built_path = ensure_fmri_stats_map(
-                    config=config,
-                    bids_fmri_root=bids_fmri_root,
-                    bids_derivatives=bids_derivatives,
-                    freesurfer_subjects_dir=freesurfer_subjects_dir,
-                    subject=subject,
-                    task=task,
-                )
-                if built_path is not None:
-                    stats_map_path = built_path
-                    enabled = True
-            except Exception as e:
-                logging.getLogger(__name__).warning("Failed to build fMRI contrast: %s", e)
+
+        from fmri_pipeline.analysis.contrast_builder import ensure_fmri_stats_map
+
+        built_path = ensure_fmri_stats_map(
+            config=config,
+            bids_fmri_root=bids_fmri_root,
+            bids_derivatives=bids_derivatives,
+            freesurfer_subjects_dir=freesurfer_subjects_dir,
+            subject=subject,
+            task=task,
+        )
+        if built_path is None:
+            raise ValueError("fMRI contrast builder did not produce a stats map path.")
+        stats_map_path = built_path
+        enabled = True
 
     try:
         threshold = float(fmri_cfg.get("threshold", 3.1))
-    except Exception:
-        threshold = 3.1
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"feature_engineering.sourcelocalization.fmri.threshold must be a float (got {fmri_cfg.get('threshold')})."
+        )
 
     tail = str(fmri_cfg.get("tail", "pos")).strip().lower()
     if tail not in {"pos", "abs"}:
-        tail = "pos"
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.tail must be one of {'pos','abs'} "
+            f"(got '{tail}')."
+        )
 
     thresholding_cfg = fmri_cfg.get("thresholding", {}) or {}
     threshold_mode = str(thresholding_cfg.get("mode", fmri_cfg.get("threshold_mode", "z"))).strip().lower()
     if threshold_mode not in {"z", "fdr"}:
-        threshold_mode = "z"
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.thresholding.mode must be one of {'z','fdr'} "
+            f"(got '{threshold_mode}')."
+        )
 
     try:
         fdr_q = float(thresholding_cfg.get("fdr_q", 0.05))
-    except Exception:
-        fdr_q = 0.05
+    except (TypeError, ValueError):
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.thresholding.fdr_q must be a float in (0, 1)."
+        )
     if not np.isfinite(fdr_q) or fdr_q <= 0 or fdr_q >= 1:
-        fdr_q = 0.05
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.thresholding.fdr_q must be in (0, 1)."
+        )
 
     stat_type = str(thresholding_cfg.get("stat_type", "z")).strip().lower()
     if stat_type not in {"z"}:
-        stat_type = "z"
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.thresholding.stat_type must be 'z' "
+            f"(got '{stat_type}')."
+        )
 
     # Parse fMRI-specific time windows
     time_windows_cfg = fmri_cfg.get("time_windows", {}) or {}
@@ -187,25 +201,25 @@ def _load_fmri_constraint_config(
     
     window_a_cfg = time_windows_cfg.get("window_a", {}) or {}
     if window_a_cfg.get("name"):
-        try:
-            window_a = FMRITimeWindow(
-                name=str(window_a_cfg.get("name", "")).strip(),
-                tmin=float(window_a_cfg.get("tmin", 0.0)),
-                tmax=float(window_a_cfg.get("tmax", 0.0)),
-            )
-        except (ValueError, TypeError):
-            pass
+        name = str(window_a_cfg.get("name", "")).strip()
+        tmin = float(window_a_cfg.get("tmin", 0.0))
+        tmax = float(window_a_cfg.get("tmax", 0.0))
+        if not name:
+            raise ValueError("fMRI window_a.name is empty.")
+        if not (np.isfinite(tmin) and np.isfinite(tmax) and tmax > tmin):
+            raise ValueError(f"Invalid fMRI window_a range: tmin={tmin}, tmax={tmax}.")
+        window_a = FMRITimeWindow(name=name, tmin=tmin, tmax=tmax)
     
     window_b_cfg = time_windows_cfg.get("window_b", {}) or {}
     if window_b_cfg.get("name"):
-        try:
-            window_b = FMRITimeWindow(
-                name=str(window_b_cfg.get("name", "")).strip(),
-                tmin=float(window_b_cfg.get("tmin", 0.0)),
-                tmax=float(window_b_cfg.get("tmax", 0.0)),
-            )
-        except (ValueError, TypeError):
-            pass
+        name = str(window_b_cfg.get("name", "")).strip()
+        tmin = float(window_b_cfg.get("tmin", 0.0))
+        tmax = float(window_b_cfg.get("tmax", 0.0))
+        if not name:
+            raise ValueError("fMRI window_b.name is empty.")
+        if not (np.isfinite(tmin) and np.isfinite(tmax) and tmax > tmin):
+            raise ValueError(f"Invalid fMRI window_b range: tmin={tmin}, tmax={tmax}.")
+        window_b = FMRITimeWindow(name=name, tmin=tmin, tmax=tmax)
 
     return FMRIConstraintConfig(
         enabled=enabled or (stats_map_path is not None),
@@ -393,7 +407,7 @@ def _fmri_roi_coords_from_stats_map(
     """
     try:
         import nibabel as nib
-    except Exception as exc:
+    except ImportError as exc:
         raise ImportError(
             "fMRI-constrained source localization requires nibabel. "
             "Install nibabel (e.g., `pip install nibabel`) and retry."
@@ -761,18 +775,15 @@ def _extract_roi_timecourses(
     
     for epoch_idx, stc in enumerate(stcs):
         for roi_idx, label in enumerate(labels):
-            try:
-                tc = mne.extract_label_time_course(
-                    stc,
-                    labels=[label],
-                    src=src,
-                    mode=mode,
-                    allow_empty=True,
-                    verbose=False,
-                )
-                roi_data[epoch_idx, roi_idx, :] = tc.squeeze()
-            except Exception:
-                roi_data[epoch_idx, roi_idx, :] = np.nan
+            tc = mne.extract_label_time_course(
+                stc,
+                labels=[label],
+                src=src,
+                mode=mode,
+                allow_empty=True,
+                verbose=False,
+            )
+            roi_data[epoch_idx, roi_idx, :] = tc.squeeze()
     
     return roi_data
 
@@ -854,12 +865,15 @@ def _compute_roi_envelope(
     high = min(fmax / nyq, 0.99)
     
     if low >= high or low <= 0:
-        return np.abs(roi_data)
-    
-    try:
-        b, a = butter(4, [low, high], btype="band")
-    except ValueError:
-        return np.abs(roi_data)
+        raise ValueError(f"Invalid bandpass range for ROI envelope: fmin={fmin}, fmax={fmax}, sfreq={sfreq}.")
+
+    b, a = butter(4, [low, high], btype="band")
+    padlen = 3 * (max(len(a), len(b)) - 1)
+    if n_times <= padlen:
+        raise ValueError(
+            f"ROI envelope requires at least {padlen + 1} samples for filtfilt padding "
+            f"(n_times={n_times}, sfreq={sfreq}, fmin={fmin}, fmax={fmax})."
+        )
     
     for epoch_idx in range(n_epochs):
         for roi_idx in range(n_rois):
@@ -868,12 +882,9 @@ def _compute_roi_envelope(
                 envelope[epoch_idx, roi_idx, :] = np.nan
                 continue
             
-            try:
-                filtered = filtfilt(b, a, tc)
-                analytic = hilbert(filtered)
-                envelope[epoch_idx, roi_idx, :] = np.abs(analytic)
-            except Exception:
-                envelope[epoch_idx, roi_idx, :] = np.nan
+            filtered = filtfilt(b, a, tc)
+            analytic = hilbert(filtered)
+            envelope[epoch_idx, roi_idx, :] = np.abs(analytic)
     
     return envelope
 
@@ -1414,15 +1425,12 @@ def extract_source_connectivity_features(
             for epoch_idx in range(n_epochs):
                 epoch_data = roi_data[epoch_idx:epoch_idx+1, :, :]
                 
-                try:
-                    con = envelope_correlation(
-                        epoch_data,
-                        orthogonalize="pairwise",
-                        verbose=False,
-                    )
-                    con_matrix = con.combine().get_data(output="dense")[:, :, 0]
-                except Exception:
-                    con_matrix = np.full((n_rois, n_rois), np.nan)
+                con = envelope_correlation(
+                    epoch_data,
+                    orthogonalize="pairwise",
+                    verbose=False,
+                )
+                con_matrix = con.combine().get_data(output="dense")[:, :, 0]
                 
                 triu_idx = np.triu_indices(n_rois, k=1)
                 mean_conn = np.nanmean(con_matrix[triu_idx])
@@ -1433,41 +1441,32 @@ def extract_source_connectivity_features(
                 records[epoch_idx][col_name] = mean_conn
                 
         elif connectivity_method.lower() in ("wpli", "plv"):
-            try:
-                con = spectral_connectivity_epochs(
-                    roi_data,
-                    method=connectivity_method.lower(),
-                    mode="multitaper",
-                    sfreq=sfreq,
-                    fmin=fmin,
-                    fmax=fmax,
-                    faverage=True,
-                    n_jobs=n_jobs,
-                    verbose=False,
-                )
+            con = spectral_connectivity_epochs(
+                roi_data,
+                method=connectivity_method.lower(),
+                mode="multitaper",
+                sfreq=sfreq,
+                fmin=fmin,
+                fmax=fmax,
+                faverage=True,
+                n_jobs=n_jobs,
+                verbose=False,
+            )
+            
+            con_data = con.get_data()
+            
+            for epoch_idx in range(n_epochs):
+                if con_data.ndim == 3:
+                    epoch_con = con_data[epoch_idx, :, 0]
+                else:
+                    epoch_con = con_data[:, 0]
                 
-                con_data = con.get_data()
+                mean_conn = np.nanmean(epoch_con)
                 
-                for epoch_idx in range(n_epochs):
-                    if con_data.ndim == 3:
-                        epoch_con = con_data[epoch_idx, :, 0]
-                    else:
-                        epoch_con = con_data[:, 0]
-                    
-                    mean_conn = np.nanmean(epoch_con)
-                    
-                    col_name = f"src_{src_cfg.method}_{band}_{connectivity_method}_global"
-                    if col_name not in feature_cols:
-                        feature_cols.append(col_name)
-                    records[epoch_idx][col_name] = mean_conn
-                    
-            except Exception as e:
-                logger.warning(f"Source connectivity failed for {band}: {e}")
                 col_name = f"src_{src_cfg.method}_{band}_{connectivity_method}_global"
                 if col_name not in feature_cols:
                     feature_cols.append(col_name)
-                for epoch_idx in range(n_epochs):
-                    records[epoch_idx][col_name] = np.nan
+                records[epoch_idx][col_name] = mean_conn
     
     features_df = pd.DataFrame(records)
     feature_cols = list(features_df.columns)

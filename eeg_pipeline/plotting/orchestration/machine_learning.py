@@ -148,9 +148,13 @@ def _plot_confusion_matrix(
 ) -> None:
     """Plot confusion matrix for classification results."""
     try:
-        cm = confusion_matrix(y_true, y_pred)
+        combined = pd.concat([y_true, y_pred], ignore_index=True)
+        labels = pd.Index(combined.dropna()).unique().tolist()
+        display_labels = [str(v) for v in labels]
+
+        cm = confusion_matrix(y_true, y_pred, labels=labels)
         fig, ax = plt.subplots(figsize=(6, 5))
-        disp = ConfusionMatrixDisplay(cm, display_labels=["No Pain", "Pain"])
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=display_labels)
         disp.plot(ax=ax, cmap="Blues")
         ax.set_title(f"Confusion Matrix - {model_name}")
         fig.tight_layout()

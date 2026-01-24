@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,20 +113,25 @@ type Model struct {
 
 	// Persistent state
 	persistentState TUIState
+
+	// Subject discovery cache (per task + data source) to avoid repeated scans.
+	subjectsCache           map[string]messages.SubjectsLoadedMsg
+	pendingSubjectsCacheKey string
 }
 
 func New() Model {
 	repoRoot := findRepoRoot()
 
 	m := Model{
-		state:       StateEnvSelect,
-		navStack:    []AppState{},
-		envSelect:   environment.New(),
-		mainMenu:    mainmenu.New(),
-		task:        "thermalactive",
-		environment: environment.EnvLocal,
-		cloudConfig: cloud.DefaultConfig(),
-		repoRoot:    repoRoot,
+		state:         StateEnvSelect,
+		navStack:      []AppState{},
+		envSelect:     environment.New(),
+		mainMenu:      mainmenu.New(),
+		task:          "thermalactive",
+		environment:   environment.EnvLocal,
+		cloudConfig:   cloud.DefaultConfig(),
+		repoRoot:      repoRoot,
+		subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
 	}
 
 	m.loadState()
@@ -483,11 +489,19 @@ func (m Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) (tea.Model, 
 		return m, nil
 	}
 
+	if m.pendingSubjectsCacheKey != "" {
+		m.subjectsCache[m.pendingSubjectsCacheKey] = msg
+		m.pendingSubjectsCacheKey = ""
+	}
+
 	subjects := m.convertSubjects(msg.Subjects)
 	m.wizard.SetSubjects(subjects)
 	m.wizard.SetAvailableMetadata(msg.AvailableWindows, msg.AvailableEventColumns)
+	if msg.AvailableWindowsByFeature != nil {
+		m.wizard.SetAvailableWindowsByFeature(msg.AvailableWindowsByFeature)
+	}
 	m.wizard.SetChannelInfo(msg.AvailableChannels, msg.UnavailableChannels)
-	
+
 	// Trigger condition effects discovery for plotting pipeline
 	if m.selectedPipeline == types.PipelinePlotting && len(subjects) > 0 {
 		// Use first subject for discovery
@@ -500,7 +514,7 @@ func (m Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) (tea.Model, 
 		}
 		return m, executor.DiscoverConditionEffectsColumns(m.repoRoot, m.task, subjectID)
 	}
-	
+
 	return m, nil
 }
 
@@ -590,19 +604,35 @@ func (m *Model) convertPlotters(source map[string][]messages.PlotterInfo) map[st
 }
 
 func (m *Model) handleColumnsDiscovered(msg messages.ColumnsDiscoveredMsg) {
-	if msg.Error != nil {
-		m.wizard.SetColumnsDiscoveryError(msg.Error)
-		return
-	}
 	// Check if this is condition effects discovery (source will be "condition_effects")
 	if msg.Source == "condition_effects" {
+		if msg.Error != nil {
+			m.wizard.SetConditionEffectsDiscoveryError(msg.Error)
+			return
+		}
 		// Extract windows from the response if available
 		windows := []string{}
 		if msg.Windows != nil {
 			windows = msg.Windows
 		}
 		m.wizard.SetConditionEffectsColumns(msg.Columns, msg.Values, windows)
+		return
+	}
+
+	// Trial-table discovery is used for feature column dropdowns (e.g., dose-response response_column).
+	// Keep it separate from the primary discovered columns (events) to avoid polluting event-column dropdowns.
+	if msg.Source == "trial_table" {
+		if msg.Error != nil {
+			m.wizard.SetTrialTableDiscoveryError(msg.Error)
+			return
+		}
+		m.wizard.SetTrialTableColumns(msg.Columns, msg.Values)
+		return
 	} else {
+		if msg.Error != nil {
+			m.wizard.SetColumnsDiscoveryError(msg.Error)
+			return
+		}
 		m.wizard.SetDiscoveredColumns(msg.Columns, msg.Values, msg.Source)
 	}
 }
@@ -678,7 +708,9 @@ func (m Model) handleRefreshSubjects() tea.Cmd {
 		return nil
 	}
 	m.wizard.SetSubjectsLoading()
-	return executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+	cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())
+	m.pendingSubjectsCacheKey = cacheKey
+	return executor.LoadSubjectsRefresh(m.repoRoot, m.task, m.selectedPipeline)
 }
 
 func (m Model) handleConfigLoaded(msg messages.ConfigLoadedMsg) (tea.Model, tea.Cmd) {
@@ -694,6 +726,8 @@ func (m Model) handleConfigLoaded(msg messages.ConfigLoadedMsg) (tea.Model, tea.
 	m.updateTask(msg.Summary.Task)
 	if m.state == StatePipelineWizard {
 		m.wizard.SetSubjectsLoading()
+		cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())
+		m.pendingSubjectsCacheKey = cacheKey
 		return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
 	}
 	return m, nil
@@ -707,6 +741,8 @@ func (m Model) handleTaskUpdated(msg messages.TaskUpdatedMsg) (tea.Model, tea.Cm
 	m.updateTask(msg.Task)
 	if m.state == StatePipelineWizard {
 		m.wizard.SetSubjectsLoading()
+		cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())
+		m.pendingSubjectsCacheKey = cacheKey
 		return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
 	}
 	return m, nil
@@ -836,23 +872,34 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 		)
 	}
 
+	cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())
+	subjectCmd := executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+	if cached, ok := m.subjectsCache[cacheKey]; ok {
+		// Serve cached subjects instantly; refresh is available via F5.
+		subjectCmd = func() tea.Msg { return cached }
+		m.pendingSubjectsCacheKey = ""
+	} else {
+		m.pendingSubjectsCacheKey = cacheKey
+	}
+
 	cmds := []tea.Cmd{
 		func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
-		executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline),
+		subjectCmd,
 		executor.LoadPlotters(m.repoRoot),
 		executor.LoadConfigSummary(m.repoRoot),
 		executor.LoadConfigKeys(m.repoRoot, configKeys),
 		executor.DiscoverColumns(m.repoRoot, m.task),
+		executor.DiscoverTrialTableColumns(m.repoRoot, m.task),
 		executor.DiscoverFmriColumns(m.repoRoot, m.task),
 		executor.DiscoverROIs(m.repoRoot, m.task),
 	}
-	
+
 	// Also discover condition effects columns for plotting (if subjects available)
 	if m.selectedPipeline == types.PipelinePlotting {
 		// Will be triggered when subjects are loaded
 		cmds = append(cmds, executor.DiscoverConditionEffectsColumns(m.repoRoot, m.task, ""))
 	}
-	
+
 	return m, tea.Batch(cmds...)
 }
 

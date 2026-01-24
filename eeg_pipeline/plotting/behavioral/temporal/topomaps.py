@@ -221,13 +221,27 @@ def _load_global_fdr_for_temporal_correlations(
     stats_dir: Path,
     use_spearman: bool,
     logger: logging.Logger,
+    feature_folder: Optional[str] = None,
 ) -> Optional[Dict[Tuple[str, str, float, float, str], bool]]:
     """Load global FDR correction map from temporal correlations TSV file."""
+    def _resolve_temporal_file(filename: str) -> Optional[Path]:
+        if feature_folder:
+            candidates = sorted(stats_dir.glob(f"temporal_correlations*/{feature_folder}/{filename}"))
+        else:
+            candidates = sorted(stats_dir.glob(f"temporal_correlations*/*/{filename}"))
+        if not candidates:
+            return None
+        if len(candidates) > 1:
+            raise ValueError(
+                f"Multiple temporal correlations files match {filename} under {stats_dir}: {candidates}"
+            )
+        return candidates[0]
+
     suffix = _get_correlation_suffix(use_spearman)
-    tsv_path = stats_dir / "temporal_correlations" / f"temporal_correlations{suffix}.tsv"
+    tsv_path = _resolve_temporal_file(f"temporal_correlations{suffix}.tsv")
     
-    if not tsv_path.exists():
-        logger.debug(f"TSV file not found for global FDR: {tsv_path.name}")
+    if tsv_path is None or not tsv_path.exists():
+        logger.debug("TSV file not found for global FDR.")
         return None
 
     try:
@@ -263,16 +277,30 @@ def _load_temporal_correlation_data(
     stats_dir: Path,
     use_spearman: bool,
     logger: logging.Logger,
+    feature_folder: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Load temporal correlation data from NPZ file."""
+    def _resolve_temporal_file(filename: str) -> Optional[Path]:
+        if feature_folder:
+            candidates = sorted(stats_dir.glob(f"temporal_correlations*/{feature_folder}/{filename}"))
+        else:
+            candidates = sorted(stats_dir.glob(f"temporal_correlations*/*/{filename}"))
+        if not candidates:
+            return None
+        if len(candidates) > 1:
+            raise ValueError(
+                f"Multiple temporal correlations files match {filename} under {stats_dir}: {candidates}"
+            )
+        return candidates[0]
+
     suffix = _get_correlation_suffix(use_spearman)
     
-    path = stats_dir / "temporal_correlations" / f"temporal_correlations_by_condition{suffix}.npz"
-    if path.exists():
+    path = _resolve_temporal_file(f"temporal_correlations_by_condition{suffix}.npz")
+    if path is not None and path.exists():
         data = np.load(path, allow_pickle=True)
         return dict(data)
 
-    logger.warning(f"Temporal correlation data not found: {path}")
+    logger.warning("Temporal correlation data not found.")
     return None
 
 
@@ -620,13 +648,24 @@ def plot_temporal_correlation_topomaps_by_pain(
     Conditions are determined by the temporal.condition_column and 
     temporal.condition_values settings in the config.
     """
-    data = _load_temporal_correlation_data(stats_dir, use_spearman, logger)
+    feature_folder = get_config_value(
+        config,
+        "plotting.plots.behavior.temporal_topomaps.stats_feature_folder",
+        None,
+    )
+    feature_folder = str(feature_folder).strip() if feature_folder is not None else None
+    if feature_folder == "":
+        feature_folder = None
+
+    data = _load_temporal_correlation_data(stats_dir, use_spearman, logger, feature_folder=feature_folder)
     if data is None:
         return
 
     logger.info("Plotting temporal correlation topomaps by condition...")
 
-    global_fdr_map = _load_global_fdr_for_temporal_correlations(stats_dir, use_spearman, logger)
+    global_fdr_map = _load_global_fdr_for_temporal_correlations(
+        stats_dir, use_spearman, logger, feature_folder=feature_folder
+    )
     use_global_fdr = global_fdr_map is not None
 
     ch_names = data.get("ch_names", None)
@@ -654,7 +693,25 @@ def plot_temporal_correlation_topomaps_by_pain(
     sig_text = get_sig_marker_text(config)
 
     suffix = _get_correlation_suffix(use_spearman)
-    data_path = stats_dir / "temporal_correlations" / f"temporal_correlations_by_condition{suffix}.npz"
+    if feature_folder:
+        candidates = sorted(
+            stats_dir.glob(
+                f"temporal_correlations*/{feature_folder}/temporal_correlations_by_condition{suffix}.npz"
+            )
+        )
+    else:
+        candidates = sorted(
+            stats_dir.glob(
+                f"temporal_correlations*/*/temporal_correlations_by_condition{suffix}.npz"
+            )
+        )
+    if len(candidates) != 1:
+        logger.warning(
+            "Expected exactly one temporal correlations NPZ for validation, found %d.",
+            len(candidates),
+        )
+        return
+    data_path = candidates[0]
     
     if not _validate_temporal_results(condition_results, data_path, subject, logger):
         return

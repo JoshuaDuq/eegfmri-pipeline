@@ -326,6 +326,12 @@ def _save_merged_features(
     logger: Any,
 ) -> None:
     """Merge and save accumulated features from multiple time ranges."""
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    also_save_csv = bool(
+        get_config_value(config, "feature_engineering.output.also_save_csv", False)
+    )
+
     feature_file_mapping = {
         "power": ("features_power.parquet", ["power", "baseline"]),
         "connectivity": ("features_connectivity.parquet", ["connectivity"]),
@@ -358,6 +364,12 @@ def _save_merged_features(
             folder = _get_folder_for_feature(base_name, config)
             save_path = features_dir / folder / filename
             write_parquet(merged_df, save_path)
+            if also_save_csv:
+                from eeg_pipeline.infra.tsv import write_csv
+
+                csv_path = save_path.with_suffix(".csv")
+                write_csv(merged_df, csv_path, index=False)
+                logger.info("Also saved merged %s as CSV: %s", base_name, csv_path)
             subject_str = (
                 features_dir.parts[-3].replace("sub-", "")
                 if len(features_dir.parts) > 3

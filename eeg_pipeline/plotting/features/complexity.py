@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present, get_band_color
 from eeg_pipeline.plotting.config import get_plot_config
@@ -156,17 +156,14 @@ def _get_complexity_columns(
 
 
 def _determine_segments(config: Any, features_df: pd.DataFrame, logger: Any) -> List[str]:
-    """Determine segments to compare from config or data."""
-    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
-    
-    if not segments or len(segments) < MIN_SEGMENTS_FOR_COMPARISON:
-        segment_set = _extract_segments_from_data(features_df)
-        if len(segment_set) >= MIN_SEGMENTS_FOR_COMPARISON:
-            segments = sorted(segment_set)[:MIN_SEGMENTS_FOR_COMPARISON]
-            if logger:
-                log_if_present(logger, "info", f"Auto-detected segments for complexity comparison: {segments}")
-    
-    return segments
+    """Determine segments to compare from config (no fallbacks)."""
+    segments = require_config_value(config, "plotting.comparisons.comparison_windows")
+    if not isinstance(segments, (list, tuple)) or len(segments) < MIN_SEGMENTS_FOR_COMPARISON:
+        raise ValueError(
+            "plotting.comparisons.comparison_windows must be a list/tuple with at least "
+            f"{MIN_SEGMENTS_FOR_COMPARISON} window names (got {segments!r})"
+        )
+    return [str(s) for s in segments]
 
 
 def _determine_bands(config: Any, features_df: pd.DataFrame) -> List[str]:
@@ -461,13 +458,12 @@ def _plot_column_comparison(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
         if not multi_group_info:
-            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
-            return
+            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
         
         masks_dict, group_labels = multi_group_info
-        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
         multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
@@ -514,18 +510,12 @@ def _plot_column_comparison(
         log_if_present(logger, "info", f"Saved complexity multi-group column comparison for {len(roi_names)} ROIs")
         return
     
-    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
     if not comp_mask_info:
-        if logger:
-            log_if_present(
-                logger, "warning",
-                "Column comparison enabled but config incomplete. "
-                "Set plotting.comparisons.comparison_column and comparison_values."
-            )
-        return
+        raise ValueError("Column comparison requested but could not resolve comparison masks.")
     
     mask1, mask2, label1, label2 = comp_mask_info
-    segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+    segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
     plot_cfg = get_plot_config(config)
     band_colors = {band: get_band_color(band, config) for band in bands}
     n_bands = len(bands)
@@ -587,61 +577,6 @@ def _plot_column_comparison(
             log_if_present(logger, "info", f"Saved complexity {metric_label} column comparison plots for {len(roi_names)} ROIs")
 
 
-def plot_hjorth_by_band(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    figsize: Tuple[float, float] = (10, 5),
-) -> plt.Figure:
-    """Plot Hjorth mobility across frequency bands."""
-    fig, ax = plt.subplots(figsize=figsize)
-    
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
-    data_list = []
-    positions = []
-    colors = []
-    
-    for i, band in enumerate(bands):
-        matching_cols = [c for c in features_df.columns if f"_{band}_" in c and "hjorth_mobility" in c]
-        if not matching_cols:
-            continue
-        
-        values = features_df[matching_cols].values.flatten()
-        values = values[np.isfinite(values)]
-        
-        if len(values) > 0:
-            data_list.append(values)
-            positions.append(i)
-            colors.append(band_colors[band])
-    
-    if data_list:
-        parts = ax.violinplot(data_list, positions=positions, showmedians=True, widths=VIOLIN_WIDTH)
-        
-        for i, pc in enumerate(parts.get("bodies", [])):
-            pc.set_facecolor(colors[i])
-            pc.set_alpha(VIOLIN_ALPHA)
-        
-        for i, (pos, vals) in enumerate(zip(positions, data_list)):
-            jitter = np.random.uniform(-JITTER_RANGE, JITTER_RANGE, len(vals))
-            ax.scatter(pos + jitter, vals, c=colors[i], alpha=SCATTER_ALPHA, s=SCATTER_SIZE)
-    
-    ax.set_xticks(range(len(bands)))
-    ax.set_xticklabels([band.capitalize() for band in bands])
-    ax.set_xlabel("Frequency Band")
-    ax.set_ylabel("Hjorth Mobility")
-    ax.set_title("Hjorth Mobility by Frequency Band")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    
-    plt.tight_layout()
-    save_fig(fig, save_path, config=config)
-    plt.close(fig)
-    
-    return fig
-
-
 def plot_complexity_by_condition(
     features_df: pd.DataFrame,
     events_df: pd.DataFrame,
@@ -698,6 +633,5 @@ def plot_complexity_by_condition(
 
 
 __all__ = [
-    "plot_hjorth_by_band",
     "plot_complexity_by_condition",
 ]

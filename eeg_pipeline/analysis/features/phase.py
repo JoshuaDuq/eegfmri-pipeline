@@ -20,12 +20,14 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times, get_segment_masks
 from eeg_pipeline.utils.config.loader import get_frequency_bands
+from eeg_pipeline.utils.parallel import get_n_jobs
 
 # Constants
 _EPSILON_COMPLEX = 1e-12
 _MIN_PEAKS_FOR_SHARPNESS = 2
 _MIN_EPOCHS_FOR_ITPC = 2
 _MIN_TIMES_FOR_SURROGATES = 3
+_MIN_CHANNELS_FOR_PARALLEL = 4  # Lower threshold for better parallelization
 
 # --- Helpers ---
 
@@ -83,6 +85,7 @@ def _compute_condition_itpc_map(
     train_mask: Optional[np.ndarray],
     min_trials_per_condition: int,
     logger: Optional[logging.Logger] = None,
+    n_jobs: int = 1,
 ) -> np.ndarray:
     """Compute per-trial ITPC maps by condition.
 
@@ -131,7 +134,7 @@ def _compute_condition_itpc_map(
                 )
             continue
 
-        cond_map = _compute_fold_global_itpc_map(data, cond_train)
+        cond_map = _compute_fold_global_itpc_map(data, cond_train, n_jobs=n_jobs, logger=logger)
         itpc_map[cond_mask] = cond_map[None, ...]
 
     return itpc_map
@@ -146,8 +149,8 @@ def _compute_peak_distance(
         return None
     try:
         fmax_hz = float(fmax_hz)
-    except (ValueError, TypeError, AttributeError):
-        return None
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError(f"Invalid fmax_hz for peak distance computation: {fmax_hz!r}") from exc
     if not (np.isfinite(fmax_hz) and fmax_hz > 0):
         return None
     half_period_samples = float(sfreq_hz) / (2.0 * float(fmax_hz))
@@ -209,21 +212,72 @@ def _normalize_complex_to_unit_vectors(data: np.ndarray) -> np.ndarray:
     return data / (np.abs(data) + _EPSILON_COMPLEX)
 
 
+###################################################################
+# Single-Channel ITPC Workers (for parallel execution)
+###################################################################
+
+
+def _compute_loo_itpc_single_channel(
+    ch_data: np.ndarray,
+    train_mask: np.ndarray,
+    train_indices: np.ndarray,
+    n_train: int,
+) -> np.ndarray:
+    """Compute LOO-ITPC for a single channel."""
+    unit_vectors = _normalize_complex_to_unit_vectors(ch_data)
+    sum_train = np.sum(unit_vectors[train_mask], axis=0)
+    
+    n_epochs = ch_data.shape[0]
+    result = np.zeros((n_epochs,) + ch_data.shape[1:], dtype=np.float32)
+    
+    mean_test = sum_train / max(1, n_train)
+    result[:] = np.abs(mean_test)
+    
+    if n_train > 1 and train_indices.size:
+        loo_train = (sum_train[None, ...] - unit_vectors[train_indices]) / (n_train - 1)
+        result[train_indices] = np.abs(loo_train)
+    
+    return result
+
+
+def _compute_global_itpc_single_channel(ch_data: np.ndarray) -> np.ndarray:
+    """Compute global ITPC for a single channel."""
+    unit_vectors = _normalize_complex_to_unit_vectors(ch_data)
+    return np.abs(np.mean(unit_vectors, axis=0)).astype(np.float32)
+
+
+def _compute_fold_global_itpc_single_channel(
+    ch_data: np.ndarray,
+    train_mask: np.ndarray,
+) -> np.ndarray:
+    """Compute fold-global ITPC for a single channel."""
+    unit_vectors = _normalize_complex_to_unit_vectors(ch_data)
+    train_unit_vectors = unit_vectors[train_mask]
+    return np.abs(np.mean(train_unit_vectors, axis=0)).astype(np.float32)
+
+
+###################################################################
+# Parallel ITPC Computation
+###################################################################
+
+
 def _compute_loo_itpc(
     data: np.ndarray,
-    train_mask: Optional[np.ndarray] = None
+    train_mask: Optional[np.ndarray] = None,
+    n_jobs: int = 1,
 ) -> np.ndarray:
-    """
-    Compute Leave-One-Out ITPC.
+    """Compute Leave-One-Out ITPC with optional parallelization.
     
     Args:
         data: Complex TFR of shape (n_epochs, n_ch, n_freqs, n_times)
         train_mask: Boolean mask indicating training trials
+        n_jobs: Number of parallel jobs (-1 for all CPUs)
         
     Returns:
         ITPC values of shape (n_epochs, n_ch, n_freqs, n_times)
     """
-    n_epochs = data.shape[0]
+    n_epochs, n_ch = data.shape[0], data.shape[1]
+    
     if n_epochs < _MIN_EPOCHS_FOR_ITPC:
         return np.zeros_like(np.abs(data), dtype=np.float32)
     
@@ -234,55 +288,224 @@ def _compute_loo_itpc(
     if n_train < 1:
         return np.zeros_like(np.abs(data), dtype=np.float32)
     
-    loo_itpc = np.zeros(data.shape, dtype=np.float32)
     train_indices = np.flatnonzero(train_mask)
+    loo_itpc = np.zeros(data.shape, dtype=np.float32)
     
-    for ch in range(data.shape[1]):
-        ch_data = data[:, ch]  # (nep, nfr, nt)
-        unit_vectors = _normalize_complex_to_unit_vectors(ch_data)
+    use_parallel = n_jobs != 1 and n_ch >= _MIN_CHANNELS_FOR_PARALLEL
+    
+    if use_parallel:
+        from joblib import Parallel, delayed
+        from eeg_pipeline.utils.parallel import _normalize_n_jobs
         
-        sum_train = np.sum(unit_vectors[train_mask], axis=0)  # (n_fr, nt)
-        
-        # Broadcast training set mean to all trials
-        mean_test = sum_train / max(1, n_train)
-        loo_itpc[:, ch] = np.abs(mean_test)
-        
-        # Update training trials with LOO values
-        if n_train > 1 and train_indices.size:
-            loo_train = (sum_train[None, ...] - unit_vectors[train_indices]) / (n_train - 1)
-            loo_itpc[train_indices, ch] = np.abs(loo_train)
-            
+        n_jobs_actual = _normalize_n_jobs(n_jobs)
+        results = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_compute_loo_itpc_single_channel)(
+                data[:, ch], train_mask, train_indices, n_train
+            )
+            for ch in range(n_ch)
+        )
+        for ch, result in enumerate(results):
+            loo_itpc[:, ch] = result
+    else:
+        for ch in range(n_ch):
+            loo_itpc[:, ch] = _compute_loo_itpc_single_channel(
+                data[:, ch], train_mask, train_indices, n_train
+            )
+    
     return loo_itpc
 
 
-def _compute_global_itpc_map(data: np.ndarray) -> np.ndarray:
-    """Compute ITPC map across epochs: |mean_e exp(i*phi_e)|."""
+def _compute_global_itpc_map(data: np.ndarray, n_jobs: int = 1, logger: Optional[logging.Logger] = None) -> np.ndarray:
+    """Compute ITPC map across epochs with optional parallelization."""
     n_ch = data.shape[1]
     itpc_map = np.zeros(data.shape[1:], dtype=np.float32)
     
-    for ch in range(n_ch):
-        ch_data = data[:, ch]
-        unit_vectors = _normalize_complex_to_unit_vectors(ch_data)
-        itpc_map[ch] = np.abs(np.mean(unit_vectors, axis=0))
+    use_parallel = n_jobs != 1 and n_ch >= _MIN_CHANNELS_FOR_PARALLEL
+    
+    if use_parallel:
+        from joblib import Parallel, delayed
+        from eeg_pipeline.utils.parallel import _normalize_n_jobs
         
+        n_jobs_actual = _normalize_n_jobs(n_jobs)
+        if logger is not None:
+            logger.debug(f"ITPC: Using parallel computation ({n_jobs_actual} jobs, {n_ch} channels)")
+        results = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_compute_global_itpc_single_channel)(data[:, ch])
+            for ch in range(n_ch)
+        )
+        for ch, result in enumerate(results):
+            itpc_map[ch] = result
+    else:
+        if logger is not None and n_jobs != 1:
+            logger.debug(f"ITPC: Sequential computation (n_channels={n_ch} < {_MIN_CHANNELS_FOR_PARALLEL})")
+        for ch in range(n_ch):
+            itpc_map[ch] = _compute_global_itpc_single_channel(data[:, ch])
+    
     return itpc_map
 
 
-def _compute_fold_global_itpc_map(data: np.ndarray, train_mask: np.ndarray) -> np.ndarray:
-    """Compute ITPC map from TRAINING trials only (leakage-safe for CV)."""
+def _compute_fold_global_itpc_map(
+    data: np.ndarray,
+    train_mask: np.ndarray,
+    n_jobs: int = 1,
+    logger: Optional[logging.Logger] = None,
+) -> np.ndarray:
+    """Compute ITPC map from TRAINING trials only with optional parallelization."""
     if train_mask is None or not np.any(train_mask):
-        return _compute_global_itpc_map(data)
+        return _compute_global_itpc_map(data, n_jobs=n_jobs, logger=logger)
     
     n_ch = data.shape[1]
     itpc_map = np.zeros(data.shape[1:], dtype=np.float32)
     
-    for ch in range(n_ch):
-        ch_data = data[:, ch]
-        unit_vectors = _normalize_complex_to_unit_vectors(ch_data)
-        train_unit_vectors = unit_vectors[train_mask]
-        itpc_map[ch] = np.abs(np.mean(train_unit_vectors, axis=0))
+    use_parallel = n_jobs != 1 and n_ch >= _MIN_CHANNELS_FOR_PARALLEL
+    
+    if use_parallel:
+        from joblib import Parallel, delayed
+        from eeg_pipeline.utils.parallel import _normalize_n_jobs
         
+        n_jobs_actual = _normalize_n_jobs(n_jobs)
+        if logger is not None:
+            logger.debug(f"ITPC: Using parallel computation ({n_jobs_actual} jobs, {n_ch} channels)")
+        results = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_compute_fold_global_itpc_single_channel)(data[:, ch], train_mask)
+            for ch in range(n_ch)
+        )
+        for ch, result in enumerate(results):
+            itpc_map[ch] = result
+    else:
+        if logger is not None and n_jobs != 1:
+            logger.debug(f"ITPC: Sequential computation (n_channels={n_ch} < {_MIN_CHANNELS_FOR_PARALLEL})")
+        for ch in range(n_ch):
+            itpc_map[ch] = _compute_fold_global_itpc_single_channel(data[:, ch], train_mask)
+    
     return itpc_map
+
+
+###################################################################
+# Precomputed ITPC (3D data: epochs, channels, time)
+###################################################################
+
+
+def _compute_itpc_single_channel_precomputed(
+    ch_data: np.ndarray,
+    train_mask: Optional[np.ndarray],
+) -> np.ndarray:
+    """Compute ITPC for a single channel from precomputed complex vectors (3D)."""
+    if train_mask is not None and np.any(train_mask):
+        return np.abs(np.mean(ch_data[train_mask], axis=0)).astype(np.float32)
+    return np.abs(np.mean(ch_data, axis=0)).astype(np.float32)
+
+
+def _compute_itpc_map_precomputed(
+    complex_vectors: np.ndarray,
+    train_mask: Optional[np.ndarray],
+    n_jobs: int = 1,
+    logger: Optional[logging.Logger] = None,
+) -> np.ndarray:
+    """Compute ITPC map from precomputed complex vectors with optional parallelization.
+    
+    Args:
+        complex_vectors: Complex unit vectors of shape (n_epochs, n_ch, n_times)
+        train_mask: Optional boolean mask for training trials
+        n_jobs: Number of parallel jobs
+        logger: Optional logger for debug messages
+        
+    Returns:
+        ITPC map of shape (n_ch, n_times)
+    """
+    n_ch = complex_vectors.shape[1]
+    itpc_map = np.zeros((n_ch, complex_vectors.shape[2]), dtype=np.float32)
+    
+    use_parallel = n_jobs != 1 and n_ch >= _MIN_CHANNELS_FOR_PARALLEL
+    
+    if use_parallel:
+        from joblib import Parallel, delayed
+        from eeg_pipeline.utils.parallel import _normalize_n_jobs
+        
+        n_jobs_actual = _normalize_n_jobs(n_jobs)
+        if logger is not None:
+            logger.debug(f"ITPC (precomputed): Using parallel computation ({n_jobs_actual} jobs, {n_ch} channels)")
+        results = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_compute_itpc_single_channel_precomputed)(
+                complex_vectors[:, ch], train_mask
+            )
+            for ch in range(n_ch)
+        )
+        for ch, result in enumerate(results):
+            itpc_map[ch] = result
+    else:
+        if logger is not None and n_jobs != 1:
+            logger.debug(f"ITPC (precomputed): Sequential computation (n_channels={n_ch} < {_MIN_CHANNELS_FOR_PARALLEL})")
+        for ch in range(n_ch):
+            itpc_map[ch] = _compute_itpc_single_channel_precomputed(
+                complex_vectors[:, ch], train_mask
+            )
+    
+    return itpc_map
+
+
+def _compute_condition_itpc_precomputed(
+    segment_complex: np.ndarray,
+    condition_labels: np.ndarray,
+    train_mask: Optional[np.ndarray],
+    min_trials: int,
+    logger: Optional[logging.Logger],
+    n_jobs: int = 1,
+) -> np.ndarray:
+    """Compute per-trial ITPC by condition from precomputed complex vectors.
+    
+    Args:
+        segment_complex: Complex vectors of shape (n_epochs, n_ch, n_times)
+        condition_labels: Condition labels for each epoch
+        train_mask: Optional training mask
+        min_trials: Minimum trials per condition
+        logger: Logger instance
+        n_jobs: Number of parallel jobs
+        
+    Returns:
+        ITPC values of shape (n_epochs, n_ch)
+    """
+    n_ep, n_ch, _ = segment_complex.shape
+    out = np.full((n_ep, n_ch), np.nan, dtype=np.float32)
+    
+    labels_arr = np.asarray(condition_labels)
+    if labels_arr.shape[0] != n_ep:
+        raise ValueError(
+            f"Condition label length ({labels_arr.shape[0]}) != n_epochs ({n_ep})."
+        )
+    
+    valid_labels = np.ones(n_ep, dtype=bool)
+    if labels_arr.dtype.kind in {"f"}:
+        valid_labels = np.isfinite(labels_arr.astype(float))
+
+    tm = None
+    if train_mask is not None:
+        tm = np.asarray(train_mask, dtype=bool)
+        if tm.shape[0] != n_ep:
+            raise ValueError(
+                f"train_mask length ({tm.shape[0]}) != n_epochs ({n_ep})."
+            )
+
+    for cond in np.unique(labels_arr[valid_labels]):
+        cond_mask = (labels_arr == cond) & valid_labels
+        cond_train = cond_mask if tm is None else (cond_mask & tm)
+        n_train = int(np.sum(cond_train))
+        
+        if n_train < int(min_trials):
+            if logger is not None:
+                logger.warning(
+                    "ITPC(condition): condition '%s' has only %d training trials (<%d); output set to NaN.",
+                    cond,
+                    n_train,
+                    int(min_trials),
+                )
+            continue
+        
+        itpc_map = _compute_itpc_map_precomputed(segment_complex, cond_train, n_jobs=n_jobs, logger=logger)
+        itpc_ch = np.nanmean(itpc_map, axis=1)
+        out[cond_mask] = itpc_ch[None, :]
+
+    return out
 
 
 def _broadcast_per_trial(values_ch: np.ndarray, n_epochs: int) -> np.ndarray:
@@ -365,6 +588,7 @@ def _compute_itpc_map_by_method(
     *,
     condition_labels: Optional[np.ndarray] = None,
     min_trials_per_condition: int = 10,
+    n_jobs: int = 1,
 ) -> np.ndarray:
     """Compute ITPC map using the specified method.
     
@@ -376,6 +600,7 @@ def _compute_itpc_map_by_method(
         logger: Logger instance for warnings
         condition_labels: Condition labels when method='condition'
         min_trials_per_condition: Minimum training trials per condition
+        n_jobs: Number of parallel jobs (-1 for all CPUs)
         
     Returns:
         ITPC map with shape (n_epochs, n_ch, n_freqs, n_times) for 'loo'/'condition',
@@ -395,7 +620,7 @@ def _compute_itpc_map_by_method(
                 "ITPC(method='loo') requires ctx.train_mask to be provided (training set trials only). "
                 "Compute ITPC within each CV fold to avoid leakage."
             )
-        return _compute_loo_itpc(data, train_mask=train_mask)
+        return _compute_loo_itpc(data, train_mask=train_mask, n_jobs=n_jobs)
 
     if method == "fold_global":
         if train_mask is None:
@@ -409,13 +634,13 @@ def _compute_itpc_map_by_method(
                     "ITPC(method='fold_global') requested but ctx.train_mask is None; computing ITPC across all trials "
                     "(equivalent to method='global'; not CV-safe)."
                 )
-            return _compute_global_itpc_map(data)
+            return _compute_global_itpc_map(data, n_jobs=n_jobs, logger=logger)
         n_training_trials = int(np.sum(train_mask))
         logger.info(
             "ITPC: Using fold_global mode - computing from %d training trials only",
             n_training_trials
         )
-        return _compute_fold_global_itpc_map(data, train_mask)
+        return _compute_fold_global_itpc_map(data, train_mask, n_jobs=n_jobs, logger=logger)
 
     if method == "condition":
         if condition_labels is None:
@@ -428,13 +653,22 @@ def _compute_itpc_map_by_method(
                 "ITPC(method='condition') in analysis_mode='trial_ml_safe' requires ctx.train_mask so the "
                 "condition-level maps can be computed from training trials only."
             )
-        return _compute_condition_itpc_map(
+        itpc_map = _compute_condition_itpc_map(
             data,
             condition_labels,
             train_mask=train_mask,
             min_trials_per_condition=int(min_trials_per_condition),
             logger=logger,
+            n_jobs=n_jobs,
         )
+        if logger is not None:
+            n_ch = data.shape[1]
+            from eeg_pipeline.utils.parallel import _normalize_n_jobs
+            n_jobs_actual = _normalize_n_jobs(n_jobs)
+            use_parallel = n_jobs != 1 and n_ch >= _MIN_CHANNELS_FOR_PARALLEL
+            if use_parallel:
+                logger.debug(f"ITPC(condition): Using parallel computation ({n_jobs_actual} jobs, {n_ch} channels)")
+        return itpc_map
 
     if method == "global":
         if train_mask is not None:
@@ -442,7 +676,7 @@ def _compute_itpc_map_by_method(
                 "ITPC: train_mask detected with method='global'. Consider using method='fold_global' "
                 "for leakage-safe CV/machine learning. Using global ITPC (all trials) as requested."
             )
-        return _compute_global_itpc_map(data)
+        return _compute_global_itpc_map(data, n_jobs=n_jobs, logger=logger)
 
     raise ValueError(f"Unsupported ITPC method: {method!r}")
 
@@ -458,8 +692,8 @@ def _extract_band_frequencies(
         fmin = float(tf_bands[band_name][0])
         fmax = float(tf_bands[band_name][1])
         return (fmin, fmax)
-    except (KeyError, IndexError, ValueError, TypeError):
-        return None
+    except (KeyError, IndexError, ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid frequency band definition for '{band_name}': {tf_bands.get(band_name)}") from exc
 
 
 def _check_harmonic_overlap(
@@ -795,6 +1029,12 @@ def extract_phase_features(
     
     train_mask = getattr(ctx, "train_mask", None)
     analysis_mode = getattr(ctx, "analysis_mode", None)
+    
+    n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_itpc")
+    if logger is not None:
+        from eeg_pipeline.utils.parallel import _normalize_n_jobs
+        n_jobs_actual = _normalize_n_jobs(n_jobs)
+        logger.info(f"ITPC: n_jobs={n_jobs_actual} (from config: {n_jobs})")
 
     condition_labels = None
     min_trials_per_condition = 10
@@ -822,9 +1062,10 @@ def extract_phase_features(
         itpc_method,
         train_mask,
         analysis_mode,
-        ctx.logger,
+        logger,
         condition_labels=condition_labels,
         min_trials_per_condition=min_trials_per_condition,
+        n_jobs=n_jobs,
     )
     
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
@@ -1174,7 +1415,8 @@ def compute_pac_comodulograms(
 
 
 def extract_itpc_from_precomputed(
-    precomputed: Any
+    precomputed: Any,
+    n_jobs: int = -1,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Compute ITPC-style metrics directly from precomputed band phases.
     
@@ -1184,6 +1426,10 @@ def extract_itpc_from_precomputed(
     - 'global': Compute across all trials, broadcast to each (pseudo-replication warning)
     - 'fold_global': Compute from training trials only (CV-safe)
     - 'condition': Compute per condition group (avoids pseudo-replication)
+    
+    Args:
+        precomputed: PrecomputedData with band phases
+        n_jobs: Number of parallel jobs (-1 for all CPUs)
     """
     logger = getattr(precomputed, "logger", None)
     is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
@@ -1200,6 +1446,12 @@ def extract_itpc_from_precomputed(
             "fold-specific training masks to avoid leakage. Use ITPC(method='global') "
             "or compute LOO-ITPC within your CV loop."
         )
+    
+    n_jobs = get_n_jobs(cfg, default=n_jobs, config_path="feature_engineering.parallel.n_jobs_itpc")
+    if logger is not None:
+        from eeg_pipeline.utils.parallel import _normalize_n_jobs
+        n_jobs_actual = _normalize_n_jobs(n_jobs)
+        logger.info(f"ITPC (precomputed): n_jobs={n_jobs_actual} (from config: {n_jobs})")
     
     analysis_mode = str(cfg.get("feature_engineering.analysis_mode", "group_stats") or "group_stats").strip().lower()
     train_mask = getattr(precomputed, "train_mask", None)
@@ -1282,51 +1534,6 @@ def extract_itpc_from_precomputed(
     baseline_mask = masks.get("baseline") if baseline_correction == "subtract" else None
     results = {}
 
-    def _compute_condition_itpc_per_trial(
-        segment_complex: np.ndarray,
-        *,
-        labels: np.ndarray,
-        train_mask_local: Optional[np.ndarray],
-        min_trials: int,
-    ) -> np.ndarray:
-        n_ep, n_ch, _ = segment_complex.shape
-        out = np.full((n_ep, n_ch), np.nan, dtype=np.float32)
-        labels_arr = np.asarray(labels)
-        if labels_arr.shape[0] != n_ep:
-            raise ValueError(
-                f"Condition label length ({labels_arr.shape[0]}) != n_epochs ({n_ep})."
-            )
-        valid_labels = np.ones(n_ep, dtype=bool)
-        if labels_arr.dtype.kind in {"f"}:
-            valid_labels = np.isfinite(labels_arr.astype(float))
-
-        tm = None
-        if train_mask_local is not None:
-            tm = np.asarray(train_mask_local, dtype=bool)
-            if tm.shape[0] != n_ep:
-                raise ValueError(
-                    f"train_mask length ({tm.shape[0]}) != n_epochs ({n_ep})."
-                )
-
-        for cond in np.unique(labels_arr[valid_labels]):
-            cond_mask = (labels_arr == cond) & valid_labels
-            cond_train = cond_mask if tm is None else (cond_mask & tm)
-            n_train = int(np.sum(cond_train))
-            if n_train < int(min_trials):
-                if logger is not None:
-                    logger.warning(
-                        "ITPC(condition): condition '%s' has only %d training trials (<%d); output set to NaN.",
-                        cond,
-                        n_train,
-                        int(min_trials),
-                    )
-                continue
-            itpc_map = np.abs(np.mean(segment_complex[cond_train], axis=0))  # (ch, time)
-            itpc_ch = np.nanmean(itpc_map, axis=1)  # (ch,)
-            out[cond_mask] = itpc_ch[None, :]
-
-        return out
-
     for band, band_data in precomputed.band_data.items():
         phases = band_data.phase
         if phases is None or phases.size == 0:
@@ -1338,11 +1545,13 @@ def extract_itpc_from_precomputed(
         if baseline_mask is not None and np.any(baseline_mask):
             baseline_complex = complex_vectors[:, :, baseline_mask]
             if itpc_method == "condition":
-                baseline_itpc = _compute_condition_itpc_per_trial(
+                baseline_itpc = _compute_condition_itpc_precomputed(
                     baseline_complex,
-                    labels=condition_labels,
-                    train_mask_local=train_mask,
-                    min_trials=min_trials_per_condition,
+                    condition_labels,
+                    train_mask,
+                    min_trials_per_condition,
+                    logger,
+                    n_jobs=n_jobs,
                 )
             else:
                 if itpc_method == "fold_global" and train_mask is None:
@@ -1354,10 +1563,8 @@ def extract_itpc_from_precomputed(
                     use_mask = None
                 else:
                     use_mask = train_mask if itpc_method == "fold_global" else None
-                base_map = (
-                    _compute_fold_global_itpc_map(baseline_complex, use_mask)
-                    if use_mask is not None
-                    else np.abs(np.mean(baseline_complex, axis=0))
+                base_map = _compute_itpc_map_precomputed(
+                    baseline_complex, use_mask, n_jobs=n_jobs, logger=logger
                 )
                 base_ch = np.nanmean(base_map, axis=1)
                 baseline_itpc = _broadcast_per_trial(base_ch, n_epochs)
@@ -1369,11 +1576,13 @@ def extract_itpc_from_precomputed(
             segment_complex = complex_vectors[:, :, mask]
             
             if itpc_method == "condition":
-                itpc_seg = _compute_condition_itpc_per_trial(
+                itpc_seg = _compute_condition_itpc_precomputed(
                     segment_complex,
-                    labels=condition_labels,
-                    train_mask_local=train_mask,
-                    min_trials=min_trials_per_condition,
+                    condition_labels,
+                    train_mask,
+                    min_trials_per_condition,
+                    logger,
+                    n_jobs=n_jobs,
                 )
             else:
                 if itpc_method == "fold_global":
@@ -1386,15 +1595,13 @@ def extract_itpc_from_precomputed(
                         use_mask = None
                     else:
                         use_mask = np.asarray(train_mask, dtype=bool)
-                    itpc_map = (
-                        _compute_fold_global_itpc_map(segment_complex, use_mask)
-                        if use_mask is not None
-                        else np.abs(np.mean(segment_complex, axis=0))
-                    )
                 else:
-                    itpc_map = np.abs(np.mean(segment_complex, axis=0))  # (ch, time)
-                itpc_ch = np.nanmean(itpc_map, axis=1)  # (ch,)
-                itpc_seg = _broadcast_per_trial(itpc_ch, n_epochs)  # (epochs, ch)
+                    use_mask = None
+                itpc_map = _compute_itpc_map_precomputed(
+                    segment_complex, use_mask, n_jobs=n_jobs, logger=logger
+                )
+                itpc_ch = np.nanmean(itpc_map, axis=1)
+                itpc_seg = _broadcast_per_trial(itpc_ch, n_epochs)
 
             if baseline_itpc is not None and seg_name != "baseline":
                 itpc_seg = itpc_seg - baseline_itpc

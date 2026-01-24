@@ -1383,6 +1383,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optItpcMinTrialsPerCondition:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optItpcNJobs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optPACPhaseRange:
 		if m.pacPhaseMin == 4.0 && m.pacPhaseMax == 8.0 {
 			m.pacPhaseMin, m.pacPhaseMax = 2.0, 4.0 // delta
@@ -1614,8 +1617,10 @@ func (m *Model) togglePlottingAdvancedOption() {
 			m.plotItemConfigs[row.plotID] = cfg
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonWindows, plotItemConfigFieldComparisonSegment, plotItemConfigFieldTopomapWindow:
-			// Open dropdown if windows available, otherwise text edit
-			if len(m.availableWindows) > 0 {
+			// Open dropdown if windows available for this feature, otherwise text edit
+			featureGroup := m.getFeatureGroupForPlot(row.plotID)
+			windows := m.GetPlottingComparisonWindows(featureGroup)
+			if len(windows) > 0 {
 				m.expandedOption = expandedPlotComparisonWindows
 				m.subCursor = 0
 				m.editingPlotID = row.plotID
@@ -1638,6 +1643,48 @@ func (m *Model) togglePlottingAdvancedOption() {
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldConnectivityCircleTopFraction, plotItemConfigFieldConnectivityCircleMinLines, plotItemConfigFieldConnectivityNetworkTopFraction:
 			m.startPlotTextEdit(row.plotID, row.plotField)
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldDoseResponseDoseColumn, plotItemConfigFieldDoseResponsePainColumn:
+			// Dose/pain columns come from aligned events / trial metadata.
+			plotCols := m.GetPlottingComparisonColumns()
+			if len(plotCols) > 0 {
+				m.expandedOption = expandedPlotComparisonColumn
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldDoseResponseResponseColumn:
+			// Response dropdown shows detected feature categories only.
+			categories := m.GetTrialTableFeatureCategories()
+			if len(categories) > 0 {
+				m.expandedOption = expandedPlotComparisonColumn
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				// No fallbacks: do not show events columns.
+				if len(m.trialTableColumns) == 0 {
+					m.ShowToast("No trial table columns discovered (run trial_table first).", "warning")
+				} else {
+					m.ShowToast("No feature categories discovered in trial table.", "warning")
+				}
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldDoseResponseSegment:
+			// Segment is a window label (from available windows). Use the same dropdown list as comparison windows.
+			windows := m.GetPlottingComparisonWindows()
+			if len(windows) > 0 {
+				m.expandedOption = expandedPlotComparisonWindows
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldTfrTopomapActiveWindow, plotItemConfigFieldTfrTopomapWindowSizeMs, plotItemConfigFieldTfrTopomapWindowCount,
 			plotItemConfigFieldTfrTopomapLabelXPosition, plotItemConfigFieldTfrTopomapLabelYPositionBottom,
@@ -1675,6 +1722,62 @@ func (m *Model) togglePlottingAdvancedOption() {
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonLabels:
 			m.startPlotTextEdit(row.plotID, row.plotField)
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldBehaviorScatterFeatures:
+			// Open dropdown for feature types
+			m.expandedOption = expandedBehaviorScatterFeatures
+			m.subCursor = 0
+			m.editingPlotID = row.plotID
+			m.editingPlotField = row.plotField
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldBehaviorScatterColumns:
+			// Open dropdown if columns available, otherwise text edit
+			plotCols := m.GetPlottingComparisonColumns()
+			if len(plotCols) > 0 {
+				m.expandedOption = expandedBehaviorScatterColumns
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldBehaviorScatterAggregationModes:
+			// Open dropdown for aggregation modes
+			m.expandedOption = expandedBehaviorScatterAggregation
+			m.subCursor = 0
+			m.editingPlotID = row.plotID
+			m.editingPlotField = row.plotField
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldBehaviorScatterSegment:
+			// Open dropdown if windows available, otherwise text edit
+			windows := m.GetPlottingComparisonWindows()
+			if len(windows) > 0 {
+				m.expandedOption = expandedBehaviorScatterSegment
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
+			folders, err := m.discoverTemporalTopomapsStatsFeatureFolders()
+			m.temporalTopomapsStatsFeatureFolders = folders
+			if err != nil {
+				m.temporalTopomapsStatsFeatureFoldersError = err.Error()
+			} else {
+				m.temporalTopomapsStatsFeatureFoldersError = ""
+			}
+
+			if len(folders) > 0 {
+				m.expandedOption = expandedTemporalTopomapsFeatureDir
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
 			m.useDefaultAdvanced = false
 		}
 		m.UpdateAdvancedOffset()
@@ -2158,23 +2261,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optTrialTableFormat:
 		m.trialTableFormat = (m.trialTableFormat + 1) % 2
 		m.useDefaultAdvanced = false
-	case optTrialTableIncludeFeatures:
-		m.trialTableIncludeFeatures = !m.trialTableIncludeFeatures
-		m.useDefaultAdvanced = false
-	case optTrialTableIncludeCovars:
-		m.trialTableIncludeCovars = !m.trialTableIncludeCovars
-		m.useDefaultAdvanced = false
-	case optTrialTableIncludeEvents:
-		m.trialTableIncludeEvents = !m.trialTableIncludeEvents
-		m.useDefaultAdvanced = false
 	case optTrialTableAddLagFeatures:
 		m.trialTableAddLagFeatures = !m.trialTableAddLagFeatures
-		m.useDefaultAdvanced = false
-	case optTrialTableExtraEventCols:
-		m.startTextEdit(textFieldTrialTableExtraEventColumns)
-		m.useDefaultAdvanced = false
-	case optTrialTableHighMissingFrac:
-		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optFeatureSummariesEnabled:
 		m.featureSummariesEnabled = !m.featureSummariesEnabled
@@ -2457,6 +2545,14 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	// Temporal
 	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs:
 		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optTemporalTargetColumn:
+		if len(m.availableColumns) > 0 {
+			m.expandedOption = expandedTemporalTargetColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldTemporalTargetColumn)
+		}
 		m.useDefaultAdvanced = false
 	case optTemporalSplitByCondition:
 		m.temporalSplitByCondition = !m.temporalSplitByCondition
@@ -3803,6 +3899,8 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		}
 	case optTfrWorkers:
 		m.tfrWorkers = int(val)
+	case optItpcNJobs:
+		m.itpcNJobs = int(val)
 	// Asymmetry options
 	case optAsymmetryMinSegmentSec:
 		if val >= 0 {
@@ -3932,11 +4030,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optRunAdjustmentMaxDummies:
 		if val >= 1 {
 			m.runAdjustmentMaxDummies = int(val)
-		}
-
-	case optTrialTableHighMissingFrac:
-		if val >= 0 && val <= 1 {
-			m.trialTableHighMissingFrac = val
 		}
 
 	// Pain residual + diagnostics

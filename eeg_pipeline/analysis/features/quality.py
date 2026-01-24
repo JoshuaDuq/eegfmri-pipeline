@@ -49,7 +49,7 @@ def _get_psd_method(config: Dict[str, Any]) -> str:
     """Get PSD computation method, defaulting to welch."""
     method = str(config.get("psd_method", "welch")).strip().lower()
     if method not in {"welch", "multitaper"}:
-        return "welch"
+        raise ValueError(f"feature_engineering.quality.psd_method must be 'welch' or 'multitaper' (got '{method}').")
     return method
 
 
@@ -57,19 +57,29 @@ def _get_frequency_range(config: Dict[str, Any], sfreq: float) -> Tuple[float, f
     """Get frequency range for PSD computation."""
     fmin = float(config.get("fmin", DEFAULT_FMIN))
     fmax = float(config.get("fmax", min(DEFAULT_FMAX, float(sfreq) / 2.0 - 0.5)))
+    if not (np.isfinite(fmin) and np.isfinite(fmax) and fmax > fmin and fmin >= 0):
+        raise ValueError(f"Invalid feature_engineering.quality fmin/fmax: fmin={fmin}, fmax={fmax}.")
     return fmin, fmax
 
 
 def _get_line_noise_parameters(config: Dict[str, Any]) -> Tuple[List[float], float, int]:
     """Extract line noise exclusion parameters."""
     line_freqs_raw = config.get("line_noise_freqs", [DEFAULT_LINE_NOISE_FREQ])
-    try:
-        line_freqs = [float(f) for f in line_freqs_raw]
-    except (ValueError, TypeError):
-        line_freqs = [DEFAULT_LINE_NOISE_FREQ]
+    if line_freqs_raw is None:
+        line_freqs_raw = []
+    if not isinstance(line_freqs_raw, (list, tuple)):
+        raise TypeError(
+            "feature_engineering.quality.line_noise_freqs must be a list/tuple of numbers "
+            f"(got {type(line_freqs_raw).__name__})."
+        )
+    line_freqs = [float(f) for f in line_freqs_raw]
     
     width = float(config.get("line_noise_width_hz", DEFAULT_LINE_NOISE_WIDTH))
     n_harmonics = int(config.get("line_noise_harmonics", DEFAULT_LINE_NOISE_HARMONICS))
+    if not (np.isfinite(width) and width > 0):
+        raise ValueError(f"feature_engineering.quality.line_noise_width_hz must be > 0 (got {width}).")
+    if n_harmonics <= 0:
+        raise ValueError(f"feature_engineering.quality.line_noise_harmonics must be > 0 (got {n_harmonics}).")
     
     return line_freqs, width, n_harmonics
 
@@ -167,9 +177,10 @@ def _compute_snr_from_psd(
     try:
         signal_low, signal_high = float(signal_band[0]), float(signal_band[1])
         noise_low, noise_high = float(noise_band[0]), float(noise_band[1])
-    except (ValueError, TypeError, IndexError):
-        signal_low, signal_high = DEFAULT_SNR_SIGNAL_BAND
-        noise_low, noise_high = DEFAULT_SNR_NOISE_BAND
+    except (ValueError, TypeError, IndexError) as exc:
+        raise ValueError(
+            f"Invalid snr_signal_band/snr_noise_band: {signal_band!r} / {noise_band!r}"
+        ) from exc
     
     signal_mask = (freqs >= signal_low) & (freqs <= signal_high)
     noise_mask = (freqs >= noise_low) & (freqs <= noise_high)
@@ -193,8 +204,8 @@ def _compute_muscle_ratio_from_psd(
     
     try:
         muscle_low, muscle_high = float(muscle_band[0]), float(muscle_band[1])
-    except (ValueError, TypeError, IndexError):
-        muscle_low, muscle_high = DEFAULT_MUSCLE_BAND
+    except (ValueError, TypeError, IndexError) as exc:
+        raise ValueError(f"Invalid muscle_band: {muscle_band!r}") from exc
     
     muscle_mask = (freqs >= muscle_low) & (freqs <= muscle_high)
     muscle_power = np.sum(psds[:, muscle_mask], axis=1)
@@ -223,23 +234,10 @@ def _compute_spectral_metrics(
     config: Dict[str, Any],
 ) -> Dict[str, np.ndarray]:
     """Compute spectral quality metrics from PSD."""
-    n_channels = data.shape[0]
-    nan_result = np.full(n_channels, np.nan)
-    
-    try:
-        psds, freqs = _compute_psd(data, sfreq, config)
-        snr = _compute_snr_from_psd(psds, freqs, config)
-        muscle_ratio = _compute_muscle_ratio_from_psd(psds, freqs, config)
-        
-        return {
-            "snr": snr,
-            "muscle": muscle_ratio,
-        }
-    except ValueError:
-        return {
-            "snr": nan_result,
-            "muscle": nan_result,
-        }
+    psds, freqs = _compute_psd(data, sfreq, config)
+    snr = _compute_snr_from_psd(psds, freqs, config)
+    muscle_ratio = _compute_muscle_ratio_from_psd(psds, freqs, config)
+    return {"snr": snr, "muscle": muscle_ratio}
 
 
 def _compute_signal_metrics(
@@ -316,7 +314,7 @@ def extract_quality_features(
     epochs = ctx.epochs
     picks, channel_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
-        return pd.DataFrame(), []
+        raise ValueError("Quality: no EEG channels available.")
     
     full_data = epochs.get_data(picks=picks)
     sfreq = epochs.info["sfreq"]
@@ -354,12 +352,14 @@ def extract_quality_features(
             if allow_full_epoch_fallback:
                 masks = {target_name: np.ones(full_data.shape[2], dtype=bool)}
             else:
-                return pd.DataFrame(), []
+                raise ValueError(
+                    f"Quality: targeted window '{target_name}' has no valid mask and allow_full_epoch_fallback=False."
+                )
     else:
         masks = get_segment_masks(epochs.times, windows, config)
     
     if not masks:
-        return pd.DataFrame(), []
+        raise ValueError("Quality: no valid time window masks available.")
 
     for segment, mask in masks.items():
         if not np.any(mask):
@@ -375,7 +375,7 @@ def extract_quality_features(
             )
 
     if not results:
-        return pd.DataFrame(), []
+        raise ValueError("Quality: no metrics were produced.")
     
     df = pd.DataFrame(results)
     return df, list(df.columns)
@@ -404,7 +404,7 @@ def compute_trial_quality_metrics(
     """
     picks, _ = pick_eeg_channels(epochs)
     if len(picks) == 0:
-        return pd.DataFrame()
+        raise ValueError("Quality: no EEG channels available.")
     
     full_data = epochs.get_data(picks=picks)
     sfreq = epochs.info["sfreq"]
@@ -424,6 +424,6 @@ def compute_trial_quality_metrics(
             results[column_name][epoch_idx] = global_value
     
     if not results:
-        return pd.DataFrame()
+        raise ValueError("Quality: no metrics were produced.")
     
     return pd.DataFrame(results)

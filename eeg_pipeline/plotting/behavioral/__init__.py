@@ -29,21 +29,22 @@ def collect_significant_plots(*args, **kwargs):
 
 
 __all__ = [
+    # Primary scatter API
+    "plot_behavior_scatter",
+    "AggregationMode",
+    # Builders
     "generate_correlation_scatter",
     "plot_residual_qc",
     "plot_regression_residual_diagnostics",
+    # Other scatter plots
     "plot_psychometrics",
-    "plot_power_roi_scatter",
-    "plot_complexity_roi_scatter",
-    "plot_aperiodic_roi_scatter",
-    "plot_connectivity_roi_scatter",
-    "plot_itpc_roi_scatter",
     "plot_behavioral_response_patterns",
-    "plot_top_behavioral_predictors",
+    # Temporal
     "plot_temporal_correlation_topomaps_by_pain",
-    "plot_pain_nonpain_clusters",
     "plot_significant_correlations_topomap",
+    # Dose response
     "visualize_dose_response",
+    # Orchestration
     "visualize_subject_behavior",
     "visualize_behavior_for_subjects",
     "collect_significant_plots",
@@ -53,20 +54,20 @@ __all__ = [
 def __getattr__(name: str):
     """Lazy import for plotting functions."""
     _module_map = {
+        # Primary API
+        "plot_behavior_scatter": "scatter",
+        "AggregationMode": "scatter",
+        # Builders
         "generate_correlation_scatter": "builders",
         "plot_residual_qc": "builders",
         "plot_regression_residual_diagnostics": "builders",
+        # Scatter
         "plot_psychometrics": "scatter",
-        "plot_power_roi_scatter": "scatter",
-        "plot_complexity_roi_scatter": "scatter",
-        "plot_aperiodic_roi_scatter": "scatter",
-        "plot_connectivity_roi_scatter": "scatter",
-        "plot_itpc_roi_scatter": "scatter",
         "plot_behavioral_response_patterns": "scatter",
-        "plot_top_behavioral_predictors": "scatter",
+        # Temporal
         "plot_temporal_correlation_topomaps_by_pain": "temporal",
-        "plot_pain_nonpain_clusters": "temporal",
         "plot_significant_correlations_topomap": "temporal",
+        # Dose response
         "visualize_dose_response": "dose_response",
     }
 

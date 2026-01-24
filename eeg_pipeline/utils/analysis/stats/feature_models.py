@@ -346,10 +346,7 @@ def _fit_ols_hc3_model(
 def _derive_binary_outcome(df: pd.DataFrame, kind: str) -> Tuple[Optional[pd.Series], Dict[str, Any]]:
     meta: Dict[str, Any] = {"binary_outcome_kind": kind}
     if kind == "pain_binary" and "pain_binary" in df.columns:
-        s = pd.to_numeric(df["pain_binary"], errors="coerce")
-        ok = s.dropna().isin([0, 1]).all() if s.dropna().size else False
-        meta["pain_binary_is_0_1"] = bool(ok)
-        return s, meta
+        return pd.to_numeric(df["pain_binary"], errors="coerce"), meta
     if kind in ("rating_median", "rating_median_split") and "rating" in df.columns:
         r = pd.to_numeric(df["rating"], errors="coerce")
         med = float(r.median(skipna=True)) if r.notna().any() else np.nan

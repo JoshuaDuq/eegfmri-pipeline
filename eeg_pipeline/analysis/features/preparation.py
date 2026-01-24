@@ -63,27 +63,24 @@ def _compute_single_band(
     
     Returns None on failure, or (band_name, band_data, gfp_band, qc_entry) on success.
     """
-    try:
-        band_data = compute_band_data(
-            data,
-            sfreq,
-            band_name,
-            fmin,
-            fmax,
-            logger=None,
-            pad_sec=pad_sec,
-            pad_cycles=pad_cycles,
-        )
-        if band_data is None:
-            return None
-        
-        gfp_band = compute_gfp(band_data.filtered)
-        band_power = band_data.power
-        
-        qc_entry = _create_band_qc_entry(band_power, fmin, fmax)
-        return band_name, band_data, gfp_band, qc_entry
-    except Exception:
-        return None
+    band_data = compute_band_data(
+        data,
+        sfreq,
+        band_name,
+        fmin,
+        fmax,
+        logger=None,
+        pad_sec=pad_sec,
+        pad_cycles=pad_cycles,
+    )
+    if band_data is None:
+        raise ValueError(f"Band computation failed for band='{band_name}' ({fmin}, {fmax}).")
+
+    gfp_band = compute_gfp(band_data.filtered)
+    band_power = band_data.power
+
+    qc_entry = _create_band_qc_entry(band_power, fmin, fmax)
+    return band_name, band_data, gfp_band, qc_entry
 
 
 def _create_band_qc_entry(band_power: np.ndarray, fmin: float, fmax: float) -> dict:
@@ -109,10 +106,10 @@ def _apply_spatial_transform(
     config: Any,
     logger: Any,
 ) -> mne.Epochs:
-    """
-    Apply spatial transform (CSD/Laplacian) to epochs.
+    """Apply spatial transform (CSD/Laplacian) to epochs.
     
-    Returns epochs unchanged if transform is 'none' or fails.
+    If transform_type is 'none', returns epochs unchanged. If a transform is requested
+    but cannot be applied, an error is raised (no silent fallback).
     """
     if transform_type not in {"csd", "laplacian"}:
         return epochs
@@ -131,22 +128,20 @@ def _apply_spatial_transform(
             stiffness=stiffness,
             verbose=False,
         )
-        if logger:
-            logger.info(
-                "Applied spatial transform=%s (CSD) to epochs for feature precomputation (lambda2=%s, stiffness=%s).",
-                transform_type,
-                lambda2,
-                stiffness,
-            )
-        return transformed
-    except Exception as exc:
-        if logger:
-            logger.warning(
-                "Failed to apply spatial transform=%s; proceeding without it (%s).",
-                transform_type,
-                exc,
-            )
-        return epochs
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise RuntimeError(
+            f"Failed to apply spatial transform='{transform_type}' (CSD). "
+            "This is required for the requested configuration; fix montage/reference/config."
+        ) from exc
+
+    if logger:
+        logger.info(
+            "Applied spatial transform=%s (CSD) to epochs for feature precomputation (lambda2=%s, stiffness=%s).",
+            transform_type,
+            lambda2,
+            stiffness,
+        )
+    return transformed
 
 
 def _get_spatial_transform_type(config: Any, feature_family: Optional[str] = None) -> str:
@@ -283,15 +278,7 @@ def _compute_time_windows(
         
         return windows, qc_dict
     except ValueError as exc:
-        qc_dict = {
-            "baseline_samples": 0,
-            "active_samples": 0,
-            "baseline_range": (np.nan, np.nan),
-            "active_range": (np.nan, np.nan),
-            "clamped": False,
-            "errors": [str(exc)],
-        }
-        return None, qc_dict
+        raise ValueError(f"Time window computation failed: {exc}") from exc
 
 
 def _compute_gfp_with_qc(data: np.ndarray) -> Tuple[np.ndarray, dict]:
@@ -385,20 +372,15 @@ def _estimate_individual_alpha_frequency(
     psd_fmin = max(MIN_FREQ_FOR_PSD, alpha_fmin - DEFAULT_PSD_FMIN_OFFSET)
     psd_fmax = min(MAX_FREQ_FOR_PSD, sfreq / 2.0 - DEFAULT_PSD_FMAX_OFFSET)
     
-    try:
-        psds, freqs = mne.time_frequency.psd_array_multitaper(
-            baseline_data,
-            sfreq=sfreq,
-            fmin=psd_fmin,
-            fmax=psd_fmax,
-            adaptive=True,
-            normalization="full",
-            verbose=False,
-        )
-    except Exception as exc:
-        if logger:
-            logger.warning("IAF PSD estimation failed: %s", exc)
-        return None
+    psds, freqs = mne.time_frequency.psd_array_multitaper(
+        baseline_data,
+        sfreq=sfreq,
+        fmin=psd_fmin,
+        fmax=psd_fmax,
+        adaptive=True,
+        normalization="full",
+        verbose=False,
+    )
     psds = np.asarray(psds, dtype=float)
     freqs = np.asarray(freqs, dtype=float)
     
@@ -598,28 +580,20 @@ def _compute_bands_parallel(
     logger: Any,
 ) -> List[Optional[Tuple[str, Any, np.ndarray, dict]]]:
     """Compute bands in parallel using joblib."""
-    try:
-        from joblib import Parallel, delayed
-        
-        results = Parallel(n_jobs=n_jobs, prefer="threads")(
-            delayed(_compute_single_band)(
-                data,
-                sfreq,
-                band_name,
-                fmin,
-                fmax,
-                pad_sec=pad_sec,
-                pad_cycles=pad_cycles,
-            )
-            for band_name, (fmin, fmax) in band_definitions
+    from joblib import Parallel, delayed
+    
+    return Parallel(n_jobs=n_jobs, prefer="threads")(
+        delayed(_compute_single_band)(
+            data,
+            sfreq,
+            band_name,
+            fmin,
+            fmax,
+            pad_sec=pad_sec,
+            pad_cycles=pad_cycles,
         )
-        return results
-    except Exception as exc:
-        if logger:
-            logger.warning(
-                "Parallel band computation failed (%s); falling back to sequential.", exc
-            )
-        return _compute_bands_sequential(data, sfreq, band_definitions, pad_sec, pad_cycles)
+        for band_name, (fmin, fmax) in band_definitions
+    )
 
 
 def _compute_bands_sequential(
@@ -902,30 +876,23 @@ def _determine_frequency_bands(
     if not use_iaf or windows is None:
         return frequency_bands if frequency_bands else None
     
-    try:
-        baseline_mask = getattr(windows, "baseline_mask", None)
-        iaf = _estimate_individual_alpha_frequency(
-            data,
-            sfreq,
-            ch_names,
-            baseline_mask,
+    baseline_mask = getattr(windows, "baseline_mask", None)
+    iaf = _estimate_individual_alpha_frequency(
+        data,
+        sfreq,
+        ch_names,
+        baseline_mask,
+        config,
+        logger=logger,
+    )
+    
+    if iaf is not None:
+        qc.time_windows["iaf_hz"] = float(iaf)
+        frequency_bands = _adjust_frequency_bands_for_iaf(
+            frequency_bands,
+            iaf,
             config,
-            logger=logger,
         )
-        
-        if iaf is not None:
-            qc.time_windows["iaf_hz"] = float(iaf)
-            frequency_bands = _adjust_frequency_bands_for_iaf(
-                frequency_bands,
-                iaf,
-                config,
-            )
-    except Exception as exc:
-        if logger:
-            logger.warning(
-                "IAF estimation failed; using config bands (%s).",
-                exc,
-            )
     
     return frequency_bands if frequency_bands else None
 

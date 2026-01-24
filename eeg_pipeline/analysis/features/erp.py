@@ -80,16 +80,13 @@ def _apply_smoothing(
     
     window_length = smooth_samples if smooth_samples % 2 == 1 else smooth_samples + 1
     
-    try:
-        return savgol_filter(
-            data,
-            window_length=window_length,
-            polyorder=_SAVGOL_POLYORDER,
-            axis=2,
-            mode="interp",
-        )
-    except (ValueError, TypeError):
-        return data
+    return savgol_filter(
+        data,
+        window_length=window_length,
+        polyorder=_SAVGOL_POLYORDER,
+        axis=2,
+        mode="interp",
+    )
 
 
 def _find_peak_in_signal(
@@ -336,12 +333,12 @@ def _apply_lowpass_filter(
             picks=picks,
             verbose=False,
         )
-        data = filtered_epochs.get_data(picks=picks)
-        logger.info("ERP: Applied %.1f Hz low-pass filter for peak detection", lowpass_hz)
-        return data
-    except Exception as exc:
-        logger.warning("ERP: Low-pass filter failed (%s); using unfiltered data", exc)
-        return epochs.get_data(picks=picks)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise RuntimeError(f"ERP low-pass filtering failed (h_freq={lowpass_hz}).") from exc
+
+    data = filtered_epochs.get_data(picks=picks)
+    logger.info("ERP: Applied %.1f Hz low-pass filter for peak detection", lowpass_hz)
+    return data
 
 
 def _parse_smoothing_config(
@@ -351,8 +348,8 @@ def _parse_smoothing_config(
     smooth_ms = erp_cfg.get("smooth_ms", 0.0)
     try:
         smooth_ms = float(smooth_ms)
-    except (TypeError, ValueError):
-        return 0
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"ERP smooth_ms must be a float (got {smooth_ms!r}).") from exc
     
     if smooth_ms <= 0:
         return 0
@@ -369,8 +366,8 @@ def _parse_peak_prominence(
     
     try:
         peak_prominence = float(peak_prom_uv) * _MICROVOLTS_TO_VOLTS
-    except (TypeError, ValueError):
-        return None
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"ERP peak_prominence_uv must be a float (got {peak_prom_uv!r}).") from exc
     
     return peak_prominence
 
@@ -396,8 +393,8 @@ def _compute_baseline_mask_for_times(
         tmin, tmax = baseline_range
         if not (np.isfinite(tmin) and np.isfinite(tmax)):
             return None
-    except (TypeError, ValueError):
-        return None
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid baseline_range in TimeWindows: {baseline_range!r}") from exc
     
     # Use a half-open interval [tmin, tmax) to avoid including t=0 exactly when
     # users specify baseline_end=0.0 (common in ERP practice).

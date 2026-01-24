@@ -1,29 +1,18 @@
 """
-Subject-Level Trial Table (Canonical)
-====================================
+Subject-Level Trial Table
+=========================
 
-Builds a single per-trial table that merges:
-- aligned events metadata
-- targets (rating)
-- temperature and pain condition labels
-- optional covariates and derived columns
-- optional feature columns (prefixed by feature type)
-
-This table is intended to be the single source of truth for subject-level
-behavior/statistics and plotting, to avoid silent misalignment.
+Builds a per-trial table: clean events.tsv columns + feature columns.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-
-if TYPE_CHECKING:
-    from eeg_pipeline.context.behavior import BehaviorContext
 
 
 @dataclass
@@ -32,164 +21,28 @@ class TrialTableBuildResult:
     metadata: Dict[str, Any]
 
 
-def _safe_numeric(series: Optional[pd.Series]) -> pd.Series:
-    if series is None:
-        return pd.Series(dtype=float)
-    return pd.to_numeric(series, errors="coerce")
-
-
-def _get_pain_column_from_events(config: Any, events: pd.DataFrame) -> Optional[str]:
-    """Extract pain column name from config and events, returning None on failure."""
-    try:
-        from eeg_pipeline.utils.data.columns import get_pain_column_from_config
-
-        return get_pain_column_from_config(config, events)
-    except (AttributeError, KeyError, ValueError):
-        return None
-
-
-def _pick_event_columns(events: pd.DataFrame, candidates: List[str]) -> Dict[str, pd.Series]:
-    selected_columns: Dict[str, pd.Series] = {}
-    for candidate in candidates:
-        if candidate in events.columns and candidate not in selected_columns:
-            selected_columns[candidate] = events[candidate]
-    return selected_columns
-
-
-def _get_rating_column_from_events(config: Any, events: pd.DataFrame) -> Optional[str]:
-    """Extract rating column name from config and events, returning None on failure."""
-    from eeg_pipeline.utils.data.columns import pick_target_column
-    
-    try:
-        rating_columns = (
-            list(config.get("event_columns.rating", []) or [])
-            if config is not None
-            else []
-        )
-        return pick_target_column(events, target_columns=rating_columns)
-    except (AttributeError, KeyError, ValueError):
-        return None
-
-
-def build_subject_trial_table(
-    ctx: Any,  # BehaviorContext
-    *,
-    include_features: bool = True,
-    include_covariates: bool = True,
-    include_events: bool = True,
-    extra_event_columns: Optional[List[str]] = None,
-) -> TrialTableBuildResult:
-    """
-    Build the canonical subject-level trial table.
-
-    Notes
-    -----
-    - Assumes ctx.load_data() already ran and alignment is validated.
-    - Uses ctx.epochs.selection as the original event index when available.
-    - Rating column is extracted from aligned_events using event_columns.rating config.
-    """
+def build_subject_trial_table(ctx: Any) -> TrialTableBuildResult:
+    """Build trial table: clean events columns + feature columns."""
     if ctx.aligned_events is None:
         raise ValueError("ctx.aligned_events is required")
 
+    from eeg_pipeline.analysis.behavior.orchestration import combine_features
+
     events = ctx.aligned_events.reset_index(drop=True)
-    n_trials = int(len(events))
+    features = combine_features(ctx)
 
-    subject = getattr(ctx, "subject", None)
-    task = getattr(ctx, "task", None)
-    meta: Dict[str, Any] = {
-        "subject": subject,
-        "task": task,
-        "n_trials": n_trials,
-        "include_features": bool(include_features),
-        "include_covariates": bool(include_covariates),
-        "include_events": bool(include_events),
-    }
-
-    df = pd.DataFrame(index=np.arange(n_trials))
-    df["subject"] = str(subject or "")
-    df["task"] = str(task or "")
-    df["epoch"] = np.arange(n_trials, dtype=int)
-
-    epochs = getattr(ctx, "epochs", None)
-    selection = getattr(epochs, "selection", None) if epochs is not None else None
-    if selection is not None:
-        try:
-            selection_arr = np.asarray(selection, dtype=int)
-            if selection_arr.shape[0] == n_trials:
-                df["original_event_index"] = selection_arr
-                meta["has_original_event_index"] = True
-            else:
-                meta["has_original_event_index"] = False
-        except (ValueError, TypeError) as exc:
-            meta["has_original_event_index"] = False
-            meta["selection_error"] = str(exc)
-
-    # Extract rating from aligned_events using event_columns.rating config
-    rating_col = _get_rating_column_from_events(ctx.config, events)
-    if rating_col is not None and rating_col in events.columns:
-        df["rating"] = pd.to_numeric(events[rating_col], errors="coerce").reset_index(drop=True)
-        meta["rating_column"] = str(rating_col)
+    if features is not None and not features.empty:
+        features = features.reset_index(drop=True)
+        df = pd.concat([events, features], axis=1)
     else:
-        # Rating column not found - leave as NaN
-        df["rating"] = np.nan
-        meta["rating_column"] = None
-    
-    temperature = getattr(ctx, "temperature", None)
-    if temperature is not None:
-        df["temperature"] = _safe_numeric(temperature).reset_index(drop=True)
+        df = events.copy()
 
-    pain_col = _get_pain_column_from_events(ctx.config, events)
-    if pain_col is not None and pain_col in events.columns:
-        df["pain_binary"] = pd.to_numeric(events[pain_col], errors="coerce")
-        meta["pain_column"] = str(pain_col)
-
-    if include_events:
-        standard_event_columns = [
-            "trial",
-            "trial_type",
-            "condition",
-            "run",
-            "block",
-            "response_time",
-        ]
-        columns_to_keep = standard_event_columns.copy()
-        if extra_event_columns:
-            columns_to_keep.extend([str(c) for c in extra_event_columns])
-        event_columns = _pick_event_columns(events, columns_to_keep)
-        for column_name, column_data in event_columns.items():
-            if column_name in df.columns:
-                continue
-            df[column_name] = column_data.reset_index(drop=True)
-
-    if include_covariates:
-        covariates_df = getattr(ctx, "covariates_df", None)
-        has_covariates = covariates_df is not None and not covariates_df.empty
-        if has_covariates:
-            covariates = covariates_df.copy().reset_index(drop=True)
-            for cov_column in covariates.columns:
-                column_name = str(cov_column)
-                if column_name in df.columns:
-                    column_name = f"cov_{column_name}"
-                df[column_name] = pd.to_numeric(covariates[cov_column], errors="coerce")
-
-    if include_features:
-        from eeg_pipeline.analysis.behavior.orchestration import combine_features
-
-        features = combine_features(ctx)
-        if features is not None and not features.empty:
-            features = features.reset_index(drop=True)
-            existing_columns = set(df.columns)
-            feature_column_names = {str(c) for c in features.columns}
-            column_collisions = existing_columns.intersection(feature_column_names)
-            if column_collisions:
-                rename_map = {
-                    c: f"feat_{c}" for c in features.columns if str(c) in column_collisions
-                }
-                features = features.rename(columns=rename_map)
-                meta["feature_column_collisions"] = sorted(column_collisions)
-            df = pd.concat([df, features], axis=1)
-
-    meta["n_columns"] = int(df.shape[1])
+    meta: Dict[str, Any] = {
+        "subject": getattr(ctx, "subject", None),
+        "task": getattr(ctx, "task", None),
+        "n_trials": len(df),
+        "n_columns": df.shape[1],
+    }
     return TrialTableBuildResult(df=df, metadata=meta)
 
 

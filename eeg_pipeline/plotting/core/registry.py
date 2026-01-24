@@ -68,6 +68,7 @@ class CategorizedPlotManager(Generic[CtxT]):
             func(self.ctx, self.saved_plots)
         except Exception as exc:
             self.logger.error(f"Plotter '{name}' failed: {exc}", exc_info=True)
+            raise RuntimeError(f"Plotter '{name}' failed") from exc
 
     def run_category(self, category: str, *, plotters: List[Tuple[str, PlotterFunc[CtxT]]]) -> None:
         if not plotters:

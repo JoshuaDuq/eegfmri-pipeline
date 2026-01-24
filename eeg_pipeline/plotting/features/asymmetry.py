@@ -28,7 +28,7 @@ from eeg_pipeline.plotting.features.utils import (
 )
 from eeg_pipeline.plotting.io.figures import log_if_present, save_fig
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
 # Plotting constants
@@ -53,21 +53,50 @@ _CONDITION_COLOR_1 = "#5a7d9a"
 _CONDITION_COLOR_2 = "#c44e52"
 
 
-def _select_segment(segments: List[str], preferred: str = "active") -> Optional[str]:
-    """Select segment from list, preferring specified segment."""
-    if not segments:
-        return None
-    if preferred in segments:
-        return preferred
-    return segments[0]
-
-
 def _sanitize_roi_name_for_path(roi_name: str) -> str:
     """Convert ROI name to filesystem-safe string."""
     from eeg_pipeline.utils.formatting import sanitize_label
     if roi_name.lower() == "all":
         return ""
     return sanitize_label(roi_name).lower()
+
+
+def _roi_has_asymmetry_data(
+    features_df: pd.DataFrame,
+    roi_name: str,
+    rois: Dict[str, List[str]],
+) -> bool:
+    """Check if ROI has any asymmetry channel pairs in the data.
+    
+    Asymmetry requires left-right hemispheric pairs. Midline ROIs and
+    single-hemisphere ROIs without cross-hemispheric pairs return False.
+    """
+    if roi_name.lower() == "all":
+        return True
+    
+    roi_patterns = rois.get(roi_name, [])
+    if not roi_patterns:
+        return False
+    
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid") or parsed.get("group") != "asymmetry":
+            continue
+        
+        scope = parsed.get("scope") or ""
+        if scope != "chpair":
+            continue
+        
+        identifier = str(parsed.get("identifier") or "")
+        if "-" not in identifier:
+            continue
+        
+        channel1, channel2 = identifier.split("-", 1)
+        roi_channels = get_roi_channels(roi_patterns, [channel1, channel2])
+        if channel1 in roi_channels or channel2 in roi_channels:
+            return True
+    
+    return False
 
 
 def _get_asymmetry_columns(
@@ -113,167 +142,6 @@ def _get_asymmetry_columns(
     return columns
 
 
-def plot_asymmetry_by_band(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    stat: Optional[str] = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot hemispheric asymmetry distributions by band."""
-    plot_cfg = get_plot_config(config)
-    segments = get_named_segments(features_df, group="asymmetry")
-    segment = _select_segment(segments, preferred="active")
-    
-    if segment is None:
-        fig = _create_empty_plot("No asymmetry data")
-        _save_empty_plot(fig, save_path, plot_cfg)
-        return fig
-    
-    bands = get_named_bands(features_df, group="asymmetry", segment=segment)
-    if not bands:
-        fig = _create_empty_plot("No asymmetry data")
-        _save_empty_plot(fig, save_path, plot_cfg)
-        return fig
-    
-    stat = _get_statistic_name(stat, config)
-    bands = _order_bands_by_config(bands, config)
-    
-    if figsize is None:
-        figsize = (
-            max(_MIN_FIGURE_WIDTH, len(bands) * _FIGURE_WIDTH_PER_BAND),
-            _FIGURE_HEIGHT,
-        )
-    
-    fig, ax = plt.subplots(figsize=figsize)
-    data_by_position = _collect_band_data(
-        features_df, segment, bands, stat
-    )
-    
-    if data_by_position:
-        _plot_violin_distributions(ax, data_by_position, bands)
-    else:
-        ax.text(
-            0.5, 0.5, "No asymmetry data",
-            ha="center", va="center", transform=ax.transAxes
-        )
-        ax.set_xticks([])
-    
-    _format_asymmetry_axes(ax, stat, segment)
-    plt.tight_layout()
-    save_fig(
-        fig, save_path,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-        config=config,
-    )
-    plt.close(fig)
-    return fig
-
-
-def _create_empty_plot(message: str) -> plt.Figure:
-    """Create an empty plot with a message."""
-    fig, ax = plt.subplots()
-    ax.text(0.5, 0.5, message, ha="center", va="center")
-    return fig
-
-
-def _save_empty_plot(fig: plt.Figure, save_path: Path, plot_cfg: Any, config: Any = None) -> None:
-    """Save an empty plot figure."""
-    plt.tight_layout()
-    save_fig(
-        fig, save_path,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-        config=config,
-    )
-    plt.close(fig)
-
-
-def _get_statistic_name(stat: Optional[str], config: Any) -> str:
-    """Get statistic name from parameter or config."""
-    if stat is not None:
-        return stat
-    config_stat = get_config_value(
-        config, "plotting.plots.features.asymmetry.stat", "index"
-    )
-    return str(config_stat) if config_stat else "index"
-
-
-def _order_bands_by_config(bands: List[str], config: Any) -> List[str]:
-    """Order bands according to config, with unmatched bands at end."""
-    band_order = get_band_names(config)
-    ordered = [b for b in band_order if b in bands]
-    remaining = [b for b in bands if b not in band_order]
-    return ordered + remaining
-
-
-def _collect_band_data(
-    features_df: pd.DataFrame,
-    segment: str,
-    bands: List[str],
-    stat: str,
-) -> Dict[int, np.ndarray]:
-    """Collect asymmetry data for each band."""
-    data_by_position = {}
-    
-    for position, band in enumerate(bands):
-        series, _, _ = collect_named_series(
-            features_df,
-            group="asymmetry",
-            segment=segment,
-            band=band,
-            stat_preference=[stat, "index", "logdiff"],
-            scope_preference=["chpair"],
-        )
-        values = series.dropna().values
-        if values.size > 0:
-            data_by_position[position] = values
-    
-    return data_by_position
-
-
-def _plot_violin_distributions(
-    ax: plt.Axes,
-    data_by_position: Dict[int, np.ndarray],
-    bands: List[str],
-) -> None:
-    """Plot violin plots for asymmetry data."""
-    positions = list(data_by_position.keys())
-    data_list = [data_by_position[pos] for pos in positions]
-    
-    parts = ax.violinplot(
-        data_list,
-        positions=positions,
-        showmedians=True,
-        widths=_VIOLIN_WIDTH,
-    )
-    
-    for body in parts.get("bodies", []):
-        body.set_facecolor(_VIOLIN_COLOR)
-        body.set_alpha(_VIOLIN_ALPHA)
-    
-    ax.set_xticks(range(len(bands)))
-    ax.set_xticklabels([band.capitalize() for band in bands])
-
-
-def _format_asymmetry_axes(ax: plt.Axes, stat: str, segment: Optional[str]) -> None:
-    """Format axes labels and title for asymmetry plot."""
-    ax.set_xlabel("Band")
-    stat_label = stat.replace("_", " ").title()
-    ax.set_ylabel(stat_label)
-    segment_label = segment if segment is not None else "unknown"
-    title = f"Asymmetry ({stat_label}) by Band ({segment_label})"
-    ax.set_title(title, fontweight="bold")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-
 def plot_asymmetry_by_condition(
     features_df: pd.DataFrame,
     events_df: pd.DataFrame,
@@ -299,9 +167,25 @@ def plot_asymmetry_by_condition(
     bands = _get_comparison_bands(features_df, config)
     metrics = _get_comparison_metrics(config)
     rois = get_roi_definitions(config)
-    roi_names = _get_comparison_roi_names(config, rois)
+    roi_names_raw = _get_comparison_roi_names(config, rois)
     
     if not bands:
+        return
+    
+    roi_names = [
+        r for r in roi_names_raw
+        if _roi_has_asymmetry_data(features_df, r, rois)
+    ]
+    skipped_rois = set(roi_names_raw) - set(roi_names)
+    if skipped_rois and logger:
+        log_if_present(
+            logger, "info",
+            f"Skipping ROIs without asymmetry pairs: {sorted(skipped_rois)}"
+        )
+    
+    if not roi_names:
+        if logger:
+            log_if_present(logger, "warning", "No ROIs with asymmetry data found")
         return
     
     if logger:
@@ -348,22 +232,14 @@ def _get_comparison_segments(
     config: Any,
     logger: Any,
 ) -> List[str]:
-    """Get segments for comparison from config or auto-detect."""
-    segments = get_config_value(
-        config, "plotting.comparisons.comparison_windows", []
-    )
-    
-    if not segments or len(segments) < 2:
-        detected = get_named_segments(features_df, group="asymmetry")
-        if len(detected) >= 2:
-            segments = detected[:2]
-            if logger:
-                log_if_present(
-                    logger, "info",
-                    f"Auto-detected segments for asymmetry comparison: {segments}"
-                )
-    
-    return segments
+    """Get segments for comparison from config (no auto-detection)."""
+    segments = require_config_value(config, "plotting.comparisons.comparison_windows")
+    if not isinstance(segments, (list, tuple)) or len(segments) < 2:
+        raise ValueError(
+            "plotting.comparisons.comparison_windows must be a list/tuple with at least 2 window names "
+            f"(got {segments!r})"
+        )
+    return [str(s) for s in segments]
 
 
 def _get_comparison_bands(
@@ -603,13 +479,12 @@ def _plot_column_comparison(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
         if not multi_group_info:
-            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
-            return
+            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
         
         masks_dict, group_labels = multi_group_info
-        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
         multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
@@ -653,21 +528,12 @@ def _plot_column_comparison(
         log_if_present(logger, "info", f"Saved asymmetry multi-group column comparison for {len(roi_names)} ROIs")
         return
     
-    comparison_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
-    
+    comparison_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
     if not comparison_mask_info:
-        if logger:
-            log_if_present(
-                logger, "warning",
-                "Column comparison enabled but config incomplete. "
-                "Set plotting.comparisons.comparison_column and comparison_values."
-            )
-        return
+        raise ValueError("Column comparison requested but could not resolve comparison masks.")
     
     mask1, mask2, label1, label2 = comparison_mask_info
-    segment_name = get_config_value(
-        config, "plotting.comparisons.comparison_segment", "active"
-    )
+    segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
     
     plot_cfg = get_plot_config(config)
     n_trials = len(features_df)
@@ -892,6 +758,5 @@ def _add_column_comparison_title(
 
 
 __all__ = [
-    "plot_asymmetry_by_band",
     "plot_asymmetry_by_condition",
 ]

@@ -62,6 +62,38 @@ class NamingSchema:
         parts.append(stat)
         return "_".join(parts)
 
+    # Known stat suffixes (single token stats checked first, then compound)
+    KNOWN_STATS = frozenset({
+        # Single-token stats
+        "lzc", "pe", "mean", "std", "percent", "db", "slope", "auc", "ptp",
+        "logratio", "bandwidth", "entropy", "geff", "clust", "smallworld",
+        # Compound stats (checked by joining from the end)
+        "peak_latency", "peak_freq", "peak_power", "peak_ratio", "peak_residual",
+        "center_freq", "edge_freq_95",
+        "erd_magnitude", "erd_duration", "ers_magnitude", "ers_duration",
+        "percent_mean", "percent_std", "db_mean", "db_std",
+        "logratio_mean", "logratio_std", "latency_diff",
+        "power_ratio", "log_ratio",
+    })
+
+    @classmethod
+    def _extract_stat_from_end(cls, parts: list[str]) -> tuple[str, int]:
+        """Extract stat from the end of parts list.
+        
+        Returns (stat_string, n_tokens_consumed).
+        Tries compound stats first (2 tokens), then single token.
+        """
+        if len(parts) >= 2:
+            compound = "_".join(parts[-2:])
+            if compound in cls.KNOWN_STATS:
+                return compound, 2
+        if parts and parts[-1] in cls.KNOWN_STATS:
+            return parts[-1], 1
+        # Fallback: assume last token is the stat
+        if parts:
+            return parts[-1], 1
+        return "", 0
+
     @staticmethod
     def parse(name: str) -> dict:
         parts = name.split("_")
@@ -91,13 +123,21 @@ class NamingSchema:
             "valid": True,
         }
 
+        remaining = parts[scope_idx + 1:]
         if scope == "global":
-            result["stat"] = "_".join(parts[scope_idx + 1:])
+            result["stat"] = "_".join(remaining)
         else:
-            if scope_idx + 1 >= len(parts):
+            if not remaining:
                 return {"valid": False}
-            result["identifier"] = parts[scope_idx + 1]
-            result["stat"] = "_".join(parts[scope_idx + 2:])
+            # Extract stat from the end, remainder is the identifier
+            stat, n_consumed = NamingSchema._extract_stat_from_end(remaining)
+            if n_consumed == 0:
+                return {"valid": False}
+            identifier_parts = remaining[:-n_consumed] if n_consumed else remaining
+            if not identifier_parts:
+                return {"valid": False}
+            result["identifier"] = "_".join(identifier_parts)
+            result["stat"] = stat
 
         return result
 
@@ -331,6 +371,13 @@ def save_features_organized(
     base_filename = f"sub-{subject}_task-{task}"
     features_path = subject_dir / f"{base_filename}_features.tsv"
     df.to_csv(features_path, sep="\t", index=False)
+
+    also_save_csv = bool(_config_get(config, "feature_engineering.output.also_save_csv", False))
+    if also_save_csv:
+        from eeg_pipeline.infra.tsv import write_csv
+
+        csv_path = subject_dir / f"{base_filename}_features.csv"
+        write_csv(df, csv_path, index=False)
 
     metadata_columns = {"condition", "trial", "epoch", "subject"}
     feature_columns = [

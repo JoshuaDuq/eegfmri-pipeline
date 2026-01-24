@@ -74,6 +74,14 @@ def get_temperature_column_from_config(
     return get_column_from_config(config, "event_columns.temperature", events_df)
 
 
+def get_rating_column_from_config(
+    config: Any,
+    events_df: Optional[pd.DataFrame] = None,
+) -> Optional[str]:
+    """Get rating column name from config, optionally matching against events dataframe."""
+    return get_column_from_config(config, "event_columns.rating", events_df)
+
+
 def pick_target_column(df: pd.DataFrame, *, target_columns: List[str]) -> Optional[str]:
     """Pick target column from dataframe, matching target list or VAS/rating patterns."""
     for col in target_columns:
@@ -97,5 +105,6 @@ __all__ = [
     "get_column_from_config",
     "get_pain_column_from_config",
     "get_temperature_column_from_config",
+    "get_rating_column_from_config",
     "pick_target_column",
 ]

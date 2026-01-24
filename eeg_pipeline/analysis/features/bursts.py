@@ -316,23 +316,20 @@ def _compute_min_samples(
         else 1
     )
 
-    try:
-        fmin = float(band_data.fmin)
-        fmax = float(band_data.fmax)
-        center_frequency = float(np.sqrt(fmin * fmax)) if fmin > 0 else np.nan
+    fmin = float(band_data.fmin)
+    fmax = float(band_data.fmax)
+    center_frequency = float(np.sqrt(fmin * fmax)) if fmin > 0 else np.nan
 
-        has_valid_frequency = (
-            np.isfinite(center_frequency)
-            and center_frequency > 0
-            and np.isfinite(min_cycles)
-            and min_cycles > 0
-        )
+    has_valid_frequency = (
+        np.isfinite(center_frequency)
+        and center_frequency > 0
+        and np.isfinite(min_cycles)
+        and min_cycles > 0
+    )
 
-        if has_valid_frequency:
-            min_samples_from_cycles = int(round((min_cycles / center_frequency) * sfreq))
-            return max(min_samples_from_duration, max(1, min_samples_from_cycles))
-    except (AttributeError, ValueError, TypeError):
-        pass
+    if has_valid_frequency:
+        min_samples_from_cycles = int(round((min_cycles / center_frequency) * sfreq))
+        return max(min_samples_from_duration, max(1, min_samples_from_cycles))
 
     return min_samples_from_duration
 

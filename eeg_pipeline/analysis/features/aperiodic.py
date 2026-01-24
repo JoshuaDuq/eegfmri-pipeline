@@ -181,24 +181,26 @@ def _apply_residual_based_peak_rejection(
         if len(kept_indices) < min_fit_points:
             break
         
-        # Fit aperiodic model on current kept points
-        try:
-            if model == "knee" and freqs_hz is not None:
-                f_kept = freqs_hz[kept_indices]
-                y_kept = log_psd[kept_indices]
-                initial_offset = float(np.nanmedian(y_kept))
-                popt, _ = curve_fit(
-                    _knee_model_function, f_kept, y_kept,
-                    p0=(initial_offset, 1.0, 1.0),
-                    bounds=([-np.inf, 0.0, _MIN_EXPONENT], [np.inf, np.inf, _KNEEMODEL_MAX_EXPONENT]),
-                    maxfev=_KNEEMODEL_MAX_ITERATIONS
-                )
-                predicted = _knee_model_function(freqs_hz, *popt)
-            else:
-                slope, intercept = np.polyfit(log_freqs[kept_indices], log_psd[kept_indices], 1)
-                predicted = intercept + slope * log_freqs
-        except Exception:
-            break
+        # Fit aperiodic model on current kept points (no silent fallback)
+        if model == "knee" and freqs_hz is not None:
+            f_kept = freqs_hz[kept_indices]
+            y_kept = log_psd[kept_indices]
+            initial_offset = float(np.nanmedian(y_kept))
+            popt, _ = curve_fit(
+                _knee_model_function,
+                f_kept,
+                y_kept,
+                p0=(initial_offset, 1.0, 1.0),
+                bounds=(
+                    [-np.inf, 0.0, _MIN_EXPONENT],
+                    [np.inf, np.inf, _KNEEMODEL_MAX_EXPONENT],
+                ),
+                maxfev=_KNEEMODEL_MAX_ITERATIONS,
+            )
+            predicted = _knee_model_function(freqs_hz, *popt)
+        else:
+            slope, intercept = np.polyfit(log_freqs[kept_indices], log_psd[kept_indices], 1)
+            predicted = intercept + slope * log_freqs
         
         # Compute residuals (positive = above aperiodic fit = potential peak)
         residuals = log_psd - predicted
@@ -288,7 +290,7 @@ def _fit_single_epoch_channel(
             epoch_idx, channel_idx, offset, slope,
             valid_bins, kept_bins, peak_rejected, kept_indices.astype(int), 0
         )
-    except Exception:
+    except (ValueError, np.linalg.LinAlgError):
         return PSDFitResult(
             epoch_idx, channel_idx, np.nan, np.nan,
             valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 3
@@ -372,7 +374,7 @@ def _fit_single_epoch_channel_knee(
             epoch_idx, channel_idx, offset, exponent, knee,
             valid_bins, kept_bins, peak_rejected, kept_indices.astype(int), 0
         )
-    except Exception:
+    except (ValueError, RuntimeError, np.linalg.LinAlgError):
         return KneeFitResult(
             epoch_idx, channel_idx, np.nan, np.nan, np.nan,
             valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 3
@@ -422,10 +424,14 @@ def _parse_line_noise_config(config: Any) -> LineNoiseConfig:
     exclude = bool(aperiodic_cfg.get("exclude_line_noise", True))
     
     line_freqs_raw = aperiodic_cfg.get("line_noise_freqs", [_DEFAULT_LINE_FREQ])
-    try:
-        line_freqs = [float(f) for f in (line_freqs_raw or [])]
-    except Exception:
-        line_freqs = [_DEFAULT_LINE_FREQ]
+    if line_freqs_raw is None:
+        line_freqs_raw = []
+    if not isinstance(line_freqs_raw, (list, tuple)):
+        raise TypeError(
+            "feature_engineering.aperiodic.line_noise_freqs must be a list/tuple of numbers "
+            f"(got {type(line_freqs_raw).__name__})."
+        )
+    line_freqs = [float(f) for f in line_freqs_raw]
     
     line_width = float(aperiodic_cfg.get("line_noise_width_hz", _DEFAULT_LINE_WIDTH))
     n_harm = int(aperiodic_cfg.get("line_noise_harmonics", _DEFAULT_LINE_HARMONICS))
@@ -674,37 +680,35 @@ def _compute_psd(
     # Compute PSD on the (possibly evoked-subtracted) data
     sfreq = epochs.info["sfreq"]
     
-    try:
-        if psd_method == "multitaper":
-            from mne.time_frequency import psd_array_multitaper
-            psds, freqs = psd_array_multitaper(
-                data,
-                sfreq=sfreq,
-                fmin=fmin,
-                fmax=fmax,
-                adaptive=bool(psd_kwargs.get("adaptive", False)),
-                normalization=psd_kwargs.get("normalization", "full"),
-                bandwidth=psd_kwargs.get("bandwidth"),
-                verbose=False,
-            )
-        else:
-            from mne.time_frequency import psd_array_welch
-            n_times = data.shape[-1]
-            n_per_seg = min(int(sfreq * 2.0), n_times)
-            n_overlap = n_per_seg // 2
-            psds, freqs = psd_array_welch(
-                data,
-                sfreq=sfreq,
-                fmin=fmin,
-                fmax=fmax,
-                n_fft=max(256, n_per_seg),
-                n_per_seg=n_per_seg,
-                n_overlap=n_overlap,
-                verbose=False,
-            )
-    except Exception as e:
-        logger.warning(f"PSD computation failed for {segment_name}: {e}")
-        raise
+    if psd_method == "multitaper":
+        from mne.time_frequency import psd_array_multitaper
+
+        psds, freqs = psd_array_multitaper(
+            data,
+            sfreq=sfreq,
+            fmin=fmin,
+            fmax=fmax,
+            adaptive=bool(psd_kwargs.get("adaptive", False)),
+            normalization=psd_kwargs.get("normalization", "full"),
+            bandwidth=psd_kwargs.get("bandwidth"),
+            verbose=False,
+        )
+    else:
+        from mne.time_frequency import psd_array_welch
+
+        n_times = data.shape[-1]
+        n_per_seg = min(int(sfreq * 2.0), n_times)
+        n_overlap = n_per_seg // 2
+        psds, freqs = psd_array_welch(
+            data,
+            sfreq=sfreq,
+            fmin=fmin,
+            fmax=fmax,
+            n_fft=max(256, n_per_seg),
+            n_per_seg=n_per_seg,
+            n_overlap=n_overlap,
+            verbose=False,
+        )
     
     psds = _validate_psd_data(psds)
     freqs = _validate_frequencies(freqs)
@@ -722,7 +726,10 @@ def _parse_psd_config(config: Any) -> Tuple[str, Dict[str, Any], float, float]:
     
     psd_method = str(aperiodic_cfg.get("psd_method", "multitaper")).strip().lower()
     if psd_method not in {"multitaper", "welch"}:
-        psd_method = "multitaper"
+        raise ValueError(
+            "feature_engineering.aperiodic.psd_method must be 'multitaper' or 'welch' "
+            f"(got '{psd_method}')."
+        )
     
     psd_kwargs: Dict[str, Any] = {}
     if psd_method == "multitaper":
@@ -730,10 +737,16 @@ def _parse_psd_config(config: Any) -> Tuple[str, Dict[str, Any], float, float]:
         if bandwidth is not None:
             try:
                 bandwidth = float(bandwidth)
-            except Exception:
-                bandwidth = None
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "feature_engineering.aperiodic.psd_bandwidth must be a positive float when provided."
+                ) from exc
         
-        if bandwidth is not None and np.isfinite(bandwidth) and bandwidth > 0:
+        if bandwidth is not None:
+            if not (np.isfinite(bandwidth) and bandwidth > 0):
+                raise ValueError(
+                    "feature_engineering.aperiodic.psd_bandwidth must be a positive float when provided."
+                )
             psd_kwargs["bandwidth"] = float(bandwidth)
         
         psd_kwargs.setdefault(
@@ -1127,12 +1140,11 @@ def _extract_aperiodic_for_segment(
     
     if subtract_evoked:
         if str(analysis_mode or "").strip().lower() == "trial_ml_safe" and train_mask is None:
-            logger.warning(
+            raise ValueError(
                 "Aperiodic subtract_evoked=True in trial_ml_safe mode without train_mask. "
                 "Evoked subtraction uses cross-trial averages which can leak in CV. "
-                "Disabling subtract_evoked for safety. Provide train_mask or use group_stats mode."
+                "Provide train_mask or disable subtract_evoked."
             )
-            subtract_evoked = False
         elif train_mask is not None:
             logger.info(
                 "Aperiodic: subtract_evoked will use training trials only (%d trials) for evoked estimate.",
@@ -1212,10 +1224,10 @@ def _extract_aperiodic_for_segment(
     if max_rms is not None:
         try:
             max_rms = float(max_rms)
-        except Exception:
-            max_rms = None
-    if max_rms is not None and not np.isfinite(max_rms):
-        max_rms = None
+        except (TypeError, ValueError) as exc:
+            raise ValueError("feature_engineering.aperiodic.max_rms must be a float when provided.") from exc
+        if not np.isfinite(max_rms):
+            raise ValueError("feature_engineering.aperiodic.max_rms must be finite when provided.")
     
     fit_ok = np.isfinite(r2)
     if min_r2 > 0:
@@ -1456,9 +1468,7 @@ def extract_aperiodic_from_precomputed(
     config = getattr(precomputed, "config", None)
     
     if config is None:
-        if logger:
-            logger.warning("Aperiodic: No config in precomputed data; skipping.")
-        return pd.DataFrame(), [], {}
+        raise ValueError("Aperiodic extraction from precomputed data requires precomputed.config.")
     
     n_epochs = precomputed.data.shape[0]
     ch_names = list(precomputed.ch_names)
@@ -1508,9 +1518,7 @@ def extract_aperiodic_from_precomputed(
         return pd.DataFrame(), [], qc_payload
     
     if not segments:
-        if logger:
-            logger.warning("Aperiodic: No segments defined; skipping.")
-        return pd.DataFrame(), [], {}
+        raise ValueError("Aperiodic extraction requires at least one valid time window segment.")
     
     spatial_modes = getattr(precomputed, "spatial_modes", ["roi", "global"])
     n_jobs = get_n_jobs(config, "aperiodic")
@@ -1539,39 +1547,36 @@ def extract_aperiodic_from_precomputed(
                     seg_name,
                 )
 
-        # Compute PSD per segment
-        try:
-            if psd_method == "multitaper":
-                from mne.time_frequency import psd_array_multitaper
-                psds, freqs = psd_array_multitaper(
-                    seg_data,
-                    sfreq=float(sfreq),
-                    fmin=float(fmin),
-                    fmax=float(fmax),
-                    adaptive=psd_kwargs.get("adaptive", True),
-                    normalization=psd_kwargs.get("normalization", "full"),
-                    bandwidth=psd_kwargs.get("bandwidth"),
-                    verbose=False,
-                )
-            else:
-                from mne.time_frequency import psd_array_welch
-                n_times = int(seg_data.shape[-1])
-                n_per_seg = min(int(float(sfreq) * 2.0), n_times)
-                n_overlap = n_per_seg // 2
-                psds, freqs = psd_array_welch(
-                    seg_data,
-                    sfreq=float(sfreq),
-                    fmin=float(fmin),
-                    fmax=float(fmax),
-                    n_fft=max(256, n_per_seg),
-                    n_per_seg=n_per_seg,
-                    n_overlap=n_overlap,
-                    verbose=False,
-                )
-        except Exception as exc:
-            if logger:
-                logger.warning("Aperiodic: PSD computation failed for %s (%s); skipping.", seg_name, exc)
-            continue
+        # Compute PSD per segment (no silent skipping)
+        if psd_method == "multitaper":
+            from mne.time_frequency import psd_array_multitaper
+
+            psds, freqs = psd_array_multitaper(
+                seg_data,
+                sfreq=float(sfreq),
+                fmin=float(fmin),
+                fmax=float(fmax),
+                adaptive=psd_kwargs.get("adaptive", True),
+                normalization=psd_kwargs.get("normalization", "full"),
+                bandwidth=psd_kwargs.get("bandwidth"),
+                verbose=False,
+            )
+        else:
+            from mne.time_frequency import psd_array_welch
+
+            n_times = int(seg_data.shape[-1])
+            n_per_seg = min(int(float(sfreq) * 2.0), n_times)
+            n_overlap = n_per_seg // 2
+            psds, freqs = psd_array_welch(
+                seg_data,
+                sfreq=float(sfreq),
+                fmin=float(fmin),
+                fmax=float(fmax),
+                n_fft=max(256, n_per_seg),
+                n_per_seg=n_per_seg,
+                n_overlap=n_overlap,
+                verbose=False,
+            )
 
         psds = _validate_psd_data(psds)
         freqs = _validate_frequencies(freqs)

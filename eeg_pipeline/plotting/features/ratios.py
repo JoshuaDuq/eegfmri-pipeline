@@ -27,16 +27,7 @@ from eeg_pipeline.plotting.features.utils import (
 )
 from eeg_pipeline.plotting.io.figures import log_if_present, save_fig
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-from eeg_pipeline.utils.config.loader import get_config_value
-
-
-def _select_preferred_segment(segments: List[str], preferred: str = "active") -> Optional[str]:
-    """Select segment from list, preferring specified segment."""
-    if not segments:
-        return None
-    if preferred in segments:
-        return preferred
-    return segments[0]
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
 def _order_ratio_pairs_by_config(pairs: List[str], config: Any) -> List[str]:
@@ -118,18 +109,14 @@ def _normalize_roi_name_for_filename(roi_name: str) -> str:
 
 
 def _get_comparison_segments(config: Any, features_df: pd.DataFrame, logger: Any) -> List[str]:
-    """Get segments for comparison from config or auto-detect from data."""
-    config_segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
-    if config_segments and len(config_segments) >= 2:
-        return config_segments
-    
-    detected_segments = get_named_segments(features_df, group="ratios")
-    if len(detected_segments) >= 2:
-        selected = detected_segments[:2]
-        log_if_present(logger, "info", f"Auto-detected segments for ratios comparison: {selected}")
-        return selected
-    
-    return []
+    """Get segments for comparison from config (no auto-detection)."""
+    segments = require_config_value(config, "plotting.comparisons.comparison_windows")
+    if not isinstance(segments, (list, tuple)) or len(segments) < 2:
+        raise ValueError(
+            "plotting.comparisons.comparison_windows must be a list/tuple with at least 2 window names "
+            f"(got {segments!r})"
+        )
+    return [str(s) for s in segments]
 
 
 def _get_comparison_roi_names(config: Any) -> List[str]:
@@ -154,93 +141,6 @@ def _get_comparison_roi_names(config: Any) -> List[str]:
                     break
     
     return roi_names if roi_names else ["all"]
-
-
-def plot_ratios_by_pair(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot distributions of power ratios by band-pair."""
-    if features_df is None or features_df.empty:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No ratio data", ha="center", va="center")
-        return fig
-    
-    plot_cfg = get_plot_config(config)
-    segments = get_named_segments(features_df, group="ratios")
-    segment = _select_preferred_segment(segments, preferred="active")
-    
-    if segment is None:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No ratio data", ha="center", va="center")
-        return fig
-    
-    pairs = get_named_bands(features_df, group="ratios", segment=segment)
-    if not pairs:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No ratio data", ha="center", va="center")
-        return fig
-    
-    pairs = _order_ratio_pairs_by_config(pairs, config)
-    
-    if figsize is None:
-        width = max(8.0, len(pairs) * 1.2)
-        figsize = (width, 5.0)
-    
-    fig, ax = plt.subplots(figsize=figsize)
-    ratio_data = []
-    positions = []
-    
-    for position, pair in enumerate(pairs):
-        series, _, _ = collect_named_series(
-            features_df,
-            group="ratios",
-            segment=segment,
-            band=pair,
-            stat_preference=["power_ratio"],
-            scope_preference=["global", "roi", "ch"],
-        )
-        values = series.dropna().values
-        if values.size == 0:
-            continue
-        ratio_data.append(values)
-        positions.append(position)
-    
-    if ratio_data:
-        violin_parts = ax.violinplot(ratio_data, positions=positions, showmedians=True, widths=0.7)
-        for body in violin_parts.get("bodies", []):
-            body.set_facecolor("#2563EB")
-            body.set_alpha(0.6)
-        
-        pair_labels = [p.replace("_", "/") for p in pairs]
-        ax.set_xticks(range(len(pairs)))
-        ax.set_xticklabels(pair_labels, rotation=30, ha="right")
-    else:
-        ax.text(0.5, 0.5, "No ratio data", ha="center", va="center", transform=ax.transAxes)
-        ax.set_xticks([])
-    
-    ax.set_xlabel("Band Ratio")
-    ax.set_ylabel("Power Ratio")
-    segment_label = segment if segment is not None else "unknown"
-    ax.set_title(f"Band Power Ratios ({segment_label})", fontweight="bold")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_path,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-        config=config,
-    )
-    plt.close(fig)
-    return fig
 
 
 def _plot_window_comparison_ratios(
@@ -367,13 +267,12 @@ def _plot_column_comparison_ratios(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
         if not multi_group_info:
-            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
-            return
+            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
         
         masks_dict, group_labels = multi_group_info
-        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
         multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
@@ -417,17 +316,12 @@ def _plot_column_comparison_ratios(
         log_if_present(logger, "info", f"Saved ratios multi-group column comparison for {len(roi_names)} ROIs")
         return
     
-    comparison_info = extract_comparison_mask(events_df, config, require_enabled=False)
+    comparison_info = extract_comparison_mask(events_df, config, require_enabled=True)
     if not comparison_info:
-        log_if_present(
-            logger, "warning",
-            "Column comparison enabled but config incomplete. "
-            "Set plotting.comparisons.comparison_column and comparison_values."
-        )
-        return
+        raise ValueError("Column comparison requested but could not resolve comparison masks.")
     
     mask1, mask2, label1, label2 = comparison_info
-    segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+    segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
     plot_cfg = get_plot_config(config)
     
     condition_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
@@ -667,6 +561,5 @@ def plot_ratios_by_condition(
 
 
 __all__ = [
-    "plot_ratios_by_pair",
     "plot_ratios_by_condition",
 ]

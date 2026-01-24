@@ -25,7 +25,7 @@ from eeg_pipeline.plotting.features.utils import (
     plot_paired_comparison,
     compute_or_load_column_stats,
 )
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.domain.features.naming import NamingSchema
 
 
@@ -168,20 +168,14 @@ def _get_comparison_segments(
     config: Any,
     logger: Any,
 ) -> List[str]:
-    """Get segments for comparison from config or auto-detect from data."""
-    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
-    
-    if len(segments) >= 2:
-        return segments
-    
-    detected = get_named_segments(features_df, group="bursts")
-    if len(detected) >= 2:
-        segments = detected[:2]
-        if logger:
-            log_if_present(logger, "info", 
-                          f"Auto-detected segments for burst comparison: {segments}")
-    
-    return segments
+    """Get segments for comparison from config (no auto-detection)."""
+    segments = require_config_value(config, "plotting.comparisons.comparison_windows")
+    if not isinstance(segments, (list, tuple)) or len(segments) < 2:
+        raise ValueError(
+            "plotting.comparisons.comparison_windows must be a list/tuple with at least 2 window names "
+            f"(got {segments!r})"
+        )
+    return [str(s) for s in segments]
 
 
 def _get_burst_metrics(config: Any) -> List[str]:
@@ -386,126 +380,6 @@ def _create_column_comparison_plot(
     return fig
 
 
-def plot_bursts_by_band(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    metrics: Optional[List[str]] = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot burst metric distributions across bands."""
-    if features_df is None or features_df.empty:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No burst data", ha="center", va="center")
-        return fig
-    
-    plot_cfg = get_plot_config(config)
-    segments = get_named_segments(features_df, group="bursts")
-    segment = _select_segment(segments, preferred="active")
-    
-    if segment is None:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No burst data", ha="center", va="center")
-        return fig
-    
-    bands = get_named_bands(features_df, group="bursts", segment=segment)
-    if not bands:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No burst data", ha="center", va="center")
-        return fig
-
-    if metrics is None:
-        metrics = get_config_value(
-            config,
-            "plotting.plots.features.bursts.metrics",
-            ["rate", "count", "duration_mean", "amp_mean", "fraction"],
-        )
-    
-    metrics = [m for m in metrics if isinstance(m, str)] if metrics else []
-    if not metrics:
-        metrics = ["rate"]
-
-    band_order = get_band_names(config)
-    bands = [b for b in band_order if b in bands] + [b for b in bands if b not in band_order]
-
-    n_rows = len(metrics)
-    if figsize is None:
-        figsize = (
-            max(_MIN_FIGURE_WIDTH, len(bands) * _FIGURE_WIDTH_PER_BAND),
-            max(_MIN_FIGURE_HEIGHT, n_rows * _FIGURE_HEIGHT_PER_METRIC),
-        )
-
-    fig, axes = plt.subplots(n_rows, 1, figsize=figsize, squeeze=False)
-    axes = axes.flatten()
-
-    for ax, metric in zip(axes, metrics):
-        data_list = []
-        positions = []
-        
-        for i, band in enumerate(bands):
-            series, _, _ = collect_named_series(
-                features_df,
-                group="bursts",
-                segment=segment,
-                band=band,
-                stat_preference=[metric],
-                scope_preference=["global", "roi", "ch"],
-            )
-            values = series.dropna().values
-            if values.size == 0:
-                continue
-            data_list.append(values)
-            positions.append(i)
-
-        if data_list:
-            violin_parts = ax.violinplot(
-                data_list,
-                positions=positions,
-                showmedians=True,
-                widths=_VIOLIN_WIDTH,
-            )
-            for body in violin_parts.get("bodies", []):
-                body.set_facecolor(_VIOLIN_COLOR)
-                body.set_alpha(_VIOLIN_ALPHA)
-            ax.set_xticks(range(len(bands)))
-            ax.set_xticklabels([band.capitalize() for band in bands])
-        else:
-            ax.text(
-                0.5, 0.5, "No data",
-                ha="center", va="center",
-                transform=ax.transAxes,
-            )
-            ax.set_xticks([])
-
-        metric_label = _format_metric_label(metric)
-        ax.set_ylabel(metric_label)
-        ax.set_title(metric_label, fontweight="bold")
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    segment_label = segment if segment is not None else "unknown"
-    fig.suptitle(
-        f"Burst Metrics by Band ({segment_label})",
-        fontsize=plot_cfg.font.figure_title,
-        fontweight="bold",
-        y=1.02,
-    )
-
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_path,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-        config=config,
-    )
-    plt.close(fig)
-    return fig
-
-
 def _plot_window_comparison(
     features_df: pd.DataFrame,
     segments: List[str],
@@ -595,13 +469,12 @@ def _plot_column_comparison(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
         if not multi_group_info:
-            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
-            return
+            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
         
         masks_dict, group_labels = multi_group_info
-        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         metric_label = _format_metric_label(metric)
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
@@ -645,22 +518,12 @@ def _plot_column_comparison(
         log_if_present(logger, "info", f"Saved bursts multi-group column comparison for {len(roi_names)} ROIs")
         return
     
-    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
     if not comp_mask_info:
-        if logger:
-            log_if_present(
-                logger, "warning",
-                "Column comparison enabled but config incomplete. "
-                "Set plotting.comparisons.comparison_column and comparison_values."
-            )
-        return
+        raise ValueError("Column comparison requested but could not resolve comparison masks.")
     
     mask1, mask2, label1, label2 = comp_mask_info
-    segment_name = get_config_value(
-        config,
-        "plotting.comparisons.comparison_segment",
-        "active",
-    )
+    segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
     metric_label = _format_metric_label(metric)
     plot_cfg = get_plot_config(config)
     n_trials = len(features_df)
@@ -810,6 +673,5 @@ def plot_bursts_by_condition(
 
 
 __all__ = [
-    "plot_bursts_by_band",
     "plot_bursts_by_condition",
 ]

@@ -18,7 +18,6 @@ from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.analysis.stats.base import get_config_value, get_epsilon_std
 from eeg_pipeline.utils.analysis.stats.correlation import fisher_z
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
-from eeg_pipeline.utils.validation import validate_pain_binary_values
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
 
 
@@ -528,7 +527,12 @@ def _split_by_pain_binary(
     column_name: str,
     logger: logging.Logger,
 ) -> Tuple[np.ndarray, np.ndarray, int, int]:
-    """Split by standard pain binary coding (1=pain, 0=nonpain)."""
+    """Split by standard pain binary coding (1=pain, 0=nonpain).
+
+    This performs numeric coercion but intentionally does not validate that
+    values are strictly binary. Non-{0,1} and NaN values are treated as neither
+    condition (i.e., excluded from both masks).
+    """
     if condition_series.dtype == object:
         condition_normalized = (
             condition_series.astype(str)
@@ -537,14 +541,7 @@ def _split_by_pain_binary(
         )
         condition_series = condition_normalized
 
-    condition_numeric = pd.to_numeric(condition_series, errors="coerce")
-    try:
-        pain_values, _n_bad = validate_pain_binary_values(
-            condition_numeric, column_name=column_name, logger=logger
-        )
-    except Exception:
-        return np.array([]), np.array([]), 0, 0
-
+    pain_values = pd.to_numeric(condition_series, errors="coerce").to_numpy()
     pain_mask = pain_values == 1
     nonpain_mask = pain_values == 0
 
@@ -553,7 +550,12 @@ def _split_by_pain_binary(
 
     logger.info(f"Condition split: {n_pain} pain, {n_nonpain} non-pain trials")
 
-    return pain_mask.to_numpy(), nonpain_mask.to_numpy(), n_pain, n_nonpain
+    return (
+        np.asarray(pain_mask, dtype=bool),
+        np.asarray(nonpain_mask, dtype=bool),
+        n_pain,
+        n_nonpain,
+    )
 
 
 def split_by_condition(

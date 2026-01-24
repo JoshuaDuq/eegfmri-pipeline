@@ -20,14 +20,12 @@ from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.style import use_style, get_color
 from eeg_pipeline.utils.analysis.channels import build_roi_map, pick_eeg_channels
 from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
 
 
 _MICROVOLTS_PER_VOLT = 1e6
 _MILLISECONDS_PER_SECOND = 1000
-_DEFAULT_BASELINE_WINDOW = [-0.2, 0.0]
-
 
 def _build_metadata_query(column: str, value: Any) -> str:
     """Build a metadata query string for a column and value.
@@ -133,8 +131,13 @@ def _get_baseline_window(config: Any) -> Tuple[float, float]:
     tuple
         (start_time, end_time) in seconds.
     """
-    erp_config = config.get("feature_engineering.erp", {})
-    return tuple(erp_config.get("baseline_window", _DEFAULT_BASELINE_WINDOW))
+    baseline_window = require_config_value(config, "feature_engineering.erp.baseline_window")
+    if not isinstance(baseline_window, (list, tuple)) or len(baseline_window) < 2:
+        raise ValueError(
+            "feature_engineering.erp.baseline_window must be a list/tuple of length 2 "
+            f"(got {baseline_window!r})"
+        )
+    return (float(baseline_window[0]), float(baseline_window[1]))
 
 
 def _plot_roi_waveform_with_error(

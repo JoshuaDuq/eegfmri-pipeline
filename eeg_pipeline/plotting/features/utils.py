@@ -780,60 +780,6 @@ def _draw_significance_bracket(
     return y + bracket_height + text_offset + 0.03
 
 
-def plot_window_comparison_auto(
-    data_by_band_2: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]],
-    data_by_band_multi: Optional[Dict[str, Dict[str, np.ndarray]]],
-    subject: str,
-    save_path: Union[Path, str],
-    feature_label: str,
-    segments: List[str],
-    config: Any = None,
-    logger: Any = None,
-    *,
-    roi_name: Optional[str] = None,
-    stats_dir: Optional[Union[Path, str]] = None,
-) -> None:
-    """Automatically choose between 2-window and multi-window comparison.
-    
-    Args:
-        data_by_band_2: Data for 2-window comparison (band -> (v1, v2))
-        data_by_band_multi: Data for multi-window comparison (band -> {segment -> values})
-        subject: Subject identifier
-        save_path: Path to save figure
-        feature_label: Label for the feature type
-        segments: List of segment names
-        config: Configuration object
-        logger: Logger instance
-        roi_name: ROI name for title
-        stats_dir: Directory containing pre-computed statistics
-    """
-    if len(segments) > 2 and data_by_band_multi:
-        plot_multi_window_comparison(
-            data_by_band=data_by_band_multi,
-            subject=subject,
-            save_path=save_path,
-            feature_label=feature_label,
-            segments=segments,
-            config=config,
-            logger=logger,
-            roi_name=roi_name,
-            stats_dir=stats_dir,
-        )
-    elif data_by_band_2:
-        plot_paired_comparison(
-            data_by_band=data_by_band_2,
-            subject=subject,
-            save_path=save_path,
-            feature_label=feature_label,
-            config=config,
-            logger=logger,
-            label1=segments[0].capitalize() if segments else "Condition 1",
-            label2=segments[1].capitalize() if len(segments) > 1 else "Condition 2",
-            roi_name=roi_name,
-            stats_dir=stats_dir,
-        )
-
-
 def plot_multi_window_comparison(
     data_by_band: Dict[str, Dict[str, np.ndarray]],
     subject: str,

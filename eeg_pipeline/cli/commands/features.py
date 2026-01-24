@@ -466,6 +466,9 @@ def _apply_itpc_overrides(args: argparse.Namespace, config: Any) -> None:
         config["feature_engineering.itpc.condition_values"] = args.itpc_condition_values
     if getattr(args, "itpc_min_trials_per_condition", None) is not None:
         config["feature_engineering.itpc.min_trials_per_condition"] = args.itpc_min_trials_per_condition
+    if getattr(args, "itpc_n_jobs", None) is not None:
+        parallel_cfg = config.setdefault("feature_engineering", {}).setdefault("parallel", {})
+        parallel_cfg["n_jobs_itpc"] = args.itpc_n_jobs
 
 
 def _apply_band_envelope_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -845,6 +848,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--itpc-condition-column", default=None, help="Column for condition-based ITPC (avoids pseudo-replication)")
     parser.add_argument("--itpc-condition-values", nargs="+", default=None, help="Specific condition values to compute ITPC for (space-separated)")
     parser.add_argument("--itpc-min-trials-per-condition", type=int, default=None, help="Minimum trials per condition for reliable ITPC (default: 10)")
+    parser.add_argument("--itpc-n-jobs", type=int, default=None, help="Number of parallel jobs for ITPC computation (-1 = all CPUs, default: -1)")
 
     # Band envelope
     parser.add_argument("--band-envelope-pad-sec", type=float, default=None, help="Padding in seconds for band envelope")

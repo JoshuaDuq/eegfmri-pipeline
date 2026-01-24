@@ -2647,6 +2647,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "minimum trials per condition"
+		case optItpcNJobs:
+			label = "Parallel Jobs"
+			value = fmt.Sprintf("%d", m.itpcNJobs)
+			if m.editingNumber && m.isCurrentlyEditing(optItpcNJobs) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "-1 = all CPUs"
 
 		// PAC
 		case optPACPhaseRange:
@@ -3597,29 +3604,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "tsv"
 			}
 			return "Trial Table Format", v, "parquet recommended"
-		case optTrialTableIncludeFeatures:
-			return "Include Features", m.boolToOnOff(m.trialTableIncludeFeatures), "merge feature columns"
-		case optTrialTableIncludeCovars:
-			return "Include Covariates", m.boolToOnOff(m.trialTableIncludeCovars), "merge covariates"
-		case optTrialTableIncludeEvents:
-			return "Include Events", m.boolToOnOff(m.trialTableIncludeEvents), "merge event metadata"
 		case optTrialTableAddLagFeatures:
 			return "Lag/Delta Columns", m.boolToOnOff(m.trialTableAddLagFeatures), "prev_* and delta_*"
-		case optTrialTableExtraEventCols:
-			val := m.trialTableExtraEventCols
-			if val == "" {
-				val = "(none)"
-			}
-			if m.editingText && m.editingTextField == textFieldTrialTableExtraEventColumns {
-				val = textDisplay
-			}
-			return "Extra Event Columns", val, "comma-separated"
-		case optTrialTableHighMissingFrac:
-			val := fmt.Sprintf("%.2f", m.trialTableHighMissingFrac)
-			if m.editingNumber && m.isCurrentlyEditing(optTrialTableHighMissingFrac) {
-				val = numberDisplay
-			}
-			return "High Missing Frac", val, "warn if column missing too much"
 
 		// Pain residual
 		case optPainResidualEnabled:
@@ -4055,6 +4041,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Smooth Window (ms)", val, "smoothing length"
+		case optTemporalTargetColumn:
+			val := m.temporalTargetColumn
+			if strings.TrimSpace(val) == "" {
+				val = "(default: rating)"
+			}
+			if m.editingText && m.editingTextField == textFieldTemporalTargetColumn {
+				val = textDisplay
+			}
+			hint := "Space to select"
+			if len(m.availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
+			}
+			return "Target Column", val, hint
 		case optTemporalSplitByCondition:
 			return "Split by Condition", m.boolToOnOff(m.temporalSplitByCondition), "separate files per condition"
 		case optTemporalConditionColumn:

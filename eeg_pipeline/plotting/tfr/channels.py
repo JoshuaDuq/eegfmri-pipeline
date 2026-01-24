@@ -21,6 +21,7 @@ from eeg_pipeline.plotting.io.figures import (
     save_fig as central_save_fig,
 )
 from eeg_pipeline.utils.formatting import format_baseline_window_string, sanitize_label
+from eeg_pipeline.utils.config.loader import require_config_value
 from ...utils.analysis.windowing import time_mask_loose, time_mask_strict
 from ...utils.analysis.tfr import (
     apply_baseline_and_average,
@@ -174,7 +175,7 @@ def _sanitize_label_for_filename(label: str) -> str:
 
 
 def _get_baseline_window(config) -> Tuple[float, float]:
-    """Get baseline window from config with fallback logic.
+    """Get baseline window from config (required).
     
     Args:
         config: Configuration object
@@ -182,8 +183,13 @@ def _get_baseline_window(config) -> Tuple[float, float]:
     Returns:
         Baseline window tuple (tmin, tmax)
     """
-    default_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
-    return tuple(default_window)
+    baseline_window = require_config_value(config, "time_frequency_analysis.baseline_window")
+    if not isinstance(baseline_window, (list, tuple)) or len(baseline_window) < 2:
+        raise ValueError(
+            "time_frequency_analysis.baseline_window must be a list/tuple of length 2 "
+            f"(got {baseline_window!r})"
+        )
+    return float(baseline_window[0]), float(baseline_window[1])
 
 
 def _get_output_formats(formats, config) -> List[str]:

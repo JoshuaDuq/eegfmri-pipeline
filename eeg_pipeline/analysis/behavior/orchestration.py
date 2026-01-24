@@ -21,6 +21,23 @@ from eeg_pipeline.utils.config.loader import get_config_value, get_config_float,
 from eeg_pipeline.infra.paths import ensure_dir
 
 
+def _also_save_csv_from_config(config: Any) -> bool:
+    return bool(get_config_value(config, "behavior_analysis.output.also_save_csv", False))
+
+
+def _write_parquet_with_optional_csv(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    also_save_csv: bool,
+) -> None:
+    from eeg_pipeline.infra.tsv import write_parquet, write_csv
+
+    write_parquet(df, path)
+    if also_save_csv:
+        write_csv(df, path.with_suffix(".csv"), index=False)
+
+
 ###################################################################
 # Result Caching Layer
 ###################################################################
@@ -40,6 +57,32 @@ class _ResultCache:
         self._feature_bands: Dict[str, str] = {}
         self._manifest: Optional[Dict[str, Any]] = None
         self._manifest_loaded: bool = False
+        self._stats_subfolders: Dict[Tuple[str, str, bool], Path] = {}
+
+    def get_stats_subfolder(
+        self,
+        stats_dir: Path,
+        kind: str,
+        overwrite: bool,
+        *,
+        ensure: bool,
+    ) -> Path:
+        """Return stable stats subfolder for this run (per kind)."""
+        key = (str(stats_dir.resolve()), str(kind), bool(overwrite))
+        if overwrite:
+            path = stats_dir / kind
+        else:
+            if key in self._stats_subfolders:
+                path = self._stats_subfolders[key]
+            else:
+                from datetime import datetime
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = stats_dir / f"{kind}_{timestamp}"
+                self._stats_subfolders[key] = path
+        if ensure:
+            ensure_dir(path)
+        return path
 
     def get_trial_table(self, ctx: BehaviorContext) -> Optional[pd.DataFrame]:
         """Get cached trial table or load from disk."""
@@ -48,12 +91,29 @@ class _ResultCache:
 
         suffix = _feature_suffix_from_context(ctx)
         fname = f"trials{suffix}"
-        trial_table_path = ctx.stats_dir / "trial_table" / f"{fname}.parquet"
+        expected_dir = get_behavior_output_dir(ctx, "trial_table", ensure=False)
+        fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv")).strip().lower()
+        preferred_ext = ".parquet" if fmt == "parquet" else ".tsv"
+        trial_table_path = expected_dir / f"{fname}{preferred_ext}"
         if not trial_table_path.exists():
-            return None
+            # Allow reading from the alternative format if present.
+            alt_ext = ".tsv" if preferred_ext == ".parquet" else ".parquet"
+            alt_path = expected_dir / f"{fname}{alt_ext}"
+            if alt_path.exists():
+                trial_table_path = alt_path
 
-        from eeg_pipeline.infra.tsv import read_parquet
-        self._trial_table_df = read_parquet(trial_table_path)
+        if not trial_table_path.exists():
+            feature_files = ctx.selected_feature_files or ctx.feature_categories or None
+            if feature_files:
+                found = _find_trial_table_path(ctx.stats_dir, feature_files=feature_files)
+                if found is None:
+                    return None
+                trial_table_path = found
+            else:
+                return None
+
+        from eeg_pipeline.infra.tsv import read_table
+        self._trial_table_df = read_table(trial_table_path)
         self._trial_table_path = trial_table_path
         return self._trial_table_df
 
@@ -117,13 +177,15 @@ class _ResultCache:
         for pattern in manifest_patterns:
             for manifest_path in features_dir.glob(pattern):
                 if manifest_path.exists():
+                    text = manifest_path.read_text(encoding="utf-8")
                     try:
-                        self._manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                        self._populate_from_manifest()
-                        ctx.logger.info("Loaded feature manifest: %s", manifest_path.name)
-                        return self._manifest
-                    except (json.JSONDecodeError, IOError) as e:
-                        ctx.logger.warning("Failed to load manifest %s: %s", manifest_path, e)
+                        self._manifest = json.loads(text)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(f"Invalid feature manifest JSON: {manifest_path}") from exc
+
+                    self._populate_from_manifest()
+                    ctx.logger.info("Loaded feature manifest: %s", manifest_path.name)
+                    return self._manifest
 
         return None
 
@@ -173,6 +235,7 @@ class _ResultCache:
         self._feature_bands.clear()
         self._manifest = None
         self._manifest_loaded = False
+        self._stats_subfolders.clear()
 
 
 # Global cache instance (reset per pipeline run)
@@ -964,10 +1027,10 @@ def stage_feature_qc_screen(
         if feature_list:
             ctx.logger.info("  %s: %d features", reason, len(feature_list))
 
-    from eeg_pipeline.infra.tsv import write_parquet
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "feature_qc")
-    write_parquet(qc_df, out_dir / f"feature_qc_screen{suffix}.parquet")
+    out_path = out_dir / f"feature_qc_screen{suffix}.parquet"
+    _write_parquet_with_optional_csv(qc_df, out_path, also_save_csv=ctx.also_save_csv)
 
     metadata = {
         "status": "ok",
@@ -1109,8 +1172,7 @@ def run_selected_stages(
         """Run a single stage using STAGE_RUNNERS dict lookup."""
         runner = STAGE_RUNNERS.get(name)
         if runner is None:
-            ctx.logger.warning("Stage '%s' has no implementation in STAGE_RUNNERS", name)
-            return None
+            raise KeyError(f"Stage '{name}' has no implementation in STAGE_RUNNERS")
         return runner(ctx, config, outputs)
 
     for step in progress_steps:
@@ -1124,13 +1186,12 @@ def run_selected_stages(
         try:
             output = _run_stage(stage_name)
             outputs[stage_name] = output
-            
+
             if results is not None:
                 _update_results_from_stage(results, stage_name, output)
-                    
         except Exception as exc:
             ctx.logger.error("Stage '%s' failed: %s", stage_name, exc)
-            outputs[stage_name] = {"status": "failed", "error": str(exc)}
+            raise
 
     return outputs
 
@@ -1288,23 +1349,62 @@ def _get_stats_subfolder(ctx: BehaviorContext, kind: str) -> Path:
     If ctx.overwrite is False, appends a timestamp to the folder name
     (e.g., 'trial_table_20260120_143022') to preserve previous outputs.
     """
-    return _get_stats_subfolder_with_overwrite(ctx.stats_dir, kind, ctx.overwrite)
+    return get_behavior_output_dir(ctx, kind, ensure=True)
 
 
-def _get_stats_subfolder_with_overwrite(stats_dir: Path, kind: str, overwrite: bool) -> Path:
+def _get_stats_subfolder_with_overwrite(
+    stats_dir: Path,
+    kind: str,
+    overwrite: bool,
+    *,
+    ensure: bool = True,
+) -> Path:
     """Helper to get a subfolder within stats_dir with overwrite control.
     
     If overwrite is False, appends a timestamp to the folder name
     (e.g., 'trial_table_20260120_143022') to preserve previous outputs.
     """
-    if overwrite:
-        path = stats_dir / kind
-    else:
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = stats_dir / f"{kind}_{timestamp}"
-    ensure_dir(path)
-    return path
+    return _cache.get_stats_subfolder(stats_dir, kind, overwrite, ensure=ensure)
+
+
+def _sanitize_path_component(value: str) -> str:
+    """Sanitize a string for use as a single path component."""
+    value = str(value).strip()
+    if not value:
+        return "all"
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+    out = []
+    for ch in value:
+        out.append(ch if ch in allowed else "_")
+    cleaned = "".join(out).strip("._-")
+    return cleaned if cleaned else "all"
+
+
+def _feature_folder_from_context(ctx: BehaviorContext) -> str:
+    """Resolve the feature folder name for this run."""
+    raw = ctx.selected_feature_files or ctx.feature_categories or []
+    items = [str(x).strip() for x in raw if str(x).strip()]
+    items = [x for x in items if x.lower() != "all"]
+    if not items:
+        return "all"
+    return _sanitize_path_component("_".join(sorted(items)))
+
+
+def _feature_folder_from_list(feature_files: List[str]) -> str:
+    items = [str(x).strip() for x in feature_files if str(x).strip()]
+    items = [x for x in items if x.lower() != "all"]
+    if not items:
+        return "all"
+    return _sanitize_path_component("_".join(sorted(items)))
+
+
+def get_behavior_output_dir(ctx: BehaviorContext, kind: str, *, ensure: bool = True) -> Path:
+    """Return `stats_dir/<kind>/<feature_folder>` (and optionally create it)."""
+    kind_dir = _get_stats_subfolder_with_overwrite(ctx.stats_dir, kind, ctx.overwrite, ensure=ensure)
+    feature_dir = kind_dir / _feature_folder_from_context(ctx)
+    if ensure:
+        ensure_dir(feature_dir)
+    return feature_dir
 
 
 def _write_stats_table(
@@ -1415,6 +1515,11 @@ def _find_stats_path(ctx: BehaviorContext, filename: str) -> Optional[Path]:
     """Helper to find a file in stats_dir or its subfolders."""
     kind = _infer_output_kind(filename)
     if kind != "unknown":
+        expected_dir = get_behavior_output_dir(ctx, kind, ensure=False)
+        expected_path = expected_dir / filename
+        if expected_path.exists():
+            return expected_path
+
         candidate_path = ctx.stats_dir / kind / filename
         if candidate_path.exists():
             return candidate_path
@@ -1812,23 +1917,22 @@ def _compute_single_effect_size(
             })
 
     if want_run_mean and run_col in df_trials.columns:
-        try:
-            df_run = pd.DataFrame({run_col: df_trials[run_col], "x": x, "y": y})
-            run_means = df_run.groupby(run_col, dropna=True)[["x", "y"]].mean(numeric_only=True)
-            r_run, p_run, n_run = safe_correlation(
-                run_means["x"].to_numpy(dtype=float),
-                run_means["y"].to_numpy(dtype=float),
-                method,
-                min_samples=3,
-                robust_method=None,
-            )
-            rec.update({
+        df_run = pd.DataFrame({run_col: df_trials[run_col], "x": x, "y": y})
+        run_means = df_run.groupby(run_col, dropna=True)[["x", "y"]].mean(numeric_only=True)
+        r_run, p_run, n_run = safe_correlation(
+            run_means["x"].to_numpy(dtype=float),
+            run_means["y"].to_numpy(dtype=float),
+            method,
+            min_samples=3,
+            robust_method=None,
+        )
+        rec.update(
+            {
                 "n_runs": int(n_run),
                 "r_run_mean": float(r_run) if np.isfinite(r_run) else np.nan,
                 "p_run_mean": float(p_run) if np.isfinite(p_run) else np.nan,
-            })
-        except (ValueError, TypeError, KeyError):
-            rec.update({"n_runs": np.nan, "r_run_mean": np.nan, "p_run_mean": np.nan})
+            }
+        )
 
     return rec
 
@@ -2364,15 +2468,18 @@ def stage_correlate_fdr(
     Single responsibility: FDR correction on p_primary column with family awareness.
     Now uses unified FDR computation for consistency across all stages.
     """
-    if not records or not isinstance(records, list):
-        ctx.logger.warning("Correlations FDR: no valid records; skipping.")
+    if records is None:
+        raise ValueError("Correlations FDR: records is None")
+    if not isinstance(records, list):
+        raise TypeError(f"Correlations FDR: records must be a list, got {type(records)!r}")
+    if not records:
+        ctx.logger.info("Correlations FDR: no records; skipping.")
         return pd.DataFrame()
 
     try:
         corr_df = pd.DataFrame(records)
-    except Exception as e:
-        ctx.logger.warning("Correlations FDR: failed to create DataFrame from records: %s", e)
-        return pd.DataFrame()
+    except Exception as exc:
+        raise ValueError("Correlations FDR: failed to build DataFrame from records") from exc
 
     if corr_df.empty:
         return corr_df
@@ -2510,34 +2617,34 @@ def _filter_feature_cols_by_band(
     
     for col in feature_cols:
         col_str = str(col)
-        try:
-            parsed = NamingSchema.parse(col_str)
-            if not parsed.get("valid"):
-                # Try stripping the feature-table prefix used in the trial table
-                matched_prefix = next((p for p in prefixes if col_str.startswith(p)), None)
-                if matched_prefix:
-                    candidate = col_str[len(matched_prefix):]
-                    parsed2 = NamingSchema.parse(candidate)
-                    if parsed2.get("valid"):
-                        parsed = parsed2
-                    else:
-                        filtered.append(col)
-                        continue
-                else:
-                    filtered.append(col)
-                    continue
-            
-            band = parsed.get("band")
-            if not band:
-                # Features without bands (ERP, complexity, etc.) - keep them
-                filtered.append(col)
-            elif str(band).lower() in selected:
-                # Band matches user selection
-                filtered.append(col)
-            # else: band doesn't match, exclude
-        except (ValueError, KeyError, AttributeError):
-            # On parse error, keep the column
+        parsed = NamingSchema.parse(col_str)
+        if not parsed.get("valid"):
+            # Try stripping the feature-table prefix used in the trial table
+            matched_prefix = next((p for p in prefixes if col_str.startswith(p)), None)
+            if not matched_prefix:
+                raise ValueError(
+                    f"Band filter: cannot parse feature column {col_str!r} "
+                    f"(selected_bands={sorted(selected)})"
+                )
+
+            candidate = col_str[len(matched_prefix):]
+            parsed2 = NamingSchema.parse(candidate)
+            if not parsed2.get("valid"):
+                raise ValueError(
+                    f"Band filter: cannot parse feature column {col_str!r} "
+                    f"after stripping prefix {matched_prefix!r} -> {candidate!r} "
+                    f"(selected_bands={sorted(selected)})"
+                )
+            parsed = parsed2
+
+        band = parsed.get("band")
+        if not band:
+            # Features without bands (ERP, complexity, etc.) - keep them
             filtered.append(col)
+        elif str(band).lower() in selected:
+            # Band matches user selection
+            filtered.append(col)
+        # else: band doesn't match, exclude
     
     if len(filtered) < len(feature_cols):
         ctx.logger.info(
@@ -2691,36 +2798,10 @@ class TrialTableResult:
 
 
 def compute_trial_table(ctx: BehaviorContext, config: Any) -> Optional[TrialTableResult]:
-    """Build the canonical per-trial analysis table (compute only, no I/O).
-    
-    Single responsibility: Compute trial table DataFrame and metadata.
-    """
+    """Build the canonical per-trial analysis table (compute only, no I/O)."""
     from eeg_pipeline.utils.data.trial_table import build_subject_trial_table
 
-    include_features = get_config_bool(ctx.config, "behavior_analysis.trial_table.include_features", True)
-    include_covariates = get_config_bool(ctx.config, "behavior_analysis.trial_table.include_covariates", True)
-    include_events = get_config_bool(ctx.config, "behavior_analysis.trial_table.include_events", True)
-
-    extra_cols = get_config_value(ctx.config, "behavior_analysis.trial_table.extra_event_columns", None)
-    extra_cols_list = [str(c) for c in extra_cols] if isinstance(extra_cols, (list, tuple)) else None
-    
-    # Automatically include condition compare_column if specified
-    compare_col = get_config_value(ctx.config, "behavior_analysis.condition.compare_column", None)
-    if compare_col:
-        compare_col = str(compare_col).strip()
-        if compare_col and extra_cols_list is not None and compare_col not in extra_cols_list:
-            extra_cols_list.append(compare_col)
-        elif compare_col and extra_cols_list is None:
-            extra_cols_list = [compare_col]
-
-    result = build_subject_trial_table(
-        ctx,
-        include_features=include_features,
-        include_covariates=include_covariates,
-        include_events=include_events,
-        extra_event_columns=extra_cols_list,
-    )
-
+    result = build_subject_trial_table(ctx)
     return TrialTableResult(df=result.df, metadata=result.metadata)
 
 
@@ -2735,7 +2816,8 @@ def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
     suffix = _feature_suffix_from_context(ctx)
     fname = f"trials{suffix}"
     out_dir = _get_stats_subfolder(ctx, "trial_table")
-    out_path = out_dir / f"{fname}.parquet"
+    out_ext = ".parquet" if fmt == "parquet" else ".tsv"
+    out_path = out_dir / f"{fname}{out_ext}"
 
     # Create a simple object with df and metadata for save_trial_table
     class _TableWrapper:
@@ -2784,7 +2866,6 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     These variables are useful for habituation/dynamics analyses.
     """
     from eeg_pipeline.utils.data.trial_table import add_lag_and_delta_features
-    from eeg_pipeline.infra.tsv import write_parquet
 
     df = _load_trial_table_df(ctx)
     if not _is_dataframe_valid(df):
@@ -2801,7 +2882,7 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "lag_features")
     out_path = out_dir / f"trials_with_lags{suffix}.parquet"
-    write_parquet(df_augmented, out_path)
+    _write_parquet_with_optional_csv(df_augmented, out_path, also_save_csv=ctx.also_save_csv)
 
     meta_path = out_dir / f"lag_features{suffix}.metadata.json"
     _write_metadata_file(meta_path, lag_meta)
@@ -2819,7 +2900,6 @@ def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     cross-validated (out-of-run) prediction to avoid overfitting.
     """
     from eeg_pipeline.utils.data.trial_table import add_pain_residual
-    from eeg_pipeline.infra.tsv import write_parquet
 
     df = _load_trial_table_df(ctx)
     if not _is_dataframe_valid(df):
@@ -2840,7 +2920,7 @@ def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "pain_residual")
     out_path = out_dir / f"trials_with_residual{suffix}.parquet"
-    write_parquet(df_augmented, out_path)
+    _write_parquet_with_optional_csv(df_augmented, out_path, also_save_csv=ctx.also_save_csv)
 
     meta_path = out_dir / f"pain_residual{suffix}.metadata.json"
     _write_metadata_file(meta_path, resid_meta)
@@ -2903,15 +2983,15 @@ def write_temperature_models(
     
     Single responsibility: Persist temperature model artifacts.
     """
-    from eeg_pipeline.infra.tsv import write_parquet
-
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "temperature_models")
 
     if model_comparison is not None:
         if _is_dataframe_valid(model_comparison.df):
             comparison_path = out_dir / f"model_comparison{suffix}.parquet"
-            write_parquet(model_comparison.df, comparison_path)
+            _write_parquet_with_optional_csv(
+                model_comparison.df, comparison_path, also_save_csv=ctx.also_save_csv
+            )
         
         metadata_path = out_dir / f"model_comparison{suffix}.metadata.json"
         metadata_path.write_text(
@@ -2923,7 +3003,9 @@ def write_temperature_models(
     if breakpoint is not None:
         if _is_dataframe_valid(breakpoint.df):
             breakpoint_path = out_dir / f"breakpoint_candidates{suffix}.parquet"
-            write_parquet(breakpoint.df, breakpoint_path)
+            _write_parquet_with_optional_csv(
+                breakpoint.df, breakpoint_path, also_save_csv=ctx.also_save_csv
+            )
         
         metadata_path = out_dir / f"breakpoint_test{suffix}.metadata.json"
         metadata_path.write_text(
@@ -2960,21 +3042,13 @@ def stage_temperature_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any
 
     mc_enabled = get_config_bool(ctx.config, "behavior_analysis.temperature_models.model_comparison.enabled", True)
     if mc_enabled:
-        try:
-            model_comparison = compute_temp_model_comparison(df["temperature"], df["rating"], ctx.config)
-            meta["model_comparison"] = model_comparison.metadata
-        except Exception as exc:
-            ctx.logger.warning("Temperature model comparison failed: %s", exc)
-            meta["model_comparison"] = {"status": "failed", "error": str(exc)}
+        model_comparison = compute_temp_model_comparison(df["temperature"], df["rating"], ctx.config)
+        meta["model_comparison"] = model_comparison.metadata
 
     bp_enabled = get_config_bool(ctx.config, "behavior_analysis.temperature_models.breakpoint_test.enabled", True)
     if bp_enabled:
-        try:
-            breakpoint = compute_temp_breakpoints(df["temperature"], df["rating"], ctx.config)
-            meta["breakpoint_test"] = breakpoint.metadata
-        except Exception as exc:
-            ctx.logger.warning("Temperature breakpoint test failed: %s", exc)
-            meta["breakpoint_test"] = {"status": "failed", "error": str(exc)}
+        breakpoint = compute_temp_breakpoints(df["temperature"], df["rating"], ctx.config)
+        meta["breakpoint_test"] = breakpoint.metadata
 
     write_temperature_models(ctx, model_comparison, breakpoint)
     meta["status"] = "ok"
@@ -3025,11 +3099,7 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     groups = None
     if getattr(ctx, "group_ids", None) is not None:
-        try:
-            groups = np.asarray(ctx.group_ids)
-        except (ValueError, TypeError) as exc:
-            ctx.logger.debug(f"Failed to convert group_ids to array: {exc}")
-            groups = None
+        groups = np.asarray(ctx.group_ids)
 
     reg_df, reg_meta = run_trialwise_feature_regressions(
         df_trials,
@@ -3280,32 +3350,25 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
     if ctx.aligned_events is not None and rating_series is not None:
         from eeg_pipeline.analysis.behavior.api import split_by_condition
 
-        try:
-            pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(
-                ctx.aligned_events, ctx.config, ctx.logger
-            )
-        except Exception as exc:
+        pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(
+            ctx.aligned_events, ctx.config, ctx.logger
+        )
+        if int(n_pain) > 0 or int(n_nonpain) > 0:
+            s = pd.to_numeric(rating_series, errors="coerce")
+            pain_ratings = s[pain_mask] if len(pain_mask) == len(s) else pd.Series(dtype=float)
+            nonpain_ratings = s[nonpain_mask] if len(nonpain_mask) == len(s) else pd.Series(dtype=float)
             qc["pain_vs_nonpain"] = {
-                "status": "failed",
-                "error": str(exc),
+                "status": "ok",
+                "n_pain": int(n_pain),
+                "n_nonpain": int(n_nonpain),
+                "mean_rating_pain": float(pain_ratings.mean()) if pain_ratings.notna().any() else np.nan,
+                "mean_rating_nonpain": float(nonpain_ratings.mean()) if nonpain_ratings.notna().any() else np.nan,
+                "mean_rating_difference_pain_minus_nonpain": (
+                    float(pain_ratings.mean() - nonpain_ratings.mean())
+                    if pain_ratings.notna().any() and nonpain_ratings.notna().any()
+                    else np.nan
+                ),
             }
-        else:
-            if int(n_pain) > 0 or int(n_nonpain) > 0:
-                s = pd.to_numeric(rating_series, errors="coerce")
-                pain_ratings = s[pain_mask] if len(pain_mask) == len(s) else pd.Series(dtype=float)
-                nonpain_ratings = s[nonpain_mask] if len(nonpain_mask) == len(s) else pd.Series(dtype=float)
-                qc["pain_vs_nonpain"] = {
-                    "status": "ok",
-                    "n_pain": int(n_pain),
-                    "n_nonpain": int(n_nonpain),
-                    "mean_rating_pain": float(pain_ratings.mean()) if pain_ratings.notna().any() else np.nan,
-                    "mean_rating_nonpain": float(nonpain_ratings.mean()) if nonpain_ratings.notna().any() else np.nan,
-                    "mean_rating_difference_pain_minus_nonpain": (
-                        float(pain_ratings.mean() - nonpain_ratings.mean())
-                        if pain_ratings.notna().any() and nonpain_ratings.notna().any()
-                        else np.nan
-                    ),
-                }
 
     if _is_dataframe_valid(ctx.covariates_df):
         cov = ctx.covariates_df
@@ -3330,24 +3393,18 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
 
 def _infer_feature_type(feature: str, config: Any) -> str:
     from eeg_pipeline.domain.features.registry import classify_feature, get_feature_registry
-    try:
-        registry = get_feature_registry(config)
-        ftype, _, _ = classify_feature(feature, include_subtype=False, registry=registry)
-        return ftype
-    except (ValueError, KeyError, AttributeError):
-        return "unknown"
+    registry = get_feature_registry(config)
+    ftype, _, _ = classify_feature(feature, include_subtype=False, registry=registry)
+    return ftype
 
 
 def _infer_feature_band(feature: str, config: Any) -> str:
     """Extract frequency band from feature name using naming schema."""
     from eeg_pipeline.domain.features.registry import classify_feature, get_feature_registry
-    try:
-        registry = get_feature_registry(config)
-        _, _, meta = classify_feature(feature, include_subtype=True, registry=registry)
-        band = meta.get("band", "N/A")
-        return str(band) if band and band != "N/A" else "broadband"
-    except (ValueError, KeyError, AttributeError):
-        return "broadband"
+    registry = get_feature_registry(config)
+    _, _, meta = classify_feature(feature, include_subtype=True, registry=registry)
+    band = meta.get("band", "N/A")
+    return str(band) if band and band != "N/A" else "broadband"
 
 
 def _summarize_covariates_qc(ctx: BehaviorContext) -> Dict[str, Any]:
@@ -3369,7 +3426,7 @@ def write_analysis_metadata(
     results: Any,
     stage_metrics: Optional[Dict[str, Any]] = None,
     outputs_manifest: Optional[Path] = None,
-) -> None:
+) -> Path:
     robust_method = pipeline_config.robust_method
     method_label = pipeline_config.method_label
     payload: Dict[str, Any] = {
@@ -3467,7 +3524,10 @@ def write_analysis_metadata(
         if "within_family_p_kind" in df.columns and df["within_family_p_kind"].notna().any():
             payload["within_family_p_kind_counts"] = df["within_family_p_kind"].fillna("unknown").value_counts().to_dict()
 
-    (ctx.stats_dir / "analysis_metadata.json").write_text(json.dumps(payload, indent=2, default=str))
+    out_dir = _get_stats_subfolder(ctx, "analysis_metadata")
+    path = out_dir / "analysis_metadata.json"
+    path.write_text(json.dumps(payload, indent=2, default=str))
+    return path
 
 
 ###################################################################
@@ -3589,33 +3649,23 @@ def stage_condition_column(
         features = df_trials[feature_cols].copy()
         groups = None
         if getattr(ctx, "group_ids", None) is not None:
-            try:
-                groups = np.asarray(ctx.group_ids)
-            except (ValueError, TypeError) as exc:
-                ctx.logger.debug(f"Failed to convert group_ids to array: {exc}")
-                groups = None
+            groups = np.asarray(ctx.group_ids)
         if groups is None:
             run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
             if run_col and run_col in df_trials.columns:
                 groups = pd.to_numeric(df_trials[run_col], errors="ignore").to_numpy()
 
-        # Suppress numpy RuntimeWarnings during condition effects computation
-        # These occur when computing stats on features with insufficient variance
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            
-            column_df = compute_condition_effects(
-                features,
-                pain_mask,
-                nonpain_mask,
-                min_samples=0,
-                fdr_alpha=config.fdr_alpha,
-                logger=ctx.logger,
-                n_jobs=config.n_jobs,
-                config=ctx.config,
-                groups=groups,
-            )
+        column_df = compute_condition_effects(
+            features,
+            pain_mask,
+            nonpain_mask,
+            min_samples=0,
+            fdr_alpha=config.fdr_alpha,
+            logger=ctx.logger,
+            n_jobs=config.n_jobs,
+            config=ctx.config,
+            groups=groups,
+        )
 
         if column_df is not None and not column_df.empty:
             column_df = column_df.copy()
@@ -3645,14 +3695,13 @@ def stage_condition_column(
 
             # Always include condition column name in filename
             col_path = out_dir / f"condition_effects_column{suffix}_{compare_col}.parquet"
-            write_parquet(column_df, col_path)
+            _write_parquet_with_optional_csv(column_df, col_path, also_save_csv=ctx.also_save_csv)
             ctx.logger.info(f"Condition column comparison: {len(column_df)} features saved to {col_path}")
             return column_df
 
     except Exception as exc:
-        if fail_fast:
-            raise
-        ctx.logger.warning(f"Condition column comparison failed: {exc}")
+        ctx.logger.error("Condition column comparison failed: %s", exc)
+        raise
 
     return pd.DataFrame()
 
@@ -3693,21 +3742,17 @@ def _compute_batch_pairwise_effect_sizes(
     Returns:
         (mean_diff, std_diff, cohens_d, hedges_g) - all shape (n_features,)
     """
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        
-        diff = v2_matrix - v1_matrix
-        mean_diff = np.nanmean(diff, axis=0)
-        std_diff = np.nanstd(diff, axis=0, ddof=1)
-        
-        # Cohen's dz (paired)
-        cohens_d = np.where(std_diff > 1e-12, mean_diff / std_diff, np.nan)
-        
-        # Hedge's g correction
-        n = np.sum(np.isfinite(v1_matrix) & np.isfinite(v2_matrix), axis=0)
-        hedges_correction = np.where(n > 1, 1 - (3 / (4 * n - 1)), 1.0)
-        hedges_g = cohens_d * hedges_correction
+    diff = v2_matrix - v1_matrix
+    mean_diff = np.nanmean(diff, axis=0)
+    std_diff = np.nanstd(diff, axis=0, ddof=1)
+
+    # Cohen's dz (paired)
+    cohens_d = np.where(std_diff > 1e-12, mean_diff / std_diff, np.nan)
+
+    # Hedge's g correction
+    n = np.sum(np.isfinite(v1_matrix) & np.isfinite(v2_matrix), axis=0)
+    hedges_correction = np.where(n > 1, 1 - (3 / (4 * n - 1)), 1.0)
+    hedges_g = cohens_d * hedges_correction
     
     return mean_diff, std_diff, cohens_d, hedges_g
 
@@ -3773,7 +3818,7 @@ def stage_condition_window(
         
         # Window files don't include condition column name in filename (windows are the comparison dimension)
         win_path = out_dir / f"condition_effects_window{suffix}.parquet"
-        write_parquet(window_df, win_path)
+        _write_parquet_with_optional_csv(window_df, win_path, also_save_csv=ctx.also_save_csv)
         ctx.logger.info(f"Condition window comparison: {len(window_df)} features saved to {win_path}")
 
     return window_df
@@ -4056,69 +4101,77 @@ def _run_window_comparison(
     cols2 = [window2_features[base] for base in common_bases]
     
     # Extract data matrices for vectorized operations
-    import warnings
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        
-        v1_matrix = df_trials[cols1].to_numpy(dtype=np.float64, na_value=np.nan)
-        v2_matrix = df_trials[cols2].to_numpy(dtype=np.float64, na_value=np.nan)
-        
-        # Compute statistics vectorized
-        valid_mask = np.isfinite(v1_matrix) & np.isfinite(v2_matrix)
-        n_valid_per_pair = valid_mask.sum(axis=0)
-        
-        # Compute means and stds vectorized
-        mean_v1 = np.nanmean(v1_matrix, axis=0)
-        mean_v2 = np.nanmean(v2_matrix, axis=0)
-        std_v1 = np.nanstd(v1_matrix, axis=0, ddof=1)
-        std_v2 = np.nanstd(v2_matrix, axis=0, ddof=1)
-        
-        # Compute effect sizes vectorized
-        mean_diff, std_diff, cohens_d, hedges_g = _compute_batch_pairwise_effect_sizes(v1_matrix, v2_matrix)
-    
-        # Wilcoxon tests must be done per-pair (no vectorized scipy version)
-        # Warnings are suppressed for degenerate cases (e.g., zero variance)
-        records: List[Dict[str, Any]] = []
-        
-        for i, base_name in enumerate(common_bases):
-            col1 = cols1[i]
-            col2 = cols2[i]
-            n_valid = int(n_valid_per_pair[i])
-            
-            if n_valid < max(min_samples, 2):
-                continue
-            
-            v1_valid = v1_matrix[valid_mask[:, i], i]
-            v2_valid = v2_matrix[valid_mask[:, i], i]
+    v1_matrix = df_trials[cols1].to_numpy(dtype=np.float64, na_value=np.nan)
+    v2_matrix = df_trials[cols2].to_numpy(dtype=np.float64, na_value=np.nan)
 
-            # Paired Wilcoxon signed-rank test
-            try:
-                stat, p_val = sp_stats.wilcoxon(v1_valid, v2_valid)
-            except (ValueError, TypeError, sp_stats.Error):
-                continue
+    # Compute statistics vectorized
+    valid_mask = np.isfinite(v1_matrix) & np.isfinite(v2_matrix)
+    n_valid_per_pair = valid_mask.sum(axis=0)
 
-            # Optional run-level Wilcoxon
-            stat_run = np.nan
-            p_val_run = np.nan
-            n_runs = np.nan
-            if use_run_unit and run_adjust_enabled and run_col in df_trials.columns:
-                try:
-                    df_run = pd.DataFrame({
+    # Compute means and stds vectorized
+    mean_v1 = np.nanmean(v1_matrix, axis=0)
+    mean_v2 = np.nanmean(v2_matrix, axis=0)
+    std_v1 = np.nanstd(v1_matrix, axis=0, ddof=1)
+    std_v2 = np.nanstd(v2_matrix, axis=0, ddof=1)
+
+    # Compute effect sizes vectorized
+    mean_diff, std_diff, cohens_d, hedges_g = _compute_batch_pairwise_effect_sizes(v1_matrix, v2_matrix)
+
+    # Wilcoxon tests must be done per-pair (no vectorized scipy version)
+    records: List[Dict[str, Any]] = []
+
+    for i, base_name in enumerate(common_bases):
+        col1 = cols1[i]
+        col2 = cols2[i]
+        n_valid = int(n_valid_per_pair[i])
+
+        if n_valid < max(min_samples, 2):
+            continue
+
+        v1_valid = v1_matrix[valid_mask[:, i], i]
+        v2_valid = v2_matrix[valid_mask[:, i], i]
+
+        try:
+            stat, p_val = sp_stats.wilcoxon(v1_valid, v2_valid)
+        except (ValueError, TypeError, sp_stats.Error) as exc:
+            raise RuntimeError(
+                f"Wilcoxon failed for window comparison '{window1}' vs '{window2}' "
+                f"(col1={col1}, col2={col2})"
+            ) from exc
+
+        stat_run = np.nan
+        p_val_run = np.nan
+        n_runs = np.nan
+        if use_run_unit and run_adjust_enabled and run_col in df_trials.columns:
+            df_run = (
+                pd.DataFrame(
+                    {
                         "run": df_trials[run_col],
                         "v1": v1_matrix[:, i],
                         "v2": v2_matrix[:, i],
-                    }).dropna()
-                    run_means = df_run.groupby("run", dropna=True)[["v1", "v2"]].mean(numeric_only=True)
-                    n_runs = int(len(run_means))
-                    if n_runs >= 2:
-                        stat_run, p_val_run = sp_stats.wilcoxon(run_means["v1"].to_numpy(), run_means["v2"].to_numpy())
-                except (ValueError, TypeError, sp_stats.Error, KeyError):
-                    pass
+                    }
+                )
+                .dropna()
+            )
+            run_means = df_run.groupby("run", dropna=True)[["v1", "v2"]].mean(numeric_only=True)
+            n_runs = int(len(run_means))
+            if n_runs >= 2:
+                try:
+                    stat_run, p_val_run = sp_stats.wilcoxon(
+                        run_means["v1"].to_numpy(),
+                        run_means["v2"].to_numpy(),
+                    )
+                except (ValueError, TypeError, sp_stats.Error, KeyError) as exc:
+                    raise RuntimeError(
+                        f"Run-level Wilcoxon failed for window comparison '{window1}' vs '{window2}' "
+                        f"(col1={col1}, col2={col2}, run_col={run_col})"
+                    ) from exc
 
-            col1_prefix = next((p for p in prefixes if str(col1).startswith(p)), "")
-            col1_raw = str(col1)[len(col1_prefix) :] if col1_prefix else str(col1)
+        col1_prefix = next((p for p in prefixes if str(col1).startswith(p)), "")
+        col1_raw = str(col1)[len(col1_prefix) :] if col1_prefix else str(col1)
 
-            records.append({
+        records.append(
+            {
                 "feature": "::".join(str(x) for x in base_name),
                 "feature_col_window1": col1,
                 "feature_col_window2": col2,
@@ -4141,7 +4194,8 @@ def _run_window_comparison(
                 "p_value_run": float(p_val_run) if np.isfinite(p_val_run) else np.nan,
                 "cohens_d": float(cohens_d[i]),
                 "hedges_g": float(hedges_g[i]),
-            })
+            }
+        )
 
     if not records:
         ctx.logger.info("Window comparison: no valid feature pairs with sufficient samples")
@@ -4181,12 +4235,7 @@ def stage_temporal_tfr(ctx: BehaviorContext) -> Optional[Dict[str, Any]]:
     from eeg_pipeline.analysis.behavior.api import compute_time_frequency_from_context
 
     ctx.logger.info("Computing time-frequency correlations...")
-    try:
-        tf_results = compute_time_frequency_from_context(ctx)
-        return tf_results
-    except Exception as exc:
-        ctx.logger.error(f"Time-frequency correlations failed: {exc}")
-        return None
+    return compute_time_frequency_from_context(ctx)
 
 
 def stage_temporal_stats(
@@ -4228,37 +4277,28 @@ def stage_temporal_stats(
     }
 
     ctx.logger.info("Computing temporal correlations by condition...")
-    try:
-        results["power"] = compute_temporal_from_context(ctx)
-    except Exception as exc:
-        ctx.logger.error(f"Temporal correlations failed: {exc}")
+    results["power"] = compute_temporal_from_context(ctx)
 
     if "itpc" in selected_features:
         ctx.logger.info("Computing ITPC temporal correlations...")
-        try:
-            itpc_results = compute_itpc_temporal_from_context(ctx)
-            results["itpc"] = itpc_results
-            if itpc_results:
-                ctx.logger.info(
-                    f"ITPC temporal: {itpc_results.get('n_tests', 0)} tests, "
-                    f"{itpc_results.get('n_sig_raw', 0)} significant"
-                )
-        except Exception as exc:
-            ctx.logger.error(f"ITPC temporal correlations failed: {exc}")
+        itpc_results = compute_itpc_temporal_from_context(ctx)
+        results["itpc"] = itpc_results
+        if itpc_results:
+            ctx.logger.info(
+                f"ITPC temporal: {itpc_results.get('n_tests', 0)} tests, "
+                f"{itpc_results.get('n_sig_raw', 0)} significant"
+            )
 
     if "erds" in selected_features:
         from eeg_pipeline.utils.analysis.stats.temporal import compute_erds_temporal_from_context
         ctx.logger.info("Computing ERDS temporal correlations...")
-        try:
-            erds_results = compute_erds_temporal_from_context(ctx)
-            results["erds"] = erds_results
-            if erds_results:
-                ctx.logger.info(
-                    f"ERDS temporal: {erds_results.get('n_tests', 0)} tests, "
-                    f"{erds_results.get('n_sig_raw', 0)} significant"
-                )
-        except Exception as exc:
-            ctx.logger.error(f"ERDS temporal correlations failed: {exc}")
+        erds_results = compute_erds_temporal_from_context(ctx)
+        results["erds"] = erds_results
+        if erds_results:
+            ctx.logger.info(
+                f"ERDS temporal: {erds_results.get('n_tests', 0)} tests, "
+                f"{erds_results.get('n_sig_raw', 0)} significant"
+            )
 
     all_temporal_records = []
     for res in results.values():
@@ -4333,12 +4373,15 @@ def stage_temporal_stats(
         normalized_records = []
         method = "spearman" if ctx.use_spearman else "pearson"
         method_label = format_correlation_method_label(method, None)
+        target_label = str(get_config_value(
+            ctx.config, "behavior_analysis.temporal.target_column", ""
+        ) or "").strip() or "rating"
         for idx, row in df_temporal.iterrows():
             normalized_records.append({
                 "analysis_type": "temporal_correlations",
                 "feature_id": row.get("channel", ""),
                 "feature_type": row.get("feature", "temporal"),
-                "target": "rating",
+                "target": target_label,
                 "method": method,
                 "robust_method": None,
                 "method_label": method_label,
@@ -4368,13 +4411,8 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
 
     ctx.logger.info("Running cluster permutation tests...")
     ctx.n_perm = config.n_permutations
-
-    try:
-        results = run_cluster_test_from_context(ctx)
-        return results if results else {"status": "completed"}
-    except Exception as exc:
-        ctx.logger.warning(f"Cluster tests failed: {exc}")
-        return {"status": "failed", "error": str(exc)}
+    results = run_cluster_test_from_context(ctx)
+    return results if results else {"status": "completed"}
 
 
 ###################################################################
@@ -4463,25 +4501,40 @@ def stage_mixed_effects(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 def _find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] = None) -> Optional[Path]:
     """Find trial table file with feature suffix.
     
-    If feature_files is provided, builds exact filename. Otherwise searches for trials_*.parquet.
-    No fallback to trials.parquet.
+    If feature_files is provided, builds exact filename. Otherwise searches for trials_*.{parquet,tsv}.
+    No fallback to trials.{parquet,tsv} (must include suffix).
     """
-    trial_table_dir = stats_dir / "trial_table"
-    if not trial_table_dir.exists():
+    trial_table_roots = sorted(p for p in stats_dir.glob("trial_table*") if p.is_dir())
+    if not trial_table_roots:
         return None
     
     if feature_files:
         suffix = "_" + "_".join(sorted(str(x) for x in feature_files))
         fname = f"trials{suffix}"
-        exact_path = trial_table_dir / f"{fname}.parquet"
-        return exact_path if exact_path.exists() else None
+        feature_dir = _feature_folder_from_list(feature_files)
+        candidates: List[Path] = []
+        for root in trial_table_roots:
+            candidates.append(root / feature_dir / f"{fname}.parquet")
+            candidates.append(root / feature_dir / f"{fname}.tsv")
+        existing = [p for p in candidates if p.exists()]
+        if len(existing) == 0:
+            return None
+        if len(existing) > 1:
+            raise ValueError(
+                f"Multiple trial table files found in {stats_dir} for {feature_dir}: {existing}. "
+                "Specify a unique stats_dir or clean old outputs to disambiguate."
+            )
+        return existing[0]
     
-    pattern_paths = list(trial_table_dir.glob("trials_*.parquet"))
+    pattern_paths: List[Path] = []
+    for root in trial_table_roots:
+        pattern_paths.extend(list(root.glob("*/trials_*.parquet")))
+        pattern_paths.extend(list(root.glob("*/trials_*.tsv")))
     if len(pattern_paths) == 0:
         return None
     if len(pattern_paths) > 1:
         raise ValueError(
-            f"Multiple trial table files found in {trial_table_dir}: {pattern_paths}. "
+            f"Multiple trial table files found in {stats_dir}: {pattern_paths}. "
             "Specify feature files to disambiguate."
         )
     return pattern_paths[0]
@@ -4525,13 +4578,9 @@ def run_group_level_mixed_effects(
     """
     from eeg_pipeline.infra.paths import deriv_stats_path
     from eeg_pipeline.infra.tsv import read_parquet
-    
-    try:
-        import statsmodels.formula.api as smf
-        from statsmodels.regression.mixed_linear_model import MixedLM
-    except ImportError:
-        logger.warning("statsmodels not available; skipping mixed-effects.")
-        return MixedEffectsResult(df=pd.DataFrame(), metadata={"status": "statsmodels_unavailable"})
+
+    import statsmodels.formula.api as smf
+    from statsmodels.regression.mixed_linear_model import MixedLM
     
     feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
     if isinstance(feature_files, str):
@@ -4552,7 +4601,7 @@ def run_group_level_mixed_effects(
             continue
         
         df = read_parquet(trial_path)
-        if df is None or df.empty:
+        if df.empty:
             continue
         
         df["subject_id"] = sub
@@ -4566,8 +4615,7 @@ def run_group_level_mixed_effects(
     logger.info("Mixed-effects: %d subjects, %d total trials", len(all_trials), len(combined))
     
     if "rating" not in combined.columns:
-        logger.warning("Mixed-effects: 'rating' column not found.")
-        return MixedEffectsResult(df=pd.DataFrame(), metadata={"status": "no_rating_column"})
+        raise KeyError("Mixed-effects requires a 'rating' column in the combined trial table.")
     
     feature_cols = [c for c in combined.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
     
@@ -4642,9 +4690,8 @@ def run_group_level_mixed_effects(
                 "family_kind": "feature_type",
             })
             
-        except Exception as e:
-            logger.warning(f"Mixed-effects failed for {feat}: {e}")
-            continue
+        except Exception as exc:
+            raise RuntimeError(f"Mixed-effects failed for feature '{feat}'") from exc
     
     if not records:
         logger.warning("Mixed-effects: no valid results.")
@@ -4876,7 +4923,6 @@ def run_group_level_analysis(
     GroupLevelResult
         Aggregated group-level results
     """
-    from eeg_pipeline.infra.tsv import write_parquet
     from eeg_pipeline.infra.paths import ensure_dir
     
     logger.info("="*60)
@@ -4901,8 +4947,11 @@ def run_group_level_analysis(
         
         if output_dir and mixed_result.df is not None and not mixed_result.df.empty:
             ensure_dir(output_dir)
-            write_parquet(mixed_result.df, output_dir / "group_mixed_effects.parquet")
-            logger.info("Saved mixed-effects results: %s", output_dir / "group_mixed_effects.parquet")
+            out_path = output_dir / "group_mixed_effects.parquet"
+            _write_parquet_with_optional_csv(
+                mixed_result.df, out_path, also_save_csv=_also_save_csv_from_config(config)
+            )
+            logger.info("Saved mixed-effects results: %s", out_path)
     
     if run_multilevel_correlations:
         logger.info("Running multilevel correlations with block-restricted permutations...")
@@ -4918,8 +4967,11 @@ def run_group_level_analysis(
         
         if output_dir and multilevel_df is not None and not multilevel_df.empty:
             ensure_dir(output_dir)
-            write_parquet(multilevel_df, output_dir / "group_multilevel_correlations.parquet")
-            logger.info("Saved multilevel correlations: %s", output_dir / "group_multilevel_correlations.parquet")
+            out_path = output_dir / "group_multilevel_correlations.parquet"
+            _write_parquet_with_optional_csv(
+                multilevel_df, out_path, also_save_csv=_also_save_csv_from_config(config)
+            )
+            logger.info("Saved multilevel correlations: %s", out_path)
     
     return GroupLevelResult(
         mixed_effects=mixed_result,
@@ -4938,7 +4990,6 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     If b3 is significant, the feature moderates how temperature affects pain rating.
     """
     from eeg_pipeline.utils.analysis.stats.moderation import run_moderation_analysis
-    from eeg_pipeline.infra.tsv import write_parquet
 
     suffix = _feature_suffix_from_context(ctx)
     method_label = getattr(config, "method_label", "")
@@ -5050,7 +5101,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     out_dir = _get_stats_subfolder(ctx, "moderation")
     out_path = out_dir / f"moderation_results{suffix}{method_suffix}.parquet"
     if not mod_df.empty:
-        write_parquet(mod_df, out_path)
+        _write_parquet_with_optional_csv(mod_df, out_path, also_save_csv=ctx.also_save_csv)
         n_sig = int((mod_df["p_fdr"] < fdr_alpha).sum())
         ctx.logger.info(
             "Moderation: %d features tested, %d significant (FDR < %.2f)",
@@ -5110,8 +5161,9 @@ def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.Data
     if not hier_summary.empty:
         hier_dir = _get_stats_subfolder(ctx, "fdr")
         hier_path = hier_dir / "hierarchical_fdr_summary.parquet"
-        from eeg_pipeline.infra.tsv import write_parquet
-        write_parquet(hier_summary, hier_path)
+        _write_parquet_with_optional_csv(
+            hier_summary, hier_path, also_save_csv=ctx.also_save_csv
+        )
         ctx.logger.info(f"Hierarchical FDR summary saved to {hier_path}")
 
         for _, row in hier_summary.iterrows():
@@ -5125,8 +5177,8 @@ def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.Data
 
 
 
-def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
-    """Write a single-subject, self-diagnosing Markdown report (non-gating)."""
+def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Path:
+    """Write a single-subject, self-diagnosing Markdown report (fail-fast)."""
     suffix = _feature_suffix_from_context(ctx)
     method_label = getattr(pipeline_config, "method_label", "")
     method_suffix = f"_{method_label}" if method_label else ""
@@ -5141,11 +5193,8 @@ def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
     if df_trials is not None and not df_trials.empty:
         n_features = int(sum(1 for c in df_trials.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)))
 
-    def _read_tsv(path: Path) -> Optional[pd.DataFrame]:
-        try:
-            return pd.read_csv(path, sep="\t")
-        except (OSError, ValueError, pd.errors.EmptyDataError):
-            return None
+    def _read_tsv(path: Path) -> pd.DataFrame:
+        return pd.read_csv(path, sep="\t")
 
     def _sig_counts(df: pd.DataFrame) -> Dict[str, Any]:
         out: Dict[str, Any] = {"n": int(len(df))}
@@ -5214,19 +5263,6 @@ def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
     lines.append(f"- Controls: temperature=`{bool(getattr(pipeline_config, 'control_temperature', True))}`, trial_order=`{bool(getattr(pipeline_config, 'control_trial_order', True))}`")
     lines.append(f"- Global FDR alpha: `{alpha}`")
     
-    val_status: Optional[str] = None
-    val_warnings: List[str] = []
-    
-    if val_status is not None:
-        lines.append(f"- Trial table validation: `{val_status}`")
-    if val_warnings:
-        lines.append("")
-        lines.append("## Validation Warnings")
-        for w in val_warnings[: min(20, len(val_warnings))]:
-            lines.append(f"- {w}")
-        if len(val_warnings) > 20:
-            lines.append(f"- ... {len(val_warnings) - 20} more")
-
     # Summaries per output file (TSVs)
     tsvs = [p for p in files if p.suffix == ".tsv"]
     if tsvs:
@@ -5234,8 +5270,8 @@ def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
         lines.append("## Outputs")
         for p in tsvs:
             df = _read_tsv(p)
-            if df is None or df.empty:
-                lines.append(f"- `{p.name}`: (empty or unreadable)")
+            if df.empty:
+                lines.append(f"- `{p.name}`: (empty)")
                 continue
             counts = _sig_counts(df)
             sig_bits = []
@@ -5255,13 +5291,9 @@ def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
 
     report_dir = _get_stats_subfolder(ctx, "subject_report")
     out_path = report_dir / f"subject_report{suffix}{method_suffix}.md"
-    try:
-        out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        ctx.logger.info("Subject report saved: %s/%s", report_dir.name, out_path.name)
-        return out_path
-    except Exception as exc:
-        ctx.logger.warning("Failed to write subject report: %s", exc)
-        return None
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    ctx.logger.info("Subject report saved: %s/%s", report_dir.name, out_path.name)
+    return out_path
 
 
 def _build_output_filename(
@@ -5288,18 +5320,8 @@ def _build_output_filename(
 
 
 def _write_metadata_file(path: Path, metadata: Dict[str, Any]) -> None:
-    """Write metadata JSON file with error handling.
-    
-    Centralizes the try/except pattern for metadata file writing.
-    
-    Args:
-        path: Path to metadata file
-        metadata: Metadata dictionary to write
-    """
-    try:
-        path.write_text(json.dumps(metadata, indent=2, default=str))
-    except (OSError, TypeError, ValueError):
-        pass
+    """Write metadata JSON file (fail-fast)."""
+    path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
 
 
 def _is_valid_df(obj: Any) -> bool:
@@ -5422,14 +5444,11 @@ def _infer_output_kind(name: str) -> str:
 def _count_rows(path: Path) -> Optional[int]:
     if path.suffix not in {".tsv", ".csv"}:
         return None
-    try:
-        with path.open("r") as f:
-            header = f.readline()
-            if not header:
-                return 0
-            return sum(1 for _ in f)
-    except (OSError, UnicodeDecodeError):
-        return None
+    with path.open("r", encoding="utf-8") as f:
+        header = f.readline()
+        if not header:
+            return 0
+        return sum(1 for _ in f)
 
 
 def write_outputs_manifest(
@@ -5440,16 +5459,26 @@ def write_outputs_manifest(
 ) -> Path:
     from datetime import datetime
 
+    feature_folder = _feature_folder_from_context(ctx)
+    out_dir = _get_stats_subfolder(ctx, "summary")
+    manifest_path = out_dir / "outputs_manifest.json"
+
     outputs = []
-    for path in sorted(p for p in ctx.stats_dir.rglob("*") if p.is_file() and p.name != "outputs_manifest.json"):
+    for path in sorted(p for p in ctx.stats_dir.rglob("*") if p.is_file()):
         # Skip hidden files or logs
         if path.name.startswith(".") or path.suffix == ".log":
+            continue
+        if path.name == "outputs_manifest.json":
+            continue
+        rel = path.relative_to(ctx.stats_dir)
+        parts = rel.parts
+        if len(parts) < 2 or parts[1] != feature_folder:
             continue
         outputs.append({
             "name": path.name,
             "path": str(path),
             "kind": _infer_output_kind(path.name),
-            "subfolder": path.parent.name if path.parent != ctx.stats_dir else None,
+            "subfolder": str(path.parent.relative_to(ctx.stats_dir)),
             "rows": _count_rows(path),
             "size_bytes": int(path.stat().st_size),
             "method_label": pipeline_config.method_label,
@@ -5479,6 +5508,5 @@ def write_outputs_manifest(
     if stage_metrics:
         payload["stage_metrics"] = stage_metrics
 
-    path = ctx.stats_dir / "outputs_manifest.json"
-    path.write_text(json.dumps(payload, indent=2, default=str))
-    return path
+    manifest_path.write_text(json.dumps(payload, indent=2, default=str))
+    return manifest_path

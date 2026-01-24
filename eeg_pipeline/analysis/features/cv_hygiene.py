@@ -94,20 +94,16 @@ def _compute_power_spectral_density(
     fmin = max(MIN_FREQ_HZ, alpha_fmin - PSD_FMIN_OFFSET_HZ)
     fmax = min(MAX_FREQ_HZ, sfreq / 2.0 - PSD_FMAX_SAFETY_MARGIN_HZ)
 
-    try:
-        psds, freqs = mne.time_frequency.psd_array_multitaper(
-            train_data,
-            sfreq=sfreq,
-            fmin=fmin,
-            fmax=fmax,
-            adaptive=True,
-            normalization="full",
-            verbose=False,
-        )
-        return np.asarray(psds, dtype=float), np.asarray(freqs, dtype=float)
-    except Exception as exc:
-        _log_warning(logger, "CV hygiene: PSD computation failed for IAF: %s", exc)
-        return None, None
+    psds, freqs = mne.time_frequency.psd_array_multitaper(
+        train_data,
+        sfreq=sfreq,
+        fmin=fmin,
+        fmax=fmax,
+        adaptive=True,
+        normalization="full",
+        verbose=False,
+    )
+    return np.asarray(psds, dtype=float), np.asarray(freqs, dtype=float)
 
 
 def _compute_aperiodic_residual(
@@ -122,12 +118,9 @@ def _compute_aperiodic_residual(
     if np.sum(fit_mask) < MIN_FREQ_POINTS_FOR_FIT:
         return None
 
-    try:
-        slope, intercept = np.polyfit(log_freqs[fit_mask], log_power[fit_mask], 1)
-        residual = log_power - (intercept + slope * log_freqs)
-        return residual
-    except (np.linalg.LinAlgError, ValueError):
-        return log_power
+    slope, intercept = np.polyfit(log_freqs[fit_mask], log_power[fit_mask], 1)
+    residual = log_power - (intercept + slope * log_freqs)
+    return residual
 
 
 def _estimate_iaf_from_residual(

@@ -246,243 +246,6 @@ def _save_and_close_figure(fig: plt.Figure, save_path: Path, config: Any = None)
 # ERDS Distribution Plots
 ###################################################################
 
-def plot_erds_temporal_evolution(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot ERDS percent/dB distributions by band for the active segment."""
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
-    plot_cfg = get_plot_config(config)
-    if figsize is None:
-        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
-
-    segment = _select_erds_segment(features_df, preferred="active")
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    percent_data, percent_positions, percent_colors = _collect_band_data(
-        features_df,
-        bands,
-        band_colors,
-        segment,
-        stat="percent_mean",
-        scope="global",
-    )
-
-    ax = axes[0]
-    _create_violin_plot(ax, percent_data, percent_positions, percent_colors, bands)
-    ax.set_xlabel("Band")
-    ax.set_ylabel("ERDS (%)")
-    ax.set_title("ERDS Percent Change")
-    _format_axis_style(ax)
-
-    db_data, db_positions, db_colors = _collect_band_data(
-        features_df,
-        bands,
-        band_colors,
-        segment,
-        stat="db_mean",
-        scope="global",
-    )
-
-    ax = axes[1]
-    _create_violin_plot(ax, db_data, db_positions, db_colors, bands)
-    if db_data:
-        ax.axhline(
-            0,
-            color=_ZERO_LINE_COLOR,
-            linestyle="-",
-            linewidth=_ZERO_LINE_WIDTH,
-        )
-    ax.set_xlabel("Band")
-    ax.set_ylabel("ERDS (dB)")
-    ax.set_title("Log-Ratio Change")
-    _format_axis_style(ax)
-
-    _create_figure_title(fig, "ERDS by Band", segment, plot_cfg)
-    _save_and_close_figure(fig, save_path, config=config)
-
-    return fig
-
-
-def plot_erds_latency_distribution(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot ERDS peak/onset latency distributions by band."""
-    plot_cfg = get_plot_config(config)
-    if figsize is None:
-        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
-
-    segment = _select_erds_segment(features_df, preferred="active")
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    peak_data, peak_positions, peak_colors = _collect_band_data(
-        features_df,
-        bands,
-        band_colors,
-        segment,
-        stat="peak_latency",
-        scope="ch",
-        scale_factor=_SECONDS_TO_MILLISECONDS,
-    )
-
-    ax = axes[0]
-    _create_violin_plot(ax, peak_data, peak_positions, peak_colors, bands)
-    _add_scatter_overlay(ax, peak_positions, peak_data, peak_colors)
-    ax.set_xlabel("Band")
-    ax.set_ylabel("Peak Latency (ms)")
-    ax.set_title("Peak Latency")
-    _format_axis_style(ax)
-
-    onset_data, onset_positions, onset_colors = _collect_band_data(
-        features_df,
-        bands,
-        band_colors,
-        segment,
-        stat="onset_latency",
-        scope="ch",
-        scale_factor=_SECONDS_TO_MILLISECONDS,
-    )
-
-    ax = axes[1]
-    _create_violin_plot(ax, onset_data, onset_positions, onset_colors, bands)
-    _add_scatter_overlay(ax, onset_positions, onset_data, onset_colors)
-    ax.set_xlabel("Band")
-    ax.set_ylabel("Onset Latency (ms)")
-    ax.set_title("Onset Latency")
-    _format_axis_style(ax)
-
-    _create_figure_title(fig, "ERDS Latencies", segment, plot_cfg)
-    _save_and_close_figure(fig, save_path, config=config)
-
-    return fig
-
-
-def plot_erds_erd_ers_separation(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot ERD vs ERS magnitude distributions by band."""
-    plot_cfg = get_plot_config(config)
-    if figsize is None:
-        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
-
-    segment = _select_erds_segment(features_df, preferred="active")
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    erd_data, erd_positions, erd_colors = _collect_band_data(
-        features_df,
-        bands,
-        band_colors,
-        segment,
-        stat="erd_magnitude",
-        scope="ch",
-    )
-
-    ax = axes[0]
-    _create_violin_plot(ax, erd_data, erd_positions, erd_colors, bands)
-    ax.set_xlabel("Band")
-    ax.set_ylabel("ERD Magnitude (%)")
-    ax.set_title("ERD Magnitude")
-    _format_axis_style(ax)
-
-    ers_data, ers_positions, ers_colors = _collect_band_data(
-        features_df,
-        bands,
-        band_colors,
-        segment,
-        stat="ers_magnitude",
-        scope="ch",
-    )
-
-    ax = axes[1]
-    _create_violin_plot(ax, ers_data, ers_positions, ers_colors, bands)
-    ax.set_xlabel("Band")
-    ax.set_ylabel("ERS Magnitude (%)")
-    ax.set_title("ERS Magnitude")
-    _format_axis_style(ax)
-
-    _create_figure_title(fig, "ERD/ERS Magnitudes", segment, plot_cfg)
-    _save_and_close_figure(fig, save_path, config=config)
-
-    return fig
-
-
-def plot_erds_global_summary(
-    features_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    config: Any = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Plot global ERDS summary by band."""
-    plot_cfg = get_plot_config(config)
-    if figsize is None:
-        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
-
-    segment = _select_erds_segment(features_df, preferred="active")
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    mean_data, mean_positions, mean_colors = _collect_band_data(
-        features_df,
-        bands,
-        band_colors,
-        segment,
-        stat="percent_mean",
-        scope="global",
-    )
-
-    ax = axes[0]
-    _create_violin_plot(ax, mean_data, mean_positions, mean_colors, bands)
-    if mean_data:
-        ax.axhline(
-            0,
-            color=_ZERO_LINE_COLOR,
-            linestyle="-",
-            linewidth=_ZERO_LINE_WIDTH,
-        )
-    ax.set_xlabel("Band")
-    ax.set_ylabel("ERDS (%)")
-    ax.set_title("Mean ERDS")
-    _format_axis_style(ax)
-
-    std_data, std_positions, std_colors = _collect_band_data(
-        features_df,
-        bands,
-        band_colors,
-        segment,
-        stat="percent_std",
-        scope="global",
-    )
-
-    ax = axes[1]
-    _create_violin_plot(ax, std_data, std_positions, std_colors, bands)
-    ax.set_xlabel("Band")
-    ax.set_ylabel("ERDS Std (%)")
-    ax.set_title("Across-Channel Variability")
-    _format_axis_style(ax)
-
-    _create_figure_title(fig, "ERDS Summary", segment, plot_cfg)
-    _save_and_close_figure(fig, save_path, config=config)
-
-    return fig
-
 
 ###################################################################
 # ERDS Condition Comparison
@@ -508,7 +271,7 @@ def _determine_roi_names(
     config: Any, rois: Dict[str, Any]
 ) -> List[str]:
     """Determine which ROIs to plot based on config."""
-    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
     comp_rois = get_config_value(
         config, "plotting.comparisons.comparison_rois", []
@@ -718,20 +481,19 @@ def _create_column_comparison_plots(
         plot_multi_group_column_comparison,
     )
     from eeg_pipeline.plotting.io.figures import log_if_present
-    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
     from eeg_pipeline.utils.formatting import sanitize_label
 
     values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=False)
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
         if not multi_group_info:
-            log_if_present(logger, "warning", "Multi-group column comparison enabled but config incomplete.")
-            return
+            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
         
         masks_dict, group_labels = multi_group_info
-        segment_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+        segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
         multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
@@ -775,21 +537,12 @@ def _create_column_comparison_plots(
         log_if_present(logger, "info", f"Saved ERDS multi-group column comparison for {len(roi_names)} ROIs")
         return
 
-    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=False)
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
     if not comp_mask_info:
-        if logger:
-            log_if_present(
-                logger,
-                "warning",
-                "Column comparison enabled but config incomplete. "
-                "Set plotting.comparisons.comparison_column and comparison_values.",
-            )
-        return
+        raise ValueError("Column comparison requested but could not resolve comparison masks.")
 
     mask1, mask2, label1, label2 = comp_mask_info
-    segment_name = get_config_value(
-        config, "plotting.comparisons.comparison_segment", "active"
-    )
+    segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
 
     condition_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
     band_colors = {band: get_band_color(band, config) for band in bands}
@@ -1002,19 +755,13 @@ def plot_erds_by_condition(
         config, "plotting.comparisons.compare_columns", False
     )
 
-    segments = get_config_value(
-        config, "plotting.comparisons.comparison_windows", []
-    )
-    if not segments or len(segments) < 2:
-        detected_segments = _get_erds_segments(features_df)
-        if len(detected_segments) >= 2:
-            segments = detected_segments[:2]
-            if logger:
-                log_if_present(
-                    logger,
-                    "info",
-                    f"Auto-detected segments for ERDS comparison: {segments}",
-                )
+    segments = require_config_value(config, "plotting.comparisons.comparison_windows")
+    if not isinstance(segments, (list, tuple)) or len(segments) < 2:
+        raise ValueError(
+            "plotting.comparisons.comparison_windows must be a list/tuple with at least 2 window names "
+            f"(got {segments!r})"
+        )
+    segments = [str(s) for s in segments]
 
     bands = get_band_names(config)
     if not bands:
@@ -1067,9 +814,5 @@ def plot_erds_by_condition(
 
 
 __all__ = [
-    "plot_erds_temporal_evolution",
-    "plot_erds_latency_distribution",
-    "plot_erds_erd_ers_separation",
-    "plot_erds_global_summary",
     "plot_erds_by_condition",
 ]

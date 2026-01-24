@@ -98,15 +98,14 @@ def _build_behavior_plot_context(
 
 CATEGORY_TO_PLOTS = {
     "psychometrics": ["psychometrics"],
-    "power": ["power_roi_scatter"],
-    "complexity": ["complexity_scatter"],
-    "aperiodic": ["aperiodic_scatter"],
-    "connectivity": ["connectivity_scatter"],
-    "itpc": ["itpc_scatter"],
-    "temporal": ["temporal_topomaps", "pain_clusters"],
+    "power": ["behavior_scatter"],
+    "complexity": ["behavior_scatter"],
+    "aperiodic": ["behavior_scatter"],
+    "connectivity": ["behavior_scatter"],
+    "itpc": ["behavior_scatter"],
+    "temporal": ["temporal_topomaps"],
     "dose_response": ["dose_response"],
-    "temperature_models": ["temperature_models"],
-    "stability": ["stability_groupwise"],
+    "scatter": ["behavior_scatter"],
 }
 
 
@@ -171,7 +170,8 @@ def visualize_subject_behavior(
         Derived data root directory. If None, resolved from config.
     visualize_categories : list of str, optional
         Specific categories to visualize (e.g., ["power", "connectivity"]).
-        Maps to specific plot names: power->power_roi_scatter, etc.
+        Feature categories (power, complexity, aperiodic, connectivity, itpc) all map
+        to the unified "behavior_scatter" plot, which can be configured via config.
         If None, all plots are generated.
     """
     logger.info(f"Visualizing behavioral correlations for sub-{subject}...")
@@ -235,11 +235,12 @@ def visualize_behavior_for_subjects(
     if logger is None:
         logger = get_logger(__name__)
 
-    mode_str = (
-        f"categories: {', '.join(visualize_categories)}"
-        if visualize_categories
-        else "full"
-    )
+    if visualize_categories:
+        mode_str = f"categories: {', '.join(visualize_categories)}"
+    elif plots:
+        mode_str = f"plots: {', '.join(plots)}"
+    else:
+        mode_str = "full"
     logger.info(
         f"Starting behavioral visualization ({mode_str}): "
         f"{len(subjects)} subject(s), task={task}"
