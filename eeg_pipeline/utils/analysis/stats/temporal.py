@@ -887,27 +887,6 @@ def _build_temporal_tsv_records(
     return records
 
 
-def _build_roi_averaged_records(
-    res: Dict[str, Any],
-    condition: str,
-    ch_names: List[str],
-    method: str,
-    roi_definitions: Optional[Dict[str, List[str]]] = None,
-) -> List[Dict[str, Any]]:
-    """Deprecated: ROI summaries computed from per-channel correlations are invalid.
-
-    This function previously attempted to create ROI-level records by Fisher-z
-    averaging channel-wise correlations and combining channel-wise p-values.
-    EEG channels are highly dependent, so meta-combining p-values across channels
-    inflates significance and does not equal the correlation of ROI-averaged
-    power with behavior.
-
-    ROI-level temporal correlations are now computed directly from ROI-averaged
-    trial-wise power in `_compute_roi_correlations_for_condition`.
-    """
-    return []
-
-
 def _compute_roi_correlations_for_condition(
     tfr,
     y: np.ndarray,

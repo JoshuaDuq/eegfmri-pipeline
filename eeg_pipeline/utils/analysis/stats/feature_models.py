@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.analysis.stats.base import safe_get_config_value as _get
+from eeg_pipeline.utils.analysis.stats.base import get_config_value as _get
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.analysis.stats.transforms import zscore_array as _zscore
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_regression_features

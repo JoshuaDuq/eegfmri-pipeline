@@ -27,6 +27,7 @@ MODE_ROIS = "rois"
 MODE_FMRI_CONDITIONS = "fmri-conditions"
 MODE_FMRI_COLUMNS = "fmri-columns"
 MODE_MULTIGROUP_STATS = "multigroup-stats"
+MODE_ML_FEATURE_SPACE = "ml-feature-space"
 
 SOURCE_BIDS = "bids"
 SOURCE_BIDS_FMRI = "bids_fmri"
@@ -125,7 +126,7 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER, MODE_ROIS, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS, MODE_MULTIGROUP_STATS],
+        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER, MODE_ROIS, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS, MODE_MULTIGROUP_STATS, MODE_ML_FEATURE_SPACE],
         help="What to show: subjects, features, config, version, discover columns, rois, fmri-conditions, fmri-columns, or multigroup-stats",
     )
     parser.add_argument(
@@ -189,7 +190,134 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Get values for a specific column only",
     )
 
+    ml_group = parser.add_argument_group("ML feature-space options (mode: ml-feature-space)")
+    ml_group.add_argument(
+        "--subjects",
+        nargs="+",
+        default=None,
+        help="Subjects to scan (e.g., 0001 0002). Defaults to first available subjects with features.",
+    )
+    ml_group.add_argument(
+        "--max-subjects",
+        type=int,
+        default=3,
+        help="Max subjects to scan when --subjects is omitted (default: 3).",
+    )
+    ml_group.add_argument(
+        "--feature-families",
+        nargs="+",
+        default=None,
+        help="Feature families to scan (e.g., power connectivity). Defaults to config machine_learning.data.feature_families.",
+    )
+
     return parser
+
+
+def _handle_ml_feature_space_mode(args: argparse.Namespace, config: Any, task: str) -> None:
+    """Discover available (band, segment, scope) values from feature columns."""
+    import pyarrow.parquet as pq
+
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    from eeg_pipeline.infra.paths import resolve_deriv_root
+
+    deriv_root = resolve_deriv_root(config=config)
+
+    def _as_list(val: Any) -> Optional[List[str]]:
+        if val is None:
+            return None
+        if isinstance(val, (list, tuple)):
+            out = [str(v).strip() for v in val if str(v).strip()]
+            return out or None
+        if isinstance(val, str) and val.strip():
+            return [val.strip()]
+        return None
+
+    families = _as_list(args.feature_families) or _as_list(config.get("machine_learning.data.feature_families")) or None
+    if not families:
+        # Broad default consistent with ML loader fallback.
+        families = ["power"]
+
+    subjects = _as_list(args.subjects)
+    if not subjects:
+        max_n = max(1, int(args.max_subjects or 3))
+        detected = []
+        for sub_dir in sorted(Path(deriv_root).glob("sub-*")):
+            sid = _extract_subject_id(sub_dir.name)
+            features_dir = Path(deriv_root) / f"sub-{sid}" / "eeg" / "features"
+            if features_dir.exists():
+                detected.append(sid)
+            if len(detected) >= max_n:
+                break
+        subjects = detected
+
+    bands: set[str] = set()
+    segments: set[str] = set()
+    scopes: set[str] = set()
+
+    for subject in subjects or []:
+        sid = _extract_subject_id(subject)
+        features_dir = Path(deriv_root) / f"sub-{sid}" / "eeg" / "features"
+        if not features_dir.exists():
+            continue
+
+        for fam in families:
+            fname_override = config.get(f"machine_learning.data.feature_files.{fam}")
+            filename = str(fname_override).strip() if isinstance(fname_override, str) and str(fname_override).strip() else f"features_{fam}.parquet"
+
+            if str(fam).startswith("pac"):
+                path = features_dir / "pac" / filename
+            elif str(fam) in {"sourcelocalization", "source_localization"} or str(fam).startswith("sourcelocalization"):
+                # Mirror ML loader behavior: sourcelocalization may live in nested subfolders.
+                candidates = [
+                    features_dir / "sourcelocalization" / "fmri_informed" / filename,
+                    features_dir / "sourcelocalization" / "eeg_only" / filename,
+                    features_dir / "sourcelocalization" / filename,
+                ]
+                path = None
+                for cand in candidates:
+                    if cand.exists():
+                        path = cand
+                        break
+                if path is None:
+                    path = candidates[0]
+            else:
+                # Default: features are stored in per-family subfolders.
+                path = features_dir / str(fam) / filename
+
+            if not path.exists():
+                continue
+
+            try:
+                cols = pq.ParquetFile(path).schema_arrow.names
+            except Exception:
+                continue
+
+            for col in cols:
+                parsed = NamingSchema.parse(str(col))
+                if not parsed.get("valid", False):
+                    continue
+                band = parsed.get("band")
+                seg = parsed.get("segment")
+                scope = parsed.get("scope")
+                if band:
+                    bands.add(str(band))
+                if seg:
+                    segments.add(str(seg))
+                if scope:
+                    scopes.add(str(scope))
+
+    payload = {
+        "subjects_scanned": subjects or [],
+        "feature_families": families,
+        "bands": sorted(bands),
+        "segments": sorted(segments),
+        "scopes": sorted(scopes),
+        "task": task,
+        "deriv_root": str(deriv_root),
+        "error": "",
+    }
+
+    print(json_module.dumps(payload))
 
 
 def _subjects_cache_dir(deriv_root: Path) -> Path:
@@ -1310,3 +1438,5 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
         _handle_config_mode(args, config, deriv_root, task)
     elif args.mode == MODE_VERSION:
         _handle_version_mode(args.output_json)
+    elif args.mode == MODE_ML_FEATURE_SPACE:
+        _handle_ml_feature_space_mode(args, config, task)

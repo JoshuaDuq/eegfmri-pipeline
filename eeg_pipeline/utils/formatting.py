@@ -37,51 +37,9 @@ def format_roi_description(roi_channels: Optional[List[str]]) -> str:
     return f"ROI: {len(roi_channels)} channels"
 
 
-def get_residual_labels(method_code: str, target_type: str) -> Tuple[str, str]:
-    """Get axis labels for residual plots."""
-    ranked_suffix = " (ranked)" if method_code == "spearman" else ""
-    x_label = f"Partial residuals{ranked_suffix} of log10(power/baseline)"
-
-    target_labels = {
-        "rating": f"Partial residuals{ranked_suffix} of rating",
-        "temperature": f"Partial residuals{ranked_suffix} of temperature (°C)",
-    }
-    y_label = target_labels.get(
-        target_type, f"Partial residuals{ranked_suffix} of {target_type}"
-    )
-
-    return x_label, y_label
-
-
-def get_target_labels(target_type: str) -> Tuple[str, str]:
-    """Get axis labels for target plots."""
-    target_labels = {
-        "rating": "Rating",
-        "temperature": "Temperature (°C)",
-    }
-    y_label = target_labels.get(target_type, target_type)
-    return "log10(power/baseline [-5–0 s])", y_label
-
-
-def format_time_suffix(time_label: Optional[str]) -> str:
-    """Format time label as a title suffix."""
-    if time_label is None:
-        return ""
-    return f" ({time_label})"
-
-
-def get_temporal_xlabel(time_label: str) -> str:
-    """Get x-axis label for temporal power plots."""
-    return f"log10(power/baseline) — {time_label}"
-
-
 __all__ = [
     "sanitize_label",
     "format_baseline_window_string",
     "format_channel_list_for_display",
     "format_roi_description",
-    "get_residual_labels",
-    "get_target_labels",
-    "format_time_suffix",
-    "get_temporal_xlabel",
 ]

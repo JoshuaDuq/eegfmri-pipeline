@@ -49,14 +49,8 @@ from eeg_pipeline.analysis.machine_learning.pipelines import (
 # Data loading (canonical location: eeg_pipeline.utils.data.machine_learning)
 from eeg_pipeline.utils.data.machine_learning import load_epoch_windows, load_active_matrix
 
-# Cross-validation orchestration (high-level CV strategies)
-# Canonical pipeline class is in eeg_pipeline.pipelines.machine_learning
-from eeg_pipeline.analysis.machine_learning.orchestration import (
-    nested_loso_predictions,
-    within_subject_kfold_predictions,
-    loso_baseline_predictions,
-    nested_loso_predictions_from_matrix,
-)
+# Compute-stage orchestration lives in eeg_pipeline.analysis.machine_learning.orchestration.
+# Canonical end-user entry point is eeg_pipeline.pipelines.machine_learning.MLPipeline.
 
 # Time generalization
 from eeg_pipeline.analysis.machine_learning.time_generalization import (
@@ -131,11 +125,6 @@ __all__ = [
     # Data
     "load_active_matrix",
     "load_epoch_windows",
-    # CV implementations
-    "nested_loso_predictions",
-    "within_subject_kfold_predictions",
-    "loso_baseline_predictions",
-    "nested_loso_predictions_from_matrix",
     # Time generalization
     "time_generalization_regression",
     # Classification
@@ -165,4 +154,3 @@ __all__ = [
     "plot_reliability_diagram",
     "save_prediction_intervals",
 ]
-

@@ -110,6 +110,15 @@ type ROIsDiscoveredMsg struct {
 	Error error    // Error if discovery failed
 }
 
+// MLFeatureSpaceDiscoveredMsg is sent when ML feature-space discovery completes.
+// It describes which NamingSchema values are available across scanned feature columns.
+type MLFeatureSpaceDiscoveredMsg struct {
+	Bands    []string
+	Segments []string
+	Scopes   []string
+	Error    error
+}
+
 // PlotterInfo describes a single plotting option exposed by the backend
 type PlotterInfo struct {
 	ID       string `json:"id"`

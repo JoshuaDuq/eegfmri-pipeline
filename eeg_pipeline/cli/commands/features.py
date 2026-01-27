@@ -787,7 +787,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--analysis-mode", choices=["group_stats", "trial_ml_safe"], default=None, help="Feature analysis mode: group_stats (default) or trial_ml_safe (ML/CV leakage-safe)")
 
     # Connectivity
-    parser.add_argument("--connectivity-measures", nargs="+", choices=["wpli2_debiased", "wpli", "aec", "plv", "pli"], default=None, help="Connectivity measures to compute")
+    parser.add_argument("--connectivity-measures", nargs="+", choices=["wpli", "aec", "plv", "pli"], default=None, help="Connectivity measures to compute")
     parser.add_argument("--conn-output-level", choices=["full", "global_only"], default=None, help="Connectivity output level")
     parser.add_argument("--conn-graph-metrics", action="store_true", default=None, help="Enable graph metrics for connectivity")
     parser.add_argument("--no-conn-graph-metrics", action="store_false", dest="conn_graph_metrics", help="Disable graph metrics for connectivity")

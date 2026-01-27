@@ -231,6 +231,98 @@ func (s MLCVScope) CLIValue() string {
 	}
 }
 
+type MLFeatureHarmonization int
+
+const (
+	MLFeatureHarmonizationDefault MLFeatureHarmonization = iota
+	MLFeatureHarmonizationIntersection
+	MLFeatureHarmonizationUnionImpute
+)
+
+func (h MLFeatureHarmonization) CLIValue() string {
+	switch h {
+	case MLFeatureHarmonizationIntersection:
+		return "intersection"
+	case MLFeatureHarmonizationUnionImpute:
+		return "union_impute"
+	default:
+		return ""
+	}
+}
+
+func (h MLFeatureHarmonization) Display() string {
+	v := h.CLIValue()
+	if v == "" {
+		return "(default)"
+	}
+	return v
+}
+
+func (h MLFeatureHarmonization) Next() MLFeatureHarmonization {
+	return MLFeatureHarmonization((int(h) + 1) % 3)
+}
+
+type MLRegressionModel int
+
+const (
+	MLRegressionElasticNet MLRegressionModel = iota
+	MLRegressionRidge
+	MLRegressionRF
+)
+
+func (r MLRegressionModel) CLIValue() string {
+	switch r {
+	case MLRegressionRidge:
+		return "ridge"
+	case MLRegressionRF:
+		return "rf"
+	default:
+		return "elasticnet"
+	}
+}
+
+func (r MLRegressionModel) Display() string {
+	return r.CLIValue()
+}
+
+func (r MLRegressionModel) Next() MLRegressionModel {
+	return MLRegressionModel((int(r) + 1) % 3)
+}
+
+type MLClassificationModel int
+
+const (
+	MLClassificationDefault MLClassificationModel = iota
+	MLClassificationSVM
+	MLClassificationLR
+	MLClassificationRF
+)
+
+func (c MLClassificationModel) CLIValue() string {
+	switch c {
+	case MLClassificationSVM:
+		return "svm"
+	case MLClassificationLR:
+		return "lr"
+	case MLClassificationRF:
+		return "rf"
+	default:
+		return ""
+	}
+}
+
+func (c MLClassificationModel) Display() string {
+	v := c.CLIValue()
+	if v == "" {
+		return "(default)"
+	}
+	return v
+}
+
+func (c MLClassificationModel) Next() MLClassificationModel {
+	return MLClassificationModel((int(c) + 1) % 4)
+}
+
 // Feature file selection for behavior pipeline
 type FeatureFile struct {
 	Key         string
@@ -557,9 +649,19 @@ const (
 	textFieldPlotTemporalTimeLabels
 	textFieldPlotAsymmetryStat
 	// Machine Learning advanced config text fields
+	textFieldMLTarget
+	textFieldMLFeatureFamilies
+	textFieldMLFeatureBands
+	textFieldMLFeatureSegments
+	textFieldMLFeatureScopes
+	textFieldMLFeatureStats
+	textFieldMLCovariates
+	textFieldMLBaselinePredictors
 	textFieldElasticNetAlphaGrid
 	textFieldElasticNetL1RatioGrid
+	textFieldRidgeAlphaGrid
 	textFieldRfMaxDepthGrid
+	textFieldVarianceThresholdGrid
 	// Preprocessing advanced config text fields
 	textFieldIcaLabelsToKeep
 )
@@ -616,6 +718,9 @@ var defaultPlotItems = []PlotItem{
 	// Machine Learning
 	{ID: "ml_regression_plots", Group: "machine_learning", Name: "Regression Plots", Description: "LOSO regression diagnostics", RequiredFiles: []string{"machine_learning/regression/loso_predictions.tsv"}},
 	{ID: "ml_timegen_plots", Group: "machine_learning", Name: "Time-Generalization", Description: "Time-generalization matrices", RequiredFiles: []string{"machine_learning/time_generalization/time_generalization_regression.npz"}},
+	{ID: "ml_classification_plots", Group: "machine_learning", Name: "Classification", Description: "LOSO classification diagnostics", RequiredFiles: []string{"machine_learning/classification/loso_predictions.tsv"}},
+	{ID: "ml_within_subject_regression_plots", Group: "machine_learning", Name: "Within-Subject Regression", Description: "Block-aware within-subject regression diagnostics", RequiredFiles: []string{"machine_learning/within_subject_regression/cv_predictions.tsv"}},
+	{ID: "ml_within_subject_classification_plots", Group: "machine_learning", Name: "Within-Subject Classification", Description: "Block-aware within-subject classification diagnostics", RequiredFiles: []string{"machine_learning/within_subject_classification/cv_predictions.tsv"}},
 }
 
 var defaultPlotCategories = []FeatureCategory{
@@ -633,7 +738,7 @@ var defaultPlotCategories = []FeatureCategory{
 	{"erp", "ERP", "Event-related potential waveforms and topographies"},
 	{"tfr", "Time-Frequency", "Time-frequency representations and contrasts"},
 	{"behavior", "Behavior", "EEG-behavior correlations and temporal stats"},
-	{"machine_learning", "Machine Learning", "Machine learning regression and time-generalization"},
+	{"machine_learning", "Machine Learning", "Machine learning regression, time-generalization, and classification"},
 }
 
 type plotCatalogPayload struct {
@@ -1720,16 +1825,38 @@ type Model struct {
 	roiDiscoveryError string   // Error message if ROI discovery failed
 
 	// Machine Learning pipeline advanced config
-	mlNPerm     int  // Permutations for significance test
-	innerSplits int  // CV inner splits
-	outerJobs   int  // Number of parallel jobs for outer CV
-	skipTimeGen bool // Skip time generalization
+	mlNPerm     int // Permutations for significance test
+	innerSplits int // CV inner splits
+	outerJobs   int // Number of parallel jobs for outer CV
 	mlScope     MLCVScope
+	mlTarget    string
+
+	mlBinaryThresholdEnabled bool
+	mlBinaryThreshold        float64
+
+	mlFeatureFamiliesSpec    string
+	mlFeatureBandsSpec       string
+	mlFeatureSegmentsSpec    string
+	mlFeatureScopesSpec      string
+	mlFeatureStatsSpec       string
+	mlFeatureHarmonization   MLFeatureHarmonization
+	mlCovariatesSpec         string
+	mlBaselinePredictorsSpec string
+
+	mlRegressionModel     MLRegressionModel
+	mlClassificationModel MLClassificationModel
+	mlRequireTrialMlSafe  bool
+
+	mlUncertaintyAlpha float64
+	mlPermNRepeats     int
+
 	// Machine Learning model hyperparameters
-	elasticNetAlphaGrid   string // alpha grid as comma-separated values
-	elasticNetL1RatioGrid string // l1_ratio grid as comma-separated values
-	rfNEstimators         int    // Random forest n_estimators
-	rfMaxDepthGrid        string // max_depth grid as comma-separated values (use "null" for None)
+	elasticNetAlphaGrid    string // alpha grid as comma-separated values
+	elasticNetL1RatioGrid  string // l1_ratio grid as comma-separated values
+	ridgeAlphaGrid         string // ridge alpha grid as comma-separated values
+	rfNEstimators          int    // Random forest n_estimators
+	rfMaxDepthGrid         string // max_depth grid as comma-separated values (use "null" for None)
+	varianceThresholdGrid  string // variance_threshold grid (e.g. 0.0 or 0.0,0.01,0.1); use 0.0 only for small train folds
 
 	// TFR parameters (for features pipeline)
 	tfrFreqMin       float64 // Min frequency for TFR
@@ -2352,13 +2479,31 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		selectedValueCursors:           make(map[string]int),
 		availableWindowsByFeature:      make(map[string][]string),
 		// Machine Learning defaults
-		mlNPerm:               0,
-		innerSplits:           3,
-		outerJobs:             1,
-		skipTimeGen:           false,
-		mlScope:               MLCVScopeGroup,
-		elasticNetAlphaGrid:   "0.001,0.01,0.1,1,10",
-		elasticNetL1RatioGrid: "0.2,0.5,0.8",
+		mlNPerm:                  0,
+		innerSplits:              3,
+		outerJobs:                1,
+		mlScope:                  MLCVScopeGroup,
+		mlTarget:                 "",
+		mlBinaryThresholdEnabled: false,
+		mlBinaryThreshold:        0.0,
+		mlFeatureFamiliesSpec:    "",
+		mlFeatureBandsSpec:       "",
+		mlFeatureSegmentsSpec:    "",
+		mlFeatureScopesSpec:      "",
+		mlFeatureStatsSpec:       "",
+		mlFeatureHarmonization:   MLFeatureHarmonizationDefault,
+		mlCovariatesSpec:         "",
+		mlBaselinePredictorsSpec: "",
+		mlRegressionModel:        MLRegressionElasticNet,
+		mlClassificationModel:    MLClassificationDefault,
+		mlRequireTrialMlSafe:     false,
+		mlUncertaintyAlpha:       0.1,
+		mlPermNRepeats:           10,
+		// Hyperparameter defaults mirror eeg_pipeline/utils/config/eeg_config.yaml
+		elasticNetAlphaGrid:    "0.001,0.01,0.1,1,10",
+		elasticNetL1RatioGrid:  "0.2,0.5,0.8",
+		varianceThresholdGrid:  "0.0,0.01,0.1",
+		ridgeAlphaGrid:        "0.01,0.1,1,10,100",
 		rfNEstimators:         500,
 		rfMaxDepthGrid:        "5,10,20,null",
 		// TFR defaults (from config)
@@ -2470,10 +2615,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 	}
 
 	// Align default measure selections with eeg_config.yaml.
-	// - feature_engineering.connectivity.measures: ["wpli2_debiased", "aec"]
+	// - feature_engineering.connectivity.measures: ["wpli", "aec"]
 	// - feature_engineering.directedconnectivity: enable_psi=true, enable_dtf=false, enable_pdc=false
 	for i, measure := range connectivityMeasures {
-		if measure.Key == "wpli2_debiased" || measure.Key == "aec" {
+		if measure.Key == "wpli" || measure.Key == "aec" {
 			m.connectivityMeasures[i] = true
 		}
 	}
@@ -2586,14 +2731,29 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		}
 
 	case types.PipelineML:
-		m.modeOptions = []string{"regression", "timegen", "classify"}
+		m.modeOptions = []string{
+			"regression",
+			"timegen",
+			"classify",
+			"model_comparison",
+			"incremental_validity",
+			"uncertainty",
+			"shap",
+			"permutation",
+		}
 		m.modeDescriptions = []string{
 			"LOSO regression",
 			"Time generalization",
 			"Binary classification",
+			"Compare ElasticNet vs Ridge vs RF",
+			"Δ performance from EEG over baseline",
+			"Conformal prediction intervals",
+			"SHAP feature importance",
+			"Permutation feature importance",
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
+			types.StepSelectMode,
 			types.StepAdvancedConfig,
 		}
 
@@ -3292,6 +3452,11 @@ func (m *Model) UpdateAdvancedOffset() {
 
 	case types.PipelineFmri:
 		options := m.getFmriPreprocessingOptions()
+		totalLines = len(options)
+		cursorLine = m.advancedCursor
+
+	case types.PipelineML:
+		options := m.getMLOptions()
 		totalLines = len(options)
 		cursorLine = m.advancedCursor
 
@@ -4197,6 +4362,8 @@ func (m Model) getExpandedListLength() int {
 		return len(m.availableColumns) + 1 // +1 for "(none)" option
 	case expandedTemporalTargetColumn:
 		return len(m.availableColumns) + 1 // +1 for "(default)" option
+	case expandedMLTargetColumn:
+		return len(m.availableColumns) + 1 // +1 for "(stage default)" option
 	case expandedItpcConditionColumn:
 		return len(m.availableColumns)
 	case expandedConnConditionValues:
@@ -4304,6 +4471,8 @@ func (m Model) getExpandedListItems() []string {
 		return append([]string{"(none)"}, m.availableColumns...)
 	case expandedTemporalTargetColumn:
 		return append([]string{"(default)"}, m.availableColumns...)
+	case expandedMLTargetColumn:
+		return append([]string{"(stage default)"}, m.availableColumns...)
 	case expandedItpcConditionColumn:
 		return m.availableColumns
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
@@ -4589,6 +4758,15 @@ func (m *Model) handleExpandedListToggle() {
 		m.expandedOption = expandedNone
 		m.subCursor = 0
 
+	case expandedMLTargetColumn:
+		if selectedItem == "(stage default)" {
+			m.mlTarget = ""
+		} else {
+			m.mlTarget = selectedItem
+		}
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
 	case expandedItpcConditionColumn:
 		m.itpcConditionColumn = selectedItem
 		m.itpcConditionValues = "" // Reset values when column changes
@@ -4699,6 +4877,8 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optCorrelationsTargetColumn
 	case expandedTemporalTargetColumn:
 		return opt == optTemporalTargetColumn
+	case expandedMLTargetColumn:
+		return opt == optMLTarget
 	case expandedItpcConditionColumn:
 		return opt == optItpcConditionColumn
 	case expandedConnConditionColumn:
@@ -4748,6 +4928,11 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			return m.temporalTargetColumn == ""
 		}
 		return m.temporalTargetColumn == item
+	case expandedMLTargetColumn:
+		if item == "(stage default)" {
+			return m.mlTarget == ""
+		}
+		return m.mlTarget == item
 	case expandedItpcConditionColumn:
 		return m.itpcConditionColumn == item
 	case expandedConnConditionColumn:
@@ -5116,13 +5301,34 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.plotComparisonLabelsSpec
 	case textFieldPlotComparisonROIs:
 		return m.plotComparisonROIsSpec
+	// Machine Learning advanced config text fields
+	case textFieldMLTarget:
+		return m.mlTarget
+	case textFieldMLFeatureFamilies:
+		return m.mlFeatureFamiliesSpec
+	case textFieldMLFeatureBands:
+		return m.mlFeatureBandsSpec
+	case textFieldMLFeatureSegments:
+		return m.mlFeatureSegmentsSpec
+	case textFieldMLFeatureScopes:
+		return m.mlFeatureScopesSpec
+	case textFieldMLFeatureStats:
+		return m.mlFeatureStatsSpec
+	case textFieldMLCovariates:
+		return m.mlCovariatesSpec
+	case textFieldMLBaselinePredictors:
+		return m.mlBaselinePredictorsSpec
 	// Machine Learning hyperparameter text fields
 	case textFieldElasticNetAlphaGrid:
 		return m.elasticNetAlphaGrid
 	case textFieldElasticNetL1RatioGrid:
 		return m.elasticNetL1RatioGrid
+	case textFieldRidgeAlphaGrid:
+		return m.ridgeAlphaGrid
 	case textFieldRfMaxDepthGrid:
 		return m.rfMaxDepthGrid
+	case textFieldVarianceThresholdGrid:
+		return m.varianceThresholdGrid
 	// Preprocessing text fields
 	case textFieldIcaLabelsToKeep:
 		return m.icaLabelsToKeep
@@ -5676,13 +5882,34 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.plotComparisonLabelsSpec = strings.TrimSpace(value)
 	case textFieldPlotComparisonROIs:
 		m.plotComparisonROIsSpec = strings.Join(strings.Fields(value), " ")
+	// Machine Learning advanced config text fields
+	case textFieldMLTarget:
+		m.mlTarget = strings.TrimSpace(value)
+	case textFieldMLFeatureFamilies:
+		m.mlFeatureFamiliesSpec = strings.TrimSpace(value)
+	case textFieldMLFeatureBands:
+		m.mlFeatureBandsSpec = strings.TrimSpace(value)
+	case textFieldMLFeatureSegments:
+		m.mlFeatureSegmentsSpec = strings.TrimSpace(value)
+	case textFieldMLFeatureScopes:
+		m.mlFeatureScopesSpec = strings.TrimSpace(value)
+	case textFieldMLFeatureStats:
+		m.mlFeatureStatsSpec = strings.TrimSpace(value)
+	case textFieldMLCovariates:
+		m.mlCovariatesSpec = strings.TrimSpace(value)
+	case textFieldMLBaselinePredictors:
+		m.mlBaselinePredictorsSpec = strings.TrimSpace(value)
 	// Machine Learning hyperparameter text fields
 	case textFieldElasticNetAlphaGrid:
-		m.elasticNetAlphaGrid = strings.Join(strings.Fields(value), "")
+		m.elasticNetAlphaGrid = strings.Join(splitLooseList(value), ",")
 	case textFieldElasticNetL1RatioGrid:
-		m.elasticNetL1RatioGrid = strings.Join(strings.Fields(value), "")
+		m.elasticNetL1RatioGrid = strings.Join(splitLooseList(value), ",")
+	case textFieldRidgeAlphaGrid:
+		m.ridgeAlphaGrid = strings.Join(splitLooseList(value), ",")
 	case textFieldRfMaxDepthGrid:
-		m.rfMaxDepthGrid = strings.Join(strings.Fields(value), "")
+		m.rfMaxDepthGrid = strings.Join(splitLooseList(value), ",")
+	case textFieldVarianceThresholdGrid:
+		m.varianceThresholdGrid = strings.Join(splitLooseList(value), ",")
 	// Preprocessing text fields
 	case textFieldIcaLabelsToKeep:
 		m.icaLabelsToKeep = strings.Join(strings.Fields(value), "")
@@ -6269,7 +6496,22 @@ const (
 	optMLNPerm
 	optMLInnerSplits
 	optMLOuterJobs
-	optMLSkipTimeGen
+	optMLTarget
+	optMLRegressionModel
+	optMLClassificationModel
+	optMLBinaryThresholdEnabled
+	optMLBinaryThreshold
+	optMLFeatureFamilies
+	optMLFeatureBands
+	optMLFeatureSegments
+	optMLFeatureScopes
+	optMLFeatureStats
+	optMLFeatureHarmonization
+	optMLCovariates
+	optMLBaselinePredictors
+	optMLRequireTrialMlSafe
+	optMLUncertaintyAlpha
+	optMLPermNRepeats
 	// Preprocessing group headers (collapsible sections)
 	optPrepGroupStages
 	optPrepGroupGeneral
@@ -6565,8 +6807,10 @@ const (
 	// Machine Learning model hyperparameters
 	optElasticNetAlphaGrid
 	optElasticNetL1RatioGrid
+	optRidgeAlphaGrid
 	optRfNEstimators
 	optRfMaxDepthGrid
+	optVarianceThresholdGrid
 	// fMRI preprocessing group headers (collapsible sections)
 	optFmriGroupRuntime
 	optFmriGroupOutput
@@ -6654,6 +6898,7 @@ const (
 	expandedTemporalTopomapsFeatureDir = 26
 	expandedConnConditionColumn        = 27
 	expandedConnConditionValues        = 28
+	expandedMLTargetColumn             = 29
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -7982,18 +8227,61 @@ func (m Model) getPlotConfigOptions() []optionType {
 }
 
 func (m Model) getMLOptions() []optionType {
-	return []optionType{
-		optUseDefaults,
-		optMLNPerm,
-		optMLInnerSplits,
-		optMLOuterJobs,
-		optRNGSeed,
-		optMLSkipTimeGen,
-		optElasticNetAlphaGrid,
-		optElasticNetL1RatioGrid,
-		optRfNEstimators,
-		optRfMaxDepthGrid,
+	mode := ""
+	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+		mode = m.modeOptions[m.modeIndex]
 	}
+
+	opts := []optionType{
+		optUseDefaults,
+		optMLTarget,
+		optMLFeatureFamilies,
+		optMLFeatureBands,
+		optMLFeatureSegments,
+		optMLFeatureScopes,
+		optMLFeatureStats,
+		optMLFeatureHarmonization,
+		optMLCovariates,
+	}
+
+	if mode == "incremental_validity" {
+		opts = append(opts, optMLBaselinePredictors)
+	}
+
+	opts = append(opts, optMLRequireTrialMlSafe)
+
+	if mode == "classify" {
+		opts = append(opts, optMLClassificationModel, optMLBinaryThresholdEnabled)
+		if m.mlBinaryThresholdEnabled {
+			opts = append(opts, optMLBinaryThreshold)
+		}
+		opts = append(opts, optVarianceThresholdGrid)
+	} else if mode != "timegen" && mode != "" {
+		// Most non-classification stages use the regression model family (timegen is separate).
+		if mode != "model_comparison" {
+			opts = append(opts, optMLRegressionModel)
+		}
+		opts = append(
+			opts,
+			optElasticNetAlphaGrid,
+			optElasticNetL1RatioGrid,
+			optRidgeAlphaGrid,
+			optRfNEstimators,
+			optRfMaxDepthGrid,
+			optVarianceThresholdGrid,
+		)
+	}
+
+	opts = append(opts, optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed)
+
+	if mode == "uncertainty" {
+		opts = append(opts, optMLUncertaintyAlpha)
+	}
+	if mode == "permutation" {
+		opts = append(opts, optMLPermNRepeats)
+	}
+
+	return opts
 }
 
 func (m Model) isCurrentlyEditing(opt optionType) bool {

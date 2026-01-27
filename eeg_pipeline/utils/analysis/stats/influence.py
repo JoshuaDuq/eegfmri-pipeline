@@ -37,7 +37,7 @@ _MIN_FEATURES_FOR_PARALLEL = 5
 _DEFAULT_COOKS_THRESHOLD_DIVISOR = 1
 
 
-from .base import safe_get_config_value as _get_config_value
+from .base import get_config_value as _get_config_value
 
 
 def _compute_hat_diagonal(X: np.ndarray) -> Optional[np.ndarray]:

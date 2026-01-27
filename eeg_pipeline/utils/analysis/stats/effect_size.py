@@ -79,35 +79,6 @@ def hedges_g(
     return float(d * correction_factor)
 
 
-def fisher_z_test(
-    r1: float,
-    r2: float,
-    n1: int,
-    n2: int,
-    config: Optional[Any] = None,
-) -> Tuple[float, float]:
-    """
-    Fisher z-test for difference between two correlations.
-    
-    Returns (z_statistic, p_value).
-    """
-    if n1 < 4 or n2 < 4:
-        return np.nan, np.nan
-
-    if not (np.isfinite(r1) and np.isfinite(r2)):
-        return np.nan, np.nan
-
-    z1 = fisher_z(r1, config=config)
-    z2 = fisher_z(r2, config=config)
-
-    standard_error = np.sqrt(1 / (n1 - 3) + 1 / (n2 - 3))
-    z_statistic = (z1 - z2) / standard_error
-
-    p_value = 2 * (1 - stats.norm.cdf(np.abs(z_statistic)))
-
-    return float(z_statistic), float(p_value)
-
-
 def cohens_q(r1: float, r2: float, config: Optional[Any] = None) -> float:
     """Cohen's q for difference between correlations."""
     if not (np.isfinite(r1) and np.isfinite(r2)):
@@ -117,29 +88,6 @@ def cohens_q(r1: float, r2: float, config: Optional[Any] = None) -> float:
     z2 = fisher_z(r2, config=config)
 
     return float(z1 - z2)
-
-
-def correlation_difference_effect(
-    r1: float,
-    r2: float,
-    n1: int,
-    n2: int,
-    config: Optional[Any] = None,
-) -> Dict[str, float]:
-    """
-    Comprehensive effect statistics for correlation difference.
-    
-    Returns dict with z_stat, p_value, cohens_q, r_diff.
-    """
-    z_stat, p_val = fisher_z_test(r1, r2, n1, n2, config)
-    q = cohens_q(r1, r2, config)
-
-    return {
-        "r_diff": float(r1 - r2) if np.isfinite(r1) and np.isfinite(r2) else np.nan,
-        "z_stat": z_stat,
-        "p_value": p_val,
-        "cohens_q": q,
-    }
 
 
 def compute_cohens_d_with_bootstrap_ci(

@@ -9,6 +9,20 @@ Compute and visualization are separated (SRP):
 - run_batch_with_plots(): compute + visualization (convenience)
 - visualize(): plot from existing results on disk
 
+ML inputs
+---------
+By default, ML loads per-trial feature tables saved by the feature pipeline
+(derivatives/*/eeg/features/*/features_*.parquet) and aligns them to the *clean*
+events.tsv for targets/covariates. Configure via:
+- config: machine_learning.data.*, machine_learning.targets.*
+- CLI: --feature-families, --target, --binary-threshold, --feature-harmonization
+
+Notes on target validity
+------------------------
+- Regression modes assume a continuous target. If the selected target is binary-like (e.g., {0,1}),
+  the pipeline logs a warning (or errors if `machine_learning.targets.strict_regression_target_continuous=true`).
+- For binary outcomes, prefer `mode="classify"`.
+
 Modes:
 - regression: LOSO regression predicting pain intensity
 - timegen: Time-generalization analysis
@@ -42,6 +56,7 @@ from eeg_pipeline.analysis.machine_learning.orchestration import (
     run_within_subject_regression_ml,
     run_time_generalization,
     run_classification_ml,
+    run_within_subject_classification_ml,
     run_model_comparison_ml,
     run_incremental_validity_ml,
 )
@@ -141,6 +156,18 @@ class MLPipeline(PipelineBase):
             "model": kwargs.get("model", DEFAULT_MODEL),
             "uncertainty_alpha": kwargs.get("uncertainty_alpha", DEFAULT_UNCERTAINTY_ALPHA),
             "perm_n_repeats": kwargs.get("perm_n_repeats", DEFAULT_PERM_N_REPEATS),
+            "classification_model": kwargs.get("classification_model"),
+            # Data/target controls (kept out of core config for CLI override friendliness)
+            "feature_families": kwargs.get("feature_families"),
+            "feature_bands": kwargs.get("feature_bands"),
+            "feature_segments": kwargs.get("feature_segments"),
+            "feature_scopes": kwargs.get("feature_scopes"),
+            "feature_stats": kwargs.get("feature_stats"),
+            "feature_harmonization": kwargs.get("feature_harmonization"),
+            "target": kwargs.get("target"),
+            "binary_threshold": kwargs.get("binary_threshold"),
+            "baseline_predictors": kwargs.get("baseline_predictors"),
+            "covariates": kwargs.get("covariates"),
         }
 
     def _run_uncertainty(
@@ -149,13 +176,35 @@ class MLPipeline(PipelineBase):
         task: str,
         rng_seed: int,
         alpha: float = DEFAULT_UNCERTAINTY_ALPHA,
+        *,
+        target: Optional[str] = None,
+        feature_families: Optional[List[str]] = None,
+        feature_harmonization: Optional[str] = None,
+        covariates: Optional[List[str]] = None,
+        feature_bands: Optional[List[str]] = None,
+        feature_segments: Optional[List[str]] = None,
+        feature_scopes: Optional[List[str]] = None,
+        feature_stats: Optional[List[str]] = None,
     ) -> Optional[Path]:
         """Run uncertainty quantification via conformal prediction."""
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_uncertainty_stage
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
         
         X, y, groups, _, _ = load_active_matrix(
-            subjects, task, self.deriv_root, self.config, self.logger
+            subjects,
+            task,
+            self.deriv_root,
+            self.config,
+            self.logger,
+            feature_families=feature_families,
+            feature_harmonization=feature_harmonization,  # type: ignore[arg-type]
+            target=target or self.config.get("machine_learning.targets.regression", None),
+            target_kind="continuous",
+            covariates=covariates,
+            feature_bands=feature_bands,
+            feature_segments=feature_segments,
+            feature_scopes=feature_scopes,
+            feature_stats=feature_stats,
         )
         
         results_dir = self.results_root / "uncertainty"
@@ -172,13 +221,35 @@ class MLPipeline(PipelineBase):
         subjects: List[str],
         task: str,
         rng_seed: int,
+        *,
+        target: Optional[str] = None,
+        feature_families: Optional[List[str]] = None,
+        feature_harmonization: Optional[str] = None,
+        covariates: Optional[List[str]] = None,
+        feature_bands: Optional[List[str]] = None,
+        feature_segments: Optional[List[str]] = None,
+        feature_scopes: Optional[List[str]] = None,
+        feature_stats: Optional[List[str]] = None,
     ) -> Optional[Path]:
         """Run SHAP-based feature importance."""
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_shap_importance_stage
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
         
         X, y, groups, feature_names, _ = load_active_matrix(
-            subjects, task, self.deriv_root, self.config, self.logger
+            subjects,
+            task,
+            self.deriv_root,
+            self.config,
+            self.logger,
+            feature_families=feature_families,
+            feature_harmonization=feature_harmonization,  # type: ignore[arg-type]
+            target=target or self.config.get("machine_learning.targets.regression", None),
+            target_kind="continuous",
+            covariates=covariates,
+            feature_bands=feature_bands,
+            feature_segments=feature_segments,
+            feature_scopes=feature_scopes,
+            feature_stats=feature_stats,
         )
         
         results_dir = self.results_root / "shap"
@@ -196,13 +267,35 @@ class MLPipeline(PipelineBase):
         task: str,
         rng_seed: int,
         n_repeats: int = DEFAULT_PERM_N_REPEATS,
+        *,
+        target: Optional[str] = None,
+        feature_families: Optional[List[str]] = None,
+        feature_harmonization: Optional[str] = None,
+        covariates: Optional[List[str]] = None,
+        feature_bands: Optional[List[str]] = None,
+        feature_segments: Optional[List[str]] = None,
+        feature_scopes: Optional[List[str]] = None,
+        feature_stats: Optional[List[str]] = None,
     ) -> Optional[Path]:
         """Run permutation-based feature importance."""
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_permutation_importance_stage
         from eeg_pipeline.utils.data.machine_learning import load_active_matrix
         
         X, y, groups, feature_names, _ = load_active_matrix(
-            subjects, task, self.deriv_root, self.config, self.logger
+            subjects,
+            task,
+            self.deriv_root,
+            self.config,
+            self.logger,
+            feature_families=feature_families,
+            feature_harmonization=feature_harmonization,  # type: ignore[arg-type]
+            target=target or self.config.get("machine_learning.targets.regression", None),
+            target_kind="continuous",
+            covariates=covariates,
+            feature_bands=feature_bands,
+            feature_segments=feature_segments,
+            feature_scopes=feature_scopes,
+            feature_stats=feature_stats,
         )
         
         results_dir = self.results_root / "permutation_importance"
@@ -238,6 +331,14 @@ class MLPipeline(PipelineBase):
                 results_root=self.results_root,
                 logger=self.logger,
                 model=params["model"],
+                target=params.get("target"),
+                feature_families=params.get("feature_families"),
+                feature_bands=params.get("feature_bands"),
+                feature_segments=params.get("feature_segments"),
+                feature_scopes=params.get("feature_scopes"),
+                feature_stats=params.get("feature_stats"),
+                feature_harmonization=params.get("feature_harmonization"),
+                covariates=params.get("covariates"),
             )
         else:
             return run_regression_ml(
@@ -252,6 +353,14 @@ class MLPipeline(PipelineBase):
                 results_root=self.results_root,
                 logger=self.logger,
                 model=params["model"],
+                target=params.get("target"),
+                feature_families=params.get("feature_families"),
+                feature_bands=params.get("feature_bands"),
+                feature_segments=params.get("feature_segments"),
+                feature_scopes=params.get("feature_scopes"),
+                feature_stats=params.get("feature_stats"),
+                feature_harmonization=params.get("feature_harmonization"),
+                covariates=params.get("covariates"),
             )
 
     def _execute_timegen(
@@ -264,9 +373,11 @@ class MLPipeline(PipelineBase):
     ) -> Optional[Path]:
         """Execute time-generalization analysis."""
         if cv_scope == "subject":
-            self.logger.warning("Time-generalization requires group scope; skipping.")
-            return None
-        
+            raise ValueError(
+                "Time-generalization uses leave-one-subject-out (group-level) CV and "
+                "does not support --cv-scope subject. Use --cv-scope group."
+            )
+
         progress.step("Time generalization", current=1, total=1)
         run_time_generalization(
             subjects=subjects,
@@ -290,6 +401,29 @@ class MLPipeline(PipelineBase):
     ) -> Path:
         """Execute classification ML analysis."""
         progress.step("Classification ML", current=1, total=1)
+        if cv_scope == "subject":
+            return run_within_subject_classification_ml(
+                subjects=subjects,
+                task=task,
+                deriv_root=self.deriv_root,
+                config=self.config,
+                n_perm=params["n_perm"],
+                inner_splits=params["inner_splits"],
+                outer_jobs=params["outer_jobs"],
+                rng_seed=params["rng_seed"],
+                results_root=self.results_root,
+                logger=self.logger,
+                classification_model=params.get("classification_model"),
+                target=params.get("target"),
+                binary_threshold=params.get("binary_threshold"),
+                feature_families=params.get("feature_families"),
+                feature_bands=params.get("feature_bands"),
+                feature_segments=params.get("feature_segments"),
+                feature_scopes=params.get("feature_scopes"),
+                feature_stats=params.get("feature_stats"),
+                feature_harmonization=params.get("feature_harmonization"),
+                covariates=params.get("covariates"),
+            )
         return run_classification_ml(
             subjects=subjects,
             task=task,
@@ -301,6 +435,16 @@ class MLPipeline(PipelineBase):
             rng_seed=params["rng_seed"],
             results_root=self.results_root,
             logger=self.logger,
+            classification_model=params.get("classification_model"),
+            target=params.get("target"),
+            binary_threshold=params.get("binary_threshold"),
+            feature_families=params.get("feature_families"),
+            feature_bands=params.get("feature_bands"),
+            feature_segments=params.get("feature_segments"),
+            feature_scopes=params.get("feature_scopes"),
+            feature_stats=params.get("feature_stats"),
+            feature_harmonization=params.get("feature_harmonization"),
+            covariates=params.get("covariates"),
         )
 
     def _execute_model_comparison(
@@ -318,10 +462,20 @@ class MLPipeline(PipelineBase):
             task=task,
             deriv_root=self.deriv_root,
             config=self.config,
+            n_perm=params["n_perm"],
             inner_splits=params["inner_splits"],
+            outer_jobs=params["outer_jobs"],
             rng_seed=params["rng_seed"],
             results_root=self.results_root,
             logger=self.logger,
+            target=params.get("target"),
+            feature_families=params.get("feature_families"),
+            feature_bands=params.get("feature_bands"),
+            feature_segments=params.get("feature_segments"),
+            feature_scopes=params.get("feature_scopes"),
+            feature_stats=params.get("feature_stats"),
+            feature_harmonization=params.get("feature_harmonization"),
+            covariates=params.get("covariates"),
         )
 
     def _execute_incremental_validity(
@@ -344,6 +498,14 @@ class MLPipeline(PipelineBase):
             rng_seed=params["rng_seed"],
             results_root=self.results_root,
             logger=self.logger,
+            target=params.get("target"),
+            baseline_predictors=params.get("baseline_predictors"),
+            feature_families=params.get("feature_families"),
+            feature_bands=params.get("feature_bands"),
+            feature_segments=params.get("feature_segments"),
+            feature_scopes=params.get("feature_scopes"),
+            feature_stats=params.get("feature_stats"),
+            feature_harmonization=params.get("feature_harmonization"),
         )
 
     def _execute_uncertainty(
@@ -361,6 +523,14 @@ class MLPipeline(PipelineBase):
             task=task,
             rng_seed=params["rng_seed"],
             alpha=params["uncertainty_alpha"],
+            target=params.get("target"),
+            feature_families=params.get("feature_families"),
+            feature_bands=params.get("feature_bands"),
+            feature_segments=params.get("feature_segments"),
+            feature_scopes=params.get("feature_scopes"),
+            feature_stats=params.get("feature_stats"),
+            feature_harmonization=params.get("feature_harmonization"),
+            covariates=params.get("covariates"),
         )
 
     def _execute_shap(
@@ -377,6 +547,14 @@ class MLPipeline(PipelineBase):
             subjects=subjects,
             task=task,
             rng_seed=params["rng_seed"],
+            target=params.get("target"),
+            feature_families=params.get("feature_families"),
+            feature_bands=params.get("feature_bands"),
+            feature_segments=params.get("feature_segments"),
+            feature_scopes=params.get("feature_scopes"),
+            feature_stats=params.get("feature_stats"),
+            feature_harmonization=params.get("feature_harmonization"),
+            covariates=params.get("covariates"),
         )
 
     def _execute_permutation(
@@ -394,6 +572,14 @@ class MLPipeline(PipelineBase):
             task=task,
             rng_seed=params["rng_seed"],
             n_repeats=params["perm_n_repeats"],
+            target=params.get("target"),
+            feature_families=params.get("feature_families"),
+            feature_bands=params.get("feature_bands"),
+            feature_segments=params.get("feature_segments"),
+            feature_scopes=params.get("feature_scopes"),
+            feature_stats=params.get("feature_stats"),
+            feature_harmonization=params.get("feature_harmonization"),
+            covariates=params.get("covariates"),
         )
 
     def _get_mode_dispatcher(self) -> Dict[str, Callable]:

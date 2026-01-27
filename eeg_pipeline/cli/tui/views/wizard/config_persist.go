@@ -603,12 +603,29 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["mlNPerm"] = m.mlNPerm
 	cfg["innerSplits"] = m.innerSplits
 	cfg["outerJobs"] = m.outerJobs
-	cfg["skipTimeGen"] = m.skipTimeGen
 	cfg["mlScope"] = int(m.mlScope)
+	cfg["mlTarget"] = m.mlTarget
+	cfg["mlBinaryThresholdEnabled"] = m.mlBinaryThresholdEnabled
+	cfg["mlBinaryThreshold"] = m.mlBinaryThreshold
+	cfg["mlFeatureFamiliesSpec"] = m.mlFeatureFamiliesSpec
+	cfg["mlFeatureBandsSpec"] = m.mlFeatureBandsSpec
+	cfg["mlFeatureSegmentsSpec"] = m.mlFeatureSegmentsSpec
+	cfg["mlFeatureScopesSpec"] = m.mlFeatureScopesSpec
+	cfg["mlFeatureStatsSpec"] = m.mlFeatureStatsSpec
+	cfg["mlFeatureHarmonization"] = int(m.mlFeatureHarmonization)
+	cfg["mlCovariatesSpec"] = m.mlCovariatesSpec
+	cfg["mlBaselinePredictorsSpec"] = m.mlBaselinePredictorsSpec
+	cfg["mlRegressionModel"] = int(m.mlRegressionModel)
+	cfg["mlClassificationModel"] = int(m.mlClassificationModel)
+	cfg["mlRequireTrialMlSafe"] = m.mlRequireTrialMlSafe
+	cfg["mlUncertaintyAlpha"] = m.mlUncertaintyAlpha
+	cfg["mlPermNRepeats"] = m.mlPermNRepeats
 	cfg["elasticNetAlphaGrid"] = m.elasticNetAlphaGrid
 	cfg["elasticNetL1RatioGrid"] = m.elasticNetL1RatioGrid
+	cfg["ridgeAlphaGrid"] = m.ridgeAlphaGrid
 	cfg["rfNEstimators"] = m.rfNEstimators
 	cfg["rfMaxDepthGrid"] = m.rfMaxDepthGrid
+	cfg["varianceThresholdGrid"] = m.varianceThresholdGrid
 
 	// Plotting Detailed Config
 	cfg["plotDpiIndex"] = m.plotDpiIndex
@@ -1469,12 +1486,29 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.mlNPerm = getInt("mlNPerm", m.mlNPerm)
 	m.innerSplits = getInt("innerSplits", m.innerSplits)
 	m.outerJobs = getInt("outerJobs", m.outerJobs)
-	m.skipTimeGen = getBool("skipTimeGen", m.skipTimeGen)
 	m.mlScope = MLCVScope(getInt("mlScope", int(m.mlScope)))
+	m.mlTarget = getString("mlTarget", m.mlTarget)
+	m.mlBinaryThresholdEnabled = getBool("mlBinaryThresholdEnabled", m.mlBinaryThresholdEnabled)
+	m.mlBinaryThreshold = getFloat("mlBinaryThreshold", m.mlBinaryThreshold)
+	m.mlFeatureFamiliesSpec = getString("mlFeatureFamiliesSpec", m.mlFeatureFamiliesSpec)
+	m.mlFeatureBandsSpec = getString("mlFeatureBandsSpec", m.mlFeatureBandsSpec)
+	m.mlFeatureSegmentsSpec = getString("mlFeatureSegmentsSpec", m.mlFeatureSegmentsSpec)
+	m.mlFeatureScopesSpec = getString("mlFeatureScopesSpec", m.mlFeatureScopesSpec)
+	m.mlFeatureStatsSpec = getString("mlFeatureStatsSpec", m.mlFeatureStatsSpec)
+	m.mlFeatureHarmonization = MLFeatureHarmonization(getInt("mlFeatureHarmonization", int(m.mlFeatureHarmonization)))
+	m.mlCovariatesSpec = getString("mlCovariatesSpec", m.mlCovariatesSpec)
+	m.mlBaselinePredictorsSpec = getString("mlBaselinePredictorsSpec", m.mlBaselinePredictorsSpec)
+	m.mlRegressionModel = MLRegressionModel(getInt("mlRegressionModel", int(m.mlRegressionModel)))
+	m.mlClassificationModel = MLClassificationModel(getInt("mlClassificationModel", int(m.mlClassificationModel)))
+	m.mlRequireTrialMlSafe = getBool("mlRequireTrialMlSafe", m.mlRequireTrialMlSafe)
+	m.mlUncertaintyAlpha = getFloat("mlUncertaintyAlpha", m.mlUncertaintyAlpha)
+	m.mlPermNRepeats = getInt("mlPermNRepeats", m.mlPermNRepeats)
 	m.elasticNetAlphaGrid = getString("elasticNetAlphaGrid", m.elasticNetAlphaGrid)
 	m.elasticNetL1RatioGrid = getString("elasticNetL1RatioGrid", m.elasticNetL1RatioGrid)
+	m.ridgeAlphaGrid = getString("ridgeAlphaGrid", m.ridgeAlphaGrid)
 	m.rfNEstimators = getInt("rfNEstimators", m.rfNEstimators)
 	m.rfMaxDepthGrid = getString("rfMaxDepthGrid", m.rfMaxDepthGrid)
+	m.varianceThresholdGrid = getString("varianceThresholdGrid", m.varianceThresholdGrid)
 
 	// Plotting
 	m.plotDpiIndex = getInt("plotDpiIndex", m.plotDpiIndex)

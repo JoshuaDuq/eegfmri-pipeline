@@ -191,12 +191,18 @@ def execute_folds_parallel(
     """Execute folds with optional parallelization."""
     from joblib import Parallel, delayed
 
-    if should_parallelize_folds(outer_n_jobs, len(folds)):
-        return Parallel(n_jobs=outer_n_jobs, prefer="threads")(
-            delayed(fold_func)(fold, train_idx, test_idx)
-            for (fold, train_idx, test_idx) in folds
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            category=warnings.UserWarning,
+            module=r"sklearn\.utils\.parallel",
         )
-    return [fold_func(fold, train_idx, test_idx) for (fold, train_idx, test_idx) in folds]
+        if should_parallelize_folds(outer_n_jobs, len(folds)):
+            return Parallel(n_jobs=outer_n_jobs, prefer="threads")(
+                delayed(fold_func)(fold, train_idx, test_idx)
+                for (fold, train_idx, test_idx) in folds
+            )
+        return [fold_func(fold, train_idx, test_idx) for (fold, train_idx, test_idx) in folds]
 
 
 ###################################################################
@@ -392,8 +398,9 @@ def compute_subject_level_r(
     
     if ci_method == "bootstrap" and len(z_vals) >= 3:
         # Subject-level bootstrap CI (often preferable for EEG)
-        rng = np.random.default_rng(42)
-        n_boot = 1000
+        boot_seed = int(get_config_value(config, "project.random_state", 42))
+        n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
+        rng = np.random.default_rng(boot_seed)
         boot_means = []
         n_subjects = len(z_vals)
         for _ in range(n_boot):
@@ -415,6 +422,84 @@ def compute_subject_level_r(
             ci_high = float(np.tanh(mean_z + delta))
 
     return agg_r, [(s, r) for s, r, _ in per_subject], ci_low, ci_high
+
+
+def compute_subject_level_errors(
+    pred_df: pd.DataFrame,
+    config: Optional[Any] = None,
+    ci_method: str = "bootstrap",
+) -> Dict[str, Any]:
+    """Compute subject-level MAE/RMSE (statistical unit = subject).
+
+    Returns unweighted mean across subjects plus optional bootstrap CI.
+    """
+    per_subject: List[Dict[str, Any]] = []
+
+    for subj, df_sub in pred_df.groupby("subject_id"):
+        yt = pd.to_numeric(df_sub["y_true"], errors="coerce").to_numpy(dtype=float)
+        yp = pd.to_numeric(df_sub["y_pred"], errors="coerce").to_numpy(dtype=float)
+        finite = np.isfinite(yt) & np.isfinite(yp)
+        n_trials = int(finite.sum())
+        if n_trials < 1:
+            continue
+        err = yp[finite] - yt[finite]
+        mae = float(np.mean(np.abs(err)))
+        rmse = float(np.sqrt(np.mean(err**2)))
+        per_subject.append(
+            {
+                "subject_id": str(subj),
+                "n_trials": n_trials,
+                "mae": mae,
+                "rmse": rmse,
+            }
+        )
+
+    if not per_subject:
+        return {
+            "mean_mae": np.nan,
+            "mean_rmse": np.nan,
+            "ci_low_mae": np.nan,
+            "ci_high_mae": np.nan,
+            "ci_low_rmse": np.nan,
+            "ci_high_rmse": np.nan,
+            "per_subject": [],
+        }
+
+    maes = np.asarray([r["mae"] for r in per_subject], dtype=float)
+    rmses = np.asarray([r["rmse"] for r in per_subject], dtype=float)
+    mean_mae = float(np.mean(maes))
+    mean_rmse = float(np.mean(rmses))
+
+    ci_low_mae = ci_high_mae = np.nan
+    ci_low_rmse = ci_high_rmse = np.nan
+
+    if ci_method == "bootstrap" and len(per_subject) >= 3:
+        boot_seed = int(get_config_value(config, "project.random_state", 42))
+        n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
+        rng = np.random.default_rng(boot_seed + 11)
+        n_sub = len(per_subject)
+
+        boot_mae = np.empty(n_boot, dtype=float)
+        boot_rmse = np.empty(n_boot, dtype=float)
+        for i in range(n_boot):
+            idx = rng.choice(n_sub, size=n_sub, replace=True)
+            boot_mae[i] = float(np.mean(maes[idx]))
+            boot_rmse[i] = float(np.mean(rmses[idx]))
+
+        ci_low_mae = float(np.percentile(boot_mae, 2.5))
+        ci_high_mae = float(np.percentile(boot_mae, 97.5))
+        ci_low_rmse = float(np.percentile(boot_rmse, 2.5))
+        ci_high_rmse = float(np.percentile(boot_rmse, 97.5))
+
+    return {
+        "mean_mae": mean_mae,
+        "mean_rmse": mean_rmse,
+        "ci_low_mae": ci_low_mae,
+        "ci_high_mae": ci_high_mae,
+        "ci_low_rmse": ci_low_rmse,
+        "ci_high_rmse": ci_high_rmse,
+        "per_subject": per_subject,
+    }
 
 
 ###################################################################
@@ -601,6 +686,7 @@ def _fit_with_inner_cv(
         cv=inner_cv,
         n_jobs=inner_n_jobs,
         refit="r",
+        error_score="raise",
     )
     gs = grid_search_with_warning_logging(gs, X_train, y_train, f"fold {fold}", log, groups=train_groups)
 
@@ -739,7 +825,7 @@ def nested_loso_predictions_matrix(
     Nested leave-one-subject-out cross-validation with hyperparameter tuning.
     
     This is the canonical feature-matrix-based LOSO implementation.
-    For epoch-based LOSO with channel harmonization, use orchestration.nested_loso_predictions.
+    Epoch-based CV helpers were removed; keep ML synchronized with the feature-table pipeline.
 
     Returns
     -------
@@ -809,6 +895,7 @@ def nested_loso_predictions_matrix(
                 cv=inner_cv,
                 n_jobs=inner_n_jobs,
                 refit="r",
+                error_score="raise",
             )
             gs = grid_search_with_warning_logging(gs, X_train, y_train, f"fold {fold}", logger, groups=groups_train)
             best_estimator = gs.best_estimator_

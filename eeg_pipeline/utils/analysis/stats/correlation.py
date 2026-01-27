@@ -34,7 +34,6 @@ _VALID_CORR_METHODS = {"spearman", "pearson"}
 _MIN_SAMPLES_CORRELATION = 3
 _MIN_SAMPLES_PSI = 5
 _MIN_SAMPLES_BAYES = 4
-_MIN_SAMPLES_RELIABILITY = 10
 _EPSILON_STD = 1e-12
 _EPSILON_STD_STRICT = 1e-10
 _EPSILON_CORRELATION = 1e-12
@@ -181,27 +180,6 @@ class CorrelationRecord:
     @property
     def is_significant(self) -> bool:
         return self.p_value < 0.05
-
-
-def build_correlation_record(identifier: str, band: str, r: float, p: float, n: int,
-                              method: str = "spearman", *, ci_low: float = np.nan,
-                              ci_high: float = np.nan, p_perm: float = np.nan,
-                              r_partial: float = np.nan, p_partial: float = np.nan,
-                              n_partial: int = 0, p_partial_perm: float = np.nan,
-                              r_partial_temp: float = np.nan, p_partial_temp: float = np.nan,
-                              n_partial_temp: int = 0, p_partial_temp_perm: float = np.nan,
-                              identifier_type: str = "channel", analysis_type: str = "power",
-                              **extra) -> CorrelationRecord:
-    """Build standardized correlation record."""
-    return CorrelationRecord(
-        identifier=identifier, band=band, correlation=_safe_float(r), p_value=_safe_float(p),
-        n_valid=int(n), method=method, ci_low=_safe_float(ci_low), ci_high=_safe_float(ci_high),
-        p_perm=_safe_float(p_perm), r_partial=_safe_float(r_partial), p_partial=_safe_float(p_partial),
-        n_partial=int(n_partial), p_partial_perm=_safe_float(p_partial_perm),
-        r_partial_temp=_safe_float(r_partial_temp), p_partial_temp=_safe_float(p_partial_temp),
-        n_partial_temp=int(n_partial_temp), p_partial_temp_perm=_safe_float(p_partial_temp_perm),
-        identifier_type=identifier_type, analysis_type=analysis_type, extra_fields=extra,
-    )
 
 
 def safe_correlation(
@@ -1004,79 +982,6 @@ def compute_loso_correlation_stability(
         stability = 0.0 if r_std > 0.1 else 1.0
     
     return r_mean, r_std, float(stability), r_values
-
-
-def compute_correlation_reliability(
-    feature_values: np.ndarray,
-    target_values: np.ndarray,
-    method: str = "split_half",
-    n_iterations: int = 100,
-    seed: int = 42,
-) -> Tuple[float, float, float]:
-    """
-    Compute reliability of feature-target correlation.
-    
-    Parameters
-    ----------
-    feature_values, target_values : array-like
-        Data arrays
-    method : str
-        "split_half": Random split-half with Spearman-Brown correction
-        "odd_even": Odd/even split
-    n_iterations : int
-        Number of random splits (for split_half method)
-    seed : int
-        Random seed
-    
-    Returns
-    -------
-    Tuple[float, float, float]
-        (reliability, ci_low, ci_high)
-    """
-    rng = np.random.default_rng(seed)
-    feature_values = np.asarray(feature_values)
-    target_values = np.asarray(target_values)
-    
-    valid = np.isfinite(feature_values) & np.isfinite(target_values)
-    n = int(np.sum(valid))
-    
-    if n < _MIN_SAMPLES_RELIABILITY:
-        return np.nan, np.nan, np.nan
-    
-    x = feature_values[valid]
-    y = target_values[valid]
-    
-    if method == "odd_even":
-        r1, _ = stats.spearmanr(x[::2], y[::2])
-        r2, _ = stats.spearmanr(x[1::2], y[1::2])
-        r_half = np.corrcoef([r1, r2])[0, 1] if np.isfinite(r1) and np.isfinite(r2) else np.nan
-        reliability = _spearman_brown(r_half)
-        return reliability, np.nan, np.nan
-    
-    reliabilities = []
-    indices = np.arange(n)
-    
-    for _ in range(n_iterations):
-        rng.shuffle(indices)
-        half = n // 2
-        idx1, idx2 = indices[:half], indices[half:2*half]
-        
-        r1, _ = stats.spearmanr(x[idx1], y[idx1])
-        r2, _ = stats.spearmanr(x[idx2], y[idx2])
-        
-        if np.isfinite(r1) and np.isfinite(r2):
-            r_half = np.corrcoef([r1, r2])[0, 1]
-            if np.isfinite(r_half):
-                reliabilities.append(_spearman_brown(r_half))
-    
-    if not reliabilities:
-        return np.nan, np.nan, np.nan
-    
-    reliability = float(np.mean(reliabilities))
-    ci_low = float(np.percentile(reliabilities, 2.5))
-    ci_high = float(np.percentile(reliabilities, 97.5))
-    
-    return reliability, ci_low, ci_high
 
 
 def save_correlation_results(

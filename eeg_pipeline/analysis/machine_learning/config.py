@@ -18,6 +18,7 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
     cv_config = resolved_config.get("machine_learning.cv", {})
     constant_config = resolved_config.get("machine_learning.constants", {})
     preprocessing_config = resolved_config.get("machine_learning.preprocessing", {})
+    pca_config = preprocessing_config.get("pca", {}) if isinstance(preprocessing_config, dict) else {}
     model_config = resolved_config.get("machine_learning.models", {})
 
     elasticnet_config = model_config.get("elasticnet", {})
@@ -38,6 +39,11 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
         "power_transformer_method": preprocessing_config.get("power_transformer_method", "yeo-johnson"),
         "power_transformer_standardize": preprocessing_config.get("power_transformer_standardize", True),
         "variance_threshold_grid": preprocessing_config.get("variance_threshold_grid", [0.0, 0.01, 0.1]),
+        "pca_enabled": bool(pca_config.get("enabled", False)),
+        "pca_n_components": pca_config.get("n_components", 0.95),
+        "pca_whiten": bool(pca_config.get("whiten", False)),
+        "pca_svd_solver": pca_config.get("svd_solver", "auto"),
+        "pca_random_state": pca_config.get("random_state", None),
         # ElasticNet regression
         "elasticnet_max_iter": elasticnet_config.get("max_iter", 10000),
         "elasticnet_tol": elasticnet_config.get("tol", 1e-4),

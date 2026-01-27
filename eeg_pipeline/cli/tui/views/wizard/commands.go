@@ -449,18 +449,6 @@ func (m Model) BuildCommand() string {
 
 	if m.Pipeline == types.PipelineML {
 		parts = append(parts, "--cv-scope", m.mlScope.CLIValue())
-		if m.skipTimeGen {
-			parts = append(parts, "--skip-timegen")
-		}
-		if m.mlNPerm > 0 {
-			parts = append(parts, "--n-perm", fmt.Sprintf("%d", m.mlNPerm))
-		}
-		if m.innerSplits > 0 && m.innerSplits != 3 {
-			parts = append(parts, "--inner-splits", fmt.Sprintf("%d", m.innerSplits))
-		}
-		if m.outerJobs > 1 {
-			parts = append(parts, "--outer-jobs", fmt.Sprintf("%d", m.outerJobs))
-		}
 	}
 
 	if m.Pipeline == types.PipelinePlotting {
@@ -2457,6 +2445,18 @@ func splitSpaceList(raw string) []string {
 	return out
 }
 
+func splitLooseList(raw string) []string {
+	replacer := strings.NewReplacer(
+		",", " ",
+		";", " ",
+		"\t", " ",
+		"\n", " ",
+		"\r", " ",
+	)
+	normalized := replacer.Replace(raw)
+	return splitSpaceList(normalized)
+}
+
 func joinShellCommand(args []string) string {
 	if len(args) == 0 {
 		return ""
@@ -2573,6 +2573,77 @@ func splitShellWords(raw string) ([]string, error) {
 func (m Model) buildMLAdvancedArgs() []string {
 	var args []string
 
+	mode := ""
+	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+		mode = m.modeOptions[m.modeIndex]
+	}
+
+	if strings.TrimSpace(m.mlTarget) != "" {
+		args = append(args, "--target", strings.TrimSpace(m.mlTarget))
+	}
+
+	if mode == "classify" && m.mlBinaryThresholdEnabled {
+		args = append(args, "--binary-threshold", fmt.Sprintf("%.6g", m.mlBinaryThreshold))
+	}
+
+	if strings.TrimSpace(m.mlFeatureFamiliesSpec) != "" {
+		args = append(args, "--feature-families")
+		args = append(args, splitLooseList(m.mlFeatureFamiliesSpec)...)
+	}
+
+	if strings.TrimSpace(m.mlFeatureBandsSpec) != "" {
+		args = append(args, "--feature-bands")
+		args = append(args, splitLooseList(m.mlFeatureBandsSpec)...)
+	}
+	if strings.TrimSpace(m.mlFeatureSegmentsSpec) != "" {
+		args = append(args, "--feature-segments")
+		args = append(args, splitLooseList(m.mlFeatureSegmentsSpec)...)
+	}
+	if strings.TrimSpace(m.mlFeatureScopesSpec) != "" {
+		args = append(args, "--feature-scopes")
+		args = append(args, splitLooseList(m.mlFeatureScopesSpec)...)
+	}
+	if strings.TrimSpace(m.mlFeatureStatsSpec) != "" {
+		args = append(args, "--feature-stats")
+		args = append(args, splitLooseList(m.mlFeatureStatsSpec)...)
+	}
+
+	if v := m.mlFeatureHarmonization.CLIValue(); v != "" {
+		args = append(args, "--feature-harmonization", v)
+	}
+
+	if strings.TrimSpace(m.mlCovariatesSpec) != "" {
+		args = append(args, "--covariates")
+		args = append(args, splitLooseList(m.mlCovariatesSpec)...)
+	}
+
+	if mode == "incremental_validity" && strings.TrimSpace(m.mlBaselinePredictorsSpec) != "" {
+		args = append(args, "--baseline-predictors")
+		args = append(args, splitLooseList(m.mlBaselinePredictorsSpec)...)
+	}
+
+	if mode == "classify" {
+		if v := m.mlClassificationModel.CLIValue(); v != "" {
+			args = append(args, "--classification-model", v)
+		}
+	}
+
+	if m.mlRequireTrialMlSafe {
+		args = append(args, "--require-trial-ml-safe")
+	}
+
+	if mode != "classify" && mode != "timegen" && mode != "model_comparison" && m.mlRegressionModel != MLRegressionElasticNet {
+		args = append(args, "--model", m.mlRegressionModel.CLIValue())
+	}
+
+	if mode == "uncertainty" && m.mlUncertaintyAlpha != 0.1 {
+		args = append(args, "--uncertainty-alpha", fmt.Sprintf("%.6g", m.mlUncertaintyAlpha))
+	}
+
+	if mode == "permutation" && m.mlPermNRepeats != 10 {
+		args = append(args, "--perm-n-repeats", fmt.Sprintf("%d", m.mlPermNRepeats))
+	}
+
 	if m.mlNPerm > 0 {
 		args = append(args, "--n-perm", fmt.Sprintf("%d", m.mlNPerm))
 	}
@@ -2592,11 +2663,17 @@ func (m Model) buildMLAdvancedArgs() []string {
 	// ElasticNet hyperparameters
 	if strings.TrimSpace(m.elasticNetAlphaGrid) != "" && m.elasticNetAlphaGrid != "0.001,0.01,0.1,1,10" {
 		args = append(args, "--elasticnet-alpha-grid")
-		args = append(args, splitCSVList(m.elasticNetAlphaGrid)...)
+		args = append(args, splitLooseList(m.elasticNetAlphaGrid)...)
 	}
 	if strings.TrimSpace(m.elasticNetL1RatioGrid) != "" && m.elasticNetL1RatioGrid != "0.2,0.5,0.8" {
 		args = append(args, "--elasticnet-l1-ratio-grid")
-		args = append(args, splitCSVList(m.elasticNetL1RatioGrid)...)
+		args = append(args, splitLooseList(m.elasticNetL1RatioGrid)...)
+	}
+
+	// Ridge hyperparameters
+	if strings.TrimSpace(m.ridgeAlphaGrid) != "" && m.ridgeAlphaGrid != "0.01,0.1,1,10,100" {
+		args = append(args, "--ridge-alpha-grid")
+		args = append(args, splitLooseList(m.ridgeAlphaGrid)...)
 	}
 
 	// Random Forest hyperparameters
@@ -2605,7 +2682,12 @@ func (m Model) buildMLAdvancedArgs() []string {
 	}
 	if strings.TrimSpace(m.rfMaxDepthGrid) != "" && m.rfMaxDepthGrid != "5,10,20,null" {
 		args = append(args, "--rf-max-depth-grid")
-		args = append(args, splitCSVList(m.rfMaxDepthGrid)...)
+		args = append(args, splitLooseList(m.rfMaxDepthGrid)...)
+	}
+
+	if strings.TrimSpace(m.varianceThresholdGrid) != "" && m.varianceThresholdGrid != "0.0,0.01,0.1" {
+		args = append(args, "--variance-threshold-grid")
+		args = append(args, splitLooseList(m.varianceThresholdGrid)...)
 	}
 
 	return args

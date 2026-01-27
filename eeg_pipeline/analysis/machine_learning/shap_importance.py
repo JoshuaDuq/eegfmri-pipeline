@@ -31,7 +31,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from sklearn.decomposition import PCA
 
+from eeg_pipeline.analysis.machine_learning.preprocessing import transform_feature_names_through_steps
 
 ###################################################################
 # Helper Functions
@@ -59,21 +61,40 @@ def _ensure_path(path: Path) -> Path:
     return path
 
 
-def _extract_estimator_and_transform(model: Any, X: np.ndarray) -> Tuple[Any, np.ndarray]:
-    """Extract estimator from pipeline and transform X through preprocessing."""
+def _extract_estimator_transform_and_feature_names(
+    model: Any,
+    X: np.ndarray,
+    feature_names: Optional[List[str]] = None,
+) -> Tuple[Any, np.ndarray, Optional[List[str]]]:
+    """Extract estimator from pipeline and transform X (and feature names) through preprocessing."""
     estimator = model
+    names = feature_names
+
     if hasattr(model, "named_steps"):
         step_names = list(model.named_steps.keys())
         estimator = model.named_steps[step_names[-1]]
-        
+
+        steps = [(n, model.named_steps[n]) for n in step_names[:-1]]
+        if names is not None:
+            # Apply selector-aware name mapping first (so it follows the fitted support masks).
+            names = transform_feature_names_through_steps(steps, names)
+            # PCA does not expose stable feature names; use component labels.
+            for _, step in steps:
+                if isinstance(step, PCA):
+                    try:
+                        n_out = int(getattr(step, "n_components_", 0) or 0)
+                    except Exception:
+                        n_out = 0
+                    if n_out > 0:
+                        names = [f"PC{i+1}" for i in range(n_out)]
+
         X_transformed = X
-        for name in step_names[:-1]:
-            step = model.named_steps[name]
+        for _, step in steps:
             if hasattr(step, "transform"):
                 X_transformed = step.transform(X_transformed)
         X = X_transformed
-    
-    return estimator, X
+
+    return estimator, X, names
 
 
 def _create_predict_fn(model: Any):
@@ -197,8 +218,10 @@ def compute_shap_values(
     
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])
-    
-    estimator, X = _extract_estimator_and_transform(model, X)
+
+    estimator, X, feature_names = _extract_estimator_transform_and_feature_names(
+        model, X, feature_names
+    )
     
     rng = np.random.default_rng(seed)
     
@@ -223,10 +246,15 @@ def compute_shap_values(
     expected_value = explainer.expected_value
     shap_values, expected_value = _handle_binary_classification_output(shap_values, expected_value)
     
+    if feature_names is None:
+        feature_names = _generate_feature_names(X.shape[1])
+    if shap_values.shape[1] != len(feature_names):
+        feature_names = _generate_feature_names(shap_values.shape[1])
+
     return SHAPResult(
         shap_values=shap_values,
         expected_value=expected_value,
-        feature_names=feature_names[:shap_values.shape[1]],  # Adjust for preprocessing
+        feature_names=feature_names,
         X=X,
     )
 
@@ -307,8 +335,8 @@ def compute_shap_for_cv_folds(
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])
     
-    # Collect SHAP values from each fold
-    all_shap_importance = []
+    # Collect SHAP importances from each fold (feature-name keyed for robustness)
+    fold_importances: List[pd.DataFrame] = []
     
     for fold_idx, (train_idx, test_idx) in enumerate(cv_splits):
         X_train, X_test = X[train_idx], X[test_idx]
@@ -322,28 +350,35 @@ def compute_shap_for_cv_folds(
             result = compute_shap_values(
                 model, X_test, feature_names, seed=seed + fold_idx
             )
-            all_shap_importance.append(result.mean_abs_shap)
+            if result.importance_df is not None and not result.importance_df.empty:
+                df = result.importance_df[["feature", "shap_importance"]].copy()
+                df["fold"] = int(fold_idx)
+                fold_importances.append(df)
         except (RuntimeError, ImportError) as e:
             continue
     
-    if not all_shap_importance:
+    if not fold_importances:
         return pd.DataFrame()
-    
-    # Aggregate across folds
-    stacked = np.stack(all_shap_importance)
-    mean_importance = np.mean(stacked, axis=0)
-    std_importance = np.std(stacked, axis=0)
-    
-    n_features = len(mean_importance)
-    if n_features != len(feature_names):
-        feature_names = _generate_feature_names(n_features)
-    
-    return pd.DataFrame({
-        "feature": feature_names,
-        "shap_importance": mean_importance,
-        "shap_std": std_importance,
-        "n_folds": len(all_shap_importance),
-    }).sort_values("shap_importance", ascending=False).reset_index(drop=True)
+
+    merged = pd.concat(fold_importances, axis=0, ignore_index=True)
+    n_folds_used = len({int(v) for v in merged["fold"].unique().tolist()})
+    n_folds_attempted = int(len(cv_splits))
+
+    agg = (
+        merged.groupby("feature", as_index=False)["shap_importance"]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+        .rename(
+            columns={
+                "mean": "shap_importance",
+                "std": "shap_std_across_folds",
+                "count": "n_folds_present",
+            }
+        )
+    )
+    agg["n_folds_used"] = int(n_folds_used)
+    agg["n_folds_attempted"] = int(n_folds_attempted)
+    return agg.sort_values("shap_importance", ascending=False).reset_index(drop=True)
 
 
 ###################################################################
@@ -386,7 +421,9 @@ def compute_shap_interactions(
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])
     
-    estimator, _ = _extract_estimator_and_transform(model, X)
+    estimator, X_transformed, feature_names = _extract_estimator_transform_and_feature_names(
+        model, X, feature_names
+    )
     
     if not hasattr(estimator, "feature_importances_"):
         raise ValueError("Interaction analysis requires tree-based model")
@@ -394,7 +431,7 @@ def compute_shap_interactions(
     # Compute interactions
     explainer = shap.TreeExplainer(estimator)
     n_samples = min(500, len(X))
-    shap_interaction = explainer.shap_interaction_values(X[:n_samples])
+    shap_interaction = explainer.shap_interaction_values(X_transformed[:n_samples])
     
     if isinstance(shap_interaction, list):
         shap_interaction, _ = _handle_binary_classification_output(shap_interaction, None)
@@ -403,6 +440,8 @@ def compute_shap_interactions(
     mean_interaction = np.mean(np.abs(shap_interaction), axis=0)
     
     # Extract top interactions
+    if feature_names is None:
+        feature_names = _generate_feature_names(X_transformed.shape[1])
     n_features = min(max_features, len(feature_names))
     
     # Get indices of top features by main effect

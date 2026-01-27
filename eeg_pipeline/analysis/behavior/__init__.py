@@ -30,7 +30,6 @@ from eeg_pipeline.analysis.behavior.api import (
     run_mediation_analysis,
     run_multilevel_correlation_analysis,
     run_pain_sensitivity_correlations,
-    run_power_topomap_correlations,
     run_unified_feature_correlations,
     split_by_condition,
     FeatureRegistry,
@@ -41,8 +40,6 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     interpret_correlation,
 )
 from eeg_pipeline.utils.analysis.stats.fdr import (
-    apply_global_fdr,
-    compute_effective_n,
     fdr_correction,
 )
 from eeg_pipeline.utils.parallel import (
@@ -78,10 +75,9 @@ __all__ = [
     "compute_temporal_from_context",
     "compute_time_frequency_correlations",
     "compute_temporal_correlations_by_condition",
-    # Cluster and topomap helpers
+    # Cluster helpers
     "compute_two_condition_time_cluster_test",
     "run_cluster_test_from_context",
-    "run_power_topomap_correlations",
     # Advanced models
     "fit_mixed_effects_model",
     "compute_icc",
@@ -97,8 +93,6 @@ __all__ = [
     "interpret_effect_size",
     "interpret_correlation",
     "fdr_correction",
-    "apply_global_fdr",
-    "compute_effective_n",
     # Parallel utilities
     "get_n_jobs",
     "parallel_map",

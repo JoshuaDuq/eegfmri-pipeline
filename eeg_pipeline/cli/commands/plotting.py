@@ -1610,11 +1610,17 @@ def _render_plots_with_per_plot_config(
             if definition.ml_mode == "regression":
                 results_dir = deriv_root / "machine_learning" / "regression"
                 visualize_regression_from_disk(results_dir=results_dir, config=plot_config)
+            elif definition.ml_mode == "regression_within":
+                results_dir = deriv_root / "machine_learning" / "within_subject_regression"
+                visualize_regression_from_disk(results_dir=results_dir, config=plot_config)
             elif definition.ml_mode == "timegen":
                 results_dir = deriv_root / "machine_learning" / "time_generalization"
                 visualize_time_generalization_from_disk(results_dir=results_dir, config=plot_config)
             elif definition.ml_mode == "classify":
                 results_dir = deriv_root / "machine_learning" / "classification"
+                visualize_classification_from_disk(results_dir=results_dir, config=plot_config)
+            elif definition.ml_mode == "classify_within":
+                results_dir = deriv_root / "machine_learning" / "within_subject_classification"
                 visualize_classification_from_disk(results_dir=results_dir, config=plot_config)
 
 
@@ -1700,11 +1706,17 @@ def _render_plots_without_per_plot_config(
         if "regression" in ml_modes:
             results_dir = deriv_root / "machine_learning" / "regression"
             visualize_regression_from_disk(results_dir=results_dir, config=config)
+        if "regression_within" in ml_modes:
+            results_dir = deriv_root / "machine_learning" / "within_subject_regression"
+            visualize_regression_from_disk(results_dir=results_dir, config=config)
         if "timegen" in ml_modes:
             results_dir = deriv_root / "machine_learning" / "time_generalization"
             visualize_time_generalization_from_disk(results_dir=results_dir, config=config)
         if "classify" in ml_modes:
             results_dir = deriv_root / "machine_learning" / "classification"
+            visualize_classification_from_disk(results_dir=results_dir, config=config)
+        if "classify_within" in ml_modes:
+            results_dir = deriv_root / "machine_learning" / "within_subject_classification"
             visualize_classification_from_disk(results_dir=results_dir, config=config)
 
 

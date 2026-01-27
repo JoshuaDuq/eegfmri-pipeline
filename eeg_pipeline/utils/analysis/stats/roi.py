@@ -7,106 +7,12 @@ Region of interest and masked statistics.
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
-import pandas as pd
 from scipy import stats
 
-from .base import _safe_float, get_statistics_constants
-
-
-def extract_roi_statistics(
-    df: Optional[pd.DataFrame],
-    roi_name: str,
-    band_name: str,
-) -> Optional[pd.Series]:
-    """Extract ROI statistics from dataframe matching ROI and band names.
-
-    Args:
-        df: Dataframe containing ROI statistics with 'roi' and 'band' columns.
-        roi_name: Name of the ROI to extract (case-insensitive).
-        band_name: Name of the frequency band to extract (case-insensitive).
-
-    Returns:
-        Series containing the matching row, or None if no match found or
-        dataframe is invalid.
-    """
-    if df is None:
-        return None
-    if df.empty:
-        return None
-    if "roi" not in df.columns or "band" not in df.columns:
-        return None
-
-    band_match = df["band"].astype(str).str.lower() == band_name.lower()
-    roi_match = df["roi"].astype(str).str.lower() == roi_name.lower()
-    mask = band_match & roi_match
-
-    if not mask.any():
-        return None
-    return df.loc[mask].iloc[0]
-
-
-def extract_overall_statistics(
-    df: Optional[pd.DataFrame],
-    band_name: str,
-    overall_keys: Optional[List[str]] = None,
-) -> Optional[pd.Series]:
-    """Extract overall statistics for a frequency band.
-
-    Attempts to find statistics using common overall ROI names.
-
-    Args:
-        df: Dataframe containing ROI statistics.
-        band_name: Name of the frequency band to extract.
-        overall_keys: List of ROI names to try for overall statistics.
-            Defaults to ["overall", "all", "global"].
-
-    Returns:
-        Series containing the matching overall statistics, or None if not found.
-    """
-    if overall_keys is None:
-        overall_keys = ["overall", "all", "global"]
-
-    for key in overall_keys:
-        row = extract_roi_statistics(df, key, band_name)
-        if row is not None:
-            return row
-    return None
-
-
-def update_stats_from_dataframe(
-    stats_df: Optional[pd.Series],
-    r_val: float,
-    p_val: float,
-    n_eff: int,
-    ci_val: Tuple[float, float],
-) -> Tuple[float, float, int, Tuple[float, float]]:
-    """Update statistics from dataframe row, using defaults if missing.
-
-    Args:
-        stats_df: Series containing statistics (may have 'r', 'p', 'n',
-            'r_ci_low', 'r_ci_high' keys).
-        r_val: Default correlation value.
-        p_val: Default p-value.
-        n_eff: Default effective sample size.
-        ci_val: Default confidence interval (low, high).
-
-    Returns:
-        Tuple of (r, p, n, (ci_low, ci_high)) with values from dataframe
-        or defaults.
-    """
-    if stats_df is None:
-        return r_val, p_val, n_eff, ci_val
-
-    r = _safe_float(stats_df.get("r", r_val))
-    p = _safe_float(stats_df.get("p", p_val))
-    n = int(stats_df.get("n", n_eff))
-    ci_low = _safe_float(stats_df.get("r_ci_low", ci_val[0]))
-    ci_high = _safe_float(stats_df.get("r_ci_high", ci_val[1]))
-
-    return r, p, n, (ci_low, ci_high)
+from .base import get_statistics_constants
 
 
 def compute_roi_percentage_change(
@@ -191,50 +97,5 @@ def compute_roi_pvalue(
         return None
 
 
-def compute_statistics_for_mask(
-    data_values: pd.Series,
-    mask: np.ndarray,
-) -> Tuple[float, float]:
-    """Compute mean and standard error of the mean (SEM) for masked data.
-
-    Args:
-        data_values: Series of data values.
-        mask: Boolean mask to select values.
-
-    Returns:
-        Tuple of (mean, sem). Returns (0.0, 0.0) if no valid data.
-    """
-    masked_values = data_values[mask].to_numpy()
-    valid_values = masked_values[np.isfinite(masked_values)]
-
-    if len(valid_values) == 0:
-        return 0.0, 0.0
-
-    mean = float(np.mean(valid_values))
-    n_samples = len(valid_values)
-    sem = float(np.std(valid_values) / np.sqrt(n_samples)) if n_samples > 1 else 0.0
-
-    return mean, sem
 
 
-def compute_coverage_statistics(
-    coverage_values: pd.Series,
-    nonpain_mask: np.ndarray,
-    pain_mask: np.ndarray,
-) -> Tuple[float, float, float, float]:
-    """Compute coverage statistics for non-pain and pain conditions.
-
-    Args:
-        coverage_values: Series of coverage values.
-        nonpain_mask: Boolean mask for non-pain condition.
-        pain_mask: Boolean mask for pain condition.
-
-    Returns:
-        Tuple of (mean_nonpain, mean_pain, sem_nonpain, sem_pain).
-    """
-    mean_nonpain, sem_nonpain = compute_statistics_for_mask(
-        coverage_values, nonpain_mask
-    )
-    mean_pain, sem_pain = compute_statistics_for_mask(coverage_values, pain_mask)
-
-    return mean_nonpain, mean_pain, sem_nonpain, sem_pain

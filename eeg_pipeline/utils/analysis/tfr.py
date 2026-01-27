@@ -10,13 +10,9 @@ import mne
 import numpy as np
 import pandas as pd
 
-from ..config.loader import load_config, get_constants, get_config_value, ensure_config, get_frequency_bands
+from ..config.loader import get_constants, get_config_value, ensure_config, get_frequency_bands
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.windowing import (
-    build_time_windows_fixed_count,
-    build_time_windows_fixed_size_clamped,
-    time_mask_loose,
-    time_mask_strict,
     time_mask,
     freq_mask,
 )
@@ -32,7 +28,6 @@ from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 ###################################################################
 
 # Numerical constants
-_EPSILON_MIN_VALUE = 1e-12
 _PERCENT_TO_RATIO_DIVISOR = 100.0
 
 def _get_tfr_constants(config=None):
@@ -538,74 +533,6 @@ def compute_tfr_for_subject(
     return tfr, baseline_df, baseline_cols, b_start, b_end
 
 
-def normalize_power_with_baseline(
-    pow_df: pd.DataFrame,
-    baseline_df: pd.DataFrame,
-    config,
-    logger: logging.Logger,
-) -> pd.DataFrame:
-    """
-    Convert raw band/bin power to log10-ratio using pre-stimulus baseline means:
-        log10(mean_bin / mean_baseline)
-    """
-    if baseline_df is None or baseline_df.empty:
-        logger.error("Baseline features missing; cannot normalize power features.")
-        return pow_df
-
-    epsilon = float(config.get("feature_engineering.constants.epsilon_std", _EPSILON_MIN_VALUE))
-    pow_numeric = pow_df.apply(pd.to_numeric, errors="coerce")
-    baseline_numeric = baseline_df.apply(pd.to_numeric, errors="coerce")
-
-    # Canonical NamingSchema patterns
-    # power_<segment>_<band>_ch_<channel>_<stat>
-    pow_pattern = re.compile(r"^power_([^_]+)_([^_]+)_ch_(.+)_(.+)$")
-    # power_baseline_<band>_ch_<channel>_mean
-    baseline_pattern = re.compile(r"^power_baseline_([^_]+)_ch_(.+)_mean$")
-
-    baseline_lookup: Dict[Tuple[str, str], np.ndarray] = {}
-    for col in baseline_numeric.columns:
-        col_str = str(col)
-        match = baseline_pattern.match(col_str)
-        if match:
-            band, ch = match.groups()
-            baseline_lookup[(band, ch)] = baseline_numeric[col].to_numpy(dtype=float)
-            continue
-
-    pow_norm = pow_numeric.copy()
-    missing: List[Tuple[str, str]] = []
-
-    for col in pow_numeric.columns:
-        col_str = str(col)
-
-        band = None
-        ch = None
-        match = pow_pattern.match(col_str)
-        if match:
-            _segment, band, ch, _stat = match.groups()
-
-        if band is None or ch is None:
-            continue
-
-        baseline_vals = baseline_lookup.get((band, ch))
-        if baseline_vals is None:
-            missing.append((band, ch))
-            pow_norm[col] = np.nan
-            continue
-
-        baseline_safe = np.where(baseline_vals > 0, baseline_vals, np.nan)
-        vals = pow_numeric[col].to_numpy(dtype=float)
-        pow_norm[col] = np.log10((vals + epsilon) / (baseline_safe + epsilon))
-
-    if missing:
-        missing_labels = ", ".join(sorted({f"{b}:{c}" for b, c in missing}))
-        logger.warning(
-            "Missing baseline columns for %d power features; set to NaN: %s",
-            len(set(missing)),
-            missing_labels,
-        )
-
-    pow_norm.columns = pow_df.columns
-    return pow_norm
 
 
 ###################################################################
@@ -618,39 +545,6 @@ def extract_eeg_channels(epochs: mne.Epochs) -> List[str]:
         if epochs.get_channel_types(picks=[ch])[0] == "eeg"
     ]
 
-def find_common_eeg_channels(epochs_dict: Dict[str, Any]) -> List[str]:
-    if not epochs_dict:
-        return []
-    
-    eeg_channel_sets = [
-        set(extract_eeg_channels(epochs))
-        for epochs in epochs_dict.values()
-    ]
-    
-    if not eeg_channel_sets:
-        return []
-    
-    if len(eeg_channel_sets) == 1:
-        return sorted(list(eeg_channel_sets[0]))
-    
-    return sorted(list(set.intersection(*eeg_channel_sets)))
-
-def find_common_channels_across_subjects(
-    subject_epochs_map: Dict[str, mne.Epochs],
-    subjects: List[str]
-) -> List[str]:
-    if not subjects:
-        return []
-    
-    channel_sets = [
-        set(extract_eeg_channels(subject_epochs_map[subj]))
-        for subj in subjects
-    ]
-    
-    if len(channel_sets) == 1:
-        return sorted(list(channel_sets[0]))
-    
-    return sorted(list(set.intersection(*channel_sets)))
 
 def find_common_channels_train_test(
     train_subjects: List[str],
@@ -670,28 +564,6 @@ def find_common_channels_train_test(
     test_channels = set(extract_eeg_channels(subj_to_epochs[test_subject]))
     return sorted([ch for ch in common_train if ch in test_channels])
 
-def prepare_bands_data_for_topomap(bands_to_df: Dict[str, pd.DataFrame], 
-                                    fdr_alpha: float) -> List[Dict]:
-    if not bands_to_df:
-        return []
-    
-    bands_data = []
-    for band, df_band in bands_to_df.items():
-        if df_band.empty or "channel" not in df_band.columns:
-            continue
-        
-        channels = df_band["channel"].astype(str).tolist()
-        correlations = df_band["r_group"].to_numpy()
-        p_values = df_band["p_group"].to_numpy()
-        sig_mask = np.isfinite(p_values) & (p_values < fdr_alpha)
-        bands_data.append({
-            "band": band,
-            "channels": channels,
-            "correlations": correlations,
-            "p_values": p_values,
-            "significant_mask": sig_mask,
-        })
-    return bands_data
 
 
 ###################################################################
@@ -753,130 +625,6 @@ def build_rois_from_info(info: mne.Info, config=None) -> Dict[str, List[str]]:
     return rois
 
 
-def extract_hemisphere_from_node(node_name: str) -> Optional[str]:
-    if not node_name:
-        return None
-    
-    hemisphere_tokens = ("LH", "RH")
-    tokens = node_name.split("_")
-    for token in tokens:
-        if token in hemisphere_tokens:
-            return token
-    
-    hemisphere_pattern = r"(?:^|_)(LH|RH)_([A-Za-z]+)"
-    match = re.search(hemisphere_pattern, node_name)
-    if match:
-        return match.group(1)
-    
-    return None
-
-
-def extract_system_from_node(node_name: str) -> Optional[str]:
-    if not node_name:
-        return None
-    
-    brain_systems = {"Vis", "SomMot", "DorsAttn", "SalVentAttn", "Limbic", "Cont", "Default"}
-    tokens = node_name.split("_")
-    for token in tokens:
-        if token in brain_systems:
-            return token
-    
-    hemisphere_pattern = r"(?:^|_)(LH|RH)_([A-Za-z]+)"
-    match = re.search(hemisphere_pattern, node_name)
-    if match:
-        candidate_system = match.group(2)
-        if candidate_system in brain_systems:
-            return candidate_system
-    
-    return None
-
-
-def build_roi_name(system: str, hemisphere: Optional[str], hemisphere_split: bool) -> str:
-    if not hemisphere_split or not hemisphere:
-        return system
-    return f"{system}_{hemisphere}"
-
-
-def build_atlas_rois_from_nodes(
-    node_list: List[str],
-    hemisphere_split: bool = True,
-) -> Dict[str, List[str]]:
-    if not node_list:
-        return {}
-    
-    roi_nodes: Dict[str, List[str]] = {}
-    for node_name in node_list:
-        if not node_name:
-            continue
-        
-        system = extract_system_from_node(node_name)
-        if system is None:
-            continue
-        
-        hemisphere = extract_hemisphere_from_node(node_name)
-        roi_name = build_roi_name(system, hemisphere, hemisphere_split)
-        roi_nodes.setdefault(roi_name, []).append(node_name)
-    
-    return roi_nodes
-
-
-def get_summary_type(roi_i: str, roi_j: str) -> str:
-    return "within" if roi_i == roi_j else "between"
-
-
-def build_summary_map_from_roi_nodes(
-    roi_map: Dict[str, List[str]],
-    prefix: str,
-    column_names: List[str],
-) -> Dict[Tuple[str, str], List[str]]:
-    if not roi_map or not column_names:
-        return {}
-    
-    summary_map: Dict[Tuple[str, str], List[str]] = {}
-    prefix_with_sep = prefix + "_"
-    
-    for column_name in column_names:
-        if not column_name.startswith(prefix_with_sep):
-            continue
-        
-        node_pair_str = column_name.split(prefix_with_sep, 1)[-1]
-        if "__" not in node_pair_str:
-            continue
-        
-        node_a, node_b = node_pair_str.split("__", 1)
-        roi_a = _find_roi_for_node(roi_map, node_a)
-        roi_b = _find_roi_for_node(roi_map, node_b)
-        
-        if roi_a is not None and roi_b is not None:
-            roi_pair = (roi_a, roi_b)
-            summary_map.setdefault(roi_pair, []).append(column_name)
-    
-    return summary_map
-
-
-def _find_roi_for_node(roi_map: Dict[str, List[str]], node: str) -> Optional[str]:
-    for roi_name, nodes in roi_map.items():
-        if node in nodes:
-            return roi_name
-    return None
-
-
-def extract_node_pair_from_column(
-    column_name: str,
-    prefix: str,
-) -> Optional[Tuple[str, str]]:
-    if not column_name.startswith(prefix + "_"):
-        return None
-    
-    node_pair_str = column_name.split(prefix + "_", 1)[-1]
-    if "__" not in node_pair_str:
-        return None
-    
-    parts = node_pair_str.split("__", 1)
-    if len(parts) != 2:
-        return None
-    
-    return (parts[0], parts[1])
 
 
 ###################################################################
@@ -928,82 +676,6 @@ def _get_config_float(config: Optional[Any], key: str, default: float) -> float:
     return float(config.get(key, default))
 
 
-def log_tfr_resolution(
-    freqs: np.ndarray,
-    n_cycles: np.ndarray,
-    sfreq: float,
-    logger: Optional[logging.Logger] = None,
-    config: Optional[Any] = None
-) -> None:
-    logger = _get_logger(logger)
-    constants = _get_tfr_constants(config)
-
-    time_res = n_cycles / freqs
-    freq_res = freqs / n_cycles
-
-    logger.info("TFR Resolution Summary:")
-    logger.info(f"  Frequency range: {freqs.min():.1f} - {freqs.max():.1f} Hz")
-    logger.info(f"  n_cycles range: {n_cycles.min():.1f} - {n_cycles.max():.1f}")
-    logger.info(f"  Time resolution: {time_res.min():.3f} - {time_res.max():.3f} s")
-    logger.info(f"  Frequency resolution: {freq_res.min():.2f} - {freq_res.max():.2f} Hz")
-
-    low_freq_mask = freqs <= constants["low_freq_threshold"]
-    if np.any(low_freq_mask):
-        low_cycles = n_cycles[low_freq_mask]
-        if np.any(low_cycles < constants["low_cycles_warning_threshold"]):
-            logger.warning(f"Low n_cycles detected in theta/alpha: min={low_cycles.min():.1f}")
-        else:
-            logger.info(f"Good low-frequency resolution: min n_cycles={low_cycles.min():.1f}")
-
-
-def validate_tfr_parameters(
-    freqs: np.ndarray,
-    n_cycles: np.ndarray,
-    sfreq: float,
-    logger: Optional[logging.Logger] = None,
-    config: Optional[Any] = None
-) -> bool:
-    logger = _get_logger(logger)
-    issues = []
-    
-    min_cycles_check = _get_config_float(
-        config, "time_frequency_analysis.tfr.min_cycles_check", 2.0
-    )
-    if np.any(n_cycles < min_cycles_check):
-        issues.append(f"n_cycles too low: min={n_cycles.min():.1f}")
-    
-    nyquist = sfreq / 2
-    if np.any(freqs >= nyquist):
-        issues.append(f"Frequencies above Nyquist: max_freq={freqs.max():.1f}, Nyquist={nyquist:.1f}")
-    
-    max_time_res = np.max(n_cycles / freqs)
-    min_freq = np.min(freqs)
-    time_res_threshold = _get_time_res_threshold(min_freq, config)
-    
-    if max_time_res > time_res_threshold:
-        issues.append(
-            f"Excessive time resolution: max={max_time_res:.1f}s "
-            f"(threshold={time_res_threshold:.1f}s for min_freq={min_freq:.1f}Hz)"
-        )
-
-    if issues:
-        for issue in issues:
-            logger.warning(f"TFR parameter issue: {issue}")
-        return False
-
-    logger.info("TFR parameters validation passed")
-    return True
-
-
-def _get_time_res_threshold(min_freq: float, config: Optional[Any]) -> float:
-    constants = _get_tfr_constants(config)
-    if min_freq <= constants["freq_threshold_for_time_res"]:
-        return _get_config_float(
-            config, "time_frequency_analysis.tfr.time_res_threshold_low_freq", 5.0
-        )
-    return _get_config_float(
-        config, "time_frequency_analysis.tfr.time_res_threshold_high_freq", 2.0
-    )
 
 
 def _get_logger(logger: Optional[logging.Logger]) -> logging.Logger:
@@ -1075,226 +747,6 @@ def get_bands_for_tfr(
 ###################################################################
 # TFR I/O with Unit Standardization
 ###################################################################
-
-def read_tfr_average_with_logratio(
-    tfr_path: Union[str, "os.PathLike[str]"],
-    baseline_window: Tuple[float, float],
-    logger: Optional[logging.Logger] = None,
-    min_baseline_samples: Optional[int] = None,
-    config: Optional[Any] = None,
-) -> Optional["mne.time_frequency.AverageTFR"]:
-    if min_baseline_samples is None:
-        config = ensure_config(config)
-        min_baseline_samples = _get_min_baseline_samples(config)
-    logger = _get_logger(logger)
-    
-    tfr_obj = _load_tfr_from_path(tfr_path, logger)
-    if tfr_obj is None:
-        return None
-    
-    if _has_baseline_sentinel(tfr_obj, config=config):
-        # Ensure the saved baseline window matches the requested one
-        saved_baseline = _extract_baseline_from_comment(tfr_obj, baseline_window)
-        if not np.allclose(saved_baseline, baseline_window, atol=1e-6):
-            logger.warning(
-                "Baseline window mismatch for %s: saved %s vs requested %s. "
-                "Skipping this TFR to avoid mixing heterogeneous baselines.",
-                tfr_path, saved_baseline, baseline_window,
-            )
-            return None
-        logger.info(
-            f"TFR at {tfr_path} already has baseline correction marker; "
-            f"skipping baseline application to prevent double correction."
-        )
-        return tfr_obj
-
-    mode_detected, detected_by_sidecar = _detect_baseline_mode(tfr_obj, tfr_path, logger)
-
-    if mode_detected is None:
-        saved_baseline = _extract_baseline_from_comment(tfr_obj, baseline_window)
-        if not np.allclose(saved_baseline, baseline_window, atol=1e-6):
-            logger.warning(
-                "No baseline marker for %s and stored baseline %s does not match requested %s; skipping to avoid mixing baselines.",
-                tfr_path, saved_baseline, baseline_window,
-            )
-            return None
-        return _apply_baseline_if_needed(
-            tfr_obj, baseline_window, min_baseline_samples, logger, tfr_path, config=config
-        )
-
-    if mode_detected == "logratio":
-        return tfr_obj
-
-    saved_baseline = _extract_baseline_from_comment(tfr_obj, baseline_window)
-    if not np.allclose(saved_baseline, baseline_window, atol=1e-6):
-        logger.warning(
-            "Baseline window mismatch for %s: saved %s vs requested %s; skipping conversion to avoid mixing baselines.",
-            tfr_path, saved_baseline, baseline_window,
-        )
-        return None
-    
-    if mode_detected == "ratio":
-        return _convert_ratio_to_logratio(tfr_obj, tfr_path, logger, detected_by_sidecar, config=config)
-    
-    if mode_detected == "percent":
-        return _convert_percent_to_logratio(tfr_obj, tfr_path, logger, detected_by_sidecar, config=config)
-
-    return None
-
-
-def _load_tfr_from_path(
-    tfr_path: Union[str, "os.PathLike[str]"],
-    logger: logging.Logger
-) -> Optional["mne.time_frequency.AverageTFR"]:
-    try:
-        read = getattr(mne.time_frequency, "read_tfrs", None)
-        if read is None:
-            logger.warning(f"read_tfrs unavailable for {tfr_path}")
-            return None
-
-        tfrs = read(str(tfr_path))
-        if tfrs is None:
-            logger.warning(f"read_tfrs returned None for {tfr_path}")
-            return None
-            
-        if not isinstance(tfrs, list):
-            tfrs = [tfrs]
-            
-        if len(tfrs) == 0:
-            logger.warning(f"No TFRs found in {tfr_path}")
-            return None
-
-        tfr_obj = tfrs[0]
-        data = getattr(tfr_obj, "data", None)
-        if data is not None and getattr(data, "ndim", 0) == 4:
-            tfr_obj = tfr_obj.average()
-        
-        return tfr_obj
-    except (OSError, ValueError) as e:
-        logger.warning(f"Error reading TFR from {tfr_path}: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error reading TFR from {tfr_path}: {e}")
-        raise
-
-
-def _has_baseline_sentinel(tfr_obj: Any, config: Optional[Any] = None) -> bool:
-    constants = _get_tfr_constants(config)
-    comment = getattr(tfr_obj, "comment", None)
-    return isinstance(comment, str) and constants["baseline_sentinel"] in comment
-
-
-def _convert_ratio_to_logratio(
-    tfr_obj: Any,
-    tfr_path: Union[str, "os.PathLike[str]"],
-    logger: logging.Logger,
-    verified: bool,
-    config: Optional[Any] = None
-) -> Optional["mne.time_frequency.AverageTFR"]:
-    if not verified:
-        logger.error(
-            f"{tfr_path}: detected 'ratio' but sidecar verification failed. "
-            f"Refusing conversion to prevent invalid results."
-        )
-        return None
-    
-    constants = _get_tfr_constants(config)
-    min_log_value = constants["min_log_value"]
-    tfr_obj.data = np.log10(np.maximum(tfr_obj.data, min_log_value))
-    if hasattr(tfr_obj, "comment"):
-        tfr_obj.comment = (tfr_obj.comment or "") + " | converted ratio->log10ratio"
-    return tfr_obj
-
-
-def _convert_percent_to_logratio(
-    tfr_obj: Any,
-    tfr_path: Union[str, "os.PathLike[str]"],
-    logger: logging.Logger,
-    verified: bool,
-    config: Optional[Any] = None
-) -> Optional["mne.time_frequency.AverageTFR"]:
-    if not verified:
-        logger.error(
-            f"{tfr_path}: detected 'percent' but sidecar verification failed. "
-            f"Refusing conversion to prevent invalid results."
-        )
-        return None
-    
-    constants = _get_tfr_constants(config)
-    min_log_value = constants["min_log_value"]
-    ratio = 1.0 + (tfr_obj.data / _PERCENT_TO_RATIO_DIVISOR)
-    tfr_obj.data = np.log10(np.clip(ratio, min_log_value, np.inf))
-    if hasattr(tfr_obj, "comment"):
-        tfr_obj.comment = (tfr_obj.comment or "") + " | converted percent->log10ratio"
-    return tfr_obj
-
-
-def _detect_baseline_mode(
-    tfr_obj: Any,
-    tfr_path: Union[str, "os.PathLike[str]"],
-    logger: logging.Logger,
-) -> Tuple[Optional[str], bool]:
-    sidecar_path = str(tfr_path).rsplit(".", 1)[0] + ".json"
-    
-    try:
-        with open(sidecar_path, "r", encoding="utf-8") as f:
-            metadata = json.load(f)
-        
-        if not bool(metadata.get("baseline_applied", False)):
-            return None, False
-        
-        mode_detected = str(metadata.get("baseline_mode", "")).strip().lower() or None
-        if mode_detected is None:
-            return None, False
-        
-        if mode_detected not in {"logratio", "ratio", "percent"}:
-            logger.warning(
-                f"Unsupported baseline mode '{mode_detected}' "
-                f"from sidecar for {tfr_path}; skipping."
-            )
-            return None, False
-        
-        comment = getattr(tfr_obj, "comment", "") or str(tfr_path)
-        logger.info(f"{comment}: Sidecar found. Baseline mode={mode_detected}")
-        return mode_detected, True
-        
-    except FileNotFoundError:
-        logger.warning(
-            f"Missing TFR sidecar for {tfr_path}. "
-            f"Cannot determine baseline units from sidecar. "
-            f"Will apply fallback baseline correction."
-        )
-        return None, False
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning(f"Failed reading TFR sidecar for {tfr_path}: {exc}")
-        return None, False
-
-
-def _apply_baseline_if_needed(
-    tfr_obj: Any,
-    baseline_window: Tuple[float, float],
-    min_baseline_samples: int,
-    logger: logging.Logger,
-    tfr_path: Union[str, "os.PathLike[str]"],
-    config: Optional[Any] = None,
-) -> Optional["mne.time_frequency.AverageTFR"]:
-    try:
-        # Use canonical baseline application so the baseline sentinel is recorded,
-        # preventing accidental double-baselining downstream.
-        apply_baseline_safe(
-            tfr_obj,
-            baseline=baseline_window,
-            mode="logratio",
-            logger=logger,
-            min_samples=min_baseline_samples,
-            config=config,
-        )
-    except ValueError as e:
-        logger.warning(f"Baseline validation failed for {tfr_path}: {e}")
-        return None
-
-    return tfr_obj
-
 
 def save_tfr_with_sidecar(
     tfr: Union["mne.time_frequency.EpochsTFR", "mne.time_frequency.AverageTFR"],
@@ -1506,50 +958,6 @@ def validate_baseline_indices(
     return b_start, b_end, idx
 
 
-def validate_active_window_for_times(
-    times: np.ndarray,
-    active_window: Optional[Tuple[float, float]] = None,
-    logger: Optional[logging.Logger] = None,
-    config=None,
-) -> Tuple[float, float, np.ndarray]:
-    config = ensure_config(config)
-    
-    if active_window is None:
-        active_window = tuple(config.get("time_frequency_analysis.active_window"))
-    
-    active_start, active_end = active_window
-    
-    if active_start >= active_end:
-        raise ValueError(
-            f"Active window invalid: start ({active_start}) must be < end ({active_end})"
-        )
-    
-    if active_start < 0:
-        raise ValueError(
-            f"Active window must start at or after stimulus onset (0 s), got start={active_start}"
-        )
-    
-    mask = (times >= active_start) & (times < active_end)
-    idx = np.where(mask)[0]
-    
-    if len(idx) < 1:
-        raise ValueError(
-            f"Active window [{active_start:.3f}, {active_end:.3f}] s contains no samples "
-            f"for time range [{times.min():.3f}, {times.max():.3f}] s"
-        )
-    
-    if logger is not None:
-        actual_tmin = float(times[idx[0]])
-        actual_tmax = float(times[idx[-1]])
-        logger.info(
-            f"Active window [{active_start:.3f}, {active_end:.3f}] s maps to "
-            f"indices [{idx[0]}, {idx[-1]}] with actual timespan [{actual_tmin:.3f}, {actual_tmax:.3f}] s "
-            f"(n_samples={len(idx)})"
-        )
-    
-    return active_start, active_end, idx
-
-
 def _check_baseline_already_applied(
     tfr_obj: Any,
     force: bool,
@@ -1699,44 +1107,6 @@ def _add_baseline_comment(
         tfr_obj.comment = baseline_tag
 
 
-def log_baseline_qc(
-    tfr_obj,
-    baseline: Tuple[Optional[float], Optional[float]],
-    min_samples: Optional[int] = None,
-    logger: Optional[logging.Logger] = None,
-    config: Optional[Any] = None,
-):
-    if min_samples is None:
-        config = ensure_config(config)
-        min_samples = _get_min_baseline_samples(config)
-    logger = _get_logger(logger)
-    constants = _get_tfr_constants(config)
-
-    times = np.asarray(tfr_obj.times)
-    b_start, b_end, idx = validate_baseline_indices(times, baseline, min_samples=min_samples, logger=logger, config=config)
-    
-    base = tfr_obj.data[:, :, :, idx]
-    temporal_std = np.nanstd(base, axis=-1)
-    med_temporal_std = float(np.nanmedian(temporal_std))
-    epoch_means = np.nanmean(base, axis=(1, 2, 3))
-    med = float(np.nanmedian(epoch_means))
-    mad = float(np.nanmedian(np.abs(epoch_means - med)))
-    min_divisor = constants["min_divisor"]
-    divisor = abs(med) if abs(med) > min_divisor else min_divisor
-    rcv = float(constants["mad_scaling_factor"] * mad / divisor)
-    n_time = int(len(idx))
-    
-    msg = (
-        f"Baseline QC: n_time={n_time}, median_temporal_std={med_temporal_std:.3g}, "
-        f"epoch_MAD={mad:.3g}, RCV={rcv:.3g}"
-    )
-    logger.info(msg)
-    
-    has_finite_metrics = np.isfinite(med_temporal_std) and np.isfinite(rcv)
-    if not has_finite_metrics:
-        logger.warning("Baseline QC: non-finite metrics detected; baseline may be unstable.")
-
-
 def apply_baseline_and_crop(
     tfr_obj,
     baseline: Tuple[Optional[float], Optional[float]],
@@ -1830,235 +1200,13 @@ def average_tfr_band(tfr_avg, fmin: float, fmax: float, tmin: float, tmax: float
     return sel.mean(axis=(1, 2))
 
 
-def extract_epochwise_channel_values(tfr_epochs, fmin: float, fmax: float, tmin: float, tmax: float):
-    freqs = np.asarray(tfr_epochs.freqs)
-    times = np.asarray(tfr_epochs.times)
-    fmask = (freqs >= float(fmin)) & (freqs <= float(fmax))
-    tmask = (times >= float(tmin)) & (times < float(tmax))
-    if fmask.sum() == 0 or tmask.sum() == 0:
-        return None
-    data = np.asarray(tfr_epochs.data)[:, :, fmask, :][:, :, :, tmask]
-    return data.mean(axis=(2, 3))
 
 
-def effective_active_window(
-    times: np.ndarray,
-    requested: Tuple[float, float]
-) -> Tuple[Optional[float], Optional[float], np.ndarray]:
-    t_arr = np.asarray(times)
-    tmin_req, tmax_req = float(requested[0]), float(requested[1])
-    tmin_eff = float(max(t_arr.min(), tmin_req))
-    tmax_eff = float(min(t_arr.max(), tmax_req))
-    if not np.isfinite(tmin_eff) or not np.isfinite(tmax_eff) or tmax_eff <= tmin_eff:
-        return None, None, np.zeros_like(t_arr, dtype=bool)
-    tmask = (t_arr >= tmin_eff) & (t_arr < tmax_eff)
-    return tmin_eff, tmax_eff, tmask
-
-
-def band_time_masks(
-    freqs: np.ndarray,
-    times: np.ndarray,
-    fmin: float,
-    fmax: float,
-    tmin: float,
-    tmax: float,
-) -> Tuple[np.ndarray, np.ndarray]:
-    f_arr = np.asarray(freqs)
-    t_arr = np.asarray(times)
-    fmask = (f_arr >= float(fmin)) & (f_arr <= float(fmax))
-    tmask = (t_arr >= float(tmin)) & (t_arr < float(tmax))
-    return fmask, tmask
-
-
-def find_tfr_path(subject: str, task: str, deriv_root: Path) -> Optional[Path]:
-    primary_path = deriv_root / f"sub-{subject}" / "eeg" / f"sub-{subject}_task-{task}_power_epo-tfr.h5"
-    if primary_path.exists():
-        return primary_path
-    
-    eeg_dir = deriv_root / f"sub-{subject}" / "eeg"
-    if eeg_dir.exists():
-        candidates = sorted(eeg_dir.glob(f"sub-{subject}_task-{task}*_epo-tfr.h5"))
-        if candidates:
-            return candidates[0]
-    
-    subj_dir = deriv_root / f"sub-{subject}"
-    if subj_dir.exists():
-        candidates = sorted(subj_dir.rglob(f"sub-{subject}_task-{task}*_epo-tfr.h5"))
-        if candidates:
-            return candidates[0]
-    
-    return None
-
-
-###################################################################
-# Subject-Level TFR Computation
-###################################################################
-
-def compute_subject_tfr(
-    subject: str,
-    task: str,
-    freq_min: float,
-    freq_max: float,
-    n_freqs: int,
-    n_cycles_factor: float,
-    tfr_decim: int,
-    tfr_picks: Union[str, list],
-    workers: Optional[int] = None,
-    logger: Optional[logging.Logger] = None,
-) -> Tuple[Optional["mne.time_frequency.EpochsTFR"], Optional[pd.DataFrame]]:
-    from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
-    
-    config = load_config()
-    epochs, events_df = load_epochs_for_analysis(
-        subject, task, align="strict", preload=True,
-        deriv_root=config.deriv_root, bids_root=config.bids_root,
-        config=config, logger=logger
-    )
-    
-    if epochs is None:
-        if logger:
-            logger.error(f"No cleaned epochs for sub-{subject}, task-{task}")
-        return None, None
-    
-    if events_df is None:
-        if logger:
-            logger.warning("Events missing; contrasts will be skipped for this subject.")
-    else:
-        _validate_trial_indices(events_df, logger)
-    
-    freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
-    n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
-    workers_default = resolve_tfr_workers(workers_default=workers if workers is not None else -1)
-    
-    resolved_picks = _resolve_picks(epochs, tfr_picks) if isinstance(tfr_picks, str) else tfr_picks
-    
-    compute_kwargs = dict(
-        method="morlet",
-        freqs=freqs,
-        n_cycles=n_cycles,
-        decim=tfr_decim,
-        picks=resolved_picks,
-        use_fft=True,
-        return_itc=False,
-        average=False,
-    )
-
-    try:
-        power = epochs.compute_tfr(**compute_kwargs, n_jobs=workers_default)
-    except PermissionError as exc:
-        if workers_default not in (None, 1) and logger is not None:
-            logger.warning(
-                "Subject TFR computation failed with PermissionError using n_jobs=%s; retrying with n_jobs=1. Error=%s",
-                str(workers_default),
-                str(exc),
-            )
-            power = epochs.compute_tfr(**compute_kwargs, n_jobs=1)
-        else:
-            raise
-    
-    return power, events_df
-
-
-def _validate_trial_indices(events_df: pd.DataFrame, logger: Optional[logging.Logger]) -> None:
-    trial_cols = ["trial", "trial_number", "trial_index"]
-    trial_col = next((c for c in trial_cols if c in events_df.columns), None)
-    if trial_col is None:
-        return
-    
-    trial_vals = pd.to_numeric(events_df[trial_col], errors="coerce")
-    run_col = next((c for c in ["run_id", "run", "run_number"] if c in events_df.columns), None)
-    
-    if run_col is not None:
-        _validate_multi_run_trials(events_df, trial_col, run_col, logger)
-    else:
-        _validate_single_run_trials(trial_vals, trial_col, logger)
-
-
-def _validate_multi_run_trials(
-    events_df: pd.DataFrame,
-    trial_col: str,
-    run_col: str,
-    logger: Optional[logging.Logger]
-) -> None:
-    grouped = events_df.groupby(run_col)[trial_col]
-    within_run_dups = grouped.apply(
-        lambda x: pd.to_numeric(x, errors="coerce").duplicated().sum()
-    ).sum()
-    
-    if within_run_dups > 0:
-        error_msg = (
-            f"CRITICAL: Trial index column '{trial_col}' has {within_run_dups} duplicates within runs. "
-            f"This indicates a serious alignment issue."
-        )
-        if logger:
-            logger.error(error_msg)
-        raise ValueError(error_msg)
-    
-    if logger:
-        logger.debug(
-            f"Trial indices validated: {len(events_df)} trials across {events_df[run_col].nunique()} runs "
-            f"(trial numbers reset per run, which is expected)."
-        )
-
-
-def _validate_single_run_trials(
-    trial_vals: pd.Series,
-    trial_col: str,
-    logger: Optional[logging.Logger]
-) -> None:
-    if trial_vals.duplicated().any():
-        n_dup = trial_vals.duplicated().sum()
-        error_msg = (
-            f"CRITICAL: Trial index column '{trial_col}' has {n_dup} duplicates. "
-            f"This indicates a serious alignment issue where multiple epochs map to the same trial."
-        )
-        if logger:
-            logger.error(error_msg)
-        raise ValueError(error_msg)
-    
-    if not trial_vals.is_monotonic_increasing and not trial_vals.is_monotonic_decreasing:
-        n_gaps = (trial_vals.diff() != 1).sum() - 1
-        if logger:
-            logger.debug(
-                f"Trial index column '{trial_col}' is non-monotonic ({n_gaps} gaps). "
-                f"This is expected when trials were dropped during preprocessing."
-            )
 
 
 ###################################################################
 # Group ROI Helpers
 ###################################################################
-
-def collect_group_temperatures(
-    events_by_subj: List[Optional[pd.DataFrame]],
-    temperature_columns: List[str],
-) -> List[float]:
-    temps = set()
-    for ev in events_by_subj:
-        if ev is None:
-            continue
-        tcol = None
-        for c in temperature_columns:
-            if c in ev.columns:
-                tcol = c
-                break
-        if tcol is None:
-            continue
-        vals = pd.to_numeric(ev[tcol], errors="coerce").round(1).dropna().unique()
-        for v in vals:
-            temps.add(float(v))
-    return sorted(temps)
-
-
-def avg_alltrials_to_avg_tfr(
-    power: "mne.time_frequency.EpochsTFR",
-    baseline: Tuple[Optional[float], Optional[float]],
-    logger: Optional[logging.Logger] = None,
-) -> "mne.time_frequency.AverageTFR":
-    tfr_avg = power.copy().average()
-    apply_baseline_and_crop(tfr_avg, baseline=baseline, mode="logratio", logger=logger)
-    return tfr_avg
-
 
 def avg_by_mask_to_avg_tfr(
     power: "mne.time_frequency.EpochsTFR",
@@ -2071,99 +1219,6 @@ def avg_by_mask_to_avg_tfr(
     return t
 
 
-def align_avg_tfrs(
-    tfr_list: List["mne.time_frequency.AverageTFR"],
-    logger: Optional[logging.Logger] = None,
-) -> Tuple[Optional[mne.Info], Optional[np.ndarray]]:
-    if not tfr_list:
-        return None, None
-    tfr_list = [t for t in tfr_list if t is not None]
-    if not tfr_list:
-        return None, None
-    base = tfr_list[0]
-    base_times = np.asarray(base.times)
-    base_freqs = np.asarray(base.freqs)
-    base_chs = list(base.info["ch_names"])
-    keep: List[Tuple[str, "mne.time_frequency.AverageTFR"]] = [("S0", base)]
-    for i, tfr in enumerate(tfr_list[1:], start=1):
-        ok = np.allclose(tfr.times, base_times) and np.allclose(tfr.freqs, base_freqs)
-        if not ok:
-            if logger:
-                logger.warning(f"Skipping subject {i}: times/freqs mismatch for group alignment")
-            continue
-        keep.append((f"S{i}", tfr))
-    if len(keep) == 0:
-        return None, None
-    ch_sets = [set(t.info["ch_names"]) for _, t in keep]
-    common = list(sorted(set.intersection(*ch_sets))) if ch_sets else []
-    if len(common) == 0:
-        if logger:
-            logger.warning("No common channels across subjects; cannot align")
-        return None, None
-    arrs = []
-    for tag, t in keep:
-        idxs = [t.info["ch_names"].index(ch) for ch in common]
-        arrs.append(np.asarray(t.data)[idxs, :, :])
-    data = np.stack(arrs, axis=0)
-    pick_inds = [base_chs.index(ch) for ch in common]
-    info_common = mne.pick_info(base.info, pick_inds)
-    return info_common, data
-
-
-def align_paired_avg_tfrs(
-    list_a: List["mne.time_frequency.AverageTFR"],
-    list_b: List["mne.time_frequency.AverageTFR"],
-    logger: Optional[logging.Logger] = None,
-) -> Tuple[Optional[mne.Info], Optional[np.ndarray], Optional[np.ndarray]]:
-    if not list_a or not list_b:
-        return None, None, None
-    n = min(len(list_a), len(list_b))
-    pairs = []
-    for i in range(n):
-        a = list_a[i]
-        b = list_b[i]
-        if a is None or b is None:
-            continue
-        pairs.append((a, b))
-    if not pairs:
-        return None, None, None
-    base_a, base_b = pairs[0]
-    base_times = np.asarray(base_a.times)
-    base_freqs = np.asarray(base_a.freqs)
-    keep: list[tuple["mne.time_frequency.AverageTFR", "mne.time_frequency.AverageTFR"]] = []
-    for idx, (a, b) in enumerate(pairs):
-        ok = (
-            np.allclose(a.times, base_times) and np.allclose(a.freqs, base_freqs)
-            and np.allclose(b.times, base_times) and np.allclose(b.freqs, base_freqs)
-        )
-        if not ok:
-            if logger:
-                logger.warning(f"Skipping subject pair {idx}: times/freqs mismatch for paired alignment")
-            continue
-        keep.append((a, b))
-    if not keep:
-        return None, None, None
-    per_pair_common = []
-    for a, b in keep:
-        per_pair_common.append(set(a.info["ch_names"]) & set(b.info["ch_names"]))
-    common = list(sorted(set.intersection(*per_pair_common))) if per_pair_common else []
-    if len(common) == 0:
-        if logger:
-            logger.warning("Paired alignment: no common channels across retained pairs")
-        return None, None, None
-    
-    data_a = []
-    data_b = []
-    for a, b in keep:
-        idx_a = [a.info["ch_names"].index(ch) for ch in common]
-        idx_b = [b.info["ch_names"].index(ch) for ch in common]
-        data_a.append(np.asarray(a.data)[idx_a, :, :])
-        data_b.append(np.asarray(b.data)[idx_b, :, :])
-    data_a_arr = np.stack(data_a, axis=0)
-    data_b_arr = np.stack(data_b, axis=0)
-    pick_inds = [base_a.info["ch_names"].index(ch) for ch in common]
-    info_common = mne.pick_info(base_a.info, pick_inds)
-    return info_common, data_a_arr, data_b_arr
 
 
 ###################################################################
@@ -2183,133 +1238,8 @@ def clip_time_range(times: np.ndarray, tmin_req: float, tmax_req: float) -> Opti
     return tmin_clip, tmax_clip
 
 
-def clip_time_window(
-    time_window: Tuple[float, float],
-    tfr_times: np.ndarray,
-    logger: Optional[logging.Logger] = None,
-) -> Optional[Tuple[float, float]]:
-    tmin_req = _safe_float(time_window[0])
-    tmax_req = _safe_float(time_window[1])
-    tmin_avail = float(tfr_times[0])
-    tmax_avail = float(tfr_times[-1])
-    tmin_clip = max(tmin_req, tmin_avail)
-    tmax_clip = min(tmax_req, tmax_avail)
-    
-    is_invalid_window = tmin_clip > tmax_clip
-    if is_invalid_window:
-        if logger:
-            logger.warning(
-                f"Requested window [{tmin_req}, {tmax_req}] outside TFR range "
-                f"[{tmin_avail}, {tmax_avail}]; aborting TF correlation computation"
-            )
-        return None
-    
-    return (tmin_clip, tmax_clip)
 
 
-###################################################################
-# TFR Time Series Extraction Utilities
-###################################################################
-
-def extract_band_series_from_tfr(
-    tfr: "mne.time_frequency.AverageTFR",
-    fmin: float,
-    fmax: float
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    if tfr is None or fmin >= fmax:
-        return None, None
-    
-    freq_mask = (tfr.freqs >= fmin) & (tfr.freqs <= fmax)
-    if freq_mask.sum() == 0:
-        return None, None
-    
-    series_logr = np.nanmean(tfr.data[:, freq_mask, :], axis=(0, 1))
-    ratio_data = np.power(10.0, tfr.data[:, freq_mask, :])
-    series_ratio = np.nanmean(ratio_data, axis=(0, 1))
-    
-    return series_logr, series_ratio
-
-
-def interpolate_to_reference_times(
-    values: np.ndarray,
-    times: np.ndarray,
-    reference_times: np.ndarray,
-    config: Optional[Any] = None
-) -> np.ndarray:
-    has_empty_inputs = (
-        values.size == 0 or 
-        times.size == 0 or 
-        reference_times.size == 0
-    )
-    if has_empty_inputs:
-        return np.full_like(reference_times, np.nan)
-    
-    constants = _get_tfr_constants(config)
-    finite_mask = np.isfinite(values)
-    n_finite = finite_mask.sum()
-    min_samples = constants["min_samples_for_stats"]
-    
-    if n_finite < min_samples:
-        return np.full_like(reference_times, np.nan)
-    
-    has_missing_values = n_finite < len(values)
-    if has_missing_values:
-        values = np.interp(times, times[finite_mask], values[finite_mask])
-    
-    return np.interp(reference_times, times, values)
-
-
-def extract_band_time_courses(
-    tfr_list: List["mne.time_frequency.AverageTFR"],
-    bands: List[str],
-    freq_bands: Dict[str, Tuple[float, float]],
-    tmin: float,
-    tmax: float,
-    config: Optional[Any] = None,
-) -> Tuple[Dict[str, List[np.ndarray]], Dict[str, List[np.ndarray]], np.ndarray]:
-    if not tfr_list or not bands or not freq_bands:
-        return {}, {}, np.array([])
-    
-    reference = tfr_list[0]
-    ref_mask = time_mask(reference.times, tmin, tmax)
-    reference_times = reference.times[ref_mask]
-    
-    band_timecourses_logr = {band: [] for band in bands}
-    band_timecourses_pct = {band: [] for band in bands}
-    
-    for tfr in tfr_list:
-        for band in bands:
-            if band not in freq_bands:
-                continue
-            
-            fmin, fmax = freq_bands[band]
-            series_logr, series_ratio = extract_band_series_from_tfr(tfr, fmin, fmax)
-            
-            if series_logr is None:
-                continue
-            
-            time_mask_subj = time_mask(tfr.times, tmin, tmax)
-            constants = _get_tfr_constants(config)
-            if time_mask_subj.sum() < constants["min_samples_for_stats"]:
-                continue
-            
-            times_subj = tfr.times[time_mask_subj]
-            values_logr = series_logr[time_mask_subj]
-            values_ratio = series_ratio[time_mask_subj]
-            
-            has_finite_logr = np.any(np.isfinite(values_logr))
-            has_finite_ratio = np.any(np.isfinite(values_ratio))
-            if not has_finite_logr and not has_finite_ratio:
-                continue
-            
-            values_logr_ref = interpolate_to_reference_times(values_logr, times_subj, reference_times, config=config)
-            values_ratio_ref = interpolate_to_reference_times(values_ratio, times_subj, reference_times, config=config)
-            
-            band_timecourses_logr[band].append(values_logr_ref)
-            values_pct = _PERCENT_TO_RATIO_DIVISOR * (values_ratio_ref - 1.0)
-            band_timecourses_pct[band].append(values_pct)
-    
-    return band_timecourses_logr, band_timecourses_pct, reference_times
 
 
 ###################################################################
@@ -2349,10 +1279,6 @@ def extract_trial_band_power(tfr_epochs, fmin: float, fmax: float, tmin: float, 
     den = np.nansum(np.where(finite, w3, 0.0), axis=-1)
     out = np.where(den > 0, num / den, np.nan)
     return out
-
-
-def extract_band_channel_means(tfr_avg, freq_mask: np.ndarray) -> np.ndarray:
-    return tfr_avg.data[:, freq_mask, :].mean(axis=(1, 2))
 
 
 def build_roi_channel_mask(ch_names: List[str], roi_channels: List[str]) -> np.ndarray:
@@ -2446,118 +1372,8 @@ def extract_tfr_object(tfr: Any):
     return tfr[0] if isinstance(tfr, list) else tfr
 
 
-def extract_band_power(
-    tfr_data: np.ndarray,
-    freqs: np.ndarray,
-    fmin: float,
-    fmax: float,
-    time_mask_array: np.ndarray,
-) -> Optional[np.ndarray]:
-    freq_mask_indices = freq_mask(freqs, fmin, fmax)
-    if not np.any(freq_mask_indices):
-        return None
-    
-    band_data = tfr_data[:, :, freq_mask_indices, :][:, :, :, time_mask_array]
-    freqs_band = freqs[freq_mask_indices]
-    if freqs_band.size < 2:
-        return None
-    
-    band_power_freq_int = np.trapz(band_data, freqs_band, axis=2)
-    return band_power_freq_int.mean(axis=2)
 
 
-def process_temporal_bin(
-    tfr_data: np.ndarray,
-    freqs: np.ndarray,
-    times: np.ndarray,
-    channel_names: List[str],
-    band: str,
-    fmin: float,
-    fmax: float,
-    time_start: float,
-    time_end: float,
-    time_label: str,
-    logger: Optional[logging.Logger] = None,
-) -> Optional[Tuple[np.ndarray, List[str]]]:
-    logger = _get_logger(logger)
-    
-    time_mask_array = time_mask(times, time_start, time_end)
-    if not np.any(time_mask_array):
-        logger.warning(
-            f"No time points in bin {time_label} ({time_start}-{time_end}s) for band '{band}'"
-        )
-        return None
-    
-    band_power = extract_band_power(tfr_data, freqs, fmin, fmax, time_mask_array)
-    if band_power is None:
-        return None
-    
-    column_names = [
-        NamingSchema.build("power", time_label, band, "ch", "mean", channel=ch)
-        for ch in channel_names
-    ]
-    return band_power, column_names
-
-
-def compute_itpc_map(tfr_data: np.ndarray, logger: Optional[logging.Logger] = None) -> np.ndarray:
-    """
-    Compute inter-trial phase coherence (ITPC) map from complex TFR data.
-    
-    Uses memory-efficient accumulation to avoid allocating full unit-phase array.
-    
-    Parameters
-    ----------
-    tfr_data : np.ndarray
-        Array with shape (epochs, channels, freqs, times) containing complex values
-    logger : Optional[logging.Logger]
-        Optional logger for warnings
-        
-    Returns
-    -------
-    np.ndarray
-        ITPC map with shape (channels, freqs, times) with values in [0, 1]
-    """
-    logger = _get_logger(logger)
-    if tfr_data.ndim != 4:
-        raise ValueError(f"Expected 4D TFR data (epochs, channels, freqs, times); got {tfr_data.shape}")
-    if not np.iscomplexobj(tfr_data):
-        logger.warning("ITPC requested but TFR data is not complex; ITPC values will be zero.")
-        return np.zeros(tfr_data.shape[1:], dtype=float)
-
-    n_epochs, n_ch, n_freq, n_time = tfr_data.shape
-    sum_real = np.zeros((n_ch, n_freq, n_time), dtype=np.float64)
-    sum_imag = np.zeros((n_ch, n_freq, n_time), dtype=np.float64)
-
-    for epoch_idx in range(n_epochs):
-        epoch = tfr_data[epoch_idx]
-        amp = np.abs(epoch) + _EPSILON_MIN_VALUE
-        unit = epoch / amp
-        sum_real += unit.real
-        sum_imag += unit.imag
-
-    mean_complex = (sum_real + 1j * sum_imag) / float(n_epochs)
-    itpc = np.abs(mean_complex).astype(np.float32)
-    return itpc
-
-
-def compute_itpc_band_time(
-    itpc_map: np.ndarray,
-    freqs: np.ndarray,
-    times: np.ndarray,
-    fmin: float,
-    fmax: float,
-    tmin: float,
-    tmax: float,
-) -> Optional[np.ndarray]:
-    """
-    Extract mean ITPC per channel within a frequency band and time window.
-    Returns None when masks are empty.
-    """
-    f_mask = freq_mask(freqs, fmin, fmax)
-    t_mask = time_mask(times, tmin, tmax)
-    if not np.any(f_mask) or not np.any(t_mask):
-        return None
-    return itpc_map[:, f_mask, :][:, :, t_mask].mean(axis=(1, 2))
 
 
 def create_tfr_subset(tfr, n: int):
@@ -2593,49 +1409,27 @@ __all__ = [
     "get_rois",
     "get_tfr_config",
     "compute_adaptive_n_cycles",
-    "log_tfr_resolution",
-    "validate_tfr_parameters",
     "resolve_tfr_workers",
     "get_bands_for_tfr",
-    "read_tfr_average_with_logratio",
     "save_tfr_with_sidecar",
     "validate_baseline_window",
     "validate_baseline_indices",
     "apply_baseline_safe",
     "apply_baseline_and_crop",
-    "log_baseline_qc",
     "average_tfr_band",
-    "extract_epochwise_channel_values",
-    "effective_active_window",
-    "band_time_masks",
     "time_mask",
     "freq_mask",
-    "compute_subject_tfr",
-    "collect_group_temperatures",
-    "avg_alltrials_to_avg_tfr",
     "avg_by_mask_to_avg_tfr",
-    "align_avg_tfrs",
-    "align_paired_avg_tfrs",
-    "clip_time_window",
     "clip_time_range",
     # TFR data extraction utilities
     "extract_trial_band_power",
-    "extract_band_channel_means",
     # ROI processing utilities
     "build_roi_channel_mask",
     "extract_significant_roi_channels",
     "extract_roi_from_tfr",
     "extract_roi_contrast_data",
-    # TFR time series extraction utilities
-    "extract_band_series_from_tfr",
-    "interpolate_to_reference_times",
-    "extract_band_time_courses",
     # TFR object extraction utilities
     "extract_tfr_object",
-    "extract_band_power",
-    "process_temporal_bin",
-    "compute_itpc_map",
-    "compute_itpc_band_time",
     # TFR manipulation utilities
     "create_tfr_subset",
     "apply_baseline_and_average",

@@ -27,16 +27,6 @@ def format_p_value(p: Optional[float]) -> str:
         return f"p={p:.2f}"
 
 
-def format_correlation_text(r_val: float, p_val: Optional[float] = None) -> str:
-    """Format correlation coefficient for display."""
-    if r_val is None or not isinstance(r_val, (int, float)):
-        return "r=N/A"
-    text = f"r={r_val:.2f}"
-    if p_val is not None:
-        text += f" ({format_p_value(p_val)})"
-    return text
-
-
 def format_cluster_ann(
     p: Optional[float],
     k: Optional[int] = None,
@@ -59,25 +49,6 @@ def format_cluster_ann(
         parts.append("*")
 
     return " ".join(parts)
-
-
-def format_fdr_ann(
-    q_min: Optional[float],
-    k_rej: Optional[int],
-    alpha: Optional[float] = None,
-    config: Optional[Any] = None,
-) -> str:
-    """Format FDR correction annotation."""
-    if alpha is None:
-        alpha = get_fdr_alpha(config)
-
-    if q_min is None:
-        return "FDR: no tests"
-
-    if k_rej is None or k_rej == 0:
-        return f"FDR q={q_min:.3f} (none sig)"
-
-    return f"FDR q={q_min:.3f} ({k_rej} sig at α={alpha})"
 
 
 def format_correlation_stats_text(

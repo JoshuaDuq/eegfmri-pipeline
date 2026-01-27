@@ -33,13 +33,13 @@ from eeg_pipeline.utils.analysis.stats.effect_size import (
 )
 from eeg_pipeline.utils.analysis.stats.mixed_effects import (
     MixedEffectsResult,
-    compute_icc,
     fit_mixed_effects_model,
     run_mediation_analysis,
     run_multilevel_correlation_analysis,
 )
 from eeg_pipeline.utils.analysis.stats.reliability import (
     compute_correlation_split_half_reliability as compute_split_half_reliability,
+    compute_icc,
 )
 from eeg_pipeline.utils.analysis.stats.temporal import (
     compute_time_frequency_correlations,
@@ -51,7 +51,6 @@ from eeg_pipeline.utils.analysis.stats.cluster import (
     compute_two_condition_time_cluster_test,
     _run_cluster_test_core,
 )
-from eeg_pipeline.utils.analysis.stats.topomaps import run_power_topomap_correlations
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -121,6 +120,4 @@ __all__ = [
     "compute_temporal_from_context",
     "compute_time_frequency_correlations",
     "compute_temporal_correlations_by_condition",
-    # Topomaps
-    "run_power_topomap_correlations",
 ]

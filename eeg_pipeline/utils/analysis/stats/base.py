@@ -178,29 +178,6 @@ def get_subject_seed(base_seed: int, subject: str) -> int:
     return int.from_bytes(digest[:8], byteorder="big") % (2**31)
 
 
-def safe_get_config_value(config: Any, key: str, default: Any) -> Any:
-    """Safely get a value from config object, returning default if unavailable.
-    
-    This is a convenience wrapper around get_config_value that handles
-    cases where config might be None or not have the expected structure.
-    
-    Parameters
-    ----------
-    config : Any
-        Configuration object (dict-like or object with get method)
-    key : str
-        Configuration key to retrieve
-    default : Any
-        Default value if key is not found
-        
-    Returns
-    -------
-    Any
-        Configuration value or default
-    """
-    return get_config_value(config, key, default)
-
-
 def _safe_float(value: Any) -> float:
     """Safely convert value to float, returning NaN on failure.
     

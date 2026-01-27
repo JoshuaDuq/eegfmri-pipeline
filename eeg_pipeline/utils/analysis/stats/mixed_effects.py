@@ -9,9 +9,6 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.analysis.stats.reliability import (
-    compute_icc_from_dataframe,
-)
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.analysis.stats.base import get_fdr_alpha
 from eeg_pipeline.utils.analysis.stats.mediation import analyze_mediation_for_features
@@ -275,9 +272,6 @@ def fit_mixed_effects_model(
     }
 
 
-compute_icc = compute_icc_from_dataframe
-
-
 def run_multilevel_correlation_analysis(
     df: pd.DataFrame,
     feature_cols: list[str],
@@ -385,7 +379,6 @@ def run_mediation_analysis(
 __all__ = [
     "MixedEffectsResult",
     "fit_mixed_effects_model",
-    "compute_icc",
     "run_multilevel_correlation_analysis",
     "run_mediation_analysis",
 ]

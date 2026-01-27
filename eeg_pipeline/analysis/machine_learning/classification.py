@@ -54,13 +54,42 @@ from sklearn.model_selection import (
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
+from sklearn.decomposition import PCA
 
 from eeg_pipeline.analysis.machine_learning.config import get_ml_config
+from eeg_pipeline.analysis.machine_learning.preprocessing import (
+    DropAllNaNColumns,
+    ReplaceInfWithNaN,
+    VarianceThreshold,
+)
 
 
 ###################################################################
 # Pipeline Factories
 ###################################################################
+
+def _build_base_preprocessing_steps(cfg: Dict[str, Any], include_scaling: bool) -> List[Tuple[str, Any]]:
+    steps: List[Tuple[str, Any]] = [
+        ("finite", ReplaceInfWithNaN()),
+        ("drop_all_nan", DropAllNaNColumns()),
+        ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
+        ("var", VarianceThreshold(threshold=cfg["variance_threshold"])),
+    ]
+    if include_scaling:
+        steps.append(("scale", StandardScaler()))
+        if cfg.get("pca_enabled", False):
+            steps.append(
+                (
+                    "pca",
+                    PCA(
+                        n_components=cfg.get("pca_n_components", 0.95),
+                        whiten=bool(cfg.get("pca_whiten", False)),
+                        random_state=cfg.get("pca_random_state", None),
+                        svd_solver=str(cfg.get("pca_svd_solver", "auto")),
+                    ),
+                )
+            )
+    return steps
 
 
 def create_svm_pipeline(
@@ -90,16 +119,19 @@ def create_svm_pipeline(
     """
     cfg = get_ml_config(config)
 
-    return Pipeline([
-        ("impute", SimpleImputer(strategy="median")),
-        ("scale", StandardScaler()),
-        ("svm", SVC(
-            kernel=kernel,
-            probability=True,
-            random_state=seed,
-            class_weight=cfg["svm_class_weight"],
-        )),
-    ])
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True)
+    steps.append(
+        (
+            "svm",
+            SVC(
+                kernel=kernel,
+                probability=True,
+                random_state=seed,
+                class_weight=cfg["svm_class_weight"],
+            ),
+        )
+    )
+    return Pipeline(steps)
 
 
 def create_logistic_pipeline(
@@ -131,17 +163,20 @@ def create_logistic_pipeline(
 
     solver = "saga" if penalty in ("l1", "elasticnet") else "lbfgs"
 
-    return Pipeline([
-        ("impute", SimpleImputer(strategy="median")),
-        ("scale", StandardScaler()),
-        ("lr", LogisticRegression(
-            penalty=penalty,
-            solver=solver,
-            max_iter=cfg["lr_max_iter"],
-            random_state=seed,
-            class_weight=cfg["lr_class_weight"],
-        )),
-    ])
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True)
+    steps.append(
+        (
+            "lr",
+            LogisticRegression(
+                penalty=penalty,
+                solver=solver,
+                max_iter=cfg["lr_max_iter"],
+                random_state=seed,
+                class_weight=cfg["lr_class_weight"],
+            ),
+        )
+    )
+    return Pipeline(steps)
 
 
 def create_rf_classification_pipeline(
@@ -168,16 +203,19 @@ def create_rf_classification_pipeline(
     """
     cfg = get_ml_config(config)
 
-    return Pipeline([
-        ("impute", SimpleImputer(strategy="median")),
-        # No scaling needed for RF
-        ("rf", RandomForestClassifier(
-            n_estimators=cfg["rf_n_estimators"],
-            random_state=seed,
-            class_weight=cfg["rf_class_weight"],
-            n_jobs=-1,
-        )),
-    ])
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=False)
+    steps.append(
+        (
+            "rf",
+            RandomForestClassifier(
+                n_estimators=cfg["rf_n_estimators"],
+                random_state=seed,
+                class_weight=cfg["rf_class_weight"],
+                n_jobs=-1,
+            ),
+        )
+    )
+    return Pipeline(steps)
 
 
 def create_ensemble_pipeline(
@@ -189,20 +227,37 @@ def create_ensemble_pipeline(
     
     Soft voting uses probability predictions for better calibration.
     """
-    svm = create_svm_pipeline(seed=seed, config=config).named_steps["svm"]
-    lr = create_logistic_pipeline(seed=seed, config=config).named_steps["lr"]
-    rf = create_rf_classification_pipeline(seed=seed, config=config).named_steps["rf"]
+    cfg = get_ml_config(config)
+
+    svm = SVC(
+        kernel=cfg["svm_kernel"],
+        probability=True,
+        random_state=seed,
+        class_weight=cfg["svm_class_weight"],
+    )
+    solver = "saga" if cfg["lr_penalty"] in ("l1", "elasticnet") else "lbfgs"
+    lr = LogisticRegression(
+        penalty=cfg["lr_penalty"],
+        solver=solver,
+        max_iter=cfg["lr_max_iter"],
+        random_state=seed,
+        class_weight=cfg["lr_class_weight"],
+    )
+    rf = RandomForestClassifier(
+        n_estimators=cfg["rf_n_estimators"],
+        random_state=seed,
+        class_weight=cfg["rf_class_weight"],
+        n_jobs=-1,
+    )
 
     ensemble = VotingClassifier(
         estimators=[("svm", svm), ("lr", lr), ("rf", rf)],
         voting="soft",
     )
 
-    return Pipeline([
-        ("impute", SimpleImputer(strategy="median")),
-        ("scale", StandardScaler()),
-        ("ensemble", ensemble),
-    ])
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True)
+    steps.append(("ensemble", ensemble))
+    return Pipeline(steps)
 
 
 ###################################################################
@@ -216,6 +271,7 @@ def build_svm_param_grid(config: Any = None) -> Dict[str, List]:
     return {
         "svm__C": cfg["svm_C_grid"],
         "svm__gamma": cfg["svm_gamma_grid"],
+        "var__threshold": cfg["variance_threshold_grid"],
     }
 
 
@@ -224,6 +280,7 @@ def build_logistic_param_grid(config: Any = None) -> Dict[str, List]:
     cfg = get_ml_config(config)
     return {
         "lr__C": cfg["lr_C_grid"],
+        "var__threshold": cfg["variance_threshold_grid"],
     }
 
 
@@ -233,6 +290,7 @@ def build_rf_classification_param_grid(config: Any = None) -> Dict[str, List]:
     return {
         "rf__max_depth": cfg["rf_max_depth_grid"],
         "rf__min_samples_leaf": [1, 3, 5],
+        "var__threshold": cfg["variance_threshold_grid"],
     }
 
 
@@ -308,10 +366,19 @@ class ClassificationResult:
                 if mask.sum() < 2:
                     continue
                 y_t, y_p = self.y_true[mask], self.y_pred[mask]
-                self.per_subject_metrics[str(subj)] = {
+                rec: Dict[str, float] = {
                     "accuracy": float(accuracy_score(y_t, y_p)),
                     "n_trials": int(mask.sum()),
                 }
+                if len(np.unique(y_t)) == 2:
+                    rec["balanced_accuracy"] = float(balanced_accuracy_score(y_t, y_p))
+                if self.y_prob is not None and len(np.unique(y_t)) == 2:
+                    try:
+                        rec["auc"] = float(roc_auc_score(y_t, self.y_prob[mask]))
+                        rec["average_precision"] = float(average_precision_score(y_t, self.y_prob[mask]))
+                    except Exception:
+                        pass
+                self.per_subject_metrics[str(subj)] = rec
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -549,6 +616,7 @@ def nested_loso_classification(
             cv=inner_cv,
             n_jobs=-1,
             refit=True,
+            error_score="raise",
         )
         
         try:

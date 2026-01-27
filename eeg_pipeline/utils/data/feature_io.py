@@ -334,49 +334,6 @@ def load_feature_bundle(
     return bundle
 
 
-def load_feature_dfs_for_subjects(
-    subjects: List[str],
-    deriv_root: Path,
-    input_filename_key: str,
-    logger: logging.Logger,
-    config: Any,
-) -> pd.DataFrame:
-    """Load feature dataframes for multiple subjects and concatenate them."""
-    input_filename = config.get(input_filename_key)
-    if not input_filename:
-        logger.warning("Input filename not found in config: %s", input_filename_key)
-        return pd.DataFrame()
-
-    all_dfs = []
-    for subject in subjects:
-        features_dir = deriv_features_path(deriv_root, subject)
-        file_path = features_dir / input_filename
-
-        if not file_path.exists():
-            logger.debug("Features not found for sub-%s at %s", subject, file_path)
-            continue
-
-        try:
-            df = read_table(file_path)
-            if df.empty:
-                continue
-            df.insert(0, "subject", subject)
-            all_dfs.append(df)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning(
-                "Failed to read features for sub-%s at %s: %s", subject, file_path, exc
-            )
-            continue
-
-    if not all_dfs:
-        logger.warning(
-            "No features found for %s across any subject", input_filename_key
-        )
-        return pd.DataFrame()
-
-    return pd.concat(all_dfs, ignore_index=True)
-
-
 ###################################################################
 # SAVING UTILITIES
 ###################################################################
@@ -937,7 +894,6 @@ def iterate_feature_columns(
 __all__ = [
     "FeatureBundle",
     "load_feature_bundle",
-    "load_feature_dfs_for_subjects",
     "_load_features_and_targets",
     "iterate_feature_columns",
     "save_all_features",

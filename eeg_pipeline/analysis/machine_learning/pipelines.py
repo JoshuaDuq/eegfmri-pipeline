@@ -14,20 +14,39 @@ from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, PowerTransformer
 from sklearn.compose import TransformedTargetRegressor
-from sklearn.feature_selection import VarianceThreshold
+from sklearn.decomposition import PCA
 
 from eeg_pipeline.analysis.machine_learning.config import get_ml_config
+from eeg_pipeline.analysis.machine_learning.preprocessing import (
+    DropAllNaNColumns,
+    ReplaceInfWithNaN,
+    VarianceThreshold,
+)
 
 
 def _build_base_preprocessing_steps(cfg: Dict[str, Any], include_scaling: bool) -> list[tuple[str, Any]]:
     """Build the common preprocessing steps shared by all regression pipelines."""
     steps: list[tuple[str, Any]] = [
+        ("finite", ReplaceInfWithNaN()),
+        ("drop_all_nan", DropAllNaNColumns()),
         ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
         ("var", VarianceThreshold(threshold=cfg["variance_threshold"])),
     ]
 
     if include_scaling:
         steps.append(("scale", StandardScaler()))
+        if cfg.get("pca_enabled", False):
+            steps.append(
+                (
+                    "pca",
+                    PCA(
+                        n_components=cfg.get("pca_n_components", 0.95),
+                        whiten=bool(cfg.get("pca_whiten", False)),
+                        random_state=cfg.get("pca_random_state", None),
+                        svd_solver=str(cfg.get("pca_svd_solver", "auto")),
+                    ),
+                )
+            )
 
     return steps
 

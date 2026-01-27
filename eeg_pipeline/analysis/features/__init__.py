@@ -49,8 +49,6 @@ from eeg_pipeline.analysis.features.normalization import (
 )
 
 from eeg_pipeline.utils.analysis.stats.reliability import (
-    compute_dataframe_reliability as compute_feature_reliability,
-    filter_reliable_features,
     ReliabilityResult,
 )
 
@@ -87,9 +85,6 @@ __all__ = [
     # Normalization
     "normalize_features",
     "FeatureNormalizer",
-    # Reliability
-    "compute_feature_reliability",
-    "filter_reliable_features",
     # Output
     "generate_manifest",
     "save_features_organized",

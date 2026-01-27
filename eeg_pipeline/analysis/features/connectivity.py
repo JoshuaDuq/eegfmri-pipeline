@@ -92,7 +92,7 @@ class ConnectivityConfig:
         if not isinstance(conn_cfg, dict):
             conn_cfg = {}
 
-        measures_cfg = conn_cfg.get("measures", ["wpli2_debiased", "aec"])
+        measures_cfg = conn_cfg.get("measures", ["wpli", "aec"])
         if isinstance(measures_cfg, str):
             measures_cfg = [measures_cfg]
         if not isinstance(measures_cfg, (list, tuple)):
@@ -308,7 +308,7 @@ def _warn_if_phase_connectivity_without_spatial_transform(
     Phase-based measures (wPLI, PLI, ImCoh, PLV) are sensitive to volume conduction.
     Using CSD or Laplacian transform reduces spurious connectivity from field spread.
     """
-    phase_measures = {"wpli", "wpli2_debiased", "imcoh", "plv", "pli"}
+    phase_measures = {"wpli", "imcoh", "plv", "pli"}
     uses_phase = bool(set(m.lower() for m in measures) & phase_measures)
     
     if not uses_phase:
@@ -371,12 +371,12 @@ def _validate_segment_duration_for_connectivity(
 
 def _resolve_phase_measures(conn_cfg: Dict[str, Any]) -> List[str]:
     """Extract phase-based connectivity measures from config dict."""
-    supported_measures = {"wpli", "wpli2_debiased", "imcoh", "plv", "pli"}
+    supported_measures = {"wpli", "imcoh", "plv", "pli"}
     measures_cfg = conn_cfg.get("measures", [])
     if isinstance(measures_cfg, (list, tuple)) and measures_cfg:
         measures = {str(m).strip().lower() for m in measures_cfg}
         measures = measures & supported_measures
-        return [m for m in ("wpli2_debiased", "wpli", "imcoh", "plv", "pli") if m in measures]
+        return [m for m in ("wpli", "imcoh", "plv", "pli") if m in measures]
     return []
 
 
@@ -890,7 +890,7 @@ def extract_connectivity_from_precomputed(
     conn_cfg = ConnectivityConfig.from_dict(config)
 
     # Resolve phase measures from config
-    supported_measures = {"wpli", "wpli2_debiased", "imcoh", "aec", "plv", "pli"}
+    supported_measures = {"wpli", "imcoh", "aec", "plv", "pli"}
     measures_cfg = conn_cfg.measures
     measures = {str(m).strip().lower() for m in measures_cfg}
     unknown = measures - supported_measures
@@ -901,7 +901,6 @@ def extract_connectivity_from_precomputed(
         )
     measures = measures & supported_measures
     enable_wpli = "wpli" in measures
-    enable_wpli2 = "wpli2_debiased" in measures
     enable_imcoh = "imcoh" in measures
     enable_aec = "aec" in measures
     enable_plv = "plv" in measures
@@ -913,7 +912,6 @@ def extract_connectivity_from_precomputed(
     phase_measures = [
         m
         for m, enabled in (
-            ("wpli2_debiased", enable_wpli2),
             ("wpli", enable_wpli),
             ("imcoh", enable_imcoh),
             ("plv", enable_plv),

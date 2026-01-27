@@ -68,7 +68,7 @@
     {
       "key": "machine_learning",
       "label": "Machine Learning",
-      "description": "Machine learning regression and time-generalization"
+      "description": "Machine learning regression, time-generalization, and classification"
     }
   ],
   "plots": [
@@ -589,6 +589,16 @@
       "ml_mode": "regression"
     },
     {
+      "id": "ml_within_subject_regression_plots",
+      "group": "machine_learning",
+      "label": "Within-Subject Regression",
+      "description": "Block-aware within-subject regression diagnostics",
+      "required_files": [
+        "machine_learning/within_subject_regression/cv_predictions.tsv"
+      ],
+      "ml_mode": "regression_within"
+    },
+    {
       "id": "ml_timegen_plots",
       "group": "machine_learning",
       "label": "Time-Generalization",
@@ -597,6 +607,26 @@
         "machine_learning/time_generalization/time_generalization_regression.npz"
       ],
       "ml_mode": "timegen"
+    },
+    {
+      "id": "ml_classification_plots",
+      "group": "machine_learning",
+      "label": "Classification",
+      "description": "LOSO classification diagnostics",
+      "required_files": [
+        "machine_learning/classification/loso_predictions.tsv"
+      ],
+      "ml_mode": "classify"
+    },
+    {
+      "id": "ml_within_subject_classification_plots",
+      "group": "machine_learning",
+      "label": "Within-Subject Classification",
+      "description": "Block-aware within-subject classification diagnostics",
+      "required_files": [
+        "machine_learning/within_subject_classification/cv_predictions.tsv"
+      ],
+      "ml_mode": "classify_within"
     }
   ]
 }

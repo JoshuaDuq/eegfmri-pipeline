@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .base import safe_get_config_value as _get_config_value
+from .base import get_config_value as _get_config_value
 
 
 # Constants

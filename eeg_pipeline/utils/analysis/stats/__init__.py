@@ -21,7 +21,6 @@ Modules:
     - permutation: Permutation tests
     - partial: Partial correlation
     - diagnostics: Regression and model diagnostics
-    - meta_analysis: Meta-analysis utilities
     - mediation: Mediation analysis
     - moderation: Moderation analysis
     - reliability: Reliability and ICC
@@ -49,7 +48,6 @@ from .base import (
     get_n_bootstrap,
     get_config_value,
     ensure_config,
-    safe_get_config_value,
     _safe_float,
 )
 
@@ -58,10 +56,6 @@ from .fdr import (
     fdr_bh_reject,
     fdr_bh_values,
     bh_adjust,
-    filter_significant_predictors,
-    get_cluster_correction_config,
-    compute_fdr_rejections_for_heatmap,
-    build_correlation_matrices_for_prefix,
 )
 
 from .cluster import (
@@ -98,14 +92,12 @@ from .correlation import (
     compute_bayes_factor_correlation,
     compute_robust_correlation,
     compute_loso_correlation_stability,
-    compute_correlation_reliability,
     # Correlation statistics helpers
     compute_correlation_stats,
 )
 
 from .bootstrap import (
     bootstrap_corr_ci,
-    bootstrap_ci_bca,
     bootstrap_mean_diff_ci,
     compute_bootstrap_ci,
 )
@@ -113,9 +105,7 @@ from .bootstrap import (
 from .effect_size import (
     cohens_d,
     hedges_g,
-    fisher_z_test,
     cohens_q,
-    correlation_difference_effect,
     compute_cohens_d_with_bootstrap_ci,
 )
 
@@ -126,24 +116,12 @@ from eeg_pipeline.utils.data.manipulation import extract_pain_masks, extract_dur
 
 from .formatting import (
     format_p_value,
-    format_correlation_text,
     format_cluster_ann,
-    format_fdr_ann,
     format_correlation_stats_text,
 )
 
 from .aggregation import (
-    compute_group_channel_statistics,
-    compute_channel_confidence_interval,
-    pool_data_by_strategy,
-    compute_band_summary_statistics,
-    compute_band_summaries,
-    compute_fisher_transformed_mean,
-    compute_group_band_statistics,
     compute_error_bars_from_ci_dicts,
-    compute_error_bars_from_arrays,
-    count_trials_by_condition,
-    compute_duration_p_value,
 )
 
 from .transforms import (
@@ -151,11 +129,8 @@ from .transforms import (
     zscore_series,
     apply_pooling_strategy,
     prepare_data_for_plotting,
-    prepare_data_without_validation,
-    prepare_group_data,
     prepare_aligned_data,
     fit_aperiodic,
-    fit_aperiodic_to_all_epochs,
     compute_linear_residuals,
     fit_linear_regression,
     compute_binned_statistics,
@@ -165,41 +140,15 @@ from .transforms import (
 from .visualization import (
     compute_kde_scale,
     compute_correlation_vmax,
-    compute_permutation_distribution_data,
-    compute_cluster_mass_histogram_data,
-    compute_pp_plot_data,
-    compute_qq_plot_data,
-    compute_effect_size_distribution_data,
-    compute_bootstrap_distribution_data,
-    compute_raincloud_data,
-    compute_spaghetti_plot_data,
-    compute_correction_comparison_data,
-    create_provenance_block,
-    format_provenance_text,
-    save_stats_for_plot,
 )
 
 from .roi import (
-    extract_roi_statistics,
-    extract_overall_statistics,
-    update_stats_from_dataframe,
     compute_roi_percentage_change,
     compute_roi_pvalue,
-    compute_statistics_for_mask,
-    compute_coverage_statistics,
 )
 
 from .band import (
-    compute_band_spatial_correlation,
-    compute_band_pair_correlation,
-    compute_subject_band_correlation_matrix,
-    compute_group_band_correlation_matrix,
-    compute_band_statistics_array,
-    compute_inter_band_correlation_statistics,
     compute_band_correlations,
-    compute_connectivity_correlations,
-    compute_inter_band_coupling_matrix,
-    compute_group_channel_power_statistics,
 )
 
 
@@ -211,8 +160,6 @@ from .permutation import (
     compute_permutation_pvalues,
     compute_permutation_pvalues_with_cov_temp,
     compute_temp_permutation_pvalues,
-    compute_permutation_pvalues_for_roi_pair,
-    permutation_null_distribution,
 )
 
 from .partial import (
@@ -223,15 +170,9 @@ from .partial import (
     compute_partial_correlation_with_covariates,
     compute_partial_correlations,
     compute_partial_correlations_with_cov_temp,
-    compute_partial_residuals_stats,
 )
 
 
-from .diagnostics import (
-    compute_vif,
-    compute_leverage_and_cooks,
-    compute_normality_summary,
-)
 
 from .paired_comparisons import (
     PairedComparisonResult,
@@ -242,18 +183,6 @@ from .paired_comparisons import (
     compute_window_comparison,
     compute_condition_comparison,
     compute_all_paired_comparisons,
-    save_paired_comparisons,
-    load_paired_comparisons,
-)
-
-from .meta_analysis import (
-    MetaAnalysisResult,
-    correlation_se,
-    compute_heterogeneity,
-    fixed_effects_meta,
-    random_effects_meta,
-    bayes_factor_correlation,
-    equivalence_test_correlation,
 )
 
 from .mediation import (
@@ -276,29 +205,16 @@ from .reliability import (
     compute_feature_reliability,
     hierarchical_fdr_dict,
     compute_hierarchical_fdr_summary,
-    cross_validated_prediction,
-    compute_calibration_curve,
-    compute_required_n_for_correlation,
-    assess_statistical_power,
-    is_underpowered,
 )
 
 from .validation import (
     AssumptionCheckResult,
     ValidationReport,
-    check_normality_shapiro,
-    check_normality_dagostino,
-    compute_qq_data,
-    check_variance_levene,
-    check_variance_bartlett,
     validate_baseline_window_pre_stimulus,
-    validate_permutation_distribution,
-    check_randomization_balance,
     compute_fwer_bonferroni,
     compute_fwer_holm,
     compute_fwer_sidak,
     validate_fwer_control,
-    validate_behavioral_contrast,
 )
 
 
@@ -316,16 +232,11 @@ __all__ = [
     "get_n_bootstrap",
     "get_config_value",
     "ensure_config",
-    "safe_get_config_value",
     # FDR
     "fdr_bh",
     "fdr_bh_reject",
     "fdr_bh_values",
     "bh_adjust",
-    "filter_significant_predictors",
-    "get_cluster_correction_config",
-    "compute_fdr_rejections_for_heatmap",
-    "build_correlation_matrices_for_prefix",
     # Cluster
     "build_distance_adjacency",
     "get_eeg_adjacency",
@@ -361,19 +272,15 @@ __all__ = [
     "compute_bayes_factor_correlation",
     "compute_robust_correlation",
     "compute_loso_correlation_stability",
-    "compute_correlation_reliability",
     # Correlation statistics helpers
     "compute_correlation_stats",
     # Bootstrap
     "bootstrap_corr_ci",
-    "bootstrap_ci_bca",
     "bootstrap_mean_diff_ci",
     # Effect Size
     "cohens_d",
     "hedges_g",
-    "fisher_z_test",
     "cohens_q",
-    "correlation_difference_effect",
     "compute_cohens_d_with_bootstrap_ci",
     # Validation
     "validate_baseline_window_pre_stimulus",
@@ -383,23 +290,11 @@ __all__ = [
     "extract_duration_data",
     # Formatting
     "format_p_value",
-    "format_correlation_text",
     "format_cluster_ann",
-    "format_fdr_ann",
     "format_correlation_stats_text",
     "_safe_float",
     # Aggregation
-    "compute_group_channel_statistics",
-    "compute_channel_confidence_interval",
-    "pool_data_by_strategy",
-    "compute_band_summary_statistics",
-    "compute_band_summaries",
-    "compute_fisher_transformed_mean",
-    "compute_group_band_statistics",
     "compute_error_bars_from_ci_dicts",
-    "compute_error_bars_from_arrays",
-    "count_trials_by_condition",
-    "compute_duration_p_value",
     # EEG Stats
     "prepare_aligned_data",
     "compute_residuals",
@@ -409,11 +304,8 @@ __all__ = [
     "zscore_series",
     "apply_pooling_strategy",
     "prepare_data_for_plotting",
-    "prepare_data_without_validation",
-    "prepare_group_data",
     # Aperiodic
     "fit_aperiodic",
-    "fit_aperiodic_to_all_epochs",
     # Regression
     "compute_linear_residuals",
     "fit_linear_regression",
@@ -422,24 +314,10 @@ __all__ = [
     "compute_kde_scale",
     "compute_correlation_vmax",
     # ROI
-    "extract_roi_statistics",
-    "extract_overall_statistics",
-    "update_stats_from_dataframe",
     "compute_roi_percentage_change",
     "compute_roi_pvalue",
-    "compute_statistics_for_mask",
-    "compute_coverage_statistics",
     # Band Stats
-    "compute_band_spatial_correlation",
-    "compute_band_pair_correlation",
-    "compute_subject_band_correlation_matrix",
-    "compute_group_band_correlation_matrix",
-    "compute_band_statistics_array",
-    "compute_inter_band_correlation_statistics",
     "compute_band_correlations",
-    "compute_connectivity_correlations",
-    "compute_inter_band_coupling_matrix",
-    "compute_group_channel_power_statistics",
     # Permutation
     "permute_within_groups",
     "perm_pval_simple",
@@ -448,8 +326,6 @@ __all__ = [
     "compute_permutation_pvalues",
     "compute_permutation_pvalues_with_cov_temp",
     "compute_temp_permutation_pvalues",
-    "compute_permutation_pvalues_for_roi_pair",
-    "permutation_null_distribution",
     # Partial
     "partial_corr_xy_given_Z",
     "partial_residuals_xy_given_Z",
@@ -457,58 +333,20 @@ __all__ = [
     "compute_partial_correlation_with_covariates",
     "compute_partial_correlations",
     "compute_partial_correlations_with_cov_temp",
-    "compute_partial_residuals_stats",
-    # Meta-analysis
-    "MetaAnalysisResult",
-    "correlation_se",
-    "compute_heterogeneity",
-    "fixed_effects_meta",
-    "random_effects_meta",
-    "bayes_factor_correlation",
-    "equivalence_test_correlation",
     # Validation
     "AssumptionCheckResult",
     "ValidationReport",
-    "check_normality_shapiro",
-    "check_normality_dagostino",
-    "compute_qq_data",
-    "check_variance_levene",
-    "check_variance_bartlett",
-    "validate_permutation_distribution",
-    "check_randomization_balance",
+    "validate_baseline_window_pre_stimulus",
     "compute_fwer_bonferroni",
     "compute_fwer_holm",
     "compute_fwer_sidak",
     "validate_fwer_control",
-    "validate_behavioral_contrast",
-    # Visualization diagnostics
-    "compute_permutation_distribution_data",
-    "compute_cluster_mass_histogram_data",
-    "compute_pp_plot_data",
-    "compute_qq_plot_data",
-    "compute_effect_size_distribution_data",
-    "compute_bootstrap_distribution_data",
-    "compute_raincloud_data",
-    "compute_spaghetti_plot_data",
-    "compute_correction_comparison_data",
-    "create_provenance_block",
-    "format_provenance_text",
-    "save_stats_for_plot",
-    # Diagnostics
-    "compute_vif",
-    "compute_leverage_and_cooks",
-    "compute_normality_summary",
     # Reliability and validity
     "compute_icc",
     "compute_split_half_reliability",
     "compute_feature_reliability",
     "hierarchical_fdr_dict",
     "compute_hierarchical_fdr_summary",
-    "cross_validated_prediction",
-    "compute_calibration_curve",
-    "compute_required_n_for_correlation",
-    "assess_statistical_power",
-    "is_underpowered",
     # Paired Comparisons
     "PairedComparisonResult",
     "PairedComparisonSummary",
@@ -518,8 +356,6 @@ __all__ = [
     "compute_window_comparison",
     "compute_condition_comparison",
     "compute_all_paired_comparisons",
-    "save_paired_comparisons",
-    "load_paired_comparisons",
     # Mediation
     "MediationResult",
     "compute_mediation_paths",

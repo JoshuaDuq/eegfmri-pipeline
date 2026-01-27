@@ -22,6 +22,7 @@ from eeg_pipeline.infra.paths import (
     find_clean_epochs_path,
 )
 from eeg_pipeline.infra.tsv import read_parquet, write_parquet
+from eeg_pipeline.infra.tsv import write_tsv
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 
 logger = get_logger(__name__)
@@ -158,6 +159,8 @@ def export_predictions(
     extra_cols = {}
     if "run_id" in meta.columns:
         extra_cols["run_id"] = meta.loc[test_indices, "run_id"].tolist()
+    if "block" in meta.columns:
+        extra_cols["block"] = meta.loc[test_indices, "block"].tolist()
 
     pred_df = pd.DataFrame(
         {
@@ -171,8 +174,9 @@ def export_predictions(
         }
     )
 
-    parquet_path = save_path.with_suffix(".parquet")
-    write_parquet(pred_df, parquet_path)
+    # Write both TSV (for plotting/back-compat) and parquet (for fast downstream use).
+    write_tsv(pred_df, save_path.with_suffix(".tsv"))
+    write_parquet(pred_df, save_path.with_suffix(".parquet"))
     return pred_df
 
 
@@ -190,6 +194,8 @@ def export_indices(
         extra["blocks_source"] = blocks_source
     if "run_id" in meta.columns:
         extra["run_id"] = meta.loc[test_indices, "run_id"].tolist()
+    if "block" in meta.columns:
+        extra["block"] = meta.loc[test_indices, "block"].tolist()
 
     idx_df = pd.DataFrame(
         {
@@ -203,8 +209,8 @@ def export_indices(
     if add_heldout_subject_id:
         idx_df["heldout_subject_id"] = idx_df["subject_id"].astype(str)
 
-    parquet_path = save_path.with_suffix(".parquet")
-    write_parquet(idx_df, parquet_path)
+    write_tsv(idx_df, save_path.with_suffix(".tsv"))
+    write_parquet(idx_df, save_path.with_suffix(".parquet"))
 
 
 def _is_power_channel_feature(parsed: dict) -> bool:

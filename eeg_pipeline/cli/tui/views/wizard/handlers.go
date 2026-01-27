@@ -2911,6 +2911,11 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 }
 
 func (m *Model) toggleMLAdvancedOption() {
+	if m.expandedOption >= 0 {
+		m.handleExpandedListToggle()
+		return
+	}
+
 	options := m.getMLOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
 		return
@@ -2920,11 +2925,52 @@ func (m *Model) toggleMLAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optMLNPerm, optMLInnerSplits, optRNGSeed, optRfNEstimators:
+	case optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed, optRfNEstimators, optMLBinaryThreshold, optMLUncertaintyAlpha, optMLPermNRepeats:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optMLSkipTimeGen:
-		m.skipTimeGen = !m.skipTimeGen
+	case optMLTarget:
+		if len(m.availableColumns) > 0 {
+			m.expandedOption = expandedMLTargetColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldMLTarget)
+		}
+		m.useDefaultAdvanced = false
+	case optMLRegressionModel:
+		m.mlRegressionModel = m.mlRegressionModel.Next()
+		m.useDefaultAdvanced = false
+	case optMLClassificationModel:
+		m.mlClassificationModel = m.mlClassificationModel.Next()
+		m.useDefaultAdvanced = false
+	case optMLBinaryThresholdEnabled:
+		m.mlBinaryThresholdEnabled = !m.mlBinaryThresholdEnabled
+		m.useDefaultAdvanced = false
+	case optMLFeatureFamilies:
+		m.startTextEdit(textFieldMLFeatureFamilies)
+		m.useDefaultAdvanced = false
+	case optMLFeatureBands:
+		m.startTextEdit(textFieldMLFeatureBands)
+		m.useDefaultAdvanced = false
+	case optMLFeatureSegments:
+		m.startTextEdit(textFieldMLFeatureSegments)
+		m.useDefaultAdvanced = false
+	case optMLFeatureScopes:
+		m.startTextEdit(textFieldMLFeatureScopes)
+		m.useDefaultAdvanced = false
+	case optMLFeatureStats:
+		m.startTextEdit(textFieldMLFeatureStats)
+		m.useDefaultAdvanced = false
+	case optMLFeatureHarmonization:
+		m.mlFeatureHarmonization = m.mlFeatureHarmonization.Next()
+		m.useDefaultAdvanced = false
+	case optMLCovariates:
+		m.startTextEdit(textFieldMLCovariates)
+		m.useDefaultAdvanced = false
+	case optMLBaselinePredictors:
+		m.startTextEdit(textFieldMLBaselinePredictors)
+		m.useDefaultAdvanced = false
+	case optMLRequireTrialMlSafe:
+		m.mlRequireTrialMlSafe = !m.mlRequireTrialMlSafe
 		m.useDefaultAdvanced = false
 	case optElasticNetAlphaGrid:
 		m.startTextEdit(textFieldElasticNetAlphaGrid)
@@ -2932,8 +2978,14 @@ func (m *Model) toggleMLAdvancedOption() {
 	case optElasticNetL1RatioGrid:
 		m.startTextEdit(textFieldElasticNetL1RatioGrid)
 		m.useDefaultAdvanced = false
+	case optRidgeAlphaGrid:
+		m.startTextEdit(textFieldRidgeAlphaGrid)
+		m.useDefaultAdvanced = false
 	case optRfMaxDepthGrid:
 		m.startTextEdit(textFieldRfMaxDepthGrid)
+		m.useDefaultAdvanced = false
+	case optVarianceThresholdGrid:
+		m.startTextEdit(textFieldVarianceThresholdGrid)
 		m.useDefaultAdvanced = false
 	}
 }
@@ -4482,6 +4534,16 @@ func (m *Model) commitMLNumber(val float64) {
 	case optMLOuterJobs:
 		if val >= 1 {
 			m.outerJobs = int(val)
+		}
+	case optMLBinaryThreshold:
+		m.mlBinaryThreshold = val
+	case optMLUncertaintyAlpha:
+		if val > 0 && val < 1 {
+			m.mlUncertaintyAlpha = val
+		}
+	case optMLPermNRepeats:
+		if val >= 1 {
+			m.mlPermNRepeats = int(val)
 		}
 	case optRNGSeed:
 		if val >= 0 {

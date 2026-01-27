@@ -16,7 +16,7 @@ import pandas as pd
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.analysis.stats.partial import compute_partial_corr
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_stability_features
-from eeg_pipeline.utils.analysis.stats.base import safe_get_config_value as _get_config_value
+from eeg_pipeline.utils.analysis.stats.base import get_config_value as _get_config_value
 
 
 # Constants

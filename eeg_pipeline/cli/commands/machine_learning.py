@@ -74,6 +74,13 @@ def _add_model_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Override RandomForest max_depth grid (use 'null' for None, only used when --model=rf).",
     )
+    parser.add_argument(
+        "--variance-threshold-grid",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Override variance_threshold grid (e.g. 0.0 or 0.0 0.01). Use 0.0 only for small train folds (e.g. --cv-scope subject with few subjects).",
+    )
 
 
 def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
@@ -101,6 +108,123 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--inner-splits", type=int, default=3)
     parser.add_argument("--outer-jobs", type=int, default=1)
     parser.add_argument("--rng-seed", type=int, default=None)
+    parser.add_argument(
+        "--classification-model",
+        type=str,
+        choices=["svm", "lr", "rf"],
+        default=None,
+        help=(
+            "Classifier family for 'classify' stage. Overrides config "
+            "'machine_learning.classification.model' when provided."
+        ),
+    )
+    parser.add_argument(
+        "--covariates",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Optional extra predictors appended to the EEG feature matrix (meta column names like "
+            "'temperature', 'trial_index', 'block')."
+        ),
+    )
+    parser.add_argument(
+        "--require-trial-ml-safe",
+        action="store_true",
+        help=(
+            "Fail fast unless config feature_engineering.analysis_mode='trial_ml_safe'. "
+            "Use this to prevent CV leakage from cross-trial feature estimates."
+        ),
+    )
+    parser.add_argument(
+        "--target",
+        type=str,
+        default=None,
+        help=(
+            "Target to predict. Can be a logical name ('rating', 'temperature', 'pain_binary') "
+            "or an explicit events.tsv column name. Defaults depend on stage."
+        ),
+    )
+    parser.add_argument(
+        "--binary-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Fixed threshold for binarizing a continuous target when running classification "
+            "(e.g., --target=rating --binary-threshold=30). Median-split is intentionally disabled."
+        ),
+    )
+    parser.add_argument(
+        "--feature-families",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Feature families to load from derivatives (e.g., power spectral aperiodic connectivity itpc erp). "
+            "If omitted, uses config machine_learning.data.feature_families."
+        ),
+    )
+    parser.add_argument(
+        "--feature-bands",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Optional restriction: only keep features whose NamingSchema band matches one of these values "
+            "(e.g., alpha beta). If omitted, no band restriction."
+        ),
+    )
+    parser.add_argument(
+        "--feature-segments",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Optional restriction: only keep features whose NamingSchema segment matches one of these values "
+            "(e.g., baseline active). If omitted, no segment restriction."
+        ),
+    )
+    parser.add_argument(
+        "--feature-scopes",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Optional restriction: only keep features whose NamingSchema scope matches one of these values "
+            "(global roi ch chpair). If omitted, no scope restriction."
+        ),
+    )
+    parser.add_argument(
+        "--feature-stats",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Optional restriction: only keep features whose NamingSchema stat matches one of these values "
+            "(e.g. wpli aec mean for connectivity). If omitted, no stat restriction."
+        ),
+    )
+    parser.add_argument(
+        "--feature-harmonization",
+        type=str,
+        choices=["intersection", "union_impute"],
+        default=None,
+        help=(
+            "How to harmonize feature columns across subjects. "
+            "'intersection' keeps only shared features (default). "
+            "'union_impute' unions columns and relies on imputation for missing values."
+        ),
+    )
+    parser.add_argument(
+        "--baseline-predictors",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Baseline predictor columns for incremental_validity (standardized meta names like 'temperature', "
+            "'trial_index', 'block'). Defaults to config machine_learning.incremental_validity.baseline_predictors."
+        ),
+    )
 
 
 def setup_ml(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -193,6 +317,11 @@ def _update_model_config(args: argparse.Namespace, config: Any) -> None:
         alpha_values = [float(v) for v in args.ridge_alpha_grid]
         config["machine_learning.models.ridge.alpha_grid"] = alpha_values
 
+    if args.variance_threshold_grid is not None:
+        config["machine_learning.preprocessing.variance_threshold_grid"] = [
+            float(v) for v in args.variance_threshold_grid
+        ]
+
 
 def _print_stage_list() -> None:
     """Print available ML stages and exit."""
@@ -211,6 +340,22 @@ def _print_dry_run_info(args: argparse.Namespace, subjects: List[str]) -> None:
     print(f"  Model: {args.model}")
     print(f"  n_perm: {args.n_perm}")
     print(f"  inner_splits: {args.inner_splits}")
+    if args.target:
+        print(f"  Target: {args.target}")
+    if args.feature_families:
+        print(f"  Feature families: {args.feature_families}")
+    if args.feature_bands:
+        print(f"  Feature bands: {args.feature_bands}")
+    if args.feature_segments:
+        print(f"  Feature segments: {args.feature_segments}")
+    if args.feature_scopes:
+        print(f"  Feature scopes: {args.feature_scopes}")
+    if args.feature_stats:
+        print(f"  Feature stats: {args.feature_stats}")
+    if args.covariates:
+        print(f"  Covariates: {args.covariates}")
+    if args.require_trial_ml_safe:
+        print("  Require trial_ml_safe: True")
 
 
 def _validate_ml_requirements(
@@ -241,6 +386,17 @@ def _build_pipeline_kwargs(args: argparse.Namespace, config: Any) -> Dict[str, A
         "model": args.model,
         "uncertainty_alpha": args.uncertainty_alpha,
         "perm_n_repeats": args.perm_n_repeats,
+        "classification_model": args.classification_model,
+        "target": args.target,
+        "binary_threshold": args.binary_threshold,
+        "feature_families": args.feature_families,
+        "feature_bands": args.feature_bands,
+        "feature_segments": args.feature_segments,
+        "feature_scopes": args.feature_scopes,
+        "feature_stats": args.feature_stats,
+        "feature_harmonization": args.feature_harmonization,
+        "baseline_predictors": args.baseline_predictors,
+        "covariates": args.covariates,
     }
 
 
@@ -263,6 +419,8 @@ def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     
     _update_path_config(args, config)
     _update_model_config(args, config)
+    if args.require_trial_ml_safe:
+        config["machine_learning.data.require_trial_ml_safe"] = True
     
     pipeline_kwargs = _build_pipeline_kwargs(args, config)
     pipeline = MLPipeline(config=config)

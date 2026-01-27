@@ -41,30 +41,6 @@ def center_series(series: pd.Series) -> pd.Series:
     return series - series.mean()
 
 
-def zscore_array(x: np.ndarray) -> np.ndarray:
-    """Z-score normalize numpy array.
-    
-    Standardizes array to zero mean and unit variance.
-    Returns NaN-filled array if variance is zero or invalid.
-    
-    Parameters
-    ----------
-    x : np.ndarray
-        Input array
-        
-    Returns
-    -------
-    np.ndarray
-        Z-scored array (NaN if variance is zero or invalid)
-    """
-    x = np.asarray(x, dtype=float)
-    mu = np.nanmean(x)
-    sd = np.nanstd(x, ddof=1)
-    if not np.isfinite(sd) or sd <= 0:
-        return np.full_like(x, np.nan)
-    return (x - mu) / sd
-
-
 def zscore_series(series: pd.Series) -> pd.Series:
     """Z-score normalize pandas Series.
     
@@ -86,6 +62,28 @@ def zscore_series(series: pd.Series) -> pd.Series:
     if std_val <= 0:
         return pd.Series(dtype=float)
     return (series - mean) / std_val
+
+
+def zscore_array(arr: np.ndarray) -> np.ndarray:
+    """Z-score normalize numpy array.
+    
+    Standardizes array to zero mean and unit variance.
+    
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array
+        
+    Returns
+    -------
+    np.ndarray
+        Z-scored array
+    """
+    mean = np.nanmean(arr)
+    std_val = np.nanstd(arr, ddof=1)
+    if std_val <= 0:
+        return np.full_like(arr, np.nan)
+    return (arr - mean) / std_val
 
 
 def apply_pooling_strategy(
@@ -136,153 +134,6 @@ def prepare_data_for_plotting(
     """
     mask = x_data.notna() & y_data.notna()
     return x_data[mask], y_data[mask], int(mask.sum())
-
-
-def prepare_data_without_validation(
-    x_data: pd.Series,
-    y_data: pd.Series,
-) -> Tuple[pd.Series, pd.Series, int]:
-    """Return data without NaN filtering.
-    
-    Used when data has already been validated (e.g., partial residuals
-    where NaNs were handled during regression).
-    
-    Parameters
-    ----------
-    x_data : pd.Series
-        First input series
-    y_data : pd.Series
-        Second input series
-        
-    Returns
-    -------
-    Tuple[pd.Series, pd.Series, int]
-        (x_data, y_data, length)
-    """
-    return x_data, y_data, len(x_data)
-
-
-def _align_and_validate_series(
-    x_array: np.ndarray,
-    y_array: np.ndarray,
-) -> Tuple[pd.Series, pd.Series]:
-    """Align arrays to same length and remove NaNs.
-    
-    Parameters
-    ----------
-    x_array : np.ndarray
-        First input array
-    y_array : np.ndarray
-        Second input array
-        
-    Returns
-    -------
-    Tuple[pd.Series, pd.Series]
-        Aligned and validated series
-    """
-    x_series = pd.Series(np.asarray(x_array))
-    y_series = pd.Series(np.asarray(y_array))
-    
-    min_length = min(len(x_series), len(y_series))
-    x_series = x_series.iloc[:min_length]
-    y_series = y_series.iloc[:min_length]
-    
-    valid_mask = x_series.notna() & y_series.notna()
-    return x_series[valid_mask], y_series[valid_mask]
-
-
-def _process_subject_data(
-    x_array: np.ndarray,
-    y_array: np.ndarray,
-    subject_id: str,
-    pooling_strategy: str,
-) -> Tuple[pd.Series, pd.Series, List[str]]:
-    """Process single subject's data and return normalized series with IDs.
-    
-    Parameters
-    ----------
-    x_array : np.ndarray
-        First variable array
-    y_array : np.ndarray
-        Second variable array
-    subject_id : str
-        Subject identifier
-    pooling_strategy : str
-        Pooling strategy to apply
-        
-    Returns
-    -------
-    Tuple[pd.Series, pd.Series, List[str]]
-        (x_normalized, y_normalized, subject_ids)
-    """
-    x_series, y_series = _align_and_validate_series(x_array, y_array)
-    
-    if x_series.empty:
-        return pd.Series(dtype=float), pd.Series(dtype=float), []
-    
-    x_normalized, y_normalized = apply_pooling_strategy(
-        x_series, y_series, pooling_strategy
-    )
-    
-    if x_normalized.empty:
-        return pd.Series(dtype=float), pd.Series(dtype=float), []
-    
-    n_samples = len(x_normalized)
-    subject_ids = [subject_id] * n_samples
-    x_reset = x_normalized.reset_index(drop=True)
-    y_reset = y_normalized.reset_index(drop=True)
-    
-    return x_reset, y_reset, subject_ids
-
-
-def prepare_group_data(
-    x_lists: List[np.ndarray],
-    y_lists: List[np.ndarray],
-    subj_order: List[str],
-    pooling_strategy: str,
-) -> Tuple[pd.Series, pd.Series, List[str]]:
-    """Prepare group data for correlation analysis.
-    
-    Parameters
-    ----------
-    x_lists : List[np.ndarray]
-        List of first variable arrays (one per subject)
-    y_lists : List[np.ndarray]
-        List of second variable arrays (one per subject)
-    subj_order : List[str]
-        Subject identifiers in order
-    pooling_strategy : str
-        Pooling strategy to apply per subject
-        
-    Returns
-    -------
-    Tuple[pd.Series, pd.Series, List[str]]
-        (x_concatenated, y_concatenated, subject_ids)
-    """
-    x_series_list, y_series_list, subject_ids = [], [], []
-
-    for idx, (x_array, y_array) in enumerate(zip(x_lists, y_lists)):
-        subject_id = (
-            subj_order[idx] if idx < len(subj_order) else str(idx)
-        )
-        x_normalized, y_normalized, ids = _process_subject_data(
-            x_array, y_array, subject_id, pooling_strategy
-        )
-        
-        if x_normalized.empty:
-            continue
-        
-        x_series_list.append(x_normalized)
-        y_series_list.append(y_normalized)
-        subject_ids.extend(ids)
-
-    if not x_series_list:
-        return pd.Series(dtype=float), pd.Series(dtype=float), []
-    
-    x_concatenated = pd.concat(x_series_list, ignore_index=True)
-    y_concatenated = pd.concat(y_series_list, ignore_index=True)
-    
-    return x_concatenated, y_concatenated, subject_ids
 
 
 ###################################################################
@@ -533,46 +384,6 @@ def fit_aperiodic(
         return np.nan, np.nan
 
 
-def fit_aperiodic_to_all_epochs(
-    log_freqs: np.ndarray,
-    log_psd: np.ndarray,
-    peak_rejection_z: float = 3.5,
-    min_points: int = 5,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Fit aperiodic component to all epochs and channels.
-    
-    Parameters
-    ----------
-    log_freqs : np.ndarray
-        Log-transformed frequencies (1D array)
-    log_psd : np.ndarray
-        Log-transformed PSD with shape (n_epochs, n_channels, n_freqs)
-    peak_rejection_z : float
-        Z-score threshold for peak rejection
-    min_points : int
-        Minimum points required for fitting
-        
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        (offsets, slopes) with shape (n_epochs, n_channels)
-    """
-    n_epochs, n_channels, _ = log_psd.shape
-    offsets = np.full((n_epochs, n_channels), np.nan)
-    slopes = np.full((n_epochs, n_channels), np.nan)
-    
-    for epoch_idx in range(n_epochs):
-        for channel_idx in range(n_channels):
-            intercept, slope = fit_aperiodic(
-                log_freqs, log_psd[epoch_idx, channel_idx, :],
-                peak_rejection_z=peak_rejection_z, min_points=min_points,
-            )
-            offsets[epoch_idx, channel_idx] = intercept
-            slopes[epoch_idx, channel_idx] = slope
-    
-    return offsets, slopes
-
-
 def compute_residuals(
     log_freqs: np.ndarray,
     log_psd: np.ndarray,
@@ -813,8 +624,6 @@ __all__ = [
     "zscore_series",
     "apply_pooling_strategy",
     "prepare_data_for_plotting",
-    "prepare_data_without_validation",
-    "prepare_group_data",
     "prepare_aligned_data",
     # Feature Transformation
     "compute_change_features",
@@ -824,6 +633,5 @@ __all__ = [
     "compute_binned_statistics",
     # Aperiodic
     "fit_aperiodic",
-    "fit_aperiodic_to_all_epochs",
     "compute_residuals",
 ]

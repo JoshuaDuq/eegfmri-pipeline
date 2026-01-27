@@ -173,11 +173,15 @@ def _plot_null_distribution_if_available(
     logger: logging.Logger,
 ) -> None:
     """Plot null distribution histogram if available."""
-    null_path = results_dir / "loso_null_elasticnet.npz"
-    if not null_path.exists():
+    null_paths = (
+        list(results_dir.glob("loso_null_*.npz"))
+        + list(results_dir.glob("cv_null_*.npz"))
+        + list(results_dir.glob("within_subject_null.npz"))
+    )
+    if not null_paths:
         return
 
-    data = np.load(null_path)
+    data = np.load(null_paths[0])
     null_rs = data.get("null_r")
     empirical_r = pooled_metrics.get("pearson_r", np.nan)
 
@@ -300,7 +304,7 @@ def visualize_regression_from_disk(
 
     pred_df = read_tsv(pred_path)
     pooled_metrics = _load_metrics_file(results_dir)
-    model_name = "elasticnet"
+    model_name = pooled_metrics.get("model", "regression")
     prefix = _extract_model_prefix(pred_path)
 
     plot_prediction_scatter(
@@ -397,9 +401,8 @@ def visualize_classification_from_disk(
     plots_dir = results_dir / "plots"
     ensure_dir(plots_dir)
 
-    pred_path = results_dir / "loso_predictions.tsv"
-    if not pred_path.exists():
-        logger.warning(f"Classification predictions not found: {pred_path}")
+    pred_path = _load_predictions_file(results_dir, logger)
+    if pred_path is None:
         return
 
     pred_df = read_tsv(pred_path)

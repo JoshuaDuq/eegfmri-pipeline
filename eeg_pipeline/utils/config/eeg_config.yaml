@@ -383,7 +383,7 @@ feature_engineering:
     line_noise_harmonics: 3
 
   connectivity:
-    measures: ["wpli2_debiased", "aec"]
+    measures: ["wpli", "aec"]
     output_level: "full"              # "full" or "global_only"
     mode: "cwt_morlet"                # mne-connectivity mode for phase measures
     aec_mode: "orth"
@@ -946,17 +946,88 @@ behavior_analysis:
 
 # 4.5 Machine Learning
 machine_learning:
+  # Data loading for ML:
+  # - Feature tables come from the feature extraction pipeline (derivatives/.../eeg/features/*/features_*.parquet)
+  # - Targets/covariates come from the *clean* events.tsv (derivatives/.../eeg/*_proc-clean_events.tsv when available)
+  data:
+    feature_set: "combined"              # "combined" | "power" | "connectivity" | "aperiodic" | "itpc" | "erp" | "channels_mean"
+    feature_families: null               # Used when feature_set="combined" (null = load all standard families; override via CLI: --feature-families ...)
+    feature_bands: null                  # Optional restriction (NamingSchema band), e.g. ["alpha", "beta"]
+    feature_segments: null               # Optional restriction (NamingSchema segment), e.g. ["baseline", "active"]
+    feature_scopes: null                 # Optional restriction (NamingSchema scope), e.g. ["global", "roi", "chpair"]
+    feature_stats: null                  # Optional restriction (NamingSchema stat), e.g. ["wpli", "aec"] for connectivity
+    feature_harmonization: "intersection"  # "intersection" | "union_impute"
+    feature_files: {}                    # Optional overrides per family: { power: "features_power.parquet", ... }
+    covariates: []                       # Optional extra predictors appended to X (meta names: temperature, trial_index, block, ...)
+    covariates_strict: false             # If true, error when requested covariates are missing
+    require_trial_ml_safe: false         # If true, error unless feature_engineering.analysis_mode="trial_ml_safe"
+
+  # Targets can be logical names ('rating', 'temperature', 'pain_binary') or explicit events.tsv column names.
+  targets:
+    regression: "rating"
+    classification: "pain_binary"
+    binary_threshold: null               # Required when classifying a continuous target (e.g., rating > 30)
+    strict_regression_target_continuous: false  # If true, error when regression target is binary-like (prefer ml classify)
+
+  incremental_validity:
+    baseline_predictors: ["temperature"] # Standardized meta names: temperature, trial_index, block
+    baseline_alpha: 1.0
+
   cv:
     inner_splits: 5
     hygiene_enabled: true
     permutation_scheme: "within_subject"  # "within_subject" | "within_subject_within_block"
+    default_n_splits: 5
+    default_n_bins: 5
+
+  evaluation:
+    ci_method: "bootstrap"               # "fixed_effects" | "bootstrap"
+    bootstrap_iterations: 1000
+
+  constants:
+    variance_threshold: 0.0
+    min_variance_for_correlation: 1e-10
+
+  preprocessing:
+    imputer_strategy: "median"
+    variance_threshold_grid: [0.0, 0.01, 0.1]
+    power_transformer_method: "yeo-johnson"
+    power_transformer_standardize: true
+    pca:
+      enabled: false
+      n_components: 0.95
+      whiten: false
+      svd_solver: "auto"
+      random_state: null
+
+  classification:
+    model: "svm"                         # "svm" | "lr" | "rf"
+
+  interpretability:
+    grouped_outputs: true                # Write band/ROI grouped importance tables when available
   models:
     elasticnet:
       alpha_grid: [0.001, 0.01, 0.1, 1, 10]
       l1_ratio_grid: [0.2, 0.5, 0.8]
+    ridge:
+      alpha_grid: [0.01, 0.1, 1.0, 10.0, 100.0]
     random_forest:
       n_estimators: 500
       max_depth_grid: [5, 10, 20, null]
+      min_samples_split_grid: [2, 5, 10]
+      min_samples_leaf_grid: [1, 2, 4]
+      bootstrap: true
+      class_weight: "balanced"
+    svm:
+      kernel: "rbf"
+      C_grid: [0.1, 1.0, 10.0]
+      gamma_grid: ["scale", "auto"]
+      class_weight: "balanced"
+    logistic_regression:
+      penalty: "l2"
+      C_grid: [0.01, 0.1, 1.0, 10.0]
+      max_iter: 1000
+      class_weight: "balanced"
 
 ###################################################################
 # 5. STATISTICS & VALIDATION
