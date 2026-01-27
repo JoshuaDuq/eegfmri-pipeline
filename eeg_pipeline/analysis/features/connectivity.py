@@ -58,10 +58,13 @@ class ConnectivityConfig:
     """
     measures: List[str]
     granularity: str
+    condition_column: Optional[str]
+    condition_values: List[str]
     phase_estimator: str
     output_level: str
     mode: str
     aec_mode: str
+    aec_absolute: bool
     n_freqs_per_band: int
     n_cycles: Optional[float]
     decim: int
@@ -81,7 +84,13 @@ class ConnectivityConfig:
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> "ConnectivityConfig":
         """Create normalized config from raw dict with validation."""
-        conn_cfg = cfg.get("feature_engineering.connectivity", {}) if hasattr(cfg, "get") else {}
+        conn_cfg = {}
+        if isinstance(cfg, dict):
+            conn_cfg = get_nested_value(cfg, "feature_engineering.connectivity", {}) or {}
+        if not isinstance(conn_cfg, dict) and hasattr(cfg, "get"):
+            conn_cfg = cfg.get("feature_engineering.connectivity", {}) or {}
+        if not isinstance(conn_cfg, dict):
+            conn_cfg = {}
 
         measures_cfg = conn_cfg.get("measures", ["wpli2_debiased", "aec"])
         if isinstance(measures_cfg, str):
@@ -100,6 +109,24 @@ class ConnectivityConfig:
                 "{'trial','condition','subject'} "
                 f"(got '{granularity}')."
             )
+
+        condition_column = conn_cfg.get("condition_column", None)
+        if condition_column is not None:
+            condition_column = str(condition_column).strip()
+        if condition_column == "":
+            condition_column = None
+
+        condition_values_cfg = conn_cfg.get("condition_values", [])
+        if condition_values_cfg is None:
+            condition_values_cfg = []
+        if isinstance(condition_values_cfg, str):
+            condition_values_cfg = [condition_values_cfg]
+        if not isinstance(condition_values_cfg, (list, tuple)):
+            raise TypeError(
+                "feature_engineering.connectivity.condition_values must be a list/tuple of strings "
+                f"(got {type(condition_values_cfg).__name__})."
+            )
+        condition_values = [str(v).strip() for v in condition_values_cfg if str(v).strip() != ""]
 
         phase_estimator = str(conn_cfg.get("phase_estimator", "within_epoch")).strip().lower()
         if phase_estimator not in {"within_epoch", "across_epochs"}:
@@ -120,6 +147,7 @@ class ConnectivityConfig:
         mode = str(conn_cfg.get("mode", "cwt_morlet")).strip().lower()
 
         aec_mode = str(conn_cfg.get("aec_mode", "orth")).strip().lower()
+        aec_absolute = bool(conn_cfg.get("aec_absolute", True))
 
         n_freqs_per_band = int(conn_cfg.get("n_freqs_per_band", 8))
 
@@ -159,10 +187,13 @@ class ConnectivityConfig:
         return cls(
             measures=measures,
             granularity=granularity,
+            condition_column=condition_column,
+            condition_values=condition_values,
             phase_estimator=phase_estimator,
             output_level=output_level,
             mode=mode,
             aec_mode=aec_mode,
+            aec_absolute=aec_absolute,
             n_freqs_per_band=n_freqs_per_band,
             n_cycles=n_cycles,
             decim=decim,
@@ -179,6 +210,86 @@ class ConnectivityConfig:
             force_within_epoch_for_ml=force_within_epoch_for_ml,
             warn_if_no_spatial_transform=warn_if_no_spatial_transform,
         )
+
+
+def _resolve_connectivity_condition_column(
+    *,
+    events: pd.DataFrame,
+    config: Any,
+    condition_column_cfg: Optional[str],
+) -> str:
+    """Resolve the events column used for condition grouping.
+
+    Fail-fast:
+    - If condition_column_cfg is provided, it must exist in events.
+    - Otherwise, we attempt the legacy auto-detection.
+    """
+    if condition_column_cfg is not None:
+        if condition_column_cfg not in events.columns:
+            raise ValueError(
+                "Connectivity granularity='condition' requested but "
+                f"feature_engineering.connectivity.condition_column='{condition_column_cfg}' "
+                "was not found in aligned_events."
+            )
+        return condition_column_cfg
+
+    for candidate in ("condition", "trial_type"):
+        if candidate in events.columns:
+            return candidate
+
+    candidates = []
+    if hasattr(config, "get"):
+        candidates = config.get("event_columns.pain_binary", []) or []
+    elif isinstance(config, dict):
+        candidates = get_nested_value(config, "event_columns.pain_binary", []) or []
+    if isinstance(candidates, (list, tuple)):
+        for c in candidates:
+            c = str(c).strip()
+            if c and c in events.columns:
+                return c
+
+    raise ValueError(
+        "Connectivity granularity='condition' requested but no condition column found in aligned_events. "
+        "Set feature_engineering.connectivity.condition_column explicitly (recommended), or ensure one of "
+        "{'condition','trial_type'} exists, or list a valid column in event_columns.pain_binary."
+    )
+
+
+def _resolve_connectivity_condition_selection(
+    *,
+    labels: pd.Series,
+    selected_values: List[str],
+) -> Tuple[np.ndarray, List[str]]:
+    """Resolve which trials/labels are included in condition-level connectivity.
+
+    Semantics:
+    - If selected_values is empty: include all labels.
+    - If selected_values is non-empty: include only trials where label is in selected_values.
+
+    Returns:
+        (included_mask, included_labels)
+    """
+    labels_str = labels.astype(str)
+    if not selected_values:
+        included_mask = np.ones(int(labels_str.shape[0]), dtype=bool)
+        included_labels = sorted(labels_str.unique())
+        return included_mask, included_labels
+
+    selected_set = {str(v) for v in selected_values if str(v).strip() != ""}
+    if not selected_set:
+        included_mask = np.ones(int(labels_str.shape[0]), dtype=bool)
+        included_labels = sorted(labels_str.unique())
+        return included_mask, included_labels
+
+    included_mask = labels_str.isin(selected_set).to_numpy()
+    if not np.any(included_mask):
+        raise ValueError(
+            "Connectivity granularity='condition' requested with "
+            "feature_engineering.connectivity.condition_values set, but none of the selected "
+            "values were found in aligned_events."
+        )
+    included_labels = sorted(labels_str[included_mask].unique())
+    return included_mask, included_labels
 
 
 ###################################################################
@@ -636,25 +747,36 @@ def extract_connectivity_features(
         if granularity == "condition":
             events = getattr(ctx, "aligned_events", None)
             if events is not None and not getattr(events, "empty", True) and len(events) == n_epochs:
-                cond_col = None
-                for candidate in ("condition", "trial_type"):
-                    if candidate in events.columns:
-                        cond_col = candidate
-                        break
-                if cond_col is None:
-                    candidates = ctx.config.get("event_columns.pain_binary", []) if hasattr(ctx.config, "get") else []
-                    if isinstance(candidates, (list, tuple)):
-                        for c in candidates:
-                            if c in events.columns:
-                                cond_col = c
-                                break
-                if cond_col is not None:
-                    labels = events[cond_col].astype(str)
-                    min_n = conn_cfg.min_epochs_per_group
-                    for lab in sorted(labels.unique()):
-                        idx = np.where((labels == lab).to_numpy())[0]
-                        if idx.size >= min_n:
-                            groups_map[f"cond:{lab}"] = idx
+                cond_col = _resolve_connectivity_condition_column(
+                    events=events,
+                    config=ctx.config,
+                    condition_column_cfg=conn_cfg.condition_column,
+                )
+                labels = events[cond_col].astype(str)
+                included_mask, included_labels = _resolve_connectivity_condition_selection(
+                    labels=labels,
+                    selected_values=conn_cfg.condition_values,
+                )
+                min_n = conn_cfg.min_epochs_per_group
+                for lab in included_labels:
+                    idx = np.where(((labels == lab).to_numpy() & included_mask))[0]
+                    if idx.size >= min_n:
+                        groups_map[f"cond:{lab}"] = idx
+
+                # If user selected specific condition values, clear phase-based columns for excluded trials.
+                # Otherwise, excluded trials would retain the global across-epochs broadcast estimate.
+                if not np.all(included_mask):
+                    exclude_idx = np.where(~included_mask)[0]
+                    conn_cfg_dict = ctx.config.get("feature_engineering.connectivity", {}) if hasattr(ctx.config, "get") else {}
+                    phase_methods = _resolve_phase_measures(conn_cfg_dict if isinstance(conn_cfg_dict, dict) else {})
+                    if phase_methods:
+                        phase_cols = [
+                            c
+                            for c in df.columns
+                            if any((f"_{m}" in c) or (f"{m}_" in c) for m in phase_methods)
+                        ]
+                        if phase_cols:
+                            df.loc[exclude_idx, phase_cols] = np.nan
 
         _apply_across_epochs_phase_estimates_inplace(
             df,
@@ -698,30 +820,23 @@ def extract_connectivity_features(
             f"(n_epochs={n_epochs}, aligned_events_len={len(events) if events is not None else 'None'})."
         )
 
-    cond_col = None
-    for candidate in ("condition", "trial_type"):
-        if candidate in events.columns:
-            cond_col = candidate
-            break
-    if cond_col is None:
-        candidates = ctx.config.get("event_columns.pain_binary", []) if hasattr(ctx.config, "get") else []
-        if isinstance(candidates, (list, tuple)):
-            for c in candidates:
-                if c in events.columns:
-                    cond_col = c
-                    break
-
-    if cond_col is None:
-        raise ValueError(
-            "Connectivity granularity='condition' requested but no condition column found in aligned_events. "
-            "Expected one of {'condition','trial_type'} or a column listed in event_columns.pain_binary."
-        )
+    cond_col = _resolve_connectivity_condition_column(
+        events=events,
+        config=ctx.config,
+        condition_column_cfg=conn_cfg.condition_column,
+    )
 
     labels = events[cond_col].astype(str)
+    included_mask, included_labels = _resolve_connectivity_condition_selection(
+        labels=labels,
+        selected_values=conn_cfg.condition_values,
+    )
     out = numeric.copy()
 
     min_n = conn_cfg.min_epochs_per_group
     counts = labels.value_counts()
+    if included_labels:
+        counts = counts.loc[[lab for lab in included_labels if lab in counts.index]]
     too_small = counts[counts < int(min_n)]
     if not too_small.empty:
         details = ", ".join([f"{k}={int(v)}" for k, v in too_small.items()])
@@ -730,8 +845,12 @@ def extract_connectivity_features(
             f"(<{int(min_n)}): {details}."
         )
 
-    for lab in sorted(labels.unique()):
-        mask = (labels == lab).to_numpy()
+    # Exclude non-selected condition values (set to NaN).
+    if not np.all(included_mask):
+        out.loc[~included_mask, :] = np.nan
+
+    for lab in included_labels:
+        mask = ((labels == lab).to_numpy() & included_mask)
         grp_mean = numeric.loc[mask].mean(axis=0)
         out.loc[mask] = [grp_mean.values] * int(np.sum(mask))
 
@@ -810,11 +929,6 @@ def extract_connectivity_from_precomputed(
 
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
-    )
 
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -823,20 +937,11 @@ def extract_connectivity_from_precomputed(
             seg_mask_map = {target_name: mask}
         else:
             if logger is not None:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "Connectivity: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "Connectivity: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
-            else:
-                return pd.DataFrame(), []
+                logger.error(
+                    "Connectivity: targeted window '%s' has no valid mask; skipping.",
+                    target_name,
+                )
+            return pd.DataFrame(), []
     else:
         masks = get_segment_masks(precomputed.times, windows, precomputed.config)
         seg_mask_map = {k: v for k, v in masks.items() if v is not None}
@@ -893,6 +998,10 @@ def extract_connectivity_from_precomputed(
     if not np.isfinite(sfreq) or sfreq <= 0:
         raise ValueError("Connectivity extraction requires a valid precomputed.sfreq (sampling frequency).")
 
+    def _is_wavelet_longer_than_signal_error(exc: BaseException) -> bool:
+        msg = str(exc).strip().lower()
+        return "wavelets is longer than the signal" in msg or "wavelet is longer than the signal" in msg
+
     def _safe_n_cycles_for_segment(
         base_n_cycles: Optional[float],
         freqs_hz: np.ndarray,
@@ -909,32 +1018,43 @@ def extract_connectivity_from_precomputed(
         if n_times <= 0:
             return np.array([]), np.array([])
 
-        duration = float(n_times) / sfreq_hz
         default_cycles = 7.0
         try:
             base = float(base_n_cycles) if base_n_cycles is not None else default_cycles
         except (TypeError, ValueError):
             base = default_cycles
 
-        # MNE requirement: n_cycles / freqs < duration (or equivalently: wavelet_length < n_times)
-        # Wavelet length = n_cycles / freq * sfreq
-        # We use a CONSERVATIVE safety factor of 0.7 to avoid edge cases
-        # This is stricter than the 0.9 factor that was causing crashes
-        safety_factor = 0.7
-        max_cycles = safety_factor * duration * freqs_hz
-        
-        # For each frequency, compute the safe n_cycles (capped at base)
-        safe_cycles = np.minimum(base, max_cycles)
-        
-        # Filter out frequencies where even 1 cycle doesn't fit
-        # (need at least 1 cycle for meaningful phase estimation)
+        # MNE's Morlet wavelet length check is based on:
+        #   W = morlet(sfreq, freqs, n_cycles)
+        #   if len(W[0]) > n_times: raise ValueError(...)
+        #
+        # In MNE, each wavelet uses:
+        #   sigma_t = n_cycles / (2*pi*freq)
+        #   t = arange(0, 5*sigma_t, 1/sfreq)
+        #   W length = 2*len(t) - 1
+        #
+        # We compute the maximum n_cycles per frequency that guarantees len(W) <= n_times,
+        # with a small safety factor to avoid boundary/rounding edge cases.
+        n_sigma = 5.0
+        half_len_max = int((n_times + 1) // 2)  # len(t) must be <= half_len_max
+        if half_len_max <= 1:
+            return np.array([]), np.array([])
+
+        safety_factor = 0.95
+        max_cycles_by_wavelet = (
+            safety_factor
+            * float(half_len_max)
+            * (2.0 * np.pi * freqs_hz)
+            / (n_sigma * sfreq_hz)
+        )
+
+        # For each frequency, cap by base (default 7) and enforce a minimum cycles threshold.
+        safe_cycles = np.minimum(base, max_cycles_by_wavelet)
+
+        # Keep at least 1 cycle for phase-based estimation; smaller values are not meaningful.
         min_required_cycles = 1.0
-        valid_mask = safe_cycles >= min_required_cycles
-        
-        valid_freqs = freqs_hz[valid_mask]
-        valid_cycles = safe_cycles[valid_mask]
-        
-        return valid_freqs, valid_cycles
+        valid_mask = np.isfinite(safe_cycles) & (safe_cycles >= min_required_cycles)
+        return freqs_hz[valid_mask], safe_cycles[valid_mask]
 
     def _slice_epochs(arr_3d: np.ndarray, mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
         if mask is None:
@@ -1014,14 +1134,26 @@ def extract_connectivity_from_precomputed(
         try:
             con = _run(method_use, use_average=use_across_epochs)
         except ValueError as e:
-            # Handle MNE's "wavelet longer than signal" and similar validation errors gracefully
-            error_msg = str(e).lower()
-            if "wavelet" in error_msg or "n_cycles" in error_msg or "longer than" in error_msg:
-                raise ValueError(
-                    f"Connectivity: segment '{seg_name}' is too short for wavelet-based '{method_use}' "
-                    f"in band '{band}'. Consider longer epochs or higher fmin."
-                ) from e
-            # Re-raise other ValueErrors
+            # User-facing requirement: warn and continue (do not crash the pipeline).
+            #
+            # We only suppress the known MNE Morlet constraint error. Other ValueErrors
+            # still surface (misconfiguration, shape mismatches, etc.).
+            if _is_wavelet_longer_than_signal_error(e):
+                if logger is not None:
+                    seg_n_times = int(seg_data.shape[-1])
+                    seg_sec = float(seg_n_times) / sfreq if sfreq > 0 else np.nan
+                    logger.warning(
+                        "Connectivity: skipped %s for segment=%s band=%s (%.3fs; %d samples @ %.1f Hz): "
+                        "Morlet wavelet longer than signal. Increase segment duration / raise fmin / or set a smaller "
+                        "feature_engineering.connectivity.n_cycles.",
+                        method_use,
+                        seg_name,
+                        band,
+                        seg_sec,
+                        seg_n_times,
+                        float(sfreq),
+                    )
+                return pd.DataFrame()
             raise
 
         con_data = np.asarray(con.get_data())
@@ -1091,7 +1223,7 @@ def extract_connectivity_from_precomputed(
             analytic_seg,
             orthogonalize=orthogonalize,
             log=False,
-            absolute=True,
+            absolute=bool(conn_cfg.aec_absolute),
         )
         ec_data = np.asarray(ec.get_data())
         if ec_data.ndim >= 1 and ec_data.shape[-1] == 1:
@@ -1449,7 +1581,10 @@ def _fit_mvar_model(
     """
     n_channels, n_times = data.shape
     
-    if n_times <= order * n_channels:
+    # Scientific validity: MVAR fits are unstable with too few samples relative
+    # to model dimensionality. This guard is intentionally conservative.
+    min_required = int(max(order * n_channels + 1, 3 * order * n_channels))
+    if n_times < min_required:
         return np.array([]), np.array([])
     
     data_centered = data - data.mean(axis=1, keepdims=True)
@@ -1477,6 +1612,14 @@ def _fit_mvar_model(
     try:
         A_flat = np.linalg.solve(R_matrix, r_vector)
     except np.linalg.LinAlgError:
+        return np.array([]), np.array([])
+
+    # Reject numerically ill-conditioned systems (DTF/PDC will be unreliable).
+    try:
+        cond = float(np.linalg.cond(R_matrix))
+        if not np.isfinite(cond) or cond > 1e12:
+            return np.array([]), np.array([])
+    except Exception:
         return np.array([]), np.array([])
     
     A = np.zeros((order, n_channels, n_channels))
@@ -1644,6 +1787,7 @@ def _compute_directed_connectivity_epoch(
     """
     results = {}
     n_channels = data.shape[0]
+    n_times = int(data.shape[1])
     
     freqs = np.linspace(fmin, fmax, n_freqs)
     
@@ -1658,6 +1802,16 @@ def _compute_directed_connectivity_epoch(
             results["psi"] = np.full((n_channels, n_channels), np.nan)
     
     if "dtf" in methods or "pdc" in methods:
+        # Additional adequacy guard: DTF/PDC via MVAR needs substantially more data
+        # than PSI and is highly sensitive to short segments.
+        # (PSI uses cross-spectrum; MVAR estimates many parameters.)
+        if n_times < int(max(3 * mvar_order * n_channels, mvar_order + 2)):
+            if "dtf" in methods:
+                results["dtf"] = np.full((n_channels, n_channels), np.nan)
+            if "pdc" in methods:
+                results["pdc"] = np.full((n_channels, n_channels), np.nan)
+            return results
+
         A, sigma = _fit_mvar_model(data, mvar_order)
         
         if A.size > 0:
@@ -1773,11 +1927,6 @@ def extract_directed_connectivity_from_precomputed(
     
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
-    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -1786,20 +1935,11 @@ def extract_directed_connectivity_from_precomputed(
             seg_mask_map = {target_name: mask}
         else:
             if logger is not None:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "Directed connectivity: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "Directed connectivity: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
-            else:
-                return pd.DataFrame(), []
+                logger.error(
+                    "Directed connectivity: targeted window '%s' has no valid mask; skipping.",
+                    target_name,
+                )
+            return pd.DataFrame(), []
     else:
         masks = get_segment_masks(precomputed.times, windows, precomputed.config)
         seg_mask_map = {k: v for k, v in masks.items() if v is not None}

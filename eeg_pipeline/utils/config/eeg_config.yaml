@@ -131,9 +131,15 @@ ica:
   labels_to_keep: ["brain", "other"]
 
 epochs:
-  tmin: -5.0
+  # IMPORTANT: Keep epochs.tmin earlier than the earliest baseline time window.
+  # With Morlet wavelets and low frequencies (e.g., 1 Hz with min_cycles=3),
+  # baseline values near the epoch boundary are edge-affected and can bias
+  # baseline-normalized power. This extra padding reduces that bias.
+  tmin: -7.0
   tmax: 15.0
-  baseline: [-2.0, 0.0]
+  # Use an ERP-appropriate baseline window. Per-feature baseline handling is preferable,
+  # but when a global epoch baseline is applied, it should match the ERP convention.
+  baseline: [-0.2, 0.0]
   # For long stimulus-locked epochs (-5..15s), fixed PTP thresholds are brittle and can
   # reject nearly all trials due to slow drift/residual artifacts. Prefer autoreject.
   reject: "autoreject_local"
@@ -191,6 +197,10 @@ time_frequency_analysis:
 feature_engineering:
   feature_categories: ["power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "erp", "bursts"]
   spatial_modes: ["roi", "channels", "global"]
+  # Controls cross-trial feature computation and leakage constraints:
+  # - "group_stats": allow cross-trial estimates (one row per subject/condition as appropriate)
+  # - "trial_ml_safe": forbid cross-trial features unless train_mask is provided (ML/CV-safe)
+  analysis_mode: "group_stats"
 
   # Per-family spatial transforms: CSD is excellent for phase connectivity but changes
   # the meaning/units/topography of amplitude-derived features. Configure separately.
@@ -212,6 +222,30 @@ feature_engineering:
   spatial_transform_params:
     lambda2: 1.0e-5
     stiffness: 4.0
+  # Global spatial transform override:
+  # - "none": use per-family spatial_transform_per_family settings (recommended)
+  # - "csd"/"laplacian": force this transform for ALL families (use with care)
+  spatial_transform: "none"
+
+  # Parallelization (per-module; -1 = all cores)
+  parallel:
+    n_jobs_bands: -1
+    n_jobs_connectivity: -1
+    n_jobs_itpc: -1
+    n_jobs_aperiodic: -1
+    n_jobs_complexity: -1
+
+  # Shared intermediates
+  precomputed:
+    subtract_evoked: null  # null = inherit feature_engineering.power.subtract_evoked
+
+  # Optional storage/extra outputs
+  save_tfr_with_sidecar: false
+  compute_change_scores: true
+  change_scores:
+    transform: "difference"          # "difference" | "percent" | "log_ratio"
+    window_pairs:
+      - ["baseline", "active"]
 
   power:
     require_baseline: true
@@ -221,6 +255,15 @@ feature_engineering:
     # is automatically disabled for safety.
     subtract_evoked: true
     min_trials_per_condition: 2
+    # Line-noise control for TFR band-averaged power (independent of notch quality).
+    # Defaults fall back to feature_engineering.spectral.* if unset.
+    exclude_line_noise: true
+    line_noise_freqs: [60.0]
+    line_noise_width_hz: 1.0
+    line_noise_harmonics: 3
+    # Emit dB-scaled versions of log10-ratio power:
+    #   db = 10 * log10(active / baseline)
+    emit_db: true
   
   constants:
     epsilon_std: *epsilon_std
@@ -232,6 +275,14 @@ feature_engineering:
     min_valid_fraction: 0.5
     min_epochs_for_plv: 10
     min_edge_samples: 30
+  
+  # Feature validity thresholds shared across families
+  features:
+    min_baseline_power: 1.0e-12      # Clamp baseline power to avoid division instability
+    min_valid_band_fraction: 0.0     # 0 disables trial dropping based on valid-band coverage
+
+  # Optional PSD settings for shared PSD helpers. If empty, feature_engineering.spectral is used.
+  psd: {}
 
   spectral:
     ratio_pairs:
@@ -241,9 +292,12 @@ feature_engineering:
       - [delta, alpha]     
       - [delta, theta]      
     include_log_ratios: true
-    # NOTE: Band ratios use Hilbert envelope² (time-domain bandpass power).
-    # For aperiodic-adjusted ratios, use *_powcorr outputs from aperiodic module.
+    # NOTE: Band ratios in this pipeline use PSD-integrated band power (power per Hz),
+    # which is appropriate for cross-band ratios. For aperiodic-adjusted ratios,
+    # use `*_powcorr` outputs from the aperiodic module.
     psd_method: "multitaper"         # "multitaper" (recommended) or "welch"
+    psd_adaptive: false
+    multitaper_adaptive: false
     fmin: 1.0
     fmax: 80.0
     exclude_line_noise: true
@@ -287,6 +341,7 @@ feature_engineering:
     # ITPC is fundamentally cross-trial; broadcasting it per trial creates pseudo-replication.
     # For condition-level analyses, compute ITPC within each condition group.
     condition_column: null        # Column name in events for condition grouping (e.g., "condition", "stimulus_type")
+    condition_values: []          # Optional: values to INCLUDE (empty = all). Other values are excluded (rows set to NaN).
     min_trials_per_condition: 10  # Minimum trials per condition for reliable ITPC
     min_segment_sec: 1.0          # Minimum segment duration for ITPC (sec)
     min_cycles_at_fmin: 3.0       # Require at least this many cycles at lowest freq in band
@@ -297,14 +352,24 @@ feature_engineering:
     skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
 
   asymmetry:
+    channel_pairs:
+      - ["F3", "F4"]
+      - ["F7", "F8"]
+      - ["C3", "C4"]
+      - ["P3", "P4"]
+      - ["O1", "O2"]
     min_segment_sec: 1.0          # Minimum segment duration for asymmetry (sec)
     min_cycles_at_fmin: 3.0       # Require at least this many cycles at lowest freq in band
     skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
+    emit_activation_convention: false  # Also emit (R-L)/(R+L) activation-style asymmetry for activation_bands
+    activation_bands: ["alpha"]
 
   aperiodic:
     model: "fixed"                 # "fixed" or "knee"
     psd_method: "multitaper"       # "multitaper" (recommended) or "welch"
     psd_bandwidth: null
+    multitaper_adaptive: false
+    subtract_evoked: false         # Induced spectra (evoked subtraction; CV-safe only with train_mask)
     fmin: 1.0                      # Must cover lowest band (delta starts at 1.0 Hz)
     fmax: 80.0                     # Must cover highest band (gamma ends at 80.0 Hz)
     peak_rejection_z: 3.5
@@ -319,19 +384,39 @@ feature_engineering:
 
   connectivity:
     measures: ["wpli2_debiased", "aec"]
+    output_level: "full"              # "full" or "global_only"
+    mode: "cwt_morlet"                # mne-connectivity mode for phase measures
     aec_mode: "orth"
+    aec_absolute: true
     aec_output: ["r"]                 # ["r"] (raw), ["z"] (Fisher-z), or ["r", "z"] (both); z averages correctly across trials/subjects
+    enable_aec: true
     enable_graph_metrics: false
     graph_top_prop: 0.1
+    small_world_n_rand: 100
     sliding_window_len: 1.0
     sliding_window_step: 0.5
+    n_freqs_per_band: 8
+    n_cycles: null
+    decim: 1
+    min_segment_samples: 50
     granularity: "trial"             # "trial", "condition", "subject"
+    condition_column: null            # When granularity="condition": events.tsv column defining condition groups (null = auto-detect)
+    condition_values: []              # Optional: values to INCLUDE. If set, other values are excluded (rows set to NaN).
     min_epochs_per_group: 5
     min_cycles_per_band: 3.0         # Minimum oscillatory cycles per band for reliable connectivity
     warn_if_no_spatial_transform: true  # Warn if phase-based measures used without CSD/Laplacian
     phase_estimator: "within_epoch"  # "within_epoch" (per-trial) or "across_epochs" (group-level, broadcast)
     force_within_epoch_for_ml: true  # Force within_epoch when train_mask detected (prevents CV leakage)
     min_segment_sec: 1.0             # Minimum segment duration for connectivity (sec)
+
+  directedconnectivity:
+    enable_psi: true
+    enable_dtf: false
+    enable_pdc: false
+    output_level: "full"     # "full" | "global_only"
+    mvar_order: 10
+    n_freqs: 16
+    min_segment_samples: 100
 
   # Source localization (MNE-Python): cortical ROI power/envelope/connectivity from source estimates.
   #
@@ -409,7 +494,9 @@ feature_engineering:
     allow_harmonic_overlap: false
     max_harmonic: 6
     harmonic_tolerance_hz: 1.0
-    compute_waveform_qc: false
+    # Emits low-frequency waveform non-sinusoidality diagnostics alongside PAC.
+    # Useful for spotting spurious PAC driven by sharp transients/non-sinusoidal waveforms.
+    compute_waveform_qc: true
     waveform_offset_ms: 5.0
 
   complexity:
@@ -425,6 +512,7 @@ feature_engineering:
 
   output:
     save_subject_level_features: true
+    also_save_csv: false
 
   erp:
     baseline_correction: true
@@ -468,7 +556,7 @@ feature_engineering:
     fmax: 100.0
     n_fft: 256
     exclude_line_noise: true
-    line_noise_freqs: [50.0]         # [60.0] for North America
+    line_noise_freqs: [60.0]         # Must match preprocessing.line_freq
     line_noise_width_hz: 1.0
     line_noise_harmonics: 3
     snr_signal_band: [1.0, 30.0]     # "Signal" band for SNR computation
@@ -478,12 +566,19 @@ feature_engineering:
 # 4.4 Behavioral Correlation
 behavior_analysis:
   correlation_method: "spearman"
+  # Optional robust estimator for correlations:
+  # - null/"none": standard Spearman/Pearson
+  # - "percentage_bend" | "winsorized" | "shepherd"
+  robust_correlation: null
   pooling_strategy: "within_subject_centered"
   control_temperature: true
   control_trial_order: true
   bootstrap: 1000
   n_jobs: -1
   targets: ["pain_rating", "temperature", "pain_binary"]
+  # Optional overrides for feature selection (null = auto-discover all available)
+  feature_files: null
+  feature_categories: null
 
   # Optional run adjustment (subject-level): enable run-aware covariates / aggregation.
   # Set enabled=false for paradigms with no runs (trial-only designs).
@@ -497,11 +592,23 @@ behavior_analysis:
   trial_table:
     enabled: true
     format: "parquet"   # "parquet" (default, recommended) or "tsv"
+    add_lag_features: true
+
+  # Trial order validation (used when control_trial_order=true)
+  trial_order:
+    max_missing_fraction: 0.1
 
   # Lag features: temporal dynamics (prev_*, delta_*) for habituation analyses
   lag_features:
     enabled: true
     group_columns: []  # Empty = auto-detect from run_adjustment.column, run_id, run, block
+  
+  # Feature QC (optional gating before running statistics)
+  feature_qc:
+    enabled: false
+    max_missing_pct: 0.2
+    min_variance: 1.0e-10
+    check_within_run_variance: true
 
   # Pain residual = rating - f(temperature) for "pain beyond stimulus intensity"
   pain_residual:
@@ -510,6 +617,10 @@ behavior_analysis:
     min_samples: 10
     spline_df_candidates: [3, 4, 5]
     poly_degree: 2
+    model_comparison:
+      enabled: true
+      min_samples: 10
+      poly_degrees: [2, 3]
     crossfit:
       enabled: false
       group_column: ""        # "" -> use behavior_analysis.run_adjustment.column
@@ -535,6 +646,7 @@ behavior_analysis:
   # Trialwise regression/moderation (complements correlations)
   regression:
     enabled: false
+    primary_unit: "trial"            # "trial" | "run_mean"
     outcome: "rating"              # "rating" | "pain_residual" | "temperature"
     include_temperature: true
     temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
@@ -612,6 +724,11 @@ behavior_analysis:
     enabled: true
     top_n: 15
   
+  # Output options
+  output:
+    also_save_csv: false
+    overwrite: true
+  
   # Permutation testing configuration
   permutation:
     # Permutation scheme for trialwise inference.
@@ -625,11 +742,16 @@ behavior_analysis:
   
   # Statistics
   statistics:
+    correlation_method: "spearman"
     fdr_alpha: 0.05
     n_permutations: 1000
     compute_reliability: false
     default_n_bootstrap: 1000
+    base_seed: 42
     hierarchical_fdr: true
+    # Temperature control used in partial correlations / permutation tests for correlations.
+    # "spline" uses a restricted cubic spline basis (linear regression on nonlinear terms).
+    temperature_control: "spline"  # "linear" | "spline"
     # If false, trial-level tests require permutation or aggregation.
     # Set true only if you explicitly accept i.i.d. trial assumptions.
     allow_iid_trials: false
@@ -641,6 +763,7 @@ behavior_analysis:
   # Correlations computation
   correlations:
     enabled: true
+    types: ["partial_cov_temp"]
     targets: ["rating", "temperature", "pain_residual"]
     compute_change_scores: true
     loso_stability: true
@@ -664,7 +787,10 @@ behavior_analysis:
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
     compare_column: ""          # Column to split by (empty = use event_columns.pain_binary)
     compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
+    compare_windows: []          # Empty = compare all available windows
+    compare_labels: null         # Optional labels for compare_values (same length)
     primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
+    overwrite: true
     p_primary_mode: "perm_if_available"   # "asymptotic" | "perm_if_available"
     permutation:
       enabled: true
@@ -675,9 +801,11 @@ behavior_analysis:
   # Temporal correlations computation  
   temporal:
     enabled: true
+    target_column: ""                 # Empty = use event_columns.rating
     time_resolution_ms: 50
     time_range_ms: [-200, 1000]
     smooth_window_ms: 100
+    correction_method: "fdr"          # "fdr" | "bonferroni" | "cluster"
     # Condition-based splitting (similar to condition comparison)
     split_by_condition: true           # If true, compute separate correlations per condition value
     condition_column: ""               # Column to split by (empty = use event_columns.pain_binary)
@@ -722,6 +850,17 @@ behavior_analysis:
     min_effect_size: 0.05
     max_mediators: 20
   
+  # Moderation analysis
+  moderation:
+    enabled: false
+    min_samples: 15
+    max_features: null
+    n_permutations: 0
+
+  # Group-level analysis controls
+  group_level:
+    block_permutation: true
+
   # Mixed effects modeling
   mixed_effects:
     enabled: false
@@ -824,6 +963,7 @@ machine_learning:
 ###################################################################
 statistics:
   alpha: &default_alpha 0.05
+  sig_alpha: *default_alpha
   fdr_alpha: *default_alpha
   n_permutations: 1000
   n_bootstrap: 1000

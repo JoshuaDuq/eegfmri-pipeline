@@ -22,6 +22,49 @@ _DESIGN_MATRIX_RANK_TOLERANCE = 1e-10
 _RESIDUAL_VARIANCE_TOLERANCE_FACTOR = 1e-12
 
 
+def _get_temperature_control_mode(config: Optional[Any]) -> str:
+    if config is None:
+        return "spline"
+    try:
+        mode = str(
+            get_config_value(
+                config,
+                "behavior_analysis.statistics.temperature_control",
+                get_config_value(config, "behavior_analysis.regression.temperature_control", "spline"),
+            )
+        ).strip().lower()
+    except Exception:
+        return "spline"
+    if mode in {"spline", "linear"}:
+        return mode
+    return "spline"
+
+
+def _build_temperature_covariates(
+    temp_series: pd.Series,
+    *,
+    config: Optional[Any],
+) -> pd.DataFrame:
+    """Build temperature covariates (linear or restricted cubic spline) for control."""
+    mode = _get_temperature_control_mode(config)
+    if mode == "linear":
+        return pd.DataFrame({"temp": temp_series})
+
+    from .splines import build_temperature_rcs_design
+
+    df_cols, covariate_names, _meta = build_temperature_rcs_design(
+        temp_series,
+        config=config,
+        key_prefix="behavior_analysis.regression.temperature_spline",
+        name_prefix="temperature_rcs",
+    )
+    rename_map = {"temperature": "temp"}
+    for name in covariate_names:
+        if name.startswith("temperature_rcs_"):
+            rename_map[name] = name.replace("temperature_", "temp_", 1)
+    return df_cols.rename(columns=rename_map)
+
+
 def _get_permutation_scheme(config: Optional[Any]) -> str:
     """Extract permutation scheme from config."""
     if config is None:
@@ -428,7 +471,7 @@ def compute_permutation_pvalues(
         )
 
     if temp_series is not None and not temp_series.empty:
-        temperature_covariates = pd.DataFrame({"temp": temp_series})
+        temperature_covariates = _build_temperature_covariates(temp_series, config=config)
         p_temp_perm = perm_pval_partial_freedman_lane(
             x_aligned,
             y_aligned,
@@ -473,7 +516,11 @@ def _compute_combined_covariates_temp_pvalue(
         return np.nan
     
     combined_covariates = covariates_df.copy()
-    combined_covariates["temp"] = temp_series
+    temp_cov = _build_temperature_covariates(temp_series, config=config)
+    overlap = [c for c in temp_cov.columns if c in combined_covariates.columns]
+    if overlap:
+        combined_covariates = combined_covariates.drop(columns=overlap, errors="ignore")
+    combined_covariates = pd.concat([combined_covariates, temp_cov], axis=1)
     combined_covariates = combined_covariates.dropna()
     
     if combined_covariates.empty:
@@ -739,5 +786,4 @@ def permutation_null_distribution(
     p_perm = (n_extreme + 1) / (n_perm + 1)
     
     return null_correlations, float(observed_r), float(p_perm)
-
 

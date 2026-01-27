@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 
 import pandas as pd
 
-from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.infra.tsv import read_table
 
 
 def load_stats_file_with_fallbacks(
@@ -17,7 +17,7 @@ def load_stats_file_with_fallbacks(
     for pattern in patterns:
         filepath = stats_dir / pattern
         if filepath.exists():
-            df = read_tsv(filepath)
+            df = read_table(filepath)
             if df is not None and not df.empty:
                 return df
     return None
@@ -29,15 +29,19 @@ def _build_stats_file_patterns(
 ) -> List[str]:
     """Build file patterns with and without method suffix for backwards compatibility."""
     method_suffix = f"_{method_label}" if method_label else ""
+
+    def _both_ext(stem: str) -> List[str]:
+        return [f"{stem}.parquet", f"{stem}.tsv"]
+
     patterns = [
-        f"corr_stats_pow_roi_vs_{base_name}{method_suffix}.tsv",
-        f"corr_stats_power_roi_vs_{base_name}{method_suffix}.tsv",
+        *_both_ext(f"corr_stats_pow_roi_vs_{base_name}{method_suffix}"),
+        *_both_ext(f"corr_stats_power_roi_vs_{base_name}{method_suffix}"),
     ]
     
     if method_label:
         patterns.extend([
-            f"corr_stats_pow_roi_vs_{base_name}.tsv",
-            f"corr_stats_power_roi_vs_{base_name}.tsv",
+            *_both_ext(f"corr_stats_pow_roi_vs_{base_name}"),
+            *_both_ext(f"corr_stats_power_roi_vs_{base_name}"),
         ])
     
     return patterns

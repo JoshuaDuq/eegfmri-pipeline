@@ -256,8 +256,10 @@ def _normalize_roi_name(roi: Optional[str]) -> str:
     Returns:
         ROI suffix string (empty if roi is None)
     """
+    # The subject-level TF grid writer uses an explicit "all" label
+    # (e.g., tf_grid_all_spearman.tsv). Treat None as "all" for discovery.
     if roi is None:
-        return ""
+        roi = "all"
     roi_sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", roi.lower())
     return f"_{roi_sanitized}"
 

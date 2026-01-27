@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -10,12 +11,11 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.infra.tsv import read_table, read_tsv
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.core.annotations import find_annotation_x_position, get_sig_marker_text
 from eeg_pipeline.plotting.core.colorbars import create_difference_colorbar
 from eeg_pipeline.plotting.core.utils import get_font_sizes
-from eeg_pipeline.plotting.features.utils import get_fdr_alpha
 from eeg_pipeline.plotting.io.figures import (
     get_behavior_footer as _get_behavior_footer,
     get_default_config as _get_default_config,
@@ -38,13 +38,58 @@ DEFAULT_ANNOTATION_SPACING_MULTIPLIER = 0.3
 DEFAULT_FIGURE_SIZE = 10.0
 
 
+def _get_behavior_fdr_alpha(config: Optional[Any], default: float = DEFAULT_ALPHA) -> float:
+    """Use the behavioral analysis alpha (falls back to global statistics alpha)."""
+    return float(
+        get_config_value(
+            config,
+            "behavior_analysis.statistics.fdr_alpha",
+            get_config_value(config, "statistics.fdr_alpha", default),
+        )
+    )
+
+
+def _round_time_value(value: float, *, decimals: int = 6) -> float:
+    """Canonicalize time keys across TSV/NPZ float formatting."""
+    return float(np.round(float(value), decimals=decimals))
+
+
+def _temporal_key(
+    condition: str,
+    band: str,
+    time_start: float,
+    time_end: float,
+    channel: str,
+) -> Tuple[str, str, float, float, str]:
+    return (
+        str(condition).strip(),
+        str(band).strip(),
+        _round_time_value(time_start),
+        _round_time_value(time_end),
+        str(channel).strip(),
+    )
+
+
+@dataclass(frozen=True)
+class TemporalPrimaryLookup:
+    """Lookup for the *primary* multiple-comparison decision used by behavior pipeline."""
+
+    correction_method: str
+    alpha: float
+    primary_value_label: str  # "q" for FDR, otherwise "p"
+    primary_p_map: Dict[Tuple[str, str, float, float, str], float]
+    primary_sig_map: Dict[Tuple[str, str, float, float, str], bool]
+
+
 def _compute_roi_statistics(
     corr_data: np.ndarray,
     p_uncorr: Optional[np.ndarray],
-    p_fdr: Optional[np.ndarray],
+    p_primary: Optional[np.ndarray],
+    sig_primary: Optional[np.ndarray],
     ch_names: List[str],
     roi_map: Dict[str, List[str]],
-) -> List[Tuple[str, float, Optional[float], Optional[float]]]:
+    alpha: float,
+) -> List[Tuple[str, float, Optional[float], Optional[float], int, Optional[int]]]:
     """Compute mean correlation and p-values for each ROI."""
     annotations = []
     for roi, roi_chs in roi_map.items():
@@ -59,6 +104,8 @@ def _compute_roi_statistics(
 
         mean_corr = np.nanmean(roi_corrs_finite)
 
+        n_roi = int(mask_vec.sum())
+
         roi_p_uncorr = None
         if p_uncorr is not None:
             roi_p_uncorr_vals = p_uncorr[mask_vec]
@@ -66,29 +113,52 @@ def _compute_roi_statistics(
             if len(roi_p_uncorr_finite) > 0:
                 roi_p_uncorr = np.nanmin(roi_p_uncorr_finite)
 
-        roi_p_fdr = None
-        if p_fdr is not None:
-            roi_p_fdr_vals = p_fdr[mask_vec]
-            roi_p_fdr_finite = roi_p_fdr_vals[np.isfinite(roi_p_fdr_vals)]
-            if len(roi_p_fdr_finite) > 0:
-                roi_p_fdr = np.nanmin(roi_p_fdr_finite)
+        roi_primary_val = None
+        if p_primary is not None:
+            roi_primary_vals = p_primary[mask_vec]
+            roi_primary_finite = roi_primary_vals[np.isfinite(roi_primary_vals)]
+            if len(roi_primary_finite) > 0:
+                roi_primary_val = np.nanmin(roi_primary_finite)
 
-        annotations.append((roi, mean_corr, roi_p_uncorr, roi_p_fdr))
+        n_sig_primary = None
+        if sig_primary is not None and n_roi > 0:
+            n_sig_primary = int(np.sum(sig_primary[mask_vec]))
+
+        annotations.append(
+            (
+                roi,
+                mean_corr,
+                roi_p_uncorr,
+                roi_primary_val,
+                n_roi,
+                n_sig_primary,
+            )
+        )
     return annotations
+
 
 
 def _format_roi_label(
     roi: str,
     mean_corr: float,
     roi_p_uncorr: Optional[float],
-    roi_p_fdr: Optional[float],
-    fdr_alpha: float,
+    roi_primary: Optional[float],
+    n_roi: int,
+    n_sig_primary: Optional[int],
+    correction_method: str,
+    alpha: float,
+    primary_value_label: str,
 ) -> str:
     """Format ROI annotation label with correlation and significance."""
     label = f"{roi}: r={mean_corr:+.2f}"
-    if roi_p_fdr is not None and np.isfinite(roi_p_fdr) and roi_p_fdr < fdr_alpha:
-        label += f" (q={roi_p_fdr:.3f})"
-    elif roi_p_uncorr is not None and np.isfinite(roi_p_uncorr) and roi_p_uncorr < DEFAULT_UNCORRECTED_ALPHA:
+
+    if n_sig_primary is not None and n_roi > 0 and n_sig_primary > 0:
+        label += f" ({n_sig_primary}/{n_roi} {correction_method})"
+        if roi_primary is not None and np.isfinite(roi_primary) and roi_primary < alpha:
+            label += f", min {primary_value_label}={roi_primary:.3f}"
+        return label
+
+    if roi_p_uncorr is not None and np.isfinite(roi_p_uncorr) and roi_p_uncorr < DEFAULT_UNCORRECTED_ALPHA:
         label += f" (p={roi_p_uncorr:.3f})"
     return label
 
@@ -116,11 +186,14 @@ def _add_correlation_roi_annotations(
     ax,
     corr_data: np.ndarray,
     p_uncorr: Optional[np.ndarray],
-    p_fdr: Optional[np.ndarray],
+    p_primary: Optional[np.ndarray],
+    sig_primary: Optional[np.ndarray],
     info: mne.Info,
     config: Optional[Any] = None,
     roi_map: Optional[Dict[str, List[str]]] = None,
-    fdr_alpha: float = DEFAULT_ALPHA,
+    correction_method: str = "primary",
+    alpha: float = DEFAULT_ALPHA,
+    primary_value_label: str = "p",
 ) -> None:
     """Add ROI correlation annotations to a topomap axis."""
     if config is None and roi_map is None:
@@ -146,13 +219,31 @@ def _add_correlation_roi_annotations(
     min_spacing = annotation_config["min_spacing"]
     spacing_multiplier = annotation_config["spacing_multiplier"]
 
-    annotations = _compute_roi_statistics(corr_data, p_uncorr, p_fdr, ch_names, roi_map)
+    annotations = _compute_roi_statistics(
+        corr_data,
+        p_uncorr,
+        p_primary,
+        sig_primary,
+        ch_names,
+        roi_map,
+        alpha=alpha,
+    )
 
-    for i, (roi, mean_corr, roi_p_uncorr, roi_p_fdr) in enumerate(annotations):
+    for i, (roi, mean_corr, roi_p_uncorr, roi_primary, n_roi, n_sig_primary) in enumerate(annotations):
         if not np.isfinite(mean_corr):
             continue
 
-        label = _format_roi_label(roi, mean_corr, roi_p_uncorr, roi_p_fdr, fdr_alpha)
+        label = _format_roi_label(
+            roi,
+            mean_corr,
+            roi_p_uncorr,
+            roi_primary,
+            n_roi,
+            n_sig_primary,
+            correction_method,
+            alpha,
+            primary_value_label,
+        )
 
         ax.text(
             x_pos_ax,
@@ -172,6 +263,139 @@ def _add_correlation_roi_annotations(
 def _get_correlation_suffix(use_spearman: bool) -> str:
     """Get file suffix based on correlation method."""
     return "_spearman" if use_spearman else "_pearson"
+
+
+def _resolve_single_candidate(
+    candidates: List[Path],
+    *,
+    logger: logging.Logger,
+    label: str,
+) -> Optional[Path]:
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Prefer the most recently modified file (common when overwrite=false).
+    try:
+        chosen = max(candidates, key=lambda p: p.stat().st_mtime)
+    except OSError:
+        chosen = sorted(candidates)[-1]
+    logger.warning("Multiple %s candidates found; using most recent: %s", label, chosen)
+    return chosen
+
+
+def _load_temporal_primary_lookup(
+    stats_dir: Path,
+    use_spearman: bool,
+    logger: logging.Logger,
+    *,
+    feature_folder: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Optional[TemporalPrimaryLookup]:
+    """Load the behavior pipeline's *primary* correction decision for temporal stats.
+
+    This is scientifically important: the NPZ `p_corrected` field is cluster-corrected
+    (time-only clustering per channel) when cluster permutations are enabled, which
+    is not the same as the behavior pipeline's configured family-wise correction
+    (`behavior_analysis.temporal.correction_method`, default: FDR).
+    """
+
+    def _candidate_paths(filename: str) -> List[Path]:
+        if feature_folder:
+            return sorted(stats_dir.glob(f"temporal_correlations*/{feature_folder}/{filename}"))
+        return sorted(stats_dir.glob(f"temporal_correlations*/*/{filename}"))
+
+    suffix = _get_correlation_suffix(use_spearman)
+    base = f"temporal_correlations{suffix}"
+    path = _resolve_single_candidate(
+        [*_candidate_paths(f"{base}.parquet"), *_candidate_paths(f"{base}.tsv")],
+        logger=logger,
+        label=f"{base} table",
+    )
+    if path is None or not path.exists():
+        return None
+
+    try:
+        df = read_table(path)
+    except Exception as exc:
+        logger.warning("Failed to load temporal correlations table %s: %s", path.name, exc)
+        return None
+    if df is None or df.empty:
+        return None
+
+    required = {"condition", "band", "time_start", "time_end", "channel"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        logger.warning("Temporal correlations table missing required columns %s: %s", missing, path.name)
+        return None
+
+    # Determine correction method and alpha (prefer table metadata if present).
+    correction_method = str(
+        df.get("correction_method", pd.Series([None])).dropna().astype(str).iloc[0]
+        if "correction_method" in df.columns and not df["correction_method"].dropna().empty
+        else get_config_value(config, "behavior_analysis.temporal.correction_method", "fdr")
+    ).strip().lower()
+    alpha = _get_behavior_fdr_alpha(config, DEFAULT_ALPHA)
+
+    # Determine primary p-like value and significance column, matching behavior stage.
+    primary_value_label = "q" if correction_method == "fdr" else "p"
+
+    if "p_primary" in df.columns:
+        p_primary = pd.to_numeric(df["p_primary"], errors="coerce")
+    elif correction_method == "fdr" and "p_fdr" in df.columns:
+        p_primary = pd.to_numeric(df["p_fdr"], errors="coerce")
+    elif correction_method == "cluster" and "p_cluster" in df.columns:
+        p_primary = pd.to_numeric(df["p_cluster"], errors="coerce")
+    elif correction_method == "bonferroni" and "p_bonferroni" in df.columns:
+        p_primary = pd.to_numeric(df["p_bonferroni"], errors="coerce")
+    else:
+        fallback_col = "p_raw" if "p_raw" in df.columns else ("p" if "p" in df.columns else None)
+        if fallback_col is None:
+            logger.warning("Temporal correlations table missing p-values: %s", path.name)
+            return None
+        p_primary = pd.to_numeric(df[fallback_col], errors="coerce")
+
+    sig_primary: Optional[pd.Series]
+    if correction_method == "fdr" and "sig_fdr" in df.columns:
+        sig_primary = df["sig_fdr"].fillna(False).astype(bool)
+    elif correction_method == "cluster" and "sig_cluster" in df.columns:
+        sig_primary = df["sig_cluster"].fillna(False).astype(bool)
+    elif correction_method == "bonferroni" and "sig_bonferroni" in df.columns:
+        sig_primary = df["sig_bonferroni"].fillna(False).astype(bool)
+    elif correction_method == "none" and "sig_raw" in df.columns:
+        sig_primary = df["sig_raw"].fillna(False).astype(bool)
+    else:
+        sig_primary = p_primary < alpha
+
+    primary_p_map: Dict[Tuple[str, str, float, float, str], float] = {}
+    primary_sig_map: Dict[Tuple[str, str, float, float, str], bool] = {}
+
+    for (cond, band, t0, t1, ch), p_val, sig_val in zip(
+        df["condition"],
+        df["band"],
+        df["time_start"],
+        df["time_end"],
+        df["channel"],
+        p_primary,
+        sig_primary,
+    ):
+        if pd.isna(cond) or pd.isna(band) or pd.isna(t0) or pd.isna(t1) or pd.isna(ch):
+            continue
+        key = _temporal_key(str(cond), str(band), float(t0), float(t1), str(ch))
+        primary_p_map[key] = float(p_val) if np.isfinite(p_val) else np.nan
+        primary_sig_map[key] = bool(sig_val) if pd.notna(sig_val) else False
+
+    if not primary_p_map:
+        return None
+
+    return TemporalPrimaryLookup(
+        correction_method=correction_method,
+        alpha=alpha,
+        primary_value_label=primary_value_label,
+        primary_p_map=primary_p_map,
+        primary_sig_map=primary_sig_map,
+    )
 
 
 def _validate_fdr_dataframe(df: pd.DataFrame, logger: logging.Logger) -> Optional[str]:
@@ -231,11 +455,7 @@ def _load_global_fdr_for_temporal_correlations(
             candidates = sorted(stats_dir.glob(f"temporal_correlations*/*/{filename}"))
         if not candidates:
             return None
-        if len(candidates) > 1:
-            raise ValueError(
-                f"Multiple temporal correlations files match {filename} under {stats_dir}: {candidates}"
-            )
-        return candidates[0]
+        return _resolve_single_candidate(candidates, logger=logger, label=filename)
 
     suffix = _get_correlation_suffix(use_spearman)
     tsv_path = _resolve_temporal_file(f"temporal_correlations{suffix}.tsv")
@@ -263,7 +483,10 @@ def _load_global_fdr_for_temporal_correlations(
         parsed = _parse_fdr_row(row, fdr_col)
         if parsed is not None:
             key, fdr_reject = parsed
-            global_fdr_map[key] = fdr_reject
+            # Canonicalize time keys to avoid float formatting mismatches.
+            cond, band, t0, t1, ch = key
+            key_norm = _temporal_key(cond, band, t0, t1, ch)
+            global_fdr_map[key_norm] = fdr_reject
 
     if not global_fdr_map:
         logger.warning(f"No valid global FDR entries found in {tsv_path.name}")
@@ -287,11 +510,7 @@ def _load_temporal_correlation_data(
             candidates = sorted(stats_dir.glob(f"temporal_correlations*/*/{filename}"))
         if not candidates:
             return None
-        if len(candidates) > 1:
-            raise ValueError(
-                f"Multiple temporal correlations files match {filename} under {stats_dir}: {candidates}"
-            )
-        return candidates[0]
+        return _resolve_single_candidate(candidates, logger=logger, label=filename)
 
     suffix = _get_correlation_suffix(use_spearman)
     
@@ -406,12 +625,15 @@ def _get_figure_layout_config(plot_cfg: Optional[Any]) -> Dict[str, Any]:
     }
 
 
-def _get_condition_labels(config: Optional[Any]) -> List[str]:
-    """Extract condition labels from config."""
+def _get_condition_labels(config: Optional[Any]) -> Optional[List[str]]:
+    """Extract condition labels from config (optional).
+
+    If not provided, callers should fall back to the actual condition names.
+    """
     labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
-    if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 2:
-        return [str(labels_spec[0]), str(labels_spec[1])]
-    return ["Condition 1", "Condition 2"]
+    if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 1:
+        return [str(x) for x in labels_spec]
+    return None
 
 
 def _build_global_fdr_mask(
@@ -425,7 +647,7 @@ def _build_global_fdr_mask(
     """Build significance mask from global FDR map."""
     sig_mask = np.zeros(len(ch_names), dtype=bool)
     for ch_idx, ch_name in enumerate(ch_names):
-        key = (condition_name, band_name, tmin_win, tmax_win, ch_name)
+        key = _temporal_key(condition_name, band_name, float(tmin_win), float(tmax_win), str(ch_name))
         if key in global_fdr_map:
             sig_mask[ch_idx] = global_fdr_map[key]
     return sig_mask
@@ -464,15 +686,14 @@ def _plot_single_band_topomaps(
     band_ranges: List[Tuple[float, float]],
     window_starts: np.ndarray,
     window_ends: np.ndarray,
-    result_row1: Dict[str, Any],
-    result_row2: Dict[str, Any],
+    results_by_condition: List[Dict[str, Any]],
     condition_names: List[str],
     info: mne.Info,
     ch_names: List[str],
     row_labels: List[str],
     vabs_corr: float,
+    primary_lookup: Optional[TemporalPrimaryLookup],
     global_fdr_map: Optional[Dict[Tuple[str, str, float, float, str], bool]],
-    use_global_fdr: bool,
     config: Optional[Any],
     font_sizes: Dict[str, int],
     layout_config: Dict[str, Any],
@@ -482,7 +703,7 @@ def _plot_single_band_topomaps(
     fmin, fmax = band_ranges[band_idx]
     freq_label = f"{band_name} ({fmin:.0f}-{fmax:.0f}Hz)"
 
-    n_rows = 2
+    n_rows = max(1, int(len(results_by_condition)))
     fig, axes = plt.subplots(
         n_rows,
         n_windows,
@@ -494,14 +715,15 @@ def _plot_single_band_topomaps(
         gridspec_kw={"hspace": layout_config["hspace"], "wspace": layout_config["wspace"]},
     )
 
-    results = [result_row1, result_row2]
-    fdr_alpha = get_fdr_alpha(config, DEFAULT_ALPHA)
+    alpha = _get_behavior_fdr_alpha(config, DEFAULT_ALPHA)
+    correction_method = primary_lookup.correction_method if primary_lookup else "cluster_p_corrected"
+    primary_value_label = primary_lookup.primary_value_label if primary_lookup else "p"
 
-    for row_idx, (row_label, result) in enumerate(zip(row_labels, results)):
+    for row_idx, (row_label, result) in enumerate(zip(row_labels, results_by_condition)):
         correlations = result["correlations"][band_idx]
         p_values = result["p_values"][band_idx]
         p_corrected = result["p_corrected"][band_idx]
-        condition_name = condition_names[row_idx] if row_idx < len(condition_names) else condition_names[0]
+        condition_name = condition_names[row_idx] if row_idx < len(condition_names) else str(condition_names[-1])
 
         axes[row_idx, 0].set_ylabel(
             f"{row_label}\n{freq_label}",
@@ -521,16 +743,26 @@ def _plot_single_band_topomaps(
 
             corr_data = correlations[col, :]
             p_uncorr = p_values[col, :]
-            p_fdr = p_corrected[col, :]
+            p_cluster = p_corrected[col, :]
 
             sig_mask_uncorr = (p_uncorr < DEFAULT_UNCORRECTED_ALPHA) & np.isfinite(p_uncorr)
 
-            if use_global_fdr and global_fdr_map is not None:
-                sig_mask_fdr = _build_global_fdr_mask(
-                    ch_names, condition_name, band_name, tmin_win, tmax_win, global_fdr_map
+            p_primary_vec = None
+            sig_primary_vec = None
+            if primary_lookup is not None:
+                p_primary_vec = np.full(len(ch_names), np.nan, dtype=float)
+                sig_primary_vec = np.zeros(len(ch_names), dtype=bool)
+                for ch_idx, ch in enumerate(ch_names):
+                    key = _temporal_key(condition_name, band_name, float(tmin_win), float(tmax_win), str(ch))
+                    if key in primary_lookup.primary_p_map:
+                        p_primary_vec[ch_idx] = primary_lookup.primary_p_map.get(key, np.nan)
+                        sig_primary_vec[ch_idx] = bool(primary_lookup.primary_sig_map.get(key, False))
+            elif global_fdr_map is not None:
+                sig_primary_vec = _build_global_fdr_mask(
+                    ch_names, condition_name, band_name, float(tmin_win), float(tmax_win), global_fdr_map
                 )
             else:
-                sig_mask_fdr = (p_fdr < fdr_alpha) & np.isfinite(p_fdr)
+                sig_primary_vec = (p_cluster < alpha) & np.isfinite(p_cluster)
 
             plot_topomap_on_ax(
                 axes[row_idx, col],
@@ -538,7 +770,7 @@ def _plot_single_band_topomaps(
                 info,
                 vmin=-vabs_corr,
                 vmax=+vabs_corr,
-                mask=sig_mask_fdr,
+                mask=sig_primary_vec,
                 mask_params=dict(
                     marker="o",
                     markerfacecolor="green",
@@ -549,17 +781,20 @@ def _plot_single_band_topomaps(
             )
 
             if sig_mask_uncorr.sum() > 0:
-                uncorr_chs = np.where(sig_mask_uncorr & ~sig_mask_fdr)[0]
+                uncorr_chs = np.where(sig_mask_uncorr & ~sig_primary_vec)[0]
                 _plot_uncorrected_markers(axes[row_idx, col], info, uncorr_chs)
 
             _add_correlation_roi_annotations(
                 axes[row_idx, col],
                 corr_data,
                 p_uncorr,
-                p_fdr,
+                p_primary_vec,
+                sig_primary_vec,
                 info,
                 config=config,
-                fdr_alpha=fdr_alpha,
+                correction_method=correction_method,
+                alpha=alpha,
+                primary_value_label=primary_value_label,
             )
 
     return fig, axes
@@ -663,10 +898,13 @@ def plot_temporal_correlation_topomaps_by_pain(
 
     logger.info("Plotting temporal correlation topomaps by condition...")
 
-    global_fdr_map = _load_global_fdr_for_temporal_correlations(
+    primary_lookup = _load_temporal_primary_lookup(
+        stats_dir, use_spearman, logger, feature_folder=feature_folder, config=config
+    )
+    # Backwards-compatibility: old outputs may only have a TSV with FDR reject flags.
+    global_fdr_map = None if primary_lookup is not None else _load_global_fdr_for_temporal_correlations(
         stats_dir, use_spearman, logger, feature_folder=feature_folder
     )
-    use_global_fdr = global_fdr_map is not None
 
     ch_names = data.get("ch_names", None)
     if ch_names is None:
@@ -705,13 +943,10 @@ def plot_temporal_correlation_topomaps_by_pain(
                 f"temporal_correlations*/*/temporal_correlations_by_condition{suffix}.npz"
             )
         )
-    if len(candidates) != 1:
-        logger.warning(
-            "Expected exactly one temporal correlations NPZ for validation, found %d.",
-            len(candidates),
-        )
+    data_path = _resolve_single_candidate(candidates, logger=logger, label="temporal_correlations_by_condition NPZ")
+    if data_path is None:
+        logger.warning("Temporal correlations NPZ not found for validation.")
         return
-    data_path = candidates[0]
     
     if not _validate_temporal_results(condition_results, data_path, subject, logger):
         return
@@ -729,18 +964,13 @@ def plot_temporal_correlation_topomaps_by_pain(
     plot_cfg = get_plot_config(config) if config else None
     layout_config = _get_figure_layout_config(plot_cfg)
     
-    # Get condition labels (use actual condition names if not configured)
-    row_labels = _get_condition_labels(config)
-    if row_labels is None or len(row_labels) != len(condition_names):
-        row_labels = condition_names
-
-    if len(condition_results) >= 2:
-        result_row1 = condition_results[condition_names[0]]
-        result_row2 = condition_results[condition_names[1]]
-    else:
-        # Single condition: duplicate for both rows
-        result_row1 = result_row2 = list(condition_results.values())[0]
-        row_labels = [condition_names[0], condition_names[0]]
+    configured_labels = _get_condition_labels(config)
+    row_labels = (
+        configured_labels
+        if configured_labels is not None and len(configured_labels) == len(condition_names)
+        else condition_names
+    )
+    results_by_condition = [condition_results[name] for name in condition_names]
 
     for band_idx, band_name in enumerate(band_names):
         fig, axes = _plot_single_band_topomaps(
@@ -749,15 +979,14 @@ def plot_temporal_correlation_topomaps_by_pain(
             band_ranges,
             window_starts,
             window_ends,
-            result_row1,
-            result_row2,
+            results_by_condition,
             condition_names,
             info,
             ch_names,
             row_labels,
             vabs_corr,
+            primary_lookup,
             global_fdr_map,
-            use_global_fdr,
             config,
             font_sizes,
             layout_config,

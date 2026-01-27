@@ -116,6 +116,8 @@ def _compute_psd(
     data: np.ndarray,
     sfreq: float,
     config: Dict[str, Any],
+    *,
+    logger: Any = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Compute power spectral density using specified method."""
     method = _get_psd_method(config)
@@ -139,18 +141,53 @@ def _compute_psd(
             verbose=False,
         )
     else:
-        n_overlap = config.get("n_overlap", n_per_seg // 2)
-        n_overlap = max(0, min(int(n_overlap), n_per_seg - 1))
-        psds, freqs = mne.time_frequency.psd_array_welch(
-            data,
-            sfreq=float(sfreq),
-            fmin=fmin,
-            fmax=fmax,
-            n_fft=n_fft,
-            n_per_seg=n_per_seg,
-            n_overlap=n_overlap,
-            verbose=False,
-        )
+        n_overlap_raw = config.get("n_overlap", n_per_seg // 2)
+        try:
+            n_overlap_raw = int(n_overlap_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "feature_engineering.quality.n_overlap must be an int (samples) or None "
+                f"(got {type(n_overlap_raw).__name__})."
+            ) from exc
+
+        # Fail-safe: MNE requires n_overlap < n_per_seg (and <= n_fft).
+        # User request: warn and continue rather than crashing quality extraction.
+        n_overlap = max(0, min(n_overlap_raw, n_per_seg - 1, n_fft - 1))
+        if logger is not None and n_overlap != n_overlap_raw:
+            logger.warning(
+                "Quality PSD: clamped Welch n_overlap from %d → %d to satisfy "
+                "n_overlap < n_per_seg (%d) and n_overlap < n_fft (%d).",
+                int(n_overlap_raw),
+                int(n_overlap),
+                int(n_per_seg),
+                int(n_fft),
+            )
+
+        try:
+            psds, freqs = mne.time_frequency.psd_array_welch(
+                data,
+                sfreq=float(sfreq),
+                fmin=fmin,
+                fmax=fmax,
+                n_fft=n_fft,
+                n_per_seg=n_per_seg,
+                n_overlap=n_overlap,
+                verbose=False,
+            )
+        except ValueError as exc:
+            msg = str(exc).lower()
+            if (
+                "n_overlap cannot be greater than n_per_seg" in msg
+                or "n_overlap" in msg and "n_per_seg" in msg
+            ):
+                if logger is not None:
+                    logger.warning(
+                        "Quality PSD: Welch parameter error (%s). "
+                        "Skipping spectral quality metrics for this segment.",
+                        str(exc).strip(),
+                    )
+                raise
+            raise
     
     freqs = np.asarray(freqs, dtype=float)
     psds = np.asarray(psds, dtype=float)
@@ -232,9 +269,25 @@ def _compute_spectral_metrics(
     data: np.ndarray,
     sfreq: float,
     config: Dict[str, Any],
+    *,
+    logger: Any = None,
 ) -> Dict[str, np.ndarray]:
     """Compute spectral quality metrics from PSD."""
-    psds, freqs = _compute_psd(data, sfreq, config)
+    try:
+        psds, freqs = _compute_psd(data, sfreq, config, logger=logger)
+    except ValueError as exc:
+        # User request: warn and continue, do not crash feature extraction.
+        # We keep time-domain quality metrics and mark spectral metrics as NaN.
+        if logger is not None:
+            logger.warning(
+                "Quality: PSD computation failed (%s). Setting SNR/muscle metrics to NaN.",
+                str(exc).strip(),
+            )
+        n_channels = int(data.shape[0])
+        return {
+            "snr": np.full(n_channels, np.nan),
+            "muscle": np.full(n_channels, np.nan),
+        }
     snr = _compute_snr_from_psd(psds, freqs, config)
     muscle_ratio = _compute_muscle_ratio_from_psd(psds, freqs, config)
     return {"snr": snr, "muscle": muscle_ratio}
@@ -244,6 +297,8 @@ def _compute_signal_metrics(
     data: np.ndarray,
     sfreq: float,
     config: Any = None,
+    *,
+    logger: Any = None,
 ) -> Dict[str, np.ndarray]:
     """Compute all quality metrics for signal data.
     
@@ -265,7 +320,7 @@ def _compute_signal_metrics(
         return metrics
     
     quality_config = _extract_quality_config(config)
-    spectral_metrics = _compute_spectral_metrics(data, sfreq, quality_config)
+    spectral_metrics = _compute_spectral_metrics(data, sfreq, quality_config, logger=logger)
     metrics.update(spectral_metrics)
     
     return metrics
@@ -327,11 +382,6 @@ def extract_quality_features(
     logger = getattr(ctx, "logger", None)
     
     has_config_get = config is not None and hasattr(config, "get")
-    allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if has_config_get
-        else False
-    )
     
     if target_name and windows is not None:
         mask = windows.get_mask(target_name)
@@ -339,27 +389,18 @@ def extract_quality_features(
             masks = {target_name: mask}
         else:
             if logger:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "Quality: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "Quality: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                masks = {target_name: np.ones(full_data.shape[2], dtype=bool)}
-            else:
-                raise ValueError(
-                    f"Quality: targeted window '{target_name}' has no valid mask and allow_full_epoch_fallback=False."
+                logger.error(
+                    "Quality: targeted window '%s' has no valid mask; skipping.",
+                    target_name,
                 )
+            return pd.DataFrame(), []
     else:
         masks = get_segment_masks(epochs.times, windows, config)
     
     if not masks:
-        raise ValueError("Quality: no valid time window masks available.")
+        if logger:
+            logger.error("Quality: no valid time window masks available; skipping.")
+        return pd.DataFrame(), []
 
     for segment, mask in masks.items():
         if not np.any(mask):
@@ -369,13 +410,15 @@ def extract_quality_features(
         
         for epoch_idx in range(n_epochs):
             epoch_data = segment_data[epoch_idx]
-            metrics = _compute_signal_metrics(epoch_data, sfreq, config)
+            metrics = _compute_signal_metrics(epoch_data, sfreq, config, logger=logger)
             _store_metric_values(
                 results, metrics, segment, channel_names, epoch_idx, n_epochs
             )
 
     if not results:
-        raise ValueError("Quality: no metrics were produced.")
+        if logger:
+            logger.error("Quality: no metrics were produced; skipping.")
+        return pd.DataFrame(), []
     
     df = pd.DataFrame(results)
     return df, list(df.columns)

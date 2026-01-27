@@ -64,6 +64,8 @@ class ScatterPlotParams:
     output_path: Path
     roi_channels: List[str]
     feature_name: str
+    stats_tag: Optional[str] = None
+    is_partial_residuals: bool = False
 
 
 def _get_scatter_plot_config_from_config(config: Any) -> ScatterPlotConfig:
@@ -93,6 +95,8 @@ def _compute_correlation_statistics(
     bootstrap_ci: int,
     rng: np.random.Generator,
     precomp_stats: Optional[Dict[str, Any]],
+    *,
+    is_partial_residuals: bool = False,
 ) -> Tuple[float, float, int, Tuple[float, float]]:
     """Compute correlation statistics from data or use precomputed values."""
     if precomp_stats:
@@ -101,8 +105,13 @@ def _compute_correlation_statistics(
         n_eff = precomp_stats["n"]
         ci_val = (precomp_stats.get("ci_low"), precomp_stats.get("ci_high"))
     else:
+        # For Spearman partial residuals, the statistically correct correlation is
+        # Pearson on rank-residuals (not re-ranking residuals and re-running Spearman).
+        method_for_stats = method_code
+        if is_partial_residuals and str(method_code).lower() == "spearman":
+            method_for_stats = "pearson"
         r_val, p_val, n_eff, ci_val = compute_correlation_stats(
-            roi_vals, target_vals, method_code, bootstrap_ci, rng
+            roi_vals, target_vals, method_for_stats, bootstrap_ci, rng
         )
     return r_val, p_val, n_eff, ci_val
 
@@ -159,6 +168,7 @@ def _generate_single_scatter(
         plot_config.bootstrap_ci,
         plot_config.rng,
         precomp_stats,
+        is_partial_residuals=params.is_partial_residuals,
     )
 
     if n_valid >= plot_config.min_samples_for_plot:
@@ -173,10 +183,12 @@ def _generate_single_scatter(
             method_code=plot_config.method_code,
             bootstrap_ci=0,
             rng=plot_config.rng,
+            is_partial_residuals=params.is_partial_residuals,
             roi_channels=params.roi_channels,
             logger=logger,
             annotated_stats=(r_val, p_val, n_eff),
             annot_ci=ci_val,
+            stats_tag=params.stats_tag,
             config=config,
         )
 

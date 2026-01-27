@@ -30,18 +30,21 @@ def _build_correlation_stats_candidates(
 ) -> List[str]:
     """Build list of candidate filenames for precomputed correlation stats."""
     method_suffix = f"_{method_label}" if method_label else ""
-    base_filename = f"corr_stats_{feature_type}_vs_{target_suffix}{method_suffix}.parquet"
-    
-    candidates = [base_filename]
+
+    def _both_ext(base: str) -> List[str]:
+        return [f"{base}.parquet", f"{base}.tsv"]
+
+    base = f"corr_stats_{feature_type}_vs_{target_suffix}{method_suffix}"
+    candidates = _both_ext(base)
     
     if target_suffix_alt:
-        alt_filename = f"corr_stats_{feature_type}_vs_{target_suffix_alt}{method_suffix}.parquet"
-        candidates.append(alt_filename)
+        alt_base = f"corr_stats_{feature_type}_vs_{target_suffix_alt}{method_suffix}"
+        candidates.extend(_both_ext(alt_base))
     
     if method_label:
-        candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix}.parquet")
+        candidates.extend(_both_ext(f"corr_stats_{feature_type}_vs_{target_suffix}"))
         if target_suffix_alt:
-            candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}.parquet")
+            candidates.extend(_both_ext(f"corr_stats_{feature_type}_vs_{target_suffix_alt}"))
     
     return candidates
 

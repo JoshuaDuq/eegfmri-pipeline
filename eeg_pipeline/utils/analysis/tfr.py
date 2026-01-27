@@ -367,7 +367,7 @@ def _extract_baseline_power_features(
     """Extract baseline power features from TFR data."""
     b_start, b_end = baseline_indices
     data_baseline = tfr.data[..., int(b_start):int(b_end)]
-    data_mean_time = np.mean(data_baseline, axis=-1)
+    data_mean_time = np.nanmean(data_baseline, axis=-1)
     
     results = {}
     ch_names = tfr.info["ch_names"]
@@ -488,6 +488,32 @@ def compute_tfr_for_subject(
     
     baseline_mask = (times >= b_start) & (times < b_end)
     b_idxs = np.where(baseline_mask)[0]
+
+    # Scientific validity warning: if baseline starts too close to the epoch boundary,
+    # low-frequency Morlet wavelets will be edge-affected and bias baseline-normalized power.
+    if freqs.size and n_cycles.size and b_idxs.size:
+        try:
+            min_idx = int(np.nanargmin(freqs))
+            f_low = float(freqs[min_idx])
+            ncy_low = float(n_cycles[min_idx])
+            if np.isfinite(f_low) and f_low > 0 and np.isfinite(ncy_low) and ncy_low > 0:
+                half_wavelet_sec = (ncy_low / f_low) / 2.0
+                baseline_first_time = float(times[b_idxs[0]])
+                epoch_start = float(times.min())
+                margin_sec = baseline_first_time - epoch_start
+                if np.isfinite(margin_sec) and margin_sec < half_wavelet_sec:
+                    logger.warning(
+                        "Baseline starts %.3fs after epoch start, but the lowest-frequency Morlet wavelet "
+                        "has ~%.3fs half-length (fmin=%.2fHz, n_cycles=%.1f). "
+                        "Baseline power will be edge-affected. Consider setting epochs.tmin earlier "
+                        "or moving the baseline window later.",
+                        margin_sec,
+                        half_wavelet_sec,
+                        f_low,
+                        ncy_low,
+                    )
+        except (ValueError, TypeError, IndexError):
+            pass
     
     if len(b_idxs) < min_baseline_samples:
         logger.info(
@@ -2302,8 +2328,27 @@ def extract_trial_band_power(tfr_epochs, fmin: float, fmax: float, tmin: float, 
     if f_mask.sum() == 0 or t_mask.sum() == 0:
         return None
     
-    sel = np.asarray(tfr_epochs.data)[:, :, f_mask, :][:, :, :, t_mask]
-    return sel.mean(axis=(2, 3))
+    sel = np.asarray(tfr_epochs.data)[:, :, f_mask, :][:, :, :, t_mask]  # (trials, ch, f, t)
+    if sel.size == 0:
+        return None
+
+    # Average over time first, then frequency-weighted average over frequencies.
+    # This avoids bias when freqs are non-uniform/log-spaced (the pipeline default).
+    # weights ~ df, computed via gradient on the selected frequency vector.
+    sel_mean_time = np.nanmean(sel, axis=-1)  # (trials, ch, f)
+    band_freqs = np.asarray(freqs[f_mask], dtype=float)
+    if band_freqs.size >= 2 and np.all(np.isfinite(band_freqs)):
+        w = np.gradient(band_freqs).astype(float)
+        w = np.where(np.isfinite(w) & (w > 0), w, np.nan)
+    else:
+        w = np.ones((band_freqs.size,), dtype=float)
+
+    w3 = w[None, None, :]
+    finite = np.isfinite(sel_mean_time) & np.isfinite(w3)
+    num = np.nansum(np.where(finite, sel_mean_time * w3, 0.0), axis=-1)
+    den = np.nansum(np.where(finite, w3, 0.0), axis=-1)
+    out = np.where(den > 0, num / den, np.nan)
+    return out
 
 
 def extract_band_channel_means(tfr_avg, freq_mask: np.ndarray) -> np.ndarray:

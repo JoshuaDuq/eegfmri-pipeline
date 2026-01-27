@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -38,6 +38,31 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
 from eeg_pipeline.utils.analysis.stats.reliability import compute_correlation_split_half_reliability
 from eeg_pipeline.utils.config.loader import get_config_value, get_min_samples
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_feature_types
+
+
+def _build_stats_config_snapshot(config: Any) -> Dict[str, Any]:
+    """Build a small, pickle-friendly config subset for parallel stats workers."""
+    temperature_control = str(
+        get_config_value(config, "behavior_analysis.statistics.temperature_control", "spline")
+    ).strip().lower() or "spline"
+    perm_scheme = str(
+        get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")
+    ).strip().lower() or "shuffle"
+    spline_cfg = get_config_value(config, "behavior_analysis.regression.temperature_spline", {}) or {}
+    spline_cfg = dict(spline_cfg) if isinstance(spline_cfg, dict) else {}
+
+    return {
+        "behavior_analysis": {
+            "statistics": {"temperature_control": temperature_control},
+            "permutation": {"scheme": perm_scheme},
+            "regression": {"temperature_spline": spline_cfg},
+        }
+    }
+
+
+def _is_temperature_target_name(target_name: str) -> bool:
+    name = str(target_name or "").strip().lower()
+    return name in {"temp", "temperature"} or "temperature" in name
 
 
 @dataclass
@@ -88,11 +113,15 @@ class CorrelationConfig:
         ))
         n_bootstrap = int(get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))
         n_permutations = int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000))
-        compute_bayes_factor = bool(get_config_value(config, "behavior_analysis.compute_bayes_factors", False))
+        compute_bayes_factor = bool(
+            get_config_value(config, "behavior_analysis.correlations.compute_bayes_factors", False)
+        )
         robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
         if robust_method is not None:
             robust_method = str(robust_method).strip().lower() or None
-        compute_loso_stability = bool(get_config_value(config, "behavior_analysis.loso_stability", True))
+        compute_loso_stability = bool(
+            get_config_value(config, "behavior_analysis.correlations.loso_stability", True)
+        )
         compute_reliability = bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False))
         n_jobs = int(get_config_value(config, "behavior_analysis.n_jobs", -1))
         
@@ -180,6 +209,7 @@ class ColumnProcessingParams:
     column_values: np.ndarray
     feature_type: str
     targets_aligned: np.ndarray
+    config: Any
     column_min_samples: int
     n_total: int
     missing_fraction: float
@@ -321,6 +351,7 @@ def _add_partial_correlations(
     method: str,
     feature_type: str,
     min_samples: int,
+    config: Optional[Any],
 ) -> None:
     """Add partial correlation results to record."""
     (
@@ -336,7 +367,7 @@ def _add_partial_correlations(
         context=feature_type,
         logger=None,
         min_samples=min_samples,
-        config=None,
+        config=config,
     )
     record["r_partial_cov"] = r_pc
     record["p_partial_cov"] = p_pc
@@ -359,6 +390,7 @@ def _add_permutation_pvalues(
     n_permutations: int,
     rng: np.random.Generator,
     perm_groups: Optional[np.ndarray],
+    config: Optional[Any],
 ) -> None:
     """Add permutation p-values to record."""
     n_eff = int(pd.concat([feature_series, target_series], axis=1).dropna().shape[0])
@@ -376,7 +408,7 @@ def _add_permutation_pvalues(
         n_perm=n_permutations,
         n_eff=n_eff,
         rng=rng,
-        config=None,
+        config=config,
         groups=perm_groups,
     )
     record["p_perm_raw"] = p_perm_raw
@@ -497,6 +529,8 @@ def _apply_fdr_to_dataframe(
         p_values = pd.to_numeric(dataframe["p_primary"], errors="coerce").to_numpy()
     
     dataframe["p_fdr"] = fdr_bh(p_values, alpha=config.fdr_alpha, config=analysis_config)
+    dataframe["q_within_family"] = dataframe["p_fdr"]
+    dataframe["within_family_p_kind"] = "p_primary_perm" if has_permutation_pvalues else "p_primary"
 
 
 def _add_loso_stability(
@@ -607,6 +641,7 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 params.correlation_method,
                 params.feature_type,
                 params.column_min_samples,
+                params.config,
             )
         except (ValueError, RuntimeError) as exc:
             raise RuntimeError(
@@ -626,6 +661,7 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 params.n_permutations,
                 random_generator,
                 params.permutation_groups,
+                params.config,
             )
         except (ValueError, RuntimeError) as exc:
             raise RuntimeError(
@@ -824,6 +860,11 @@ class FeatureBehaviorCorrelator:
         if df is None or df.empty or targets is None or len(targets) == 0:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
+        effective_config = config
+        if config.control_temperature and _is_temperature_target_name(target_name):
+            # Scientific validity: never "control for temperature" when temperature is the target.
+            effective_config = replace(config, control_temperature=False, temperature_series=None)
+
         min_samples_align = get_min_samples(self.config, "default")
         df_aligned, targets_aligned = align_features_and_targets(
             df, targets, min_samples_align, self.logger
@@ -832,14 +873,14 @@ class FeatureBehaviorCorrelator:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
         cov_aligned, temp_aligned, loso_groups, perm_groups = self._align_data_for_correlation(
-            df_aligned, targets_aligned, config, subject_ids
+            df_aligned, targets_aligned, effective_config, subject_ids
         )
         
-        n_jobs_actual = config.n_jobs if config.n_jobs != -1 else max(1, cpu_count() - 1)
+        n_jobs_actual = effective_config.n_jobs if effective_config.n_jobs != -1 else max(1, cpu_count() - 1)
         
         base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
-        if config.rng is not None:
-            base_seed = int(config.rng.integers(0, 2**31))
+        if effective_config.rng is not None:
+            base_seed = int(effective_config.rng.integers(0, 2**31))
         
         targets_arr = targets_aligned.values if hasattr(targets_aligned, 'values') else np.asarray(targets_aligned)
         n_total = int(len(targets_arr))
@@ -848,7 +889,10 @@ class FeatureBehaviorCorrelator:
         
         column_params_list = []
         screening_records = []
-        method_label = config.method_label or format_correlation_method_label(config.method, config.robust_method)
+        method_label = effective_config.method_label or format_correlation_method_label(
+            effective_config.method, effective_config.robust_method
+        )
+        stats_config_snapshot = _build_stats_config_snapshot(self.config)
         
         for column_index, column_name in enumerate(df_aligned.columns):
             column_values = pd.to_numeric(df_aligned[column_name], errors="coerce").values
@@ -884,6 +928,7 @@ class FeatureBehaviorCorrelator:
                 column_values=column_values,
                 feature_type=feature_type,
                 targets_aligned=targets_arr,
+                config=stats_config_snapshot,
                 column_min_samples=min_samples,
                 n_total=n_total,
                 missing_fraction=missing_fraction,
@@ -892,18 +937,18 @@ class FeatureBehaviorCorrelator:
                 temperature_aligned=temp_aligned,
                 loso_groups=loso_groups_arr,
                 permutation_groups=perm_groups_arr,
-                correlation_method=config.method,
-                robust_method=config.robust_method,
+                correlation_method=effective_config.method,
+                robust_method=effective_config.robust_method,
                 method_label=method_label,
                 target_name=target_name,
-                n_permutations=config.n_permutations,
-                n_bootstrap=config.n_bootstrap,
+                n_permutations=effective_config.n_permutations,
+                n_bootstrap=effective_config.n_bootstrap,
                 random_seed=base_seed + column_index,
-                control_temperature=config.control_temperature,
-                control_trial_order=config.control_trial_order,
-                compute_bayes_factor=config.compute_bayes_factor,
-                compute_loso_stability=config.compute_loso_stability,
-                compute_reliability=config.compute_reliability,
+                control_temperature=effective_config.control_temperature,
+                control_trial_order=effective_config.control_trial_order,
+                compute_bayes_factor=effective_config.compute_bayes_factor,
+                compute_loso_stability=effective_config.compute_loso_stability,
+                compute_reliability=effective_config.compute_reliability,
             )
             column_params_list.append(params)
 
@@ -1013,8 +1058,12 @@ class FeatureBehaviorCorrelator:
                 parsed_columns.append((str(column), str(band), str(segment), str(identifier)))
                 column_to_channel[str(column)] = str(identifier)
         
-        method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
-        records = []
+        effective_config = corr_config
+        if corr_config.control_temperature and _is_temperature_target_name(target_name):
+            effective_config = replace(corr_config, control_temperature=False, temperature_series=None)
+
+        method_label = format_correlation_method_label(effective_config.method, effective_config.robust_method)
+        records: List[Dict[str, Any]] = []
         for band in bands:
             band_lower = str(band).lower()
             band_columns = [col for col, b, _seg, _ch in parsed_columns if b.lower() == band_lower]
@@ -1028,7 +1077,9 @@ class FeatureBehaviorCorrelator:
             
             if not band_columns:
                 continue
-            
+
+            band_matrix = power_df[band_columns].apply(pd.to_numeric, errors="coerce")
+
             for roi_name, patterns in roi_definitions.items():
                 roi_columns = []
                 for col in band_columns:
@@ -1043,76 +1094,184 @@ class FeatureBehaviorCorrelator:
                 if not roi_columns:
                     continue
                 
-                roi_values = power_df[roi_columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                valid_mask = roi_values.notna() & targets.notna()
+                roi_values = band_matrix[roi_columns].mean(axis=1)
+                df_pair = pd.concat([roi_values.rename("x"), targets.rename("y")], axis=1).dropna()
+                if df_pair.empty:
+                    continue
+
+                cov_aligned = None
+                if effective_config.control_trial_order:
+                    if effective_config.control_temperature:
+                        if effective_config.covariates_without_temp_df is not None:
+                            cov_aligned = effective_config.covariates_without_temp_df.reindex(df_pair.index)
+                    elif effective_config.covariates_df is not None:
+                        cov_aligned = effective_config.covariates_df.reindex(df_pair.index)
+
+                temp_aligned = None
+                if effective_config.control_temperature and effective_config.temperature_series is not None:
+                    temp_aligned = effective_config.temperature_series.reindex(df_pair.index)
                 
                 correlation_coefficient, p_value, n_valid = safe_correlation(
-                    roi_values[valid_mask].values,
-                    targets[valid_mask].values,
-                    corr_config.method,
-                    0,
-                    robust_method=corr_config.robust_method,
+                    df_pair["x"].values,
+                    df_pair["y"].values,
+                    effective_config.method,
+                    effective_config.min_samples,
+                    robust_method=effective_config.robust_method,
                 )
                 if not np.isfinite(correlation_coefficient):
                     continue
-                
-                records.append({
+
+                record: Dict[str, Any] = {
                     "roi": roi_name,
                     "band": band,
                     "r": correlation_coefficient,
                     "p": p_value,
                     "n": n_valid,
-                    "method": corr_config.method,
-                    "robust_method": corr_config.robust_method,
+                    "method": effective_config.method,
+                    "robust_method": effective_config.robust_method,
                     "method_label": method_label,
                     "target": target_name,
-                })
+                    "r_raw": correlation_coefficient,
+                    "p_raw": p_value,
+                    "p_primary": p_value,
+                    "r_primary": correlation_coefficient,
+                    "p_kind_primary": "p_raw",
+                    "p_primary_source": "raw",
+                    "p_primary_perm": np.nan,
+                    "p_primary_is_permutation": False,
+                }
+
+                if cov_aligned is not None or temp_aligned is not None:
+                    _add_partial_correlations(
+                        record,
+                        df_pair["x"],
+                        df_pair["y"],
+                        cov_aligned,
+                        temp_aligned,
+                        effective_config.method,
+                        feature_type="power_roi",
+                        min_samples=effective_config.min_samples,
+                        config=self.config,
+                    )
+                    _select_primary_correlation(
+                        record,
+                        effective_config.control_temperature,
+                        effective_config.control_trial_order,
+                    )
+
+                if effective_config.n_permutations and effective_config.n_permutations > 0:
+                    rng = effective_config.rng
+                    if rng is None:
+                        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
+                        rng = np.random.default_rng(base_seed)
+                    _add_permutation_pvalues(
+                        record,
+                        df_pair["x"],
+                        df_pair["y"],
+                        cov_aligned,
+                        temp_aligned,
+                        effective_config.method,
+                        effective_config.n_permutations,
+                        rng,
+                        perm_groups=None,
+                        config=self.config,
+                    )
+                    _update_primary_perm_pvalue(record)
+
+                records.append(record)
             
-            overall_values = power_df[band_columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-            valid_mask = overall_values.notna() & targets.notna()
-            if valid_mask.sum() > 0:
+            overall_values = band_matrix.mean(axis=1)
+            df_pair = pd.concat([overall_values.rename("x"), targets.rename("y")], axis=1).dropna()
+            if not df_pair.empty:
+                cov_aligned = None
+                if effective_config.control_trial_order:
+                    if effective_config.control_temperature:
+                        if effective_config.covariates_without_temp_df is not None:
+                            cov_aligned = effective_config.covariates_without_temp_df.reindex(df_pair.index)
+                    elif effective_config.covariates_df is not None:
+                        cov_aligned = effective_config.covariates_df.reindex(df_pair.index)
+
+                temp_aligned = None
+                if effective_config.control_temperature and effective_config.temperature_series is not None:
+                    temp_aligned = effective_config.temperature_series.reindex(df_pair.index)
+
                 correlation_coefficient, p_value, n_valid = safe_correlation(
-                    overall_values[valid_mask].values,
-                    targets[valid_mask].values,
-                    corr_config.method,
-                    0,
-                    robust_method=corr_config.robust_method,
+                    df_pair["x"].values,
+                    df_pair["y"].values,
+                    effective_config.method,
+                    effective_config.min_samples,
+                    robust_method=effective_config.robust_method,
                 )
                 if not np.isfinite(correlation_coefficient):
                     continue
-                records.append({
+
+                record: Dict[str, Any] = {
                     "roi": "overall",
                     "band": band,
                     "r": correlation_coefficient,
                     "p": p_value,
                     "n": n_valid,
-                    "method": corr_config.method,
-                    "robust_method": corr_config.robust_method,
+                    "method": effective_config.method,
+                    "robust_method": effective_config.robust_method,
                     "method_label": method_label,
                     "target": target_name,
-                })
+                    "r_raw": correlation_coefficient,
+                    "p_raw": p_value,
+                    "p_primary": p_value,
+                    "r_primary": correlation_coefficient,
+                    "p_kind_primary": "p_raw",
+                    "p_primary_source": "raw",
+                    "p_primary_perm": np.nan,
+                    "p_primary_is_permutation": False,
+                }
+
+                if cov_aligned is not None or temp_aligned is not None:
+                    _add_partial_correlations(
+                        record,
+                        df_pair["x"],
+                        df_pair["y"],
+                        cov_aligned,
+                        temp_aligned,
+                        effective_config.method,
+                        feature_type="power_roi",
+                        min_samples=effective_config.min_samples,
+                        config=self.config,
+                    )
+                    _select_primary_correlation(
+                        record,
+                        effective_config.control_temperature,
+                        effective_config.control_trial_order,
+                    )
+
+                if effective_config.n_permutations and effective_config.n_permutations > 0:
+                    rng = effective_config.rng
+                    if rng is None:
+                        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
+                        rng = np.random.default_rng(base_seed)
+                    _add_permutation_pvalues(
+                        record,
+                        df_pair["x"],
+                        df_pair["y"],
+                        cov_aligned,
+                        temp_aligned,
+                        effective_config.method,
+                        effective_config.n_permutations,
+                        rng,
+                        perm_groups=None,
+                        config=self.config,
+                    )
+                    _update_primary_perm_pvalue(record)
+
+                records.append(record)
         
         if not records:
             self.logger.warning("No ROI correlations computed - check power column naming")
             return None
         
         df = pd.DataFrame(records)
-        df["p_raw"] = df["p"]
-        df["p_primary"] = df["p"]
-        df["p_kind_primary"] = "p"
-        df["p_primary_source"] = "raw"
-        
-        if corr_config.apply_fdr:
-            if "band" in df.columns:
-                for band, mask in df.groupby("band").groups.items():
-                    band_indices = list(mask)
-                    band_p_values = df.loc[band_indices, "p"].to_numpy()
-                    df.loc[band_indices, "p_fdr"] = fdr_bh(
-                        band_p_values, alpha=corr_config.fdr_alpha, config=self.config
-                    )
-            else:
-                all_p_values = df["p"].to_numpy()
-                df["p_fdr"] = fdr_bh(all_p_values, alpha=corr_config.fdr_alpha, config=self.config)
+
+        if effective_config.apply_fdr:
+            _apply_fdr_to_dataframe(df, effective_config, self.config)
         target_suffix = "rating" if "rating" in target_name.lower() else "temp"
         method_suffix = f"_{method_label}" if method_label else ""
         from eeg_pipeline.infra.paths import ensure_dir
@@ -1263,5 +1422,3 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
         temperature_series=ctx.temperature,
         corr_config=CorrelationConfig.from_context(ctx),
     )
-
-

@@ -47,7 +47,7 @@ from eeg_pipeline.infra.tsv import write_parquet
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
+from eeg_pipeline.utils.analysis.tfr import compute_complex_tfr, compute_tfr_morlet
 from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
 from eeg_pipeline.utils.data.columns import pick_target_column
@@ -129,6 +129,52 @@ def _precompute_tfr_if_needed(
     
     logger.info("Pre-computing TFR on full epochs for multi-range extraction...")
     return compute_tfr_morlet(epochs, config, logger=logger)
+
+
+def _precompute_complex_tfr_if_needed(
+    epochs: "mne.Epochs",
+    time_ranges: List[Dict[str, Any]],
+    feature_categories: List[str],
+    config: Any,
+    logger: Any,
+) -> Optional[Any]:
+    """Pre-compute complex TFR once for multi-range extraction.
+
+    This avoids recomputing (and reallocating) a full-length complex TFR for each
+    time range when ITPC is requested, or when PAC explicitly uses TFR-based mode.
+    """
+    if len(time_ranges) <= 1:
+        return None
+
+    needs_itpc = "itpc" in feature_categories or "phase" in feature_categories
+    needs_pac_complex = False
+    if "pac" in feature_categories and hasattr(config, "get"):
+        pac_cfg = config.get("feature_engineering.pac", {}) or {}
+        pac_source = str(pac_cfg.get("source", "precomputed")).strip().lower()
+        needs_pac_complex = pac_source != "precomputed"
+
+    if not (needs_itpc or needs_pac_complex):
+        return None
+
+    from eeg_pipeline.analysis.features.preparation import (
+        _apply_spatial_transform,
+        _get_spatial_transform_type,
+    )
+
+    phase_family = "itpc" if ("itpc" in feature_categories or "phase" in feature_categories) else "pac"
+    phase_transform = _get_spatial_transform_type(config, feature_family=phase_family)
+
+    epochs_for_complex = epochs
+    if phase_transform in {"csd", "laplacian"}:
+        epochs_for_complex = epochs.copy().pick_types(
+            eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+        )
+        epochs_for_complex = _apply_spatial_transform(
+            epochs_for_complex, phase_transform, config, logger
+        )
+
+    logger.info("Pre-computing complex TFR on full epochs for multi-range extraction...")
+    return compute_complex_tfr(epochs_for_complex, config, logger)
 
 
 def _precompute_intermediates_if_needed(
@@ -505,6 +551,10 @@ class FeaturePipeline(PipelineBase):
             epochs, time_ranges, feature_categories, self.config, self.logger
         )
 
+        tfr_complex_full = _precompute_complex_tfr_if_needed(
+            epochs, time_ranges, feature_categories, self.config, self.logger
+        )
+
         precomputed_full = _precompute_intermediates_if_needed(
             epochs,
             time_ranges,
@@ -566,6 +616,7 @@ class FeaturePipeline(PipelineBase):
                 name=name,
                 aggregation_method=kwargs.get("aggregation_method", "mean"),
                 tfr=tfr_full,
+                tfr_complex=tfr_complex_full,
                 precomputed=precomputed_full,
                 explicit_windows=explicit_windows,
             )

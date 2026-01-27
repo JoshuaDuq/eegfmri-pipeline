@@ -75,11 +75,6 @@ def extract_erds_from_precomputed(
     windows = precomputed.windows
 
     target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-        if hasattr(config, "get")
-        else False
-    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -88,20 +83,11 @@ def extract_erds_from_precomputed(
             segment_masks = {target_name: mask}
         else:
             if precomputed.logger:
-                if allow_full_epoch_fallback:
-                    precomputed.logger.warning(
-                        "ERDS: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    precomputed.logger.error(
-                        "ERDS: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
-            else:
-                return pd.DataFrame(), [], {"error": f"invalid_target_window_mask:{target_name}"}
+                precomputed.logger.error(
+                    "ERDS: targeted window '%s' has no valid mask; skipping.",
+                    target_name,
+                )
+            return pd.DataFrame(), [], {"error": f"invalid_target_window_mask:{target_name}"}
     else:
         segment_masks = get_segment_masks(precomputed.times, windows, precomputed.config)
     
@@ -141,6 +127,8 @@ def extract_erds_from_precomputed(
                 clamped_channels_for_band = 0
                 baseline_valid_count = 0
                 n_channels = len(precomputed.ch_names)
+                baseline_ref_by_channel = np.full((n_channels,), np.nan, dtype=float)
+                active_mean_by_channel = np.full((n_channels,), np.nan, dtype=float)
 
                 for ch_idx, ch_name in enumerate(precomputed.ch_names):
                     baseline_power, baseline_frac, _, baseline_total = nanmean_with_fraction(
@@ -181,6 +169,9 @@ def extract_erds_from_precomputed(
                             erds_full_db = 10 * np.log10(safe_active_mean / baseline_ref)
                         else:
                             erds_full_db = np.nan
+                        if np.isfinite(active_power_mean):
+                            baseline_ref_by_channel[ch_idx] = float(baseline_ref)
+                            active_mean_by_channel[ch_idx] = float(active_power_mean)
                     else:
                         erds_full = np.nan
                         erds_trace = np.full_like(active_power_trace, np.nan)
@@ -281,36 +272,113 @@ def extract_erds_from_precomputed(
                         record[
                             NamingSchema.build("erds", segment_label, band, "global", "percent_std")
                         ] = np.nan
-                    elif valid_erds:
-                        record[
-                            NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
-                        ] = float(np.mean(valid_erds))
-                        record[
-                            NamingSchema.build("erds", segment_label, band, "global", "percent_std")
-                        ] = float(np.std(valid_erds))
+                    else:
+                        # Scientific validity: compute ERDS on spatially-aggregated power
+                        # (mean across channels) rather than averaging per-channel ERDS (ratio).
+                        valid_mask_ch = np.isfinite(baseline_ref_by_channel) & np.isfinite(active_mean_by_channel)
+                        if not np.any(valid_mask_ch):
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
+                            ] = np.nan
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "global", "percent_std")
+                            ] = np.nan
+                        else:
+                            baseline_mean = float(np.nanmean(baseline_ref_by_channel[valid_mask_ch]))
+                            active_mean = float(np.nanmean(active_mean_by_channel[valid_mask_ch]))
+                            if baseline_mean > epsilon and np.isfinite(baseline_mean) and np.isfinite(active_mean):
+                                global_percent_mean = float(((active_mean - baseline_mean) / baseline_mean) * 100)
+                            else:
+                                global_percent_mean = np.nan
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
+                            ] = global_percent_mean
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "global", "percent_std")
+                            ] = float(np.std(valid_erds)) if valid_erds else np.nan
 
                     if use_log_ratio:
-                        if baseline_valid_fraction < min_valid_fraction or not valid_log:
+                        if baseline_valid_fraction < min_valid_fraction:
                             record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = np.nan
                             record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = np.nan
                         else:
-                            record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = float(np.mean(valid_log))
-                            record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = float(np.std(valid_log))
+                            valid_mask_ch = np.isfinite(baseline_ref_by_channel) & np.isfinite(active_mean_by_channel)
+                            if not np.any(valid_mask_ch):
+                                record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = np.nan
+                                record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = np.nan
+                            else:
+                                baseline_mean = float(np.nanmean(baseline_ref_by_channel[valid_mask_ch]))
+                                active_mean = float(np.nanmean(active_mean_by_channel[valid_mask_ch]))
+                                if (
+                                    baseline_mean > epsilon
+                                    and active_mean > 0
+                                    and np.isfinite(baseline_mean)
+                                    and np.isfinite(active_mean)
+                                ):
+                                    db_mean = float(10 * np.log10(max(active_mean, min_active_power) / baseline_mean))
+                                else:
+                                    db_mean = np.nan
+                                record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = db_mean
+                                record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = (
+                                    float(np.std(valid_log)) if valid_log else np.nan
+                                )
 
                 if "roi" in spatial_modes and roi_map:
                     for roi_name, roi_indices in roi_map.items():
-                        roi_erds = [all_erds_full[idx] for idx in roi_indices if np.isfinite(all_erds_full[idx])]
-                        if roi_erds:
-                            record[NamingSchema.build("erds", segment_label, band, "roi", "percent_mean", channel=roi_name)] = float(np.mean(roi_erds))
+                        roi_idx = np.asarray(roi_indices, dtype=int)
+                        if roi_idx.size == 0:
+                            record[
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "roi", "percent_mean", channel=roi_name
+                                )
+                            ] = np.nan
+                            if use_log_ratio:
+                                record[
+                                    NamingSchema.build(
+                                        "erds", segment_label, band, "roi", "db_mean", channel=roi_name
+                                    )
+                                ] = np.nan
+                            continue
+
+                        valid_roi = np.isfinite(baseline_ref_by_channel[roi_idx]) & np.isfinite(
+                            active_mean_by_channel[roi_idx]
+                        )
+                        if not np.any(valid_roi):
+                            record[
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "roi", "percent_mean", channel=roi_name
+                                )
+                            ] = np.nan
                         else:
-                            record[NamingSchema.build("erds", segment_label, band, "roi", "percent_mean", channel=roi_name)] = np.nan
+                            b_roi = float(np.nanmean(baseline_ref_by_channel[roi_idx][valid_roi]))
+                            a_roi = float(np.nanmean(active_mean_by_channel[roi_idx][valid_roi]))
+                            if b_roi > epsilon and np.isfinite(b_roi) and np.isfinite(a_roi):
+                                roi_percent_mean = float(((a_roi - b_roi) / b_roi) * 100)
+                            else:
+                                roi_percent_mean = np.nan
+                            record[
+                                NamingSchema.build(
+                                    "erds", segment_label, band, "roi", "percent_mean", channel=roi_name
+                                )
+                            ] = roi_percent_mean
                         
                         if use_log_ratio:
-                            roi_log = [all_log_full[idx] for idx in roi_indices if np.isfinite(all_log_full[idx])]
-                            if roi_log:
-                                record[NamingSchema.build("erds", segment_label, band, "roi", "db_mean", channel=roi_name)] = float(np.mean(roi_log))
+                            if not np.any(valid_roi):
+                                record[
+                                    NamingSchema.build(
+                                        "erds", segment_label, band, "roi", "db_mean", channel=roi_name
+                                    )
+                                ] = np.nan
                             else:
-                                record[NamingSchema.build("erds", segment_label, band, "roi", "db_mean", channel=roi_name)] = np.nan
+                                if b_roi > epsilon and a_roi > 0 and np.isfinite(b_roi) and np.isfinite(a_roi):
+                                    roi_db_mean = float(10 * np.log10(max(a_roi, min_active_power) / b_roi))
+                                else:
+                                    roi_db_mean = np.nan
+                                record[
+                                    NamingSchema.build(
+                                        "erds", segment_label, band, "roi", "db_mean", channel=roi_name
+                                    )
+                                ] = roi_db_mean
 
     if clamped_baselines > 0 and precomputed.logger:
         precomputed.logger.info(

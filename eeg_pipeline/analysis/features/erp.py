@@ -608,27 +608,17 @@ def extract_erp_features(
 
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
-    allow_full_epoch_fallback = bool(
-        ctx.config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
-    )
     
     if target_name and windows is not None:
         mask = windows.get_mask(target_name)
         if mask is not None and np.any(mask):
             segment_masks = {target_name: mask}
         else:
-            if allow_full_epoch_fallback:
-                ctx.logger.warning(
-                    "ERP: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                    target_name,
-                )
-                segment_masks = {target_name: np.ones_like(times, dtype=bool)}
-            else:
-                ctx.logger.error(
-                    "ERP: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                    target_name,
-                )
-                return pd.DataFrame(), []
+            ctx.logger.error(
+                "ERP: targeted window '%s' has no valid mask; skipping.",
+                target_name,
+            )
+            return pd.DataFrame(), []
     else:
         segment_masks = get_segment_masks(times, windows, ctx.config)
         component_masks = _build_component_masks(times, erp_cfg)

@@ -386,9 +386,16 @@ def discover_trial_table_columns(
     
     try:
         if trial_file.suffix == ".parquet":
-            from eeg_pipeline.infra.tsv import read_parquet
-            df = read_parquet(trial_file)
-            df = df.head(500) if df is not None else pd.DataFrame()
+            import pyarrow.parquet as pq
+            # Use increased thrift limit for large trial tables with many columns
+            pf = pq.ParquetFile(
+                trial_file,
+                memory_map=False,
+                thrift_string_size_limit=500_000_000,
+            )
+            # Read only first 500 rows for discovery
+            table = pf.read_row_group(0) if pf.num_row_groups > 0 else pf.read()
+            df = table.slice(0, 500).to_pandas()
         else:
             df = pd.read_csv(trial_file, sep="\t", nrows=500)
         result["columns"] = df.columns.tolist()
@@ -405,7 +412,7 @@ def discover_trial_table_columns(
             if len(unique_vals) <= 50:
                 vals = [str(v) for v in unique_vals if pd.notna(v)]
                 result["values"][col] = sorted(set(vals))
-    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError, Exception):
         pass
     
     return result

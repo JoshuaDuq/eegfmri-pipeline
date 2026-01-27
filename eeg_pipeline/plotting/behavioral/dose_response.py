@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,7 +54,10 @@ _MAX_ROI_PAIR_PLOTS = 30
 # Stat equivalence groups: stats that can substitute for each other.
 # Used to make plotting resilient to baseline-normalized feature names.
 _STAT_EQUIVALENTS: dict[str, list[str]] = {
-    "mean": ["logratio_mean", "percent_mean", "db_mean"],
+    # Per-trial channel power is often stored as `logratio` (not `mean`),
+    # while ROI/global aggregates may use `logratio_mean`. Treat both as
+    # compatible with a requested `mean` stat for plotting purposes.
+    "mean": ["logratio_mean", "logratio", "percent_mean", "db_mean"],
     "std": ["logratio_std", "percent_std", "db_std"],
     "logratio_mean": ["mean"],
     "logratio_std": ["std"],
@@ -61,6 +65,7 @@ _STAT_EQUIVALENTS: dict[str, list[str]] = {
     "percent_std": ["std"],
     "db_mean": ["mean"],
     "db_std": ["std"],
+    "logratio": ["mean"],
 }
 
 
@@ -568,22 +573,114 @@ def _roi_power_series(
     trials: pd.DataFrame,
     *,
     roi_name: str,
+    roi_patterns: Optional[object] = None,
     band: str,
     segment: str,
     stat: str,
+    logger: Optional[logging.Logger] = None,
 ) -> tuple[pd.Series, list[str]]:
     cols = [str(c) for c in trials.columns]
 
-    roi_col = _find_feature_column(
-        cols,
-        group="power",
-        segment=segment,
-        band=band,
-        scope="roi",
-        identifier=roi_name,
-        stat=stat,
-    )
-    return pd.to_numeric(trials[roi_col], errors="coerce"), [roi_col]
+    try:
+        roi_col = _find_feature_column(
+            cols,
+            group="power",
+            segment=segment,
+            band=band,
+            scope="roi",
+            identifier=roi_name,
+            stat=stat,
+        )
+        return pd.to_numeric(trials[roi_col], errors="coerce"), [roi_col]
+    except ValueError:
+        pass
+
+    if roi_patterns is None:
+        raise ValueError(
+            f"Missing ROI-level power feature and no ROI definition provided (roi={roi_name!r}, band={band!r})."
+        )
+
+    patterns: list[str] = []
+    if isinstance(roi_patterns, str):
+        patterns = [p.strip() for p in roi_patterns.split(",") if p.strip()]
+    elif isinstance(roi_patterns, (list, tuple, set)):
+        patterns = [str(p).strip() for p in roi_patterns if str(p).strip()]
+    else:
+        patterns = [str(roi_patterns).strip()] if str(roi_patterns).strip() else []
+
+    if not patterns:
+        raise ValueError(
+            f"Missing ROI-level power feature and ROI definition is empty (roi={roi_name!r}, band={band!r})."
+        )
+
+    # Fallback: approximate ROI power as the mean across matching channel features.
+    # This supports cases where ROI aggregation was not enabled during extraction,
+    # but channel-level power features are present in the trial table.
+    candidate_stats = [stat] + _STAT_EQUIVALENTS.get(stat, [])
+    ch_cols_by_stat: dict[str, dict[str, str]] = {}
+    for col in cols:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "power":
+            continue
+        if parsed.get("segment") != segment:
+            continue
+        if parsed.get("band") != band:
+            continue
+        if parsed.get("scope") != "ch":
+            continue
+        identifier = parsed.get("identifier")
+        if not identifier:
+            continue
+        st = parsed.get("stat") or ""
+        ch_cols_by_stat.setdefault(str(identifier), {})[str(st)] = str(col)
+
+    def matches_any_pattern(channel: str) -> bool:
+        channel_str = str(channel)
+        for pat in patterns:
+            if channel_str.lower() == pat.lower():
+                return True
+            try:
+                if re.match(pat, channel_str, flags=re.IGNORECASE):
+                    return True
+            except re.error:
+                continue
+        return False
+
+    used_cols: list[str] = []
+    for ch, by_stat in ch_cols_by_stat.items():
+        if not matches_any_pattern(ch):
+            continue
+        selected = None
+        for st in candidate_stats:
+            if st in by_stat:
+                selected = by_stat[st]
+                break
+        if selected is None and by_stat:
+            # Last resort: pick any available stat for that channel.
+            selected = next(iter(by_stat.values()))
+        if selected:
+            used_cols.append(selected)
+
+    # Preserve deterministic order for reproducibility.
+    used_cols = sorted(set(used_cols))
+    if not used_cols:
+        raise ValueError(
+            "No channel-level power features matched ROI definition "
+            f"(roi={roi_name!r}, band={band!r}, patterns={patterns!r})."
+        )
+
+    if logger is not None:
+        logger.debug(
+            "Dose-response: computed ROI=%s band=%s from %d channel feature(s).",
+            roi_name,
+            band,
+            len(used_cols),
+        )
+
+    y = trials[used_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+    return y, used_cols
 
 
 def _save_summary_table(
@@ -925,14 +1022,31 @@ def _plot_roi_bands_vs_dose_single_subject(
             ax = fig.add_subplot(111)
             _style_axes(ax)
 
-            band_df = df[[dose_col, f"roi_power_{band}"]].copy()
+            y_col = f"roi_power_{band}"
+            if y_col not in df.columns:
+                logger.warning(
+                    "Skipping ROI power plot (roi=%s, band=%s): missing column %s.",
+                    roi_name,
+                    band,
+                    y_col,
+                )
+                plt.close(fig)
+                continue
+
+            band_df = df[[dose_col, y_col]].copy()
             band_df = band_df.dropna()
             if band_df.empty:
-                raise ValueError(f"No valid rows for ROI={roi_name!r}, band={band!r}.")
+                logger.warning(
+                    "Skipping ROI power plot (roi=%s, band=%s): no valid rows after dropping NaNs.",
+                    roi_name,
+                    band,
+                )
+                plt.close(fig)
+                continue
 
             summ = _mean_sem_by_x(
                 band_df[dose_col].to_numpy(dtype=float),
-                band_df[f"roi_power_{band}"].to_numpy(dtype=float),
+                band_df[y_col].to_numpy(dtype=float),
             )
             ax.errorbar(
                 summ["x"],
@@ -1198,56 +1312,53 @@ def visualize_dose_response(
         if not roi_names:
             raise ValueError("No ROIs configured in time_frequency_analysis.rois.")
 
-        trial_columns = [str(c) for c in trials.columns]
-        missing_features: list[str] = []
-        for roi in roi_names:
-            for band in bands:
-                try:
-                    _find_feature_column(
-                        trial_columns,
-                        group="power",
-                        segment=segment,
-                        band=str(band),
-                        scope="roi",
-                        identifier=str(roi),
-                        stat=stat,
-                    )
-                except ValueError as exc:
-                    missing_features.append(str(exc))
-                    continue
-
-        if missing_features:
-            examples = "\n".join(missing_features[:12])
-            more = "" if len(missing_features) <= 12 else f"\n... (+{len(missing_features) - 12} more)"
-            raise ValueError(
-                "Missing ROI-level power features in the trial table. "
-                f"trial_table={trial_path}. "
-                "Ensure power ROI aggregation is enabled during feature extraction. "
-                f"Examples:\n{examples}{more}"
-            )
-
         roi_dir = out_dir / "roi_power"
         ensure_dir(roi_dir)
         for roi_name_str in roi_names:
             roi_table = pd.DataFrame({cols.dose: table[cols.dose]})
+            roi_patterns = roi_defs.get(roi_name_str)
+            used_bands: list[str] = []
             for band in bands:
-                y, used_cols = _roi_power_series(
-                    table,
-                    roi_name=roi_name_str,
-                    band=str(band),
-                    segment=segment,
-                    stat=stat,
-                )
+                try:
+                    y, used_cols = _roi_power_series(
+                        table,
+                        roi_name=roi_name_str,
+                        roi_patterns=roi_patterns,
+                        band=str(band),
+                        segment=segment,
+                        stat=stat,
+                        logger=logger,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping ROI power series (roi=%s, band=%s): %s",
+                        roi_name_str,
+                        band,
+                        exc,
+                    )
+                    continue
                 if not used_cols:
-                    raise ValueError(f"ROI power series used 0 columns (roi={roi_name_str!r}, band={band!r}).")
+                    logger.warning(
+                        "Skipping ROI power series (roi=%s, band=%s): used 0 columns.",
+                        roi_name_str,
+                        band,
+                    )
+                    continue
                 roi_table[f"roi_power_{band}"] = y
+                used_bands.append(str(band))
             roi_table = roi_table.dropna(subset=[cols.dose])
+            if not used_bands:
+                logger.warning(
+                    "Skipping ROI power dose-response plots for roi=%s: no usable features found.",
+                    roi_name_str,
+                )
+                continue
 
             roi_saved = _plot_roi_bands_vs_dose_single_subject(
                 roi_table,
                 subject=subject,
                 roi_name=roi_name_str,
-                bands=bands,
+                bands=used_bands,
                 dose_col=cols.dose,
                 out_dir=roi_dir,
                 config=config,

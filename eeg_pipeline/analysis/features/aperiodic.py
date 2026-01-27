@@ -3,7 +3,8 @@ Aperiodic (1/f) Feature Extraction
 ===================================
 
 Extracts aperiodic spectral features using FOOOF-like fitting:
-- Slope: 1/f exponent (related to E/I balance)
+- Slope: log-log PSD slope (typically negative)
+- Exponent: 1/f exponent (typically positive; exponent ≈ -slope for fixed model)
 - Offset: Broadband power level
 - Power-corrected band power: Ratio of observed to 1/f background power within band
 
@@ -828,6 +829,28 @@ def _compute_theta_beta_ratio(
     return tbr_matrix
 
 
+def _compute_theta_beta_ratio_raw(
+    freqs: np.ndarray,
+    psds: np.ndarray,
+    theta_range: Tuple[float, float],
+    beta_range: Tuple[float, float],
+) -> np.ndarray:
+    """Compute conventional theta/beta ratio from raw PSD (not aperiodic-adjusted)."""
+    if psds.ndim != 3:
+        raise ValueError(f"psds must be 3D (epochs, channels, freqs); got shape={psds.shape}.")
+
+    theta_mask = (freqs >= theta_range[0]) & (freqs <= theta_range[1])
+    beta_mask = (freqs >= beta_range[0]) & (freqs <= beta_range[1])
+    if not (np.any(theta_mask) and np.any(beta_mask)):
+        return np.full(psds.shape[:2], np.nan, dtype=float)
+
+    theta_pow = np.nanmean(psds[..., theta_mask], axis=2)
+    beta_pow = np.nanmean(psds[..., beta_mask], axis=2)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = np.where(beta_pow > 0, theta_pow / beta_pow, np.nan)
+    return out
+
+
 def _validate_band_coverage(
     freqs: np.ndarray,
     band_name: str,
@@ -943,7 +966,6 @@ def _rebuild_window_masks(
     windows: Any,
     times: np.ndarray,
     target_name: Optional[str],
-    allow_full_epoch_fallback: bool,
     logger: Any,
 ) -> Tuple[Dict[str, np.ndarray], Optional[str]]:
     """Rebuild window masks for the current time axis.
@@ -967,18 +989,11 @@ def _rebuild_window_masks(
         if mask is not None and len(mask) == len(times) and np.any(mask):
             segments = {target_name: mask}
         else:
-            if allow_full_epoch_fallback:
-                logger.warning(
-                    "Aperiodic: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                    target_name,
-                )
-                segments = {target_name: np.ones(len(times), dtype=bool)}
-            else:
-                logger.error(
-                    "Aperiodic: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                    target_name,
-                )
-                error_msg = f"invalid_target_window_mask:{target_name}"
+            logger.error(
+                "Aperiodic: targeted window '%s' has no valid mask; skipping.",
+                target_name,
+            )
+            error_msg = f"invalid_target_window_mask:{target_name}"
     else:
         if windows is not None and hasattr(windows, 'ranges'):
             for seg_name, seg_range in windows.ranges.items():
@@ -1249,15 +1264,17 @@ def _extract_aperiodic_for_segment(
         metrics["slope"] = ("broadband", "slope", np.full_like(exponent, np.nan))
     else:
         metrics["slope"] = ("broadband", "slope", slopes.copy())
+        # Exponent is the conventional positive 1/f parameter (≈ -slope for fixed model).
+        metrics["exponent"] = ("broadband", "exponent", (-slopes).copy())
     
     metrics["offset"] = ("broadband", "offset", offsets.copy())
     metrics["r2"] = ("broadband", "r2", r2.copy())
     metrics["rms"] = ("broadband", "rms", rms.copy())
     
-    # Apply fit_ok mask to all aperiodic parameters
-    mask_metrics = ["slope", "offset"]
+    # Apply fit_ok mask to all aperiodic parameters (avoid misinterpretation of failed fits)
+    mask_metrics = ["slope", "offset", "exponent"]
     if fit_params.model == "knee":
-        mask_metrics.extend(["exponent", "knee"])
+        mask_metrics.append("knee")
     for metric_name in mask_metrics:
         if metric_name in metrics:
             matrix = metrics[metric_name][2]
@@ -1272,9 +1289,11 @@ def _extract_aperiodic_for_segment(
     # Compute APF and TBR
     apf_matrix = _compute_alpha_peak_frequency(freqs, residuals, alpha_range, fit_ok)
     tbr_matrix = _compute_theta_beta_ratio(freqs, residuals, theta_range, beta_range, fit_ok)
+    tbr_raw_matrix = _compute_theta_beta_ratio_raw(freqs, psds, theta_range, beta_range)
     
     metrics["peakfreq"] = ("alpha", "peakfreq", apf_matrix)
     metrics["tbr"] = ("broadband", "tbr", tbr_matrix)
+    metrics["tbr_raw"] = ("broadband", "tbr_raw", tbr_raw_matrix)
     
     # Compute power-corrected band power per band with coverage validation
     band_coverage_info: Dict[str, float] = {}
@@ -1368,14 +1387,11 @@ def extract_aperiodic_features(
     
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
-    allow_full_epoch_fallback = bool(
-        _get_config_value(config, "feature_engineering.windows.allow_full_epoch_fallback", False)
-    )
     
     # CRITICAL: Rebuild masks for the current (potentially cropped) time axis
     # This prevents shape mismatches when epochs have been cropped after windows were built
     segments, error_msg = _rebuild_window_masks(
-        windows, epochs.times, target_name, allow_full_epoch_fallback, logger
+        windows, epochs.times, target_name, logger
     )
     if error_msg:
         qc_payload["error"] = error_msg
@@ -1417,6 +1433,13 @@ def extract_aperiodic_features(
         return pd.DataFrame(), [], {}
     
     df = pd.DataFrame(all_data)
+    df.attrs["aperiodic_definitions"] = {
+        "slope": "log10(PSD) = offset + slope*log10(f); slope typically negative",
+        "exponent": "1/f exponent (typically positive); exponent ≈ -slope for fixed model",
+        "tbr": "theta/beta ratio computed on aperiodic-adjusted residual power (oscillatory excess ratio)",
+        "tbr_raw": "conventional theta/beta ratio computed on raw PSD power",
+        "peakfreq": "alpha peak frequency from aperiodic-adjusted residual spectrum (center-of-gravity)",
+    }
     
     segments_done = sorted([k for k, v in qc_payload.get("segments", {}).items() if v])
     qc_payload["segments_computed"] = segments_done
@@ -1486,6 +1509,17 @@ def extract_aperiodic_from_precomputed(
     fit_params = _validate_fit_parameters(peak_rejection_z, min_fit_points, model)
     psd_method, psd_kwargs, fmin, fmax = _parse_psd_config(config)
     line_noise_cfg = _parse_line_noise_config(config)
+    min_r2 = float(aperiodic_cfg.get("min_r2", 0.0))
+    if not np.isfinite(min_r2):
+        min_r2 = 0.0
+    max_rms = aperiodic_cfg.get("max_rms", None)
+    if max_rms is not None:
+        try:
+            max_rms = float(max_rms)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("feature_engineering.aperiodic.max_rms must be a float when provided.") from exc
+        if not np.isfinite(max_rms):
+            raise ValueError("feature_engineering.aperiodic.max_rms must be finite when provided.")
     
     all_data: Dict[str, Any] = {}
     qc_payload: Dict[str, Any] = {
@@ -1500,9 +1534,6 @@ def extract_aperiodic_from_precomputed(
     
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        _get_config_value(config, "feature_engineering.windows.allow_full_epoch_fallback", False)
-    )
     
     # CRITICAL: Rebuild masks for the current time axis
     # This prevents shape mismatches when epochs have been cropped after windows were built
@@ -1511,7 +1542,7 @@ def extract_aperiodic_from_precomputed(
         logger = logging.getLogger("aperiodic")
     
     segments, error_msg = _rebuild_window_masks(
-        windows, times, target_name, allow_full_epoch_fallback, logger
+        windows, times, target_name, logger
     )
     if error_msg:
         qc_payload["error"] = error_msg
@@ -1523,6 +1554,8 @@ def extract_aperiodic_from_precomputed(
     spatial_modes = getattr(precomputed, "spatial_modes", ["roi", "global"])
     n_jobs = get_n_jobs(config, "aperiodic")
     condition_labels = getattr(precomputed, "condition_labels", None)
+    roi_map = _build_roi_map(ch_names, config) if "roi" in spatial_modes else {}
+    freq_bands = get_frequency_bands_for_aperiodic(config)
     
     for seg_name, seg_mask in segments.items():
         if seg_mask is None or not np.any(seg_mask):
@@ -1600,17 +1633,94 @@ def extract_aperiodic_from_precomputed(
             log_freqs, log_psd, fit_params, logger,
             n_jobs=n_jobs, line_noise_mask=line_noise_mask
         )
-        
-        _aggregate_aperiodic_features(
-            all_data, n_epochs, seg_name, ch_names,
-            slopes, offsets, spatial_modes, config
+
+        knees = None
+        if fit_params.model == "knee":
+            knees = qc.get("knees") if isinstance(qc, dict) else None
+            if knees is None:
+                knees = np.full_like(offsets, np.nan)
+            residuals = _compute_knee_residuals(freqs, log_psd, offsets, slopes, knees)
+        else:
+            residuals = compute_residuals(log_freqs, log_psd, offsets, slopes)
+
+        r2, rms = _compute_fit_r2_and_rms(
+            log_freqs,
+            log_psd,
+            offsets,
+            slopes,
+            fit_masks,
+            model=fit_params.model,
+            knees=knees,
+            freqs_hz=freqs,
         )
+
+        fit_ok = np.isfinite(r2)
+        if min_r2 > 0:
+            fit_ok &= (r2 >= min_r2)
+        if max_rms is not None:
+            fit_ok &= (np.isfinite(rms) & (rms <= max_rms))
+
+        exponent = (-slopes).copy()
+        slopes_masked = slopes.copy()
+        offsets_masked = offsets.copy()
+        exponent_masked = exponent.copy()
+        slopes_masked[~fit_ok] = np.nan
+        offsets_masked[~fit_ok] = np.nan
+        exponent_masked[~fit_ok] = np.nan
+        if isinstance(knees, np.ndarray) and knees.shape == offsets.shape:
+            knees = knees.copy()
+            knees[~fit_ok] = np.nan
+
+        theta_range = tuple(freq_bands.get("theta", (4.0, 8.0)))
+        beta_range = tuple(freq_bands.get("beta", (13.0, 30.0)))
+        alpha_range = tuple(freq_bands.get("alpha", (8.0, 13.0)))
+
+        apf_matrix = _compute_alpha_peak_frequency(freqs, residuals, alpha_range, fit_ok)
+        tbr_powcorr = _compute_theta_beta_ratio(freqs, residuals, theta_range, beta_range, fit_ok)
+        tbr_raw = _compute_theta_beta_ratio_raw(freqs, psds, theta_range, beta_range)
+
+        metrics: Dict[str, Tuple[str, str, np.ndarray]] = {
+            "slope": ("broadband", "slope", slopes_masked),
+            "exponent": ("broadband", "exponent", exponent_masked),
+            "offset": ("broadband", "offset", offsets_masked),
+            "r2": ("broadband", "r2", r2),
+            "rms": ("broadband", "rms", rms),
+            "peakfreq": ("alpha", "peakfreq", apf_matrix),
+            "tbr": ("broadband", "tbr", tbr_powcorr),
+            "tbr_raw": ("broadband", "tbr_raw", tbr_raw),
+        }
+        if fit_params.model == "knee" and isinstance(knees, np.ndarray):
+            metrics["knee"] = ("broadband", "knee", knees)
+
+        # Power-corrected band power per requested band
+        for band_name in bands:
+            if band_name not in freq_bands:
+                continue
+            band_range = tuple(freq_bands[band_name])
+            is_valid, _coverage = _validate_band_coverage(freqs, band_name, band_range, logger)
+            if not is_valid:
+                continue
+            pc_matrix = _compute_power_corrected_band_power(
+                freqs, residuals, band_name, band_range, fit_ok
+            )
+            metrics[f"{band_name}_powcorr"] = (band_name, "powcorr", pc_matrix)
+
+        aggregated = _aggregate_features_by_spatial_mode(
+            metrics,
+            ch_names,
+            seg_name,
+            spatial_modes,
+            roi_map,
+        )
+        all_data.update(aggregated)
         
         qc_payload["segments"][seg_name] = {
             "n_epochs": n_epochs,
             "duration_sec": seg_duration_sec,
             "mean_slope": float(np.nanmean(slopes)),
+            "mean_exponent": float(np.nanmean(exponent)),
             "mean_offset": float(np.nanmean(offsets)),
+            "fit_ok_fraction": float(np.mean(fit_ok)) if fit_ok.size else np.nan,
             "line_noise_bins_removed": int(n_removed),
         }
     
@@ -1620,6 +1730,13 @@ def extract_aperiodic_from_precomputed(
         return pd.DataFrame(), [], {}
     
     df = pd.DataFrame(all_data)
+    df.attrs["aperiodic_definitions"] = {
+        "slope": "log10(PSD) = offset + slope*log10(f); slope typically negative",
+        "exponent": "1/f exponent (typically positive); exponent ≈ -slope for fixed model",
+        "tbr": "theta/beta ratio computed on aperiodic-adjusted residual power (oscillatory excess ratio)",
+        "tbr_raw": "conventional theta/beta ratio computed on raw PSD power",
+        "peakfreq": "alpha peak frequency from aperiodic-adjusted residual spectrum (center-of-gravity)",
+    }
     return df, list(df.columns), qc_payload
 
 
@@ -1637,6 +1754,7 @@ def _aggregate_aperiodic_features(
     roi_map = _build_roi_map(ch_names, config) if "roi" in spatial_modes else {}
     metrics = {
         "slope": ("broadband", "slope", slopes),
+        "exponent": ("broadband", "exponent", (-slopes).copy()),
         "offset": ("broadband", "offset", offsets),
     }
     aggregated = _aggregate_features_by_spatial_mode(

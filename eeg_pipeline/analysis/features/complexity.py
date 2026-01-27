@@ -199,9 +199,6 @@ def extract_complexity_from_precomputed(
 
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        get_config_value(cfg, "feature_engineering.windows.allow_full_epoch_fallback", False)
-    )
 
     # Get segment masks with proper targeted window handling
     if target_name and windows is not None:
@@ -210,20 +207,11 @@ def extract_complexity_from_precomputed(
             segments = {target_name: mask}
         else:
             if logger:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "Complexity: targeted window '%s' has no valid mask; using full epoch.",
-                        target_name,
-                    )
-                else:
-                    logger.warning(
-                        "Complexity: targeted window '%s' has no valid mask; skipping.",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                segments = {target_name: np.ones(len(precomputed.times), dtype=bool)}
-            else:
-                return pd.DataFrame(), []
+                logger.warning(
+                    "Complexity: targeted window '%s' has no valid mask; skipping.",
+                    target_name,
+                )
+            return pd.DataFrame(), []
     else:
         segments = get_segment_masks(precomputed.times, windows, cfg)
         segments = {k: v for k, v in segments.items() if v is not None and np.any(v)}
@@ -288,4 +276,3 @@ def extract_complexity_from_precomputed(
 
 
 __all__ = ["extract_complexity_from_precomputed"]
-

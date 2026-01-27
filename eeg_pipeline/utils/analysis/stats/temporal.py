@@ -306,8 +306,9 @@ def _compute_correlations_for_condition(
     if mask is None:
         return None
 
-    idx = np.where(mask)[0] if mask.dtype == bool else mask
-    tfr_c, y_c = tfr[idx], y[mask]
+    is_bool_mask = mask.dtype == bool
+    idx = np.where(mask)[0] if is_bool_mask else np.asarray(mask)
+    tfr_c, y_c = tfr[idx], (y[mask] if is_bool_mask else y[idx])
     if groups is not None:
         try:
             groups_arr = np.asarray(groups)
@@ -335,6 +336,9 @@ def _compute_correlations_for_condition(
         req_samples = cov_vals.shape[1] * min_samples_per_cov + partial_corr_base
     else:
         req_samples = 0
+
+    # Always require a minimum number of observations for stable inference.
+    req_samples = max(int(req_samples), int(MIN_OBSERVATIONS_FOR_CORRELATION))
 
     tasks = []
 
@@ -499,6 +503,7 @@ def _compute_correlations_for_condition(
                 covariates_matrix=cov_vals,
                 groups=groups_c,
                 cluster_forming_threshold=cluster_forming_threshold,
+                config=config,
             )
 
             cluster_labels[band_idx, :, channel_idx] = labels[:, 0]
@@ -723,11 +728,20 @@ def _run_tf_correlations_core(
         run_col = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
         groups = events[run_col].to_numpy() if run_col and events is not None and run_col in events.columns else None
         c_labels, c_pvals, c_sig, c_recs, perm_masses, c_thresh = compute_cluster_correction_2d(
-            correlations=cluster_stat, p_values=pvals, bin_data=bin_data,
-            informative_bins=info_bins, y_array=y_arr, cluster_alpha=c_alpha,
-            n_cluster_perm=n_perm, alpha=c_alpha, min_valid_points=min_pts,
-            use_spearman=use_spearman, cluster_rng=rng, covariates_matrix=cov_mat,
+            correlations=cluster_stat,
+            p_values=pvals,
+            bin_data=bin_data,
+            informative_bins=info_bins,
+            y_array=y_arr,
+            cluster_alpha=c_alpha,
+            n_cluster_perm=n_perm,
+            alpha=c_alpha,
+            min_valid_points=min_pts,
+            use_spearman=use_spearman,
+            cluster_rng=rng,
+            covariates_matrix=cov_mat,
             groups=groups,
+            config=config,
         )
 
     ensure_dir(stats_dir)
@@ -880,74 +894,282 @@ def _build_roi_averaged_records(
     method: str,
     roi_definitions: Optional[Dict[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Build ROI-averaged records from temporal correlation results.
-    
-    Creates aggregated records by averaging correlation values across channels
-    within each ROI. Also computes an "all" ROI averaging all channels.
+    """Deprecated: ROI summaries computed from per-channel correlations are invalid.
+
+    This function previously attempted to create ROI-level records by Fisher-z
+    averaging channel-wise correlations and combining channel-wise p-values.
+    EEG channels are highly dependent, so meta-combining p-values across channels
+    inflates significance and does not equal the correlation of ROI-averaged
+    power with behavior.
+
+    ROI-level temporal correlations are now computed directly from ROI-averaged
+    trial-wise power in `_compute_roi_correlations_for_condition`.
     """
+    return []
+
+
+def _compute_roi_correlations_for_condition(
+    tfr,
+    y: np.ndarray,
+    mask: np.ndarray,
+    condition_name: str,
+    bands: Dict[str, Tuple[float, float]],
+    win_s: np.ndarray,
+    win_e: np.ndarray,
+    *,
+    fmax_available: float,
+    corr_fn,
+    logger,
+    cov_df: Optional[pd.DataFrame] = None,
+    config: Optional[Any] = None,
+    groups: Optional[np.ndarray] = None,
+    roi_definitions: Optional[Dict[str, List[str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Compute ROI-level temporal correlations from ROI-averaged trial-wise power.
+
+    Scientific validity:
+    - Computes the correlation of a *single ROI summary per trial* with behavior,
+      rather than meta-combining channel-wise correlations/p-values.
+    - Supports partial correlation when covariates are provided.
+    - Optionally applies time-only cluster correction across windows (for each ROI/band),
+      using the same permutation machinery as channel-level temporal correlations.
+    """
+    if mask is None:
+        return []
+
+    is_bool_mask = getattr(mask, "dtype", None) == bool
+    idx = np.where(mask)[0] if is_bool_mask else np.asarray(mask)
+    if idx.size == 0:
+        return []
+
+    tfr_c = tfr[idx]
+    y_c = y[mask] if is_bool_mask else y[idx]
+    use_spearman = corr_fn == spearmanr
+    method = "spearman" if use_spearman else "pearson"
     method_label = format_correlation_method_label(method, None)
-    records = []
-    corrs = res["correlations"]  # shape: (n_bands, n_windows, n_channels)
-    pvals = res["p_values"]
-    n_valid = res["n_valid"]
-    band_names = res["band_names"]
-    win_s = res["window_starts"]
-    win_e = res["window_ends"]
-    
-    n_bands, n_windows, n_channels = corrs.shape
-    
-    # Default ROI: all channels
-    if roi_definitions is None:
-        roi_definitions = {}
-    roi_definitions["all"] = ch_names
-    
-    for roi_name, roi_channels in roi_definitions.items():
-        # Map channel names to indices
-        ch_indices = [i for i, ch in enumerate(ch_names) if ch in roi_channels]
-        if not ch_indices:
+
+    cov_vals = None
+    cov_cols: Optional[List[str]] = None
+    if cov_df is not None and not cov_df.empty:
+        cov_df_c = cov_df.iloc[idx].apply(pd.to_numeric, errors="coerce")
+        cov_vals = cov_df_c.to_numpy()
+        cov_cols = list(cov_df_c.columns)
+
+    # Minimum samples for stable correlation / valid t-stat conversion
+    min_samples = int(
+        get_config_value(
+            config, "behavior_analysis.statistics.min_observations_for_correlation", MIN_OBSERVATIONS_FOR_CORRELATION
+        )
+    )
+    min_samples = max(min_samples, MIN_OBSERVATIONS_FOR_CORRELATION)
+
+    if cov_vals is not None:
+        min_samples_per_cov = int(get_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate", 5))
+        partial_corr_base = int(get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5))
+        req_samples = int(cov_vals.shape[1]) * int(min_samples_per_cov) + int(partial_corr_base)
+        req_samples = max(req_samples, min_samples)
+    else:
+        req_samples = min_samples
+
+    # Cluster correction config
+    n_cluster_perm = int(
+        get_config_value(config, "behavior_analysis.cluster.n_permutations", None)
+        or get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 0)
+    )
+    c_alpha = float(
+        get_config_value(config, "behavior_analysis.cluster.alpha", None)
+        or get_config_value(config, "behavior_analysis.cluster_correction.alpha", get_config_value(config, "statistics.sig_alpha", 0.05))
+    )
+    cluster_forming_threshold = (
+        get_config_value(config, "behavior_analysis.cluster.forming_threshold", None)
+        or get_config_value(config, "behavior_analysis.cluster_correction.cluster_forming_threshold", None)
+        or get_config_value(config, "behavior_analysis.cluster_correction.forming_threshold", None)
+    )
+    if cluster_forming_threshold is not None:
+        try:
+            threshold_float = float(cluster_forming_threshold)
+            if threshold_float < 1.0:
+                if logger:
+                    logger.warning(
+                        "%s: cluster_forming_threshold=%.4g looks like a p-value/r threshold; deriving threshold by permutation instead.",
+                        condition_name,
+                        threshold_float,
+                    )
+                cluster_forming_threshold = None
+        except (ValueError, TypeError):
+            cluster_forming_threshold = None
+
+    seed = int(get_config_value(config, "project.random_state", 42))
+    cluster_rng = np.random.default_rng(seed)
+
+    if groups is not None:
+        try:
+            groups_arr = np.asarray(groups)
+            groups_c = groups_arr
+        except Exception:
+            groups_c = None
+    else:
+        groups_c = None
+
+    ch_names = list(getattr(tfr, "ch_names", []))
+    n_ch = len(ch_names)
+    if n_ch == 0:
+        return []
+
+    # Build ROI map: include an explicit "all" ROI.
+    roi_defs: Dict[str, List[str]] = {}
+    if roi_definitions:
+        roi_defs.update({str(k): list(v) for k, v in roi_definitions.items() if isinstance(v, (list, tuple))})
+    roi_defs.setdefault("all", ch_names)
+
+    roi_to_indices: Dict[str, List[int]] = {}
+    for roi_name, roi_channels in roi_defs.items():
+        indices = [i for i, ch in enumerate(ch_names) if ch in set(roi_channels)]
+        if indices:
+            roi_to_indices[str(roi_name)] = indices
+
+    if not roi_to_indices:
+        return []
+
+    records: List[Dict[str, Any]] = []
+
+    from eeg_pipeline.utils.analysis.stats.cluster import compute_cluster_correction_2d
+
+    band_names = list(bands.keys())
+    for band_name in band_names:
+        fmin, fmax_band = bands[band_name]
+        fmax_effective = min(float(fmax_band), float(fmax_available))
+        if float(fmin) >= float(fmax_effective):
             continue
-            
-        for band_idx in range(n_bands):
-            for window_idx in range(n_windows):
-                roi_corrs = corrs[band_idx, window_idx, ch_indices]
-                roi_pvals = pvals[band_idx, window_idx, ch_indices]
-                roi_n = n_valid[band_idx, window_idx, ch_indices]
-                
-                valid_mask = np.isfinite(roi_corrs) & np.isfinite(roi_pvals)
-                if not valid_mask.any():
+
+        # Cache per-window per-trial per-channel power once per band.
+        band_power_by_window: List[Optional[np.ndarray]] = []
+        for t0, t1 in zip(win_s, win_e):
+            band_power_by_window.append(
+                extract_trial_band_power(tfr_c, float(fmin), float(fmax_effective), float(t0), float(t1))
+            )
+
+        for roi_name, ch_indices in roi_to_indices.items():
+            n_windows = int(len(win_s))
+            r_vec = np.full((n_windows,), np.nan)
+            p_vec = np.full((n_windows,), np.nan)
+            n_vec = np.zeros((n_windows,), dtype=int)
+            roi_bin_data = np.full((n_windows, 1, len(y_c)), np.nan)
+            informative_bins: List[Tuple[int, int]] = []
+
+            for window_idx, band_power in enumerate(band_power_by_window):
+                if band_power is None or band_power.size == 0:
                     continue
-                    
-                valid_corrs = roi_corrs[valid_mask]
-                z_values = np.arctanh(np.clip(valid_corrs, -0.9999, 0.9999))
-                z_mean = np.mean(z_values)
-                r_mean = np.tanh(z_mean)
-                
-                n_mean = int(np.min(roi_n[valid_mask]))
-                
-                valid_pvals = roi_pvals[valid_mask]
-                valid_pvals = np.clip(valid_pvals, 1e-300, 1.0)  # Avoid log(0)
-                chi2_stat = -2 * np.sum(np.log(valid_pvals))
-                from scipy.stats import chi2
-                combined_p = 1.0 - chi2.cdf(chi2_stat, df=2 * len(valid_pvals))
-                
-                records.append({
-                    "condition": condition,
-                    "band": band_names[band_idx],
-                    "time_start": float(win_s[window_idx]),
-                    "time_end": float(win_e[window_idx]),
-                    "channel": f"roi_{roi_name}",
-                    "r": float(r_mean),
-                    "beta_std": float(r_mean),
-                    "beta_kind": "standardized",
-                    "p": float(combined_p),
-                    "p_cluster": np.nan,
-                    "cluster_id": 0,
-                    "cluster_significant": False,
-                    "n": n_mean,
-                    "method": method,
-                    "method_label": method_label,
-                    "n_channels": len(ch_indices),
-                })
+
+                if band_power.shape[0] != len(y_c) or band_power.shape[1] != n_ch:
+                    continue
+
+                roi_trial_vals = np.nanmean(band_power[:, ch_indices], axis=1)
+                roi_bin_data[window_idx, 0, :] = roi_trial_vals
+
+                valid = np.isfinite(roi_trial_vals) & np.isfinite(y_c)
+                if cov_vals is not None:
+                    valid &= np.all(np.isfinite(cov_vals), axis=1)
+
+                n_obs = int(np.sum(valid))
+                if n_obs < req_samples:
+                    continue
+
+                if np.std(roi_trial_vals[valid]) < MIN_VARIANCE_THRESHOLD:
+                    continue
+
+                try:
+                    if cov_vals is not None and cov_vals.shape[1] > 0:
+                        r, p, n_out = compute_partial_corr(
+                            pd.Series(roi_trial_vals[valid]),
+                            pd.Series(y_c[valid]),
+                            pd.DataFrame(cov_vals[valid], columns=cov_cols),
+                            method=method,
+                        )
+                        if int(n_out) < req_samples:
+                            continue
+                        r_vec[window_idx] = float(r)
+                        p_vec[window_idx] = float(p)
+                        n_vec[window_idx] = int(n_out)
+                    else:
+                        r, p = corr_fn(roi_trial_vals[valid], y_c[valid])
+                        if not (np.isfinite(r) and np.isfinite(p)):
+                            continue
+                        r_vec[window_idx] = float(r)
+                        p_vec[window_idx] = float(p)
+                        n_vec[window_idx] = n_obs
+                    informative_bins.append((window_idx, 0))
+                except (ValueError, RuntimeWarning):
+                    continue
+
+            if not informative_bins:
+                continue
+
+            # Cluster correction across time windows (time-only adjacency via (n_windows, 1) shape).
+            p_cluster_vec = np.full_like(p_vec, np.nan, dtype=float)
+            cluster_id_vec = np.zeros_like(n_vec, dtype=int)
+            cluster_sig_vec = np.zeros_like(n_vec, dtype=bool)
+
+            if n_cluster_perm > 0:
+                n_cov = int(cov_vals.shape[1]) if cov_vals is not None else 0
+                t_stat = np.full((n_windows,), np.nan, dtype=float)
+                for w_idx, _ in informative_bins:
+                    r_val = float(r_vec[w_idx])
+                    n_obs = int(n_vec[w_idx])
+                    dof = n_obs - n_cov - 2
+                    if np.isfinite(r_val) and dof > 0 and abs(r_val) < 1:
+                        denom = max(MIN_DENOMINATOR_THRESHOLD, 1.0 - r_val**2)
+                        t_stat[w_idx] = r_val * np.sqrt(float(dof) / denom)
+
+                try:
+                    labels, p_corr, sig_mask, _records, _perm_max, _thresh = compute_cluster_correction_2d(
+                        correlations=t_stat[:, None],
+                        p_values=p_vec[:, None],
+                        bin_data=roi_bin_data,
+                        informative_bins=informative_bins,
+                        y_array=y_c,
+                        cluster_alpha=c_alpha,
+                        n_cluster_perm=n_cluster_perm,
+                        alpha=c_alpha,
+                        min_valid_points=req_samples,
+                        use_spearman=use_spearman,
+                        cluster_rng=cluster_rng,
+                        covariates_matrix=cov_vals,
+                        groups=groups_c,
+                        cluster_forming_threshold=cluster_forming_threshold,
+                        config=config,
+                    )
+                    cluster_id_vec = labels[:, 0].astype(int)
+                    p_cluster_vec = p_corr[:, 0].astype(float)
+                    cluster_sig_vec = sig_mask[:, 0].astype(bool)
+                except Exception:
+                    # Fall back to uncorrected output if cluster correction fails.
+                    pass
+
+            for window_idx in range(n_windows):
+                if not (np.isfinite(r_vec[window_idx]) and np.isfinite(p_vec[window_idx])):
+                    continue
+                records.append(
+                    {
+                        "condition": condition_name,
+                        "band": band_name,
+                        "time_start": float(win_s[window_idx]),
+                        "time_end": float(win_e[window_idx]),
+                        "channel": f"roi_{roi_name}",
+                        "r": float(r_vec[window_idx]),
+                        "beta_std": float(r_vec[window_idx]),
+                        "beta_kind": "standardized",
+                        "p": float(p_vec[window_idx]),
+                        "p_cluster": float(p_cluster_vec[window_idx]) if np.isfinite(p_cluster_vec[window_idx]) else np.nan,
+                        "cluster_id": int(cluster_id_vec[window_idx]),
+                        "cluster_significant": bool(cluster_sig_vec[window_idx]),
+                        "n": int(n_vec[window_idx]),
+                        "method": method,
+                        "method_label": method_label,
+                        "n_channels": int(len(ch_indices)),
+                    }
+                )
+
     return records
 
 
@@ -1145,7 +1367,22 @@ def _run_temporal_by_condition_core(
             
             # ROI-averaged records
             if include_roi_averages:
-                roi_records = _build_roi_averaged_records(res, safe_name, ch_names, method, roi_definitions)
+                roi_records = _compute_roi_correlations_for_condition(
+                    tfr,
+                    y_arr,
+                    mask,
+                    safe_name,
+                    bands,
+                    win_s,
+                    win_e,
+                    fmax_available=fmax,
+                    corr_fn=corr_fn,
+                    logger=logger,
+                    cov_df=cov_df,
+                    config=config,
+                    groups=groups_cond,
+                    roi_definitions=roi_definitions,
+                )
                 for rec in roi_records:
                     rec["feature"] = "power_roi"
                 all_tsv_records.extend(roi_records)

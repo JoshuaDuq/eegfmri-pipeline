@@ -435,11 +435,8 @@ def generate_correlation_scatter(
 
     significance_threshold = float(behavioral_config.get("significance_threshold", 0.05))
     has_covariates = Z_covars is not None and not Z_covars.empty
-    inference = (
-        "Displayed: partial-correlation p-values (uncorrected)"
-        if has_covariates
-        else "Displayed: correlation p-values (uncorrected)"
-    )
+    has_partial = has_covariates or bool(is_partial_residuals)
+    inference = "Displayed: partial-correlation p-values (uncorrected)" if has_partial else "Displayed: correlation p-values (uncorrected)"
 
     save_fig(
         fig,

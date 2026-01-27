@@ -1360,6 +1360,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optItpcMethod:
 		m.itpcMethod = (m.itpcMethod + 1) % 4 // 0: global, 1: fold_global, 2: loo, 3: condition
 		m.useDefaultAdvanced = false
+	case optItpcAllowUnsafeLoo:
+		m.itpcAllowUnsafeLoo = !m.itpcAllowUnsafeLoo
+		m.useDefaultAdvanced = false
+	case optItpcBaselineCorrection:
+		m.itpcBaselineCorrection = (m.itpcBaselineCorrection + 1) % 2 // 0: none, 1: subtract
+		m.useDefaultAdvanced = false
 	case optItpcConditionColumn:
 		if len(m.availableColumns) > 0 {
 			m.expandedOption = expandedItpcConditionColumn
@@ -1446,6 +1452,18 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms, optAperiodicLineNoiseFreq, optAperiodicLineNoiseWidthHz, optAperiodicLineNoiseHarmonics:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optAperiodicMinSegmentSec:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optAperiodicModel:
+		m.aperiodicModel = (m.aperiodicModel + 1) % 2 // 0: fixed, 1: knee
+		m.useDefaultAdvanced = false
+	case optAperiodicPsdMethod:
+		m.aperiodicPsdMethod = (m.aperiodicPsdMethod + 1) % 2 // 0: multitaper, 1: welch
+		m.useDefaultAdvanced = false
+	case optAperiodicExcludeLineNoise:
+		m.aperiodicExcludeLineNoise = !m.aperiodicExcludeLineNoise
+		m.useDefaultAdvanced = false
 	case optPEOrder:
 		m.complexityPEOrder++
 		if m.complexityPEOrder > 7 {
@@ -1500,7 +1518,19 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 			m.burstThresholdZ = 1.5
 		}
 		m.useDefaultAdvanced = false
+	case optBurstThresholdReference:
+		m.burstThresholdReference = (m.burstThresholdReference + 1) % 3 // 0: trial, 1: subject, 2: condition
+		m.useDefaultAdvanced = false
+	case optBurstMinTrialsPerCondition, optBurstMinSegmentSec:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optBurstSkipInvalidSegments:
+		m.burstSkipInvalidSegments = !m.burstSkipInvalidSegments
+		m.useDefaultAdvanced = false
 	case optBurstMinDuration:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optBurstMinCycles:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optBurstBands:
@@ -1512,6 +1542,21 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optPowerRequireBaseline:
 		m.powerRequireBaseline = !m.powerRequireBaseline
 		m.useDefaultAdvanced = false
+	case optPowerSubtractEvoked:
+		m.powerSubtractEvoked = !m.powerSubtractEvoked
+		m.useDefaultAdvanced = false
+	case optPowerMinTrialsPerCondition:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPowerExcludeLineNoise:
+		m.powerExcludeLineNoise = !m.powerExcludeLineNoise
+		m.useDefaultAdvanced = false
+	case optPowerLineNoiseFreq, optPowerLineNoiseWidthHz, optPowerLineNoiseHarmonics:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPowerEmitDb:
+		m.powerEmitDb = !m.powerEmitDb
+		m.useDefaultAdvanced = false
 	case optSpectralEdge:
 		switch m.spectralEdgePercentile {
 		case 0.90:
@@ -1522,8 +1567,55 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 			m.spectralEdgePercentile = 0.90
 		}
 		m.useDefaultAdvanced = false
+	case optSpectralIncludeLogRatios:
+		m.spectralIncludeLogRatios = !m.spectralIncludeLogRatios
+		m.useDefaultAdvanced = false
+	case optSpectralPsdAdaptive:
+		m.spectralPsdAdaptive = !m.spectralPsdAdaptive
+		m.useDefaultAdvanced = false
+	case optSpectralMultitaperAdaptive:
+		m.spectralMultitaperAdaptive = !m.spectralMultitaperAdaptive
+		m.useDefaultAdvanced = false
+	case optSpectralExcludeLineNoise:
+		m.spectralExcludeLineNoise = !m.spectralExcludeLineNoise
+		m.useDefaultAdvanced = false
+	case optSpectralLineNoiseFreq, optSpectralLineNoiseWidthHz, optSpectralLineNoiseHarmonics:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optConnOutputLevel:
 		m.connOutputLevel = (m.connOutputLevel + 1) % 2
+		m.useDefaultAdvanced = false
+	case optConnGranularity:
+		m.connGranularity = (m.connGranularity + 1) % 3 // 0: trial, 1: condition, 2: subject
+		m.useDefaultAdvanced = false
+	case optConnConditionColumn:
+		if len(m.availableColumns) > 0 {
+			m.expandedOption = expandedConnConditionColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldConnConditionColumn)
+		}
+		m.useDefaultAdvanced = false
+	case optConnConditionValues:
+		if m.connConditionColumn == "" {
+			m.ShowToast("Select a condition column first", "warning")
+			return
+		}
+		if vals := m.GetDiscoveredColumnValues(m.connConditionColumn); len(vals) > 0 {
+			m.expandedOption = expandedConnConditionValues
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldConnConditionValues)
+		}
+		m.useDefaultAdvanced = false
+	case optConnPhaseEstimator:
+		m.connPhaseEstimator = (m.connPhaseEstimator + 1) % 2 // 0: within_epoch, 1: across_epochs
+		m.useDefaultAdvanced = false
+	case optConnMinEpochsPerGroup, optConnMinCyclesPerBand, optConnMinSegmentSec:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optConnWarnNoSpatialTransform:
+		m.connWarnNoSpatialTransform = !m.connWarnNoSpatialTransform
 		m.useDefaultAdvanced = false
 	case optConnGraphMetrics:
 		m.connGraphMetrics = !m.connGraphMetrics
@@ -1534,8 +1626,26 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optConnAECMode:
 		m.connAECMode = (m.connAECMode + 1) % 3
 		m.useDefaultAdvanced = false
+	case optConnAECOutput:
+		m.connAECOutput = (m.connAECOutput + 1) % 3 // 0: r, 1: z, 2: r+z
+		m.useDefaultAdvanced = false
+	case optConnForceWithinEpochML:
+		m.connForceWithinEpochML = !m.connForceWithinEpochML
+		m.useDefaultAdvanced = false
 
 	case optMinEpochs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFeatAnalysisMode:
+		m.featAnalysisMode = (m.featAnalysisMode + 1) % 2 // 0: group_stats, 1: trial_ml_safe
+		m.useDefaultAdvanced = false
+	case optFeatComputeChangeScores:
+		m.featComputeChangeScores = !m.featComputeChangeScores
+		m.useDefaultAdvanced = false
+	case optFeatSaveTfrWithSidecar:
+		m.featSaveTfrWithSidecar = !m.featSaveTfrWithSidecar
+		m.useDefaultAdvanced = false
+	case optFeatNJobsBands, optFeatNJobsConnectivity, optFeatNJobsAperiodic, optFeatNJobsComplexity:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optSpectralRatioPairs:
@@ -1546,6 +1656,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optAsymmetryChannelPairs:
 		m.startTextEdit(textFieldAsymmetryChannelPairs)
+		m.useDefaultAdvanced = false
+	case optAsymmetryEmitActivationConvention:
+		m.asymmetryEmitActivationConvention = !m.asymmetryEmitActivationConvention
+		m.useDefaultAdvanced = false
+	case optAsymmetryActivationBands:
+		m.startTextEdit(textFieldAsymmetryActivationBands)
 		m.useDefaultAdvanced = false
 	// Spatial transform section
 	case optFeatGroupSpatialTransform:
@@ -1562,6 +1678,21 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.featGroupTFRExpanded = !m.featGroupTFRExpanded
 	case optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers:
 		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optBandEnvelopePadSec, optBandEnvelopePadCycles, optIAFAlphaWidthHz, optIAFSearchRangeMin, optIAFSearchRangeMax, optIAFMinProminence, optIAFMinCyclesAtFmin, optIAFMinBaselineSec:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optIAFEnabled:
+		m.iafEnabled = !m.iafEnabled
+		m.useDefaultAdvanced = false
+	case optIAFRois:
+		m.ShowToast("IAF ROIs are taken from the ROI selection step", "info")
+		m.useDefaultAdvanced = false
+	case optIAFAllowFullFallback:
+		m.iafAllowFullFallback = !m.iafAllowFullFallback
+		m.useDefaultAdvanced = false
+	case optIAFAllowAllChannelsFallback:
+		m.iafAllowAllChannelsFallback = !m.iafAllowAllChannelsFallback
 		m.useDefaultAdvanced = false
 	}
 
@@ -1694,18 +1825,20 @@ func (m *Model) togglePlottingAdvancedOption() {
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonValues:
-			// Open dropdown if column selected and values available
+			// Always open dropdown if column selected (values may be discovered later)
 			cfg := m.plotItemConfigs[row.plotID]
 			col := cfg.ComparisonColumn
 			if col == "" {
 				col = m.plotComparisonColumn // fallback to global
 			}
-			if vals := m.GetPlottingComparisonColumnValues(col); len(vals) > 0 {
+			if col != "" {
+				// Column is selected - open dropdown (even if values not discovered yet)
 				m.expandedOption = expandedPlotComparisonValues
 				m.subCursor = 0
 				m.editingPlotID = row.plotID
 				m.editingPlotField = row.plotField
 			} else {
+				// No column selected - use text edit
 				m.startPlotTextEdit(row.plotID, row.plotField)
 			}
 			m.useDefaultAdvanced = false
@@ -2264,8 +2397,20 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optTrialTableAddLagFeatures:
 		m.trialTableAddLagFeatures = !m.trialTableAddLagFeatures
 		m.useDefaultAdvanced = false
+	case optTrialOrderMaxMissingFraction:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optFeatureSummariesEnabled:
 		m.featureSummariesEnabled = !m.featureSummariesEnabled
+		m.useDefaultAdvanced = false
+	case optFeatureQCEnabled:
+		m.featureQCEnabled = !m.featureQCEnabled
+		m.useDefaultAdvanced = false
+	case optFeatureQCMaxMissingPct, optFeatureQCMinVariance:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFeatureQCCheckWithinRunVariance:
+		m.featureQCCheckWithinRunVariance = !m.featureQCCheckWithinRunVariance
 		m.useDefaultAdvanced = false
 	case optPainResidualEnabled:
 		m.painResidualEnabled = !m.painResidualEnabled
@@ -2532,6 +2677,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startTextEdit(textFieldCorrelationsTargetColumn)
 		}
 		m.useDefaultAdvanced = false
+	case optCorrelationsTypes:
+		m.startTextEdit(textFieldCorrelationsTypes)
+		m.useDefaultAdvanced = false
 	case optCorrelationsMultilevel:
 		// Toggle multilevel_correlations computation
 		for i, comp := range m.computations {
@@ -2540,6 +2688,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 				break
 			}
 		}
+		m.useDefaultAdvanced = false
+	case optGroupLevelBlockPermutation:
+		m.groupLevelBlockPermutation = !m.groupLevelBlockPermutation
 		m.useDefaultAdvanced = false
 
 	// Temporal
@@ -3735,6 +3886,10 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 {
 			m.aperiodicMaxRms = val
 		}
+	case optAperiodicMinSegmentSec:
+		if val > 0 {
+			m.aperiodicMinSegmentSec = val
+		}
 	case optAperiodicLineNoiseFreq:
 		if val > 0 {
 			m.aperiodicLineNoiseFreq = val
@@ -3773,8 +3928,20 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 && val <= 100 {
 			m.burstThresholdPercentile = val
 		}
+	case optBurstMinTrialsPerCondition:
+		if val >= 1 {
+			m.burstMinTrialsPerCondition = int(val)
+		}
+	case optBurstMinSegmentSec:
+		if val >= 0 {
+			m.burstMinSegmentSec = val
+		}
 	case optBurstMinDuration:
 		m.burstMinDuration = int(val)
+	case optBurstMinCycles:
+		if val > 0 {
+			m.burstMinCycles = val
+		}
 	case optERPSmoothMs:
 		if val >= 0 {
 			m.erpSmoothMs = val
@@ -3787,14 +3954,50 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val > 0 {
 			m.erpLowpassHz = val
 		}
+	case optPowerMinTrialsPerCondition:
+		if val >= 0 {
+			m.powerMinTrialsPerCondition = int(val)
+		}
+	case optPowerLineNoiseFreq:
+		if val > 0 {
+			m.powerLineNoiseFreq = val
+		}
+	case optPowerLineNoiseWidthHz:
+		if val > 0 {
+			m.powerLineNoiseWidthHz = val
+		}
+	case optPowerLineNoiseHarmonics:
+		if val >= 1 {
+			m.powerLineNoiseHarmonics = int(val)
+		}
 	case optMinEpochs:
 		m.minEpochsForFeatures = int(val)
+	case optFeatNJobsBands:
+		m.featNJobsBands = int(val)
+	case optFeatNJobsConnectivity:
+		m.featNJobsConnectivity = int(val)
+	case optFeatNJobsAperiodic:
+		m.featNJobsAperiodic = int(val)
+	case optFeatNJobsComplexity:
+		m.featNJobsComplexity = int(val)
 	case optConnGraphProp:
 		m.connGraphProp = val
 	case optConnWindowLen:
 		m.connWindowLen = val
 	case optConnWindowStep:
 		m.connWindowStep = val
+	case optConnMinEpochsPerGroup:
+		if val >= 1 {
+			m.connMinEpochsPerGroup = int(val)
+		}
+	case optConnMinCyclesPerBand:
+		if val > 0 {
+			m.connMinCyclesPerBand = val
+		}
+	case optConnMinSegmentSec:
+		if val >= 0 {
+			m.connMinSegmentSec = val
+		}
 
 	// Source localization numeric options
 	case optSourceLocReg:
@@ -3928,6 +4131,18 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val > 0 {
 			m.spectralFmax = val
 		}
+	case optSpectralLineNoiseFreq:
+		if val > 0 {
+			m.spectralLineNoiseFreq = val
+		}
+	case optSpectralLineNoiseWidthHz:
+		if val >= 0 {
+			m.spectralLineNoiseWidthHz = val
+		}
+	case optSpectralLineNoiseHarmonics:
+		if val >= 0 {
+			m.spectralLineNoiseHarmonics = int(val)
+		}
 	case optSpectralMinSegmentSec:
 		if val >= 0 {
 			m.spectralMinSegmentSec = val
@@ -3935,6 +4150,35 @@ func (m *Model) commitFeaturesNumber(val float64) {
 	case optSpectralMinCyclesAtFmin:
 		if val >= 0 {
 			m.spectralMinCyclesAtFmin = val
+		}
+	// Band envelope / IAF
+	case optBandEnvelopePadSec:
+		if val >= 0 {
+			m.bandEnvelopePadSec = val
+		}
+	case optBandEnvelopePadCycles:
+		if val >= 0 {
+			m.bandEnvelopePadCycles = val
+		}
+	case optIAFAlphaWidthHz:
+		if val > 0 {
+			m.iafAlphaWidthHz = val
+		}
+	case optIAFSearchRangeMin:
+		m.iafSearchRangeMin = val
+	case optIAFSearchRangeMax:
+		m.iafSearchRangeMax = val
+	case optIAFMinProminence:
+		if val >= 0 {
+			m.iafMinProminence = val
+		}
+	case optIAFMinCyclesAtFmin:
+		if val >= 0 {
+			m.iafMinCyclesAtFmin = val
+		}
+	case optIAFMinBaselineSec:
+		if val >= 0 {
+			m.iafMinBaselineSec = val
 		}
 	// Quality options
 	case optQualityFmin:
@@ -4030,6 +4274,18 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optRunAdjustmentMaxDummies:
 		if val >= 1 {
 			m.runAdjustmentMaxDummies = int(val)
+		}
+	case optTrialOrderMaxMissingFraction:
+		if val >= 0 && val <= 1 {
+			m.trialOrderMaxMissingFraction = val
+		}
+	case optFeatureQCMaxMissingPct:
+		if val >= 0 && val <= 1 {
+			m.featureQCMaxMissingPct = val
+		}
+	case optFeatureQCMinVariance:
+		if val > 0 {
+			m.featureQCMinVariance = val
 		}
 
 	// Pain residual + diagnostics

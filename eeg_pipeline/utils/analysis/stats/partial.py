@@ -30,14 +30,54 @@ import pandas as pd
 from scipy import stats
 from scipy.linalg import lstsq
 
-from .base import _safe_float, get_statistics_constants
+from .base import _safe_float, get_statistics_constants, get_config_value
 from .correlation import compute_correlation
+from .splines import build_temperature_rcs_design
 
 
 # Constants
 _ILL_CONDITIONED_THRESHOLD = 1e10
 _DEFAULT_COLLINEARITY_THRESHOLD = 0.9
 _MIN_SAMPLES_CORRELATION = 3
+
+
+def _get_temperature_control_mode(config: Optional[Any]) -> str:
+    """Resolve temperature control mode for correlation statistics."""
+    mode = str(
+        get_config_value(
+            config,
+            "behavior_analysis.statistics.temperature_control",
+            get_config_value(config, "behavior_analysis.regression.temperature_control", "spline"),
+        )
+    ).strip().lower()
+    if mode in {"spline", "linear"}:
+        return mode
+    return "spline"
+
+
+def _build_temperature_covariates(
+    temperature_series: pd.Series,
+    *,
+    config: Optional[Any],
+) -> pd.DataFrame:
+    """Build temperature covariates (linear or restricted cubic spline) for control."""
+    mode = _get_temperature_control_mode(config)
+    if mode == "linear":
+        return pd.DataFrame({"temp": temperature_series})
+
+    df_cols, covariate_names, _meta = build_temperature_rcs_design(
+        temperature_series,
+        config=config,
+        key_prefix="behavior_analysis.regression.temperature_spline",
+        name_prefix="temperature_rcs",
+    )
+
+    # Standardize names used elsewhere in the stats stack.
+    rename_map = {"temperature": "temp"}
+    for name in covariate_names:
+        if name.startswith("temperature_rcs_"):
+            rename_map[name] = name.replace("temperature_", "temp_", 1)
+    return df_cols.rename(columns=rename_map)
 
 
 def check_collinearity(
@@ -198,9 +238,22 @@ def partial_corr_xy_given_Z(
     residuals_x = x_vals - design_matrix @ beta_x
     residuals_y = y_vals - design_matrix @ beta_y
 
+    # Partial correlation: correlation of residuals is valid, but the p-value must
+    # use dof = n - k - 2 (k covariates), not the default dof = n - 2.
     corr_method = "pearson" if method.lower() == "spearman" else method
-    r, p = compute_correlation(residuals_x, residuals_y, corr_method)
-    return float(r), float(p), len(df)
+    r, _p_unused = compute_correlation(residuals_x, residuals_y, corr_method)
+    r = float(r)
+
+    n = int(len(df))
+    k = int(Z.shape[1])
+    dof = n - k - 2
+    if not np.isfinite(r) or dof <= 0 or abs(r) >= 1.0:
+        return (np.nan if not np.isfinite(r) else r), np.nan, n
+
+    denom = max(1e-12, 1.0 - (r * r))
+    t_stat = r * np.sqrt(float(dof) / denom)
+    p = float(2.0 * stats.t.sf(np.abs(t_stat), df=float(dof)))
+    return r, p, n
 
 
 def compute_partial_corr(
@@ -359,7 +412,7 @@ def compute_partial_correlations(
         )
     
     if temperature_series is not None and not temperature_series.empty:
-        temp_cov = pd.DataFrame({"temp": temperature_series})
+        temp_cov = _build_temperature_covariates(temperature_series, config=config)
         r_temp, p_temp, n_temp = compute_partial_correlation_with_covariates(
             roi_values, target_values, temp_cov, method, f"{context} rating|temp", logger, min_samples, config
         )
@@ -399,7 +452,11 @@ def compute_partial_correlations_with_cov_temp(
     
     if has_covariates and has_temperature:
         covariates_with_temp = covariates_df.copy()
-        covariates_with_temp["temp"] = temperature_series
+        temp_cov = _build_temperature_covariates(temperature_series, config=config)
+        overlap = [c for c in temp_cov.columns if c in covariates_with_temp.columns]
+        if overlap:
+            covariates_with_temp = covariates_with_temp.drop(columns=overlap, errors="ignore")
+        covariates_with_temp = pd.concat([covariates_with_temp, temp_cov], axis=1)
         try:
             r_cov_temp, p_cov_temp, n_cov_temp = compute_partial_correlation_with_covariates(
                 roi_values,
@@ -485,4 +542,3 @@ def compute_partial_residuals_stats(
         confidence_interval = (np.nan, np.nan)
     
     return float(r_residual), float(p_residual), n_partial, confidence_interval
-

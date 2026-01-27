@@ -159,8 +159,8 @@ func (m Model) SelectedSpatialModes() []string {
 
 func (m Model) SelectedROIs() []string {
 	var result []string
-	for i, sel := range m.roiSelected {
-		if sel && i < len(m.rois) {
+	for i := 0; i < len(m.rois); i++ {
+		if m.roiSelected[i] {
 			result = append(result, m.rois[i].Key)
 		}
 	}
@@ -1379,6 +1379,21 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.burstThresholdMethod >= 0 && m.burstThresholdMethod < len(methods) {
 			args = append(args, "--burst-threshold-method", methods[m.burstThresholdMethod])
 		}
+		refs := []string{"trial", "subject", "condition"}
+		if m.burstThresholdReference >= 0 && m.burstThresholdReference < len(refs) {
+			args = append(args, "--burst-threshold-reference", refs[m.burstThresholdReference])
+		}
+		if m.burstMinTrialsPerCondition != 10 {
+			args = append(args, "--burst-min-trials-per-condition", fmt.Sprintf("%d", m.burstMinTrialsPerCondition))
+		}
+		if m.burstMinSegmentSec != 2.0 {
+			args = append(args, "--burst-min-segment-sec", fmt.Sprintf("%.2f", m.burstMinSegmentSec))
+		}
+		if m.burstSkipInvalidSegments {
+			args = append(args, "--burst-skip-invalid-segments")
+		} else {
+			args = append(args, "--no-burst-skip-invalid-segments")
+		}
 		if m.burstThresholdMethod == 0 && m.burstThresholdPercentile > 0 {
 			args = append(args, "--burst-threshold-percentile", fmt.Sprintf("%.1f", m.burstThresholdPercentile))
 		}
@@ -1386,6 +1401,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--burst-threshold", fmt.Sprintf("%.2f", m.burstThresholdZ))
 		}
 		args = append(args, "--burst-min-duration", fmt.Sprintf("%d", m.burstMinDuration))
+		if m.burstMinCycles != 3.0 {
+			args = append(args, "--burst-min-cycles", fmt.Sprintf("%.1f", m.burstMinCycles))
+		}
 		if strings.TrimSpace(m.burstBandsSpec) != "" {
 			args = append(args, "--burst-bands")
 			args = append(args, splitCSVList(m.burstBandsSpec)...)
@@ -1398,6 +1416,33 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--power-require-baseline")
 		} else {
 			args = append(args, "--no-power-require-baseline")
+		}
+		if m.powerSubtractEvoked {
+			args = append(args, "--power-subtract-evoked")
+		} else {
+			args = append(args, "--no-power-subtract-evoked")
+		}
+		if m.powerMinTrialsPerCondition != 2 {
+			args = append(args, "--power-min-trials-per-condition", fmt.Sprintf("%d", m.powerMinTrialsPerCondition))
+		}
+		if m.powerExcludeLineNoise {
+			args = append(args, "--power-exclude-line-noise")
+		} else {
+			args = append(args, "--no-power-exclude-line-noise")
+		}
+		if m.powerLineNoiseFreq != 60.0 {
+			args = append(args, "--power-line-noise-freq", fmt.Sprintf("%.0f", m.powerLineNoiseFreq))
+		}
+		if m.powerLineNoiseWidthHz != 1.0 {
+			args = append(args, "--power-line-noise-width-hz", fmt.Sprintf("%.1f", m.powerLineNoiseWidthHz))
+		}
+		if m.powerLineNoiseHarmonics != 3 {
+			args = append(args, "--power-line-noise-harmonics", fmt.Sprintf("%d", m.powerLineNoiseHarmonics))
+		}
+		if m.powerEmitDb {
+			args = append(args, "--power-emit-db")
+		} else {
+			args = append(args, "--no-power-emit-db")
 		}
 		modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
 		if m.powerBaselineMode < len(modes) {
@@ -1420,6 +1465,17 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	if m.isCategorySelected("asymmetry") && strings.TrimSpace(m.asymmetryChannelPairsSpec) != "" {
 		args = append(args, "--asymmetry-channel-pairs")
 		args = append(args, splitCSVList(m.asymmetryChannelPairsSpec)...)
+	}
+	if m.isCategorySelected("asymmetry") && strings.TrimSpace(m.asymmetryActivationBandsSpec) != "" {
+		args = append(args, "--asymmetry-activation-bands")
+		args = append(args, splitCSVList(m.asymmetryActivationBandsSpec)...)
+	}
+	if m.isCategorySelected("asymmetry") {
+		if m.asymmetryEmitActivationConvention {
+			args = append(args, "--asymmetry-emit-activation-convention")
+		} else {
+			args = append(args, "--no-asymmetry-emit-activation-convention")
+		}
 	}
 
 	// TFR parameters
@@ -1469,6 +1525,16 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.spectralPsdMethod != 0 {
 			args = append(args, "--spectral-psd-method", "welch")
 		}
+		if m.spectralPsdAdaptive {
+			args = append(args, "--spectral-psd-adaptive")
+		} else {
+			args = append(args, "--no-spectral-psd-adaptive")
+		}
+		if m.spectralMultitaperAdaptive {
+			args = append(args, "--spectral-multitaper-adaptive")
+		} else {
+			args = append(args, "--no-spectral-multitaper-adaptive")
+		}
 		if m.spectralFmin != 1.0 {
 			args = append(args, "--spectral-fmin", fmt.Sprintf("%.1f", m.spectralFmin))
 		}
@@ -1478,8 +1544,14 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if !m.spectralExcludeLineNoise {
 			args = append(args, "--no-spectral-exclude-line-noise")
 		}
-		if m.spectralLineNoiseFreq != 50.0 {
+		if m.spectralLineNoiseFreq != 60.0 {
 			args = append(args, "--spectral-line-noise-freq", fmt.Sprintf("%.0f", m.spectralLineNoiseFreq))
+		}
+		if m.spectralLineNoiseWidthHz != 1.0 {
+			args = append(args, "--spectral-line-noise-width-hz", fmt.Sprintf("%.1f", m.spectralLineNoiseWidthHz))
+		}
+		if m.spectralLineNoiseHarmonics != 3 {
+			args = append(args, "--spectral-line-noise-harmonics", fmt.Sprintf("%d", m.spectralLineNoiseHarmonics))
 		}
 		if m.spectralMinSegmentSec != 2.0 {
 			args = append(args, "--spectral-min-segment-sec", fmt.Sprintf("%.1f", m.spectralMinSegmentSec))
@@ -1509,9 +1581,26 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.iafMinProminence != 0.05 {
 			args = append(args, "--iaf-min-prominence", fmt.Sprintf("%.3f", m.iafMinProminence))
 		}
-		if strings.TrimSpace(m.iafRoisSpec) != "" && m.iafRoisSpec != "ParOccipital_Midline,ParOccipital_Left,ParOccipital_Right" {
+		if m.iafMinCyclesAtFmin != 5.0 {
+			args = append(args, "--iaf-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.iafMinCyclesAtFmin))
+		}
+		if m.iafMinBaselineSec != 0.0 {
+			args = append(args, "--iaf-min-baseline-sec", fmt.Sprintf("%.2f", m.iafMinBaselineSec))
+		}
+		if m.iafAllowFullFallback {
+			args = append(args, "--iaf-allow-full-fallback")
+		} else {
+			args = append(args, "--no-iaf-allow-full-fallback")
+		}
+		if m.iafAllowAllChannelsFallback {
+			args = append(args, "--iaf-allow-all-channels-fallback")
+		} else {
+			args = append(args, "--no-iaf-allow-all-channels-fallback")
+		}
+		rois := m.SelectedROIs()
+		if len(rois) > 0 {
 			args = append(args, "--iaf-rois")
-			args = append(args, splitCSVList(m.iafRoisSpec)...)
+			args = append(args, rois...)
 		}
 	}
 
@@ -1526,8 +1615,14 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if !m.aperiodicExcludeLineNoise {
 			args = append(args, "--no-aperiodic-exclude-line-noise")
 		}
-		if m.aperiodicLineNoiseFreq != 50.0 {
+		if m.aperiodicLineNoiseFreq != 60.0 {
 			args = append(args, "--aperiodic-line-noise-freq", fmt.Sprintf("%.0f", m.aperiodicLineNoiseFreq))
+		}
+		if m.aperiodicLineNoiseWidthHz != 1.0 {
+			args = append(args, "--aperiodic-line-noise-width-hz", fmt.Sprintf("%.1f", m.aperiodicLineNoiseWidthHz))
+		}
+		if m.aperiodicLineNoiseHarmonics != 3 {
+			args = append(args, "--aperiodic-line-noise-harmonics", fmt.Sprintf("%d", m.aperiodicLineNoiseHarmonics))
 		}
 	}
 
@@ -1536,6 +1631,17 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.connGranularity != 0 {
 			granularities := []string{"trial", "condition", "subject"}
 			args = append(args, "--conn-granularity", granularities[m.connGranularity])
+		}
+		if m.connGranularity == 1 && strings.TrimSpace(m.connConditionColumn) != "" {
+			args = append(args, "--conn-condition-column", strings.TrimSpace(m.connConditionColumn))
+			if strings.TrimSpace(m.connConditionValues) != "" {
+				spec := strings.ReplaceAll(m.connConditionValues, ",", " ")
+				vals := strings.Fields(spec)
+				if len(vals) > 0 {
+					args = append(args, "--conn-condition-values")
+					args = append(args, vals...)
+				}
+			}
 		}
 		if m.connMinEpochsPerGroup != 5 {
 			args = append(args, "--conn-min-epochs-per-group", fmt.Sprintf("%d", m.connMinEpochsPerGroup))
@@ -1576,6 +1682,8 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 		if m.pacComputeWaveformQC {
 			args = append(args, "--pac-compute-waveform-qc")
+		} else {
+			args = append(args, "--no-pac-compute-waveform-qc")
 		}
 		if m.pacWaveformOffsetMs != 5.0 {
 			args = append(args, "--pac-waveform-offset-ms", fmt.Sprintf("%.1f", m.pacWaveformOffsetMs))
@@ -1605,7 +1713,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 
 	// Ratios advanced options
 	if m.isCategorySelected("ratios") {
-		if m.ratiosMinSegmentSec != 0.5 {
+		if m.ratiosMinSegmentSec != 1.0 {
 			args = append(args, "--ratios-min-segment-sec", fmt.Sprintf("%.2f", m.ratiosMinSegmentSec))
 		}
 		if m.ratiosMinCyclesAtFmin != 3.0 {
@@ -1618,7 +1726,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 
 	// Asymmetry advanced options
 	if m.isCategorySelected("asymmetry") {
-		if m.asymmetryMinSegmentSec != 0.5 {
+		if m.asymmetryMinSegmentSec != 1.0 {
 			args = append(args, "--asymmetry-min-segment-sec", fmt.Sprintf("%.2f", m.asymmetryMinSegmentSec))
 		}
 		if m.asymmetryMinCyclesAtFmin != 3.0 {
@@ -1649,7 +1757,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.qualityLineNoiseFreq != 60.0 {
 			args = append(args, "--quality-line-noise-freq", fmt.Sprintf("%.0f", m.qualityLineNoiseFreq))
 		}
-		if m.qualityLineNoiseWidthHz != 2.0 {
+		if m.qualityLineNoiseWidthHz != 1.0 {
 			args = append(args, "--quality-line-noise-width-hz", fmt.Sprintf("%.1f", m.qualityLineNoiseWidthHz))
 		}
 		if m.qualityLineNoiseHarmonics != 3 {
@@ -1689,6 +1797,32 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	// Generic & Validation
 
 	args = append(args, "--min-epochs", fmt.Sprintf("%d", m.minEpochsForFeatures))
+	analysisModes := []string{"group_stats", "trial_ml_safe"}
+	args = append(args, "--analysis-mode", analysisModes[m.featAnalysisMode])
+
+	// Execution options
+	if m.featComputeChangeScores {
+		args = append(args, "--compute-change-scores")
+	} else {
+		args = append(args, "--no-compute-change-scores")
+	}
+	if m.featSaveTfrWithSidecar {
+		args = append(args, "--save-tfr-with-sidecar")
+	} else {
+		args = append(args, "--no-save-tfr-with-sidecar")
+	}
+	if m.featNJobsBands != -1 {
+		args = append(args, "--n-jobs-bands", fmt.Sprintf("%d", m.featNJobsBands))
+	}
+	if m.featNJobsConnectivity != -1 {
+		args = append(args, "--n-jobs-connectivity", fmt.Sprintf("%d", m.featNJobsConnectivity))
+	}
+	if m.featNJobsAperiodic != -1 {
+		args = append(args, "--n-jobs-aperiodic", fmt.Sprintf("%d", m.featNJobsAperiodic))
+	}
+	if m.featNJobsComplexity != -1 {
+		args = append(args, "--n-jobs-complexity", fmt.Sprintf("%d", m.featNJobsComplexity))
+	}
 
 	// Storage options
 	if m.saveSubjectLevelFeatures {
@@ -1786,6 +1920,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if !m.trialTableAddLagFeatures {
 			args = append(args, "--no-trial-table-add-lag-features")
 		}
+		if m.trialOrderMaxMissingFraction != 0.1 {
+			args = append(args, "--trial-order-max-missing-fraction", fmt.Sprintf("%.3f", m.trialOrderMaxMissingFraction))
+		}
 
 		if !m.featureSummariesEnabled {
 			args = append(args, "--no-feature-summaries")
@@ -1842,6 +1979,24 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			if m.painResidualCrossfitMethod == 0 && m.painResidualCrossfitSplineKnots != 5 {
 				args = append(args, "--pain-residual-crossfit-spline-n-knots", fmt.Sprintf("%d", m.painResidualCrossfitSplineKnots))
 			}
+		}
+	}
+
+	// Feature QC (optional gating)
+	if m.isComputationSelected("correlations") || m.isComputationSelected("multilevel_correlations") {
+		if m.featureQCEnabled {
+			args = append(args, "--feature-qc-enabled")
+			if m.featureQCMaxMissingPct != 0.2 {
+				args = append(args, "--feature-qc-max-missing-pct", fmt.Sprintf("%.3f", m.featureQCMaxMissingPct))
+			}
+			if m.featureQCMinVariance != 1e-10 {
+				args = append(args, "--feature-qc-min-variance", fmt.Sprintf("%.6e", m.featureQCMinVariance))
+			}
+			if !m.featureQCCheckWithinRunVariance {
+				args = append(args, "--no-feature-qc-check-within-run-variance")
+			}
+		} else {
+			args = append(args, "--no-feature-qc-enabled")
 		}
 	}
 
@@ -2058,6 +2213,10 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if !m.correlationsPreferPainResidual {
 			args = append(args, "--no-correlations-prefer-pain-residual")
 		}
+		if strings.TrimSpace(m.correlationsTypesSpec) != "" && m.correlationsTypesSpec != "partial_cov_temp" {
+			args = append(args, "--correlations-types")
+			args = append(args, splitCSVList(m.correlationsTypesSpec)...)
+		}
 		if m.correlationsPrimaryUnit == 1 {
 			args = append(args, "--correlations-primary-unit", "run_mean")
 		}
@@ -2070,6 +2229,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if strings.TrimSpace(m.correlationsTargetColumn) != "" {
 			args = append(args, "--correlations-target-column", m.correlationsTargetColumn)
 		}
+	}
+
+	// Multilevel correlations (group-level)
+	if m.isComputationSelected("multilevel_correlations") && !m.groupLevelBlockPermutation {
+		args = append(args, "--no-group-level-block-permutation")
 	}
 
 	// Report

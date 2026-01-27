@@ -38,7 +38,6 @@ __all__ = [
     "plot_regression_residual_diagnostics",
     # Other scatter plots
     "plot_psychometrics",
-    "plot_behavioral_response_patterns",
     # Temporal
     "plot_temporal_correlation_topomaps_by_pain",
     "plot_significant_correlations_topomap",
@@ -63,7 +62,6 @@ def __getattr__(name: str):
         "plot_regression_residual_diagnostics": "builders",
         # Scatter
         "plot_psychometrics": "scatter",
-        "plot_behavioral_response_patterns": "scatter",
         # Temporal
         "plot_temporal_correlation_topomaps_by_pain": "temporal",
         "plot_significant_correlations_topomap": "temporal",

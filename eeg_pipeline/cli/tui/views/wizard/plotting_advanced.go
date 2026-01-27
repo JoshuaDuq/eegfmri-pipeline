@@ -718,16 +718,31 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		}
 		hint := "e.g. 0 1"
 		vals := m.GetPlottingComparisonColumnValues(col)
-		if len(vals) > 0 {
+		if col == "" {
+			hint = "select column first"
+		} else if len(vals) > 0 {
 			hint = fmt.Sprintf("Space to select · %d values", len(vals))
+		} else if m.columnDiscoveryError != "" {
+			hint = "discovery failed · enter values manually"
+		} else if !m.columnDiscoveryDone && !m.trialTableDiscoveryDone {
+			hint = "discovering values..."
+		} else {
+			hint = "Space to select · enter values manually (space-separated)"
 		}
 		// When dropdown is expanded for this field, treat as focused
 		isEditing := m.expandedOption == expandedPlotComparisonValues && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonValues
 		lines := []renderLine{m.renderPlotValueLine("values", value, hint, focused || isEditing, labelWidth)}
-		// Show dropdown if expanded for this field
-		if isEditing && len(vals) > 0 {
-			expandedLines := m.renderExpandedListItems(vals, m.isPlotFieldValueSelected(cfg.ComparisonValuesSpec))
-			lines = append(lines, expandedLines...)
+		// Show dropdown if expanded for this field (even if empty - allows manual entry)
+		if isEditing {
+			if len(vals) > 0 {
+				expandedLines := m.renderExpandedListItems(vals, m.isPlotFieldValueSelected(cfg.ComparisonValuesSpec))
+				lines = append(lines, expandedLines...)
+			} else if col != "" {
+				// Show empty state message when column selected but values not discovered
+				hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+				hintText := hintStyle.Render(fmt.Sprintf("  No values discovered for %s yet. Enter values manually (space-separated).", col))
+				lines = append(lines, renderLine{text: hintText})
+			}
 		}
 		return lines
 	case plotItemConfigFieldComparisonLabels:

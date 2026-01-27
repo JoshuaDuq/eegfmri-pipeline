@@ -106,8 +106,16 @@ def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None
         config["feature_engineering.connectivity.force_within_epoch_for_ml"] = args.conn_force_within_epoch_for_ml
     
     conn_cfg = config.setdefault("feature_engineering", {}).setdefault("connectivity", {})
+    if getattr(args, "conn_window_len", None) is not None:
+        conn_cfg["sliding_window_len"] = args.conn_window_len
+    if getattr(args, "conn_window_step", None) is not None:
+        conn_cfg["sliding_window_step"] = args.conn_window_step
     if getattr(args, "conn_granularity", None) is not None:
         conn_cfg["granularity"] = args.conn_granularity
+    if getattr(args, "conn_condition_column", None) is not None:
+        conn_cfg["condition_column"] = args.conn_condition_column
+    if getattr(args, "conn_condition_values", None) is not None:
+        conn_cfg["condition_values"] = args.conn_condition_values
     if getattr(args, "conn_min_epochs_per_group", None) is not None:
         conn_cfg["min_epochs_per_group"] = args.conn_min_epochs_per_group
     if getattr(args, "conn_min_cycles_per_band", None) is not None:
@@ -118,6 +126,22 @@ def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None
         conn_cfg["phase_estimator"] = args.conn_phase_estimator
     if getattr(args, "conn_min_segment_sec", None) is not None:
         conn_cfg["min_segment_sec"] = args.conn_min_segment_sec
+    if getattr(args, "conn_mode", None) is not None:
+        conn_cfg["mode"] = args.conn_mode
+    if getattr(args, "conn_aec_absolute", None) is not None:
+        conn_cfg["aec_absolute"] = args.conn_aec_absolute
+    if getattr(args, "conn_n_freqs_per_band", None) is not None:
+        conn_cfg["n_freqs_per_band"] = args.conn_n_freqs_per_band
+    if getattr(args, "conn_n_cycles", None) is not None:
+        conn_cfg["n_cycles"] = args.conn_n_cycles
+    if getattr(args, "conn_decim", None) is not None:
+        conn_cfg["decim"] = args.conn_decim
+    if getattr(args, "conn_min_segment_samples", None) is not None:
+        conn_cfg["min_segment_samples"] = args.conn_min_segment_samples
+    if getattr(args, "conn_small_world_n_rand", None) is not None:
+        conn_cfg["small_world_n_rand"] = args.conn_small_world_n_rand
+    if getattr(args, "conn_enable_aec", None) is not None:
+        conn_cfg["enable_aec"] = args.conn_enable_aec
 
 
 def _apply_directedconnectivity_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -313,6 +337,10 @@ def _apply_aperiodic_overrides(args: argparse.Namespace, config: Any) -> None:
         config["feature_engineering.aperiodic.min_fit_points"] = args.aperiodic_min_points
     if getattr(args, "aperiodic_min_segment_sec", None) is not None:
         config["feature_engineering.aperiodic.min_segment_sec"] = args.aperiodic_min_segment_sec
+    if getattr(args, "aperiodic_psd_bandwidth", None) is not None:
+        config["feature_engineering.aperiodic.psd_bandwidth"] = args.aperiodic_psd_bandwidth
+    if getattr(args, "aperiodic_max_rms", None) is not None:
+        config["feature_engineering.aperiodic.max_rms"] = args.aperiodic_max_rms
     
     # Scientific validity: induced spectra option
     if getattr(args, "aperiodic_subtract_evoked", None) is not None:
@@ -361,6 +389,10 @@ def _apply_erp_overrides(args: argparse.Namespace, config: Any) -> None:
         config["feature_engineering.erp.components"] = _parse_erp_components(args.erp_components)
     if getattr(args, "erp_lowpass_hz", None) is not None:
         config["feature_engineering.erp.lowpass_hz"] = args.erp_lowpass_hz
+    if getattr(args, "erp_smooth_ms", None) is not None:
+        config["feature_engineering.erp.smooth_ms"] = args.erp_smooth_ms
+    if getattr(args, "erp_peak_prominence_uv", None) is not None:
+        config["feature_engineering.erp.peak_prominence_uv"] = args.erp_peak_prominence_uv
 
 
 def _apply_burst_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -371,6 +403,16 @@ def _apply_burst_overrides(args: argparse.Namespace, config: Any) -> None:
         config["feature_engineering.bursts.threshold_method"] = args.burst_threshold_method
     if getattr(args, "burst_threshold_percentile", None) is not None:
         config["feature_engineering.bursts.threshold_percentile"] = args.burst_threshold_percentile
+    if getattr(args, "burst_threshold_reference", None) is not None:
+        config["feature_engineering.bursts.threshold_reference"] = args.burst_threshold_reference
+    if getattr(args, "burst_min_trials_per_condition", None) is not None:
+        config["feature_engineering.bursts.min_trials_per_condition"] = int(
+            args.burst_min_trials_per_condition
+        )
+    if getattr(args, "burst_min_segment_sec", None) is not None:
+        config["feature_engineering.bursts.min_segment_sec"] = args.burst_min_segment_sec
+    if getattr(args, "burst_skip_invalid_segments", None) is not None:
+        config["feature_engineering.bursts.skip_invalid_segments"] = args.burst_skip_invalid_segments
     if getattr(args, "burst_bands", None) is not None:
         config["feature_engineering.bursts.bands"] = list(_split_list_tokens(args.burst_bands))
     if getattr(args, "burst_min_duration", None) is not None:
@@ -385,6 +427,20 @@ def _apply_power_overrides(args: argparse.Namespace, config: Any) -> None:
         config["time_frequency_analysis.baseline_mode"] = args.power_baseline_mode
     if getattr(args, "power_require_baseline", None) is not None:
         config["feature_engineering.power.require_baseline"] = args.power_require_baseline
+    if getattr(args, "power_subtract_evoked", None) is not None:
+        config["feature_engineering.power.subtract_evoked"] = args.power_subtract_evoked
+    if getattr(args, "power_min_trials_per_condition", None) is not None:
+        config["feature_engineering.power.min_trials_per_condition"] = args.power_min_trials_per_condition
+    if getattr(args, "power_exclude_line_noise", None) is not None:
+        config["feature_engineering.power.exclude_line_noise"] = args.power_exclude_line_noise
+    if getattr(args, "power_line_noise_freq", None) is not None:
+        config["feature_engineering.power.line_noise_freqs"] = [args.power_line_noise_freq]
+    if getattr(args, "power_line_noise_width_hz", None) is not None:
+        config["feature_engineering.power.line_noise_width_hz"] = args.power_line_noise_width_hz
+    if getattr(args, "power_line_noise_harmonics", None) is not None:
+        config["feature_engineering.power.line_noise_harmonics"] = args.power_line_noise_harmonics
+    if getattr(args, "power_emit_db", None) is not None:
+        config["feature_engineering.power.emit_db"] = args.power_emit_db
 
 
 def _apply_spectral_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -401,6 +457,10 @@ def _apply_spectral_overrides(args: argparse.Namespace, config: Any) -> None:
         spectral_cfg["include_log_ratios"] = args.spectral_include_log_ratios
     if getattr(args, "spectral_psd_method", None) is not None:
         spectral_cfg["psd_method"] = args.spectral_psd_method
+    if getattr(args, "spectral_psd_adaptive", None) is not None:
+        spectral_cfg["psd_adaptive"] = args.spectral_psd_adaptive
+    if getattr(args, "spectral_multitaper_adaptive", None) is not None:
+        spectral_cfg["multitaper_adaptive"] = args.spectral_multitaper_adaptive
     if getattr(args, "spectral_fmin", None) is not None:
         spectral_cfg["fmin"] = args.spectral_fmin
     if getattr(args, "spectral_fmax", None) is not None:
@@ -425,6 +485,29 @@ def _apply_asymmetry_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply asymmetry-related config overrides."""
     if getattr(args, "asymmetry_channel_pairs", None) is not None:
         config["feature_engineering.asymmetry.channel_pairs"] = _parse_pair_tokens(args.asymmetry_channel_pairs, label="asymmetry")
+    if getattr(args, "asymmetry_activation_bands", None) is not None:
+        config["feature_engineering.asymmetry.activation_bands"] = list(_split_list_tokens(args.asymmetry_activation_bands))
+    if getattr(args, "asymmetry_emit_activation_convention", None) is not None:
+        config["feature_engineering.asymmetry.emit_activation_convention"] = args.asymmetry_emit_activation_convention
+    
+    asym_cfg = config.setdefault("feature_engineering", {}).setdefault("asymmetry", {})
+    if getattr(args, "asymmetry_min_segment_sec", None) is not None:
+        asym_cfg["min_segment_sec"] = args.asymmetry_min_segment_sec
+    if getattr(args, "asymmetry_min_cycles_at_fmin", None) is not None:
+        asym_cfg["min_cycles_at_fmin"] = args.asymmetry_min_cycles_at_fmin
+    if getattr(args, "asymmetry_skip_invalid_segments", None) is not None:
+        asym_cfg["skip_invalid_segments"] = args.asymmetry_skip_invalid_segments
+
+
+def _apply_ratios_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply band-ratio validity config overrides."""
+    ratios_cfg = config.setdefault("feature_engineering", {}).setdefault("ratios", {})
+    if getattr(args, "ratios_min_segment_sec", None) is not None:
+        ratios_cfg["min_segment_sec"] = args.ratios_min_segment_sec
+    if getattr(args, "ratios_min_cycles_at_fmin", None) is not None:
+        ratios_cfg["min_cycles_at_fmin"] = args.ratios_min_cycles_at_fmin
+    if getattr(args, "ratios_skip_invalid_segments", None) is not None:
+        ratios_cfg["skip_invalid_segments"] = args.ratios_skip_invalid_segments
 
 
 def _apply_tfr_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -493,6 +576,14 @@ def _apply_iaf_overrides(args: argparse.Namespace, config: Any) -> None:
         bands_cfg["iaf_min_prominence"] = args.iaf_min_prominence
     if getattr(args, "iaf_rois", None) is not None:
         bands_cfg["iaf_rois"] = args.iaf_rois
+    if getattr(args, "iaf_min_cycles_at_fmin", None) is not None:
+        bands_cfg["iaf_min_cycles_at_fmin"] = args.iaf_min_cycles_at_fmin
+    if getattr(args, "iaf_min_baseline_sec", None) is not None:
+        bands_cfg["iaf_min_baseline_sec"] = args.iaf_min_baseline_sec
+    if getattr(args, "iaf_allow_full_fallback", None) is not None:
+        bands_cfg["allow_full_fallback"] = args.iaf_allow_full_fallback
+    if getattr(args, "iaf_allow_all_channels_fallback", None) is not None:
+        bands_cfg["allow_all_channels_fallback"] = args.iaf_allow_all_channels_fallback
 
 
 def _apply_quality_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -508,6 +599,12 @@ def _apply_quality_overrides(args: argparse.Namespace, config: Any) -> None:
         quality_cfg["n_fft"] = args.quality_n_fft
     if getattr(args, "quality_exclude_line_noise", None) is not None:
         quality_cfg["exclude_line_noise"] = args.quality_exclude_line_noise
+    if getattr(args, "quality_line_noise_freq", None) is not None:
+        quality_cfg["line_noise_freqs"] = [args.quality_line_noise_freq]
+    if getattr(args, "quality_line_noise_width_hz", None) is not None:
+        quality_cfg["line_noise_width_hz"] = args.quality_line_noise_width_hz
+    if getattr(args, "quality_line_noise_harmonics", None) is not None:
+        quality_cfg["line_noise_harmonics"] = args.quality_line_noise_harmonics
     if getattr(args, "quality_snr_signal_band", None) is not None:
         quality_cfg["snr_signal_band"] = list(args.quality_snr_signal_band)
     if getattr(args, "quality_snr_noise_band", None) is not None:
@@ -627,6 +724,7 @@ def _apply_feature_config_overrides(args: argparse.Namespace, config: Any) -> No
     _apply_burst_overrides(args, config)
     _apply_power_overrides(args, config)
     _apply_spectral_overrides(args, config)
+    _apply_ratios_overrides(args, config)
     _apply_asymmetry_overrides(args, config)
     _apply_tfr_overrides(args, config)
     _apply_itpc_overrides(args, config)
@@ -634,9 +732,30 @@ def _apply_feature_config_overrides(args: argparse.Namespace, config: Any) -> No
     _apply_iaf_overrides(args, config)
     _apply_quality_overrides(args, config)
     _apply_erds_overrides(args, config)
+    _apply_execution_overrides(args, config)
     _apply_validation_overrides(args, config)
     _apply_output_overrides(args, config)
     _apply_spatial_transform_overrides(args, config)
+
+
+def _apply_execution_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply execution/runtime overrides for the features pipeline."""
+    if getattr(args, "analysis_mode", None) is not None:
+        config["feature_engineering.analysis_mode"] = args.analysis_mode
+    if getattr(args, "compute_change_scores", None) is not None:
+        config["feature_engineering.compute_change_scores"] = args.compute_change_scores
+    if getattr(args, "save_tfr_with_sidecar", None) is not None:
+        config["feature_engineering.save_tfr_with_sidecar"] = args.save_tfr_with_sidecar
+
+    parallel_cfg = config.setdefault("feature_engineering", {}).setdefault("parallel", {})
+    if getattr(args, "n_jobs_bands", None) is not None:
+        parallel_cfg["n_jobs_bands"] = args.n_jobs_bands
+    if getattr(args, "n_jobs_connectivity", None) is not None:
+        parallel_cfg["n_jobs_connectivity"] = args.n_jobs_connectivity
+    if getattr(args, "n_jobs_aperiodic", None) is not None:
+        parallel_cfg["n_jobs_aperiodic"] = args.n_jobs_aperiodic
+    if getattr(args, "n_jobs_complexity", None) is not None:
+        parallel_cfg["n_jobs_complexity"] = args.n_jobs_complexity
 
 
 def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -665,9 +784,10 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--tmax", type=float, default=None, help="End time in seconds for feature extraction window")
     parser.add_argument("--time-range", nargs=3, action="append", metavar=("NAME", "TMIN", "TMAX"), help="Define a named time range (e.g. baseline 0 1). Can be specified multiple times.")
     parser.add_argument("--aggregation-method", choices=["mean", "median"], default="mean", help="Aggregation method for spatial modes (default: mean)")
+    parser.add_argument("--analysis-mode", choices=["group_stats", "trial_ml_safe"], default=None, help="Feature analysis mode: group_stats (default) or trial_ml_safe (ML/CV leakage-safe)")
 
     # Connectivity
-    parser.add_argument("--connectivity-measures", nargs="+", choices=["wpli", "aec", "plv", "pli"], default=None, help="Connectivity measures to compute")
+    parser.add_argument("--connectivity-measures", nargs="+", choices=["wpli2_debiased", "wpli", "aec", "plv", "pli"], default=None, help="Connectivity measures to compute")
     parser.add_argument("--conn-output-level", choices=["full", "global_only"], default=None, help="Connectivity output level")
     parser.add_argument("--conn-graph-metrics", action="store_true", default=None, help="Enable graph metrics for connectivity")
     parser.add_argument("--no-conn-graph-metrics", action="store_false", dest="conn_graph_metrics", help="Disable graph metrics for connectivity")
@@ -676,13 +796,27 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--aec-output", nargs="+", choices=["r", "z"], default=None, help="AEC output format: r (raw), z (Fisher-z transform), or both")
     parser.add_argument("--conn-force-within-epoch-for-ml", action="store_true", default=None, help="Force within_epoch phase estimator when train_mask detected (CV-safe)")
     parser.add_argument("--no-conn-force-within-epoch-for-ml", action="store_false", dest="conn_force_within_epoch_for_ml", help="Allow across_epochs phase estimator even in CV/machine learning mode")
+    parser.add_argument("--conn-window-len", type=float, default=None, help="Sliding window length for connectivity (seconds)")
+    parser.add_argument("--conn-window-step", type=float, default=None, help="Sliding window step for connectivity (seconds)")
     parser.add_argument("--conn-granularity", choices=["trial", "condition", "subject"], default=None, help="Connectivity granularity")
+    parser.add_argument("--conn-condition-column", default=None, help="Event column used to define connectivity condition groups when granularity='condition' (e.g., 'trial_type', 'pain_binary').")
+    parser.add_argument("--conn-condition-values", nargs="+", default=None, help="Condition values to include for connectivity grouping when granularity='condition' (space-separated). Other values are excluded (set to NaN).")
     parser.add_argument("--conn-min-epochs-per-group", type=int, default=None, help="Min epochs per group for connectivity")
     parser.add_argument("--conn-min-cycles-per-band", type=float, default=None, help="Min cycles per band for connectivity")
     parser.add_argument("--conn-warn-no-spatial-transform", action="store_true", default=None, help="Warn if no spatial transform for phase connectivity")
     parser.add_argument("--no-conn-warn-no-spatial-transform", action="store_false", dest="conn_warn_no_spatial_transform")
     parser.add_argument("--conn-phase-estimator", choices=["within_epoch", "across_epochs"], default=None, help="Phase estimator mode")
     parser.add_argument("--conn-min-segment-sec", type=float, default=None, help="Min segment duration for connectivity")
+    parser.add_argument("--conn-mode", choices=["cwt_morlet", "multitaper", "fourier"], default=None, help="Connectivity time-frequency mode for phase measures (default: cwt_morlet)")
+    parser.add_argument("--conn-aec-absolute", action="store_true", default=None, help="Use absolute envelope correlation (AEC) values")
+    parser.add_argument("--no-conn-aec-absolute", action="store_false", dest="conn_aec_absolute")
+    parser.add_argument("--conn-n-freqs-per-band", type=int, default=None, help="Number of frequencies sampled per band for phase connectivity")
+    parser.add_argument("--conn-n-cycles", type=float, default=None, help="Fixed n_cycles for connectivity wavelets (overrides automatic)")
+    parser.add_argument("--conn-decim", type=int, default=None, help="Decimation factor for connectivity computation")
+    parser.add_argument("--conn-min-segment-samples", type=int, default=None, help="Minimum segment samples for connectivity computation")
+    parser.add_argument("--conn-small-world-n-rand", type=int, default=None, help="Number of random graphs for small-world sigma estimation")
+    parser.add_argument("--conn-enable-aec", action="store_true", default=None, help="Enable AEC computation when 'aec' is selected")
+    parser.add_argument("--no-conn-enable-aec", action="store_false", dest="conn_enable_aec")
 
     # Directed connectivity
     parser.add_argument("--directed-connectivity-measures", nargs="+", choices=["psi", "dtf", "pdc"], default=None, help="Directed connectivity measures: psi (Phase Slope Index), dtf (Directed Transfer Function), pdc (Partial Directed Coherence)")
@@ -778,6 +912,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--aperiodic-min-points", type=int, default=None, help="Minimum fit points for aperiodic")
     parser.add_argument("--aperiodic-subtract-evoked", action="store_true", default=None, help="Subtract evoked response for induced spectra (recommended for pain paradigms)")
     parser.add_argument("--aperiodic-min-segment-sec", type=float, default=None, help="Minimum segment duration (seconds) for stable aperiodic fits (default: 2.0)")
+    parser.add_argument("--aperiodic-psd-bandwidth", type=float, default=None, help="PSD bandwidth for multitaper aperiodic estimation (Hz)")
+    parser.add_argument("--aperiodic-max-rms", type=float, default=None, help="Maximum RMS residual for acceptable aperiodic fits")
     parser.add_argument("--aperiodic-model", choices=["fixed", "knee"], default=None, help="Aperiodic model type")
     parser.add_argument("--aperiodic-psd-method", choices=["multitaper", "welch"], default=None, help="PSD method for aperiodic")
     parser.add_argument("--aperiodic-exclude-line-noise", action="store_true", default=None, help="Exclude line noise from aperiodic fit")
@@ -793,11 +929,18 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-erp-allow-no-baseline", action="store_false", dest="erp_allow_no_baseline", help="Require baseline window when ERP baseline correction is enabled")
     parser.add_argument("--erp-components", nargs="+", default=None, metavar="COMP", help="ERP component windows, e.g. n1=0.10-0.20 n2=0.20-0.35 p2=0.35-0.50")
     parser.add_argument("--erp-lowpass-hz", type=float, default=None, help="Low-pass filter frequency (Hz) for ERP peak detection (default: 30.0)")
+    parser.add_argument("--erp-smooth-ms", type=float, default=None, help="Smoothing window length (ms) for ERP (0 = no smoothing)")
+    parser.add_argument("--erp-peak-prominence-uv", type=float, default=None, help="Peak prominence threshold (µV) for ERP peak detection")
 
     # Burst
     parser.add_argument("--burst-threshold", type=float, default=None, help="Z-score threshold for burst detection (used with zscore/mad methods)")
     parser.add_argument("--burst-threshold-method", choices=["percentile", "zscore", "mad"], default=None, help="Burst threshold method: percentile, zscore, or mad (default: percentile)")
     parser.add_argument("--burst-threshold-percentile", type=float, default=None, help="Percentile threshold for burst detection (0-100, default: 95.0)")
+    parser.add_argument("--burst-threshold-reference", choices=["trial", "subject", "condition"], default=None, help="Burst threshold reference: trial (trialwise-valid), subject (cross-trial), or condition (cross-trial within condition)")
+    parser.add_argument("--burst-min-trials-per-condition", type=int, default=None, help="Minimum trials per condition when threshold_reference='condition' (default: 10)")
+    parser.add_argument("--burst-min-segment-sec", type=float, default=None, help="Minimum segment duration (sec) before attempting bursts (default: 2.0)")
+    parser.add_argument("--burst-skip-invalid-segments", action="store_true", default=None, help="Skip invalid segments for bursts")
+    parser.add_argument("--no-burst-skip-invalid-segments", action="store_false", dest="burst_skip_invalid_segments")
     parser.add_argument("--burst-bands", nargs="+", default=None, metavar="BAND", help="Burst bands to compute, e.g. beta gamma")
     parser.add_argument("--burst-min-duration", type=int, default=None, help="Minimum burst duration (ms)")
     parser.add_argument("--burst-min-cycles", type=float, default=None, help="Minimum oscillatory cycles for burst detection")
@@ -806,6 +949,16 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--power-baseline-mode", choices=["logratio", "mean", "ratio", "zscore", "zlogratio"], default=None, help="Baseline normalization mode for power")
     parser.add_argument("--power-require-baseline", action="store_true", default=None, help="Require baseline for power normalization")
     parser.add_argument("--no-power-require-baseline", action="store_false", dest="power_require_baseline", help="Allow raw log power without baseline")
+    parser.add_argument("--power-subtract-evoked", action="store_true", default=None, help="Subtract evoked response to isolate induced power (use with care in CV)")
+    parser.add_argument("--no-power-subtract-evoked", action="store_false", dest="power_subtract_evoked", help="Do not subtract evoked response for power")
+    parser.add_argument("--power-min-trials-per-condition", type=int, default=None, help="Minimum trials per condition for power computation (default: 2)")
+    parser.add_argument("--power-exclude-line-noise", action="store_true", default=None, help="Exclude line noise frequencies from power computation")
+    parser.add_argument("--no-power-exclude-line-noise", action="store_false", dest="power_exclude_line_noise")
+    parser.add_argument("--power-line-noise-freq", type=float, default=None, help="Line noise frequency for power (50 or 60 Hz)")
+    parser.add_argument("--power-line-noise-width-hz", type=float, default=None, help="Line noise frequency band width to exclude for power")
+    parser.add_argument("--power-line-noise-harmonics", type=int, default=None, help="Number of line noise harmonics to exclude for power")
+    parser.add_argument("--power-emit-db", action="store_true", default=None, help="Emit dB-scaled versions of log10-ratio power (10*log10)")
+    parser.add_argument("--no-power-emit-db", action="store_false", dest="power_emit_db")
 
     # Spectral
     parser.add_argument("--spectral-edge-percentile", type=float, default=None, help="Percentile for spectral edge frequency (0-1)")
@@ -814,6 +967,10 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--spectral-include-log-ratios", action="store_true", default=None, help="Include log ratios in spectral features")
     parser.add_argument("--no-spectral-include-log-ratios", action="store_false", dest="spectral_include_log_ratios")
     parser.add_argument("--spectral-psd-method", choices=["multitaper", "welch"], default=None, help="PSD method for spectral features")
+    parser.add_argument("--spectral-psd-adaptive", action="store_true", default=None, help="Enable adaptive PSD settings for spectral features")
+    parser.add_argument("--no-spectral-psd-adaptive", action="store_false", dest="spectral_psd_adaptive")
+    parser.add_argument("--spectral-multitaper-adaptive", action="store_true", default=None, help="Enable adaptive multitaper for spectral PSD")
+    parser.add_argument("--no-spectral-multitaper-adaptive", action="store_false", dest="spectral_multitaper_adaptive")
     parser.add_argument("--spectral-fmin", type=float, default=None, help="Min frequency for spectral features")
     parser.add_argument("--spectral-fmax", type=float, default=None, help="Max frequency for spectral features")
     parser.add_argument("--spectral-exclude-line-noise", action="store_true", default=None, help="Exclude line noise from spectral computation")
@@ -827,6 +984,19 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     # Asymmetry
     parser.add_argument("--asymmetry-channel-pairs", nargs="+", default=None, metavar="PAIR", help="Channel pairs for asymmetry, e.g. F3:F4 C3:C4")
+    parser.add_argument("--asymmetry-activation-bands", nargs="+", default=None, metavar="BAND", help="Bands for activation-style asymmetry outputs (default: alpha)")
+    parser.add_argument("--asymmetry-emit-activation-convention", action="store_true", default=None, help="Emit activation-style asymmetry (R-L)/(R+L) for activation bands")
+    parser.add_argument("--no-asymmetry-emit-activation-convention", action="store_false", dest="asymmetry_emit_activation_convention")
+    parser.add_argument("--asymmetry-min-segment-sec", type=float, default=None, help="Minimum segment duration for asymmetry (sec)")
+    parser.add_argument("--asymmetry-min-cycles-at-fmin", type=float, default=None, help="Minimum cycles at lowest frequency for asymmetry")
+    parser.add_argument("--asymmetry-skip-invalid-segments", action="store_true", default=None, help="Skip invalid segments for asymmetry")
+    parser.add_argument("--no-asymmetry-skip-invalid-segments", action="store_false", dest="asymmetry_skip_invalid_segments")
+
+    # Ratios (validity)
+    parser.add_argument("--ratios-min-segment-sec", type=float, default=None, help="Minimum segment duration for band ratios (sec)")
+    parser.add_argument("--ratios-min-cycles-at-fmin", type=float, default=None, help="Minimum cycles at lowest frequency for band ratios")
+    parser.add_argument("--ratios-skip-invalid-segments", action="store_true", default=None, help="Skip invalid segments for band ratios")
+    parser.add_argument("--no-ratios-skip-invalid-segments", action="store_false", dest="ratios_skip_invalid_segments")
 
     # TFR
     parser.add_argument("--tfr-freq-min", type=float, default=None, help="Minimum frequency for TFR (Hz)")
@@ -846,7 +1016,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-itpc-allow-unsafe-loo", action="store_false", dest="itpc_allow_unsafe_loo")
     parser.add_argument("--itpc-baseline-correction", choices=["none", "subtract"], default=None, help="ITPC baseline correction mode")
     parser.add_argument("--itpc-condition-column", default=None, help="Column for condition-based ITPC (avoids pseudo-replication)")
-    parser.add_argument("--itpc-condition-values", nargs="+", default=None, help="Specific condition values to compute ITPC for (space-separated)")
+    parser.add_argument("--itpc-condition-values", nargs="+", default=None, help="Condition values to include for ITPC when method='condition' (space-separated). Other values are excluded (set to NaN).")
     parser.add_argument("--itpc-min-trials-per-condition", type=int, default=None, help="Minimum trials per condition for reliable ITPC (default: 10)")
     parser.add_argument("--itpc-n-jobs", type=int, default=None, help="Number of parallel jobs for ITPC computation (-1 = all CPUs, default: -1)")
 
@@ -861,6 +1031,12 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--iaf-search-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="IAF search range in Hz")
     parser.add_argument("--iaf-min-prominence", type=float, default=None, help="IAF minimum peak prominence")
     parser.add_argument("--iaf-rois", nargs="+", default=None, help="ROIs for IAF detection")
+    parser.add_argument("--iaf-min-cycles-at-fmin", type=float, default=None, help="Minimum cycles at IAF search fmin for stable peak detection")
+    parser.add_argument("--iaf-min-baseline-sec", type=float, default=None, help="Additional absolute minimum baseline duration (sec) for IAF (0 disables)")
+    parser.add_argument("--iaf-allow-full-fallback", action="store_true", default=None, help="If baseline is missing, allow using full segment for IAF (not recommended)")
+    parser.add_argument("--no-iaf-allow-full-fallback", action="store_false", dest="iaf_allow_full_fallback")
+    parser.add_argument("--iaf-allow-all-channels-fallback", action="store_true", default=None, help="If IAF ROIs are missing, allow using all channels (not recommended)")
+    parser.add_argument("--no-iaf-allow-all-channels-fallback", action="store_false", dest="iaf_allow_all_channels_fallback")
 
     # Complexity
     parser.add_argument("--pe-order", type=int, default=None, help="Permutation entropy order (3-7, default: from config)")
@@ -878,6 +1054,9 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--quality-n-fft", type=int, default=None, help="FFT size for quality metrics")
     parser.add_argument("--quality-exclude-line-noise", action="store_true", default=None, help="Exclude line noise from quality metrics")
     parser.add_argument("--no-quality-exclude-line-noise", action="store_false", dest="quality_exclude_line_noise")
+    parser.add_argument("--quality-line-noise-freq", type=float, default=None, help="Line noise frequency for quality metrics")
+    parser.add_argument("--quality-line-noise-width-hz", type=float, default=None, help="Line noise width for quality metrics")
+    parser.add_argument("--quality-line-noise-harmonics", type=int, default=None, help="Line noise harmonics for quality metrics")
     parser.add_argument("--quality-snr-signal-band", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Signal band for SNR computation")
     parser.add_argument("--quality-snr-noise-band", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Noise band for SNR computation")
     parser.add_argument("--quality-muscle-band", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Muscle band for artifact detection")
@@ -892,6 +1071,14 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     # Validation and output
     parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")
+    parser.add_argument("--compute-change-scores", action="store_true", default=None, dest="compute_change_scores", help="Compute within-subject change score columns")
+    parser.add_argument("--no-compute-change-scores", action="store_false", dest="compute_change_scores", help="Disable change score columns")
+    parser.add_argument("--save-tfr-with-sidecar", action="store_true", default=None, dest="save_tfr_with_sidecar", help="Save TFR arrays alongside feature tables")
+    parser.add_argument("--no-save-tfr-with-sidecar", action="store_false", dest="save_tfr_with_sidecar", help="Do not save TFR arrays sidecar")
+    parser.add_argument("--n-jobs-bands", type=int, default=None, help="Parallel jobs for band-wise precompute (-1 = all)")
+    parser.add_argument("--n-jobs-connectivity", type=int, default=None, help="Parallel jobs for connectivity (-1 = all)")
+    parser.add_argument("--n-jobs-aperiodic", type=int, default=None, help="Parallel jobs for aperiodic (-1 = all)")
+    parser.add_argument("--n-jobs-complexity", type=int, default=None, help="Parallel jobs for complexity (-1 = all)")
     parser.add_argument("--save-subject-level-features", action="store_true", default=None, help="Save subject-level features for constant values")
     parser.add_argument("--no-save-subject-level-features", action="store_false", dest="save_subject_level_features", help="Do not save subject-level features")
     

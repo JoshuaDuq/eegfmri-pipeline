@@ -1,5 +1,7 @@
 package wizard
 
+import "encoding/json"
+
 // ExportConfig exports all advanced configuration options to a map for persistence.
 // This includes all pipeline-specific settings (features, behavior, preprocessing, fMRI, plotting, ML).
 func (m Model) ExportConfig() map[string]interface{} {
@@ -74,6 +76,9 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["plotGroupTextExpanded"] = m.plotGroupTextExpanded
 	cfg["plotGroupValidationExpanded"] = m.plotGroupValidationExpanded
 	cfg["plotGroupTFRMiscExpanded"] = m.plotGroupTFRMiscExpanded
+	// Plotting per-plot config + UI expansion state
+	cfg["plotItemConfigs"] = m.plotItemConfigs
+	cfg["plotItemConfigExpanded"] = stringsMapToBoolMap(m.plotItemConfigExpanded)
 
 	// PAC/CFC configuration
 	cfg["pacPhaseMin"] = m.pacPhaseMin
@@ -130,6 +135,10 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["burstThresholdZ"] = m.burstThresholdZ
 	cfg["burstThresholdMethod"] = m.burstThresholdMethod
 	cfg["burstThresholdPercentile"] = m.burstThresholdPercentile
+	cfg["burstThresholdReference"] = m.burstThresholdReference
+	cfg["burstMinTrialsPerCondition"] = m.burstMinTrialsPerCondition
+	cfg["burstMinSegmentSec"] = m.burstMinSegmentSec
+	cfg["burstSkipInvalidSegments"] = m.burstSkipInvalidSegments
 	cfg["burstMinDuration"] = m.burstMinDuration
 	cfg["burstMinCycles"] = m.burstMinCycles
 	cfg["burstBandsSpec"] = m.burstBandsSpec
@@ -137,8 +146,17 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// Power/Spectral configuration
 	cfg["powerBaselineMode"] = m.powerBaselineMode
 	cfg["powerRequireBaseline"] = m.powerRequireBaseline
+	cfg["powerSubtractEvoked"] = m.powerSubtractEvoked
+	cfg["powerMinTrialsPerCondition"] = m.powerMinTrialsPerCondition
+	cfg["powerExcludeLineNoise"] = m.powerExcludeLineNoise
+	cfg["powerLineNoiseFreq"] = m.powerLineNoiseFreq
+	cfg["powerLineNoiseWidthHz"] = m.powerLineNoiseWidthHz
+	cfg["powerLineNoiseHarmonics"] = m.powerLineNoiseHarmonics
+	cfg["powerEmitDb"] = m.powerEmitDb
 	cfg["spectralEdgePercentile"] = m.spectralEdgePercentile
 	cfg["spectralRatioPairsSpec"] = m.spectralRatioPairsSpec
+	cfg["spectralPsdAdaptive"] = m.spectralPsdAdaptive
+	cfg["spectralMultitaperAdaptive"] = m.spectralMultitaperAdaptive
 	cfg["spectralPsdMethod"] = m.spectralPsdMethod
 	cfg["spectralFmin"] = m.spectralFmin
 	cfg["spectralFmax"] = m.spectralFmax
@@ -158,6 +176,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["connWindowStep"] = m.connWindowStep
 	cfg["connAECMode"] = m.connAECMode
 	cfg["connGranularity"] = m.connGranularity
+	cfg["connConditionColumn"] = m.connConditionColumn
+	cfg["connConditionValues"] = m.connConditionValues
 	cfg["connMinEpochsPerGroup"] = m.connMinEpochsPerGroup
 	cfg["connMinCyclesPerBand"] = m.connMinCyclesPerBand
 	cfg["connWarnNoSpatialTransform"] = m.connWarnNoSpatialTransform
@@ -235,6 +255,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// Aggregation/storage
 	cfg["aggregationMethod"] = m.aggregationMethod
 	cfg["minEpochsForFeatures"] = m.minEpochsForFeatures
+	cfg["featAnalysisMode"] = m.featAnalysisMode
+	cfg["featComputeChangeScores"] = m.featComputeChangeScores
+	cfg["featSaveTfrWithSidecar"] = m.featSaveTfrWithSidecar
+	cfg["featNJobsBands"] = m.featNJobsBands
+	cfg["featNJobsConnectivity"] = m.featNJobsConnectivity
+	cfg["featNJobsAperiodic"] = m.featNJobsAperiodic
+	cfg["featNJobsComplexity"] = m.featNJobsComplexity
 	cfg["saveSubjectLevelFeatures"] = m.saveSubjectLevelFeatures
 	cfg["featAlsoSaveCsv"] = m.featAlsoSaveCsv
 
@@ -283,6 +310,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["asymmetryMinSegmentSec"] = m.asymmetryMinSegmentSec
 	cfg["asymmetryMinCyclesAtFmin"] = m.asymmetryMinCyclesAtFmin
 	cfg["asymmetrySkipInvalidSegments"] = m.asymmetrySkipInvalidSegments
+	cfg["asymmetryEmitActivationConvention"] = m.asymmetryEmitActivationConvention
+	cfg["asymmetryActivationBandsSpec"] = m.asymmetryActivationBandsSpec
 	cfg["ratiosMinSegmentSec"] = m.ratiosMinSegmentSec
 	cfg["ratiosMinCyclesAtFmin"] = m.ratiosMinCyclesAtFmin
 	cfg["ratiosSkipInvalidSegments"] = m.ratiosSkipInvalidSegments
@@ -295,6 +324,10 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["iafSearchRangeMax"] = m.iafSearchRangeMax
 	cfg["iafMinProminence"] = m.iafMinProminence
 	cfg["iafRoisSpec"] = m.iafRoisSpec
+	cfg["iafMinCyclesAtFmin"] = m.iafMinCyclesAtFmin
+	cfg["iafMinBaselineSec"] = m.iafMinBaselineSec
+	cfg["iafAllowFullFallback"] = m.iafAllowFullFallback
+	cfg["iafAllowAllChannelsFallback"] = m.iafAllowAllChannelsFallback
 
 	// Directed connectivity
 	cfg["directedConnEnabled"] = m.directedConnEnabled
@@ -347,8 +380,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// Trial table
 	cfg["trialTableFormat"] = m.trialTableFormat
 	cfg["trialTableAddLagFeatures"] = m.trialTableAddLagFeatures
-	// Note: older configs persisted include/extras/missing-frac, but these are no longer
-	// exposed in the CLI; we intentionally do not persist them anymore.
+	cfg["trialOrderMaxMissingFraction"] = m.trialOrderMaxMissingFraction
+
+	// Feature QC
+	cfg["featureQCEnabled"] = m.featureQCEnabled
+	cfg["featureQCMaxMissingPct"] = m.featureQCMaxMissingPct
+	cfg["featureQCMinVariance"] = m.featureQCMinVariance
+	cfg["featureQCCheckWithinRunVariance"] = m.featureQCCheckWithinRunVariance
 
 	// Pain residual
 	cfg["painResidualEnabled"] = m.painResidualEnabled
@@ -435,11 +473,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["correlationsTargetRating"] = m.correlationsTargetRating
 	cfg["correlationsTargetTemperature"] = m.correlationsTargetTemperature
 	cfg["correlationsTargetPainResidual"] = m.correlationsTargetPainResidual
+	cfg["correlationsTypesSpec"] = m.correlationsTypesSpec
 	cfg["correlationsTargetColumn"] = m.correlationsTargetColumn
 	cfg["correlationsPreferPainResidual"] = m.correlationsPreferPainResidual
 	cfg["correlationsUseCrossfitResidual"] = m.correlationsUseCrossfitResidual
 	cfg["correlationsPrimaryUnit"] = m.correlationsPrimaryUnit
 	cfg["correlationsPermutationPrimary"] = m.correlationsPermutationPrimary
+	cfg["groupLevelBlockPermutation"] = m.groupLevelBlockPermutation
 
 	// Mixed Effects & Mediation
 	cfg["mixedEffectsType"] = m.mixedEffectsType
@@ -878,6 +918,28 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.plotGroupValidationExpanded = getBool("plotGroupValidationExpanded", m.plotGroupValidationExpanded)
 	m.plotGroupTFRMiscExpanded = getBool("plotGroupTFRMiscExpanded", m.plotGroupTFRMiscExpanded)
 
+	// Plotting per-plot config + UI expansion state
+	if v, ok := cfg["plotItemConfigExpanded"]; ok {
+		m.plotItemConfigExpanded = boolMapToStringsMap(v)
+	}
+	if v, ok := cfg["plotItemConfigs"]; ok {
+		raw, ok := v.(map[string]interface{})
+		if ok {
+			m.plotItemConfigs = make(map[string]PlotItemConfig, len(raw))
+			for plotID, rawCfg := range raw {
+				blob, err := json.Marshal(rawCfg)
+				if err != nil {
+					continue
+				}
+				var pc PlotItemConfig
+				if err := json.Unmarshal(blob, &pc); err != nil {
+					continue
+				}
+				m.plotItemConfigs[plotID] = pc
+			}
+		}
+	}
+
 	// PAC/CFC
 	m.pacPhaseMin = getFloat("pacPhaseMin", m.pacPhaseMin)
 	m.pacPhaseMax = getFloat("pacPhaseMax", m.pacPhaseMax)
@@ -933,6 +995,10 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.burstThresholdZ = getFloat("burstThresholdZ", m.burstThresholdZ)
 	m.burstThresholdMethod = getInt("burstThresholdMethod", m.burstThresholdMethod)
 	m.burstThresholdPercentile = getFloat("burstThresholdPercentile", m.burstThresholdPercentile)
+	m.burstThresholdReference = getInt("burstThresholdReference", m.burstThresholdReference)
+	m.burstMinTrialsPerCondition = getInt("burstMinTrialsPerCondition", m.burstMinTrialsPerCondition)
+	m.burstMinSegmentSec = getFloat("burstMinSegmentSec", m.burstMinSegmentSec)
+	m.burstSkipInvalidSegments = getBool("burstSkipInvalidSegments", m.burstSkipInvalidSegments)
 	m.burstMinDuration = getInt("burstMinDuration", m.burstMinDuration)
 	m.burstMinCycles = getFloat("burstMinCycles", m.burstMinCycles)
 	m.burstBandsSpec = getString("burstBandsSpec", m.burstBandsSpec)
@@ -940,8 +1006,17 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	// Power/Spectral
 	m.powerBaselineMode = getInt("powerBaselineMode", m.powerBaselineMode)
 	m.powerRequireBaseline = getBool("powerRequireBaseline", m.powerRequireBaseline)
+	m.powerSubtractEvoked = getBool("powerSubtractEvoked", m.powerSubtractEvoked)
+	m.powerMinTrialsPerCondition = getInt("powerMinTrialsPerCondition", m.powerMinTrialsPerCondition)
+	m.powerExcludeLineNoise = getBool("powerExcludeLineNoise", m.powerExcludeLineNoise)
+	m.powerLineNoiseFreq = getFloat("powerLineNoiseFreq", m.powerLineNoiseFreq)
+	m.powerLineNoiseWidthHz = getFloat("powerLineNoiseWidthHz", m.powerLineNoiseWidthHz)
+	m.powerLineNoiseHarmonics = getInt("powerLineNoiseHarmonics", m.powerLineNoiseHarmonics)
+	m.powerEmitDb = getBool("powerEmitDb", m.powerEmitDb)
 	m.spectralEdgePercentile = getFloat("spectralEdgePercentile", m.spectralEdgePercentile)
 	m.spectralRatioPairsSpec = getString("spectralRatioPairsSpec", m.spectralRatioPairsSpec)
+	m.spectralPsdAdaptive = getBool("spectralPsdAdaptive", m.spectralPsdAdaptive)
+	m.spectralMultitaperAdaptive = getBool("spectralMultitaperAdaptive", m.spectralMultitaperAdaptive)
 	m.spectralPsdMethod = getInt("spectralPsdMethod", m.spectralPsdMethod)
 	m.spectralFmin = getFloat("spectralFmin", m.spectralFmin)
 	m.spectralFmax = getFloat("spectralFmax", m.spectralFmax)
@@ -961,6 +1036,8 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.connWindowStep = getFloat("connWindowStep", m.connWindowStep)
 	m.connAECMode = getInt("connAECMode", m.connAECMode)
 	m.connGranularity = getInt("connGranularity", m.connGranularity)
+	m.connConditionColumn = getString("connConditionColumn", m.connConditionColumn)
+	m.connConditionValues = getString("connConditionValues", m.connConditionValues)
 	m.connMinEpochsPerGroup = getInt("connMinEpochsPerGroup", m.connMinEpochsPerGroup)
 	m.connMinCyclesPerBand = getFloat("connMinCyclesPerBand", m.connMinCyclesPerBand)
 	m.connWarnNoSpatialTransform = getBool("connWarnNoSpatialTransform", m.connWarnNoSpatialTransform)
@@ -1038,6 +1115,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	// Aggregation/storage
 	m.aggregationMethod = getInt("aggregationMethod", m.aggregationMethod)
 	m.minEpochsForFeatures = getInt("minEpochsForFeatures", m.minEpochsForFeatures)
+	m.featAnalysisMode = getInt("featAnalysisMode", m.featAnalysisMode)
+	m.featComputeChangeScores = getBool("featComputeChangeScores", m.featComputeChangeScores)
+	m.featSaveTfrWithSidecar = getBool("featSaveTfrWithSidecar", m.featSaveTfrWithSidecar)
+	m.featNJobsBands = getInt("featNJobsBands", m.featNJobsBands)
+	m.featNJobsConnectivity = getInt("featNJobsConnectivity", m.featNJobsConnectivity)
+	m.featNJobsAperiodic = getInt("featNJobsAperiodic", m.featNJobsAperiodic)
+	m.featNJobsComplexity = getInt("featNJobsComplexity", m.featNJobsComplexity)
 	m.saveSubjectLevelFeatures = getBool("saveSubjectLevelFeatures", m.saveSubjectLevelFeatures)
 	m.featAlsoSaveCsv = getBool("featAlsoSaveCsv", m.featAlsoSaveCsv)
 
@@ -1086,6 +1170,8 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.asymmetryMinSegmentSec = getFloat("asymmetryMinSegmentSec", m.asymmetryMinSegmentSec)
 	m.asymmetryMinCyclesAtFmin = getFloat("asymmetryMinCyclesAtFmin", m.asymmetryMinCyclesAtFmin)
 	m.asymmetrySkipInvalidSegments = getBool("asymmetrySkipInvalidSegments", m.asymmetrySkipInvalidSegments)
+	m.asymmetryEmitActivationConvention = getBool("asymmetryEmitActivationConvention", m.asymmetryEmitActivationConvention)
+	m.asymmetryActivationBandsSpec = getString("asymmetryActivationBandsSpec", m.asymmetryActivationBandsSpec)
 	m.ratiosMinSegmentSec = getFloat("ratiosMinSegmentSec", m.ratiosMinSegmentSec)
 	m.ratiosMinCyclesAtFmin = getFloat("ratiosMinCyclesAtFmin", m.ratiosMinCyclesAtFmin)
 	m.ratiosSkipInvalidSegments = getBool("ratiosSkipInvalidSegments", m.ratiosSkipInvalidSegments)
@@ -1098,6 +1184,10 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.iafSearchRangeMax = getFloat("iafSearchRangeMax", m.iafSearchRangeMax)
 	m.iafMinProminence = getFloat("iafMinProminence", m.iafMinProminence)
 	m.iafRoisSpec = getString("iafRoisSpec", m.iafRoisSpec)
+	m.iafMinCyclesAtFmin = getFloat("iafMinCyclesAtFmin", m.iafMinCyclesAtFmin)
+	m.iafMinBaselineSec = getFloat("iafMinBaselineSec", m.iafMinBaselineSec)
+	m.iafAllowFullFallback = getBool("iafAllowFullFallback", m.iafAllowFullFallback)
+	m.iafAllowAllChannelsFallback = getBool("iafAllowAllChannelsFallback", m.iafAllowAllChannelsFallback)
 
 	// Directed connectivity
 	m.directedConnEnabled = getBool("directedConnEnabled", m.directedConnEnabled)
@@ -1150,6 +1240,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	// Trial table
 	m.trialTableFormat = getInt("trialTableFormat", m.trialTableFormat)
 	m.trialTableAddLagFeatures = getBool("trialTableAddLagFeatures", m.trialTableAddLagFeatures)
+	m.trialOrderMaxMissingFraction = getFloat("trialOrderMaxMissingFraction", m.trialOrderMaxMissingFraction)
+
+	// Feature QC
+	m.featureQCEnabled = getBool("featureQCEnabled", m.featureQCEnabled)
+	m.featureQCMaxMissingPct = getFloat("featureQCMaxMissingPct", m.featureQCMaxMissingPct)
+	m.featureQCMinVariance = getFloat("featureQCMinVariance", m.featureQCMinVariance)
+	m.featureQCCheckWithinRunVariance = getBool("featureQCCheckWithinRunVariance", m.featureQCCheckWithinRunVariance)
 	// Backward-compat: we accept older persisted keys but ignore them.
 	_ = getBool("trialTableIncludeFeatures", true)
 	_ = getBool("trialTableIncludeCovars", true)
@@ -1242,11 +1339,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.correlationsTargetRating = getBool("correlationsTargetRating", m.correlationsTargetRating)
 	m.correlationsTargetTemperature = getBool("correlationsTargetTemperature", m.correlationsTargetTemperature)
 	m.correlationsTargetPainResidual = getBool("correlationsTargetPainResidual", m.correlationsTargetPainResidual)
+	m.correlationsTypesSpec = getString("correlationsTypesSpec", m.correlationsTypesSpec)
 	m.correlationsTargetColumn = getString("correlationsTargetColumn", m.correlationsTargetColumn)
 	m.correlationsPreferPainResidual = getBool("correlationsPreferPainResidual", m.correlationsPreferPainResidual)
 	m.correlationsUseCrossfitResidual = getBool("correlationsUseCrossfitResidual", m.correlationsUseCrossfitResidual)
 	m.correlationsPrimaryUnit = getInt("correlationsPrimaryUnit", m.correlationsPrimaryUnit)
 	m.correlationsPermutationPrimary = getBool("correlationsPermutationPrimary", m.correlationsPermutationPrimary)
+	m.groupLevelBlockPermutation = getBool("groupLevelBlockPermutation", m.groupLevelBlockPermutation)
 
 	// Mixed Effects & Mediation
 	m.mixedEffectsType = getInt("mixedEffectsType", m.mixedEffectsType)

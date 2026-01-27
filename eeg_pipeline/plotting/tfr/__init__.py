@@ -41,8 +41,6 @@ __all__ = [
     # Topomap plotting
     "plot_pain_nonpain_temporal_topomaps_diff_allbands",
     "plot_temporal_topomaps_allbands_active",
-    # Quality control
-    "qc_baseline_active_power",
     # Band power evolution
     "visualize_band_evolution",
     "plot_band_power_evolution_all_conditions",
@@ -74,8 +72,6 @@ def __getattr__(name: str):
         # Topomap plotting
         "plot_pain_nonpain_temporal_topomaps_diff_allbands": "topomaps",
         "plot_temporal_topomaps_allbands_active": "topomaps",
-        # Quality control
-        "qc_baseline_active_power": "qc",
         # Band power evolution
         "visualize_band_evolution": "band_evolution",
         "plot_band_power_evolution_all_conditions": "band_evolution",

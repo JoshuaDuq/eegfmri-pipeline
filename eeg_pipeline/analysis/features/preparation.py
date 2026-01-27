@@ -154,6 +154,11 @@ def _get_spatial_transform_type(config: Any, feature_family: Optional[str] = Non
     if family in {"directedconnectivity", "directed_connectivity", "dconn"}:
         family = "connectivity"
 
+    global_transform = str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
+    # Explicit global override: force transform across families.
+    if global_transform in {"csd", "laplacian"}:
+        return global_transform
+
     if family:
         per_family = config.get("feature_engineering.spatial_transform_per_family", {})
         if isinstance(per_family, dict) and family in per_family:
@@ -161,10 +166,9 @@ def _get_spatial_transform_type(config: Any, feature_family: Optional[str] = Non
             if transform in {"none", "csd", "laplacian"}:
                 return transform
     
-    transform = str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
-    if transform not in {"none", "csd", "laplacian"}:
+    if global_transform not in {"none", "csd", "laplacian"}:
         return "none"
-    return transform
+    return global_transform
 
 
 def _create_empty_precomputed_data(

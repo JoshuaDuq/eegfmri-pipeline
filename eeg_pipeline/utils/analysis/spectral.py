@@ -439,7 +439,8 @@ def compute_psd_bandpower(
     line_freqs : Optional[list[float]]
         Line noise frequencies (e.g., [50.0] or [60.0]). Required if exclude_line_noise=True.
     line_width : Optional[float]
-        Width (Hz) around each line frequency to exclude. Default 1.0 Hz.
+        Half-width (Hz) around each line frequency to exclude (i.e., excludes
+        [f0 - line_width, f0 + line_width]). Default 1.0 Hz.
     n_harmonics : Optional[int]
         Number of harmonics to exclude. Default 3.
     logger : Optional[logging.Logger]
@@ -521,7 +522,7 @@ def compute_psd_bandpower(
         for base_freq in line_freqs:
             for harmonic in range(1, n_harm + 1):
                 center = base_freq * harmonic
-                line_noise_mask |= (freqs >= center - width / 2) & (freqs <= center + width / 2)
+                line_noise_mask |= (freqs >= center - width) & (freqs <= center + width)
         if logger and np.any(line_noise_mask):
             n_excluded = np.sum(line_noise_mask)
             logger.debug("Excluding %d frequency bins for line noise", n_excluded)

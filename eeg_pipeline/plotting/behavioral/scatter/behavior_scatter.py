@@ -37,10 +37,11 @@ from eeg_pipeline.plotting.behavioral.scatter.core import (
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.utils import get_named_segments
 from eeg_pipeline.plotting.io.figures import get_band_color
-from eeg_pipeline.utils.analysis.stats import joint_valid_mask
+from eeg_pipeline.utils.analysis.stats import compute_partial_residuals, joint_valid_mask
 from eeg_pipeline.utils.analysis.stats.correlation import format_correlation_method_label
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
 from eeg_pipeline.utils.data import load_precomputed_correlations, load_subject_scatter_data
+from eeg_pipeline.utils.data.covariates import build_covariate_matrix
 from eeg_pipeline.utils.formatting import sanitize_label
 
 
@@ -337,6 +338,79 @@ def _get_all_channels_from_roi_map(roi_map: Dict[str, List[str]]) -> List[str]:
     return sorted(all_channels)
 
 
+def _is_temperature_target(target_col: str, config: Any) -> bool:
+    target = str(target_col).strip().lower()
+    temperature_cols = get_config_value(config, "event_columns.temperature", []) or []
+    temperature_cols = {str(col).strip().lower() for col in temperature_cols}
+    return target in temperature_cols or target == "temp" or "temperature" in target
+
+
+def _build_scatter_covariates(
+    events_df: pd.DataFrame,
+    target_col: str,
+    config: Any,
+) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """Build a covariate matrix so scatter plots reflect analysis controls."""
+    control_temperature = bool(get_config_value(config, "behavior_analysis.control_temperature", True))
+    control_trial_order = bool(get_config_value(config, "behavior_analysis.control_trial_order", True))
+
+    cov_df = build_covariate_matrix(events_df, requested_covariates=None, config=config)
+    if cov_df is None or cov_df.empty:
+        return None, None
+
+    include_temperature = control_temperature and not _is_temperature_target(target_col, config)
+    include_trial = control_trial_order
+
+    parts: List[pd.DataFrame] = []
+    controls: List[str] = []
+
+    if include_trial and "trial" in cov_df.columns:
+        parts.append(cov_df[["trial"]])
+        controls.append("trial")
+
+    if include_temperature and "temperature" in cov_df.columns:
+        from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
+
+        mode = str(
+            get_config_value(
+                config,
+                "behavior_analysis.statistics.temperature_control",
+                get_config_value(config, "behavior_analysis.regression.temperature_control", "spline"),
+            )
+        ).strip().lower() or "spline"
+
+        temp_series = cov_df["temperature"]
+        if mode == "linear":
+            parts.append(pd.DataFrame({"temp": pd.to_numeric(temp_series, errors="coerce")}, index=cov_df.index))
+            controls.append("temp")
+        else:
+            temp_design, cov_names, _meta = build_temperature_rcs_design(
+                temp_series,
+                config=config,
+                key_prefix="behavior_analysis.regression.temperature_spline",
+                name_prefix="temperature_rcs",
+            )
+            rename_map = {"temperature": "temp"}
+            for name in cov_names:
+                if name.startswith("temperature_rcs_"):
+                    rename_map[name] = name.replace("temperature_", "temp_", 1)
+            temp_design = temp_design.rename(columns=rename_map)
+            parts.append(temp_design)
+            controls.append("temp(spline)" if len(temp_design.columns) > 1 else "temp")
+
+    if not parts:
+        return None, None
+
+    out = pd.concat(parts, axis=1)
+    out = out.loc[:, ~out.columns.duplicated()].copy()
+    out = out.dropna(how="all", axis=1)
+    if out.empty:
+        return None, None
+
+    stats_tag = f"partial (controls: {', '.join(controls)})"
+    return out, stats_tag
+
+
 def _plot_for_aggregation_mode(
     *,
     mode: AggregationMode,
@@ -347,6 +421,8 @@ def _plot_for_aggregation_mode(
     segment: Optional[str],
     target_col: str,
     target_values: pd.Series,
+    covariates_df: Optional[pd.DataFrame],
+    stats_tag: Optional[str],
     roi_map: Dict[str, List[str]],
     all_channels: List[str],
     metric: Optional[str],
@@ -384,6 +460,8 @@ def _plot_for_aggregation_mode(
             config=config,
             results=results,
             channels=all_channels,
+            covariates_df=covariates_df,
+            stats_tag=stats_tag,
         )
 
     elif mode == AggregationMode.ROI:
@@ -412,6 +490,8 @@ def _plot_for_aggregation_mode(
                 config=config,
                 results=results,
                 channels=roi_channels,
+                covariates_df=covariates_df,
+                stats_tag=stats_tag,
             )
 
     elif mode == AggregationMode.CHANNEL:
@@ -440,6 +520,8 @@ def _plot_for_aggregation_mode(
                 config=config,
                 results=results,
                 channels=[channel],
+                covariates_df=covariates_df,
+                stats_tag=stats_tag,
             )
 
 
@@ -459,6 +541,8 @@ def _generate_scatter_plot(
     config,
     results: Dict[str, List],
     channels: List[str],
+    covariates_df: Optional[pd.DataFrame],
+    stats_tag: Optional[str],
 ) -> None:
     """Generate a single scatter plot."""
     valid_mask = joint_valid_mask(feature_vals, target_vals)
@@ -470,12 +554,35 @@ def _generate_scatter_plot(
     title = _format_title(feature_type, band, target_col, location, metric)
     x_label = _format_x_label(feature_type, band, metric)
     y_label = target_col
+
+    x_plot = feature_vals
+    y_plot = target_vals
+    is_partial_residuals = False
+
+    if covariates_df is not None and not covariates_df.empty:
+        x_res, y_res, n_res = compute_partial_residuals(
+            x_plot,
+            y_plot,
+            covariates_df,
+            plot_config.method_code,
+            logger=logger,
+            context=f"scatter {feature_type}/{band}/{location} vs {target_col}",
+            config=config,
+        )
+        if n_res >= plot_config.min_samples_for_plot:
+            x_plot = x_res
+            y_plot = y_res
+            is_partial_residuals = True
+            x_label = f"Residuals of {x_label}"
+            y_label = f"Residuals of {target_col}"
+            title = f"{title} (partial)"
+
     filename = _format_filename(feature_type, band, target_col, location, metric)
     output_path = output_dir / filename
 
     params = ScatterPlotParams(
-        roi_vals=feature_vals,
-        target_vals=target_vals,
+        roi_vals=x_plot,
+        target_vals=y_plot,
         roi=location,
         band=band,
         band_title=band.capitalize(),
@@ -488,6 +595,8 @@ def _generate_scatter_plot(
         output_path=output_path,
         roi_channels=channels,
         feature_name=f"{feature_type}_{band}" + (f"_{metric}" if metric else ""),
+        stats_tag=stats_tag,
+        is_partial_residuals=is_partial_residuals,
     )
 
     _generate_single_scatter(
@@ -653,6 +762,7 @@ def plot_behavior_scatter(
 
         available_segments = set()
         available_groups = set()
+        available_bands = set()
         for col in features_df.columns:
             parsed = NamingSchema.parse(str(col))
             if parsed.get("valid"):
@@ -662,6 +772,9 @@ def plot_behavior_scatter(
                 grp = parsed.get("group")
                 if grp:
                     available_groups.add(grp)
+                band = parsed.get("band")
+                if band:
+                    available_bands.add(str(band).strip().lower())
         
         if segment is None and available_segments:
             detected_segments = get_named_segments(features_df)
@@ -682,6 +795,15 @@ def plot_behavior_scatter(
         ensure_dir(feature_dir)
 
         metrics_list = FEATURE_METRICS.get(feature_type, [None])
+        if available_bands:
+            if available_bands == {"broadband"}:
+                bands_to_plot = ["broadband"]
+            else:
+                bands_to_plot = [b for b in bands if str(b).strip().lower() in available_bands]
+                if not bands_to_plot:
+                    bands_to_plot = sorted(available_bands)
+        else:
+            bands_to_plot = bands
 
         for column in columns:
             target_values, valid = _get_behavioral_column(events_df, column)
@@ -689,7 +811,9 @@ def plot_behavior_scatter(
                 logger.info(f"Column '{column}' not found or invalid in events.tsv, skipping")
                 continue
 
-            for band in bands:
+            covariates_df, stats_tag = _build_scatter_covariates(events_df, column, config)
+
+            for band in bands_to_plot:
                 band_color = get_band_color(band, config)
                 band_dir = feature_dir / sanitize_label(band)
                 ensure_dir(band_dir)
@@ -707,6 +831,8 @@ def plot_behavior_scatter(
                             segment=segment,
                             target_col=column,
                             target_values=target_values,
+                            covariates_df=covariates_df,
+                            stats_tag=stats_tag,
                             roi_map=roi_map,
                             all_channels=all_channels,
                             metric=metric,

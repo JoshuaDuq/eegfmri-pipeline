@@ -65,6 +65,7 @@ def _fit_lmer_manual(
     y: np.ndarray,
     x: np.ndarray,
     groups: np.ndarray,
+    covariates: np.ndarray | None = None,
 ) -> MixedEffectsResult:
     """Fit linear mixed-effects model using a simple iterative estimator."""
     unique_groups = np.unique(groups)
@@ -74,7 +75,14 @@ def _fit_lmer_manual(
     if n_groups < MIN_GROUPS_FOR_MIXED_EFFECTS or n_obs < MIN_OBSERVATIONS_FOR_MIXED_EFFECTS:
         return _create_failed_result(n_groups, n_obs)
 
-    design_matrix = np.column_stack([np.ones(n_obs), x])
+    if covariates is not None:
+        if covariates.ndim == 1:
+            covariates = covariates.reshape(-1, 1)
+        if covariates.shape[0] != n_obs:
+            return _create_failed_result(n_groups, n_obs)
+        design_matrix = np.column_stack([np.ones(n_obs), x, covariates])
+    else:
+        design_matrix = np.column_stack([np.ones(n_obs), x])
     try:
         beta_ols = np.linalg.lstsq(design_matrix, y, rcond=None)[0]
     except np.linalg.LinAlgError:
@@ -121,12 +129,12 @@ def _fit_lmer_manual(
         fixed_effect = beta_gls[1]
         fixed_se = se[1]
 
-        df = max(n_groups - 2, 1)
+        df = max(n_groups - design_matrix.shape[1], 1)
         t_stat = fixed_effect / (fixed_se + EPSILON)
         fixed_p = 2 * (1 - stats.t.cdf(abs(t_stat), df))
 
         log_likelihood = _compute_log_likelihood(n_obs, sigma2_u, sigma2_e)
-        n_params = 4
+        n_params = int(design_matrix.shape[1] + 2)
         aic = -2 * log_likelihood + 2 * n_params
         bic = -2 * log_likelihood + n_params * np.log(n_obs)
 
@@ -210,8 +218,8 @@ def fit_mixed_effects_model(
             "n_observations": len(df_clean),
         }
 
-    y = df_clean[behavior_col].values
-    x = df_clean[feature_col].values
+    y = df_clean[behavior_col].to_numpy(dtype=float)
+    x = df_clean[feature_col].to_numpy(dtype=float)
     groups = df_clean[subject_col].values
 
     x_mean = np.mean(x)
@@ -219,10 +227,35 @@ def fit_mixed_effects_model(
     y_mean = np.mean(y)
     y_std = np.std(y)
 
+    if not np.isfinite(x_std) or x_std <= EPSILON:
+        return {
+            "converged": False,
+            "error": "Feature has near-zero variance",
+            "n_observations": len(df_clean),
+        }
+    if not np.isfinite(y_std) or y_std <= EPSILON:
+        return {
+            "converged": False,
+            "error": "Behavior has near-zero variance",
+            "n_observations": len(df_clean),
+        }
+
     x_standardized = (x - x_mean) / (x_std + EPSILON)
     y_standardized = (y - y_mean) / (y_std + EPSILON)
 
-    result = _fit_lmer_manual(y_standardized, x_standardized, groups)
+    covariate_matrix = None
+    if covariates:
+        cov_df = df_clean[covariates]
+        cov_df = pd.get_dummies(cov_df, drop_first=True, dummy_na=False)
+        if not cov_df.empty:
+            cov_values = cov_df.to_numpy(dtype=float)
+            cov_mean = np.nanmean(cov_values, axis=0)
+            cov_std = np.nanstd(cov_values, axis=0)
+            keep = np.isfinite(cov_std) & (cov_std > EPSILON)
+            if np.any(keep):
+                covariate_matrix = (cov_values[:, keep] - cov_mean[keep]) / (cov_std[keep] + EPSILON)
+
+    result = _fit_lmer_manual(y_standardized, x_standardized, groups, covariates=covariate_matrix)
 
     scale_factor = y_std / (x_std + EPSILON)
 
@@ -356,4 +389,3 @@ __all__ = [
     "run_multilevel_correlation_analysis",
     "run_mediation_analysis",
 ]
-

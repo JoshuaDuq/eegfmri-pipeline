@@ -274,11 +274,15 @@ def _compute_tfr_for_features(
 ) -> tuple[Any, Optional[pd.DataFrame], List[str], Optional[float], Optional[float]]:
     """Compute TFR and baseline data for feature extraction.
     
-    IMPORTANT: Uses original (uncropped) epochs for TFR computation to ensure
-    baseline windows are available. Cropping happens AFTER baseline extraction.
+    IMPORTANT:
+    - Power TFR is computed from the original (uncropped) epochs so baseline windows
+      remain available for normalization.
+    - Complex TFR is expensive; for multi-range extraction it can be provided by the
+      pipeline via ctx.tfr_complex to avoid recomputing it for every time range.
     """
     tfr_complex = None
     tfr_power = None
+    epochs_for_complex = None
     
     epochs_for_tfr = getattr(ctx, "_original_epochs", None) or ctx.epochs
     epochs_for_power_tfr = epochs_for_tfr
@@ -320,28 +324,54 @@ def _compute_tfr_for_features(
             ctx.power_evoked_subtracted = True
             ctx.power_evoked_subtracted_conditionwise = condition_labels is not None
 
-    needs_complex = any(category in ctx.feature_categories for category in ["itpc", "pac"])
+    pac_needs_complex = False
+    if "pac" in ctx.feature_categories:
+        pac_cfg = ctx.config.get("feature_engineering.pac", {}) if hasattr(ctx.config, "get") else {}
+        pac_source = str(pac_cfg.get("source", "precomputed")).strip().lower()
+        pac_needs_complex = pac_source != "precomputed"
+
+    needs_complex = ("itpc" in ctx.feature_categories) or pac_needs_complex
     if needs_complex:
-        epochs_for_complex = epochs_for_tfr
         from eeg_pipeline.analysis.features.preparation import (
             _apply_spatial_transform,
             _get_spatial_transform_type,
         )
 
-        phase_family = "itpc" if "itpc" in ctx.feature_categories else "pac"
-        phase_transform = _get_spatial_transform_type(ctx.config, feature_family=phase_family)
-        if phase_transform in {"csd", "laplacian"}:
-            epochs_for_complex = epochs_for_tfr.copy().pick_types(
-                eeg=True, meg=False, eog=False, stim=False, exclude="bads"
-            )
-            epochs_for_complex = _apply_spatial_transform(
-                epochs_for_complex, phase_transform, ctx.config, ctx.logger
-            )
+        # Fast-path reuse: if the pipeline provided a precomputed complex TFR for these
+        # epochs (e.g., multi-range extraction), reuse it without recomputing transforms.
+        existing_complex = getattr(ctx, "tfr_complex", None)
+        if existing_complex is not None:
+            try:
+                if (
+                    hasattr(existing_complex, "times")
+                    and hasattr(epochs_for_tfr, "times")
+                    and len(existing_complex.times) == len(epochs_for_tfr.times)
+                    and np.isclose(float(existing_complex.times[0]), float(epochs_for_tfr.times[0]))
+                    and np.isclose(float(existing_complex.times[-1]), float(epochs_for_tfr.times[-1]))
+                ):
+                    tfr_complex = existing_complex
+            except Exception:
+                tfr_complex = None
 
-        tfr_complex = compute_complex_tfr(epochs_for_complex, ctx.config, ctx.logger)
+        if tfr_complex is None:
+            phase_family = "itpc" if "itpc" in ctx.feature_categories else "pac"
+            phase_transform = _get_spatial_transform_type(ctx.config, feature_family=phase_family)
+            epochs_for_complex = epochs_for_tfr
+            if phase_transform in {"csd", "laplacian"}:
+                epochs_for_complex = epochs_for_tfr.copy().pick_types(
+                    eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+                )
+                epochs_for_complex = _apply_spatial_transform(
+                    epochs_for_complex, phase_transform, ctx.config, ctx.logger
+                )
+            tfr_complex = compute_complex_tfr(epochs_for_complex, ctx.config, ctx.logger)
         if tfr_complex is not None:
             ctx.tfr_complex = tfr_complex
-            if not ctx.power_evoked_subtracted and epochs_for_complex is epochs_for_tfr:
+            if (
+                tfr_power is None
+                and not ctx.power_evoked_subtracted
+                and epochs_for_complex is epochs_for_tfr
+            ):
                 ctx.logger.info("Deriving power TFR from complex TFR...")
                 tfr_power = tfr_complex.copy()
                 tfr_power.data = np.abs(tfr_complex.data) ** 2
@@ -400,7 +430,20 @@ def _compute_tfr_for_features(
             )
 
     if ctx.config.get("feature_engineering.save_tfr_with_sidecar", False):
-        _save_tfr_with_sidecar(ctx, tfr, baseline_start, baseline_end)
+        # In multi-range extraction, the per-range TFR is cropped to the current window.
+        # Applying a baseline correction after cropping can fail for non-baseline windows
+        # because the baseline interval is outside the cropped time axis.
+        # Save the TFR only once (for the baseline window if present).
+        explicit_windows = getattr(ctx, "explicit_windows", None)
+        multi_range = isinstance(explicit_windows, (list, tuple)) and len(explicit_windows) > 1
+        name = str(getattr(ctx, "name", "") or "").strip().lower()
+        if multi_range and name not in {"", "baseline"}:
+            ctx.logger.info(
+                "Skipping TFR save for range '%s' during multi-range extraction; saving only baseline TFR.",
+                getattr(ctx, "name", None),
+            )
+        else:
+            _save_tfr_with_sidecar(ctx, tfr, baseline_start, baseline_end)
 
     return tfr, baseline_df, baseline_cols, baseline_start, baseline_end
 
@@ -457,6 +500,29 @@ def _extract_pac_features(
             precomputed_pac = getter("pac")
         if precomputed_pac is None:
             precomputed_pac = precomputed_data
+
+        # Scientific validity: Hilbert PAC should respect the PAC family spatial transform
+        # (e.g., CSD). If we reuse a precomputed object built for a different family, it
+        # may have spatial_transform='none' and bias phase-based features.
+        expected_transform = "none"
+        try:
+            from eeg_pipeline.analysis.features.preparation import _get_spatial_transform_type
+
+            expected_transform = _get_spatial_transform_type(ctx.config, feature_family="pac")
+        except Exception:
+            expected_transform = "none"
+
+        current_transform = str(getattr(precomputed_pac, "spatial_transform", "none")).strip().lower()
+        if precomputed_pac is not None and expected_transform in {"csd", "laplacian"}:
+            if current_transform != expected_transform:
+                ctx.logger.warning(
+                    "PAC: existing precomputed intermediates have spatial_transform='%s' but PAC requires '%s'; "
+                    "recomputing precomputed intermediates for PAC.",
+                    current_transform,
+                    expected_transform,
+                )
+                precomputed_pac = None
+
         if precomputed_pac is None and getattr(ctx, "epochs", None) is not None:
             from eeg_pipeline.utils.config.loader import get_frequency_band_names
 

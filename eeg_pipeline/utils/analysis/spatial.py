@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
+import logging
 import numpy as np
 
 from eeg_pipeline.utils.analysis.channels import build_roi_map
@@ -26,13 +27,24 @@ _SPATIAL_MODE_CHANNELS = "channels"
 _SPATIAL_MODE_GLOBAL = "global"
 _AGGREGATION_MEAN = "mean"
 _AGGREGATION_MEDIAN = "median"
+_WARNED_LATERALITY_ROIS = False
 
 
 def get_roi_definitions(config: Any) -> Dict[str, List[str]]:
     """Get ROI definitions from config."""
     from eeg_pipeline.utils.config.loader import get_config_value
-    
-    return get_config_value(config, "rois", {})
+
+    rois = get_config_value(config, "rois", {}) or {}
+    global _WARNED_LATERALITY_ROIS
+    if not _WARNED_LATERALITY_ROIS and isinstance(rois, dict) and rois:
+        roi_names = [str(k).lower() for k in rois.keys()]
+        if any(("ipsi" in k) or ("contra" in k) for k in roi_names):
+            logging.getLogger(__name__).warning(
+                "ROI definitions include Ipsi/Contra labels. Ensure stimulation laterality is consistent "
+                "or flip channels/trials accordingly; otherwise ROI features can be mis-labeled."
+            )
+            _WARNED_LATERALITY_ROIS = True
+    return rois
 
 
 def _get_aggregation_function(method: str) -> Callable:

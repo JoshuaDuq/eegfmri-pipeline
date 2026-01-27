@@ -1744,6 +1744,12 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	if m.expandedOption == expandedItpcConditionValues {
 		totalLines += len(m.GetDiscoveredColumnValues(m.itpcConditionColumn))
 	}
+	if m.expandedOption == expandedConnConditionColumn {
+		totalLines += len(m.availableColumns)
+	}
+	if m.expandedOption == expandedConnConditionValues {
+		totalLines += len(m.GetDiscoveredColumnValues(m.connConditionColumn))
+	}
 
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
@@ -2017,6 +2023,83 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "-1 = all cores"
+		case optBandEnvelopePadSec:
+			label = "Envelope pad (sec)"
+			value = fmt.Sprintf("%.2f", m.bandEnvelopePadSec)
+			if m.editingNumber && m.isCurrentlyEditing(optBandEnvelopePadSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "padding for Hilbert envelopes"
+		case optBandEnvelopePadCycles:
+			label = "Envelope pad (cycles)"
+			value = fmt.Sprintf("%.1f", m.bandEnvelopePadCycles)
+			if m.editingNumber && m.isCurrentlyEditing(optBandEnvelopePadCycles) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "padding scaled by fmin"
+		case optIAFEnabled:
+			label = "IAF enabled"
+			value = m.boolToOnOff(m.iafEnabled)
+			hint = "individualized alpha frequency"
+		case optIAFAlphaWidthHz:
+			label = "IAF alpha width"
+			value = fmt.Sprintf("%.1f Hz", m.iafAlphaWidthHz)
+			if m.editingNumber && m.isCurrentlyEditing(optIAFAlphaWidthHz) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "alpha band half-width"
+		case optIAFSearchRangeMin:
+			label = "IAF search min"
+			value = fmt.Sprintf("%.1f Hz", m.iafSearchRangeMin)
+			if m.editingNumber && m.isCurrentlyEditing(optIAFSearchRangeMin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "search range lower bound"
+		case optIAFSearchRangeMax:
+			label = "IAF search max"
+			value = fmt.Sprintf("%.1f Hz", m.iafSearchRangeMax)
+			if m.editingNumber && m.isCurrentlyEditing(optIAFSearchRangeMax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "search range upper bound"
+		case optIAFMinProminence:
+			label = "IAF prominence"
+			value = fmt.Sprintf("%.3f", m.iafMinProminence)
+			if m.editingNumber && m.isCurrentlyEditing(optIAFMinProminence) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum PSD peak prominence"
+		case optIAFRois:
+			label = "IAF ROIs"
+			rois := m.SelectedROIs()
+			if len(rois) == 0 {
+				value = "(select ROIs in ROI step)"
+			} else {
+				value = strings.Join(rois, ",")
+			}
+			hint = "derived from ROI selection step"
+		case optIAFMinCyclesAtFmin:
+			label = "IAF min cycles"
+			value = fmt.Sprintf("%.1f", m.iafMinCyclesAtFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optIAFMinCyclesAtFmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "cycles at iaf search fmin"
+		case optIAFMinBaselineSec:
+			label = "IAF min baseline"
+			value = fmt.Sprintf("%.2f s", m.iafMinBaselineSec)
+			if m.editingNumber && m.isCurrentlyEditing(optIAFMinBaselineSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "additional baseline duration"
+		case optIAFAllowFullFallback:
+			label = "Allow full fallback"
+			value = m.boolToOnOff(m.iafAllowFullFallback)
+			hint = "use full segment if baseline missing"
+		case optIAFAllowAllChannelsFallback:
+			label = "Allow channels fallback"
+			value = m.boolToOnOff(m.iafAllowAllChannelsFallback)
+			hint = "use all channels if ROIs missing"
 		case optFeatGroupStorage:
 			label = "▸ Storage"
 			hint = "Space to toggle"
@@ -2076,6 +2159,86 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Output Level"
 			value = connOutputVal
 			hint = "full / global_only"
+		case optConnGranularity:
+			label = "Granularity"
+			granularities := []string{"trial", "condition", "subject"}
+			value = granularities[m.connGranularity]
+			hint = "trial / condition / subject"
+		case optConnConditionColumn:
+			label = "Condition Column"
+			val := m.connConditionColumn
+			if val == "" {
+				val = "(select column)"
+			}
+			if m.editingText && m.editingTextField == textFieldConnConditionColumn {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if len(m.availableColumns) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.availableColumns))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedConnConditionColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optConnConditionValues:
+			label = "Condition Values"
+			if m.connConditionColumn == "" {
+				value = "(select column first)"
+				hint = "requires column selection"
+			} else {
+				val := m.connConditionValues
+				if val == "" {
+					val = "(select values)"
+				}
+				if m.editingText && m.editingTextField == textFieldConnConditionValues {
+					val = m.textBuffer + "█"
+				}
+				value = val
+				expandIndicatorHint := ""
+				if vals := m.GetDiscoveredColumnValues(m.connConditionColumn); len(vals) > 0 {
+					expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), m.connConditionColumn)
+				}
+				hint = "Space to select (others excluded)" + expandIndicatorHint
+				if m.expandedOption == expandedConnConditionValues {
+					expandIndicator = " [-]"
+				} else {
+					expandIndicator = " [+]"
+				}
+			}
+		case optConnPhaseEstimator:
+			label = "Phase estimator"
+			estimators := []string{"within_epoch", "across_epochs"}
+			value = estimators[m.connPhaseEstimator]
+			hint = "within_epoch / across_epochs"
+		case optConnMinEpochsPerGroup:
+			label = "Min epochs/group"
+			value = fmt.Sprintf("%d", m.connMinEpochsPerGroup)
+			if m.editingNumber && m.isCurrentlyEditing(optConnMinEpochsPerGroup) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "for condition/subject granularity"
+		case optConnMinCyclesPerBand:
+			label = "Min cycles/band"
+			value = fmt.Sprintf("%.1f", m.connMinCyclesPerBand)
+			if m.editingNumber && m.isCurrentlyEditing(optConnMinCyclesPerBand) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "recommended cycles at band fmin"
+		case optConnMinSegmentSec:
+			label = "Min segment (s)"
+			value = fmt.Sprintf("%.1f", m.connMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optConnMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum duration"
+		case optConnWarnNoSpatialTransform:
+			label = "Warn (no transform)"
+			value = m.boolToOnOff(m.connWarnNoSpatialTransform)
+			hint = "warn when phase measures lack CSD/Laplacian"
 		case optConnGraphMetrics:
 			label = "Graph Metrics"
 			value = connGraphVal
@@ -2096,6 +2259,21 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "AEC Mode"
 			value = connAecVal
 			hint = "orth/none/sym"
+		case optConnAECOutput:
+			label = "AEC Output"
+			switch m.connAECOutput {
+			case 1:
+				value = "z"
+			case 2:
+				value = "r+z"
+			default:
+				value = "r"
+			}
+			hint = "r (raw), z (Fisher-z), or both"
+		case optConnForceWithinEpochML:
+			label = "Force within_epoch"
+			value = m.boolToOnOff(m.connForceWithinEpochML)
+			hint = "CV/ML leakage safety"
 
 		// Directed Connectivity (PSI, DTF, PDC)
 		case optDirectedConnMeasures:
@@ -2595,6 +2773,15 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			itpcMethods := []string{"global", "fold_global", "loo", "condition"}
 			value = itpcMethods[m.itpcMethod]
 			hint = "global/fold_global/loo/condition"
+		case optItpcAllowUnsafeLoo:
+			label = "Allow unsafe LOO"
+			value = m.boolToOnOff(m.itpcAllowUnsafeLoo)
+			hint = "unsafe unless computed within CV folds"
+		case optItpcBaselineCorrection:
+			label = "Baseline correction"
+			modes := []string{"none", "subtract"}
+			value = modes[m.itpcBaselineCorrection]
+			hint = "ITPC baseline correction"
 		case optItpcConditionColumn:
 			label = "Condition Column"
 			val := m.itpcConditionColumn
@@ -2633,7 +2820,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				if vals := m.GetDiscoveredColumnValues(m.itpcConditionColumn); len(vals) > 0 {
 					expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), m.itpcConditionColumn)
 				}
-				hint = "Space to select" + expandIndicatorHint
+				hint = "Space to select (others excluded)" + expandIndicatorHint
 				if m.expandedOption == expandedItpcConditionValues {
 					expandIndicator = " [-]"
 				} else {
@@ -2730,6 +2917,16 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			hint = "offset in milliseconds"
 
 		// Aperiodic
+		case optAperiodicModel:
+			label = "Model"
+			models := []string{"fixed", "knee"}
+			value = models[m.aperiodicModel]
+			hint = "aperiodic model type"
+		case optAperiodicPsdMethod:
+			label = "PSD method"
+			methods := []string{"multitaper", "welch"}
+			value = methods[m.aperiodicPsdMethod]
+			hint = "PSD estimation method"
 		case optAperiodicFmin:
 			aperiodicFminVal := fmt.Sprintf("%.1f", m.aperiodicFmin)
 			if m.editingNumber && m.isCurrentlyEditing(optAperiodicFmin) {
@@ -2746,6 +2943,17 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Fit range (max)"
 			value = aperiodicFmaxVal
 			hint = "maximum frequency (Hz)"
+		case optAperiodicMinSegmentSec:
+			label = "Min segment (s)"
+			value = fmt.Sprintf("%.1f", m.aperiodicMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum duration for stable fits"
+		case optAperiodicExcludeLineNoise:
+			label = "Exclude line noise"
+			value = m.boolToOnOff(m.aperiodicExcludeLineNoise)
+			hint = "exclude line-noise bins before fitting"
 		case optAperiodicPeakZ:
 			label = "Peak Z-thresh"
 			value = aperiodicPeakZVal
@@ -2865,6 +3073,29 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Threshold Z"
 			value = burstThreshVal
 			hint = "amplitude trigger"
+		case optBurstThresholdReference:
+			label = "Threshold ref"
+			refs := []string{"trial", "subject", "condition"}
+			value = refs[m.burstThresholdReference]
+			hint = "trial/subject/condition"
+		case optBurstMinTrialsPerCondition:
+			label = "Min trials/cond"
+			value = fmt.Sprintf("%d", m.burstMinTrialsPerCondition)
+			if m.editingNumber && m.isCurrentlyEditing(optBurstMinTrialsPerCondition) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "used for condition reference"
+		case optBurstMinSegmentSec:
+			label = "Min segment (s)"
+			value = fmt.Sprintf("%.2f", m.burstMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optBurstMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "skip short segments"
+		case optBurstSkipInvalidSegments:
+			label = "Skip invalid"
+			value = m.boolToOnOff(m.burstSkipInvalidSegments)
+			hint = "skip invalid segments"
 		case optBurstMinDuration:
 			label = "Min Duration"
 			value = burstMinDurVal
@@ -2879,6 +3110,46 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Require baseline"
 			value = powerRequireBaselineVal
 			hint = "allow raw log power if OFF"
+		case optPowerSubtractEvoked:
+			label = "Subtract evoked"
+			value = m.boolToOnOff(m.powerSubtractEvoked)
+			hint = "induced power; CV-safe only with train_mask"
+		case optPowerMinTrialsPerCondition:
+			label = "Min trials/cond"
+			value = fmt.Sprintf("%d", m.powerMinTrialsPerCondition)
+			if m.editingNumber && m.isCurrentlyEditing(optPowerMinTrialsPerCondition) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum trials per condition"
+		case optPowerExcludeLineNoise:
+			label = "Exclude line noise"
+			value = m.boolToOnOff(m.powerExcludeLineNoise)
+			hint = "exclude line-noise bins"
+		case optPowerLineNoiseFreq:
+			label = "Line noise freq"
+			value = fmt.Sprintf("%.0f", m.powerLineNoiseFreq)
+			if m.editingNumber && m.isCurrentlyEditing(optPowerLineNoiseFreq) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "Hz (50 or 60)"
+		case optPowerLineNoiseWidthHz:
+			label = "Line noise width"
+			value = fmt.Sprintf("%.1f", m.powerLineNoiseWidthHz)
+			if m.editingNumber && m.isCurrentlyEditing(optPowerLineNoiseWidthHz) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "Hz bandwidth to exclude"
+		case optPowerLineNoiseHarmonics:
+			label = "Line noise harmonics"
+			value = fmt.Sprintf("%d", m.powerLineNoiseHarmonics)
+			if m.editingNumber && m.isCurrentlyEditing(optPowerLineNoiseHarmonics) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "number of harmonics"
+		case optPowerEmitDb:
+			label = "Emit dB"
+			value = m.boolToOnOff(m.powerEmitDb)
+			hint = "emit 10*log10 ratios"
 		case optPowerBaselineMode:
 			label = "Baseline mode"
 			value = powerBaselineVal
@@ -2965,6 +3236,21 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Skip invalid"
 			value = m.boolToOnOff(m.asymmetrySkipInvalidSegments)
 			hint = "skip invalid segments"
+		case optAsymmetryEmitActivationConvention:
+			label = "Emit activation"
+			value = m.boolToOnOff(m.asymmetryEmitActivationConvention)
+			hint = "(R-L)/(R+L) for activation bands"
+		case optAsymmetryActivationBands:
+			label = "Activation bands"
+			val := m.asymmetryActivationBandsSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(default: alpha)"
+			}
+			if m.editingText && m.editingTextField == textFieldAsymmetryActivationBands {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "e.g. alpha,beta"
 
 		// Ratios advanced options
 		case optRatiosMinSegmentSec:
@@ -2987,11 +3273,23 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			hint = "skip invalid segments"
 
 		// Spectral advanced options
+		case optSpectralIncludeLogRatios:
+			label = "Log ratios"
+			value = m.boolToOnOff(m.spectralIncludeLogRatios)
+			hint = "include log ratios"
 		case optSpectralPsdMethod:
 			label = "PSD method"
 			methods := []string{"multitaper", "welch"}
 			value = methods[m.spectralPsdMethod]
 			hint = "multitaper or welch"
+		case optSpectralPsdAdaptive:
+			label = "PSD adaptive"
+			value = m.boolToOnOff(m.spectralPsdAdaptive)
+			hint = "adaptive PSD settings"
+		case optSpectralMultitaperAdaptive:
+			label = "Multitaper adaptive"
+			value = m.boolToOnOff(m.spectralMultitaperAdaptive)
+			hint = "adaptive multitaper (if supported)"
 		case optSpectralFmin:
 			label = "Freq min"
 			value = fmt.Sprintf("%.1f Hz", m.spectralFmin)
@@ -3020,6 +3318,31 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "cycles at lowest freq"
+		case optSpectralExcludeLineNoise:
+			label = "Exclude line noise"
+			value = m.boolToOnOff(m.spectralExcludeLineNoise)
+			hint = "exclude line-noise bins"
+		case optSpectralLineNoiseFreq:
+			label = "Line noise freq"
+			value = fmt.Sprintf("%.0f", m.spectralLineNoiseFreq)
+			if m.editingNumber && m.isCurrentlyEditing(optSpectralLineNoiseFreq) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "Hz (50 or 60)"
+		case optSpectralLineNoiseWidthHz:
+			label = "Line noise width"
+			value = fmt.Sprintf("%.1f", m.spectralLineNoiseWidthHz)
+			if m.editingNumber && m.isCurrentlyEditing(optSpectralLineNoiseWidthHz) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "Hz bandwidth to exclude"
+		case optSpectralLineNoiseHarmonics:
+			label = "Line noise harmonics"
+			value = fmt.Sprintf("%d", m.spectralLineNoiseHarmonics)
+			if m.editingNumber && m.isCurrentlyEditing(optSpectralLineNoiseHarmonics) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "number of harmonics"
 
 		// Quality group header
 		case optFeatGroupQuality:
@@ -3183,6 +3506,47 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Min Epochs"
 			value = minEpochsVal
 			hint = "global minimum required"
+		case optFeatAnalysisMode:
+			label = "Analysis mode"
+			modes := []string{"group_stats", "trial_ml_safe"}
+			value = modes[m.featAnalysisMode]
+			hint = "group_stats / trial_ml_safe"
+		case optFeatComputeChangeScores:
+			label = "Change scores"
+			value = m.boolToOnOff(m.featComputeChangeScores)
+			hint = "add within-subject change columns"
+		case optFeatSaveTfrWithSidecar:
+			label = "Save TFR sidecar"
+			value = m.boolToOnOff(m.featSaveTfrWithSidecar)
+			hint = "write TFR arrays for inspection"
+		case optFeatNJobsBands:
+			label = "n_jobs (bands)"
+			value = fmt.Sprintf("%d", m.featNJobsBands)
+			if m.editingNumber && m.isCurrentlyEditing(optFeatNJobsBands) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "-1 = all cores"
+		case optFeatNJobsConnectivity:
+			label = "n_jobs (connectivity)"
+			value = fmt.Sprintf("%d", m.featNJobsConnectivity)
+			if m.editingNumber && m.isCurrentlyEditing(optFeatNJobsConnectivity) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "-1 = all cores"
+		case optFeatNJobsAperiodic:
+			label = "n_jobs (aperiodic)"
+			value = fmt.Sprintf("%d", m.featNJobsAperiodic)
+			if m.editingNumber && m.isCurrentlyEditing(optFeatNJobsAperiodic) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "-1 = all cores"
+		case optFeatNJobsComplexity:
+			label = "n_jobs (complexity)"
+			value = fmt.Sprintf("%d", m.featNJobsComplexity)
+			if m.editingNumber && m.isCurrentlyEditing(optFeatNJobsComplexity) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "-1 = all cores"
 
 		default:
 			label = "Unknown"
@@ -3352,6 +3716,49 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		if opt == optItpcConditionValues && m.expandedOption == expandedItpcConditionValues {
 			subIndent := "      " // 6 spaces for sub-items
 			vals := m.GetDiscoveredColumnValues(m.itpcConditionColumn)
+			for j, v := range vals {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isColumnValueSelected(v)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(v) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (Connectivity condition column)
+		if opt == optConnConditionColumn && m.expandedOption == expandedConnConditionColumn {
+			subIndent := "      " // 6 spaces for sub-items
+			for j, col := range m.availableColumns {
+				isSubFocused := j == m.subCursor
+				isSelected := m.connConditionColumn == col
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(col) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (Connectivity condition values)
+		if opt == optConnConditionValues && m.expandedOption == expandedConnConditionValues {
+			subIndent := "      " // 6 spaces for sub-items
+			vals := m.GetDiscoveredColumnValues(m.connConditionColumn)
 			for j, v := range vals {
 				isSubFocused := j == m.subCursor
 				isSelected := m.isColumnValueSelected(v)
@@ -3596,6 +4003,31 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "LOSO Stability", m.boolToOnOff(m.behaviorComputeLosoStability), "leave-one-out stability"
 		case optComputeBayesFactors:
 			return "Bayes Factors", m.boolToOnOff(m.behaviorComputeBayesFactors), "optional BF reporting"
+		case optFeatureQCEnabled:
+			return "Feature QC", m.boolToOnOff(m.featureQCEnabled), "pre-filter features (optional gating)"
+		case optFeatureQCMaxMissingPct:
+			if !m.featureQCEnabled {
+				return "QC Max Missing %", "N/A", "enable Feature QC"
+			}
+			val := fmt.Sprintf("%.2f", m.featureQCMaxMissingPct)
+			if m.editingNumber && m.isCurrentlyEditing(optFeatureQCMaxMissingPct) {
+				val = numberDisplay
+			}
+			return "QC Max Missing %", val, "fraction missing allowed"
+		case optFeatureQCMinVariance:
+			if !m.featureQCEnabled {
+				return "QC Min Variance", "N/A", "enable Feature QC"
+			}
+			val := fmt.Sprintf("%.2e", m.featureQCMinVariance)
+			if m.editingNumber && m.isCurrentlyEditing(optFeatureQCMinVariance) {
+				val = numberDisplay
+			}
+			return "QC Min Variance", val, "drop near-constant features"
+		case optFeatureQCCheckWithinRunVariance:
+			if !m.featureQCEnabled {
+				return "QC Within-Run Var", "N/A", "enable Feature QC"
+			}
+			return "QC Within-Run Var", m.boolToOnOff(m.featureQCCheckWithinRunVariance), "check per-run variance"
 
 		// Trial table
 		case optTrialTableFormat:
@@ -3606,6 +4038,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Trial Table Format", v, "parquet recommended"
 		case optTrialTableAddLagFeatures:
 			return "Lag/Delta Columns", m.boolToOnOff(m.trialTableAddLagFeatures), "prev_* and delta_*"
+		case optTrialOrderMaxMissingFraction:
+			if !m.controlTrialOrder {
+				return "Trial Order Max Missing", "N/A", "enable Control Trial Order"
+			}
+			val := fmt.Sprintf("%.2f", m.trialOrderMaxMissingFraction)
+			if m.editingNumber && m.isCurrentlyEditing(optTrialOrderMaxMissingFraction) {
+				val = numberDisplay
+			}
+			return "Trial Order Max Missing", val, "disable control if missing > threshold"
 
 		// Pain residual
 		case optPainResidualEnabled:
@@ -4176,6 +4617,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Target: pain_residual", m.boolToOnOff(m.correlationsTargetPainResidual), "include residual"
 		case optCorrelationsPreferPainResidual:
 			return "Prefer pain_residual", m.boolToOnOff(m.correlationsPreferPainResidual), "auto target selection"
+		case optCorrelationsTypes:
+			val := m.correlationsTypesSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(default: partial_cov_temp)"
+			}
+			if m.editingText && m.editingTextField == textFieldCorrelationsTypes {
+				val = textDisplay
+			}
+			return "Correlation Types", val, "comma-separated: raw,partial_cov,partial_temp,partial_cov_temp,run_mean"
 		case optCorrelationsUseCrossfitPainResidual:
 			return "Use pain_residual_cv", m.boolToOnOff(m.correlationsUseCrossfitResidual), "requires residual crossfit"
 		case optCorrelationsPrimaryUnit:
@@ -4206,6 +4656,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = "Yes"
 			}
 			return "Group Multilevel Correlations", val, "Space to toggle"
+		case optGroupLevelBlockPermutation:
+			if !m.isComputationSelected("multilevel_correlations") {
+				return "Block Permutation", "N/A", "enable Group Multilevel Correlations"
+			}
+			return "Block Permutation", m.boolToOnOff(m.groupLevelBlockPermutation), "block-restricted when available"
 
 		// Cluster
 		case optClusterThreshold:

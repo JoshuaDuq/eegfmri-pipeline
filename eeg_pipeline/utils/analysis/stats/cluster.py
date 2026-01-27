@@ -1254,26 +1254,33 @@ def _permute_indices_2d(
     n_samples: int,
     rng_seed: int,
     groups: Optional[np.ndarray],
+    *,
+    scheme: str = "shuffle",
 ) -> np.ndarray:
     """Generate permuted indices (stateless for parallel use)."""
     rng = np.random.default_rng(rng_seed)
-    if groups is None:
-        return rng.permutation(n_samples)
-    
-    permuted_indices = []
-    unique_groups = np.unique(groups)
-    for group in unique_groups:
-        group_indices = np.where(groups == group)[0]
-        permuted_group = rng.permutation(len(group_indices))
-        permuted_indices.extend(group_indices[permuted_group])
-    
-    return np.asarray(permuted_indices)
+    groups_array = np.asarray(groups) if groups is not None else None
+
+    # IMPORTANT scientific validity:
+    # In pain paradigms, trial order often carries autocorrelation (habituation/drift).
+    # Support circular-shift permutations (optionally within groups) to preserve
+    # serial dependence when requested.
+    from .permutation import permute_within_groups
+
+    return permute_within_groups(
+        n_samples,
+        rng,
+        groups=groups_array,
+        min_group_size=1,
+        scheme=scheme,
+    )
 
 
 def _single_permutation_threshold(
     perm_seed: int,
     n_samples: int,
     groups: Optional[np.ndarray],
+    scheme: str,
     informative_bins: List[Tuple[int, int]],
     bin_data: np.ndarray,
     y_array: np.ndarray,
@@ -1286,7 +1293,12 @@ def _single_permutation_threshold(
     
     Returns maximum absolute t-statistic across all bins for this permutation.
     """
-    permuted_indices = _permute_indices_2d(n_samples, perm_seed, groups)
+    permuted_indices = _permute_indices_2d(
+        n_samples,
+        perm_seed,
+        groups,
+        scheme=scheme,
+    )
     max_absolute_value = 0.0
     
     for frequency_idx, time_idx in informative_bins:
@@ -1314,6 +1326,7 @@ def _single_permutation_mass(
     perm_seed: int,
     n_samples: int,
     groups: Optional[np.ndarray],
+    scheme: str,
     informative_bins: List[Tuple[int, int]],
     bin_data: np.ndarray,
     y_array: np.ndarray,
@@ -1327,7 +1340,12 @@ def _single_permutation_mass(
     cluster_structure: Optional[np.ndarray],
 ) -> float:
     """Single permutation for max mass computation."""
-    permuted_indices = _permute_indices_2d(n_samples, perm_seed, groups)
+    permuted_indices = _permute_indices_2d(
+        n_samples,
+        perm_seed,
+        groups,
+        scheme=scheme,
+    )
     permuted_correlations = np.full(correlations_shape, np.nan)
     permuted_pvalues = np.full(correlations_shape, np.nan)
     
@@ -1547,6 +1565,7 @@ def _build_residual_cache(
 def _derive_cluster_forming_threshold(
     n_samples: int,
     groups: Optional[np.ndarray],
+    scheme: str,
     informative_bins: List[Tuple[int, int]],
     bin_data: np.ndarray,
     y_array: np.ndarray,
@@ -1567,6 +1586,7 @@ def _derive_cluster_forming_threshold(
         n_jobs,
         n_samples=n_samples,
         groups=groups,
+        scheme=scheme,
         informative_bins=informative_bins,
         bin_data=bin_data,
         y_array=y_array,
@@ -1598,6 +1618,8 @@ def compute_permutation_max_masses(
     groups: Optional[np.ndarray] = None,
     cluster_forming_threshold: Optional[float] = None,
     n_jobs: int = -1,
+    *,
+    scheme: str = "shuffle",
 ) -> Tuple[List[float], float]:
     """Compute permutation distribution of max cluster masses.
     
@@ -1609,6 +1631,10 @@ def compute_permutation_max_masses(
     n_jobs_actual = _determine_parallel_jobs(n_jobs)
     groups_array = np.asarray(groups) if groups is not None else None
     n_samples = len(y_array)
+
+    scheme = str(scheme or "shuffle").strip().lower()
+    if scheme not in {"shuffle", "circular_shift"}:
+        scheme = "shuffle"
     
     residual_cache: Dict[Tuple[int, int], Tuple[np.ndarray, np.ndarray, Dict[int, int]]] = {}
     covariate_count = 0
@@ -1628,6 +1654,7 @@ def compute_permutation_max_masses(
         cluster_forming_threshold = _derive_cluster_forming_threshold(
             n_samples,
             groups_array,
+            scheme,
             informative_bins,
             bin_data,
             y_array,
@@ -1649,6 +1676,7 @@ def compute_permutation_max_masses(
         n_jobs_actual,
         n_samples=n_samples,
         groups=groups_array,
+        scheme=scheme,
         informative_bins=informative_bins,
         bin_data=bin_data,
         y_array=y_array,
@@ -1728,6 +1756,9 @@ def compute_cluster_correction_2d(
     groups: Optional[np.ndarray] = None,
     cluster_forming_threshold: Optional[float] = None,
     n_jobs: int = -1,
+    *,
+    config: Optional[Any] = None,
+    scheme: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict[str, Any]], List[float], float]:
     """Full 2D cluster correction pipeline."""
     if not informative_bins:
@@ -1737,6 +1768,9 @@ def compute_cluster_correction_2d(
         default_threshold = float(cluster_forming_threshold or 0.0)
         return empty_labels, empty_pvalues, empty_mask, [], [], default_threshold
     
+    if scheme is None:
+        scheme = str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
+
     permutation_max_masses, derived_threshold = compute_permutation_max_masses(
         bin_data,
         informative_bins,
@@ -1752,6 +1786,7 @@ def compute_cluster_correction_2d(
         groups,
         cluster_forming_threshold,
         n_jobs,
+        scheme=scheme,
     )
     
     final_threshold = (

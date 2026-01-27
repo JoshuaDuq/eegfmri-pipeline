@@ -827,6 +827,199 @@ def _get_band_frequency_mask(tfr: Any, band: str, config: Any, logger: logging.L
 ###################################################################
 
 
+def _plot_psd_by_conditions(
+    tfr_epochs: Any,
+    conditions: List[Tuple[str, np.ndarray]],
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    roi_suffix: str = "",
+    roi_name: Optional[str] = None,
+) -> bool:
+    """Plot PSD by condition with uncertainty visualization and frequency band annotations.
+    
+    Computes PSD per trial, then averages across channels and time windows.
+    Shows mean ± SEM with shaded confidence intervals for scientific rigor.
+    Includes frequency band annotations and optional statistical comparison.
+    
+    Args:
+        tfr_epochs: EpochsTFR object
+        conditions: List of (label, mask) tuples
+        subject: Subject identifier
+        save_dir: Directory to save plots
+        logger: Logger instance
+        config: Configuration object
+    
+    Returns:
+        True if plot was created
+    
+    Raises:
+        ValueError: If insufficient conditions or no valid data
+    """
+    if len(conditions) < 1:
+        raise ValueError(
+            f"power_spectral_density requires at least 1 condition, got {len(conditions)}"
+        )
+    
+    plot_cfg = get_plot_config(config)
+    fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
+    fig, ax = plt.subplots(figsize=fig_size)
+    
+    active_window = _get_active_window(config)
+    tfr_baseline = _get_plotting_tfr_baseline_window(config)
+    
+    condition_colors = plt.cm.Set2(np.linspace(0.2, 0.8, len(conditions)))
+    
+    freq_bands = get_frequency_bands(config)
+    features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
+    
+    psd_data_by_condition = []
+    
+    for idx, (label, mask) in enumerate(conditions):
+        n_trials_cond = int(mask.sum())
+        if n_trials_cond < 1:
+            continue
+        
+        tfr_cond = tfr_epochs[mask]
+        if len(tfr_cond) == 0:
+            continue
+        
+        tfr_cond_avg = tfr_cond.average()
+        apply_baseline_and_crop(tfr_cond_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
+        tfr_cond_win = _crop_tfr_to_active(tfr_cond_avg, active_window, logger)
+        
+        if tfr_cond_win is None:
+            continue
+        
+        psd_mean = tfr_cond_win.data.mean(axis=(0, 2))
+        
+        if len(psd_mean) != len(tfr_cond_win.freqs):
+            logger.warning(f"Frequency dimension mismatch: {len(psd_mean)} vs {len(tfr_cond_win.freqs)}")
+            continue
+        
+        freqs = tfr_cond_win.freqs
+        
+        if len(tfr_cond) >= MIN_EPOCHS_FOR_SEM:
+            psd_per_trial = []
+            for trial_idx in range(len(tfr_cond)):
+                tfr_trial = tfr_cond[[trial_idx]]
+                tfr_trial_avg = tfr_trial.average()
+                apply_baseline_and_crop(tfr_trial_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
+                tfr_trial_win = _crop_tfr_to_active(tfr_trial_avg, active_window, logger)
+                if tfr_trial_win is not None:
+                    psd_trial = tfr_trial_win.data.mean(axis=(0, 2))
+                    if len(psd_trial) == len(freqs):
+                        psd_per_trial.append(psd_trial)
+            
+            if len(psd_per_trial) >= MIN_EPOCHS_FOR_SEM:
+                psd_per_trial = np.array(psd_per_trial)
+                psd_sem = psd_per_trial.std(axis=0, ddof=1) / np.sqrt(len(psd_per_trial))
+                ci_multiplier = 1.96
+                psd_ci_lower = psd_mean - ci_multiplier * psd_sem
+                psd_ci_upper = psd_mean + ci_multiplier * psd_sem
+            else:
+                psd_sem = np.zeros_like(psd_mean)
+                psd_ci_lower = psd_mean
+                psd_ci_upper = psd_mean
+        else:
+            psd_sem = np.zeros_like(psd_mean)
+            psd_ci_lower = psd_mean
+            psd_ci_upper = psd_mean
+        
+        psd_data_by_condition.append({
+            'label': label,
+            'freqs': freqs,
+            'mean': psd_mean,
+            'sem': psd_sem,
+            'ci_lower': psd_ci_lower,
+            'ci_upper': psd_ci_upper,
+            'n_trials': n_trials_cond,
+            'color': condition_colors[idx],
+        })
+    
+    if not psd_data_by_condition:
+        plt.close(fig)
+        raise ValueError(
+            "power_spectral_density plot failed: no conditions had valid trials. "
+            "Check that conditions have sufficient data."
+        )
+    
+    for psd_data in psd_data_by_condition:
+        has_uncertainty = np.any(psd_data['sem'] > 0)
+        
+        if has_uncertainty:
+            ax.fill_between(
+                psd_data['freqs'],
+                psd_data['ci_lower'],
+                psd_data['ci_upper'],
+                color=psd_data['color'],
+                alpha=0.15,
+                linewidth=0,
+                zorder=1,
+            )
+        
+        ax.plot(
+            psd_data['freqs'],
+            psd_data['mean'],
+            color=psd_data['color'],
+            linewidth=2.0,
+            label=f"{psd_data['label']} (n={psd_data['n_trials']})",
+            zorder=3,
+        )
+    
+    for band, (fmin, fmax) in features_freq_bands.items():
+        if fmin < psd_data_by_condition[0]['freqs'].max():
+            fmax_clipped = min(fmax, psd_data_by_condition[0]['freqs'].max())
+            ax.axvspan(fmin, fmax_clipped, alpha=0.06, color="0.6", linewidth=0, zorder=0)
+            mid = (fmin + fmax_clipped) / 2
+            if mid < psd_data_by_condition[0]['freqs'].max():
+                y_max = ax.get_ylim()[1]
+                ax.text(
+                    mid, y_max * 0.96, band[0].upper(),
+                    fontsize=8, ha="center", va="top", color="0.5", zorder=2,
+                    fontweight='medium'
+                )
+    
+    ax.axhline(0, color="0.4", linewidth=1.0, alpha=0.5, linestyle='--', zorder=2)
+    ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
+    ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
+    ax.legend(loc='best', fontsize=plot_cfg.font.medium, frameon=False, handlelength=1.5)
+    
+    if roi_name:
+        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+        title = f"Power Spectral Density (sub-{subject}) | ROI: {roi_display}"
+        fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.98)
+    
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
+    ax.grid(True, alpha=0.25, linestyle='-', linewidth=0.5, zorder=0)
+    ax.tick_params(labelsize=plot_cfg.font.small)
+    
+    footer_text = (
+        f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
+        f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}]s | "
+        f"n={len(tfr_epochs)} trials | 95% CI"
+    )
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small - 1,
+        color='0.5',
+        alpha=0.7
+    )
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 1])
+    output_path = save_dir / f'sub-{subject}_power_spectral_density_by_condition{roi_suffix}'
+    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
+    plt.close(fig)
+    logger.info(f"Saved PSD by condition (Induced) with uncertainty visualization{roi_suffix}")
+    return True
+
+
 def _plot_psd_by_temperature(
     tfr_epochs: Any,
     temps: pd.Series,
@@ -835,7 +1028,11 @@ def _plot_psd_by_temperature(
     logger: logging.Logger,
     config: Any
 ) -> bool:
-    """Plot PSD by temperature condition (internal helper).
+    """Plot PSD by temperature condition with uncertainty visualization and frequency band annotations.
+    
+    Computes PSD per trial, then averages across channels and time windows.
+    Shows mean ± SEM with shaded confidence intervals for scientific rigor.
+    Includes frequency band annotations.
     
     Args:
         tfr_epochs: EpochsTFR object
@@ -856,60 +1053,141 @@ def _plot_psd_by_temperature(
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
-    COLOR_MAP_START = 0.15
-    COLOR_MAP_END = 0.85
-    temp_colors = plt.cm.coolwarm(np.linspace(COLOR_MAP_START, COLOR_MAP_END, len(unique_temps)))
+    temp_colors = plt.cm.coolwarm(np.linspace(0.2, 0.8, len(unique_temps)))
     
     active_window = _get_active_window(config)
     tfr_baseline = _get_plotting_tfr_baseline_window(config)
     
-    trial_counts = []
+    freq_bands = get_frequency_bands(config)
+    features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
+    
+    psd_data_by_temp = []
+    
     for idx, temp in enumerate(unique_temps):
         temp_mask = (temps == temp).to_numpy()
         n_trials_temp = int(temp_mask.sum())
         if n_trials_temp < 1:
             continue
-        trial_counts.append(f"{temp:.0f}°C: n={n_trials_temp}")
-            
-        tfr_temp_avg = tfr_epochs[temp_mask].average()
+        
+        tfr_temp = tfr_epochs[temp_mask]
+        if len(tfr_temp) == 0:
+            continue
+        
+        tfr_temp_avg = tfr_temp.average()
         apply_baseline_and_crop(tfr_temp_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
         tfr_temp_win = _crop_tfr_to_active(tfr_temp_avg, active_window, logger)
         
         if tfr_temp_win is None:
             continue
-            
-        psd_avg = tfr_temp_win.data.mean(axis=(0, 2))
         
-        if len(psd_avg) != len(tfr_temp_win.freqs):
-            logger.warning(f"Frequency dimension mismatch: {len(psd_avg)} vs {len(tfr_temp_win.freqs)}")
+        psd_mean = tfr_temp_win.data.mean(axis=(0, 2))
+        
+        if len(psd_mean) != len(tfr_temp_win.freqs):
+            logger.warning(f"Frequency dimension mismatch: {len(psd_mean)} vs {len(tfr_temp_win.freqs)}")
             continue
+        
+        freqs = tfr_temp_win.freqs
+        
+        if len(tfr_temp) >= MIN_EPOCHS_FOR_SEM:
+            psd_per_trial = []
+            for trial_idx in range(len(tfr_temp)):
+                tfr_trial = tfr_temp[[trial_idx]]
+                tfr_trial_avg = tfr_trial.average()
+                apply_baseline_and_crop(tfr_trial_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
+                tfr_trial_win = _crop_tfr_to_active(tfr_trial_avg, active_window, logger)
+                if tfr_trial_win is not None:
+                    psd_trial = tfr_trial_win.data.mean(axis=(0, 2))
+                    if len(psd_trial) == len(freqs):
+                        psd_per_trial.append(psd_trial)
             
+            if len(psd_per_trial) >= MIN_EPOCHS_FOR_SEM:
+                psd_per_trial = np.array(psd_per_trial)
+                psd_sem = psd_per_trial.std(axis=0, ddof=1) / np.sqrt(len(psd_per_trial))
+                ci_multiplier = 1.96
+                psd_ci_lower = psd_mean - ci_multiplier * psd_sem
+                psd_ci_upper = psd_mean + ci_multiplier * psd_sem
+            else:
+                psd_sem = np.zeros_like(psd_mean)
+                psd_ci_lower = psd_mean
+                psd_ci_upper = psd_mean
+        else:
+            psd_sem = np.zeros_like(psd_mean)
+            psd_ci_lower = psd_mean
+            psd_ci_upper = psd_mean
+        
+        psd_data_by_temp.append({
+            'label': f'{temp:.0f}°C',
+            'freqs': freqs,
+            'mean': psd_mean,
+            'sem': psd_sem,
+            'ci_lower': psd_ci_lower,
+            'ci_upper': psd_ci_upper,
+            'n_trials': n_trials_temp,
+            'color': temp_colors[idx],
+        })
+    
+    if not psd_data_by_temp:
+        plt.close(fig)
+        return False
+    
+    for psd_data in psd_data_by_temp:
+        has_uncertainty = np.any(psd_data['sem'] > 0)
+        
+        if has_uncertainty:
+            ax.fill_between(
+                psd_data['freqs'],
+                psd_data['ci_lower'],
+                psd_data['ci_upper'],
+                color=psd_data['color'],
+                alpha=0.15,
+                linewidth=0,
+                zorder=1,
+            )
+        
         ax.plot(
-            tfr_temp_win.freqs, psd_avg,
-            color=temp_colors[idx], linewidth=1.5,
-            label=f'{temp:.0f}°C (n={n_trials_temp})', alpha=0.9
+            psd_data['freqs'],
+            psd_data['mean'],
+            color=psd_data['color'],
+            linewidth=2.0,
+            label=f"{psd_data['label']} (n={psd_data['n_trials']})",
+            zorder=3,
         )
     
-    ax.axhline(0, color=plot_cfg.style.colors.gray, 
-               linewidth=plot_cfg.style.line.width_standard, 
-               alpha=plot_cfg.style.line.alpha_dim, linestyle='--')
-    ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel)
-    ax.set_ylabel("Power spectral density (log10 ratio to baseline)", fontsize=plot_cfg.font.ylabel)
-    ax.legend(loc='upper left', fontsize=plot_cfg.font.title, frameon=False)
+    for band, (fmin, fmax) in features_freq_bands.items():
+        if fmin < psd_data_by_temp[0]['freqs'].max():
+            fmax_clipped = min(fmax, psd_data_by_temp[0]['freqs'].max())
+            ax.axvspan(fmin, fmax_clipped, alpha=0.06, color="0.6", linewidth=0, zorder=0)
+            mid = (fmin + fmax_clipped) / 2
+            if mid < psd_data_by_temp[0]['freqs'].max():
+                y_max = ax.get_ylim()[1]
+                ax.text(
+                    mid, y_max * 0.96, band[0].upper(),
+                    fontsize=8, ha="center", va="top", color="0.5", zorder=2,
+                    fontweight='medium'
+                )
+    
+    ax.axhline(0, color="0.4", linewidth=1.0, alpha=0.5, linestyle='--', zorder=2)
+    ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
+    ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
+    ax.legend(loc='best', fontsize=plot_cfg.font.medium, frameon=False, handlelength=1.5)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.grid(True, alpha=plot_cfg.style.alpha_grid, linestyle=':', linewidth=0.5)
+    ax.spines['left'].set_linewidth(0.8)
+    ax.spines['bottom'].set_linewidth(0.8)
+    ax.grid(True, alpha=0.25, linestyle='-', linewidth=0.5, zorder=0)
+    ax.tick_params(labelsize=plot_cfg.font.small)
     
     footer_text = (
         f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
-        f"Active: [{active_window[0]:.1f}, {active_window[1]:.1f}]s | "
-        f"Total: n={len(tfr_epochs)} trials"
+        f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}]s | "
+        f"n={len(tfr_epochs)} trials | 95% CI"
     )
     fig.text(
         0.99, 0.01, footer_text,
         ha='right', va='bottom',
-        fontsize=plot_cfg.font.small,
-        color='gray', alpha=0.8
+        fontsize=plot_cfg.font.small - 1,
+        color='0.5',
+        alpha=0.7
     )
     
     plt.tight_layout(rect=[0, 0.03, 1, 1])
@@ -917,7 +1195,7 @@ def _plot_psd_by_temperature(
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
-    logger.info("Saved PSD by temperature (Induced)")
+    logger.info("Saved PSD by temperature (Induced) with uncertainty visualization")
     return True
 
 
@@ -960,7 +1238,7 @@ def _plot_psd_overall(
     
     plot_cfg = get_plot_config(config)
     ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.medium)
-    ax.set_ylabel("log10(power/baseline)", fontsize=plot_cfg.font.medium)
+    ax.set_ylabel(r"$\log_{10}$(power/baseline)", fontsize=plot_cfg.font.medium)
     ax.tick_params(labelsize=plot_cfg.font.small)
     sns.despine(ax=ax, trim=True)
     
@@ -979,46 +1257,125 @@ def plot_power_spectral_density(
     events_df: Optional[pd.DataFrame] = None,
     config: Optional[Any] = None
 ) -> None:
-    """Plot power spectral density.
+    """Plot power spectral density by condition, one plot per ROI.
     
-    If events_df with temperature column is provided, plots by temperature.
-    Otherwise, plots overall induced PSD.
+    Requires condition selection to be configured via plotting.comparisons.
+    Creates one plot per ROI specified in the TUI.
+    No fallbacks - errors will surface if conditions cannot be extracted.
     
     Args:
         tfr: EpochsTFR object
         subject: Subject identifier
         save_dir: Directory to save plots
         logger: Logger instance
-        events_df: Optional events DataFrame with temperature column
-        config: Configuration object
+        events_df: Events DataFrame (required)
+        config: Configuration object (required)
+    
+    Raises:
+        ValueError: If events_df or config is missing, or if conditions cannot be extracted
     """
     _validate_epochs_tfr(tfr, "plot_power_spectral_density", logger)
     
-    active_window = _get_active_window(config)
-    tfr_baseline = _get_plotting_tfr_baseline_window(config)
+    if events_df is None or events_df.empty:
+        raise ValueError(
+            "plot_power_spectral_density requires events_df. "
+            "No fallback will be used."
+        )
     
-    if events_df is not None and not events_df.empty:
-        temp_col = None
-        if config is None:
-            logger.warning("Config is required to identify temperature column; skipping temperature-based PSD")
+    if config is None:
+        raise ValueError(
+            "plot_power_spectral_density requires config. "
+            "No fallback will be used."
+        )
+    
+    if len(tfr) != len(events_df):
+        raise ValueError(
+            f"TFR window ({len(tfr)} epochs) and events "
+            f"({len(events_df)} rows) length mismatch for subject {subject}"
+        )
+    
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
+    from eeg_pipeline.utils.formatting import sanitize_label
+    
+    rois = get_roi_definitions(config)
+    all_channels = tfr.ch_names
+    roi_names = _get_comparison_rois(config, rois)
+    
+    if logger:
+        logger.info(f"PSD plotting: ROIs={roi_names}")
+    
+    column = require_config_value(config, "plotting.comparisons.comparison_column")
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
+    
+    if not isinstance(values_spec, (list, tuple)) or len(values_spec) < 1:
+        raise ValueError(
+            "power_spectral_density requires plotting.comparisons.comparison_values with at least 1 value. "
+            "Configure via TUI plot-specific settings or CLI."
+        )
+    
+    if len(values_spec) == 1:
+        val = values_spec[0]
+        if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 1:
+            label = str(labels_spec[0]).strip()
         else:
-            temp_col = find_temperature_column_in_events(events_df, config)
-        if temp_col is not None:
-            temps = pd.to_numeric(events_df[temp_col], errors="coerce")
-            if len(tfr) != len(temps):
-                raise ValueError(
-                    f"TFR window ({len(tfr)} epochs) and events "
-                    f"({len(temps)} rows) length mismatch for subject {subject}"
-                )
-            if _plot_psd_by_temperature(tfr, temps, subject, save_dir, logger, config):
-                return
+            label = str(val)
+        
+        column_values = events_df[column]
+        try:
+            numeric_val = float(val)
+            mask = (pd.to_numeric(column_values, errors="coerce") == numeric_val).values
+        except (ValueError, TypeError):
+            val_str = str(val).strip().lower()
+            mask = (column_values.astype(str).str.strip().str.lower() == val_str).values
+        
+        if int(mask.sum()) == 0:
+            raise ValueError(
+                f"power_spectral_density: no trials found for value {val!r} in column {column!r}"
+            )
+        
+        conditions = [(label, mask)]
+    elif len(values_spec) == 2:
+        comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
+        if not comp_mask_info:
+            raise ValueError(
+                "power_spectral_density plot requested but could not resolve comparison masks. "
+                "Configure plotting.comparisons.comparison_column and comparison_values."
+            )
+        mask1, mask2, label1, label2 = comp_mask_info
+        conditions = [(label1, mask1), (label2, mask2)]
+    else:
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
+        if not multi_group_info:
+            raise ValueError(
+                "power_spectral_density plot requested but could not resolve multi-group masks. "
+                "Configure plotting.comparisons.comparison_column and comparison_values."
+            )
+        masks_dict, group_labels = multi_group_info
+        conditions = [(label, masks_dict[label]) for label in group_labels]
     
-    tfr_avg = tfr.copy().average()
-    apply_baseline_and_crop(tfr_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-    tfr_win = _crop_tfr_to_active(tfr_avg, active_window, logger)
-    
-    if tfr_win is not None:
-        _plot_psd_overall(tfr_win, subject, save_dir, logger, config)
+    for roi_name in roi_names:
+        if roi_name == "all":
+            roi_channels = all_channels
+        else:
+            roi_channels = get_roi_channels(rois[roi_name], all_channels)
+        
+        if not roi_channels:
+            if logger:
+                logger.warning(f"No channels found for ROI {roi_name}, skipping PSD plot")
+            continue
+        
+        tfr_roi = tfr.copy().pick_channels(roi_channels)
+        if len(tfr_roi.ch_names) == 0:
+            if logger:
+                logger.warning(f"No valid channels after filtering for ROI {roi_name}, skipping PSD plot")
+            continue
+        
+        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+        roi_suffix = f"_roi-{roi_safe}" if roi_safe else ""
+        
+        _plot_psd_by_conditions(tfr_roi, conditions, subject, save_dir, logger, config, roi_suffix=roi_suffix, roi_name=roi_name)
 
 
 def plot_cross_frequency_power_correlation(
@@ -1150,7 +1507,7 @@ def plot_cross_frequency_power_correlation(
     ax2.set_xticklabels([b.capitalize() for b in valid_bands], rotation=45, ha="right",
                         fontsize=plot_cfg.font.medium)
     ax2.set_yticklabels([b.capitalize() for b in valid_bands], fontsize=plot_cfg.font.medium)
-    ax2.set_title("Significance (-log₁₀ p)", fontsize=plot_cfg.font.title, fontweight="bold")
+    ax2.set_title(r"Significance ($-\log_{10}$ p)", fontsize=plot_cfg.font.title, fontweight="bold")
     
     P_VALUE_THRESHOLD_DISPLAY = 0.001
     LOG_PVAL_TEXT_THRESHOLD = 1.5
@@ -1178,7 +1535,7 @@ def plot_cross_frequency_power_correlation(
                     color=text_color, fontsize=plot_cfg.font.small - 1)
     
     cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8)
-    cbar2.set_label("-log₁₀(p)", fontsize=plot_cfg.font.label)
+    cbar2.set_label(r"$-\log_{10}$(p)", fontsize=plot_cfg.font.label)
     
     ax2.axhline(-0.5, color="gray", linewidth=0.5)
     ax2.axhline(n_bands - 0.5, color="gray", linewidth=0.5)
@@ -1214,9 +1571,10 @@ def plot_band_power_topomaps(
     segment: str,
     events_df: Optional[pd.DataFrame] = None,
 ) -> None:
-    """Band power topomaps showing spatial distribution per frequency band.
+    """Band power topomaps showing spatial distribution per frequency band, one plot per ROI.
     
     Creates MNE topomaps for each frequency band. Supports condition-based filtering.
+    Creates one plot per ROI specified in the TUI.
     
     Args:
         segment: Time window segment name (required, no fallback).
@@ -1232,6 +1590,14 @@ def plot_band_power_topomaps(
     
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.formatting import sanitize_label
+
+    rois = get_roi_definitions(config)
+    all_channels = epochs_info.ch_names
+    roi_names = _get_comparison_rois(config, rois)
+    
+    if logger:
+        logger.info(f"Topomap plotting: ROIs={roi_names}")
 
     compare_columns = bool(get_config_value(config, "plotting.comparisons.compare_columns", True))
     comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
@@ -1260,6 +1626,46 @@ def plot_band_power_topomaps(
         mask1, mask2, label1, label2 = comp_mask_info
         conditions = [(label1, mask1), (label2, mask2)]
     
+    plot_cfg = get_plot_config(config)
+    
+    for roi_name in roi_names:
+        if roi_name == "all":
+            roi_channels = all_channels
+        else:
+            roi_channels = get_roi_channels(rois[roi_name], all_channels)
+        
+        if not roi_channels:
+            if logger:
+                logger.warning(f"No channels found for ROI {roi_name}, skipping topomap plot")
+            continue
+        
+        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+        roi_suffix = f"_roi-{roi_safe}" if roi_safe else ""
+        
+        epochs_info_roi = mne.pick_info(epochs_info, mne.pick_channels(epochs_info.ch_names, include=roi_channels, ordered=True))
+        
+        _plot_band_power_topomaps_for_roi(
+            pow_df, epochs_info_roi, bands, subject, save_dir, logger, config,
+            segment, conditions, compare_columns, roi_name, roi_suffix, events_df
+        )
+
+
+def _plot_band_power_topomaps_for_roi(
+    pow_df: pd.DataFrame,
+    epochs_info: mne.Info,
+    bands: List[str],
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    segment: str,
+    conditions: Optional[List[Tuple[str, np.ndarray]]],
+    compare_columns: bool,
+    roi_name: str,
+    roi_suffix: str,
+    events_df: Optional[pd.DataFrame],
+) -> None:
+    """Internal helper to plot topomaps for a single ROI."""
     plot_cfg = get_plot_config(config)
     
     def extract_band_data(power_subset: pd.DataFrame) -> Tuple[List[str], Dict[str, Dict[str, float]], set]:
@@ -1404,7 +1810,8 @@ def plot_band_power_topomaps(
             band_color = get_band_color(band, config)
             ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
         
-        title_text = f"Band Power Topomaps - {segment.capitalize()} (sub-{subject})"
+        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+        title_text = f"Band Power Topomaps - {segment.capitalize()} (sub-{subject}) | ROI: {roi_display}"
         if condition_label:
             title_text += f" | {condition_label}"
         fig.suptitle(title_text, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
@@ -1416,9 +1823,9 @@ def plot_band_power_topomaps(
         
         if condition_label:
             condition_safe = sanitize_label(condition_label).lower().replace(" ", "_")
-            filename = f"sub-{subject}_band_power_topomaps_{segment}_{condition_safe}"
+            filename = f"sub-{subject}_band_power_topomaps_{segment}_{condition_safe}{roi_suffix}"
         else:
-            filename = f"sub-{subject}_band_power_topomaps_{segment}"
+            filename = f"sub-{subject}_band_power_topomaps_{segment}{roi_suffix}"
         
         save_fig(fig, save_dir / filename,
                  formats=plot_cfg.formats, dpi=plot_cfg.dpi,
@@ -1555,7 +1962,8 @@ def plot_band_power_topomaps(
 
         label1 = str(conditions[0][0])
         label2 = str(conditions[1][0])
-        title = f"Band Power Contrast - {segment.capitalize()} (sub-{subject}) | {label2} − {label1}"
+        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+        title = f"Band Power Contrast - {segment.capitalize()} (sub-{subject}) | ROI: {roi_display} | {label2} − {label1}"
         fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
         fig.text(
             0.5,
@@ -1570,7 +1978,7 @@ def plot_band_power_topomaps(
 
         label1_safe = sanitize_label(str(conditions[0][0])).lower().replace(" ", "_")
         label2_safe = sanitize_label(str(conditions[1][0])).lower().replace(" ", "_")
-        out = save_dir / f"sub-{subject}_band_power_topomaps_{segment}_contrast_{label2_safe}_minus_{label1_safe}"
+        out = save_dir / f"sub-{subject}_band_power_topomaps_{segment}_contrast_{label2_safe}_minus_{label1_safe}{roi_suffix}"
         save_fig(
             fig,
             out,

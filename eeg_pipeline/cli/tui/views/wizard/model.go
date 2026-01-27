@@ -472,6 +472,7 @@ const (
 	textFieldClusterConditionColumn
 	textFieldClusterConditionValues
 	textFieldCorrelationsTargetColumn
+	textFieldCorrelationsTypes
 	// Frequency band editing text fields
 	textFieldBandName
 	textFieldBandLowHz
@@ -481,11 +482,16 @@ const (
 	textFieldBurstBands
 	textFieldSpectralRatioPairs
 	textFieldAsymmetryChannelPairs
+	textFieldAsymmetryActivationBands
+	textFieldIAFRois
 	textFieldERPComponents
 	textFieldERDSBands
 	// ITPC condition-based text fields
 	textFieldItpcConditionColumn
 	textFieldItpcConditionValues
+	// Connectivity condition-based text fields
+	textFieldConnConditionColumn
+	textFieldConnConditionValues
 	// Source localization advanced config text fields
 	textFieldSourceLocSubject
 	textFieldSourceLocTrans
@@ -1176,20 +1182,33 @@ type Model struct {
 	erpLowpassHz          float64 // Low-pass filter before ERP peak detection (Hz)
 
 	// Burst configuration
-	burstThresholdZ          float64
-	burstThresholdMethod     int     // 0: percentile, 1: zscore, 2: mad
-	burstThresholdPercentile float64 // Percentile threshold (for percentile method)
-	burstMinDuration         int     // ms
-	burstMinCycles           float64 // Minimum oscillatory cycles for burst detection
-	burstBandsSpec           string  // e.g. beta,gamma
+	burstThresholdZ            float64
+	burstThresholdMethod       int     // 0: percentile, 1: zscore, 2: mad
+	burstThresholdPercentile   float64 // Percentile threshold (for percentile method)
+	burstThresholdReference    int     // 0: trial, 1: subject, 2: condition
+	burstMinTrialsPerCondition int     // used when threshold_reference="condition"
+	burstMinSegmentSec         float64 // Minimum segment duration (sec) before attempting bursts
+	burstSkipInvalidSegments   bool    // Skip invalid segments
+	burstMinDuration           int     // ms
+	burstMinCycles             float64 // Minimum oscillatory cycles for burst detection
+	burstBandsSpec             string  // e.g. beta,gamma
 
 	// Power configuration
-	powerBaselineMode    int // 0: logratio, 1: mean, 2: ratio, 3: zscore, 4: zlogratio
-	powerRequireBaseline bool
+	powerBaselineMode          int // 0: logratio, 1: mean, 2: ratio, 3: zscore, 4: zlogratio
+	powerRequireBaseline       bool
+	powerSubtractEvoked        bool
+	powerMinTrialsPerCondition int
+	powerExcludeLineNoise      bool
+	powerLineNoiseFreq         float64
+	powerLineNoiseWidthHz      float64
+	powerLineNoiseHarmonics    int
+	powerEmitDb                bool
 
 	// Spectral configuration
-	spectralEdgePercentile float64
-	spectralRatioPairsSpec string // e.g. theta:beta,alpha:beta
+	spectralEdgePercentile     float64
+	spectralRatioPairsSpec     string // e.g. theta:beta,alpha:beta
+	spectralPsdAdaptive        bool
+	spectralMultitaperAdaptive bool
 
 	// Aggregation
 	aggregationMethod int // 0: mean, 1: median
@@ -1197,15 +1216,26 @@ type Model struct {
 	// Generic
 	minEpochsForFeatures int
 
+	// Execution (features pipeline)
+	featAnalysisMode        int // 0: group_stats, 1: trial_ml_safe
+	featComputeChangeScores bool
+	featSaveTfrWithSidecar  bool
+	featNJobsBands          int
+	featNJobsConnectivity   int
+	featNJobsAperiodic      int
+	featNJobsComplexity     int
+
 	// Storage configuration
 	saveSubjectLevelFeatures bool
 	featAlsoSaveCsv          bool // Also save feature tables as CSV files
 
 	// Asymmetry
-	asymmetryChannelPairsSpec    string  // e.g. F3:F4,C3:C4
-	asymmetryMinSegmentSec       float64 // Minimum segment duration
-	asymmetryMinCyclesAtFmin     float64 // Minimum cycles at lowest frequency
-	asymmetrySkipInvalidSegments bool    // Skip invalid segments
+	asymmetryChannelPairsSpec         string  // e.g. F3:F4,C3:C4
+	asymmetryMinSegmentSec            float64 // Minimum segment duration
+	asymmetryMinCyclesAtFmin          float64 // Minimum cycles at lowest frequency
+	asymmetrySkipInvalidSegments      bool    // Skip invalid segments
+	asymmetryEmitActivationConvention bool
+	asymmetryActivationBandsSpec      string // e.g. alpha,beta
 
 	// Ratios
 	ratiosMinSegmentSec       float64 // Minimum segment duration
@@ -1261,12 +1291,16 @@ type Model struct {
 	bandEnvelopePadCycles float64 // Padding in cycles
 
 	// IAF (Individualized Alpha Frequency) options
-	iafEnabled        bool    // Use individualized bands
-	iafAlphaWidthHz   float64 // Alpha band width
-	iafSearchRangeMin float64 // IAF search range min
-	iafSearchRangeMax float64 // IAF search range max
-	iafMinProminence  float64 // IAF peak prominence threshold
-	iafRoisSpec       string  // IAF ROIs (comma-separated)
+	iafEnabled                  bool    // Use individualized bands
+	iafAlphaWidthHz             float64 // Alpha band width
+	iafSearchRangeMin           float64 // IAF search range min
+	iafSearchRangeMax           float64 // IAF search range max
+	iafMinProminence            float64 // IAF peak prominence threshold
+	iafRoisSpec                 string  // IAF ROIs (comma-separated)
+	iafMinCyclesAtFmin          float64 // Minimum cycles at iaf_search_range_hz[0]
+	iafMinBaselineSec           float64 // Additional absolute minimum baseline duration (sec)
+	iafAllowFullFallback        bool    // If baseline missing, allow full segment (not recommended)
+	iafAllowAllChannelsFallback bool    // If ROIs missing, allow all channels fallback
 
 	// Aperiodic advanced options
 	aperiodicModel              int     // 0: fixed
@@ -1285,6 +1319,8 @@ type Model struct {
 
 	// Connectivity advanced options
 	connGranularity            int     // 0: trial, 1: condition, 2: subject
+	connConditionColumn        string  // Condition grouping column (events.tsv)
+	connConditionValues        string  // Allowed condition values (comma/space-separated)
 	connMinEpochsPerGroup      int     // Minimum epochs per group
 	connMinCyclesPerBand       float64 // Minimum cycles per band
 	connWarnNoSpatialTransform bool    // Warn if no spatial transform
@@ -1476,7 +1512,16 @@ type Model struct {
 	trialTableFormat         int // 0=parquet, 1=tsv
 	trialTableAddLagFeatures bool
 
+	// Trial order validation (used when controlTrialOrder=true)
+	trialOrderMaxMissingFraction float64
+
 	featureSummariesEnabled bool
+
+	// Feature QC (pre-statistics gating)
+	featureQCEnabled                bool
+	featureQCMaxMissingPct          float64
+	featureQCMinVariance            float64
+	featureQCCheckWithinRunVariance bool
 
 	painResidualEnabled                 bool
 	painResidualMethod                  int // 0=spline, 1=poly
@@ -1564,11 +1609,13 @@ type Model struct {
 	correlationsTargetRating        bool
 	correlationsTargetTemperature   bool
 	correlationsTargetPainResidual  bool
+	correlationsTypesSpec           string // Comma-separated list (e.g., "partial_cov_temp,raw")
 	correlationsPreferPainResidual  bool
 	correlationsUseCrossfitResidual bool
 	correlationsPrimaryUnit         int // 0=trial, 1=run_mean
 	correlationsPermutationPrimary  bool
 	correlationsTargetColumn        string // Custom target column from events (dropdown)
+	groupLevelBlockPermutation      bool   // Use block-restricted permutations when block/run is available
 
 	// Pain sensitivity
 
@@ -1869,8 +1916,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		pacMinEpochs: 2,
 		pacPairsSpec: "theta:gamma,alpha:gamma",
 		// Aperiodic defaults
-		aperiodicFmin:      2.0,
-		aperiodicFmax:      40.0,
+		aperiodicFmin:      1.0,
+		aperiodicFmax:      80.0,
 		aperiodicPeakZ:     3.5,
 		aperiodicMinR2:     0.6,
 		aperiodicMinPoints: 5,
@@ -1885,27 +1932,40 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		erpPeakProminenceUv:   0.0, // 0 = use default from config
 		erpLowpassHz:          30.0,
 		// Burst defaults
-		burstThresholdZ:          2.0,
-		burstThresholdMethod:     0, // 0: percentile
-		burstThresholdPercentile: 95.0,
-		burstMinDuration:         50,
-		burstMinCycles:           3.0,
-		burstBandsSpec:           "beta,gamma",
+		burstThresholdZ:            2.0,
+		burstThresholdMethod:       0, // 0: percentile
+		burstThresholdPercentile:   95.0,
+		burstThresholdReference:    0, // 0: trial
+		burstMinTrialsPerCondition: 10,
+		burstMinSegmentSec:         2.0,
+		burstSkipInvalidSegments:   true,
+		burstMinDuration:           50,
+		burstMinCycles:             3.0,
+		burstBandsSpec:             "beta,gamma",
 		// Power defaults
-		powerBaselineMode:    0,
-		powerRequireBaseline: true,
+		powerBaselineMode:          0,
+		powerRequireBaseline:       true,
+		powerSubtractEvoked:        true,
+		powerMinTrialsPerCondition: 2,
+		powerExcludeLineNoise:      true,
+		powerLineNoiseFreq:         60.0,
+		powerLineNoiseWidthHz:      1.0,
+		powerLineNoiseHarmonics:    3,
+		powerEmitDb:                true,
 		// Spectral defaults
-		spectralEdgePercentile: 0.95,
-		spectralRatioPairsSpec: "theta:beta,theta:alpha,alpha:beta,delta:alpha,delta:theta",
+		spectralEdgePercentile:     0.95,
+		spectralRatioPairsSpec:     "theta:beta,theta:alpha,alpha:beta,delta:alpha,delta:theta",
+		spectralPsdAdaptive:        false,
+		spectralMultitaperAdaptive: false,
 		// Connectivity defaults
 		connOutputLevel:  0,
-		connGraphMetrics: true,
+		connGraphMetrics: false,
 		connGraphProp:    0.1,
 		connWindowLen:    1.0,
 		connWindowStep:   0.5,
 		connAECMode:      0,
 		// Scientific validity defaults (new)
-		itpcMethod:                0,    // 0: global (default)
+		itpcMethod:                1,    // 1: fold_global (CV-safe default)
 		itpcConditionColumn:       "",   // Empty = not using condition-based ITPC
 		itpcConditionValues:       "",   // Empty = all unique values
 		itpcMinTrialsPerCondition: 10,   // Minimum trials per condition
@@ -1925,7 +1985,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		spectralFmin:               1.0,
 		spectralFmax:               80.0,
 		spectralExcludeLineNoise:   true,
-		spectralLineNoiseFreq:      50.0,
+		spectralLineNoiseFreq:      60.0,
 		spectralLineNoiseWidthHz:   1.0,
 		spectralLineNoiseHarmonics: 3,
 		spectralMinSegmentSec:      2.0,
@@ -1936,12 +1996,16 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		bandEnvelopePadCycles: 3.0,
 
 		// IAF defaults
-		iafEnabled:        false,
-		iafAlphaWidthHz:   2.0,
-		iafSearchRangeMin: 7.0,
-		iafSearchRangeMax: 13.0,
-		iafMinProminence:  0.05,
-		iafRoisSpec:       "ParOccipital_Midline,ParOccipital_Left,ParOccipital_Right",
+		iafEnabled:                  false,
+		iafAlphaWidthHz:             2.0,
+		iafSearchRangeMin:           7.0,
+		iafSearchRangeMax:           13.0,
+		iafMinProminence:            0.05,
+		iafRoisSpec:                 "ParOccipital_Midline,ParOccipital_Left,ParOccipital_Right",
+		iafMinCyclesAtFmin:          5.0,
+		iafMinBaselineSec:           0.0,
+		iafAllowFullFallback:        false,
+		iafAllowAllChannelsFallback: false,
 
 		// Aperiodic advanced defaults
 		aperiodicModel:              0,   // 0: fixed
@@ -1949,7 +2013,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		aperiodicPsdBandwidth:       0.0, // 0 = use default
 		aperiodicMaxRms:             0.0, // 0 = no limit
 		aperiodicExcludeLineNoise:   true,
-		aperiodicLineNoiseFreq:      50.0,
+		aperiodicLineNoiseFreq:      60.0,
 		aperiodicLineNoiseWidthHz:   1.0,
 		aperiodicLineNoiseHarmonics: 3,
 
@@ -1960,6 +2024,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// Connectivity advanced defaults
 		connGranularity:            0, // 0: trial
+		connConditionColumn:        "",
+		connConditionValues:        "",
 		connMinEpochsPerGroup:      5,
 		connMinCyclesPerBand:       3.0,
 		connWarnNoSpatialTransform: true,
@@ -2042,7 +2108,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		pacMaxHarmonic:         6,
 		pacHarmonicToleranceHz: 1.0,
 		pacRandomSeed:          0,
-		pacComputeWaveformQC:   false,
+		pacComputeWaveformQC:   true,
 		pacWaveformOffsetMs:    5.0,
 
 		// Complexity advanced defaults
@@ -2088,23 +2154,32 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// Validation & Generic
 		minEpochsForFeatures:     10,
+		featAnalysisMode:         0,
+		featComputeChangeScores:  true,
+		featSaveTfrWithSidecar:   false,
+		featNJobsBands:           -1,
+		featNJobsConnectivity:    -1,
+		featNJobsAperiodic:       -1,
+		featNJobsComplexity:      -1,
 		featAlsoSaveCsv:          false,
 		saveSubjectLevelFeatures: true,
 
 		// Asymmetry defaults
-		asymmetryChannelPairsSpec:    "",
-		asymmetryMinSegmentSec:       0.5,
-		asymmetryMinCyclesAtFmin:     3.0,
-		asymmetrySkipInvalidSegments: true,
+		asymmetryChannelPairsSpec:         "F3:F4,F7:F8,C3:C4,P3:P4,O1:O2",
+		asymmetryMinSegmentSec:            1.0,
+		asymmetryMinCyclesAtFmin:          3.0,
+		asymmetrySkipInvalidSegments:      true,
+		asymmetryEmitActivationConvention: false,
+		asymmetryActivationBandsSpec:      "alpha",
 
 		// Ratios defaults
-		ratiosMinSegmentSec:       0.5,
+		ratiosMinSegmentSec:       1.0,
 		ratiosMinCyclesAtFmin:     3.0,
 		ratiosSkipInvalidSegments: true,
 
 		// Quality line noise defaults
 		qualityLineNoiseFreq:      60.0,
-		qualityLineNoiseWidthHz:   2.0,
+		qualityLineNoiseWidthHz:   1.0,
 		qualityLineNoiseHarmonics: 3,
 		// Behavior defaults
 		correlationMethod:     "spearman",
@@ -2127,10 +2202,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		runAdjustmentIncludeInCorrelations: true,
 		runAdjustmentMaxDummies:            20,
 
-		trialTableFormat:         1,
-		trialTableAddLagFeatures: true,
+		trialTableFormat:             1,
+		trialTableAddLagFeatures:     true,
+		trialOrderMaxMissingFraction: 0.1,
 
-		featureSummariesEnabled: true,
+		featureSummariesEnabled:         true,
+		featureQCEnabled:                false,
+		featureQCMaxMissingPct:          0.2,
+		featureQCMinVariance:            1e-10,
+		featureQCCheckWithinRunVariance: true,
 
 		painResidualEnabled:                 true,
 		painResidualMethod:                  0,
@@ -2210,10 +2290,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		correlationsTargetRating:        true,
 		correlationsTargetTemperature:   true,
 		correlationsTargetPainResidual:  true,
+		correlationsTypesSpec:           "partial_cov_temp",
 		correlationsPreferPainResidual:  true,
 		correlationsUseCrossfitResidual: false,
 		correlationsPrimaryUnit:         0,
 		correlationsPermutationPrimary:  false,
+		groupLevelBlockPermutation:      true,
 
 		reportTopN:                     15,
 		temporalResolutionMs:           50,
@@ -2387,6 +2469,20 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		fmriRawDcm2niixArgs:     "",
 	}
 
+	// Align default measure selections with eeg_config.yaml.
+	// - feature_engineering.connectivity.measures: ["wpli2_debiased", "aec"]
+	// - feature_engineering.directedconnectivity: enable_psi=true, enable_dtf=false, enable_pdc=false
+	for i, measure := range connectivityMeasures {
+		if measure.Key == "wpli2_debiased" || measure.Key == "aec" {
+			m.connectivityMeasures[i] = true
+		}
+	}
+	for i, measure := range directedConnectivityMeasures {
+		if measure.Key == "psi" {
+			m.directedConnMeasures[i] = true
+		}
+	}
+
 	// Time ranges
 	m.TimeRanges = []types.TimeRange{}
 	m.editingRangeIdx = noRangeEditing
@@ -2448,17 +2544,17 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Default selections organized by analysis purpose
 		defaultComps := map[string]bool{
 			// Data Preparation
-			"trial_table":   true,
-			"lag_features":  true,
-			"pain_residual": true,
+			"trial_table":   false,
+			"lag_features":  false,
+			"pain_residual": false,
 
 			// Core Analyses
-			"correlations":            true,
+			"correlations":            false,
 			"multilevel_correlations": false,
 			"regression":              false,
-			"condition":               true,
+			"condition":               false,
 			"temporal":                false,
-			"pain_sensitivity":        true,
+			"pain_sensitivity":        false,
 			"cluster":                 false,
 
 			// Advanced/Causal Analyses
@@ -2467,9 +2563,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"mixed_effects": false,
 
 			// Quality & Validation
-			"stability":  true,
-			"validation": true,
-			"report":     true,
+			"stability":  false,
+			"validation": false,
+			"report":     false,
 		}
 		for i, c := range behaviorComputations {
 			m.computationSelected[i] = defaultComps[c.Key]
@@ -3747,12 +3843,22 @@ func (m *Model) SetTrialTableDiscoveryError(err error) {
 	m.trialTableDiscoveryDone = true
 }
 
-// GetDiscoveredColumnValues returns the unique values for a column
+// GetDiscoveredColumnValues returns the unique values for a column.
+// Checks primary discovered columns first, then trial table columns as fallback.
 func (m Model) GetDiscoveredColumnValues(column string) []string {
-	if m.discoveredColumnValues == nil {
-		return nil
+	// First check the primary discovery source
+	if m.discoveredColumnValues != nil {
+		if vals, ok := m.discoveredColumnValues[column]; ok && len(vals) > 0 {
+			return vals
+		}
 	}
-	return m.discoveredColumnValues[column]
+	// Fallback to trial table values (in case column came from trial table discovery)
+	if m.trialTableColumnValues != nil {
+		if vals, ok := m.trialTableColumnValues[column]; ok && len(vals) > 0 {
+			return vals
+		}
+	}
+	return nil
 }
 
 // SetConditionEffectsColumns sets the columns, values, and windows discovered from condition effects files
@@ -3900,13 +4006,18 @@ func detectFeatureCategoriesFromColumns(columns []string) []string {
 // If featureGroup is provided, returns only windows for that feature group.
 func (m Model) GetPlottingComparisonWindows(featureGroup ...string) []string {
 	if len(featureGroup) > 0 && featureGroup[0] != "" {
-		if m.availableWindowsByFeature == nil {
-			return []string{}
+		// Prefer feature-specific windows (more accurate), but fall back to the global
+		// discovered windows list so selection dropdowns still work even when the
+		// executor didn't provide per-feature windows.
+		//
+		// This is a UI convenience fallback only; downstream plotting code will still
+		// validate window availability when reading feature files.
+		if m.availableWindowsByFeature != nil {
+			if windows, ok := m.availableWindowsByFeature[featureGroup[0]]; ok && len(windows) > 0 {
+				return windows
+			}
 		}
-		if windows, ok := m.availableWindowsByFeature[featureGroup[0]]; ok {
-			return windows
-		}
-		return []string{}
+		return m.availableWindows
 	}
 	return m.availableWindows
 }
@@ -4028,6 +4139,8 @@ func (m Model) getExpandedListLength() int {
 		return len(directedConnectivityMeasures)
 	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
 		return len(m.availableColumns)
+	case expandedConnConditionColumn:
+		return len(m.availableColumns)
 	case expandedConditionCompareValues:
 		if m.conditionCompareColumn == "" {
 			return 0
@@ -4086,6 +4199,11 @@ func (m Model) getExpandedListLength() int {
 		return len(m.availableColumns) + 1 // +1 for "(default)" option
 	case expandedItpcConditionColumn:
 		return len(m.availableColumns)
+	case expandedConnConditionValues:
+		if m.connConditionColumn == "" {
+			return 0
+		}
+		return len(m.GetDiscoveredColumnValues(m.connConditionColumn))
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
 		return len(m.fmriDiscoveredColumns)
 	case expandedFmriCondAValue:
@@ -4105,6 +4223,8 @@ func (m Model) getExpandedListLength() int {
 		return len(behaviorScatterAggregationModes)
 	case expandedBehaviorScatterSegment:
 		return len(m.GetPlottingComparisonWindows())
+	case expandedTemporalTopomapsFeatureDir:
+		return len(m.temporalTopomapsStatsFeatureFolders)
 	}
 	return 0
 }
@@ -4125,6 +4245,8 @@ func (m Model) getExpandedListItems() []string {
 		}
 		return items
 	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
+		return m.availableColumns
+	case expandedConnConditionColumn:
 		return m.availableColumns
 	case expandedConditionCompareValues:
 		if m.conditionCompareColumn == "" {
@@ -4195,6 +4317,11 @@ func (m Model) getExpandedListItems() []string {
 			return nil
 		}
 		return m.GetDiscoveredColumnValues(m.itpcConditionColumn)
+	case expandedConnConditionValues:
+		if m.connConditionColumn == "" {
+			return nil
+		}
+		return m.GetDiscoveredColumnValues(m.connConditionColumn)
 	case expandedBehaviorScatterFeatures:
 		return behaviorScatterFeatureTypes
 	case expandedBehaviorScatterColumns:
@@ -4258,6 +4385,8 @@ func (m Model) isColumnValueSelected(value string) bool {
 		}
 	case expandedItpcConditionValues:
 		selectedValues = m.itpcConditionValues
+	case expandedConnConditionValues:
+		selectedValues = m.connConditionValues
 	case expandedBehaviorScatterFeatures:
 		if m.editingPlotID != "" {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
@@ -4464,6 +4593,12 @@ func (m *Model) handleExpandedListToggle() {
 		m.itpcConditionColumn = selectedItem
 		m.itpcConditionValues = "" // Reset values when column changes
 		m.expandedOption = expandedNone
+		m.subCursor = 0
+	case expandedConnConditionColumn:
+		m.connConditionColumn = selectedItem
+		m.connConditionValues = "" // Reset values when column changes
+		m.expandedOption = expandedNone
+		m.subCursor = 0
 	case expandedFmriCondAColumn:
 		m.sourceLocFmriCondAColumn = selectedItem
 		m.sourceLocFmriCondAValue = "" // Reset value when column changes
@@ -4485,6 +4620,8 @@ func (m *Model) handleExpandedListToggle() {
 
 	case expandedItpcConditionValues:
 		m.toggleColumnValue(selectedItem, &m.itpcConditionValues)
+	case expandedConnConditionValues:
+		m.toggleColumnValue(selectedItem, &m.connConditionValues)
 
 	case expandedBehaviorScatterFeatures:
 		if m.editingPlotID != "" {
@@ -4564,6 +4701,8 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optTemporalTargetColumn
 	case expandedItpcConditionColumn:
 		return opt == optItpcConditionColumn
+	case expandedConnConditionColumn:
+		return opt == optConnConditionColumn
 	case expandedFmriCondAColumn:
 		return opt == optSourceLocFmriCondAColumn
 	case expandedFmriCondAValue:
@@ -4574,6 +4713,8 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optSourceLocFmriCondBValue
 	case expandedItpcConditionValues:
 		return opt == optItpcConditionValues
+	case expandedConnConditionValues:
+		return opt == optConnConditionValues
 	}
 	return false
 }
@@ -4609,6 +4750,8 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.temporalTargetColumn == item
 	case expandedItpcConditionColumn:
 		return m.itpcConditionColumn == item
+	case expandedConnConditionColumn:
+		return m.connConditionColumn == item
 	case expandedFmriCondAColumn:
 		return m.sourceLocFmriCondAColumn == item
 	case expandedFmriCondAValue:
@@ -4618,7 +4761,7 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 	case expandedFmriCondBValue:
 		return m.sourceLocFmriCondBValue == item
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
-		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues:
+		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues:
 		return m.isColumnValueSelected(item)
 	case expandedBehaviorScatterSegment:
 		// Check plot-specific config
@@ -4829,10 +4972,16 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.clusterConditionValues
 	case textFieldCorrelationsTargetColumn:
 		return m.correlationsTargetColumn
+	case textFieldCorrelationsTypes:
+		return m.correlationsTypesSpec
 	case textFieldItpcConditionColumn:
 		return m.itpcConditionColumn
 	case textFieldItpcConditionValues:
 		return m.itpcConditionValues
+	case textFieldConnConditionColumn:
+		return m.connConditionColumn
+	case textFieldConnConditionValues:
+		return m.connConditionValues
 	case textFieldPACPairs:
 		return m.pacPairsSpec
 	case textFieldBurstBands:
@@ -4843,6 +4992,10 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.spectralRatioPairsSpec
 	case textFieldAsymmetryChannelPairs:
 		return m.asymmetryChannelPairsSpec
+	case textFieldAsymmetryActivationBands:
+		return m.asymmetryActivationBandsSpec
+	case textFieldIAFRois:
+		return m.iafRoisSpec
 	case textFieldERPComponents:
 		return m.erpComponentsSpec
 	case textFieldSourceLocSubject:
@@ -5368,10 +5521,16 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.clusterConditionValues = strings.TrimSpace(value)
 	case textFieldCorrelationsTargetColumn:
 		m.correlationsTargetColumn = strings.TrimSpace(value)
+	case textFieldCorrelationsTypes:
+		m.correlationsTypesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldItpcConditionColumn:
 		m.itpcConditionColumn = strings.TrimSpace(value)
 	case textFieldItpcConditionValues:
 		m.itpcConditionValues = strings.TrimSpace(value)
+	case textFieldConnConditionColumn:
+		m.connConditionColumn = strings.TrimSpace(value)
+	case textFieldConnConditionValues:
+		m.connConditionValues = strings.TrimSpace(value)
 	case textFieldPACPairs:
 		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldBurstBands:
@@ -5382,6 +5541,10 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.spectralRatioPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldAsymmetryChannelPairs:
 		m.asymmetryChannelPairsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldAsymmetryActivationBands:
+		m.asymmetryActivationBandsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldIAFRois:
+		m.iafRoisSpec = strings.Join(strings.Fields(value), "")
 	case textFieldERPComponents:
 		m.erpComponentsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldSourceLocSubject:
@@ -5739,6 +5902,10 @@ const (
 	optAperiodicLineNoiseFreq
 	optAperiodicLineNoiseWidthHz
 	optAperiodicLineNoiseHarmonics
+	optAperiodicMinSegmentSec
+	optAperiodicModel
+	optAperiodicPsdMethod
+	optAperiodicExcludeLineNoise
 	optPEOrder
 	optPEDelay
 	optComplexitySignalBasis
@@ -5748,6 +5915,10 @@ const (
 	optBurstThresholdMethod
 	optBurstThresholdPercentile
 	optBurstThreshold
+	optBurstThresholdReference
+	optBurstMinTrialsPerCondition
+	optBurstMinSegmentSec
+	optBurstSkipInvalidSegments
 	optBurstMinDuration
 	optBurstMinCycles
 	optBurstBands
@@ -5759,12 +5930,23 @@ const (
 	optERPLowpassHz
 	optPowerBaselineMode
 	optPowerRequireBaseline
+	optPowerSubtractEvoked
+	optPowerMinTrialsPerCondition
+	optPowerExcludeLineNoise
+	optPowerLineNoiseFreq
+	optPowerLineNoiseWidthHz
+	optPowerLineNoiseHarmonics
+	optPowerEmitDb
 	optSpectralEdge
 	optSpectralRatioPairs
+	optSpectralIncludeLogRatios
+	optSpectralExcludeLineNoise
 	optSpectralLineNoiseFreq
 	optSpectralLineNoiseWidthHz
 	optSpectralLineNoiseHarmonics
 	optSpectralPsdMethod
+	optSpectralPsdAdaptive
+	optSpectralMultitaperAdaptive
 	optSpectralFmin
 	optSpectralFmax
 	optSpectralMinSegmentSec
@@ -5774,6 +5956,8 @@ const (
 	optAsymmetryMinSegmentSec
 	optAsymmetryMinCyclesAtFmin
 	optAsymmetrySkipInvalidSegments
+	optAsymmetryEmitActivationConvention
+	optAsymmetryActivationBands
 	// Ratios options
 	optRatiosMinSegmentSec
 	optRatiosMinCyclesAtFmin
@@ -5805,6 +5989,16 @@ const (
 	optConnWindowLen
 	optConnWindowStep
 	optConnAECMode
+	optConnAECOutput
+	optConnForceWithinEpochML
+	optConnGranularity
+	optConnConditionColumn
+	optConnConditionValues
+	optConnMinEpochsPerGroup
+	optConnMinCyclesPerBand
+	optConnWarnNoSpatialTransform
+	optConnPhaseEstimator
+	optConnMinSegmentSec
 	// Directed connectivity options (PSI, DTF, PDC)
 	optDirectedConnMeasures
 	optDirectedConnOutputLevel
@@ -5816,6 +6010,13 @@ const (
 	optSpatialTransformLambda2
 	optSpatialTransformStiffness
 	optMinEpochs
+	optFeatAnalysisMode
+	optFeatComputeChangeScores
+	optFeatSaveTfrWithSidecar
+	optFeatNJobsBands
+	optFeatNJobsConnectivity
+	optFeatNJobsAperiodic
+	optFeatNJobsComplexity
 	// Source localization options (LCMV, eLORETA)
 	optSourceLocMode
 	optSourceLocMethod
@@ -5872,6 +6073,8 @@ const (
 	optSourceLocFmriWindowBTmax
 	// ITPC options (condition-based)
 	optItpcMethod
+	optItpcAllowUnsafeLoo
+	optItpcBaselineCorrection
 	optItpcConditionColumn
 	optItpcConditionValues
 	optItpcMinTrialsPerCondition
@@ -5921,7 +6124,12 @@ const (
 	// Behavior options - Trial table / residual
 	optTrialTableFormat
 	optTrialTableAddLagFeatures
+	optTrialOrderMaxMissingFraction
 	optFeatureSummariesEnabled
+	optFeatureQCEnabled
+	optFeatureQCMaxMissingPct
+	optFeatureQCMinVariance
+	optFeatureQCCheckWithinRunVariance
 	optPainResidualEnabled
 	optPainResidualMethod
 	optPainResidualPolyDegree
@@ -6008,12 +6216,14 @@ const (
 	optCorrelationsTargetRating
 	optCorrelationsTargetTemperature
 	optCorrelationsTargetPainResidual
+	optCorrelationsTypes
 	optCorrelationsPreferPainResidual
 	optCorrelationsUseCrossfitPainResidual
 	optCorrelationsMultilevel
 	optCorrelationsPrimaryUnit
 	optCorrelationsPermutationPrimary
 	optCorrelationsTargetColumn
+	optGroupLevelBlockPermutation
 	// Behavior options - Pain sensitivity / temporal
 	optTemporalResolutionMs
 	optTemporalTimeMinMs
@@ -6339,6 +6549,19 @@ const (
 	optTfrMinCycles
 	optTfrNCyclesFactor
 	optTfrWorkers
+	// Band envelope + IAF (features pipeline)
+	optBandEnvelopePadSec
+	optBandEnvelopePadCycles
+	optIAFEnabled
+	optIAFAlphaWidthHz
+	optIAFSearchRangeMin
+	optIAFSearchRangeMax
+	optIAFMinProminence
+	optIAFRois
+	optIAFMinCyclesAtFmin
+	optIAFMinBaselineSec
+	optIAFAllowFullFallback
+	optIAFAllowAllChannelsFallback
 	// Machine Learning model hyperparameters
 	optElasticNetAlphaGrid
 	optElasticNetL1RatioGrid
@@ -6429,6 +6652,8 @@ const (
 	expandedBehaviorScatterSegment     = 24
 	expandedTemporalTargetColumn       = 25
 	expandedTemporalTopomapsFeatureDir = 26
+	expandedConnConditionColumn        = 27
+	expandedConnConditionValues        = 28
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -6439,7 +6664,25 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("connectivity") {
 		options = append(options, optFeatGroupConnectivity)
 		if m.featGroupConnectivityExpanded {
-			options = append(options, optConnectivity, optConnOutputLevel, optConnGraphMetrics, optConnGraphProp, optConnWindowLen, optConnWindowStep, optConnAECMode)
+			options = append(options, optConnectivity, optConnOutputLevel, optConnGranularity)
+			if m.connGranularity == 1 {
+				options = append(options, optConnConditionColumn, optConnConditionValues)
+			}
+			options = append(
+				options,
+				optConnPhaseEstimator,
+				optConnMinEpochsPerGroup,
+				optConnMinCyclesPerBand,
+				optConnMinSegmentSec,
+				optConnWarnNoSpatialTransform,
+				optConnGraphMetrics,
+				optConnGraphProp,
+				optConnWindowLen,
+				optConnWindowStep,
+				optConnAECMode,
+				optConnAECOutput,
+				optConnForceWithinEpochML,
+			)
 		}
 	}
 
@@ -6460,7 +6703,24 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("aperiodic") {
 		options = append(options, optFeatGroupAperiodic)
 		if m.featGroupAperiodicExpanded {
-			options = append(options, optAperiodicFmin, optAperiodicFmax, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms, optAperiodicLineNoiseFreq, optAperiodicLineNoiseWidthHz, optAperiodicLineNoiseHarmonics, optAperiodicSubtractEvoked)
+			options = append(
+				options,
+				optAperiodicModel,
+				optAperiodicPsdMethod,
+				optAperiodicFmin,
+				optAperiodicFmax,
+				optAperiodicPsdBandwidth,
+				optAperiodicMinSegmentSec,
+				optAperiodicExcludeLineNoise,
+				optAperiodicLineNoiseFreq,
+				optAperiodicLineNoiseWidthHz,
+				optAperiodicLineNoiseHarmonics,
+				optAperiodicPeakZ,
+				optAperiodicMinR2,
+				optAperiodicMinPoints,
+				optAperiodicMaxRms,
+				optAperiodicSubtractEvoked,
+			)
 		}
 	}
 	if m.isCategorySelected("complexity") {
@@ -6478,20 +6738,57 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("bursts") {
 		options = append(options, optFeatGroupBursts)
 		if m.featGroupBurstsExpanded {
-			options = append(options, optBurstThresholdMethod, optBurstThresholdPercentile, optBurstThreshold, optBurstMinDuration, optBurstBands)
+			options = append(
+				options,
+				optBurstThresholdMethod,
+				optBurstThresholdPercentile,
+				optBurstThreshold,
+				optBurstThresholdReference,
+				optBurstMinTrialsPerCondition,
+				optBurstMinSegmentSec,
+				optBurstSkipInvalidSegments,
+				optBurstMinDuration,
+				optBurstMinCycles,
+				optBurstBands,
+			)
 		}
 	}
 	if m.isCategorySelected("power") {
 		options = append(options, optFeatGroupPower)
 		if m.featGroupPowerExpanded {
-			options = append(options, optPowerRequireBaseline, optPowerBaselineMode)
+			options = append(
+				options,
+				optPowerRequireBaseline,
+				optPowerBaselineMode,
+				optPowerSubtractEvoked,
+				optPowerMinTrialsPerCondition,
+				optPowerExcludeLineNoise,
+				optPowerLineNoiseFreq,
+				optPowerLineNoiseWidthHz,
+				optPowerLineNoiseHarmonics,
+				optPowerEmitDb,
+			)
 		}
 	}
 	if m.isCategorySelected("spectral") {
 		options = append(options, optFeatGroupSpectral)
 		if m.featGroupSpectralExpanded {
-			options = append(options, optSpectralEdge, optSpectralPsdMethod, optSpectralFmin, optSpectralFmax,
-				optSpectralMinSegmentSec, optSpectralMinCyclesAtFmin)
+			options = append(
+				options,
+				optSpectralIncludeLogRatios,
+				optSpectralPsdMethod,
+				optSpectralPsdAdaptive,
+				optSpectralMultitaperAdaptive,
+				optSpectralFmin,
+				optSpectralFmax,
+				optSpectralMinSegmentSec,
+				optSpectralMinCyclesAtFmin,
+				optSpectralExcludeLineNoise,
+				optSpectralLineNoiseFreq,
+				optSpectralLineNoiseWidthHz,
+				optSpectralLineNoiseHarmonics,
+				optSpectralEdge,
+			)
 		}
 	}
 	if m.isCategorySelected("ratios") {
@@ -6503,7 +6800,15 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("asymmetry") {
 		options = append(options, optFeatGroupAsymmetry)
 		if m.featGroupAsymmetryExpanded {
-			options = append(options, optAsymmetryChannelPairs, optAsymmetryMinSegmentSec, optAsymmetryMinCyclesAtFmin, optAsymmetrySkipInvalidSegments)
+			options = append(
+				options,
+				optAsymmetryChannelPairs,
+				optAsymmetryMinSegmentSec,
+				optAsymmetryMinCyclesAtFmin,
+				optAsymmetrySkipInvalidSegments,
+				optAsymmetryEmitActivationConvention,
+				optAsymmetryActivationBands,
+			)
 		}
 	}
 	if m.isCategorySelected("quality") {
@@ -6607,7 +6912,7 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("itpc") {
 		options = append(options, optFeatGroupITPC)
 		if m.featGroupITPCExpanded {
-			options = append(options, optItpcMethod)
+			options = append(options, optItpcMethod, optItpcAllowUnsafeLoo, optItpcBaselineCorrection)
 			// Show condition-based options only when method is "condition" (method index 3)
 			if m.itpcMethod == 3 {
 				options = append(options, optItpcConditionColumn, optItpcConditionValues, optItpcMinTrialsPerCondition)
@@ -6618,7 +6923,26 @@ func (m Model) getFeaturesOptions() []optionType {
 	// TFR settings (always available for features that use time-frequency)
 	options = append(options, optFeatGroupTFR)
 	if m.featGroupTFRExpanded {
-		options = append(options, optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers)
+		options = append(
+			options,
+			optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers,
+			optBandEnvelopePadSec, optBandEnvelopePadCycles,
+			optIAFEnabled,
+		)
+		if m.iafEnabled {
+			options = append(
+				options,
+				optIAFAlphaWidthHz,
+				optIAFSearchRangeMin,
+				optIAFSearchRangeMax,
+				optIAFMinProminence,
+				optIAFRois,
+				optIAFMinCyclesAtFmin,
+				optIAFMinBaselineSec,
+				optIAFAllowFullFallback,
+				optIAFAllowAllChannelsFallback,
+			)
+		}
 	}
 
 	options = append(options, optFeatGroupStorage)
@@ -6628,7 +6952,17 @@ func (m Model) getFeaturesOptions() []optionType {
 
 	options = append(options, optFeatGroupExecution)
 	if m.featGroupExecutionExpanded {
-		options = append(options, optMinEpochs)
+		options = append(
+			options,
+			optMinEpochs,
+			optFeatAnalysisMode,
+			optFeatComputeChangeScores,
+			optFeatSaveTfrWithSidecar,
+			optFeatNJobsBands,
+			optFeatNJobsConnectivity,
+			optFeatNJobsAperiodic,
+			optFeatNJobsComplexity,
+		)
 		if m.isCategorySelected("itpc") {
 			options = append(options, optItpcNJobs)
 		}
@@ -6935,6 +7269,7 @@ func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 		"pac_by_condition",
 		// Power - uses aligned_events
 		"power_by_condition",
+		"power_spectral_density",
 		// ERP - all use conditions
 		"erp_butterfly",
 		"erp_roi",
@@ -7025,6 +7360,14 @@ func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 		// aperiodic_topomaps only uses column comparisons, not window/segment comparisons
 		fields = append(fields,
 			plotItemConfigFieldCompareColumns,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
+		)
+	} else if plot.ID == "power_spectral_density" {
+		// power_spectral_density only uses column comparisons (supports 1+ conditions)
+		// CompareColumns toggle not needed - column comparison is always required
+		fields = append(fields,
 			plotItemConfigFieldComparisonColumn,
 			plotItemConfigFieldComparisonValues,
 			plotItemConfigFieldComparisonLabels,
@@ -7337,6 +7680,16 @@ func (m Model) getBehaviorOptions() []optionType {
 					optComputeBayesFactors,
 				)
 			}
+
+			// Feature QC (optional gating) - relevant for correlations / multilevel correlations
+			if m.isComputationSelected("correlations") || m.isComputationSelected("multilevel_correlations") {
+				options = append(options,
+					optFeatureQCEnabled,
+					optFeatureQCMaxMissingPct,
+					optFeatureQCMinVariance,
+					optFeatureQCCheckWithinRunVariance,
+				)
+			}
 		}
 	}
 
@@ -7347,6 +7700,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			options = append(options,
 				optTrialTableFormat,
 				optTrialTableAddLagFeatures,
+				optTrialOrderMaxMissingFraction,
 				optFeatureSummariesEnabled,
 			)
 		}
@@ -7377,20 +7731,26 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// Correlations section
-	if m.isComputationSelected("correlations") {
+	if m.isComputationSelected("correlations") || m.isComputationSelected("multilevel_correlations") {
 		options = append(options, optBehaviorGroupCorrelations)
 		if m.behaviorGroupCorrelationsExpanded {
-			options = append(options,
-				optCorrelationsTargetRating,
-				optCorrelationsTargetTemperature,
-				optCorrelationsTargetPainResidual,
-				optCorrelationsTargetColumn,
-				optCorrelationsPreferPainResidual,
-				optCorrelationsPrimaryUnit,
-				optCorrelationsPermutationPrimary,
-				optCorrelationsUseCrossfitPainResidual,
-				optCorrelationsMultilevel,
-			)
+			if m.isComputationSelected("correlations") {
+				options = append(options,
+					optCorrelationsTargetRating,
+					optCorrelationsTargetTemperature,
+					optCorrelationsTargetPainResidual,
+					optCorrelationsTargetColumn,
+					optCorrelationsPreferPainResidual,
+					optCorrelationsTypes,
+					optCorrelationsPrimaryUnit,
+					optCorrelationsPermutationPrimary,
+					optCorrelationsUseCrossfitPainResidual,
+				)
+			}
+			options = append(options, optCorrelationsMultilevel)
+			if m.isComputationSelected("multilevel_correlations") {
+				options = append(options, optGroupLevelBlockPermutation)
+			}
 		}
 	}
 

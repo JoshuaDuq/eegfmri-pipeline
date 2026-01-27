@@ -151,16 +151,53 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     trial_table_group.add_argument("--no-trial-table-add-lag-features", action="store_false", dest="trial_table_add_lag_features")
     trial_table_group.add_argument("--feature-summaries", action="store_true", default=None, dest="feature_summaries_enabled")
     trial_table_group.add_argument("--no-feature-summaries", action="store_false", dest="feature_summaries_enabled")
+    trial_table_group.add_argument(
+        "--trial-order-max-missing-fraction",
+        type=float,
+        default=None,
+        help="Max fraction of missing trial-order values before disabling trial-order control (default: 0.1)",
+    )
+
+    feature_qc_group = parser.add_argument_group("Feature QC options")
+    feature_qc_group.add_argument("--feature-qc-enabled", action="store_true", default=None, dest="feature_qc_enabled")
+    feature_qc_group.add_argument("--no-feature-qc-enabled", action="store_false", dest="feature_qc_enabled")
+    feature_qc_group.add_argument("--feature-qc-max-missing-pct", type=float, default=None)
+    feature_qc_group.add_argument("--feature-qc-min-variance", type=float, default=None)
+    feature_qc_group.add_argument(
+        "--feature-qc-check-within-run-variance",
+        action="store_true",
+        default=None,
+        dest="feature_qc_check_within_run_variance",
+    )
+    feature_qc_group.add_argument(
+        "--no-feature-qc-check-within-run-variance",
+        action="store_false",
+        dest="feature_qc_check_within_run_variance",
+    )
 
     residual_group = parser.add_argument_group("Pain residual / temperature-model diagnostics")
     residual_group.add_argument("--pain-residual", action="store_true", default=None, dest="pain_residual_enabled")
     residual_group.add_argument("--no-pain-residual", action="store_false", dest="pain_residual_enabled")
     residual_group.add_argument("--pain-residual-method", choices=["spline", "poly"], default=None)
     residual_group.add_argument("--pain-residual-min-samples", type=int, default=None)
+    residual_group.add_argument(
+        "--pain-residual-spline-df-candidates",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Candidate spline degrees of freedom for temperature→rating residual model (e.g., 3 4 5)",
+    )
     residual_group.add_argument("--pain-residual-poly-degree", type=int, default=None)
     residual_group.add_argument("--pain-residual-model-compare", action="store_true", default=None, dest="pain_residual_model_compare_enabled")
     residual_group.add_argument("--no-pain-residual-model-compare", action="store_false", dest="pain_residual_model_compare_enabled")
     residual_group.add_argument("--pain-residual-model-compare-min-samples", type=int, default=None)
+    residual_group.add_argument(
+        "--pain-residual-model-compare-poly-degrees",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Polynomial degrees to compare in pain-residual model comparison (e.g., 2 3)",
+    )
     residual_group.add_argument("--pain-residual-breakpoint-test", action="store_true", default=None, dest="pain_residual_breakpoint_enabled")
     residual_group.add_argument("--no-pain-residual-breakpoint-test", action="store_false", dest="pain_residual_breakpoint_enabled")
     residual_group.add_argument("--pain-residual-breakpoint-min-samples", type=int, default=None)
@@ -258,6 +295,13 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     correlations_group = parser.add_argument_group("Correlations (trial-table) options")
     correlations_group.add_argument("--correlations-targets", nargs="+", choices=["rating", "temperature", "pain_residual"], default=None)
+    correlations_group.add_argument(
+        "--correlations-types",
+        nargs="+",
+        choices=["raw", "partial_cov", "partial_temp", "partial_cov_temp", "run_mean"],
+        default=None,
+        help="Correlation types to compute (default from config)",
+    )
     correlations_group.add_argument("--correlations-primary-unit", choices=["trial", "run_mean"], default=None)
     correlations_group.add_argument("--correlations-prefer-pain-residual", action="store_true", default=None, dest="correlations_prefer_pain_residual")
     correlations_group.add_argument("--no-correlations-prefer-pain-residual", action="store_false", dest="correlations_prefer_pain_residual")
@@ -277,6 +321,18 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         dest="correlations_target_column",
         help="Custom target column name from events (e.g., 'vas_rating', 'pain_intensity')",
+    )
+    correlations_group.add_argument(
+        "--group-level-block-permutation",
+        action="store_true",
+        default=None,
+        dest="group_level_block_permutation",
+        help="Use block-restricted permutations when a block/run column is available (default: True)",
+    )
+    correlations_group.add_argument(
+        "--no-group-level-block-permutation",
+        action="store_false",
+        dest="group_level_block_permutation",
     )
 
     report_group = parser.add_argument_group("Report options")
@@ -475,9 +531,24 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         tt["format"] = str(args.trial_table_format).strip().lower()
     if getattr(args, "trial_table_add_lag_features", None) is not None:
         tt["add_lag_features"] = bool(args.trial_table_add_lag_features)
+    if getattr(args, "trial_order_max_missing_fraction", None) is not None:
+        ba.setdefault("trial_order", {})["max_missing_fraction"] = float(
+            args.trial_order_max_missing_fraction
+        )
 
     if getattr(args, "feature_summaries_enabled", None) is not None:
         ba.setdefault("feature_summaries", {})["enabled"] = bool(args.feature_summaries_enabled)
+
+    # Feature QC
+    fqc = ba.setdefault("feature_qc", {})
+    if getattr(args, "feature_qc_enabled", None) is not None:
+        fqc["enabled"] = bool(args.feature_qc_enabled)
+    if getattr(args, "feature_qc_max_missing_pct", None) is not None:
+        fqc["max_missing_pct"] = float(args.feature_qc_max_missing_pct)
+    if getattr(args, "feature_qc_min_variance", None) is not None:
+        fqc["min_variance"] = float(args.feature_qc_min_variance)
+    if getattr(args, "feature_qc_check_within_run_variance", None) is not None:
+        fqc["check_within_run_variance"] = bool(args.feature_qc_check_within_run_variance)
 
     # Pain residual / temperature-model diagnostics
     pr = ba.setdefault("pain_residual", {})
@@ -487,6 +558,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         pr["method"] = str(args.pain_residual_method).strip().lower()
     if getattr(args, "pain_residual_min_samples", None) is not None:
         pr["min_samples"] = int(args.pain_residual_min_samples)
+    if getattr(args, "pain_residual_spline_df_candidates", None) is not None:
+        pr["spline_df_candidates"] = list(args.pain_residual_spline_df_candidates)
     if getattr(args, "pain_residual_poly_degree", None) is not None:
         pr["poly_degree"] = int(args.pain_residual_poly_degree)
 
@@ -495,6 +568,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         mc["enabled"] = bool(args.pain_residual_model_compare_enabled)
     if getattr(args, "pain_residual_model_compare_min_samples", None) is not None:
         mc["min_samples"] = int(args.pain_residual_model_compare_min_samples)
+    if getattr(args, "pain_residual_model_compare_poly_degrees", None) is not None:
+        mc["poly_degrees"] = list(args.pain_residual_model_compare_poly_degrees)
 
     bp = pr.setdefault("breakpoint_test", {})
     if getattr(args, "pain_residual_breakpoint_enabled", None) is not None:
@@ -675,6 +750,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         corr_cfg["targets"] = [
             str(t).strip().lower() for t in (args.correlations_targets or [])
         ]
+    if getattr(args, "correlations_types", None) is not None:
+        corr_cfg["types"] = list(args.correlations_types)
     if getattr(args, "correlations_primary_unit", None) is not None:
         corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
     if getattr(args, "correlations_prefer_pain_residual", None) is not None:
@@ -687,6 +764,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         corr_cfg.setdefault("permutation", {})["enabled"] = enabled
     if getattr(args, "correlations_target_column", None) is not None:
         corr_cfg["target_column"] = str(args.correlations_target_column).strip()
+    if getattr(args, "group_level_block_permutation", None) is not None:
+        ba.setdefault("group_level", {})["block_permutation"] = bool(args.group_level_block_permutation)
 
     # Report
     if getattr(args, "report_top_n", None) is not None:

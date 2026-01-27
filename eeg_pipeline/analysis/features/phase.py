@@ -83,6 +83,7 @@ def _compute_condition_itpc_map(
     condition_labels: np.ndarray,
     *,
     train_mask: Optional[np.ndarray],
+    condition_values: Optional[List[str]] = None,
     min_trials_per_condition: int,
     logger: Optional[logging.Logger] = None,
     n_jobs: int = 1,
@@ -110,9 +111,21 @@ def _compute_condition_itpc_map(
     if labels.dtype.kind in {"f"}:
         valid_labels = np.isfinite(labels.astype(float))
 
+    labels_str = labels.astype(str)
+    include_mask = valid_labels
+    selected = [str(v).strip() for v in (condition_values or []) if str(v).strip() != ""]
+    if selected:
+        selected_set = set(selected)
+        include_mask = valid_labels & np.isin(labels_str, list(selected_set))
+        if not np.any(include_mask):
+            raise ValueError(
+                "ITPC(method='condition') requested with feature_engineering.itpc.condition_values set, "
+                "but none of the selected values were found in condition labels."
+            )
+
     itpc_map = np.full((n_epochs,) + tuple(data.shape[1:]), np.nan, dtype=np.float32)
-    for cond in np.unique(labels[valid_labels]):
-        cond_mask = (labels == cond) & valid_labels
+    for cond in np.unique(labels_str[include_mask]):
+        cond_mask = (labels_str == cond) & include_mask
         if train_mask is None:
             cond_train = cond_mask
         else:
@@ -448,6 +461,7 @@ def _compute_condition_itpc_precomputed(
     segment_complex: np.ndarray,
     condition_labels: np.ndarray,
     train_mask: Optional[np.ndarray],
+    condition_values: Optional[List[str]],
     min_trials: int,
     logger: Optional[logging.Logger],
     n_jobs: int = 1,
@@ -478,6 +492,18 @@ def _compute_condition_itpc_precomputed(
     if labels_arr.dtype.kind in {"f"}:
         valid_labels = np.isfinite(labels_arr.astype(float))
 
+    labels_str = labels_arr.astype(str)
+    include_mask = valid_labels
+    selected = [str(v).strip() for v in (condition_values or []) if str(v).strip() != ""]
+    if selected:
+        selected_set = set(selected)
+        include_mask = valid_labels & np.isin(labels_str, list(selected_set))
+        if not np.any(include_mask):
+            raise ValueError(
+                "ITPC(method='condition') requested with feature_engineering.itpc.condition_values set, "
+                "but none of the selected values were found in condition labels."
+            )
+
     tm = None
     if train_mask is not None:
         tm = np.asarray(train_mask, dtype=bool)
@@ -486,8 +512,8 @@ def _compute_condition_itpc_precomputed(
                 f"train_mask length ({tm.shape[0]}) != n_epochs ({n_ep})."
             )
 
-    for cond in np.unique(labels_arr[valid_labels]):
-        cond_mask = (labels_arr == cond) & valid_labels
+    for cond in np.unique(labels_str[include_mask]):
+        cond_mask = (labels_str == cond) & include_mask
         cond_train = cond_mask if tm is None else (cond_mask & tm)
         n_train = int(np.sum(cond_train))
         
@@ -587,6 +613,7 @@ def _compute_itpc_map_by_method(
     logger: logging.Logger,
     *,
     condition_labels: Optional[np.ndarray] = None,
+    condition_values: Optional[List[str]] = None,
     min_trials_per_condition: int = 10,
     n_jobs: int = 1,
 ) -> np.ndarray:
@@ -657,6 +684,7 @@ def _compute_itpc_map_by_method(
             data,
             condition_labels,
             train_mask=train_mask,
+            condition_values=condition_values,
             min_trials_per_condition=int(min_trials_per_condition),
             logger=logger,
             n_jobs=n_jobs,
@@ -1037,10 +1065,20 @@ def extract_phase_features(
         logger.info(f"ITPC: n_jobs={n_jobs_actual} (from config: {n_jobs})")
 
     condition_labels = None
+    condition_values: List[str] = []
     min_trials_per_condition = 10
     if itpc_method == "condition":
         itpc_cfg = _safe_config_get(config, "feature_engineering.itpc", {})
         condition_column = itpc_cfg.get("condition_column")
+        condition_values_cfg = itpc_cfg.get("condition_values", []) or []
+        if isinstance(condition_values_cfg, str):
+            condition_values_cfg = [condition_values_cfg]
+        if not isinstance(condition_values_cfg, (list, tuple)):
+            raise TypeError(
+                "feature_engineering.itpc.condition_values must be a list/tuple of strings "
+                f"(got {type(condition_values_cfg).__name__})."
+            )
+        condition_values = [str(v).strip() for v in condition_values_cfg if str(v).strip() != ""]
         min_trials_per_condition = int(itpc_cfg.get("min_trials_per_condition", 10))
         if not condition_column:
             raise ValueError(
@@ -1064,6 +1102,7 @@ def extract_phase_features(
         analysis_mode,
         logger,
         condition_labels=condition_labels,
+        condition_values=condition_values,
         min_trials_per_condition=min_trials_per_condition,
         n_jobs=n_jobs,
     )
@@ -1076,7 +1115,6 @@ def extract_phase_features(
     
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
-    allow_full_epoch_fallback = bool(_safe_config_get(config, "feature_engineering.windows.allow_full_epoch_fallback", False))
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -1092,20 +1130,11 @@ def extract_phase_features(
             segment_masks = {target_name: mask}
         else:
             if logger:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "ITPC: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "ITPC: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                segment_masks = {target_name: np.ones_like(times, dtype=bool)}
-            else:
-                return pd.DataFrame(), []
+                logger.error(
+                    "ITPC: targeted window '%s' has no valid mask; skipping.",
+                    target_name,
+                )
+            return pd.DataFrame(), []
         segments = [target_name]
     else:
         segment_masks = get_segment_masks(epochs.times, windows, config)
@@ -1160,6 +1189,29 @@ def extract_phase_features(
         return pd.DataFrame(), []
         
     df = pd.DataFrame(results)
+
+    # Mark broadcast/non-i.i.d. features to prevent pseudo-replication in downstream stats.
+    # - loo: trial-wise (each epoch computed leaving it out)
+    # - condition: condition-level maps broadcast within condition
+    # - global/fold_global: subject-level maps broadcast to all epochs
+    df.attrs["itpc_method"] = str(itpc_method)
+    if itpc_method == "loo":
+        df.attrs["feature_granularity"] = "trial"
+    elif itpc_method == "condition":
+        df.attrs["feature_granularity"] = "condition"
+        df.attrs["broadcast_warning"] = (
+            "ITPC(method='condition') produces condition-level values broadcast to all trials "
+            "within condition. Do NOT treat rows as i.i.d. trial observations; aggregate or "
+            "use primary_unit='condition'."
+        )
+    else:
+        df.attrs["feature_granularity"] = "subject"
+        df.attrs["broadcast_warning"] = (
+            f"ITPC(method='{itpc_method}') produces subject-level values broadcast to all trials. "
+            "Do NOT treat rows as i.i.d. trial observations; aggregate or use primary_unit='subject'."
+        )
+        df.attrs["threshold_train_mask_used"] = bool(train_mask is not None and itpc_method == "fold_global")
+
     return df, list(df.columns)
 
 
@@ -1468,6 +1520,15 @@ def extract_itpc_from_precomputed(
 
     itpc_cfg = _safe_config_get(cfg, "feature_engineering.itpc", {})
     condition_column = itpc_cfg.get("condition_column", None)
+    condition_values_cfg = itpc_cfg.get("condition_values", []) or []
+    if isinstance(condition_values_cfg, str):
+        condition_values_cfg = [condition_values_cfg]
+    if not isinstance(condition_values_cfg, (list, tuple)):
+        raise TypeError(
+            "feature_engineering.itpc.condition_values must be a list/tuple of strings "
+            f"(got {type(condition_values_cfg).__name__})."
+        )
+    condition_values = [str(v).strip() for v in condition_values_cfg if str(v).strip() != ""]
     min_trials_per_condition = int(itpc_cfg.get("min_trials_per_condition", 10))
 
     condition_labels = None
@@ -1491,7 +1552,6 @@ def extract_itpc_from_precomputed(
     
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(_safe_config_get(cfg, "feature_engineering.windows.allow_full_epoch_fallback", False))
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -1500,20 +1560,11 @@ def extract_itpc_from_precomputed(
             masks = {target_name: mask}
         else:
             if logger:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "ITPC: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "ITPC: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
-            else:
-                return pd.DataFrame(), []
+                logger.error(
+                    "ITPC: targeted window '%s' has no valid mask; skipping.",
+                    target_name,
+                )
+            return pd.DataFrame(), []
     else:
         masks = get_segment_masks(precomputed.times, windows, precomputed.config)
     
@@ -1549,6 +1600,7 @@ def extract_itpc_from_precomputed(
                     baseline_complex,
                     condition_labels,
                     train_mask,
+                    condition_values,
                     min_trials_per_condition,
                     logger,
                     n_jobs=n_jobs,
@@ -1580,6 +1632,7 @@ def extract_itpc_from_precomputed(
                     segment_complex,
                     condition_labels,
                     train_mask,
+                    condition_values,
                     min_trials_per_condition,
                     logger,
                     n_jobs=n_jobs,
@@ -1616,6 +1669,24 @@ def extract_itpc_from_precomputed(
         return pd.DataFrame(), []
         
     df = pd.DataFrame(results)
+
+    # Mark broadcast/non-i.i.d. features to prevent pseudo-replication downstream.
+    df.attrs["itpc_method"] = str(itpc_method)
+    if itpc_method == "condition":
+        df.attrs["feature_granularity"] = "condition"
+        df.attrs["broadcast_warning"] = (
+            "ITPC(method='condition') produces condition-level values broadcast to all trials "
+            "within condition. Do NOT treat rows as i.i.d. trial observations; aggregate or "
+            "use primary_unit='condition'."
+        )
+    else:
+        df.attrs["feature_granularity"] = "subject"
+        df.attrs["broadcast_warning"] = (
+            f"ITPC(method='{itpc_method}') produces subject-level values broadcast to all trials. "
+            "Do NOT treat rows as i.i.d. trial observations; aggregate or use primary_unit='subject'."
+        )
+        df.attrs["threshold_train_mask_used"] = bool(train_mask is not None and itpc_method == "fold_global")
+
     return df, list(df.columns)
 
 
@@ -1663,7 +1734,6 @@ def extract_pac_from_precomputed(
     n_epochs = precomputed.data.shape[0]
     windows = precomputed.windows
 
-    allow_full_epoch_fallback = bool(_safe_config_get(config, "feature_engineering.windows.allow_full_epoch_fallback", False))
     target_name = getattr(windows, "name", None) if windows else None
 
     if target_name and windows is not None:
@@ -1672,20 +1742,11 @@ def extract_pac_from_precomputed(
             masks = {target_name: mask}
         else:
             if logger is not None:
-                if allow_full_epoch_fallback:
-                    logger.warning(
-                        "PAC: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                        target_name,
-                    )
-                else:
-                    logger.error(
-                        "PAC: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                        target_name,
-                    )
-            if allow_full_epoch_fallback:
-                masks = {target_name: np.ones_like(precomputed.times, dtype=bool)}
-            else:
-                return pd.DataFrame(), []
+                logger.error(
+                    "PAC: targeted window '%s' has no valid mask; skipping.",
+                    target_name,
+                )
+            return pd.DataFrame(), []
     else:
         masks = get_segment_masks(precomputed.times, windows, config)
 

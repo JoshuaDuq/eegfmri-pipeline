@@ -161,14 +161,11 @@ def _get_segment_masks_with_fallback(
     logger: Optional[logging.Logger],
     feature_name: str,
 ) -> Dict[str, np.ndarray]:
-    """Get segment masks with fallback handling."""
+    """Get segment masks (strict; no full-epoch fallback)."""
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
     
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
-    allow_full_epoch_fallback = bool(
-        get_config_value(config, "feature_engineering.windows.allow_full_epoch_fallback", False)
-    )
     
     if target_name and windows is not None:
         mask = windows.get_mask(target_name)
@@ -176,21 +173,11 @@ def _get_segment_masks_with_fallback(
             return {target_name: mask}
         
         if logger:
-            if allow_full_epoch_fallback:
-                logger.warning(
-                    "%s: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
-                    feature_name,
-                    target_name,
-                )
-            else:
-                logger.error(
-                    "%s: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
-                    feature_name,
-                    target_name,
-                )
-        
-        if allow_full_epoch_fallback:
-            return {target_name: np.ones(len(precomputed.times), dtype=bool)}
+            logger.error(
+                "%s: targeted window '%s' has no valid mask; skipping.",
+                feature_name,
+                target_name,
+            )
         return {}
     
     return get_segment_masks(precomputed.times, windows, config)
@@ -329,6 +316,10 @@ def extract_band_ratios_from_precomputed(
                 rec = records[ep_idx]
                 r_ch = r_all[ep_idx]
                 log_r_ch = log_r_all[ep_idx] if log_r_all is not None else None
+                p_num_ch = p_num[ep_idx]
+                p_den_ch = p_den[ep_idx]
+
+                valid_ch = np.isfinite(p_num_ch) & np.isfinite(p_den_ch) & (p_den_ch > eps)
 
                 if "channels" in spatial_modes:
                     for c, ch in enumerate(precomputed.ch_names):
@@ -344,25 +335,51 @@ def extract_band_ratios_from_precomputed(
 
                 if "roi" in spatial_modes and roi_map:
                     for roi_name, idxs in roi_map.items():
-                        if idxs:
-                            val = np.nanmean(r_ch[idxs])
-                            col = NamingSchema.build(
-                                "ratios", seg_label, pair_label, "roi", "power_ratio", channel=roi_name
+                        idx = np.asarray(idxs, dtype=int)
+                        if idx.size == 0:
+                            continue
+
+                        roi_valid = valid_ch[idx]
+                        if np.any(roi_valid):
+                            mean_num_roi = float(np.nanmean(p_num_ch[idx][roi_valid]))
+                            mean_den_roi = float(np.nanmean(p_den_ch[idx][roi_valid]))
+                            val = float(mean_num_roi / mean_den_roi) if mean_den_roi > eps else np.nan
+                            val_log = (
+                                float(np.log(mean_num_roi) - np.log(mean_den_roi))
+                                if mean_num_roi > eps and mean_den_roi > eps
+                                else np.nan
                             )
-                            rec[col] = float(val)
-                            if include_log and log_r_ch is not None:
-                                val_log = np.nanmean(log_r_ch[idxs])
-                                col_log = NamingSchema.build(
-                                    "ratios", seg_label, pair_label, "roi", "log_ratio", channel=roi_name
-                                )
-                                rec[col_log] = float(val_log)
+                        else:
+                            val = np.nan
+                            val_log = np.nan
+
+                        col = NamingSchema.build(
+                            "ratios", seg_label, pair_label, "roi", "power_ratio", channel=roi_name
+                        )
+                        rec[col] = float(val)
+                        if include_log:
+                            col_log = NamingSchema.build(
+                                "ratios", seg_label, pair_label, "roi", "log_ratio", channel=roi_name
+                            )
+                            rec[col_log] = float(val_log)
 
                 if "global" in spatial_modes:
-                    val = np.nanmean(r_ch)
+                    if np.any(valid_ch):
+                        mean_num_global = float(np.nanmean(p_num_ch[valid_ch]))
+                        mean_den_global = float(np.nanmean(p_den_ch[valid_ch]))
+                        val = float(mean_num_global / mean_den_global) if mean_den_global > eps else np.nan
+                        val_log = (
+                            float(np.log(mean_num_global) - np.log(mean_den_global))
+                            if mean_num_global > eps and mean_den_global > eps
+                            else np.nan
+                        )
+                    else:
+                        val = np.nan
+                        val_log = np.nan
+
                     col = NamingSchema.build("ratios", seg_label, pair_label, "global", "power_ratio")
                     rec[col] = float(val)
-                    if include_log and log_r_ch is not None:
-                        val_log = np.nanmean(log_r_ch)
+                    if include_log:
                         col_log = NamingSchema.build("ratios", seg_label, pair_label, "global", "log_ratio")
                         rec[col_log] = float(val_log)
 
