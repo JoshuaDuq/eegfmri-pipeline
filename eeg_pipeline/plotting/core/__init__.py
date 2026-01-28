@@ -30,7 +30,6 @@ __all__ = [
     "create_scalpmean_tfr_from_existing",
     "get_strict_mode",
     "compute_cluster_significance",
-    "compute_cluster_significance_from_combined",
     "build_statistical_title",
 ]
 
@@ -55,7 +54,6 @@ _MODULE_MAP = {
     "create_scalpmean_tfr_from_existing": "topomaps",
     "get_strict_mode": "statistics",
     "compute_cluster_significance": "statistics",
-    "compute_cluster_significance_from_combined": "statistics",
     "build_statistical_title": "statistics",
 }
 

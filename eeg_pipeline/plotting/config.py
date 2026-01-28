@@ -136,7 +136,6 @@ class TextPosition:
     channel_annotation_x: float = 0.02
     channel_annotation_y: float = 0.94
     title_y: float = 0.975
-    residual_qc_title_y: float = 1.02
 
 
 @dataclass
@@ -402,7 +401,6 @@ class PlotConfig:
             channel_annotation_x=text_pos_dict.get("channel_annotation_x", 0.02),
             channel_annotation_y=text_pos_dict.get("channel_annotation_y", 0.94),
             title_y=text_pos_dict.get("title_y", 0.975),
-            residual_qc_title_y=text_pos_dict.get("residual_qc_title_y", 1.02),
         )
     
     @classmethod
@@ -634,9 +632,3 @@ def _extract_config_dict(config: Any) -> Dict[str, Any]:
         return config
     
     return {}
-
-
-def reset_plot_config_cache() -> None:
-    """Reset the global plot config cache. Useful for testing."""
-    global _plot_config_cache
-    _plot_config_cache = None

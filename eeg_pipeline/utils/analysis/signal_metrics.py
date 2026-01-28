@@ -6,52 +6,16 @@ Low-level signal processing functions for computing metrics on 1D arrays.
 These are pure numpy functions with no EEG-specific dependencies.
 
 Categories:
-- Time-domain: zero crossings, RMS, peak-to-peak, line length
-- Complexity: permutation entropy, Hjorth, Lempel-Ziv
-- Spectral: peak frequency, band power, spectral entropy
+- GFP: global field power (spatial std over channels)
+- Complexity: permutation entropy, Lempel-Ziv
 """
 
 from __future__ import annotations
 
 from math import factorial
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import numpy as np
-
-
-# =============================================================================
-# Time-Domain Metrics
-# =============================================================================
-
-def compute_zero_crossings(x: np.ndarray) -> int:
-    """Count zero crossings in a 1D signal."""
-    if len(x) < 2:
-        return 0
-    
-    signs = np.sign(x)
-    signs[signs == 0] = 1
-    return int(np.sum(np.diff(signs) != 0))
-
-
-def compute_rms(x: np.ndarray) -> float:
-    """Compute root mean square of a signal."""
-    if len(x) == 0:
-        return np.nan
-    return float(np.sqrt(np.mean(x ** 2)))
-
-
-def compute_peak_to_peak(x: np.ndarray) -> float:
-    """Compute peak-to-peak amplitude."""
-    if len(x) == 0:
-        return np.nan
-    return float(np.max(x) - np.min(x))
-
-
-def compute_line_length(x: np.ndarray) -> float:
-    """Compute line length (sum of absolute differences)."""
-    if len(x) < 2:
-        return np.nan
-    return float(np.sum(np.abs(np.diff(x))))
 
 
 def compute_gfp(data: np.ndarray) -> np.ndarray:
@@ -144,45 +108,6 @@ def compute_permutation_entropy(
     return float(entropy)
 
 
-def compute_hjorth_parameters(x: np.ndarray) -> Tuple[float, float, float]:
-    """
-    Compute Hjorth parameters: activity, mobility, complexity.
-    
-    Parameters
-    ----------
-    x : np.ndarray
-        Input signal
-    
-    Returns
-    -------
-    Tuple[float, float, float]
-        (activity, mobility, complexity)
-    """
-    if len(x) < 3:
-        return np.nan, np.nan, np.nan
-    
-    first_diff = np.diff(x)
-    second_diff = np.diff(first_diff)
-    
-    variance_signal = np.var(x, ddof=1)
-    variance_first_diff = np.var(first_diff, ddof=1)
-    variance_second_diff = np.var(second_diff, ddof=1)
-    
-    if variance_signal == 0:
-        return np.nan, np.nan, np.nan
-    
-    activity = float(variance_signal)
-    mobility = float(np.sqrt(variance_first_diff / variance_signal))
-    
-    if variance_first_diff > 0 and mobility > 0:
-        mobility_first_diff = np.sqrt(variance_second_diff / variance_first_diff)
-        complexity = float(mobility_first_diff / mobility)
-    else:
-        complexity = np.nan
-    
-    return activity, mobility, complexity
-
-
 def compute_lempel_ziv_complexity(x: np.ndarray, threshold: Optional[float] = None) -> float:
     """
     Compute Lempel-Ziv complexity of a binarized signal.
@@ -233,171 +158,3 @@ def compute_lempel_ziv_complexity(x: np.ndarray, threshold: Optional[float] = No
         return float(complexity_count / theoretical_max)
     
     return np.nan
-
-
-# =============================================================================
-# Spectral Metrics
-# =============================================================================
-
-def compute_peak_frequency(
-    freqs: np.ndarray,
-    psd: np.ndarray,
-    fmin: float,
-    fmax: float,
-    min_prominence: float = 0.1,
-) -> Tuple[float, float]:
-    """
-    Find peak frequency and power within a frequency band.
-    
-    Parameters
-    ----------
-    freqs : np.ndarray
-        Frequency array
-    psd : np.ndarray
-        Power spectral density array
-    fmin, fmax : float
-        Frequency band limits
-    min_prominence : float
-        Minimum prominence for peak detection (0-1)
-    
-    Returns
-    -------
-    Tuple[float, float]
-        (peak_frequency, peak_power)
-    """
-    band_mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(band_mask):
-        return np.nan, np.nan
-
-    band_freqs = freqs[band_mask]
-    band_psd = psd[band_mask]
-
-    if not np.any(np.isfinite(band_psd)):
-        return np.nan, np.nan
-
-    peak_idx = np.nanargmax(band_psd)
-    peak_freq = float(band_freqs[peak_idx])
-    peak_power = float(band_psd[peak_idx])
-
-    psd_min = np.nanmin(band_psd)
-    psd_max = np.nanmax(band_psd)
-    psd_range = psd_max - psd_min
-    
-    if psd_range > 0:
-        peak_prominence = (peak_power - psd_min) / psd_range
-        if peak_prominence < min_prominence:
-            return np.nan, np.nan
-
-    return peak_freq, peak_power
-
-
-def compute_band_power(
-    freqs: np.ndarray,
-    psd: np.ndarray,
-    fmin: float,
-    fmax: float,
-) -> float:
-    """
-    Compute absolute power within a frequency band by integrating the PSD.
-    
-    Parameters
-    ----------
-    freqs : np.ndarray
-        Frequency array
-    psd : np.ndarray
-        Power spectral density array
-    fmin, fmax : float
-        Frequency band limits
-    
-    Returns
-    -------
-    float
-        Band-limited power (area under PSD curve)
-    """
-    band_mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(band_mask):
-        return np.nan
-
-    band_freqs = freqs[band_mask]
-    band_psd = psd[band_mask]
-
-    finite_mask = np.isfinite(band_freqs) & np.isfinite(band_psd)
-    if not np.any(finite_mask):
-        return np.nan
-
-    band_freqs_clean = band_freqs[finite_mask]
-    band_psd_clean = band_psd[finite_mask]
-
-    if band_freqs_clean.size < 2:
-        return np.nan
-
-    return float(np.trapz(band_psd_clean, band_freqs_clean))
-
-
-def compute_spectral_entropy(
-    freqs: np.ndarray,
-    psd: np.ndarray,
-    fmin: Optional[float] = None,
-    fmax: Optional[float] = None,
-    normalize: bool = True,
-) -> float:
-    """
-    Compute spectral entropy of a PSD.
-    
-    Spectral entropy measures the flatness/peakedness of the spectrum.
-    High entropy = flat spectrum (white noise-like)
-    Low entropy = peaked spectrum (dominant frequency)
-    
-    Parameters
-    ----------
-    freqs : np.ndarray
-        Frequency array
-    psd : np.ndarray
-        Power spectral density array
-    fmin, fmax : float, optional
-        Frequency limits for computation
-    normalize : bool
-        If True, normalize by maximum entropy
-    
-    Returns
-    -------
-    float
-        Spectral entropy value
-    """
-    if fmin is not None and fmax is not None:
-        mask = (freqs >= fmin) & (freqs <= fmax)
-        freqs = freqs[mask]
-        psd = psd[mask]
-
-    freqs_clean = np.asarray(freqs, dtype=float)
-    psd_clean = np.asarray(psd, dtype=float)
-
-    finite_mask = np.isfinite(freqs_clean) & np.isfinite(psd_clean)
-    freqs_clean = freqs_clean[finite_mask]
-    psd_clean = psd_clean[finite_mask]
-
-    if freqs_clean.size < 2 or not np.any(psd_clean > 0):
-        return np.nan
-
-    frequency_bin_widths = np.gradient(freqs_clean)
-    power_per_bin = psd_clean * frequency_bin_widths
-    total_power = np.nansum(power_per_bin)
-    
-    if not np.isfinite(total_power) or total_power <= 0:
-        return np.nan
-
-    probabilities = power_per_bin / total_power
-    probabilities = probabilities[probabilities > 0]
-    
-    if probabilities.size == 0:
-        return np.nan
-
-    spectral_entropy = float(-np.sum(probabilities * np.log2(probabilities)))
-
-    if normalize and probabilities.size > 1:
-        max_entropy = np.log2(probabilities.size)
-        spectral_entropy = spectral_entropy / max_entropy
-
-    return spectral_entropy
-
-

@@ -916,6 +916,8 @@ func (m *Model) getAdvancedOptionCount() int {
 		return len(m.getPreprocessingOptions())
 	case types.PipelineFmri:
 		return len(m.getFmriPreprocessingOptions())
+	case types.PipelineFmriAnalysis:
+		return len(m.getFmriAnalysisOptions())
 	case types.PipelineRawToBIDS:
 		return len(m.getRawToBidsOptions())
 	case types.PipelineFmriRawToBIDS:
@@ -960,6 +962,8 @@ func (m *Model) toggleAdvancedOption() {
 		m.togglePreprocessingAdvancedOption()
 	case types.PipelineFmri:
 		m.toggleFmriAdvancedOption()
+	case types.PipelineFmriAnalysis:
+		m.toggleFmriAnalysisAdvancedOption()
 	case types.PipelineRawToBIDS:
 		m.toggleRawToBidsAdvancedOption()
 	case types.PipelineFmriRawToBIDS:
@@ -3283,6 +3287,115 @@ func (m *Model) toggleFmriAdvancedOption() {
 	m.UpdateAdvancedOffset()
 }
 
+func (m *Model) toggleFmriAnalysisAdvancedOption() {
+	options := m.getFmriAnalysisOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+
+	// Group headers
+	case optFmriAnalysisGroupInput:
+		m.fmriAnalysisGroupInputExpanded = !m.fmriAnalysisGroupInputExpanded
+	case optFmriAnalysisGroupContrast:
+		m.fmriAnalysisGroupContrastExpanded = !m.fmriAnalysisGroupContrastExpanded
+	case optFmriAnalysisGroupGLM:
+		m.fmriAnalysisGroupGLMExpanded = !m.fmriAnalysisGroupGLMExpanded
+	case optFmriAnalysisGroupConfounds:
+		m.fmriAnalysisGroupConfoundsExpanded = !m.fmriAnalysisGroupConfoundsExpanded
+	case optFmriAnalysisGroupOutput:
+		m.fmriAnalysisGroupOutputExpanded = !m.fmriAnalysisGroupOutputExpanded
+
+	// Input
+	case optFmriAnalysisInputSource:
+		m.fmriAnalysisInputSourceIndex = (m.fmriAnalysisInputSourceIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisFmriprepSpace:
+		m.startTextEdit(textFieldFmriAnalysisFmriprepSpace)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisRequireFmriprep:
+		m.fmriAnalysisRequireFmriprep = !m.fmriAnalysisRequireFmriprep
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisRuns:
+		m.startTextEdit(textFieldFmriAnalysisRuns)
+		m.useDefaultAdvanced = false
+
+	// Contrast
+	case optFmriAnalysisContrastType:
+		m.fmriAnalysisContrastType = (m.fmriAnalysisContrastType + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisCondA:
+		if len(m.fmriAnalysisConditions) > 0 {
+			m.fmriAnalysisCondAIdx = (m.fmriAnalysisCondAIdx + 1) % len(m.fmriAnalysisConditions)
+			m.fmriAnalysisCondAValue = m.fmriAnalysisConditions[m.fmriAnalysisCondAIdx]
+		} else {
+			m.startTextEdit(textFieldFmriAnalysisCondAValue)
+		}
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisCondB:
+		if len(m.fmriAnalysisConditions) > 0 {
+			m.fmriAnalysisCondBIdx = (m.fmriAnalysisCondBIdx + 1) % len(m.fmriAnalysisConditions)
+			m.fmriAnalysisCondBValue = m.fmriAnalysisConditions[m.fmriAnalysisCondBIdx]
+		} else {
+			m.startTextEdit(textFieldFmriAnalysisCondBValue)
+		}
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisContrastName:
+		m.startTextEdit(textFieldFmriAnalysisContrastName)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisFormula:
+		m.startTextEdit(textFieldFmriAnalysisFormula)
+		m.useDefaultAdvanced = false
+
+	// GLM
+	case optFmriAnalysisHrfModel:
+		m.fmriAnalysisHrfModel = (m.fmriAnalysisHrfModel + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisDriftModel:
+		m.fmriAnalysisDriftModel = (m.fmriAnalysisDriftModel + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisHighPassHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisLowPassHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Confounds / QC
+	case optFmriAnalysisConfoundsStrategy:
+		m.fmriAnalysisConfoundsStrategy = (m.fmriAnalysisConfoundsStrategy + 1) % 7
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisWriteDesignMatrix:
+		m.fmriAnalysisWriteDesignMatrix = !m.fmriAnalysisWriteDesignMatrix
+		m.useDefaultAdvanced = false
+
+	// Output
+	case optFmriAnalysisOutputType:
+		m.fmriAnalysisOutputType = (m.fmriAnalysisOutputType + 1) % 4
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisOutputDir:
+		m.startTextEdit(textFieldFmriAnalysisOutputDir)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisResampleToFS:
+		m.fmriAnalysisResampleToFS = !m.fmriAnalysisResampleToFS
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisFreesurferDir:
+		m.startTextEdit(textFieldFmriAnalysisFreesurferDir)
+		m.useDefaultAdvanced = false
+	}
+
+	// Clamp cursor after expand/collapse changes
+	options = m.getFmriAnalysisOptions()
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
+	}
+	m.UpdateAdvancedOffset()
+}
+
 func (m *Model) toggleRawToBidsAdvancedOption() {
 	options := m.getRawToBidsOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
@@ -3422,6 +3535,8 @@ func (m *Model) commitNumberInput() {
 		m.commitPreprocessingNumber(val)
 	case types.PipelineFmri:
 		m.commitFmriNumber(val)
+	case types.PipelineFmriAnalysis:
+		m.commitFmriAnalysisNumber(val)
 	case types.PipelineRawToBIDS:
 		m.commitRawToBidsNumber(val)
 	case types.PipelineFmriRawToBIDS:
@@ -4679,6 +4794,25 @@ func (m *Model) commitFmriNumber(val float64) {
 	case optFmriRandomSeed:
 		if val >= 0 {
 			m.fmriRandomSeed = int(val)
+		}
+	}
+}
+
+func (m *Model) commitFmriAnalysisNumber(val float64) {
+	options := m.getFmriAnalysisOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optFmriAnalysisHighPassHz:
+		if val >= 0 {
+			m.fmriAnalysisHighPassHz = val
+		}
+	case optFmriAnalysisLowPassHz:
+		if val >= 0 {
+			m.fmriAnalysisLowPassHz = val
 		}
 	}
 }

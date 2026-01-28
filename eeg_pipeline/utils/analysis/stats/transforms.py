@@ -17,51 +17,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.analysis.stats._regression_utils import _ols_fit
-
 
 ###################################################################
 # Data Transformation
 ###################################################################
-
-
-def center_series(series: pd.Series) -> pd.Series:
-    """Center series by subtracting mean.
-    
-    Parameters
-    ----------
-    series : pd.Series
-        Input series
-        
-    Returns
-    -------
-    pd.Series
-        Centered series (zero mean)
-    """
-    return series - series.mean()
-
-
-def zscore_series(series: pd.Series) -> pd.Series:
-    """Z-score normalize pandas Series.
-    
-    Standardizes series to zero mean and unit variance.
-    Returns empty series if variance is zero or invalid.
-    
-    Parameters
-    ----------
-    series : pd.Series
-        Input series
-        
-    Returns
-    -------
-    pd.Series
-        Z-scored series (empty if variance is zero or invalid)
-    """
-    mean = series.mean()
-    std_val = series.std(ddof=1)
-    if std_val <= 0:
-        return pd.Series(dtype=float)
-    return (series - mean) / std_val
 
 
 def zscore_array(arr: np.ndarray) -> np.ndarray:
@@ -84,34 +43,6 @@ def zscore_array(arr: np.ndarray) -> np.ndarray:
     if std_val <= 0:
         return np.full_like(arr, np.nan)
     return (arr - mean) / std_val
-
-
-def apply_pooling_strategy(
-    x: pd.Series,
-    y: pd.Series,
-    pooling_strategy: str,
-) -> Tuple[pd.Series, pd.Series]:
-    """Apply pooling strategy for correlation analysis.
-    
-    Parameters
-    ----------
-    x : pd.Series
-        First variable
-    y : pd.Series
-        Second variable
-    pooling_strategy : str
-        Strategy: "within_subject_centered", "within_subject_zscored", or "none"
-        
-    Returns
-    -------
-    Tuple[pd.Series, pd.Series]
-        Transformed (x, y) series
-    """
-    if pooling_strategy == "within_subject_centered":
-        return center_series(x), center_series(y)
-    if pooling_strategy == "within_subject_zscored":
-        return zscore_series(x), zscore_series(y)
-    return x, y
 
 
 def prepare_data_for_plotting(
@@ -139,46 +70,6 @@ def prepare_data_for_plotting(
 ###################################################################
 # Regression Utilities
 ###################################################################
-
-
-def compute_linear_residuals(
-    x_data: pd.Series,
-    y_data: pd.Series,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute linear regression residuals for plotting/visualization.
-    
-    Parameters
-    ----------
-    x_data : pd.Series
-        Predictor variable
-    y_data : pd.Series
-        Outcome variable
-        
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray, np.ndarray]
-        (fitted_values, residuals, x_valid)
-    """
-    x_numeric = pd.to_numeric(x_data, errors="coerce")
-    y_numeric = pd.to_numeric(y_data, errors="coerce")
-    valid_mask = x_numeric.notna() & y_numeric.notna()
-    
-    x_valid = x_numeric[valid_mask].to_numpy(dtype=float)
-    y_valid = y_numeric[valid_mask].to_numpy(dtype=float)
-    
-    if len(x_valid) < 2:
-        return np.array([]), np.array([]), np.array([])
-    
-    design_matrix = np.column_stack([np.ones(len(x_valid)), x_valid])
-    beta = _ols_fit(design_matrix, y_valid)
-    
-    if beta is None:
-        return np.array([]), np.array([]), np.array([])
-    
-    fitted_values = design_matrix @ beta
-    residuals = y_valid - fitted_values
-    
-    return fitted_values, residuals, x_valid
 
 
 def fit_linear_regression(
@@ -287,101 +178,6 @@ def compute_binned_statistics(
             bin_stds.append(bin_std)
     
     return bin_centers, bin_means, bin_stds
-
-
-###################################################################
-# Aperiodic Fitting
-###################################################################
-
-
-def _reject_peaks(
-    frequencies: np.ndarray,
-    psd_values: np.ndarray,
-    peak_rejection_z: float,
-    min_points: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Reject spectral peaks using robust outlier detection.
-    
-    Parameters
-    ----------
-    frequencies : np.ndarray
-        Frequency values
-    psd_values : np.ndarray
-        Power spectral density values
-    peak_rejection_z : float
-        Z-score threshold for peak rejection
-    min_points : int
-        Minimum points required after rejection
-        
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        (frequencies, psd_values) with peaks removed
-    """
-    mad = stats.median_abs_deviation(
-        psd_values, scale="normal", nan_policy="omit"
-    )
-    median_psd = np.median(psd_values) if np.isfinite(psd_values).any() else np.nan
-    
-    mad_threshold = 1e-12
-    is_mad_valid = np.isfinite(mad) and mad > mad_threshold
-    is_median_valid = np.isfinite(median_psd)
-    
-    if not (is_mad_valid and is_median_valid):
-        return frequencies, psd_values
-    
-    rejection_threshold = median_psd + peak_rejection_z * mad
-    keep_mask = psd_values <= rejection_threshold
-    
-    if keep_mask.sum() >= min_points:
-        return frequencies[keep_mask], psd_values[keep_mask]
-    
-    return frequencies, psd_values
-
-
-def fit_aperiodic(
-    log_freqs: np.ndarray,
-    log_psd: np.ndarray,
-    peak_rejection_z: float = 3.5,
-    min_points: int = 5,
-) -> Tuple[float, float]:
-    """Fit aperiodic (1/f) component to log-log PSD.
-    
-    Parameters
-    ----------
-    log_freqs : np.ndarray
-        Log-transformed frequencies
-    log_psd : np.ndarray
-        Log-transformed power spectral density
-    peak_rejection_z : float
-        Z-score threshold for peak rejection
-    min_points : int
-        Minimum points required for fitting
-        
-    Returns
-    -------
-    Tuple[float, float]
-        (intercept, slope) or (np.nan, np.nan) if fitting fails
-    """
-    finite_mask = np.isfinite(log_freqs) & np.isfinite(log_psd)
-    frequencies = log_freqs[finite_mask]
-    psd_values = log_psd[finite_mask]
-    
-    if frequencies.size < min_points:
-        return np.nan, np.nan
-    
-    frequencies, psd_values = _reject_peaks(
-        frequencies, psd_values, peak_rejection_z, min_points
-    )
-    
-    if frequencies.size < min_points:
-        return np.nan, np.nan
-    
-    try:
-        slope, intercept = np.polyfit(frequencies, psd_values, 1)
-        return float(intercept), float(slope)
-    except (ValueError, np.linalg.LinAlgError):
-        return np.nan, np.nan
 
 
 def compute_residuals(
@@ -548,90 +344,15 @@ def compute_change_features(
     return pd.DataFrame(change_data, index=features_df.index)
 
 
-###################################################################
-# Data Alignment Utilities
-###################################################################
-
-
-def prepare_aligned_data(
-    x: pd.Series,
-    y: pd.Series,
-    Z: Optional[pd.DataFrame] = None,
-) -> Tuple[pd.Series, pd.Series, Optional[pd.DataFrame], int, int]:
-    """Align x, y, and covariates, removing NaN rows.
-    
-    General utility for aligning multiple series/dataframes and removing
-    rows with missing values. Used by correlation and partial correlation
-    functions.
-    
-    Parameters
-    ----------
-    x : pd.Series
-        First input series
-    y : pd.Series
-        Second input series
-    Z : Optional[pd.DataFrame]
-        Optional covariates dataframe
-        
-    Returns
-    -------
-    Tuple[pd.Series, pd.Series, Optional[pd.DataFrame], int, int]
-        (x_clean, y_clean, Z_clean, n_total, n_kept)
-    """
-    x_series = x if isinstance(x, pd.Series) else pd.Series(x)
-    y_series = y if isinstance(y, pd.Series) else pd.Series(y)
-    
-    frames = [x_series.rename("__x__"), y_series.rename("__y__")]
-    has_covariates = False
-    
-    if Z is not None:
-        if isinstance(Z, pd.DataFrame):
-            has_data = len(Z) > 0 and len(Z.columns) > 0
-            if has_data:
-                frames.append(Z)
-                has_covariates = True
-        else:
-            try:
-                Z_dataframe = pd.DataFrame(Z)
-                has_data = len(Z_dataframe) > 0 and len(Z_dataframe.columns) > 0
-                if has_data:
-                    frames.append(Z_dataframe)
-                    has_covariates = True
-            except (ValueError, TypeError):
-                pass
-
-    combined_data = pd.concat(frames, axis=1)
-    n_total = len(combined_data)
-    clean_data = combined_data.dropna()
-    n_kept = len(clean_data)
-
-    if n_kept == 0:
-        return pd.Series(dtype=float), pd.Series(dtype=float), None, n_total, n_kept
-
-    x_name = x_series.name if x_series.name is not None else "x"
-    y_name = y_series.name if y_series.name is not None else "y"
-    
-    x_clean = clean_data.pop("__x__").rename(x_name)
-    y_clean = clean_data.pop("__y__").rename(y_name)
-    Z_clean = clean_data if has_covariates else None
-
-    return x_clean, y_clean, Z_clean, n_total, n_kept
-
-
 __all__ = [
     # Transform
-    "center_series",
-    "zscore_series",
-    "apply_pooling_strategy",
+    "zscore_array",
     "prepare_data_for_plotting",
-    "prepare_aligned_data",
     # Feature Transformation
     "compute_change_features",
     # Regression
-    "compute_linear_residuals",
     "fit_linear_regression",
     "compute_binned_statistics",
     # Aperiodic
-    "fit_aperiodic",
     "compute_residuals",
 ]

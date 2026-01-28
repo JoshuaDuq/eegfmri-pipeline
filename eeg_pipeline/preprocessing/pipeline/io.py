@@ -2,8 +2,6 @@ import os
 import mne
 import pandas as pd
 import numpy as np
-from pathlib import Path
-from mne_bids import BIDSPath, read_raw_bids, get_entities_from_fname
 
 
 ###################################################################
@@ -12,29 +10,6 @@ from mne_bids import BIDSPath, read_raw_bids, get_entities_from_fname
 
 def load_epochs(file_path, **kwargs):
     return mne.read_epochs(file_path, **kwargs)
-
-
-def load_raw(file_path, preload=True, bids_root=None, **kwargs):
-    if bids_root is not None:
-        try:
-            ents = get_entities_from_fname(file_path)
-            bp = BIDSPath(
-                root=bids_root,
-                subject=ents.get("subject"),
-                session=ents.get("session"),
-                task=ents.get("task"),
-                datatype="eeg",
-                suffix="eeg",
-                extension=os.path.splitext(file_path)[1],
-                check=False,
-            )
-            raw = read_raw_bids(bp, verbose=False)
-            if preload:
-                raw.load_data()
-            return raw
-        except Exception:
-            pass
-    return mne.io.read_raw(file_path, preload=preload, **kwargs)
 
 
 def load_ica(file_path, **kwargs):
@@ -84,12 +59,3 @@ def create_empty_components_tsv(n_components):
 
 def write_components_tsv(components_df, file_path, index=False):
     components_df.to_csv(file_path, sep="\t", index=index)
-
-
-###################################################################
-# Features I/O
-###################################################################
-
-def save_features(features_df, file_path, index=True):
-    features_df.to_csv(file_path, index=index)
-

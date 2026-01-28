@@ -1,6 +1,4 @@
-import os
 import re
-from pathlib import Path
 from mne_bids import BIDSPath, get_entities_from_fname
 
 
@@ -69,20 +67,6 @@ def get_subject_session(bids_path):
     return subject, session
 
 
-def format_subject_session(subject, session=None):
-    sub_num = f"sub-{subject}"
-    
-    if not session:
-        session = "1"
-        session_out = ""
-        session_file = ""
-    else:
-        session_out = f"ses-{session}"
-        session_file = f"ses-{session}_"
-    
-    return sub_num, session, session_out, session_file
-
-
 ###################################################################
 # Path Manipulation
 ###################################################################
@@ -93,13 +77,6 @@ def get_derived_path(file_path, old_suffix, new_suffix):
 
 def get_channels_path_from_eeg_file(eeg_file):
     return re.sub(r"_eeg\.[^.]+$", "_channels.tsv", eeg_file)
-
-
-def create_output_dirs(base_path, subject, session=None):
-    sub_num, session, session_out, _ = format_subject_session(subject, session)
-    output_dir = os.path.join(base_path, sub_num, session_out)
-    os.makedirs(output_dir, exist_ok=True)
-    return output_dir
 
 
 ###################################################################

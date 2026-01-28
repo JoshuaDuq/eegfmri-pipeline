@@ -1,5 +1,4 @@
 import os
-import re
 import mne
 import pyprep
 import pandas as pd
@@ -10,53 +9,6 @@ from mne_bids_pipeline._logging import gen_log_kwargs, logger
 
 from . import utils
 from . import io
-
-
-###################################################################
-# Segment Rejection
-###################################################################
-
-def reject_bad_segs(raw, annot_to_reject='', delete_non_bads=True):
-    raw_segs = []
-    if delete_non_bads:
-        del_idx = [i for i, x in enumerate(raw.annotations.description) if x != annot_to_reject]
-        raw.annotations.delete(del_idx)
-
-    if len(raw.annotations.onset) > 0 and raw.annotations.onset[0] != 0:
-        tmin = 0
-        tmax = raw.annotations.onset[0]
-        raw_segs.append(
-            raw.copy().crop(
-                tmin=tmin,
-                tmax=tmax,
-                include_tmax=False,
-            )
-        )
-
-    for jsegment in range(1, len(raw.annotations)):
-        if raw.annotations.description[jsegment] == annot_to_reject:
-            tmin = raw.annotations.onset[jsegment-1] + raw.annotations.duration[jsegment-1]
-            tmax = raw.annotations.onset[jsegment]
-            raw_segs.append(
-                raw.copy().crop(
-                    tmin=tmin,
-                    tmax=tmax,
-                    include_tmax=False,
-                )
-            )
-
-    if len(raw.annotations.onset) > 0 and raw.annotations.onset[-1] + raw.annotations.duration[-1] < raw.times[-1]:
-        tmin = raw.annotations.onset[-1] + raw.annotations.duration[-1]
-        tmax = raw.times[-1]
-        raw_segs.append(
-            raw.copy().crop(
-                tmin=tmin,
-                tmax=tmax,
-                include_tmax=True,
-            )
-        )
-
-    return mne.concatenate_raws(raw_segs), len(raw_segs)
 
 
 ###################################################################
@@ -220,8 +172,6 @@ def run_bads_detection_single_file(
                         "New Segment",
                     ),
                 )
-                n_blocks = len(annot_breaks)
-                original_dur = raw.times[-1]
                 removed_dur = float(np.sum(annot_breaks.duration)) if len(annot_breaks) else 0.0
                 msg = f"Found {len(annot_breaks)} breaks in the data; not cropping prior to PyPREP."
                 logger.info(

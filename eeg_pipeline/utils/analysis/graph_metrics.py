@@ -8,8 +8,6 @@ These functions operate on adjacency matrices (numpy arrays).
 Metrics:
 - Global efficiency (weighted)
 - Small-world sigma
-- Participation coefficient
-- Clustering coefficient
 - Thresholding utilities
 """
 
@@ -207,64 +205,6 @@ def compute_small_world_sigma(
         return np.nan
 
 
-def compute_participation_coefficient(
-    adj: np.ndarray,
-    community_labels: Dict[int, str],
-) -> np.ndarray:
-    """
-    Compute participation coefficient for each node.
-    
-    Participation coefficient measures how evenly a node's connections
-    are distributed across communities. High P = diverse connections.
-    
-    Parameters
-    ----------
-    adj : np.ndarray
-        Adjacency matrix
-    community_labels : Dict[int, str]
-        Mapping from node index to community label
-    
-    Returns
-    -------
-    np.ndarray
-        Participation coefficient for each node
-    """
-    num_nodes = adj.shape[0]
-    
-    if not community_labels:
-        return np.full(num_nodes, np.nan, dtype=float)
-    
-    unique_communities = sorted(set(community_labels.values()))
-    if len(unique_communities) < 2:
-        return np.full(num_nodes, np.nan, dtype=float)
-    
-    adjacency = np.maximum(adj, 0.0)
-    node_degrees = adjacency.sum(axis=1)
-    participation_coefficients = np.full(num_nodes, np.nan, dtype=float)
-    
-    for node_idx in range(num_nodes):
-        node_degree = node_degrees[node_idx]
-        if node_degree <= 0:
-            continue
-        
-        squared_proportion_sum = 0.0
-        for community in unique_communities:
-            community_node_indices = [
-                j
-                for j, label in community_labels.items()
-                if label == community
-            ]
-            if not community_node_indices:
-                continue
-            connections_to_community = np.sum(
-                adjacency[node_idx, community_node_indices]
-            )
-            proportion = connections_to_community / node_degree
-            squared_proportion_sum += proportion ** 2
-        
-        participation_coefficients[node_idx] = 1.0 - squared_proportion_sum
-    
-    return participation_coefficients
 
 
 

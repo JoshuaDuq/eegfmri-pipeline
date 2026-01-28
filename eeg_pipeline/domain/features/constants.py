@@ -38,24 +38,13 @@ SPATIAL_MODES = [
     "global",    # Global mean across all channels
 ]
 
-PRECOMPUTED_GROUP_CHOICES = [
-    "erds",
-    "spectral",
-    "ratios",
-    "asymmetry",
-]
-
-
 ###################################################################
 # Numerical Constants
 ###################################################################
 
 EPSILON_STD = 1e-12       # For standard deviation floor (avoid div-by-zero)
 EPSILON_PSD = 1e-20       # For PSD floor (avoid log of zero)
-EPSILON_FANO = 1e-12      # For Fano factor denominator
 MIN_SAMPLES_DEFAULT = 10  # Minimum samples for most feature extraction
-MIN_SAMPLES_COMPLEXITY = 100  # Minimum samples for complexity metrics
-MIN_SAMPLES_BURST = 10    # Minimum samples for burst detection
 
 
 ###################################################################

@@ -7,7 +7,6 @@ All windowing logic should import from this module.
 
 Provides:
 - time_mask, freq_mask: Basic masking functions
-- sliding_window_centers: Connectivity sliding windows
 - TimeWindowSpec: Builder class for complex windowing scenarios
 - WindowMetadata: Metadata for individual windows
 """
@@ -90,40 +89,6 @@ def time_mask_loose(
 def freq_mask(freqs: np.ndarray, fmin: float, fmax: float) -> np.ndarray:
     """Create boolean mask for frequency window [fmin, fmax]."""
     return (freqs >= fmin) & (freqs <= fmax)
-
-
-def sliding_window_centers(config: Any, n_windows: int) -> np.ndarray:
-    """
-    Compute centers of sliding windows for connectivity features based on config.
-    Uses active start/end and window length/step to cap window count.
-    """
-    feat_cfg = config.get("feature_engineering.features", {})
-    active_default = config.get("time_frequency_analysis.active_window", [0.0, 0.0])
-    
-    active_window = feat_cfg.get("active_window", active_default)
-    if isinstance(active_window, (list, tuple)) and len(active_window) >= 2:
-        active_start = float(active_window[0])
-        active_end = float(active_window[1])
-    else:
-        active_start = float(active_default[0])
-        active_end = float(active_default[1])
-
-    conn_cfg = config.get("feature_engineering.connectivity", {})
-    window_length = float(conn_cfg.get("sliding_window_len", 1.0))
-    window_step = float(conn_cfg.get("sliding_window_step", 0.5))
-
-    if active_end <= active_start:
-        return np.array([])
-
-    active_duration = active_end - active_start
-    available_duration = active_duration - window_length
-    max_windows = int(np.floor(available_duration / window_step) + 1)
-    max_windows = max(0, max_windows)
-    n_use = min(n_windows, max_windows)
-
-    window_center_offset = window_length / 2.0
-    centers = active_start + np.arange(n_use) * window_step + window_center_offset
-    return centers
 
 
 def build_time_windows(

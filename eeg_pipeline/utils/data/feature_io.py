@@ -874,28 +874,10 @@ def save_dropped_trials_log(
     write_tsv(out, drop_log_path)
 
 
-def iterate_feature_columns(
-    feature_df: pd.DataFrame,
-    col_prefix: Optional[str] = None,
-) -> Tuple[List[str], pd.DataFrame]:
-    """Extract feature columns matching optional prefix."""
-    if feature_df is None or feature_df.empty:
-        return [], pd.DataFrame()
-    if col_prefix:
-        matching_cols = [
-            col for col in feature_df.columns if str(col).startswith(col_prefix)
-        ]
-        if not matching_cols:
-            return [], pd.DataFrame()
-        return matching_cols, feature_df[matching_cols]
-    return list(feature_df.columns), feature_df
-
-
 __all__ = [
     "FeatureBundle",
     "load_feature_bundle",
     "_load_features_and_targets",
-    "iterate_feature_columns",
     "save_all_features",
     "save_dropped_trials_log",
 ]

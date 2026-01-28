@@ -40,7 +40,7 @@ from eeg_pipeline.plotting.io.figures import get_band_color
 from eeg_pipeline.utils.analysis.stats import compute_partial_residuals, joint_valid_mask
 from eeg_pipeline.utils.analysis.stats.correlation import format_correlation_method_label
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
-from eeg_pipeline.utils.data import load_precomputed_correlations, load_subject_scatter_data
+from eeg_pipeline.utils.data import load_subject_scatter_data
 from eeg_pipeline.utils.data.covariates import build_covariate_matrix
 from eeg_pipeline.utils.formatting import sanitize_label
 

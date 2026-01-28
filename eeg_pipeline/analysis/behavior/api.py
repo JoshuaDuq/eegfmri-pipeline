@@ -35,7 +35,6 @@ from eeg_pipeline.utils.analysis.stats.mixed_effects import (
     MixedEffectsResult,
     fit_mixed_effects_model,
     run_mediation_analysis,
-    run_multilevel_correlation_analysis,
 )
 from eeg_pipeline.utils.analysis.stats.reliability import (
     compute_correlation_split_half_reliability as compute_split_half_reliability,
@@ -109,7 +108,6 @@ __all__ = [
     "MixedEffectsResult",
     "fit_mixed_effects_model",
     "compute_icc",
-    "run_multilevel_correlation_analysis",
     "run_mediation_analysis",
     # Condition
     "split_by_condition",

@@ -647,53 +647,6 @@ def get_min_channels_required(config: Any = None, min_absolute: int = 4) -> int:
 ###################################################################
 
 
-def _fit_with_inner_cv(
-    pipe,
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    train_groups: np.ndarray,
-    config_dict: Optional[Dict],
-    fold: int,
-    inner_n_jobs: int,
-    log: logging.Logger,
-    seed: int,
-    inner_splits: int,
-) -> Tuple[Any, Optional[pd.DataFrame], Optional[GridSearchCV]]:
-    """Fit pipeline with inner CV for hyperparameter tuning.
-    
-    Returns:
-        Tuple of (best_estimator, cv_results_df, grid_search_cv)
-        If n_splits < 2, returns (fitted_pipe, None, None)
-    """
-    from eeg_pipeline.analysis.machine_learning.pipelines import build_elasticnet_param_grid
-
-    n_unique = len(np.unique(train_groups))
-    n_splits = get_inner_cv_splits(n_unique, inner_splits)
-
-    if n_splits < 2:
-        log.info(f"Fold {fold}: <2 groups, fitting without inner CV")
-        pipe.fit(X_train, y_train)
-        return pipe, None, None
-
-    inner_cv = create_inner_cv(train_groups, n_splits)
-    param_grid = build_elasticnet_param_grid(config_dict)
-    scoring = create_scoring_dict()
-
-    gs = GridSearchCV(
-        estimator=pipe,
-        param_grid=param_grid,
-        scoring=scoring,
-        cv=inner_cv,
-        n_jobs=inner_n_jobs,
-        refit="r",
-        error_score="raise",
-    )
-    gs = grid_search_with_warning_logging(gs, X_train, y_train, f"fold {fold}", log, groups=train_groups)
-
-    cv_results = pd.DataFrame(gs.cv_results_)
-    return gs.best_estimator_, cv_results, gs
-
-
 def _fit_default_pipeline(
     pipe,
     X_train: np.ndarray,
@@ -711,20 +664,6 @@ def _fit_default_pipeline(
                 pass
     pipe_clone.fit(X_train, y_train)
     return pipe_clone
-
-
-def _predict_and_log(
-    estimator,
-    X_test: np.ndarray,
-    y_test: np.ndarray,
-    fold: int,
-    log: logging.Logger,
-) -> np.ndarray:
-    """Make predictions and log fold performance."""
-    y_pred = estimator.predict(X_test)
-    r, _ = safe_pearsonr(y_test, y_pred)
-    log.info(f"Fold {fold}: r={r:.3f}, n_test={len(y_test)}")
-    return y_pred
 
 
 ###################################################################

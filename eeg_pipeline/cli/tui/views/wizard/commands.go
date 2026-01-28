@@ -421,7 +421,8 @@ func (m Model) BuildCommand() string {
 		m.Pipeline == types.PipelineBehavior ||
 		m.Pipeline == types.PipelinePlotting ||
 		m.Pipeline == types.PipelineML ||
-		m.Pipeline == types.PipelineFmri
+		m.Pipeline == types.PipelineFmri ||
+		m.Pipeline == types.PipelineFmriAnalysis
 
 	hasValidModeIndex := len(m.modeOptions) > m.modeIndex
 	modeToUse := ""
@@ -577,10 +578,11 @@ func (m Model) BuildCommand() string {
 		m.Pipeline == types.PipelineBehavior ||
 		m.Pipeline == types.PipelineML ||
 		m.Pipeline == types.PipelinePlotting ||
-		m.Pipeline == types.PipelineFmri
+		m.Pipeline == types.PipelineFmri ||
+		m.Pipeline == types.PipelineFmriAnalysis
 
 	if needsPaths {
-		if m.Pipeline == types.PipelineFmri {
+		if m.Pipeline == types.PipelineFmri || m.Pipeline == types.PipelineFmriAnalysis {
 			if m.bidsFmriRoot != "" {
 				parts = append(parts, "--bids-fmri-root", expandUserPath(m.bidsFmriRoot))
 			}
@@ -634,6 +636,8 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, m.buildPreprocessingAdvancedArgs()...)
 		case types.PipelineFmri:
 			parts = append(parts, m.buildFmriAdvancedArgs()...)
+		case types.PipelineFmriAnalysis:
+			parts = append(parts, m.buildFmriAnalysisAdvancedArgs()...)
 		case types.PipelineRawToBIDS:
 			parts = append(parts, m.buildRawToBidsAdvancedArgs()...)
 		case types.PipelineFmriRawToBIDS:
@@ -651,12 +655,10 @@ func (m Model) BuildCommand() string {
 	allSubjectsSelected := len(subjs) == 0 || len(subjs) == len(m.subjects)
 	if allSubjectsSelected {
 		parts = append(parts, "--all-subjects")
-	} else if len(subjs) <= 10 {
+	} else {
 		for _, s := range subjs {
 			parts = append(parts, "--subject", s)
 		}
-	} else {
-		parts = append(parts, "--subjects", strings.Join(subjs, ","))
 	}
 
 	if m.DryRunMode {
@@ -2970,6 +2972,83 @@ func (m Model) buildFmriAdvancedArgs() []string {
 
 	// Advanced
 	ab.addIfNonEmpty("--fmriprep-extra-args", m.fmriExtraArgs)
+
+	return ab.build()
+}
+
+func (m Model) buildFmriAnalysisAdvancedArgs() []string {
+	ab := newArgBuilder()
+
+	inputSource := "fmriprep"
+	if m.fmriAnalysisInputSourceIndex%2 == 1 {
+		inputSource = "bids_raw"
+	}
+	ab.args = append(ab.args, "--input-source", inputSource)
+
+	if strings.TrimSpace(m.fmriAnalysisFmriprepSpace) != "" && strings.TrimSpace(m.fmriAnalysisFmriprepSpace) != "T1w" {
+		ab.args = append(ab.args, "--fmriprep-space", strings.TrimSpace(m.fmriAnalysisFmriprepSpace))
+	}
+
+	if !m.fmriAnalysisRequireFmriprep {
+		ab.args = append(ab.args, "--no-require-fmriprep")
+	}
+
+	// Runs: accept space-separated ints (e.g. "1 2 3")
+	runsSpec := strings.TrimSpace(m.fmriAnalysisRunsSpec)
+	if runsSpec != "" {
+		runs := splitSpaceList(runsSpec)
+		if len(runs) > 0 {
+			ab.args = append(ab.args, "--runs")
+			ab.args = append(ab.args, runs...)
+		}
+	}
+
+	// Contrast
+	ab.addIfNonEmpty("--contrast-name", strings.TrimSpace(m.fmriAnalysisContrastName))
+
+	if m.fmriAnalysisContrastType%2 == 1 {
+		ab.args = append(ab.args, "--contrast-type", "custom")
+		ab.addIfNonEmpty("--formula", strings.TrimSpace(m.fmriAnalysisFormula))
+	} else {
+		ab.args = append(ab.args, "--contrast-type", "t-test")
+		ab.addIfNonEmpty("--cond-a-value", strings.TrimSpace(m.fmriAnalysisCondAValue))
+		ab.addIfNonEmpty("--cond-b-value", strings.TrimSpace(m.fmriAnalysisCondBValue))
+	}
+
+	// GLM
+	hrfOptions := []string{"spm", "flobs", "fir"}
+	ab.args = append(ab.args, "--hrf-model", hrfOptions[m.fmriAnalysisHrfModel%len(hrfOptions)])
+	driftOptions := []string{"none", "cosine", "polynomial"}
+	ab.args = append(ab.args, "--drift-model", driftOptions[m.fmriAnalysisDriftModel%len(driftOptions)])
+
+	ab.args = append(ab.args, "--high-pass-hz", fmt.Sprintf("%.6f", m.fmriAnalysisHighPassHz))
+	ab.args = append(ab.args, "--low-pass-hz", fmt.Sprintf("%.6f", m.fmriAnalysisLowPassHz))
+
+	// Confounds / QC
+	confoundsOptions := []string{
+		"auto",
+		"none",
+		"motion6",
+		"motion12",
+		"motion24",
+		"motion24+wmcsf",
+		"motion24+wmcsf+fd",
+	}
+	ab.args = append(ab.args, "--confounds-strategy", confoundsOptions[m.fmriAnalysisConfoundsStrategy%len(confoundsOptions)])
+	if m.fmriAnalysisWriteDesignMatrix {
+		ab.args = append(ab.args, "--write-design-matrix")
+	}
+
+	// Output
+	outTypeOptions := []string{"z-score", "t-stat", "cope", "beta"}
+	ab.args = append(ab.args, "--output-type", outTypeOptions[m.fmriAnalysisOutputType%len(outTypeOptions)])
+
+	ab.addIfNonEmpty("--output-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisOutputDir)))
+
+	if m.fmriAnalysisResampleToFS {
+		ab.args = append(ab.args, "--resample-to-freesurfer")
+		ab.addIfNonEmpty("--freesurfer-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisFreesurferDir)))
+	}
 
 	return ab.build()
 }

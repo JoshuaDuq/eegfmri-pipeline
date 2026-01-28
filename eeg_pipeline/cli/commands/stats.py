@@ -12,6 +12,7 @@ import pandas as pd
 
 from eeg_pipeline.cli.common import add_task_arg, resolve_task
 from eeg_pipeline.infra.paths import deriv_features_path, resolve_deriv_root
+from eeg_pipeline.pipelines.constants import FEATURE_CATEGORIES
 from eeg_pipeline.utils.data.subjects import (
     _collect_subjects_from_bids,
     _collect_subjects_from_derivatives_epochs,
@@ -28,22 +29,6 @@ INDENT_SIZE = 2
 PERCENTAGE_PRECISION = 1
 STORAGE_BAR_SCALE = 5
 TIMELINE_DISPLAY_LIMIT = 20
-
-FEATURE_CATEGORIES = [
-    "power",
-    "connectivity",
-    "aperiodic",
-    "erp",
-    "bursts",
-    "itpc",
-    "pac",
-    "complexity",
-    "quality",
-    "erds",
-    "spectral",
-    "ratios",
-    "asymmetry",
-]
 
 METADATA_COLUMNS = {"subject", "epoch", "condition", "task"}
 

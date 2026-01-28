@@ -599,6 +599,35 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriLevelIndex"] = m.fmriLevelIndex
 	cfg["fmriTaskId"] = m.fmriTaskId
 
+	// fMRI Analysis
+	cfg["fmriAnalysisInputSourceIndex"] = m.fmriAnalysisInputSourceIndex
+	cfg["fmriAnalysisFmriprepSpace"] = m.fmriAnalysisFmriprepSpace
+	cfg["fmriAnalysisRequireFmriprep"] = m.fmriAnalysisRequireFmriprep
+	cfg["fmriAnalysisRunsSpec"] = m.fmriAnalysisRunsSpec
+	cfg["fmriAnalysisContrastType"] = m.fmriAnalysisContrastType
+	cfg["fmriAnalysisCondAValue"] = m.fmriAnalysisCondAValue
+	cfg["fmriAnalysisCondBValue"] = m.fmriAnalysisCondBValue
+	cfg["fmriAnalysisCondAIdx"] = m.fmriAnalysisCondAIdx
+	cfg["fmriAnalysisCondBIdx"] = m.fmriAnalysisCondBIdx
+	cfg["fmriAnalysisContrastName"] = m.fmriAnalysisContrastName
+	cfg["fmriAnalysisFormula"] = m.fmriAnalysisFormula
+	cfg["fmriAnalysisHrfModel"] = m.fmriAnalysisHrfModel
+	cfg["fmriAnalysisDriftModel"] = m.fmriAnalysisDriftModel
+	cfg["fmriAnalysisHighPassHz"] = m.fmriAnalysisHighPassHz
+	cfg["fmriAnalysisLowPassHz"] = m.fmriAnalysisLowPassHz
+	cfg["fmriAnalysisOutputType"] = m.fmriAnalysisOutputType
+	cfg["fmriAnalysisOutputDir"] = m.fmriAnalysisOutputDir
+	cfg["fmriAnalysisResampleToFS"] = m.fmriAnalysisResampleToFS
+	cfg["fmriAnalysisFreesurferDir"] = m.fmriAnalysisFreesurferDir
+	cfg["fmriAnalysisConfoundsStrategy"] = m.fmriAnalysisConfoundsStrategy
+	cfg["fmriAnalysisWriteDesignMatrix"] = m.fmriAnalysisWriteDesignMatrix
+
+	cfg["fmriAnalysisGroupInputExpanded"] = m.fmriAnalysisGroupInputExpanded
+	cfg["fmriAnalysisGroupContrastExpanded"] = m.fmriAnalysisGroupContrastExpanded
+	cfg["fmriAnalysisGroupGLMExpanded"] = m.fmriAnalysisGroupGLMExpanded
+	cfg["fmriAnalysisGroupConfoundsExpanded"] = m.fmriAnalysisGroupConfoundsExpanded
+	cfg["fmriAnalysisGroupOutputExpanded"] = m.fmriAnalysisGroupOutputExpanded
+
 	// ML pipeline
 	cfg["mlNPerm"] = m.mlNPerm
 	cfg["innerSplits"] = m.innerSplits
@@ -1481,6 +1510,35 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fmriNoMsm = getBool("fmriNoMsm", m.fmriNoMsm)
 	m.fmriLevelIndex = getInt("fmriLevelIndex", m.fmriLevelIndex)
 	m.fmriTaskId = getString("fmriTaskId", m.fmriTaskId)
+
+	// fMRI Analysis
+	m.fmriAnalysisInputSourceIndex = getInt("fmriAnalysisInputSourceIndex", m.fmriAnalysisInputSourceIndex)
+	m.fmriAnalysisFmriprepSpace = getString("fmriAnalysisFmriprepSpace", m.fmriAnalysisFmriprepSpace)
+	m.fmriAnalysisRequireFmriprep = getBool("fmriAnalysisRequireFmriprep", m.fmriAnalysisRequireFmriprep)
+	m.fmriAnalysisRunsSpec = getString("fmriAnalysisRunsSpec", m.fmriAnalysisRunsSpec)
+	m.fmriAnalysisContrastType = getInt("fmriAnalysisContrastType", m.fmriAnalysisContrastType)
+	m.fmriAnalysisCondAValue = getString("fmriAnalysisCondAValue", m.fmriAnalysisCondAValue)
+	m.fmriAnalysisCondBValue = getString("fmriAnalysisCondBValue", m.fmriAnalysisCondBValue)
+	m.fmriAnalysisCondAIdx = getInt("fmriAnalysisCondAIdx", m.fmriAnalysisCondAIdx)
+	m.fmriAnalysisCondBIdx = getInt("fmriAnalysisCondBIdx", m.fmriAnalysisCondBIdx)
+	m.fmriAnalysisContrastName = getString("fmriAnalysisContrastName", m.fmriAnalysisContrastName)
+	m.fmriAnalysisFormula = getString("fmriAnalysisFormula", m.fmriAnalysisFormula)
+	m.fmriAnalysisHrfModel = getInt("fmriAnalysisHrfModel", m.fmriAnalysisHrfModel)
+	m.fmriAnalysisDriftModel = getInt("fmriAnalysisDriftModel", m.fmriAnalysisDriftModel)
+	m.fmriAnalysisHighPassHz = getFloat("fmriAnalysisHighPassHz", m.fmriAnalysisHighPassHz)
+	m.fmriAnalysisLowPassHz = getFloat("fmriAnalysisLowPassHz", m.fmriAnalysisLowPassHz)
+	m.fmriAnalysisOutputType = getInt("fmriAnalysisOutputType", m.fmriAnalysisOutputType)
+	m.fmriAnalysisOutputDir = getString("fmriAnalysisOutputDir", m.fmriAnalysisOutputDir)
+	m.fmriAnalysisResampleToFS = getBool("fmriAnalysisResampleToFS", m.fmriAnalysisResampleToFS)
+	m.fmriAnalysisFreesurferDir = getString("fmriAnalysisFreesurferDir", m.fmriAnalysisFreesurferDir)
+	m.fmriAnalysisConfoundsStrategy = getInt("fmriAnalysisConfoundsStrategy", m.fmriAnalysisConfoundsStrategy)
+	m.fmriAnalysisWriteDesignMatrix = getBool("fmriAnalysisWriteDesignMatrix", m.fmriAnalysisWriteDesignMatrix)
+
+	m.fmriAnalysisGroupInputExpanded = getBool("fmriAnalysisGroupInputExpanded", m.fmriAnalysisGroupInputExpanded)
+	m.fmriAnalysisGroupContrastExpanded = getBool("fmriAnalysisGroupContrastExpanded", m.fmriAnalysisGroupContrastExpanded)
+	m.fmriAnalysisGroupGLMExpanded = getBool("fmriAnalysisGroupGLMExpanded", m.fmriAnalysisGroupGLMExpanded)
+	m.fmriAnalysisGroupConfoundsExpanded = getBool("fmriAnalysisGroupConfoundsExpanded", m.fmriAnalysisGroupConfoundsExpanded)
+	m.fmriAnalysisGroupOutputExpanded = getBool("fmriAnalysisGroupOutputExpanded", m.fmriAnalysisGroupOutputExpanded)
 
 	// ML pipeline
 	m.mlNPerm = getInt("mlNPerm", m.mlNPerm)

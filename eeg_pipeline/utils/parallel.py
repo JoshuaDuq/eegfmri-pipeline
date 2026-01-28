@@ -9,25 +9,21 @@ import hashlib
 import logging
 import os
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from joblib import Parallel, cpu_count, delayed
 
-T = TypeVar("T")
-
 # Constants
 _MIN_PARALLEL_JOBS = 1
 _DEFAULT_CPU_RESERVE = 1
-_MIN_FEATURES_FOR_PARALLEL_CORRELATION = 10
 _MIN_FEATURES_FOR_PARALLEL_CONDITION = 10
 _MIN_FEATURES_FOR_PARALLEL_REGRESSION = 10
 _MIN_FEATURES_FOR_PARALLEL_STABILITY = 10
 _MIN_FEATURES_FOR_PARALLEL_INFLUENCE = 5
 _MIN_FEATURE_TYPES_FOR_PARALLEL = 2
 _NUMERIC_TOLERANCE = 1e-12
-_SPLIT_HALF_RELIABILITY_SPLITS = 50
 _MIN_FEATURES_FOR_BATCH_CONDITION = 100  # Use vectorized batch for 100+ features
 
 
@@ -65,199 +61,6 @@ def _should_use_parallel(n_jobs: int, num_items: int, min_items: int = 1) -> boo
     """Determine if parallel execution should be used."""
     normalized_jobs = _normalize_n_jobs(n_jobs)
     return normalized_jobs > 1 and num_items >= min_items
-
-
-def _execute_parallel(
-    func: Callable[..., T],
-    items: List[Any],
-    n_jobs: int,
-    backend: str = "loky",
-    verbose: int = 0,
-    **kwargs: Any,
-) -> List[T]:
-    """Execute function on items in parallel using joblib."""
-    normalized_jobs = _normalize_n_jobs(n_jobs)
-    return Parallel(n_jobs=normalized_jobs, backend=backend, verbose=verbose)(
-        delayed(func)(item, **kwargs) for item in items
-    )
-
-
-def parallel_map(
-    func: Callable[..., T],
-    items: List[Any],
-    n_jobs: int = -1,
-    backend: str = "loky",
-    verbose: int = 0,
-    desc: str = "",
-    logger: Optional[logging.Logger] = None,
-    **kwargs: Any,
-) -> List[T]:
-    """Apply function to items in parallel."""
-    if not items:
-        return []
-
-    if not _should_use_parallel(n_jobs, len(items)):
-        return [func(item, **kwargs) for item in items]
-
-    if logger and desc:
-        normalized_jobs = _normalize_n_jobs(n_jobs)
-        logger.debug(f"Parallel {desc}: {len(items)} items, {normalized_jobs} jobs")
-
-    return _execute_parallel(func, items, n_jobs, backend, verbose, **kwargs)
-
-
-def parallel_correlate_features(
-    feature_columns: List[str],
-    feature_df: pd.DataFrame,
-    target_arr: np.ndarray,
-    temp_arr: Optional[np.ndarray],
-    order_arr: Optional[np.ndarray],
-    method: str,
-    min_samples: int,
-    compute_reliability: bool,
-    rng_seed: int,
-    n_jobs: int = -1,
-    logger: Optional[logging.Logger] = None,
-) -> List[Dict[str, Any]]:
-    """Correlate multiple features with target.
-    
-    Uses vectorized batch computation when partial correlations and reliability
-    are not needed. Falls back to per-feature computation otherwise.
-    """
-    if not feature_columns:
-        return []
-    
-    n_features = len(feature_columns)
-    
-    # Use vectorized batch for simple correlations (no partials, no reliability)
-    needs_partials = temp_arr is not None or order_arr is not None
-    needs_reliability = compute_reliability
-    
-    if n_features >= _MIN_FEATURES_FOR_BATCH_CONDITION and not needs_partials and not needs_reliability:
-        from eeg_pipeline.utils.analysis.stats.correlation import compute_batch_correlations
-        return compute_batch_correlations(
-            feature_columns=feature_columns,
-            feature_df=feature_df,
-            target_arr=target_arr,
-            method=method,
-            min_samples=min_samples,
-            logger=logger,
-        )
-    
-    # Fall back to per-feature computation for partial correlations or reliability
-    if logger:
-        logger.info(f"Correlations: {n_features} features (per-feature mode, partials={needs_partials}, reliability={needs_reliability})")
-    
-    if not _should_use_parallel(n_jobs, n_features, _MIN_FEATURES_FOR_PARALLEL_CORRELATION):
-        results = []
-        for col in feature_columns:
-            result = _correlate_single_column(
-                col,
-                feature_df,
-                target_arr,
-                temp_arr,
-                order_arr,
-                method,
-                min_samples,
-                compute_reliability,
-                rng_seed,
-            )
-            if result is not None:
-                results.append(result)
-        return results
-
-    normalized_jobs = _normalize_n_jobs(n_jobs)
-    results = Parallel(n_jobs=normalized_jobs, backend="loky")(
-        delayed(_correlate_single_column)(
-            col,
-            feature_df,
-            target_arr,
-            temp_arr,
-            order_arr,
-            method,
-            min_samples,
-            compute_reliability,
-            rng_seed + i,
-        )
-        for i, col in enumerate(feature_columns)
-    )
-
-    return [result for result in results if result is not None]
-
-
-def _extract_band_from_column_name(column_name: str) -> str:
-    """Extract frequency band name from column name."""
-    frequency_bands = ["delta", "theta", "alpha", "beta", "gamma"]
-    column_lower = column_name.lower()
-    for band in frequency_bands:
-        if band in column_lower:
-            return band
-    return "broadband"
-
-
-def _correlate_single_column(
-    col: str,
-    feature_df: pd.DataFrame,
-    target_arr: np.ndarray,
-    temp_arr: Optional[np.ndarray],
-    order_arr: Optional[np.ndarray],
-    method: str,
-    min_samples: int,
-    compute_reliability: bool,
-    rng_seed: int,
-) -> Optional[Dict[str, Any]]:
-    """Correlate a single feature column with target."""
-    from eeg_pipeline.utils.analysis.stats.correlation import (
-        correlate_single_feature,
-        interpret_correlation,
-    )
-    from eeg_pipeline.utils.analysis.stats.reliability import (
-        compute_correlation_split_half_reliability as compute_split_half_reliability,
-    )
-
-    feature_arr = pd.to_numeric(feature_df[col], errors="coerce").values
-
-    is_change_score = "_change_" in col
-    band = _extract_band_from_column_name(col)
-
-    correlation_results = correlate_single_feature(
-        feature_arr, target_arr, temp_arr, order_arr, method, min_samples
-    )
-    r_raw, p_raw, r_pt, p_pt, r_po, p_po, r_pf, p_pf, n = correlation_results
-
-    if not np.isfinite(r_raw):
-        return None
-
-    r_primary = r_pt if np.isfinite(r_pt) else r_raw
-    p_primary = p_pt if np.isfinite(p_pt) else p_raw
-    effect_interpretation = interpret_correlation(r_primary)
-
-    reliability = np.nan
-    if compute_reliability:
-        rng = np.random.default_rng(rng_seed)
-        reliability = compute_split_half_reliability(
-            feature_arr, target_arr, method, n_splits=_SPLIT_HALF_RELIABILITY_SPLITS, rng=rng
-        )
-
-    return {
-        "feature": col,
-        "band": band,
-        "r_raw": float(r_raw),
-        "p_raw": float(p_raw),
-        "n": n,
-        "r_partial_temp": float(r_pt) if np.isfinite(r_pt) else np.nan,
-        "p_partial_temp": float(p_pt) if np.isfinite(p_pt) else np.nan,
-        "r_partial_order": float(r_po) if np.isfinite(r_po) else np.nan,
-        "p_partial_order": float(p_po) if np.isfinite(p_po) else np.nan,
-        "r_partial_full": float(r_pf) if np.isfinite(r_pf) else np.nan,
-        "p_partial_full": float(p_pf) if np.isfinite(p_pf) else np.nan,
-        "effect_interpretation": effect_interpretation,
-        "reliability": reliability,
-        "is_change_score": is_change_score,
-        "method": method,
-        "r_primary": r_primary,
-        "p_primary": p_primary,
-    }
 
 
 def parallel_condition_effects(
@@ -529,43 +332,6 @@ def parallel_feature_types(
     return {name: result for (name, _), result in zip(items, parallel_results)}
 
 
-def _safe_process_subject(
-    subject: str, process_func: Callable[[str], T], logger: Optional[logging.Logger]
-) -> Tuple[str, Optional[T]]:
-    """Safely process a single subject, returning subject ID and result."""
-    try:
-        return subject, process_func(subject)
-    except Exception as e:
-        if logger:
-            logger.error(f"Failed sub-{subject}: {e}")
-        return subject, None
-
-
-def parallel_subjects(
-    subjects: List[str],
-    process_func: Callable[[str], T],
-    n_jobs: int = -1,
-    logger: Optional[logging.Logger] = None,
-) -> Dict[str, Optional[T]]:
-    """Process multiple subjects in parallel."""
-    if not _should_use_parallel(n_jobs, len(subjects)):
-        results: Dict[str, Optional[T]] = {}
-        for subject in subjects:
-            _, result = _safe_process_subject(subject, process_func, logger)
-            results[subject] = result
-        return results
-
-    normalized_jobs = _normalize_n_jobs(n_jobs)
-    if logger:
-        logger.info(f"Parallel processing: {len(subjects)} subjects, {normalized_jobs} jobs")
-
-    parallel_results = Parallel(n_jobs=normalized_jobs, backend="loky")(
-        delayed(_safe_process_subject)(subject, process_func, logger) for subject in subjects
-    )
-
-    return {subject: result for subject, result in parallel_results}
-
-
 def _parallel_features_generic(
     feature_args: List[Tuple[Any, ...]],
     process_func: Callable[..., Optional[Dict[str, Any]]],
@@ -633,11 +399,8 @@ def parallel_influence_features(
 
 __all__ = [
     "get_n_jobs",
-    "parallel_map",
-    "parallel_correlate_features",
     "parallel_condition_effects",
     "parallel_feature_types",
-    "parallel_subjects",
     "parallel_regression_features",
     "parallel_stability_features",
     "parallel_influence_features",

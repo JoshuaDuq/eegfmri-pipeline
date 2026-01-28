@@ -2,7 +2,7 @@
 Bootstrap Statistics
 ===================
 
-Bootstrap confidence intervals for correlations and means.
+Bootstrap confidence intervals for correlations.
 """
 
 from __future__ import annotations
@@ -10,13 +10,11 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 import numpy as np
-from scipy import stats
 
 from .base import get_n_bootstrap, get_ci_level
 
 # Minimum sample sizes for valid statistics
 MIN_SAMPLES_BOOTSTRAP_CORR = 4
-MIN_SAMPLES_BOOTSTRAP_MEAN = 3
 MIN_SAMPLES_BCA = 5
 
 # Minimum bootstrap replicates for valid confidence intervals
@@ -120,45 +118,6 @@ def bootstrap_corr_ci(
     ci_level = get_ci_level(config)
     x_valid, y_valid = _filter_finite_pairs(x, y)
     return _bootstrap_corr_ci_impl(x_valid, y_valid, method, n_boot, ci_level, rng)
-
-
-def bootstrap_mean_diff_ci(
-    group1: np.ndarray,
-    group2: np.ndarray,
-    n_boot: Optional[int] = None,
-    ci_level: Optional[float] = None,
-    rng: Optional[np.random.Generator] = None,
-    config: Optional[Any] = None,
-) -> Tuple[float, float, float]:
-    """Bootstrap percentile CI for mean difference (group2 - group1)."""
-    n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
-    if ci_level is None:
-        ci_level = get_ci_level(config)
-
-    group1_valid = np.asarray(group1).ravel()
-    group2_valid = np.asarray(group2).ravel()
-    group1_valid = group1_valid[np.isfinite(group1_valid)]
-    group2_valid = group2_valid[np.isfinite(group2_valid)]
-
-    n1 = group1_valid.size
-    n2 = group2_valid.size
-    if n1 < MIN_SAMPLES_BOOTSTRAP_MEAN or n2 < MIN_SAMPLES_BOOTSTRAP_MEAN:
-        return np.nan, np.nan, np.nan
-
-    bootstrap_differences = np.empty(n_boot, dtype=float)
-    for i in range(n_boot):
-        indices1 = rng.integers(0, n1, size=n1)
-        indices2 = rng.integers(0, n2, size=n2)
-        mean1 = np.mean(group1_valid[indices1])
-        mean2 = np.mean(group2_valid[indices2])
-        bootstrap_differences[i] = mean2 - mean1
-
-    observed_diff = np.mean(group2_valid) - np.mean(group1_valid)
-    lower_percentile, upper_percentile = _compute_percentile_bounds(ci_level)
-    ci_low = np.percentile(bootstrap_differences, lower_percentile)
-    ci_high = np.percentile(bootstrap_differences, upper_percentile)
-
-    return float(observed_diff), float(ci_low), float(ci_high)
 
 
 def compute_bootstrap_ci(

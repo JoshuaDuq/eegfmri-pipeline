@@ -1,8 +1,2 @@
-from . import run_pipeline
-from . import create_config
-
-__all__ = [
-    'run_pipeline',
-    'create_config',
-]
+"""Preprocessing helper scripts. Run via: python -m eeg_pipeline.preprocessing.scripts.run_pipeline or create_config."""
 

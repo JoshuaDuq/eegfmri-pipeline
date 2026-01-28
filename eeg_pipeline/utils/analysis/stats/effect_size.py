@@ -79,17 +79,6 @@ def hedges_g(
     return float(d * correction_factor)
 
 
-def cohens_q(r1: float, r2: float, config: Optional[Any] = None) -> float:
-    """Cohen's q for difference between correlations."""
-    if not (np.isfinite(r1) and np.isfinite(r2)):
-        return np.nan
-
-    z1 = fisher_z(r1, config=config)
-    z2 = fisher_z(r2, config=config)
-
-    return float(z1 - z2)
-
-
 def compute_cohens_d_with_bootstrap_ci(
     group_a_data: np.ndarray,
     group_b_data: np.ndarray,

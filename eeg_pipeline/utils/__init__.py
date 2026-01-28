@@ -10,7 +10,6 @@ Submodules:
 - data: Data loading, feature manipulation, and file I/O for data structures
 - validation: Data validation utilities
 - progress: Progress tracking and reporting
-- decorators: Function decorators for common patterns
 - formatting: String formatting utilities
 - parallel: Parallel processing utilities
 """

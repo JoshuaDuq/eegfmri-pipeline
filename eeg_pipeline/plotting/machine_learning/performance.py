@@ -28,60 +28,6 @@ from eeg_pipeline.plotting.machine_learning.helpers import (
 )
 
 
-def _plot_bootstrap_metric(
-    ax,
-    point_value: float,
-    ci: list,
-    metric_name: str,
-    plot_cfg,
-    model_name: Optional[str] = None,
-) -> None:
-    """Plot bootstrap metric with confidence interval."""
-    ax.axvline(
-        point_value,
-        color=plot_cfg.style.colors.red,
-        linewidth=plot_cfg.style.line.width_bold,
-        label='Observed',
-    )
-    ax.axvline(
-        ci[0],
-        color=plot_cfg.style.colors.black,
-        linewidth=plot_cfg.style.line.width_standard,
-        linestyle='--',
-        alpha=plot_cfg.style.alpha_ci_line,
-    )
-    ax.axvline(
-        ci[1],
-        color=plot_cfg.style.colors.black,
-        linewidth=plot_cfg.style.line.width_standard,
-        linestyle='--',
-        alpha=plot_cfg.style.alpha_ci_line,
-    )
-    ax.axvspan(
-        ci[0],
-        ci[1],
-        alpha=plot_cfg.style.alpha_ci,
-        color=plot_cfg.style.colors.black,
-        label='95% CI',
-    )
-    ax.set_xlabel(metric_name)
-    ax.set_ylabel('')
-
-    if model_name:
-        ax.text(
-            plot_cfg.text_position.bootstrap_x,
-            plot_cfg.text_position.bootstrap_y,
-            model_name,
-            transform=ax.transAxes,
-            fontsize=plot_cfg.font.medium,
-            verticalalignment='top',
-            weight='bold',
-        )
-
-    ax.legend(fontsize=plot_cfg.font.small, loc='upper right', frameon=False)
-    despine(ax)
-
-
 def plot_prediction_scatter(
     pred_df: pd.DataFrame,
     model_name: str,
@@ -365,52 +311,6 @@ def plot_calibration_curve(
     
     save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
     logger.info(f"Saved {model_name} calibration curve: {save_path}")
-
-
-def plot_bootstrap_distributions(
-    bootstrap_results: dict,
-    save_path: Path,
-    config: Optional[Any] = None,
-) -> None:
-    """Plot bootstrap distributions for performance metrics across models."""
-    if not bootstrap_results:
-        logger.warning("Empty bootstrap results dictionary")
-        return
-    
-    valid_models = [
-        name for name, res in bootstrap_results.items() if res is not None
-    ]
-    if len(valid_models) == 0:
-        logger.warning("No valid bootstrap results found")
-        return
-    
-    plot_cfg = get_plot_config(config)
-    fig_size_wide = plot_cfg.get_figure_size("wide", plot_type="machine_learning")
-    
-    n_models = len(valid_models)
-    fig_height = fig_size_wide[1] * n_models
-    fig, axes = plt.subplots(
-        n_models, 2, figsize=(fig_size_wide[0], fig_height)
-    )
-    
-    if n_models == 1:
-        axes = axes.reshape(1, -1)
-    
-    for row, model_name in enumerate(valid_models):
-        res = bootstrap_results[model_name]
-        r_point = res.get('r_point', np.nan)
-        r_ci = res.get('r_ci', [np.nan, np.nan])
-        r2_point = res.get('r2_point', np.nan)
-        r2_ci = res.get('r2_ci', [np.nan, np.nan])
-        
-        _plot_bootstrap_metric(
-            axes[row, 0], r_point, r_ci, "Pearson's r", plot_cfg, model_name
-        )
-        _plot_bootstrap_metric(axes[row, 1], r2_point, r2_ci, 'R²', plot_cfg)
-    
-    plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
-    logger.info(f"Saved bootstrap distributions: {save_path}")
 
 
 def plot_permutation_null(

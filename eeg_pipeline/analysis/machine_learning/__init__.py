@@ -7,8 +7,8 @@ Submodules:
 - orchestration: High-level CV orchestration (LOSO, within-subject CV)
 - time_generalization: Temporal generalization analysis
 
-Data loading utilities live in `eeg_pipeline.utils.data.machine_learning` (ML matrices)
-and `eeg_pipeline.utils.data.epochs_loading` / `eeg_pipeline.utils.data.features_io`.
+Data loading: `eeg_pipeline.utils.data.machine_learning` (ML matrices),
+`eeg_pipeline.utils.data.feature_io`, `eeg_pipeline.utils.data.epochs`.
 """
 
 # CV utilities
@@ -32,10 +32,6 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     create_best_params_record,
     get_inner_cv_splits,
     get_min_channels_required,
-    _save_best_params,
-    _fit_with_inner_cv,
-    _fit_default_pipeline,
-    _predict_and_log,
 )
 
 # Pipeline factories
@@ -47,7 +43,7 @@ from eeg_pipeline.analysis.machine_learning.pipelines import (
 )
 
 # Data loading (canonical location: eeg_pipeline.utils.data.machine_learning)
-from eeg_pipeline.utils.data.machine_learning import load_epoch_windows, load_active_matrix
+from eeg_pipeline.utils.data.machine_learning import load_active_matrix
 
 # Compute-stage orchestration lives in eeg_pipeline.analysis.machine_learning.orchestration.
 # Canonical end-user entry point is eeg_pipeline.pipelines.machine_learning.MLPipeline.
@@ -66,7 +62,6 @@ from eeg_pipeline.analysis.machine_learning.classification import (
     decode_pain_binary,
     nested_loso_classification,
     ClassificationResult,
-    save_classification_results,
 )
 
 # SHAP feature importance
@@ -74,22 +69,13 @@ from eeg_pipeline.analysis.machine_learning.shap_importance import (
     compute_shap_values,
     compute_shap_importance,
     compute_shap_for_cv_folds,
-    compute_shap_interactions,
     SHAPResult,
-    plot_shap_summary,
-    plot_shap_bar,
-    save_shap_results,
 )
 
 # Uncertainty quantification
 from eeg_pipeline.analysis.machine_learning.uncertainty import (
     compute_prediction_intervals,
-    calibrate_classifier,
     PredictionIntervalResult,
-    CalibrationResult,
-    plot_prediction_intervals,
-    plot_reliability_diagram,
-    save_prediction_intervals,
 )
 
 __all__ = [
@@ -113,10 +99,6 @@ __all__ = [
     "create_best_params_record",
     "get_inner_cv_splits",
     "get_min_channels_required",
-    "_save_best_params",
-    "_fit_with_inner_cv",
-    "_fit_default_pipeline",
-    "_predict_and_log",
     # Pipelines
     "create_elasticnet_pipeline",
     "create_rf_pipeline",
@@ -124,7 +106,6 @@ __all__ = [
     "build_rf_param_grid",
     # Data
     "load_active_matrix",
-    "load_epoch_windows",
     # Time generalization
     "time_generalization_regression",
     # Classification
@@ -135,22 +116,12 @@ __all__ = [
     "decode_pain_binary",
     "nested_loso_classification",
     "ClassificationResult",
-    "save_classification_results",
     # SHAP
     "compute_shap_values",
     "compute_shap_importance",
     "compute_shap_for_cv_folds",
-    "compute_shap_interactions",
     "SHAPResult",
-    "plot_shap_summary",
-    "plot_shap_bar",
-    "save_shap_results",
     # Uncertainty
     "compute_prediction_intervals",
-    "calibrate_classifier",
     "PredictionIntervalResult",
-    "CalibrationResult",
-    "plot_prediction_intervals",
-    "plot_reliability_diagram",
-    "save_prediction_intervals",
 ]

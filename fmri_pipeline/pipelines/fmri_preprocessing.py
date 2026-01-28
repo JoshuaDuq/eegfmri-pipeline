@@ -295,9 +295,7 @@ class FmriPreprocessingPipeline(PipelineBase):
             if progress is not None and hasattr(progress, "step"):
                 progress.step("Run fMRIPrep")
 
-            subject_logger = self.get_subject_logger(
-                subject, filename="fmri_preprocessing.log"
-            )
+            subject_logger = self.get_subject_logger(subject)
             _stream_subprocess(cmd, subject_logger)
             success = True
         finally:

@@ -834,20 +834,6 @@ def plot_itpc_by_condition(
                               f"Saved ITPC column comparison plots for {len(roi_names)} ROIs")
 
 
-def _get_pac_plot_cfg(config):
-    """Get PAC-specific plot configuration.
-    
-    Args:
-        config: Configuration object
-    
-    Returns:
-        Tuple of (plot_cfg, pac_cfg)
-    """
-    plot_cfg = get_plot_config(config)
-    pac_cfg = plot_cfg.plot_type_configs.get("pac", {})
-    return plot_cfg, pac_cfg
-
-
 def _get_pac_columns_for_roi(pac_df: pd.DataFrame, segment: str, pair: str, 
                              roi_name: str, rois: Dict, all_channels: List[str]) -> List[str]:
     """Get PAC columns filtered by segment, pair, and ROI.

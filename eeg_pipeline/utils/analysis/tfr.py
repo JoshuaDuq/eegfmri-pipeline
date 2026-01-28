@@ -12,15 +12,11 @@ import pandas as pd
 
 from ..config.loader import get_constants, get_config_value, ensure_config, get_frequency_bands
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.utils.analysis.windowing import (
-    time_mask,
-    freq_mask,
-)
+from eeg_pipeline.utils.analysis.windowing import time_mask
 from eeg_pipeline.utils.analysis.stats import (
     validate_baseline_window_pre_stimulus,
     _safe_float,
 )
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 
 
 ###################################################################
@@ -1205,23 +1201,6 @@ def average_tfr_band(tfr_avg, fmin: float, fmax: float, tmin: float, tmax: float
 
 
 ###################################################################
-# Group ROI Helpers
-###################################################################
-
-def avg_by_mask_to_avg_tfr(
-    power: "mne.time_frequency.EpochsTFR",
-    mask: np.ndarray,
-    baseline: Tuple[Optional[float], Optional[float]],
-    logger: Optional[logging.Logger] = None,
-) -> Optional["mne.time_frequency.AverageTFR"]:
-    t = power.copy()[mask].average()
-    apply_baseline_and_crop(t, baseline=baseline, mode="logratio", logger=logger)
-    return t
-
-
-
-
-###################################################################
 # Time Window Utilities
 ###################################################################
 
@@ -1318,54 +1297,6 @@ def extract_roi_from_tfr(avg_tfr, roi: str, roi_map: Optional[Dict[str, List[str
     return None
 
 
-def extract_roi_contrast_data(
-    power: np.ndarray, 
-    ev: pd.DataFrame, 
-    roi: str, 
-    roi_map: Optional[Dict[str, List[str]]], 
-    config,
-    baseline: Tuple[Optional[float], Optional[float]],
-    logger: Optional[logging.Logger] = None
-) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-    """
-    Extracts ROI power for pain vs non-pain conditions.
-    
-    CRITICAL: This function computes INDUCED POWER for visualization.
-    It performs averaging of raw power across trials FIRST, and then applies
-    baseline correction (log-ratio) to the averages.
-    
-    Do not use the output of this function for statistical tests that require
-    trial-level variance.
-    """
-    if power is None or ev is None:
-        return None
-    
-    pain_col = get_pain_column_from_config(config, ev) if config else None
-    if pain_col is None or pain_col not in ev.columns:
-        return None
-    
-    pain_vals = pd.to_numeric(ev[pain_col], errors="coerce").fillna(0).astype(int)
-    pain_mask = pain_vals == 1
-    non_mask = pain_vals == 0
-    
-    if not (pain_mask.any() and non_mask.any()):
-        return None
-    
-    a_p = avg_by_mask_to_avg_tfr(power, pain_mask, baseline=baseline, logger=logger)
-    a_n = avg_by_mask_to_avg_tfr(power, non_mask, baseline=baseline, logger=logger)
-    
-    if a_p is None or a_n is None:
-        return None
-    
-    r_p = extract_roi_from_tfr(a_p, roi, roi_map, config)
-    r_n = extract_roi_from_tfr(a_n, roi, roi_map, config)
-    
-    if r_p is not None and r_n is not None:
-        return r_p.data[0], r_n.data[0]
-    
-    return None
-
-
 def extract_tfr_object(tfr: Any):
     if tfr is None or (isinstance(tfr, list) and len(tfr) == 0):
         return None
@@ -1418,8 +1349,6 @@ __all__ = [
     "apply_baseline_and_crop",
     "average_tfr_band",
     "time_mask",
-    "freq_mask",
-    "avg_by_mask_to_avg_tfr",
     "clip_time_range",
     # TFR data extraction utilities
     "extract_trial_band_power",
@@ -1427,7 +1356,6 @@ __all__ = [
     "build_roi_channel_mask",
     "extract_significant_roi_channels",
     "extract_roi_from_tfr",
-    "extract_roi_contrast_data",
     # TFR object extraction utilities
     "extract_tfr_object",
     # TFR manipulation utilities

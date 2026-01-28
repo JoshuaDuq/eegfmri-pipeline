@@ -71,21 +71,6 @@ def deriv_plots_path(deriv_root: Path, subject: str, subdir: Optional[str] = Non
     return plots_dir
 
 
-def deriv_group_eeg_path(deriv_root: Path) -> Path:
-    return deriv_root / "group" / "eeg"
-
-
-def deriv_group_stats_path(deriv_root: Path) -> Path:
-    return deriv_group_eeg_path(deriv_root) / "stats"
-
-
-def deriv_group_plots_path(deriv_root: Path, subdir: Optional[str] = None) -> Path:
-    plots_root = deriv_group_eeg_path(deriv_root) / "plots"
-    if subdir:
-        return plots_root / subdir
-    return plots_root
-
-
 def find_connectivity_features_path(deriv_root: Path, subject: str) -> Path:
     sub = _normalize_subject_label(subject)
     base = deriv_root / sub / "eeg" / "features"
@@ -422,14 +407,6 @@ def load_events_df(
     )
 
 
-def extract_subject_id_from_path(path: Path) -> Optional[str]:
-    """Extract subject ID from path using BIDS naming convention."""
-    path_str = str(path)
-    pattern = rf"{SUBJECT_PREFIX}(\d+)"
-    match = re.search(pattern, path_str)
-    return match.group(1) if match else None
-
-
 def ensure_derivatives_dataset_description(
     deriv_root: Optional[Path] = None,
     constants: Optional[Dict[str, Any]] = None,
@@ -461,20 +438,14 @@ def ensure_derivatives_dataset_description(
 
 __all__ = [
     "ensure_dir",
-    "bids_sub_eeg_path",
     "bids_events_path",
-    "deriv_sub_eeg_path",
     "deriv_features_path",
     "deriv_stats_path",
     "deriv_plots_path",
-    "deriv_group_eeg_path",
-    "deriv_group_stats_path",
-    "deriv_group_plots_path",
     "find_connectivity_features_path",
     "resolve_deriv_root",
     "find_clean_epochs_path",
     "find_clean_events_path",
     "load_events_df",
-    "extract_subject_id_from_path",
     "ensure_derivatives_dataset_description",
 ]

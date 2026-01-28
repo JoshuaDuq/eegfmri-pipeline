@@ -8,7 +8,6 @@ Constants, config helpers, and core data structures for statistics.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from typing import Any, Optional
 
 import numpy as np
@@ -19,25 +18,6 @@ from eeg_pipeline.utils.config.loader import (
     get_config_value,
     get_constants,
 )
-
-
-@dataclass
-class CorrelationStats:
-    """Container for correlation statistics."""
-
-    correlation: float = np.nan
-    p_value: float = np.nan
-    ci_low: float = np.nan
-    ci_high: float = np.nan
-    r_partial: float = np.nan
-    p_partial: float = np.nan
-    n_partial: int = 0
-    r_partial_temp: float = np.nan
-    p_partial_temp: float = np.nan
-    n_partial_temp: int = 0
-    p_perm: float = np.nan
-    p_partial_perm: float = np.nan
-    p_partial_temp_perm: float = np.nan
 
 
 def get_statistics_constants(config=None):
@@ -101,31 +81,6 @@ def get_z_critical_value(ci_level: float) -> float:
     return float(stats.norm.ppf((1 + ci_level) / 2))
 
 
-def filter_finite_values(values: np.ndarray, flatten: bool = False) -> np.ndarray:
-    """Extract finite values from array.
-    
-    Consolidated utility for filtering finite values used throughout
-    the statistics modules.
-    
-    Parameters
-    ----------
-    values : np.ndarray
-        Input array
-    flatten : bool
-        If True, flatten array before filtering (default: False)
-        
-    Returns
-    -------
-    np.ndarray
-        Array containing only finite values
-    """
-    if flatten:
-        values = np.asarray(values).ravel()
-    else:
-        values = np.asarray(values)
-    return values[np.isfinite(values)]
-
-
 def get_n_permutations(config: Optional[Any] = None) -> int:
     """Get number of permutations from config."""
     return int(get_config_value(config, "statistics.n_permutations", 1000))
@@ -139,16 +94,6 @@ def get_n_bootstrap(config: Optional[Any] = None) -> int:
 def get_epsilon_std(config: Optional[Any] = None) -> float:
     """Get epsilon for standard deviation/division operations."""
     return float(get_config_value(config, "epsilon_std", 1e-12))
-
-
-def get_epsilon_psd(config: Optional[Any] = None) -> float:
-    """Get epsilon for power spectral density/log operations."""
-    return float(get_config_value(config, "epsilon_psd", 1e-20))
-
-
-def get_epsilon_amp(config: Optional[Any] = None) -> float:
-    """Get epsilon for amplitude calculations."""
-    return float(get_config_value(config, "epsilon_amp", 1e-10))
 
 
 def get_min_samples_for_correlation(config: Optional[Any] = None) -> int:

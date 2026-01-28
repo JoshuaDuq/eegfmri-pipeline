@@ -49,6 +49,19 @@ class ContrastBuilderConfig:
     cluster_p_threshold: float
     output_type: str
     resample_to_freesurfer: bool
+    # Which trial_type rows are eligible for condition remapping.
+    # If None, defaults to ["stimulation"] when conditioning on a non-trial_type column.
+    condition_scope_trial_types: Optional[List[str]] = None
+    # Confounds / QC (optional)
+    confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|auto
+    write_design_matrix: bool = False
+
+
+def _safe_slug(value: str) -> str:
+    value = (value or "").strip()
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value)
+    cleaned = "_".join(part for part in cleaned.split("_") if part)
+    return cleaned or "contrast"
 
 
 def _cfg_get(config: Any, key: str, default: Any) -> Any:
@@ -78,6 +91,8 @@ def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
         str(contrast_cfg.low_pass_hz or ""),
         str(contrast_cfg.drift_model or ""),
         str(contrast_cfg.hrf_model),
+        str(getattr(contrast_cfg, "confounds_strategy", "auto")),
+        str(bool(getattr(contrast_cfg, "write_design_matrix", False))),
     ]
     key = "_".join(key_parts)
     return hashlib.md5(key.encode()).hexdigest()[:8]
@@ -126,6 +141,25 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     cond_a_cfg = contrast_cfg.get("condition_a", {}) or {}
     cond_b_cfg = contrast_cfg.get("condition_b", {}) or {}
 
+    scope_raw = contrast_cfg.get("condition_scope_trial_types")
+    condition_scope_trial_types = None
+    if scope_raw is not None:
+        if isinstance(scope_raw, list):
+            condition_scope_trial_types = [str(v).strip() for v in scope_raw if str(v).strip()]
+        else:
+            # Allow comma-separated string
+            condition_scope_trial_types = [
+                part.strip()
+                for part in str(scope_raw).split(",")
+                if part.strip()
+            ] or None
+
+    # Confounds/QC (optional; safe defaults keep behavior stable)
+    confounds_strategy = str(contrast_cfg.get("confounds_strategy", "auto")).strip().lower()
+    if confounds_strategy == "":
+        confounds_strategy = "auto"
+    write_design_matrix = bool(contrast_cfg.get("write_design_matrix", False))
+
     return ContrastBuilderConfig(
         enabled=bool(contrast_cfg.get("enabled", False)),
         input_source=input_source,
@@ -140,6 +174,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         condition_a_value=cond_a_cfg.get("value"),
         condition_b_column=cond_b_cfg.get("column"),
         condition_b_value=cond_b_cfg.get("value"),
+        condition_scope_trial_types=condition_scope_trial_types,
         formula=contrast_cfg.get("formula"),
         name=str(contrast_cfg.get("name", "contrast")),
         runs=runs,
@@ -151,6 +186,8 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         cluster_p_threshold=float(contrast_cfg.get("cluster_p_threshold", 0.001)),
         output_type=str(contrast_cfg.get("output_type", "z_score")),
         resample_to_freesurfer=bool(contrast_cfg.get("resample_to_freesurfer", True)),
+        confounds_strategy=confounds_strategy,
+        write_design_matrix=write_design_matrix,
     )
 
 
@@ -178,7 +215,16 @@ def discover_available_conditions(
 
     all_conditions = set()
 
-    for events_file in func_dir.glob(f"{sub_label}_task-{task}_run-*_events.tsv"):
+    candidates = [
+        p
+        for p in sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_events.tsv"))
+        if not p.name.endswith("_bold_events.tsv")
+    ]
+    if not candidates:
+        # Backward-compat: older outputs used a non-BIDS `_bold_events.tsv` suffix.
+        candidates = sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_bold_events.tsv"))
+
+    for events_file in candidates:
         try:
             events_df = pd.read_csv(events_file, sep="\t")
             if "trial_type" in events_df.columns:
@@ -215,7 +261,15 @@ def discover_bold_runs(
 
     # Discover run numbers from events first (most robust).
     run_nums: List[int] = []
-    for events_file in sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_events.tsv")):
+    events_glob = [
+        p
+        for p in sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_events.tsv"))
+        if not p.name.endswith("_bold_events.tsv")
+    ]
+    if not events_glob:
+        events_glob = sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_bold_events.tsv"))
+
+    for events_file in events_glob:
         try:
             run_str = events_file.name.split("_run-")[1].split("_")[0]
             run_nums.append(int(run_str))
@@ -246,6 +300,10 @@ def discover_bold_runs(
             f"{sub_label}_task-{task}_run-{run_num:02d}_events.tsv",
             f"{sub_label}_task-{task}_run-{run_num}_events.tsv",
             f"{sub_label}_task-{task}_run-0{run_num}_events.tsv",
+            # Backward-compat: legacy non-BIDS naming
+            f"{sub_label}_task-{task}_run-{run_num:02d}_bold_events.tsv",
+            f"{sub_label}_task-{task}_run-{run_num}_bold_events.tsv",
+            f"{sub_label}_task-{task}_run-0{run_num}_bold_events.tsv",
         ]
         events_file = None
         for pattern in events_patterns:
@@ -417,26 +475,201 @@ def _get_tr_from_bold(bold_path: Path) -> float:
     raise ValueError(f"Could not determine TR for {bold_path}")
 
 
-def _select_confound_columns(confounds_df: pd.DataFrame) -> pd.DataFrame:
-    """Select relevant confound columns for GLM."""
-    priority_cols = [
-        "trans_x", "trans_y", "trans_z",
-        "rot_x", "rot_y", "rot_z",
-        "trans_x_derivative1", "trans_y_derivative1", "trans_z_derivative1",
-        "rot_x_derivative1", "rot_y_derivative1", "rot_z_derivative1",
-        "csf", "white_matter",
-        "framewise_displacement",
-    ]
+def _build_first_level_model(
+    *,
+    tr: float,
+    cfg: "ContrastBuilderConfig",
+    mask_img: Optional[Any] = None,
+) -> Any:
+    """Create a nilearn FirstLevelModel with best-effort compatibility across versions."""
+    from nilearn.glm.first_level import FirstLevelModel
+    import inspect
 
-    available = [c for c in priority_cols if c in confounds_df.columns]
+    low_pass = None
+    try:
+        if cfg.low_pass_hz is not None:
+            lp = float(cfg.low_pass_hz)
+            if lp > 0:
+                low_pass = lp
+    except Exception:
+        low_pass = None
 
-    if not available:
+    high_pass = cfg.high_pass_hz if float(cfg.high_pass_hz) > 0 else None
+
+    kwargs: dict[str, Any] = dict(
+        t_r=tr,
+        hrf_model=cfg.hrf_model,
+        drift_model=cfg.drift_model,
+        high_pass=high_pass,
+        noise_model="ar1",
+        standardize=True,
+        signal_scaling=0,
+        minimize_memory=False,
+    )
+
+    # Some nilearn versions support low_pass; add only if present to avoid TypeError.
+    sig = inspect.signature(FirstLevelModel)
+    if "low_pass" in sig.parameters:
+        kwargs["low_pass"] = low_pass
+
+    if mask_img is not None:
+        kwargs["mask_img"] = mask_img
+
+    return FirstLevelModel(**kwargs)
+
+
+def _select_confound_columns(
+    confounds_df: pd.DataFrame,
+    cfg: ContrastBuilderConfig,
+) -> Optional[pd.DataFrame]:
+    """Select confound columns for GLM (fMRIPrep confounds convention).
+
+    Notes
+    -----
+    - Defaults are designed to be robust across datasets and nilearn versions.
+    - This is *first-level* nuisance regression; for group-level inference you
+      should also apply appropriate second-level modeling and multiple
+      comparisons correction.
+    """
+    strategy = str(getattr(cfg, "confounds_strategy", "auto") or "auto").strip().lower()
+    if strategy in {"", "default"}:
+        strategy = "auto"
+
+    if strategy in {"none", "no", "off"}:
         return None
 
-    selected = confounds_df[available].copy()
-    selected = selected.fillna(0)
+    motion6 = ["trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]
+    motion_derivs = [f"{c}_derivative1" for c in motion6]
+    motion_power2 = [f"{c}_power2" for c in motion6]
+    motion_derivs_power2 = [f"{c}_derivative1_power2" for c in motion6]
 
+    base_cols: List[str] = []
+    if strategy in {"motion6"}:
+        base_cols = motion6
+    elif strategy in {"motion12", "motion+derivs"}:
+        base_cols = motion6 + motion_derivs
+    elif strategy in {"motion24"}:
+        base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2
+    elif strategy in {"motion24+wmcsf", "motion24+wm_csf"}:
+        base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2 + ["white_matter", "csf"]
+    elif strategy in {"motion24+wmcsf+fd", "motion24+wm_csf+fd"}:
+        base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2 + ["white_matter", "csf", "framewise_displacement"]
+    elif strategy in {"auto"}:
+        # Prefer a widely used "24p + WM/CSF + FD" if present, otherwise fall back.
+        if all(c in confounds_df.columns for c in motion6):
+            base_cols = motion6 + motion_derivs
+            if all(c in confounds_df.columns for c in motion_power2 + motion_derivs_power2):
+                base_cols += motion_power2 + motion_derivs_power2
+            if "white_matter" in confounds_df.columns:
+                base_cols.append("white_matter")
+            if "csf" in confounds_df.columns:
+                base_cols.append("csf")
+            if "framewise_displacement" in confounds_df.columns:
+                base_cols.append("framewise_displacement")
+        else:
+            # Non-fMRIPrep-like confounds file; keep previous conservative behavior.
+            base_cols = [
+                "csf",
+                "white_matter",
+                "framewise_displacement",
+            ]
+    else:
+        raise ValueError(
+            f"Unsupported confounds_strategy '{strategy}'. "
+            "Use one of: none, motion6, motion12, motion24, motion24+wmcsf, motion24+wmcsf+fd, auto."
+        )
+
+    # Add motion outlier regressors when present (standard fMRIPrep outputs).
+    outlier_cols = [
+        c
+        for c in confounds_df.columns
+        if c.startswith("motion_outlier")
+        or c.startswith("non_steady_state_outlier")
+        or c.startswith("outlier")
+    ]
+
+    cols = [c for c in base_cols if c in confounds_df.columns]
+    cols += [c for c in outlier_cols if c not in cols]
+
+    if not cols:
+        return None
+
+    selected = confounds_df[cols].copy()
+    # fMRIPrep FD has NaN for the first frame; safest is to set to 0.
+    selected = selected.fillna(0)
     return selected
+
+
+def _run_label_from_bold_path(bold_path: Path, fallback_idx: int) -> str:
+    """Extract a BIDS-style run label (e.g., 'run-01') from a BOLD filename."""
+    for token in bold_path.name.split("_"):
+        if token.startswith("run-") and len(token) >= 5:
+            return token
+    return f"run-{fallback_idx + 1:02d}"
+
+
+def _write_design_matrices(
+    flm: "FirstLevelModel",
+    included_bold_paths: List[Path],
+    output_dir: Path,
+    *,
+    prefix: str,
+) -> Dict[str, Any]:
+    """
+    Write per-run design matrices to disk for QC/debugging.
+
+    - Always writes TSVs when possible.
+    - Attempts to write PNGs when nilearn plotting is available.
+    """
+    design_mats = getattr(flm, "design_matrices_", None)
+    if not isinstance(design_mats, list) or len(design_mats) == 0:
+        return {}
+
+    qc_dir = output_dir / "qc"
+    qc_dir.mkdir(parents=True, exist_ok=True)
+
+    tsv_paths: List[str] = []
+    png_paths: List[str] = []
+
+    for idx, dm in enumerate(design_mats):
+        run_label = (
+            _run_label_from_bold_path(included_bold_paths[idx], idx)
+            if idx < len(included_bold_paths)
+            else f"run-{idx + 1:02d}"
+        )
+
+        tsv_path = qc_dir / f"{prefix}_{run_label}_design_matrix.tsv"
+        try:
+            dm.to_csv(tsv_path, sep="\t", index=True, index_label="frame")
+            tsv_paths.append(str(tsv_path))
+        except Exception as exc:
+            logger.warning("Failed to write design matrix TSV for %s (%s)", run_label, exc)
+
+        # Optional PNG output (best-effort).
+        try:
+            from nilearn.plotting import plot_design_matrix
+
+            ax = plot_design_matrix(dm)
+            fig = getattr(ax, "figure", None) or getattr(ax, "get_figure", lambda: None)()
+            if fig is not None:
+                png_path = qc_dir / f"{prefix}_{run_label}_design_matrix.png"
+                fig.savefig(png_path, dpi=150, bbox_inches="tight")
+                png_paths.append(str(png_path))
+                try:
+                    import matplotlib.pyplot as plt
+
+                    plt.close(fig)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    out: Dict[str, Any] = {}
+    if tsv_paths:
+        out["design_matrix_tsv_paths"] = tsv_paths
+    if png_paths:
+        out["design_matrix_png_paths"] = png_paths
+    return out
 
 
 @dataclass
@@ -495,6 +728,19 @@ def _remap_events_by_condition_columns(
     val_a = cfg.condition_a_value
     col_b = cfg.condition_b_column
     val_b = cfg.condition_b_value
+    scope_trial_types = cfg.condition_scope_trial_types
+
+    if scope_trial_types is None and col_a and col_a != "trial_type" and "trial_type" in events_df.columns:
+        # Most BIDS task designs include multiple phases (fixation/question/rating) with the
+        # per-trial condition columns repeated across all phases. If we remap all rows, we'd
+        # incorrectly label non-stimulation phases as cond_a/cond_b, harming GLM validity.
+        trial_types = set(events_df["trial_type"].dropna().astype(str).tolist())
+        if "stimulation" in trial_types:
+            scope_trial_types = ["stimulation"]
+
+    scope_mask = pd.Series(True, index=events_df.index)
+    if scope_trial_types:
+        scope_mask = events_df.get("trial_type", "").astype(str).isin(scope_trial_types)
 
     # Validate column A exists (this is always required)
     if col_a not in events_df.columns:
@@ -505,7 +751,7 @@ def _remap_events_by_condition_columns(
 
     # Check condition A value
     val_a_typed = _coerce_condition_value(val_a, events_df[col_a])
-    mask_a = events_df[col_a] == val_a_typed
+    mask_a = scope_mask & (events_df[col_a] == val_a_typed)
     cond_a_found = mask_a.any()
     cond_a_count = int(mask_a.sum())
     missing_cond_a_msg = ""
@@ -532,7 +778,7 @@ def _remap_events_by_condition_columns(
     cond_b_count = 0
     missing_cond_b_msg = ""
 
-    if col_b and val_b:
+    if col_b and val_b is not None and str(val_b).strip() != "":
         if col_b not in events_df.columns:
             raise ValueError(
                 f"Condition B column '{col_b}' not found in events. "
@@ -540,7 +786,7 @@ def _remap_events_by_condition_columns(
             )
 
         val_b_typed = _coerce_condition_value(val_b, events_df[col_b])
-        mask_b = events_df[col_b] == val_b_typed
+        mask_b = scope_mask & (events_df[col_b] == val_b_typed)
         cond_b_found = mask_b.any()
         cond_b_count = int(mask_b.sum())
 
@@ -573,7 +819,7 @@ def _remap_events_by_condition_columns(
     )
 
 
-def _coerce_condition_value(value: str, series: pd.Series) -> Any:
+def _coerce_condition_value(value: Any, series: pd.Series) -> Any:
     """
     Coerce string value to match the dtype of the series.
 
@@ -582,15 +828,15 @@ def _coerce_condition_value(value: str, series: pd.Series) -> Any:
     if pd.api.types.is_integer_dtype(series):
         try:
             return int(value)
-        except ValueError:
+        except (ValueError, TypeError):
             pass
     if pd.api.types.is_float_dtype(series):
         try:
             return float(value)
-        except ValueError:
+        except (ValueError, TypeError):
             pass
     if pd.api.types.is_bool_dtype(series):
-        return value.lower() in ("true", "1", "yes")
+        return str(value).strip().lower() in ("true", "1", "yes")
     return value
 
 
@@ -626,20 +872,22 @@ def fit_first_level_glm(
     confounds = None
     if confounds_path is not None and confounds_path.exists():
         confounds_df = pd.read_csv(confounds_path, sep="\t")
-        confounds = _select_confound_columns(confounds_df)
+        confounds = _select_confound_columns(confounds_df, cfg)
         if confounds is not None:
             logger.info("Using %d confound regressors", confounds.shape[1])
 
-    flm = FirstLevelModel(
-        t_r=tr,
-        hrf_model=cfg.hrf_model,
-        drift_model=cfg.drift_model,
-        high_pass=cfg.high_pass_hz if cfg.high_pass_hz > 0 else None,
-        noise_model="ar1",
-        standardize=True,
-        signal_scaling=0,
-        minimize_memory=False,
-    )
+    # Use a matching brain mask when available (best practice with fMRIPrep outputs).
+    mask_img = None
+    try:
+        import nibabel as nib
+
+        mask_path = _discover_brain_mask_for_bold(bold_path)
+        if mask_path is not None and mask_path.exists():
+            mask_img = nib.load(str(mask_path))
+    except Exception:
+        mask_img = None
+
+    flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
 
     flm.fit(bold_path, events=events_df, confounds=confounds)
 
@@ -755,7 +1003,7 @@ def fit_first_level_glm_multi_run(
         confounds = None
         if confounds_path is not None and confounds_path.exists():
             confounds_df = pd.read_csv(confounds_path, sep="\t")
-            confounds = _select_confound_columns(confounds_df)
+            confounds = _select_confound_columns(confounds_df, cfg)
             if confounds is not None:
                 confound_columns.update(list(confounds.columns))
                 logger.info("Run %d: using %d confound regressors", run_idx, confounds.shape[1])
@@ -794,17 +1042,7 @@ def fit_first_level_glm_multi_run(
     except Exception:
         mask_img = None
 
-    flm = FirstLevelModel(
-        t_r=tr,
-        hrf_model=cfg.hrf_model,
-        drift_model=cfg.drift_model,
-        high_pass=cfg.high_pass_hz if cfg.high_pass_hz > 0 else None,
-        noise_model="ar1",
-        standardize=True,
-        signal_scaling=0,
-        mask_img=mask_img,
-        minimize_memory=False,
-    )
+    flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
 
     flm.fit(valid_bold_paths, events=valid_events_list, confounds=valid_confounds_list)
 
@@ -901,6 +1139,8 @@ def build_contrast_from_runs(
     subject: str,
     task: str,
     cfg: ContrastBuilderConfig,
+    *,
+    output_dir: Optional[Path] = None,
 ) -> Tuple["Nifti1Image", Dict[str, Any]]:
     """
     Build contrast map from multiple runs using a single multi-run GLM.
@@ -945,6 +1185,20 @@ def build_contrast_from_runs(
         cfg=cfg,
     )
 
+    qc_meta: Dict[str, Any] = {}
+    if bool(getattr(cfg, "write_design_matrix", False)) and output_dir is not None:
+        try:
+            sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
+            prefix = f"{sub_label}_task-{task}_contrast-{_safe_slug(str(getattr(cfg, 'name', 'contrast')))}"
+            qc_meta = _write_design_matrices(
+                glm_result.flm,
+                glm_result.included_bold_paths,
+                Path(output_dir).expanduser().resolve(),
+                prefix=prefix,
+            )
+        except Exception as exc:
+            logger.warning("Failed to write design-matrix QC outputs (%s); continuing.", exc)
+
     contrast_map, contrast_def, output_type = compute_contrast_map(
         glm_result.flm,
         cfg,
@@ -977,9 +1231,11 @@ def build_contrast_from_runs(
         "total_cond_b_events": glm_result.total_cond_b_events,
         # GLM details
         "confound_columns": glm_result.confound_columns,
+        "confounds_strategy": str(getattr(cfg, "confounds_strategy", "auto")),
         "contrast_def": contrast_def,
         "output_type": output_type,
     }
+    meta.update(qc_meta)
     return contrast_map, meta
 
 
@@ -1130,22 +1386,23 @@ def build_fmri_contrast(
         cfg.contrast_type,
     )
 
+    sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
+    if output_dir is None:
+        output_dir = bids_derivatives / sub_label / "fmri_contrasts"
+
     contrast_map, run_meta = build_contrast_from_runs(
         bids_fmri_root=bids_fmri_root,
         bids_derivatives=bids_derivatives,
         subject=subject,
         task=task,
         cfg=cfg,
+        output_dir=output_dir,
     )
 
-    sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
     fs_subject_dir = freesurfer_subjects_dir / sub_label
 
     if cfg.resample_to_freesurfer and fs_subject_dir.exists():
         contrast_map = resample_to_freesurfer(contrast_map, fs_subject_dir)
-
-    if output_dir is None:
-        output_dir = bids_derivatives / sub_label / "fmri_contrasts"
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

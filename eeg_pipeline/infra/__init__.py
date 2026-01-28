@@ -4,7 +4,7 @@ This package contains low-level modules that are safe to depend on from anywhere
 - filesystem/path resolution
 - logging setup
 - table I/O
-- machine_learning I/O (run manifests, predictions export)
+- machine_learning I/O (predictions, indices, best-params)
 """
 
 from __future__ import annotations

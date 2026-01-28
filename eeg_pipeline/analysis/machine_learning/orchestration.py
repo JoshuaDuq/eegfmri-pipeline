@@ -1991,7 +1991,6 @@ def _run_uncertainty_stage(
     """Run conformal prediction for uncertainty quantification."""
     from eeg_pipeline.analysis.machine_learning.uncertainty import (
         compute_prediction_intervals,
-        save_prediction_intervals,
     )
     from sklearn.model_selection import LeaveOneGroupOut
     

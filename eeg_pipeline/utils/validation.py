@@ -8,11 +8,7 @@ Validates data quality before expensive computations.
 Usage
 -----
 ```python
-from eeg_pipeline.utils.validation import (
-    validate_epochs,
-    validate_features,
-    ValidationResult,
-)
+from eeg_pipeline.utils.validation import validate_epochs, ValidationResult
 
 result = validate_epochs(epochs, config)
 if not result.valid:
@@ -27,7 +23,6 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import numpy as np
-import pandas as pd
 import mne
 
 from eeg_pipeline.utils.config.loader import get_config_value
@@ -41,8 +36,6 @@ DEFAULT_MIN_EPOCHS = 20
 DEFAULT_MIN_CHANNELS = 10
 DEFAULT_SAMPLING_FREQ = 500
 DEFAULT_MAX_AMPLITUDE_UV = 500
-DEFAULT_MIN_ROWS = 10
-DEFAULT_MAX_NAN_FRACTION = 0.1
 DEFAULT_PERCENT_THRESHOLD = 5.0
 CRITICAL_NAN_FRACTION = 0.01
 WARNING_EXTREME_FRACTION = 0.1
@@ -271,156 +264,6 @@ def validate_epochs(
 
 
 ###################################################################
-# Feature Validation
-###################################################################
-
-
-def _check_dataframe_empty(features_df: pd.DataFrame) -> Optional[str]:
-    """Check if DataFrame is None or empty."""
-    if features_df is None:
-        return "Features DataFrame is None"
-    if features_df.empty:
-        return "Features DataFrame is empty"
-    return None
-
-
-def _check_minimum_rows(n_rows: int, min_rows: int) -> Optional[str]:
-    """Check if DataFrame has minimum required rows."""
-    if n_rows < min_rows:
-        return f"Insufficient rows: {n_rows} < {min_rows}"
-    return None
-
-
-def _check_expected_columns(
-    features_df: pd.DataFrame, expected_columns: Optional[list[str]]
-) -> Optional[str]:
-    """Check if expected columns are present."""
-    if not expected_columns:
-        return None
-    missing = set(expected_columns) - set(features_df.columns)
-    if missing:
-        return f"Missing expected columns: {missing}"
-    return None
-
-
-def _check_nan_fractions(
-    features_df: pd.DataFrame, max_nan_fraction: float
-) -> Optional[str]:
-    """Check NaN fractions per column."""
-    nan_fractions = features_df.isna().mean()
-    high_nan_cols = nan_fractions[nan_fractions > max_nan_fraction]
-    if len(high_nan_cols) > 0:
-        return f"{len(high_nan_cols)} columns have >{max_nan_fraction:.0%} NaN values"
-    return None
-
-
-def _check_constant_columns(features_df: pd.DataFrame) -> Optional[str]:
-    """Check for constant columns."""
-    constant_cols = [
-        col for col in features_df.columns if features_df[col].nunique() <= 1
-    ]
-    if constant_cols:
-        return f"{len(constant_cols)} constant columns detected"
-    return None
-
-
-def _check_infinite_values(features_df: pd.DataFrame) -> Optional[str]:
-    """Check for infinite values in numeric columns."""
-    numeric_df = features_df.select_dtypes(include=[np.number])
-    inf_count = int(np.sum(np.isinf(numeric_df.values)))
-    if inf_count > 0:
-        return f"Data contains {inf_count} infinite values"
-    return None
-
-
-def validate_features(
-    features_df: pd.DataFrame,
-    expected_columns: Optional[list[str]] = None,
-    min_rows: int = DEFAULT_MIN_ROWS,
-    max_nan_fraction: float = DEFAULT_MAX_NAN_FRACTION,
-    logger: Optional[logging.Logger] = None,
-) -> ValidationResult:
-    """
-    Validate a feature DataFrame.
-
-    Checks:
-    - DataFrame is not empty
-    - Minimum row count
-    - NaN fraction within limits
-    - Expected columns present (if specified)
-    - No constant columns
-
-    Parameters
-    ----------
-    features_df : pd.DataFrame
-        Feature DataFrame to validate
-    expected_columns : list[str], optional
-        Columns that must be present
-    min_rows : int
-        Minimum required rows
-    max_nan_fraction : float
-        Maximum allowed NaN fraction per column
-    logger : logging.Logger, optional
-        Logger for warnings
-
-    Returns
-    -------
-    ValidationResult
-        Validation outcome
-    """
-    logger = _get_logger(logger)
-    issues = []
-    warnings = []
-
-    empty_issue = _check_dataframe_empty(features_df)
-    if empty_issue:
-        return ValidationResult.failure([empty_issue])
-
-    n_rows, n_cols = features_df.shape
-
-    row_issue = _check_minimum_rows(n_rows, min_rows)
-    if row_issue:
-        issues.append(row_issue)
-
-    column_issue = _check_expected_columns(features_df, expected_columns)
-    if column_issue:
-        issues.append(column_issue)
-
-    nan_warning = _check_nan_fractions(features_df, max_nan_fraction)
-    if nan_warning:
-        warnings.append(nan_warning)
-
-    constant_warning = _check_constant_columns(features_df)
-    if constant_warning:
-        warnings.append(constant_warning)
-
-    inf_issue = _check_infinite_values(features_df)
-    if inf_issue:
-        issues.append(inf_issue)
-
-    numeric_df = features_df.select_dtypes(include=[np.number])
-    valid = len(issues) == 0
-    metadata = {
-        "n_rows": n_rows,
-        "n_cols": n_cols,
-        "n_numeric_cols": len(numeric_df.columns),
-        "overall_nan_fraction": float(features_df.isna().mean().mean()),
-    }
-
-    result = ValidationResult(
-        valid=valid,
-        issues=issues,
-        warnings=warnings,
-        metadata=metadata,
-    )
-
-    if not valid or warnings:
-        result.log_issues(logger)
-
-    return result
-
-
-###################################################################
 # Data Format Helpers
 ###################################################################
 
@@ -553,14 +396,3 @@ def require_epochs_tfr(
     return True
 
 
-###################################################################
-# Data Value Validation
-###################################################################
-
-def check_pyriemann() -> bool:
-    """Check if pyriemann package is available."""
-    try:
-        import pyriemann  # type: ignore[reportMissingImports]
-        return True
-    except ImportError:
-        return False

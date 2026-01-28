@@ -34,13 +34,10 @@ __all__ = [
     "AggregationMode",
     # Builders
     "generate_correlation_scatter",
-    "plot_residual_qc",
-    "plot_regression_residual_diagnostics",
     # Other scatter plots
     "plot_psychometrics",
     # Temporal
     "plot_temporal_correlation_topomaps_by_pain",
-    "plot_significant_correlations_topomap",
     # Dose response
     "visualize_dose_response",
     # Orchestration
@@ -58,13 +55,10 @@ def __getattr__(name: str):
         "AggregationMode": "scatter",
         # Builders
         "generate_correlation_scatter": "builders",
-        "plot_residual_qc": "builders",
-        "plot_regression_residual_diagnostics": "builders",
         # Scatter
         "plot_psychometrics": "scatter",
         # Temporal
         "plot_temporal_correlation_topomaps_by_pain": "temporal",
-        "plot_significant_correlations_topomap": "temporal",
         # Dose response
         "visualize_dose_response": "dose_response",
     }

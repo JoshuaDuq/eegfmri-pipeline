@@ -90,6 +90,9 @@ event_columns:
 alignment:
   allow_misaligned_trim: false
   min_alignment_samples: 5
+  # EEG↔fMRI: recommended for simultaneous acquisition
+  trim_to_first_volume: true         # EEG raw_to_bids: trim to first volume marker
+  fmri_onset_reference: "first_iti_start"  # fMRI raw_to_bids: event onsets relative to first ITI
 
 eeg:
   montage: "easycap-M1"

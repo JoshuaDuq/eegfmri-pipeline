@@ -22,10 +22,7 @@ from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import get_band_color
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.analysis.stats.effect_size import cohens_d as _cohens_d
-from eeg_pipeline.utils.analysis.stats.paired_comparisons import (
-    compute_paired_cohens_d,
-    safe_mannwhitneyu,
-)
+from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
 from eeg_pipeline.domain.features.naming import NamingSchema
 
 

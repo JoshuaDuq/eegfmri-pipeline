@@ -25,7 +25,6 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -648,52 +647,3 @@ def nested_loso_classification(
     return result, best_params_df
 
 
-###################################################################
-# Utilities
-###################################################################
-
-
-def save_classification_results(
-    result: ClassificationResult,
-    output_path: Path,
-    prefix: str = "classification",
-) -> Dict[str, Path]:
-    """Save classification results to files."""
-    from eeg_pipeline.infra.tsv import write_tsv
-    
-    output_path = Path(output_path)
-    output_path.mkdir(parents=True, exist_ok=True)
-    saved = {}
-    
-    # Metrics
-    metrics_df = pd.DataFrame([result.to_dict()])
-    metrics_path = output_path / f"{prefix}_metrics.tsv"
-    write_tsv(metrics_df, metrics_path)
-    saved["metrics"] = metrics_path
-    
-    # Predictions
-    pred_df = pd.DataFrame({
-        "y_true": result.y_true,
-        "y_pred": result.y_pred,
-    })
-    if result.y_prob is not None:
-        pred_df["y_prob"] = result.y_prob
-    if result.groups is not None:
-        pred_df["group"] = result.groups
-    
-    pred_path = output_path / f"{prefix}_predictions.tsv"
-    write_tsv(pred_df, pred_path)
-    saved["predictions"] = pred_path
-    
-    # ROC curve data
-    if result.fpr is not None:
-        roc_df = pd.DataFrame({
-            "fpr": result.fpr,
-            "tpr": result.tpr,
-            "threshold": result.thresholds,
-        })
-        roc_path = output_path / f"{prefix}_roc.tsv"
-        write_tsv(roc_df, roc_path)
-        saved["roc"] = roc_path
-    
-    return saved

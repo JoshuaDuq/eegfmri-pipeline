@@ -48,22 +48,6 @@ def get_specific_config(config_file, prefix):
     return config
 
 
-def get_features_config(config_file):
-    spec = importlib.util.spec_from_file_location(
-        name="custom_config", location=config_file
-    )
-    custom_cfg = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(custom_cfg)
-    
-    features_config = {}
-    for key in dir(custom_cfg):
-        if "features_" in key:
-            val = getattr(custom_cfg, key)
-            features_config[key] = val
-    
-    return features_config
-
-
 def get_config_keyval(config_file, key, return_false_if_not_found=True):
     spec = importlib.util.spec_from_file_location(
         name="custom_config", location=config_file

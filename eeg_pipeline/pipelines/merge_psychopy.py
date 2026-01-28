@@ -86,7 +86,14 @@ class MergePsychopyPipeline(PipelineBase):
             return
 
         eeg_paths = sorted(eeg_dir.glob(f"sub-{subject}_task-{task}_run-*_events.tsv"))
-        fmri_paths = sorted(fmri_dir.glob(f"sub-{subject}_task-{task}_run-*_events.tsv"))
+        fmri_paths = [
+            p
+            for p in sorted(fmri_dir.glob(f"sub-{subject}_task-{task}_run-*_events.tsv"))
+            if not p.name.endswith("_bold_events.tsv")
+        ]
+        if not fmri_paths:
+            # Backward-compat: older outputs used a non-BIDS `_bold_events.tsv` suffix.
+            fmri_paths = sorted(fmri_dir.glob(f"sub-{subject}_task-{task}_run-*_bold_events.tsv"))
         if not eeg_paths or not fmri_paths:
             return
 

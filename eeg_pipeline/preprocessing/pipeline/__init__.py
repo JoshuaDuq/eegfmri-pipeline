@@ -5,7 +5,6 @@ from . import preprocess
 from . import ica
 from . import tfr
 from . import stats
-from . import plotting
 
 __all__ = [
     'config',
@@ -15,6 +14,5 @@ __all__ = [
     'ica',
     'tfr',
     'stats',
-    'plotting',
 ]
 

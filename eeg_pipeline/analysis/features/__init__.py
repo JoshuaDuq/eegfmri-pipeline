@@ -48,10 +48,6 @@ from eeg_pipeline.analysis.features.normalization import (
     FeatureNormalizer,
 )
 
-from eeg_pipeline.utils.analysis.stats.reliability import (
-    ReliabilityResult,
-)
-
 # =============================================================================
 # Manifest & Output
 # =============================================================================
@@ -104,8 +100,6 @@ _LAZY_IMPORTS = {
     "zscore_normalize": "normalization",
     "robust_normalize": "normalization",
     # Reliability (canonical: utils.analysis.stats.reliability)
-    "ReliabilityResult": "eeg_pipeline.utils.analysis.stats.reliability",
-    "compute_split_half_reliability": "eeg_pipeline.utils.analysis.stats.reliability",
     "compute_icc": "eeg_pipeline.utils.analysis.stats.reliability",
     # Quality
     "compute_trial_quality_metrics": "quality",

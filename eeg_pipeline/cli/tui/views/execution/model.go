@@ -159,7 +159,7 @@ func New(command string) Model {
 		width:            80,
 		height:           24,
 		logViewport:      vp,
-		RepoRoot:          "",
+		RepoRoot:         "",
 		ShowInfo:         true,
 		ShowWarning:      true,
 		ShowError:        true,
@@ -673,6 +673,8 @@ func (m Model) GetOutputPaths() []string {
 			filepath.Join(base, "behavior"),
 			filepath.Join(base, "stats"),
 		}
+	case strings.Contains(cmd, "fmri-analysis"):
+		paths = []string{filepath.Join(base, "sub-XX", "fmri", "first_level")}
 	case strings.Contains(cmd, "fmri") && strings.Contains(cmd, "preprocess"):
 		paths = []string{filepath.Join(base, "preprocessed", "fmri", "fmriprep")}
 	case strings.Contains(cmd, "fmri-raw-to-bids"):

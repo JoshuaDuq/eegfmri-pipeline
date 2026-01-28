@@ -10,7 +10,6 @@ import pandas as pd
 from eeg_pipeline.pipelines.constants import (
     BEHAVIOR_COMPUTATIONS,
     BEHAVIOR_VISUALIZE_CATEGORIES,
-    FEATURE_CATEGORIES,
     FEATURE_VISUALIZE_CATEGORIES,
     FREQUENCY_BANDS,
 )
@@ -613,91 +612,14 @@ def discover_condition_effects_columns(
     return result
 
 
-def discover_fmri_event_columns(
-    fmri_root: Union[str, Path],
-    task: str = "pain",
-    subject: Optional[str] = None,
-) -> dict:
-    """Discover available columns and their unique values from fMRI events files.
-    
-    This is separate from EEG events discovery because fMRI events files
-    have different columns (e.g., pain_binary_coded vs pain_binary).
-    
-    Returns
-    -------
-    dict
-        {
-            "columns": ["onset", "duration", "trial_type", "pain_binary_coded", ...],
-            "values": {
-                "pain_binary_coded": ["0", "1"],
-                "trial_type": ["temp49p3", "feedback"],
-                ...
-            },
-            "source": "fmri_events",
-            "file": "path/to/file"
-        }
-    """
-    fmri_root = Path(fmri_root)
-    result = {"columns": [], "values": {}, "source": "fmri_events", "file": None}
-    
-    events_file = None
-    patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"]
-    
-    if subject:
-        subj_id = subject.replace("sub-", "")
-        func_dir = fmri_root / f"sub-{subj_id}" / "func"
-        if func_dir.exists():
-            for pattern in patterns:
-                files = list(func_dir.glob(pattern))
-                if files:
-                    events_file = files[0]
-                    break
-    
-    if not events_file:
-        for subj_dir in sorted(fmri_root.glob("sub-*"))[:5]:
-            func_dir = subj_dir / "func"
-            if not func_dir.exists():
-                continue
-            for pattern in patterns:
-                files = list(func_dir.glob(pattern))
-                if files:
-                    events_file = files[0]
-                    break
-            if events_file:
-                break
-    
-    if not events_file:
-        return result
-    
-    try:
-        df = pd.read_csv(events_file, sep="\t")
-        result["columns"] = df.columns.tolist()
-        result["file"] = str(events_file)
-        
-        skip_columns = {"onset", "duration", "sample", "value", "stim_file"}
-        for col in df.columns:
-            if col.lower() in skip_columns:
-                continue
-            unique_vals = df[col].dropna().unique()
-            if len(unique_vals) <= 50:
-                vals = [str(v) for v in unique_vals if pd.notna(v)]
-                result["values"][col] = sorted(set(vals))
-    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
-        pass
-    
-    return result
-
-
 __all__ = [
     "detect_available_bands",
     "detect_feature_availability",
     "_empty_feature_availability",
     "discover_event_columns",
     "discover_trial_table_columns",
-    "discover_fmri_event_columns",
     "BEHAVIOR_COMPUTATIONS",
     "FEATURE_VISUALIZE_CATEGORIES",
     "BEHAVIOR_VISUALIZE_CATEGORIES",
     "FREQUENCY_BANDS",
-    "FEATURE_CATEGORIES",
 ]

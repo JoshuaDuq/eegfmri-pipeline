@@ -272,7 +272,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     defaults_overrides.add_argument("--text-channel-annotation-x", type=float, default=None, help="Channel annotation x position (default from config)")
     defaults_overrides.add_argument("--text-channel-annotation-y", type=float, default=None, help="Channel annotation y position (default from config)")
     defaults_overrides.add_argument("--text-title-y", type=float, default=None, help="Title y position (default from config)")
-    defaults_overrides.add_argument("--text-residual-qc-title-y", type=float, default=None, help="Residual QC title y position (default from config)")
 
     # Validation thresholds (plotting.validation.*)
     defaults_overrides.add_argument("--validation-min-bins-for-calibration", type=int, default=None, help="Min bins for calibration (default from config)")
@@ -1086,8 +1085,6 @@ def _apply_text_position_overrides(args: argparse.Namespace, config: Any) -> Non
         _apply_config_override(config, "plotting.styling.text_position.channel_annotation_y", float(args.text_channel_annotation_y))
     if _get_arg_value(args, "text_title_y") is not None:
         _apply_config_override(config, "plotting.styling.text_position.title_y", float(args.text_title_y))
-    if _get_arg_value(args, "text_residual_qc_title_y") is not None:
-        _apply_config_override(config, "plotting.styling.text_position.residual_qc_title_y", float(args.text_residual_qc_title_y))
 
 
 def _apply_validation_overrides(args: argparse.Namespace, config: Any) -> None:

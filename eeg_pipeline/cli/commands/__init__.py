@@ -35,15 +35,7 @@ from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
 from eeg_pipeline.cli.commands.utilities import setup_utilities, run_utilities
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
 from fmri_pipeline.cli.commands.fmri import setup_fmri, run_fmri
-
-from eeg_pipeline.cli.commands.base import (
-    detect_available_bands,
-    detect_feature_availability,
-    BEHAVIOR_COMPUTATIONS,
-    FEATURE_VISUALIZE_CATEGORIES,
-    BEHAVIOR_VISUALIZE_CATEGORIES,
-    FREQUENCY_BANDS,
-)
+from fmri_pipeline.cli.commands.fmri_analysis import setup_fmri_analysis, run_fmri_analysis
 
 
 COMMANDS: List[Command] = [
@@ -61,6 +53,12 @@ COMMANDS: List[Command] = [
         name="fmri",
         setup=setup_fmri,
         run=run_fmri,
+        requires_subjects=False,
+    ),
+    Command(
+        name="fmri-analysis",
+        setup=setup_fmri_analysis,
+        run=run_fmri_analysis,
         requires_subjects=False,
     ),
     Command(
@@ -112,14 +110,4 @@ def get_command(name: str):
     return None
 
 
-__all__ = [
-    "Command",
-    "COMMANDS",
-    "get_command",
-    "detect_available_bands",
-    "detect_feature_availability",
-    "BEHAVIOR_COMPUTATIONS",
-    "FEATURE_VISUALIZE_CATEGORIES",
-    "BEHAVIOR_VISUALIZE_CATEGORIES",
-    "FREQUENCY_BANDS",
-]
+__all__ = ["Command", "COMMANDS", "get_command"]

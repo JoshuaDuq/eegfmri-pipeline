@@ -377,50 +377,6 @@ def perm_pval_partial_freedman_lane(
     return exceed_count / (n_perm + 1)
 
 
-def compute_perm_and_partial_perm(
-    x: pd.Series,
-    y: pd.Series,
-    covariates_df: Optional[pd.DataFrame],
-    method: str,
-    n_perm: Optional[int],
-    rng: np.random.Generator,
-    *,
-    groups: Optional[np.ndarray] = None,
-    config: Optional[Any] = None,
-    scheme: str = "shuffle",
-) -> Tuple[float, float]:
-    """Compute permutation p-values for simple and partial correlation."""
-    p_perm = p_partial_perm = np.nan
-    if n_perm is None or n_perm <= 0:
-        return p_perm, p_partial_perm
-    
-    p_perm = perm_pval_simple(
-        x,
-        y,
-        method,
-        n_perm,
-        rng,
-        groups=groups,
-        config=config,
-        scheme=scheme,
-    )
-    
-    if covariates_df is not None and not covariates_df.empty:
-        p_partial_perm = perm_pval_partial_freedman_lane(
-            x,
-            y,
-            covariates_df,
-            method,
-            n_perm,
-            rng,
-            groups=groups,
-            config=config,
-            scheme=scheme,
-        )
-    
-    return p_perm, p_partial_perm
-
-
 def compute_permutation_pvalues(
     x_aligned: pd.Series,
     y_aligned: pd.Series,
@@ -632,68 +588,4 @@ def compute_permutation_pvalues_with_cov_temp(
     )
 
     return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
-
-
-def compute_temp_permutation_pvalues(
-    roi_values: pd.Series,
-    temp_values: pd.Series,
-    covariates_without_temp_df: Optional[pd.DataFrame],
-    method: str,
-    n_perm: Optional[int],
-    rng: np.random.Generator,
-    groups: Optional[np.ndarray] = None,
-    config: Optional[Any] = None,
-) -> Tuple[float, float]:
-    """Compute temperature permutation p-values."""
-    
-    p_temp_perm = p_partial_perm = np.nan
-    
-    if n_perm is None or n_perm <= 0:
-        return p_temp_perm, p_partial_perm
-    
-    p_temp_perm = perm_pval_simple(roi_values, temp_values, method, n_perm, rng, groups=groups, config=config)
-    
-    if covariates_without_temp_df is not None and not covariates_without_temp_df.empty:
-        p_partial_perm = perm_pval_partial_freedman_lane(roi_values, temp_values, covariates_without_temp_df, method, n_perm, rng, groups=groups, config=config)
-    
-    return p_temp_perm, p_partial_perm
-
-
-def _extract_groups_from_covariates(
-    covariates_df: pd.DataFrame,
-) -> Optional[np.ndarray]:
-    """Extract group information from covariates if present."""
-    group_column_names = ["run", "run_id", "block"]
-    
-    for column in covariates_df.columns:
-        column_lower = str(column).lower()
-        if column_lower in group_column_names:
-            group_candidate = pd.to_numeric(
-                covariates_df[column], errors="coerce"
-            ).to_numpy()
-            valid_groups = group_candidate[~np.isnan(group_candidate)]
-            has_multiple_groups = len(np.unique(valid_groups)) < len(group_candidate)
-            
-            if has_multiple_groups:
-                return group_candidate
-    
-    return None
-
-
-def _subset_covariates_with_mask(
-    covariates_df: pd.DataFrame,
-    mask: pd.Series,
-) -> Optional[pd.DataFrame]:
-    """Subset covariates dataframe using mask."""
-    if isinstance(mask, pd.Series):
-        covariates_subset = covariates_df.iloc[mask]
-    else:
-        covariates_subset = covariates_df[mask]
-    
-    if covariates_subset.empty:
-        return None
-    
-    return covariates_subset
-
-
 

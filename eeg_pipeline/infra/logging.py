@@ -60,20 +60,6 @@ def get_module_logger(logger: Optional[logging.Logger] = None, module_name: Opti
     return get_logger(module_name or __name__)
 
 
-def log_and_raise_error(logger: logging.Logger, error_msg: str, exception_class=ValueError) -> None:
-    logger.error(error_msg)
-    raise exception_class(error_msg)
-
-
-def reset_logging() -> None:
-    global _configured_loggers
-    for name in list(_configured_loggers):
-        logger = logging.getLogger(name)
-        logger.handlers.clear()
-        logger.propagate = True
-    _configured_loggers.clear()
-
-
 def get_subject_logger(
     module_name: str,
     subject: str,
@@ -87,32 +73,13 @@ def get_subject_logger(
     return get_logger(logger_name)
 
 
-def get_pipeline_logger(module_name: Optional[str] = None) -> logging.Logger:
-    logger_name = module_name or DEFAULT_LOGGER_NAME
-    return get_logger(logger_name)
-
-
 def get_default_logger() -> logging.Logger:
     return get_logger(DEFAULT_LOGGER_NAME)
-
-
-def get_group_logger(
-    module_name: str,
-) -> logging.Logger:
-    if not module_name or not isinstance(module_name, str):
-        raise ValueError("Module name must be a non-empty string")
-    
-    logger_name = f"{module_name}.group"
-    return get_logger(logger_name)
 
 
 __all__ = [
     "get_logger",
     "get_module_logger",
-    "log_and_raise_error",
-    "reset_logging",
     "get_subject_logger",
-    "get_group_logger",
-    "get_pipeline_logger",
     "get_default_logger",
 ]

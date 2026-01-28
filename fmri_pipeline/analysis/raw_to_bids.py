@@ -506,6 +506,19 @@ def run_fmri_raw_to_bids(
                         dest_prefix += f"_run-{run_label}"
 
                     mapped, jsons = _classify_fieldmap_outputs(tmp_dir)
+                    all_tes: List[float] = []
+                    for _suf, _n, _js in mapped:
+                        if _js.exists():
+                            _m = _load_json(_js)
+                            for _k in ("EchoTime", "EchoTime1", "EchoTime2"):
+                                _v = _m.get(_k)
+                                if _v is not None:
+                                    try:
+                                        all_tes.append(float(_v))
+                                    except (TypeError, ValueError):
+                                        pass
+                    all_tes = sorted(set(all_tes))
+
                     for suffix, nifti, js in mapped:
                         dest_stem = f"{dest_prefix}_{suffix}"
                         dest_nifti = dest_dir / f"{dest_stem}.nii.gz"
@@ -520,6 +533,12 @@ def run_fmri_raw_to_bids(
                             shutil.move(str(js), str(dest_json))
                         else:
                             _safe_write_json(dest_json, {})
+                        if suffix == "phasediff":
+                            meta = _load_json(dest_json)
+                            if ("EchoTime1" not in meta or "EchoTime2" not in meta) and len(all_tes) >= 2:
+                                meta["EchoTime1"] = all_tes[0]
+                                meta["EchoTime2"] = all_tes[-1]
+                                _safe_write_json(dest_json, meta)
                         fmap_json_paths.append(dest_json)
                         n_written += 1
                     continue

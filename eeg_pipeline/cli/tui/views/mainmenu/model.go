@@ -35,6 +35,7 @@ var analysisPipelines = []pipelineItem{
 	{"Behavior", "EEG-behavior analysis", 2},
 	{"Machine Learning", "LOSO regression & classification", 3},
 	{"Plotting", "Curate and export visualization suites", 4},
+	{"fMRI Analysis", "First-level GLM contrasts per subject", 9},
 }
 
 type utilityItem struct {

@@ -148,43 +148,6 @@ def _create_time_generalization_plot(
     return fig, ax
 
 
-def plot_time_generalization_matrix(
-    tg_matrix: np.ndarray,
-    window_centers: np.ndarray,
-    save_path: Path,
-    metric: str = "r",
-    config: Optional[Any] = None,
-) -> None:
-    """
-    Plot train×test time-generalization matrix for regression machine learning.
-
-    Parameters
-    ----------
-    tg_matrix : np.ndarray
-        Time-generalization matrix of shape (n_train_windows, n_test_windows).
-    window_centers : np.ndarray
-        Window center times in seconds.
-    save_path : Path
-        Path to save the figure.
-    metric : str, default="r"
-        Metric name for colorbar label.
-    config : Optional[Any], default=None
-        Plot configuration object.
-    """
-    if not _validate_time_generalization_inputs(tg_matrix, window_centers):
-        return
-
-    plot_cfg = get_plot_config(config)
-    fig, ax = _create_time_generalization_plot(tg_matrix, window_centers, metric, plot_cfg)
-
-    ax.set_title("Time-generalization")
-    despine(ax)
-
-    plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats, config=config)
-    logger.info("Saved time-generalization matrix to %s", save_path)
-
-
 def plot_time_generalization_with_null(
     tg_matrix: np.ndarray,
     null_matrix: Optional[np.ndarray],

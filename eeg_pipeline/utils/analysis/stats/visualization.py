@@ -8,16 +8,10 @@ for permutation distributions, cluster-mass histograms, and p-p plots.
 
 from __future__ import annotations
 
-from typing import Dict, List, Union
-
 import numpy as np
 import pandas as pd
 from scipy.stats import gaussian_kde
 
-
-
-# Constants
-DEFAULT_CORRELATION_VMAX = 0.5
 
 
 ###################################################################
@@ -38,38 +32,3 @@ def compute_kde_scale(
     if kde_vals.max() > 0:
         return hist_counts.max() / kde_vals.max()
     return 1.0
-
-
-def compute_correlation_vmax(data: Union[np.ndarray, List[Dict]]) -> float:
-    """Compute symmetric vmax for correlation heatmaps."""
-    if isinstance(data, np.ndarray):
-        finite_vals = data[np.isfinite(data)]
-        if len(finite_vals) == 0:
-            return DEFAULT_CORRELATION_VMAX
-        return max(abs(np.min(finite_vals)), abs(np.max(finite_vals)))
-    
-    all_corrs = []
-    for bd in data:
-        correlations = bd['correlations']
-        sig_mask = bd.get('significant_mask', np.ones(len(correlations), dtype=bool))
-        sig_corrs = correlations[sig_mask]
-        finite_sig = sig_corrs[np.isfinite(sig_corrs)]
-        if len(finite_sig) > 0:
-            all_corrs.extend(finite_sig)
-    
-    if not all_corrs:
-        for bd in data:
-            correlations = bd['correlations']
-            finite_corrs = correlations[np.isfinite(correlations)]
-            all_corrs.extend(finite_corrs)
-    
-    if not all_corrs:
-        return DEFAULT_CORRELATION_VMAX
-    
-    return max(abs(np.min(all_corrs)), abs(np.max(all_corrs)))
-
-
-
-
-
-

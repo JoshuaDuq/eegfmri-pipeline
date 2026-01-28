@@ -515,6 +515,20 @@ func (m Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) (tea.Model, 
 		return m, executor.DiscoverConditionEffectsColumns(m.repoRoot, m.task, subjectID)
 	}
 
+	// Trigger fMRI condition discovery for fMRI analysis pipeline (for contrast pickers)
+	if m.selectedPipeline == types.PipelineFmriAnalysis && len(subjects) > 0 {
+		subjectID := ""
+		for _, subj := range subjects {
+			if subj.ID != "" {
+				subjectID = subj.ID
+				break
+			}
+		}
+		if subjectID != "" {
+			return m, executor.DiscoverFmriConditions(m.repoRoot, subjectID, m.task)
+		}
+	}
+
 	return m, nil
 }
 
@@ -847,7 +861,7 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	m.mainMenu.SelectedPipeline = -1
 
 	configKeys := []string{"time_frequency_analysis.bands"}
-	if m.selectedPipeline == types.PipelineFmri {
+	if m.selectedPipeline == types.PipelineFmri || m.selectedPipeline == types.PipelineFmriAnalysis {
 		configKeys = append(configKeys,
 			"fmri_preprocessing.engine",
 			"fmri_preprocessing.fmriprep.image",

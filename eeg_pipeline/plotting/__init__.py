@@ -36,7 +36,6 @@ __all__ = [
 def __getattr__(name: str):
     """Lazy import for plotting functions."""
     _module_map = {
-        "log": "core",
         "format_cluster_significance_info": "core",
         "format_ttest_significance_info": "core",
         "build_significance_info": "core",
@@ -53,7 +52,6 @@ def __getattr__(name: str):
         "build_topomap_percentage_label": "core",
         "create_scalpmean_tfr_from_existing": "core",
         "get_strict_mode": "core",
-        "compute_cluster_significance_from_combined": "core",
         "plot_power_spectral_density": "features",
         "plot_connectivity_heatmap": "features",
         "plot_connectivity_network": "features",
@@ -70,26 +68,17 @@ def __getattr__(name: str):
         "visualize_subject_tfr": "tfr",
         "visualize_tfr_for_subjects": "tfr",
         "generate_correlation_scatter": "behavioral",
-        "plot_residual_qc": "behavioral",
-        "plot_regression_residual_diagnostics": "behavioral",
         "plot_psychometrics": "behavioral",
         "plot_temporal_correlation_topomaps_by_pain": "behavioral",
         "visualize_subject_behavior": "behavioral",
         "visualize_behavior_for_subjects": "behavioral",
-        "plot_time_generalization_matrix": "machine_learning",
         "plot_time_generalization_with_null": "machine_learning",
         "plot_prediction_scatter": "machine_learning",
         "plot_per_subject_performance": "machine_learning",
         "plot_ml_null_hist": "machine_learning",
         "plot_calibration_curve": "machine_learning",
-        "plot_bootstrap_distributions": "machine_learning",
         "plot_permutation_null": "machine_learning",
         "plot_residual_diagnostics": "machine_learning",
-        "plot_model_comparison": "machine_learning",
-        "plot_riemann_band_comparison": "machine_learning",
-        "plot_riemann_sliding_window": "machine_learning",
-        "plot_incremental_validity": "machine_learning",
-        "plot_feature_importance_top_n": "machine_learning",
     }
 
     if name in _module_map:

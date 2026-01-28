@@ -42,11 +42,11 @@ htmlcov/
 .ruff_cache/
 
 ### Go (TUI) ###
+.gocache/
 eeg_pipeline/cli/tui/tui
 eeg_pipeline/cli/tui/eeg-tui
 eeg_pipeline/cli/tui/eeg-pipeline-tui
 eeg_pipeline/cli/tui/.cache/
-eeg_pipeline/cli/tui/.gocache/
 eeg_pipeline/cli/tui/.gomodcache/
 eeg_pipeline/cli/tui/.gopath/
 bin/
@@ -74,14 +74,12 @@ eeg_pipeline/data/**
 !eeg_pipeline/data/bids_output/
 eeg_pipeline/data/bids_output/**
 !eeg_pipeline/data/bids_output/README
-!eeg_pipeline/data/bids_output/dataset_description.json
 !eeg_pipeline/data/bids_output/participants.tsv
 !eeg_pipeline/data/bids_output/participants.json
 
 # Allow specific metadata files in derivatives
 !eeg_pipeline/data/derivatives/
 eeg_pipeline/data/derivatives/**
-!eeg_pipeline/data/derivatives/dataset_description.json
 
 # Allow external data if it exists
 !eeg_pipeline/data/external/

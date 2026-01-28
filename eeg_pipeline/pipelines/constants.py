@@ -8,7 +8,7 @@ Single source of truth for both Python CLI and Go TUI.
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import List
 
 
 FREQUENCY_BANDS: List[str] = [
@@ -17,12 +17,6 @@ FREQUENCY_BANDS: List[str] = [
     "alpha",
     "beta",
     "gamma",
-]
-
-
-MANDATORY_TIME_WINDOWS: List[str] = [
-    "baseline",
-    "active",
 ]
 
 
@@ -43,24 +37,6 @@ FEATURE_CATEGORIES: List[str] = [
     "ratios",
     "asymmetry",
 ]
-
-FEATURE_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
-    "power": "Band power features (theta, alpha, beta, gamma)",
-    "connectivity": "Phase connectivity metrics",
-    "directedconnectivity": "Directed connectivity metrics (PSI, DTF, PDC)",
-    "sourcelocalization": "Source-localized power and connectivity",
-    "aperiodic": "1/f spectral slope parameters",
-    "erp": "ERP/LEP time-domain features",
-    "complexity": "Signal complexity measures",
-    "bursts": "Oscillatory burst dynamics",
-    "itpc": "Inter-trial phase coherence",
-    "pac": "Phase-amplitude coupling",
-    "quality": "Data quality and artifact metrics",
-    "erds": "Event-related (de)synchronization",
-    "spectral": "Spectral edge and other freq metrics",
-    "ratios": "Power ratios (e.g., theta/beta)",
-    "asymmetry": "Inter-hemispheric asymmetry",
-}
 
 
 BEHAVIOR_COMPUTATIONS: List[str] = [
@@ -83,27 +59,6 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "moderation",
     "mixed_effects",
 ]
-
-BEHAVIOR_COMPUTATION_DESCRIPTIONS: Dict[str, str] = {
-    "trial_table": "Export canonical per-trial analysis table",
-    "lag_features": "Add lag/delta dynamics to trial table",
-    "pain_residual": "Compute pain_residual = rating - f(temperature)",
-    "temperature_models": "Model comparison and breakpoint detection on temp→rating",
-    "regression": "Feature regression with optional permutation and model sensitivity",
-    "models": "Multi-family sensitivity analysis (bundled under regression in TUI)",
-    "stability": "Run/block stability diagnostics (non-gating)",
-    "consistency": "Effect direction consistency across outcomes",
-    "influence": "Influence diagnostics (Cook's distance/leverage)",
-    "report": "Single-subject report (reproducible summary)",
-    "correlations": "EEG-rating correlations",
-    "pain_sensitivity": "Individual pain sensitivity analysis",
-    "condition": "Compare conditions (e.g., ramp vs active)",
-    "temporal": "Time-resolved correlation analysis",
-    "cluster": "Cluster-based permutation tests",
-    "mediation": "Path analysis and mediation models",
-    "moderation": "Moderation analysis (interaction effects)",
-    "mixed_effects": "Mixed-effects modeling",
-}
 
 
 FEATURE_VISUALIZE_CATEGORIES: List[str] = [
@@ -132,31 +87,3 @@ BEHAVIOR_VISUALIZE_CATEGORIES: List[str] = [
     "temporal",
     "dose_response",
 ]
-
-
-PREPROCESSING_MODES: List[str] = [
-    "full",
-    "bad-channels",
-    "ica",
-    "epochs",
-]
-
-PREPROCESSING_MODE_DESCRIPTIONS: Dict[str, str] = {
-    "full": "Full preprocessing pipeline",
-    "bad-channels": "Bad channel detection only",
-    "ica": "ICA fitting and labeling",
-    "epochs": "Epoch creation only",
-}
-
-
-ML_MODES: List[str] = [
-    "regression",
-    "timegen",
-    "classify",
-]
-
-ML_MODE_DESCRIPTIONS: Dict[str, str] = {
-    "regression": "LOSO regression",
-    "timegen": "Time generalization",
-    "classify": "Binary classification",
-}

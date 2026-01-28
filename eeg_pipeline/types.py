@@ -14,28 +14,11 @@ import os
 os.environ.setdefault("NUMPY_SKIP_MACOS_CHECK", "1")
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Protocol,
-    Tuple,
-    TypedDict,
-    Union,
-    runtime_checkable,
-)
+from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 import pandas as pd
 
-# Type aliases
-PathLike = Union[str, Path]
-ArrayLike = Union[np.ndarray, List[float], pd.Series]
-FrequencyBand = Tuple[float, float]
 CorrelationMethod = Literal["spearman", "pearson"]
 
 
@@ -51,27 +34,6 @@ class ConfigLike(Protocol):
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value by dot-separated key."""
         ...
-
-
-###################################################################
-# Feature Extraction Types
-###################################################################
-
-
-class FrequencyBands(TypedDict, total=False):
-    """Frequency band definitions."""
-
-    delta: Tuple[float, float]
-    theta: Tuple[float, float]
-    alpha: Tuple[float, float]
-    beta: Tuple[float, float]
-    gamma: Tuple[float, float]
-    low_gamma: Tuple[float, float]
-    high_gamma: Tuple[float, float]
-
-
-# Re-export ValidationResult from utils.validation to avoid duplication
-from eeg_pipeline.utils.validation import ValidationResult
 
 
 ###################################################################
@@ -107,112 +69,6 @@ class CorrelationResult:
             "p_perm": self.p_perm,
             "q": self.q,
         }
-
-
-###################################################################
-# Machine Learning Types
-###################################################################
-
-
-@dataclass
-class MLResult:
-    """Result of a machine learning analysis."""
-
-    y_true: np.ndarray
-    y_pred: np.ndarray
-    r: float
-    r2: float
-    mse: float
-    ci_low: Optional[float] = None
-    ci_high: Optional[float] = None
-    p_perm: Optional[float] = None
-    feature_importance: Optional[Dict[str, float]] = None
-
-
-@dataclass
-class CVFoldResult:
-    """Result from a single cross-validation fold."""
-
-    fold: int
-    train_idx: np.ndarray
-    test_idx: np.ndarray
-    y_true: np.ndarray
-    y_pred: np.ndarray
-    best_params: Optional[Dict[str, Any]] = None
-    subject: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "fold": self.fold,
-            "y_true": self.y_true.tolist(),
-            "y_pred": self.y_pred.tolist(),
-            "test_idx": self.test_idx.tolist(),
-            "best_params": self.best_params,
-            "subject": self.subject,
-        }
-
-
-###################################################################
-# Pipeline Types
-###################################################################
-
-
-@dataclass
-class SubjectResult:
-    """Result of processing a single subject."""
-
-    subject: str
-    success: bool
-    error: Optional[str] = None
-    duration_seconds: Optional[float] = None
-    outputs: Dict[str, Path] = field(default_factory=dict)
-
-
-@dataclass
-class BatchResult:
-    """Result of batch processing multiple subjects."""
-
-    subjects: List[str]
-    results: List[SubjectResult]
-    total_duration: float
-
-    @property
-    def n_success(self) -> int:
-        return sum(1 for r in self.results if r.success)
-
-    @property
-    def n_failed(self) -> int:
-        return sum(1 for r in self.results if not r.success)
-
-    @property
-    def failed_subjects(self) -> List[str]:
-        return [r.subject for r in self.results if not r.success]
-
-
-###################################################################
-# Callback Types
-###################################################################
-
-ProgressCallback = Callable[[str, float], None]
-
-
-def null_progress(stage: str, fraction: float) -> None:
-    """No-op progress callback when progress reporting is disabled."""
-
-
-###################################################################
-# Constants
-###################################################################
-
-DEFAULT_BANDS: FrequencyBands = {
-    "delta": (1.0, 4.0),
-    "theta": (4.0, 8.0),
-    "alpha": (8.0, 13.0),
-    "beta": (13.0, 30.0),
-    "gamma": (30.0, 80.0),
-}
-
-EPSILON = 1e-12
 
 
 ###################################################################

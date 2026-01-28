@@ -42,54 +42,6 @@ def extract_aligned_column_vector(
     return None
 
 
-def extract_pain_vector(
-    tfr,
-    events_df: Optional[pd.DataFrame],
-    pain_col: Optional[str],
-    n_samples: int,
-) -> Optional[pd.Series]:
-    """Extract pain vector as Series from TFR or events DataFrame.
-    
-    Args:
-        tfr: TFR object that may have metadata attribute
-        events_df: Optional events DataFrame
-        pain_col: Name of pain column, or None
-        n_samples: Number of samples to extract
-        
-    Returns:
-        Series with integer pain values, or None if column not found
-    """
-    if pain_col is None:
-        return None
-    pain_vec = extract_aligned_column_vector(tfr, events_df, pain_col, n_samples)
-    if pain_vec is None:
-        return None
-    return pd.to_numeric(pain_vec, errors="coerce").fillna(0).astype(int)
-
-
-def extract_pain_vector_array(
-    tfr,
-    events_df: Optional[pd.DataFrame],
-    pain_col: Optional[str],
-    n_samples: int,
-) -> Optional[np.ndarray]:
-    """Extract pain vector as numpy array from TFR or events DataFrame.
-    
-    Args:
-        tfr: TFR object that may have metadata attribute
-        events_df: Optional events DataFrame
-        pain_col: Name of pain column, or None
-        n_samples: Number of samples to extract
-        
-    Returns:
-        Array with integer pain values, or None if column not found
-    """
-    pain_series = extract_pain_vector(tfr, events_df, pain_col, n_samples)
-    if pain_series is None:
-        return None
-    return pain_series.values
-
-
 def extract_temperature_series(
     tfr,
     events_df: Optional[pd.DataFrame],
@@ -110,22 +62,6 @@ def extract_temperature_series(
     if temp_col is None:
         return None
     return extract_aligned_column_vector(tfr, events_df, temp_col, n_samples)
-
-
-def extract_time_frequency_grid(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    """Extract unique frequency and time values from DataFrame.
-    
-    Args:
-        df: DataFrame with 'freq' and 'time_start' columns
-        
-    Returns:
-        Tuple of (frequencies, times) arrays, or empty arrays if columns missing
-    """
-    if "freq" not in df.columns or "time_start" not in df.columns:
-        return np.array([]), np.array([])
-    freqs = np.unique(np.round(df["freq"].to_numpy(dtype=float), 6))
-    times = np.unique(np.round(df["time_start"].to_numpy(dtype=float), 6))
-    return freqs, times
 
 
 def _extract_unique_temperatures(
@@ -252,10 +188,7 @@ def create_temperature_masks_from_range(
 __all__ = [
     "compute_aligned_data_length",
     "extract_aligned_column_vector",
-    "extract_pain_vector",
-    "extract_pain_vector_array",
     "extract_temperature_series",
-    "extract_time_frequency_grid",
     "create_temperature_masks",
     "get_temperature_range",
     "create_temperature_masks_from_range",

@@ -63,17 +63,6 @@ def read_table(path: Path, **kwargs) -> pd.DataFrame:
     return read_tsv(path, **kwargs)
 
 
-def write_table(df: pd.DataFrame, path: Path, index: bool = False, **kwargs) -> None:
-    """Write DataFrame to TSV, CSV, or parquet file based on extension."""
-    suffix = path.suffix.lower()
-    if suffix == ".parquet":
-        write_parquet(df, path, index=index, **kwargs)
-    elif suffix == ".csv":
-        write_csv(df, path, index=index)
-    else:
-        write_tsv(df, path, index=index)
-
-
 _PARQUET_SIZE_THRESHOLD = 100
 
 
@@ -115,7 +104,6 @@ __all__ = [
     "read_parquet",
     "write_parquet",
     "read_table",
-    "write_table",
     "write_csv",
     "write_stats_table",
 ]

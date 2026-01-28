@@ -160,6 +160,8 @@ func (m Model) getExpectedOutputPaths() []string {
 		return []string{base + "sub-XX/eeg/plots/"}
 	case types.PipelineFmri:
 		return []string{base + "preprocessed/fmri/fmriprep/sub-XX/"}
+	case types.PipelineFmriAnalysis:
+		return []string{base + "sub-XX/fmri/first_level/task-*/contrast-*/"}
 	case types.PipelineFmriRawToBIDS:
 		return []string{"bids_output/fmri/sub-XX/"}
 	case types.PipelineRawToBIDS:
@@ -1578,6 +1580,8 @@ func (m Model) renderAdvancedConfig() string {
 		return m.renderPreprocessingAdvancedConfig()
 	case types.PipelineFmri:
 		return m.renderFmriAdvancedConfig()
+	case types.PipelineFmriAnalysis:
+		return m.renderFmriAnalysisAdvancedConfig()
 	case types.PipelineRawToBIDS:
 		return m.renderRawToBidsAdvancedConfig()
 	case types.PipelineFmriRawToBIDS:
@@ -4931,7 +4935,7 @@ func (m Model) renderMLAdvancedConfig() string {
 			return textFieldVarianceThresholdGrid, true
 		default:
 			return textFieldNone, false
-	}
+		}
 	}
 
 	renderTextOrDefault := func(raw string, emptyLabel string) string {
@@ -6063,6 +6067,349 @@ func (m Model) renderFmriAdvancedConfig() string {
 			b.WriteString("  " + hintStyle.Render(hint))
 		}
 		b.WriteString("\n")
+	}
+
+	if showScrollIndicators && endLine < totalLines {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more below", totalLines-endLine)) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderFmriAnalysisAdvancedConfig() string {
+	var b strings.Builder
+
+	accent := m.renderAnimatedAccent()
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" ADVANCED CONFIGURATION") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+	b.WriteString(infoStyle.Render("Configure first-level fMRI GLM settings and a single contrast.") + "\n\n")
+
+	if m.useDefaultAdvanced {
+		return m.renderDefaultConfigView("fMRI analysis")
+	}
+
+	labelWidth := defaultLabelWidthWide
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	// Display values
+	inputSourceOptions := []string{"fmriprep", "bids_raw"}
+	inputSourceVal := inputSourceOptions[m.fmriAnalysisInputSourceIndex%len(inputSourceOptions)]
+
+	spaceVal := strings.TrimSpace(m.fmriAnalysisFmriprepSpace)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisFmriprepSpace {
+		spaceVal = m.textBuffer + "█"
+	}
+	if spaceVal == "" {
+		spaceVal = "T1w"
+	}
+
+	runsVal := strings.TrimSpace(m.fmriAnalysisRunsSpec)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisRuns {
+		runsVal = m.textBuffer + "█"
+	}
+	if runsVal == "" {
+		runsVal = "(auto)"
+	}
+
+	contrastTypeOptions := []string{"t-test", "custom"}
+	contrastTypeVal := contrastTypeOptions[m.fmriAnalysisContrastType%len(contrastTypeOptions)]
+
+	condAVal := strings.TrimSpace(m.fmriAnalysisCondAValue)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisCondAValue {
+		condAVal = m.textBuffer + "█"
+	}
+	if condAVal == "" {
+		condAVal = "(set)"
+	}
+
+	condBVal := strings.TrimSpace(m.fmriAnalysisCondBValue)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisCondBValue {
+		condBVal = m.textBuffer + "█"
+	}
+	if condBVal == "" {
+		condBVal = "(optional)"
+	}
+
+	contrastNameVal := strings.TrimSpace(m.fmriAnalysisContrastName)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisContrastName {
+		contrastNameVal = m.textBuffer + "█"
+	}
+	if contrastNameVal == "" {
+		contrastNameVal = "(required)"
+	}
+
+	formulaVal := strings.TrimSpace(m.fmriAnalysisFormula)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisFormula {
+		formulaVal = m.textBuffer + "█"
+	}
+	if formulaVal == "" {
+		formulaVal = "(none)"
+	}
+
+	hrfOptions := []string{"spm", "flobs", "fir"}
+	hrfVal := hrfOptions[m.fmriAnalysisHrfModel%len(hrfOptions)]
+	driftOptions := []string{"none", "cosine", "polynomial"}
+	driftVal := driftOptions[m.fmriAnalysisDriftModel%len(driftOptions)]
+
+	confoundsOptions := []string{
+		"auto",
+		"none",
+		"motion6",
+		"motion12",
+		"motion24",
+		"motion24+wmcsf",
+		"motion24+wmcsf+fd",
+	}
+	confoundsVal := confoundsOptions[m.fmriAnalysisConfoundsStrategy%len(confoundsOptions)]
+
+	highPassVal := fmt.Sprintf("%.3f", m.fmriAnalysisHighPassHz)
+	lowPassVal := fmt.Sprintf("%.3f", m.fmriAnalysisLowPassHz)
+	if m.fmriAnalysisLowPassHz <= 0 {
+		lowPassVal = "0 (disabled)"
+	}
+
+	if m.editingNumber {
+		buffer := m.numberBuffer + "█"
+		switch {
+		case m.isCurrentlyEditing(optFmriAnalysisHighPassHz):
+			highPassVal = buffer
+		case m.isCurrentlyEditing(optFmriAnalysisLowPassHz):
+			lowPassVal = buffer
+		}
+	}
+
+	outTypeOptions := []string{"z-score", "t-stat", "cope", "beta"}
+	outTypeVal := outTypeOptions[m.fmriAnalysisOutputType%len(outTypeOptions)]
+
+	outDirVal := strings.TrimSpace(m.fmriAnalysisOutputDir)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisOutputDir {
+		outDirVal = m.textBuffer + "█"
+	}
+	if outDirVal == "" {
+		outDirVal = "(default)"
+	}
+
+	fsDirVal := strings.TrimSpace(m.fmriAnalysisFreesurferDir)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisFreesurferDir {
+		fsDirVal = m.textBuffer + "█"
+	}
+	if fsDirVal == "" {
+		fsDirVal = "(from config)"
+	}
+
+	options := m.getFmriAnalysisOptions()
+
+	// Scrolling support
+	totalLines := len(options)
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = defaultTerminalHeight
+	}
+	startLine, endLine, showScrollIndicators := calculateScrollWindow(
+		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
+
+	if showScrollIndicators && startLine > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more above", startLine)) + "\n")
+	}
+
+	for i, opt := range options {
+		if i < startLine || i >= endLine {
+			continue
+		}
+
+		isFocused := i == m.advancedCursor
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+		}
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+		label := ""
+		value := ""
+		hint := ""
+
+		switch opt {
+		case optUseDefaults:
+			label = "Configuration"
+			value = "Custom"
+			hint = "Space to use defaults"
+
+		// Group headers
+		case optFmriAnalysisGroupInput:
+			if m.fmriAnalysisGroupInputExpanded {
+				label = "▾ Input"
+			} else {
+				label = "▸ Input"
+			}
+			hint = "BOLD source + runs"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFmriAnalysisGroupContrast:
+			if m.fmriAnalysisGroupContrastExpanded {
+				label = "▾ Contrast"
+			} else {
+				label = "▸ Contrast"
+			}
+			hint = "Conditions + name"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFmriAnalysisGroupGLM:
+			if m.fmriAnalysisGroupGLMExpanded {
+				label = "▾ GLM"
+			} else {
+				label = "▸ GLM"
+			}
+			hint = "HRF, drift, filters"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFmriAnalysisGroupConfounds:
+			if m.fmriAnalysisGroupConfoundsExpanded {
+				label = "▾ Confounds/QC"
+			} else {
+				label = "▸ Confounds/QC"
+			}
+			hint = "Nuisance + QC outputs"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFmriAnalysisGroupOutput:
+			if m.fmriAnalysisGroupOutputExpanded {
+				label = "▾ Output"
+			} else {
+				label = "▸ Output"
+			}
+			hint = "Map type + paths"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		// Input
+		case optFmriAnalysisInputSource:
+			label = "Input Source"
+			value = inputSourceVal
+			hint = "Space to toggle"
+		case optFmriAnalysisFmriprepSpace:
+			label = "fMRIPrep Space"
+			value = spaceVal
+			hint = "Space to edit"
+		case optFmriAnalysisRequireFmriprep:
+			label = "Require fMRIPrep"
+			if m.fmriAnalysisRequireFmriprep {
+				value = "true"
+			} else {
+				value = "false"
+			}
+			hint = "Space to toggle"
+		case optFmriAnalysisRuns:
+			label = "Runs"
+			value = runsVal
+			hint = "Space to edit"
+
+		// Contrast
+		case optFmriAnalysisContrastType:
+			label = "Type"
+			value = contrastTypeVal
+			hint = "Space to toggle"
+		case optFmriAnalysisCondA:
+			label = "Condition A"
+			value = condAVal
+			if len(m.fmriAnalysisConditions) > 0 {
+				hint = "Space to cycle"
+			} else {
+				hint = "Space to edit"
+			}
+		case optFmriAnalysisCondB:
+			label = "Condition B"
+			value = condBVal
+			if len(m.fmriAnalysisConditions) > 0 {
+				hint = "Space to cycle"
+			} else {
+				hint = "Space to edit"
+			}
+		case optFmriAnalysisContrastName:
+			label = "Contrast Name"
+			value = contrastNameVal
+			hint = "Space to edit"
+		case optFmriAnalysisFormula:
+			label = "Formula"
+			value = formulaVal
+			hint = "Space to edit"
+
+		// GLM
+		case optFmriAnalysisHrfModel:
+			label = "HRF"
+			value = hrfVal
+			hint = "Space to toggle"
+		case optFmriAnalysisDriftModel:
+			label = "Drift"
+			value = driftVal
+			hint = "Space to toggle"
+		case optFmriAnalysisHighPassHz:
+			label = "High-pass (Hz)"
+			value = highPassVal
+			hint = "Space to edit"
+		case optFmriAnalysisLowPassHz:
+			label = "Low-pass (Hz)"
+			value = lowPassVal
+			hint = "Space to edit (0 disables)"
+
+		// Confounds / QC
+		case optFmriAnalysisConfoundsStrategy:
+			label = "Confounds"
+			value = confoundsVal
+			hint = "Space to cycle"
+		case optFmriAnalysisWriteDesignMatrix:
+			label = "Write Design Matrix"
+			if m.fmriAnalysisWriteDesignMatrix {
+				value = "true"
+			} else {
+				value = "false"
+			}
+			hint = "Space to toggle"
+
+		// Output
+		case optFmriAnalysisOutputType:
+			label = "Output Type"
+			value = outTypeVal
+			hint = "Space to toggle"
+		case optFmriAnalysisOutputDir:
+			label = "Output Dir"
+			value = outDirVal
+			hint = "Space to edit"
+		case optFmriAnalysisResampleToFS:
+			label = "Resample to FS"
+			if m.fmriAnalysisResampleToFS {
+				value = "true"
+			} else {
+				value = "false"
+			}
+			hint = "Space to toggle"
+		case optFmriAnalysisFreesurferDir:
+			label = "FreeSurfer Dir"
+			value = fsDirVal
+			hint = "Space to edit"
+		}
+
+		line := cursor + labelStyle.Render(label) + " " + valueStyle.Render(value)
+		if hint != "" {
+			line += "  " + hintStyle.Render(hint)
+		}
+		b.WriteString(line + "\n")
 	}
 
 	if showScrollIndicators && endLine < totalLines {

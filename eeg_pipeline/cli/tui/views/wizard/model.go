@@ -534,6 +534,15 @@ const (
 	textFieldFmriExtraArgs
 	textFieldFmriSkullStripTemplate
 	textFieldFmriTaskId
+	// fMRI analysis text fields
+	textFieldFmriAnalysisFmriprepSpace
+	textFieldFmriAnalysisRuns
+	textFieldFmriAnalysisCondAValue
+	textFieldFmriAnalysisCondBValue
+	textFieldFmriAnalysisContrastName
+	textFieldFmriAnalysisFormula
+	textFieldFmriAnalysisOutputDir
+	textFieldFmriAnalysisFreesurferDir
 	textFieldRawMontage
 	textFieldPrepMontage
 	textFieldPrepChTypes
@@ -956,6 +965,37 @@ type Model struct {
 	fmriGroupReproExpanded       bool
 	fmriGroupValidationExpanded  bool
 	fmriGroupAdvancedExpanded    bool
+
+	// fMRI analysis (first-level GLM + contrasts) configuration
+	fmriAnalysisInputSourceIndex  int      // 0: fmriprep, 1: bids_raw
+	fmriAnalysisFmriprepSpace     string   // e.g., "T1w"
+	fmriAnalysisRequireFmriprep   bool     // Fail if fMRIPrep outputs missing
+	fmriAnalysisRunsSpec          string   // Space-separated ints (e.g., "1 2 3") or empty for auto
+	fmriAnalysisContrastType      int      // 0: t-test, 1: custom
+	fmriAnalysisCondAValue        string   // Condition A trial_type
+	fmriAnalysisCondBValue        string   // Condition B trial_type
+	fmriAnalysisConditions        []string // Discovered trial_type values
+	fmriAnalysisCondAIdx          int
+	fmriAnalysisCondBIdx          int
+	fmriAnalysisContrastName      string // e.g., "pain_vs_nonpain"
+	fmriAnalysisFormula           string // Custom formula
+	fmriAnalysisHrfModel          int    // 0: spm, 1: flobs, 2: fir
+	fmriAnalysisDriftModel        int    // 0: none, 1: cosine, 2: polynomial
+	fmriAnalysisHighPassHz        float64
+	fmriAnalysisLowPassHz         float64
+	fmriAnalysisOutputType        int    // 0: z-score, 1: t-stat, 2: cope, 3: beta
+	fmriAnalysisOutputDir         string // Optional output directory override
+	fmriAnalysisResampleToFS      bool
+	fmriAnalysisFreesurferDir     string // Optional FreeSurfer SUBJECTS_DIR override
+	fmriAnalysisConfoundsStrategy int    // 0..N (see render/command builder options)
+	fmriAnalysisWriteDesignMatrix bool   // Write design matrices to <output>/qc/
+
+	// fMRI analysis UI group expansion states
+	fmriAnalysisGroupInputExpanded     bool
+	fmriAnalysisGroupContrastExpanded  bool
+	fmriAnalysisGroupGLMExpanded       bool
+	fmriAnalysisGroupConfoundsExpanded bool
+	fmriAnalysisGroupOutputExpanded    bool
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
 	plotGroupDefaultsExpanded    bool
@@ -1851,12 +1891,12 @@ type Model struct {
 	mlPermNRepeats     int
 
 	// Machine Learning model hyperparameters
-	elasticNetAlphaGrid    string // alpha grid as comma-separated values
-	elasticNetL1RatioGrid  string // l1_ratio grid as comma-separated values
-	ridgeAlphaGrid         string // ridge alpha grid as comma-separated values
-	rfNEstimators          int    // Random forest n_estimators
-	rfMaxDepthGrid         string // max_depth grid as comma-separated values (use "null" for None)
-	varianceThresholdGrid  string // variance_threshold grid (e.g. 0.0 or 0.0,0.01,0.1); use 0.0 only for small train folds
+	elasticNetAlphaGrid   string // alpha grid as comma-separated values
+	elasticNetL1RatioGrid string // l1_ratio grid as comma-separated values
+	ridgeAlphaGrid        string // ridge alpha grid as comma-separated values
+	rfNEstimators         int    // Random forest n_estimators
+	rfMaxDepthGrid        string // max_depth grid as comma-separated values (use "null" for None)
+	varianceThresholdGrid string // variance_threshold grid (e.g. 0.0 or 0.0,0.01,0.1); use 0.0 only for small train folds
 
 	// TFR parameters (for features pipeline)
 	tfrFreqMin       float64 // Min frequency for TFR
@@ -2500,9 +2540,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlUncertaintyAlpha:       0.1,
 		mlPermNRepeats:           10,
 		// Hyperparameter defaults mirror eeg_pipeline/utils/config/eeg_config.yaml
-		elasticNetAlphaGrid:    "0.001,0.01,0.1,1,10",
-		elasticNetL1RatioGrid:  "0.2,0.5,0.8",
-		varianceThresholdGrid:  "0.0,0.01,0.1",
+		elasticNetAlphaGrid:   "0.001,0.01,0.1,1,10",
+		elasticNetL1RatioGrid: "0.2,0.5,0.8",
+		varianceThresholdGrid: "0.0,0.01,0.1",
 		ridgeAlphaGrid:        "0.01,0.1,1,10,100",
 		rfNEstimators:         500,
 		rfMaxDepthGrid:        "5,10,20,null",
@@ -2594,7 +2634,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		rawMontage:           "easycap-M1",
 		rawLineFreq:          60,
 		rawOverwrite:         false,
-		rawTrimToFirstVolume: false,
+		rawTrimToFirstVolume: true,
 		rawEventPrefixes:     "",
 		rawKeepAnnotations:   false,
 		mergeEventPrefixes:   "",
@@ -2608,7 +2648,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		fmriRawOverwrite:        false,
 		fmriRawCreateEvents:     true,
 		fmriRawEventGranularity: 0, // phases
-		fmriRawOnsetRefIndex:    0, // as_is
+		fmriRawOnsetRefIndex:    1, // first_iti_start (recommended for simultaneous EEG-fMRI)
 		fmriRawOnsetOffsetS:     0.0,
 		fmriRawDcm2niixPath:     "",
 		fmriRawDcm2niixArgs:     "",
@@ -2837,6 +2877,46 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriGroupValidationExpanded = false
 		m.fmriGroupAdvancedExpanded = false
 
+	case types.PipelineFmriAnalysis:
+		m.modeOptions = []string{"first-level"}
+		m.modeDescriptions = []string{
+			"First-level GLM contrasts (per subject)",
+		}
+		m.steps = []types.WizardStep{
+			types.StepSelectSubjects,
+			types.StepAdvancedConfig,
+		}
+
+		// Defaults match fmri_pipeline/cli/commands/fmri_analysis.py
+		m.fmriAnalysisInputSourceIndex = 0 // fmriprep
+		m.fmriAnalysisFmriprepSpace = "T1w"
+		m.fmriAnalysisRequireFmriprep = true
+		m.fmriAnalysisRunsSpec = ""    // auto-detect
+		m.fmriAnalysisContrastType = 0 // t-test
+		m.fmriAnalysisCondAValue = ""
+		m.fmriAnalysisCondBValue = ""
+		m.fmriAnalysisConditions = nil
+		m.fmriAnalysisCondAIdx = 0
+		m.fmriAnalysisCondBIdx = 1
+		m.fmriAnalysisContrastName = "pain_vs_nonpain"
+		m.fmriAnalysisFormula = ""
+		m.fmriAnalysisHrfModel = 0   // spm
+		m.fmriAnalysisDriftModel = 1 // cosine
+		m.fmriAnalysisHighPassHz = 0.008
+		m.fmriAnalysisLowPassHz = 0.0
+		m.fmriAnalysisOutputType = 0 // z-score
+		m.fmriAnalysisOutputDir = ""
+		m.fmriAnalysisResampleToFS = false
+		m.fmriAnalysisFreesurferDir = ""
+		m.fmriAnalysisConfoundsStrategy = 0 // auto
+		m.fmriAnalysisWriteDesignMatrix = false
+
+		m.fmriAnalysisGroupInputExpanded = true
+		m.fmriAnalysisGroupContrastExpanded = true
+		m.fmriAnalysisGroupGLMExpanded = false
+		m.fmriAnalysisGroupConfoundsExpanded = false
+		m.fmriAnalysisGroupOutputExpanded = false
+
 	case types.PipelineMergePsychoPyData:
 		m.modeOptions = []string{"merge-psychopy"}
 		m.modeDescriptions = []string{"Merge PsychoPy TrialSummary into BIDS events.tsv"}
@@ -2975,6 +3055,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sourceLocFmriCondAValue = msg.Conditions[m.sourceLocFmriCondIdx1]
 			if len(msg.Conditions) > 1 && m.sourceLocFmriCondIdx2 < len(msg.Conditions) {
 				m.sourceLocFmriCondBValue = msg.Conditions[m.sourceLocFmriCondIdx2]
+			}
+
+			// Also populate fMRI analysis condition pickers (trial_type values)
+			m.fmriAnalysisConditions = msg.Conditions
+			if m.fmriAnalysisCondAIdx >= len(msg.Conditions) {
+				m.fmriAnalysisCondAIdx = 0
+			}
+			if m.fmriAnalysisCondBIdx >= len(msg.Conditions) {
+				m.fmriAnalysisCondBIdx = 0
+			}
+			if m.fmriAnalysisCondAValue == "" {
+				m.fmriAnalysisCondAValue = msg.Conditions[m.fmriAnalysisCondAIdx]
+			}
+			if m.fmriAnalysisCondBValue == "" && len(msg.Conditions) > 1 {
+				// Prefer a different default if possible.
+				idx := m.fmriAnalysisCondBIdx
+				if idx == m.fmriAnalysisCondAIdx {
+					idx = (idx + 1) % len(msg.Conditions)
+					m.fmriAnalysisCondBIdx = idx
+				}
+				m.fmriAnalysisCondBValue = msg.Conditions[idx]
 			}
 		}
 		return m, nil
@@ -3452,6 +3553,11 @@ func (m *Model) UpdateAdvancedOffset() {
 
 	case types.PipelineFmri:
 		options := m.getFmriPreprocessingOptions()
+		totalLines = len(options)
+		cursorLine = m.advancedCursor
+
+	case types.PipelineFmriAnalysis:
+		options := m.getFmriAnalysisOptions()
 		totalLines = len(options)
 		cursorLine = m.advancedCursor
 
@@ -5097,6 +5203,22 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriSkullStripTemplate
 	case textFieldFmriTaskId:
 		return m.fmriTaskId
+	case textFieldFmriAnalysisFmriprepSpace:
+		return m.fmriAnalysisFmriprepSpace
+	case textFieldFmriAnalysisRuns:
+		return m.fmriAnalysisRunsSpec
+	case textFieldFmriAnalysisCondAValue:
+		return m.fmriAnalysisCondAValue
+	case textFieldFmriAnalysisCondBValue:
+		return m.fmriAnalysisCondBValue
+	case textFieldFmriAnalysisContrastName:
+		return m.fmriAnalysisContrastName
+	case textFieldFmriAnalysisFormula:
+		return m.fmriAnalysisFormula
+	case textFieldFmriAnalysisOutputDir:
+		return m.fmriAnalysisOutputDir
+	case textFieldFmriAnalysisFreesurferDir:
+		return m.fmriAnalysisFreesurferDir
 	case textFieldRawMontage:
 		return m.rawMontage
 	case textFieldPrepMontage:
@@ -5667,6 +5789,22 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriSkullStripTemplate = strings.TrimSpace(value)
 	case textFieldFmriTaskId:
 		m.fmriTaskId = strings.TrimSpace(value)
+	case textFieldFmriAnalysisFmriprepSpace:
+		m.fmriAnalysisFmriprepSpace = strings.TrimSpace(value)
+	case textFieldFmriAnalysisRuns:
+		m.fmriAnalysisRunsSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriAnalysisCondAValue:
+		m.fmriAnalysisCondAValue = strings.TrimSpace(value)
+	case textFieldFmriAnalysisCondBValue:
+		m.fmriAnalysisCondBValue = strings.TrimSpace(value)
+	case textFieldFmriAnalysisContrastName:
+		m.fmriAnalysisContrastName = strings.TrimSpace(value)
+	case textFieldFmriAnalysisFormula:
+		m.fmriAnalysisFormula = strings.TrimSpace(value)
+	case textFieldFmriAnalysisOutputDir:
+		m.fmriAnalysisOutputDir = strings.TrimSpace(value)
+	case textFieldFmriAnalysisFreesurferDir:
+		m.fmriAnalysisFreesurferDir = strings.TrimSpace(value)
 	case textFieldRawMontage:
 		m.rawMontage = value
 	case textFieldPrepMontage:
@@ -6861,6 +6999,32 @@ const (
 	optFmriNoMsm
 	optFmriLevel
 	optFmriTaskId
+	// fMRI analysis (first-level GLM + contrasts) group headers
+	optFmriAnalysisGroupInput
+	optFmriAnalysisGroupContrast
+	optFmriAnalysisGroupGLM
+	optFmriAnalysisGroupConfounds
+	optFmriAnalysisGroupOutput
+	// fMRI analysis options
+	optFmriAnalysisInputSource
+	optFmriAnalysisFmriprepSpace
+	optFmriAnalysisRequireFmriprep
+	optFmriAnalysisRuns
+	optFmriAnalysisContrastType
+	optFmriAnalysisCondA
+	optFmriAnalysisCondB
+	optFmriAnalysisContrastName
+	optFmriAnalysisFormula
+	optFmriAnalysisHrfModel
+	optFmriAnalysisDriftModel
+	optFmriAnalysisHighPassHz
+	optFmriAnalysisLowPassHz
+	optFmriAnalysisConfoundsStrategy
+	optFmriAnalysisWriteDesignMatrix
+	optFmriAnalysisOutputType
+	optFmriAnalysisOutputDir
+	optFmriAnalysisResampleToFS
+	optFmriAnalysisFreesurferDir
 	// System/global settings
 	optSystemNJobs
 	optSystemStrictMode
@@ -7400,6 +7564,65 @@ func (m Model) getFmriPreprocessingOptions() []optionType {
 	options = append(options, optFmriGroupAdvanced)
 	if m.fmriGroupAdvancedExpanded {
 		options = append(options, optFmriExtraArgs)
+	}
+
+	return options
+}
+
+func (m Model) getFmriAnalysisOptions() []optionType {
+	options := []optionType{optUseDefaults}
+
+	options = append(options, optFmriAnalysisGroupInput)
+	if m.fmriAnalysisGroupInputExpanded {
+		options = append(options,
+			optFmriAnalysisInputSource,
+			optFmriAnalysisFmriprepSpace,
+			optFmriAnalysisRequireFmriprep,
+			optFmriAnalysisRuns,
+		)
+	}
+
+	options = append(options, optFmriAnalysisGroupContrast)
+	if m.fmriAnalysisGroupContrastExpanded {
+		options = append(options,
+			optFmriAnalysisContrastType,
+			optFmriAnalysisCondA,
+			optFmriAnalysisCondB,
+			optFmriAnalysisContrastName,
+		)
+		if m.fmriAnalysisContrastType == 1 {
+			options = append(options, optFmriAnalysisFormula)
+		}
+	}
+
+	options = append(options, optFmriAnalysisGroupGLM)
+	if m.fmriAnalysisGroupGLMExpanded {
+		options = append(options,
+			optFmriAnalysisHrfModel,
+			optFmriAnalysisDriftModel,
+			optFmriAnalysisHighPassHz,
+			optFmriAnalysisLowPassHz,
+		)
+	}
+
+	options = append(options, optFmriAnalysisGroupConfounds)
+	if m.fmriAnalysisGroupConfoundsExpanded {
+		options = append(options,
+			optFmriAnalysisConfoundsStrategy,
+			optFmriAnalysisWriteDesignMatrix,
+		)
+	}
+
+	options = append(options, optFmriAnalysisGroupOutput)
+	if m.fmriAnalysisGroupOutputExpanded {
+		options = append(options,
+			optFmriAnalysisOutputType,
+			optFmriAnalysisOutputDir,
+			optFmriAnalysisResampleToFS,
+		)
+		if m.fmriAnalysisResampleToFS {
+			options = append(options, optFmriAnalysisFreesurferDir)
+		}
 	}
 
 	return options
@@ -8316,6 +8539,8 @@ func (m Model) isCurrentlyEditing(opt optionType) bool {
 		options = m.getFmriRawToBidsOptions()
 	case types.PipelineFmri:
 		options = m.getFmriPreprocessingOptions()
+	case types.PipelineFmriAnalysis:
+		options = m.getFmriAnalysisOptions()
 	default:
 		return false
 	}

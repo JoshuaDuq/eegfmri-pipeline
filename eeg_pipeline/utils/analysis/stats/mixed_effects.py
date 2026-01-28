@@ -9,8 +9,6 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
-from eeg_pipeline.utils.analysis.stats.base import get_fdr_alpha
 from eeg_pipeline.utils.analysis.stats.mediation import analyze_mediation_for_features
 
 
@@ -272,54 +270,6 @@ def fit_mixed_effects_model(
     }
 
 
-def run_multilevel_correlation_analysis(
-    df: pd.DataFrame,
-    feature_cols: list[str],
-    behavior_col: str,
-    subject_col: str = "subject",
-    covariates: list[str] | None = None,
-    config: Any = None,
-) -> pd.DataFrame:
-    """Run multilevel models for multiple features."""
-    if behavior_col not in df.columns:
-        return pd.DataFrame()
-
-    valid_features = [f for f in feature_cols if f in df.columns]
-    if not valid_features:
-        return pd.DataFrame()
-
-    results = []
-    for feature in valid_features:
-        try:
-            result = fit_mixed_effects_model(
-                df,
-                feature,
-                behavior_col,
-                subject_col,
-                covariates=covariates,
-            )
-            result["feature"] = feature
-            result["behavior"] = behavior_col
-            results.append(result)
-        except (ValueError, KeyError):
-            continue
-
-    if not results:
-        return pd.DataFrame()
-
-    results_df = pd.DataFrame(results)
-
-    if "fixed_p" in results_df.columns:
-        valid_p = results_df["fixed_p"].dropna()
-        if len(valid_p) > 0:
-            q_vals = fdr_bh(valid_p.values)
-            results_df.loc[valid_p.index, "fixed_p_fdr"] = q_vals
-            alpha_threshold = get_fdr_alpha(config) if config is not None else 0.05
-            results_df.loc[valid_p.index, "significant_fdr"] = q_vals < alpha_threshold
-
-    return results_df
-
-
 def run_mediation_analysis(
     df: pd.DataFrame,
     x_col: str,
@@ -379,6 +329,5 @@ def run_mediation_analysis(
 __all__ = [
     "MixedEffectsResult",
     "fit_mixed_effects_model",
-    "run_multilevel_correlation_analysis",
     "run_mediation_analysis",
 ]
