@@ -20,11 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.infra.paths import deriv_features_path, _find_clean_events_path
-from eeg_pipeline.utils.analysis.stats.correlation import (
-    CorrelationRecord,
-    compute_correlation,
-)
+from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.utils.analysis.stats.correlation import CorrelationRecord
 from eeg_pipeline.utils.data.columns import pick_target_column
 
 

@@ -63,10 +63,9 @@ def build_feature_metadata(
                         ch = channels[int(idx)]
                         # Prefer first ROI match if overlaps occur.
                         channel_to_roi.setdefault(str(ch), str(roi_name))
-                meta["roi"] = meta.get("roi")
-                roi_from_channel = meta.get("channel").map(channel_to_roi) if "channel" in meta.columns else None
-                if roi_from_channel is not None:
-                    meta["roi"] = meta["roi"].fillna(roi_from_channel)
+                if "roi" not in meta.columns:
+                    meta["roi"] = np.nan
+                meta["roi"] = meta["roi"].fillna(meta["channel"].map(channel_to_roi))
 
     return meta
 

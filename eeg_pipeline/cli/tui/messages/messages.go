@@ -1,12 +1,6 @@
 package messages
 
-import (
-	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
-)
-
-const tickInterval = 100 * time.Millisecond
+import "time"
 
 // =========================================================================
 // Application State Messages
@@ -14,13 +8,6 @@ const tickInterval = 100 * time.Millisecond
 
 // TickMsg is sent periodically for animations and progress updates
 type TickMsg struct{}
-
-// Tick creates a command that sends TickMsg periodically
-func Tick() tea.Cmd {
-	return tea.Tick(tickInterval, func(t time.Time) tea.Msg {
-		return TickMsg{}
-	})
-}
 
 // =========================================================================
 // Execution Messages
@@ -108,15 +95,6 @@ type ColumnsDiscoveredMsg struct {
 type ROIsDiscoveredMsg struct {
 	ROIs  []string // Available ROI names from feature data
 	Error error    // Error if discovery failed
-}
-
-// MLFeatureSpaceDiscoveredMsg is sent when ML feature-space discovery completes.
-// It describes which NamingSchema values are available across scanned feature columns.
-type MLFeatureSpaceDiscoveredMsg struct {
-	Bands    []string
-	Segments []string
-	Scopes   []string
-	Error    error
 }
 
 // PlotterInfo describes a single plotting option exposed by the backend

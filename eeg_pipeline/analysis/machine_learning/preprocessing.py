@@ -7,7 +7,6 @@ training fold only (via ``fit``) and apply them to the corresponding test fold.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 import numpy as np
@@ -50,13 +49,6 @@ class VarianceThreshold(BaseEstimator, TransformerMixin):
 
     def get_feature_names_out(self, input_features=None):
         return self._vt.get_feature_names_out(input_features=input_features)
-
-
-@dataclass
-class FeatureNameState:
-    """Container for feature names as they pass through a pipeline."""
-
-    names: List[str]
 
 
 class ReplaceInfWithNaN(BaseEstimator, TransformerMixin):

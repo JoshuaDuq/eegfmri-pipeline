@@ -19,9 +19,7 @@ from eeg_pipeline.analysis.behavior.api import (
     compute_two_condition_time_cluster_test,
     compute_pain_sensitivity_index,
     compute_split_half_reliability,
-    compute_temporal_correlations_by_condition,
     compute_temporal_from_context,
-    compute_time_frequency_correlations,
     compute_time_frequency_from_context,
     fit_mixed_effects_model,
     run_cluster_test_from_context,
@@ -62,8 +60,6 @@ __all__ = [
     "compute_multigroup_condition_effects",
     "compute_time_frequency_from_context",
     "compute_temporal_from_context",
-    "compute_time_frequency_correlations",
-    "compute_temporal_correlations_by_condition",
     # Cluster helpers
     "compute_two_condition_time_cluster_test",
     "run_cluster_test_from_context",

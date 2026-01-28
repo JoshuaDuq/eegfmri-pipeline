@@ -30,7 +30,7 @@ import pandas as pd
 from scipy import stats
 from scipy.linalg import lstsq
 
-from .base import _safe_float, get_statistics_constants, get_config_value
+from .base import get_statistics_constants, get_config_value
 from .correlation import compute_correlation
 from .splines import build_temperature_rcs_design
 
@@ -203,7 +203,6 @@ def partial_corr_xy_given_Z(
     y: pd.Series,
     Z: pd.DataFrame,
     method: str,
-    config: Optional[Any] = None,
 ) -> Tuple[float, float, int]:
     """
     Partial correlation of x,y controlling for Z.
@@ -261,16 +260,12 @@ def compute_partial_corr(
     y: pd.Series,
     Z: Optional[pd.DataFrame],
     method: str,
-    *,
-    logger: Optional[logging.Logger] = None,
-    context: str = "",
-    config: Optional[Any] = None,
 ) -> Tuple[float, float, int]:
     """
     Compute partial correlation, handling edge cases.
-    
+
     If Z is None or empty, returns simple correlation.
-    
+
     Parameters
     ----------
     x, y : pd.Series
@@ -279,13 +274,7 @@ def compute_partial_corr(
         Covariates to control for. If None or empty, computes simple correlation.
     method : str
         Correlation method ('pearson' or 'spearman')
-    logger : Optional[logging.Logger]
-        Logger for warnings
-    context : str
-        Context string for logging
-    config : Optional[Any]
-        Configuration object
-        
+
     Returns
     -------
     Tuple[float, float, int]
@@ -298,7 +287,7 @@ def compute_partial_corr(
         r, p = compute_correlation(x.values[valid], y.values[valid], method)
         return r, p, int(np.sum(valid))
 
-    return partial_corr_xy_given_Z(x, y, Z, method, config)
+    return partial_corr_xy_given_Z(x, y, Z, method)
 
 
 def partial_residuals_xy_given_Z(
@@ -385,7 +374,6 @@ def compute_partial_correlation_with_covariates(
         aligned_data["y"],
         aligned_data[covariates_df.columns],
         method,
-        config,
     )
 
 

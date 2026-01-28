@@ -95,7 +95,3 @@ def compute_roi_pvalue(
         return None
     except (ValueError, TypeError, IndexError):
         return None
-
-
-
-

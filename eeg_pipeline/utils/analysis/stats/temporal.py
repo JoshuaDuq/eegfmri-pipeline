@@ -29,11 +29,9 @@ from eeg_pipeline.utils.analysis.tfr import (
 )
 from eeg_pipeline.utils.analysis.windowing import build_time_windows_fixed_size_clamped
 from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.data.feature_io import _load_features_and_targets
 from eeg_pipeline.utils.data.tfr_alignment import compute_aligned_data_length
-from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
-from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
+from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import write_tsv
 
 if TYPE_CHECKING:
@@ -775,50 +773,6 @@ def _run_tf_correlations_core(
     }
 
 
-def compute_time_frequency_correlations(
-    subject: str,
-    task: str,
-    deriv_root: Path,
-    config,
-    use_spearman: bool,
-    logger,
-) -> None:
-    """Load data from disk and run time-frequency correlations."""
-    epochs, events = load_epochs_for_analysis(
-        subject, task, align="strict", preload=True,
-        deriv_root=deriv_root, bids_root=config.bids_root,
-        config=config, logger=logger,
-    )
-    if events is None:
-        raise ValueError(f"Time-frequency correlations: events missing for sub-{subject}, task-{task}")
-    y = _get_temporal_targets_from_events(
-        events,
-        config=config,
-        logger=logger,
-        analysis_name="Time-frequency correlations",
-    )
-
-    stats_cfg = config.get("behavior_analysis.statistics", {})
-    partial_covars = stats_cfg.get("partial_covariates", [])
-    cov_df = None
-    if partial_covars and events is not None:
-        avail = [c for c in partial_covars if c in events.columns]
-        if avail:
-            cov_df = events[avail].apply(pd.to_numeric, errors="coerce")
-
-    return _run_tf_correlations_core(
-        subject,
-        epochs,
-        events,
-        y,
-        deriv_stats_path(deriv_root, subject) / "temporal_correlations" / "all",
-        config,
-        use_spearman,
-        cov_df,
-        logger,
-    )
-
-
 def _build_temporal_tsv_records(
     res: Dict[str, Any],
     condition: str,
@@ -1386,48 +1340,6 @@ def _run_temporal_by_condition_core(
         "records": all_tsv_records,
         "condition_results": condition_results,
     }
-
-
-def compute_temporal_correlations_by_condition(
-    subject: str,
-    task: str,
-    deriv_root: Path,
-    config,
-    use_spearman: bool,
-    logger,
-) -> None:
-    """Compute temporal correlations by condition by loading data from disk."""
-    logger.info("Computing temporal correlations by condition...")
-    epochs, events = load_epochs_for_analysis(
-        subject, task, align="strict", preload=True,
-        deriv_root=deriv_root, bids_root=config.bids_root,
-        config=config, logger=logger,
-    )
-    if events is None:
-        raise ValueError(f"Temporal correlations: events missing for sub-{subject}, task-{task}")
-    y = _get_temporal_targets_from_events(
-        events,
-        config=config,
-        logger=logger,
-        analysis_name="Temporal correlations",
-    )
-    stats_cfg = config.get("behavior_analysis.statistics", {})
-    partial_covars = stats_cfg.get("partial_covariates", [])
-    cov_df = None
-    if partial_covars and events is not None:
-        avail = [c for c in partial_covars if c in events.columns]
-        if avail:
-            cov_df = events[avail].apply(pd.to_numeric, errors="coerce")
-    return _run_temporal_by_condition_core(
-        epochs,
-        events,
-        y,
-        deriv_stats_path(deriv_root, subject) / "temporal_correlations" / "all",
-        config,
-        use_spearman,
-        cov_df,
-        logger,
-    )
 
 
 def compute_time_frequency_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:

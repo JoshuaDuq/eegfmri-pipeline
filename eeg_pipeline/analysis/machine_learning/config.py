@@ -15,7 +15,6 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
     """
     resolved_config = config if config is not None else load_config()
 
-    cv_config = resolved_config.get("machine_learning.cv", {})
     constant_config = resolved_config.get("machine_learning.constants", {})
     preprocessing_config = resolved_config.get("machine_learning.preprocessing", {})
     pca_config = preprocessing_config.get("pca", {}) if isinstance(preprocessing_config, dict) else {}
@@ -28,12 +27,8 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
     lr_config = model_config.get("logistic_regression", {})
 
     return {
-        # CV settings
-        "default_n_splits": cv_config.get("default_n_splits", 5),
-        "default_n_bins": cv_config.get("default_n_bins", 5),
         # Constants
         "variance_threshold": constant_config.get("variance_threshold", 0.0),
-        "min_variance_for_correlation": constant_config.get("min_variance_for_correlation", 1e-10),
         # Preprocessing
         "imputer_strategy": preprocessing_config.get("imputer_strategy", "median"),
         "power_transformer_method": preprocessing_config.get("power_transformer_method", "yeo-johnson"),

@@ -41,8 +41,6 @@ from eeg_pipeline.utils.analysis.stats.reliability import (
     compute_icc,
 )
 from eeg_pipeline.utils.analysis.stats.temporal import (
-    compute_time_frequency_correlations,
-    compute_temporal_correlations_by_condition,
     compute_time_frequency_from_context,
     compute_temporal_from_context,
 )
@@ -116,6 +114,4 @@ __all__ = [
     # Temporal
     "compute_time_frequency_from_context",
     "compute_temporal_from_context",
-    "compute_time_frequency_correlations",
-    "compute_temporal_correlations_by_condition",
 ]

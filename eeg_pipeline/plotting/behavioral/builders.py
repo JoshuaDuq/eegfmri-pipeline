@@ -229,9 +229,7 @@ def _compute_correlation_statistics(
         return annotated_stats
     
     if Z_covars is not None and not Z_covars.empty:
-        return _partial_corr_xy_given_Z(
-            x_clean, y_clean, Z_covars, method_code, config=config
-        )
+        return _partial_corr_xy_given_Z(x_clean, y_clean, Z_covars, method_code)
     
     mask = joint_valid_mask(x_clean, y_clean)
     n_valid = int(mask.sum())
