@@ -1041,27 +1041,26 @@ def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
     from fmri_pipeline.analysis.contrast_builder import discover_available_conditions
 
     task = resolve_task(args.task, config)
-    
-    # Get fMRI root from config
+
     fmri_root = config.get("paths.bids_fmri_root")
     if not fmri_root:
-        # Fallback to default location
-        fmri_root = config.get("paths.bids_root", "").replace("bids_output", "fMRI_data")
-    
+        bids = config.get("paths.bids_root", "") or ""
+        if bids:
+            fmri_root = str(Path(bids).parent / "fmri")
+        if not fmri_root:
+            fmri_root = bids.replace("bids_output", "fMRI_data") if bids else "."
+
     fmri_root = Path(fmri_root)
     if not fmri_root.is_absolute():
-        # Make relative to project root
         from eeg_pipeline.utils.config.loader import get_project_root
         fmri_root = get_project_root() / fmri_root
 
     subject = args.subject
-    if not subject:
-        # Auto-detect first available subject
-        if fmri_root.exists():
-            for sub_dir in sorted(fmri_root.glob("sub-*")):
-                if sub_dir.is_dir():
-                    subject = sub_dir.name.replace("sub-", "")
-                    break
+    if not subject and fmri_root.exists():
+        for sub_dir in sorted(fmri_root.glob("sub-*")):
+            if sub_dir.is_dir():
+                subject = sub_dir.name.replace("sub-", "")
+                break
 
     if not subject:
         result = {
@@ -1076,24 +1075,29 @@ def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
             print("Error: No subject specified and none found in fMRI directory")
         return
 
-    # Map task name (thermalactive -> pain for fMRI)
-    fmri_task = task.replace("thermal", "pain").replace("active", "")
-    if not fmri_task:
-        fmri_task = "pain"
+    # Try original task first (e.g. thermalactive); fall back to pain-style mapping.
+    task_candidates = [task] if task else []
+    mapped = (task or "").replace("thermal", "pain").replace("active", "")
+    if mapped and mapped not in task_candidates:
+        task_candidates.append(mapped)
+    if not task_candidates or (len(task_candidates) == 1 and not task_candidates[0]):
+        task_candidates = ["pain"]
 
+    conditions = []
+    used_task = task_candidates[0]
     try:
-        conditions = discover_available_conditions(fmri_root, subject, fmri_task)
+        for t in task_candidates:
+            conditions = discover_available_conditions(fmri_root, subject, t)
+            if conditions:
+                used_task = t
+                break
     except Exception as e:
         conditions = []
         error_msg = str(e)
     else:
         error_msg = None
 
-    result = {
-        "conditions": conditions,
-        "subject": subject,
-        "task": fmri_task,
-    }
+    result = {"conditions": conditions, "subject": subject, "task": used_task}
     if error_msg:
         result["error"] = error_msg
 
@@ -1101,12 +1105,12 @@ def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
         _print_json_output(result)
     else:
         if conditions:
-            print(f"Available fMRI conditions for sub-{subject}, task-{fmri_task}:")
+            print(f"Available fMRI conditions for sub-{subject}, task-{used_task}:")
             for cond in conditions:
                 print(f"  - {cond}")
             print(f"\nTotal: {len(conditions)} conditions")
         else:
-            print(f"No conditions found for sub-{subject}, task-{fmri_task}")
+            print(f"No conditions found for sub-{subject}, task-{used_task}")
             if error_msg:
                 print(f"Error: {error_msg}")
 
@@ -1284,16 +1288,26 @@ def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
 
     fmri_root = config.get("paths.bids_fmri_root")
     if not fmri_root:
-        fmri_root = config.get("paths.bids_root", "").replace("bids_output", "fMRI_data")
+        bids = config.get("paths.bids_root", "") or ""
+        if bids:
+            # Try bids_output/fmri when bids_root is e.g. .../bids_output/eeg
+            fmri_root = str(Path(bids).parent / "fmri")
+        if not fmri_root:
+            fmri_root = bids.replace("bids_output", "fMRI_data") if bids else "."
 
     fmri_root = Path(fmri_root)
     if not fmri_root.is_absolute():
         from eeg_pipeline.utils.config.loader import get_project_root
         fmri_root = get_project_root() / fmri_root
 
-    fmri_task = task.replace("thermal", "pain").replace("active", "")
-    if not fmri_task:
-        fmri_task = "pain"
+    # Try original task first (e.g. thermalactive); BIDS filenames use the actual task.
+    # Fall back to pain-style mapping for datasets that use "pain" in the task entity.
+    task_candidates = [task] if task else []
+    mapped = (task or "").replace("thermal", "pain").replace("active", "")
+    if mapped and mapped not in task_candidates:
+        task_candidates.append(mapped)
+    if not task_candidates or (len(task_candidates) == 1 and not task_candidates[0]):
+        task_candidates = ["pain"]
 
     subject = args.subject
     if not subject and fmri_root.exists():
@@ -1310,36 +1324,36 @@ def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
         subj_id = subject.replace("sub-", "")
         sub_label = f"sub-{subj_id}"
 
-    func_dir = fmri_root / sub_label / "func" if sub_label else None
-    candidates = []
-    if func_dir and func_dir.exists():
-        candidates = [
-            p
-            for p in sorted(func_dir.glob(f"{sub_label}_task-{fmri_task}_run-*_events.tsv"))
+    def glob_events(func_dir: Path, sub: str, t: str) -> list:
+        out = [
+            p for p in sorted(func_dir.glob(f"{sub}_task-{t}_run-*_events.tsv"))
             if not p.name.endswith("_bold_events.tsv")
         ]
-        if not candidates:
-            candidates = sorted(func_dir.glob(f"{sub_label}_task-{fmri_task}_run-*_bold_events.tsv"))
-        if not candidates:
-            candidates = sorted(func_dir.glob(f"{sub_label}_task-{fmri_task}_*events.tsv"))
+        if not out:
+            out = sorted(func_dir.glob(f"{sub}_task-{t}_run-*_bold_events.tsv"))
+        if not out:
+            out = sorted(func_dir.glob(f"{sub}_task-{t}_*events.tsv"))
+        return out
+
+    candidates = []
+    if sub_label:
+        func_dir = fmri_root / sub_label / "func"
+        if func_dir.exists():
+            for t in task_candidates:
+                candidates = glob_events(func_dir, sub_label, t)
+                if candidates:
+                    break
     if not candidates and fmri_root.exists():
-        # Fall back to scanning a few subjects if a specific subject was not found / provided.
         for sub_dir in sorted(fmri_root.glob("sub-*"))[:5]:
             func_dir2 = sub_dir / "func"
             if not func_dir2.exists():
                 continue
             sub2 = sub_dir.name
-            files = [
-                p
-                for p in sorted(func_dir2.glob(f"{sub2}_task-{fmri_task}_run-*_events.tsv"))
-                if not p.name.endswith("_bold_events.tsv")
-            ]
-            if not files:
-                files = sorted(func_dir2.glob(f"{sub2}_task-{fmri_task}_run-*_bold_events.tsv"))
-            if not files:
-                files = sorted(func_dir2.glob(f"{sub2}_task-{fmri_task}_*events.tsv"))
-            if files:
-                candidates = files
+            for t in task_candidates:
+                candidates = glob_events(func_dir2, sub2, t)
+                if candidates:
+                    break
+            if candidates:
                 break
 
     if candidates:

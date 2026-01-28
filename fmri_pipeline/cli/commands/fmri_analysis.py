@@ -251,14 +251,9 @@ def _resolve_subjects(args: argparse.Namespace, bids_root: Path, config: Any) ->
 
 
 def _map_task_to_fmri(task: str) -> str:
+    """Return task name for fMRI file matching (pass-through, no mapping)."""
     task = (task or "").strip()
-    if not task:
-        return "pain"
-    if "thermal" in task or "active" in task:
-        mapped = task.replace("thermal", "pain").replace("active", "")
-        mapped = mapped.strip("_-")
-        return mapped or "pain"
-    return task
+    return task if task else "thermalactive"
 
 
 def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: Any) -> None:

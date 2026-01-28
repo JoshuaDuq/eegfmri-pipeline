@@ -416,6 +416,7 @@ def _discover_fmriprep_preproc_bold(
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
 
     search_dirs = [
+        bids_derivatives / "preprocessed" / "fmri" / sub_label / "func",
         bids_derivatives / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
         bids_derivatives / "fmriprep" / sub_label / "func",
     ]

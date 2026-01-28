@@ -20,7 +20,7 @@ paths:
 fmri_preprocessing:
   engine: "docker"  # "docker" or "apptainer"
   fmriprep:
-    image: "nipreps/fmriprep:23.2.1"  # Docker image tag or apptainer URI/path
+    image: "nipreps/fmriprep:25.2.4"  # Docker image tag or apptainer URI/path
     output_dir: null  # BIDS derivatives root (null = <deriv_root>/preprocessed/fmri)
     work_dir: null  # Scratch/work directory (null = <deriv_root>/work/fmriprep)
     fs_license_file: "eeg_pipeline/licenses/license_freesurfer.txt"  # FreeSurfer license.txt (null = paths.freesurfer_license)

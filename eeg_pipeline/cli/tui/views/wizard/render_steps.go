@@ -1261,12 +1261,6 @@ func parseFloat(s string, defaultVal float64) float64 {
 	return val
 }
 
-func (m Model) renderPlotSelectionSplit() string {
-	// For wide screens, just use the same simple layout as narrow
-	// This keeps the interface consistent
-	return m.renderPlotSelection()
-}
-
 func (m Model) renderFeaturePlotterSelection() string {
 	var b strings.Builder
 	b.WriteString(styles.SectionTitleStyle.Render(" FEATURE PLOTS ") + "\n\n")
@@ -6087,7 +6081,15 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	b.WriteString(accent + titleStyle.Render(" ADVANCED CONFIGURATION") + "\n\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-	b.WriteString(infoStyle.Render("Configure first-level fMRI GLM settings and a single contrast.") + "\n\n")
+	if m.editingNumber {
+		b.WriteString(infoStyle.Render("Type a number, press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.editingText {
+		b.WriteString(infoStyle.Render("Type text, press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.expandedOption >= 0 {
+		b.WriteString(infoStyle.Render("Space to select item · ↑↓ to navigate · Esc to close list") + "\n\n")
+	} else {
+		b.WriteString(infoStyle.Render("Configure first-level fMRI GLM settings and a single contrast. Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+	}
 
 	if m.useDefaultAdvanced {
 		return m.renderDefaultConfigView("fMRI analysis")
@@ -6119,12 +6121,28 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	contrastTypeOptions := []string{"t-test", "custom"}
 	contrastTypeVal := contrastTypeOptions[m.fmriAnalysisContrastType%len(contrastTypeOptions)]
 
+	condAColumnVal := strings.TrimSpace(m.fmriAnalysisCondAColumn)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisCondAColumn {
+		condAColumnVal = m.textBuffer + "█"
+	}
+	if condAColumnVal == "" {
+		condAColumnVal = "(select column)"
+	}
+
 	condAVal := strings.TrimSpace(m.fmriAnalysisCondAValue)
 	if m.editingText && m.editingTextField == textFieldFmriAnalysisCondAValue {
 		condAVal = m.textBuffer + "█"
 	}
 	if condAVal == "" {
-		condAVal = "(set)"
+		condAVal = "(select value)"
+	}
+
+	condBColumnVal := strings.TrimSpace(m.fmriAnalysisCondBColumn)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisCondBColumn {
+		condBColumnVal = m.textBuffer + "█"
+	}
+	if condBColumnVal == "" {
+		condBColumnVal = "(select column)"
 	}
 
 	condBVal := strings.TrimSpace(m.fmriAnalysisCondBValue)
@@ -6204,8 +6222,14 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 
 	options := m.getFmriAnalysisOptions()
 
-	// Scrolling support
-	totalLines := len(options)
+	// Scrolling support: count option lines + expanded list lines
+	totalLines := 0
+	for _, opt := range options {
+		totalLines++
+		if m.shouldRenderExpandedListAfterOption(opt) {
+			totalLines += m.getExpandedListLength()
+		}
+	}
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
 		effectiveHeight = defaultTerminalHeight
@@ -6217,10 +6241,12 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more above", startLine)) + "\n")
 	}
 
+	lineIdx := 0
 	for i, opt := range options {
-		if i < startLine || i >= endLine {
-			continue
+		if lineIdx >= endLine {
+			break
 		}
+		inRange := lineIdx >= startLine
 
 		isFocused := i == m.advancedCursor
 		cursor := "  "
@@ -6325,19 +6351,39 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			label = "Type"
 			value = contrastTypeVal
 			hint = "Space to toggle"
-		case optFmriAnalysisCondA:
-			label = "Condition A"
-			value = condAVal
-			if len(m.fmriAnalysisConditions) > 0 {
-				hint = "Space to cycle"
+		case optFmriAnalysisCondAColumn:
+			label = "Cond A Column"
+			value = condAColumnVal
+			if len(m.fmriDiscoveredColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns", len(m.fmriDiscoveredColumns))
 			} else {
 				hint = "Space to edit"
 			}
-		case optFmriAnalysisCondB:
-			label = "Condition B"
+		case optFmriAnalysisCondAValue:
+			label = "Cond A Value"
+			value = condAVal
+			if m.fmriAnalysisCondAColumn == "" {
+				hint = "Select column first"
+			} else if vals := m.GetFmriDiscoveredColumnValues(m.fmriAnalysisCondAColumn); len(vals) > 0 {
+				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.fmriAnalysisCondAColumn)
+			} else {
+				hint = "Space to edit"
+			}
+		case optFmriAnalysisCondBColumn:
+			label = "Cond B Column"
+			value = condBColumnVal
+			if len(m.fmriDiscoveredColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns", len(m.fmriDiscoveredColumns))
+			} else {
+				hint = "Space to edit"
+			}
+		case optFmriAnalysisCondBValue:
+			label = "Cond B Value"
 			value = condBVal
-			if len(m.fmriAnalysisConditions) > 0 {
-				hint = "Space to cycle"
+			if m.fmriAnalysisCondBColumn == "" {
+				hint = "Select column first"
+			} else if vals := m.GetFmriDiscoveredColumnValues(m.fmriAnalysisCondBColumn); len(vals) > 0 {
+				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.fmriAnalysisCondBColumn)
 			} else {
 				hint = "Space to edit"
 			}
@@ -6409,7 +6455,27 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		if hint != "" {
 			line += "  " + hintStyle.Render(hint)
 		}
-		b.WriteString(line + "\n")
+		if inRange {
+			b.WriteString(line + "\n")
+		}
+		lineIdx++
+		if m.shouldRenderExpandedListAfterOption(opt) {
+			items := m.getExpandedListItems()
+			subIndent := "      "
+			for j, item := range items {
+				if lineIdx >= startLine && lineIdx < endLine {
+					isSubFocused := j == m.subCursor
+					isSelected := m.isExpandedItemSelected(j, item)
+					checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+					itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
+					if isSubFocused {
+						itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+					}
+					b.WriteString(subIndent + checkbox + " " + itemStyle.Render(item) + "\n")
+				}
+				lineIdx++
+			}
+		}
 	}
 
 	if showScrollIndicators && endLine < totalLines {

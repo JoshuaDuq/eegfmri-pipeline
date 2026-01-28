@@ -86,7 +86,7 @@ class FmriPreprocessingPipeline(PipelineBase):
                 )
 
             fmriprep_cfg = self.config.get("fmri_preprocessing.fmriprep", {}) or {}
-            image = fmriprep_cfg.get("image", "nipreps/fmriprep:23.2.1")
+            image = fmriprep_cfg.get("image", "nipreps/fmriprep:25.2.4")
 
             bids_dir = Path(str(fmri_root)).expanduser().resolve()
             if not bids_dir.exists():

@@ -605,10 +605,10 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriAnalysisRequireFmriprep"] = m.fmriAnalysisRequireFmriprep
 	cfg["fmriAnalysisRunsSpec"] = m.fmriAnalysisRunsSpec
 	cfg["fmriAnalysisContrastType"] = m.fmriAnalysisContrastType
+	cfg["fmriAnalysisCondAColumn"] = m.fmriAnalysisCondAColumn
 	cfg["fmriAnalysisCondAValue"] = m.fmriAnalysisCondAValue
+	cfg["fmriAnalysisCondBColumn"] = m.fmriAnalysisCondBColumn
 	cfg["fmriAnalysisCondBValue"] = m.fmriAnalysisCondBValue
-	cfg["fmriAnalysisCondAIdx"] = m.fmriAnalysisCondAIdx
-	cfg["fmriAnalysisCondBIdx"] = m.fmriAnalysisCondBIdx
 	cfg["fmriAnalysisContrastName"] = m.fmriAnalysisContrastName
 	cfg["fmriAnalysisFormula"] = m.fmriAnalysisFormula
 	cfg["fmriAnalysisHrfModel"] = m.fmriAnalysisHrfModel
@@ -1517,10 +1517,10 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fmriAnalysisRequireFmriprep = getBool("fmriAnalysisRequireFmriprep", m.fmriAnalysisRequireFmriprep)
 	m.fmriAnalysisRunsSpec = getString("fmriAnalysisRunsSpec", m.fmriAnalysisRunsSpec)
 	m.fmriAnalysisContrastType = getInt("fmriAnalysisContrastType", m.fmriAnalysisContrastType)
+	m.fmriAnalysisCondAColumn = getString("fmriAnalysisCondAColumn", "trial_type")
 	m.fmriAnalysisCondAValue = getString("fmriAnalysisCondAValue", m.fmriAnalysisCondAValue)
+	m.fmriAnalysisCondBColumn = getString("fmriAnalysisCondBColumn", "trial_type")
 	m.fmriAnalysisCondBValue = getString("fmriAnalysisCondBValue", m.fmriAnalysisCondBValue)
-	m.fmriAnalysisCondAIdx = getInt("fmriAnalysisCondAIdx", m.fmriAnalysisCondAIdx)
-	m.fmriAnalysisCondBIdx = getInt("fmriAnalysisCondBIdx", m.fmriAnalysisCondBIdx)
 	m.fmriAnalysisContrastName = getString("fmriAnalysisContrastName", m.fmriAnalysisContrastName)
 	m.fmriAnalysisFormula = getString("fmriAnalysisFormula", m.fmriAnalysisFormula)
 	m.fmriAnalysisHrfModel = getInt("fmriAnalysisHrfModel", m.fmriAnalysisHrfModel)

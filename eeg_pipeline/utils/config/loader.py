@@ -52,7 +52,7 @@ def _looks_like_path_string(value: str) -> bool:
     if len(value) >= 2 and value[1] == ":":
         return True
     if any(sep in value for sep in ("/", "\\")):
-        # Exclude Docker image names (e.g., nipreps/fmriprep:23.2.1)
+        # Exclude Docker image names (e.g., nipreps/fmriprep:25.2.4)
         # Docker images have a colon after the last slash (tag separator)
         if ":" in value:
             last_slash_idx = max(value.rfind("/"), value.rfind("\\"))
@@ -442,6 +442,11 @@ def ensure_config(config: Optional[Any] = None) -> Any:
 def _get_default_config_path() -> Path:
     config_dir = Path(__file__).parent
     return config_dir / "eeg_config.yaml"
+
+
+def get_project_root() -> Path:
+    """Return the project/repo root (parent of the eeg_pipeline package)."""
+    return Path(__file__).resolve().parents[3]
 
 
 def get_config_int(config: Any, key: str, default: int) -> int:

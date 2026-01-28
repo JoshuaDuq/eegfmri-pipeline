@@ -3288,6 +3288,11 @@ func (m *Model) toggleFmriAdvancedOption() {
 }
 
 func (m *Model) toggleFmriAnalysisAdvancedOption() {
+	if m.expandedOption >= 0 {
+		m.handleExpandedListToggle()
+		return
+	}
+
 	options := m.getFmriAnalysisOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
 		return
@@ -3328,21 +3333,29 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriAnalysisContrastType:
 		m.fmriAnalysisContrastType = (m.fmriAnalysisContrastType + 1) % 2
 		m.useDefaultAdvanced = false
-	case optFmriAnalysisCondA:
-		if len(m.fmriAnalysisConditions) > 0 {
-			m.fmriAnalysisCondAIdx = (m.fmriAnalysisCondAIdx + 1) % len(m.fmriAnalysisConditions)
-			m.fmriAnalysisCondAValue = m.fmriAnalysisConditions[m.fmriAnalysisCondAIdx]
-		} else {
-			m.startTextEdit(textFieldFmriAnalysisCondAValue)
-		}
+	case optFmriAnalysisCondAColumn:
+		m.expandedOption = expandedFmriAnalysisCondAColumn
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
-	case optFmriAnalysisCondB:
-		if len(m.fmriAnalysisConditions) > 0 {
-			m.fmriAnalysisCondBIdx = (m.fmriAnalysisCondBIdx + 1) % len(m.fmriAnalysisConditions)
-			m.fmriAnalysisCondBValue = m.fmriAnalysisConditions[m.fmriAnalysisCondBIdx]
-		} else {
-			m.startTextEdit(textFieldFmriAnalysisCondBValue)
+	case optFmriAnalysisCondAValue:
+		if m.fmriAnalysisCondAColumn == "" {
+			m.ShowToast("Select a column first", "warning")
+			return
 		}
+		m.expandedOption = expandedFmriAnalysisCondAValue
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisCondBColumn:
+		m.expandedOption = expandedFmriAnalysisCondBColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisCondBValue:
+		if m.fmriAnalysisCondBColumn == "" {
+			m.ShowToast("Select a column first", "warning")
+			return
+		}
+		m.expandedOption = expandedFmriAnalysisCondBValue
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optFmriAnalysisContrastName:
 		m.startTextEdit(textFieldFmriAnalysisContrastName)

@@ -64,7 +64,7 @@ func (m Model) View() string {
 	footerH := strings.Count(footer, "\n") + footerSpacingLines
 
 	mainH := max(containerH-containerPadV*2-containerBorder-headerH-footerH, minMainContentHeight)
-	mainContent := m.renderMainContent(w < narrowWidthThreshold, h < shortHeightThreshold)
+	mainContent := m.renderMainContent(h < shortHeightThreshold)
 
 	mainStyled := lipgloss.NewStyle().Width(innerW).Height(mainH).Render(mainContent)
 	innerView := header + "\n\n" + mainStyled + "\n" + footer
@@ -108,19 +108,19 @@ func (m Model) renderHelpOverlay() string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, m.helpOverlay.View())
 }
 
-func (m Model) renderMainContent(isNarrow, isShort bool) string {
+func (m Model) renderMainContent(isShort bool) string {
 	if m.ConfirmingExecute {
 		return m.renderConfirmation()
 	}
 
-	content := m.renderStepContent(isNarrow)
+	content := m.renderStepContent()
 	if len(m.validationErrors) > 0 && !isShort {
 		content += "\n" + m.renderValidationErrors()
 	}
 	return content
 }
 
-func (m Model) renderStepContent(isNarrow bool) string {
+func (m Model) renderStepContent() string {
 	switch m.CurrentStep {
 	case types.StepSelectMode:
 		return m.renderModeSelection()
@@ -129,10 +129,7 @@ func (m Model) renderStepContent(isNarrow bool) string {
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		return m.renderCategorySelection()
 	case types.StepSelectPlots:
-		if isNarrow {
-			return m.renderPlotSelection()
-		}
-		return m.renderPlotSelectionSplit()
+		return m.renderPlotSelection()
 	case types.StepSelectFeaturePlotters:
 		return m.renderFeaturePlotterSelection()
 	case types.StepPlotConfig:

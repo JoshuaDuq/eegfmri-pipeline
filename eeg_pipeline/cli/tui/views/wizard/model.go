@@ -537,7 +537,9 @@ const (
 	// fMRI analysis text fields
 	textFieldFmriAnalysisFmriprepSpace
 	textFieldFmriAnalysisRuns
+	textFieldFmriAnalysisCondAColumn
 	textFieldFmriAnalysisCondAValue
+	textFieldFmriAnalysisCondBColumn
 	textFieldFmriAnalysisCondBValue
 	textFieldFmriAnalysisContrastName
 	textFieldFmriAnalysisFormula
@@ -972,11 +974,10 @@ type Model struct {
 	fmriAnalysisRequireFmriprep   bool     // Fail if fMRIPrep outputs missing
 	fmriAnalysisRunsSpec          string   // Space-separated ints (e.g., "1 2 3") or empty for auto
 	fmriAnalysisContrastType      int      // 0: t-test, 1: custom
-	fmriAnalysisCondAValue        string   // Condition A trial_type
-	fmriAnalysisCondBValue        string   // Condition B trial_type
-	fmriAnalysisConditions        []string // Discovered trial_type values
-	fmriAnalysisCondAIdx          int
-	fmriAnalysisCondBIdx          int
+	fmriAnalysisCondAColumn       string   // Condition A: events column (e.g. trial_type, pain_binary_coded)
+	fmriAnalysisCondAValue        string   // Condition A: value in that column
+	fmriAnalysisCondBColumn       string   // Condition B: events column
+	fmriAnalysisCondBValue        string   // Condition B: value in that column
 	fmriAnalysisContrastName      string // e.g., "pain_vs_nonpain"
 	fmriAnalysisFormula           string // Custom formula
 	fmriAnalysisHrfModel          int    // 0: spm, 1: flobs, 2: fir
@@ -2827,7 +2828,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// Defaults mirror fmri_pipeline/utils/config/fmri_config.yaml (fmri_preprocessing.*)
 		m.fmriEngineIndex = 0 // docker
-		m.fmriFmriprepImage = "nipreps/fmriprep:23.2.1"
+		m.fmriFmriprepImage = "nipreps/fmriprep:25.2.4"
 		m.fmriFmriprepOutputDir = ""
 		m.fmriFmriprepWorkDir = ""
 		m.fmriFreesurferLicenseFile = ""
@@ -2893,11 +2894,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisRequireFmriprep = true
 		m.fmriAnalysisRunsSpec = ""    // auto-detect
 		m.fmriAnalysisContrastType = 0 // t-test
+		m.fmriAnalysisCondAColumn = "trial_type"
 		m.fmriAnalysisCondAValue = ""
+		m.fmriAnalysisCondBColumn = "trial_type"
 		m.fmriAnalysisCondBValue = ""
-		m.fmriAnalysisConditions = nil
-		m.fmriAnalysisCondAIdx = 0
-		m.fmriAnalysisCondBIdx = 1
 		m.fmriAnalysisContrastName = "pain_vs_nonpain"
 		m.fmriAnalysisFormula = ""
 		m.fmriAnalysisHrfModel = 0   // spm
@@ -3057,26 +3057,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sourceLocFmriCondBValue = msg.Conditions[m.sourceLocFmriCondIdx2]
 			}
 
-			// Also populate fMRI analysis condition pickers (trial_type values)
-			m.fmriAnalysisConditions = msg.Conditions
-			if m.fmriAnalysisCondAIdx >= len(msg.Conditions) {
-				m.fmriAnalysisCondAIdx = 0
-			}
-			if m.fmriAnalysisCondBIdx >= len(msg.Conditions) {
-				m.fmriAnalysisCondBIdx = 0
-			}
-			if m.fmriAnalysisCondAValue == "" {
-				m.fmriAnalysisCondAValue = msg.Conditions[m.fmriAnalysisCondAIdx]
-			}
-			if m.fmriAnalysisCondBValue == "" && len(msg.Conditions) > 1 {
-				// Prefer a different default if possible.
-				idx := m.fmriAnalysisCondBIdx
-				if idx == m.fmriAnalysisCondAIdx {
-					idx = (idx + 1) % len(msg.Conditions)
-					m.fmriAnalysisCondBIdx = idx
-				}
-				m.fmriAnalysisCondBValue = msg.Conditions[idx]
-			}
 		}
 		return m, nil
 
@@ -3698,13 +3678,6 @@ func (m *Model) UpdateFeaturePlotterOffset() {
 		lineIdx,
 		maxLines,
 	)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // calculateScrollOffset computes the scroll offset to keep the cursor visible.
@@ -4483,6 +4456,24 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn))
 	case expandedFmriCondBValue:
 		return len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn))
+	case expandedFmriAnalysisCondAColumn, expandedFmriAnalysisCondBColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedFmriAnalysisCondAValue:
+		n := len(m.GetFmriDiscoveredColumnValues(m.fmriAnalysisCondAColumn))
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedFmriAnalysisCondBValue:
+		n := len(m.GetFmriDiscoveredColumnValues(m.fmriAnalysisCondBColumn))
+		if n == 0 {
+			return 1
+		}
+		return n
 	case expandedItpcConditionValues:
 		if m.itpcConditionColumn == "" {
 			return 0
@@ -4587,6 +4578,23 @@ func (m Model) getExpandedListItems() []string {
 		return m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn)
 	case expandedFmriCondBValue:
 		return m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn)
+	case expandedFmriAnalysisCondAColumn, expandedFmriAnalysisCondBColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedFmriAnalysisCondAValue:
+		vals := m.GetFmriDiscoveredColumnValues(m.fmriAnalysisCondAColumn)
+		if len(vals) == 0 {
+			return []string{"(type manually)"}
+		}
+		return vals
+	case expandedFmriAnalysisCondBValue:
+		vals := m.GetFmriDiscoveredColumnValues(m.fmriAnalysisCondBColumn)
+		if len(vals) == 0 {
+			return []string{"(type manually)"}
+		}
+		return vals
 	case expandedItpcConditionValues:
 		if m.itpcConditionColumn == "" {
 			return nil
@@ -4901,6 +4909,48 @@ func (m *Model) handleExpandedListToggle() {
 		m.sourceLocFmriCondBValue = selectedItem
 		m.expandedOption = expandedNone
 		m.subCursor = 0
+	case expandedFmriAnalysisCondAColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisCondAColumn)
+		} else {
+			m.fmriAnalysisCondAColumn = selectedItem
+			m.fmriAnalysisCondAValue = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriAnalysisCondAValue:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisCondAValue)
+		} else {
+			m.fmriAnalysisCondAValue = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriAnalysisCondBColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisCondBColumn)
+		} else {
+			m.fmriAnalysisCondBColumn = selectedItem
+			m.fmriAnalysisCondBValue = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriAnalysisCondBValue:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisCondBValue)
+		} else {
+			m.fmriAnalysisCondBValue = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
 
 	case expandedItpcConditionValues:
 		m.toggleColumnValue(selectedItem, &m.itpcConditionValues)
@@ -4997,6 +5047,14 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optSourceLocFmriCondBColumn
 	case expandedFmriCondBValue:
 		return opt == optSourceLocFmriCondBValue
+	case expandedFmriAnalysisCondAColumn:
+		return opt == optFmriAnalysisCondAColumn
+	case expandedFmriAnalysisCondAValue:
+		return opt == optFmriAnalysisCondAValue
+	case expandedFmriAnalysisCondBColumn:
+		return opt == optFmriAnalysisCondBColumn
+	case expandedFmriAnalysisCondBValue:
+		return opt == optFmriAnalysisCondBValue
 	case expandedItpcConditionValues:
 		return opt == optItpcConditionValues
 	case expandedConnConditionValues:
@@ -5051,6 +5109,14 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.sourceLocFmriCondBColumn == item
 	case expandedFmriCondBValue:
 		return m.sourceLocFmriCondBValue == item
+	case expandedFmriAnalysisCondAColumn:
+		return m.fmriAnalysisCondAColumn == item
+	case expandedFmriAnalysisCondAValue:
+		return m.fmriAnalysisCondAValue == item
+	case expandedFmriAnalysisCondBColumn:
+		return m.fmriAnalysisCondBColumn == item
+	case expandedFmriAnalysisCondBValue:
+		return m.fmriAnalysisCondBValue == item
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
 		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues:
 		return m.isColumnValueSelected(item)
@@ -5207,8 +5273,12 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisFmriprepSpace
 	case textFieldFmriAnalysisRuns:
 		return m.fmriAnalysisRunsSpec
+	case textFieldFmriAnalysisCondAColumn:
+		return m.fmriAnalysisCondAColumn
 	case textFieldFmriAnalysisCondAValue:
 		return m.fmriAnalysisCondAValue
+	case textFieldFmriAnalysisCondBColumn:
+		return m.fmriAnalysisCondBColumn
 	case textFieldFmriAnalysisCondBValue:
 		return m.fmriAnalysisCondBValue
 	case textFieldFmriAnalysisContrastName:
@@ -5793,8 +5863,12 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisFmriprepSpace = strings.TrimSpace(value)
 	case textFieldFmriAnalysisRuns:
 		m.fmriAnalysisRunsSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriAnalysisCondAColumn:
+		m.fmriAnalysisCondAColumn = strings.TrimSpace(value)
 	case textFieldFmriAnalysisCondAValue:
 		m.fmriAnalysisCondAValue = strings.TrimSpace(value)
+	case textFieldFmriAnalysisCondBColumn:
+		m.fmriAnalysisCondBColumn = strings.TrimSpace(value)
 	case textFieldFmriAnalysisCondBValue:
 		m.fmriAnalysisCondBValue = strings.TrimSpace(value)
 	case textFieldFmriAnalysisContrastName:
@@ -7011,8 +7085,10 @@ const (
 	optFmriAnalysisRequireFmriprep
 	optFmriAnalysisRuns
 	optFmriAnalysisContrastType
-	optFmriAnalysisCondA
-	optFmriAnalysisCondB
+	optFmriAnalysisCondAColumn
+	optFmriAnalysisCondAValue
+	optFmriAnalysisCondBColumn
+	optFmriAnalysisCondBValue
 	optFmriAnalysisContrastName
 	optFmriAnalysisFormula
 	optFmriAnalysisHrfModel
@@ -7063,6 +7139,10 @@ const (
 	expandedConnConditionColumn        = 27
 	expandedConnConditionValues        = 28
 	expandedMLTargetColumn             = 29
+	expandedFmriAnalysisCondAColumn    = 30
+	expandedFmriAnalysisCondAValue     = 31
+	expandedFmriAnalysisCondBColumn    = 32
+	expandedFmriAnalysisCondBValue     = 33
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -7586,8 +7666,10 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 	if m.fmriAnalysisGroupContrastExpanded {
 		options = append(options,
 			optFmriAnalysisContrastType,
-			optFmriAnalysisCondA,
-			optFmriAnalysisCondB,
+			optFmriAnalysisCondAColumn,
+			optFmriAnalysisCondAValue,
+			optFmriAnalysisCondBColumn,
+			optFmriAnalysisCondBValue,
 			optFmriAnalysisContrastName,
 		)
 		if m.fmriAnalysisContrastType == 1 {

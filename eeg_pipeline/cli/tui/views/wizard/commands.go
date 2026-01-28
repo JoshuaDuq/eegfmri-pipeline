@@ -3011,7 +3011,9 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		ab.addIfNonEmpty("--formula", strings.TrimSpace(m.fmriAnalysisFormula))
 	} else {
 		ab.args = append(ab.args, "--contrast-type", "t-test")
+		ab.addIfNonEmpty("--cond-a-column", strings.TrimSpace(m.fmriAnalysisCondAColumn))
 		ab.addIfNonEmpty("--cond-a-value", strings.TrimSpace(m.fmriAnalysisCondAValue))
+		ab.addIfNonEmpty("--cond-b-column", strings.TrimSpace(m.fmriAnalysisCondBColumn))
 		ab.addIfNonEmpty("--cond-b-value", strings.TrimSpace(m.fmriAnalysisCondBValue))
 	}
 
