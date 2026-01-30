@@ -187,13 +187,7 @@ def run_regression_ml(
     feature_scopes: Optional[List[str]] = None,
     feature_stats: Optional[List[str]] = None,
 ) -> Path:
-    """Run LOSO regression on per-trial feature-table inputs.
-    
-    Parameters
-    ----------
-    model : str
-        Model family: 'elasticnet' (default), 'ridge', or 'rf' (RandomForest).
-    """
+    """Run LOSO regression on per-trial feature-table inputs."""
     if target is None:
         target = get_config_value(config, "machine_learning.targets.regression", None)
 
@@ -403,13 +397,7 @@ def run_within_subject_regression_ml(
     feature_scopes: Optional[List[str]] = None,
     feature_stats: Optional[List[str]] = None,
 ) -> Path:
-    """Run within-subject (block-aware) regression on per-trial feature-table inputs.
-    
-    Parameters
-    ----------
-    model : str
-        Model family: 'elasticnet' (default), 'ridge', or 'rf' (RandomForest).
-    """
+    """Run within-subject (block-aware) regression on per-trial feature-table inputs."""
     if target is None:
         target = get_config_value(config, "machine_learning.targets.regression", None)
 
@@ -1553,9 +1541,18 @@ def run_model_comparison_ml(
     
     # Define model pipelines (shared preprocessing + config)
     models = {
-        "elasticnet": {"pipe": create_elasticnet_pipeline(seed=rng_seed, config=config), "param_grid": build_elasticnet_param_grid(config)},
-        "ridge": {"pipe": create_ridge_pipeline(seed=rng_seed, config=config), "param_grid": build_ridge_param_grid(config)},
-        "rf": {"pipe": create_rf_pipeline(seed=rng_seed, config=config), "param_grid": build_rf_param_grid(config)},
+        "elasticnet": {
+            "pipe": create_elasticnet_pipeline(seed=rng_seed, config=config),
+            "param_grid": build_elasticnet_param_grid(config),
+        },
+        "ridge": {
+            "pipe": create_ridge_pipeline(seed=rng_seed, config=config),
+            "param_grid": build_ridge_param_grid(config),
+        },
+        "rf": {
+            "pipe": create_rf_pipeline(seed=rng_seed, config=config),
+            "param_grid": build_rf_param_grid(config),
+        },
     }
     
     # Shared outer CV folds

@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from fmri_pipeline.analysis.events_selection import normalize_trial_type_list
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,6 +57,11 @@ class ContrastBuilderConfig:
     # Confounds / QC (optional)
     confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|auto
     write_design_matrix: bool = False
+    smoothing_fwhm: Optional[float] = None
+    # Optional: restrict which trial_type rows are passed to nilearn for GLM.
+    # If None, all rows are modeled (default/current behavior).
+    # Recommended for multi-phase tasks: ["stimulation", "pain_question", "vas_rating"].
+    events_to_model: Optional[List[str]] = None
 
 
 def _safe_slug(value: str) -> str:
@@ -93,6 +100,8 @@ def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
         str(contrast_cfg.hrf_model),
         str(getattr(contrast_cfg, "confounds_strategy", "auto")),
         str(bool(getattr(contrast_cfg, "write_design_matrix", False))),
+        str(getattr(contrast_cfg, "smoothing_fwhm", None) or ""),
+        str(getattr(contrast_cfg, "events_to_model", None) or ""),
     ]
     key = "_".join(key_parts)
     return hashlib.md5(key.encode()).hexdigest()[:8]
@@ -159,6 +168,14 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     if confounds_strategy == "":
         confounds_strategy = "auto"
     write_design_matrix = bool(contrast_cfg.get("write_design_matrix", False))
+    try:
+        from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
+
+        smoothing_fwhm = normalize_smoothing_fwhm(contrast_cfg.get("smoothing_fwhm"))
+    except Exception:
+        smoothing_fwhm = None
+
+    events_to_model = normalize_trial_type_list(contrast_cfg.get("events_to_model"))
 
     return ContrastBuilderConfig(
         enabled=bool(contrast_cfg.get("enabled", False)),
@@ -188,6 +205,8 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         resample_to_freesurfer=bool(contrast_cfg.get("resample_to_freesurfer", True)),
         confounds_strategy=confounds_strategy,
         write_design_matrix=write_design_matrix,
+        smoothing_fwhm=smoothing_fwhm,
+        events_to_model=events_to_model,
     )
 
 
@@ -360,15 +379,18 @@ def discover_confounds(
     """
     Discover confounds file from fMRIPrep derivatives if available.
 
-    Searches multiple possible fMRIPrep output locations:
-      1. derivatives/fmriprep/sub-*/func/ (standard fMRIPrep layout)
-      2. derivatives/preprocessed/fmri/sub-*/func/ (fmri_preprocessing pipeline default)
+    Searches (aligned with _discover_fmriprep_preproc_bold):
+      - derivatives/preprocessed/fmri/sub-*/func/
+      - derivatives/preprocessed/fmri/fmriprep/sub-*/func/
+      - derivatives/fmriprep/sub-*/func/
+      - derivatives/sub-*/func/
 
     Returns path to confounds TSV or None if not found.
     """
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
 
     search_dirs = [
+        bids_derivatives / "preprocessed" / "fmri" / sub_label / "func",
         bids_derivatives / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
         bids_derivatives / "fmriprep" / sub_label / "func",
         bids_derivatives / sub_label / "func",
@@ -508,6 +530,16 @@ def _build_first_level_model(
         minimize_memory=False,
     )
 
+    # Optional spatial smoothing at first-level (mm FWHM).
+    try:
+        from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
+
+        smoothing_fwhm = normalize_smoothing_fwhm(getattr(cfg, "smoothing_fwhm", None))
+        if smoothing_fwhm is not None:
+            kwargs["smoothing_fwhm"] = smoothing_fwhm
+    except Exception:
+        pass
+
     # Some nilearn versions support low_pass; add only if present to avoid TypeError.
     sig = inspect.signature(FirstLevelModel)
     if "low_pass" in sig.parameters:
@@ -532,66 +564,12 @@ def _select_confound_columns(
       should also apply appropriate second-level modeling and multiple
       comparisons correction.
     """
-    strategy = str(getattr(cfg, "confounds_strategy", "auto") or "auto").strip().lower()
-    if strategy in {"", "default"}:
-        strategy = "auto"
+    from fmri_pipeline.analysis.confounds_selection import select_fmriprep_confounds_columns
 
-    if strategy in {"none", "no", "off"}:
-        return None
-
-    motion6 = ["trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]
-    motion_derivs = [f"{c}_derivative1" for c in motion6]
-    motion_power2 = [f"{c}_power2" for c in motion6]
-    motion_derivs_power2 = [f"{c}_derivative1_power2" for c in motion6]
-
-    base_cols: List[str] = []
-    if strategy in {"motion6"}:
-        base_cols = motion6
-    elif strategy in {"motion12", "motion+derivs"}:
-        base_cols = motion6 + motion_derivs
-    elif strategy in {"motion24"}:
-        base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2
-    elif strategy in {"motion24+wmcsf", "motion24+wm_csf"}:
-        base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2 + ["white_matter", "csf"]
-    elif strategy in {"motion24+wmcsf+fd", "motion24+wm_csf+fd"}:
-        base_cols = motion6 + motion_derivs + motion_power2 + motion_derivs_power2 + ["white_matter", "csf", "framewise_displacement"]
-    elif strategy in {"auto"}:
-        # Prefer a widely used "24p + WM/CSF + FD" if present, otherwise fall back.
-        if all(c in confounds_df.columns for c in motion6):
-            base_cols = motion6 + motion_derivs
-            if all(c in confounds_df.columns for c in motion_power2 + motion_derivs_power2):
-                base_cols += motion_power2 + motion_derivs_power2
-            if "white_matter" in confounds_df.columns:
-                base_cols.append("white_matter")
-            if "csf" in confounds_df.columns:
-                base_cols.append("csf")
-            if "framewise_displacement" in confounds_df.columns:
-                base_cols.append("framewise_displacement")
-        else:
-            # Non-fMRIPrep-like confounds file; keep previous conservative behavior.
-            base_cols = [
-                "csf",
-                "white_matter",
-                "framewise_displacement",
-            ]
-    else:
-        raise ValueError(
-            f"Unsupported confounds_strategy '{strategy}'. "
-            "Use one of: none, motion6, motion12, motion24, motion24+wmcsf, motion24+wmcsf+fd, auto."
-        )
-
-    # Add motion outlier regressors when present (standard fMRIPrep outputs).
-    outlier_cols = [
-        c
-        for c in confounds_df.columns
-        if c.startswith("motion_outlier")
-        or c.startswith("non_steady_state_outlier")
-        or c.startswith("outlier")
-    ]
-
-    cols = [c for c in base_cols if c in confounds_df.columns]
-    cols += [c for c in outlier_cols if c not in cols]
-
+    cols = select_fmriprep_confounds_columns(
+        list(confounds_df.columns),
+        strategy=str(getattr(cfg, "confounds_strategy", "auto") or "auto"),
+    )
     if not cols:
         return None
 
@@ -865,6 +843,15 @@ def fit_first_level_glm(
             f"Found: {list(events_df.columns)}, need: {required_cols}"
         )
 
+    if getattr(cfg, "events_to_model", None):
+        allow = set(str(x) for x in (cfg.events_to_model or []) if str(x).strip())
+        if allow:
+            events_df = events_df[events_df["trial_type"].astype(str).isin(allow)].copy()
+            if events_df.empty:
+                raise ValueError(
+                    f"After applying events_to_model={sorted(allow)}, no events remained in {events_path}."
+                )
+
     # Use strict=True for single-run: cannot skip the only run
     remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=True)
     events_df = remap_result.events_df[["onset", "duration", "trial_type"]].copy()
@@ -963,6 +950,19 @@ def fit_first_level_glm_multi_run(
                 f"Found: {list(events_df.columns)}, need: {required_cols}"
             )
 
+        if getattr(cfg, "events_to_model", None):
+            allow = set(str(x) for x in (cfg.events_to_model or []) if str(x).strip())
+            if allow:
+                events_df = events_df[events_df["trial_type"].astype(str).isin(allow)].copy()
+                if events_df.empty:
+                    skipped_runs.append((run_idx, f"events_to_model removed all events for {events_path.name}"))
+                    logger.warning(
+                        "Run %d excluded from GLM: events_to_model removed all events (%s)",
+                        run_idx,
+                        events_path.name,
+                    )
+                    continue
+
         # Remap conditions, allowing missing values (strict=False)
         remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=False)
 
@@ -1045,7 +1045,35 @@ def fit_first_level_glm_multi_run(
 
     flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
 
-    flm.fit(valid_bold_paths, events=valid_events_list, confounds=valid_confounds_list)
+    strategy = str(getattr(cfg, "confounds_strategy", "auto") or "auto").strip().lower()
+    if strategy in {"", "default"}:
+        strategy = "auto"
+
+    all_none = all(c is None for c in valid_confounds_list)
+    any_none = any(c is None for c in valid_confounds_list)
+
+    if all_none:
+        if strategy in {"none", "no", "off"}:
+            confounds_arg: Optional[List[pd.DataFrame]] = None
+        else:
+            raise ValueError(
+                "No confounds files found for any run. Under deriv-root, looked for "
+                "*desc-confounds_timeseries.tsv or *desc-confounds_regressors.tsv in: "
+                "preprocessed/fmri/sub-<id>/func, preprocessed/fmri/fmriprep/sub-<id>/func, "
+                "fmriprep/sub-<id>/func, sub-<id>/func. "
+                "Use --confounds-strategy none to run without confounds, or ensure fMRIPrep "
+                "confounds exist."
+            )
+    elif any_none:
+        raise ValueError(
+            "Confounds file missing for some runs but present for others. "
+            "Supply confounds for all runs, or use --confounds-strategy none when no "
+            "confounds are available."
+        )
+    else:
+        confounds_arg = valid_confounds_list
+
+    flm.fit(valid_bold_paths, events=valid_events_list, confounds=confounds_arg)
 
     return MultiRunGLMResult(
         flm=flm,
@@ -1124,7 +1152,25 @@ def compute_contrast_map(
 
     logger.info("Computing contrast: %s (output: %s)", contrast_def, output_type)
 
-    contrast_map = flm.compute_contrast(contrast_def, output_type=output_type)
+    # For multi-run models, nilearn warns if a single contrast definition is passed.
+    # Provide one contrast per run to avoid noisy warnings and be explicit.
+    contrast_arg: Any = contrast_def
+    try:
+        n_runs = len(getattr(flm, "design_matrices_", []) or [])
+        if n_runs > 1 and not isinstance(contrast_def, (list, tuple, dict)):
+            contrast_arg = [contrast_def] * n_runs
+    except Exception:
+        contrast_arg = contrast_def
+
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"One contrast given, assuming it for all.*",
+            category=UserWarning,
+        )
+        contrast_map = flm.compute_contrast(contrast_arg, output_type=output_type)
 
     return contrast_map, str(contrast_def), str(output_type)
 
@@ -1143,6 +1189,26 @@ def build_contrast_from_runs(
     *,
     output_dir: Optional[Path] = None,
 ) -> Tuple["Nifti1Image", Dict[str, Any]]:
+    contrast_map, meta, _glm_result, _contrast_def, _output_type = build_contrast_from_runs_detailed(
+        bids_fmri_root=bids_fmri_root,
+        bids_derivatives=bids_derivatives,
+        subject=subject,
+        task=task,
+        cfg=cfg,
+        output_dir=output_dir,
+    )
+    return contrast_map, meta
+
+
+def build_contrast_from_runs_detailed(
+    bids_fmri_root: Path,
+    bids_derivatives: Path,
+    subject: str,
+    task: str,
+    cfg: ContrastBuilderConfig,
+    *,
+    output_dir: Optional[Path] = None,
+) -> Tuple["Nifti1Image", Dict[str, Any], "MultiRunGLMResult", str, str]:
     """
     Build contrast map from multiple runs using a single multi-run GLM.
 
@@ -1237,7 +1303,7 @@ def build_contrast_from_runs(
         "output_type": output_type,
     }
     meta.update(qc_meta)
-    return contrast_map, meta
+    return contrast_map, meta, glm_result, str(contrast_def), str(output_type)
 
 
 ###################################################################

@@ -63,7 +63,7 @@ var pipelineDescriptions = [pipelineCount]string{
 	PipelineMergePsychoPyData: "Merge PsychoPy data into BIDS events files",
 	PipelineRawToBIDS:         "Convert raw BrainVision data to BIDS",
 	PipelineFmriRawToBIDS:     "Convert raw fMRI DICOM series to BIDS",
-	PipelineFmriAnalysis:      "First-level GLM + contrasts per subject",
+	PipelineFmriAnalysis:      "First-level contrasts + trial-wise pain signatures",
 }
 
 // String returns the display name for the pipeline

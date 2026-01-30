@@ -543,8 +543,11 @@ const (
 	textFieldFmriAnalysisCondBValue
 	textFieldFmriAnalysisContrastName
 	textFieldFmriAnalysisFormula
+	textFieldFmriAnalysisEventsToModel
 	textFieldFmriAnalysisOutputDir
 	textFieldFmriAnalysisFreesurferDir
+	textFieldFmriAnalysisSignatureDir
+	textFieldFmriAnalysisSignatureRoiNames
 	textFieldRawMontage
 	textFieldPrepMontage
 	textFieldPrepChTypes
@@ -661,6 +664,7 @@ const (
 	textFieldPlotAsymmetryStat
 	// Machine Learning advanced config text fields
 	textFieldMLTarget
+	textFieldMLFmriSigContrastName
 	textFieldMLFeatureFamilies
 	textFieldMLFeatureBands
 	textFieldMLFeatureSegments
@@ -969,23 +973,25 @@ type Model struct {
 	fmriGroupAdvancedExpanded    bool
 
 	// fMRI analysis (first-level GLM + contrasts) configuration
-	fmriAnalysisInputSourceIndex  int      // 0: fmriprep, 1: bids_raw
-	fmriAnalysisFmriprepSpace     string   // e.g., "T1w"
-	fmriAnalysisRequireFmriprep   bool     // Fail if fMRIPrep outputs missing
-	fmriAnalysisRunsSpec          string   // Space-separated ints (e.g., "1 2 3") or empty for auto
-	fmriAnalysisContrastType      int      // 0: t-test, 1: custom
-	fmriAnalysisCondAColumn       string   // Condition A: events column (e.g. trial_type, pain_binary_coded)
-	fmriAnalysisCondAValue        string   // Condition A: value in that column
-	fmriAnalysisCondBColumn       string   // Condition B: events column
-	fmriAnalysisCondBValue        string   // Condition B: value in that column
+	fmriAnalysisInputSourceIndex  int    // 0: fmriprep, 1: bids_raw
+	fmriAnalysisFmriprepSpace     string // e.g., "T1w"
+	fmriAnalysisRequireFmriprep   bool   // Fail if fMRIPrep outputs missing
+	fmriAnalysisRunsSpec          string // Space-separated ints (e.g., "1 2 3") or empty for auto
+	fmriAnalysisContrastType      int    // 0: t-test, 1: custom
+	fmriAnalysisCondAColumn       string // Condition A: events column (e.g. trial_type, pain_binary_coded)
+	fmriAnalysisCondAValue        string // Condition A: value in that column
+	fmriAnalysisCondBColumn       string // Condition B: events column
+	fmriAnalysisCondBValue        string // Condition B: value in that column
 	fmriAnalysisContrastName      string // e.g., "pain_vs_nonpain"
 	fmriAnalysisFormula           string // Custom formula
+	fmriAnalysisEventsToModel     string // Optional: comma-separated list of trial_type values to include (first-level only)
 	fmriAnalysisHrfModel          int    // 0: spm, 1: flobs, 2: fir
 	fmriAnalysisDriftModel        int    // 0: none, 1: cosine, 2: polynomial
 	fmriAnalysisHighPassHz        float64
 	fmriAnalysisLowPassHz         float64
-	fmriAnalysisOutputType        int    // 0: z-score, 1: t-stat, 2: cope, 3: beta
-	fmriAnalysisOutputDir         string // Optional output directory override
+	fmriAnalysisSmoothingFwhm     float64 // mm; 0 disables
+	fmriAnalysisOutputType        int     // 0: z-score, 1: t-stat, 2: cope, 3: beta
+	fmriAnalysisOutputDir         string  // Optional output directory override
 	fmriAnalysisResampleToFS      bool
 	fmriAnalysisFreesurferDir     string // Optional FreeSurfer SUBJECTS_DIR override
 	fmriAnalysisConfoundsStrategy int    // 0..N (see render/command builder options)
@@ -997,6 +1003,48 @@ type Model struct {
 	fmriAnalysisGroupGLMExpanded       bool
 	fmriAnalysisGroupConfoundsExpanded bool
 	fmriAnalysisGroupOutputExpanded    bool
+	fmriAnalysisGroupPlottingExpanded  bool
+
+	// fMRI analysis plotting/report configuration
+	fmriAnalysisPlotsEnabled             bool
+	fmriAnalysisPlotHTML                 bool
+	fmriAnalysisPlotSpaceIndex           int     // 0: both, 1: native, 2: mni
+	fmriAnalysisPlotThresholdModeIndex   int     // 0: z, 1: fdr, 2: none
+	fmriAnalysisPlotZThreshold           float64 // default: 2.3
+	fmriAnalysisPlotFdrQ                 float64 // default: 0.05
+	fmriAnalysisPlotClusterMinVoxels     int     // default: 0
+	fmriAnalysisPlotVmaxModeIndex        int     // 0: per-space robust, 1: shared robust, 2: manual
+	fmriAnalysisPlotVmaxManual           float64 // default used when manual
+	fmriAnalysisPlotIncludeUnthresholded bool
+	fmriAnalysisPlotFormatPNG            bool
+	fmriAnalysisPlotFormatSVG            bool
+	fmriAnalysisPlotTypeSlices           bool
+	fmriAnalysisPlotTypeGlass            bool
+	fmriAnalysisPlotTypeHist             bool
+	fmriAnalysisPlotTypeClusters         bool
+	fmriAnalysisPlotEffectSize           bool
+	fmriAnalysisPlotStandardError        bool
+	fmriAnalysisPlotMotionQC             bool
+	fmriAnalysisPlotCarpetQC             bool
+	fmriAnalysisPlotTSNRQC               bool
+	fmriAnalysisPlotDesignQC             bool
+	fmriAnalysisPlotEmbedImages          bool
+	fmriAnalysisPlotSignatures           bool
+	fmriAnalysisSignatureDir             string // optional override; empty => auto
+
+	// fMRI trial-wise signatures configuration (beta-series, LSS)
+	fmriTrialSigGroupExpanded           bool
+	fmriTrialSigIncludeOtherEvents      bool
+	fmriTrialSigMaxTrialsPerRun         int // 0 = no cap
+	fmriTrialSigFixedEffectsWeighting   int // 0: variance, 1: mean
+	fmriTrialSigWriteTrialBetas         bool
+	fmriTrialSigWriteTrialVariances     bool
+	fmriTrialSigWriteConditionBetas     bool
+	fmriTrialSigSignatureNPS            bool
+	fmriTrialSigSignatureSIIPS1         bool
+	fmriTrialSigLssOtherRegressorsIndex int // 0: per-condition, 1: all
+	// ROI-restricted signature expression (atlas/labels from config; only ROI names configurable in TUI)
+	fmriTrialSigRoiNames string // space-separated ROI names, or "all"; empty = no ROI readouts
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
 	plotGroupDefaultsExpanded    bool
@@ -1872,6 +1920,15 @@ type Model struct {
 	mlScope     MLCVScope
 	mlTarget    string
 
+	// ML: fMRI signature target settings (used when mlTarget == "fmri_signature")
+	mlFmriSigGroupExpanded      bool
+	mlFmriSigMethodIndex        int    // 0: beta-series, 1: lss
+	mlFmriSigContrastName       string // e.g., pain_vs_nonpain
+	mlFmriSigSignatureIndex     int    // 0: NPS, 1: SIIPS1
+	mlFmriSigMetricIndex        int    // 0: dot, 1: cosine, 2: pearson_r
+	mlFmriSigNormalizationIndex int    // 0: none, 1..: zscore/robust options
+	mlFmriSigRoundDecimals      int    // default: 3
+
 	mlBinaryThresholdEnabled bool
 	mlBinaryThreshold        float64
 
@@ -2520,26 +2577,33 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		selectedValueCursors:           make(map[string]int),
 		availableWindowsByFeature:      make(map[string][]string),
 		// Machine Learning defaults
-		mlNPerm:                  0,
-		innerSplits:              3,
-		outerJobs:                1,
-		mlScope:                  MLCVScopeGroup,
-		mlTarget:                 "",
-		mlBinaryThresholdEnabled: false,
-		mlBinaryThreshold:        0.0,
-		mlFeatureFamiliesSpec:    "",
-		mlFeatureBandsSpec:       "",
-		mlFeatureSegmentsSpec:    "",
-		mlFeatureScopesSpec:      "",
-		mlFeatureStatsSpec:       "",
-		mlFeatureHarmonization:   MLFeatureHarmonizationDefault,
-		mlCovariatesSpec:         "",
-		mlBaselinePredictorsSpec: "",
-		mlRegressionModel:        MLRegressionElasticNet,
-		mlClassificationModel:    MLClassificationDefault,
-		mlRequireTrialMlSafe:     false,
-		mlUncertaintyAlpha:       0.1,
-		mlPermNRepeats:           10,
+		mlNPerm:                     0,
+		innerSplits:                 3,
+		outerJobs:                   1,
+		mlScope:                     MLCVScopeGroup,
+		mlTarget:                    "",
+		mlFmriSigGroupExpanded:      true,
+		mlFmriSigMethodIndex:        0,
+		mlFmriSigContrastName:       "pain_vs_nonpain",
+		mlFmriSigSignatureIndex:     0,
+		mlFmriSigMetricIndex:        0,
+		mlFmriSigNormalizationIndex: 0,
+		mlFmriSigRoundDecimals:      3,
+		mlBinaryThresholdEnabled:    false,
+		mlBinaryThreshold:           0.0,
+		mlFeatureFamiliesSpec:       "",
+		mlFeatureBandsSpec:          "",
+		mlFeatureSegmentsSpec:       "",
+		mlFeatureScopesSpec:         "",
+		mlFeatureStatsSpec:          "",
+		mlFeatureHarmonization:      MLFeatureHarmonizationDefault,
+		mlCovariatesSpec:            "",
+		mlBaselinePredictorsSpec:    "",
+		mlRegressionModel:           MLRegressionElasticNet,
+		mlClassificationModel:       MLClassificationDefault,
+		mlRequireTrialMlSafe:        false,
+		mlUncertaintyAlpha:          0.1,
+		mlPermNRepeats:              10,
 		// Hyperparameter defaults mirror eeg_pipeline/utils/config/eeg_config.yaml
 		elasticNetAlphaGrid:   "0.001,0.01,0.1,1,10",
 		elasticNetL1RatioGrid: "0.2,0.5,0.8",
@@ -2879,11 +2943,14 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriGroupAdvancedExpanded = false
 
 	case types.PipelineFmriAnalysis:
-		m.modeOptions = []string{"first-level"}
+		m.modeOptions = []string{"first-level", "beta-series", "lss"}
 		m.modeDescriptions = []string{
 			"First-level GLM contrasts (per subject)",
+			"Trial-wise betas (one GLM per run) + NPS/SIIPS1 readouts",
+			"Least Squares Separate (one GLM per trial) + NPS/SIIPS1 readouts",
 		}
 		m.steps = []types.WizardStep{
+			types.StepSelectMode,
 			types.StepSelectSubjects,
 			types.StepAdvancedConfig,
 		}
@@ -2900,10 +2967,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisCondBValue = ""
 		m.fmriAnalysisContrastName = "pain_vs_nonpain"
 		m.fmriAnalysisFormula = ""
+		m.fmriAnalysisEventsToModel = ""
 		m.fmriAnalysisHrfModel = 0   // spm
 		m.fmriAnalysisDriftModel = 1 // cosine
 		m.fmriAnalysisHighPassHz = 0.008
 		m.fmriAnalysisLowPassHz = 0.0
+		m.fmriAnalysisSmoothingFwhm = 5.0
 		m.fmriAnalysisOutputType = 0 // z-score
 		m.fmriAnalysisOutputDir = ""
 		m.fmriAnalysisResampleToFS = false
@@ -2916,6 +2985,47 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisGroupGLMExpanded = false
 		m.fmriAnalysisGroupConfoundsExpanded = false
 		m.fmriAnalysisGroupOutputExpanded = false
+		m.fmriAnalysisGroupPlottingExpanded = true
+
+		// Plotting/report defaults (TUI convenience defaults; CLI defaults are "off")
+		m.fmriAnalysisPlotsEnabled = true
+		m.fmriAnalysisPlotHTML = true
+		m.fmriAnalysisPlotSpaceIndex = 0         // both
+		m.fmriAnalysisPlotThresholdModeIndex = 0 // z
+		m.fmriAnalysisPlotZThreshold = 2.3
+		m.fmriAnalysisPlotFdrQ = 0.05
+		m.fmriAnalysisPlotClusterMinVoxels = 50
+		m.fmriAnalysisPlotVmaxModeIndex = 0 // per-space robust
+		m.fmriAnalysisPlotVmaxManual = 5.0
+		m.fmriAnalysisPlotIncludeUnthresholded = true
+		m.fmriAnalysisPlotFormatPNG = true
+		m.fmriAnalysisPlotFormatSVG = true
+		m.fmriAnalysisPlotTypeSlices = true
+		m.fmriAnalysisPlotTypeGlass = true
+		m.fmriAnalysisPlotTypeHist = true
+		m.fmriAnalysisPlotTypeClusters = true
+		m.fmriAnalysisPlotEffectSize = true
+		m.fmriAnalysisPlotStandardError = true
+		m.fmriAnalysisPlotMotionQC = true
+		m.fmriAnalysisPlotCarpetQC = true
+		m.fmriAnalysisPlotTSNRQC = true
+		m.fmriAnalysisPlotDesignQC = true
+		m.fmriAnalysisPlotEmbedImages = true
+		m.fmriAnalysisPlotSignatures = true
+		m.fmriAnalysisSignatureDir = ""
+
+		// Trial-wise signature defaults (used by beta-series / lss modes)
+		m.fmriTrialSigGroupExpanded = true
+		m.fmriTrialSigIncludeOtherEvents = true
+		m.fmriTrialSigMaxTrialsPerRun = 0
+		m.fmriTrialSigFixedEffectsWeighting = 0 // variance
+		m.fmriTrialSigWriteTrialBetas = false
+		m.fmriTrialSigWriteTrialVariances = false
+		m.fmriTrialSigWriteConditionBetas = true
+		m.fmriTrialSigSignatureNPS = true
+		m.fmriTrialSigSignatureSIIPS1 = true
+		m.fmriTrialSigLssOtherRegressorsIndex = 0 // per-condition
+		m.fmriTrialSigRoiNames = ""
 
 	case types.PipelineMergePsychoPyData:
 		m.modeOptions = []string{"merge-psychopy"}
@@ -3016,6 +3126,29 @@ func (m Model) tick() tea.Cmd {
 	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
+}
+
+// IsEditing reports whether the wizard is currently in any interactive
+// editing mode. When true, global keybindings like quitting should be
+// suppressed so that edit-specific handlers can consume the keys.
+func (m Model) IsEditing() bool {
+	if m.editingText || m.editingNumber {
+		return true
+	}
+
+	if m.editingBandIdx >= 0 {
+		return true
+	}
+
+	if m.editingROIIdx >= 0 {
+		return true
+	}
+
+	if m.editingRangeIdx != noRangeEditing {
+		return true
+	}
+
+	return false
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -5285,10 +5418,16 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisContrastName
 	case textFieldFmriAnalysisFormula:
 		return m.fmriAnalysisFormula
+	case textFieldFmriAnalysisEventsToModel:
+		return m.fmriAnalysisEventsToModel
 	case textFieldFmriAnalysisOutputDir:
 		return m.fmriAnalysisOutputDir
 	case textFieldFmriAnalysisFreesurferDir:
 		return m.fmriAnalysisFreesurferDir
+	case textFieldFmriAnalysisSignatureDir:
+		return m.fmriAnalysisSignatureDir
+	case textFieldFmriAnalysisSignatureRoiNames:
+		return m.fmriTrialSigRoiNames
 	case textFieldRawMontage:
 		return m.rawMontage
 	case textFieldPrepMontage:
@@ -5496,6 +5635,8 @@ func (m Model) getTextFieldValue(field textField) string {
 	// Machine Learning advanced config text fields
 	case textFieldMLTarget:
 		return m.mlTarget
+	case textFieldMLFmriSigContrastName:
+		return m.mlFmriSigContrastName
 	case textFieldMLFeatureFamilies:
 		return m.mlFeatureFamiliesSpec
 	case textFieldMLFeatureBands:
@@ -5875,10 +6016,16 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisContrastName = strings.TrimSpace(value)
 	case textFieldFmriAnalysisFormula:
 		m.fmriAnalysisFormula = strings.TrimSpace(value)
+	case textFieldFmriAnalysisEventsToModel:
+		m.fmriAnalysisEventsToModel = strings.TrimSpace(value)
 	case textFieldFmriAnalysisOutputDir:
 		m.fmriAnalysisOutputDir = strings.TrimSpace(value)
 	case textFieldFmriAnalysisFreesurferDir:
 		m.fmriAnalysisFreesurferDir = strings.TrimSpace(value)
+	case textFieldFmriAnalysisSignatureDir:
+		m.fmriAnalysisSignatureDir = strings.TrimSpace(value)
+	case textFieldFmriAnalysisSignatureRoiNames:
+		m.fmriTrialSigRoiNames = strings.TrimSpace(value)
 	case textFieldRawMontage:
 		m.rawMontage = value
 	case textFieldPrepMontage:
@@ -6097,6 +6244,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 	// Machine Learning advanced config text fields
 	case textFieldMLTarget:
 		m.mlTarget = strings.TrimSpace(value)
+	case textFieldMLFmriSigContrastName:
+		m.mlFmriSigContrastName = strings.TrimSpace(value)
 	case textFieldMLFeatureFamilies:
 		m.mlFeatureFamiliesSpec = strings.TrimSpace(value)
 	case textFieldMLFeatureBands:
@@ -6709,6 +6858,13 @@ const (
 	optMLInnerSplits
 	optMLOuterJobs
 	optMLTarget
+	optMLFmriSigGroup
+	optMLFmriSigMethod
+	optMLFmriSigContrastName
+	optMLFmriSigSignature
+	optMLFmriSigMetric
+	optMLFmriSigNormalization
+	optMLFmriSigRoundDecimals
 	optMLRegressionModel
 	optMLClassificationModel
 	optMLBinaryThresholdEnabled
@@ -7079,6 +7235,7 @@ const (
 	optFmriAnalysisGroupGLM
 	optFmriAnalysisGroupConfounds
 	optFmriAnalysisGroupOutput
+	optFmriAnalysisGroupPlotting
 	// fMRI analysis options
 	optFmriAnalysisInputSource
 	optFmriAnalysisFmriprepSpace
@@ -7095,12 +7252,52 @@ const (
 	optFmriAnalysisDriftModel
 	optFmriAnalysisHighPassHz
 	optFmriAnalysisLowPassHz
+	optFmriAnalysisSmoothingFwhm
+	optFmriAnalysisEventsToModel
 	optFmriAnalysisConfoundsStrategy
 	optFmriAnalysisWriteDesignMatrix
 	optFmriAnalysisOutputType
 	optFmriAnalysisOutputDir
 	optFmriAnalysisResampleToFS
 	optFmriAnalysisFreesurferDir
+	// fMRI analysis plotting/report options
+	optFmriAnalysisPlotsEnabled
+	optFmriAnalysisPlotHTML
+	optFmriAnalysisPlotSpace
+	optFmriAnalysisPlotThresholdMode
+	optFmriAnalysisPlotZThreshold
+	optFmriAnalysisPlotFdrQ
+	optFmriAnalysisPlotClusterMinVoxels
+	optFmriAnalysisPlotVmaxMode
+	optFmriAnalysisPlotVmaxManual
+	optFmriAnalysisPlotIncludeUnthresholded
+	optFmriAnalysisPlotFormatPNG
+	optFmriAnalysisPlotFormatSVG
+	optFmriAnalysisPlotTypeSlices
+	optFmriAnalysisPlotTypeGlass
+	optFmriAnalysisPlotTypeHist
+	optFmriAnalysisPlotTypeClusters
+	optFmriAnalysisPlotEffectSize
+	optFmriAnalysisPlotStandardError
+	optFmriAnalysisPlotMotionQC
+	optFmriAnalysisPlotCarpetQC
+	optFmriAnalysisPlotTSNRQC
+	optFmriAnalysisPlotDesignQC
+	optFmriAnalysisPlotEmbedImages
+	optFmriAnalysisPlotSignatures
+	optFmriAnalysisSignatureDir
+	// fMRI analysis trial-wise signatures options
+	optFmriTrialSigGroup
+	optFmriTrialSigIncludeOtherEvents
+	optFmriTrialSigMaxTrialsPerRun
+	optFmriTrialSigFixedEffectsWeighting
+	optFmriTrialSigWriteTrialBetas
+	optFmriTrialSigWriteTrialVariances
+	optFmriTrialSigWriteConditionBetas
+	optFmriTrialSigSignatureNPS
+	optFmriTrialSigSignatureSIIPS1
+	optFmriTrialSigLssOtherRegressors
+	optFmriTrialSigRoiNames
 	// System/global settings
 	optSystemNJobs
 	optSystemStrictMode
@@ -7652,6 +7849,12 @@ func (m Model) getFmriPreprocessingOptions() []optionType {
 func (m Model) getFmriAnalysisOptions() []optionType {
 	options := []optionType{optUseDefaults}
 
+	mode := ""
+	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+		mode = m.modeOptions[m.modeIndex]
+	}
+	isFirstLevel := mode == "" || mode == "first-level"
+
 	options = append(options, optFmriAnalysisGroupInput)
 	if m.fmriAnalysisGroupInputExpanded {
 		options = append(options,
@@ -7664,15 +7867,17 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 
 	options = append(options, optFmriAnalysisGroupContrast)
 	if m.fmriAnalysisGroupContrastExpanded {
+		if isFirstLevel {
+			options = append(options, optFmriAnalysisContrastType)
+		}
 		options = append(options,
-			optFmriAnalysisContrastType,
 			optFmriAnalysisCondAColumn,
 			optFmriAnalysisCondAValue,
 			optFmriAnalysisCondBColumn,
 			optFmriAnalysisCondBValue,
 			optFmriAnalysisContrastName,
 		)
-		if m.fmriAnalysisContrastType == 1 {
+		if isFirstLevel && m.fmriAnalysisContrastType == 1 {
 			options = append(options, optFmriAnalysisFormula)
 		}
 	}
@@ -7684,26 +7889,93 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 			optFmriAnalysisDriftModel,
 			optFmriAnalysisHighPassHz,
 			optFmriAnalysisLowPassHz,
+			optFmriAnalysisSmoothingFwhm,
 		)
 	}
 
 	options = append(options, optFmriAnalysisGroupConfounds)
 	if m.fmriAnalysisGroupConfoundsExpanded {
-		options = append(options,
-			optFmriAnalysisConfoundsStrategy,
-			optFmriAnalysisWriteDesignMatrix,
-		)
+		if isFirstLevel {
+			options = append(options, optFmriAnalysisEventsToModel)
+		}
+		options = append(options, optFmriAnalysisConfoundsStrategy)
+		if isFirstLevel {
+			options = append(options, optFmriAnalysisWriteDesignMatrix)
+		}
 	}
 
 	options = append(options, optFmriAnalysisGroupOutput)
 	if m.fmriAnalysisGroupOutputExpanded {
-		options = append(options,
-			optFmriAnalysisOutputType,
-			optFmriAnalysisOutputDir,
-			optFmriAnalysisResampleToFS,
-		)
-		if m.fmriAnalysisResampleToFS {
-			options = append(options, optFmriAnalysisFreesurferDir)
+		if isFirstLevel {
+			options = append(options,
+				optFmriAnalysisOutputType,
+				optFmriAnalysisOutputDir,
+				optFmriAnalysisResampleToFS,
+			)
+			if m.fmriAnalysisResampleToFS {
+				options = append(options, optFmriAnalysisFreesurferDir)
+			}
+		} else {
+			options = append(options, optFmriAnalysisOutputDir)
+		}
+	}
+
+	if isFirstLevel {
+		options = append(options, optFmriAnalysisGroupPlotting)
+		if m.fmriAnalysisGroupPlottingExpanded {
+			options = append(options, optFmriAnalysisPlotsEnabled, optFmriAnalysisPlotHTML, optFmriAnalysisPlotSpace)
+
+			// Thresholding
+			options = append(options, optFmriAnalysisPlotThresholdMode, optFmriAnalysisPlotZThreshold)
+			if m.fmriAnalysisPlotThresholdModeIndex%3 == 1 { // fdr
+				options = append(options, optFmriAnalysisPlotFdrQ)
+			}
+			options = append(options, optFmriAnalysisPlotClusterMinVoxels)
+
+			// Scaling
+			options = append(options, optFmriAnalysisPlotVmaxMode)
+			if m.fmriAnalysisPlotVmaxModeIndex%3 == 2 { // manual
+				options = append(options, optFmriAnalysisPlotVmaxManual)
+			}
+
+			// Content
+			options = append(options,
+				optFmriAnalysisPlotIncludeUnthresholded,
+				optFmriAnalysisPlotFormatPNG,
+				optFmriAnalysisPlotFormatSVG,
+				optFmriAnalysisPlotTypeSlices,
+				optFmriAnalysisPlotTypeGlass,
+				optFmriAnalysisPlotTypeHist,
+				optFmriAnalysisPlotTypeClusters,
+				optFmriAnalysisPlotEffectSize,
+				optFmriAnalysisPlotStandardError,
+				optFmriAnalysisPlotMotionQC,
+				optFmriAnalysisPlotCarpetQC,
+				optFmriAnalysisPlotTSNRQC,
+				optFmriAnalysisPlotDesignQC,
+				optFmriAnalysisPlotEmbedImages,
+				optFmriAnalysisPlotSignatures,
+				optFmriAnalysisSignatureDir,
+			)
+		}
+	} else {
+		options = append(options, optFmriTrialSigGroup)
+		if m.fmriTrialSigGroupExpanded {
+			options = append(options,
+				optFmriTrialSigIncludeOtherEvents,
+				optFmriTrialSigMaxTrialsPerRun,
+				optFmriTrialSigFixedEffectsWeighting,
+				optFmriTrialSigWriteConditionBetas,
+				optFmriTrialSigWriteTrialBetas,
+				optFmriTrialSigWriteTrialVariances,
+				optFmriTrialSigSignatureNPS,
+				optFmriTrialSigSignatureSIIPS1,
+				optFmriAnalysisSignatureDir,
+				optFmriTrialSigRoiNames,
+			)
+			if mode == "lss" {
+				options = append(options, optFmriTrialSigLssOtherRegressors)
+			}
 		}
 	}
 
@@ -8551,6 +8823,20 @@ func (m Model) getMLOptions() []optionType {
 
 	if mode == "incremental_validity" {
 		opts = append(opts, optMLBaselinePredictors)
+	}
+
+	if strings.EqualFold(strings.TrimSpace(m.mlTarget), "fmri_signature") {
+		opts = append(opts, optMLFmriSigGroup)
+		if m.mlFmriSigGroupExpanded {
+			opts = append(opts,
+				optMLFmriSigMethod,
+				optMLFmriSigContrastName,
+				optMLFmriSigSignature,
+				optMLFmriSigMetric,
+				optMLFmriSigNormalization,
+				optMLFmriSigRoundDecimals,
+			)
+		}
 	}
 
 	opts = append(opts, optMLRequireTrialMlSafe)

@@ -142,7 +142,8 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Target to predict. Can be a logical name ('rating', 'temperature', 'pain_binary') "
-            "or an explicit events.tsv column name. Defaults depend on stage."
+            "or an explicit events.tsv column name. Use --target=fmri_signature to predict trial-wise "
+            "NPS/SIIPS1 expression from fMRI beta-series/LSS. Defaults depend on stage."
         ),
     )
     parser.add_argument(
@@ -224,6 +225,50 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
             "Baseline predictor columns for incremental_validity (standardized meta names like 'temperature', "
             "'trial_index', 'block'). Defaults to config machine_learning.incremental_validity.baseline_predictors."
         ),
+    )
+
+    fmri_sig = parser.add_argument_group("fMRI signature target (when --target=fmri_signature)")
+    fmri_sig.add_argument(
+        "--fmri-signature-method",
+        choices=["beta-series", "lss"],
+        default=None,
+        help="Which fMRI trial-beta estimation method to load signature targets from (default: beta-series).",
+    )
+    fmri_sig.add_argument(
+        "--fmri-signature-contrast-name",
+        type=str,
+        default=None,
+        help="Contrast name folder under fmri/(beta_series|lss)/task-*/contrast-*/ (default: pain_vs_nonpain).",
+    )
+    fmri_sig.add_argument(
+        "--fmri-signature-name",
+        choices=["NPS", "SIIPS1"],
+        default=None,
+        help="Which signature to use as the ML target (default: NPS).",
+    )
+    fmri_sig.add_argument(
+        "--fmri-signature-metric",
+        choices=["dot", "cosine", "pearson_r"],
+        default=None,
+        help="Which signature similarity metric to use (default: dot).",
+    )
+    fmri_sig.add_argument(
+        "--fmri-signature-normalization",
+        choices=[
+            "none",
+            "zscore_within_run",
+            "zscore_within_subject",
+            "robust_zscore_within_run",
+            "robust_zscore_within_subject",
+        ],
+        default=None,
+        help="Optional normalization applied to the signature target (default: none).",
+    )
+    fmri_sig.add_argument(
+        "--fmri-signature-round-decimals",
+        type=int,
+        default=None,
+        help="Rounding precision (decimals) for onset/duration matching across modalities (default: 3).",
     )
 
 
@@ -323,6 +368,22 @@ def _update_model_config(args: argparse.Namespace, config: Any) -> None:
         ]
 
 
+def _update_fmri_signature_target_config(args: argparse.Namespace, config: Any) -> None:
+    """Update config for fMRI signature target loading when requested."""
+    if getattr(args, "fmri_signature_method", None):
+        config["machine_learning.fmri_signature.method"] = str(args.fmri_signature_method)
+    if getattr(args, "fmri_signature_contrast_name", None):
+        config["machine_learning.fmri_signature.contrast_name"] = str(args.fmri_signature_contrast_name)
+    if getattr(args, "fmri_signature_name", None):
+        config["machine_learning.fmri_signature.signature_name"] = str(args.fmri_signature_name)
+    if getattr(args, "fmri_signature_metric", None):
+        config["machine_learning.fmri_signature.metric"] = str(args.fmri_signature_metric)
+    if getattr(args, "fmri_signature_normalization", None):
+        config["machine_learning.fmri_signature.normalization"] = str(args.fmri_signature_normalization)
+    if getattr(args, "fmri_signature_round_decimals", None) is not None:
+        config["machine_learning.fmri_signature.round_decimals"] = int(args.fmri_signature_round_decimals)
+
+
 def _print_stage_list() -> None:
     """Print available ML stages and exit."""
     print("\nAvailable ML stages:")
@@ -419,6 +480,7 @@ def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     
     _update_path_config(args, config)
     _update_model_config(args, config)
+    _update_fmri_signature_target_config(args, config)
     if args.require_trial_ml_safe:
         config["machine_learning.data.require_trial_ml_safe"] = True
     

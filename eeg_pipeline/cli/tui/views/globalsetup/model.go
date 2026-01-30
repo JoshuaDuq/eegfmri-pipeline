@@ -190,6 +190,13 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
+// IsEditing reports whether the global setup view is currently editing a
+// configuration field. When true, global keybindings like quitting should
+// be suppressed so that the text editor can consume the keys.
+func (m Model) IsEditing() bool {
+	return m.editingText
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:

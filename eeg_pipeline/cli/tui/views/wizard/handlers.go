@@ -283,6 +283,8 @@ func (m *Model) handleTab() {
 }
 
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
+	prevStep := m.CurrentStep
+
 	// Per-step validation
 	errors := m.validateStep()
 	if len(errors) > 0 {
@@ -294,6 +296,20 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	if m.stepIndex < len(m.steps)-1 {
 		m.stepIndex++
 		m.CurrentStep = m.steps[m.stepIndex]
+
+		// Mode-dependent defaults (fMRI analysis)
+		if prevStep == types.StepSelectMode && m.Pipeline == types.PipelineFmriAnalysis {
+			mode := ""
+			if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+				mode = m.modeOptions[m.modeIndex]
+			}
+			if mode == "beta-series" || mode == "lss" {
+				space := strings.TrimSpace(m.fmriAnalysisFmriprepSpace)
+				if space == "" || strings.EqualFold(space, "T1w") {
+					m.fmriAnalysisFmriprepSpace = "MNI152NLin2009cAsym"
+				}
+			}
+		}
 
 		for m.stepIndex < len(m.steps)-1 {
 			if !m.shouldSkipStep(m.CurrentStep) {
@@ -765,6 +781,27 @@ func (m *Model) validate() []string {
 		formatCount := countSelectedStringItems(m.plotFormatSelected)
 		if formatCount == 0 {
 			errors = append(errors, "No output formats selected")
+		}
+	}
+
+	if m.Pipeline == types.PipelineFmriAnalysis {
+		mode := ""
+		if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+			mode = m.modeOptions[m.modeIndex]
+		}
+		if strings.TrimSpace(m.fmriAnalysisCondAValue) == "" {
+			errors = append(errors, "fMRI analysis: Cond A Value is required")
+		}
+		if mode == "beta-series" || mode == "lss" {
+			if strings.TrimSpace(m.fmriAnalysisCondBValue) == "" {
+				errors = append(errors, "fMRI trial signatures: Cond B Value is required")
+			}
+			if !m.fmriTrialSigSignatureNPS && !m.fmriTrialSigSignatureSIIPS1 {
+				errors = append(errors, "fMRI trial signatures: select at least one signature (NPS/SIIPS1)")
+			}
+		}
+		if mode == "first-level" && m.fmriAnalysisContrastType%2 == 1 && strings.TrimSpace(m.fmriAnalysisFormula) == "" {
+			errors = append(errors, "fMRI first-level: custom contrast requires a formula")
 		}
 	}
 
@@ -2940,6 +2977,27 @@ func (m *Model) toggleMLAdvancedOption() {
 			m.startTextEdit(textFieldMLTarget)
 		}
 		m.useDefaultAdvanced = false
+	case optMLFmriSigGroup:
+		m.mlFmriSigGroupExpanded = !m.mlFmriSigGroupExpanded
+		m.useDefaultAdvanced = false
+	case optMLFmriSigMethod:
+		m.mlFmriSigMethodIndex = (m.mlFmriSigMethodIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optMLFmriSigContrastName:
+		m.startTextEdit(textFieldMLFmriSigContrastName)
+		m.useDefaultAdvanced = false
+	case optMLFmriSigSignature:
+		m.mlFmriSigSignatureIndex = (m.mlFmriSigSignatureIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optMLFmriSigMetric:
+		m.mlFmriSigMetricIndex = (m.mlFmriSigMetricIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optMLFmriSigNormalization:
+		m.mlFmriSigNormalizationIndex = (m.mlFmriSigNormalizationIndex + 1) % 5
+		m.useDefaultAdvanced = false
+	case optMLFmriSigRoundDecimals:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optMLRegressionModel:
 		m.mlRegressionModel = m.mlRegressionModel.Next()
 		m.useDefaultAdvanced = false
@@ -3314,6 +3372,10 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.fmriAnalysisGroupConfoundsExpanded = !m.fmriAnalysisGroupConfoundsExpanded
 	case optFmriAnalysisGroupOutput:
 		m.fmriAnalysisGroupOutputExpanded = !m.fmriAnalysisGroupOutputExpanded
+	case optFmriAnalysisGroupPlotting:
+		m.fmriAnalysisGroupPlottingExpanded = !m.fmriAnalysisGroupPlottingExpanded
+	case optFmriTrialSigGroup:
+		m.fmriTrialSigGroupExpanded = !m.fmriTrialSigGroupExpanded
 
 	// Input
 	case optFmriAnalysisInputSource:
@@ -3377,8 +3439,14 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriAnalysisLowPassHz:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optFmriAnalysisSmoothingFwhm:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 
 	// Confounds / QC
+	case optFmriAnalysisEventsToModel:
+		m.startTextEdit(textFieldFmriAnalysisEventsToModel)
+		m.useDefaultAdvanced = false
 	case optFmriAnalysisConfoundsStrategy:
 		m.fmriAnalysisConfoundsStrategy = (m.fmriAnalysisConfoundsStrategy + 1) % 7
 		m.useDefaultAdvanced = false
@@ -3398,6 +3466,157 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optFmriAnalysisFreesurferDir:
 		m.startTextEdit(textFieldFmriAnalysisFreesurferDir)
+		m.useDefaultAdvanced = false
+
+	// Plotting / Report
+	case optFmriAnalysisPlotsEnabled:
+		m.fmriAnalysisPlotsEnabled = !m.fmriAnalysisPlotsEnabled
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotHTML:
+		m.fmriAnalysisPlotHTML = !m.fmriAnalysisPlotHTML
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotSpace:
+		m.fmriAnalysisPlotSpaceIndex = (m.fmriAnalysisPlotSpaceIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotThresholdMode:
+		m.fmriAnalysisPlotThresholdModeIndex = (m.fmriAnalysisPlotThresholdModeIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotZThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotFdrQ:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotClusterMinVoxels:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotVmaxMode:
+		m.fmriAnalysisPlotVmaxModeIndex = (m.fmriAnalysisPlotVmaxModeIndex + 1) % 3
+		if m.fmriAnalysisPlotVmaxModeIndex%3 == 2 && m.fmriAnalysisPlotVmaxManual <= 0 {
+			m.fmriAnalysisPlotVmaxManual = 5.0
+		}
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotVmaxManual:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotIncludeUnthresholded:
+		m.fmriAnalysisPlotIncludeUnthresholded = !m.fmriAnalysisPlotIncludeUnthresholded
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotFormatPNG:
+		next := !m.fmriAnalysisPlotFormatPNG
+		if !next && !m.fmriAnalysisPlotFormatSVG {
+			m.ShowToast("At least one format is required (PNG/SVG)", "warning")
+			return
+		}
+		m.fmriAnalysisPlotFormatPNG = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotFormatSVG:
+		next := !m.fmriAnalysisPlotFormatSVG
+		if !next && !m.fmriAnalysisPlotFormatPNG {
+			m.ShowToast("At least one format is required (PNG/SVG)", "warning")
+			return
+		}
+		m.fmriAnalysisPlotFormatSVG = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTypeSlices:
+		next := !m.fmriAnalysisPlotTypeSlices
+		if !next && !(m.fmriAnalysisPlotTypeGlass || m.fmriAnalysisPlotTypeHist || m.fmriAnalysisPlotTypeClusters) {
+			m.ShowToast("Select at least one plot type", "warning")
+			return
+		}
+		m.fmriAnalysisPlotTypeSlices = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTypeGlass:
+		next := !m.fmriAnalysisPlotTypeGlass
+		if !next && !(m.fmriAnalysisPlotTypeSlices || m.fmriAnalysisPlotTypeHist || m.fmriAnalysisPlotTypeClusters) {
+			m.ShowToast("Select at least one plot type", "warning")
+			return
+		}
+		m.fmriAnalysisPlotTypeGlass = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTypeHist:
+		next := !m.fmriAnalysisPlotTypeHist
+		if !next && !(m.fmriAnalysisPlotTypeSlices || m.fmriAnalysisPlotTypeGlass || m.fmriAnalysisPlotTypeClusters) {
+			m.ShowToast("Select at least one plot type", "warning")
+			return
+		}
+		m.fmriAnalysisPlotTypeHist = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTypeClusters:
+		next := !m.fmriAnalysisPlotTypeClusters
+		if !next && !(m.fmriAnalysisPlotTypeSlices || m.fmriAnalysisPlotTypeGlass || m.fmriAnalysisPlotTypeHist) {
+			m.ShowToast("Select at least one plot type", "warning")
+			return
+		}
+		m.fmriAnalysisPlotTypeClusters = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotEffectSize:
+		m.fmriAnalysisPlotEffectSize = !m.fmriAnalysisPlotEffectSize
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotStandardError:
+		m.fmriAnalysisPlotStandardError = !m.fmriAnalysisPlotStandardError
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotMotionQC:
+		m.fmriAnalysisPlotMotionQC = !m.fmriAnalysisPlotMotionQC
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotCarpetQC:
+		m.fmriAnalysisPlotCarpetQC = !m.fmriAnalysisPlotCarpetQC
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTSNRQC:
+		m.fmriAnalysisPlotTSNRQC = !m.fmriAnalysisPlotTSNRQC
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotDesignQC:
+		m.fmriAnalysisPlotDesignQC = !m.fmriAnalysisPlotDesignQC
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotEmbedImages:
+		m.fmriAnalysisPlotEmbedImages = !m.fmriAnalysisPlotEmbedImages
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotSignatures:
+		m.fmriAnalysisPlotSignatures = !m.fmriAnalysisPlotSignatures
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisSignatureDir:
+		m.startTextEdit(textFieldFmriAnalysisSignatureDir)
+	case optFmriTrialSigRoiNames:
+		m.startTextEdit(textFieldFmriAnalysisSignatureRoiNames)
+		m.useDefaultAdvanced = false
+
+	// Trial-wise signatures
+	case optFmriTrialSigIncludeOtherEvents:
+		m.fmriTrialSigIncludeOtherEvents = !m.fmriTrialSigIncludeOtherEvents
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigMaxTrialsPerRun:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigFixedEffectsWeighting:
+		m.fmriTrialSigFixedEffectsWeighting = (m.fmriTrialSigFixedEffectsWeighting + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigWriteTrialBetas:
+		m.fmriTrialSigWriteTrialBetas = !m.fmriTrialSigWriteTrialBetas
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigWriteTrialVariances:
+		m.fmriTrialSigWriteTrialVariances = !m.fmriTrialSigWriteTrialVariances
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigWriteConditionBetas:
+		m.fmriTrialSigWriteConditionBetas = !m.fmriTrialSigWriteConditionBetas
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigSignatureNPS:
+		next := !m.fmriTrialSigSignatureNPS
+		if !next && !m.fmriTrialSigSignatureSIIPS1 {
+			m.ShowToast("Select at least one signature (NPS/SIIPS1)", "warning")
+			return
+		}
+		m.fmriTrialSigSignatureNPS = next
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigSignatureSIIPS1:
+		next := !m.fmriTrialSigSignatureSIIPS1
+		if !next && !m.fmriTrialSigSignatureNPS {
+			m.ShowToast("Select at least one signature (NPS/SIIPS1)", "warning")
+			return
+		}
+		m.fmriTrialSigSignatureSIIPS1 = next
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigLssOtherRegressors:
+		m.fmriTrialSigLssOtherRegressorsIndex = (m.fmriTrialSigLssOtherRegressorsIndex + 1) % 2
 		m.useDefaultAdvanced = false
 	}
 
@@ -4681,6 +4900,10 @@ func (m *Model) commitMLNumber(val float64) {
 		if val >= 1 {
 			m.rfNEstimators = int(val)
 		}
+	case optMLFmriSigRoundDecimals:
+		if val >= 0 {
+			m.mlFmriSigRoundDecimals = int(val)
+		}
 	}
 }
 
@@ -4826,6 +5049,30 @@ func (m *Model) commitFmriAnalysisNumber(val float64) {
 	case optFmriAnalysisLowPassHz:
 		if val >= 0 {
 			m.fmriAnalysisLowPassHz = val
+		}
+	case optFmriAnalysisSmoothingFwhm:
+		if val >= 0 {
+			m.fmriAnalysisSmoothingFwhm = val
+		}
+	case optFmriAnalysisPlotZThreshold:
+		if val > 0 {
+			m.fmriAnalysisPlotZThreshold = val
+		}
+	case optFmriAnalysisPlotFdrQ:
+		if val > 0 && val <= 1 {
+			m.fmriAnalysisPlotFdrQ = val
+		}
+	case optFmriAnalysisPlotClusterMinVoxels:
+		if val >= 0 {
+			m.fmriAnalysisPlotClusterMinVoxels = int(val)
+		}
+	case optFmriAnalysisPlotVmaxManual:
+		if val > 0 {
+			m.fmriAnalysisPlotVmaxManual = val
+		}
+	case optFmriTrialSigMaxTrialsPerRun:
+		if val >= 0 {
+			m.fmriTrialSigMaxTrialsPerRun = int(val)
 		}
 	}
 }

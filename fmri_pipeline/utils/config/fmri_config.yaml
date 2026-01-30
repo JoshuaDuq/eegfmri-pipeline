@@ -13,6 +13,14 @@ paths:
   # FreeSurfer SUBJECTS_DIR (structural MRI surfaces)
   freesurfer_dir: null
 
+  # Optional: directory for MNI atlas label images + label tables used by ROI-restricted signature extraction.
+  # Recommended location: eeg_pipeline/data/external/atlases
+  atlas_dir: "eeg_pipeline/data/external/atlases"
+  # Default atlas (basename or path) for ROI signature readouts when --signature-roi is used without --signature-roi-atlas (e.g. from TUI).
+  signature_roi_atlas: null
+  # Optional default labels table (TSV/CSV); null = infer sidecar next to atlas.
+  signature_roi_labels: null
+
 
 ###################################################################
 # fMRI Preprocessing (fMRIPrep)
@@ -145,7 +153,13 @@ fmri_contrast:
   # Best practice for designs where per-trial columns (e.g., pain_binary_coded) repeat across phases.
   # If null, the contrast builder defaults to ["stimulation"] when condition_a.column != "trial_type".
   condition_scope_trial_types: null  # e.g., ["stimulation"]
-  
+
+  # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
+  # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
+  #   ["stimulation", "pain_question", "vas_rating"]
+  # This focuses the model on the stimulation response while controlling for rating/question overlap.
+  events_to_model: null
+
   # Custom formula (optional, overrides condition_a/b)
   formula: null                # e.g., "condition_a - condition_b"
   

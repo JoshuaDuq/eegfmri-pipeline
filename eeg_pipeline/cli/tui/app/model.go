@@ -377,6 +377,20 @@ func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// When a sub-view is actively editing configuration, defer all key
+	// handling to that view so that global bindings like "q" do not
+	// trigger application-level exits.
+	switch m.state {
+	case StatePipelineWizard:
+		if m.wizard.IsEditing() {
+			return m, nil
+		}
+	case StateGlobalSetup:
+		if m.global.IsEditing() {
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, m.handleQuit()

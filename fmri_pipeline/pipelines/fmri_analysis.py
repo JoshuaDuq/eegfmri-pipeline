@@ -39,12 +39,109 @@ class FmriAnalysisPipeline(PipelineBase):
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="fmri_analysis", config=config)
 
+    def _discover_signature_root(self) -> Optional[Path]:
+        """
+        Best-effort path discovery for multivariate pain signature weight maps.
+
+        Preference:
+        1) config: paths.signature_dir (explicit override)
+        2) sibling directory of derivatives: <deriv_root>/../external
+        """
+        try:
+            cfg_path = self.config.get("paths.signature_dir")
+        except Exception:
+            cfg_path = None
+        if cfg_path:
+            p = Path(str(cfg_path)).expanduser()
+            return p if p.exists() else None
+
+        try:
+            candidate = Path(self.deriv_root).expanduser().resolve().parent / "external"
+            return candidate if candidate.exists() else None
+        except Exception:
+            return None
+
+    def _discover_plot_assets(
+        self,
+        *,
+        sub_label: str,
+        task: str,
+        space: str,
+    ) -> tuple[Optional[Path], Optional[Path]]:
+        """
+        Best-effort discovery of a background image + brain mask for plotting.
+
+        Preference order:
+        - Brain mask: use fMRIPrep func-space brain masks (match BOLD/stat resolution).
+        - Background: prefer anatomical preproc T1w (nice-looking) when available, else use func boldref.
+        """
+        deriv_root = self.deriv_root
+        space = (space or "").strip().lower()
+
+        # 1) Preferred: func-level brain mask + boldref in the same space
+        func_dirs = [
+            deriv_root / "preprocessed" / "fmri" / sub_label / "func",
+            deriv_root / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
+            deriv_root / "fmriprep" / sub_label / "func",
+        ]
+        space_tok = "MNI152NLin2009cAsym" if space == "mni" else "T1w"
+        # Use run-01 as the representative reference (typically consistent across runs).
+        func_mask_patterns = [
+            f"{sub_label}_task-{task}_run-01_space-{space_tok}_desc-brain_mask.nii.gz",
+            f"{sub_label}_task-{task}_run-1_space-{space_tok}_desc-brain_mask.nii.gz",
+        ]
+        func_boldref_patterns = [
+            f"{sub_label}_task-{task}_run-01_space-{space_tok}_boldref.nii.gz",
+            f"{sub_label}_task-{task}_run-1_space-{space_tok}_boldref.nii.gz",
+        ]
+
+        func_mask: Optional[Path] = None
+        func_bg: Optional[Path] = None
+        for d in func_dirs:
+            if not d.exists():
+                continue
+            if func_mask is None:
+                func_mask = next((d / n for n in func_mask_patterns if (d / n).exists()), None)
+            if func_bg is None:
+                func_bg = next((d / n for n in func_boldref_patterns if (d / n).exists()), None)
+            if func_mask is not None and func_bg is not None:
+                break
+
+        # 2) Optional: anatomical preproc background (better-looking overlays)
+        search_dirs = [
+            deriv_root / "preprocessed" / "fmri" / sub_label / "anat",
+            deriv_root / "preprocessed" / "fmri" / "fmriprep" / sub_label / "anat",
+            deriv_root / "fmriprep" / sub_label / "anat",
+        ]
+
+        if space == "mni":
+            bg_names = [
+                f"{sub_label}_space-MNI152NLin2009cAsym_desc-preproc_T1w.nii.gz",
+            ]
+        else:
+            bg_names = [
+                f"{sub_label}_desc-preproc_T1w.nii.gz",
+            ]
+
+        anat_bg: Optional[Path] = None
+        for d in search_dirs:
+            if not d.exists():
+                continue
+            anat_bg = next((d / n for n in bg_names if (d / n).exists()), None)
+            if anat_bg is not None:
+                break
+
+        bg_out = anat_bg or func_bg
+        mask_out = func_mask
+        return bg_out, mask_out
+
     def process_subject(
         self,
         subject: str,
         task: str,
         *,
         contrast_cfg: Any,
+        plotting_cfg: Optional[Any] = None,
         output_dir: Optional[Path] = None,
         freesurfer_subjects_dir: Optional[Path] = None,
         dry_run: bool = False,
@@ -54,7 +151,7 @@ class FmriAnalysisPipeline(PipelineBase):
         import nibabel as nib
 
         from fmri_pipeline.analysis.contrast_builder import (
-            build_contrast_from_runs,
+            build_contrast_from_runs_detailed,
             resample_to_freesurfer,
         )
 
@@ -92,7 +189,7 @@ class FmriAnalysisPipeline(PipelineBase):
         if progress is not None and hasattr(progress, "step"):
             progress.step("Fit multi-run GLM + compute contrast")
 
-        contrast_img, run_meta = build_contrast_from_runs(
+        contrast_img, run_meta, glm_result, contrast_def, _ = build_contrast_from_runs_detailed(
             bids_fmri_root=Path(str(bids_fmri_root)).expanduser().resolve(),
             bids_derivatives=deriv_root,
             subject=subject,
@@ -105,6 +202,8 @@ class FmriAnalysisPipeline(PipelineBase):
             output_type_actual = str(run_meta.get("output_type"))
             nifti_path = out_dir / f"{sub_label}_task-{task}_contrast-{contrast_name}_stat-{output_type_actual}_{cfg_hash}.nii.gz"
             sidecar_path = nifti_path.with_suffix("").with_suffix(".json")
+
+        contrast_img_for_plotting = contrast_img
 
         # Optional: resample to FreeSurfer subject space for downstream EEG integration.
         if bool(getattr(contrast_cfg, "resample_to_freesurfer", False)):
@@ -124,6 +223,98 @@ class FmriAnalysisPipeline(PipelineBase):
 
         nib.save(contrast_img, str(nifti_path))
 
+        plotting_meta: Optional[dict[str, Any]] = None
+        try:
+            from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
+            from fmri_pipeline.analysis.reporting import run_fmri_plotting_and_report
+
+            cfg_obj = plotting_cfg if isinstance(plotting_cfg, FmriPlottingConfig) else None
+            if cfg_obj is not None and cfg_obj.normalized().enabled:
+                # Optionally generate an MNI-space contrast in-memory (for plots only).
+                mni_img = None
+                mni_effect = None
+                mni_variance = None
+                want_mni = cfg_obj.normalized().space in {"mni", "both"}
+                if want_mni:
+                    try:
+                        from fmri_pipeline.analysis.contrast_builder import ContrastBuilderConfig
+
+                        if isinstance(contrast_cfg, ContrastBuilderConfig):
+                            cfg_mni = ContrastBuilderConfig(
+                                **{**asdict(contrast_cfg), "fmriprep_space": "MNI152NLin2009cAsym"}
+                            )
+                        else:
+                            # Best-effort: reuse the cfg and override fmriprep_space when it's attribute-like.
+                            cfg_mni = contrast_cfg
+                            if hasattr(cfg_mni, "fmriprep_space"):
+                                setattr(cfg_mni, "fmriprep_space", "MNI152NLin2009cAsym")
+
+                        # Cache MNI map to disk for reproducibility and to avoid refitting when rerunning plots.
+                        mni_nifti_path = out_dir / (
+                            f"{sub_label}_task-{task}_contrast-{contrast_name}"
+                            f"_space-MNI152NLin2009cAsym_stat-{output_type_actual}_{cfg_hash}.nii.gz"
+                        )
+                        if mni_nifti_path.exists():
+                            mni_img = nib.load(str(mni_nifti_path))
+                        else:
+                            mni_img, _mni_meta, mni_glm, mni_contrast_def, _mni_out_type = build_contrast_from_runs_detailed(
+                                bids_fmri_root=Path(str(bids_fmri_root)).expanduser().resolve(),
+                                bids_derivatives=deriv_root,
+                                subject=subject,
+                                task=task,
+                                cfg=cfg_mni,
+                                output_dir=out_dir,
+                            )
+                            try:
+                                nib.save(mni_img, str(mni_nifti_path))
+                            except Exception:
+                                pass
+
+                            try:
+                                mni_effect = mni_glm.flm.compute_contrast(mni_contrast_def, output_type="effect_size")
+                                mni_variance = mni_glm.flm.compute_contrast(mni_contrast_def, output_type="variance")
+                            except Exception:
+                                pass
+                    except Exception as exc:
+                        self.logger.warning("Skipping MNI plotting (failed to build MNI contrast): %s", exc)
+
+                native_bg, native_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="native")
+                mni_bg, mni_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="mni")
+
+                native_effect = None
+                native_variance = None
+                try:
+                    if bool(getattr(cfg_obj, "include_effect_size", True)) or bool(
+                        getattr(cfg_obj, "include_standard_error", True)
+                    ):
+                        native_effect = glm_result.flm.compute_contrast(contrast_def, output_type="effect_size")
+                        native_variance = glm_result.flm.compute_contrast(contrast_def, output_type="variance")
+                except Exception:
+                    pass
+
+                plotting_meta = run_fmri_plotting_and_report(
+                    contrast_dir=out_dir,
+                    subject=sub_label,
+                    task=task,
+                    contrast_name=contrast_name,
+                    cfg=cfg_obj,
+                    run_meta=run_meta if isinstance(run_meta, dict) else None,
+                    native_stat_img=contrast_img_for_plotting,
+                    mni_stat_img=mni_img,
+                    native_effect_img=native_effect,
+                    native_variance_img=native_variance,
+                    mni_effect_img=mni_effect,
+                    mni_variance_img=mni_variance,
+                    native_bg_img_path=native_bg,
+                    mni_bg_img_path=mni_bg,
+                    native_mask_img_path=native_mask,
+                    mni_mask_img_path=mni_mask,
+                    signature_root=self._discover_signature_root(),
+                )
+        except Exception as exc:
+            # Best-effort: plotting/reporting should never fail the fMRI analysis step.
+            self.logger.warning("Failed to generate fMRI plots/report (continuing): %s", exc)
+
         try:
             import json
 
@@ -135,6 +326,10 @@ class FmriAnalysisPipeline(PipelineBase):
                 "output_type_actual": output_type_actual,
                 "run_meta": run_meta,
                 "contrast_cfg": asdict(contrast_cfg) if hasattr(contrast_cfg, "__dataclass_fields__") else repr(contrast_cfg),
+                "plotting": {
+                    "cfg": asdict(plotting_cfg) if hasattr(plotting_cfg, "__dataclass_fields__") else repr(plotting_cfg),
+                    "outputs": plotting_meta,
+                },
             }
             sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
         except Exception:

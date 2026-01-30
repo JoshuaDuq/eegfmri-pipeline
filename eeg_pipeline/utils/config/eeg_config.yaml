@@ -479,6 +479,10 @@ feature_engineering:
         drift_model: "cosine"      # "none" | "cosine" | "polynomial"
         high_pass_hz: 0.008
         low_pass_hz: 0.1
+        # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
+        # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
+        #   ["stimulation", "pain_question", "vas_rating"]
+        events_to_model: null
         cluster_correction: true
         cluster_p_threshold: 0.001
         output_type: "z-score"     # "z-score" | "t-stat" | "cope" | "beta"

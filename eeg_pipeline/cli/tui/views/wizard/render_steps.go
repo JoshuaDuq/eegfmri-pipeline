@@ -161,7 +161,18 @@ func (m Model) getExpectedOutputPaths() []string {
 	case types.PipelineFmri:
 		return []string{base + "preprocessed/fmri/fmriprep/sub-XX/"}
 	case types.PipelineFmriAnalysis:
-		return []string{base + "sub-XX/fmri/first_level/task-*/contrast-*/"}
+		mode := ""
+		if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+			mode = m.modeOptions[m.modeIndex]
+		}
+		switch mode {
+		case "beta-series":
+			return []string{base + "sub-XX/fmri/beta_series/task-*/contrast-*/"}
+		case "lss":
+			return []string{base + "sub-XX/fmri/lss/task-*/contrast-*/"}
+		default:
+			return []string{base + "sub-XX/fmri/first_level/task-*/contrast-*/"}
+		}
 	case types.PipelineFmriRawToBIDS:
 		return []string{"bids_output/fmri/sub-XX/"}
 	case types.PipelineRawToBIDS:
@@ -4903,6 +4914,8 @@ func (m Model) renderMLAdvancedConfig() string {
 		switch opt {
 		case optMLTarget:
 			return textFieldMLTarget, true
+		case optMLFmriSigContrastName:
+			return textFieldMLFmriSigContrastName, true
 		case optMLFeatureFamilies:
 			return textFieldMLFeatureFamilies, true
 		case optMLFeatureBands:
@@ -4957,6 +4970,35 @@ func (m Model) renderMLAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
 			}
 			label, value = "Target", renderTextOrDefault(m.mlTarget, "(stage default)")
+		case optMLFmriSigGroup:
+			if m.mlFmriSigGroupExpanded {
+				label = "▾ fMRI Signature Target"
+			} else {
+				label = "▸ fMRI Signature Target"
+			}
+			value, hint = "", "Space to toggle"
+		case optMLFmriSigMethod:
+			methods := []string{"beta-series", "lss"}
+			label, value, hint = "fMRI Sig Method", methods[m.mlFmriSigMethodIndex%len(methods)], "which fMRI target to load"
+		case optMLFmriSigContrastName:
+			label, value, hint = "fMRI Contrast Name", renderTextOrDefault(m.mlFmriSigContrastName, "(pain_vs_nonpain)"), "must match fmri/(beta_series|lss)/task-*/contrast-*"
+		case optMLFmriSigSignature:
+			sigs := []string{"NPS", "SIIPS1"}
+			label, value, hint = "fMRI Signature", sigs[m.mlFmriSigSignatureIndex%len(sigs)], "signature used as target"
+		case optMLFmriSigMetric:
+			metrics := []string{"dot", "cosine", "pearson_r"}
+			label, value, hint = "fMRI Sig Metric", metrics[m.mlFmriSigMetricIndex%len(metrics)], "target metric"
+		case optMLFmriSigNormalization:
+			norms := []string{
+				"none",
+				"zscore_within_run",
+				"zscore_within_subject",
+				"robust_zscore_within_run",
+				"robust_zscore_within_subject",
+			}
+			label, value, hint = "Target Normalization", norms[m.mlFmriSigNormalizationIndex%len(norms)], "recommended: within_run"
+		case optMLFmriSigRoundDecimals:
+			label, value, hint = "Align Round Decimals", fmt.Sprintf("%d", m.mlFmriSigRoundDecimals), "onset/duration rounding for alignment"
 		case optMLFeatureFamilies:
 			label, value, hint = "Feature Families", renderTextOrDefault(m.mlFeatureFamiliesSpec, "(config default)"), "e.g., power aperiodic connectivity"
 		case optMLFeatureBands:
@@ -6088,7 +6130,18 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	} else if m.expandedOption >= 0 {
 		b.WriteString(infoStyle.Render("Space to select item · ↑↓ to navigate · Esc to close list") + "\n\n")
 	} else {
-		b.WriteString(infoStyle.Render("Configure first-level fMRI GLM settings and a single contrast. Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+		mode := "first-level"
+		if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+			mode = m.modeOptions[m.modeIndex]
+		}
+		switch mode {
+		case "beta-series":
+			b.WriteString(infoStyle.Render("Configure trial-wise beta-series (one GLM per run) and pain signature readouts. Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+		case "lss":
+			b.WriteString(infoStyle.Render("Configure LSS trial-wise betas (one GLM per trial) and pain signature readouts. Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+		default:
+			b.WriteString(infoStyle.Render("Configure first-level fMRI GLM settings and a single contrast. Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+		}
 	}
 
 	if m.useDefaultAdvanced {
@@ -6169,6 +6222,14 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		formulaVal = "(none)"
 	}
 
+	eventsToModelVal := strings.TrimSpace(m.fmriAnalysisEventsToModel)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisEventsToModel {
+		eventsToModelVal = m.textBuffer + "█"
+	}
+	if eventsToModelVal == "" {
+		eventsToModelVal = "(all)"
+	}
+
 	hrfOptions := []string{"spm", "flobs", "fir"}
 	hrfVal := hrfOptions[m.fmriAnalysisHrfModel%len(hrfOptions)]
 	driftOptions := []string{"none", "cosine", "polynomial"}
@@ -6190,6 +6251,22 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	if m.fmriAnalysisLowPassHz <= 0 {
 		lowPassVal = "0 (disabled)"
 	}
+	smoothingVal := fmt.Sprintf("%.1f", m.fmriAnalysisSmoothingFwhm)
+	if m.fmriAnalysisSmoothingFwhm <= 0 {
+		smoothingVal = "0 (disabled)"
+	}
+
+	// Plotting / report display values
+	plotSpaceOptions := []string{"both", "native", "mni"}
+	plotSpaceVal := plotSpaceOptions[m.fmriAnalysisPlotSpaceIndex%len(plotSpaceOptions)]
+	plotZVal := fmt.Sprintf("%.2f", m.fmriAnalysisPlotZThreshold)
+	plotThresholdModeOptions := []string{"z", "fdr", "none"}
+	plotThresholdModeVal := plotThresholdModeOptions[m.fmriAnalysisPlotThresholdModeIndex%len(plotThresholdModeOptions)]
+	plotFdrQVal := fmt.Sprintf("%.3f", m.fmriAnalysisPlotFdrQ)
+	plotClusterMinVal := fmt.Sprintf("%d", m.fmriAnalysisPlotClusterMinVoxels)
+	plotVmaxModeOptions := []string{"per-space-robust", "shared-robust", "manual"}
+	plotVmaxModeVal := plotVmaxModeOptions[m.fmriAnalysisPlotVmaxModeIndex%len(plotVmaxModeOptions)]
+	plotVmaxManualVal := fmt.Sprintf("%.2f", m.fmriAnalysisPlotVmaxManual)
 
 	if m.editingNumber {
 		buffer := m.numberBuffer + "█"
@@ -6198,6 +6275,16 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			highPassVal = buffer
 		case m.isCurrentlyEditing(optFmriAnalysisLowPassHz):
 			lowPassVal = buffer
+		case m.isCurrentlyEditing(optFmriAnalysisSmoothingFwhm):
+			smoothingVal = buffer
+		case m.isCurrentlyEditing(optFmriAnalysisPlotZThreshold):
+			plotZVal = buffer
+		case m.isCurrentlyEditing(optFmriAnalysisPlotFdrQ):
+			plotFdrQVal = buffer
+		case m.isCurrentlyEditing(optFmriAnalysisPlotClusterMinVoxels):
+			plotClusterMinVal = buffer
+		case m.isCurrentlyEditing(optFmriAnalysisPlotVmaxManual):
+			plotVmaxManualVal = buffer
 		}
 	}
 
@@ -6218,6 +6305,14 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	}
 	if fsDirVal == "" {
 		fsDirVal = "(from config)"
+	}
+
+	roiNamesVal := strings.TrimSpace(m.fmriTrialSigRoiNames)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisSignatureRoiNames {
+		roiNamesVal = m.textBuffer + "█"
+	}
+	if roiNamesVal == "" {
+		roiNamesVal = "(none; atlas/labels from config)"
 	}
 
 	options := m.getFmriAnalysisOptions()
@@ -6323,6 +6418,26 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
+		case optFmriAnalysisGroupPlotting:
+			if m.fmriAnalysisGroupPlottingExpanded {
+				label = "▾ Plotting"
+			} else {
+				label = "▸ Plotting"
+			}
+			hint = "Figures + HTML report"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFmriTrialSigGroup:
+			if m.fmriTrialSigGroupExpanded {
+				label = "▾ Trial Signatures"
+			} else {
+				label = "▸ Trial Signatures"
+			}
+			hint = "Beta-series / LSS + signature readouts"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
 
 		// Input
 		case optFmriAnalysisInputSource:
@@ -6413,8 +6528,16 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			label = "Low-pass (Hz)"
 			value = lowPassVal
 			hint = "Space to edit (0 disables)"
+		case optFmriAnalysisSmoothingFwhm:
+			label = "Smoothing (FWHM mm)"
+			value = smoothingVal
+			hint = "Space to edit (0 disables)"
 
 		// Confounds / QC
+		case optFmriAnalysisEventsToModel:
+			label = "Events to Model"
+			value = eventsToModelVal
+			hint = "Space to edit (comma-separated; empty = all)"
 		case optFmriAnalysisConfoundsStrategy:
 			label = "Confounds"
 			value = confoundsVal
@@ -6449,6 +6572,170 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			label = "FreeSurfer Dir"
 			value = fsDirVal
 			hint = "Space to edit"
+
+		// Plotting / report
+		case optFmriAnalysisPlotsEnabled:
+			label = "Generate Plots"
+			value = m.boolToOnOff(m.fmriAnalysisPlotsEnabled)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotHTML:
+			label = "HTML Report"
+			value = m.boolToOnOff(m.fmriAnalysisPlotHTML)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotSpace:
+			label = "Plot Space"
+			value = plotSpaceVal
+			hint = "Space to cycle"
+		case optFmriAnalysisPlotThresholdMode:
+			label = "Threshold Mode"
+			value = plotThresholdModeVal
+			hint = "Space to cycle"
+		case optFmriAnalysisPlotZThreshold:
+			label = "Z Threshold"
+			value = plotZVal
+			hint = "Space to edit (used when mode=z)"
+		case optFmriAnalysisPlotFdrQ:
+			label = "FDR q"
+			value = plotFdrQVal
+			hint = "Space to edit (used when mode=fdr)"
+		case optFmriAnalysisPlotClusterMinVoxels:
+			label = "Min Cluster Vox"
+			value = plotClusterMinVal
+			hint = "Space to edit (0 disables)"
+		case optFmriAnalysisPlotVmaxMode:
+			label = "Vmax Mode"
+			value = plotVmaxModeVal
+			hint = "Space to cycle"
+		case optFmriAnalysisPlotVmaxManual:
+			label = "Vmax Manual"
+			value = plotVmaxManualVal
+			hint = "Space to edit"
+		case optFmriAnalysisPlotIncludeUnthresholded:
+			label = "Include Unthresholded"
+			value = m.boolToOnOff(m.fmriAnalysisPlotIncludeUnthresholded)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotFormatPNG:
+			label = "Format: PNG"
+			value = m.boolToOnOff(m.fmriAnalysisPlotFormatPNG)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotFormatSVG:
+			label = "Format: SVG"
+			value = m.boolToOnOff(m.fmriAnalysisPlotFormatSVG)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotTypeSlices:
+			label = "Plot: Slices"
+			value = m.boolToOnOff(m.fmriAnalysisPlotTypeSlices)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotTypeGlass:
+			label = "Plot: Glass"
+			value = m.boolToOnOff(m.fmriAnalysisPlotTypeGlass)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotTypeHist:
+			label = "Plot: Histogram"
+			value = m.boolToOnOff(m.fmriAnalysisPlotTypeHist)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotTypeClusters:
+			label = "Plot: Clusters"
+			value = m.boolToOnOff(m.fmriAnalysisPlotTypeClusters)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotEffectSize:
+			label = "Plot: Effect Size"
+			value = m.boolToOnOff(m.fmriAnalysisPlotEffectSize)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotStandardError:
+			label = "Plot: Std Error"
+			value = m.boolToOnOff(m.fmriAnalysisPlotStandardError)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotMotionQC:
+			label = "QC: Motion"
+			value = m.boolToOnOff(m.fmriAnalysisPlotMotionQC)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotCarpetQC:
+			label = "QC: Carpet"
+			value = m.boolToOnOff(m.fmriAnalysisPlotCarpetQC)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotTSNRQC:
+			label = "QC: tSNR"
+			value = m.boolToOnOff(m.fmriAnalysisPlotTSNRQC)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotDesignQC:
+			label = "QC: Design"
+			value = m.boolToOnOff(m.fmriAnalysisPlotDesignQC)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotEmbedImages:
+			label = "Embed Images"
+			value = m.boolToOnOff(m.fmriAnalysisPlotEmbedImages)
+			hint = "Space to toggle"
+		case optFmriAnalysisPlotSignatures:
+			label = "Pain Signatures (NPS/SIIPS1)"
+			value = m.boolToOnOff(m.fmriAnalysisPlotSignatures)
+			hint = "Space to toggle"
+		case optFmriAnalysisSignatureDir:
+			label = "Signature Dir"
+			value = strings.TrimSpace(m.fmriAnalysisSignatureDir)
+			if m.editingText && m.editingTextField == textFieldFmriAnalysisSignatureDir {
+				value = m.textBuffer + "█"
+			}
+			if value == "" {
+				value = "(auto: <deriv_root>/../external)"
+			}
+			hint = "Space to edit"
+		case optFmriTrialSigRoiNames:
+			label = "ROI Names"
+			value = roiNamesVal
+			hint = "e.g. all or Insula_L dACC; atlas from config; Space to edit"
+
+		// Trial-wise signatures
+		case optFmriTrialSigIncludeOtherEvents:
+			label = "Include Other Events"
+			value = m.boolToOnOff(m.fmriTrialSigIncludeOtherEvents)
+			hint = "Space to toggle"
+		case optFmriTrialSigMaxTrialsPerRun:
+			label = "Max Trials/Run"
+			if m.editingNumber && m.isCurrentlyEditing(optFmriTrialSigMaxTrialsPerRun) {
+				value = m.numberBuffer + "█"
+			} else if m.fmriTrialSigMaxTrialsPerRun <= 0 {
+				value = "(none)"
+			} else {
+				value = fmt.Sprintf("%d", m.fmriTrialSigMaxTrialsPerRun)
+			}
+			hint = "Space to edit (0 disables)"
+		case optFmriTrialSigFixedEffectsWeighting:
+			label = "Fixed-Effects Weighting"
+			if m.fmriTrialSigFixedEffectsWeighting%2 == 1 {
+				value = "mean"
+			} else {
+				value = "variance"
+			}
+			hint = "Space to toggle"
+		case optFmriTrialSigWriteTrialBetas:
+			label = "Write Trial Betas"
+			value = m.boolToOnOff(m.fmriTrialSigWriteTrialBetas)
+			hint = "Space to toggle"
+		case optFmriTrialSigWriteTrialVariances:
+			label = "Write Trial Variances"
+			value = m.boolToOnOff(m.fmriTrialSigWriteTrialVariances)
+			hint = "Space to toggle"
+		case optFmriTrialSigWriteConditionBetas:
+			label = "Write Condition Betas"
+			value = m.boolToOnOff(m.fmriTrialSigWriteConditionBetas)
+			hint = "Space to toggle"
+		case optFmriTrialSigSignatureNPS:
+			label = "Signature: NPS"
+			value = m.boolToOnOff(m.fmriTrialSigSignatureNPS)
+			hint = "Space to toggle"
+		case optFmriTrialSigSignatureSIIPS1:
+			label = "Signature: SIIPS1"
+			value = m.boolToOnOff(m.fmriTrialSigSignatureSIIPS1)
+			hint = "Space to toggle"
+		case optFmriTrialSigLssOtherRegressors:
+			label = "LSS Other Trials"
+			if m.fmriTrialSigLssOtherRegressorsIndex%2 == 1 {
+				value = "all"
+			} else {
+				value = "per-condition"
+			}
+			hint = "Space to toggle"
 		}
 
 		line := cursor + labelStyle.Render(label) + " " + valueStyle.Render(value)

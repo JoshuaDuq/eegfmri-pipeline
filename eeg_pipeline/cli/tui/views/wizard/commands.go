@@ -2584,6 +2584,36 @@ func (m Model) buildMLAdvancedArgs() []string {
 		args = append(args, "--target", strings.TrimSpace(m.mlTarget))
 	}
 
+	if strings.EqualFold(strings.TrimSpace(m.mlTarget), "fmri_signature") {
+		methods := []string{"beta-series", "lss"}
+		args = append(args, "--fmri-signature-method", methods[m.mlFmriSigMethodIndex%len(methods)])
+
+		contrast := strings.TrimSpace(m.mlFmriSigContrastName)
+		if contrast != "" && contrast != "pain_vs_nonpain" {
+			args = append(args, "--fmri-signature-contrast-name", contrast)
+		}
+
+		sigs := []string{"NPS", "SIIPS1"}
+		args = append(args, "--fmri-signature-name", sigs[m.mlFmriSigSignatureIndex%len(sigs)])
+
+		metrics := []string{"dot", "cosine", "pearson_r"}
+		args = append(args, "--fmri-signature-metric", metrics[m.mlFmriSigMetricIndex%len(metrics)])
+
+		norms := []string{
+			"none",
+			"zscore_within_run",
+			"zscore_within_subject",
+			"robust_zscore_within_run",
+			"robust_zscore_within_subject",
+		}
+		if m.mlFmriSigNormalizationIndex%len(norms) != 0 {
+			args = append(args, "--fmri-signature-normalization", norms[m.mlFmriSigNormalizationIndex%len(norms)])
+		}
+		if m.mlFmriSigRoundDecimals != 3 {
+			args = append(args, "--fmri-signature-round-decimals", fmt.Sprintf("%d", m.mlFmriSigRoundDecimals))
+		}
+	}
+
 	if mode == "classify" && m.mlBinaryThresholdEnabled {
 		args = append(args, "--binary-threshold", fmt.Sprintf("%.6g", m.mlBinaryThreshold))
 	}
@@ -2979,6 +3009,12 @@ func (m Model) buildFmriAdvancedArgs() []string {
 func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	ab := newArgBuilder()
 
+	mode := "first-level"
+	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+		mode = m.modeOptions[m.modeIndex]
+	}
+	isFirstLevel := mode == "first-level"
+
 	inputSource := "fmriprep"
 	if m.fmriAnalysisInputSourceIndex%2 == 1 {
 		inputSource = "bids_raw"
@@ -3006,7 +3042,7 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	// Contrast
 	ab.addIfNonEmpty("--contrast-name", strings.TrimSpace(m.fmriAnalysisContrastName))
 
-	if m.fmriAnalysisContrastType%2 == 1 {
+	if isFirstLevel && m.fmriAnalysisContrastType%2 == 1 {
 		ab.args = append(ab.args, "--contrast-type", "custom")
 		ab.addIfNonEmpty("--formula", strings.TrimSpace(m.fmriAnalysisFormula))
 	} else {
@@ -3025,6 +3061,7 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 
 	ab.args = append(ab.args, "--high-pass-hz", fmt.Sprintf("%.6f", m.fmriAnalysisHighPassHz))
 	ab.args = append(ab.args, "--low-pass-hz", fmt.Sprintf("%.6f", m.fmriAnalysisLowPassHz))
+	ab.args = append(ab.args, "--smoothing-fwhm", fmt.Sprintf("%.1f", m.fmriAnalysisSmoothingFwhm))
 
 	// Confounds / QC
 	confoundsOptions := []string{
@@ -3037,19 +3074,171 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		"motion24+wmcsf+fd",
 	}
 	ab.args = append(ab.args, "--confounds-strategy", confoundsOptions[m.fmriAnalysisConfoundsStrategy%len(confoundsOptions)])
-	if m.fmriAnalysisWriteDesignMatrix {
+	if isFirstLevel {
+		ab.addIfNonEmpty("--events-to-model", strings.TrimSpace(m.fmriAnalysisEventsToModel))
+	}
+	if isFirstLevel && m.fmriAnalysisWriteDesignMatrix {
 		ab.args = append(ab.args, "--write-design-matrix")
 	}
 
 	// Output
-	outTypeOptions := []string{"z-score", "t-stat", "cope", "beta"}
-	ab.args = append(ab.args, "--output-type", outTypeOptions[m.fmriAnalysisOutputType%len(outTypeOptions)])
-
 	ab.addIfNonEmpty("--output-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisOutputDir)))
 
-	if m.fmriAnalysisResampleToFS {
-		ab.args = append(ab.args, "--resample-to-freesurfer")
-		ab.addIfNonEmpty("--freesurfer-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisFreesurferDir)))
+	if isFirstLevel {
+		outTypeOptions := []string{"z-score", "t-stat", "cope", "beta"}
+		ab.args = append(ab.args, "--output-type", outTypeOptions[m.fmriAnalysisOutputType%len(outTypeOptions)])
+
+		if m.fmriAnalysisResampleToFS {
+			ab.args = append(ab.args, "--resample-to-freesurfer")
+			ab.addIfNonEmpty("--freesurfer-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisFreesurferDir)))
+		}
+	}
+
+	// Trial-wise signatures (beta-series / lss)
+	if !isFirstLevel {
+		if !m.fmriTrialSigIncludeOtherEvents {
+			ab.args = append(ab.args, "--no-include-other-events")
+		}
+		if m.fmriTrialSigMaxTrialsPerRun > 0 {
+			ab.args = append(ab.args, "--max-trials-per-run", fmt.Sprintf("%d", m.fmriTrialSigMaxTrialsPerRun))
+		}
+		weighting := []string{"variance", "mean"}
+		if m.fmriTrialSigFixedEffectsWeighting%len(weighting) != 0 {
+			ab.args = append(ab.args, "--fixed-effects-weighting", weighting[m.fmriTrialSigFixedEffectsWeighting%len(weighting)])
+		}
+		if m.fmriTrialSigWriteTrialBetas {
+			ab.args = append(ab.args, "--write-trial-betas")
+		} else {
+			ab.args = append(ab.args, "--no-write-trial-betas")
+		}
+		if m.fmriTrialSigWriteTrialVariances {
+			ab.args = append(ab.args, "--write-trial-variances")
+		} else {
+			ab.args = append(ab.args, "--no-write-trial-variances")
+		}
+		if !m.fmriTrialSigWriteConditionBetas {
+			ab.args = append(ab.args, "--no-write-condition-betas")
+		}
+
+		// Signatures: only emit flag if subset selected
+		var sigs []string
+		if m.fmriTrialSigSignatureNPS {
+			sigs = append(sigs, "NPS")
+		}
+		if m.fmriTrialSigSignatureSIIPS1 {
+			sigs = append(sigs, "SIIPS1")
+		}
+		if len(sigs) > 0 && len(sigs) < 2 {
+			ab.args = append(ab.args, "--signatures")
+			ab.args = append(ab.args, sigs...)
+		}
+
+		if mode == "lss" && m.fmriTrialSigLssOtherRegressorsIndex%2 == 1 {
+			ab.args = append(ab.args, "--lss-other-regressors", "all")
+		}
+
+		if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
+			ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
+		}
+		roiNames := strings.Fields(strings.TrimSpace(m.fmriTrialSigRoiNames))
+		if len(roiNames) > 0 {
+			ab.args = append(ab.args, "--signature-roi")
+			ab.args = append(ab.args, roiNames...)
+		}
+
+		return ab.build()
+	}
+
+	// Plotting / Report (CLI defaults are off)
+	if m.fmriAnalysisPlotsEnabled {
+		ab.args = append(ab.args, "--plots")
+
+		if m.fmriAnalysisPlotHTML {
+			ab.args = append(ab.args, "--plot-html-report")
+		}
+
+		plotSpaceOptions := []string{"both", "native", "mni"}
+		ab.args = append(ab.args, "--plot-space", plotSpaceOptions[m.fmriAnalysisPlotSpaceIndex%len(plotSpaceOptions)])
+
+		thresholdModeOptions := []string{"z", "fdr", "none"}
+		ab.args = append(ab.args, "--plot-threshold-mode", thresholdModeOptions[m.fmriAnalysisPlotThresholdModeIndex%len(thresholdModeOptions)])
+
+		ab.args = append(ab.args, "--plot-z-threshold", fmt.Sprintf("%.2f", m.fmriAnalysisPlotZThreshold))
+		if m.fmriAnalysisPlotThresholdModeIndex%3 == 1 { // fdr
+			ab.args = append(ab.args, "--plot-fdr-q", fmt.Sprintf("%.3f", m.fmriAnalysisPlotFdrQ))
+		}
+		if m.fmriAnalysisPlotClusterMinVoxels > 0 {
+			ab.args = append(ab.args, "--plot-cluster-min-voxels", fmt.Sprintf("%d", m.fmriAnalysisPlotClusterMinVoxels))
+		}
+
+		vmaxModeOptions := []string{"per-space-robust", "shared-robust", "manual"}
+		ab.args = append(ab.args, "--plot-vmax-mode", vmaxModeOptions[m.fmriAnalysisPlotVmaxModeIndex%len(vmaxModeOptions)])
+		if m.fmriAnalysisPlotVmaxModeIndex%3 == 2 { // manual
+			ab.args = append(ab.args, "--plot-vmax", fmt.Sprintf("%.2f", m.fmriAnalysisPlotVmaxManual))
+		}
+
+		if !m.fmriAnalysisPlotIncludeUnthresholded {
+			ab.args = append(ab.args, "--no-plot-include-unthresholded")
+		}
+
+		if !m.fmriAnalysisPlotEffectSize {
+			ab.args = append(ab.args, "--plot-no-effect-size")
+		}
+		if !m.fmriAnalysisPlotStandardError {
+			ab.args = append(ab.args, "--plot-no-standard-error")
+		}
+		if !m.fmriAnalysisPlotMotionQC {
+			ab.args = append(ab.args, "--plot-no-motion-qc")
+		}
+		if !m.fmriAnalysisPlotCarpetQC {
+			ab.args = append(ab.args, "--plot-no-carpet-qc")
+		}
+		if !m.fmriAnalysisPlotTSNRQC {
+			ab.args = append(ab.args, "--plot-no-tsnr-qc")
+		}
+		if !m.fmriAnalysisPlotDesignQC {
+			ab.args = append(ab.args, "--plot-no-design-qc")
+		}
+		if !m.fmriAnalysisPlotEmbedImages {
+			ab.args = append(ab.args, "--plot-no-embed-images")
+		}
+		if !m.fmriAnalysisPlotSignatures {
+			ab.args = append(ab.args, "--plot-no-signatures")
+		} else if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
+			ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
+		}
+
+		// Formats: require at least one
+		var formats []string
+		if m.fmriAnalysisPlotFormatPNG {
+			formats = append(formats, "png")
+		}
+		if m.fmriAnalysisPlotFormatSVG {
+			formats = append(formats, "svg")
+		}
+		if len(formats) > 0 {
+			ab.args = append(ab.args, "--plot-formats")
+			ab.args = append(ab.args, formats...)
+		}
+
+		// Plot types: require at least one
+		var plotTypes []string
+		if m.fmriAnalysisPlotTypeSlices {
+			plotTypes = append(plotTypes, "slices")
+		}
+		if m.fmriAnalysisPlotTypeGlass {
+			plotTypes = append(plotTypes, "glass")
+		}
+		if m.fmriAnalysisPlotTypeHist {
+			plotTypes = append(plotTypes, "hist")
+		}
+		if m.fmriAnalysisPlotTypeClusters {
+			plotTypes = append(plotTypes, "clusters")
+		}
+		if len(plotTypes) > 0 {
+			ab.args = append(ab.args, "--plot-types")
+			ab.args = append(ab.args, plotTypes...)
+		}
 	}
 
 	return ab.build()
