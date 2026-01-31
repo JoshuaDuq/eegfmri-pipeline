@@ -26,18 +26,18 @@ const (
 const (
 	tickInterval = 150 * time.Millisecond
 
-	contentWidthPadding     = 6
-	separatorWidthPadding   = 4
-	maxSeparatorWidth       = 55
-	minMainContentHeight    = 10
-	headerHeightPadding     = 3
-	footerHeightPadding     = 2
-	optionNameWidth         = 20
-	cloudPanelWidthPadding  = 10
-	footerWidthPadding      = 8
-	maxErrorMsgLength       = 40
-	helpOverlayWidth        = 45
-	labelStyleWidth         = 15
+	contentWidthPadding    = 6
+	separatorWidthPadding  = 4
+	maxSeparatorWidth      = 55
+	minMainContentHeight   = 10
+	headerHeightPadding    = 3
+	footerHeightPadding    = 2
+	optionNameWidth        = 20
+	cloudPanelWidthPadding = 10
+	footerWidthPadding     = 8
+	maxErrorMsgLength      = 40
+	helpOverlayWidth       = 45
+	labelStyleWidth        = 15
 )
 
 const (
@@ -84,10 +84,10 @@ type Model struct {
 	width    int
 	height   int
 
-	CloudConfig        cloud.Config
-	VMStatus           string
-	VMHostname         string
-	VMError            error
+	CloudConfig           cloud.Config
+	VMStatus              string
+	VMHostname            string
+	VMError               error
 	showCloudConfirmation bool
 
 	helpOverlay components.HelpOverlay

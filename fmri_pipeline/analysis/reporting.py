@@ -73,6 +73,44 @@ def _discover_design_matrix_qc(contrast_dir: Path) -> List[Tuple[Optional[Path],
     return out
 
 
+def _vif_from_design(X: "np.ndarray") -> "np.ndarray":
+    """
+    Variance inflation factor per column of design matrix X (n_samples, n_features).
+
+    VIF_j = 1 / (1 - R²_j), where R²_j is from regressing column j on all other columns.
+    Returns inf where R² >= 1 (perfect collinearity) or computation fails.
+    """
+    import numpy as np
+
+    n, p = X.shape
+    if p < 2:
+        return np.array([], dtype=np.float64)
+
+    vif = np.full(p, np.nan, dtype=np.float64)
+    for j in range(p):
+        y = X[:, j]
+        Z = np.delete(X, j, axis=1)
+        Z_const = np.column_stack([np.ones(n, dtype=X.dtype), Z])
+        try:
+            beta, residuals, rank, _ = np.linalg.lstsq(Z_const, y, rcond=None)
+            if residuals.size:
+                ss_res = float(residuals.flat[0])
+            else:
+                ss_res = float(np.sum((y - Z_const @ beta) ** 2))
+            ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+            if ss_tot <= 0:
+                vif[j] = np.inf
+                continue
+            r_sq = 1.0 - (ss_res / ss_tot)
+            if r_sq >= 1.0 or np.isnan(r_sq):
+                vif[j] = np.inf
+            else:
+                vif[j] = 1.0 / (1.0 - r_sq)
+        except Exception:
+            vif[j] = np.inf
+    return vif
+
+
 def generate_carpet_qc_images(
     *,
     contrast_dir: Path,
@@ -1315,6 +1353,19 @@ def run_fmri_plotting_and_report(
                             cond = float(s.max() / s.min())
                     except Exception:
                         cond = None
+                    # Variance inflation factor (max over regressors)
+                    max_vif = None
+                    max_vif_regressor = ""
+                    if X.shape[1] >= 2:
+                        vifs = _vif_from_design(X)
+                        finite = np.isfinite(vifs)
+                        if np.any(finite):
+                            idx_max = int(np.nanargmax(np.where(finite, vifs, -1)))
+                            max_vif = float(vifs[idx_max])
+                            max_vif_regressor = cols[idx_max] if idx_max < len(cols) else ""
+                        elif np.any(~np.isnan(vifs)):
+                            max_vif = np.inf
+                            max_vif_regressor = ""
                     rows.append(
                         {
                             "design_matrix": tsv.name,
@@ -1322,6 +1373,8 @@ def run_fmri_plotting_and_report(
                             "max_abs_corr": float(abs(max_corr)) if max_corr is not None else None,
                             "top_corr_pair": top_pair,
                             "condition_number": cond,
+                            "max_vif": max_vif,
+                            "max_vif_regressor": max_vif_regressor,
                         }
                     )
                 if rows:
@@ -1338,7 +1391,7 @@ def run_fmri_plotting_and_report(
                             title="Design Matrix Sanity (per run)",
                             tsv_path=tsv_out,
                             html_table=html_table,
-                            caption="High correlations or large condition numbers indicate collinearity/instability.",
+                            caption="High max_abs_corr, condition_number, or max_vif (variance inflation factor) indicate collinearity/instability.",
                         )
                     )
     except Exception as exc:

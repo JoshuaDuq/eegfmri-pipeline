@@ -42,7 +42,7 @@ const (
 	ExecMetricsDashboardLines  = 8
 	ExecCompletionSummaryLines = 14
 	ExecCopyModeBannerLines    = 1
-	ExecSearchInputLines = 1
+	ExecSearchInputLines       = 1
 
 	MaxRecentErrors = 5
 )

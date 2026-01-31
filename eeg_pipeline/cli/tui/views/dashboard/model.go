@@ -417,4 +417,3 @@ func (m Model) renderFooter() string {
 
 	return styles.FooterStyle.Render(hintsText)
 }
-
