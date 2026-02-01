@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eeg-pipeline/tui/animation"
 	"github.com/eeg-pipeline/tui/components"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
@@ -548,6 +549,8 @@ const (
 	textFieldFmriAnalysisFreesurferDir
 	textFieldFmriAnalysisSignatureDir
 	textFieldFmriAnalysisSignatureRoiNames
+	textFieldFmriTrialSigGroupColumn
+	textFieldFmriTrialSigGroupValues
 	textFieldRawMontage
 	textFieldPrepMontage
 	textFieldPrepChTypes
@@ -1034,6 +1037,7 @@ type Model struct {
 
 	// fMRI trial-wise signatures configuration (beta-series, LSS)
 	fmriTrialSigGroupExpanded           bool
+	fmriTrialSigMethodIndex             int // 0: beta-series, 1: lss
 	fmriTrialSigIncludeOtherEvents      bool
 	fmriTrialSigMaxTrialsPerRun         int // 0 = no cap
 	fmriTrialSigFixedEffectsWeighting   int // 0: variance, 1: mean
@@ -1045,6 +1049,10 @@ type Model struct {
 	fmriTrialSigLssOtherRegressorsIndex int // 0: per-condition, 1: all
 	// ROI-restricted signature expression (atlas/labels from config; only ROI names configurable in TUI)
 	fmriTrialSigRoiNames string // space-separated ROI names, or "all"; empty = no ROI readouts
+	// Signature grouping (compute signatures for specific values within an events column)
+	fmriTrialSigGroupColumn     string // e.g., temperature
+	fmriTrialSigGroupValuesSpec string // space-separated values (e.g., "44.3 45.3 46.3")
+	fmriTrialSigGroupScopeIndex int    // 0: across-runs (average), 1: per-run
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
 	plotGroupDefaultsExpanded    bool
@@ -1299,7 +1307,10 @@ type Model struct {
 	showHelp    bool
 
 	// Animation
-	ticker int
+	ticker               int
+	animQueue            animation.Queue
+	subjectLoadingSpinner components.Spinner
+	plotLoadingSpinner    components.Spinner
 
 	width  int
 	height int
@@ -1552,6 +1563,7 @@ type Model struct {
 	sourceLocFmriThreshold     float64 // Threshold (e.g., z>=3.1)
 	sourceLocFmriTail          int     // 0: pos, 1: abs
 	sourceLocFmriMinClusterVox int     // Minimum cluster size (voxels)
+	sourceLocFmriMinClusterMM3 float64 // Minimum cluster volume (mm^3); preferred when > 0
 	sourceLocFmriMaxClusters   int     // Max clusters retained
 	sourceLocFmriMaxVoxPerClus int     // Max voxels sampled per cluster
 	sourceLocFmriMaxTotalVox   int     // Max total voxels across clusters
@@ -1581,7 +1593,7 @@ type Model struct {
 	sourceLocFmriDriftModel        int      // 0: none, 1: cosine, 2: polynomial
 	sourceLocFmriHighPassHz        float64  // High-pass cutoff (Hz)
 	sourceLocFmriLowPassHz         float64  // Low-pass cutoff (Hz)
-	sourceLocFmriClusterCorrection bool     // Enable cluster-level FWE correction
+	sourceLocFmriClusterCorrection bool     // Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction)
 	sourceLocFmriClusterPThreshold float64  // Cluster-forming p-threshold
 	sourceLocFmriOutputType        int      // 0: z-score, 1: t-stat, 2: cope, 3: beta
 	sourceLocFmriResampleToFS      bool     // Auto-resample to FreeSurfer space
@@ -2287,6 +2299,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriThreshold:     3.1,
 		sourceLocFmriTail:          0, // 0: pos
 		sourceLocFmriMinClusterVox: 50,
+		sourceLocFmriMinClusterMM3: 400.0,
 		sourceLocFmriMaxClusters:   20,
 		sourceLocFmriMaxVoxPerClus: 2000,
 		sourceLocFmriMaxTotalVox:   20000,
@@ -2306,7 +2319,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriHrfModel:          0,     // 0: SPM
 		sourceLocFmriDriftModel:        1,     // 1: cosine
 		sourceLocFmriHighPassHz:        0.008, // 128s period
-		sourceLocFmriLowPassHz:         0.1,
+		sourceLocFmriLowPassHz:         0.0,
 		sourceLocFmriClusterCorrection: true,
 		sourceLocFmriClusterPThreshold: 0.001,
 		sourceLocFmriOutputType:        0, // 0: z-score
@@ -2943,11 +2956,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriGroupAdvancedExpanded = false
 
 	case types.PipelineFmriAnalysis:
-		m.modeOptions = []string{"first-level", "beta-series", "lss"}
+		m.modeOptions = []string{"first-level", "trial-signatures"}
 		m.modeDescriptions = []string{
 			"First-level GLM contrasts (per subject)",
-			"Trial-wise betas (one GLM per run) + NPS/SIIPS1 readouts",
-			"Least Squares Separate (one GLM per trial) + NPS/SIIPS1 readouts",
+			"Trial-wise betas + NPS/SIIPS1 readouts (beta-series or LSS)",
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectMode,
@@ -3016,6 +3028,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// Trial-wise signature defaults (used by beta-series / lss modes)
 		m.fmriTrialSigGroupExpanded = true
+		m.fmriTrialSigMethodIndex = 0 // beta-series
 		m.fmriTrialSigIncludeOtherEvents = true
 		m.fmriTrialSigMaxTrialsPerRun = 0
 		m.fmriTrialSigFixedEffectsWeighting = 0 // variance
@@ -3026,6 +3039,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriTrialSigSignatureSIIPS1 = true
 		m.fmriTrialSigLssOtherRegressorsIndex = 0 // per-condition
 		m.fmriTrialSigRoiNames = ""
+		m.fmriTrialSigGroupColumn = ""
+		m.fmriTrialSigGroupValuesSpec = ""
+		m.fmriTrialSigGroupScopeIndex = 0 // across-runs (average)
+
+		// Backward-compat: older configs used modeIndex 2=lss.
+		// New mode options are 0=first-level, 1=trial-signatures, with method selected separately.
+		if m.modeIndex == 2 {
+			m.modeIndex = 1
+			m.fmriTrialSigMethodIndex = 1 // lss
+		}
+		if m.modeIndex < 0 || m.modeIndex >= len(m.modeOptions) {
+			m.modeIndex = 0
+		}
 
 	case types.PipelineMergePsychoPyData:
 		m.modeOptions = []string{"merge-psychopy"}
@@ -3109,6 +3135,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 	// Set repository root for running Python commands
 	m.repoRoot = repoRoot
 
+	m.animQueue.Push(animation.CursorBlinkLoop())
+	m.subjectLoadingSpinner = components.NewSpinner("Loading subjects...")
+	m.plotLoadingSpinner = components.NewSpinner("Loading available feature plots...")
 	return m
 }
 
@@ -3119,13 +3148,22 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 type tickMsg struct{}
 
 func (m Model) Init() tea.Cmd {
-	return m.tick()
+	return tea.Batch(m.tick(), m.immediateTick())
+}
+
+func (m Model) immediateTick() tea.Cmd {
+	return tea.Tick(0, func(t time.Time) tea.Msg { return tickMsg{} })
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*styles.TickIntervalMs, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
+}
+
+// CursorBlinkVisible returns true when the cursor should be shown (blink on phase).
+func (m Model) CursorBlinkVisible() bool {
+	return m.animQueue.CursorVisible()
 }
 
 // IsEditing reports whether the wizard is currently in any interactive
@@ -3155,6 +3193,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		m.ticker++
+		m.animQueue.Tick()
+		m.subjectLoadingSpinner.Tick()
+		m.plotLoadingSpinner.Tick()
 		m.TickToast()
 		return m, m.tick()
 
@@ -4607,6 +4648,18 @@ func (m Model) getExpandedListLength() int {
 			return 1
 		}
 		return n
+	case expandedFmriTrialSigGroupColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedFmriTrialSigGroupValues:
+		n := len(m.GetFmriDiscoveredColumnValues(m.fmriTrialSigGroupColumn))
+		if n == 0 {
+			return 1
+		}
+		return n
 	case expandedItpcConditionValues:
 		if m.itpcConditionColumn == "" {
 			return 0
@@ -4728,6 +4781,20 @@ func (m Model) getExpandedListItems() []string {
 			return []string{"(type manually)"}
 		}
 		return vals
+	case expandedFmriTrialSigGroupColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedFmriTrialSigGroupValues:
+		if m.fmriTrialSigGroupColumn == "" {
+			return nil
+		}
+		vals := m.GetFmriDiscoveredColumnValues(m.fmriTrialSigGroupColumn)
+		if len(vals) == 0 {
+			return []string{"(type manually)"}
+		}
+		return vals
 	case expandedItpcConditionValues:
 		if m.itpcConditionColumn == "" {
 			return nil
@@ -4803,6 +4870,8 @@ func (m Model) isColumnValueSelected(value string) bool {
 		selectedValues = m.itpcConditionValues
 	case expandedConnConditionValues:
 		selectedValues = m.connConditionValues
+	case expandedFmriTrialSigGroupValues:
+		selectedValues = m.fmriTrialSigGroupValuesSpec
 	case expandedBehaviorScatterFeatures:
 		if m.editingPlotID != "" {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
@@ -5084,6 +5153,25 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
+	case expandedFmriTrialSigGroupColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriTrialSigGroupColumn)
+		} else {
+			m.fmriTrialSigGroupColumn = selectedItem
+			m.fmriTrialSigGroupValuesSpec = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriTrialSigGroupValues:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriTrialSigGroupValues)
+		} else {
+			m.toggleSpaceValue(selectedItem, &m.fmriTrialSigGroupValuesSpec)
+		}
 
 	case expandedItpcConditionValues:
 		m.toggleColumnValue(selectedItem, &m.itpcConditionValues)
@@ -5188,6 +5276,10 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optFmriAnalysisCondBColumn
 	case expandedFmriAnalysisCondBValue:
 		return opt == optFmriAnalysisCondBValue
+	case expandedFmriTrialSigGroupColumn:
+		return opt == optFmriTrialSigGroupColumn
+	case expandedFmriTrialSigGroupValues:
+		return opt == optFmriTrialSigGroupValues
 	case expandedItpcConditionValues:
 		return opt == optItpcConditionValues
 	case expandedConnConditionValues:
@@ -5250,8 +5342,11 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.fmriAnalysisCondBColumn == item
 	case expandedFmriAnalysisCondBValue:
 		return m.fmriAnalysisCondBValue == item
+	case expandedFmriTrialSigGroupColumn:
+		return m.fmriTrialSigGroupColumn == item
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
-		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues:
+		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues,
+		expandedFmriTrialSigGroupValues:
 		return m.isColumnValueSelected(item)
 	case expandedBehaviorScatterSegment:
 		// Check plot-specific config
@@ -5428,6 +5523,10 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisSignatureDir
 	case textFieldFmriAnalysisSignatureRoiNames:
 		return m.fmriTrialSigRoiNames
+	case textFieldFmriTrialSigGroupColumn:
+		return m.fmriTrialSigGroupColumn
+	case textFieldFmriTrialSigGroupValues:
+		return m.fmriTrialSigGroupValuesSpec
 	case textFieldRawMontage:
 		return m.rawMontage
 	case textFieldPrepMontage:
@@ -6026,6 +6125,11 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisSignatureDir = strings.TrimSpace(value)
 	case textFieldFmriAnalysisSignatureRoiNames:
 		m.fmriTrialSigRoiNames = strings.TrimSpace(value)
+	case textFieldFmriTrialSigGroupColumn:
+		m.fmriTrialSigGroupColumn = strings.TrimSpace(value)
+		m.fmriTrialSigGroupValuesSpec = "" // Reset values when column changes
+	case textFieldFmriTrialSigGroupValues:
+		m.fmriTrialSigGroupValuesSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldRawMontage:
 		m.rawMontage = value
 	case textFieldPrepMontage:
@@ -6626,6 +6730,7 @@ const (
 	optSourceLocFmriThreshold
 	optSourceLocFmriTail
 	optSourceLocFmriMinClusterVox
+	optSourceLocFmriMinClusterMM3
 	optSourceLocFmriMaxClusters
 	optSourceLocFmriMaxVoxPerClus
 	optSourceLocFmriMaxTotalVox
@@ -7288,6 +7393,7 @@ const (
 	optFmriAnalysisSignatureDir
 	// fMRI analysis trial-wise signatures options
 	optFmriTrialSigGroup
+	optFmriTrialSigMethod
 	optFmriTrialSigIncludeOtherEvents
 	optFmriTrialSigMaxTrialsPerRun
 	optFmriTrialSigFixedEffectsWeighting
@@ -7298,6 +7404,9 @@ const (
 	optFmriTrialSigSignatureSIIPS1
 	optFmriTrialSigLssOtherRegressors
 	optFmriTrialSigRoiNames
+	optFmriTrialSigGroupColumn
+	optFmriTrialSigGroupValues
+	optFmriTrialSigGroupScope
 	// System/global settings
 	optSystemNJobs
 	optSystemStrictMode
@@ -7340,6 +7449,8 @@ const (
 	expandedFmriAnalysisCondAValue     = 31
 	expandedFmriAnalysisCondBColumn    = 32
 	expandedFmriAnalysisCondBValue     = 33
+	expandedFmriTrialSigGroupColumn    = 34
+	expandedFmriTrialSigGroupValues    = 35
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -7557,12 +7668,15 @@ func (m Model) getFeaturesOptions() []optionType {
 						optSourceLocFmriRequireProvenance,
 						optSourceLocFmriThreshold,
 						optSourceLocFmriTail,
-						optSourceLocFmriMinClusterVox,
 						optSourceLocFmriMaxClusters,
 						optSourceLocFmriMaxVoxPerClus,
 						optSourceLocFmriMaxTotalVox,
 						optSourceLocFmriRandomSeed,
 					)
+					options = append(options, optSourceLocFmriMinClusterMM3)
+					if m.sourceLocFmriMinClusterMM3 <= 0 {
+						options = append(options, optSourceLocFmriMinClusterVox)
+					}
 					options = append(options, optSourceLocFmriContrastEnabled)
 					if m.sourceLocFmriContrastEnabled {
 						options = append(options, optSourceLocFmriContrastType)
@@ -7961,7 +8075,12 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 	} else {
 		options = append(options, optFmriTrialSigGroup)
 		if m.fmriTrialSigGroupExpanded {
+			trialMethod := "beta-series"
+			if m.fmriTrialSigMethodIndex%2 == 1 {
+				trialMethod = "lss"
+			}
 			options = append(options,
+				optFmriTrialSigMethod,
 				optFmriTrialSigIncludeOtherEvents,
 				optFmriTrialSigMaxTrialsPerRun,
 				optFmriTrialSigFixedEffectsWeighting,
@@ -7972,8 +8091,11 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 				optFmriTrialSigSignatureSIIPS1,
 				optFmriAnalysisSignatureDir,
 				optFmriTrialSigRoiNames,
+				optFmriTrialSigGroupColumn,
+				optFmriTrialSigGroupValues,
+				optFmriTrialSigGroupScope,
 			)
-			if mode == "lss" {
+			if trialMethod == "lss" {
 				options = append(options, optFmriTrialSigLssOtherRegressors)
 			}
 		}

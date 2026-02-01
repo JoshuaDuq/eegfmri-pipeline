@@ -1346,7 +1346,8 @@ def resample_to_freesurfer(
         contrast_map,
         target_img,
         interpolation=interpolation,
-        copy_header=False,
+        force_resample=True,
+        copy_header=True,
     )
 
     return resampled
@@ -1358,6 +1359,7 @@ def _cluster_extent_mask_from_z_map(
     p_threshold: float,
     tail: str,
     min_cluster_voxels: int,
+    min_cluster_volume_mm3: Optional[float] = None,
 ) -> "Nifti1Image":
     """Create a cluster-extent thresholded mask from a z-stat image.
 
@@ -1389,6 +1391,17 @@ def _cluster_extent_mask_from_z_map(
 
     img = nib.load(str(z_img)) if isinstance(z_img, (str, Path)) else z_img
     data = np.asarray(img.get_fdata(dtype=np.float32))
+
+    voxel_vol_mm3 = None
+    try:
+        zooms = img.header.get_zooms()
+        if len(zooms) >= 3:
+            voxel_vol_mm3 = float(abs(float(zooms[0]) * float(zooms[1]) * float(zooms[2])))
+            if not np.isfinite(voxel_vol_mm3) or voxel_vol_mm3 <= 0:
+                voxel_vol_mm3 = None
+    except Exception:
+        voxel_vol_mm3 = None
+
     finite = np.isfinite(data)
     if tail == "abs":
         seed = finite & (np.abs(data) >= z_thr)
@@ -1405,8 +1418,13 @@ def _cluster_extent_mask_from_z_map(
     keep = np.zeros_like(seed, dtype=bool)
     for cluster_id in range(1, int(n_clusters) + 1):
         vox = (labeled == cluster_id)
-        if int(np.sum(vox)) >= int(min_cluster_voxels):
-            keep |= vox
+        n_vox = int(np.sum(vox))
+        if min_cluster_volume_mm3 is not None and voxel_vol_mm3 is not None:
+            if (float(n_vox) * float(voxel_vol_mm3)) >= float(min_cluster_volume_mm3):
+                keep |= vox
+        else:
+            if n_vox >= int(min_cluster_voxels):
+                keep |= vox
 
     mask_u8 = keep.astype(np.uint8)
     return nib.Nifti1Image(mask_u8, img.affine, img.header)
@@ -1487,9 +1505,18 @@ def build_fmri_contrast(
             fmri_cfg = src_cfg.get("fmri", {}) if isinstance(src_cfg, dict) else {}
             tail = str(fmri_cfg.get("tail", "pos")).strip().lower()
             min_cluster_voxels = int(fmri_cfg.get("cluster_min_voxels", 50))
+            min_cluster_volume_mm3 = fmri_cfg.get("cluster_min_volume_mm3", None)
+            try:
+                if min_cluster_volume_mm3 is not None:
+                    min_cluster_volume_mm3 = float(min_cluster_volume_mm3)
+                    if not np.isfinite(min_cluster_volume_mm3) or min_cluster_volume_mm3 <= 0:
+                        min_cluster_volume_mm3 = None
+            except Exception:
+                min_cluster_volume_mm3 = None
         except Exception:
             tail = "pos"
             min_cluster_voxels = 50
+            min_cluster_volume_mm3 = None
 
         try:
             mask_img = _cluster_extent_mask_from_z_map(
@@ -1497,6 +1524,7 @@ def build_fmri_contrast(
                 p_threshold=cfg.cluster_p_threshold,
                 tail=tail,
                 min_cluster_voxels=min_cluster_voxels,
+                min_cluster_volume_mm3=min_cluster_volume_mm3,
             )
             mask_name = f"{sub_label}_{cfg.name}_mask_cluster_{contrast_hash}.nii.gz"
             mask_path = output_dir / mask_name

@@ -55,6 +55,39 @@ def _maybe_import_nilearn_image():
         return None
 
 
+def _maybe_resample_to_img(
+    *,
+    moving_img: Any,
+    target_img: Any,
+    interpolation: str,
+) -> Any:
+    """
+    Best-effort resampling of a NIfTI image onto a target image grid.
+
+    Uses nilearn when available; falls back to nibabel when possible.
+    Raises ValueError on failure (to avoid silent scientific invalidity).
+    """
+    nilearn_image = _maybe_import_nilearn_image()
+    if nilearn_image is not None:
+        return nilearn_image.resample_to_img(
+            moving_img,
+            target_img,
+            interpolation=interpolation,
+            force_resample=True,
+            copy_header=True,
+        )
+
+    try:
+        from nibabel.processing import resample_from_to  # type: ignore
+
+        order = 0 if interpolation == "nearest" else 1
+        return resample_from_to(moving_img, (target_img.shape, target_img.affine), order=order)
+    except Exception as exc:
+        raise ValueError(
+            "Could not resample image to target grid (missing nilearn and/or resampling backend)."
+        ) from exc
+
+
 def _flatten_masked_pairs(
     *,
     img_data: Any,
@@ -122,6 +155,7 @@ def compute_pain_signature_expression(
     signature_root: Path,
     mask_img: Optional[Any] = None,
     signatures: Optional[Sequence[str]] = None,
+    resampling: str = "image_to_weights",
 ) -> List[PainSignatureResult]:
     """
     Compute multivariate pain signature expression (best-effort).
@@ -129,7 +163,10 @@ def compute_pain_signature_expression(
     Scientific notes:
     - Intended for MNI-space images when using the provided NPS/SIIPS1 weight maps.
     - Returns both dot-product (pattern expression) and Pearson correlation (scale-invariant).
-    - Uses intersection of finite voxels and an optional analysis mask.
+    - Uses intersection of finite voxels and an optional analysis mask (resampled as needed).
+    - Resampling strategy matters for comparability across signatures/resolutions:
+        * resampling="image_to_weights" (default): resample the target image (and mask) to each signature's grid.
+        * resampling="weights_to_image": resample each signature's weights (and mask) to the target image grid.
     """
     nib = _maybe_import_nibabel()
     if nib is None:
@@ -141,40 +178,104 @@ def compute_pain_signature_expression(
     if not files:
         return []
 
-    # Load target image data
+    resampling = str(resampling or "image_to_weights").strip().lower().replace("-", "_")
+    if resampling not in {"image_to_weights", "weights_to_image"}:
+        raise ValueError("resampling must be one of: image_to_weights, weights_to_image")
+
+    # Load target image
     img = stat_or_effect_img
     if isinstance(img, (str, Path)):
         img = nib.load(str(img))
 
-    nilearn_image = _maybe_import_nilearn_image()
     results: List[PainSignatureResult] = []
 
-    mask_data = None
+    m = None
     if mask_img is not None:
         m = mask_img
         if isinstance(m, (str, Path)):
             m = nib.load(str(m))
-        try:
-            mask_data = m.get_fdata().astype(bool)
-        except Exception:
-            mask_data = None
-
-    img_data = img.get_fdata()
 
     for name, w_path in files.items():
         try:
             w_img = nib.load(str(w_path))
-            # Resample weights to the target image grid when possible
-            if nilearn_image is not None:
-                try:
-                    w_img = nilearn_image.resample_to_img(w_img, img, interpolation="continuous")
-                except Exception:
-                    pass
-            w_data = w_img.get_fdata()
+            if resampling == "image_to_weights":
+                # Preferred: resample subject/stat image to signature grid.
+                x_img = img
+                if tuple(getattr(x_img, "shape", ())) != tuple(getattr(w_img, "shape", ())):
+                    x_img = _maybe_resample_to_img(moving_img=x_img, target_img=w_img, interpolation="continuous")
+                else:
+                    try:
+                        import numpy as np
 
-            if w_data.shape != img_data.shape:
+                        if not np.allclose(x_img.affine, w_img.affine):
+                            x_img = _maybe_resample_to_img(moving_img=x_img, target_img=w_img, interpolation="continuous")
+                    except Exception:
+                        x_img = _maybe_resample_to_img(moving_img=x_img, target_img=w_img, interpolation="continuous")
+
+                mask_data = None
+                if m is not None:
+                    mask_on_ref = m
+                    if tuple(getattr(mask_on_ref, "shape", ())) != tuple(getattr(w_img, "shape", ())):
+                        mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=w_img, interpolation="nearest")
+                    else:
+                        try:
+                            import numpy as np
+
+                            if not np.allclose(mask_on_ref.affine, w_img.affine):
+                                mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=w_img, interpolation="nearest")
+                        except Exception:
+                            mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=w_img, interpolation="nearest")
+                    try:
+                        mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
+                    except Exception:
+                        mask_data = None
+
+                img_data = x_img.get_fdata()
+                w_data = w_img.get_fdata()
+            else:
+                # Backward-compatible: resample signature weights to the target image grid.
+                w_on_ref = w_img
+                if tuple(getattr(w_on_ref, "shape", ())) != tuple(getattr(img, "shape", ())):
+                    w_on_ref = _maybe_resample_to_img(moving_img=w_on_ref, target_img=img, interpolation="continuous")
+                else:
+                    try:
+                        import numpy as np
+
+                        if not np.allclose(w_on_ref.affine, img.affine):
+                            w_on_ref = _maybe_resample_to_img(moving_img=w_on_ref, target_img=img, interpolation="continuous")
+                    except Exception:
+                        w_on_ref = _maybe_resample_to_img(moving_img=w_on_ref, target_img=img, interpolation="continuous")
+
+                mask_data = None
+                if m is not None:
+                    mask_on_ref = m
+                    if tuple(getattr(mask_on_ref, "shape", ())) != tuple(getattr(img, "shape", ())):
+                        mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=img, interpolation="nearest")
+                    else:
+                        try:
+                            import numpy as np
+
+                            if not np.allclose(mask_on_ref.affine, img.affine):
+                                mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=img, interpolation="nearest")
+                        except Exception:
+                            mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=img, interpolation="nearest")
+                    try:
+                        mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
+                    except Exception:
+                        mask_data = None
+
+                img_data = img.get_fdata()
+                w_data = w_on_ref.get_fdata()
+
+            if tuple(getattr(w_data, "shape", ())) != tuple(getattr(img_data, "shape", ())):
                 # Can't align => skip (avoids scientifically invalid comparisons)
                 continue
+
+            if mask_data is not None and tuple(getattr(mask_data, "shape", ())) != tuple(getattr(img_data, "shape", ())):
+                raise ValueError(
+                    f"Mask grid mismatch for signature {name}: "
+                    f"mask_shape={getattr(mask_data,'shape',None)} img_shape={getattr(img_data,'shape',None)}"
+                )
 
             x_vec, w_vec = _flatten_masked_pairs(img_data=img_data, w_data=w_data, mask_data=mask_data)
             if not x_vec:
@@ -196,7 +297,10 @@ def compute_pain_signature_expression(
                     pearson_r=r,
                 )
             )
-        except Exception:
+        except Exception as exc:
+            # Avoid silently masking/mixing mismatched grids.
+            if isinstance(exc, ValueError) and "Mask grid mismatch" in str(exc):
+                raise
             continue
 
     return results

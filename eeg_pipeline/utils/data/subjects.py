@@ -112,12 +112,19 @@ def _has_feature_files(directory: Path) -> bool:
 
 
 def _extract_subject_id_from_features_path(features_path: Path) -> Optional[str]:
-    """Extract subject ID from features directory path."""
+    """Extract subject ID from features directory path.
+
+    Supports:
+    - deriv_root/sub-XXX/eeg/features  (parts[-3] = sub-XXX)
+    - deriv_root/preprocessed/eeg/sub-XXX/features  (parts[-2] = sub-XXX)
+    """
     try:
-        sub_dir_name = features_path.parts[-3]
-        return sub_dir_name.replace("sub-", "")
+        for part in reversed(features_path.parts):
+            if part.startswith("sub-"):
+                return part.replace("sub-", "", 1)
     except (IndexError, AttributeError):
-        return None
+        pass
+    return None
 
 
 def _resolve_source_root(config: EEGConfig, bids_root: Optional[Path]) -> Optional[Path]:

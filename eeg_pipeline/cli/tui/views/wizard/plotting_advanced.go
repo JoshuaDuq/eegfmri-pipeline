@@ -10,16 +10,11 @@ import (
 )
 
 const (
-	// UI layout constants
 	defaultViewHeight        = 40
 	headerOverheadLines      = 10
 	minimumVisibleLines      = 8
 	initialLineCapacity      = 256
 	maxAvailableItemsDisplay = 4
-
-	// Cursor animation
-	accentFrameCount = 4
-	accentFrameStep  = 3
 )
 
 // plotDefaults holds all default values from eeg_config.yaml plotting section
@@ -399,19 +394,11 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 }
 
 func (m Model) renderPlottingAdvancedHeader(builder *strings.Builder) {
-	accentFrames := []string{"◆", "◇", "◆", "◈"}
-	frameIndex := (m.ticker / accentFrameStep) % accentFrameCount
 	accent := lipgloss.NewStyle().
 		Foreground(styles.Accent).
 		Bold(true).
-		Render(accentFrames[frameIndex])
-
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Primary).
-		MarginLeft(1)
-
-	builder.WriteString(accent + titleStyle.Render(" ADVANCED PLOT SETTINGS") + "\n\n")
+		Render(styles.SelectedMark + " ")
+	builder.WriteString(accent + styles.SectionTitleStyle.Render("Advanced plot settings") + "\n\n")
 }
 
 func (m Model) renderMinimalView(builder *strings.Builder) string {
@@ -427,10 +414,10 @@ func (m Model) renderMinimalView(builder *strings.Builder) string {
 	labelStyle := m.buildLabelStyle(labelWidth, isFocused)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
-	builder.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
+	builder.WriteString(cursor + labelStyle.Render("configuration:") + " " + valueStyle.Render("using defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
 
 	tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
-	builder.WriteString("\n" + tipStyle.Render("Tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
+	builder.WriteString("\n" + tipStyle.Render("tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
 	return builder.String()
 }
 
@@ -536,7 +523,7 @@ func (m Model) isOptionDisabled(opt optionType) bool {
 
 func (m Model) renderCursor(isFocused bool) string {
 	if isFocused {
-		return lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+		return styles.RenderCursorOptional(m.CursorBlinkVisible())
 	}
 	return "  "
 }
@@ -602,9 +589,6 @@ func (m Model) buildValueStyle(opt optionType) lipgloss.Style {
 func (m Model) renderSectionLine(label string, focused bool) renderLine {
 	cursor := m.renderCursor(focused)
 	style := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-	if focused {
-		style = style.Underline(true)
-	}
 	return renderLine{text: cursor + style.Render(label)}
 }
 

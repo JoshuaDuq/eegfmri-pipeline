@@ -77,6 +77,7 @@ class FMRIConstraintConfig:
     fdr_q: float
     stat_type: str  # "z" only (required)
     cluster_min_voxels: int
+    cluster_min_volume_mm3: Optional[float]
     max_clusters: int
     max_voxels_per_cluster: int
     max_total_voxels: int
@@ -194,6 +195,15 @@ def _load_fmri_constraint_config(
             f"(got '{stat_type}')."
         )
 
+    cluster_min_volume_mm3 = fmri_cfg.get("cluster_min_volume_mm3", None)
+    try:
+        if cluster_min_volume_mm3 is not None:
+            cluster_min_volume_mm3 = float(cluster_min_volume_mm3)
+            if not np.isfinite(cluster_min_volume_mm3) or cluster_min_volume_mm3 <= 0:
+                cluster_min_volume_mm3 = None
+    except Exception:
+        cluster_min_volume_mm3 = None
+
     # Parse fMRI-specific time windows
     time_windows_cfg = fmri_cfg.get("time_windows", {}) or {}
     window_a = None
@@ -232,6 +242,7 @@ def _load_fmri_constraint_config(
         fdr_q=fdr_q,
         stat_type=stat_type,
         cluster_min_voxels=_safe_int(fmri_cfg.get("cluster_min_voxels", 50), 50),
+        cluster_min_volume_mm3=cluster_min_volume_mm3,
         max_clusters=_safe_int(fmri_cfg.get("max_clusters", 20), 20),
         max_voxels_per_cluster=_safe_int(fmri_cfg.get("max_voxels_per_cluster", 2000), 2000),
         max_total_voxels=_safe_int(fmri_cfg.get("max_total_voxels", 20000), 20000),
@@ -419,6 +430,16 @@ def _fmri_roi_coords_from_stats_map(
     data = np.asarray(img.get_fdata(dtype=np.float32))
     affine = np.asarray(img.affine, dtype=float)
 
+    voxel_vol_mm3 = None
+    try:
+        zooms = img.header.get_zooms()
+        if len(zooms) >= 3:
+            voxel_vol_mm3 = float(abs(float(zooms[0]) * float(zooms[1]) * float(zooms[2])))
+            if not np.isfinite(voxel_vol_mm3) or voxel_vol_mm3 <= 0:
+                voxel_vol_mm3 = None
+    except Exception:
+        voxel_vol_mm3 = None
+
     if data.ndim == 4:
         data = data[..., 0]
     if data.ndim != 3:
@@ -490,15 +511,23 @@ def _fmri_roi_coords_from_stats_map(
         if vox.size == 0:
             continue
         n_vox = int(vox.shape[0])
-        if n_vox < int(cfg.cluster_min_voxels):
-            continue
+        if cfg.cluster_min_volume_mm3 is not None and voxel_vol_mm3 is not None:
+            vol = float(n_vox) * float(voxel_vol_mm3)
+            if vol < float(cfg.cluster_min_volume_mm3):
+                continue
+        else:
+            if n_vox < int(cfg.cluster_min_voxels):
+                continue
         peak_val = float(np.nanmax(np.abs(data[labeled == cluster_id])))
         clusters.append((cluster_id, n_vox, peak_val))
 
     if not clusters:
-        raise ValueError(
-            f"All clusters were smaller than cluster_min_voxels={cfg.cluster_min_voxels}."
-        )
+        if cfg.cluster_min_volume_mm3 is not None and voxel_vol_mm3 is not None:
+            raise ValueError(
+                "All clusters were smaller than "
+                f"cluster_min_volume_mm3={float(cfg.cluster_min_volume_mm3):g} (voxel_vol_mm3={float(voxel_vol_mm3):g})."
+            )
+        raise ValueError(f"All clusters were smaller than cluster_min_voxels={cfg.cluster_min_voxels}.")
 
     clusters.sort(key=lambda t: (t[2], t[1]), reverse=True)
     clusters = clusters[: max(1, int(cfg.max_clusters))]

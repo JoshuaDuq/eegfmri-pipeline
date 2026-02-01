@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/eeg-pipeline/tui/animation"
+	"github.com/eeg-pipeline/tui/components"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/styles"
@@ -92,6 +95,10 @@ type Model struct {
 	statusMessage string
 	statusIsError bool
 
+	animQueue   animation.Queue
+	searchSpinner components.Spinner
+	saveSpinner   components.Spinner
+
 	Done bool
 }
 
@@ -117,7 +124,7 @@ func DefaultConfigKeys() []string {
 
 func New(repoRoot string) Model {
 	overridesPath := filepath.Join(repoRoot, "eeg_pipeline", "data", "derivatives", ".tui_overrides.json")
-	return Model{
+	m := Model{
 		repoRoot:      repoRoot,
 		overridesPath: overridesPath,
 		sections: []sectionDef{
@@ -127,6 +134,10 @@ func New(repoRoot string) Model {
 		},
 		isLoading: true,
 	}
+	m.animQueue.Push(animation.ProgressPulseLoop())
+	m.searchSpinner = components.NewSpinner("Searching for paths and configuration...")
+	m.saveSpinner = components.NewSpinner("Saving changes...")
+	return m
 }
 
 func (m *Model) SetSize(width, height int) {
@@ -187,8 +198,20 @@ func (m *Model) SetConfigValues(values map[string]interface{}) {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(m.tick(), m.immediateTick())
 }
+
+func (m Model) immediateTick() tea.Cmd {
+	return tea.Tick(0, func(t time.Time) tea.Msg { return tickMsg{} })
+}
+
+func (m Model) tick() tea.Cmd {
+	return tea.Tick(time.Millisecond*styles.TickIntervalMs, func(t time.Time) tea.Msg {
+		return tickMsg{}
+	})
+}
+
+type tickMsg struct{}
 
 // IsEditing reports whether the global setup view is currently editing a
 // configuration field. When true, global keybindings like quitting should
@@ -199,6 +222,11 @@ func (m Model) IsEditing() bool {
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tickMsg:
+		m.animQueue.Tick()
+		m.searchSpinner.Tick()
+		m.saveSpinner.Tick()
+		return m, m.tick()
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -261,7 +289,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	// Render header
-	title := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("◆ GLOBAL SETUP")
+	title := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Global setup")
 	section := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.sections[m.sectionIndex].label)
 	header := title + "  " + section
 	headerHeight := 3
@@ -281,7 +309,7 @@ func (m Model) View() string {
 	mainContent.WriteString(m.renderFields())
 
 	if m.isLoading {
-		mainContent.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render("  Searching for paths and configuration..."))
+		mainContent.WriteString("\n  " + m.searchSpinner.View())
 	}
 
 	if m.statusMessage != "" {
@@ -293,7 +321,7 @@ func (m Model) View() string {
 	}
 
 	if m.isSaving {
-		mainContent.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Saving changes..."))
+		mainContent.WriteString("\n  " + m.saveSpinner.View())
 	}
 
 	// Force main content to fill available height
@@ -322,14 +350,14 @@ func (m Model) renderFooter() string {
 		}
 	}
 
-	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, "  "))
+	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, styles.RenderFooterSeparator()))
 }
 
 func (m Model) renderFields() string {
 	var b strings.Builder
 	section := m.sections[m.sectionIndex]
 
-	b.WriteString(styles.SectionTitleStyle.Render(" "+strings.ToUpper(section.label)+" ") + "\n\n")
+	b.WriteString(styles.SectionTitleStyle.Render(" "+section.label+" ") + "\n\n")
 	if section.description != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(section.description) + "\n\n")
 	}

@@ -217,6 +217,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocFmriThreshold"] = m.sourceLocFmriThreshold
 	cfg["sourceLocFmriTail"] = m.sourceLocFmriTail
 	cfg["sourceLocFmriMinClusterVox"] = m.sourceLocFmriMinClusterVox
+	cfg["sourceLocFmriMinClusterMM3"] = m.sourceLocFmriMinClusterMM3
 	cfg["sourceLocFmriMaxClusters"] = m.sourceLocFmriMaxClusters
 	cfg["sourceLocFmriMaxVoxPerClus"] = m.sourceLocFmriMaxVoxPerClus
 	cfg["sourceLocFmriMaxTotalVox"] = m.sourceLocFmriMaxTotalVox
@@ -657,6 +658,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriAnalysisPlotSignatures"] = m.fmriAnalysisPlotSignatures
 	cfg["fmriAnalysisSignatureDir"] = m.fmriAnalysisSignatureDir
 	cfg["fmriTrialSigGroupExpanded"] = m.fmriTrialSigGroupExpanded
+	cfg["fmriTrialSigMethodIndex"] = m.fmriTrialSigMethodIndex
 	cfg["fmriTrialSigIncludeOtherEvents"] = m.fmriTrialSigIncludeOtherEvents
 	cfg["fmriTrialSigMaxTrialsPerRun"] = m.fmriTrialSigMaxTrialsPerRun
 	cfg["fmriTrialSigFixedEffectsWeighting"] = m.fmriTrialSigFixedEffectsWeighting
@@ -667,6 +669,9 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriTrialSigSignatureSIIPS1"] = m.fmriTrialSigSignatureSIIPS1
 	cfg["fmriTrialSigLssOtherRegressorsIndex"] = m.fmriTrialSigLssOtherRegressorsIndex
 	cfg["fmriTrialSigRoiNames"] = m.fmriTrialSigRoiNames
+	cfg["fmriTrialSigGroupColumn"] = m.fmriTrialSigGroupColumn
+	cfg["fmriTrialSigGroupValuesSpec"] = m.fmriTrialSigGroupValuesSpec
+	cfg["fmriTrialSigGroupScopeIndex"] = m.fmriTrialSigGroupScopeIndex
 
 	// ML pipeline
 	cfg["mlNPerm"] = m.mlNPerm
@@ -1170,6 +1175,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.sourceLocFmriThreshold = getFloat("sourceLocFmriThreshold", m.sourceLocFmriThreshold)
 	m.sourceLocFmriTail = getInt("sourceLocFmriTail", m.sourceLocFmriTail)
 	m.sourceLocFmriMinClusterVox = getInt("sourceLocFmriMinClusterVox", m.sourceLocFmriMinClusterVox)
+	m.sourceLocFmriMinClusterMM3 = getFloat("sourceLocFmriMinClusterMM3", m.sourceLocFmriMinClusterMM3)
 	m.sourceLocFmriMaxClusters = getInt("sourceLocFmriMaxClusters", m.sourceLocFmriMaxClusters)
 	m.sourceLocFmriMaxVoxPerClus = getInt("sourceLocFmriMaxVoxPerClus", m.sourceLocFmriMaxVoxPerClus)
 	m.sourceLocFmriMaxTotalVox = getInt("sourceLocFmriMaxTotalVox", m.sourceLocFmriMaxTotalVox)
@@ -1616,6 +1622,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fmriAnalysisPlotSignatures = getBool("fmriAnalysisPlotSignatures", m.fmriAnalysisPlotSignatures)
 	m.fmriAnalysisSignatureDir = getString("fmriAnalysisSignatureDir", m.fmriAnalysisSignatureDir)
 	m.fmriTrialSigGroupExpanded = getBool("fmriTrialSigGroupExpanded", m.fmriTrialSigGroupExpanded)
+	m.fmriTrialSigMethodIndex = getInt("fmriTrialSigMethodIndex", m.fmriTrialSigMethodIndex)
 	m.fmriTrialSigIncludeOtherEvents = getBool("fmriTrialSigIncludeOtherEvents", m.fmriTrialSigIncludeOtherEvents)
 	m.fmriTrialSigMaxTrialsPerRun = getInt("fmriTrialSigMaxTrialsPerRun", m.fmriTrialSigMaxTrialsPerRun)
 	m.fmriTrialSigFixedEffectsWeighting = getInt("fmriTrialSigFixedEffectsWeighting", m.fmriTrialSigFixedEffectsWeighting)
@@ -1626,6 +1633,9 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fmriTrialSigSignatureSIIPS1 = getBool("fmriTrialSigSignatureSIIPS1", m.fmriTrialSigSignatureSIIPS1)
 	m.fmriTrialSigLssOtherRegressorsIndex = getInt("fmriTrialSigLssOtherRegressorsIndex", m.fmriTrialSigLssOtherRegressorsIndex)
 	m.fmriTrialSigRoiNames = getString("fmriTrialSigRoiNames", m.fmriTrialSigRoiNames)
+	m.fmriTrialSigGroupColumn = getString("fmriTrialSigGroupColumn", m.fmriTrialSigGroupColumn)
+	m.fmriTrialSigGroupValuesSpec = getString("fmriTrialSigGroupValuesSpec", m.fmriTrialSigGroupValuesSpec)
+	m.fmriTrialSigGroupScopeIndex = getInt("fmriTrialSigGroupScopeIndex", m.fmriTrialSigGroupScopeIndex)
 
 	// ML pipeline
 	m.mlNPerm = getInt("mlNPerm", m.mlNPerm)

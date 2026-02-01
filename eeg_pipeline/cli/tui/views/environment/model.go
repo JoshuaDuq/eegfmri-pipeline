@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eeg-pipeline/tui/animation"
 	"github.com/eeg-pipeline/tui/cloud"
 	"github.com/eeg-pipeline/tui/components"
 	"github.com/eeg-pipeline/tui/styles"
@@ -24,8 +25,6 @@ const (
 )
 
 const (
-	tickInterval = 150 * time.Millisecond
-
 	contentWidthPadding    = 6
 	separatorWidthPadding  = 4
 	maxSeparatorWidth      = 55
@@ -89,14 +88,11 @@ type Model struct {
 	VMHostname            string
 	VMError               error
 	showCloudConfirmation bool
+	animQueue             animation.Queue
 
 	helpOverlay components.HelpOverlay
 	showHelp    bool
-
-	ticker int
 }
-
-type TickMsg struct{}
 
 func New() Model {
 	help := components.NewHelpOverlay("Environment Shortcuts", helpOverlayWidth)
@@ -111,13 +107,15 @@ func New() Model {
 		{Key: "Q/Esc", Description: "Quit"},
 	})
 
-	return Model{
+	m := Model{
 		cursor:      0,
 		Selected:    EnvLocal,
 		CloudConfig: cloud.DefaultConfig(),
 		VMStatus:    vmStatusUnknown,
 		helpOverlay: help,
 	}
+	m.animQueue.Push(animation.ProgressPulseLoop())
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -125,10 +123,12 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(tickInterval, func(t time.Time) tea.Msg {
-		return TickMsg{}
+	return tea.Tick(time.Millisecond*styles.TickIntervalMs, func(t time.Time) tea.Msg {
+		return tickMsg{}
 	})
 }
+
+type tickMsg struct{}
 
 func (m Model) isCloudSelected() bool {
 	return m.cursor < len(environments) && environments[m.cursor].env == EnvGoogleCloud
@@ -228,10 +228,9 @@ func (m Model) handleVMStatus(msg cloud.VMStatusMsg) Model {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case TickMsg:
-		m.ticker++
+	case tickMsg:
+		m.animQueue.Tick()
 		return m, m.tick()
-
 	case tea.KeyMsg:
 		key := msg.String()
 		if m.showHelp {
@@ -341,7 +340,7 @@ func (m Model) renderWelcomeBanner() string {
 	logo := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
-		Render("◆ EEG PIPELINE")
+		Render("EEG Pipeline")
 
 	version := lipgloss.NewStyle().
 		Foreground(styles.Muted).
@@ -396,11 +395,9 @@ func (m Model) renderTitle(separatorWidth int) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
 	subtitleStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 
-	title := titleStyle.Render("Select Environment")
-	subtitle := subtitleStyle.Render("  Where should pipelines run?")
-	separator := lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("─", separatorWidth))
-
-	return title + subtitle + "\n" + separator
+	title := titleStyle.Render("Select environment")
+	subtitle := subtitleStyle.Render("  where should pipelines run?")
+	return title + subtitle + "\n" + styles.RenderHeaderSeparator(separatorWidth)
 }
 
 func (m Model) renderOptions() string {
@@ -444,7 +441,7 @@ func (m Model) renderCloudConfirmation() string {
 		Foreground(styles.Muted).
 		PaddingLeft(2)
 
-	message := messageStyle.Render("Are you sure you want to start the Cloud environment?")
+	message := messageStyle.Render("Are you sure you want to start the cloud environment?")
 	hint := hintStyle.Render("(Y)es / (N)o")
 
 	return message + "\n" + hint
@@ -453,14 +450,16 @@ func (m Model) renderCloudConfirmation() string {
 func (m Model) renderVMStatusBadge() string {
 	switch m.VMStatus {
 	case vmStatusChecking, vmStatusStarting:
-		animationFrames := []string{"◐", "◓", "◑", "◒"}
-		frameIndex := m.ticker % len(animationFrames)
-		currentFrame := animationFrames[frameIndex]
 		label := vmStatusChecking
 		if m.VMStatus == vmStatusStarting {
 			label = vmStatusStarting
 		}
-		return lipgloss.NewStyle().Foreground(styles.Accent).Render("[" + currentFrame + " " + label + "]")
+		kind, progress := m.animQueue.Current()
+		icon := styles.ActiveMark
+		if kind == animation.KindProgressPulse && progress >= 0.5 {
+			icon = styles.PendingMark
+		}
+		return lipgloss.NewStyle().Foreground(styles.Accent).Render("[" + icon + " " + label + "]")
 	case vmStatusRunning:
 		return lipgloss.NewStyle().Foreground(styles.Success).Render("[" + styles.ActiveMark + " running]")
 	case vmStatusStopped:
@@ -482,11 +481,11 @@ func (m Model) renderCloudPanel() string {
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(labelStyleWidth)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
 
-	content.WriteString(labelStyle.Render("SSH Host:") + valueStyle.Render(m.CloudConfig.RemoteHost) + "\n")
-	content.WriteString(labelStyle.Render("Remote Path:") + valueStyle.Render(m.CloudConfig.RemoteBase) + "\n")
-	content.WriteString(labelStyle.Render("GCP Instance:") + valueStyle.Render(m.CloudConfig.GCPInstance) + "\n")
+	content.WriteString(labelStyle.Render("SSH host:") + valueStyle.Render(m.CloudConfig.RemoteHost) + "\n")
+	content.WriteString(labelStyle.Render("Remote path:") + valueStyle.Render(m.CloudConfig.RemoteBase) + "\n")
+	content.WriteString(labelStyle.Render("GCP instance:") + valueStyle.Render(m.CloudConfig.GCPInstance) + "\n")
 
-	statusLabel := labelStyle.Render("Status:")
+	statusLabel := labelStyle.Render("status:")
 	statusLine := m.renderCloudStatusLine(statusLabel, valueStyle, labelStyle)
 	content.WriteString(statusLine)
 
@@ -517,15 +516,15 @@ func (m Model) renderCloudStatusLine(statusLabel string, valueStyle, labelStyle 
 		return statusLabel + statusText + "\n"
 
 	case vmStatusChecking:
-		statusText := lipgloss.NewStyle().Foreground(styles.Accent).Render("Checking connection...")
+		statusText := lipgloss.NewStyle().Foreground(styles.Accent).Render("checking connection...")
 		return statusLabel + statusText + "\n"
 
 	case vmStatusStarting:
-		statusText := lipgloss.NewStyle().Foreground(styles.Accent).Render("Starting VM...")
+		statusText := lipgloss.NewStyle().Foreground(styles.Accent).Render("starting VM...")
 		return statusLabel + statusText + "\n"
 
 	default:
-		statusText := lipgloss.NewStyle().Foreground(styles.Muted).Render("Unknown")
+		statusText := lipgloss.NewStyle().Foreground(styles.Muted).Render("unknown")
 		return statusLabel + statusText + "\n"
 	}
 }
@@ -545,6 +544,5 @@ func (m Model) renderFooter() string {
 
 	hints = append(hints, styles.RenderKeyHint("Q", "Quit"))
 
-	separator := "  "
-	return styles.FooterStyle.Width(m.width - footerWidthPadding).Render(strings.Join(hints, separator))
+	return styles.FooterStyle.Width(m.width - footerWidthPadding).Render(strings.Join(hints, styles.RenderFooterSeparator()))
 }

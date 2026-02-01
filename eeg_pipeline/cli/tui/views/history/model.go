@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eeg-pipeline/tui/animation"
+	"github.com/eeg-pipeline/tui/components"
 	"github.com/eeg-pipeline/tui/styles"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,7 +21,6 @@ const (
 	historyFileName          = "history.json"
 	historyMaxEntries        = 50
 	maxVisibleHistoryRecords = 10
-	tickInterval             = 100 * time.Millisecond
 )
 
 ///////////////////////////////////////////////////////////////////
@@ -45,8 +46,6 @@ type historyData struct {
 	MaxEntries int               `json:"max_entries"`
 }
 
-type tickMsg struct{}
-
 ///////////////////////////////////////////////////////////////////
 // Model
 ///////////////////////////////////////////////////////////////////
@@ -57,7 +56,8 @@ type Model struct {
 	historyPath string
 	loading     bool
 	loadError   error
-	ticker      int
+	animQueue   animation.Queue
+	spinner     components.Spinner
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -66,10 +66,13 @@ type Model struct {
 
 func New(repoRoot string) Model {
 	historyPath := filepath.Join(repoRoot, "eeg_pipeline", "cli", "tui", ".cache", historyFileName)
-	return Model{
+	m := Model{
 		historyPath: historyPath,
 		loading:     true,
+		spinner:     components.NewSpinner("Loading history..."),
 	}
+	m.animQueue.Push(animation.CursorBlinkLoop())
+	return m
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -136,17 +139,20 @@ type loadHistoryMsg struct {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		m.tick(),
-		m.loadHistoryCmd(),
-	)
+	return tea.Batch(m.loadHistoryCmd(), m.tick(), m.immediateTick())
+}
+
+func (m Model) immediateTick() tea.Cmd {
+	return tea.Tick(0, func(t time.Time) tea.Msg { return tickMsg{} })
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(tickInterval, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*styles.TickIntervalMs, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }
+
+type tickMsg struct{}
 
 func (m Model) loadHistoryCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -158,9 +164,9 @@ func (m Model) loadHistoryCmd() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
-		m.ticker++
+		m.animQueue.Tick()
+		m.spinner.Tick()
 		return m, m.tick()
-
 	case loadHistoryMsg:
 		m.loading = false
 		if msg.Error != nil {
@@ -233,23 +239,17 @@ func (m Model) renderHeader() string {
 	title := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
-		Render("◆ EXECUTION HISTORY")
+		Render("Execution history")
 
 	count := lipgloss.NewStyle().
 		Foreground(styles.Muted).
 		Render(fmt.Sprintf("  (%d records)", len(m.records)))
 
-	separator := lipgloss.NewStyle().
-		Foreground(styles.Secondary).
-		Render(strings.Repeat("─", 65))
-
-	return title + count + "\n" + separator
+	return title + count + "\n" + styles.RenderHeaderSeparator(65)
 }
 
 func (m Model) renderLoading() string {
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	frame := frames[m.ticker%len(frames)]
-	return "\n  " + lipgloss.NewStyle().Foreground(styles.Accent).Render(frame+" Loading history...")
+	return "\n  " + m.spinner.View()
 }
 
 func (m Model) renderError() string {
@@ -289,7 +289,7 @@ func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
 
 	cursor := "  "
 	if isCursor {
-		cursor = lipgloss.NewStyle().Foreground(styles.Primary).Render("▸ ")
+		cursor = styles.RenderCursorOptional(m.animQueue.CursorVisible())
 	}
 
 	var statusIcon string
@@ -356,6 +356,6 @@ func (m Model) renderFooter() string {
 		styles.RenderKeyHint("Esc", "Back"),
 	}
 
-	separator := lipgloss.NewStyle().Foreground(styles.Secondary).Render("  │  ")
+	separator := styles.RenderFooterSeparator()
 	return styles.FooterStyle.Render(strings.Join(hints, separator))
 }

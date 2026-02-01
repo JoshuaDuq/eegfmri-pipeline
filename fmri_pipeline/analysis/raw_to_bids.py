@@ -288,6 +288,8 @@ def _write_events_tsv_for_run(
     onset_reference: str,
     onset_offset_s: float,
     event_granularity: str,
+    bold_nifti: Optional[Path] = None,
+    bold_json: Optional[Path] = None,
 ) -> None:
     df = pd.read_csv(behavior_csv)
     if "run_id" not in df.columns:
@@ -388,6 +390,55 @@ def _write_events_tsv_for_run(
     out_tsv.parent.mkdir(parents=True, exist_ok=True)
     ev_df = pd.DataFrame(rows)
     ev_df = ev_df.sort_values(["onset", "trial_number", "trial_type"], kind="mergesort")
+
+    # Scientific validity guardrail: ensure events are plausible for this run.
+    # If onsets are not "seconds from BOLD run start", the GLM will be invalid.
+    try:
+        if bold_nifti is not None and Path(bold_nifti).exists():
+            try:
+                import nibabel as nib  # type: ignore
+            except ImportError as exc:
+                raise ImportError(
+                    "Validating events.tsv against BOLD duration requires nibabel. "
+                    "Install nibabel or disable event generation with --no-events."
+                ) from exc
+
+            img = nib.load(str(bold_nifti))
+            shape = getattr(img, "shape", None)
+            n_vols = int(shape[3]) if shape and len(shape) >= 4 else 0
+            tr = None
+            if bold_json is not None and Path(bold_json).exists():
+                meta = _load_json(Path(bold_json))
+                if "RepetitionTime" in meta:
+                    try:
+                        tr = float(meta["RepetitionTime"])
+                    except Exception:
+                        tr = None
+            if tr is None:
+                try:
+                    zooms = img.header.get_zooms()
+                    if len(zooms) >= 4:
+                        tr = float(zooms[3])
+                except Exception:
+                    tr = None
+
+            if n_vols > 0 and tr is not None and tr > 0:
+                run_dur_s = float(n_vols) * float(tr)
+                max_end = float((ev_df["onset"] + ev_df["duration"]).max())
+                min_onset = float(ev_df["onset"].min())
+                tol = max(2.0 * float(tr), 1.0)
+                if min_onset < -tol or max_end > (run_dur_s + tol):
+                    raise ValueError(
+                        "Events are out of bounds for the BOLD run. "
+                        f"min_onset={min_onset:.3f}s, max_end={max_end:.3f}s, "
+                        f"run_duration≈{run_dur_s:.3f}s (n_vols={n_vols}, TR={float(tr):.3f}). "
+                        "This usually means PsychoPy timestamps are not aligned to BOLD run start. "
+                        "Try --onset-reference first_iti_start or first_stim_start (and/or --onset-offset-s)."
+                    )
+    except Exception:
+        # Raise to prevent silently generating scientifically invalid events.tsv.
+        raise
+
     ev_df.to_csv(out_tsv, sep="\t", index=False)
 
 
@@ -604,6 +655,8 @@ def run_fmri_raw_to_bids(
                             onset_reference=onset_reference,
                             onset_offset_s=float(onset_offset_s),
                             event_granularity=event_granularity,
+                            bold_nifti=dest_nifti,
+                            bold_json=dest_json,
                         )
                     else:
                         log.warning("No TrialSummary.csv found for %s run %s", subj_dir.name, s.run)

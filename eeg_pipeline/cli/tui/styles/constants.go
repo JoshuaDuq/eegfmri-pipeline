@@ -48,13 +48,17 @@ const (
 )
 
 const (
-	CheckMark    = "✓"
-	CrossMark    = "✗"
-	PendingMark  = "○"
-	ActiveMark   = "●"
-	SelectedMark = "➜"
-	BulletMark   = "•"
-	WarningMark  = "⚠"
+	CheckMark           = "✓"
+	CrossMark           = "✗"
+	PendingMark         = "○"
+	ActiveMark          = "●"
+	SelectedMark        = "▸"
+	BulletMark          = "•"
+	WarningMark         = "⚠"
+	FooterHintSeparator = "  │  "
+
+	HeaderSeparatorChar = "─"
+	SectionDividerChar  = "─"
 )
 
 const (

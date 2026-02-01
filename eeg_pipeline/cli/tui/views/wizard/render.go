@@ -16,8 +16,6 @@ const (
 	minMainContentHeight  = 10
 	headerSpacingLines    = 3
 	footerSpacingLines    = 2
-	footerHintSeparator   = "  "
-	breadcrumbFrameDiv    = 3
 	containerPadH         = 2
 	containerPadV         = 1
 	containerBorder       = 2
@@ -73,7 +71,7 @@ func (m Model) View() string {
 		Width(containerW).
 		Height(containerH).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Primary).
+		BorderForeground(styles.Secondary).
 		Padding(containerPadV, containerPadH).
 		Render(innerView)
 
@@ -179,7 +177,7 @@ func (m Model) renderHeader(width int) string {
 
 func (m Model) buildTitleRow() string {
 	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	title := accentStyle.Render("◆ ") + styles.BrandStyle.Render(strings.ToUpper(m.Pipeline.String()))
+	title := accentStyle.Render(styles.SelectedMark+" ") + styles.BrandStyle.Render(strings.ToUpper(m.Pipeline.String()))
 
 	parts := []string{title}
 	if badge := m.buildSubjectBadge(); badge != "" {
@@ -248,14 +246,13 @@ func (m Model) breadcrumbStep(idx int, step types.WizardStep) (icon, text string
 
 	switch {
 	case idx < m.stepIndex:
-		icon = lipgloss.NewStyle().Foreground(styles.Success).Render("●")
+		icon = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
 		text = lipgloss.NewStyle().Foreground(styles.TextDim).Render(name)
 	case idx == m.stepIndex:
-		frames := []string{"◉", "●", "◉", "◎"}
-		icon = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(frames[(m.ticker/breadcrumbFrameDiv)%len(frames)])
+		icon = styles.RenderCursorOptional(m.CursorBlinkVisible())
 		text = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(name)
 	default:
-		icon = lipgloss.NewStyle().Foreground(styles.Muted).Render("○")
+		icon = lipgloss.NewStyle().Foreground(styles.Muted).Render(styles.PendingMark)
 		text = lipgloss.NewStyle().Foreground(styles.Muted).Render(name)
 	}
 	return
@@ -284,7 +281,7 @@ func (m Model) renderFooter(width int) string {
 	}
 
 	return styles.FooterStyle.Width(width).Align(lipgloss.Center).
-		Render(strings.Join(hints, footerHintSeparator))
+		Render(strings.Join(hints, styles.RenderFooterSeparator()))
 }
 
 func (m Model) renderToast(width int) string {

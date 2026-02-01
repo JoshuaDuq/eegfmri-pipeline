@@ -533,6 +533,53 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
             "Use 'all' to compute all labeled ROIs."
         ),
     )
+    trial_group.add_argument(
+        "--signature-group-column",
+        type=str,
+        default=None,
+        help=(
+            "Optional: events column to compute signature summaries for each selected value "
+            "(e.g., temperature). When set together with --signature-group-values, the pipeline "
+            "will compute fixed-effects maps per value and write signatures/group_signature_expression.tsv."
+        ),
+    )
+    trial_group.add_argument(
+        "--signature-group-values",
+        nargs="+",
+        default=None,
+        metavar="VAL",
+        help=(
+            "Optional: value(s) within --signature-group-column to summarize (e.g., 44.3 45.3 46.3). "
+            "Use multiple values to compute signatures for each value."
+        ),
+    )
+    trial_group.add_argument(
+        "--signature-group-scope",
+        choices=["across-runs", "per-run"],
+        default=None,
+        help="Signature grouping scope for --signature-group-column/values (default: across-runs).",
+    )
+    trial_group.add_argument(
+        "--signature-scope-trial-types",
+        nargs="+",
+        default=None,
+        metavar="TT",
+        help=(
+            "Optional: restrict which events.tsv trial_type rows are eligible for trial selection. "
+            "This prevents accidentally mixing phases when selecting by per-trial columns (e.g., pain_binary_coded). "
+            "Use 'all' to disable scoping. Default: stimulation when selecting via non-trial_type columns."
+        ),
+    )
+    trial_group.add_argument(
+        "--signature-scope-stim-phases",
+        nargs="+",
+        default=None,
+        metavar="PHASE",
+        help=(
+            "Optional: restrict which stim_phase values are eligible for trial selection (only when events.tsv has a stim_phase column). "
+            "Use 'all' to disable scoping. Default: plateau if stim_phase exists and plateau is present."
+        ),
+    )
 
     return parser
 
@@ -728,12 +775,21 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             method=mode,
             include_other_events=include_other_events,
             lss_other_regressors=lss_other,
+            condition_scope_trial_types=tuple(getattr(args, "signature_scope_trial_types", None) or ()) or None,
+            condition_scope_stim_phases=tuple(getattr(args, "signature_scope_stim_phases", None) or ()) or None,
             max_trials_per_run=int(args.max_trials_per_run) if args.max_trials_per_run else None,
             fixed_effects_weighting=fixed_weighting,
             signatures=tuple(args.signatures) if args.signatures else None,
             roi_atlas=roi_atlas,
             roi_labels=roi_labels or None,
             roi_names=tuple(args.signature_rois) if getattr(args, "signature_rois", None) else None,
+            signature_group_column=str(getattr(args, "signature_group_column", "") or "").strip() or None,
+            signature_group_values=tuple(getattr(args, "signature_group_values", None) or ()) or None,
+            signature_group_scope=(
+                str(getattr(args, "signature_group_scope", "") or "").strip().lower().replace("-", "_")
+                if getattr(args, "signature_group_scope", None)
+                else "across_runs"
+            ),
             write_trial_betas=bool(args.write_trial_betas) if args.write_trial_betas is not None else False,
             write_trial_variances=bool(args.write_trial_variances) if args.write_trial_variances is not None else False,
             write_condition_betas=bool(args.write_condition_betas) if args.write_condition_betas is not None else True,

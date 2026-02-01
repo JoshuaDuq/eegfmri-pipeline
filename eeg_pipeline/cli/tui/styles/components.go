@@ -2,8 +2,7 @@ package styles
 
 import "github.com/charmbracelet/lipgloss"
 
-// Common component styles for the TUI, built on the shared color palette.
-
+// Component styles: lab-instrument, refined. Clear hierarchy, consistent borders.
 var (
 	BrandStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -12,26 +11,35 @@ var (
 
 	SectionTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(Primary).
-				Underline(true).
+				Foreground(Secondary).
 				MarginBottom(1)
 
 	CardStyle = lipgloss.NewStyle().
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Muted)
+			BorderForeground(Secondary)
+
+	CardStyleFocused = lipgloss.NewStyle().
+				Padding(1, 2).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(Primary).
+				BorderLeft(true)
 
 	BoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Muted).
+			BorderForeground(Secondary).
 			Padding(0, 1)
 
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(TextDim).
 			MarginTop(1).
 			Border(lipgloss.NormalBorder(), true, false, false, false).
-			BorderForeground(Muted).
+			BorderForeground(Secondary).
 			PaddingTop(1)
+
+	HeaderLineStyle = lipgloss.NewStyle().Foreground(Secondary)
+
+	SectionDividerStyle = lipgloss.NewStyle().Foreground(Muted)
 
 	ProgressFilledStyle = lipgloss.NewStyle().Foreground(Primary)
 	ProgressEmptyStyle  = lipgloss.NewStyle().Foreground(Muted)

@@ -460,6 +460,9 @@ feature_engineering:
       fdr_q: 0.05
       stat_type: "z"
       cluster_min_voxels: 50
+      # Preferred: stable across voxel sizes/resampling. When set, overrides cluster_min_voxels.
+      # Example: 50 vox @ 2mm isotropic ≈ 50 * 8 = 400 mm^3.
+      cluster_min_volume_mm3: 400
       max_clusters: 20
       max_voxels_per_cluster: 2000
       max_total_voxels: 20000
@@ -478,7 +481,7 @@ feature_engineering:
         hrf_model: "spm"           # "spm" | "flobs" | "fir"
         drift_model: "cosine"      # "none" | "cosine" | "polynomial"
         high_pass_hz: 0.008
-        low_pass_hz: 0.1
+        low_pass_hz: null          # Optional; avoid unless you know you need it
         # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
         # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
         #   ["stimulation", "pain_question", "vas_rating"]

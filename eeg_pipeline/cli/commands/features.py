@@ -219,6 +219,11 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         fmri_cfg["tail"] = args.source_fmri_tail
     if getattr(args, "source_fmri_cluster_min_voxels", None) is not None:
         fmri_cfg["cluster_min_voxels"] = args.source_fmri_cluster_min_voxels
+        # If the user explicitly sets a voxel threshold, clear the volume threshold unless they also set it.
+        if getattr(args, "source_fmri_cluster_min_mm3", None) is None:
+            fmri_cfg["cluster_min_volume_mm3"] = None
+    if getattr(args, "source_fmri_cluster_min_mm3", None) is not None:
+        fmri_cfg["cluster_min_volume_mm3"] = args.source_fmri_cluster_min_mm3
     if getattr(args, "source_fmri_max_clusters", None) is not None:
         fmri_cfg["max_clusters"] = args.source_fmri_max_clusters
     if getattr(args, "source_fmri_max_voxels_per_cluster", None) is not None:
@@ -854,6 +859,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-threshold", type=float, default=None, help="Threshold applied to fMRI stats map (default: 3.1).")
     parser.add_argument("--source-fmri-tail", choices=["pos", "abs"], default=None, help="Threshold tail: pos (positive only) or abs (absolute value) (default: pos).")
     parser.add_argument("--source-fmri-cluster-min-voxels", type=int, default=None, help="Minimum cluster size in voxels after thresholding (default: 50).")
+    parser.add_argument("--source-fmri-cluster-min-mm3", type=float, default=None, dest="source_fmri_cluster_min_mm3", help="Minimum cluster volume in mm^3 after thresholding (preferred; overrides --source-fmri-cluster-min-voxels when set).")
     parser.add_argument("--source-fmri-max-clusters", type=int, default=None, help="Maximum number of clusters kept from fMRI map (default: 20).")
     parser.add_argument("--source-fmri-max-voxels-per-cluster", type=int, default=None, help="Maximum voxels sampled per cluster (default: 2000; set 0 for no limit).")
     parser.add_argument("--source-fmri-max-total-voxels", type=int, default=None, help="Maximum total voxels across all clusters (default: 20000; set 0 for no limit).")
@@ -876,8 +882,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-hrf-model", choices=["spm", "flobs", "fir"], default=None, help="HRF model for GLM (default: spm).")
     parser.add_argument("--source-fmri-drift-model", choices=["none", "cosine", "polynomial"], default=None, help="Drift model for GLM (default: cosine).")
     parser.add_argument("--source-fmri-high-pass", type=float, default=None, help="High-pass filter cutoff in Hz (default: 0.008).")
-    parser.add_argument("--source-fmri-low-pass", type=float, default=None, help="Low-pass filter cutoff in Hz (default: 0.1).")
-    parser.add_argument("--source-fmri-cluster-correction", action="store_true", default=None, dest="source_fmri_cluster_correction", help="Enable cluster-level FWE correction.")
+    parser.add_argument("--source-fmri-low-pass", type=float, default=None, help="Optional low-pass cutoff in Hz (default: disabled; avoid unless you know you need it).")
+    parser.add_argument("--source-fmri-cluster-correction", action="store_true", default=None, dest="source_fmri_cluster_correction", help="Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction).")
     parser.add_argument("--source-fmri-cluster-p-threshold", type=float, default=None, help="Cluster-forming p-threshold (default: 0.001).")
     parser.add_argument("--source-fmri-output-type", choices=["z-score", "t-stat", "cope", "beta"], default=None, help="Output statistical map type (default: z-score).")
     parser.add_argument("--source-fmri-resample-to-fs", action="store_true", default=None, dest="source_fmri_resample_to_fs", help="Auto-resample stats map to FreeSurfer subject space.")

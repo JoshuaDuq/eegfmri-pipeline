@@ -117,10 +117,11 @@ func TestBuildFmriAnalysisAdvancedArgs_EventsToModelEmittedForFirstLevel(t *test
 
 func TestBuildFmriAnalysisAdvancedArgs_BetaSeriesEmitsTrialSignatureFlags(t *testing.T) {
 	m := Model{}
-	m.modeOptions = []string{"first-level", "beta-series", "lss"}
-	m.modeIndex = 1 // beta-series
+	m.modeOptions = []string{"first-level", "trial-signatures"}
+	m.modeIndex = 1 // trial-signatures (beta-series by default)
 
 	m.fmriTrialSigIncludeOtherEvents = false
+	m.fmriTrialSigMethodIndex = 0 // beta-series
 	m.fmriTrialSigWriteTrialBetas = true
 	m.fmriTrialSigWriteTrialVariances = false
 	m.fmriTrialSigWriteConditionBetas = false
@@ -150,6 +151,35 @@ func TestBuildFmriAnalysisAdvancedArgs_BetaSeriesEmitsTrialSignatureFlags(t *tes
 	}
 	if v != "NPS" {
 		t.Fatalf("unexpected --signatures value %q (expected NPS)", v)
+	}
+}
+
+func TestBuildFmriAnalysisAdvancedArgs_BetaSeriesEmitsSignatureGroupingFlags(t *testing.T) {
+	m := Model{}
+	m.modeOptions = []string{"first-level", "trial-signatures"}
+	m.modeIndex = 1 // trial-signatures
+
+	m.fmriTrialSigGroupColumn = "temperature"
+	m.fmriTrialSigGroupValuesSpec = "44.3 45.3 46.3"
+	m.fmriTrialSigGroupScopeIndex = 1  // per-run
+	m.fmriTrialSigMethodIndex = 0      // beta-series
+	m.fmriTrialSigGroupExpanded = true // irrelevant for args but matches UI
+
+	args := m.buildFmriAnalysisAdvancedArgs()
+
+	if v, ok := argValue(args, "--signature-group-column"); !ok || v != "temperature" {
+		t.Fatalf("expected --signature-group-column temperature, got: %#v", args)
+	}
+	if !containsString(args, "--signature-group-values") {
+		t.Fatalf("expected --signature-group-values in args, got: %#v", args)
+	}
+	for _, want := range []string{"44.3", "45.3", "46.3"} {
+		if !containsString(args, want) {
+			t.Fatalf("expected %q in args, got: %#v", want, args)
+		}
+	}
+	if v, ok := argValue(args, "--signature-group-scope"); !ok || v != "per-run" {
+		t.Fatalf("expected --signature-group-scope per-run, got: %#v", args)
 	}
 }
 

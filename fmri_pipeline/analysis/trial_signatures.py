@@ -43,12 +43,21 @@ class TrialSignatureExtractionConfig:
     method: str  # "beta-series" | "lss"
     include_other_events: bool = True
     lss_other_regressors: str = "per_condition"  # "per_condition" | "all"
+    # Optional: scope which events.tsv rows are eligible for trial selection (prevents mixing phases).
+    # Use ("all",) to disable scoping.
+    condition_scope_trial_types: Optional[Tuple[str, ...]] = None
+    # Optional: further restrict to stim phases (only when a 'stim_phase' column exists).
+    # Use ("all",) to disable scoping.
+    condition_scope_stim_phases: Optional[Tuple[str, ...]] = None
     max_trials_per_run: Optional[int] = None
     fixed_effects_weighting: str = "variance"  # "variance" | "mean"
     signatures: Optional[Tuple[str, ...]] = None  # default: all discovered
     roi_atlas: Optional[str] = None  # atlas label image (MNI) path or alias
     roi_labels: Optional[str] = None  # labels table path (TSV/CSV) mapping label -> name
     roi_names: Optional[Tuple[str, ...]] = None  # ROI names to extract (or ("all",))
+    signature_group_column: Optional[str] = None  # e.g., "temperature"
+    signature_group_values: Optional[Tuple[str, ...]] = None  # values to include (e.g., ("44.3","45.3"))
+    signature_group_scope: str = "across_runs"  # "across_runs" | "per_run"
 
     # Outputs
     write_trial_betas: bool = False
@@ -85,6 +94,43 @@ class TrialSignatureExtractionConfig:
         if weight not in {"variance", "mean"}:
             weight = "variance"
 
+        def _norm_scope(values: Optional[Sequence[str]]) -> Optional[Tuple[str, ...]]:
+            if not values:
+                return None
+            raw: List[str] = []
+            for item in values:
+                if item is None:
+                    continue
+                s = str(item).replace(";", ",").strip()
+                if not s:
+                    continue
+                raw.extend([p.strip() for p in s.split(",") if p.strip()])
+            if not raw:
+                return None
+            if any(s.strip().lower() in {"all", "*", "@all"} for s in raw):
+                # Explicitly disable scoping. Represent as empty tuple so we can distinguish
+                # "user disabled" from "user did not specify" (None).
+                return tuple()
+            out: List[str] = []
+            seen = set()
+            for s in raw:
+                key = s.strip().lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(s.strip())
+            return tuple(out) if out else None
+
+        scope_trial_types = _norm_scope(self.condition_scope_trial_types)
+        scope_stim_phases = _norm_scope(self.condition_scope_stim_phases)
+
+        # Safety default: when selecting trials via non-trial_type columns (e.g., pain_binary_coded),
+        # restrict selection to stimulation events unless the user explicitly overrides.
+        col_a = str(self.condition_a_column or "").strip().lower()
+        col_b = str(self.condition_b_column or "").strip().lower()
+        if scope_trial_types is None and (col_a != "trial_type" or col_b != "trial_type"):
+            scope_trial_types = ("stimulation",)
+
         roi_atlas = (self.roi_atlas or "").strip() or None
         roi_labels = (self.roi_labels or "").strip() or None
         roi_names = None
@@ -111,6 +157,33 @@ class TrialSignatureExtractionConfig:
                     dedup.append(s.strip())
                 roi_names = tuple(dedup) if dedup else None
 
+        group_col = (self.signature_group_column or "").strip() or None
+        group_vals = None
+        if self.signature_group_values:
+            raw_vals: List[str] = []
+            for item in self.signature_group_values:
+                if item is None:
+                    continue
+                s = str(item).replace(";", ",").strip()
+                if not s:
+                    continue
+                raw_vals.extend([p.strip() for p in s.split(",") if p.strip()])
+            dedup_vals: List[str] = []
+            seen_vals = set()
+            for v in raw_vals:
+                k = v.strip()
+                if not k:
+                    continue
+                if k in seen_vals:
+                    continue
+                seen_vals.add(k)
+                dedup_vals.append(k)
+            group_vals = tuple(dedup_vals) if dedup_vals else None
+
+        group_scope = (self.signature_group_scope or "across_runs").strip().lower().replace("-", "_")
+        if group_scope not in {"across_runs", "per_run"}:
+            group_scope = "across_runs"
+
         return TrialSignatureExtractionConfig(
             **{
                 **asdict(self),
@@ -120,10 +193,15 @@ class TrialSignatureExtractionConfig:
                 "smoothing_fwhm": smoothing_fwhm,
                 "method": method,
                 "lss_other_regressors": lss_other,
+                "condition_scope_trial_types": scope_trial_types,
+                "condition_scope_stim_phases": scope_stim_phases,
                 "fixed_effects_weighting": weight,
                 "roi_atlas": roi_atlas,
                 "roi_labels": roi_labels,
                 "roi_names": roi_names,
+                "signature_group_column": group_col,
+                "signature_group_values": group_vals,
+                "signature_group_scope": group_scope,
             }
         )
 
@@ -393,7 +471,10 @@ def _build_roi_masks_from_atlas(
         raise RuntimeError("ROI masking requires nilearn to resample the atlas to the target image grid.") from exc
 
     atlas_img = nib.load(str(atlas_path))
-    atlas_res = nilearn_image.resample_to_img(atlas_img, target_img, interpolation="nearest")
+    atlas_res = nilearn_image.resample_to_img(
+        atlas_img, target_img, interpolation="nearest",
+        force_resample=True, copy_header=True,
+    )
     data = atlas_res.get_fdata()
     finite = np.isfinite(data)
     if not np.any(finite):
@@ -450,7 +531,10 @@ def _resample_mask_to_target(mask_img: Any, target_img: Any) -> Any:
             return mask_img
     except Exception:
         pass
-    return nilearn_image.resample_to_img(mask_img, target_img, interpolation="nearest")
+    return nilearn_image.resample_to_img(
+        mask_img, target_img, interpolation="nearest",
+        force_resample=True, copy_header=True,
+    )
 
 
 def _intersect_masks_to_target(*, roi_mask_img: Any, brain_mask_img: Any, target_img: Any) -> Any:
@@ -741,7 +825,7 @@ def _build_first_level_model(
 
 
 def _make_trial_regressor(run_label: str, trial_index: int, condition: str) -> str:
-    return f"trial_{_safe_slug(run_label)}_{trial_index:03d}_{condition.lower()}"
+    return f"trial_{_safe_slug(run_label)}_{trial_index:03d}_{_safe_slug(condition).lower()}"
 
 
 def _extract_trials_for_run(
@@ -762,21 +846,79 @@ def _extract_trials_for_run(
 
     col_a = str(cfg.condition_a_column).strip()
     col_b = str(cfg.condition_b_column).strip()
-    if col_a not in events_df.columns or col_b not in events_df.columns:
-        raise ValueError(f"Events file missing selection columns: {col_a}, {col_b} in {events_path}")
+    group_col = (cfg.signature_group_column or "").strip()
+    group_vals = tuple(cfg.signature_group_values or ())
 
-    val_a = _coerce_condition_value(cfg.condition_a_value, events_df[col_a])
-    val_b = _coerce_condition_value(cfg.condition_b_value, events_df[col_b])
+    group_mode = bool(group_col and group_vals)
+    mask_a = None
+    sel_mask = None
 
-    mask_a = events_df[col_a] == val_a
-    mask_b = events_df[col_b] == val_b
-    sel_mask = mask_a | mask_b
+    scope_mask = pd.Series([True] * int(len(events_df)), index=events_df.index)
 
-    selected = events_df.loc[sel_mask].copy()
-    if selected.empty:
-        raise ValueError(f"No trials matched cond A/B selection in {events_path}")
+    scope_trial_types_raw = cfg.condition_scope_trial_types
+    scope_trial_types = tuple(scope_trial_types_raw or ())
+    if scope_trial_types:
+        if "trial_type" not in events_df.columns:
+            raise ValueError(
+                f"condition_scope_trial_types is set but events file has no 'trial_type' column: {events_path}"
+            )
+        allow = {str(v).strip() for v in scope_trial_types if str(v).strip()}
+        scope_mask &= events_df["trial_type"].astype(str).str.strip().isin(list(allow))
 
-    selected = selected.sort_values("onset").reset_index(drop=False)
+    scope_stim_phases_raw = cfg.condition_scope_stim_phases
+    scope_stim_phases = tuple(scope_stim_phases_raw or ())
+    if (
+        scope_stim_phases_raw is None
+        and ("stim_phase" in events_df.columns)
+        and (
+            (scope_trial_types_raw is None)
+            or ("stimulation" in {s.lower() for s in scope_trial_types})
+        )
+    ):
+        # Safety default for phase-granularity pain tasks: use plateau only if present.
+        try:
+            phases = set(events_df["stim_phase"].dropna().astype(str).str.strip().tolist())
+            if "plateau" in phases:
+                scope_stim_phases = ("plateau",)
+        except Exception:
+            scope_stim_phases = tuple()
+
+    if scope_stim_phases:
+        if "stim_phase" not in events_df.columns:
+            raise ValueError(
+                f"condition_scope_stim_phases is set but events file has no 'stim_phase' column: {events_path}"
+            )
+        allow = {str(v).strip() for v in scope_stim_phases if str(v).strip()}
+        scope_mask &= events_df["stim_phase"].astype(str).str.strip().isin(list(allow))
+
+    if group_mode:
+        if group_col not in events_df.columns:
+            raise ValueError(f"Events file missing signature group column: {group_col} in {events_path}")
+        allowed = {str(v).strip() for v in group_vals if str(v).strip()}
+        col_str = events_df[group_col].astype(str).str.strip()
+        sel_mask = scope_mask & col_str.isin(list(allowed))
+        selected = events_df.loc[sel_mask].copy()
+        if selected.empty:
+            raise ValueError(
+                f"No trials matched signature group selection in {events_path} (column={group_col}, values={sorted(allowed)})"
+            )
+        selected = selected.sort_values("onset").reset_index(drop=False)
+    else:
+        if col_a not in events_df.columns or col_b not in events_df.columns:
+            raise ValueError(f"Events file missing selection columns: {col_a}, {col_b} in {events_path}")
+
+        val_a = _coerce_condition_value(cfg.condition_a_value, events_df[col_a])
+        val_b = _coerce_condition_value(cfg.condition_b_value, events_df[col_b])
+
+        mask_a = scope_mask & (events_df[col_a] == val_a)
+        mask_b = scope_mask & (events_df[col_b] == val_b)
+        sel_mask = mask_a | mask_b
+
+        selected = events_df.loc[sel_mask].copy()
+        if selected.empty:
+            raise ValueError(f"No trials matched cond A/B selection in {events_path}")
+
+        selected = selected.sort_values("onset").reset_index(drop=False)
 
     run_label = f"run-{run_num:02d}"
     trials: List[TrialInfo] = []
@@ -788,7 +930,10 @@ def _extract_trials_for_run(
     modeled_rows: List[Dict[str, Any]] = []
 
     for idx, row in selected.iterrows():
-        condition = "A" if bool(mask_a.loc[row["index"]]) else "B"
+        if group_mode:
+            condition = str(row.get(group_col, "")).strip() or "group"
+        else:
+            condition = "A" if bool(mask_a.loc[row["index"]]) else "B"
         reg = _make_trial_regressor(run_label, int(idx) + 1, condition)
 
         onset = float(row["onset"])
@@ -1068,11 +1213,18 @@ def run_trial_signature_extraction_for_subject(
         roi_name_to_label = {name: int(idx) for idx, name in roi_selected}
         atlas_display = roi_atlas_path.name
 
-    # Per-condition maps (optional)
-    cond_a_effects: List[Any] = []
-    cond_a_vars: List[Any] = []
-    cond_b_effects: List[Any] = []
-    cond_b_vars: List[Any] = []
+    grouping_enabled = bool(cfg.signature_group_column and cfg.signature_group_values)
+
+    group_effects: Dict[str, List[Any]] = {}
+    group_vars: Dict[str, List[Any]] = {}
+    group_effects_by_run: Dict[int, Dict[str, List[Any]]] = {}
+    group_vars_by_run: Dict[int, Dict[str, List[Any]]] = {}
+
+    def _append_group(container: Dict[str, List[Any]], key: str, value: Any) -> None:
+        container.setdefault(str(key), []).append(value)
+
+    def _append_group_by_run(container: Dict[int, Dict[str, List[Any]]], run_num: int, key: str, value: Any) -> None:
+        container.setdefault(int(run_num), {}).setdefault(str(key), []).append(value)
 
     for run_num, bold_path, events_path, confounds_path in runs:
         import pandas as pd  # type: ignore
@@ -1141,14 +1293,11 @@ def run_trial_signature_extraction_for_subject(
                 except Exception:
                     var_img = None
 
-                if t.condition == "A":
-                    cond_a_effects.append(beta_img)
-                    if var_img is not None:
-                        cond_a_vars.append(var_img)
-                else:
-                    cond_b_effects.append(beta_img)
-                    if var_img is not None:
-                        cond_b_vars.append(var_img)
+                _append_group(group_effects, t.condition, beta_img)
+                _append_group_by_run(group_effects_by_run, run_num, t.condition, beta_img)
+                if var_img is not None:
+                    _append_group(group_vars, t.condition, var_img)
+                    _append_group_by_run(group_vars_by_run, run_num, t.condition, var_img)
 
                 if cfg.write_trial_betas:
                     p = out_dir / "trial_betas" / t.run_label / f"{sub_label}_task-{cfg.task}_{t.run_label}_{t.regressor}_beta.nii.gz"
@@ -1177,6 +1326,8 @@ def run_trial_signature_extraction_for_subject(
                                 "trial_index": t.trial_index,
                                 "condition": t.condition,
                                 "regressor": t.regressor,
+                                "original_trial_type": t.original_trial_type,
+                                "stim_phase": str(t.extra.get("stim_phase", "")),
                                 "onset": f"{t.onset:.6f}",
                                 "duration": f"{t.duration:.6f}",
                                 "signature": s.name,
@@ -1230,6 +1381,8 @@ def run_trial_signature_extraction_for_subject(
                                     "trial_index": t.trial_index,
                                     "condition": t.condition,
                                     "regressor": t.regressor,
+                                    "original_trial_type": t.original_trial_type,
+                                    "stim_phase": str(t.extra.get("stim_phase", "")),
                                     "onset": f"{t.onset:.6f}",
                                     "duration": f"{t.duration:.6f}",
                                     "atlas": atlas_display or "",
@@ -1282,14 +1435,11 @@ def run_trial_signature_extraction_for_subject(
                 except Exception:
                     var_img = None
 
-                if t.condition == "A":
-                    cond_a_effects.append(beta_img)
-                    if var_img is not None:
-                        cond_a_vars.append(var_img)
-                else:
-                    cond_b_effects.append(beta_img)
-                    if var_img is not None:
-                        cond_b_vars.append(var_img)
+                _append_group(group_effects, t.condition, beta_img)
+                _append_group_by_run(group_effects_by_run, run_num, t.condition, beta_img)
+                if var_img is not None:
+                    _append_group(group_vars, t.condition, var_img)
+                    _append_group_by_run(group_vars_by_run, run_num, t.condition, var_img)
 
                 if cfg.write_trial_betas:
                     p = out_dir / "trial_betas" / t.run_label / f"{sub_label}_task-{cfg.task}_{t.run_label}_trial-{t.trial_index:03d}_beta.nii.gz"
@@ -1317,6 +1467,9 @@ def run_trial_signature_extraction_for_subject(
                                 "run_num": t.run,
                                 "trial_index": t.trial_index,
                                 "condition": t.condition,
+                                "regressor": "target",
+                                "original_trial_type": t.original_trial_type,
+                                "stim_phase": str(t.extra.get("stim_phase", "")),
                                 "signature": s.name,
                                 "dot": f"{s.dot:.8g}",
                                 "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
@@ -1370,6 +1523,8 @@ def run_trial_signature_extraction_for_subject(
                                     "trial_index": t.trial_index,
                                     "condition": t.condition,
                                     "regressor": "target",
+                                    "original_trial_type": t.original_trial_type,
+                                    "stim_phase": str(t.extra.get("stim_phase", "")),
                                     "onset": f"{t.onset:.6f}",
                                     "duration": f"{t.duration:.6f}",
                                     "atlas": atlas_display or "",
@@ -1392,121 +1547,280 @@ def run_trial_signature_extraction_for_subject(
     if roi_enabled:
         _write_tsv(out_dir / "signatures" / "trial_signature_expression_rois.tsv", trial_sig_roi_rows)
 
-    # Condition averages (fixed-effects) + signatures
+    # Condition/group averages (fixed-effects) + signatures
     cond_rows: List[Dict[str, Any]] = []
     cond_roi_rows: List[Dict[str, Any]] = []
-    if (cond_a_effects or cond_b_effects) and (cfg.write_condition_betas or signature_root is not None or roi_enabled):
+
+    group_rows: List[Dict[str, Any]] = []
+    group_roi_rows: List[Dict[str, Any]] = []
+
+    if (group_effects) and (cfg.write_condition_betas or signature_root is not None or roi_enabled):
         import nibabel as nib  # type: ignore
 
         cond_dir = out_dir / "condition_betas"
         if cfg.write_condition_betas:
             cond_dir.mkdir(parents=True, exist_ok=True)
 
-        a_img = None
-        b_img = None
-        if cond_a_effects:
-            a_img = _fixed_effects_combine_effects(
-                effects=cond_a_effects,
-                variances=cond_a_vars if cond_a_vars else None,
-                method=cfg.fixed_effects_weighting,
-            )
-            if cfg.write_condition_betas:
-                nib.save(a_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_beta.nii.gz"))
-        if cond_b_effects:
-            b_img = _fixed_effects_combine_effects(
-                effects=cond_b_effects,
-                variances=cond_b_vars if cond_b_vars else None,
-                method=cfg.fixed_effects_weighting,
-            )
-            if cfg.write_condition_betas:
-                nib.save(b_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-b_beta.nii.gz"))
+        if not grouping_enabled:
+            cond_a_effects = list(group_effects.get("A", []))
+            cond_a_vars = list(group_vars.get("A", []))
+            cond_b_effects = list(group_effects.get("B", []))
+            cond_b_vars = list(group_vars.get("B", []))
 
-        diff_img = None
-        if a_img is not None and b_img is not None:
-            import numpy as np  # type: ignore
-
-            a = np.asanyarray(a_img.dataobj)
-            b = np.asanyarray(b_img.dataobj)
-            diff_img = nib.Nifti1Image(a - b, a_img.affine, a_img.header)
-            if cfg.write_condition_betas:
-                nib.save(diff_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_minus_b_beta.nii.gz"))
-
-        if signature_root is not None:
-            for label, img in [
-                ("cond_a", a_img),
-                ("cond_b", b_img),
-                ("cond_a_minus_b", diff_img),
-            ]:
-                if img is None:
-                    continue
-                sigs = compute_pain_signature_expression(
-                    stat_or_effect_img=img,
-                    signature_root=signature_root,
-                    mask_img=None,
-                    signatures=cfg.signatures,
+            a_img = None
+            b_img = None
+            if cond_a_effects:
+                a_img = _fixed_effects_combine_effects(
+                    effects=cond_a_effects,
+                    variances=cond_a_vars if cond_a_vars else None,
+                    method=cfg.fixed_effects_weighting,
                 )
-                for s in sigs:
-                    cond_rows.append(
-                        {
-                            "subject": sub_label,
-                            "task": cfg.task,
-                            "method": cfg.method,
-                            "map": label,
-                            "signature": s.name,
-                            "dot": f"{s.dot:.8g}",
-                            "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
-                            "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
-                            "n_voxels": s.n_voxels,
-                                "weights": str(s.weight_path),
-                        }
-                    )
-        if roi_enabled and signature_root is not None and roi_atlas_path is not None:
-            target_for_rois = a_img or b_img or diff_img
-            if target_for_rois is not None:
-                cond_roi_masks = _build_roi_masks_from_atlas(
-                    atlas_path=roi_atlas_path,
-                    labels=roi_selected,
-                    target_img=target_for_rois,
+                if cfg.write_condition_betas:
+                    nib.save(a_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_beta.nii.gz"))
+            if cond_b_effects:
+                b_img = _fixed_effects_combine_effects(
+                    effects=cond_b_effects,
+                    variances=cond_b_vars if cond_b_vars else None,
+                    method=cfg.fixed_effects_weighting,
                 )
-                cond_roi_masks_final: Dict[str, Any] = {}
-                cond_roi_mask_meta: Dict[str, Tuple[str, int]] = {}
-                brain_union = None
-                if run_brain_masks:
-                    brain_union = _union_masks_to_target(run_brain_masks, target_for_rois)
-                for roi_name, roi_mask in cond_roi_masks.items():
-                    final_mask = (
-                        _intersect_masks_to_target(
-                            roi_mask_img=roi_mask, brain_mask_img=brain_union, target_img=target_for_rois
-                        )
-                        if brain_union is not None
-                        else roi_mask
-                    )
-                    h, n = _mask_hash_and_count(final_mask)
-                    cond_roi_masks_final[str(roi_name)] = final_mask
-                    cond_roi_mask_meta[str(roi_name)] = (h, n)
+                if cfg.write_condition_betas:
+                    nib.save(b_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-b_beta.nii.gz"))
 
-                for map_label, img in [
+            diff_img = None
+            if a_img is not None and b_img is not None:
+                import numpy as np  # type: ignore
+
+                a = np.asanyarray(a_img.dataobj)
+                b = np.asanyarray(b_img.dataobj)
+                diff_img = nib.Nifti1Image(a - b, a_img.affine, a_img.header)
+                if cfg.write_condition_betas:
+                    nib.save(diff_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_minus_b_beta.nii.gz"))
+
+            if signature_root is not None:
+                for label, img in [
                     ("cond_a", a_img),
                     ("cond_b", b_img),
                     ("cond_a_minus_b", diff_img),
                 ]:
                     if img is None:
                         continue
-                    for roi_name, roi_mask in cond_roi_masks_final.items():
+                    brain_union = None
+                    if run_brain_masks:
+                        try:
+                            brain_union = _union_masks_to_target(run_brain_masks, img)
+                        except Exception:
+                            brain_union = None
+                    sigs = compute_pain_signature_expression(
+                        stat_or_effect_img=img,
+                        signature_root=signature_root,
+                        mask_img=brain_union,
+                        signatures=cfg.signatures,
+                    )
+                    for s in sigs:
+                        cond_rows.append(
+                            {
+                                "subject": sub_label,
+                                "task": cfg.task,
+                                "method": cfg.method,
+                                "map": label,
+                                "signature": s.name,
+                                "dot": f"{s.dot:.8g}",
+                                "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
+                                "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
+                                "n_voxels": s.n_voxels,
+                                "weights": str(s.weight_path),
+                            }
+                        )
+            if roi_enabled and signature_root is not None and roi_atlas_path is not None:
+                target_for_rois = a_img or b_img or diff_img
+                if target_for_rois is not None:
+                    cond_roi_masks = _build_roi_masks_from_atlas(
+                        atlas_path=roi_atlas_path,
+                        labels=roi_selected,
+                        target_img=target_for_rois,
+                    )
+                    cond_roi_masks_final: Dict[str, Any] = {}
+                    cond_roi_mask_meta: Dict[str, Tuple[str, int]] = {}
+                    brain_union = None
+                    if run_brain_masks:
+                        brain_union = _union_masks_to_target(run_brain_masks, target_for_rois)
+                    for roi_name, roi_mask in cond_roi_masks.items():
+                        final_mask = (
+                            _intersect_masks_to_target(
+                                roi_mask_img=roi_mask, brain_mask_img=brain_union, target_img=target_for_rois
+                            )
+                            if brain_union is not None
+                            else roi_mask
+                        )
+                        h, n = _mask_hash_and_count(final_mask)
+                        cond_roi_masks_final[str(roi_name)] = final_mask
+                        cond_roi_mask_meta[str(roi_name)] = (h, n)
+
+                    for map_label, img in [
+                        ("cond_a", a_img),
+                        ("cond_b", b_img),
+                        ("cond_a_minus_b", diff_img),
+                    ]:
+                        if img is None:
+                            continue
+                        for roi_name, roi_mask in cond_roi_masks_final.items():
+                            sigs = compute_pain_signature_expression(
+                                stat_or_effect_img=img,
+                                signature_root=signature_root,
+                                mask_img=roi_mask,
+                                signatures=cfg.signatures,
+                            )
+                            for s in sigs:
+                                mh, mn = cond_roi_mask_meta.get(str(roi_name), ("", 0))
+                                cond_roi_rows.append(
+                                    {
+                                        "subject": sub_label,
+                                        "task": cfg.task,
+                                        "method": cfg.method,
+                                        "map": map_label,
+                                        "atlas": atlas_display or "",
+                                        "roi": str(roi_name),
+                                        "roi_label": roi_name_to_label.get(str(roi_name), ""),
+                                        "roi_mask_hash": mh,
+                                        "roi_mask_n_voxels": mn,
+                                        "signature": s.name,
+                                        "dot": f"{s.dot:.8g}",
+                                        "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
+                                        "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
+                                        "n_voxels": s.n_voxels,
+                                        "weights": str(s.weight_path),
+                                    }
+                                )
+            _write_tsv(out_dir / "signatures" / "condition_signature_expression.tsv", cond_rows)
+            if roi_enabled:
+                _write_tsv(out_dir / "signatures" / "condition_signature_expression_rois.tsv", cond_roi_rows)
+        else:
+            def _count_trials_for_group(run_label: Optional[str], group: str) -> int:
+                n = 0
+                for t in trial_infos:
+                    if str(t.condition) != str(group):
+                        continue
+                    if run_label is not None and str(t.run_label) != str(run_label):
+                        continue
+                    n += 1
+                return n
+
+            def _iter_group_sets():
+                scope = str(cfg.signature_group_scope or "across_runs").strip().lower().replace("-", "_")
+                if scope == "per_run":
+                    for r in sorted(group_effects_by_run.keys()):
+                        by_group = group_effects_by_run.get(int(r), {})
+                        for g in sorted(by_group.keys()):
+                            yield ("per_run", f"run-{int(r):02d}", int(r), str(g), by_group.get(str(g), []), group_vars_by_run.get(int(r), {}).get(str(g), []))
+                else:
+                    for g in sorted(group_effects.keys()):
+                        yield ("across_runs", "", None, str(g), group_effects.get(str(g), []), group_vars.get(str(g), []))
+
+            brain_union_cache: Dict[str, Any] = {}
+
+            for scope, run_label, run_num, group, effects, variances in _iter_group_sets():
+                if not effects:
+                    continue
+                img = _fixed_effects_combine_effects(
+                    effects=effects,
+                    variances=variances if variances else None,
+                    method=cfg.fixed_effects_weighting,
+                )
+
+                if cfg.write_condition_betas:
+                    parts = [f"{sub_label}_task-{cfg.task}"]
+                    if run_label:
+                        parts.append(run_label)
+                    parts.append(f"group-{_safe_slug(group)}")
+                    nib.save(img, str(cond_dir / ("_".join(parts) + "_beta.nii.gz")))
+
+                n_trials = _count_trials_for_group(run_label or None, group)
+
+                if signature_root is not None:
+                    brain_union = None
+                    if run_brain_masks:
+                        try:
+                            brain_union = _union_masks_to_target(run_brain_masks, img)
+                        except Exception:
+                            brain_union = None
+                    sigs = compute_pain_signature_expression(
+                        stat_or_effect_img=img,
+                        signature_root=signature_root,
+                        mask_img=brain_union,
+                        signatures=cfg.signatures,
+                    )
+                    for s in sigs:
+                        group_rows.append(
+                            {
+                                "subject": sub_label,
+                                "task": cfg.task,
+                                "method": cfg.method,
+                                "scope": scope,
+                                "run": run_label,
+                                "run_num": "" if run_num is None else int(run_num),
+                                "group_column": str(cfg.signature_group_column or ""),
+                                "group_value": str(group),
+                                "n_trials": n_trials,
+                                "signature": s.name,
+                                "dot": f"{s.dot:.8g}",
+                                "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
+                                "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
+                                "n_voxels": s.n_voxels,
+                                "weights": str(s.weight_path),
+                            }
+                        )
+
+                if roi_enabled and signature_root is not None and roi_atlas_path is not None:
+                    cache_key = f"{atlas_display or ''}|{img.shape if hasattr(img, 'shape') else ''}|{run_label}|{group}"
+                    roi_masks_final = brain_union_cache.get(cache_key)
+                    roi_mask_meta: Dict[str, Tuple[str, int]] = {}
+                    if roi_masks_final is None:
+                        roi_masks = _build_roi_masks_from_atlas(
+                            atlas_path=roi_atlas_path,
+                            labels=roi_selected,
+                            target_img=img,
+                        )
+                        cond_roi_masks_final: Dict[str, Any] = {}
+                        brain_union = None
+                        if run_brain_masks:
+                            brain_union = _union_masks_to_target(run_brain_masks, img)
+                        for roi_name, roi_mask in roi_masks.items():
+                            final_mask = (
+                                _intersect_masks_to_target(
+                                    roi_mask_img=roi_mask, brain_mask_img=brain_union, target_img=img
+                                )
+                                if brain_union is not None
+                                else roi_mask
+                            )
+                            h, n = _mask_hash_and_count(final_mask)
+                            cond_roi_masks_final[str(roi_name)] = final_mask
+                            roi_mask_meta[str(roi_name)] = (h, n)
+                        brain_union_cache[cache_key] = cond_roi_masks_final
+                        roi_masks_final = cond_roi_masks_final
+                    else:
+                        for roi_name, roi_mask in roi_masks_final.items():
+                            roi_mask_meta[str(roi_name)] = _mask_hash_and_count(roi_mask)
+
+                    for roi_name, roi_mask in roi_masks_final.items():
                         sigs = compute_pain_signature_expression(
                             stat_or_effect_img=img,
                             signature_root=signature_root,
                             mask_img=roi_mask,
                             signatures=cfg.signatures,
                         )
+                        mh, mn = roi_mask_meta.get(str(roi_name), ("", 0))
                         for s in sigs:
-                            mh, mn = cond_roi_mask_meta.get(str(roi_name), ("", 0))
-                            cond_roi_rows.append(
+                            group_roi_rows.append(
                                 {
                                     "subject": sub_label,
                                     "task": cfg.task,
                                     "method": cfg.method,
-                                    "map": map_label,
+                                    "scope": scope,
+                                    "run": run_label,
+                                    "run_num": "" if run_num is None else int(run_num),
+                                    "group_column": str(cfg.signature_group_column or ""),
+                                    "group_value": str(group),
+                                    "n_trials": n_trials,
                                     "atlas": atlas_display or "",
                                     "roi": str(roi_name),
                                     "roi_label": roi_name_to_label.get(str(roi_name), ""),
@@ -1520,9 +1834,10 @@ def run_trial_signature_extraction_for_subject(
                                     "weights": str(s.weight_path),
                                 }
                             )
-    _write_tsv(out_dir / "signatures" / "condition_signature_expression.tsv", cond_rows)
-    if roi_enabled:
-        _write_tsv(out_dir / "signatures" / "condition_signature_expression_rois.tsv", cond_roi_rows)
+
+            _write_tsv(out_dir / "signatures" / "group_signature_expression.tsv", group_rows)
+            if roi_enabled:
+                _write_tsv(out_dir / "signatures" / "group_signature_expression_rois.tsv", group_roi_rows)
 
     (out_dir / "provenance.json").write_text(json.dumps(provenance, indent=2))
     return {

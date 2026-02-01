@@ -489,7 +489,7 @@ def generate_pain_signature_tables(
             html_table=html_table,
             caption=(
                 "Dot product is the raw pattern expression; cosine and Pearson r are scale-invariant. "
-                "Computed on the unthresholded effect-size map, after resampling signature weights to the image grid."
+                "Computed on the unthresholded effect-size map, after resampling the image (and mask) to each signature's grid."
             ),
         )
     ]
@@ -718,7 +718,10 @@ def _stat_summary_from_img(img: Any, mask_img: Optional[Any] = None) -> Dict[str
                 try:
                     from nilearn.image import resample_to_img  # type: ignore
 
-                    mask_res = resample_to_img(mask_img, img, interpolation="nearest")
+                    mask_res = resample_to_img(
+                        mask_img, img, interpolation="nearest",
+                        force_resample=True, copy_header=True,
+                    )
                     mask = np.asarray(mask_res.get_fdata()).astype(bool)
                 except Exception:
                     mask = None
@@ -967,7 +970,10 @@ def generate_fmri_space_section(
                     try:
                         from nilearn.image import resample_to_img  # type: ignore
 
-                        m_res = resample_to_img(mask_img, stat_img, interpolation="nearest")
+                        m_res = resample_to_img(
+                        mask_img, stat_img, interpolation="nearest",
+                        force_resample=True, copy_header=True,
+                    )
                         m = np.asarray(m_res.get_fdata()).astype(bool)
                     except Exception:
                         m = None

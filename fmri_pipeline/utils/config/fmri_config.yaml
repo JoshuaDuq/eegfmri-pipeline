@@ -171,7 +171,7 @@ fmri_contrast:
   hrf_model: "spm"             # "spm" | "flobs" | "fir"
   drift_model: "cosine"        # "none" | "cosine" | "polynomial"
   high_pass_hz: 0.008          # High-pass filter (128s period)
-  low_pass_hz: 0.1             # Low-pass filter
+  low_pass_hz: null            # Optional; avoid unless you know you need it
   
   # Cluster correction (heuristic, not FWE-corrected)
   cluster_correction: true
@@ -204,6 +204,8 @@ fmri_constraint:
   
   # Cluster filtering
   cluster_min_voxels: 10       # Minimum cluster size in voxels
+  # Preferred: stable across voxel sizes/resampling. When set, overrides cluster_min_voxels.
+  cluster_min_volume_mm3: null
   max_clusters: 20             # Keep top-N clusters by peak/size
   max_voxels_per_cluster: 2000 # Subsample voxels per cluster (0 = no limit)
   max_total_voxels: 20000      # Subsample total voxels (0 = no limit)

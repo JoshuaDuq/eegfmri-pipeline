@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/eeg-pipeline/tui/animation"
+	"github.com/eeg-pipeline/tui/components"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/styles"
 
@@ -17,23 +20,25 @@ import (
 )
 
 const (
-	tickIntervalMs     = 150
-	headerSeparatorLen = 60
-	subjectLabelWidth  = 12
-	subjectBarWidth    = 25
-	featureLabelWidth  = 14
-	featureBarWidth    = 20
+	headerSeparatorLen  = 60
+	subjectLabelWidth   = 14
+	subjectBarWidth     = 25
+	featureLabelWidth   = 24
+	featureBarWidth     = 20
 )
 
 type StatsData struct {
-	TotalSubjects     int            `json:"total_subjects"`
-	BidsSubjects      int            `json:"bids_subjects"`
-	EegPrepSubjects   int            `json:"eeg_prep_subjects"`
-	FmriPrepSubjects  int            `json:"fmri_prep_subjects"`
-	EpochsSubjects    int            `json:"epochs_subjects"`
-	FeaturesSubjects  int            `json:"features_subjects"`
-	FeatureCategories map[string]int `json:"feature_categories"`
-	Task              string         `json:"task"`
+	TotalSubjects          int            `json:"total_subjects"`
+	BidsSubjects           int            `json:"bids_subjects"`
+	EegPrepSubjects        int            `json:"eeg_prep_subjects"`
+	FmriPrepSubjects       int            `json:"fmri_prep_subjects"`
+	EpochsSubjects         int            `json:"epochs_subjects"`
+	FeaturesSubjects       int            `json:"features_subjects"`
+	FmriFirstLevelSubjects int            `json:"fmri_first_level_subjects"`
+	FmriBetaSeriesSubjects int            `json:"fmri_beta_series_subjects"`
+	FmriLssSubjects        int            `json:"fmri_lss_subjects"`
+	FeatureCategories      map[string]int `json:"feature_categories"`
+	Task                   string         `json:"task"`
 }
 
 type loadStatsMsg struct {
@@ -41,36 +46,41 @@ type loadStatsMsg struct {
 	Error error
 }
 
-type tickMsg struct{}
-
 type Model struct {
 	stats      StatsData
 	loading    bool
 	loadError  error
 	repoRoot   string
 	lastUpdate time.Time
-	ticker     int
+	animQueue  animation.Queue
+	spinner    components.Spinner
 }
 
 func New(repoRoot string) Model {
-	return Model{
+	m := Model{
 		repoRoot: repoRoot,
 		loading:  true,
+		spinner:  components.NewSpinner("Loading project statistics..."),
 	}
+	m.animQueue.Push(animation.ProgressPulseLoop())
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		m.tick(),
-		m.loadStats(),
-	)
+	return tea.Batch(m.loadStats(), m.tick(), m.immediateTick())
+}
+
+func (m Model) immediateTick() tea.Cmd {
+	return tea.Tick(0, func(t time.Time) tea.Msg { return tickMsg{} })
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*tickIntervalMs, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*styles.TickIntervalMs, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }
+
+type tickMsg struct{}
 
 func (m Model) loadStats() tea.Cmd {
 	return func() tea.Msg {
@@ -129,9 +139,9 @@ func (m Model) parseStatsOutput(output string) (StatsData, error) {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
-		m.ticker++
+		m.animQueue.Tick()
+		m.spinner.Tick()
 		return m, m.tick()
-
 	case loadStatsMsg:
 		return m.handleLoadStatsMsg(msg)
 
@@ -160,7 +170,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "r" {
 		m.loading = true
 		m.loadError = nil
-		return m, m.loadStats()
+		return m, tea.Batch(m.loadStats(), m.tick())
 	}
 	return m, nil
 }
@@ -191,24 +201,17 @@ func (m Model) renderHeader() string {
 	title := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
-		Render("◆ PROJECT DASHBOARD")
+		Render("Project dashboard")
 
-	separator := lipgloss.NewStyle().
-		Foreground(styles.Secondary).
-		Render(strings.Repeat("─", headerSeparatorLen))
-
-	return title + "\n" + separator
+	sepLen := headerSeparatorLen
+	if sepLen > 60 {
+		sepLen = 60
+	}
+	return title + "\n" + styles.RenderHeaderSeparator(sepLen)
 }
 
 func (m Model) renderLoading() string {
-	spinnerFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	frameIndex := m.ticker % len(spinnerFrames)
-	currentFrame := spinnerFrames[frameIndex]
-
-	spinner := lipgloss.NewStyle().Foreground(styles.Accent).Render(currentFrame)
-	loadingText := lipgloss.NewStyle().Foreground(styles.Text).Render(" Loading project statistics...")
-
-	return "\n\n  " + spinner + loadingText + "\n\n"
+	return "\n\n  " + m.spinner.View() + "\n\n"
 }
 
 func (m Model) renderError() string {
@@ -230,10 +233,12 @@ func (m Model) renderStats() string {
 
 	b.WriteString("\n")
 	b.WriteString(m.renderTaskInfo())
+	b.WriteString("\n\n")
+	b.WriteString(m.renderEegSection())
 	b.WriteString("\n")
-	b.WriteString(m.renderSubjectProgress())
-	b.WriteString("\n")
-	b.WriteString(m.renderFeatureCategories())
+	b.WriteString(styles.SectionDividerStyle.Render("  " + strings.Repeat(styles.SectionDividerChar, 36)))
+	b.WriteString("\n\n")
+	b.WriteString(m.renderFmriSection())
 	b.WriteString("\n")
 	b.WriteString(m.renderLastUpdate())
 
@@ -254,36 +259,78 @@ func (m Model) renderLastUpdate() string {
 	updateText := lipgloss.NewStyle().
 		Foreground(styles.Muted).
 		Italic(true).
-		Render("  Last updated: " + updateTime)
+		Render("  last updated: " + updateTime)
 	return updateText + "\n"
 }
 
-func (m Model) renderSubjectProgress() string {
+func (m Model) subjectRowColor(label string, count, total int) lipgloss.Color {
+	if label == "Total" {
+		return styles.Muted
+	}
+	if total == 0 {
+		return styles.Muted
+	}
+	pct := float64(count) / float64(total)
+	if pct == 0 {
+		return styles.Warning
+	}
+	if pct >= 1 {
+		return styles.Success
+	}
+	return styles.Primary
+}
+
+func (m Model) renderEegSection() string {
 	var b strings.Builder
 
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Primary).
-		Underline(true).
-		Render(" SUBJECTS ")
+	header := styles.SectionTitleStyle.Render("EEG")
 	b.WriteString("  " + header + "\n\n")
 
 	totalSubjects := m.stats.TotalSubjects
-	subjectItems := []struct {
+	eegRows := []struct {
 		label string
 		count int
-		color lipgloss.Color
 	}{
-		{"Total", totalSubjects, styles.Text},
-		{"BIDS", m.stats.BidsSubjects, styles.Accent},
-		{"EEG Prep", m.stats.EegPrepSubjects, styles.Secondary},
-		{"fMRI Prep", m.stats.FmriPrepSubjects, styles.Secondary},
-		{"Epochs", m.stats.EpochsSubjects, styles.Warning},
-		{"Features", m.stats.FeaturesSubjects, styles.Success},
+		{"Total", totalSubjects},
+		{"BIDS", m.stats.BidsSubjects},
+		{"EEG Prep", m.stats.EegPrepSubjects},
+		{"Epochs", m.stats.EpochsSubjects},
+		{"Features", m.stats.FeaturesSubjects},
 	}
 
-	for _, item := range subjectItems {
-		b.WriteString(m.renderSubjectItem(item.label, item.count, item.color, totalSubjects))
+	for _, row := range eegRows {
+		color := m.subjectRowColor(row.label, row.count, totalSubjects)
+		b.WriteString(m.renderSubjectItem(row.label, row.count, color, totalSubjects))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(m.renderFeatureCategories())
+
+	return b.String()
+}
+
+func (m Model) renderFmriSection() string {
+	var b strings.Builder
+
+	header := styles.SectionTitleStyle.Render("fMRI")
+	b.WriteString("  " + header + "\n\n")
+
+	totalSubjects := m.stats.TotalSubjects
+	fmriRows := []struct {
+		label string
+		count int
+	}{
+		{"Total", totalSubjects},
+		{"BIDS", m.stats.BidsSubjects},
+		{"fMRI Prep", m.stats.FmriPrepSubjects},
+		{"First level", m.stats.FmriFirstLevelSubjects},
+		{"Beta series", m.stats.FmriBetaSeriesSubjects},
+		{"LSS", m.stats.FmriLssSubjects},
+	}
+
+	for _, row := range fmriRows {
+		color := m.subjectRowColor(row.label, row.count, totalSubjects)
+		b.WriteString(m.renderSubjectItem(row.label, row.count, color, totalSubjects))
 	}
 
 	return b.String()
@@ -308,8 +355,12 @@ func (m Model) renderSubjectItem(label string, count int, color lipgloss.Color, 
 		Render(fmt.Sprintf("%d", count))
 
 	percentageText := m.formatPercentageText(percentage, isTotal)
+	zeroIndicator := ""
+	if !isTotal && totalSubjects > 0 && count == 0 {
+		zeroIndicator = " " + lipgloss.NewStyle().Foreground(styles.Warning).Render("—")
+	}
 
-	return labelText + countText + " " + progressBar + percentageText + "\n"
+	return labelText + countText + " " + progressBar + percentageText + zeroIndicator + "\n"
 }
 
 func (m Model) calculatePercentage(count, total int, isTotal bool) float64 {
@@ -336,24 +387,39 @@ func (m Model) renderMiniBar(percentage float64, width int, color lipgloss.Color
 	filledWidth := int(percentage * float64(width))
 	emptyWidth := width - filledWidth
 
-	filledBar := lipgloss.NewStyle().
-		Foreground(color).
-		Render(strings.Repeat("█", filledWidth))
-	emptyBar := lipgloss.NewStyle().
-		Foreground(styles.Secondary).
-		Render(strings.Repeat("░", emptyWidth))
+	filledBar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("▓", filledWidth))
+	emptyBar := lipgloss.NewStyle().Foreground(styles.Muted).Render(strings.Repeat("░", emptyWidth))
 
 	return filledBar + emptyBar
+}
+
+func (m Model) featureCategoryRowColor(count, total int) lipgloss.Color {
+	if total == 0 {
+		return styles.Muted
+	}
+	pct := float64(count) / float64(total)
+	if pct == 0 {
+		return styles.Warning
+	}
+	if pct >= 1 {
+		return styles.Success
+	}
+	return styles.Primary
+}
+
+func (m Model) allFeatureCategoriesZero(totalSubjects int) bool {
+	for _, count := range m.stats.FeatureCategories {
+		if count > 0 {
+			return false
+		}
+	}
+	return totalSubjects > 0
 }
 
 func (m Model) renderFeatureCategories() string {
 	var b strings.Builder
 
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Primary).
-		Underline(true).
-		Render(" FEATURE CATEGORIES ")
+	header := styles.SectionTitleStyle.Render("Feature categories")
 	b.WriteString("  " + header + "\n\n")
 
 	if len(m.stats.FeatureCategories) == 0 {
@@ -366,12 +432,27 @@ func (m Model) renderFeatureCategories() string {
 	}
 
 	totalSubjects := m.getTotalForFeatureCategories()
-	featureCategories := []string{
-		"power", "connectivity", "aperiodic", "bursts", "complexity",
-		"itpc", "pac", "quality", "erds", "spectral", "ratios", "asymmetry",
+	keys := make([]string, 0, len(m.stats.FeatureCategories))
+	for k := range m.stats.FeatureCategories {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	if m.allFeatureCategoriesZero(totalSubjects) {
+		n := len(keys)
+		summary := lipgloss.NewStyle().
+			Foreground(styles.Warning).
+			Render(fmt.Sprintf("    All categories: 0/%d subjects (no data yet)", totalSubjects))
+		b.WriteString(summary + "\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).
+			Render(fmt.Sprintf("    %d categories: %s", n, strings.Join(keys, ", "))) + "\n")
+		return b.String()
 	}
 
-	for _, category := range featureCategories {
+	for _, category := range keys {
+		if category == "" {
+			continue
+		}
 		b.WriteString(m.renderFeatureCategory(category, totalSubjects))
 	}
 
@@ -388,20 +469,25 @@ func (m Model) getTotalForFeatureCategories() int {
 func (m Model) renderFeatureCategory(category string, totalSubjects int) string {
 	count := m.stats.FeatureCategories[category]
 	percentage := m.calculatePercentage(count, totalSubjects, false)
+	color := m.featureCategoryRowColor(count, totalSubjects)
 
-	categoryIcon := styles.BulletMark
 	label := lipgloss.NewStyle().
 		Foreground(styles.TextDim).
 		Width(featureLabelWidth).
-		Render("  " + categoryIcon + " " + category)
+		Render("  " + styles.BulletMark + " " + category)
 
-	progressBar := m.renderMiniBar(percentage, featureBarWidth, styles.Primary)
+	progressBar := m.renderMiniBar(percentage, featureBarWidth, color)
 
 	countText := lipgloss.NewStyle().
-		Foreground(styles.Text).
+		Foreground(color).
 		Render(fmt.Sprintf(" %d/%d", count, totalSubjects))
 
-	return label + progressBar + countText + "\n"
+	zeroIndicator := ""
+	if totalSubjects > 0 && count == 0 {
+		zeroIndicator = " " + lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark)
+	}
+
+	return label + progressBar + countText + zeroIndicator + "\n"
 }
 
 func (m Model) renderFooter() string {
@@ -410,10 +496,7 @@ func (m Model) renderFooter() string {
 		styles.RenderKeyHint("Esc", "Back"),
 	}
 
-	hintSeparator := lipgloss.NewStyle().
-		Foreground(styles.Secondary).
-		Render("  │  ")
-	hintsText := strings.Join(hints, hintSeparator)
+	hintsText := strings.Join(hints, styles.RenderFooterSeparator())
 
 	return styles.FooterStyle.Render(hintsText)
 }

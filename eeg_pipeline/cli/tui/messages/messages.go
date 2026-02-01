@@ -6,7 +6,7 @@ import "time"
 // Application State Messages
 // =========================================================================
 
-// TickMsg is sent periodically for animations and progress updates
+// TickMsg is sent periodically for progress and elapsed-time updates.
 type TickMsg struct{}
 
 // =========================================================================

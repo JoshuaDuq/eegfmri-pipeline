@@ -445,7 +445,15 @@ func (m Model) BuildCommand() string {
 			}
 		}
 
-		parts = append(parts, modeToUse)
+		cliMode := modeToUse
+		if m.Pipeline == types.PipelineFmriAnalysis && modeToUse == "trial-signatures" {
+			if m.fmriTrialSigMethodIndex%2 == 1 {
+				cliMode = "lss"
+			} else {
+				cliMode = "beta-series"
+			}
+		}
+		parts = append(parts, cliMode)
 	}
 
 	if m.Pipeline == types.PipelineML {
@@ -1235,7 +1243,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 				if m.sourceLocFmriTail == 1 {
 					args = append(args, "--source-fmri-tail", "abs")
 				}
-				if m.sourceLocFmriMinClusterVox != 50 {
+				if m.sourceLocFmriMinClusterMM3 > 0 {
+					args = append(args, "--source-fmri-cluster-min-mm3", fmt.Sprintf("%.0f", m.sourceLocFmriMinClusterMM3))
+				} else if m.sourceLocFmriMinClusterVox != 50 {
 					args = append(args, "--source-fmri-cluster-min-voxels", fmt.Sprintf("%d", m.sourceLocFmriMinClusterVox))
 				}
 				if m.sourceLocFmriMaxClusters != 20 {
@@ -1302,7 +1312,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 					if m.sourceLocFmriHighPassHz != 0.008 {
 						args = append(args, "--source-fmri-high-pass", fmt.Sprintf("%.4f", m.sourceLocFmriHighPassHz))
 					}
-					if m.sourceLocFmriLowPassHz != 0.1 {
+					if m.sourceLocFmriLowPassHz > 0 {
 						args = append(args, "--source-fmri-low-pass", fmt.Sprintf("%.2f", m.sourceLocFmriLowPassHz))
 					}
 					if m.sourceLocFmriClusterCorrection {
@@ -3014,6 +3024,10 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		mode = m.modeOptions[m.modeIndex]
 	}
 	isFirstLevel := mode == "first-level"
+	trialMethod := "beta-series"
+	if m.fmriTrialSigMethodIndex%2 == 1 {
+		trialMethod = "lss"
+	}
 
 	inputSource := "fmriprep"
 	if m.fmriAnalysisInputSourceIndex%2 == 1 {
@@ -3133,7 +3147,7 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 			ab.args = append(ab.args, sigs...)
 		}
 
-		if mode == "lss" && m.fmriTrialSigLssOtherRegressorsIndex%2 == 1 {
+		if trialMethod == "lss" && m.fmriTrialSigLssOtherRegressorsIndex%2 == 1 {
 			ab.args = append(ab.args, "--lss-other-regressors", "all")
 		}
 
@@ -3144,6 +3158,18 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		if len(roiNames) > 0 {
 			ab.args = append(ab.args, "--signature-roi")
 			ab.args = append(ab.args, roiNames...)
+		}
+
+		// Signature grouping (e.g., temperature levels)
+		groupCol := strings.TrimSpace(m.fmriTrialSigGroupColumn)
+		groupVals := splitSpaceList(strings.TrimSpace(m.fmriTrialSigGroupValuesSpec))
+		if groupCol != "" && len(groupVals) > 0 {
+			ab.args = append(ab.args, "--signature-group-column", groupCol)
+			ab.args = append(ab.args, "--signature-group-values")
+			ab.args = append(ab.args, groupVals...)
+			if m.fmriTrialSigGroupScopeIndex%2 == 1 {
+				ab.args = append(ab.args, "--signature-group-scope", "per-run")
+			}
 		}
 
 		return ab.build()

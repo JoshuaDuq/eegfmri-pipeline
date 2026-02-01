@@ -303,7 +303,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
 				mode = m.modeOptions[m.modeIndex]
 			}
-			if mode == "beta-series" || mode == "lss" {
+			if mode == "trial-signatures" {
 				space := strings.TrimSpace(m.fmriAnalysisFmriprepSpace)
 				if space == "" || strings.EqualFold(space, "T1w") {
 					m.fmriAnalysisFmriprepSpace = "MNI152NLin2009cAsym"
@@ -789,15 +789,29 @@ func (m *Model) validate() []string {
 		if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
 			mode = m.modeOptions[m.modeIndex]
 		}
-		if strings.TrimSpace(m.fmriAnalysisCondAValue) == "" {
-			errors = append(errors, "fMRI analysis: Cond A Value is required")
-		}
-		if mode == "beta-series" || mode == "lss" {
-			if strings.TrimSpace(m.fmriAnalysisCondBValue) == "" {
-				errors = append(errors, "fMRI trial signatures: Cond B Value is required")
+		groupingEnabled := strings.TrimSpace(m.fmriTrialSigGroupColumn) != "" && strings.TrimSpace(m.fmriTrialSigGroupValuesSpec) != ""
+
+		if mode == "trial-signatures" {
+			if groupingEnabled {
+				// Grouping mode uses Group Column/Values for trial selection; Cond A/B may be left empty.
+				if strings.TrimSpace(m.fmriTrialSigGroupColumn) == "" || strings.TrimSpace(m.fmriTrialSigGroupValuesSpec) == "" {
+					errors = append(errors, "fMRI trial signatures: Group Column and Group Values are required when grouping is enabled")
+				}
+			} else {
+				if strings.TrimSpace(m.fmriAnalysisCondAValue) == "" {
+					errors = append(errors, "fMRI trial signatures: Cond A Value is required (or enable grouping)")
+				}
+				if strings.TrimSpace(m.fmriAnalysisCondBValue) == "" {
+					errors = append(errors, "fMRI trial signatures: Cond B Value is required (or enable grouping)")
+				}
 			}
 			if !m.fmriTrialSigSignatureNPS && !m.fmriTrialSigSignatureSIIPS1 {
 				errors = append(errors, "fMRI trial signatures: select at least one signature (NPS/SIIPS1)")
+			}
+		} else {
+			// First-level
+			if strings.TrimSpace(m.fmriAnalysisCondAValue) == "" {
+				errors = append(errors, "fMRI analysis: Cond A Value is required")
 			}
 		}
 		if mode == "first-level" && m.fmriAnalysisContrastType%2 == 1 && strings.TrimSpace(m.fmriAnalysisFormula) == "" {
@@ -1262,6 +1276,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriTail:
 		m.sourceLocFmriTail = (m.sourceLocFmriTail + 1) % 2 // 0: pos, 1: abs
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriMinClusterMM3:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriMinClusterVox:
 		m.startNumberEdit()
@@ -3579,8 +3596,34 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriTrialSigRoiNames:
 		m.startTextEdit(textFieldFmriAnalysisSignatureRoiNames)
 		m.useDefaultAdvanced = false
+	case optFmriTrialSigGroupColumn:
+		if len(m.fmriDiscoveredColumns) > 0 {
+			m.expandedOption = expandedFmriTrialSigGroupColumn
+		} else {
+			m.startTextEdit(textFieldFmriTrialSigGroupColumn)
+		}
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigGroupValues:
+		if strings.TrimSpace(m.fmriTrialSigGroupColumn) == "" {
+			m.ShowToast("Select a group column first", "warning")
+			return
+		}
+		if vals := m.GetFmriDiscoveredColumnValues(m.fmriTrialSigGroupColumn); len(vals) > 0 {
+			m.expandedOption = expandedFmriTrialSigGroupValues
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldFmriTrialSigGroupValues)
+		}
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigGroupScope:
+		m.fmriTrialSigGroupScopeIndex = (m.fmriTrialSigGroupScopeIndex + 1) % 2
+		m.useDefaultAdvanced = false
 
 	// Trial-wise signatures
+	case optFmriTrialSigMethod:
+		m.fmriTrialSigMethodIndex = (m.fmriTrialSigMethodIndex + 1) % 2
+		m.useDefaultAdvanced = false
 	case optFmriTrialSigIncludeOtherEvents:
 		m.fmriTrialSigIncludeOtherEvents = !m.fmriTrialSigIncludeOtherEvents
 		m.useDefaultAdvanced = false
@@ -4424,6 +4467,10 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val > 0 {
 			m.sourceLocFmriThreshold = val
 		}
+	case optSourceLocFmriMinClusterMM3:
+		if val >= 0 {
+			m.sourceLocFmriMinClusterMM3 = val
+		}
 	case optSourceLocFmriMinClusterVox:
 		if val >= 0 {
 			m.sourceLocFmriMinClusterVox = int(val)
@@ -4449,7 +4496,7 @@ func (m *Model) commitFeaturesNumber(val float64) {
 			m.sourceLocFmriHighPassHz = val
 		}
 	case optSourceLocFmriLowPassHz:
-		if val > 0 {
+		if val >= 0 {
 			m.sourceLocFmriLowPassHz = val
 		}
 	case optSourceLocFmriClusterPThreshold:

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/eeg-pipeline/tui/animation"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/styles"
@@ -128,9 +129,10 @@ type Model struct {
 	resourceUpdateChan chan messages.ResourceUpdateMsg // Channel for resource updates
 	stopResourceChan   chan struct{}                   // Signal to stop resource monitoring
 
-	width  int
-	height int
-	ticker int
+	width     int
+	height    int
+	ticker    int
+	animQueue animation.Queue
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -148,7 +150,7 @@ func New(command string) Model {
 	vp.MouseWheelEnabled = true
 	vp.MouseWheelDelta = styles.MouseWheelScrollLines
 
-	return Model{
+	m := Model{
 		Command:          command,
 		Status:           StatusPending,
 		Progress:         0,
@@ -167,6 +169,8 @@ func New(command string) Model {
 		SubjectStatuses:  make(map[string]string),
 		FailedSubjects:   []string{},
 	}
+	m.animQueue.Push(animation.ProgressPulseLoop())
+	return m
 }
 
 // NewWithRoot creates a new execution model and associates it with
@@ -195,7 +199,7 @@ type CommandStartedMsg struct {
 ///////////////////////////////////////////////////////////////////
 
 // Init implements tea.Model and starts the periodic ticker used
-// to drive UI animations and elapsed time updates.
+// to drive progress and elapsed time updates.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.tick(),
@@ -441,6 +445,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case messages.TickMsg:
 		m.ticker++
+		m.animQueue.Tick()
 		// Only continue ticking while running
 		if m.Status == StatusRunning {
 			return m, m.tick()
@@ -1260,17 +1265,17 @@ func (m Model) renderCompletionSummary() string {
 	switch m.Status {
 	case StatusSuccess:
 		icon = styles.CheckMark
-		statusText = "COMPLETED SUCCESSFULLY"
+		statusText = "Completed successfully"
 		statusColor = styles.Success
 		borderColor = styles.Success
 	case StatusFailed:
 		icon = styles.CrossMark
-		statusText = "EXECUTION FAILED"
+		statusText = "Execution failed"
 		statusColor = styles.Error
 		borderColor = styles.Error
 	case StatusCancelled:
 		icon = "⊘"
-		statusText = "EXECUTION CANCELLED"
+		statusText = "Execution cancelled"
 		statusColor = styles.Warning
 		borderColor = styles.Warning
 	default:
@@ -1296,19 +1301,19 @@ func (m Model) renderCompletionSummary() string {
 	// Duration
 	duration := m.getDuration()
 	durationStr := formatDuration(duration)
-	b.WriteString(labelStyle.Render("Duration:") + valueStyle.Render(durationStr) + "\n")
+	b.WriteString(labelStyle.Render("duration:") + valueStyle.Render(durationStr) + "\n")
 
 	// Subjects processed
 	if m.SubjectTotal > 0 && m.SubjectCurrent > 0 {
 		subjProgress := float64(m.SubjectCurrent) / float64(m.SubjectTotal)
 		subjInfo := fmt.Sprintf("%d of %d (%.0f%%)", m.SubjectCurrent, m.SubjectTotal, subjProgress*100)
-		b.WriteString(labelStyle.Render("Subjects:") + valueStyle.Render(subjInfo) + "\n")
+		b.WriteString(labelStyle.Render("subjects:") + valueStyle.Render(subjInfo) + "\n")
 	}
 
 	// Exit code for failures
 	if m.Status == StatusFailed {
 		exitStyle := lipgloss.NewStyle().Foreground(styles.Error).Bold(true)
-		b.WriteString(labelStyle.Render("Exit Code:") + exitStyle.Render(fmt.Sprintf("%d", m.ExitCode)) + "\n")
+		b.WriteString(labelStyle.Render("Exit code:") + exitStyle.Render(fmt.Sprintf("%d", m.ExitCode)) + "\n")
 	}
 
 	// Error count with visual indicator
@@ -1318,7 +1323,7 @@ func (m Model) renderCompletionSummary() string {
 		if len(m.ErrorLines) > 5 {
 			errText += " (scroll log to view)"
 		}
-		b.WriteString(labelStyle.Render("Errors:") + errStyle.Render(errText) + "\n")
+		b.WriteString(labelStyle.Render("errors:") + errStyle.Render(errText) + "\n")
 	}
 
 	// Log lines processed
@@ -1326,12 +1331,12 @@ func (m Model) renderCompletionSummary() string {
 	if m.LogTruncated {
 		logCount += lipgloss.NewStyle().Foreground(styles.Warning).Render(" (truncated)")
 	}
-	b.WriteString(labelStyle.Render("Log:") + valueStyle.Render(logCount) + "\n")
+	b.WriteString(labelStyle.Render("log:") + valueStyle.Render(logCount) + "\n")
 
 	// Show output paths for successful runs
 	if m.Status == StatusSuccess && m.RepoRoot != "" {
 		b.WriteString("\n")
-		outputHeader := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Output Locations:")
+		outputHeader := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Output locations:")
 		b.WriteString(outputHeader + "\n")
 
 		outputPaths := m.GetOutputPaths()
@@ -1400,7 +1405,6 @@ func (m Model) renderCompletionSummary() string {
 		b.WriteString(retryBtn + "  " + menuBtn)
 	}
 
-	// Summary card styling
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
@@ -1426,9 +1430,9 @@ func formatDuration(d time.Duration) string {
 // renderHeader renders the top title bar indicating local vs cloud
 // execution and colors it according to the current status.
 func (m Model) renderHeader() string {
-	title := " PIPELINE EXECUTION "
+	title := "Pipeline execution"
 	if m.IsCloud {
-		title = " CLOUD EXECUTION "
+		title = "Cloud execution"
 	}
 
 	borderColor := styles.Secondary
@@ -1446,7 +1450,6 @@ func (m Model) renderHeader() string {
 	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(borderColor).
-		Underline(true).
 		Render(title)
 
 	return lipgloss.PlaceHorizontal(m.width-4, lipgloss.Center, header)
@@ -1459,7 +1462,7 @@ func (m Model) renderInfoPanel() string {
 
 	if m.StartTime.Unix() > 0 {
 		duration := m.getDuration()
-		timeLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Elapsed:")
+		timeLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("elapsed:")
 		timeValue := lipgloss.NewStyle().Foreground(styles.Text).Render(formatDuration(duration))
 		info.WriteString(timeLabel + timeValue)
 
@@ -1472,7 +1475,7 @@ func (m Model) renderInfoPanel() string {
 	}
 
 	if m.SubjectTotal > 0 && m.CurrentSubject != "" && m.Status == StatusRunning {
-		subjLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Subject:")
+		subjLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("subject:")
 		subjValue := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(m.CurrentSubject)
 		subjProgress := lipgloss.NewStyle().Foreground(styles.TextDim).Render(
 			fmt.Sprintf(" (%d of %d)", m.SubjectCurrent, m.SubjectTotal))
@@ -1488,7 +1491,7 @@ func (m Model) renderInfoPanel() string {
 	}
 
 	if len(m.FailedSubjects) > 0 {
-		failLabel := lipgloss.NewStyle().Foreground(styles.Error).Width(10).Render("Failed:")
+		failLabel := lipgloss.NewStyle().Foreground(styles.Error).Width(10).Render("failed:")
 		failValue := lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render(
 			fmt.Sprintf("%d subject(s)", len(m.FailedSubjects)))
 		info.WriteString(failLabel + failValue + "\n")
@@ -1533,7 +1536,7 @@ func (m Model) renderProgressSection() string {
 	isNarrow := m.width < 100
 	isShort := m.height < 30
 
-	// Section header with animated icon
+	// Section header with status icon
 	var progressIcon string
 	var iconStyle lipgloss.Style
 	switch m.Status {
@@ -1544,14 +1547,14 @@ func (m Model) renderProgressSection() string {
 		progressIcon = styles.CrossMark
 		iconStyle = lipgloss.NewStyle().Foreground(styles.Error)
 	default:
-		progressIcon = []string{"◔", "◑", "◕", "●"}[m.ticker%4]
+		progressIcon = styles.ActiveMark
 		iconStyle = lipgloss.NewStyle().Foreground(styles.Accent)
 	}
 
-	b.WriteString(iconStyle.Render(progressIcon) + " " + styles.SectionTitleStyle.Render(" PROGRESS ") + "\n")
+	b.WriteString(iconStyle.Render(progressIcon) + " " + styles.SectionTitleStyle.Render("Progress") + "\n")
 
-	// Overall progress with animated gradient bar
-	progressLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Overall")
+	// Overall progress bar
+	progressLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("overall")
 	barWidth := m.width - 22
 	if isNarrow {
 		barWidth = m.width - 15
@@ -1595,7 +1598,7 @@ func (m Model) renderProgressSection() string {
 	// Current step progress with enhanced styling
 	if m.CurrentSubject != "" || m.CurrentOperation != "" {
 		b.WriteString("\n")
-		stepLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Step")
+		stepLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("step")
 
 		if m.OperationTotal > 0 {
 			stepProgress := float64(m.OperationCurrent) / float64(m.OperationTotal)
@@ -1636,7 +1639,7 @@ func (m Model) renderMetricsDashboard() string {
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	metricBox := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Secondary).
 		Padding(0, 1).
 		MarginRight(1)
@@ -1673,7 +1676,7 @@ func (m Model) renderPerCoreCPU() string {
 
 	// Header
 	headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
-	b.WriteString("  " + headerStyle.Render("CPU CORES") + "\n")
+	b.WriteString("  " + headerStyle.Render("CPU cores") + "\n")
 
 	// Determine layout based on number of cores
 	numCores := len(m.CPUCoreUsages)
@@ -1786,7 +1789,7 @@ func (m Model) renderLogSection() string {
 			Foreground(lipgloss.Color("#000000")).
 			Background(styles.Accent).
 			Padding(0, 2).
-			Render("COPY MODE: Select text with mouse, then Cmd+C. Press M or Esc to exit.")
+			Render("Copy mode: Select text with mouse, then Cmd+C. Press M or Esc to exit.")
 		b.WriteString(copyBanner + "\n")
 	}
 
@@ -1795,7 +1798,7 @@ func (m Model) renderLogSection() string {
 		searchIcon := lipgloss.NewStyle().Foreground(styles.Accent).Render("> ")
 		inputStyle := lipgloss.NewStyle().
 			Foreground(styles.Text).
-			Underline(true).
+			Bold(true).
 			Padding(0, 1)
 
 		query := m.searchQuery
@@ -1815,7 +1818,7 @@ func (m Model) renderLogSection() string {
 		b.WriteString(searchInput + "\n")
 	}
 
-	logHeader := styles.SectionTitleStyle.Render(" LOG ")
+	logHeader := styles.SectionTitleStyle.Render("Log")
 	if len(m.OutputLines) > 0 {
 		scrollPct := 0
 		if m.logViewport.TotalLineCount() > 0 {
@@ -1858,8 +1861,7 @@ func (m Model) renderCloudStages() string {
 			marker = "[" + styles.CheckMark + "]"
 		} else if s.stage == m.CloudStage && m.Status == StatusRunning {
 			style = style.Foreground(styles.Accent).Bold(true)
-			frames := []string{"-", "\\", "|", "/"}
-			marker = "[" + frames[m.ticker%len(frames)] + "]"
+			marker = "[" + styles.ActiveMark + "]"
 		} else if m.CloudStage == StageDone {
 			style = style.Foreground(styles.Success)
 			marker = "[" + styles.CheckMark + "]"
@@ -1871,8 +1873,8 @@ func (m Model) renderCloudStages() string {
 	return strings.Join(parts, "   ")
 }
 
-// renderAnimatedProgressBar renders the main progress bar with a
-// color gradient and animated leading edge while running.
+// renderAnimatedProgressBar renders the main progress bar (single accent color; name kept for API).
+// When running, the leading edge pulses via the animation queue.
 func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 	if width < styles.MinProgressBarWidth {
 		width = styles.MinProgressBarWidth
@@ -1889,31 +1891,27 @@ func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 		filled = width
 	}
 
-	// Create gradient effect with color transition
-	var bar string
-	for i := 0; i < filled; i++ {
-		pct := float64(i) / float64(width)
-		if pct < 0.33 {
-			bar += lipgloss.NewStyle().Foreground(styles.Accent).Render("█")
-		} else if pct < 0.66 {
-			bar += lipgloss.NewStyle().Foreground(styles.Primary).Render("█")
+	fillStyle := lipgloss.NewStyle().Foreground(styles.Accent)
+	emptyStyle := lipgloss.NewStyle().Foreground(styles.Secondary)
+
+	var fillBlock string
+	if m.Status == StatusRunning {
+		kind, progress := m.animQueue.Current()
+		if kind == animation.KindProgressPulse && filled > 0 {
+			leadPulse := "▓"
+			if progress < 0.5 {
+				leadPulse = "█"
+			}
+			fillBlock = fillStyle.Render(strings.Repeat("█", filled-1)+leadPulse)
 		} else {
-			bar += lipgloss.NewStyle().Foreground(styles.Success).Render("█")
+			fillBlock = fillStyle.Render(strings.Repeat("█", filled))
 		}
-	}
-
-	// Animated leading edge when not complete
-	if filled < width && filled > 0 && m.Status == StatusRunning {
-		leadChars := []string{"▓", "▒", "░"}
-		leadIdx := m.ticker % len(leadChars)
-		bar += lipgloss.NewStyle().Foreground(styles.Accent).Render(leadChars[leadIdx])
-		bar += lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("░", width-filled-1))
 	} else {
-		bar += lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("░", width-filled))
+		fillBlock = fillStyle.Render(strings.Repeat("█", filled))
 	}
 
+	bar := fillBlock + emptyStyle.Render(strings.Repeat("░", width-filled))
 	pct := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(fmt.Sprintf(" %3.0f%%", p*100))
-
 	return bar + pct
 }
 
@@ -1936,17 +1934,15 @@ func (m Model) renderStatus() string {
 	style := lipgloss.NewStyle().Bold(true).Padding(0, 1)
 	switch m.Status {
 	case StatusRunning:
-		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-		spinner := frames[m.ticker%len(frames)]
-		return style.Background(styles.Accent).Foreground(lipgloss.Color("#000000")).Render(spinner + " RUNNING ")
+		return style.Background(styles.Accent).Foreground(lipgloss.Color("#000000")).Render(styles.ActiveMark + " Running ")
 	case StatusSuccess:
-		return style.Background(styles.Success).Foreground(lipgloss.Color("#000000")).Render(styles.CheckMark + " SUCCESS ")
+		return style.Background(styles.Success).Foreground(lipgloss.Color("#000000")).Render(styles.CheckMark + " Success ")
 	case StatusFailed:
-		return style.Background(styles.Error).Foreground(lipgloss.Color("#FFFFFF")).Render(styles.CrossMark + " FAILED ")
+		return style.Background(styles.Error).Foreground(lipgloss.Color("#FFFFFF")).Render(styles.CrossMark + " Failed ")
 	case StatusCancelled:
-		return style.Background(styles.Muted).Foreground(lipgloss.Color("#FFFFFF")).Render(" CANCELLED ")
+		return style.Background(styles.Muted).Foreground(lipgloss.Color("#FFFFFF")).Render(" Cancelled ")
 	default:
-		return style.Foreground(styles.Muted).Render(" PENDING ")
+		return style.Foreground(styles.Muted).Render(" Pending ")
 	}
 }
 
@@ -1997,8 +1993,7 @@ func (m Model) renderFooter() string {
 		}
 	}
 
-	separator := "   "
-	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, separator))
+	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, styles.RenderFooterSeparator()))
 }
 
 ///////////////////////////////////////////////////////////////////

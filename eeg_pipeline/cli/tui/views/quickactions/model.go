@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eeg-pipeline/tui/animation"
 	"github.com/eeg-pipeline/tui/styles"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -30,15 +31,13 @@ type Action struct {
 }
 
 var (
-	headerFrames = []string{"◆", "◇", "◆", "◈"}
-	cursorFrames = []string{"▸", "▹", "▸", "▹"}
 	quickActions = []Action{
-		{Type: ActionStats, Name: "Project Stats", Description: "View subject & feature analytics", Icon: "◆", Shortcut: "S"},
-		{Type: ActionHistory, Name: "History", Description: "View recent pipeline executions", Icon: "◇", Shortcut: "H"},
-		{Type: ActionValidate, Name: "Validate", Description: "Check data integrity", Icon: "◈", Shortcut: "V"},
-		{Type: ActionExport, Name: "Export", Description: "Export features to CSV", Icon: "◇", Shortcut: "X"},
-		{Type: ActionConfig, Name: "Config", Description: "View configuration", Icon: "◆", Shortcut: "C"},
-		{Type: ActionRefresh, Name: "Refresh", Description: "Reload subject data", Icon: "◈", Shortcut: "R"},
+		{Type: ActionStats, Name: "Project Stats", Description: "View subject & feature analytics", Icon: styles.SelectedMark, Shortcut: "S"},
+		{Type: ActionHistory, Name: "History", Description: "View recent pipeline executions", Icon: styles.SelectedMark, Shortcut: "H"},
+		{Type: ActionValidate, Name: "Validate", Description: "Check data integrity", Icon: styles.SelectedMark, Shortcut: "V"},
+		{Type: ActionExport, Name: "Export", Description: "Export features to CSV", Icon: styles.SelectedMark, Shortcut: "X"},
+		{Type: ActionConfig, Name: "Config", Description: "View configuration", Icon: styles.SelectedMark, Shortcut: "C"},
+		{Type: ActionRefresh, Name: "Refresh", Description: "Reload subject data", Icon: styles.SelectedMark, Shortcut: "R"},
 	}
 	shortcutMap = map[string]ActionType{
 		"s": ActionStats,
@@ -58,13 +57,16 @@ type Model struct {
 	SelectedAction ActionType
 	Done           bool
 	ticker         int
+	animQueue      animation.Queue
 }
 
 func New() Model {
-	return Model{
+	m := Model{
 		cursor:  0,
 		Visible: false,
 	}
+	m.animQueue.Push(animation.CursorBlinkLoop())
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -72,7 +74,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*styles.TickIntervalMs, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }
@@ -81,6 +83,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		m.ticker++
+		m.animQueue.Tick()
 		return m, m.tick()
 
 	case tea.KeyMsg:
@@ -120,22 +123,12 @@ func (m Model) View() string {
 
 	var b strings.Builder
 
-	headerIcon := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(headerFrames[(m.ticker/2)%len(headerFrames)])
-
-	header := headerIcon + " " + lipgloss.NewStyle().
+	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
-		Render("QUICK ACTIONS")
+		Render("Quick actions")
 	b.WriteString(header + "\n")
-
-	divWidth := 35
-	div1 := lipgloss.NewStyle().Foreground(styles.Accent).Render(strings.Repeat("─", divWidth/3))
-	div2 := lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("─", divWidth/3))
-	div3 := lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("─", divWidth/3+divWidth%3))
-	b.WriteString(div1 + div2 + div3 + "\n\n")
+	b.WriteString(styles.RenderHeaderSeparator(35) + "\n\n")
 
 	for i, action := range quickActions {
 		b.WriteString(m.renderAction(action, i == m.cursor) + "\n")
@@ -143,27 +136,18 @@ func (m Model) View() string {
 
 	b.WriteString("\n")
 
-	footer := lipgloss.NewStyle().Foreground(styles.Muted).Render("Use shortcuts or ") +
+	footer := lipgloss.NewStyle().Foreground(styles.Muted).Render("use shortcuts or ") +
 		lipgloss.NewStyle().Foreground(styles.Primary).Render("Enter") +
 		lipgloss.NewStyle().Foreground(styles.Muted).Render(" to select")
 	b.WriteString(footer)
 
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Primary).
-		Padding(1, 2).
-		Width(42)
-
-	return box.Render(b.String())
+	return styles.CardStyle.Width(42).Padding(1, 2).Render(b.String())
 }
 
 func (m Model) renderAction(action Action, isCursor bool) string {
 	cursor := "  "
 	if isCursor {
-		cursor = lipgloss.NewStyle().
-			Foreground(styles.Primary).
-			Bold(true).
-			Render(cursorFrames[(m.ticker/2)%len(cursorFrames)] + " ")
+		cursor = styles.RenderCursorOptional(m.animQueue.CursorVisible())
 	}
 
 	shortcutStyle := lipgloss.NewStyle()

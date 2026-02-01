@@ -6,7 +6,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 import pandas as pd
 
@@ -33,6 +33,20 @@ TIMELINE_DISPLAY_LIMIT = 20
 METADATA_COLUMNS = {"subject", "epoch", "condition", "task"}
 
 
+
+def _resolve_features_dir(deriv_root: Path, subject: str) -> Optional[Path]:
+    """Return the first existing features directory for the subject.
+
+    Checks: deriv_root/sub-XXX/eeg/features, then deriv_root/preprocessed/eeg/sub-XXX/features.
+    """
+    standard = deriv_features_path(deriv_root, subject)
+    if standard.exists():
+        return standard
+    preproc = deriv_root / "preprocessed" / "eeg" / f"sub-{subject}" / "features"
+    if preproc.exists():
+        return preproc
+    return None
+
 def get_dir_size(path: Path) -> int:
     """Calculate total size in bytes of all files under the given directory."""
     total_size = 0
@@ -54,6 +68,14 @@ def format_size(size_bytes: int) -> str:
             return f"{size:.1f} {unit}"
         size /= BYTES_PER_KB
     return f"{size:.1f} TB"
+
+
+def _resolve_fmriprep_output_dir(deriv_root: Path, config: Any) -> Path:
+    """Resolve fMRIPrep output parent dir: fmri_preprocessing.fmriprep.output_dir or deriv_root/preprocessed/fmri."""
+    raw = config.get("fmri_preprocessing.fmriprep.output_dir")
+    if raw and str(raw).strip():
+        return Path(str(raw).strip()).expanduser().resolve()
+    return deriv_root / "preprocessed" / "fmri"
 
 
 def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
@@ -89,33 +111,79 @@ def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set
                         subj_id = subj_dir.name.replace("sub-", "")
                         eeg_prep_subjects.add(subj_id)
 
-    # Collect fMRI preprocessing subjects (fMRIPrep output)
+    # Collect fMRI preprocessing subjects (fMRIPrep output).
+    # Path: output_dir from fmri_preprocessing.fmriprep.output_dir or deriv_root/preprocessed/fmri.
+    # Layout: <output_dir>/sub-XXX/func/*preproc_bold* (subject dirs directly under output_dir).
     fmri_prep_subjects = set()
-    fmriprep_dir = deriv_root / "fmriprep"
-    if fmriprep_dir.exists():
-        for subj_dir in fmriprep_dir.glob("sub-*"):
-            if subj_dir.is_dir():
-                # Check for preproc bold files as indicator of fMRI preprocessing
-                func_dir = subj_dir / "func"
-                if func_dir.exists() and list(func_dir.glob("*preproc_bold*")):
-                    subj_id = subj_dir.name.replace("sub-", "")
-                    fmri_prep_subjects.add(subj_id)
+    fmri_output_dir = _resolve_fmriprep_output_dir(deriv_root, config)
+    if fmri_output_dir.exists():
+        for subj_dir in fmri_output_dir.glob("sub-*"):
+            if not subj_dir.is_dir():
+                continue
+            func_dir = subj_dir / "func"
+            if func_dir.exists() and list(func_dir.glob("*preproc_bold*")):
+                subj_id = subj_dir.name.replace("sub-", "")
+                fmri_prep_subjects.add(subj_id)
 
     return bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects
+
+
+def _collect_fmri_analysis_subjects(deriv_root: Path) -> tuple[set[str], set[str], set[str]]:
+    """Collect subjects with fMRI analysis outputs.
+
+    Paths (aligned with fmri_pipeline):
+      - first_level: deriv_root/sub-XXX/fmri/first_level/
+      - beta_series: deriv_root/sub-XXX/fmri/beta_series/
+      - lss: deriv_root/sub-XXX/fmri/lss/
+
+    Returns:
+        (first_level_subjects, beta_series_subjects, lss_subjects)
+    """
+    first_level_subjects: set[str] = set()
+    beta_series_subjects: set[str] = set()
+    lss_subjects: set[str] = set()
+
+    for subj_dir in deriv_root.glob("sub-*"):
+        if not subj_dir.is_dir():
+            continue
+        subj_id = subj_dir.name.replace("sub-", "")
+        fmri_dir = subj_dir / "fmri"
+
+        fl_dir = fmri_dir / "first_level"
+        if fl_dir.exists() and any(fl_dir.rglob("*")) and any(f.is_file() for f in fl_dir.rglob("*")):
+            first_level_subjects.add(subj_id)
+
+        bs_dir = fmri_dir / "beta_series"
+        if bs_dir.exists() and any(bs_dir.rglob("*")) and any(f.is_file() for f in bs_dir.rglob("*")):
+            beta_series_subjects.add(subj_id)
+
+        lss_dir = fmri_dir / "lss"
+        if lss_dir.exists() and any(lss_dir.rglob("*")) and any(f.is_file() for f in lss_dir.rglob("*")):
+            lss_subjects.add(subj_id)
+
+    return first_level_subjects, beta_series_subjects, lss_subjects
 
 
 def _count_feature_categories(
     features_subjects: set[str], deriv_root: Path
 ) -> dict[str, int]:
-    """Count how many subjects have each feature category."""
+    """Count how many subjects have each feature category.
+
+    Looks for features_{category}* under sub-XXX/eeg/features (and subdirs)
+    and under preprocessed/eeg/sub-XXX/features (and subdirs). Supports .tsv and .parquet.
+    """
     category_counts = {category: 0 for category in FEATURE_CATEGORIES}
     for subject in features_subjects:
-        features_dir = deriv_features_path(deriv_root, subject)
-        if not features_dir.exists():
+        features_dir = _resolve_features_dir(deriv_root, subject)
+        if features_dir is None:
             continue
         for category in FEATURE_CATEGORIES:
-            feature_files = list(features_dir.glob(f"features_{category}*"))
-            if feature_files:
+            found = any(
+                f.suffix in {".tsv", ".parquet"}
+                for f in features_dir.rglob(f"features_{category}*")
+                if f.is_file()
+            )
+            if found:
                 category_counts[category] += 1
     return category_counts
 
@@ -195,6 +263,9 @@ def _handle_summary_mode(
     features_subjects: set[str],
     eeg_prep_subjects: set[str],
     fmri_prep_subjects: set[str],
+    fmri_first_level_subjects: set[str],
+    fmri_beta_series_subjects: set[str],
+    fmri_lss_subjects: set[str],
 ) -> None:
     """Handle summary statistics mode."""
     n_bids = len(bids_subjects)
@@ -202,7 +273,14 @@ def _handle_summary_mode(
     n_features = len(features_subjects)
     n_eeg_prep = len(eeg_prep_subjects)
     n_fmri_prep = len(fmri_prep_subjects)
-    all_subjects = bids_subjects | epochs_subjects | features_subjects | eeg_prep_subjects | fmri_prep_subjects
+    n_fmri_first_level = len(fmri_first_level_subjects)
+    n_fmri_beta_series = len(fmri_beta_series_subjects)
+    n_fmri_lss = len(fmri_lss_subjects)
+    all_subjects = (
+        bids_subjects | epochs_subjects | features_subjects
+        | eeg_prep_subjects | fmri_prep_subjects
+        | fmri_first_level_subjects | fmri_beta_series_subjects | fmri_lss_subjects
+    )
     n_total = len(all_subjects)
 
     category_counts = _count_feature_categories(features_subjects, deriv_root)
@@ -212,11 +290,17 @@ def _handle_summary_mode(
         pct_features = (n_features / n_total) * 100
         pct_eeg_prep = (n_eeg_prep / n_total) * 100
         pct_fmri_prep = (n_fmri_prep / n_total) * 100
+        pct_fmri_first_level = (n_fmri_first_level / n_total) * 100
+        pct_fmri_beta_series = (n_fmri_beta_series / n_total) * 100
+        pct_fmri_lss = (n_fmri_lss / n_total) * 100
     else:
         pct_epochs = 0.0
         pct_features = 0.0
         pct_eeg_prep = 0.0
         pct_fmri_prep = 0.0
+        pct_fmri_first_level = 0.0
+        pct_fmri_beta_series = 0.0
+        pct_fmri_lss = 0.0
 
     stats = {
         "total_subjects": n_total,
@@ -225,6 +309,12 @@ def _handle_summary_mode(
         "eeg_prep_pct": round(pct_eeg_prep, PERCENTAGE_PRECISION),
         "fmri_prep_subjects": n_fmri_prep,
         "fmri_prep_pct": round(pct_fmri_prep, PERCENTAGE_PRECISION),
+        "fmri_first_level_subjects": n_fmri_first_level,
+        "fmri_first_level_pct": round(pct_fmri_first_level, PERCENTAGE_PRECISION),
+        "fmri_beta_series_subjects": n_fmri_beta_series,
+        "fmri_beta_series_pct": round(pct_fmri_beta_series, PERCENTAGE_PRECISION),
+        "fmri_lss_subjects": n_fmri_lss,
+        "fmri_lss_pct": round(pct_fmri_lss, PERCENTAGE_PRECISION),
         "epochs_subjects": n_epochs,
         "features_subjects": n_features,
         "epochs_pct": round(pct_epochs, PERCENTAGE_PRECISION),
@@ -299,8 +389,8 @@ def _handle_features_mode(
     """Handle feature statistics mode."""
     feature_stats = []
     for subject in sorted(features_subjects):
-        features_dir = deriv_features_path(deriv_root, subject)
-        if not features_dir.exists():
+        features_dir = _resolve_features_dir(deriv_root, subject)
+        if features_dir is None:
             continue
 
         subject_stats = {
@@ -310,14 +400,22 @@ def _handle_features_mode(
             "categories": [],
         }
 
-        for tsv_file in features_dir.glob("features_*.tsv"):
+        for feat_file in list(features_dir.rglob("features_*.tsv")) + list(
+            features_dir.rglob("features_*.parquet")
+        ):
+            if not feat_file.is_file():
+                continue
             try:
-                dataframe = pd.read_csv(tsv_file, sep="\t", nrows=1)
+                if feat_file.suffix == ".tsv":
+                    dataframe = pd.read_csv(feat_file, sep="\t", nrows=1)
+                else:
+                    dataframe = pd.read_parquet(feat_file)
+                    dataframe = dataframe.head(1)
                 feature_count = _count_feature_columns(dataframe)
                 subject_stats["files"] += 1
                 subject_stats["total_features"] += feature_count
 
-                category = _extract_category_from_filename(tsv_file.stem)
+                category = _extract_category_from_filename(feat_file.stem)
                 if category not in subject_stats["categories"]:
                     subject_stats["categories"].append(category)
             except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
@@ -362,8 +460,9 @@ def _handle_storage_mode(
 
     features_total = 0
     for subject in features_subjects:
-        features_dir = deriv_features_path(deriv_root, subject)
-        features_total += get_dir_size(features_dir)
+        features_dir = _resolve_features_dir(deriv_root, subject)
+        if features_dir is not None:
+            features_total += get_dir_size(features_dir)
     storage_stats["features"] = features_total
 
     epochs_dir = deriv_root / "epochs"
@@ -419,11 +518,14 @@ def _handle_timeline_mode(
     """Handle processing timeline mode."""
     feature_times = []
     for subject in features_subjects:
-        features_dir = deriv_features_path(deriv_root, subject)
-        if not features_dir.exists():
+        features_dir = _resolve_features_dir(deriv_root, subject)
+        if features_dir is None:
             continue
 
-        tsv_files = list(features_dir.glob("*.tsv"))
+        tsv_files = list(features_dir.rglob("*.tsv")) + list(
+            features_dir.rglob("*.parquet")
+        )
+        tsv_files = [f for f in tsv_files if f.is_file()]
         if not tsv_files:
             continue
 
@@ -493,6 +595,8 @@ def run_stats(args: argparse.Namespace, subjects: List[str], config: Any) -> Non
         deriv_root, task, config
     )
 
+    fmri_first_level, fmri_beta_series, fmri_lss = _collect_fmri_analysis_subjects(deriv_root)
+
     if args.mode == "summary":
         _handle_summary_mode(
             args,
@@ -503,6 +607,9 @@ def run_stats(args: argparse.Namespace, subjects: List[str], config: Any) -> Non
             features_subjects,
             eeg_prep_subjects,
             fmri_prep_subjects,
+            fmri_first_level,
+            fmri_beta_series,
+            fmri_lss,
         )
     elif args.mode == "subjects":
         _handle_subjects_mode(

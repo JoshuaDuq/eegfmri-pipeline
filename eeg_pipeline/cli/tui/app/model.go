@@ -911,6 +911,7 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	}
 
 	cmds := []tea.Cmd{
+		m.wizard.Init(),
 		func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 		subjectCmd,
 		executor.LoadPlotters(m.repoRoot),
@@ -936,7 +937,10 @@ func (m Model) handleGlobalSetupSelected() (tea.Model, tea.Cmd) {
 	m.global = globalsetup.New(m.repoRoot)
 	m.global.SetSize(m.width, m.height)
 	m.pushState(StateGlobalSetup)
-	return m, executor.LoadConfigKeys(m.repoRoot, globalsetup.DefaultConfigKeys())
+	return m, tea.Batch(
+		m.global.Init(),
+		executor.LoadConfigKeys(m.repoRoot, globalsetup.DefaultConfigKeys()),
+	)
 }
 
 func (m Model) handleWizardUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1046,7 +1050,10 @@ func (m Model) handleQuickAction(action quickactions.ActionType) (tea.Model, tea
 		m.global = globalsetup.New(m.repoRoot)
 		m.global.SetSize(m.width, m.height)
 		m.pushState(StateGlobalSetup)
-		return m, executor.LoadConfigKeys(m.repoRoot, globalsetup.DefaultConfigKeys())
+		return m, tea.Batch(
+			m.global.Init(),
+			executor.LoadConfigKeys(m.repoRoot, globalsetup.DefaultConfigKeys()),
+		)
 	case quickactions.ActionRefresh:
 		// Refresh subjects
 		if m.state == StatePipelineWizard {

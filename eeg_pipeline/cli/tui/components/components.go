@@ -60,13 +60,14 @@ func (t Toast) View() string {
 	}
 
 	icon, bgColor, fgColor := t.toastColors()
-	style := lipgloss.NewStyle().
+	return lipgloss.NewStyle().
 		Foreground(fgColor).
 		Background(bgColor).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Muted).
 		Padding(0, 2).
-		Bold(true)
-
-	return style.Render(icon + " " + t.Message)
+		Bold(true).
+		Render(icon + " " + t.Message)
 }
 
 const helpKeyWidth = 12
@@ -139,12 +140,12 @@ func (h HelpOverlay) View() string {
 		content.WriteString("\n")
 	}
 
-	dismissHint := lipgloss.NewStyle().Foreground(styles.Muted).Render("Press ? or Esc to close")
+	dismissHint := lipgloss.NewStyle().Foreground(styles.Muted).Render("press ? or Esc to close")
 	content.WriteString(dismissHint)
 
 	box := lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(styles.Primary).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Secondary).
 		Padding(1, 2).
 		Width(h.Width)
 
@@ -170,8 +171,8 @@ func (s *Spinner) Tick() {
 }
 
 func (s Spinner) View() string {
-	frameStyle := lipgloss.NewStyle().Foreground(styles.Accent)
-	labelStyle := lipgloss.NewStyle().Foreground(styles.Text)
+	frameStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	return frameStyle.Render(s.Frames[s.Index]) + " " + labelStyle.Render(s.Label)
 }
 

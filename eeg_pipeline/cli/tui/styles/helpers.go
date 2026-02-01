@@ -2,6 +2,7 @@ package styles
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -124,14 +125,38 @@ func RenderTerminalTooSmall(width, height int) string {
 	return msg + hint + current
 }
 
+// RenderCursor returns the styled list/focus cursor (SelectedMark + space).
+func RenderCursor() string {
+	return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(SelectedMark + " ")
+}
+
+// RenderCursorOptional returns the cursor when visible, or two spaces for alignment (for blink).
+func RenderCursorOptional(visible bool) string {
+	if visible {
+		return RenderCursor()
+	}
+	return "  "
+}
+
+// RenderFooterSeparator returns the styled footer hint separator (e.g. "  │  ").
+func RenderFooterSeparator() string {
+	return lipgloss.NewStyle().Foreground(Secondary).Render(FooterHintSeparator)
+}
+
 func RenderKeyHint(key, label string) string {
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#000000")).
-		Background(Accent).
-		Bold(true).
-		Padding(0, 1)
+		Foreground(Accent).
+		Bold(true)
 	labelStyle := lipgloss.NewStyle().Foreground(TextDim).PaddingLeft(1)
-	return keyStyle.Render(key) + labelStyle.Render(label)
+	return keyStyle.Render(key) + labelStyle.Render(" "+label)
+}
+
+// RenderHeaderSeparator returns a styled horizontal line (e.g. for under titles).
+func RenderHeaderSeparator(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return HeaderLineStyle.Render(strings.Repeat(HeaderSeparatorChar, width))
 }
 
 func RenderCheckbox(checked, focused bool) string {
