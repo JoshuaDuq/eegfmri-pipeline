@@ -281,6 +281,8 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         contrast_cfg["high_pass_hz"] = args.source_fmri_high_pass
     if getattr(args, "source_fmri_low_pass", None) is not None:
         contrast_cfg["low_pass_hz"] = args.source_fmri_low_pass
+    if getattr(args, "source_fmri_stim_phases_to_model", None) is not None:
+        contrast_cfg["stim_phases_to_model"] = args.source_fmri_stim_phases_to_model
     if getattr(args, "source_fmri_cluster_correction", None) is not None:
         contrast_cfg["cluster_correction"] = args.source_fmri_cluster_correction
     if getattr(args, "source_fmri_cluster_p_threshold", None) is not None:
@@ -883,6 +885,16 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-drift-model", choices=["none", "cosine", "polynomial"], default=None, help="Drift model for GLM (default: cosine).")
     parser.add_argument("--source-fmri-high-pass", type=float, default=None, help="High-pass filter cutoff in Hz (default: 0.008).")
     parser.add_argument("--source-fmri-low-pass", type=float, default=None, help="Optional low-pass cutoff in Hz (default: disabled; avoid unless you know you need it).")
+    parser.add_argument(
+        "--source-fmri-stim-phases-to-model",
+        type=str,
+        default=None,
+        help=(
+            "Optional comma-separated allow-list of stimulation sub-phases to include when events.tsv has a stim_phase column. "
+            "If unset, defaults to plateau-only when plateau is present (safety default). "
+            "Use 'all' to disable phase scoping."
+        ),
+    )
     parser.add_argument("--source-fmri-cluster-correction", action="store_true", default=None, dest="source_fmri_cluster_correction", help="Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction).")
     parser.add_argument("--source-fmri-cluster-p-threshold", type=float, default=None, help="Cluster-forming p-threshold (default: 0.001).")
     parser.add_argument("--source-fmri-output-type", choices=["z-score", "t-stat", "cope", "beta"], default=None, help="Output statistical map type (default: z-score).")

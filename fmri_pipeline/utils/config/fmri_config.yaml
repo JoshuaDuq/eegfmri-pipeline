@@ -9,18 +9,9 @@ paths:
   
   # fMRI BIDS root directory (raw fMRI data)
   bids_fmri_root: null
-  
+
   # FreeSurfer SUBJECTS_DIR (structural MRI surfaces)
   freesurfer_dir: null
-
-  # Optional: directory for MNI atlas label images + label tables used by ROI-restricted signature extraction.
-  # Recommended location: eeg_pipeline/data/external/atlases
-  atlas_dir: "eeg_pipeline/data/external/atlases"
-  # Default atlas (basename or path) for ROI signature readouts when --signature-roi is used without --signature-roi-atlas (e.g. from TUI).
-  signature_roi_atlas: null
-  # Optional default labels table (TSV/CSV); null = infer sidecar next to atlas.
-  signature_roi_labels: null
-
 
 ###################################################################
 # fMRI Preprocessing (fMRIPrep)
@@ -159,6 +150,11 @@ fmri_contrast:
   #   ["stimulation", "pain_question", "vas_rating"]
   # This focuses the model on the stimulation response while controlling for rating/question overlap.
   events_to_model: null
+
+  # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
+  # If null, defaults to ["plateau"] when plateau is present (safety default for phase-granularity pain tasks).
+  # Use ["all"] to disable scoping and model all stimulation phases.
+  stim_phases_to_model: null
 
   # Custom formula (optional, overrides condition_a/b)
   formula: null                # e.g., "condition_a - condition_b"

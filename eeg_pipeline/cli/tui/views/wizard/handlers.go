@@ -1381,6 +1381,10 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSourceLocFmriLowPassHz:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optSourceLocFmriStimPhasesToModel:
+		m.expandedOption = expandedSourceLocFmriStimPhases
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
 	case optSourceLocFmriClusterCorrection:
 		m.sourceLocFmriClusterCorrection = !m.sourceLocFmriClusterCorrection
 		m.useDefaultAdvanced = false
@@ -1425,7 +1429,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.itpcBaselineCorrection = (m.itpcBaselineCorrection + 1) % 2 // 0: none, 1: subtract
 		m.useDefaultAdvanced = false
 	case optItpcConditionColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedItpcConditionColumn
 			m.subCursor = 0
 		} else {
@@ -1647,7 +1651,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.connGranularity = (m.connGranularity + 1) % 3 // 0: trial, 1: condition, 2: subject
 		m.useDefaultAdvanced = false
 	case optConnConditionColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedConnConditionColumn
 			m.subCursor = 0
 		} else {
@@ -2421,7 +2425,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.runAdjustmentEnabled = !m.runAdjustmentEnabled
 		m.useDefaultAdvanced = false
 	case optRunAdjustmentColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedRunAdjustmentColumn
 			m.subCursor = 0
 		} else {
@@ -2498,7 +2502,12 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.painResidualCrossfitEnabled = !m.painResidualCrossfitEnabled
 		m.useDefaultAdvanced = false
 	case optPainResidualCrossfitGroupColumn:
-		m.startTextEdit(textFieldPainResidualCrossfitGroupColumn)
+		if len(m.GetAvailableColumns()) > 0 {
+			m.expandedOption = expandedPainResidualCrossfitGroupColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldPainResidualCrossfitGroupColumn)
+		}
 		m.useDefaultAdvanced = false
 	case optPainResidualCrossfitNSplits:
 		m.startNumberEdit()
@@ -2630,7 +2639,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.stabilityOutcome = (m.stabilityOutcome + 1) % 3
 		m.useDefaultAdvanced = false
 	case optStabilityGroupColumn:
-		m.stabilityGroupColumn = (m.stabilityGroupColumn + 1) % 3
+		m.expandedOption = expandedStabilityGroupColumn
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optStabilityPartialTemp:
 		m.stabilityPartialTemp = !m.stabilityPartialTemp
@@ -2728,7 +2738,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.correlationsPermutationPrimary = !m.correlationsPermutationPrimary
 		m.useDefaultAdvanced = false
 	case optCorrelationsTargetColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedCorrelationsTargetColumn
 			m.subCursor = 0
 		} else {
@@ -2756,7 +2766,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optTemporalTargetColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedTemporalTargetColumn
 			m.subCursor = 0
 		} else {
@@ -2767,7 +2777,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.temporalSplitByCondition = !m.temporalSplitByCondition
 		m.useDefaultAdvanced = false
 	case optTemporalConditionColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedTemporalConditionColumn
 			m.subCursor = 0
 		} else {
@@ -2855,7 +2865,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	case optClusterConditionColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedClusterConditionColumn
 			m.subCursor = 0
 		} else {
@@ -2907,7 +2917,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	// Condition options
 	case optConditionCompareColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedConditionCompareColumn
 			m.subCursor = 0
 		} else {
@@ -2987,7 +2997,7 @@ func (m *Model) toggleMLAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optMLTarget:
-		if len(m.availableColumns) > 0 {
+		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedMLTargetColumn
 			m.subCursor = 0
 		} else {
@@ -3464,6 +3474,10 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriAnalysisEventsToModel:
 		m.startTextEdit(textFieldFmriAnalysisEventsToModel)
 		m.useDefaultAdvanced = false
+	case optFmriAnalysisStimPhasesToModel:
+		m.expandedOption = expandedFmriAnalysisStimPhases
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
 	case optFmriAnalysisConfoundsStrategy:
 		m.fmriAnalysisConfoundsStrategy = (m.fmriAnalysisConfoundsStrategy + 1) % 7
 		m.useDefaultAdvanced = false
@@ -3591,11 +3605,12 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriAnalysisPlotSignatures:
 		m.fmriAnalysisPlotSignatures = !m.fmriAnalysisPlotSignatures
 		m.useDefaultAdvanced = false
-	case optFmriAnalysisSignatureDir:
-		m.startTextEdit(textFieldFmriAnalysisSignatureDir)
-	case optFmriTrialSigRoiNames:
-		m.startTextEdit(textFieldFmriAnalysisSignatureRoiNames)
-		m.useDefaultAdvanced = false
+		case optFmriAnalysisSignatureDir:
+			m.startTextEdit(textFieldFmriAnalysisSignatureDir)
+		case optFmriTrialSigScopeStimPhases:
+			m.expandedOption = expandedFmriTrialSigStimPhases
+			m.subCursor = 0
+			m.useDefaultAdvanced = false
 	case optFmriTrialSigGroupColumn:
 		if len(m.fmriDiscoveredColumns) > 0 {
 			m.expandedOption = expandedFmriTrialSigGroupColumn

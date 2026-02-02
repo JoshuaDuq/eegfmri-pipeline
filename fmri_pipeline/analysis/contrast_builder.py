@@ -62,6 +62,10 @@ class ContrastBuilderConfig:
     # If None, all rows are modeled (default/current behavior).
     # Recommended for multi-phase tasks: ["stimulation", "pain_question", "vas_rating"].
     events_to_model: Optional[List[str]] = None
+    # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
+    # If None, defaults to plateau-only when plateau is present (safety default for pain tasks).
+    # Use ["all"] to disable phase scoping.
+    stim_phases_to_model: Optional[List[str]] = None
 
 
 def _safe_slug(value: str) -> str:
@@ -102,6 +106,7 @@ def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
         str(bool(getattr(contrast_cfg, "write_design_matrix", False))),
         str(getattr(contrast_cfg, "smoothing_fwhm", None) or ""),
         str(getattr(contrast_cfg, "events_to_model", None) or ""),
+        str(getattr(contrast_cfg, "stim_phases_to_model", None) or ""),
     ]
     key = "_".join(key_parts)
     return hashlib.md5(key.encode()).hexdigest()[:8]
@@ -176,6 +181,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         smoothing_fwhm = None
 
     events_to_model = normalize_trial_type_list(contrast_cfg.get("events_to_model"))
+    stim_phases_to_model = normalize_trial_type_list(contrast_cfg.get("stim_phases_to_model"))
 
     return ContrastBuilderConfig(
         enabled=bool(contrast_cfg.get("enabled", False)),
@@ -207,7 +213,57 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         write_design_matrix=write_design_matrix,
         smoothing_fwhm=smoothing_fwhm,
         events_to_model=events_to_model,
+        stim_phases_to_model=stim_phases_to_model,
     )
+
+
+def _apply_stimulation_phase_scoping(
+    events_df: pd.DataFrame,
+    *,
+    allowed_stim_phases: Optional[List[str]],
+) -> pd.DataFrame:
+    """
+    Restrict stimulation events to specific stim_phase values without dropping non-stimulation rows.
+
+    Rationale: In phase-granularity pain tasks, `trial_type="stimulation"` typically appears 3x per
+    trial (ramp_up/plateau/ramp_down). For GLM contrast estimation, a safe default is to model only
+    the plateau when it is present, unless explicitly disabled.
+    """
+    if "trial_type" not in events_df.columns or "stim_phase" not in events_df.columns:
+        return events_df
+
+    raw = allowed_stim_phases
+    if raw is not None:
+        allow_norm = [str(v).strip().lower() for v in raw if str(v).strip()]
+        if not allow_norm:
+            return events_df
+        if "all" in set(allow_norm):
+            return events_df
+        allow = set(allow_norm)
+    else:
+        # Safety default: plateau-only when stim_phase exists and plateau is present.
+        stim_mask = events_df["trial_type"].astype(str).str.strip().str.lower().eq("stimulation")
+        try:
+            phases = (
+                events_df.loc[stim_mask, "stim_phase"]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .tolist()
+            )
+            if "plateau" not in set(phases):
+                return events_df
+        except Exception:
+            return events_df
+        allow = {"plateau"}
+
+    stim_mask = events_df["trial_type"].astype(str).str.strip().str.lower().eq("stimulation")
+    phase_norm = events_df["stim_phase"].fillna("").astype(str).str.strip().str.lower()
+    keep = (~stim_mask) | phase_norm.isin(list(allow))
+    if bool(keep.all()):
+        return events_df
+    return events_df.loc[keep].copy()
 
 
 ###################################################################
@@ -852,6 +908,11 @@ def fit_first_level_glm(
                     f"After applying events_to_model={sorted(allow)}, no events remained in {events_path}."
                 )
 
+    events_df = _apply_stimulation_phase_scoping(
+        events_df,
+        allowed_stim_phases=getattr(cfg, "stim_phases_to_model", None),
+    )
+
     # Use strict=True for single-run: cannot skip the only run
     remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=True)
     events_df = remap_result.events_df[["onset", "duration", "trial_type"]].copy()
@@ -962,6 +1023,11 @@ def fit_first_level_glm_multi_run(
                         events_path.name,
                     )
                     continue
+
+        events_df = _apply_stimulation_phase_scoping(
+            events_df,
+            allowed_stim_phases=getattr(cfg, "stim_phases_to_model", None),
+        )
 
         # Remap conditions, allowing missing values (strict=False)
         remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=False)

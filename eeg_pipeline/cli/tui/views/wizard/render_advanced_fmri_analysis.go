@@ -202,14 +202,6 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		fsDirVal = "(from config)"
 	}
 
-	roiNamesVal := strings.TrimSpace(m.fmriTrialSigRoiNames)
-	if m.editingText && m.editingTextField == textFieldFmriAnalysisSignatureRoiNames {
-		roiNamesVal = m.textBuffer + "█"
-	}
-	if roiNamesVal == "" {
-		roiNamesVal = "(none; atlas/labels from config)"
-	}
-
 	options := m.getFmriAnalysisOptions()
 
 	// Scrolling support: count option lines + expanded list lines
@@ -255,6 +247,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		label := ""
 		value := ""
 		hint := ""
+		expandIndicator := ""
 
 		switch opt {
 		case optUseDefaults:
@@ -433,6 +426,26 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			label = "Events to Model"
 			value = eventsToModelVal
 			hint = "Space to edit (comma-separated; empty = all)"
+		case optFmriAnalysisStimPhasesToModel:
+			label = "Stim Phase Scope"
+			val := strings.TrimSpace(m.fmriAnalysisStimPhasesToModel)
+			if val == "" {
+				val = "(auto)"
+			}
+			if m.editingText && m.editingTextField == textFieldFmriAnalysisStimPhasesToModel {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if vals := m.GetFmriDiscoveredColumnValues("stim_phase"); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in stim_phase", len(vals))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedFmriAnalysisStimPhases {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
 		case optFmriAnalysisConfoundsStrategy:
 			label = "Confounds"
 			value = confoundsVal
@@ -575,10 +588,26 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 				value = "(auto: <deriv_root>/../external)"
 			}
 			hint = "Space to edit"
-		case optFmriTrialSigRoiNames:
-			label = "ROI Names"
-			value = roiNamesVal
-			hint = "e.g. all or Insula_L dACC; atlas from config; Space to edit"
+		case optFmriTrialSigScopeStimPhases:
+			label = "Stim Phase Scope"
+			val := strings.TrimSpace(m.fmriTrialSigScopeStimPhases)
+			if val == "" {
+				val = "(auto)"
+			}
+			if m.editingText && m.editingTextField == textFieldFmriTrialSigScopeStimPhases {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if vals := m.GetFmriDiscoveredColumnValues("stim_phase"); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in stim_phase", len(vals))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedFmriTrialSigStimPhases {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
 		case optFmriTrialSigGroupColumn:
 			label = "Group Column"
 			value = strings.TrimSpace(m.fmriTrialSigGroupColumn)
@@ -680,7 +709,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			hint = "Space to toggle"
 		}
 
-		line := cursor + labelStyle.Render(label) + " " + valueStyle.Render(value)
+		line := cursor + labelStyle.Render(label) + " " + valueStyle.Render(value+expandIndicator)
 		if hint != "" {
 			line += "  " + hintStyle.Render(hint)
 		}

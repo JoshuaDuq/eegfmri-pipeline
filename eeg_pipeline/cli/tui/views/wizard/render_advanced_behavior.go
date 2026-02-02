@@ -36,6 +36,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	options := m.getBehaviorOptions()
+	availableColumns := m.GetAvailableColumns()
 
 	getOptionDisplay := func(opt optionType) (string, string, string) {
 		numberDisplay := m.numberBuffer + "█"
@@ -191,8 +192,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			hint := "Space to select"
 			if !m.runAdjustmentEnabled {
 				hint = "run identifier column (enable Run Adjustment)"
-			} else if len(m.availableColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
+			} else if len(availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Run Column", val, hint
 		case optRunAdjustmentIncludeInCorrelations:
@@ -337,7 +338,13 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldPainResidualCrossfitGroupColumn {
 				val = textDisplay
 			}
-			return "Crossfit Group Col", val, "GroupKFold column (blank=run column)"
+			hint := "Space to select"
+			if len(availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
+			} else {
+				hint = "Space to edit (blank=run column)"
+			}
+			return "Crossfit Group Col", val, hint
 		case optPainResidualCrossfitNSplits:
 			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
 				return "Crossfit Splits", "N/A", "enable Residual Crossfit"
@@ -517,14 +524,14 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "Outcome", v, "auto prefers pain_residual"
 		case optStabilityGroupColumn:
-			v := "auto"
+			v := "(auto)"
 			switch m.stabilityGroupColumn {
 			case 1:
 				v = "run"
 			case 2:
 				v = "block"
 			}
-			return "Group Column", v, "auto selects run/block"
+			return "Group Column", v, "Space to select"
 		case optStabilityPartialTemp:
 			return "Partial Temperature", m.boolToOnOff(m.stabilityPartialTemp), "control temperature"
 		case optStabilityMaxFeatures:
@@ -623,8 +630,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.availableColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
+			if len(availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Compare Column", val, hint
 		case optConditionCompareWindows:
@@ -709,8 +716,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.availableColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
+			if len(availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Target Column", val, hint
 		case optTemporalSplitByCondition:
@@ -724,8 +731,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.availableColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
+			if len(availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Condition Column", val, hint
 		case optTemporalConditionValues:
@@ -863,8 +870,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.availableColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
+			if len(availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Custom Target Column", val, hint
 		case optCorrelationsMultilevel:
@@ -911,8 +918,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.availableColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
+			if len(availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Cluster Column", val, hint
 		case optClusterConditionValues:
@@ -1101,4 +1108,3 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 	return b.String()
 }
-

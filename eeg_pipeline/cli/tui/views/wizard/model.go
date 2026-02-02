@@ -545,13 +545,14 @@ const (
 	textFieldFmriAnalysisContrastName
 	textFieldFmriAnalysisFormula
 	textFieldFmriAnalysisEventsToModel
-	textFieldFmriAnalysisOutputDir
-	textFieldFmriAnalysisFreesurferDir
-	textFieldFmriAnalysisSignatureDir
-	textFieldFmriAnalysisSignatureRoiNames
-	textFieldFmriTrialSigGroupColumn
-	textFieldFmriTrialSigGroupValues
-	textFieldRawMontage
+	textFieldFmriAnalysisStimPhasesToModel
+		textFieldFmriAnalysisOutputDir
+		textFieldFmriAnalysisFreesurferDir
+		textFieldFmriAnalysisSignatureDir
+		textFieldFmriTrialSigGroupColumn
+		textFieldFmriTrialSigGroupValues
+		textFieldFmriTrialSigScopeStimPhases
+		textFieldRawMontage
 	textFieldPrepMontage
 	textFieldPrepChTypes
 	textFieldPrepEegReference
@@ -614,6 +615,7 @@ const (
 	textFieldSourceLocFmriContrastFormula
 	textFieldSourceLocFmriContrastName
 	textFieldSourceLocFmriRunsToInclude
+	textFieldSourceLocFmriStimPhasesToModel
 	textFieldSourceLocFmriWindowAName
 	textFieldSourceLocFmriWindowBName
 	textFieldPainResidualSplineDfCandidates
@@ -988,6 +990,7 @@ type Model struct {
 	fmriAnalysisContrastName      string // e.g., "pain_vs_nonpain"
 	fmriAnalysisFormula           string // Custom formula
 	fmriAnalysisEventsToModel     string // Optional: comma-separated list of trial_type values to include (first-level only)
+	fmriAnalysisStimPhasesToModel string // "": auto (plateau if present), "all", or specific phase(s)
 	fmriAnalysisHrfModel          int    // 0: spm, 1: flobs, 2: fir
 	fmriAnalysisDriftModel        int    // 0: none, 1: cosine, 2: polynomial
 	fmriAnalysisHighPassHz        float64
@@ -1043,16 +1046,15 @@ type Model struct {
 	fmriTrialSigFixedEffectsWeighting   int // 0: variance, 1: mean
 	fmriTrialSigWriteTrialBetas         bool
 	fmriTrialSigWriteTrialVariances     bool
-	fmriTrialSigWriteConditionBetas     bool
-	fmriTrialSigSignatureNPS            bool
-	fmriTrialSigSignatureSIIPS1         bool
-	fmriTrialSigLssOtherRegressorsIndex int // 0: per-condition, 1: all
-	// ROI-restricted signature expression (atlas/labels from config; only ROI names configurable in TUI)
-	fmriTrialSigRoiNames string // space-separated ROI names, or "all"; empty = no ROI readouts
-	// Signature grouping (compute signatures for specific values within an events column)
-	fmriTrialSigGroupColumn     string // e.g., temperature
-	fmriTrialSigGroupValuesSpec string // space-separated values (e.g., "44.3 45.3 46.3")
-	fmriTrialSigGroupScopeIndex int    // 0: across-runs (average), 1: per-run
+		fmriTrialSigWriteConditionBetas     bool
+		fmriTrialSigSignatureNPS            bool
+		fmriTrialSigSignatureSIIPS1         bool
+		fmriTrialSigLssOtherRegressorsIndex int // 0: per-condition, 1: all
+		// Signature grouping (compute signatures for specific values within an events column)
+		fmriTrialSigGroupColumn     string // e.g., temperature
+		fmriTrialSigGroupValuesSpec string // space-separated values (e.g., "44.3 45.3 46.3")
+		fmriTrialSigGroupScopeIndex int    // 0: across-runs (average), 1: per-run
+	fmriTrialSigScopeStimPhases string // "": auto (plateau if present), "all", or specific phase(s)
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
 	plotGroupDefaultsExpanded    bool
@@ -1307,8 +1309,8 @@ type Model struct {
 	showHelp    bool
 
 	// Animation
-	ticker               int
-	animQueue            animation.Queue
+	ticker                int
+	animQueue             animation.Queue
 	subjectLoadingSpinner components.Spinner
 	plotLoadingSpinner    components.Spinner
 
@@ -1593,6 +1595,7 @@ type Model struct {
 	sourceLocFmriDriftModel        int      // 0: none, 1: cosine, 2: polynomial
 	sourceLocFmriHighPassHz        float64  // High-pass cutoff (Hz)
 	sourceLocFmriLowPassHz         float64  // Low-pass cutoff (Hz)
+	sourceLocFmriStimPhasesToModel string   // "": auto (plateau if present), "all", or specific phase(s)
 	sourceLocFmriClusterCorrection bool     // Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction)
 	sourceLocFmriClusterPThreshold float64  // Cluster-forming p-threshold
 	sourceLocFmriOutputType        int      // 0: z-score, 1: t-stat, 2: cope, 3: beta
@@ -2320,6 +2323,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriDriftModel:        1,     // 1: cosine
 		sourceLocFmriHighPassHz:        0.008, // 128s period
 		sourceLocFmriLowPassHz:         0.0,
+		sourceLocFmriStimPhasesToModel: "", // auto (plateau-only default when present)
 		sourceLocFmriClusterCorrection: true,
 		sourceLocFmriClusterPThreshold: 0.001,
 		sourceLocFmriOutputType:        0, // 0: z-score
@@ -2980,8 +2984,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisContrastName = "pain_vs_nonpain"
 		m.fmriAnalysisFormula = ""
 		m.fmriAnalysisEventsToModel = ""
-		m.fmriAnalysisHrfModel = 0   // spm
-		m.fmriAnalysisDriftModel = 1 // cosine
+		m.fmriAnalysisStimPhasesToModel = "" // auto (plateau-only default when present)
+		m.fmriAnalysisHrfModel = 0           // spm
+		m.fmriAnalysisDriftModel = 1         // cosine
 		m.fmriAnalysisHighPassHz = 0.008
 		m.fmriAnalysisLowPassHz = 0.0
 		m.fmriAnalysisSmoothingFwhm = 5.0
@@ -3035,13 +3040,13 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriTrialSigWriteTrialBetas = false
 		m.fmriTrialSigWriteTrialVariances = false
 		m.fmriTrialSigWriteConditionBetas = true
-		m.fmriTrialSigSignatureNPS = true
-		m.fmriTrialSigSignatureSIIPS1 = true
-		m.fmriTrialSigLssOtherRegressorsIndex = 0 // per-condition
-		m.fmriTrialSigRoiNames = ""
-		m.fmriTrialSigGroupColumn = ""
-		m.fmriTrialSigGroupValuesSpec = ""
-		m.fmriTrialSigGroupScopeIndex = 0 // across-runs (average)
+			m.fmriTrialSigSignatureNPS = true
+			m.fmriTrialSigSignatureSIIPS1 = true
+			m.fmriTrialSigLssOtherRegressorsIndex = 0 // per-condition
+			m.fmriTrialSigGroupColumn = ""
+			m.fmriTrialSigGroupValuesSpec = ""
+			m.fmriTrialSigGroupScopeIndex = 0  // across-runs (average)
+			m.fmriTrialSigScopeStimPhases = "" // auto (plateau-only default when present)
 
 		// Backward-compat: older configs used modeIndex 2=lss.
 		// New mode options are 0=first-level, 1=trial-signatures, with method selected separately.
@@ -4305,6 +4310,16 @@ func (m Model) GetConditionEffectsColumnValues(column string) []string {
 	return m.conditionEffectsColumnValues[column]
 }
 
+// GetAvailableColumns returns the best available columns for dropdowns.
+// Prefers discovered event columns, then falls back to lightweight columns
+// surfaced by the subjects endpoint.
+func (m Model) GetAvailableColumns() []string {
+	if len(m.discoveredColumns) > 0 {
+		return m.discoveredColumns
+	}
+	return m.availableColumns
+}
+
 // GetPlottingComparisonColumns returns columns for plotting comparison from trial table (events.tsv).
 // Feature plots (connectivity, power, etc.) use trial-level columns for condition comparisons,
 // not condition effects stats columns.
@@ -4556,9 +4571,9 @@ func (m Model) getExpandedListLength() int {
 	case expandedDirectedConnMeasures:
 		return len(directedConnectivityMeasures)
 	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
-		return len(m.availableColumns)
+		return len(m.GetAvailableColumns())
 	case expandedConnConditionColumn:
-		return len(m.availableColumns)
+		return len(m.GetAvailableColumns())
 	case expandedConditionCompareValues:
 		if m.conditionCompareColumn == "" {
 			return 0
@@ -4610,15 +4625,15 @@ func (m Model) getExpandedListLength() int {
 	case expandedPlotComparisonROIs:
 		return len(m.discoveredROIs)
 	case expandedRunAdjustmentColumn:
-		return len(m.availableColumns)
+		return len(m.GetAvailableColumns())
 	case expandedCorrelationsTargetColumn:
-		return len(m.availableColumns) + 1 // +1 for "(none)" option
+		return len(m.GetAvailableColumns()) + 1 // +1 for "(none)" option
 	case expandedTemporalTargetColumn:
-		return len(m.availableColumns) + 1 // +1 for "(default)" option
+		return len(m.GetAvailableColumns()) + 1 // +1 for "(default)" option
 	case expandedMLTargetColumn:
-		return len(m.availableColumns) + 1 // +1 for "(stage default)" option
+		return len(m.GetAvailableColumns()) + 1 // +1 for "(stage default)" option
 	case expandedItpcConditionColumn:
-		return len(m.availableColumns)
+		return len(m.GetAvailableColumns())
 	case expandedConnConditionValues:
 		if m.connConditionColumn == "" {
 			return 0
@@ -4648,6 +4663,8 @@ func (m Model) getExpandedListLength() int {
 			return 1
 		}
 		return n
+	case expandedFmriAnalysisStimPhases:
+		return len(m.getExpandedListItems())
 	case expandedFmriTrialSigGroupColumn:
 		n := len(m.fmriDiscoveredColumns)
 		if n == 0 {
@@ -4660,6 +4677,10 @@ func (m Model) getExpandedListLength() int {
 			return 1
 		}
 		return n
+	case expandedFmriTrialSigStimPhases:
+		return len(m.getExpandedListItems())
+	case expandedSourceLocFmriStimPhases:
+		return len(m.getExpandedListItems())
 	case expandedItpcConditionValues:
 		if m.itpcConditionColumn == "" {
 			return 0
@@ -4675,6 +4696,13 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetPlottingComparisonWindows())
 	case expandedTemporalTopomapsFeatureDir:
 		return len(m.temporalTopomapsStatsFeatureFolders)
+	case expandedPainResidualCrossfitGroupColumn:
+		if len(m.GetAvailableColumns()) == 0 {
+			return 2
+		}
+		return len(m.GetAvailableColumns()) + 1
+	case expandedStabilityGroupColumn:
+		return 3
 	}
 	return 0
 }
@@ -4695,9 +4723,9 @@ func (m Model) getExpandedListItems() []string {
 		}
 		return items
 	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
-		return m.availableColumns
+		return m.GetAvailableColumns()
 	case expandedConnConditionColumn:
-		return m.availableColumns
+		return m.GetAvailableColumns()
 	case expandedConditionCompareValues:
 		if m.conditionCompareColumn == "" {
 			return nil
@@ -4749,15 +4777,15 @@ func (m Model) getExpandedListItems() []string {
 	case expandedPlotComparisonROIs:
 		return m.discoveredROIs
 	case expandedRunAdjustmentColumn:
-		return m.availableColumns
+		return m.GetAvailableColumns()
 	case expandedCorrelationsTargetColumn:
-		return append([]string{"(none)"}, m.availableColumns...)
+		return append([]string{"(none)"}, m.GetAvailableColumns()...)
 	case expandedTemporalTargetColumn:
-		return append([]string{"(default)"}, m.availableColumns...)
+		return append([]string{"(default)"}, m.GetAvailableColumns()...)
 	case expandedMLTargetColumn:
-		return append([]string{"(stage default)"}, m.availableColumns...)
+		return append([]string{"(stage default)"}, m.GetAvailableColumns()...)
 	case expandedItpcConditionColumn:
-		return m.availableColumns
+		return m.GetAvailableColumns()
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
 		return m.fmriDiscoveredColumns
 	case expandedFmriCondAValue:
@@ -4781,6 +4809,13 @@ func (m Model) getExpandedListItems() []string {
 			return []string{"(type manually)"}
 		}
 		return vals
+	case expandedFmriAnalysisStimPhases:
+		items := []string{"(auto)", "(all)"}
+		vals := m.GetFmriDiscoveredColumnValues("stim_phase")
+		if len(vals) == 0 {
+			return append(items, "(type manually)")
+		}
+		return append(items, vals...)
 	case expandedFmriTrialSigGroupColumn:
 		if len(m.fmriDiscoveredColumns) == 0 {
 			return []string{"(type manually)"}
@@ -4795,6 +4830,20 @@ func (m Model) getExpandedListItems() []string {
 			return []string{"(type manually)"}
 		}
 		return vals
+	case expandedFmriTrialSigStimPhases:
+		items := []string{"(auto)", "(all)"}
+		vals := m.GetFmriDiscoveredColumnValues("stim_phase")
+		if len(vals) == 0 {
+			return append(items, "(type manually)")
+		}
+		return append(items, vals...)
+	case expandedSourceLocFmriStimPhases:
+		items := []string{"(auto)", "(all)"}
+		vals := m.GetFmriDiscoveredColumnValues("stim_phase")
+		if len(vals) == 0 {
+			return append(items, "(type manually)")
+		}
+		return append(items, vals...)
 	case expandedItpcConditionValues:
 		if m.itpcConditionColumn == "" {
 			return nil
@@ -4815,6 +4864,15 @@ func (m Model) getExpandedListItems() []string {
 		return m.GetPlottingComparisonWindows()
 	case expandedTemporalTopomapsFeatureDir:
 		return m.temporalTopomapsStatsFeatureFolders
+	case expandedPainResidualCrossfitGroupColumn:
+		items := []string{"(default: run column)"}
+		cols := m.GetAvailableColumns()
+		if len(cols) == 0 {
+			return append(items, "(type manually)")
+		}
+		return append(items, cols...)
+	case expandedStabilityGroupColumn:
+		return []string{"(auto)", "run", "block"}
 	}
 	return nil
 }
@@ -5111,6 +5169,25 @@ func (m *Model) handleExpandedListToggle() {
 		m.sourceLocFmriCondBValue = selectedItem
 		m.expandedOption = expandedNone
 		m.subCursor = 0
+	case expandedSourceLocFmriStimPhases:
+		switch selectedItem {
+		case "(auto)":
+			m.sourceLocFmriStimPhasesToModel = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(all)":
+			m.sourceLocFmriStimPhasesToModel = "all"
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(type manually)":
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldSourceLocFmriStimPhasesToModel)
+		default:
+			m.sourceLocFmriStimPhasesToModel = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
 	case expandedFmriAnalysisCondAColumn:
 		if selectedItem == "(type manually)" {
 			m.expandedOption = expandedNone
@@ -5153,6 +5230,25 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
+	case expandedFmriAnalysisStimPhases:
+		switch selectedItem {
+		case "(auto)":
+			m.fmriAnalysisStimPhasesToModel = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(all)":
+			m.fmriAnalysisStimPhasesToModel = "all"
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(type manually)":
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisStimPhasesToModel)
+		default:
+			m.fmriAnalysisStimPhasesToModel = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
 	case expandedFmriTrialSigGroupColumn:
 		if selectedItem == "(type manually)" {
 			m.expandedOption = expandedNone
@@ -5171,6 +5267,25 @@ func (m *Model) handleExpandedListToggle() {
 			m.startTextEdit(textFieldFmriTrialSigGroupValues)
 		} else {
 			m.toggleSpaceValue(selectedItem, &m.fmriTrialSigGroupValuesSpec)
+		}
+	case expandedFmriTrialSigStimPhases:
+		switch selectedItem {
+		case "(auto)":
+			m.fmriTrialSigScopeStimPhases = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(all)":
+			m.fmriTrialSigScopeStimPhases = "all"
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(type manually)":
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriTrialSigScopeStimPhases)
+		default:
+			m.fmriTrialSigScopeStimPhases = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
 		}
 
 	case expandedItpcConditionValues:
@@ -5220,6 +5335,32 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
+	case expandedPainResidualCrossfitGroupColumn:
+		switch selectedItem {
+		case "(default: run column)":
+			m.painResidualCrossfitGroupColumn = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(type manually)":
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldPainResidualCrossfitGroupColumn)
+		default:
+			m.painResidualCrossfitGroupColumn = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedStabilityGroupColumn:
+		switch selectedItem {
+		case "run":
+			m.stabilityGroupColumn = 1
+		case "block":
+			m.stabilityGroupColumn = 2
+		default:
+			m.stabilityGroupColumn = 0
+		}
+		m.expandedOption = expandedNone
+		m.subCursor = 0
 	}
 
 	m.useDefaultAdvanced = false
@@ -5276,14 +5417,24 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optFmriAnalysisCondBColumn
 	case expandedFmriAnalysisCondBValue:
 		return opt == optFmriAnalysisCondBValue
+	case expandedFmriAnalysisStimPhases:
+		return opt == optFmriAnalysisStimPhasesToModel
 	case expandedFmriTrialSigGroupColumn:
 		return opt == optFmriTrialSigGroupColumn
 	case expandedFmriTrialSigGroupValues:
 		return opt == optFmriTrialSigGroupValues
+	case expandedFmriTrialSigStimPhases:
+		return opt == optFmriTrialSigScopeStimPhases
 	case expandedItpcConditionValues:
 		return opt == optItpcConditionValues
 	case expandedConnConditionValues:
 		return opt == optConnConditionValues
+	case expandedSourceLocFmriStimPhases:
+		return opt == optSourceLocFmriStimPhasesToModel
+	case expandedPainResidualCrossfitGroupColumn:
+		return opt == optPainResidualCrossfitGroupColumn
+	case expandedStabilityGroupColumn:
+		return opt == optStabilityGroupColumn
 	}
 	return false
 }
@@ -5334,6 +5485,19 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.sourceLocFmriCondBColumn == item
 	case expandedFmriCondBValue:
 		return m.sourceLocFmriCondBValue == item
+	case expandedSourceLocFmriStimPhases:
+		if item == "(auto)" {
+			return strings.TrimSpace(m.sourceLocFmriStimPhasesToModel) == ""
+		}
+		if item == "(all)" {
+			return strings.TrimSpace(m.sourceLocFmriStimPhasesToModel) == "all"
+		}
+		for _, p := range splitSpaceList(m.sourceLocFmriStimPhasesToModel) {
+			if p == item {
+				return true
+			}
+		}
+		return false
 	case expandedFmriAnalysisCondAColumn:
 		return m.fmriAnalysisCondAColumn == item
 	case expandedFmriAnalysisCondAValue:
@@ -5342,8 +5506,34 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.fmriAnalysisCondBColumn == item
 	case expandedFmriAnalysisCondBValue:
 		return m.fmriAnalysisCondBValue == item
+	case expandedFmriAnalysisStimPhases:
+		if item == "(auto)" {
+			return strings.TrimSpace(m.fmriAnalysisStimPhasesToModel) == ""
+		}
+		if item == "(all)" {
+			return strings.TrimSpace(m.fmriAnalysisStimPhasesToModel) == "all"
+		}
+		for _, p := range splitSpaceList(m.fmriAnalysisStimPhasesToModel) {
+			if p == item {
+				return true
+			}
+		}
+		return false
 	case expandedFmriTrialSigGroupColumn:
 		return m.fmriTrialSigGroupColumn == item
+	case expandedFmriTrialSigStimPhases:
+		if item == "(auto)" {
+			return strings.TrimSpace(m.fmriTrialSigScopeStimPhases) == ""
+		}
+		if item == "(all)" {
+			return strings.TrimSpace(m.fmriTrialSigScopeStimPhases) == "all"
+		}
+		for _, p := range splitSpaceList(m.fmriTrialSigScopeStimPhases) {
+			if p == item {
+				return true
+			}
+		}
+		return false
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
 		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues,
 		expandedFmriTrialSigGroupValues:
@@ -5354,6 +5544,24 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
 				return cfg.BehaviorScatterSegmentSpec == item
 			}
+		}
+		return false
+	case expandedPainResidualCrossfitGroupColumn:
+		if item == "(default: run column)" {
+			return strings.TrimSpace(m.painResidualCrossfitGroupColumn) == ""
+		}
+		if item == "(type manually)" {
+			return false
+		}
+		return m.painResidualCrossfitGroupColumn == item
+	case expandedStabilityGroupColumn:
+		switch item {
+		case "(auto)":
+			return m.stabilityGroupColumn == 0
+		case "run":
+			return m.stabilityGroupColumn == 1
+		case "block":
+			return m.stabilityGroupColumn == 2
 		}
 		return false
 	}
@@ -5515,18 +5723,20 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisFormula
 	case textFieldFmriAnalysisEventsToModel:
 		return m.fmriAnalysisEventsToModel
+	case textFieldFmriAnalysisStimPhasesToModel:
+		return m.fmriAnalysisStimPhasesToModel
 	case textFieldFmriAnalysisOutputDir:
 		return m.fmriAnalysisOutputDir
 	case textFieldFmriAnalysisFreesurferDir:
 		return m.fmriAnalysisFreesurferDir
-	case textFieldFmriAnalysisSignatureDir:
-		return m.fmriAnalysisSignatureDir
-	case textFieldFmriAnalysisSignatureRoiNames:
-		return m.fmriTrialSigRoiNames
-	case textFieldFmriTrialSigGroupColumn:
-		return m.fmriTrialSigGroupColumn
-	case textFieldFmriTrialSigGroupValues:
-		return m.fmriTrialSigGroupValuesSpec
+		case textFieldFmriAnalysisSignatureDir:
+			return m.fmriAnalysisSignatureDir
+		case textFieldFmriTrialSigGroupColumn:
+			return m.fmriTrialSigGroupColumn
+		case textFieldFmriTrialSigGroupValues:
+			return m.fmriTrialSigGroupValuesSpec
+	case textFieldFmriTrialSigScopeStimPhases:
+		return m.fmriTrialSigScopeStimPhases
 	case textFieldRawMontage:
 		return m.rawMontage
 	case textFieldPrepMontage:
@@ -5635,6 +5845,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.sourceLocFmriContrastName
 	case textFieldSourceLocFmriRunsToInclude:
 		return m.sourceLocFmriRunsToInclude
+	case textFieldSourceLocFmriStimPhasesToModel:
+		return m.sourceLocFmriStimPhasesToModel
 	case textFieldSourceLocFmriWindowAName:
 		return m.sourceLocFmriWindowAName
 	case textFieldSourceLocFmriWindowBName:
@@ -6117,19 +6329,21 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisFormula = strings.TrimSpace(value)
 	case textFieldFmriAnalysisEventsToModel:
 		m.fmriAnalysisEventsToModel = strings.TrimSpace(value)
+	case textFieldFmriAnalysisStimPhasesToModel:
+		m.fmriAnalysisStimPhasesToModel = strings.TrimSpace(value)
 	case textFieldFmriAnalysisOutputDir:
 		m.fmriAnalysisOutputDir = strings.TrimSpace(value)
 	case textFieldFmriAnalysisFreesurferDir:
 		m.fmriAnalysisFreesurferDir = strings.TrimSpace(value)
-	case textFieldFmriAnalysisSignatureDir:
-		m.fmriAnalysisSignatureDir = strings.TrimSpace(value)
-	case textFieldFmriAnalysisSignatureRoiNames:
-		m.fmriTrialSigRoiNames = strings.TrimSpace(value)
-	case textFieldFmriTrialSigGroupColumn:
-		m.fmriTrialSigGroupColumn = strings.TrimSpace(value)
-		m.fmriTrialSigGroupValuesSpec = "" // Reset values when column changes
-	case textFieldFmriTrialSigGroupValues:
+		case textFieldFmriAnalysisSignatureDir:
+			m.fmriAnalysisSignatureDir = strings.TrimSpace(value)
+		case textFieldFmriTrialSigGroupColumn:
+			m.fmriTrialSigGroupColumn = strings.TrimSpace(value)
+			m.fmriTrialSigGroupValuesSpec = "" // Reset values when column changes
+		case textFieldFmriTrialSigGroupValues:
 		m.fmriTrialSigGroupValuesSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriTrialSigScopeStimPhases:
+		m.fmriTrialSigScopeStimPhases = strings.TrimSpace(value)
 	case textFieldRawMontage:
 		m.rawMontage = value
 	case textFieldPrepMontage:
@@ -6238,6 +6452,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.sourceLocFmriContrastName = value
 	case textFieldSourceLocFmriRunsToInclude:
 		m.sourceLocFmriRunsToInclude = value
+	case textFieldSourceLocFmriStimPhasesToModel:
+		m.sourceLocFmriStimPhasesToModel = strings.TrimSpace(value)
 	case textFieldSourceLocFmriWindowAName:
 		m.sourceLocFmriWindowAName = value
 	case textFieldSourceLocFmriWindowBName:
@@ -6754,6 +6970,7 @@ const (
 	optSourceLocFmriDriftModel
 	optSourceLocFmriHighPassHz
 	optSourceLocFmriLowPassHz
+	optSourceLocFmriStimPhasesToModel
 	optSourceLocFmriClusterCorrection
 	optSourceLocFmriClusterPThreshold
 	optSourceLocFmriOutputType
@@ -7359,6 +7576,7 @@ const (
 	optFmriAnalysisLowPassHz
 	optFmriAnalysisSmoothingFwhm
 	optFmriAnalysisEventsToModel
+	optFmriAnalysisStimPhasesToModel
 	optFmriAnalysisConfoundsStrategy
 	optFmriAnalysisWriteDesignMatrix
 	optFmriAnalysisOutputType
@@ -7403,9 +7621,9 @@ const (
 	optFmriTrialSigSignatureNPS
 	optFmriTrialSigSignatureSIIPS1
 	optFmriTrialSigLssOtherRegressors
-	optFmriTrialSigRoiNames
 	optFmriTrialSigGroupColumn
 	optFmriTrialSigGroupValues
+	optFmriTrialSigScopeStimPhases
 	optFmriTrialSigGroupScope
 	// System/global settings
 	optSystemNJobs
@@ -7414,43 +7632,48 @@ const (
 )
 
 const (
-	expandedNone                       = -1
-	expandedConnectivityMeasures       = 0
-	expandedConditionCompareColumn     = 1
-	expandedConditionCompareValues     = 2
-	expandedConditionCompareWindows    = 3
-	expandedTemporalConditionColumn    = 4
-	expandedTemporalConditionValues    = 5
-	expandedClusterConditionColumn     = 6
-	expandedClusterConditionValues     = 7
-	expandedPlotComparisonColumn       = 8
-	expandedPlotComparisonValues       = 9
-	expandedPlotComparisonWindows      = 10
-	expandedPlotComparisonROIs         = 11
-	expandedDirectedConnMeasures       = 12
-	expandedRunAdjustmentColumn        = 13
-	expandedCorrelationsTargetColumn   = 14
-	expandedItpcConditionColumn        = 15
-	expandedItpcConditionValues        = 16
-	expandedFmriCondAColumn            = 17
-	expandedFmriCondAValue             = 18
-	expandedFmriCondBColumn            = 19
-	expandedFmriCondBValue             = 20
-	expandedBehaviorScatterFeatures    = 21
-	expandedBehaviorScatterColumns     = 22
-	expandedBehaviorScatterAggregation = 23
-	expandedBehaviorScatterSegment     = 24
-	expandedTemporalTargetColumn       = 25
-	expandedTemporalTopomapsFeatureDir = 26
-	expandedConnConditionColumn        = 27
-	expandedConnConditionValues        = 28
-	expandedMLTargetColumn             = 29
-	expandedFmriAnalysisCondAColumn    = 30
-	expandedFmriAnalysisCondAValue     = 31
-	expandedFmriAnalysisCondBColumn    = 32
-	expandedFmriAnalysisCondBValue     = 33
-	expandedFmriTrialSigGroupColumn    = 34
-	expandedFmriTrialSigGroupValues    = 35
+	expandedNone                            = -1
+	expandedConnectivityMeasures            = 0
+	expandedConditionCompareColumn          = 1
+	expandedConditionCompareValues          = 2
+	expandedConditionCompareWindows         = 3
+	expandedTemporalConditionColumn         = 4
+	expandedTemporalConditionValues         = 5
+	expandedClusterConditionColumn          = 6
+	expandedClusterConditionValues          = 7
+	expandedPlotComparisonColumn            = 8
+	expandedPlotComparisonValues            = 9
+	expandedPlotComparisonWindows           = 10
+	expandedPlotComparisonROIs              = 11
+	expandedDirectedConnMeasures            = 12
+	expandedRunAdjustmentColumn             = 13
+	expandedCorrelationsTargetColumn        = 14
+	expandedItpcConditionColumn             = 15
+	expandedItpcConditionValues             = 16
+	expandedFmriCondAColumn                 = 17
+	expandedFmriCondAValue                  = 18
+	expandedFmriCondBColumn                 = 19
+	expandedFmriCondBValue                  = 20
+	expandedBehaviorScatterFeatures         = 21
+	expandedBehaviorScatterColumns          = 22
+	expandedBehaviorScatterAggregation      = 23
+	expandedBehaviorScatterSegment          = 24
+	expandedTemporalTargetColumn            = 25
+	expandedTemporalTopomapsFeatureDir      = 26
+	expandedConnConditionColumn             = 27
+	expandedConnConditionValues             = 28
+	expandedMLTargetColumn                  = 29
+	expandedFmriAnalysisCondAColumn         = 30
+	expandedFmriAnalysisCondAValue          = 31
+	expandedFmriAnalysisCondBColumn         = 32
+	expandedFmriAnalysisCondBValue          = 33
+	expandedFmriAnalysisStimPhases          = 34
+	expandedFmriTrialSigGroupColumn         = 35
+	expandedFmriTrialSigGroupValues         = 36
+	expandedSourceLocFmriStimPhases         = 37
+	expandedPainResidualCrossfitGroupColumn = 38
+	expandedStabilityGroupColumn            = 39
+	expandedFmriTrialSigStimPhases          = 40
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -7692,7 +7915,7 @@ func (m Model) getFeaturesOptions() []optionType {
 						if !m.sourceLocFmriAutoDetectRuns {
 							options = append(options, optSourceLocFmriRunsToInclude)
 						}
-						options = append(options, optSourceLocFmriHrfModel, optSourceLocFmriDriftModel)
+						options = append(options, optSourceLocFmriHrfModel, optSourceLocFmriDriftModel, optSourceLocFmriStimPhasesToModel)
 						options = append(options, optSourceLocFmriHighPassHz, optSourceLocFmriLowPassHz)
 						options = append(options, optSourceLocFmriClusterCorrection)
 						if m.sourceLocFmriClusterCorrection {
@@ -8010,7 +8233,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 	options = append(options, optFmriAnalysisGroupConfounds)
 	if m.fmriAnalysisGroupConfoundsExpanded {
 		if isFirstLevel {
-			options = append(options, optFmriAnalysisEventsToModel)
+			options = append(options, optFmriAnalysisEventsToModel, optFmriAnalysisStimPhasesToModel)
 		}
 		options = append(options, optFmriAnalysisConfoundsStrategy)
 		if isFirstLevel {
@@ -8079,21 +8302,21 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 			if m.fmriTrialSigMethodIndex%2 == 1 {
 				trialMethod = "lss"
 			}
-			options = append(options,
-				optFmriTrialSigMethod,
-				optFmriTrialSigIncludeOtherEvents,
-				optFmriTrialSigMaxTrialsPerRun,
+				options = append(options,
+					optFmriTrialSigMethod,
+					optFmriTrialSigIncludeOtherEvents,
+					optFmriTrialSigMaxTrialsPerRun,
 				optFmriTrialSigFixedEffectsWeighting,
 				optFmriTrialSigWriteConditionBetas,
 				optFmriTrialSigWriteTrialBetas,
 				optFmriTrialSigWriteTrialVariances,
-				optFmriTrialSigSignatureNPS,
-				optFmriTrialSigSignatureSIIPS1,
-				optFmriAnalysisSignatureDir,
-				optFmriTrialSigRoiNames,
-				optFmriTrialSigGroupColumn,
-				optFmriTrialSigGroupValues,
-				optFmriTrialSigGroupScope,
+					optFmriTrialSigSignatureNPS,
+					optFmriTrialSigSignatureSIIPS1,
+					optFmriAnalysisSignatureDir,
+					optFmriTrialSigScopeStimPhases,
+					optFmriTrialSigGroupColumn,
+					optFmriTrialSigGroupValues,
+					optFmriTrialSigGroupScope,
 			)
 			if trialMethod == "lss" {
 				options = append(options, optFmriTrialSigLssOtherRegressors)

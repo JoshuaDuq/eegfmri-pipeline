@@ -152,6 +152,16 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
             "Example (recommended for your task): stimulation,pain_question,vas_rating"
         ),
     )
+    glm_group.add_argument(
+        "--stim-phases-to-model",
+        type=str,
+        default=None,
+        help=(
+            "Optional comma-separated allow-list of stimulation sub-phases to include when events.tsv has a stim_phase column. "
+            "If unset, defaults to plateau-only when plateau is present (safety default). "
+            "Use 'all' to disable phase scoping."
+        ),
+    )
 
     qc_group = parser.add_argument_group("Confounds / QC")
     qc_group.add_argument(
@@ -504,36 +514,6 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="LSS: model other trials per-condition or pooled (default: per-condition)",
     )
     trial_group.add_argument(
-        "--signature-roi-atlas",
-        type=str,
-        default=None,
-        help=(
-            "Optional: atlas label image (integer labels) in MNI space, used to compute ROI-restricted "
-            "signature expression. Provide a NIfTI path, or a basename that can be found under the pipeline "
-            "external directories (e.g., eeg_pipeline/data/external or eeg_pipeline/data/external/atlases)."
-        ),
-    )
-    trial_group.add_argument(
-        "--signature-roi-labels",
-        type=str,
-        default=None,
-        help=(
-            "Optional: atlas labels table mapping label index -> ROI name (TSV/CSV). "
-            "If omitted, the pipeline will try to infer a sidecar file next to the atlas."
-        ),
-    )
-    trial_group.add_argument(
-        "--signature-roi",
-        dest="signature_rois",
-        nargs="+",
-        default=None,
-        metavar="ROI",
-        help=(
-            "ROI name(s) from the atlas labels table for ROI-restricted signature expression. "
-            "Use 'all' to compute all labeled ROIs."
-        ),
-    )
-    trial_group.add_argument(
         "--signature-group-column",
         type=str,
         default=None,
@@ -716,6 +696,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         from fmri_pipeline.analysis.events_selection import normalize_trial_type_list
 
         events_to_model = normalize_trial_type_list(args.events_to_model)
+        stim_phases_to_model = normalize_trial_type_list(getattr(args, "stim_phases_to_model", None))
         cfg = ContrastBuilderConfig(
             enabled=True,
             input_source=input_source,
@@ -743,17 +724,13 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             write_design_matrix=write_design_matrix,
             smoothing_fwhm=smoothing_fwhm,
             events_to_model=events_to_model,
+            stim_phases_to_model=stim_phases_to_model,
         )
     else:
         include_other_events = True if args.include_other_events is None else bool(args.include_other_events)
         fixed_weighting = str(args.fixed_effects_weighting or "variance").strip().lower()
         lss_other = str(args.lss_other_regressors or "per-condition").strip().lower()
         lss_other = "per_condition" if lss_other == "per-condition" else lss_other
-
-        roi_atlas = (getattr(args, "signature_roi_atlas", None) or "").strip() or None
-        roi_labels = (getattr(args, "signature_roi_labels", None) or "").strip() or None
-        if getattr(args, "signature_rois", None) and not roi_atlas:
-            roi_atlas = "tpl-MNI152NLin2009cAsym_atlas-Schaefer2018_desc-100Parcels7Networks_res-02_dseg"
 
         trial_cfg = TrialSignatureExtractionConfig(
             input_source=input_source,
@@ -780,9 +757,6 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             max_trials_per_run=int(args.max_trials_per_run) if args.max_trials_per_run else None,
             fixed_effects_weighting=fixed_weighting,
             signatures=tuple(args.signatures) if args.signatures else None,
-            roi_atlas=roi_atlas,
-            roi_labels=roi_labels or None,
-            roi_names=tuple(args.signature_rois) if getattr(args, "signature_rois", None) else None,
             signature_group_column=str(getattr(args, "signature_group_column", "") or "").strip() or None,
             signature_group_values=tuple(getattr(args, "signature_group_values", None) or ()) or None,
             signature_group_scope=(

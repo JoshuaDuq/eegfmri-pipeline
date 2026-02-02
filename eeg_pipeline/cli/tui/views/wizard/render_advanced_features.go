@@ -149,13 +149,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		totalLines += len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn))
 	}
 	if m.expandedOption == expandedItpcConditionColumn {
-		totalLines += len(m.availableColumns)
+		totalLines += len(m.GetAvailableColumns())
 	}
 	if m.expandedOption == expandedItpcConditionValues {
 		totalLines += len(m.GetDiscoveredColumnValues(m.itpcConditionColumn))
 	}
 	if m.expandedOption == expandedConnConditionColumn {
-		totalLines += len(m.availableColumns)
+		totalLines += len(m.GetAvailableColumns())
 	}
 	if m.expandedOption == expandedConnConditionValues {
 		totalLines += len(m.GetDiscoveredColumnValues(m.connConditionColumn))
@@ -585,8 +585,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value = val
 			expandIndicatorHint := ""
-			if len(m.availableColumns) > 0 {
-				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.availableColumns))
+			if len(m.GetAvailableColumns()) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.GetAvailableColumns()))
 			}
 			hint = "Space to select" + expandIndicatorHint
 			if m.expandedOption == expandedConnConditionColumn {
@@ -1097,6 +1097,26 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "optional; generally avoid for task GLM"
+		case optSourceLocFmriStimPhasesToModel:
+			label = "Stim Phase Scope"
+			val := strings.TrimSpace(m.sourceLocFmriStimPhasesToModel)
+			if val == "" {
+				val = "(auto)"
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriStimPhasesToModel {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if vals := m.GetFmriDiscoveredColumnValues("stim_phase"); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in stim_phase", len(vals))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedSourceLocFmriStimPhases {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
 		case optSourceLocFmriClusterCorrection:
 			label = "Cluster Correction"
 			if m.sourceLocFmriClusterCorrection {
@@ -1214,8 +1234,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value = val
 			expandIndicatorHint := ""
-			if len(m.availableColumns) > 0 {
-				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.availableColumns))
+			if len(m.GetAvailableColumns()) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.GetAvailableColumns()))
 			}
 			hint = "Space to select" + expandIndicatorHint
 			if m.expandedOption == expandedItpcConditionColumn {
@@ -2112,10 +2132,32 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 		}
 
+		// Expanded items (fMRI stimulation phase scope)
+		if opt == optSourceLocFmriStimPhasesToModel && m.expandedOption == expandedSourceLocFmriStimPhases {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
 		// Expanded items (ITPC condition column)
 		if opt == optItpcConditionColumn && m.expandedOption == expandedItpcConditionColumn {
 			subIndent := "      " // 6 spaces for sub-items
-			for j, col := range m.availableColumns {
+			for j, col := range m.GetAvailableColumns() {
 				isSubFocused := j == m.subCursor
 				isSelected := m.itpcConditionColumn == col
 
@@ -2158,7 +2200,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		// Expanded items (Connectivity condition column)
 		if opt == optConnConditionColumn && m.expandedOption == expandedConnConditionColumn {
 			subIndent := "      " // 6 spaces for sub-items
-			for j, col := range m.availableColumns {
+			for j, col := range m.GetAvailableColumns() {
 				isSubFocused := j == m.subCursor
 				isSelected := m.connConditionColumn == col
 

@@ -486,6 +486,10 @@ feature_engineering:
         # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
         #   ["stimulation", "pain_question", "vas_rating"]
         events_to_model: null
+        # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
+        # If null, defaults to ["plateau"] when plateau is present (safety default for phase-granularity pain tasks).
+        # Use ["all"] to disable scoping and model all stimulation phases.
+        stim_phases_to_model: null
         cluster_correction: true
         cluster_p_threshold: 0.001
         output_type: "z-score"     # "z-score" | "t-stat" | "cope" | "beta"

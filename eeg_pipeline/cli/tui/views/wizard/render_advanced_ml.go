@@ -76,6 +76,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		return trimmed
 	}
 
+	availableColumns := m.GetAvailableColumns()
 	rows := m.getMLOptions()
 	for i, opt := range rows {
 		isFocused := i == m.advancedCursor
@@ -89,8 +90,8 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"
 		case optMLTarget:
 			hint = "e.g., rating / temperature / pain_binary"
-			if len(m.availableColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
+			if len(availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			label, value = "Target", renderTextOrDefault(m.mlTarget, "(stage default)")
 		case optMLFmriSigGroup:
@@ -220,4 +221,3 @@ func (m Model) renderMLAdvancedConfig() string {
 
 	return b.String()
 }
-

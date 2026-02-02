@@ -1325,12 +1325,14 @@ def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
         sub_label = f"sub-{subj_id}"
 
     def glob_events(func_dir: Path, sub: str, t: str) -> list:
-        out = [
-            p for p in sorted(func_dir.glob(f"{sub}_task-{t}_run-*_events.tsv"))
-            if not p.name.endswith("_bold_events.tsv")
-        ]
+        # Prefer *_bold_events.tsv (time-aligned "analysis-ready" events) when present,
+        # then fall back to standard *_events.tsv.
+        out = sorted(func_dir.glob(f"{sub}_task-{t}_run-*_bold_events.tsv"))
         if not out:
-            out = sorted(func_dir.glob(f"{sub}_task-{t}_run-*_bold_events.tsv"))
+            out = [
+                p for p in sorted(func_dir.glob(f"{sub}_task-{t}_run-*_events.tsv"))
+                if not p.name.endswith("_bold_events.tsv")
+            ]
         if not out:
             out = sorted(func_dir.glob(f"{sub}_task-{t}_*events.tsv"))
         return out

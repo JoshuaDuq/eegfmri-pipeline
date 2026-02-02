@@ -1309,6 +1309,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 					if m.sourceLocFmriDriftModel != 1 { // cosine is default
 						args = append(args, "--source-fmri-drift-model", driftModels[m.sourceLocFmriDriftModel])
 					}
+					if strings.TrimSpace(m.sourceLocFmriStimPhasesToModel) != "" {
+						args = append(args, "--source-fmri-stim-phases-to-model", strings.TrimSpace(m.sourceLocFmriStimPhasesToModel))
+					}
 					if m.sourceLocFmriHighPassHz != 0.008 {
 						args = append(args, "--source-fmri-high-pass", fmt.Sprintf("%.4f", m.sourceLocFmriHighPassHz))
 					}
@@ -3090,6 +3093,9 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	ab.args = append(ab.args, "--confounds-strategy", confoundsOptions[m.fmriAnalysisConfoundsStrategy%len(confoundsOptions)])
 	if isFirstLevel {
 		ab.addIfNonEmpty("--events-to-model", strings.TrimSpace(m.fmriAnalysisEventsToModel))
+		if strings.TrimSpace(m.fmriAnalysisStimPhasesToModel) != "" {
+			ab.args = append(ab.args, "--stim-phases-to-model", strings.TrimSpace(m.fmriAnalysisStimPhasesToModel))
+		}
 	}
 	if isFirstLevel && m.fmriAnalysisWriteDesignMatrix {
 		ab.args = append(ab.args, "--write-design-matrix")
@@ -3147,22 +3153,25 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 			ab.args = append(ab.args, sigs...)
 		}
 
+		// Optional: restrict which stim_phase values are eligible for trial selection (signatures only).
+		// Empty => omit flag (CLI default: plateau-only when stim_phase exists and plateau is present).
+		phaseSpec := strings.TrimSpace(m.fmriTrialSigScopeStimPhases)
+		if phaseSpec != "" {
+			ab.args = append(ab.args, "--signature-scope-stim-phases")
+			ab.args = append(ab.args, splitSpaceList(phaseSpec)...)
+		}
+
 		if trialMethod == "lss" && m.fmriTrialSigLssOtherRegressorsIndex%2 == 1 {
 			ab.args = append(ab.args, "--lss-other-regressors", "all")
 		}
 
-		if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
-			ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
-		}
-		roiNames := strings.Fields(strings.TrimSpace(m.fmriTrialSigRoiNames))
-		if len(roiNames) > 0 {
-			ab.args = append(ab.args, "--signature-roi")
-			ab.args = append(ab.args, roiNames...)
-		}
+			if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
+				ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
+			}
 
-		// Signature grouping (e.g., temperature levels)
-		groupCol := strings.TrimSpace(m.fmriTrialSigGroupColumn)
-		groupVals := splitSpaceList(strings.TrimSpace(m.fmriTrialSigGroupValuesSpec))
+			// Signature grouping (e.g., temperature levels)
+			groupCol := strings.TrimSpace(m.fmriTrialSigGroupColumn)
+			groupVals := splitSpaceList(strings.TrimSpace(m.fmriTrialSigGroupValuesSpec))
 		if groupCol != "" && len(groupVals) > 0 {
 			ab.args = append(ab.args, "--signature-group-column", groupCol)
 			ab.args = append(ab.args, "--signature-group-values")

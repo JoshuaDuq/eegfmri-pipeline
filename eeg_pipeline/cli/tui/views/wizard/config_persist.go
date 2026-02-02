@@ -668,10 +668,10 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriTrialSigSignatureNPS"] = m.fmriTrialSigSignatureNPS
 	cfg["fmriTrialSigSignatureSIIPS1"] = m.fmriTrialSigSignatureSIIPS1
 	cfg["fmriTrialSigLssOtherRegressorsIndex"] = m.fmriTrialSigLssOtherRegressorsIndex
-	cfg["fmriTrialSigRoiNames"] = m.fmriTrialSigRoiNames
 	cfg["fmriTrialSigGroupColumn"] = m.fmriTrialSigGroupColumn
 	cfg["fmriTrialSigGroupValuesSpec"] = m.fmriTrialSigGroupValuesSpec
 	cfg["fmriTrialSigGroupScopeIndex"] = m.fmriTrialSigGroupScopeIndex
+	cfg["fmriTrialSigScopeStimPhases"] = m.fmriTrialSigScopeStimPhases
 
 	// ML pipeline
 	cfg["mlNPerm"] = m.mlNPerm
@@ -1632,10 +1632,10 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fmriTrialSigSignatureNPS = getBool("fmriTrialSigSignatureNPS", m.fmriTrialSigSignatureNPS)
 	m.fmriTrialSigSignatureSIIPS1 = getBool("fmriTrialSigSignatureSIIPS1", m.fmriTrialSigSignatureSIIPS1)
 	m.fmriTrialSigLssOtherRegressorsIndex = getInt("fmriTrialSigLssOtherRegressorsIndex", m.fmriTrialSigLssOtherRegressorsIndex)
-	m.fmriTrialSigRoiNames = getString("fmriTrialSigRoiNames", m.fmriTrialSigRoiNames)
 	m.fmriTrialSigGroupColumn = getString("fmriTrialSigGroupColumn", m.fmriTrialSigGroupColumn)
 	m.fmriTrialSigGroupValuesSpec = getString("fmriTrialSigGroupValuesSpec", m.fmriTrialSigGroupValuesSpec)
 	m.fmriTrialSigGroupScopeIndex = getInt("fmriTrialSigGroupScopeIndex", m.fmriTrialSigGroupScopeIndex)
+	m.fmriTrialSigScopeStimPhases = getString("fmriTrialSigScopeStimPhases", m.fmriTrialSigScopeStimPhases)
 
 	// ML pipeline
 	m.mlNPerm = getInt("mlNPerm", m.mlNPerm)

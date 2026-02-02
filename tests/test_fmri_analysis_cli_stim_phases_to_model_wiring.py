@@ -20,19 +20,17 @@ class _DotGetConfig(dict):
         return super().get(key, default)
 
 
-class TestFmriAnalysisCliSignatureScopeWiring(unittest.TestCase):
-    def test_signature_scope_args_are_wired_to_trial_cfg(self):
+class TestFmriAnalysisCliStimPhasesToModelWiring(unittest.TestCase):
+    def test_first_level_stim_phases_to_model_is_wired_to_contrast_cfg(self):
         from fmri_pipeline.cli.commands.fmri_analysis import run_fmri_analysis
 
         with tempfile.TemporaryDirectory() as td:
             bids_root = Path(td) / "bids_fmri_root"
-            bids_root.mkdir(parents=True, exist_ok=True)
             (bids_root / "sub-0000").mkdir(parents=True, exist_ok=True)
 
             config = _DotGetConfig({"paths": {}})
 
             args = argparse.Namespace(
-                # Common CLI args used by run_fmri_analysis
                 bids_fmri_root=str(bids_root),
                 deriv_root=None,
                 freesurfer_dir=None,
@@ -46,7 +44,7 @@ class TestFmriAnalysisCliSignatureScopeWiring(unittest.TestCase):
                 dry_run=True,
                 output_dir=None,
                 # Mode + modeling
-                mode="lss",
+                mode="first-level",
                 input_source="fmriprep",
                 fmriprep_space=None,
                 require_fmriprep=True,
@@ -54,10 +52,10 @@ class TestFmriAnalysisCliSignatureScopeWiring(unittest.TestCase):
                 contrast_name="pain_vs_nonpain",
                 contrast_type="t-test",
                 formula=None,
-                cond_a_column="pain_binary_coded",
-                cond_a_value="1",
-                cond_b_column="pain_binary_coded",
-                cond_b_value="0",
+                cond_a_column="trial_type",
+                cond_a_value="stimulation",
+                cond_b_column="trial_type",
+                cond_b_value="fixation_rest",
                 confounds_strategy="auto",
                 write_design_matrix=None,
                 hrf_model="spm",
@@ -65,24 +63,35 @@ class TestFmriAnalysisCliSignatureScopeWiring(unittest.TestCase):
                 high_pass_hz=0.008,
                 low_pass_hz=None,
                 smoothing_fwhm=None,
-                # Trial-wise signature options
-                include_other_events=None,
-                fixed_effects_weighting=None,
-                lss_other_regressors=None,
-                max_trials_per_run=None,
-                signatures=None,
-                signature_group_column=None,
-                signature_group_values=None,
-                signature_group_scope=None,
-                write_trial_betas=None,
-                write_trial_variances=None,
-                write_condition_betas=None,
-                # Scope args (the subject of this test)
-                signature_scope_trial_types=["stimulation", "rating"],
-                signature_scope_stim_phases=["plateau"],
+                events_to_model=None,
+                # NEW: stimulation phase scoping (subject of this test)
+                stim_phases_to_model="plateau",
+                # Plotting args (must exist on args namespace)
+                plots=False,
+                plot_html_report=None,
+                plot_formats=None,
+                plot_space=None,
+                plot_threshold_mode=None,
+                plot_z_threshold=None,
+                plot_fdr_q=None,
+                plot_cluster_min_voxels=None,
+                plot_vmax_mode=None,
+                plot_vmax=None,
+                plot_include_unthresholded=None,
+                plot_types=None,
+                plot_effect_size=None,
+                plot_standard_error=None,
+                plot_motion_qc=None,
+                plot_carpet_qc=None,
+                plot_tsnr_qc=None,
+                plot_design_qc=None,
+                plot_embed_images=None,
+                plot_signatures=None,
+                output_type="z-score",
+                resample_to_freesurfer=False,
             )
 
-            with patch("fmri_pipeline.pipelines.fmri_trial_signatures.FmriTrialSignaturePipeline") as MockPipeline:
+            with patch("fmri_pipeline.pipelines.fmri_analysis.FmriAnalysisPipeline") as MockPipeline:
                 instance = MockPipeline.return_value
                 instance.run_batch.return_value = None
 
@@ -90,10 +99,10 @@ class TestFmriAnalysisCliSignatureScopeWiring(unittest.TestCase):
 
                 call = instance.run_batch.call_args
                 self.assertIsNotNone(call)
-                trial_cfg = call.kwargs["trial_cfg"]
-                self.assertEqual(trial_cfg.condition_scope_trial_types, ("stimulation", "rating"))
-                self.assertEqual(trial_cfg.condition_scope_stim_phases, ("plateau",))
+                contrast_cfg = call.kwargs["contrast_cfg"]
+                self.assertEqual(contrast_cfg.stim_phases_to_model, ["plateau"])
 
 
 if __name__ == "__main__":
     unittest.main()
+

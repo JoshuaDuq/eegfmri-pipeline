@@ -14,14 +14,14 @@ A terminal-based user interface for the EEG Pipeline built with Go and [Bubble T
 Navigate to the TUI directory and build/run:
 
 ```bash
-cd /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/cli/tui && go mod download && go build -o tui . && ./tui
+cd path/to/EEG_fMRI_Pipeline/eeg_pipeline/cli/tui && go mod download && go build -o tui . && ./tui
 ```
 
 ### Step-by-Step
 
-1. **Navigate to TUI directory:**
+1. **Navigate to TUI directory** (from repository root):
    ```bash
-   cd /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/cli/tui
+   cd eeg_pipeline/cli/tui
    ```
 
 2. **Download dependencies:**
@@ -44,10 +44,11 @@ cd /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/cli/tui && go mod downl
 ### Alternative: Run Directly Without Building
 
 ```bash
-cd /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/cli/tui && go run main.go
+cd eeg_pipeline/cli/tui && go run main.go
 ```
 
 ## Notes
 
 - The TUI expects to be run from the repository root context (it searches for the `eeg_pipeline` directory to find the repo root).
 - Ensure Go 1.21+ is installed. Check with `go version`.
+- UI is minimal and scientific: static cursors, sentence-case labels, normal borders, single-color progress bars.

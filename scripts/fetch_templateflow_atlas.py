@@ -2,10 +2,6 @@
 """
 Fetch an MNI atlas from TemplateFlow and copy it into this repo's external atlas directory.
 
-This is intended to support ROI-restricted NPS/SIIPS1 readouts, which require:
-  - an integer atlas label image (NIfTI, MNI space)
-  - a labels table mapping label id -> ROI name (TSV)
-
 Example:
   ./.venv/bin/python scripts/fetch_templateflow_atlas.py --schaefer 100 7 --resolution 2
 """
@@ -93,12 +89,7 @@ def main() -> None:
     print("Wrote:")
     print(f"  atlas : {atlas_dst}")
     print(f"  labels: {labels_dst}")
-    print("")
-    print("Use with ROI signatures:")
-    print(f"  --signature-roi-atlas {atlas_dst.name}")
-    print(f"  --signature-roi-labels {labels_dst.name}")
 
 
 if __name__ == "__main__":
     main()
-

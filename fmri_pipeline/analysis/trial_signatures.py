@@ -52,9 +52,6 @@ class TrialSignatureExtractionConfig:
     max_trials_per_run: Optional[int] = None
     fixed_effects_weighting: str = "variance"  # "variance" | "mean"
     signatures: Optional[Tuple[str, ...]] = None  # default: all discovered
-    roi_atlas: Optional[str] = None  # atlas label image (MNI) path or alias
-    roi_labels: Optional[str] = None  # labels table path (TSV/CSV) mapping label -> name
-    roi_names: Optional[Tuple[str, ...]] = None  # ROI names to extract (or ("all",))
     signature_group_column: Optional[str] = None  # e.g., "temperature"
     signature_group_values: Optional[Tuple[str, ...]] = None  # values to include (e.g., ("44.3","45.3"))
     signature_group_scope: str = "across_runs"  # "across_runs" | "per_run"
@@ -131,32 +128,6 @@ class TrialSignatureExtractionConfig:
         if scope_trial_types is None and (col_a != "trial_type" or col_b != "trial_type"):
             scope_trial_types = ("stimulation",)
 
-        roi_atlas = (self.roi_atlas or "").strip() or None
-        roi_labels = (self.roi_labels or "").strip() or None
-        roi_names = None
-        if self.roi_names:
-            # Accept comma/semicolon-separated values and normalize special "all".
-            raw: List[str] = []
-            for item in self.roi_names:
-                if item is None:
-                    continue
-                s = str(item).replace(";", ",").strip()
-                if not s:
-                    continue
-                raw.extend([p.strip() for p in s.split(",") if p.strip()])
-            if any(s.strip().lower() in {"all", "*", "@all"} for s in raw):
-                roi_names = ("all",)
-            else:
-                dedup: List[str] = []
-                seen = set()
-                for s in raw:
-                    key = s.strip().lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    dedup.append(s.strip())
-                roi_names = tuple(dedup) if dedup else None
-
         group_col = (self.signature_group_column or "").strip() or None
         group_vals = None
         if self.signature_group_values:
@@ -196,9 +167,6 @@ class TrialSignatureExtractionConfig:
                 "condition_scope_trial_types": scope_trial_types,
                 "condition_scope_stim_phases": scope_stim_phases,
                 "fixed_effects_weighting": weight,
-                "roi_atlas": roi_atlas,
-                "roi_labels": roi_labels,
-                "roi_names": roi_names,
                 "signature_group_column": group_col,
                 "signature_group_values": group_vals,
                 "signature_group_scope": group_scope,
@@ -227,301 +195,13 @@ def _safe_slug(value: str) -> str:
     return value or "item"
 
 
-def _resolve_path_with_search(
-    value: str,
-    *,
-    search_roots: Sequence[Path],
-    suffixes: Sequence[str] = (".nii.gz", ".nii", ".tsv", ".csv", ".txt"),
-) -> Path:
-    """
-    Resolve a file path from an explicit path or by searching roots.
-
-    - If `value` exists as-is, return it.
-    - Else try `<root>/<value>` and `<root>/<value><suffix>` for common suffixes.
-    """
-    p = Path(str(value)).expanduser()
-    if p.exists():
-        return p
-    for root in search_roots:
-        root = Path(root)
-        if not root:
-            continue
-        cand = root / str(value)
-        if cand.exists():
-            return cand
-        for suf in suffixes:
-            cand2 = root / f"{value}{suf}"
-            if cand2.exists():
-                return cand2
-    roots_str = ", ".join(str(r) for r in search_roots[:4])
-    raise FileNotFoundError(
-        f"Could not resolve path: {value} (searched: {roots_str}). "
-        "Run: python scripts/fetch_templateflow_atlas.py --schaefer 100 7 --resolution 2"
-    )
-
-
-def _infer_atlas_labels_sidecar(atlas_path: Path) -> Optional[Path]:
-    """
-    Best-effort inference for an atlas labels sidecar file.
-    Tries: <atlas_stem>{,.tsv|.csv|.txt}, <atlas_stem>_labels.*, and (TemplateFlow)
-    <atlas_stem> with _res-XX_ stripped + .tsv (labels often omit resolution in the name).
-    """
-    import re
-
-    p = Path(atlas_path)
-    stem = p.name
-    if stem.endswith(".nii.gz"):
-        base = stem[: -len(".nii.gz")]
-    elif stem.endswith(".nii"):
-        base = stem[: -len(".nii")]
-    else:
-        base = p.stem
-
-    for ext in (".tsv", ".csv", ".txt"):
-        cand = p.with_name(base + ext)
-        if cand.exists():
-            return cand
-        cand = p.with_name(base + "_labels" + ext)
-        if cand.exists():
-            return cand
-    # TemplateFlow: labels file often has same stem but without _res-XX_
-    base_no_res = re.sub(r"_res-\d+_", "_", base)
-    if base_no_res != base:
-        for ext in (".tsv", ".csv", ".txt"):
-            cand = p.with_name(base_no_res + ext)
-            if cand.exists():
-                return cand
-    return None
-
-
-def _read_atlas_labels_table(labels_path: Path) -> Dict[int, str]:
-    """
-    Read a labels table mapping integer label -> ROI name.
-
-    Supports TSV/CSV with either:
-      - header columns like (label|index|id) and (name|roi|region)
-      - two-column rows: <label> <name>
-    """
-    import csv
-
-    path = Path(labels_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Atlas labels file does not exist: {path}")
-
-    # Heuristic delimiter
-    delim = "\t" if path.suffix.lower() == ".tsv" else ","
-    text = path.read_text(errors="ignore").splitlines()
-    if not text:
-        raise ValueError(f"Empty atlas labels file: {path}")
-
-    # Fall back to whitespace splitting for .txt if needed
-    sample = text[0]
-    if path.suffix.lower() == ".txt" and ("\t" not in sample and "," not in sample):
-        # We'll treat it as a 2-column whitespace table
-        out: Dict[int, str] = {}
-        for line in text:
-            s = line.strip()
-            if not s or s.startswith("#"):
-                continue
-            parts = s.split()
-            if len(parts) < 2:
-                continue
-            try:
-                idx = int(float(parts[0]))
-            except Exception:
-                continue
-            name = " ".join(parts[1:]).strip()
-            if name:
-                out[idx] = name
-        if not out:
-            raise ValueError(f"Could not parse atlas labels from: {path}")
-        return out
-
-    # CSV/TSV parsing
-    out: Dict[int, str] = {}
-    with path.open(newline="") as f:
-        reader = csv.reader(f, delimiter=delim)
-        first = next(reader, None)
-        if first is None:
-            raise ValueError(f"Empty atlas labels file: {path}")
-
-        # Detect header if first field is not numeric
-        def _is_num(v: str) -> bool:
-            try:
-                float(v)
-                return True
-            except Exception:
-                return False
-
-        header = None
-        rows_iter = reader
-        if first and any(not _is_num(v) for v in first[:1]):
-            header = [str(c).strip().lower() for c in first]
-        else:
-            # No header; treat as row
-            rows_iter = iter([first] + list(reader))
-
-        if header is not None:
-            # Re-read with DictReader for easier mapping
-            f.seek(0)
-            d = csv.DictReader(f, delimiter=delim)
-            fieldnames = [str(c).strip().lower() for c in (d.fieldnames or [])]
-            idx_key = next((k for k in fieldnames if k in {"label", "index", "id", "roi_id"}), None)
-            name_key = next((k for k in fieldnames if k in {"name", "roi", "region", "label_name"}), None)
-            if idx_key is None or name_key is None:
-                raise ValueError(
-                    f"Atlas labels file must have columns like (label/index) and (name/roi/region): {path}"
-                )
-            for row in d:
-                try:
-                    idx = int(float(str(row.get(idx_key, "")).strip()))
-                except Exception:
-                    continue
-                name = str(row.get(name_key, "")).strip()
-                if name:
-                    out[idx] = name
-            if not out:
-                raise ValueError(f"No valid labels parsed from: {path}")
-            return out
-
-        # Two-column table parsing
-        for row in rows_iter:
-            if not row:
-                continue
-            if len(row) < 2:
-                continue
-            try:
-                idx = int(float(str(row[0]).strip()))
-            except Exception:
-                continue
-            name = str(row[1]).strip()
-            if name:
-                out[idx] = name
-        if not out:
-            raise ValueError(f"Could not parse atlas labels from: {path}")
-    return out
-
-
-def _select_roi_labels(labels: Dict[int, str], roi_names: Tuple[str, ...]) -> List[Tuple[int, str]]:
-    if not labels:
-        raise ValueError("No atlas labels available.")
-    if len(roi_names) == 1 and str(roi_names[0]).strip().lower() == "all":
-        return sorted(labels.items(), key=lambda t: int(t[0]))
-
-    # Build reverse lookup by lowercased label name
-    name_to_label: Dict[str, int] = {}
-    for idx, name in labels.items():
-        key = str(name).strip().lower()
-        if key and key not in name_to_label:
-            name_to_label[key] = int(idx)
-
-    selected: List[Tuple[int, str]] = []
-    missing: List[str] = []
-    for req in roi_names:
-        q = str(req).strip()
-        if not q:
-            continue
-        key = q.lower()
-        if key in name_to_label:
-            idx = name_to_label[key]
-            selected.append((idx, labels[idx]))
-            continue
-
-        # Try unique substring match
-        matches = [(idx, name) for idx, name in labels.items() if key in str(name).strip().lower()]
-        if len(matches) == 1:
-            selected.append((int(matches[0][0]), str(matches[0][1])))
-            continue
-        missing.append(q)
-
-    if missing:
-        examples = ", ".join([str(n) for _, n in list(sorted(labels.items()))[:15]])
-        raise ValueError(
-            "Unknown/ambiguous ROI name(s): "
-            + ", ".join(missing)
-            + f". Examples of available names: {examples} ..."
-        )
-
-    # Deduplicate by label index
-    out: List[Tuple[int, str]] = []
-    seen = set()
-    for idx, name in selected:
-        if int(idx) in seen:
-            continue
-        seen.add(int(idx))
-        out.append((int(idx), str(name)))
-    return out
-
-
-def _build_roi_masks_from_atlas(
-    *,
-    atlas_path: Path,
-    labels: List[Tuple[int, str]],
-    target_img: Any,
-) -> Dict[str, Any]:
-    """
-    Return mapping ROI name -> NIfTI mask aligned to `target_img` grid.
-    """
-    import numpy as np  # type: ignore
-    import nibabel as nib  # type: ignore
-
-    try:
-        from nilearn import image as nilearn_image  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError("ROI masking requires nilearn to resample the atlas to the target image grid.") from exc
-
-    atlas_img = nib.load(str(atlas_path))
-    atlas_res = nilearn_image.resample_to_img(
-        atlas_img, target_img, interpolation="nearest",
-        force_resample=True, copy_header=True,
-    )
-    data = atlas_res.get_fdata()
-    finite = np.isfinite(data)
-    if not np.any(finite):
-        raise ValueError(f"Atlas has no finite voxels after resampling: {atlas_path}")
-    # Ensure integer-like labels
-    vals = data[finite]
-    if not np.all(np.isclose(vals, np.round(vals), atol=1e-3)):
-        raise ValueError(f"Atlas does not look like an integer label image: {atlas_path}")
-    lab = np.round(data).astype(int)
-
-    masks: Dict[str, Any] = {}
-    for idx, name in labels:
-        idx = int(idx)
-        if idx == 0:
-            continue
-        m = lab == idx
-        if int(np.sum(m)) == 0:
-            continue
-        masks[str(name)] = nib.Nifti1Image(m.astype(np.uint8), atlas_res.affine, atlas_res.header)
-    if not masks:
-        raise ValueError("All requested ROI masks were empty after resampling to the target image grid.")
-    return masks
-
-
-def _mask_hash_and_count(mask_img: Any) -> Tuple[str, int]:
-    import hashlib
-
-    import numpy as np  # type: ignore
-
-    data = np.asanyarray(mask_img.get_fdata())
-    mask = np.isfinite(data) & (data > 0)
-    n_vox = int(np.sum(mask))
-
-    h = hashlib.sha256()
-    h.update(mask.astype(np.uint8).tobytes())
-    h.update(np.asanyarray(mask_img.affine, dtype=np.float64).tobytes())
-    h.update(np.asanyarray(mask.shape, dtype=np.int64).tobytes())
-    return h.hexdigest(), n_vox
-
-
 def _resample_mask_to_target(mask_img: Any, target_img: Any) -> Any:
     import numpy as np  # type: ignore
 
     try:
         from nilearn import image as nilearn_image  # type: ignore
     except Exception as exc:  # pragma: no cover
-        raise RuntimeError("ROI masking requires nilearn to resample masks to the target image grid.") from exc
+        raise RuntimeError("Mask resampling requires nilearn to align masks to the target image grid.") from exc
 
     # Best-effort: if already aligned, avoid resampling. (nilearn will still handle it if needed.)
     try:
@@ -535,19 +215,6 @@ def _resample_mask_to_target(mask_img: Any, target_img: Any) -> Any:
         mask_img, target_img, interpolation="nearest",
         force_resample=True, copy_header=True,
     )
-
-
-def _intersect_masks_to_target(*, roi_mask_img: Any, brain_mask_img: Any, target_img: Any) -> Any:
-    import numpy as np  # type: ignore
-    import nibabel as nib  # type: ignore
-
-    roi = _resample_mask_to_target(roi_mask_img, target_img)
-    brain = _resample_mask_to_target(brain_mask_img, target_img)
-
-    r = np.asanyarray(roi.get_fdata())
-    b = np.asanyarray(brain.get_fdata())
-    m = np.isfinite(r) & np.isfinite(b) & (r > 0) & (b > 0)
-    return nib.Nifti1Image(m.astype(np.uint8), roi.affine, roi.header)
 
 
 def _union_masks_to_target(mask_imgs: Sequence[Any], target_img: Any) -> Any:
@@ -1116,17 +783,15 @@ def run_trial_signature_extraction_for_subject(
     """
     Compute trial-wise beta maps (beta-series or LSS) and multivariate signature expression.
 
-    Outputs (per subject) under:
-      <deriv_root>/sub-XX/fmri/<beta_series|lss>/task-<task>/contrast-<name>/
-        - trials.tsv
-        - signatures/trial_signature_expression.tsv
-        - signatures/trial_signature_expression_rois.tsv (optional)
-        - condition_betas/*.nii.gz (optional)
-        - signatures/condition_signature_expression.tsv
-        - signatures/condition_signature_expression_rois.tsv (optional)
-        - provenance.json
-        - trial_betas/**/*.nii.gz (optional)
-    """
+        Outputs (per subject) under:
+          <deriv_root>/sub-XX/fmri/<beta_series|lss>/task-<task>/contrast-<name>/
+            - trials.tsv
+            - signatures/trial_signature_expression.tsv
+            - condition_betas/*.nii.gz (optional)
+            - signatures/condition_signature_expression.tsv
+            - provenance.json
+            - trial_betas/**/*.nii.gz (optional)
+        """
     cfg = cfg.normalized()
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
     if signature_root is not None:
@@ -1168,50 +833,7 @@ def run_trial_signature_extraction_for_subject(
     trial_infos: List[TrialInfo] = []
     trial_rows_out: List[Dict[str, Any]] = []
     trial_sig_rows: List[Dict[str, Any]] = []
-    trial_sig_roi_rows: List[Dict[str, Any]] = []
     run_brain_masks: List[Any] = []
-
-    roi_enabled = bool(signature_root is not None and cfg.roi_atlas and cfg.roi_names)
-    roi_atlas_path: Optional[Path] = None
-    roi_labels_path: Optional[Path] = None
-    roi_label_map: Dict[int, str] = {}
-    roi_selected: List[Tuple[int, str]] = []
-    roi_name_to_label: Dict[str, int] = {}
-    atlas_display: Optional[str] = None
-
-    if roi_enabled:
-        atlas_search_roots: List[Path] = []
-        if signature_root is not None:
-            atlas_search_roots.append(Path(signature_root))
-            atlas_search_roots.append(Path(signature_root) / "atlases")
-        external_root = Path(deriv_root).expanduser().resolve().parent / "external"
-        atlas_search_roots.append(external_root)
-        atlas_search_roots.append(external_root / "atlases")
-        atlas_search_roots.append(Path(deriv_root))
-
-        roi_atlas_path = _resolve_path_with_search(
-            str(cfg.roi_atlas),
-            search_roots=atlas_search_roots,
-            suffixes=(".nii.gz", ".nii"),
-        )
-        if cfg.roi_labels:
-            roi_labels_path = _resolve_path_with_search(
-                str(cfg.roi_labels),
-                search_roots=atlas_search_roots,
-                suffixes=(".tsv", ".csv", ".txt"),
-            )
-        else:
-            roi_labels_path = _infer_atlas_labels_sidecar(roi_atlas_path)
-        if roi_labels_path is None:
-            raise ValueError(
-                f"--signature-roi-atlas provided but no labels file could be inferred. "
-                f"Pass --signature-roi-labels explicitly. atlas={roi_atlas_path}"
-            )
-
-        roi_label_map = _read_atlas_labels_table(roi_labels_path)
-        roi_selected = _select_roi_labels(roi_label_map, tuple(cfg.roi_names or ()))
-        roi_name_to_label = {name: int(idx) for idx, name in roi_selected}
-        atlas_display = roi_atlas_path.name
 
     grouping_enabled = bool(cfg.signature_group_column and cfg.signature_group_values)
 
@@ -1254,10 +876,6 @@ def run_trial_signature_extraction_for_subject(
         )
         if not trials:
             continue
-
-        run_roi_masks: Optional[Dict[str, Any]] = None
-        run_roi_masks_final: Optional[Dict[str, Any]] = None
-        run_roi_mask_meta: Optional[Dict[str, Tuple[str, int]]] = None
 
         if cfg.method == "beta-series":
             flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
@@ -1338,66 +956,6 @@ def run_trial_signature_extraction_for_subject(
                                 "weights": str(s.weight_path),
                             }
                         )
-
-                if roi_enabled and signature_root is not None and roi_atlas_path is not None:
-                    if run_roi_masks_final is None:
-                        run_roi_masks = _build_roi_masks_from_atlas(
-                            atlas_path=roi_atlas_path,
-                            labels=roi_selected,
-                            target_img=beta_img,
-                        )
-                        run_roi_masks_final = {}
-                        run_roi_mask_meta = {}
-                        for roi_name, roi_mask in run_roi_masks.items():
-                            final_mask = (
-                                _intersect_masks_to_target(
-                                    roi_mask_img=roi_mask, brain_mask_img=mask_img, target_img=beta_img
-                                )
-                                if mask_img is not None
-                                else roi_mask
-                            )
-                            h, n = _mask_hash_and_count(final_mask)
-                            run_roi_masks_final[str(roi_name)] = final_mask
-                            run_roi_mask_meta[str(roi_name)] = (h, n)
-
-                    for roi_name, roi_mask in (run_roi_masks_final or {}).items():
-                        sigs = compute_pain_signature_expression(
-                            stat_or_effect_img=beta_img,
-                            signature_root=signature_root,
-                            mask_img=roi_mask,
-                            signatures=cfg.signatures,
-                        )
-                        for s in sigs:
-                            mh, mn = ("", 0)
-                            if run_roi_mask_meta and str(roi_name) in run_roi_mask_meta:
-                                mh, mn = run_roi_mask_meta[str(roi_name)]
-                            trial_sig_roi_rows.append(
-                                {
-                                    "subject": sub_label,
-                                    "task": cfg.task,
-                                    "method": cfg.method,
-                                    "run": t.run_label,
-                                    "run_num": t.run,
-                                    "trial_index": t.trial_index,
-                                    "condition": t.condition,
-                                    "regressor": t.regressor,
-                                    "original_trial_type": t.original_trial_type,
-                                    "stim_phase": str(t.extra.get("stim_phase", "")),
-                                    "onset": f"{t.onset:.6f}",
-                                    "duration": f"{t.duration:.6f}",
-                                    "atlas": atlas_display or "",
-                                    "roi": str(roi_name),
-                                    "roi_label": roi_name_to_label.get(str(roi_name), ""),
-                                    "roi_mask_hash": mh,
-                                    "roi_mask_n_voxels": mn,
-                                    "signature": s.name,
-                                    "dot": f"{s.dot:.8g}",
-                                    "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
-                                    "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
-                                    "n_voxels": s.n_voxels,
-                                    "weights": str(s.weight_path),
-                                }
-                            )
 
         else:
             # LSS: one model per trial within each run
@@ -1481,80 +1039,15 @@ def run_trial_signature_extraction_for_subject(
                             }
                         )
 
-                if roi_enabled and signature_root is not None and roi_atlas_path is not None:
-                    if run_roi_masks_final is None:
-                        run_roi_masks = _build_roi_masks_from_atlas(
-                            atlas_path=roi_atlas_path,
-                            labels=roi_selected,
-                            target_img=beta_img,
-                        )
-                        run_roi_masks_final = {}
-                        run_roi_mask_meta = {}
-                        for roi_name, roi_mask in run_roi_masks.items():
-                            final_mask = (
-                                _intersect_masks_to_target(
-                                    roi_mask_img=roi_mask, brain_mask_img=mask_img, target_img=beta_img
-                                )
-                                if mask_img is not None
-                                else roi_mask
-                            )
-                            h, n = _mask_hash_and_count(final_mask)
-                            run_roi_masks_final[str(roi_name)] = final_mask
-                            run_roi_mask_meta[str(roi_name)] = (h, n)
-
-                    for roi_name, roi_mask in (run_roi_masks_final or {}).items():
-                        sigs = compute_pain_signature_expression(
-                            stat_or_effect_img=beta_img,
-                            signature_root=signature_root,
-                            mask_img=roi_mask,
-                            signatures=cfg.signatures,
-                        )
-                        for s in sigs:
-                            mh, mn = ("", 0)
-                            if run_roi_mask_meta and str(roi_name) in run_roi_mask_meta:
-                                mh, mn = run_roi_mask_meta[str(roi_name)]
-                            trial_sig_roi_rows.append(
-                                {
-                                    "subject": sub_label,
-                                    "task": cfg.task,
-                                    "method": cfg.method,
-                                    "run": t.run_label,
-                                    "run_num": t.run,
-                                    "trial_index": t.trial_index,
-                                    "condition": t.condition,
-                                    "regressor": "target",
-                                    "original_trial_type": t.original_trial_type,
-                                    "stim_phase": str(t.extra.get("stim_phase", "")),
-                                    "onset": f"{t.onset:.6f}",
-                                    "duration": f"{t.duration:.6f}",
-                                    "atlas": atlas_display or "",
-                                    "roi": str(roi_name),
-                                    "roi_label": roi_name_to_label.get(str(roi_name), ""),
-                                    "roi_mask_hash": mh,
-                                    "roi_mask_n_voxels": mn,
-                                    "signature": s.name,
-                                    "dot": f"{s.dot:.8g}",
-                                    "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
-                                    "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
-                                    "n_voxels": s.n_voxels,
-                                    "weights": str(s.weight_path),
-                                }
-                            )
-
     # Write metadata tables
     _write_tsv(out_dir / "trials.tsv", trial_rows_out)
     _write_tsv(out_dir / "signatures" / "trial_signature_expression.tsv", trial_sig_rows)
-    if roi_enabled:
-        _write_tsv(out_dir / "signatures" / "trial_signature_expression_rois.tsv", trial_sig_roi_rows)
 
     # Condition/group averages (fixed-effects) + signatures
     cond_rows: List[Dict[str, Any]] = []
-    cond_roi_rows: List[Dict[str, Any]] = []
-
     group_rows: List[Dict[str, Any]] = []
-    group_roi_rows: List[Dict[str, Any]] = []
 
-    if (group_effects) and (cfg.write_condition_betas or signature_root is not None or roi_enabled):
+    if (group_effects) and (cfg.write_condition_betas or signature_root is not None):
         import nibabel as nib  # type: ignore
 
         cond_dir = out_dir / "condition_betas"
@@ -1631,69 +1124,8 @@ def run_trial_signature_extraction_for_subject(
                                 "weights": str(s.weight_path),
                             }
                         )
-            if roi_enabled and signature_root is not None and roi_atlas_path is not None:
-                target_for_rois = a_img or b_img or diff_img
-                if target_for_rois is not None:
-                    cond_roi_masks = _build_roi_masks_from_atlas(
-                        atlas_path=roi_atlas_path,
-                        labels=roi_selected,
-                        target_img=target_for_rois,
-                    )
-                    cond_roi_masks_final: Dict[str, Any] = {}
-                    cond_roi_mask_meta: Dict[str, Tuple[str, int]] = {}
-                    brain_union = None
-                    if run_brain_masks:
-                        brain_union = _union_masks_to_target(run_brain_masks, target_for_rois)
-                    for roi_name, roi_mask in cond_roi_masks.items():
-                        final_mask = (
-                            _intersect_masks_to_target(
-                                roi_mask_img=roi_mask, brain_mask_img=brain_union, target_img=target_for_rois
-                            )
-                            if brain_union is not None
-                            else roi_mask
-                        )
-                        h, n = _mask_hash_and_count(final_mask)
-                        cond_roi_masks_final[str(roi_name)] = final_mask
-                        cond_roi_mask_meta[str(roi_name)] = (h, n)
-
-                    for map_label, img in [
-                        ("cond_a", a_img),
-                        ("cond_b", b_img),
-                        ("cond_a_minus_b", diff_img),
-                    ]:
-                        if img is None:
-                            continue
-                        for roi_name, roi_mask in cond_roi_masks_final.items():
-                            sigs = compute_pain_signature_expression(
-                                stat_or_effect_img=img,
-                                signature_root=signature_root,
-                                mask_img=roi_mask,
-                                signatures=cfg.signatures,
-                            )
-                            for s in sigs:
-                                mh, mn = cond_roi_mask_meta.get(str(roi_name), ("", 0))
-                                cond_roi_rows.append(
-                                    {
-                                        "subject": sub_label,
-                                        "task": cfg.task,
-                                        "method": cfg.method,
-                                        "map": map_label,
-                                        "atlas": atlas_display or "",
-                                        "roi": str(roi_name),
-                                        "roi_label": roi_name_to_label.get(str(roi_name), ""),
-                                        "roi_mask_hash": mh,
-                                        "roi_mask_n_voxels": mn,
-                                        "signature": s.name,
-                                        "dot": f"{s.dot:.8g}",
-                                        "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
-                                        "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
-                                        "n_voxels": s.n_voxels,
-                                        "weights": str(s.weight_path),
-                                    }
-                                )
             _write_tsv(out_dir / "signatures" / "condition_signature_expression.tsv", cond_rows)
-            if roi_enabled:
-                _write_tsv(out_dir / "signatures" / "condition_signature_expression_rois.tsv", cond_roi_rows)
+
         else:
             def _count_trials_for_group(run_label: Optional[str], group: str) -> int:
                 n = 0
@@ -1711,12 +1143,24 @@ def run_trial_signature_extraction_for_subject(
                     for r in sorted(group_effects_by_run.keys()):
                         by_group = group_effects_by_run.get(int(r), {})
                         for g in sorted(by_group.keys()):
-                            yield ("per_run", f"run-{int(r):02d}", int(r), str(g), by_group.get(str(g), []), group_vars_by_run.get(int(r), {}).get(str(g), []))
+                            yield (
+                                "per_run",
+                                f"run-{int(r):02d}",
+                                int(r),
+                                str(g),
+                                by_group.get(str(g), []),
+                                group_vars_by_run.get(int(r), {}).get(str(g), []),
+                            )
                 else:
                     for g in sorted(group_effects.keys()):
-                        yield ("across_runs", "", None, str(g), group_effects.get(str(g), []), group_vars.get(str(g), []))
-
-            brain_union_cache: Dict[str, Any] = {}
+                        yield (
+                            "across_runs",
+                            "",
+                            None,
+                            str(g),
+                            group_effects.get(str(g), []),
+                            group_vars.get(str(g), []),
+                        )
 
             for scope, run_label, run_num, group, effects, variances in _iter_group_sets():
                 if not effects:
@@ -1770,74 +1214,7 @@ def run_trial_signature_extraction_for_subject(
                             }
                         )
 
-                if roi_enabled and signature_root is not None and roi_atlas_path is not None:
-                    cache_key = f"{atlas_display or ''}|{img.shape if hasattr(img, 'shape') else ''}|{run_label}|{group}"
-                    roi_masks_final = brain_union_cache.get(cache_key)
-                    roi_mask_meta: Dict[str, Tuple[str, int]] = {}
-                    if roi_masks_final is None:
-                        roi_masks = _build_roi_masks_from_atlas(
-                            atlas_path=roi_atlas_path,
-                            labels=roi_selected,
-                            target_img=img,
-                        )
-                        cond_roi_masks_final: Dict[str, Any] = {}
-                        brain_union = None
-                        if run_brain_masks:
-                            brain_union = _union_masks_to_target(run_brain_masks, img)
-                        for roi_name, roi_mask in roi_masks.items():
-                            final_mask = (
-                                _intersect_masks_to_target(
-                                    roi_mask_img=roi_mask, brain_mask_img=brain_union, target_img=img
-                                )
-                                if brain_union is not None
-                                else roi_mask
-                            )
-                            h, n = _mask_hash_and_count(final_mask)
-                            cond_roi_masks_final[str(roi_name)] = final_mask
-                            roi_mask_meta[str(roi_name)] = (h, n)
-                        brain_union_cache[cache_key] = cond_roi_masks_final
-                        roi_masks_final = cond_roi_masks_final
-                    else:
-                        for roi_name, roi_mask in roi_masks_final.items():
-                            roi_mask_meta[str(roi_name)] = _mask_hash_and_count(roi_mask)
-
-                    for roi_name, roi_mask in roi_masks_final.items():
-                        sigs = compute_pain_signature_expression(
-                            stat_or_effect_img=img,
-                            signature_root=signature_root,
-                            mask_img=roi_mask,
-                            signatures=cfg.signatures,
-                        )
-                        mh, mn = roi_mask_meta.get(str(roi_name), ("", 0))
-                        for s in sigs:
-                            group_roi_rows.append(
-                                {
-                                    "subject": sub_label,
-                                    "task": cfg.task,
-                                    "method": cfg.method,
-                                    "scope": scope,
-                                    "run": run_label,
-                                    "run_num": "" if run_num is None else int(run_num),
-                                    "group_column": str(cfg.signature_group_column or ""),
-                                    "group_value": str(group),
-                                    "n_trials": n_trials,
-                                    "atlas": atlas_display or "",
-                                    "roi": str(roi_name),
-                                    "roi_label": roi_name_to_label.get(str(roi_name), ""),
-                                    "roi_mask_hash": mh,
-                                    "roi_mask_n_voxels": mn,
-                                    "signature": s.name,
-                                    "dot": f"{s.dot:.8g}",
-                                    "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",
-                                    "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
-                                    "n_voxels": s.n_voxels,
-                                    "weights": str(s.weight_path),
-                                }
-                            )
-
             _write_tsv(out_dir / "signatures" / "group_signature_expression.tsv", group_rows)
-            if roi_enabled:
-                _write_tsv(out_dir / "signatures" / "group_signature_expression_rois.tsv", group_roi_rows)
 
     (out_dir / "provenance.json").write_text(json.dumps(provenance, indent=2))
     return {
@@ -1845,6 +1222,4 @@ def run_trial_signature_extraction_for_subject(
         "n_trials": len(trial_infos),
         "n_trial_signature_rows": len(trial_sig_rows),
         "n_condition_signature_rows": len(cond_rows),
-        "n_trial_signature_roi_rows": len(trial_sig_roi_rows),
-        "n_condition_signature_roi_rows": len(cond_roi_rows),
     }
