@@ -692,6 +692,21 @@ func (m Model) renderSubjectSelection() string {
 		}
 		b.WriteString("  " + labelStyle.Render("scope:") + " " + groupOpt + "  " + subjectOpt + "  " +
 			hintStyle.Render("[Tab to toggle]") + "\n\n")
+	} else if m.Pipeline == types.PipelinePlotting {
+		labelStyle := lipgloss.NewStyle().Foreground(styles.Text)
+		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+		hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+
+		groupOpt := dimStyle.Render("Group")
+		subjectOpt := dimStyle.Render("Subject")
+		if m.plottingScope == PlottingScopeGroup {
+			groupOpt = valueStyle.Render("Group")
+		} else {
+			subjectOpt = valueStyle.Render("Subject")
+		}
+		b.WriteString("  " + labelStyle.Render("level:") + " " + groupOpt + "  " + subjectOpt + "  " +
+			hintStyle.Render("[Tab to toggle]") + "\n\n")
 	}
 
 	if m.subjectsLoading {
@@ -739,6 +754,9 @@ func (m Model) renderSubjectSelection() string {
 	if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
 		minValid = 2
 	}
+	if m.Pipeline == types.PipelinePlotting && m.plottingScope == PlottingScopeGroup {
+		minValid = 2
+	}
 
 	var statusIndicator string
 	if validCount >= minValid {
@@ -773,7 +791,7 @@ func (m Model) renderSubjectSelection() string {
 	}
 
 	overhead := 12
-	if m.Pipeline == types.PipelineML {
+	if m.Pipeline == types.PipelineML || m.Pipeline == types.PipelinePlotting {
 		overhead += 2
 	}
 	layout := styles.CalculateListLayout(m.height, m.subjectCursor, len(filteredSubjects), overhead)

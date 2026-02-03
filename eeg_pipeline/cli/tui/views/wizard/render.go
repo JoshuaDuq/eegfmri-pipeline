@@ -94,9 +94,24 @@ func (m Model) containerDimensions(w, h int) (int, int) {
 	if cw < minContainerWidth {
 		cw = minContainerWidth
 	}
+	maxWidth := w - 2
+	if maxWidth < 1 {
+		maxWidth = 1
+	}
+	if cw > maxWidth {
+		cw = maxWidth
+	}
+
 	ch := h - 2
 	if ch < minContainerHeight {
 		ch = minContainerHeight
+	}
+	maxHeight := h - 2
+	if maxHeight < 1 {
+		maxHeight = 1
+	}
+	if ch > maxHeight {
+		ch = maxHeight
 	}
 	return cw, ch
 }

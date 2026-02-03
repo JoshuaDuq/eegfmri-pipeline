@@ -709,6 +709,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["varianceThresholdGrid"] = m.varianceThresholdGrid
 
 	// Plotting Detailed Config
+	cfg["plottingScope"] = int(m.plottingScope)
 	cfg["plotDpiIndex"] = m.plotDpiIndex
 	cfg["plotSavefigDpiIndex"] = m.plotSavefigDpiIndex
 	cfg["plotSharedColorbar"] = m.plotSharedColorbar
@@ -1673,6 +1674,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.varianceThresholdGrid = getString("varianceThresholdGrid", m.varianceThresholdGrid)
 
 	// Plotting
+	m.plottingScope = PlottingScope(getInt("plottingScope", int(m.plottingScope)))
 	m.plotDpiIndex = getInt("plotDpiIndex", m.plotDpiIndex)
 	m.plotSavefigDpiIndex = getInt("plotSavefigDpiIndex", m.plotSavefigDpiIndex)
 	m.plotSharedColorbar = getBool("plotSharedColorbar", m.plotSharedColorbar)

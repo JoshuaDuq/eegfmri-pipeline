@@ -112,6 +112,9 @@ func (m *Model) shouldSkipStep(step types.WizardStep) bool {
 		if step == types.StepSelectFeaturePlotters && len(m.selectedFeaturePlotterCategories()) == 0 {
 			return true
 		}
+		if step == types.StepSelectROIs && !m.plottingNeedsROIs() {
+			return true
+		}
 	}
 	return false
 }
@@ -261,6 +264,14 @@ func (m *Model) handleTab() {
 			}
 			return
 		}
+		if m.Pipeline == types.PipelinePlotting {
+			if m.plottingScope == PlottingScopeGroup {
+				m.plottingScope = PlottingScopeSubject
+			} else {
+				m.plottingScope = PlottingScopeGroup
+			}
+			return
+		}
 	case types.StepAdvancedConfig:
 		if m.expandedOption >= 0 {
 			m.expandedOption = expandedNone
@@ -382,6 +393,9 @@ func (m *Model) validateStep() []string {
 		}
 		minRequired := minSubjectsRequired
 		if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
+			minRequired = minSubjectsForGroupCV
+		}
+		if m.Pipeline == types.PipelinePlotting && m.plottingScope == PlottingScopeGroup {
 			minRequired = minSubjectsForGroupCV
 		}
 		if selectedCount < minRequired {
@@ -739,6 +753,9 @@ func (m *Model) validate() []string {
 
 	minRequired := minSubjectsRequired
 	if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
+		minRequired = minSubjectsForGroupCV
+	}
+	if m.Pipeline == types.PipelinePlotting && m.plottingScope == PlottingScopeGroup {
 		minRequired = minSubjectsForGroupCV
 	}
 

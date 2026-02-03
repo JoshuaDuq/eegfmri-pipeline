@@ -98,12 +98,6 @@ type Model struct {
 	NumCPUCores   int       // Total number of CPU cores
 	EpochInfo     string
 
-	// Log filtering
-	ShowDebug   bool
-	ShowInfo    bool
-	ShowWarning bool
-	ShowError   bool
-
 	// Error tracking
 	ErrorLines         []string
 	LogTruncated       bool
@@ -116,11 +110,6 @@ type Model struct {
 	// Copy mode - disables mouse capture for text selection
 	copyMode bool
 
-	// Search/filter mode
-	searchMode    bool
-	searchQuery   string
-	searchMatches int
-
 	// Internal
 	cmd                *exec.Cmd
 	cancel             context.CancelFunc
@@ -129,10 +118,14 @@ type Model struct {
 	resourceUpdateChan chan messages.ResourceUpdateMsg // Channel for resource updates
 	stopResourceChan   chan struct{}                   // Signal to stop resource monitoring
 
-	width     int
-	height    int
-	ticker    int
-	animQueue animation.Queue
+	width      int
+	height     int
+	useTwoCol  bool
+	leftWidth  int
+	rightWidth int
+	columnGap  int
+	ticker     int
+	animQueue  animation.Queue
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -160,15 +153,15 @@ func New(command string) Model {
 		StartTime:        time.Now(),
 		width:            80,
 		height:           24,
+		columnGap:        2,
 		logViewport:      vp,
 		RepoRoot:         "",
-		ShowInfo:         true,
-		ShowWarning:      true,
-		ShowError:        true,
 		SubjectDurations: []time.Duration{},
 		SubjectStatuses:  make(map[string]string),
 		FailedSubjects:   []string{},
 	}
+	m.updateLayout()
+	m.updateViewportSize()
 	m.animQueue.Push(animation.ProgressPulseLoop())
 	return m
 }
@@ -523,32 +516,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Handle search mode first
-		if m.searchMode {
-			switch msg.String() {
-			case "esc":
-				m.searchMode = false
-				m.searchQuery = ""
-				m.updateViewportSize()
-				m.updateLogViewport()
-			case "enter":
-				m.searchMode = false
-				// Keep filter active
-			case "backspace":
-				if len(m.searchQuery) > 0 {
-					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
-					m.updateLogViewport()
-				}
-			default:
-				if len(msg.String()) == 1 {
-					m.searchQuery += msg.String()
-					m.updateViewportSize()
-					m.updateLogViewport()
-				}
-			}
-			return m, nil
-		}
-
 		// Check if copy mode is active
 		if m.copyMode {
 			switch msg.String() {
@@ -563,12 +530,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "/":
-			// Enter search mode
-			m.searchMode = true
-			m.searchQuery = ""
-			m.updateViewportSize()
-			return m, nil
 		case "m":
 			m.copyMode = true
 			m.updateViewportSize()
@@ -596,30 +557,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.OpenResultsFolder()
 			}
 			return m, nil
-		case "i":
-			m.ShowInfo = !m.ShowInfo
-			m.updateLogViewport()
-			return m, nil
-		case "d":
-			m.ShowDebug = !m.ShowDebug
-			m.updateLogViewport()
-			return m, nil
-		case "w":
-			m.ShowWarning = !m.ShowWarning
-			m.updateLogViewport()
-			return m, nil
-		case "e":
-			m.ShowError = !m.ShowError
-			m.updateLogViewport()
-			return m, nil
-		case "S": // Capital S for Subject filter
-			m.searchMode = true
-			m.searchQuery = "sub-" // Pre-fill with sub-
-			return m, nil
-		case "j", "down":
+		case "down":
 			m.logViewport.LineDown(styles.ScrollStepSize)
 			return m, nil
-		case "k", "up":
+		case "up":
 			m.logViewport.LineUp(styles.ScrollStepSize)
 			return m, nil
 		case "g":
@@ -828,6 +769,8 @@ func (m Model) OpenResultsFolder() tea.Cmd {
 
 // updateViewportSize recalculates log viewport dimensions based on current state
 func (m *Model) updateViewportSize() {
+	m.updateLayout()
+
 	reservedHeight := styles.ExecBaseReservedLines
 
 	// Metrics dashboard visible when terminal is tall enough and execution is active
@@ -840,12 +783,41 @@ func (m *Model) updateViewportSize() {
 		reservedHeight += styles.ExecCopyModeBannerLines
 	}
 
-	if m.searchMode || m.searchQuery != "" {
-		reservedHeight += styles.ExecSearchInputLines
-	}
-
 	if m.IsDone() {
 		reservedHeight += styles.ExecCompletionSummaryLines
+	}
+
+	if m.useTwoCol {
+		contentHeight := m.height - styles.ExecHeaderLines - styles.ExecFooterLines
+		if contentHeight < styles.MinLogHeight {
+			contentHeight = styles.MinLogHeight
+		}
+
+		logReserved := styles.ExecLogTitleLines + styles.ExecViewportBorderLines
+		if m.copyMode {
+			logReserved += styles.ExecCopyModeBannerLines
+		}
+
+		logHeight := contentHeight - logReserved
+		if logHeight < styles.MinLogHeight {
+			logHeight = styles.MinLogHeight
+		}
+		if logHeight > styles.MaxLogHeight {
+			logHeight = styles.MaxLogHeight
+		}
+
+		logWidth := m.leftWidth - 8
+		if logWidth < styles.MinLogWidth {
+			logWidth = styles.MinLogWidth
+		}
+		if logWidth > styles.MaxLogWidth {
+			logWidth = styles.MaxLogWidth
+		}
+
+		m.logViewport.Width = logWidth
+		m.logViewport.Height = logHeight
+		m.updateLogViewport()
+		return
 	}
 
 	logHeight := m.height - reservedHeight
@@ -1128,12 +1100,9 @@ func wrapText(text string, width int) []string {
 }
 
 // updateLogViewport rebuilds the viewport contents from the current
-// log buffer, applying level filters, search highlighting and soft
-// line-wrapping to match the available width.
+// log buffer, applying soft line-wrapping to match the available width.
 func (m *Model) updateLogViewport() {
 	var filtered []string
-	query := strings.ToLower(m.searchQuery)
-	highlightStyle := lipgloss.NewStyle().Background(styles.Accent).Foreground(lipgloss.Color("#000000"))
 
 	// Calculate available width: viewport width minus border (2) and padding (2)
 	contentWidth := m.logViewport.Width - 4
@@ -1142,56 +1111,13 @@ func (m *Model) updateLogViewport() {
 	}
 
 	for _, line := range m.OutputLines {
-		upperLine := strings.ToUpper(line)
-
-		// 1. Level Filtering
-		isInfo := strings.Contains(upperLine, "INFO")
-		isDebug := strings.Contains(upperLine, "DEBUG")
-		isWarn := strings.Contains(upperLine, "WARN")
-		isError := strings.Contains(upperLine, "ERROR") || strings.Contains(upperLine, "CRITICAL") || strings.Contains(upperLine, "EXCEPTION") || strings.Contains(line, "Traceback")
-
-		// If it's a known level, check if we should show it
-		if isInfo && !m.ShowInfo {
-			continue
-		}
-		if isDebug && !m.ShowDebug {
-			continue
-		}
-		if isWarn && !m.ShowWarning {
-			continue
-		}
-		if isError && !m.ShowError {
-			continue
-		}
-
-		// 2. Search/Subject Filtering
-		if query != "" {
-			if !strings.Contains(strings.ToLower(line), query) {
-				continue
-			}
-
-			// Highlight matches
-			idx := strings.Index(strings.ToLower(line), query)
-			if idx >= 0 {
-				before := line[:idx]
-				match := line[idx : idx+len(m.searchQuery)]
-				after := line[idx+len(m.searchQuery):]
-				line = before + highlightStyle.Render(match) + after
-			}
-		}
-
 		// Wrap line to fit viewport width
 		wrappedLines := wrapText(line, contentWidth)
 		filtered = append(filtered, wrappedLines...)
 	}
 
-	m.searchMatches = len(filtered)
 	if len(filtered) == 0 {
-		if query != "" {
-			filtered = append(filtered, lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("No matches found for: "+m.searchQuery))
-		} else {
-			filtered = append(filtered, lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("All logs hidden by filters"))
-		}
+		filtered = append(filtered, lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("Log output will appear here..."))
 	}
 
 	m.logViewport.SetContent(strings.Join(filtered, "\n"))
@@ -1229,23 +1155,40 @@ func (m Model) View() string {
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n")
 
-	// Info Panel
-	b.WriteString(m.renderInfoPanel())
-	b.WriteString("\n")
+	if m.useTwoCol {
+		sidebar := strings.Builder{}
+		sidebar.WriteString(m.renderInfoPanel())
+		sidebar.WriteString("\n\n")
+		if m.IsDone() {
+			sidebar.WriteString(m.renderCompletionSummary())
+		} else {
+			sidebar.WriteString(m.renderSidebarCard(m.renderProgressSection()))
+		}
 
-	if m.IsDone() {
-		// Show completion summary instead of progress section when done
-		b.WriteString(m.renderCompletionSummary())
+		logView := lipgloss.NewStyle().Width(m.leftWidth).Render(m.renderLogSection())
+		sidebarView := lipgloss.NewStyle().Width(m.rightWidth).Render(sidebar.String())
+		columns := lipgloss.JoinHorizontal(lipgloss.Top, logView, strings.Repeat(" ", m.columnGap), sidebarView)
+		b.WriteString(columns)
 		b.WriteString("\n")
 	} else {
-		// Progress Section (only while running)
-		b.WriteString(m.renderProgressSection())
+		// Log Section
+		b.WriteString(m.renderLogSection())
 		b.WriteString("\n")
-	}
 
-	// Log Section
-	b.WriteString(m.renderLogSection())
-	b.WriteString("\n")
+		// Info Panel
+		b.WriteString(m.renderInfoPanel())
+		b.WriteString("\n")
+
+		if m.IsDone() {
+			// Show completion summary instead of progress section when done
+			b.WriteString(m.renderCompletionSummary())
+			b.WriteString("\n")
+		} else {
+			// Progress Section (only while running)
+			b.WriteString(m.renderSidebarCard(m.renderProgressSection()))
+			b.WriteString("\n")
+		}
+	}
 
 	// Footer
 	b.WriteString(m.renderFooter())
@@ -1409,7 +1352,7 @@ func (m Model) renderCompletionSummary() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(1, 2).
-		Width(m.width - 10)
+		Width(m.panelWidth())
 
 	return cardStyle.Render(b.String())
 }
@@ -1460,6 +1403,8 @@ func (m Model) renderHeader() string {
 func (m Model) renderInfoPanel() string {
 	info := strings.Builder{}
 
+	info.WriteString(styles.SectionTitleStyle.Render("Summary") + "\n")
+
 	if m.StartTime.Unix() > 0 {
 		duration := m.getDuration()
 		timeLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("elapsed:")
@@ -1497,7 +1442,7 @@ func (m Model) renderInfoPanel() string {
 		info.WriteString(failLabel + failValue + "\n")
 	}
 
-	return styles.CardStyle.Width(m.width - 10).Render(info.String())
+	return m.renderSidebarCard(info.String())
 }
 
 func (m *Model) calculateETA() {
@@ -1533,7 +1478,8 @@ func (m Model) renderProgressSection() string {
 	var b strings.Builder
 
 	// Responsive Layout Decision
-	isNarrow := m.width < 100
+	contentWidth := m.contentWidth()
+	isNarrow := contentWidth < 100
 	isShort := m.height < 30
 
 	// Section header with status icon
@@ -1555,15 +1501,15 @@ func (m Model) renderProgressSection() string {
 
 	// Overall progress bar
 	progressLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("overall")
-	barWidth := m.width - 22
+	barWidth := contentWidth - 22
 	if isNarrow {
-		barWidth = m.width - 15
+		barWidth = contentWidth - 15
 	}
 	b.WriteString("  " + progressLabel + m.renderAnimatedProgressBar(m.Progress, barWidth) + "\n")
 
 	// Metrics Dashboard (Responsive)
 	if !isShort {
-		b.WriteString("\n" + m.renderMetricsDashboard() + "\n")
+		b.WriteString("\n" + m.renderMetricsDashboard() + "\n\n")
 	}
 
 	// Subject counter with visual indicator
@@ -1602,7 +1548,7 @@ func (m Model) renderProgressSection() string {
 
 		if m.OperationTotal > 0 {
 			stepProgress := float64(m.OperationCurrent) / float64(m.OperationTotal)
-			b.WriteString("  " + stepLabel + m.renderMiniProgressBar(stepProgress, m.width-32))
+			b.WriteString("  " + stepLabel + m.renderMiniProgressBar(stepProgress, contentWidth-32))
 
 			// Operation name with step counter
 			opText := fmt.Sprintf(" %s (%d/%d)", m.CurrentOperation, m.OperationCurrent, m.OperationTotal)
@@ -1620,7 +1566,7 @@ func (m Model) renderProgressSection() string {
 
 	// Cloud stages (if cloud mode)
 	if m.IsCloud {
-		b.WriteString("\n  " + m.renderCloudStages() + "\n")
+		b.WriteString("\n  " + m.renderCloudStages() + "\n\n")
 	}
 
 	// Status Badge with enhanced styling
@@ -1641,7 +1587,7 @@ func (m Model) renderMetricsDashboard() string {
 	metricBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Secondary).
-		Padding(0, 1).
+		Padding(1, 2).
 		MarginRight(1)
 
 	// Memory Metric
@@ -1660,10 +1606,11 @@ func (m Model) renderMetricsDashboard() string {
 	// Per-core CPU display
 	cpuCoresView := m.renderPerCoreCPU()
 
-	return topRow + "\n" + cpuCoresView
+	return topRow + "\n\n" + cpuCoresView
 }
 
-// renderPerCoreCPU renders a visual display of per-core CPU usage
+// renderPerCoreCPU renders a visual display of per-core CPU usage.
+// Uses fixed-width cells to avoid wrapping and keep rows aligned.
 func (m Model) renderPerCoreCPU() string {
 	if m.NumCPUCores == 0 || len(m.CPUCoreUsages) == 0 {
 		// Fallback to simple display if no per-core data
@@ -1674,64 +1621,76 @@ func (m Model) renderPerCoreCPU() string {
 
 	var b strings.Builder
 
-	// Header
-	headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
-	b.WriteString("  " + headerStyle.Render("CPU cores") + "\n")
-
-	// Determine layout based on number of cores
 	numCores := len(m.CPUCoreUsages)
-	coresPerRow := 4
-	if m.width > 120 {
-		coresPerRow = 8
-	} else if m.width > 80 {
-		coresPerRow = 6
-	} else if m.width < 60 {
-		coresPerRow = 2
+	availableWidth := m.contentWidth() - 2 // indent
+	const (
+		minCellWidth = 12
+		maxCellWidth = 18
+		minBarWidth  = 6
+	)
+	if availableWidth < minCellWidth {
+		availableWidth = minCellWidth
 	}
 
-	// Calculate bar width based on available space
-	barWidth := 8
-	if m.width > 120 {
-		barWidth = 12
-	} else if m.width < 80 {
-		barWidth = 6
+	coresPerRow := availableWidth / minCellWidth
+	if coresPerRow < 1 {
+		coresPerRow = 1
+	}
+	if coresPerRow > numCores {
+		coresPerRow = numCores
 	}
 
-	// Render cores in rows
-	for i := 0; i < numCores; i++ {
-		if i%coresPerRow == 0 {
-			if i > 0 {
-				b.WriteString("\n")
+	slotWidth := availableWidth / coresPerRow
+	if slotWidth > maxCellWidth {
+		slotWidth = maxCellWidth
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	pctStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	rowStyle := lipgloss.NewStyle().PaddingLeft(2)
+
+	// Render cores in rows using fixed-width cells
+	for row := 0; row*coresPerRow < numCores; row++ {
+		start := row * coresPerRow
+		end := start + coresPerRow
+		if end > numCores {
+			end = numCores
+		}
+
+		var cells []string
+		for i := start; i < end; i++ {
+			coreUsage := m.CPUCoreUsages[i]
+			if coreUsage > 100 {
+				coreUsage = 100
 			}
-			b.WriteString("  ")
+			if coreUsage < 0 {
+				coreUsage = 0
+			}
+
+			label := labelStyle.Render(fmt.Sprintf("C%-2d", i))
+			pct := pctStyle.Render(fmt.Sprintf("%3.0f%%", coreUsage))
+			line1 := label + " " + pct
+
+			barWidth := slotWidth - 2
+			if barWidth < minBarWidth {
+				barWidth = minBarWidth
+			}
+			bar := m.renderCoreMiniBar(coreUsage, barWidth)
+			line2 := " " + bar
+
+			cell := lipgloss.NewStyle().Width(slotWidth).Height(2).Render(line1 + "\n" + line2)
+			cells = append(cells, cell)
 		}
 
-		coreUsage := m.CPUCoreUsages[i]
-		if coreUsage > 100 {
-			coreUsage = 100
+		rowLine := rowStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, cells...))
+		b.WriteString(rowLine)
+		if end < numCores {
+			b.WriteString("\n")
 		}
-		if coreUsage < 0 {
-			coreUsage = 0
-		}
-
-		// Core label
-		coreLabel := fmt.Sprintf("%2d", i)
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Muted).Width(3)
-		b.WriteString(labelStyle.Render(coreLabel))
-
-		// Mini bar for this core
-		b.WriteString(m.renderCoreMiniBar(coreUsage, barWidth))
-
-		// Percentage value
-		pctStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(5)
-		b.WriteString(pctStyle.Render(fmt.Sprintf("%3.0f%%", coreUsage)))
-
-		// Spacing between cores
-		b.WriteString("  ")
 	}
 
 	// Overall CPU summary
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	totalStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	avgUsage := 0.0
@@ -1781,6 +1740,7 @@ func (m Model) renderCoreMiniBar(usage float64, width int) string {
 
 func (m Model) renderLogSection() string {
 	var b strings.Builder
+	contentWidth := m.logViewport.Width
 
 	// Copy mode banner
 	if m.copyMode {
@@ -1790,32 +1750,7 @@ func (m Model) renderLogSection() string {
 			Background(styles.Accent).
 			Padding(0, 2).
 			Render("Copy mode: Select text with mouse, then Cmd+C. Press M or Esc to exit.")
-		b.WriteString(copyBanner + "\n")
-	}
-
-	// Search mode input
-	if m.searchMode || m.searchQuery != "" {
-		searchIcon := lipgloss.NewStyle().Foreground(styles.Accent).Render("> ")
-		inputStyle := lipgloss.NewStyle().
-			Foreground(styles.Text).
-			Bold(true).
-			Padding(0, 1)
-
-		query := m.searchQuery
-		if m.searchMode {
-			query += "▎" // Cursor indicator
-		}
-
-		searchInput := searchIcon + inputStyle.Render(query)
-
-		// Show match count if we have results
-		if m.searchQuery != "" {
-			matchInfo := lipgloss.NewStyle().Foreground(styles.Muted).Render(
-				fmt.Sprintf("  %d matches", m.searchMatches))
-			searchInput += matchInfo
-		}
-
-		b.WriteString(searchInput + "\n")
+		b.WriteString(lipgloss.NewStyle().Width(contentWidth).Render(copyBanner) + "\n")
 	}
 
 	logHeader := styles.SectionTitleStyle.Render("Log")
@@ -1833,7 +1768,7 @@ func (m Model) renderLogSection() string {
 		logHeader += indicator
 	}
 
-	b.WriteString(logHeader + "\n")
+	b.WriteString(lipgloss.NewStyle().Width(contentWidth).Render(logHeader) + "\n")
 	b.WriteString(m.logViewport.View())
 
 	return b.String()
@@ -1902,7 +1837,7 @@ func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 			if progress < 0.5 {
 				leadPulse = "█"
 			}
-			fillBlock = fillStyle.Render(strings.Repeat("█", filled-1)+leadPulse)
+			fillBlock = fillStyle.Render(strings.Repeat("█", filled-1) + leadPulse)
 		} else {
 			fillBlock = fillStyle.Render(strings.Repeat("█", filled))
 		}
@@ -1959,14 +1894,7 @@ func (m Model) getDuration() time.Duration {
 func (m Model) renderFooter() string {
 	var hints []string
 
-	// Special footer for search mode
-	if m.searchMode {
-		hints = []string{
-			styles.RenderKeyHint("Esc", "Cancel Search"),
-			styles.RenderKeyHint("Enter", "Apply Filter"),
-			lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render("Type to search..."),
-		}
-	} else if m.copyMode {
+	if m.copyMode {
 		// Footer for copy mode
 		hints = []string{
 			styles.RenderKeyHint("M/Esc", "Exit Copy Mode"),
@@ -1977,19 +1905,16 @@ func (m Model) renderFooter() string {
 		hints = []string{
 			styles.RenderKeyHint("Enter", "Return to Menu"),
 			styles.RenderKeyHint("C", "Copy Log"),
-			styles.RenderKeyHint("/", "Search"),
-			styles.RenderKeyHint("D/I/W/E", "Filter Logs"),
-			styles.RenderKeyHint("S", "Subj Filter"),
+			styles.RenderKeyHint("O", "Open Results"),
 			styles.RenderKeyHint("R", "Retry"),
 		}
 	} else {
 		hints = []string{
 			styles.RenderKeyHint("Ctrl+C", "Cancel"),
-			styles.RenderKeyHint("/", "Search"),
-			styles.RenderKeyHint("D/I/W/E", "Filter Logs"),
-			styles.RenderKeyHint("S", "Subj Filter"),
+			styles.RenderKeyHint("C", "Copy Log"),
 			styles.RenderKeyHint("M", "Copy Mode"),
-			styles.RenderKeyHint("J/K", "Scroll"),
+			styles.RenderKeyHint("↑/↓", "Scroll"),
+			styles.RenderKeyHint("G/Shift+G", "Top/Bottom"),
 		}
 	}
 
@@ -2359,6 +2284,77 @@ func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 	m.updateViewportSize()
+}
+
+func (m *Model) updateLayout() {
+	const (
+		minTwoColWidth  = 120
+		minTwoColHeight = 28
+		minSidebarWidth = 44
+	)
+
+	useTwo := m.width >= minTwoColWidth && m.height >= minTwoColHeight
+	if !useTwo {
+		m.useTwoCol = false
+		m.leftWidth = m.width
+		m.rightWidth = 0
+		return
+	}
+
+	gap := m.columnGap
+	if gap <= 0 {
+		gap = 2
+	}
+
+	minLogWidth := styles.MinLogWidth + 8
+
+	available := m.width - gap
+	right := int(float64(available) * 0.38)
+	if right < minSidebarWidth {
+		right = minSidebarWidth
+	}
+	if right > available-minLogWidth {
+		right = available - minLogWidth
+	}
+	left := available - right
+	if left < minLogWidth || right < minSidebarWidth {
+		m.useTwoCol = false
+		m.leftWidth = m.width
+		m.rightWidth = 0
+		return
+	}
+
+	m.useTwoCol = true
+	m.leftWidth = left
+	m.rightWidth = right
+}
+
+func (m Model) contentWidth() int {
+	if m.useTwoCol {
+		return m.rightWidth
+	}
+	return m.width
+}
+
+func (m Model) panelWidth() int {
+	base := m.contentWidth()
+	if m.useTwoCol {
+		base -= 4
+	} else {
+		base -= 10
+	}
+	if base < 30 {
+		base = 30
+	}
+	return base
+}
+
+func (m Model) renderSidebarCard(content string) string {
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Secondary).
+		Padding(1, 3)
+	return cardStyle.Width(m.panelWidth()).Render(content)
 }
 
 func (m Model) copyLogToClipboard() tea.Cmd {

@@ -85,6 +85,12 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
+    parser.add_argument(
+        "--analysis-scope",
+        choices=["subject", "group"],
+        default="subject",
+        help="Compute plots per subject (default) or as a group aggregate (limited support)",
+    )
 
     parser.add_argument(
         "--plots",
@@ -1720,6 +1726,8 @@ def _render_plots_without_per_plot_config(
 def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the plotting command."""
     if args.mode == "tfr":
+        if getattr(args, "analysis_scope", "subject") == "group":
+            raise ValueError("Group analysis scope is not supported for mode='tfr'.")
         return _run_tfr_mode(args, subjects, config)
 
     if getattr(args, "bids_root", None):
@@ -1740,6 +1748,20 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
 
     task = resolve_task(args.task, config)
     progress = create_progress_reporter(args)
+
+    if getattr(args, "analysis_scope", "subject") == "group":
+        progress.start("plotting_group", subjects)
+        _run_group_plotting(
+            args=args,
+            subjects=subjects,
+            task=task,
+            config=config,
+            plot_ids=plot_ids,
+            plot_item_configs=plot_item_configs,
+            progress=progress,
+        )
+        progress.complete(success=True)
+        return
 
     if plot_item_configs:
         progress.start("plotting", subjects)
@@ -1789,6 +1811,57 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         progress=progress,
     )
     progress.complete(success=True)
+
+
+def _run_group_plotting(
+    *,
+    args: argparse.Namespace,
+    subjects: List[str],
+    task: str,
+    config: Any,
+    plot_ids: List[str],
+    plot_item_configs: Dict[str, Dict[str, List[str]]],
+    progress: Any,
+) -> None:
+    """Run group-level plotting for selected plot IDs.
+
+    Group mode is intentionally limited: it only supports a subset of plots
+    that have a well-defined across-subject aggregation.
+    """
+    import logging
+
+    from eeg_pipeline.plotting.orchestration.features import (
+        visualize_band_power_topomaps_for_group,
+    )
+
+    logger = logging.getLogger(__name__)
+    supported = {"band_power_topomaps"}
+
+    total = len(plot_ids)
+    for idx, plot_id in enumerate(plot_ids, start=1):
+        definition = PLOT_BY_ID.get(plot_id)
+        label = (definition.label if definition else "") or plot_id
+        progress.step(f"Rendering {label} (group)", current=idx, total=total)
+
+        if plot_id not in supported:
+            logger.warning(
+                "Group plotting currently supports only %s; skipping %s",
+                ", ".join(sorted(supported)),
+                plot_id,
+            )
+            continue
+
+        plot_config = ConfigDict(copy.deepcopy(dict(config)))
+        overrides = plot_item_configs.get(plot_id, {})
+        if overrides:
+            _apply_plot_item_overrides(plot_config, overrides)
+
+        visualize_band_power_topomaps_for_group(
+            subjects=subjects,
+            task=task,
+            config=plot_config,
+            logger=logger,
+        )
 
 
 def _update_tfr_config(

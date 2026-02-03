@@ -12,6 +12,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import pandas as pd
+import numpy as np
+
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.infra.paths import (
@@ -31,6 +34,7 @@ from eeg_pipeline.plotting.features.context import (
     VisualizationManager,
     VisualizationRegistry,
 )
+from eeg_pipeline.domain.features.naming import NamingSchema
 
 
 # Known feature types for manifest generation
@@ -410,6 +414,82 @@ def _save_plot_manifest(
     logger.info(f"Saved plot manifest ({len(plot_files)} plots)")
 
 
+def _load_features_power_df(
+    *,
+    features_dir: Path,
+    read_table: Any,
+    logger: logging.Logger,
+) -> Optional[pd.DataFrame]:
+    """Load the per-subject power feature table(s) with deterministic logic."""
+    if not features_dir.exists():
+        return None
+
+    search_dirs = [features_dir / "power", features_dir]
+    search_dirs = [d for d in search_dirs if d.is_dir()]
+    if not search_dirs:
+        return None
+
+    exts = [".parquet", ".tsv"]
+
+    suffix_paths: List[Path] = []
+    for d in search_dirs:
+        for ext in exts:
+            suffix_paths.extend(sorted(d.glob(f"features_power_*{ext}")))
+    suffix_paths = [p for p in suffix_paths if p.stem != "features_power"]
+
+    paths: List[Path] = []
+    if suffix_paths:
+        seen: Set[Path] = set()
+        for p in suffix_paths:
+            if p not in seen:
+                seen.add(p)
+                paths.append(p)
+    else:
+        for d in search_dirs:
+            for ext in exts:
+                p = d / f"features_power{ext}"
+                if p.exists():
+                    paths = [p]
+                    break
+            if paths:
+                break
+
+    if not paths:
+        return None
+
+    frames: List[pd.DataFrame] = []
+    base_len: Optional[int] = None
+
+    for path in paths:
+        try:
+            df = read_table(path)
+        except Exception as exc:  # pragma: no cover - best-effort file read
+            logger.warning("Failed to read %s: %s", path, exc)
+            continue
+        if df is None or df.empty:
+            continue
+        df = df.reset_index(drop=True)
+        if base_len is None:
+            base_len = len(df)
+        elif len(df) != base_len:
+            logger.warning(
+                "Skipping %s (rows=%d) due to length mismatch (expected %d)",
+                path.name,
+                len(df),
+                base_len,
+            )
+            continue
+        frames.append(df)
+
+    if not frames:
+        return None
+
+    combined = pd.concat(frames, axis=1)
+    if combined.columns.duplicated().any():
+        combined = combined.loc[:, ~combined.columns.duplicated()]
+    return combined
+
+
 def _load_config_if_needed(config: Any) -> Any:
     """Load configuration if not provided.
     
@@ -598,7 +678,347 @@ def visualize_features_for_subjects(
     logger.info("Feature visualization complete")
 
 
+def visualize_band_power_topomaps_for_group(
+    *,
+    subjects: List[str],
+    task: Optional[str] = None,
+    deriv_root: Optional[Path] = None,
+    config: Any = None,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Compute group-aggregate band power topomaps.
+
+    Aggregation is equal-weight per subject: for each subject, compute a mean
+    feature vector across trials, then average those vectors across subjects.
+    Outputs are written under `sub-group/eeg/plots/features/power/`.
+    """
+    if not subjects:
+        raise ValueError("No subjects specified")
+
+    config = _load_config_if_needed(config)
+    setup_matplotlib(config)
+    task = _resolve_task(task, config)
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
+
+    if logger is None:
+        logger = get_logger(__name__)
+
+    from eeg_pipeline.infra.tsv import read_table
+    from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
+    from eeg_pipeline.plotting.features.power import (
+        plot_band_power_topomaps,
+        plot_band_power_topomaps_window_contrast,
+        plot_band_power_topomaps_group_condition_contrast,
+    )
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+
+    # Window(s) to plot must match NamingSchema "segment" tokens in features_power columns.
+    topomap_windows = get_config_value(config, "plotting.plots.features.power.topomap_windows", None)
+    if topomap_windows:
+        if isinstance(topomap_windows, str):
+            windows_list = [w.strip() for w in topomap_windows.split() if w.strip()]
+        elif isinstance(topomap_windows, list):
+            windows_list = [str(w).strip() for w in topomap_windows if str(w).strip()]
+        else:
+            windows_list = []
+    else:
+        windows_list = []
+
+    if not windows_list:
+        raise ValueError(
+            "band_power_topomaps requires plotting.plots.features.power.topomap_windows to be set."
+        )
+
+    bands = get_frequency_band_names(config)
+    if not bands:
+        raise ValueError("No frequency bands resolved for plotting.")
+
+    per_subject_means: List[pd.Series] = []
+    per_subject_cond1_means: List[pd.Series] = []
+    per_subject_cond2_means: List[pd.Series] = []
+    infos: List[Any] = []
+    cond_label1: Optional[str] = None
+    cond_label2: Optional[str] = None
+
+    for subject in subjects:
+        features_dir = deriv_features_path(effective_deriv_root, subject)
+        power_df = _load_features_power_df(features_dir=features_dir, read_table=read_table, logger=logger)
+        if power_df is None or power_df.empty:
+            logger.warning("Group topomaps: missing power features for sub-%s; skipping", subject)
+            continue
+
+        epochs, events_df = load_epochs_for_analysis(
+            subject=subject,
+            task=task,
+            align="strict",
+            preload=False,
+            deriv_root=effective_deriv_root,
+            config=config,
+            logger=logger,
+        )
+        if epochs is None:
+            logger.warning("Group topomaps: missing epochs for sub-%s; skipping", subject)
+            continue
+
+        subject_mean = power_df.mean(numeric_only=True)
+        if subject_mean.empty:
+            logger.warning("Group topomaps: no numeric power columns for sub-%s; skipping", subject)
+            continue
+
+        per_subject_means.append(subject_mean)
+        infos.append(epochs.info)
+
+        # Optional: group-level condition comparison (paired across subjects).
+        # We compute per-subject means within each condition and then run paired tests
+        # across subjects for the contrast maps.
+        compare_columns = bool(get_config_value(config, "plotting.comparisons.compare_columns", False))
+        if compare_columns:
+            if events_df is None or events_df.empty:
+                logger.warning(
+                    "Group topomaps: compare_columns requested but events_df is missing for sub-%s; skipping condition comparison for this subject",
+                    subject,
+                )
+            elif len(events_df) != len(power_df):
+                logger.warning(
+                    "Group topomaps: compare_columns requested but length mismatch for sub-%s (events=%d, power=%d); skipping condition comparison for this subject",
+                    subject,
+                    len(events_df),
+                    len(power_df),
+                )
+            else:
+                comp = extract_comparison_mask(events_df, config, require_enabled=False)
+                if comp is None:
+                    logger.warning(
+                        "Group topomaps: compare_columns requested but could not resolve comparison masks for sub-%s; skipping condition comparison for this subject",
+                        subject,
+                    )
+                else:
+                    mask1, mask2, label1, label2 = comp
+                    if cond_label1 is None:
+                        cond_label1 = label1
+                        cond_label2 = label2
+                    n = len(power_df)
+                    m1 = np.asarray(mask1[:n], dtype=bool)
+                    m2 = np.asarray(mask2[:n], dtype=bool)
+                    if int(m1.sum()) == 0 or int(m2.sum()) == 0:
+                        logger.warning(
+                            "Group topomaps: sub-%s has no trials for one or both conditions (%s=%d, %s=%d); skipping condition comparison for this subject",
+                            subject,
+                            label1,
+                            int(m1.sum()),
+                            label2,
+                            int(m2.sum()),
+                        )
+                    else:
+                        cond1_mean = power_df[m1].mean(numeric_only=True)
+                        cond2_mean = power_df[m2].mean(numeric_only=True)
+                        if cond1_mean.empty or cond2_mean.empty:
+                            logger.warning(
+                                "Group topomaps: sub-%s condition means empty; skipping condition comparison for this subject",
+                                subject,
+                            )
+                        else:
+                            per_subject_cond1_means.append(cond1_mean)
+                            per_subject_cond2_means.append(cond2_mean)
+
+    if len(per_subject_means) < 2:
+        raise ValueError("Group topomaps require at least 2 valid subjects with epochs and power features.")
+
+    # Choose a reference montage/channel set from the first valid subject.
+    # We intentionally do NOT require strict channel intersection across subjects,
+    # because that can drop otherwise-valid electrodes and change the topomap.
+    ref_info = infos[0]
+    allowed_channels: Set[str] = set(ref_info.ch_names)
+
+    union_cols: Set[str] = set()
+    channels_in_cols: Set[str] = set()
+    for mean_series in per_subject_means:
+        for col in mean_series.index:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "power":
+                continue
+            if parsed.get("scope") != "ch":
+                continue
+            if parsed.get("segment") not in windows_list:
+                continue
+            if parsed.get("band") not in bands:
+                continue
+            ch = parsed.get("identifier")
+            if ch not in allowed_channels:
+                continue
+            union_cols.add(str(col))
+            if ch:
+                channels_in_cols.add(str(ch))
+
+    if not union_cols:
+        raise ValueError("Group topomaps: no band×channel power features found across subjects.")
+
+    ordered_cols = sorted(union_cols)
+    group_df = pd.DataFrame([s.reindex(ordered_cols) for s in per_subject_means], columns=ordered_cols)
+
+    # Drop columns that are entirely missing across subjects.
+    all_nan_cols = [c for c in group_df.columns if group_df[c].isna().all()]
+    if all_nan_cols:
+        logger.warning(
+            "Group topomaps: dropping %d columns with no data across subjects.",
+            len(all_nan_cols),
+        )
+        group_df = group_df.drop(columns=all_nan_cols)
+
+    if group_df.empty or group_df.shape[1] == 0:
+        raise ValueError("Group topomaps: no usable columns remain after alignment.")
+
+    # Build a reference Info restricted to the channels that appear in the selected columns.
+    import mne
+
+    ordered_channels = [ch for ch in ref_info.ch_names if ch in channels_in_cols]
+    if not ordered_channels:
+        raise ValueError("Group topomaps: no channels available after alignment to reference montage.")
+    picks = mne.pick_channels(ref_info.ch_names, include=ordered_channels, ordered=True)
+    ref_info_common = mne.pick_info(ref_info, picks)
+
+    plots_dir = deriv_plots_path(effective_deriv_root, "group", subdir="features")
+    power_plots_dir = plots_dir / "power"
+    ensure_dir(power_plots_dir)
+
+    for window in windows_list:
+        plot_band_power_topomaps(
+            pow_df=group_df,
+            epochs_info=ref_info_common,
+            bands=bands,
+            subject="group",
+            save_dir=power_plots_dir,
+            logger=logger,
+            config=config,
+            segment=window,
+            events_df=None,
+            sample_unit="subjects",
+        )
+
+    # Group-level condition comparison (means per condition + paired contrast).
+    compare_columns = bool(get_config_value(config, "plotting.comparisons.compare_columns", False))
+    if (
+        compare_columns
+        and cond_label1 is not None
+        and cond_label2 is not None
+        and len(per_subject_cond1_means) >= 2
+        and len(per_subject_cond2_means) >= 2
+        and len(per_subject_cond1_means) == len(per_subject_cond2_means)
+    ):
+        # Reuse the same feature selection logic as the primary group plot, but based on the
+        # condition-specific per-subject summaries.
+        union_cols_cond: Set[str] = set()
+        channels_in_cols_cond: Set[str] = set()
+        for mean_series in list(per_subject_cond1_means) + list(per_subject_cond2_means):
+            for col in mean_series.index:
+                parsed = NamingSchema.parse(str(col))
+                if not parsed.get("valid"):
+                    continue
+                if parsed.get("group") != "power":
+                    continue
+                if parsed.get("scope") != "ch":
+                    continue
+                if parsed.get("segment") not in windows_list:
+                    continue
+                if parsed.get("band") not in bands:
+                    continue
+                ch = parsed.get("identifier")
+                if ch not in allowed_channels:
+                    continue
+                union_cols_cond.add(str(col))
+                if ch:
+                    channels_in_cols_cond.add(str(ch))
+
+        if union_cols_cond:
+            ordered_cols_cond = sorted(union_cols_cond)
+            cond1_df = pd.DataFrame(
+                [s.reindex(ordered_cols_cond) for s in per_subject_cond1_means],
+                columns=ordered_cols_cond,
+            )
+            cond2_df = pd.DataFrame(
+                [s.reindex(ordered_cols_cond) for s in per_subject_cond2_means],
+                columns=ordered_cols_cond,
+            )
+
+            # Drop columns that are entirely missing across both conditions.
+            combined = pd.concat([cond1_df, cond2_df], axis=0, ignore_index=True)
+            all_nan_cols = [c for c in ordered_cols_cond if c in combined.columns and combined[c].isna().all()]
+            if all_nan_cols:
+                cond1_df = cond1_df.drop(columns=all_nan_cols)
+                cond2_df = cond2_df.drop(columns=all_nan_cols)
+
+            for window in windows_list:
+                plot_band_power_topomaps(
+                    pow_df=cond1_df,
+                    epochs_info=ref_info_common,
+                    bands=bands,
+                    subject="group",
+                    save_dir=power_plots_dir,
+                    logger=logger,
+                    config=config,
+                    segment=window,
+                    events_df=None,
+                    sample_unit="subjects",
+                    label_suffix=cond_label1,
+                )
+                plot_band_power_topomaps(
+                    pow_df=cond2_df,
+                    epochs_info=ref_info_common,
+                    bands=bands,
+                    subject="group",
+                    save_dir=power_plots_dir,
+                    logger=logger,
+                    config=config,
+                    segment=window,
+                    events_df=None,
+                    sample_unit="subjects",
+                    label_suffix=cond_label2,
+                )
+                plot_band_power_topomaps_group_condition_contrast(
+                    pow_df_condition1=cond1_df,
+                    pow_df_condition2=cond2_df,
+                    epochs_info=ref_info_common,
+                    bands=bands,
+                    subject="group",
+                    save_dir=power_plots_dir,
+                    logger=logger,
+                    config=config,
+                    segment=window,
+                    label1=cond_label1,
+                    label2=cond_label2,
+                    sample_unit="subjects",
+                )
+        else:
+            logger.warning("Group topomaps: compare_columns requested but no usable condition columns were found.")
+    elif compare_columns:
+        logger.warning(
+            "Group topomaps: compare_columns requested but insufficient paired subjects were available (cond1=%d, cond2=%d).",
+            len(per_subject_cond1_means),
+            len(per_subject_cond2_means),
+        )
+
+    compare_windows = bool(get_config_value(config, "plotting.comparisons.compare_windows", True))
+    if compare_windows and len(windows_list) == 2:
+        window1, window2 = windows_list[0], windows_list[1]
+        plot_band_power_topomaps_window_contrast(
+            pow_df=group_df,
+            epochs_info=ref_info_common,
+            bands=bands,
+            subject="group",
+            save_dir=power_plots_dir,
+            logger=logger,
+            config=config,
+            window1=window1,
+            window2=window2,
+        )
+
+    _save_plot_manifest(plots_dir=plots_dir, subject="group", logger=logger)
+
+
 __all__ = [
     "visualize_features",
     "visualize_features_for_subjects",
+    "visualize_band_power_topomaps_for_group",
 ]

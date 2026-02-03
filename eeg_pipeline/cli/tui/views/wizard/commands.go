@@ -258,6 +258,17 @@ func (m Model) SelectedPlotIDs() []string {
 	return result
 }
 
+func (m Model) plottingNeedsROIs() bool {
+	if m.Pipeline != types.PipelinePlotting {
+		return true
+	}
+	selected := m.SelectedPlotIDs()
+	if len(selected) == 1 && selected[0] == "band_power_topomaps" {
+		return false
+	}
+	return true
+}
+
 func (m Model) SelectedPlotFormats() []string {
 	var result []string
 	for _, format := range m.plotFormats {
@@ -461,6 +472,10 @@ func (m Model) BuildCommand() string {
 	}
 
 	if m.Pipeline == types.PipelinePlotting {
+		if m.plottingScope == PlottingScopeGroup {
+			parts = append(parts, "--analysis-scope", m.plottingScope.CLIValue())
+		}
+
 		// Always pass --plots to enable independent plot execution
 		selectedPlots := m.SelectedPlotIDs()
 		if len(selectedPlots) > 0 && len(selectedPlots) < len(m.plotItems) {
@@ -502,11 +517,13 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--no-shared-colorbar")
 		}
 
-		// Pass ROI definitions to plotting command
-		roiDefs := m.GetROIDefinitions()
-		if len(roiDefs) > 0 {
-			parts = append(parts, "--rois")
-			parts = append(parts, roiDefs...)
+		if m.plottingNeedsROIs() {
+			// Pass ROI definitions to plotting command
+			roiDefs := m.GetROIDefinitions()
+			if len(roiDefs) > 0 {
+				parts = append(parts, "--rois")
+				parts = append(parts, roiDefs...)
+			}
 		}
 
 		// Pass band selection and definitions to plotting command
@@ -931,9 +948,17 @@ func (m Model) buildPlotItemConfigArgs() []string {
 			args = append(args, "--plot-item-config", plotID, "comparison_rois")
 			args = append(args, splitSpaceList(cfg.ComparisonROIsSpec)...)
 		}
-		if strings.TrimSpace(cfg.TopomapWindowsSpec) != "" {
+		topomapSpec := strings.TrimSpace(cfg.TopomapWindowsSpec)
+		if topomapSpec == "" && plotID == "band_power_topomaps" {
+			if strings.TrimSpace(cfg.ComparisonWindowsSpec) != "" {
+				topomapSpec = strings.TrimSpace(cfg.ComparisonWindowsSpec)
+			} else if strings.TrimSpace(m.plotComparisonWindowsSpec) != "" {
+				topomapSpec = strings.TrimSpace(m.plotComparisonWindowsSpec)
+			}
+		}
+		if topomapSpec != "" {
 			args = append(args, "--plot-item-config", plotID, "topomap_windows")
-			args = append(args, splitSpaceList(cfg.TopomapWindowsSpec)...)
+			args = append(args, splitSpaceList(topomapSpec)...)
 		}
 		if strings.TrimSpace(cfg.TfrTopomapActiveWindow) != "" {
 			args = append(args, "--plot-item-config", plotID, "tfr_topomap_active_window", strings.TrimSpace(cfg.TfrTopomapActiveWindow))

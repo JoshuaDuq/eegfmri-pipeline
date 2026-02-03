@@ -1,6 +1,11 @@
 package wizard
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/eeg-pipeline/tui/types"
+)
 
 func containsString(items []string, want string) bool {
 	for _, it := range items {
@@ -18,6 +23,25 @@ func argValue(args []string, key string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func containsSubsequence(items []string, subseq []string) bool {
+	if len(subseq) == 0 {
+		return true
+	}
+	for i := 0; i <= len(items)-len(subseq); i++ {
+		match := true
+		for j := 0; j < len(subseq); j++ {
+			if items[i+j] != subseq[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildFmriAnalysisAdvancedArgs_DisabledCarpetAndTSNRAddsFlags(t *testing.T) {
@@ -215,5 +239,69 @@ func TestBuildMLAdvancedArgs_FmriSignatureTargetEmitsFlags(t *testing.T) {
 	}
 	if v, ok := argValue(args, "--fmri-signature-round-decimals"); !ok || v != "4" {
 		t.Fatalf("expected --fmri-signature-round-decimals 4, got: %#v", args)
+	}
+}
+
+func TestBuildCommand_PlottingGroupScopeAddsAnalysisScopeFlag(t *testing.T) {
+	m := Model{}
+	m.Pipeline = types.PipelinePlotting
+	m.modeOptions = []string{"visualize"}
+	m.modeIndex = 0
+	m.plottingScope = PlottingScopeGroup
+
+	cmd := m.BuildCommand()
+	if !strings.Contains(cmd, "--analysis-scope group") {
+		t.Fatalf("expected --analysis-scope group in command, got: %s", cmd)
+	}
+}
+
+func TestShouldSkipStep_PlottingRoiStepSkippedForBandPowerTopomapsOnly(t *testing.T) {
+	m := Model{}
+	m.Pipeline = types.PipelinePlotting
+	m.plotItems = []PlotItem{{ID: "band_power_topomaps", Group: "power"}}
+	m.plotSelected = map[int]bool{0: true}
+	m.selected = map[int]bool{}
+
+	if m.plottingNeedsROIs() {
+		t.Fatalf("expected plottingNeedsROIs=false for band_power_topomaps only")
+	}
+	if !m.shouldSkipStep(types.StepSelectROIs) {
+		t.Fatalf("expected StepSelectROIs to be skipped for band_power_topomaps only")
+	}
+}
+
+func TestBuildCommand_PlottingBandPowerTopomapsDoesNotEmitRois(t *testing.T) {
+	m := Model{}
+	m.Pipeline = types.PipelinePlotting
+	m.modeOptions = []string{"visualize"}
+	m.modeIndex = 0
+	m.plotItems = []PlotItem{{ID: "band_power_topomaps", Group: "power"}}
+	m.plotSelected = map[int]bool{0: true}
+	m.selected = map[int]bool{}
+
+	// Force ROI definitions to be non-default so we'd emit --rois if the pipeline needed ROIs.
+	m.rois = []ROIDefinition{{Key: "TestROI", Name: "TestROI", Channels: "Fp1,Fp2"}}
+	m.roiSelected = map[int]bool{0: true}
+
+	cmd := m.BuildCommand()
+	if strings.Contains(cmd, "--rois") {
+		t.Fatalf("did not expect --rois in command, got: %s", cmd)
+	}
+}
+
+func TestBuildPlotItemConfigArgs_BandPowerTopomapsFallsBackToComparisonWindows(t *testing.T) {
+	m := Model{}
+	m.plotItems = []PlotItem{{ID: "band_power_topomaps", Group: "power"}}
+	m.plotSelected = map[int]bool{0: true}
+	m.plotItemConfigs = map[string]PlotItemConfig{
+		"band_power_topomaps": {
+			ComparisonWindowsSpec: "baseline plateau",
+		},
+	}
+
+	args := m.buildPlotItemConfigArgs()
+	want := []string{"--plot-item-config", "band_power_topomaps", "topomap_windows", "baseline", "plateau"}
+	if !containsSubsequence(args, want) {
+		t.Fatalf("expected topomap_windows to default to comparison windows; args=%#v", args)
 	}
 }

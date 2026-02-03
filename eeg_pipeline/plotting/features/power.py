@@ -18,6 +18,7 @@ from mne.viz import plot_topomap
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
+from eeg_pipeline.plotting.io.figures import get_viz_params
 from eeg_pipeline.utils.data.columns import (
     find_temperature_column_in_events,
 )
@@ -33,6 +34,7 @@ from eeg_pipeline.utils.analysis.tfr import (
 )
 from eeg_pipeline.utils.config.loader import get_frequency_bands, require_config_value
 from scipy.stats import mannwhitneyu
+from scipy.stats import wilcoxon
 
 
 ###################################################################
@@ -1570,6 +1572,9 @@ def plot_band_power_topomaps(
     config: Any,
     segment: str,
     events_df: Optional[pd.DataFrame] = None,
+    *,
+    sample_unit: str = "trials",
+    label_suffix: Optional[str] = None,
 ) -> None:
     """Band power topomaps showing spatial distribution per frequency band, one plot per ROI.
     
@@ -1579,6 +1584,8 @@ def plot_band_power_topomaps(
     Args:
         segment: Time window segment name (required, no fallback).
         events_df: Optional events DataFrame for condition-based filtering.
+        label_suffix: Optional label to append to the title/filename when not using
+            condition-based filtering (e.g., group mean for a specific condition).
     """
     if pow_df is None or epochs_info is None:
         return
@@ -1592,12 +1599,7 @@ def plot_band_power_topomaps(
     from eeg_pipeline.utils.config.loader import get_config_value
     from eeg_pipeline.utils.formatting import sanitize_label
 
-    rois = get_roi_definitions(config)
     all_channels = epochs_info.ch_names
-    roi_names = _get_comparison_rois(config, rois)
-    
-    if logger:
-        logger.info(f"Topomap plotting: ROIs={roi_names}")
 
     compare_columns = bool(get_config_value(config, "plotting.comparisons.compare_columns", True))
     comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
@@ -1626,28 +1628,21 @@ def plot_band_power_topomaps(
         mask1, mask2, label1, label2 = comp_mask_info
         conditions = [(label1, mask1), (label2, mask2)]
     
-    plot_cfg = get_plot_config(config)
-    
-    for roi_name in roi_names:
-        if roi_name == "all":
-            roi_channels = all_channels
-        else:
-            roi_channels = get_roi_channels(rois[roi_name], all_channels)
-        
-        if not roi_channels:
-            if logger:
-                logger.warning(f"No channels found for ROI {roi_name}, skipping topomap plot")
-            continue
-        
-        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
-        roi_suffix = f"_roi-{roi_safe}" if roi_safe else ""
-        
-        epochs_info_roi = mne.pick_info(epochs_info, mne.pick_channels(epochs_info.ch_names, include=roi_channels, ordered=True))
-        
-        _plot_band_power_topomaps_for_roi(
-            pow_df, epochs_info_roi, bands, subject, save_dir, logger, config,
-            segment, conditions, compare_columns, roi_name, roi_suffix, events_df
-        )
+    _plot_band_power_topomaps_for_roi(
+        pow_df,
+        epochs_info,
+        bands,
+        subject,
+        save_dir,
+        logger,
+        config,
+        segment,
+        conditions,
+        compare_columns,
+        events_df,
+        sample_unit,
+        label_suffix,
+    )
 
 
 def _plot_band_power_topomaps_for_roi(
@@ -1661,11 +1656,11 @@ def _plot_band_power_topomaps_for_roi(
     segment: str,
     conditions: Optional[List[Tuple[str, np.ndarray]]],
     compare_columns: bool,
-    roi_name: str,
-    roi_suffix: str,
     events_df: Optional[pd.DataFrame],
+    sample_unit: str,
+    label_suffix: Optional[str] = None,
 ) -> None:
-    """Internal helper to plot topomaps for a single ROI."""
+    """Internal helper to plot topomaps."""
     plot_cfg = get_plot_config(config)
     
     def extract_band_data(power_subset: pd.DataFrame) -> Tuple[List[str], Dict[str, Dict[str, float]], set]:
@@ -1772,7 +1767,7 @@ def _plot_band_power_topomaps_for_roi(
         condition_pow_df: pd.DataFrame,
         condition_label: Optional[str],
         condition_color: Optional[str],
-        n_trials: int,
+        n_samples: int,
         unit: str,
         value: str,
     ) -> None:
@@ -1794,8 +1789,14 @@ def _plot_band_power_topomaps_for_roi(
             
             for ch_idx, ch_name in enumerate(epochs_info.ch_names):
                 if ch_name in ch_power:
-                    data_array[ch_idx] = ch_power[ch_name]
-                    mask[ch_idx] = True
+                    val = ch_power[ch_name]
+                    try:
+                        is_finite = np.isfinite(val)
+                    except TypeError:
+                        is_finite = False
+                    if is_finite:
+                        data_array[ch_idx] = float(val)
+                        mask[ch_idx] = True
             
             if mask.sum() > MIN_CHANNELS_FOR_TOPO:
                 valid_data = data_array[mask]
@@ -1810,22 +1811,23 @@ def _plot_band_power_topomaps_for_roi(
             band_color = get_band_color(band, config)
             ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
         
-        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
-        title_text = f"Band Power Topomaps - {segment.capitalize()} (sub-{subject}) | ROI: {roi_display}"
-        if condition_label:
-            title_text += f" | {condition_label}"
+        title_text = f"Band Power Topomaps - {segment.capitalize()} (sub-{subject})"
+        effective_label = condition_label or (str(label_suffix).strip() if label_suffix is not None else "")
+        if effective_label:
+            title_text += f" | {effective_label}"
         fig.suptitle(title_text, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
         
-        footer = f"n={n_trials} trials | Segment: {segment} | Values: {value}"
+        unit_label = str(sample_unit).strip() or "trials"
+        footer = f"n={n_samples} {unit_label} | Segment: {segment} | Values: {value}"
         fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
         
         plt.tight_layout(rect=[0, 0.03, 1, 0.98])
         
-        if condition_label:
-            condition_safe = sanitize_label(condition_label).lower().replace(" ", "_")
-            filename = f"sub-{subject}_band_power_topomaps_{segment}_{condition_safe}{roi_suffix}"
+        if effective_label:
+            condition_safe = sanitize_label(effective_label).lower().replace(" ", "_")
+            filename = f"sub-{subject}_band_power_topomaps_{segment}_{condition_safe}"
         else:
-            filename = f"sub-{subject}_band_power_topomaps_{segment}{roi_suffix}"
+            filename = f"sub-{subject}_band_power_topomaps_{segment}"
         
         save_fig(fig, save_dir / filename,
                  formats=plot_cfg.formats, dpi=plot_cfg.dpi,
@@ -1962,8 +1964,7 @@ def _plot_band_power_topomaps_for_roi(
 
         label1 = str(conditions[0][0])
         label2 = str(conditions[1][0])
-        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
-        title = f"Band Power Contrast - {segment.capitalize()} (sub-{subject}) | ROI: {roi_display} | {label2} − {label1}"
+        title = f"Band Power Contrast - {segment.capitalize()} (sub-{subject}) | {label2} − {label1}"
         fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
         fig.text(
             0.5,
@@ -1978,7 +1979,7 @@ def _plot_band_power_topomaps_for_roi(
 
         label1_safe = sanitize_label(str(conditions[0][0])).lower().replace(" ", "_")
         label2_safe = sanitize_label(str(conditions[1][0])).lower().replace(" ", "_")
-        out = save_dir / f"sub-{subject}_band_power_topomaps_{segment}_contrast_{label2_safe}_minus_{label1_safe}{roi_suffix}"
+        out = save_dir / f"sub-{subject}_band_power_topomaps_{segment}_contrast_{label2_safe}_minus_{label1_safe}"
         save_fig(
             fig,
             out,
@@ -2016,7 +2017,11 @@ def _plot_band_power_topomaps_for_roi(
     else:
         save_topomap_plot(pow_df, None, None, len(pow_df), unit_label, value_label)
         if logger:
-            logger.info(f"Saved band power topomaps ({segment})")
+            label_for_log = str(label_suffix).strip() if label_suffix is not None else ""
+            if label_for_log:
+                logger.info(f"Saved band power topomaps ({segment}) | {label_for_log}")
+            else:
+                logger.info(f"Saved band power topomaps ({segment})")
 
 
 def plot_band_power_topomaps_window_contrast(
@@ -2174,6 +2179,203 @@ def plot_band_power_topomaps_window_contrast(
     save_fig(
         fig,
         save_dir / f"sub-{subject}_band_power_topomaps_contrast_{window2}_minus_{window1}",
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        config=config,
+    )
+    plt.close(fig)
+
+
+def plot_band_power_topomaps_group_condition_contrast(
+    *,
+    pow_df_condition1: pd.DataFrame,
+    pow_df_condition2: pd.DataFrame,
+    epochs_info: mne.Info,
+    bands: List[str],
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    segment: str,
+    label1: str,
+    label2: str,
+    sample_unit: str = "subjects",
+) -> None:
+    """Paired condition contrast topomaps (label2 − label1) across samples (typically subjects).
+
+    This is intended for group-level plotting, where each row in pow_df_condition*
+    represents a subject-level summary (e.g., mean across trials within a condition).
+
+    Statistical testing:
+    - Paired Wilcoxon signed-rank test per band×channel.
+    - Global FDR correction across all band×channel tests within this (segment) contrast.
+    - If fewer than MIN_TRIALS_FOR_STATISTICS paired samples exist for a given test,
+      p-values default to 1.0 and no significance markers will be shown.
+    """
+    if pow_df_condition1 is None or pow_df_condition2 is None:
+        return
+    if pow_df_condition1.empty or pow_df_condition2.empty or epochs_info is None:
+        return
+
+    if not segment or segment.strip() == "":
+        if logger:
+            logger.error(
+                "plot_band_power_topomaps_group_condition_contrast requires segment parameter. No fallback will be used."
+            )
+        return
+
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_fdr_alpha
+    from eeg_pipeline.utils.formatting import sanitize_label
+
+    plot_cfg = get_plot_config(config)
+    viz_params = get_viz_params(config)
+    alpha = float(get_fdr_alpha(config))
+
+    def _band_channel_columns(df: pd.DataFrame, segment_name: str) -> Dict[str, Dict[str, str]]:
+        mapping: Dict[str, Dict[str, str]] = {str(b): {} for b in bands}
+        for c in df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "power":
+                continue
+            if parsed.get("segment") != segment_name:
+                continue
+            if parsed.get("scope") != "ch":
+                continue
+            band = str(parsed.get("band") or "")
+            ch = str(parsed.get("identifier") or "")
+            if band in mapping and ch:
+                mapping[band][ch] = str(c)
+        return mapping
+
+    cols1 = _band_channel_columns(pow_df_condition1, segment)
+    cols2 = _band_channel_columns(pow_df_condition2, segment)
+
+    tests: List[Tuple[str, str, float]] = []  # (band, ch, p)
+    diff_map: Dict[Tuple[str, str], float] = {}
+
+    for band in [str(b) for b in bands]:
+        ch_to_col1 = cols1.get(band, {})
+        ch_to_col2 = cols2.get(band, {})
+        for ch_name in epochs_info.ch_names:
+            col1 = ch_to_col1.get(ch_name)
+            col2 = ch_to_col2.get(ch_name)
+            if not col1 or not col2:
+                continue
+
+            s1 = pd.to_numeric(pow_df_condition1[col1], errors="coerce")
+            s2 = pd.to_numeric(pow_df_condition2[col2], errors="coerce")
+            valid = s1.notna() & s2.notna()
+            diffs = (s2[valid] - s1[valid]).values
+
+            mean_diff = float(np.nanmean(diffs)) if diffs.size else np.nan
+            diff_map[(band, ch_name)] = mean_diff
+
+            if int(valid.sum()) < MIN_TRIALS_FOR_STATISTICS:
+                p = 1.0
+            else:
+                # Wilcoxon cannot run on all-zero diffs.
+                if diffs.size == 0 or not np.isfinite(diffs).any() or np.allclose(diffs, 0):
+                    p = 1.0
+                else:
+                    try:
+                        p = float(wilcoxon(diffs, zero_method="wilcox", alternative="two-sided").pvalue)
+                    except Exception:
+                        p = 1.0
+            tests.append((band, ch_name, p))
+
+    if not tests:
+        return
+
+    rejected, qvals, _ = apply_fdr_correction([p for _, _, p in tests], config=config)
+    q_map: Dict[Tuple[str, str], float] = {}
+    sig_map: Dict[Tuple[str, str], bool] = {}
+    for (band, ch, _), q, rej in zip(tests, qvals, rejected):
+        q_map[(band, ch)] = float(q)
+        sig_map[(band, ch)] = bool(rej) and float(q) < alpha
+
+    width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
+    fig, axes = plt.subplots(1, len(bands), figsize=(width_per_band * len(bands), 4))
+    if len(bands) == 1:
+        axes = [axes]
+
+    total_sig = 0
+    total_tests = 0
+
+    for i, band in enumerate([str(b) for b in bands]):
+        ax = axes[i]
+        data_array = np.full(len(epochs_info.ch_names), np.nan, dtype=float)
+        sig_mask_full = np.zeros(len(epochs_info.ch_names), dtype=bool)
+
+        for ch_idx, ch_name in enumerate(epochs_info.ch_names):
+            key = (band, ch_name)
+            if key not in diff_map:
+                continue
+            data_array[ch_idx] = float(diff_map[key])
+            if sig_map.get(key, False):
+                sig_mask_full[ch_idx] = True
+
+        present = np.isfinite(data_array)
+        if present.sum() <= MIN_CHANNELS_FOR_TOPO:
+            ax.set_axis_off()
+            continue
+
+        valid_data = data_array[present]
+        valid_info = mne.pick_info(epochs_info, np.where(present)[0])
+        valid_sig = sig_mask_full[present]
+
+        vmax = float(np.nanmax(np.abs(valid_data))) if np.isfinite(valid_data).any() else 1.0
+        vmin = -vmax
+
+        im, _ = plot_topomap(
+            valid_data,
+            valid_info,
+            axes=ax,
+            show=False,
+            cmap="RdBu_r",
+            contours=6,
+            vlim=(vmin, vmax),
+            mask=valid_sig,
+            mask_params=viz_params.get("sig_mask_params"),
+        )
+        plt.colorbar(im, ax=ax, shrink=0.6, label="Δ power")
+
+        band_color = get_band_color(band, config)
+        ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
+
+        for ch_name in epochs_info.ch_names:
+            key = (band, ch_name)
+            if key in q_map:
+                total_tests += 1
+                if sig_map.get(key, False):
+                    total_sig += 1
+
+    fig.suptitle(
+        f"Band Power Contrast - {segment.capitalize()} (sub-{subject}) | {label2} − {label1}",
+        fontsize=plot_cfg.font.figure_title,
+        fontweight="bold",
+        y=1.02,
+    )
+    fig.text(
+        0.5,
+        0.01,
+        f"n={len(pow_df_condition1)} {sample_unit} | FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests,1)}",
+        ha="center",
+        va="bottom",
+        fontsize=plot_cfg.font.small,
+        color="gray",
+    )
+    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+
+    label1_safe = sanitize_label(str(label1)).lower().replace(" ", "_")
+    label2_safe = sanitize_label(str(label2)).lower().replace(" ", "_")
+    out = save_dir / f"sub-{subject}_band_power_topomaps_{segment}_contrast_{label2_safe}_minus_{label1_safe}"
+    save_fig(
+        fig,
+        out,
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,

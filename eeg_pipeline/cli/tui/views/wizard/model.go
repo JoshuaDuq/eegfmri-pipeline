@@ -232,6 +232,22 @@ func (s MLCVScope) CLIValue() string {
 	}
 }
 
+type PlottingScope int
+
+const (
+	PlottingScopeSubject PlottingScope = iota
+	PlottingScopeGroup
+)
+
+func (s PlottingScope) CLIValue() string {
+	switch s {
+	case PlottingScopeGroup:
+		return "group"
+	default:
+		return "subject"
+	}
+}
+
 type MLFeatureHarmonization int
 
 const (
@@ -917,6 +933,7 @@ type Model struct {
 	featurePlotterError    string
 
 	// Plotting output configuration
+	plottingScope       PlottingScope
 	plotFormats         []string
 	plotFormatSelected  map[string]bool
 	plotDpiOptions      []int
@@ -2643,6 +2660,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		icaLabelsToKeep:        "brain,other",
 		plotSelected:           make(map[int]bool),
 		featurePlotterSelected: make(map[string]bool),
+		plottingScope:          PlottingScopeSubject,
 		plotFormats:            []string{"png", "svg", "pdf"},
 		plotFormatSelected: map[string]bool{
 			"png": true,
@@ -3618,7 +3636,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.helpOverlay.Width = min(50, m.width-10)
+		maxOverlayWidth := m.width - 4
+		if maxOverlayWidth < 1 {
+			maxOverlayWidth = 1
+		}
+		m.helpOverlay.Width = min(50, maxOverlayWidth)
 	}
 
 	// Always update plot offset if in that step to ensure it's in sync
