@@ -313,6 +313,7 @@ const (
 	MLClassificationSVM
 	MLClassificationLR
 	MLClassificationRF
+	MLClassificationCNN
 )
 
 func (c MLClassificationModel) CLIValue() string {
@@ -323,6 +324,8 @@ func (c MLClassificationModel) CLIValue() string {
 		return "lr"
 	case MLClassificationRF:
 		return "rf"
+	case MLClassificationCNN:
+		return "cnn"
 	default:
 		return ""
 	}
@@ -337,7 +340,7 @@ func (c MLClassificationModel) Display() string {
 }
 
 func (c MLClassificationModel) Next() MLClassificationModel {
-	return MLClassificationModel((int(c) + 1) % 4)
+	return MLClassificationModel((int(c) + 1) % 5)
 }
 
 // Feature file selection for behavior pipeline
@@ -562,13 +565,13 @@ const (
 	textFieldFmriAnalysisFormula
 	textFieldFmriAnalysisEventsToModel
 	textFieldFmriAnalysisStimPhasesToModel
-		textFieldFmriAnalysisOutputDir
-		textFieldFmriAnalysisFreesurferDir
-		textFieldFmriAnalysisSignatureDir
-		textFieldFmriTrialSigGroupColumn
-		textFieldFmriTrialSigGroupValues
-		textFieldFmriTrialSigScopeStimPhases
-		textFieldRawMontage
+	textFieldFmriAnalysisOutputDir
+	textFieldFmriAnalysisFreesurferDir
+	textFieldFmriAnalysisSignatureDir
+	textFieldFmriTrialSigGroupColumn
+	textFieldFmriTrialSigGroupValues
+	textFieldFmriTrialSigScopeStimPhases
+	textFieldRawMontage
 	textFieldPrepMontage
 	textFieldPrepChTypes
 	textFieldPrepEegReference
@@ -1063,14 +1066,14 @@ type Model struct {
 	fmriTrialSigFixedEffectsWeighting   int // 0: variance, 1: mean
 	fmriTrialSigWriteTrialBetas         bool
 	fmriTrialSigWriteTrialVariances     bool
-		fmriTrialSigWriteConditionBetas     bool
-		fmriTrialSigSignatureNPS            bool
-		fmriTrialSigSignatureSIIPS1         bool
-		fmriTrialSigLssOtherRegressorsIndex int // 0: per-condition, 1: all
-		// Signature grouping (compute signatures for specific values within an events column)
-		fmriTrialSigGroupColumn     string // e.g., temperature
-		fmriTrialSigGroupValuesSpec string // space-separated values (e.g., "44.3 45.3 46.3")
-		fmriTrialSigGroupScopeIndex int    // 0: across-runs (average), 1: per-run
+	fmriTrialSigWriteConditionBetas     bool
+	fmriTrialSigSignatureNPS            bool
+	fmriTrialSigSignatureSIIPS1         bool
+	fmriTrialSigLssOtherRegressorsIndex int // 0: per-condition, 1: all
+	// Signature grouping (compute signatures for specific values within an events column)
+	fmriTrialSigGroupColumn     string // e.g., temperature
+	fmriTrialSigGroupValuesSpec string // space-separated values (e.g., "44.3 45.3 46.3")
+	fmriTrialSigGroupScopeIndex int    // 0: across-runs (average), 1: per-run
 	fmriTrialSigScopeStimPhases string // "": auto (plateau if present), "all", or specific phase(s)
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
@@ -3058,13 +3061,13 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriTrialSigWriteTrialBetas = false
 		m.fmriTrialSigWriteTrialVariances = false
 		m.fmriTrialSigWriteConditionBetas = true
-			m.fmriTrialSigSignatureNPS = true
-			m.fmriTrialSigSignatureSIIPS1 = true
-			m.fmriTrialSigLssOtherRegressorsIndex = 0 // per-condition
-			m.fmriTrialSigGroupColumn = ""
-			m.fmriTrialSigGroupValuesSpec = ""
-			m.fmriTrialSigGroupScopeIndex = 0  // across-runs (average)
-			m.fmriTrialSigScopeStimPhases = "" // auto (plateau-only default when present)
+		m.fmriTrialSigSignatureNPS = true
+		m.fmriTrialSigSignatureSIIPS1 = true
+		m.fmriTrialSigLssOtherRegressorsIndex = 0 // per-condition
+		m.fmriTrialSigGroupColumn = ""
+		m.fmriTrialSigGroupValuesSpec = ""
+		m.fmriTrialSigGroupScopeIndex = 0  // across-runs (average)
+		m.fmriTrialSigScopeStimPhases = "" // auto (plateau-only default when present)
 
 		// Backward-compat: older configs used modeIndex 2=lss.
 		// New mode options are 0=first-level, 1=trial-signatures, with method selected separately.
@@ -5751,12 +5754,12 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisOutputDir
 	case textFieldFmriAnalysisFreesurferDir:
 		return m.fmriAnalysisFreesurferDir
-		case textFieldFmriAnalysisSignatureDir:
-			return m.fmriAnalysisSignatureDir
-		case textFieldFmriTrialSigGroupColumn:
-			return m.fmriTrialSigGroupColumn
-		case textFieldFmriTrialSigGroupValues:
-			return m.fmriTrialSigGroupValuesSpec
+	case textFieldFmriAnalysisSignatureDir:
+		return m.fmriAnalysisSignatureDir
+	case textFieldFmriTrialSigGroupColumn:
+		return m.fmriTrialSigGroupColumn
+	case textFieldFmriTrialSigGroupValues:
+		return m.fmriTrialSigGroupValuesSpec
 	case textFieldFmriTrialSigScopeStimPhases:
 		return m.fmriTrialSigScopeStimPhases
 	case textFieldRawMontage:
@@ -6108,6 +6111,30 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		}
 		return out, true
 	}
+	asListSpec := func(v interface{}) (string, bool) {
+		switch vals := v.(type) {
+		case []interface{}:
+			out := make([]string, 0, len(vals))
+			for _, item := range vals {
+				s := strings.TrimSpace(fmt.Sprintf("%v", item))
+				if s != "" && s != "<nil>" {
+					out = append(out, s)
+				}
+			}
+			return strings.Join(out, " "), true
+		case []string:
+			out := make([]string, 0, len(vals))
+			for _, item := range vals {
+				s := strings.TrimSpace(item)
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			return strings.Join(out, " "), true
+		default:
+			return "", false
+		}
+	}
 
 	if rawBands, ok := values["time_frequency_analysis.bands"]; ok {
 		bands := parseConfigBands(rawBands)
@@ -6217,6 +6244,126 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 	if v, ok := values["fmri_preprocessing.fmriprep.mem_mb"]; ok {
 		if n, ok := asInt(v); ok {
 			m.fmriMemMb = n
+		}
+	}
+
+	// ML defaults from eeg_config.yaml for TUI hydration.
+	if v, ok := values["machine_learning.targets.regression"]; ok {
+		if s, ok := asString(v); ok && strings.TrimSpace(m.mlTarget) == "" {
+			m.mlTarget = s
+		}
+	}
+	if v, ok := values["machine_learning.targets.classification"]; ok {
+		if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
+			m.mlTarget = s
+		}
+	}
+	if v, ok := values["machine_learning.targets.binary_threshold"]; ok && v != nil {
+		switch n := v.(type) {
+		case float64:
+			m.mlBinaryThresholdEnabled = true
+			m.mlBinaryThreshold = n
+		case int:
+			m.mlBinaryThresholdEnabled = true
+			m.mlBinaryThreshold = float64(n)
+		}
+	}
+	if v, ok := values["machine_learning.data.feature_families"]; ok {
+		if spec, ok := asListSpec(v); ok {
+			m.mlFeatureFamiliesSpec = spec
+		}
+	}
+	if v, ok := values["machine_learning.data.feature_bands"]; ok {
+		if spec, ok := asListSpec(v); ok {
+			m.mlFeatureBandsSpec = spec
+		}
+	}
+	if v, ok := values["machine_learning.data.feature_segments"]; ok {
+		if spec, ok := asListSpec(v); ok {
+			m.mlFeatureSegmentsSpec = spec
+		}
+	}
+	if v, ok := values["machine_learning.data.feature_scopes"]; ok {
+		if spec, ok := asListSpec(v); ok {
+			m.mlFeatureScopesSpec = spec
+		}
+	}
+	if v, ok := values["machine_learning.data.feature_stats"]; ok {
+		if spec, ok := asListSpec(v); ok {
+			m.mlFeatureStatsSpec = spec
+		}
+	}
+	if v, ok := values["machine_learning.data.feature_harmonization"]; ok {
+		if s, ok := asString(v); ok {
+			switch strings.ToLower(strings.TrimSpace(s)) {
+			case "intersection":
+				m.mlFeatureHarmonization = MLFeatureHarmonizationIntersection
+			case "union_impute":
+				m.mlFeatureHarmonization = MLFeatureHarmonizationUnionImpute
+			default:
+				m.mlFeatureHarmonization = MLFeatureHarmonizationDefault
+			}
+		}
+	}
+	if v, ok := values["machine_learning.data.covariates"]; ok {
+		if spec, ok := asListSpec(v); ok {
+			m.mlCovariatesSpec = spec
+		}
+	}
+	if v, ok := values["machine_learning.data.require_trial_ml_safe"]; ok {
+		if b, ok := asBool(v); ok {
+			m.mlRequireTrialMlSafe = b
+		}
+	}
+	if v, ok := values["machine_learning.classification.model"]; ok {
+		if s, ok := asString(v); ok {
+			switch strings.ToLower(strings.TrimSpace(s)) {
+			case "svm":
+				m.mlClassificationModel = MLClassificationSVM
+			case "lr":
+				m.mlClassificationModel = MLClassificationLR
+			case "rf":
+				m.mlClassificationModel = MLClassificationRF
+			case "cnn":
+				m.mlClassificationModel = MLClassificationCNN
+			default:
+				m.mlClassificationModel = MLClassificationDefault
+			}
+		}
+	}
+	if v, ok := values["machine_learning.cv.inner_splits"]; ok {
+		if n, ok := asInt(v); ok {
+			m.innerSplits = n
+		}
+	}
+	if v, ok := values["machine_learning.models.elasticnet.alpha_grid"]; ok {
+		if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
+			m.elasticNetAlphaGrid = strings.Join(splitLooseList(spec), ",")
+		}
+	}
+	if v, ok := values["machine_learning.models.elasticnet.l1_ratio_grid"]; ok {
+		if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
+			m.elasticNetL1RatioGrid = strings.Join(splitLooseList(spec), ",")
+		}
+	}
+	if v, ok := values["machine_learning.models.ridge.alpha_grid"]; ok {
+		if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
+			m.ridgeAlphaGrid = strings.Join(splitLooseList(spec), ",")
+		}
+	}
+	if v, ok := values["machine_learning.models.random_forest.n_estimators"]; ok {
+		if n, ok := asInt(v); ok {
+			m.rfNEstimators = n
+		}
+	}
+	if v, ok := values["machine_learning.models.random_forest.max_depth_grid"]; ok {
+		if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
+			m.rfMaxDepthGrid = strings.Join(splitLooseList(spec), ",")
+		}
+	}
+	if v, ok := values["machine_learning.preprocessing.variance_threshold_grid"]; ok {
+		if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
+			m.varianceThresholdGrid = strings.Join(splitLooseList(spec), ",")
 		}
 	}
 }
@@ -6357,12 +6504,12 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisOutputDir = strings.TrimSpace(value)
 	case textFieldFmriAnalysisFreesurferDir:
 		m.fmriAnalysisFreesurferDir = strings.TrimSpace(value)
-		case textFieldFmriAnalysisSignatureDir:
-			m.fmriAnalysisSignatureDir = strings.TrimSpace(value)
-		case textFieldFmriTrialSigGroupColumn:
-			m.fmriTrialSigGroupColumn = strings.TrimSpace(value)
-			m.fmriTrialSigGroupValuesSpec = "" // Reset values when column changes
-		case textFieldFmriTrialSigGroupValues:
+	case textFieldFmriAnalysisSignatureDir:
+		m.fmriAnalysisSignatureDir = strings.TrimSpace(value)
+	case textFieldFmriTrialSigGroupColumn:
+		m.fmriTrialSigGroupColumn = strings.TrimSpace(value)
+		m.fmriTrialSigGroupValuesSpec = "" // Reset values when column changes
+	case textFieldFmriTrialSigGroupValues:
 		m.fmriTrialSigGroupValuesSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldFmriTrialSigScopeStimPhases:
 		m.fmriTrialSigScopeStimPhases = strings.TrimSpace(value)
@@ -8324,21 +8471,21 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 			if m.fmriTrialSigMethodIndex%2 == 1 {
 				trialMethod = "lss"
 			}
-				options = append(options,
-					optFmriTrialSigMethod,
-					optFmriTrialSigIncludeOtherEvents,
-					optFmriTrialSigMaxTrialsPerRun,
+			options = append(options,
+				optFmriTrialSigMethod,
+				optFmriTrialSigIncludeOtherEvents,
+				optFmriTrialSigMaxTrialsPerRun,
 				optFmriTrialSigFixedEffectsWeighting,
 				optFmriTrialSigWriteConditionBetas,
 				optFmriTrialSigWriteTrialBetas,
 				optFmriTrialSigWriteTrialVariances,
-					optFmriTrialSigSignatureNPS,
-					optFmriTrialSigSignatureSIIPS1,
-					optFmriAnalysisSignatureDir,
-					optFmriTrialSigScopeStimPhases,
-					optFmriTrialSigGroupColumn,
-					optFmriTrialSigGroupValues,
-					optFmriTrialSigGroupScope,
+				optFmriTrialSigSignatureNPS,
+				optFmriTrialSigSignatureSIIPS1,
+				optFmriAnalysisSignatureDir,
+				optFmriTrialSigScopeStimPhases,
+				optFmriTrialSigGroupColumn,
+				optFmriTrialSigGroupValues,
+				optFmriTrialSigGroupScope,
 			)
 			if trialMethod == "lss" {
 				options = append(options, optFmriTrialSigLssOtherRegressors)

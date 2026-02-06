@@ -111,7 +111,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--classification-model",
         type=str,
-        choices=["svm", "lr", "rf"],
+        choices=["svm", "lr", "rf", "cnn"],
         default=None,
         help=(
             "Classifier family for 'classify' stage. Overrides config "

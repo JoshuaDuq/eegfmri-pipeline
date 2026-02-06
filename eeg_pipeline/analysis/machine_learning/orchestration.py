@@ -51,7 +51,7 @@ from eeg_pipeline.analysis.machine_learning.pipelines import (
     build_ridge_param_grid,
     build_rf_param_grid,
 )
-from eeg_pipeline.utils.data.machine_learning import load_active_matrix
+from eeg_pipeline.utils.data.machine_learning import load_active_matrix, load_epoch_tensor_matrix
 from eeg_pipeline.utils.config.loader import load_config, get_config_value
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.machine_learning import (
@@ -953,29 +953,47 @@ def run_classification_ml(
         nested_loso_classification,
         ClassificationResult,
     )
+    from eeg_pipeline.analysis.machine_learning.cnn import nested_loso_cnn_classification
     
     if target is None:
         target = str(get_config_value(config, "machine_learning.targets.classification", "pain_binary"))
     if binary_threshold is None:
         binary_threshold = get_config_value(config, "machine_learning.targets.binary_threshold", None)
 
-    X, y_binary, groups, feature_names, meta = load_active_matrix(
-        subjects,
-        task,
-        deriv_root,
-        config,
-        logger,
-        feature_families=feature_families,
-        feature_harmonization=feature_harmonization,  # type: ignore[arg-type]
-        target=target,
-        target_kind="binary",
-        binary_threshold=binary_threshold,
-        covariates=covariates,
-        feature_bands=feature_bands,
-        feature_segments=feature_segments,
-        feature_scopes=feature_scopes,
-        feature_stats=feature_stats,
-    )
+    if classification_model is not None and str(classification_model).strip():
+        model_type = str(classification_model).strip().lower()
+    else:
+        model_type = str(get_config_value(config, "machine_learning.classification.model", "svm")).strip().lower()
+
+    if model_type == "cnn":
+        X, y_binary, groups, feature_names, meta = load_epoch_tensor_matrix(
+            subjects,
+            task,
+            deriv_root,
+            config,
+            logger,
+            target=target,
+            target_kind="binary",
+            binary_threshold=binary_threshold,
+        )
+    else:
+        X, y_binary, groups, feature_names, meta = load_active_matrix(
+            subjects,
+            task,
+            deriv_root,
+            config,
+            logger,
+            feature_families=feature_families,
+            feature_harmonization=feature_harmonization,  # type: ignore[arg-type]
+            target=target,
+            target_kind="binary",
+            binary_threshold=binary_threshold,
+            covariates=covariates,
+            feature_bands=feature_bands,
+            feature_segments=feature_segments,
+            feature_scopes=feature_scopes,
+            feature_stats=feature_stats,
+        )
     blocks = None
     if meta is not None and hasattr(meta, "columns") and "block" in meta.columns:
         blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy()
@@ -986,23 +1004,28 @@ def run_classification_ml(
     ensure_dir(plots_dir)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
 
-    if classification_model is not None and str(classification_model).strip():
-        model_type = str(classification_model).strip()
+    if model_type == "cnn":
+        result, best_params_df = nested_loso_cnn_classification(
+            X=X,
+            y=y_binary,
+            groups=groups,
+            seed=rng_seed,
+            config=config,
+            logger=logger,
+        )
     else:
-        model_type = str(get_config_value(config, "machine_learning.classification.model", "svm"))
-    
-    result, best_params_df = nested_loso_classification(
-        X=X,
-        y=y_binary,
-        groups=groups,
-        model=model_type,
-        inner_splits=inner_splits,
-        seed=rng_seed,
-        config=config,
-        logger=logger,
-        harmonization_mode=feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
-    )
+        result, best_params_df = nested_loso_classification(
+            X=X,
+            y=y_binary,
+            groups=groups,
+            model=model_type,
+            inner_splits=inner_splits,
+            seed=rng_seed,
+            config=config,
+            logger=logger,
+            harmonization_mode=feature_harmonization
+            or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
+        )
     failed_fold_count = int(getattr(result, "failed_fold_count", 0) or 0)
     n_folds_total = int(getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups)))
     failed_fold_fraction = float(failed_fold_count / max(n_folds_total, 1))
@@ -1138,7 +1161,9 @@ def run_classification_ml(
         "model": model_type,
         "n_subjects": len(np.unique(groups)),
         "n_samples": int(len(y_binary)),
-        "n_features": int(X.shape[1]),
+        "n_features": int(X.shape[1] * X.shape[2]) if X.ndim == 3 else int(X.shape[1]),
+        "n_channels": int(X.shape[1]) if X.ndim == 3 else None,
+        "n_timepoints": int(X.shape[2]) if X.ndim == 3 else None,
         "class_balance": float(np.mean(y_binary)) if len(y_binary) else np.nan,
         "failed_fold_count": int(failed_fold_count),
         "n_folds_total": int(n_folds_total),
@@ -1247,6 +1272,7 @@ def run_within_subject_classification_ml(
         create_rf_classification_pipeline,
         create_svm_pipeline,
     )
+    from eeg_pipeline.analysis.machine_learning.cnn import fit_predict_cnn_binary_classifier
     from sklearn.model_selection import StratifiedGroupKFold
 
     if target is None:
@@ -1254,23 +1280,40 @@ def run_within_subject_classification_ml(
     if binary_threshold is None:
         binary_threshold = get_config_value(config, "machine_learning.targets.binary_threshold", None)
 
-    X, y, groups, _feature_names, meta = load_active_matrix(
-        subjects,
-        task,
-        deriv_root,
-        config,
-        logger,
-        feature_families=feature_families,
-        feature_harmonization=feature_harmonization,  # type: ignore[arg-type]
-        target=target,
-        target_kind="binary",
-        binary_threshold=binary_threshold,
-        covariates=covariates,
-        feature_bands=feature_bands,
-        feature_segments=feature_segments,
-        feature_scopes=feature_scopes,
-        feature_stats=feature_stats,
-    )
+    if classification_model is not None and str(classification_model).strip():
+        model_type = str(classification_model).strip().lower()
+    else:
+        model_type = str(get_config_value(config, "machine_learning.classification.model", "svm")).strip().lower()
+
+    if model_type == "cnn":
+        X, y, groups, _feature_names, meta = load_epoch_tensor_matrix(
+            subjects,
+            task,
+            deriv_root,
+            config,
+            logger,
+            target=target,
+            target_kind="binary",
+            binary_threshold=binary_threshold,
+        )
+    else:
+        X, y, groups, _feature_names, meta = load_active_matrix(
+            subjects,
+            task,
+            deriv_root,
+            config,
+            logger,
+            feature_families=feature_families,
+            feature_harmonization=feature_harmonization,  # type: ignore[arg-type]
+            target=target,
+            target_kind="binary",
+            binary_threshold=binary_threshold,
+            covariates=covariates,
+            feature_bands=feature_bands,
+            feature_segments=feature_segments,
+            feature_scopes=feature_scopes,
+            feature_stats=feature_stats,
+        )
 
     if meta is None or not hasattr(meta, "columns") or "block" not in meta.columns:
         raise ValueError(
@@ -1292,12 +1335,10 @@ def run_within_subject_classification_ml(
         meta = meta.loc[finite_blocks].reset_index(drop=True)
         blocks_all = blocks_all[finite_blocks]
 
-    if classification_model is not None and str(classification_model).strip():
-        model_type = str(classification_model).strip()
-    else:
-        model_type = str(get_config_value(config, "machine_learning.classification.model", "svm"))
-
-    if model_type == "lr":
+    if model_type == "cnn":
+        base_pipe = None
+        param_grid = {}
+    elif model_type == "lr":
         base_pipe = create_logistic_pipeline(seed=rng_seed, config=config)
         param_grid = build_logistic_param_grid(config)
     elif model_type == "rf":
@@ -1355,50 +1396,67 @@ def run_within_subject_classification_ml(
             # Inner CV: stratified and block-aware (within subject).
             n_unique_blocks = len(np.unique(blocks_train))
             effective_splits = min(max(2, int(inner_splits)), n_unique_blocks)
-            best_estimator = clone(base_pipe)
-
-            if effective_splits >= 2:
-                inner_cv = StratifiedGroupKFold(
-                    n_splits=effective_splits,
-                    shuffle=True,
-                    random_state=rng_seed + int(fold_counter),
-                )
+            if model_type == "cnn":
                 try:
-                    grid = GridSearchCV(
-                        estimator=clone(base_pipe),
-                        param_grid=param_grid,
-                        scoring="roc_auc",
-                        cv=inner_cv,
-                        n_jobs=1,
-                        refit=True,
-                        error_score="raise",
+                    y_pred, y_prob = fit_predict_cnn_binary_classifier(
+                        X_train=X_train,
+                        y_train=y_train,
+                        groups_train=blocks_train.astype(str),
+                        X_test=X_test,
+                        seed=rng_seed + int(fold_counter),
+                        config=config,
+                        logger=logger,
                     )
-                    grid.fit(X_train, y_train, groups=blocks_train)
-                    best_estimator = grid.best_estimator_
-                except Exception as exc:
-                    logger.warning(
-                        "Within-subject fold %s (%s): inner CV failed (%s); fitting default pipeline.",
-                        int(fold_counter),
-                        str(subject_id),
-                        exc,
-                    )
-                    best_estimator.fit(X_train, y_train)
+                except Exception:
+                    maj = int(np.median(y_train)) if len(y_train) else 0
+                    y_pred = np.full(len(y_test), maj, dtype=int)
+                    y_prob = np.full(len(y_test), float(maj), dtype=float)
+                    failed_folds += 1
             else:
-                best_estimator.fit(X_train, y_train)
+                best_estimator = clone(base_pipe)
 
-            try:
-                y_pred = best_estimator.predict(X_test).astype(int)
-                y_prob = None
-                if hasattr(best_estimator, "predict_proba"):
+                if effective_splits >= 2:
+                    inner_cv = StratifiedGroupKFold(
+                        n_splits=effective_splits,
+                        shuffle=True,
+                        random_state=rng_seed + int(fold_counter),
+                    )
                     try:
-                        y_prob = best_estimator.predict_proba(X_test)[:, 1]
-                    except Exception:
-                        y_prob = None
-            except Exception:
-                maj = int(np.median(y_train)) if len(y_train) else 0
-                y_pred = np.full(len(y_test), maj, dtype=int)
-                y_prob = np.full(len(y_test), float(maj), dtype=float)
-                failed_folds += 1
+                        grid = GridSearchCV(
+                            estimator=clone(base_pipe),
+                            param_grid=param_grid,
+                            scoring="roc_auc",
+                            cv=inner_cv,
+                            n_jobs=1,
+                            refit=True,
+                            error_score="raise",
+                        )
+                        grid.fit(X_train, y_train, groups=blocks_train)
+                        best_estimator = grid.best_estimator_
+                    except Exception as exc:
+                        logger.warning(
+                            "Within-subject fold %s (%s): inner CV failed (%s); fitting default pipeline.",
+                            int(fold_counter),
+                            str(subject_id),
+                            exc,
+                        )
+                        best_estimator.fit(X_train, y_train)
+                else:
+                    best_estimator.fit(X_train, y_train)
+
+                try:
+                    y_pred = best_estimator.predict(X_test).astype(int)
+                    y_prob = None
+                    if hasattr(best_estimator, "predict_proba"):
+                        try:
+                            y_prob = best_estimator.predict_proba(X_test)[:, 1]
+                        except Exception:
+                            y_prob = None
+                except Exception:
+                    maj = int(np.median(y_train)) if len(y_train) else 0
+                    y_pred = np.full(len(y_test), maj, dtype=int)
+                    y_prob = np.full(len(y_test), float(maj), dtype=float)
+                    failed_folds += 1
 
             recs.append(
                 {
@@ -1530,7 +1588,9 @@ def run_within_subject_classification_ml(
         },
         "n_subjects": int(len(np.unique(groups_ordered))),
         "n_samples": int(len(y_true_all)),
-        "n_features": int(X.shape[1]),
+        "n_features": int(X.shape[1] * X.shape[2]) if X.ndim == 3 else int(X.shape[1]),
+        "n_channels": int(X.shape[1]) if X.ndim == 3 else None,
+        "n_timepoints": int(X.shape[2]) if X.ndim == 3 else None,
         "failed_fold_count": int(failed_fold_count),
         "n_folds_total": int(n_folds_total),
         "failed_fold_fraction": float(failed_fold_fraction),
@@ -1675,6 +1735,7 @@ def _run_classification_permutations(
 ) -> Optional[np.ndarray]:
     """Run permutation test for classification."""
     from eeg_pipeline.analysis.machine_learning.classification import nested_loso_classification
+    from eeg_pipeline.analysis.machine_learning.cnn import nested_loso_cnn_classification
     
     rng = np.random.default_rng(seed)
     null_aucs = []
@@ -1720,17 +1781,27 @@ def _run_classification_permutations(
                 y_perm[mask] = rng.permutation(y_perm[mask])
         
         try:
-            result, _ = nested_loso_classification(
-                X=X,
-                y=y_perm,
-                groups=groups,
-                model=model,
-                inner_splits=inner_splits,
-                seed=seed + i + 1,
-                config=config,
-                logger=None,
-                harmonization_mode=harmonization_mode,
-            )
+            if str(model).strip().lower() == "cnn":
+                result, _ = nested_loso_cnn_classification(
+                    X=X,
+                    y=y_perm,
+                    groups=groups,
+                    seed=seed + i + 1,
+                    config=config,
+                    logger=None,
+                )
+            else:
+                result, _ = nested_loso_classification(
+                    X=X,
+                    y=y_perm,
+                    groups=groups,
+                    model=model,
+                    inner_splits=inner_splits,
+                    seed=seed + i + 1,
+                    config=config,
+                    logger=None,
+                    harmonization_mode=harmonization_mode,
+                )
             auc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
             auc_for_inference = auc_subj_mean if np.isfinite(auc_subj_mean) else float(result.auc)
             if np.isfinite(auc_for_inference):

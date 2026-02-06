@@ -875,6 +875,29 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	m.mainMenu.SelectedPipeline = -1
 
 	configKeys := []string{"time_frequency_analysis.bands"}
+	if m.selectedPipeline == types.PipelineML {
+		configKeys = append(configKeys,
+			"machine_learning.targets.regression",
+			"machine_learning.targets.classification",
+			"machine_learning.targets.binary_threshold",
+			"machine_learning.data.feature_families",
+			"machine_learning.data.feature_bands",
+			"machine_learning.data.feature_segments",
+			"machine_learning.data.feature_scopes",
+			"machine_learning.data.feature_stats",
+			"machine_learning.data.feature_harmonization",
+			"machine_learning.data.covariates",
+			"machine_learning.data.require_trial_ml_safe",
+			"machine_learning.classification.model",
+			"machine_learning.cv.inner_splits",
+			"machine_learning.models.elasticnet.alpha_grid",
+			"machine_learning.models.elasticnet.l1_ratio_grid",
+			"machine_learning.models.ridge.alpha_grid",
+			"machine_learning.models.random_forest.n_estimators",
+			"machine_learning.models.random_forest.max_depth_grid",
+			"machine_learning.preprocessing.variance_threshold_grid",
+		)
+	}
 	if m.selectedPipeline == types.PipelineFmri || m.selectedPipeline == types.PipelineFmriAnalysis {
 		configKeys = append(configKeys,
 			"fmri_preprocessing.engine",

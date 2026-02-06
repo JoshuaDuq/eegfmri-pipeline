@@ -63,6 +63,10 @@ from eeg_pipeline.analysis.machine_learning.classification import (
     nested_loso_classification,
     ClassificationResult,
 )
+from eeg_pipeline.analysis.machine_learning.cnn import (
+    fit_predict_cnn_binary_classifier,
+    nested_loso_cnn_classification,
+)
 
 # SHAP feature importance
 from eeg_pipeline.analysis.machine_learning.shap_importance import (
@@ -116,6 +120,8 @@ __all__ = [
     "decode_pain_binary",
     "nested_loso_classification",
     "ClassificationResult",
+    "fit_predict_cnn_binary_classifier",
+    "nested_loso_cnn_classification",
     # SHAP
     "compute_shap_values",
     "compute_shap_importance",

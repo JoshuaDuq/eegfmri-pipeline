@@ -144,7 +144,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optMLRegressionModel:
 			label, value, hint = "Regression Model", m.mlRegressionModel.Display(), "elasticnet / ridge / rf"
 		case optMLClassificationModel:
-			label, value, hint = "Classification Model", m.mlClassificationModel.Display(), "svm / lr / rf"
+			label, value, hint = "Classification Model", m.mlClassificationModel.Display(), "svm / lr / rf / cnn"
 		case optMLBinaryThresholdEnabled:
 			label, value, hint = "Binary Threshold", m.boolToOnOff(m.mlBinaryThresholdEnabled), "enable fixed threshold for classification"
 		case optMLBinaryThreshold:

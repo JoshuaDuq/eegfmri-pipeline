@@ -1225,6 +1225,117 @@ def load_channels_mean_matrix(
     return X, y_all, groups_arr, feature_cols or [], meta
 
 
+def load_epoch_tensor_matrix(
+    subjects: List[str],
+    task: str,
+    deriv_root: Path,
+    config: Any,
+    log: Optional[logging.Logger] = None,
+    *,
+    target: Optional[str] = None,
+    target_kind: MLTargetKind = "continuous",
+    binary_threshold: Optional[float] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str], pd.DataFrame]:
+    """ML epochs loader for CNN models: returns X as (n_trials, n_channels, n_timepoints)."""
+    if log is None:
+        log = logging.getLogger(__name__)
+
+    payloads: List[Tuple[str, mne.Epochs, pd.DataFrame, np.ndarray, List[str]]] = []
+    ch_sets: List[set] = []
+
+    for sub in subjects:
+        epochs, aligned_events = load_epochs_for_analysis(
+            sub,
+            task,
+            align="strict",
+            preload=True,
+            deriv_root=deriv_root,
+            config=config,
+            logger=log,
+        )
+        if epochs is None or aligned_events is None:
+            log.warning("No epochs for sub-%s; skipping", str(sub))
+            continue
+
+        y_series, _y_col = _resolve_target_series(
+            aligned_events,
+            target=target,
+            target_kind=target_kind,
+            binary_threshold=binary_threshold,
+            config=config,
+        )
+        if target_kind == "binary":
+            y_series = _ensure_binary_target(
+                y_series, binary_threshold=binary_threshold, positive_rule=">"
+            )
+        y_sub = pd.to_numeric(y_series, errors="coerce").to_numpy(dtype=float)
+
+        n_trials = min(len(epochs), len(y_sub), len(aligned_events))
+        if n_trials < 1:
+            continue
+        epochs = epochs[:n_trials]
+        aligned_events = aligned_events.iloc[:n_trials].reset_index(drop=True)
+        y_sub = y_sub[:n_trials]
+
+        picks = mne.pick_types(
+            epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+        )
+        if len(picks) == 0:
+            log.warning("No EEG channels available for sub-%s; skipping", str(sub))
+            continue
+
+        ch_names = [str(epochs.ch_names[p]) for p in picks]
+        _subject_raw, subject_bids = _normalize_subject(sub)
+        payloads.append((subject_bids, epochs, aligned_events, y_sub, ch_names))
+        ch_sets.append(set(ch_names))
+
+    if not payloads:
+        raise RuntimeError("No subjects with usable epoch tensors for CNN ML")
+
+    common_channels = sorted(set.intersection(*ch_sets)) if len(ch_sets) > 1 else sorted(ch_sets[0])
+    if len(common_channels) == 0:
+        raise RuntimeError("No common EEG channels across selected subjects for CNN ML")
+
+    X_blocks: List[np.ndarray] = []
+    y_blocks: List[np.ndarray] = []
+    groups: List[str] = []
+    meta_blocks: List[pd.DataFrame] = []
+
+    for subject_bids, epochs, aligned_events, y_sub, _ch_names in payloads:
+        epochs_common = epochs.copy().pick(common_channels)
+        X_sub = epochs_common.get_data(picks="eeg", reject_by_annotation=None).astype(float)
+        if X_sub.shape[0] != len(y_sub):
+            log.warning("Mismatch X/y for sub-%s; skipping", str(subject_bids))
+            continue
+
+        X_blocks.append(X_sub)
+        y_blocks.append(y_sub)
+        groups.extend([subject_bids] * len(y_sub))
+        meta_sub = pd.DataFrame(_standardize_meta_columns(aligned_events, config))
+        meta_sub.insert(0, "subject_id", subject_bids)
+        meta_blocks.append(meta_sub)
+
+    if not X_blocks:
+        raise RuntimeError("No subjects with valid epoch tensor data")
+
+    X = np.concatenate(X_blocks, axis=0)
+    y_all = np.concatenate(y_blocks)
+    groups_arr = np.asarray(groups)
+    meta = pd.concat(meta_blocks, axis=0, ignore_index=True)
+
+    X, y_all, groups_arr, meta = _filter_finite_targets(X, y_all, groups_arr, meta)
+    meta = meta.reset_index(drop=True)
+    meta["trial_id"] = np.arange(len(meta), dtype=int)
+
+    if target_kind == "binary":
+        unique = set(np.unique(y_all).tolist())
+        if not unique.issubset({0.0, 1.0}):
+            raise ValueError(f"Binary target contains values outside {{0,1}} after filtering: {sorted(unique)}")
+        y_all = y_all.astype(int)
+
+    return X, y_all, groups_arr, common_channels, meta
+
+
 def filter_finite_targets(
     indices: np.ndarray,
     targets: np.ndarray,

@@ -242,6 +242,77 @@ func TestBuildMLAdvancedArgs_FmriSignatureTargetEmitsFlags(t *testing.T) {
 	}
 }
 
+func TestBuildMLAdvancedArgs_ClassifyEmitsCNNClassificationModel(t *testing.T) {
+	m := Model{}
+	m.modeOptions = []string{"classify"}
+	m.modeIndex = 0
+	m.mlClassificationModel = MLClassificationCNN
+
+	args := m.buildMLAdvancedArgs()
+
+	if v, ok := argValue(args, "--classification-model"); !ok || v != "cnn" {
+		t.Fatalf("expected --classification-model cnn, got: %#v", args)
+	}
+}
+
+func TestMLClassificationModelCycleIncludesCNN(t *testing.T) {
+	if got := MLClassificationCNN.CLIValue(); got != "cnn" {
+		t.Fatalf("expected cnn CLI value, got %q", got)
+	}
+	if next := MLClassificationRF.Next(); next != MLClassificationCNN {
+		t.Fatalf("expected rf.Next() to be cnn, got %v", next)
+	}
+	if next := MLClassificationCNN.Next(); next != MLClassificationDefault {
+		t.Fatalf("expected cnn.Next() to wrap to default, got %v", next)
+	}
+}
+
+func TestApplyConfigKeys_HydratesMLSettingsIncludingCNN(t *testing.T) {
+	m := Model{}
+	m.modeOptions = []string{"classify"}
+	m.modeIndex = 0
+
+	m.ApplyConfigKeys(map[string]interface{}{
+		"machine_learning.targets.classification":              "pain_binary",
+		"machine_learning.targets.binary_threshold":            30.0,
+		"machine_learning.data.feature_families":               []interface{}{"power", "connectivity"},
+		"machine_learning.data.feature_harmonization":          "intersection",
+		"machine_learning.data.covariates":                     []interface{}{"temperature", "block"},
+		"machine_learning.data.require_trial_ml_safe":          true,
+		"machine_learning.classification.model":                "cnn",
+		"machine_learning.cv.inner_splits":                     4.0,
+		"machine_learning.models.random_forest.max_depth_grid": []interface{}{5.0, 10.0, nil},
+	})
+
+	if m.mlTarget != "pain_binary" {
+		t.Fatalf("expected mlTarget pain_binary, got %q", m.mlTarget)
+	}
+	if !m.mlBinaryThresholdEnabled || m.mlBinaryThreshold != 30.0 {
+		t.Fatalf("expected binary threshold enabled at 30.0, got enabled=%v value=%v", m.mlBinaryThresholdEnabled, m.mlBinaryThreshold)
+	}
+	if m.mlClassificationModel != MLClassificationCNN {
+		t.Fatalf("expected CNN classification model, got %v", m.mlClassificationModel)
+	}
+	if m.mlFeatureFamiliesSpec != "power connectivity" {
+		t.Fatalf("unexpected feature families spec: %q", m.mlFeatureFamiliesSpec)
+	}
+	if m.mlFeatureHarmonization != MLFeatureHarmonizationIntersection {
+		t.Fatalf("unexpected feature harmonization: %v", m.mlFeatureHarmonization)
+	}
+	if m.mlCovariatesSpec != "temperature block" {
+		t.Fatalf("unexpected covariates spec: %q", m.mlCovariatesSpec)
+	}
+	if !m.mlRequireTrialMlSafe {
+		t.Fatalf("expected require-trial-ml-safe=true")
+	}
+	if m.innerSplits != 4 {
+		t.Fatalf("expected innerSplits=4, got %d", m.innerSplits)
+	}
+	if m.rfMaxDepthGrid != "5,10" {
+		t.Fatalf("unexpected RF max depth grid: %q", m.rfMaxDepthGrid)
+	}
+}
+
 func TestBuildCommand_PlottingGroupScopeAddsAnalysisScopeFlag(t *testing.T) {
 	m := Model{}
 	m.Pipeline = types.PipelinePlotting

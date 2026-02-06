@@ -25,6 +25,7 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
     random_forest_config = model_config.get("random_forest", {})
     svm_config = model_config.get("svm", {})
     lr_config = model_config.get("logistic_regression", {})
+    cnn_config = model_config.get("cnn", {})
 
     return {
         # Constants
@@ -64,6 +65,21 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
         "lr_C_grid": lr_config.get("C_grid", [0.01, 0.1, 1.0, 10.0]),
         "lr_max_iter": lr_config.get("max_iter", 1000),
         "lr_class_weight": lr_config.get("class_weight", "balanced"),
+        # CNN classification (EEGNet-style)
+        "cnn_temporal_filters": int(cnn_config.get("temporal_filters", 8)),
+        "cnn_depth_multiplier": int(cnn_config.get("depth_multiplier", 2)),
+        "cnn_pointwise_filters": int(cnn_config.get("pointwise_filters", 16)),
+        "cnn_kernel_length": int(cnn_config.get("kernel_length", 64)),
+        "cnn_separable_kernel_length": int(cnn_config.get("separable_kernel_length", 16)),
+        "cnn_dropout": float(cnn_config.get("dropout", 0.5)),
+        "cnn_batch_size": int(cnn_config.get("batch_size", 64)),
+        "cnn_max_epochs": int(cnn_config.get("max_epochs", 75)),
+        "cnn_patience": int(cnn_config.get("patience", 10)),
+        "cnn_learning_rate": float(cnn_config.get("learning_rate", 1e-3)),
+        "cnn_weight_decay": float(cnn_config.get("weight_decay", 1e-3)),
+        "cnn_val_fraction": float(cnn_config.get("val_fraction", 0.2)),
+        "cnn_gradient_clip_norm": float(cnn_config.get("gradient_clip_norm", 1.0)),
+        "cnn_use_cuda": bool(cnn_config.get("use_cuda", False)),
     }
 
 

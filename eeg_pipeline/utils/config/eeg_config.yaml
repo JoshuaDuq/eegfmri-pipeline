@@ -1017,7 +1017,7 @@ machine_learning:
       random_state: null
 
   classification:
-    model: "svm"                         # "svm" | "lr" | "rf"
+    model: "svm"                         # "svm" | "lr" | "rf" | "cnn"
     min_subjects_with_auc_for_inference: 2  # Require at least this many subjects with defined held-out AUC
     max_failed_fold_fraction: 0.25       # Abort classification if failed folds exceed this fraction of total folds
 
@@ -1050,6 +1050,21 @@ machine_learning:
       C_grid: [0.01, 0.1, 1.0, 10.0]
       max_iter: 1000
       class_weight: "balanced"
+    cnn:
+      temporal_filters: 8
+      depth_multiplier: 2
+      pointwise_filters: 16
+      kernel_length: 64
+      separable_kernel_length: 16
+      dropout: 0.5
+      batch_size: 64
+      max_epochs: 75
+      patience: 10
+      learning_rate: 0.001
+      weight_decay: 0.001
+      val_fraction: 0.2
+      gradient_clip_norm: 1.0
+      use_cuda: false
 
 ###################################################################
 # 5. STATISTICS & VALIDATION
