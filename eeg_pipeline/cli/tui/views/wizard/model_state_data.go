@@ -6,6 +6,8 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
+// Subject and metadata state mutators/accessors.
+
 func (m *Model) SetSubjects(subjects []types.SubjectStatus) {
 	m.subjects = subjects
 	m.subjectsLoading = false

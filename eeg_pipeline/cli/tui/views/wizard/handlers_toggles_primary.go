@@ -5,6 +5,8 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
+// Primary advanced-toggle handlers (features/behavior/plotting/fMRI groups).
+
 func (m *Model) toggleAdvancedOption() {
 	switch m.Pipeline {
 	case types.PipelineFeatures:

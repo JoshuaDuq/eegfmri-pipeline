@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Rendering helpers for status, progress, metrics, and log panels.
+
 func (m Model) extractErrorSummary() string {
 	if len(m.ErrorLines) == 0 {
 		return ""

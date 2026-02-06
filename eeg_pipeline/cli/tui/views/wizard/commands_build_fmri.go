@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+// fMRI/fMRI analysis pipeline advanced argument builders.
+
 func (m Model) buildFmriAdvancedArgs() []string {
 	ab := newArgBuilder()
 

@@ -20,6 +20,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// State transition and per-view delegation flow.
+
 func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case StateEnvSelect:

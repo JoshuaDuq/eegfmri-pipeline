@@ -15,6 +15,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Runtime CPU/memory sampling and per-core usage helpers.
+
 func (m *Model) startResourceMonitoring() tea.Cmd {
 	return func() tea.Msg {
 		if m.cmd == nil || m.cmd.Process == nil || m.resourceUpdateChan == nil || m.stopResourceChan == nil {

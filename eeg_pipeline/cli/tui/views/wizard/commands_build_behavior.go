@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+// Behavior pipeline advanced argument builder.
+
 func (m Model) buildBehaviorAdvancedArgs() []string {
 	var args []string
 

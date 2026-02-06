@@ -6,6 +6,8 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
+// Advanced-option list builders and active-edit checks.
+
 func (m Model) getFeaturesOptions() []optionType {
 	var options []optionType
 	options = append(options, optUseDefaults)

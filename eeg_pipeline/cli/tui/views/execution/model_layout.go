@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Layout sizing, lifecycle helpers, and clipboard export.
+
 func (m *Model) stopResourceMonitoringSafe() {
 	if m.stopResourceChan != nil {
 		select {

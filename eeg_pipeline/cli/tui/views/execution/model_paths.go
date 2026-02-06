@@ -13,6 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Output-path parsing and results-folder opening helpers.
+
 func (m Model) GetOutputPaths() []string {
 	if m.RepoRoot == "" {
 		return nil

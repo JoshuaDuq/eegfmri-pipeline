@@ -4,6 +4,8 @@ import (
 	"strings"
 )
 
+// Secondary advanced-toggle handlers (ML/preprocessing/utilities).
+
 func (m *Model) toggleMLAdvancedOption() {
 	if m.expandedOption >= 0 {
 		m.handleExpandedListToggle()

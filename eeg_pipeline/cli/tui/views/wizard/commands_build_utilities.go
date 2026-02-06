@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+// Utilities/raw-conversion pipeline advanced argument builders.
+
 func (m Model) buildRawToBidsAdvancedArgs() []string {
 	var args []string
 

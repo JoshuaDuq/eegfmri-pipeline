@@ -15,6 +15,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Asynchronous message handlers and data conversion helpers.
+
 func (m Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
 		m.execution.AddOutput("Error loading subjects: " + msg.Error.Error())

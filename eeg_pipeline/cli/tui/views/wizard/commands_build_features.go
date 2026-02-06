@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+// Features pipeline advanced argument builder.
+
 func (m Model) buildFeaturesAdvancedArgs() []string {
 	var args []string
 

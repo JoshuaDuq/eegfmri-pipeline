@@ -6,6 +6,8 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
+// Numeric input commit handlers by pipeline.
+
 func (m *Model) commitFmriRawToBidsNumber(val float64) {
 	options := m.getFmriRawToBidsOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {

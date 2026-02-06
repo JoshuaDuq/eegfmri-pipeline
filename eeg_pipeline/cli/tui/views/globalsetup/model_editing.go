@@ -13,6 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Editing, browse, and overrides persistence helpers.
+
 func (m *Model) moveCursor(delta int) {
 	section := m.sections[m.sectionIndex].key
 	fields := m.sectionFields(section)

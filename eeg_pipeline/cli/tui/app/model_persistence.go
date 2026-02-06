@@ -8,6 +8,8 @@ import (
 	"github.com/eeg-pipeline/tui/views/wizard"
 )
 
+// Persistence and local state helpers.
+
 func findRepoRoot() string {
 	exePath, err := os.Executable()
 	if err == nil {

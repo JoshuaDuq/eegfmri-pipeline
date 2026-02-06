@@ -8,6 +8,8 @@ import (
 	"github.com/eeg-pipeline/tui/messages"
 )
 
+// Expanded-list selection and config/text-edit mutation helpers.
+
 func (m Model) getExpandedListLength() int {
 	switch m.expandedOption {
 	case expandedConnectivityMeasures:

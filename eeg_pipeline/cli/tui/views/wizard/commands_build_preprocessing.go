@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+// Preprocessing pipeline advanced argument builder.
+
 func (m Model) buildPreprocessingAdvancedArgs() []string {
 	var args []string
 

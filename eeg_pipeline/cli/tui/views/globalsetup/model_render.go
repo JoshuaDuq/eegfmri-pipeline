@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Rendering helpers for the global setup view.
+
 func (m Model) View() string {
 	// Render header
 	title := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Global setup")

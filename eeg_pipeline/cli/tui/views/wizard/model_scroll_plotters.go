@@ -10,6 +10,8 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
+// Scroll calculations, plotting availability summaries, and plotter discovery.
+
 func (m *Model) UpdateComputationOffset() {
 	// Match overhead with renderComputationSelection (12 lines)
 	overheadLines := 12

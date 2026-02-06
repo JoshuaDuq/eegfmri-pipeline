@@ -11,6 +11,8 @@ import (
 	"github.com/eeg-pipeline/tui/styles"
 )
 
+// Log ingestion, cleanup, and viewport maintenance.
+
 func (m *Model) updateViewportSize() {
 	m.updateLayout()
 
