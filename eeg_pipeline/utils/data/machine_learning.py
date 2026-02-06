@@ -898,6 +898,9 @@ def load_active_matrix(
             raise ValueError(msg + " (Blocked by machine_learning.data.require_trial_ml_safe=true)")
         log.warning(msg)
 
+    requested_subject_ids = [_normalize_subject(str(s))[1] for s in subjects]
+    excluded_subjects: List[Dict[str, str]] = []
+
     X_dfs: List[pd.DataFrame] = []
     y_list: List[np.ndarray] = []
     groups_list: List[str] = []
@@ -920,6 +923,19 @@ def load_active_matrix(
             )
         except (FileNotFoundError, ValueError) as exc:
             log.warning("Skipping %s: %s", str(sub), exc)
+            excluded_subjects.append(
+                {
+                    "subject_id": _normalize_subject(str(sub))[1],
+                    "reason": str(exc),
+                }
+            )
+            continue
+
+        if len(y_sub) == 0:
+            subject_bids = _normalize_subject(str(sub))[1]
+            msg = "No valid trials after target filtering."
+            log.warning("Skipping %s: %s", subject_bids, msg)
+            excluded_subjects.append({"subject_id": subject_bids, "reason": msg})
             continue
 
         if first_cols is None:
@@ -940,19 +956,14 @@ def load_active_matrix(
     if first_cols is None:
         raise RuntimeError("No feature columns detected.")
 
-    if harmonization == "union_impute":
-        all_cols = sorted(set.union(*col_sets)) if col_sets else first_cols
-        X_all_df = pd.concat([df.reindex(columns=all_cols) for df in X_dfs], axis=0, ignore_index=True)
-        feature_names = all_cols
-    else:
-        common_cols = set.intersection(*col_sets) if col_sets else set(first_cols)
-        feature_names = [c for c in first_cols if c in common_cols]
-        if not feature_names:
-            raise RuntimeError(
-                "No overlapping features across subjects after harmonization='intersection'. "
-                "Use machine_learning.data.feature_harmonization='union_impute' to allow missing values."
-            )
-        X_all_df = pd.concat([df.loc[:, feature_names].copy() for df in X_dfs], axis=0, ignore_index=True)
+    all_cols = sorted(set.union(*col_sets)) if col_sets else first_cols
+    X_all_df = pd.concat([df.reindex(columns=all_cols) for df in X_dfs], axis=0, ignore_index=True)
+    feature_names = all_cols
+    if harmonization == "intersection":
+        log.info(
+            "Using fold-specific intersection harmonization: preserving union feature space at load time "
+            "and applying train-only intersection within CV folds."
+        )
 
     # Optional filters by parsed feature metadata (band/segment/scope).
     # These filters are applied after harmonization so "intersection" behaves predictably.
@@ -1038,6 +1049,45 @@ def load_active_matrix(
         if not unique.issubset({0.0, 1.0}):
             raise ValueError(f"Binary target contains values outside {{0,1}} after filtering: {sorted(unique)}")
         y_all = y_all.astype(int)
+
+    included_subject_ids = sorted(set(groups_arr.astype(str).tolist()))
+    excluded_by_difference = sorted(set(requested_subject_ids) - set(included_subject_ids))
+    excluded_seen = {str(r.get("subject_id", "")) for r in excluded_subjects}
+    for subject_id in excluded_by_difference:
+        if subject_id not in excluded_seen:
+            excluded_subjects.append(
+                {
+                    "subject_id": subject_id,
+                    "reason": "Excluded during matrix assembly (no usable trials/features).",
+                }
+            )
+
+    n_requested = len(requested_subject_ids)
+    n_excluded = len(excluded_by_difference)
+    excluded_fraction = float(n_excluded / n_requested) if n_requested > 0 else 0.0
+    max_excluded_fraction = float(
+        get_config_value(config, "machine_learning.data.max_excluded_subject_fraction", 1.0)
+    )
+
+    meta.attrs["requested_subjects"] = requested_subject_ids
+    meta.attrs["included_subjects"] = included_subject_ids
+    meta.attrs["excluded_subjects"] = excluded_subjects
+    meta.attrs["excluded_fraction"] = excluded_fraction
+    meta.attrs["max_excluded_subject_fraction"] = max_excluded_fraction
+    meta.attrs["feature_harmonization_mode"] = harmonization
+
+    if n_requested > 0 and excluded_fraction > max_excluded_fraction:
+        details = "; ".join(
+            f"{rec.get('subject_id', '?')}: {rec.get('reason', 'unknown')}"
+            for rec in excluded_subjects
+            if rec.get("subject_id") in set(excluded_by_difference)
+        )
+        raise RuntimeError(
+            "Too many requested subjects were excluded while building the ML matrix: "
+            f"excluded={n_excluded}/{n_requested} ({excluded_fraction:.3f}) exceeds "
+            f"machine_learning.data.max_excluded_subject_fraction={max_excluded_fraction:.3f}. "
+            f"Excluded subjects: {details}"
+        )
 
     log.info(
         "Built ML matrix from feature tables: X=%s, n_subjects=%d, families=%s, target=%s",

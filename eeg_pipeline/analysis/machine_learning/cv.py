@@ -139,6 +139,62 @@ def create_loso_folds(X: np.ndarray, groups: np.ndarray) -> List[Tuple[int, np.n
     ]
 
 
+def compute_train_group_intersection_mask(
+    X_train: np.ndarray,
+    groups_train: np.ndarray,
+) -> np.ndarray:
+    """Return per-column mask where each train subject has at least one finite value."""
+    X_arr = np.asarray(X_train, dtype=float)
+    groups_arr = np.asarray(groups_train)
+    if X_arr.ndim != 2:
+        raise ValueError(f"Expected 2D X_train, got shape={X_arr.shape}")
+    if X_arr.shape[0] != len(groups_arr):
+        raise ValueError(
+            f"Length mismatch for X_train/groups_train: {X_arr.shape[0]} vs {len(groups_arr)}"
+        )
+    n_features = X_arr.shape[1]
+    if n_features == 0:
+        return np.zeros(0, dtype=bool)
+
+    keep_mask = np.ones(n_features, dtype=bool)
+    unique_groups = np.unique(groups_arr)
+    for grp in unique_groups:
+        grp_mask = groups_arr == grp
+        if not np.any(grp_mask):
+            continue
+        # Feature must be present for this group (at least one finite row).
+        grp_has = np.any(np.isfinite(X_arr[grp_mask]), axis=0)
+        keep_mask &= grp_has
+
+    # If strict per-group intersection is empty, fall back to any-finite in train.
+    if not np.any(keep_mask):
+        keep_mask = np.any(np.isfinite(X_arr), axis=0)
+    return keep_mask
+
+
+def apply_fold_feature_harmonization(
+    X_train: np.ndarray,
+    X_test: np.ndarray,
+    groups_train: np.ndarray,
+    harmonization_mode: Optional[str],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Apply fold-specific feature harmonization (intersection/union) safely."""
+    mode = (harmonization_mode or "union_impute").strip().lower()
+    Xtr = np.asarray(X_train, dtype=float)
+    Xte = np.asarray(X_test, dtype=float)
+    if Xtr.shape[1] != Xte.shape[1]:
+        raise ValueError(f"X_train/X_test feature mismatch: {Xtr.shape[1]} vs {Xte.shape[1]}")
+
+    if mode != "intersection":
+        keep = np.ones(Xtr.shape[1], dtype=bool)
+        return Xtr, Xte, keep
+
+    keep = compute_train_group_intersection_mask(Xtr, np.asarray(groups_train))
+    if keep.size == 0 or not np.any(keep):
+        raise ValueError("Fold-specific intersection harmonization removed all features.")
+    return Xtr[:, keep], Xte[:, keep], keep
+
+
 def create_inner_cv(train_groups: np.ndarray, inner_cv_splits: int) -> GroupKFold:
     """Create inner CV splitter for hyperparameter tuning."""
     n_unique = len(np.unique(train_groups))
@@ -759,6 +815,7 @@ def nested_loso_predictions_matrix(
     null_n_perm: int = 0,
     null_output_path: Optional[Path] = None,
     config: Optional[Dict[str, Any]] = None,
+    harmonization_mode: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, List[str], List[int], List[int]]:
     """
     Nested leave-one-subject-out cross-validation with hyperparameter tuning.
@@ -815,6 +872,12 @@ def nested_loso_predictions_matrix(
         X_train, X_test = X[train_idx_f], X[test_idx_f]
         y_train, y_test = y[train_idx_f], y[test_idx_f]
         groups_train = groups[train_idx_f]
+        X_train, X_test, _ = apply_fold_feature_harmonization(
+            X_train,
+            X_test,
+            groups_train,
+            harmonization_mode,
+        )
 
         n_train_subjects = len(np.unique(groups_train))
 
@@ -869,7 +932,8 @@ def nested_loso_predictions_matrix(
     if null_n_perm > 0 and null_output_path:
         run_permutation_test(
             X, y, groups, blocks, pipe, param_grid, inner_cv_splits, inner_n_jobs,
-            seed, model_name, null_n_perm, null_output_path, config
+            seed, model_name, null_n_perm, null_output_path, config,
+            harmonization_mode=harmonization_mode,
         )
 
     return y_true, y_pred, groups_ordered, test_indices, fold_ids
@@ -889,6 +953,7 @@ def run_permutation_test(
     null_n_perm: int,
     null_output_path: Path,
     config: Optional[Dict[str, Any]],
+    harmonization_mode: Optional[str] = None,
 ) -> None:
     """Run permutation test for null distribution."""
     logger.info(f"Computing {null_n_perm} permutation null distributions...")
@@ -897,14 +962,14 @@ def run_permutation_test(
     null_r2 = []
     n_completed = 0
 
-    perm_scheme = "within_subject"
+    perm_scheme = "within_subject_within_block"
     if config is not None:
         try:
             perm_scheme = str(get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)).strip().lower()
         except Exception:
-            perm_scheme = "within_subject"
+            perm_scheme = "within_subject_within_block"
     if perm_scheme not in {"within_subject", "within_subject_within_block"}:
-        perm_scheme = "within_subject"
+        perm_scheme = "within_subject_within_block"
 
     blocks_arr = None
     if perm_scheme == "within_subject_within_block":
@@ -938,6 +1003,7 @@ def run_permutation_test(
             X=X, y=y_perm, groups=groups, blocks=blocks_arr, pipe=pipe, param_grid=param_grid,
             inner_cv_splits=inner_cv_splits, n_jobs=inner_n_jobs, seed=seed + perm,
             model_name=model_name, outer_n_jobs=1, null_n_perm=0, config=config,
+            harmonization_mode=harmonization_mode,
         )
 
         pred_df = pd.DataFrame({"y_true": y_true_p, "y_pred": y_pred_p, "subject_id": groups_p})

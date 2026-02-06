@@ -30,8 +30,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
+from sklearn.model_selection import GroupKFold, GridSearchCV
 
 from eeg_pipeline.analysis.machine_learning.preprocessing import transform_feature_names_through_steps
+from eeg_pipeline.analysis.machine_learning.cv import apply_fold_feature_harmonization
 
 ###################################################################
 # Helper Functions
@@ -293,6 +295,10 @@ def compute_shap_for_cv_folds(
     cv_splits: List[Tuple[np.ndarray, np.ndarray]],
     feature_names: Optional[List[str]] = None,
     seed: int = 42,
+    groups: Optional[np.ndarray] = None,
+    harmonization_mode: Optional[str] = None,
+    param_grid: Optional[Dict[str, Any]] = None,
+    inner_cv_splits: int = 3,
 ) -> pd.DataFrame:
     """
     Compute SHAP importance aggregated across CV folds.
@@ -332,14 +338,48 @@ def compute_shap_for_cv_folds(
     for fold_idx, (train_idx, test_idx) in enumerate(cv_splits):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train = y[train_idx]
-        
+        groups_train = groups[train_idx] if groups is not None else None
+
         # Train model
         model = model_factory()
-        model.fit(X_train, y_train)
-        
+        keep_mask = np.ones(X_train.shape[1], dtype=bool)
+        if groups_train is not None:
+            X_train, X_test, keep_mask = apply_fold_feature_harmonization(
+                X_train,
+                X_test,
+                groups_train,
+                harmonization_mode,
+            )
+
+        if param_grid and groups_train is not None and len(np.unique(groups_train)) >= 2:
+            n_splits = min(int(inner_cv_splits), len(np.unique(groups_train)))
+            if n_splits >= 2:
+                try:
+                    inner_cv = GroupKFold(n_splits=n_splits)
+                    gs = GridSearchCV(
+                        estimator=model,
+                        param_grid=param_grid,
+                        scoring="r2",
+                        cv=inner_cv,
+                        n_jobs=1,
+                        refit=True,
+                        error_score="raise",
+                    )
+                    gs.fit(X_train, y_train, groups=groups_train)
+                    model = gs.best_estimator_
+                except Exception:
+                    model.fit(X_train, y_train)
+            else:
+                model.fit(X_train, y_train)
+        else:
+            model.fit(X_train, y_train)
+
         try:
             result = compute_shap_values(
-                model, X_test, feature_names, seed=seed + fold_idx
+                model,
+                X_test,
+                [f for f, keep in zip(feature_names or _generate_feature_names(X.shape[1]), keep_mask) if keep],
+                seed=seed + fold_idx,
             )
             if result.importance_df is not None and not result.importance_df.empty:
                 df = result.importance_df[["feature", "shap_importance"]].copy()

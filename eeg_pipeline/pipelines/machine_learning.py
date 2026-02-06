@@ -185,6 +185,7 @@ class MLPipeline(PipelineBase):
         feature_segments: Optional[List[str]] = None,
         feature_scopes: Optional[List[str]] = None,
         feature_stats: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Optional[Path]:
         """Run uncertainty quantification via conformal prediction."""
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_uncertainty_stage
@@ -214,6 +215,7 @@ class MLPipeline(PipelineBase):
             X=X, y=y, groups=groups,
             config=self.config, seed=rng_seed, alpha=alpha,
             results_dir=results_dir, logger=self.logger,
+            model_name=model or DEFAULT_MODEL,
         )
 
     def _run_shap(
@@ -230,6 +232,7 @@ class MLPipeline(PipelineBase):
         feature_segments: Optional[List[str]] = None,
         feature_scopes: Optional[List[str]] = None,
         feature_stats: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Optional[Path]:
         """Run SHAP-based feature importance."""
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_shap_importance_stage
@@ -259,6 +262,7 @@ class MLPipeline(PipelineBase):
             X=X, y=y, groups=groups, feature_names=feature_names,
             config=self.config, seed=rng_seed,
             results_dir=results_dir, logger=self.logger,
+            model_name=model or DEFAULT_MODEL,
         )
 
     def _run_permutation_importance(
@@ -276,6 +280,7 @@ class MLPipeline(PipelineBase):
         feature_segments: Optional[List[str]] = None,
         feature_scopes: Optional[List[str]] = None,
         feature_stats: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Optional[Path]:
         """Run permutation-based feature importance."""
         from eeg_pipeline.analysis.machine_learning.orchestration import _run_permutation_importance_stage
@@ -305,6 +310,7 @@ class MLPipeline(PipelineBase):
             X=X, y=y, groups=groups, feature_names=feature_names,
             config=self.config, seed=rng_seed, n_repeats=n_repeats,
             results_dir=results_dir, logger=self.logger,
+            model_name=model or DEFAULT_MODEL,
         )
 
     def _execute_regression(
@@ -531,6 +537,7 @@ class MLPipeline(PipelineBase):
             feature_stats=params.get("feature_stats"),
             feature_harmonization=params.get("feature_harmonization"),
             covariates=params.get("covariates"),
+            model=params.get("model"),
         )
 
     def _execute_shap(
@@ -555,6 +562,7 @@ class MLPipeline(PipelineBase):
             feature_stats=params.get("feature_stats"),
             feature_harmonization=params.get("feature_harmonization"),
             covariates=params.get("covariates"),
+            model=params.get("model"),
         )
 
     def _execute_permutation(
@@ -580,6 +588,7 @@ class MLPipeline(PipelineBase):
             feature_stats=params.get("feature_stats"),
             feature_harmonization=params.get("feature_harmonization"),
             covariates=params.get("covariates"),
+            model=params.get("model"),
         )
 
     def _get_mode_dispatcher(self) -> Dict[str, Callable]:

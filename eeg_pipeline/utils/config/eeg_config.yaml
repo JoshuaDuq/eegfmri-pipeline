@@ -975,6 +975,7 @@ machine_learning:
     covariates: []                       # Optional extra predictors appended to X (meta names: temperature, trial_index, block, ...)
     covariates_strict: false             # If true, error when requested covariates are missing
     require_trial_ml_safe: false         # If true, error unless feature_engineering.analysis_mode="trial_ml_safe"
+    max_excluded_subject_fraction: 0.25  # Fail ML matrix build if excluded subjects exceed this fraction of requested subjects
 
   # Targets can be logical names ('rating', 'temperature', 'pain_binary') or explicit events.tsv column names.
   targets:
@@ -990,7 +991,8 @@ machine_learning:
   cv:
     inner_splits: 5
     hygiene_enabled: true
-    permutation_scheme: "within_subject"  # "within_subject" | "within_subject_within_block"
+    permutation_scheme: "within_subject_within_block"  # "within_subject" | "within_subject_within_block"
+    min_valid_permutation_fraction: 0.5  # Minimum completed/requested permutations required for valid p-values
     default_n_splits: 5
     default_n_bins: 5
 
@@ -1016,9 +1018,15 @@ machine_learning:
 
   classification:
     model: "svm"                         # "svm" | "lr" | "rf"
+    min_subjects_with_auc_for_inference: 2  # Require at least this many subjects with defined held-out AUC
+    max_failed_fold_fraction: 0.25       # Abort classification if failed folds exceed this fraction of total folds
 
   interpretability:
     grouped_outputs: true                # Write band/ROI grouped importance tables when available
+  analysis:
+    time_generalization:
+      min_subjects_per_cell: 2           # Require at least this many held-out subjects with finite cell scores
+      min_valid_permutation_fraction: 0.8  # Minimum valid permutations required for TG inferential outputs
   models:
     elasticnet:
       alpha_grid: [0.001, 0.01, 0.1, 1, 10]

@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import json
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,7 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     create_within_subject_folds,
     create_block_aware_inner_cv,
     create_inner_cv,
+    apply_fold_feature_harmonization,
     create_scoring_dict,
     get_inner_cv_splits,
     determine_inner_n_jobs,
@@ -99,6 +100,162 @@ def _warn_or_raise_if_binary_like_regression_target(
         logger.warning(msg)
 
     return {"binary_like": bool(binary_like), "unique_values": uniques_list}
+
+
+def _subject_mean_metric(
+    per_subject_metrics: Optional[Dict[str, Dict[str, Any]]],
+    key: str,
+) -> float:
+    """Mean of a per-subject metric, treating subject as the inferential unit."""
+    if not per_subject_metrics:
+        return np.nan
+
+    vals: List[float] = []
+    for rec in per_subject_metrics.values():
+        if not isinstance(rec, dict):
+            continue
+        value = rec.get(key)
+        if value is None:
+            continue
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v):
+            vals.append(v)
+    if not vals:
+        return np.nan
+    return float(np.mean(vals))
+
+
+def _count_finite_subject_metric(
+    per_subject_metrics: Optional[Dict[str, Dict[str, Any]]],
+    key: str,
+) -> int:
+    if not per_subject_metrics:
+        return 0
+    count = 0
+    for rec in per_subject_metrics.values():
+        if not isinstance(rec, dict):
+            continue
+        value = rec.get(key)
+        if value is None:
+            continue
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v):
+            count += 1
+    return int(count)
+
+
+def _normalize_subject_ids(subjects: List[str]) -> List[str]:
+    out: List[str] = []
+    for s in subjects:
+        s_str = str(s).strip()
+        out.append(s_str if s_str.startswith("sub-") else f"sub-{s_str}")
+    return out
+
+
+def _build_regression_model_spec(
+    model_name: Optional[str],
+    *,
+    seed: int,
+    config: Any,
+) -> Tuple[str, Pipeline, Dict[str, Any]]:
+    name = str(model_name or "elasticnet").strip().lower()
+    if name == "ridge":
+        return "ridge", create_ridge_pipeline(seed=seed, config=config), build_ridge_param_grid(config)
+    if name == "rf":
+        return "rf", create_rf_pipeline(seed=seed, config=config), build_rf_param_grid(config)
+    return "elasticnet", create_elasticnet_pipeline(seed=seed, config=config), build_elasticnet_param_grid(config)
+
+
+def _fit_tuned_regression_estimator(
+    *,
+    base_pipe: Pipeline,
+    param_grid: Dict[str, Any],
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    groups_train: np.ndarray,
+    inner_splits: int,
+    seed: int,
+    logger: logging.Logger,
+    fold_info: str,
+) -> Pipeline:
+    n_unique = len(np.unique(groups_train))
+    if n_unique < 2:
+        est = clone(base_pipe)
+        est.fit(X_train, y_train)
+        return est
+
+    inner_cv = create_inner_cv(groups_train, inner_splits)
+    scoring = create_scoring_dict()
+    gs = GridSearchCV(
+        estimator=clone(base_pipe),
+        param_grid=param_grid,
+        scoring=scoring,
+        cv=inner_cv,
+        n_jobs=1,
+        refit="r",
+        error_score="raise",
+    )
+    gs = grid_search_with_warning_logging(gs, X_train, y_train, fold_info=fold_info, log=logger, groups=groups_train)
+    return gs.best_estimator_
+
+
+def export_subject_selection_report(
+    results_dir: Path,
+    subjects_requested: List[str],
+    groups_used: np.ndarray,
+    meta: Optional[pd.DataFrame],
+    config: Any,
+) -> Dict[str, Any]:
+    """Write included/excluded subject reports for ML run transparency."""
+    requested_ids = _normalize_subject_ids(subjects_requested)
+    included_ids = sorted({str(g) for g in np.asarray(groups_used, dtype=object).tolist()})
+
+    excluded_records: List[Dict[str, str]] = []
+    if meta is not None and hasattr(meta, "attrs"):
+        raw = meta.attrs.get("excluded_subjects", [])
+        if isinstance(raw, list):
+            for rec in raw:
+                if not isinstance(rec, dict):
+                    continue
+                subject_id = str(rec.get("subject_id", "")).strip()
+                reason = str(rec.get("reason", "")).strip()
+                if subject_id:
+                    excluded_records.append(
+                        {
+                            "subject_id": subject_id,
+                            "reason": reason or "Excluded during matrix assembly.",
+                        }
+                    )
+
+    reason_map = {r["subject_id"]: r["reason"] for r in excluded_records}
+    excluded_ids = sorted(set(requested_ids) - set(included_ids))
+    excluded_rows = [
+        {"subject_id": sid, "reason": reason_map.get(sid, "Excluded during matrix assembly.")}
+        for sid in excluded_ids
+    ]
+
+    included_df = pd.DataFrame({"subject_id": included_ids})
+    excluded_df = pd.DataFrame(excluded_rows, columns=["subject_id", "reason"])
+    included_df.to_csv(results_dir / "included_subjects.tsv", sep="\t", index=False)
+    excluded_df.to_csv(results_dir / "excluded_subjects.tsv", sep="\t", index=False)
+
+    n_requested = len(requested_ids)
+    n_excluded = len(excluded_ids)
+    exclusion_fraction = float(n_excluded / n_requested) if n_requested > 0 else 0.0
+    threshold = float(get_config_value(config, "machine_learning.data.max_excluded_subject_fraction", 1.0))
+    return {
+        "n_requested": n_requested,
+        "n_included": int(len(included_ids)),
+        "n_excluded": n_excluded,
+        "excluded_fraction": exclusion_fraction,
+        "max_excluded_subject_fraction": threshold,
+    }
 
 
 def _fit_within_subject_fold(
@@ -222,6 +379,7 @@ def run_regression_ml(
     plots_dir = results_dir / "plots"
     ensure_dir(results_dir)
     ensure_dir(plots_dir)
+    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
 
     if model == "ridge":
         pipe = create_ridge_pipeline(seed=rng_seed, config=config)
@@ -257,6 +415,8 @@ def run_regression_ml(
         null_n_perm=n_perm,
         null_output_path=null_path,
         config=config,
+        harmonization_mode=feature_harmonization
+        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
     )
 
     pred_path = results_dir / "loso_predictions.tsv"
@@ -340,6 +500,7 @@ def run_regression_ml(
         "n_subjects": len(np.unique(groups_ordered)),
         "n_trials": len(y_true),
         "n_features": int(X.shape[1]),
+        "subject_selection": subject_selection,
         "subject_level": {
             "r": r_subj,
             "ci_low": ci_low,
@@ -458,6 +619,7 @@ def run_within_subject_regression_ml(
     plots_dir = results_dir / "plots"
     ensure_dir(results_dir)
     ensure_dir(plots_dir)
+    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
     
     model_name = model if model else "elasticnet"
 
@@ -587,44 +749,63 @@ def run_within_subject_regression_ml(
                 
                 y_perm[subj_mask] = subj_y
             
-            perm_folds = create_within_subject_folds(
-                groups=groups,
-                blocks_all=blocks_all,
-                inner_cv_splits=inner_splits,
-                seed=rng_seed + perm_idx + 1,
-                config=config,
-                epochs=None,
-                apply_hygiene=False,
-            )
-            
-            perm_y_true = []
-            perm_y_pred = []
-            
-            for fold_counter, train_idx, test_idx, subject_id, _ in perm_folds:
+            perm_fold_records: List[Dict[str, Any]] = []
+
+            for fold_counter, train_idx, test_idx, subject_id, _ in folds:
                 X_train_p = X[train_idx]
                 X_test_p = X[test_idx]
                 y_train_p = y_perm[train_idx]
                 y_test_p = y_perm[test_idx]
-                
+
+                blocks_train_p = blocks_all[train_idx] if blocks_all is not None else None
+
                 if model == "ridge":
                     pipe_p = create_ridge_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config)
+                    param_grid_p = build_ridge_param_grid(config)
                 elif model == "rf":
                     pipe_p = create_rf_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config)
+                    param_grid_p = build_rf_param_grid(config)
                 else:
                     pipe_p = create_elasticnet_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config)
-                
+                    param_grid_p = build_elasticnet_param_grid(config)
+
+                if "regressor" in pipe_p.named_steps:
+                    pipe_p.named_steps["regressor"].param_grid = param_grid_p
+
                 try:
-                    pipe_p.fit(X_train_p, y_train_p)
-                    y_pred_p = pipe_p.predict(X_test_p)
-                    perm_y_true.extend(y_test_p)
-                    perm_y_pred.extend(y_pred_p)
+                    best_estimator_p = _fit_within_subject_fold(
+                        pipe=pipe_p,
+                        X_train=X_train_p,
+                        y_train=y_train_p,
+                        blocks_train=blocks_train_p,
+                        fold=int(fold_counter),
+                        subject_id=str(subject_id),
+                        random_state=rng_seed + perm_idx + int(fold_counter),
+                        n_jobs=1,
+                        logger=logger,
+                        inner_splits=inner_splits,
+                    )
+                    y_pred_p = best_estimator_p.predict(X_test_p)
+                    perm_fold_records.append(
+                        {
+                            "y_true": np.asarray(y_test_p, dtype=float),
+                            "y_pred": np.asarray(y_pred_p, dtype=float),
+                            "subject_id": [str(subject_id)] * len(y_test_p),
+                        }
+                    )
                 except Exception:
                     continue
-            
-            if len(perm_y_true) >= 3:
-                r_perm, _ = safe_pearsonr(np.asarray(perm_y_true), np.asarray(perm_y_pred))
+
+            if perm_fold_records:
+                y_true_perm = np.concatenate([r["y_true"] for r in perm_fold_records])
+                y_pred_perm = np.concatenate([r["y_pred"] for r in perm_fold_records])
+                subject_perm = np.concatenate([np.asarray(r["subject_id"], dtype=object) for r in perm_fold_records])
+                perm_df = pd.DataFrame(
+                    {"y_true": y_true_perm, "y_pred": y_pred_perm, "subject_id": subject_perm}
+                )
+                r_perm, _, _, _ = compute_subject_level_r(perm_df, config, ci_method=ci_method)
                 if np.isfinite(r_perm):
-                    null_rs.append(r_perm)
+                    null_rs.append(float(r_perm))
             
             if (perm_idx + 1) % 10 == 0:
                 logger.info(f"Permutation {perm_idx + 1}/{n_perm}")
@@ -671,6 +852,7 @@ def run_within_subject_regression_ml(
         "n_subjects": len(np.unique(groups)),
         "n_trials": len(y_true_all),
         "n_features": int(X.shape[1]),
+        "subject_selection": subject_selection,
         "subject_level": {
             "r": r_subj,
             "ci_low": ci_low,
@@ -802,6 +984,7 @@ def run_classification_ml(
     plots_dir = results_dir / "plots"
     ensure_dir(results_dir)
     ensure_dir(plots_dir)
+    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
 
     if classification_model is not None and str(classification_model).strip():
         model_type = str(classification_model).strip()
@@ -817,7 +1000,21 @@ def run_classification_ml(
         seed=rng_seed,
         config=config,
         logger=logger,
+        harmonization_mode=feature_harmonization
+        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
     )
+    failed_fold_count = int(getattr(result, "failed_fold_count", 0) or 0)
+    n_folds_total = int(getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups)))
+    failed_fold_fraction = float(failed_fold_count / max(n_folds_total, 1))
+    max_failed_fold_fraction = float(
+        get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
+    )
+    if failed_fold_fraction > max_failed_fold_fraction:
+        raise RuntimeError(
+            "Classification fold failure fraction exceeded validity threshold: "
+            f"failed={failed_fold_count}/{n_folds_total} ({failed_fold_fraction:.3f}) > "
+            f"machine_learning.classification.max_failed_fold_fraction={max_failed_fold_fraction:.3f}."
+        )
 
     # Export predictions
     pred_df = pd.DataFrame({
@@ -842,6 +1039,25 @@ def run_classification_ml(
             rows.append(row)
         if rows:
             pd.DataFrame(rows).to_csv(results_dir / "per_subject_metrics.tsv", sep="\t", index=False)
+    auc_subject_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
+    balanced_accuracy_subject_mean = _subject_mean_metric(result.per_subject_metrics, "balanced_accuracy")
+    accuracy_subject_mean = _subject_mean_metric(result.per_subject_metrics, "accuracy")
+    min_subjects_auc = int(
+        get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
+    )
+    n_subjects_with_auc = _count_finite_subject_metric(result.per_subject_metrics, "auc")
+    n_subjects_total = int(len(np.unique(groups)))
+    auc_inference_valid = n_subjects_with_auc >= min_subjects_auc
+    if not auc_inference_valid:
+        logger.warning(
+            "Classification AUC inference disabled: only %d/%d subjects had evaluable AUC (< %d required).",
+            int(n_subjects_with_auc),
+            int(n_subjects_total),
+            int(min_subjects_auc),
+        )
+    auc_for_inference = (
+        auc_subject_mean if (np.isfinite(auc_subject_mean) and auc_inference_valid) else np.nan
+    )
 
     # Compute calibration metrics (Brier score, reliability) when probabilities are available
     calibration_data = {}
@@ -902,9 +1118,18 @@ def run_classification_ml(
             "feature_harmonization": feature_harmonization,
             "covariates": covariates,
         },
-        "auc": result.auc,
-        "balanced_accuracy": result.balanced_accuracy,
-        "accuracy": result.accuracy,
+        "subject_selection": subject_selection,
+        "auc": float(auc_for_inference) if np.isfinite(auc_for_inference) else np.nan,
+        "balanced_accuracy": (
+            float(balanced_accuracy_subject_mean)
+            if np.isfinite(balanced_accuracy_subject_mean)
+            else float(result.balanced_accuracy)
+        ),
+        "accuracy": (
+            float(accuracy_subject_mean)
+            if np.isfinite(accuracy_subject_mean)
+            else float(result.accuracy)
+        ),
         "precision": result.precision,
         "recall": result.recall,
         "f1": result.f1,
@@ -915,6 +1140,30 @@ def run_classification_ml(
         "n_samples": int(len(y_binary)),
         "n_features": int(X.shape[1]),
         "class_balance": float(np.mean(y_binary)) if len(y_binary) else np.nan,
+        "failed_fold_count": int(failed_fold_count),
+        "n_folds_total": int(n_folds_total),
+        "failed_fold_fraction": float(failed_fold_fraction),
+        "max_failed_fold_fraction": float(max_failed_fold_fraction),
+        "subject_level": {
+            "auc_mean": float(auc_subject_mean) if np.isfinite(auc_subject_mean) else np.nan,
+            "balanced_accuracy_mean": (
+                float(balanced_accuracy_subject_mean)
+                if np.isfinite(balanced_accuracy_subject_mean)
+                else np.nan
+            ),
+            "accuracy_mean": float(accuracy_subject_mean) if np.isfinite(accuracy_subject_mean) else np.nan,
+            "n_subjects_with_auc": int(n_subjects_with_auc),
+            "n_subjects_without_auc": int(max(0, n_subjects_total - n_subjects_with_auc)),
+            "min_subjects_with_auc_for_inference": int(min_subjects_auc),
+            "auc_inference_valid": bool(auc_inference_valid),
+        },
+        "pooled_trials": {
+            "auc": float(result.auc) if np.isfinite(result.auc) else np.nan,
+            "balanced_accuracy": float(result.balanced_accuracy)
+            if np.isfinite(result.balanced_accuracy)
+            else np.nan,
+            "accuracy": float(result.accuracy) if np.isfinite(result.accuracy) else np.nan,
+        },
     }
     
     # Save calibration data separately
@@ -926,12 +1175,29 @@ def run_classification_ml(
     if n_perm > 0:
         logger.info(f"Running {n_perm} permutations for classification...")
         null_aucs = _run_classification_permutations(
-            X, y_binary, groups, blocks, model_type, inner_splits, rng_seed, n_perm, config, logger
+            X,
+            y_binary,
+            groups,
+            blocks,
+            model_type,
+            inner_splits,
+            rng_seed,
+            n_perm,
+            config,
+            logger,
+            harmonization_mode=feature_harmonization
+            or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
         )
-        if null_aucs is not None and len(null_aucs) > 0:
-            p_val = float(((null_aucs >= result.auc).sum() + 1) / (len(null_aucs) + 1))
+        if null_aucs is not None and len(null_aucs) > 0 and np.isfinite(auc_for_inference):
+            metrics["n_perm_requested"] = int(n_perm)
+            metrics["n_perm_completed"] = int(len(null_aucs))
+            p_val = float(((null_aucs >= auc_for_inference).sum() + 1) / (len(null_aucs) + 1))
             metrics["p_value"] = p_val
-            np.savez(results_dir / f"loso_null_{model_type}.npz", null_auc=null_aucs)
+            np.savez(
+                results_dir / f"loso_null_{model_type}.npz",
+                null_auc_subject_mean=null_aucs,
+                empirical_auc_subject_mean=auc_for_inference,
+            )
 
     # Write reproducibility info
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
@@ -982,7 +1248,6 @@ def run_within_subject_classification_ml(
         create_svm_pipeline,
     )
     from sklearn.model_selection import StratifiedGroupKFold
-    from sklearn.metrics import roc_auc_score
 
     if target is None:
         target = str(get_config_value(config, "machine_learning.targets.classification", "pain_binary"))
@@ -1058,8 +1323,9 @@ def run_within_subject_classification_ml(
             "Ensure each selected subject has at least 2 unique block/run labels."
         )
 
-    def _run_with_labels(y_labels: np.ndarray) -> List[Dict[str, Any]]:
+    def _run_with_labels(y_labels: np.ndarray) -> Tuple[List[Dict[str, Any]], int]:
         recs: List[Dict[str, Any]] = []
+        failed_folds = 0
         for fold_counter, train_idx, test_idx, subject_id, _fold_params in folds:
             X_train = X[train_idx]
             X_test = X[test_idx]
@@ -1073,6 +1339,7 @@ def run_within_subject_classification_ml(
                 maj = int(unique_train[0]) if len(unique_train) == 1 else 0
                 y_pred = np.full(len(y_test), maj, dtype=int)
                 y_prob = np.full(len(y_test), float(maj), dtype=float)
+                failed_folds += 1
                 recs.append(
                     {
                         "fold": int(fold_counter),
@@ -1119,13 +1386,19 @@ def run_within_subject_classification_ml(
             else:
                 best_estimator.fit(X_train, y_train)
 
-            y_pred = best_estimator.predict(X_test).astype(int)
-            y_prob = None
-            if hasattr(best_estimator, "predict_proba"):
-                try:
-                    y_prob = best_estimator.predict_proba(X_test)[:, 1]
-                except Exception:
-                    y_prob = None
+            try:
+                y_pred = best_estimator.predict(X_test).astype(int)
+                y_prob = None
+                if hasattr(best_estimator, "predict_proba"):
+                    try:
+                        y_prob = best_estimator.predict_proba(X_test)[:, 1]
+                    except Exception:
+                        y_prob = None
+            except Exception:
+                maj = int(np.median(y_train)) if len(y_train) else 0
+                y_pred = np.full(len(y_test), maj, dtype=int)
+                y_prob = np.full(len(y_test), float(maj), dtype=float)
+                failed_folds += 1
 
             recs.append(
                 {
@@ -1137,9 +1410,9 @@ def run_within_subject_classification_ml(
                     "test_idx": np.asarray(test_idx, dtype=int),
                 }
             )
-        return recs
+        return recs, int(failed_folds)
 
-    fold_records = _run_with_labels(y)
+    fold_records, failed_fold_count = _run_with_labels(y)
 
     fold_records = sorted(fold_records, key=lambda r: r["fold"])
     y_true_all = np.concatenate([np.asarray(r["y_true"]) for r in fold_records]).astype(int)
@@ -1170,6 +1443,7 @@ def run_within_subject_classification_ml(
     plots_dir = results_dir / "plots"
     ensure_dir(results_dir)
     ensure_dir(plots_dir)
+    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
 
     pred_path = results_dir / "cv_predictions.tsv"
     pred_df = export_predictions(
@@ -1195,7 +1469,20 @@ def run_within_subject_classification_ml(
         y_pred=y_pred_all,
         y_prob=y_prob_all,
         groups=np.asarray(groups_ordered),
+        failed_fold_count=int(failed_fold_count),
+        n_folds_total=int(len(folds)),
     )
+    n_folds_total = int(getattr(result, "n_folds_total", len(folds)) or len(folds))
+    failed_fold_fraction = float(int(failed_fold_count) / max(n_folds_total, 1))
+    max_failed_fold_fraction = float(
+        get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
+    )
+    if failed_fold_fraction > max_failed_fold_fraction:
+        raise RuntimeError(
+            "Within-subject classification fold failure fraction exceeded validity threshold: "
+            f"failed={int(failed_fold_count)}/{n_folds_total} ({failed_fold_fraction:.3f}) > "
+            f"machine_learning.classification.max_failed_fold_fraction={max_failed_fold_fraction:.3f}."
+        )
 
     # Save per-subject metrics
     if getattr(result, "per_subject_metrics", None):
@@ -1207,15 +1494,28 @@ def run_within_subject_classification_ml(
         if rows:
             pd.DataFrame(rows).to_csv(results_dir / "per_subject_metrics.tsv", sep="\t", index=False)
 
-    auc_subj_mean = np.nan
-    if result.per_subject_metrics:
-        aucs = [v.get("auc") for v in result.per_subject_metrics.values() if isinstance(v.get("auc"), float)]
-        if aucs:
-            auc_subj_mean = float(np.mean(aucs))
+    auc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
+    bal_acc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "balanced_accuracy")
+    acc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "accuracy")
+    min_subjects_auc = int(
+        get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
+    )
+    n_subjects_total = int(len(np.unique(groups_ordered)))
+    n_subjects_with_auc = _count_finite_subject_metric(result.per_subject_metrics, "auc")
+    auc_inference_valid = n_subjects_with_auc >= min_subjects_auc
+    if not auc_inference_valid:
+        logger.warning(
+            "Within-subject classification AUC inference disabled: only %d/%d subjects had evaluable AUC (< %d required).",
+            int(n_subjects_with_auc),
+            int(n_subjects_total),
+            int(min_subjects_auc),
+        )
+    auc_for_inference = auc_subj_mean if (np.isfinite(auc_subj_mean) and auc_inference_valid) else np.nan
 
     metrics: Dict[str, Any] = {
         "cv_scope": "subject",
         "model": model_type,
+        "subject_selection": subject_selection,
         "data": {
             "target": target,
             "target_kind": "binary",
@@ -1231,24 +1531,49 @@ def run_within_subject_classification_ml(
         "n_subjects": int(len(np.unique(groups_ordered))),
         "n_samples": int(len(y_true_all)),
         "n_features": int(X.shape[1]),
-        "balanced_accuracy": result.balanced_accuracy,
-        "accuracy": result.accuracy,
-        "auc": result.auc,
+        "failed_fold_count": int(failed_fold_count),
+        "n_folds_total": int(n_folds_total),
+        "failed_fold_fraction": float(failed_fold_fraction),
+        "max_failed_fold_fraction": float(max_failed_fold_fraction),
+        "balanced_accuracy": (
+            float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else float(result.balanced_accuracy)
+        ),
+        "accuracy": float(acc_subj_mean) if np.isfinite(acc_subj_mean) else float(result.accuracy),
+        "auc": float(auc_for_inference) if np.isfinite(auc_for_inference) else np.nan,
         "average_precision": result.average_precision,
         "f1": result.f1,
         "precision": result.precision,
         "recall": result.recall,
         "specificity": result.specificity,
-        "auc_subject_mean": auc_subj_mean,
+        "subject_level": {
+            "auc_mean": float(auc_subj_mean) if np.isfinite(auc_subj_mean) else np.nan,
+            "balanced_accuracy_mean": float(bal_acc_subj_mean)
+            if np.isfinite(bal_acc_subj_mean)
+            else np.nan,
+            "accuracy_mean": float(acc_subj_mean) if np.isfinite(acc_subj_mean) else np.nan,
+            "n_subjects_with_auc": int(n_subjects_with_auc),
+            "n_subjects_without_auc": int(max(0, n_subjects_total - n_subjects_with_auc)),
+            "min_subjects_with_auc_for_inference": int(min_subjects_auc),
+            "auc_inference_valid": bool(auc_inference_valid),
+        },
+        "pooled_trials": {
+            "auc": float(result.auc) if np.isfinite(result.auc) else np.nan,
+            "balanced_accuracy": float(result.balanced_accuracy)
+            if np.isfinite(result.balanced_accuracy)
+            else np.nan,
+            "accuracy": float(result.accuracy) if np.isfinite(result.accuracy) else np.nan,
+        },
         "class_balance": float(np.mean(y_true_all)) if len(y_true_all) else np.nan,
         "n_perm": int(n_perm) if n_perm else 0,
     }
 
     # Optional permutation p-value (AUC) under label randomization (full refit per permutation).
     if n_perm and n_perm > 0:
-        perm_scheme = str(get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject")).strip().lower()
+        perm_scheme = str(
+            get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject_within_block")
+        ).strip().lower()
         if perm_scheme not in {"within_subject", "within_subject_within_block"}:
-            perm_scheme = "within_subject"
+            perm_scheme = "within_subject_within_block"
         logger.info("Running %d permutations for within-subject classification...", int(n_perm))
         rng = np.random.default_rng(rng_seed)
         null_auc = []
@@ -1268,24 +1593,59 @@ def run_within_subject_classification_ml(
                 else:
                     y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
 
-            perm_records = _run_with_labels(y_perm)
+            perm_records, _ = _run_with_labels(y_perm)
             perm_records = sorted(perm_records, key=lambda r: r["fold"])
             y_true_p = np.concatenate([np.asarray(r["y_true"]) for r in perm_records]).astype(int)
-            y_prob_parts = [r.get("y_prob") for r in perm_records]
-            if any(v is None for v in y_prob_parts):
-                continue
             try:
-                y_prob_p = np.concatenate([np.asarray(v, dtype=float) for v in y_prob_parts])  # type: ignore[arg-type]
-                if len(np.unique(y_true_p)) == 2:
-                    null_auc.append(float(roc_auc_score(y_true_p, y_prob_p)))
+                y_pred_p = np.concatenate([np.asarray(r["y_pred"]) for r in perm_records]).astype(int)
+                groups_p: List[str] = []
+                y_prob_parts = []
+                has_prob = True
+                for r in perm_records:
+                    groups_p.extend([str(s) for s in r["subject_id"]])
+                    if r.get("y_prob") is None:
+                        has_prob = False
+                    y_prob_parts.append(r.get("y_prob"))
+                y_prob_p = None
+                if has_prob:
+                    y_prob_p = np.concatenate([np.asarray(v, dtype=float) for v in y_prob_parts])  # type: ignore[arg-type]
+                perm_result = ClassificationResult(
+                    y_true=y_true_p,
+                    y_pred=y_pred_p,
+                    y_prob=y_prob_p,
+                    groups=np.asarray(groups_p),
+                )
+                perm_auc_subj_mean = _subject_mean_metric(perm_result.per_subject_metrics, "auc")
+                perm_auc_for_inference = (
+                    perm_auc_subj_mean if np.isfinite(perm_auc_subj_mean) else float(perm_result.auc)
+                )
+                if np.isfinite(perm_auc_for_inference):
+                    null_auc.append(float(perm_auc_for_inference))
             except Exception:
                 continue
 
-        if null_auc and np.isfinite(result.auc):
+        n_completed = len(null_auc)
+        completion_rate = (n_completed / int(n_perm)) if int(n_perm) > 0 else 0.0
+        min_completion = float(
+            get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5)
+        )
+        if int(n_perm) > 0 and completion_rate < min_completion:
+            raise RuntimeError(
+                f"Insufficient valid within-subject classification permutations ({n_completed}/{int(n_perm)}, "
+                f"rate={completion_rate:.3f} < required {min_completion:.3f})"
+            )
+
+        if null_auc and np.isfinite(auc_for_inference):
             null_auc_arr = np.asarray(null_auc, dtype=float)
-            p_val = float(((null_auc_arr >= float(result.auc)).sum() + 1) / (len(null_auc_arr) + 1))
+            metrics["n_perm_requested"] = int(n_perm)
+            metrics["n_perm_completed"] = int(len(null_auc_arr))
+            p_val = float(((null_auc_arr >= float(auc_for_inference)).sum() + 1) / (len(null_auc_arr) + 1))
             metrics["p_value_auc"] = p_val
-            np.savez(results_dir / f"cv_null_{model_type}.npz", null_auc=null_auc_arr)
+            np.savez(
+                results_dir / f"cv_null_{model_type}.npz",
+                null_auc_subject_mean=null_auc_arr,
+                empirical_auc_subject_mean=auc_for_inference,
+            )
 
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
     with open(results_dir / "pooled_metrics.json", "w") as f:
@@ -1311,6 +1671,7 @@ def _run_classification_permutations(
     n_perm: int,
     config: Any,
     logger: logging.Logger,
+    harmonization_mode: Optional[str] = None,
 ) -> Optional[np.ndarray]:
     """Run permutation test for classification."""
     from eeg_pipeline.analysis.machine_learning.classification import nested_loso_classification
@@ -1318,13 +1679,13 @@ def _run_classification_permutations(
     rng = np.random.default_rng(seed)
     null_aucs = []
 
-    perm_scheme = "within_subject"
+    perm_scheme = "within_subject_within_block"
     try:
         perm_scheme = str(get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)).strip().lower()
     except Exception:
-        perm_scheme = "within_subject"
+        perm_scheme = "within_subject_within_block"
     if perm_scheme not in {"within_subject", "within_subject_within_block"}:
-        perm_scheme = "within_subject"
+        perm_scheme = "within_subject_within_block"
 
     blocks_arr = None
     if perm_scheme == "within_subject_within_block":
@@ -1368,15 +1729,28 @@ def _run_classification_permutations(
                 seed=seed + i + 1,
                 config=config,
                 logger=None,
+                harmonization_mode=harmonization_mode,
             )
-            null_aucs.append(result.auc)
+            auc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
+            auc_for_inference = auc_subj_mean if np.isfinite(auc_subj_mean) else float(result.auc)
+            if np.isfinite(auc_for_inference):
+                null_aucs.append(float(auc_for_inference))
         except Exception:
             continue
         
         if (i + 1) % 10 == 0:
             logger.info(f"Permutation {i + 1}/{n_perm}")
-    
-    return np.array(null_aucs) if null_aucs else None
+
+    n_completed = len(null_aucs)
+    completion_rate = (n_completed / n_perm) if n_perm > 0 else 0.0
+    min_completion = float(get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5))
+    if n_perm > 0 and completion_rate < min_completion:
+        raise RuntimeError(
+            f"Insufficient valid classification permutations ({n_completed}/{n_perm}, "
+            f"rate={completion_rate:.3f} < required {min_completion:.3f})"
+        )
+
+    return np.array(null_aucs, dtype=float) if null_aucs else None
 
 
 ###################################################################
@@ -1538,6 +1912,7 @@ def run_model_comparison_ml(
     
     results_dir = results_root / "model_comparison"
     ensure_dir(results_dir)
+    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
     
     # Define model pipelines (shared preprocessing + config)
     models = {
@@ -1558,7 +1933,15 @@ def run_model_comparison_ml(
     # Shared outer CV folds
     from sklearn.model_selection import LeaveOneGroupOut
     outer_cv = LeaveOneGroupOut()
+    harmonization_mode = (
+        feature_harmonization
+        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    )
     outer_folds = list(outer_cv.split(X, y, groups))
+    harmonization_mode = (
+        feature_harmonization
+        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    )
     
     comparison_records = []
     
@@ -1573,6 +1956,12 @@ def run_model_comparison_ml(
             X_train, X_test = X[train_idx], X[test_idx]
             y_train, y_test = y[train_idx], y[test_idx]
             groups_train = groups[train_idx]
+            X_train, X_test, _ = apply_fold_feature_harmonization(
+                X_train,
+                X_test,
+                groups_train,
+                harmonization_mode,
+            )
             
             # Inner CV for hyperparameter tuning (group-aware)
             inner_cv = create_inner_cv(groups_train, inner_splits)
@@ -1619,7 +2008,8 @@ def run_model_comparison_ml(
             "feature_stats": feature_stats,
             "feature_harmonization": feature_harmonization,
             "covariates": covariates,
-        }
+        },
+        "subject_selection": subject_selection,
     }
     for model_name in models.keys():
         model_rows = comparison_df[comparison_df["model"] == model_name]
@@ -1698,6 +2088,7 @@ def run_incremental_validity_ml(
     
     results_dir = results_root / "incremental_validity"
     ensure_dir(results_dir)
+    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
     
     if baseline_predictors is None:
         raw_preds = get_config_value(config, "machine_learning.incremental_validity.baseline_predictors", ["temperature"])
@@ -1741,33 +2132,69 @@ def run_incremental_validity_ml(
     for fold_idx, (train_idx, test_idx) in enumerate(outer_cv.split(X, y, groups)):
         test_subj = groups[test_idx[0]]
         groups_train = groups[train_idx]
+        X_full_train = X_full[train_idx]
+        X_full_test = X_full[test_idx]
+        X_full_train, X_full_test, _ = apply_fold_feature_harmonization(
+            X_full_train,
+            X_full_test,
+            groups_train,
+            harmonization_mode,
+        )
         
-        # Baseline model (out-of-fold; fixed alpha by default)
-        baseline_alpha = float(get_config_value(config, "machine_learning.incremental_validity.baseline_alpha", 1.0))
+        # Baseline model (out-of-fold; tuned under the same group-aware inner CV logic)
         imputer_strategy = str(get_config_value(config, "machine_learning.preprocessing.imputer_strategy", "median"))
+        baseline_alpha_grid_raw = get_config_value(
+            config,
+            "machine_learning.models.ridge.alpha_grid",
+            [0.01, 0.1, 1.0, 10.0, 100.0],
+        )
+        if isinstance(baseline_alpha_grid_raw, (list, tuple)):
+            baseline_alpha_grid = [float(a) for a in baseline_alpha_grid_raw]
+        else:
+            baseline_alpha_grid = [float(baseline_alpha_grid_raw)]
+
         base_pipe = Pipeline(
             [
                 ("finite", ReplaceInfWithNaN()),
                 ("drop_all_nan", DropAllNaNColumns()),
                 ("impute", SimpleImputer(strategy=imputer_strategy)),
                 ("scale", StandardScaler()),
-                ("ridge", Ridge(alpha=baseline_alpha, random_state=rng_seed)),
+                ("ridge", Ridge(alpha=1.0, random_state=rng_seed)),
             ]
         )
-        base_pipe.fit(X_baseline[train_idx], y[train_idx])
-        y_pred_baseline[test_idx] = base_pipe.predict(X_baseline[test_idx])
+        n_train_subjects = len(np.unique(groups_train))
+        if n_train_subjects >= 2:
+            inner_cv_base = create_inner_cv(groups_train, inner_splits)
+            grid_n_jobs_base = determine_inner_n_jobs(outer_n_jobs=1, n_jobs=1)
+            base_grid = GridSearchCV(
+                estimator=base_pipe,
+                param_grid={"ridge__alpha": baseline_alpha_grid},
+                cv=inner_cv_base,
+                scoring="r2",
+                n_jobs=grid_n_jobs_base,
+                error_score="raise",
+            )
+            base_grid.fit(X_baseline[train_idx], y[train_idx], groups=groups_train)
+            y_pred_baseline[test_idx] = base_grid.predict(X_baseline[test_idx])
+        else:
+            base_pipe.fit(X_baseline[train_idx], y[train_idx])
+            y_pred_baseline[test_idx] = base_pipe.predict(X_baseline[test_idx])
         r2_base = r2_score(y[test_idx], y_pred_baseline[test_idx])
         
         # Full model (baseline predictors are accounted for by comparing to the baseline model)
         pipe_full = create_elasticnet_pipeline(seed=rng_seed, config=config)
         param_grid = build_elasticnet_param_grid(config)
-        inner_cv = create_inner_cv(groups_train, inner_splits)
-        grid_n_jobs = determine_inner_n_jobs(outer_n_jobs=1, n_jobs=1)
-        grid = GridSearchCV(
-            pipe_full, param_grid, cv=inner_cv, scoring="r2", n_jobs=grid_n_jobs, error_score="raise"
-        )
-        grid.fit(X_full[train_idx], y[train_idx], groups=groups_train)
-        y_pred_full[test_idx] = grid.predict(X_full[test_idx])
+        if n_train_subjects >= 2:
+            inner_cv = create_inner_cv(groups_train, inner_splits)
+            grid_n_jobs = determine_inner_n_jobs(outer_n_jobs=1, n_jobs=1)
+            grid = GridSearchCV(
+                pipe_full, param_grid, cv=inner_cv, scoring="r2", n_jobs=grid_n_jobs, error_score="raise"
+            )
+            grid.fit(X_full_train, y[train_idx], groups=groups_train)
+            y_pred_full[test_idx] = grid.predict(X_full_test)
+        else:
+            pipe_full.fit(X_full_train, y[train_idx])
+            y_pred_full[test_idx] = pipe_full.predict(X_full_test)
         r2_full = r2_score(y[test_idx], y_pred_full[test_idx])
         
         records.append({
@@ -1799,6 +2226,7 @@ def run_incremental_validity_ml(
             "feature_stats": feature_stats,
             "feature_harmonization": feature_harmonization,
         },
+        "subject_selection": subject_selection,
         "r2_baseline": r2_baseline_overall,
         "r2_full": r2_full_overall,
         "delta_r2": r2_full_overall - r2_baseline_overall,
@@ -1830,6 +2258,7 @@ def _run_permutation_importance_stage(
     n_repeats: int,
     results_dir: Path,
     logger: logging.Logger,
+    model_name: str = "elasticnet",
 ) -> Optional[Path]:
     """Run per-fold permutation importance and aggregate."""
     from sklearn.model_selection import LeaveOneGroupOut
@@ -1839,7 +2268,15 @@ def _run_permutation_importance_stage(
         build_feature_metadata,
     )
     
-    pipe = create_elasticnet_pipeline(seed=seed, config=config)
+    resolved_model, base_pipe, param_grid = _build_regression_model_spec(
+        model_name,
+        seed=seed,
+        config=config,
+    )
+    harmonization_mode = str(
+        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
+    ).strip().lower()
+    inner_splits = int(get_config_value(config, "machine_learning.cv.inner_splits", 5))
     logo = LeaveOneGroupOut()
     
     all_importances = []
@@ -1847,10 +2284,27 @@ def _run_permutation_importance_stage(
     for fold_idx, (train_idx, test_idx) in enumerate(logo.split(X, y, groups)):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
-        
-        pipe_fold = clone(pipe)
+        groups_train = groups[train_idx]
+        X_train, X_test, keep_mask = apply_fold_feature_harmonization(
+            X_train,
+            X_test,
+            groups_train,
+            harmonization_mode,
+        )
+
+        pipe_fold = clone(base_pipe)
         try:
-            pipe_fold.fit(X_train, y_train)
+            pipe_fold = _fit_tuned_regression_estimator(
+                base_pipe=pipe_fold,
+                param_grid=param_grid,
+                X_train=X_train,
+                y_train=y_train,
+                groups_train=groups_train,
+                inner_splits=inner_splits,
+                seed=seed + fold_idx,
+                logger=logger,
+                fold_info=f"perm-importance fold {fold_idx}",
+            )
             result = permutation_importance(
                 pipe_fold, X_test, y_test,
                 n_repeats=n_repeats,
@@ -1858,7 +2312,9 @@ def _run_permutation_importance_stage(
                 scoring="r2",
                 n_jobs=1,
             )
-            all_importances.append(result.importances_mean)
+            full_importance = np.full(len(feature_names), np.nan, dtype=float)
+            full_importance[np.asarray(keep_mask, dtype=bool)] = result.importances_mean
+            all_importances.append(full_importance)
         except Exception as e:
             logger.warning(f"Fold {fold_idx} permutation importance failed: {e}")
             continue
@@ -1871,11 +2327,13 @@ def _run_permutation_importance_stage(
     std_importance = np.std(np.stack(all_importances), axis=0)
     
     importance_df = pd.DataFrame({
-        "feature": feature_names[:len(mean_importance)],
+        "feature": feature_names,
         "importance_mean": mean_importance,
         "importance_std": std_importance,
         "n_folds": len(all_importances),
-    }).sort_values("importance_mean", ascending=False)
+    })
+    importance_df = importance_df.loc[np.isfinite(importance_df["importance_mean"].to_numpy(dtype=float))]
+    importance_df = importance_df.sort_values("importance_mean", ascending=False)
     
     output_path = results_dir / "permutation_importance.tsv"
     importance_df.to_csv(output_path, sep="\t", index=False)
@@ -1915,6 +2373,7 @@ def _run_shap_importance_stage(
     seed: int,
     results_dir: Path,
     logger: logging.Logger,
+    model_name: str = "elasticnet",
 ) -> Optional[Path]:
     """Run per-fold SHAP importance and aggregate."""
     try:
@@ -1931,13 +2390,31 @@ def _run_shap_importance_stage(
     
     logo = LeaveOneGroupOut()
     cv_splits = list(logo.split(X, y, groups))
-    
+    harmonization_mode = str(
+        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
+    ).strip().lower()
+    inner_splits = int(get_config_value(config, "machine_learning.cv.inner_splits", 5))
+    _resolved_model, base_pipe, param_grid = _build_regression_model_spec(
+        model_name,
+        seed=seed,
+        config=config,
+    )
+
     def model_factory():
-        return create_elasticnet_pipeline(seed=seed, config=config)
+        return clone(base_pipe)
     
     try:
         importance_df = compute_shap_for_cv_folds(
-            model_factory, X, y, cv_splits, feature_names, seed
+            model_factory,
+            X,
+            y,
+            cv_splits,
+            feature_names,
+            seed,
+            groups=groups,
+            harmonization_mode=harmonization_mode,
+            param_grid=param_grid,
+            inner_cv_splits=inner_splits,
         )
         
         if importance_df.empty:
@@ -1984,6 +2461,7 @@ def _run_uncertainty_stage(
     alpha: float,
     results_dir: Path,
     logger: logging.Logger,
+    model_name: str = "elasticnet",
 ) -> Optional[Path]:
     """Run conformal prediction for uncertainty quantification."""
     from eeg_pipeline.analysis.machine_learning.uncertainty import (
@@ -1991,7 +2469,15 @@ def _run_uncertainty_stage(
     )
     from sklearn.model_selection import LeaveOneGroupOut
     
-    pipe = create_elasticnet_pipeline(seed=seed, config=config)
+    _resolved_model, base_pipe, param_grid = _build_regression_model_spec(
+        model_name,
+        seed=seed,
+        config=config,
+    )
+    harmonization_mode = str(
+        get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
+    ).strip().lower()
+    inner_splits = int(get_config_value(config, "machine_learning.cv.inner_splits", 5))
     logo = LeaveOneGroupOut()
     
     all_intervals = []
@@ -2000,10 +2486,27 @@ def _run_uncertainty_stage(
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
-        
+        X_train, X_test, _ = apply_fold_feature_harmonization(
+            X_train,
+            X_test,
+            groups_train,
+            harmonization_mode,
+        )
+
         try:
+            tuned_model = _fit_tuned_regression_estimator(
+                base_pipe=clone(base_pipe),
+                param_grid=param_grid,
+                X_train=X_train,
+                y_train=y_train,
+                groups_train=groups_train,
+                inner_splits=inner_splits,
+                seed=seed + fold_idx,
+                logger=logger,
+                fold_info=f"uncertainty fold {fold_idx}",
+            )
             result = compute_prediction_intervals(
-                model=clone(pipe),
+                model=clone(tuned_model),
                 X_train=X_train,
                 y_train=y_train,
                 X_test=X_test,

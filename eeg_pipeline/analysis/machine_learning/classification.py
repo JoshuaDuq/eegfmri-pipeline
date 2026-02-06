@@ -56,6 +56,7 @@ from sklearn.svm import SVC
 from sklearn.decomposition import PCA
 
 from eeg_pipeline.analysis.machine_learning.config import get_ml_config
+from eeg_pipeline.analysis.machine_learning.cv import apply_fold_feature_harmonization
 from eeg_pipeline.analysis.machine_learning.preprocessing import (
     DropAllNaNColumns,
     ReplaceInfWithNaN,
@@ -327,6 +328,8 @@ class ClassificationResult:
     
     # Per-subject metrics (for LOSO)
     per_subject_metrics: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    failed_fold_count: int = 0
+    n_folds_total: int = 0
     
     def __post_init__(self):
         """Compute all metrics."""
@@ -350,11 +353,17 @@ class ClassificationResult:
         self.specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else np.nan
         
         # AUC (requires probabilities)
-        if self.y_prob is not None and len(np.unique(self.y_true)) == 2:
+        if self.y_prob is not None:
             try:
-                self.auc = float(roc_auc_score(self.y_true, self.y_prob))
-                self.average_precision = float(average_precision_score(self.y_true, self.y_prob))
-                self.fpr, self.tpr, self.thresholds = roc_curve(self.y_true, self.y_prob)
+                prob_mask = np.isfinite(self.y_prob) & np.isfinite(self.y_true)
+                if np.sum(prob_mask) >= 2 and len(np.unique(self.y_true[prob_mask])) == 2:
+                    self.auc = float(roc_auc_score(self.y_true[prob_mask], self.y_prob[prob_mask]))
+                    self.average_precision = float(
+                        average_precision_score(self.y_true[prob_mask], self.y_prob[prob_mask])
+                    )
+                    self.fpr, self.tpr, self.thresholds = roc_curve(
+                        self.y_true[prob_mask], self.y_prob[prob_mask]
+                    )
             except ValueError:
                 pass
         
@@ -373,8 +382,13 @@ class ClassificationResult:
                     rec["balanced_accuracy"] = float(balanced_accuracy_score(y_t, y_p))
                 if self.y_prob is not None and len(np.unique(y_t)) == 2:
                     try:
-                        rec["auc"] = float(roc_auc_score(y_t, self.y_prob[mask]))
-                        rec["average_precision"] = float(average_precision_score(y_t, self.y_prob[mask]))
+                        subj_prob = self.y_prob[mask]
+                        prob_mask = np.isfinite(subj_prob) & np.isfinite(y_t)
+                        if np.sum(prob_mask) >= 2 and len(np.unique(y_t[prob_mask])) == 2:
+                            rec["auc"] = float(roc_auc_score(y_t[prob_mask], subj_prob[prob_mask]))
+                            rec["average_precision"] = float(
+                                average_precision_score(y_t[prob_mask], subj_prob[prob_mask])
+                            )
                     except Exception:
                         pass
                 self.per_subject_metrics[str(subj)] = rec
@@ -485,11 +499,19 @@ def decode_pain_binary(
     
     # Cross-validation predictions
     y_pred = np.zeros(len(y), dtype=int)
-    y_prob = np.zeros(len(y), dtype=float)
+    y_prob = np.full(len(y), np.nan, dtype=float)
     
     for train_idx, test_idx in cv_splits:
         X_train, X_test = X[train_idx], X[test_idx]
         y_train = y[train_idx]
+        groups_train = groups[train_idx] if groups is not None else None
+
+        X_train, X_test, _ = apply_fold_feature_harmonization(
+            X_train,
+            X_test,
+            groups_train if groups_train is not None else np.array(["all"] * len(X_train), dtype=object),
+            "intersection" if groups_train is not None else "union_impute",
+        )
         
         pipe_clone = clone(pipe)
         pipe_clone.fit(X_train, y_train)
@@ -501,8 +523,10 @@ def decode_pain_binary(
     return ClassificationResult(
         y_true=y,
         y_pred=y_pred,
-        y_prob=y_prob if np.any(y_prob) else None,
+        y_prob=y_prob if np.any(np.isfinite(y_prob)) else None,
         groups=groups,
+        failed_fold_count=0,
+        n_folds_total=int(len(cv_splits)),
     )
 
 
@@ -520,6 +544,7 @@ def nested_loso_classification(
     seed: int = 42,
     config: Any = None,
     logger: Any = None,
+    harmonization_mode: Optional[str] = None,
 ) -> Tuple[ClassificationResult, pd.DataFrame]:
     """
     Nested leave-one-subject-out classification with hyperparameter tuning.
@@ -572,23 +597,33 @@ def nested_loso_classification(
         raise ValueError(f"Unknown model: {model}")
     
     outer_cv = LeaveOneGroupOut()
+    outer_splits = list(outer_cv.split(X, y, groups))
     
     y_pred = np.zeros(len(y), dtype=int)
-    y_prob = np.zeros(len(y), dtype=float)
+    y_prob = np.full(len(y), np.nan, dtype=float)
     best_params_records = []
+    failed_fold_count = 0
+    n_folds_total = len(outer_splits)
     
-    for fold, (train_idx, test_idx) in enumerate(outer_cv.split(X, y, groups)):
+    for fold, (train_idx, test_idx) in enumerate(outer_splits):
         test_subject = groups[test_idx[0]]
         log.info(f"Fold {fold}: testing on subject {test_subject}")
         
         X_train, X_test = X[train_idx], X[test_idx]
         y_train = y[train_idx]
         train_groups = groups[train_idx]
+        X_train, X_test, _ = apply_fold_feature_harmonization(
+            X_train,
+            X_test,
+            train_groups,
+            harmonization_mode,
+        )
         
         # Skip if only one class in training
         if len(np.unique(y_train)) < 2:
             log.warning(f"Fold {fold}: only one class in training, skipping")
             y_pred[test_idx] = int(np.median(y_train))
+            failed_fold_count += 1
             continue
         
         # Inner CV: group-aware stratified CV to prevent within-subject mixing
@@ -633,17 +668,18 @@ def nested_loso_classification(
         except Exception as e:
             log.error(f"Fold {fold} failed: {e}")
             y_pred[test_idx] = int(np.median(y_train))
+            failed_fold_count += 1
     
     result = ClassificationResult(
         y_true=y,
         y_pred=y_pred,
-        y_prob=y_prob if np.any(y_prob) else None,
+        y_prob=y_prob if np.any(np.isfinite(y_prob)) else None,
         groups=groups,
+        failed_fold_count=int(failed_fold_count),
+        n_folds_total=int(n_folds_total),
     )
     
     best_params_df = pd.DataFrame(best_params_records) if best_params_records else pd.DataFrame()
     
     log.info(result.summary())
     return result, best_params_df
-
-

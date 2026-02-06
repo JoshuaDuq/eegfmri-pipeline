@@ -3,9 +3,10 @@ from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 
 import numpy as np
+import pandas as pd
 from scipy import ndimage
-from sklearn.model_selection import LeaveOneGroupOut
-from sklearn.linear_model import Ridge, RidgeCV
+from sklearn.model_selection import LeaveOneGroupOut, GroupKFold, GridSearchCV
+from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -26,10 +27,202 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     get_min_channels_required,
     safe_pearsonr,
 )
-from eeg_pipeline.utils.config.loader import load_config, get_fisher_z_clip_values
+from eeg_pipeline.utils.config.loader import load_config, get_fisher_z_clip_values, get_config_value
 from eeg_pipeline.infra.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _extract_trial_blocks_from_records(
+    trial_records: List[Tuple[str, int]],
+    subj_to_epochs: Dict[str, Any],
+) -> np.ndarray:
+    """Extract per-trial block/run labels aligned to trial_records."""
+    candidate_cols = ("block", "run_id", "run", "session", "run_num")
+    block_values = np.full(len(trial_records), np.nan, dtype=object)
+    block_series_by_subject: Dict[str, Optional[pd.Series]] = {}
+
+    for subject_id, epochs in subj_to_epochs.items():
+        metadata = getattr(epochs, "metadata", None)
+        if not isinstance(metadata, pd.DataFrame) or metadata.empty:
+            block_series_by_subject[str(subject_id)] = None
+            continue
+        col = next((c for c in candidate_cols if c in metadata.columns), None)
+        if col is None:
+            block_series_by_subject[str(subject_id)] = None
+            continue
+        block_series_by_subject[str(subject_id)] = metadata[col].reset_index(drop=True)
+
+    for i, (subject_id, trial_idx) in enumerate(trial_records):
+        series = block_series_by_subject.get(str(subject_id))
+        if series is None:
+            continue
+        idx = int(trial_idx)
+        if idx < 0 or idx >= len(series):
+            continue
+        val = series.iloc[idx]
+        block_values[i] = np.nan if pd.isna(val) else val
+
+    return block_values
+
+
+def _permute_labels_within_subject_structure(
+    y: np.ndarray,
+    groups: np.ndarray,
+    blocks: Optional[np.ndarray],
+    *,
+    rng: np.random.Generator,
+    scheme: str,
+) -> np.ndarray:
+    """Permute labels within subject or within subject×block."""
+    y_perm = np.asarray(y, dtype=float).copy()
+    groups_arr = np.asarray(groups, dtype=object)
+    blocks_arr = np.asarray(blocks, dtype=object) if blocks is not None else None
+    perm_scheme = str(scheme).strip().lower()
+    if perm_scheme not in {"within_subject", "within_subject_within_block"}:
+        perm_scheme = "within_subject_within_block"
+    if perm_scheme == "within_subject_within_block" and blocks_arr is None:
+        perm_scheme = "within_subject"
+
+    for subject_id in np.unique(groups_arr):
+        subject_mask = groups_arr == subject_id
+        if perm_scheme == "within_subject_within_block" and blocks_arr is not None:
+            for block_label in pd.unique(blocks_arr[subject_mask]):
+                if pd.isna(block_label):
+                    block_mask = subject_mask & pd.isna(blocks_arr)
+                else:
+                    block_mask = subject_mask & (blocks_arr == block_label)
+                if np.sum(block_mask) >= 2:
+                    y_perm[block_mask] = rng.permutation(y_perm[block_mask])
+        else:
+            y_perm[subject_mask] = rng.permutation(y_perm[subject_mask])
+    return y_perm
+
+
+def _aggregate_time_generalization_matrices(
+    stacked_r: np.ndarray,
+    stacked_r2: np.ndarray,
+    stacked_counts: np.ndarray,
+    config: Dict[str, Any],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Aggregate fold-level TG matrices using subject-first statistics."""
+    n_windows = stacked_r.shape[1]
+    tg_r = np.full((n_windows, n_windows), np.nan, dtype=float)
+    tg_r2 = np.full_like(tg_r, np.nan)
+    coverage_map = np.zeros_like(tg_r, dtype=int)
+    subject_coverage_map = np.zeros_like(tg_r, dtype=int)
+
+    min_subjects_per_cell = int(
+        get_config_value(config, "machine_learning.analysis.time_generalization.min_subjects_per_cell", 2)
+    )
+    min_count_per_cell = int(
+        get_config_value(config, "machine_learning.analysis.time_generalization.min_count_per_cell", 15)
+    )
+    clip_min, clip_max = get_fisher_z_clip_values(config)
+
+    for i in range(n_windows):
+        for j in range(n_windows):
+            cell_r = stacked_r[:, i, j]
+            cell_r2 = stacked_r2[:, i, j]
+            cell_counts = stacked_counts[:, i, j]
+
+            finite_mask = np.isfinite(cell_r) & np.isfinite(cell_r2) & (cell_counts > 0)
+            if not np.any(finite_mask):
+                continue
+
+            valid_r = cell_r[finite_mask]
+            valid_r2 = cell_r2[finite_mask]
+            valid_counts = cell_counts[finite_mask]
+            coverage_map[i, j] = int(valid_counts.sum())
+            subject_coverage_map[i, j] = int(np.sum(finite_mask))
+
+            # Subject-level reliability is primary: require minimum number of subjects first.
+            if subject_coverage_map[i, j] < min_subjects_per_cell:
+                continue
+            if coverage_map[i, j] < min_count_per_cell:
+                continue
+
+            r_clipped = np.clip(valid_r, clip_min, clip_max)
+            tg_r[i, j] = float(np.tanh(np.mean(np.arctanh(r_clipped))))
+            # Predeclared rule for R² aggregation: equal-subject weighting.
+            tg_r2[i, j] = float(np.mean(valid_r2))
+
+    tested_mask = np.isfinite(tg_r)
+    return tg_r, tg_r2, coverage_map, subject_coverage_map, tested_mask
+
+
+def _compute_time_generalization_significance(
+    *,
+    tg_r: np.ndarray,
+    null_r: np.ndarray,
+    config: Dict[str, Any],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute TG significance maps using only empirically tested cells."""
+    tested_mask = np.isfinite(tg_r)
+    p_matrix = np.full_like(tg_r, np.nan, dtype=float)
+    sig_fdr = np.zeros_like(tg_r, dtype=bool)
+    sig_maxstat = np.zeros_like(tg_r, dtype=bool)
+    sig_cluster = np.zeros_like(tg_r, dtype=bool)
+
+    if not isinstance(null_r, np.ndarray) or null_r.size == 0 or tg_r.size == 0 or not np.any(tested_mask):
+        return p_matrix, sig_fdr, sig_maxstat, sig_cluster, tested_mask
+
+    n_perm_valid = int(null_r.shape[0])
+
+    for i in range(tg_r.shape[0]):
+        for j in range(tg_r.shape[1]):
+            if not tested_mask[i, j]:
+                continue
+            null_vals = null_r[:, i, j]
+            finite_null = null_vals[np.isfinite(null_vals)]
+            if finite_null.size > 0:
+                p_matrix[i, j] = float(
+                    (np.sum(np.abs(finite_null) >= np.abs(tg_r[i, j])) + 1) / (finite_null.size + 1)
+                )
+
+    tested_p = p_matrix[tested_mask]
+    finite_p = np.isfinite(tested_p)
+    if np.any(finite_p):
+        reject = np.zeros_like(tested_p, dtype=bool)
+        _, p_fdr_valid, _, _ = multipletests(tested_p[finite_p], alpha=0.05, method="fdr_bh")
+        reject[finite_p] = p_fdr_valid < 0.05
+        sig_fdr[tested_mask] = reject
+
+    null_abs_masked = np.where(tested_mask[None, :, :], np.abs(null_r), np.nan)
+    null_max_abs = np.nanmax(null_abs_masked, axis=(1, 2))
+    finite_null_max = null_max_abs[np.isfinite(null_max_abs)]
+    max_stat_threshold = float(np.percentile(finite_null_max, 95)) if finite_null_max.size > 0 else np.inf
+    sig_maxstat = tested_mask & (np.abs(tg_r) >= max_stat_threshold)
+
+    cluster_alpha = float(
+        get_config_value(config, "machine_learning.analysis.time_generalization.cluster_threshold", 0.05)
+    )
+    null_tested_vals = null_r[:, tested_mask]
+    finite_null_abs = np.abs(null_tested_vals[np.isfinite(null_tested_vals)])
+    if finite_null_abs.size == 0:
+        cluster_stat_threshold = np.inf
+    else:
+        cluster_stat_threshold = float(np.percentile(finite_null_abs, 100.0 * (1.0 - cluster_alpha)))
+
+    uncorrected_sig = tested_mask & (np.abs(tg_r) >= cluster_stat_threshold)
+    labeled_clusters, n_clusters = ndimage.label(uncorrected_sig)
+    if n_clusters > 0:
+        observed_cluster_sizes = ndimage.sum(uncorrected_sig, labeled_clusters, range(1, n_clusters + 1))
+        null_max_clusters = np.zeros(n_perm_valid, dtype=float)
+        for perm_idx in range(n_perm_valid):
+            null_map = null_r[perm_idx]
+            null_sig = tested_mask & np.isfinite(null_map) & (np.abs(null_map) >= cluster_stat_threshold)
+            labeled_null, n_null_clusters = ndimage.label(null_sig)
+            if n_null_clusters > 0:
+                null_cluster_sizes = ndimage.sum(null_sig, labeled_null, range(1, n_null_clusters + 1))
+                null_max_clusters[perm_idx] = float(np.max(null_cluster_sizes))
+
+        cluster_size_threshold = float(np.percentile(null_max_clusters, 95)) if n_perm_valid > 0 else np.inf
+        for cluster_id in range(1, n_clusters + 1):
+            if observed_cluster_sizes[cluster_id - 1] >= cluster_size_threshold:
+                sig_cluster |= labeled_clusters == cluster_id
+
+    return p_matrix, sig_fdr, sig_maxstat, sig_cluster, tested_mask
 
 
 def _extract_window_features(
@@ -143,6 +336,7 @@ def time_generalization_regression(
     """
     tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
     trial_records, y_all_arr, groups_arr, subj_to_epochs, _ = prepare_trial_records_from_epochs(tuples)
+    trial_blocks_arr = _extract_trial_blocks_from_records(trial_records, subj_to_epochs)
 
     config = config_dict or load_config()
     min_subjects_for_loso = config.get("analysis.min_subjects_for_group", 2)
@@ -231,22 +425,41 @@ def time_generalization_regression(
                 train_feat_i_clean = train_feat_i_clean[:, col_mask]
                 imputer = SimpleImputer(strategy='mean')
                 train_feat_i_clean = imputer.fit_transform(train_feat_i_clean)
-                
+                groups_train_i = groups_arr[train_idx_f][finite_mask_train]
+                y_train_i = y_train[finite_mask_train]
+
                 use_ridgecv = config.get("machine_learning.analysis.time_generalization.use_ridgecv", False)
                 alpha_grid = config.get("machine_learning.analysis.time_generalization.alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0])
-                
-                if use_ridgecv and len(y_train[finite_mask_train]) >= 5:
-                    ridge_model = RidgeCV(alphas=alpha_grid, cv=min(5, len(y_train[finite_mask_train])))
-                else:
+
+                model = None
+                if use_ridgecv and len(y_train_i) >= 5:
+                    n_unique_groups = len(np.unique(groups_train_i))
+                    if n_unique_groups >= 2:
+                        try:
+                            n_splits_inner = min(5, n_unique_groups)
+                            inner_cv = GroupKFold(n_splits=n_splits_inner)
+                            grid = GridSearchCV(
+                                estimator=Pipeline([("scale", StandardScaler()), ("ridge", Ridge())]),
+                                param_grid={"ridge__alpha": alpha_grid},
+                                scoring="r2",
+                                cv=inner_cv,
+                                n_jobs=1,
+                                refit=True,
+                                error_score="raise",
+                            )
+                            grid.fit(train_feat_i_clean, y_train_i, groups=groups_train_i)
+                            model = grid.best_estimator_
+                        except Exception:
+                            model = None
+
+                if model is None:
                     default_alpha = config.get("machine_learning.analysis.time_generalization.default_alpha", 1.0)
-                    ridge_model = Ridge(alpha=default_alpha)
-                
-                model = Pipeline([("scale", StandardScaler()), ("ridge", ridge_model)])
-                try:
-                    model.fit(train_feat_i_clean, y_train[finite_mask_train])
-                except Exception:
-                    continue
-                
+                    model = Pipeline([("scale", StandardScaler()), ("ridge", Ridge(alpha=default_alpha))])
+                    try:
+                        model.fit(train_feat_i_clean, y_train_i)
+                    except Exception:
+                        continue
+
                 for j in range(n_windows):
                     test_feat_j = test_feats[:, j, :]
                     finite_mask_test = np.isfinite(test_feat_j).any(axis=1)
@@ -307,161 +520,81 @@ def time_generalization_regression(
         stacked_r = np.stack(fold_mats_r, axis=0)
         stacked_r2 = np.stack(fold_mats_r2, axis=0)
         stacked_counts = np.stack(fold_counts, axis=0)
-        
-        n_windows = stacked_r.shape[1]
-        tg_r = np.full((n_windows, n_windows), np.nan, dtype=float)
-        tg_r2 = np.full_like(tg_r, np.nan)
-        coverage_map = np.zeros_like(tg_r, dtype=int)
-        
-        min_count_per_cell = config.get(
-            "machine_learning.analysis.time_generalization.min_count_per_cell", 15
+        tg_r, tg_r2, coverage_map, subject_coverage_map, _tested_mask = _aggregate_time_generalization_matrices(
+            stacked_r,
+            stacked_r2,
+            stacked_counts,
+            config,
         )
-        
-        for i in range(n_windows):
-            for j in range(n_windows):
-                cell_r = stacked_r[:, i, j]
-                cell_r2 = stacked_r2[:, i, j]
-                cell_counts = stacked_counts[:, i, j]
-                
-                finite_mask = np.isfinite(cell_r) & np.isfinite(cell_r2) & (cell_counts > 0)
-                
-                if not np.any(finite_mask):
-                    continue
-                
-                valid_r = cell_r[finite_mask]
-                valid_r2 = cell_r2[finite_mask]
-                valid_counts = cell_counts[finite_mask]
-                total_count = valid_counts.sum()
-                
-                coverage_map[i, j] = total_count
-                
-                if total_count < min_count_per_cell:
-                    continue
-                
-                clip_min, clip_max = get_fisher_z_clip_values(config)
-                r_clipped = np.clip(valid_r, clip_min, clip_max)
-                r_z = np.arctanh(r_clipped)
-                fisher_weights = np.maximum(valid_counts - 3.0, 1.0)
-                fisher_weights = fisher_weights / fisher_weights.sum()
-                weighted_z_mean = np.average(r_z, weights=fisher_weights)
-                tg_r[i, j] = np.tanh(weighted_z_mean)
-                
-                tg_r2[i, j] = np.average(valid_r2, weights=fisher_weights)
-        
-        return tg_r, tg_r2, window_centers_out if window_centers_out is not None else np.array([]), coverage_map
-    
-    tg_r, tg_r2, window_centers_out, coverage_map = _run_time_gen(y_all_arr)
 
-    null_r = []
-    null_r2 = []
+        return (
+            tg_r,
+            tg_r2,
+            window_centers_out if window_centers_out is not None else np.array([]),
+            coverage_map,
+            subject_coverage_map,
+        )
+    
+    tg_r, tg_r2, window_centers_out, coverage_map, subject_coverage_map = _run_time_gen(y_all_arr)
+
+    null_r_list: List[np.ndarray] = []
+    null_r2_list: List[np.ndarray] = []
     if n_perm > 0 and len(tg_r) > 0:
         rng = np.random.default_rng(seed)
         expected_shape = tg_r.shape
+        perm_scheme = str(
+            get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject_within_block")
+        ).strip().lower()
+        if perm_scheme not in {"within_subject", "within_subject_within_block"}:
+            perm_scheme = "within_subject_within_block"
+
+        if perm_scheme == "within_subject_within_block" and np.all(pd.isna(trial_blocks_arr)):
+            logger.warning(
+                "Time-generalization permutation requested subject×block shuffling but no block labels were found; "
+                "falling back to within-subject permutation."
+            )
+            perm_scheme = "within_subject"
+
         for perm_idx in range(n_perm):
-            y_perm = y_all_arr.copy()
-            for subject_id in np.unique(groups_arr):
-                subject_mask = groups_arr == subject_id
-                subject_indices = np.where(subject_mask)[0]
-                y_perm[subject_indices] = rng.permutation(y_perm[subject_indices])
-            tg_r_perm, tg_r2_perm, _, _ = _run_time_gen(y_perm)
+            y_perm = _permute_labels_within_subject_structure(
+                y_all_arr,
+                groups_arr,
+                trial_blocks_arr if perm_scheme == "within_subject_within_block" else None,
+                rng=rng,
+                scheme=perm_scheme,
+            )
+            tg_r_perm, tg_r2_perm, _, _, _ = _run_time_gen(y_perm)
             if tg_r_perm.size > 0 and tg_r_perm.shape == expected_shape:
-                null_r.append(tg_r_perm)
-                null_r2.append(tg_r2_perm)
+                null_r_list.append(tg_r_perm)
+                null_r2_list.append(tg_r2_perm)
             else:
                 logger.warning(
                     f"Permutation {perm_idx + 1}/{n_perm}: Empty or shape-mismatched output "
                     f"(shape={tg_r_perm.shape}, expected={expected_shape}). Skipping."
                 )
-        
-        if len(null_r) == 0:
-            logger.error(
-                f"All {n_perm} permutations produced empty or invalid outputs. "
-                "Cannot compute null distribution for time-generalization."
+        n_perm_valid = len(null_r_list)
+        completion_rate = (n_perm_valid / int(n_perm)) if int(n_perm) > 0 else 0.0
+        min_completion = float(
+            get_config_value(config, "machine_learning.analysis.time_generalization.min_valid_permutation_fraction", 0.8)
+        )
+        if int(n_perm) > 0 and completion_rate < min_completion:
+            raise RuntimeError(
+                f"Insufficient valid time-generalization permutations ({n_perm_valid}/{int(n_perm)}, "
+                f"rate={completion_rate:.3f} < required {min_completion:.3f})"
             )
-            null_r = np.array([])
-            null_r2 = np.array([])
-        elif len(null_r) < n_perm:
-            logger.warning(
-                f"Only {len(null_r)}/{n_perm} permutations produced valid outputs. "
-                "Null distribution may be unreliable."
-            )
-            null_r = np.stack(null_r, axis=0)
-            null_r2 = np.stack(null_r2, axis=0)
-        else:
-            null_r = np.stack(null_r, axis=0)
-            null_r2 = np.stack(null_r2, axis=0)
+    null_r = np.stack(null_r_list, axis=0) if null_r_list else np.array([])
+    null_r2 = np.stack(null_r2_list, axis=0) if null_r2_list else np.array([])
 
-    # Compute cell-wise p-values and apply multiple comparison corrections
-    p_matrix = np.ones_like(tg_r)
-    sig_fdr = np.zeros_like(tg_r, dtype=bool)
-    sig_maxstat = np.zeros_like(tg_r, dtype=bool)
-    sig_cluster = np.zeros_like(tg_r, dtype=bool)
-    
-    if isinstance(null_r, np.ndarray) and null_r.size > 0 and tg_r.size > 0:
-        n_perm_valid = null_r.shape[0]
-        
-        for i in range(tg_r.shape[0]):
-            for j in range(tg_r.shape[1]):
-                if np.isfinite(tg_r[i, j]):
-                    null_vals = null_r[:, i, j]
-                    finite_null = null_vals[np.isfinite(null_vals)]
-                    if len(finite_null) > 0:
-                        p_matrix[i, j] = (np.sum(np.abs(finite_null) >= np.abs(tg_r[i, j])) + 1) / (len(finite_null) + 1)
-        
-        p_flat = p_matrix.flatten()
-        valid_mask = np.isfinite(p_flat) & (p_flat < 1.0)
-        if valid_mask.sum() > 0:
-            reject_flat = np.zeros(len(p_flat), dtype=bool)
-            _, p_fdr_valid, _, _ = multipletests(p_flat[valid_mask], alpha=0.05, method="fdr_bh")
-            reject_flat[valid_mask] = p_fdr_valid < 0.05
-            sig_fdr = reject_flat.reshape(tg_r.shape)
-            
-            n_sig = sig_fdr.sum()
-            n_tests = valid_mask.sum()
-            logger.info(f"Time-generalization FDR: {n_sig}/{n_tests} significant cells")
-        
-        null_max_abs = np.nanmax(np.abs(null_r), axis=(1, 2))
-        empirical_max_abs = np.abs(tg_r)
-        max_stat_threshold = np.percentile(null_max_abs[np.isfinite(null_max_abs)], 95) if np.any(np.isfinite(null_max_abs)) else np.inf
-        sig_maxstat = (empirical_max_abs >= max_stat_threshold) & np.isfinite(tg_r)
-        n_sig_maxstat = sig_maxstat.sum()
-        logger.info(f"Time-generalization max-stat (FWER): {n_sig_maxstat}/{valid_mask.sum()} significant cells (threshold={max_stat_threshold:.3f})")
-        
-        cluster_threshold = config.get("machine_learning.analysis.time_generalization.cluster_threshold", 0.05)
-        uncorrected_sig = p_matrix < cluster_threshold
-        labeled_clusters, n_clusters = ndimage.label(uncorrected_sig)
-        
-        if n_clusters > 0:
-            observed_cluster_sizes = ndimage.sum(uncorrected_sig, labeled_clusters, range(1, n_clusters + 1))
-            null_max_clusters = []
-            for perm_idx in range(n_perm_valid):
-                null_p_perm = np.ones_like(tg_r)
-                for i in range(tg_r.shape[0]):
-                    for j in range(tg_r.shape[1]):
-                        if np.isfinite(null_r[perm_idx, i, j]):
-                            other_perms = np.delete(null_r[:, i, j], perm_idx)
-                            finite_other = other_perms[np.isfinite(other_perms)]
-                            if len(finite_other) > 0:
-                                null_p_perm[i, j] = (np.sum(np.abs(finite_other) >= np.abs(null_r[perm_idx, i, j])) + 1) / (len(finite_other) + 1)
-                
-                null_sig = null_p_perm < cluster_threshold
-                labeled_null, n_null_clusters = ndimage.label(null_sig)
-                if n_null_clusters > 0:
-                    null_cluster_sizes = ndimage.sum(null_sig, labeled_null, range(1, n_null_clusters + 1))
-                    null_max_clusters.append(np.max(null_cluster_sizes) if len(null_cluster_sizes) > 0 else 0)
-                else:
-                    null_max_clusters.append(0)
-            
-            null_max_clusters = np.array(null_max_clusters)
-            cluster_size_threshold = np.percentile(null_max_clusters, 95) if len(null_max_clusters) > 0 else np.inf
-            
-            for cluster_id in range(1, n_clusters + 1):
-                cluster_size = observed_cluster_sizes[cluster_id - 1]
-                if cluster_size >= cluster_size_threshold:
-                    sig_cluster |= (labeled_clusters == cluster_id)
-            
-            n_sig_cluster = sig_cluster.sum()
-            logger.info(f"Time-generalization cluster (FWER): {n_sig_cluster}/{valid_mask.sum()} significant cells (min cluster size={cluster_size_threshold:.0f})")
+    p_matrix, sig_fdr, sig_maxstat, sig_cluster, tested_mask = _compute_time_generalization_significance(
+        tg_r=tg_r,
+        null_r=null_r,
+        config=config,
+    )
+    n_tested = int(np.sum(tested_mask))
+    if n_tested > 0:
+        logger.info("Time-generalization FDR: %d/%d significant cells", int(np.sum(sig_fdr)), n_tested)
+        logger.info("Time-generalization max-stat (FWER): %d/%d significant cells", int(np.sum(sig_maxstat)), n_tested)
+        logger.info("Time-generalization cluster (FWER): %d/%d significant cells", int(np.sum(sig_cluster)), n_tested)
 
     if results_dir is not None:
         try:
@@ -472,6 +605,8 @@ def time_generalization_regression(
                 r2_matrix=tg_r2,
                 window_centers=window_centers_out,
                 coverage_map=coverage_map,
+                subject_coverage_map=subject_coverage_map,
+                tested_mask=tested_mask,
                 null_r=null_r,
                 null_r2=null_r2,
                 p_matrix=p_matrix,

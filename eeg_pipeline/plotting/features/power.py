@@ -1576,10 +1576,10 @@ def plot_band_power_topomaps(
     sample_unit: str = "trials",
     label_suffix: Optional[str] = None,
 ) -> None:
-    """Band power topomaps showing spatial distribution per frequency band, one plot per ROI.
+    """Band power topomaps showing spatial distribution per frequency band.
     
-    Creates MNE topomaps for each frequency band. Supports condition-based filtering.
-    Creates one plot per ROI specified in the TUI.
+    Creates MNE topomaps for each frequency band for a single segment.
+    Supports condition-based filtering and optional column-based contrasts.
     
     Args:
         segment: Time window segment name (required, no fallback).
@@ -1628,7 +1628,7 @@ def plot_band_power_topomaps(
         mask1, mask2, label1, label2 = comp_mask_info
         conditions = [(label1, mask1), (label2, mask2)]
     
-    _plot_band_power_topomaps_for_roi(
+    _plot_band_power_topomaps_single_segment(
         pow_df,
         epochs_info,
         bands,
@@ -1643,9 +1643,9 @@ def plot_band_power_topomaps(
         sample_unit,
         label_suffix,
     )
-
-
-def _plot_band_power_topomaps_for_roi(
+    
+    
+def _plot_band_power_topomaps_single_segment(
     pow_df: pd.DataFrame,
     epochs_info: mne.Info,
     bands: List[str],
