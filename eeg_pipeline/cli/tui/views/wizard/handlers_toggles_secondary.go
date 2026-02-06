@@ -1,0 +1,793 @@
+package wizard
+
+import (
+	"strings"
+)
+
+func (m *Model) toggleMLAdvancedOption() {
+	if m.expandedOption >= 0 {
+		m.handleExpandedListToggle()
+		return
+	}
+
+	options := m.getMLOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed, optRfNEstimators, optMLBinaryThreshold, optMLUncertaintyAlpha, optMLPermNRepeats:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMLTarget:
+		if len(m.GetAvailableColumns()) > 0 {
+			m.expandedOption = expandedMLTargetColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldMLTarget)
+		}
+		m.useDefaultAdvanced = false
+	case optMLFmriSigGroup:
+		m.mlFmriSigGroupExpanded = !m.mlFmriSigGroupExpanded
+		m.useDefaultAdvanced = false
+	case optMLFmriSigMethod:
+		m.mlFmriSigMethodIndex = (m.mlFmriSigMethodIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optMLFmriSigContrastName:
+		m.startTextEdit(textFieldMLFmriSigContrastName)
+		m.useDefaultAdvanced = false
+	case optMLFmriSigSignature:
+		m.mlFmriSigSignatureIndex = (m.mlFmriSigSignatureIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optMLFmriSigMetric:
+		m.mlFmriSigMetricIndex = (m.mlFmriSigMetricIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optMLFmriSigNormalization:
+		m.mlFmriSigNormalizationIndex = (m.mlFmriSigNormalizationIndex + 1) % 5
+		m.useDefaultAdvanced = false
+	case optMLFmriSigRoundDecimals:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMLRegressionModel:
+		m.mlRegressionModel = m.mlRegressionModel.Next()
+		m.useDefaultAdvanced = false
+	case optMLClassificationModel:
+		m.mlClassificationModel = m.mlClassificationModel.Next()
+		m.useDefaultAdvanced = false
+	case optMLBinaryThresholdEnabled:
+		m.mlBinaryThresholdEnabled = !m.mlBinaryThresholdEnabled
+		m.useDefaultAdvanced = false
+	case optMLFeatureFamilies:
+		m.startTextEdit(textFieldMLFeatureFamilies)
+		m.useDefaultAdvanced = false
+	case optMLFeatureBands:
+		m.startTextEdit(textFieldMLFeatureBands)
+		m.useDefaultAdvanced = false
+	case optMLFeatureSegments:
+		m.startTextEdit(textFieldMLFeatureSegments)
+		m.useDefaultAdvanced = false
+	case optMLFeatureScopes:
+		m.startTextEdit(textFieldMLFeatureScopes)
+		m.useDefaultAdvanced = false
+	case optMLFeatureStats:
+		m.startTextEdit(textFieldMLFeatureStats)
+		m.useDefaultAdvanced = false
+	case optMLFeatureHarmonization:
+		m.mlFeatureHarmonization = m.mlFeatureHarmonization.Next()
+		m.useDefaultAdvanced = false
+	case optMLCovariates:
+		m.startTextEdit(textFieldMLCovariates)
+		m.useDefaultAdvanced = false
+	case optMLBaselinePredictors:
+		m.startTextEdit(textFieldMLBaselinePredictors)
+		m.useDefaultAdvanced = false
+	case optMLRequireTrialMlSafe:
+		m.mlRequireTrialMlSafe = !m.mlRequireTrialMlSafe
+		m.useDefaultAdvanced = false
+	case optElasticNetAlphaGrid:
+		m.startTextEdit(textFieldElasticNetAlphaGrid)
+		m.useDefaultAdvanced = false
+	case optElasticNetL1RatioGrid:
+		m.startTextEdit(textFieldElasticNetL1RatioGrid)
+		m.useDefaultAdvanced = false
+	case optRidgeAlphaGrid:
+		m.startTextEdit(textFieldRidgeAlphaGrid)
+		m.useDefaultAdvanced = false
+	case optRfMaxDepthGrid:
+		m.startTextEdit(textFieldRfMaxDepthGrid)
+		m.useDefaultAdvanced = false
+	case optVarianceThresholdGrid:
+		m.startTextEdit(textFieldVarianceThresholdGrid)
+		m.useDefaultAdvanced = false
+	}
+}
+
+func (m *Model) togglePreprocessingAdvancedOption() {
+	options := m.getPreprocessingOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	// Group expansion toggles
+	case optPrepGroupStages:
+		m.prepGroupStagesExpanded = !m.prepGroupStagesExpanded
+	case optPrepGroupGeneral:
+		m.prepGroupGeneralExpanded = !m.prepGroupGeneralExpanded
+	case optPrepGroupFiltering:
+		m.prepGroupFilteringExpanded = !m.prepGroupFilteringExpanded
+	case optPrepGroupPyprep:
+		m.prepGroupPyprepExpanded = !m.prepGroupPyprepExpanded
+	case optPrepGroupICA:
+		m.prepGroupICAExpanded = !m.prepGroupICAExpanded
+	case optPrepGroupEpoching:
+		m.prepGroupEpochingExpanded = !m.prepGroupEpochingExpanded
+	// Stage toggles
+	case optPrepStageBadChannels:
+		m.prepStageSelected[0] = !m.prepStageSelected[0]
+		m.useDefaultAdvanced = false
+	case optPrepStageFiltering:
+		m.prepStageSelected[1] = !m.prepStageSelected[1]
+		m.useDefaultAdvanced = false
+	case optPrepStageICA:
+		m.prepStageSelected[2] = !m.prepStageSelected[2]
+		m.useDefaultAdvanced = false
+	case optPrepStageEpoching:
+		m.prepStageSelected[3] = !m.prepStageSelected[3]
+		m.useDefaultAdvanced = false
+	case optPrepUsePyprep:
+		m.prepUsePyprep = !m.prepUsePyprep
+		m.useDefaultAdvanced = false
+	case optPrepUseIcalabel:
+		m.prepUseIcalabel = !m.prepUseIcalabel
+		m.useDefaultAdvanced = false
+	case optPrepMontage:
+		m.startTextEdit(textFieldPrepMontage)
+		m.useDefaultAdvanced = false
+	case optPrepChTypes:
+		m.startTextEdit(textFieldPrepChTypes)
+		m.useDefaultAdvanced = false
+	case optPrepEegReference:
+		m.startTextEdit(textFieldPrepEegReference)
+		m.useDefaultAdvanced = false
+	case optPrepEogChannels:
+		m.startTextEdit(textFieldPrepEogChannels)
+		m.useDefaultAdvanced = false
+	case optPrepRandomState:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPrepTaskIsRest:
+		m.prepTaskIsRest = !m.prepTaskIsRest
+		m.useDefaultAdvanced = false
+	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq, optPrepZaplineFline, optPrepICAComp, optPrepICALFreq, optPrepICARejThresh, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsBaseline, optPrepEpochsReject:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPrepFindBreaks:
+		m.prepFindBreaks = !m.prepFindBreaks
+		m.useDefaultAdvanced = false
+	case optPrepRansac:
+		m.prepRansac = !m.prepRansac
+		m.useDefaultAdvanced = false
+	case optPrepRepeats, optPrepBreaksMinLength, optPrepTStartAfterPrevious, optPrepTStopBeforeNext:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPrepAverageReref:
+		m.prepAverageReref = !m.prepAverageReref
+		m.useDefaultAdvanced = false
+	case optPrepFileExtension:
+		m.startTextEdit(textFieldPrepFileExtension)
+		m.useDefaultAdvanced = false
+	case optPrepConsiderPreviousBads:
+		m.prepConsiderPreviousBads = !m.prepConsiderPreviousBads
+		m.useDefaultAdvanced = false
+	case optPrepOverwriteChansTsv:
+		m.prepOverwriteChansTsv = !m.prepOverwriteChansTsv
+		m.useDefaultAdvanced = false
+	case optPrepDeleteBreaks:
+		m.prepDeleteBreaks = !m.prepDeleteBreaks
+		m.useDefaultAdvanced = false
+	case optPrepRenameAnotDict:
+		m.startTextEdit(textFieldPrepRenameAnotDict)
+		m.useDefaultAdvanced = false
+	case optPrepCustomBadDict:
+		m.startTextEdit(textFieldPrepCustomBadDict)
+		m.useDefaultAdvanced = false
+	case optPrepSpatialFilter:
+		m.prepSpatialFilter = (m.prepSpatialFilter + 1) % 2
+		m.useDefaultAdvanced = false
+	case optPrepICAAlgorithm:
+		m.prepICAAlgorithm = (m.prepICAAlgorithm + 1) % 4
+		m.useDefaultAdvanced = false
+	case optPrepKeepMnebidsBads:
+		m.prepKeepMnebidsBads = !m.prepKeepMnebidsBads
+		m.useDefaultAdvanced = false
+	case optIcaLabelsToKeep:
+		m.startTextEdit(textFieldIcaLabelsToKeep)
+		m.useDefaultAdvanced = false
+	case optPrepEpochsNoBaseline:
+		m.prepEpochsNoBaseline = !m.prepEpochsNoBaseline
+		m.useDefaultAdvanced = false
+	case optPrepConditions:
+		m.startTextEdit(textFieldPrepConditions)
+		m.useDefaultAdvanced = false
+	case optPrepRejectMethod:
+		m.prepRejectMethod = (m.prepRejectMethod + 1) % 3
+		m.useDefaultAdvanced = false
+	case optPrepRunSourceEstimation:
+		m.prepRunSourceEstimation = !m.prepRunSourceEstimation
+	case optPrepWriteCleanEvents:
+		m.prepWriteCleanEvents = !m.prepWriteCleanEvents
+	case optPrepOverwriteCleanEvents:
+		m.prepOverwriteCleanEvents = !m.prepOverwriteCleanEvents
+	case optPrepCleanEventsStrict:
+		m.prepCleanEventsStrict = !m.prepCleanEventsStrict
+		m.useDefaultAdvanced = false
+	}
+
+	// Clamp cursor after expand/collapse changes
+	options = m.getPreprocessingOptions()
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
+	}
+	m.UpdateAdvancedOffset()
+}
+
+func (m *Model) toggleFmriAdvancedOption() {
+	options := m.getFmriPreprocessingOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+
+	// Group expansion toggles
+	case optFmriGroupRuntime:
+		m.fmriGroupRuntimeExpanded = !m.fmriGroupRuntimeExpanded
+	case optFmriGroupOutput:
+		m.fmriGroupOutputExpanded = !m.fmriGroupOutputExpanded
+	case optFmriGroupPerformance:
+		m.fmriGroupPerformanceExpanded = !m.fmriGroupPerformanceExpanded
+	case optFmriGroupAnatomical:
+		m.fmriGroupAnatomicalExpanded = !m.fmriGroupAnatomicalExpanded
+	case optFmriGroupBold:
+		m.fmriGroupBoldExpanded = !m.fmriGroupBoldExpanded
+	case optFmriGroupQc:
+		m.fmriGroupQcExpanded = !m.fmriGroupQcExpanded
+	case optFmriGroupDenoising:
+		m.fmriGroupDenoisingExpanded = !m.fmriGroupDenoisingExpanded
+	case optFmriGroupSurface:
+		m.fmriGroupSurfaceExpanded = !m.fmriGroupSurfaceExpanded
+	case optFmriGroupMultiecho:
+		m.fmriGroupMultiechoExpanded = !m.fmriGroupMultiechoExpanded
+	case optFmriGroupRepro:
+		m.fmriGroupReproExpanded = !m.fmriGroupReproExpanded
+	case optFmriGroupValidation:
+		m.fmriGroupValidationExpanded = !m.fmriGroupValidationExpanded
+	case optFmriGroupAdvanced:
+		m.fmriGroupAdvancedExpanded = !m.fmriGroupAdvancedExpanded
+
+	// Runtime
+	case optFmriEngine:
+		m.fmriEngineIndex = (m.fmriEngineIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriFmriprepImage:
+		m.startTextEdit(textFieldFmriFmriprepImage)
+		m.useDefaultAdvanced = false
+
+	// Output
+	case optFmriOutputSpaces:
+		m.startTextEdit(textFieldFmriOutputSpaces)
+		m.useDefaultAdvanced = false
+	case optFmriIgnore:
+		m.startTextEdit(textFieldFmriIgnore)
+		m.useDefaultAdvanced = false
+	case optFmriLevel:
+		m.fmriLevelIndex = (m.fmriLevelIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriCiftiOutput:
+		m.fmriCiftiOutputIndex = (m.fmriCiftiOutputIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriTaskId:
+		m.startTextEdit(textFieldFmriTaskId)
+		m.useDefaultAdvanced = false
+
+	// Performance
+	case optFmriNThreads:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriOmpNThreads:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriMemMb:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriLowMem:
+		m.fmriLowMem = !m.fmriLowMem
+		m.useDefaultAdvanced = false
+
+	// Anatomical
+	case optFmriSkipReconstruction:
+		m.fmriSkipReconstruction = !m.fmriSkipReconstruction
+		m.useDefaultAdvanced = false
+	case optFmriLongitudinal:
+		m.fmriLongitudinal = !m.fmriLongitudinal
+		m.useDefaultAdvanced = false
+	case optFmriSkullStripTemplate:
+		m.startTextEdit(textFieldFmriSkullStripTemplate)
+		m.useDefaultAdvanced = false
+	case optFmriSkullStripFixedSeed:
+		m.fmriSkullStripFixedSeed = !m.fmriSkullStripFixedSeed
+		m.useDefaultAdvanced = false
+
+	// BOLD processing
+	case optFmriBold2T1wInit:
+		m.fmriBold2T1wInitIndex = (m.fmriBold2T1wInitIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriBold2T1wDof:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriSliceTimeRef:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriDummyScans:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Quality control
+	case optFmriFdSpikeThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriDvarsSpikeThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Denoising
+	case optFmriUseAroma:
+		m.fmriUseAroma = !m.fmriUseAroma
+		m.useDefaultAdvanced = false
+
+	// Surface
+	case optFmriMedialSurfaceNan:
+		m.fmriMedialSurfaceNan = !m.fmriMedialSurfaceNan
+		m.useDefaultAdvanced = false
+	case optFmriNoMsm:
+		m.fmriNoMsm = !m.fmriNoMsm
+		m.useDefaultAdvanced = false
+
+	// Multi-echo
+	case optFmriMeOutputEchos:
+		m.fmriMeOutputEchos = !m.fmriMeOutputEchos
+		m.useDefaultAdvanced = false
+
+	// Reproducibility
+	case optFmriRandomSeed:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Validation
+	case optFmriSkipBidsValidation:
+		m.fmriSkipBidsValidation = !m.fmriSkipBidsValidation
+		m.useDefaultAdvanced = false
+	case optFmriStopOnFirstCrash:
+		m.fmriStopOnFirstCrash = !m.fmriStopOnFirstCrash
+		m.useDefaultAdvanced = false
+	case optFmriCleanWorkdir:
+		m.fmriCleanWorkdir = !m.fmriCleanWorkdir
+		m.useDefaultAdvanced = false
+
+	// Advanced
+	case optFmriExtraArgs:
+		m.startTextEdit(textFieldFmriExtraArgs)
+		m.useDefaultAdvanced = false
+	}
+
+	// Clamp cursor after expand/collapse changes
+	options = m.getFmriPreprocessingOptions()
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
+	}
+	m.UpdateAdvancedOffset()
+}
+
+func (m *Model) toggleFmriAnalysisAdvancedOption() {
+	if m.expandedOption >= 0 {
+		m.handleExpandedListToggle()
+		return
+	}
+
+	options := m.getFmriAnalysisOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+
+	// Group headers
+	case optFmriAnalysisGroupInput:
+		m.fmriAnalysisGroupInputExpanded = !m.fmriAnalysisGroupInputExpanded
+	case optFmriAnalysisGroupContrast:
+		m.fmriAnalysisGroupContrastExpanded = !m.fmriAnalysisGroupContrastExpanded
+	case optFmriAnalysisGroupGLM:
+		m.fmriAnalysisGroupGLMExpanded = !m.fmriAnalysisGroupGLMExpanded
+	case optFmriAnalysisGroupConfounds:
+		m.fmriAnalysisGroupConfoundsExpanded = !m.fmriAnalysisGroupConfoundsExpanded
+	case optFmriAnalysisGroupOutput:
+		m.fmriAnalysisGroupOutputExpanded = !m.fmriAnalysisGroupOutputExpanded
+	case optFmriAnalysisGroupPlotting:
+		m.fmriAnalysisGroupPlottingExpanded = !m.fmriAnalysisGroupPlottingExpanded
+	case optFmriTrialSigGroup:
+		m.fmriTrialSigGroupExpanded = !m.fmriTrialSigGroupExpanded
+
+	// Input
+	case optFmriAnalysisInputSource:
+		m.fmriAnalysisInputSourceIndex = (m.fmriAnalysisInputSourceIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisFmriprepSpace:
+		m.startTextEdit(textFieldFmriAnalysisFmriprepSpace)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisRequireFmriprep:
+		m.fmriAnalysisRequireFmriprep = !m.fmriAnalysisRequireFmriprep
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisRuns:
+		m.startTextEdit(textFieldFmriAnalysisRuns)
+		m.useDefaultAdvanced = false
+
+	// Contrast
+	case optFmriAnalysisContrastType:
+		m.fmriAnalysisContrastType = (m.fmriAnalysisContrastType + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisCondAColumn:
+		m.expandedOption = expandedFmriAnalysisCondAColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisCondAValue:
+		if m.fmriAnalysisCondAColumn == "" {
+			m.ShowToast("Select a column first", "warning")
+			return
+		}
+		m.expandedOption = expandedFmriAnalysisCondAValue
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisCondBColumn:
+		m.expandedOption = expandedFmriAnalysisCondBColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisCondBValue:
+		if m.fmriAnalysisCondBColumn == "" {
+			m.ShowToast("Select a column first", "warning")
+			return
+		}
+		m.expandedOption = expandedFmriAnalysisCondBValue
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisContrastName:
+		m.startTextEdit(textFieldFmriAnalysisContrastName)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisFormula:
+		m.startTextEdit(textFieldFmriAnalysisFormula)
+		m.useDefaultAdvanced = false
+
+	// GLM
+	case optFmriAnalysisHrfModel:
+		m.fmriAnalysisHrfModel = (m.fmriAnalysisHrfModel + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisDriftModel:
+		m.fmriAnalysisDriftModel = (m.fmriAnalysisDriftModel + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisHighPassHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisLowPassHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisSmoothingFwhm:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Confounds / QC
+	case optFmriAnalysisEventsToModel:
+		m.startTextEdit(textFieldFmriAnalysisEventsToModel)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisStimPhasesToModel:
+		m.expandedOption = expandedFmriAnalysisStimPhases
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisConfoundsStrategy:
+		m.fmriAnalysisConfoundsStrategy = (m.fmriAnalysisConfoundsStrategy + 1) % 7
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisWriteDesignMatrix:
+		m.fmriAnalysisWriteDesignMatrix = !m.fmriAnalysisWriteDesignMatrix
+		m.useDefaultAdvanced = false
+
+	// Output
+	case optFmriAnalysisOutputType:
+		m.fmriAnalysisOutputType = (m.fmriAnalysisOutputType + 1) % 4
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisOutputDir:
+		m.startTextEdit(textFieldFmriAnalysisOutputDir)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisResampleToFS:
+		m.fmriAnalysisResampleToFS = !m.fmriAnalysisResampleToFS
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisFreesurferDir:
+		m.startTextEdit(textFieldFmriAnalysisFreesurferDir)
+		m.useDefaultAdvanced = false
+
+	// Plotting / Report
+	case optFmriAnalysisPlotsEnabled:
+		m.fmriAnalysisPlotsEnabled = !m.fmriAnalysisPlotsEnabled
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotHTML:
+		m.fmriAnalysisPlotHTML = !m.fmriAnalysisPlotHTML
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotSpace:
+		m.fmriAnalysisPlotSpaceIndex = (m.fmriAnalysisPlotSpaceIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotThresholdMode:
+		m.fmriAnalysisPlotThresholdModeIndex = (m.fmriAnalysisPlotThresholdModeIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotZThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotFdrQ:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotClusterMinVoxels:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotVmaxMode:
+		m.fmriAnalysisPlotVmaxModeIndex = (m.fmriAnalysisPlotVmaxModeIndex + 1) % 3
+		if m.fmriAnalysisPlotVmaxModeIndex%3 == 2 && m.fmriAnalysisPlotVmaxManual <= 0 {
+			m.fmriAnalysisPlotVmaxManual = 5.0
+		}
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotVmaxManual:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotIncludeUnthresholded:
+		m.fmriAnalysisPlotIncludeUnthresholded = !m.fmriAnalysisPlotIncludeUnthresholded
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotFormatPNG:
+		next := !m.fmriAnalysisPlotFormatPNG
+		if !next && !m.fmriAnalysisPlotFormatSVG {
+			m.ShowToast("At least one format is required (PNG/SVG)", "warning")
+			return
+		}
+		m.fmriAnalysisPlotFormatPNG = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotFormatSVG:
+		next := !m.fmriAnalysisPlotFormatSVG
+		if !next && !m.fmriAnalysisPlotFormatPNG {
+			m.ShowToast("At least one format is required (PNG/SVG)", "warning")
+			return
+		}
+		m.fmriAnalysisPlotFormatSVG = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTypeSlices:
+		next := !m.fmriAnalysisPlotTypeSlices
+		if !next && !(m.fmriAnalysisPlotTypeGlass || m.fmriAnalysisPlotTypeHist || m.fmriAnalysisPlotTypeClusters) {
+			m.ShowToast("Select at least one plot type", "warning")
+			return
+		}
+		m.fmriAnalysisPlotTypeSlices = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTypeGlass:
+		next := !m.fmriAnalysisPlotTypeGlass
+		if !next && !(m.fmriAnalysisPlotTypeSlices || m.fmriAnalysisPlotTypeHist || m.fmriAnalysisPlotTypeClusters) {
+			m.ShowToast("Select at least one plot type", "warning")
+			return
+		}
+		m.fmriAnalysisPlotTypeGlass = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTypeHist:
+		next := !m.fmriAnalysisPlotTypeHist
+		if !next && !(m.fmriAnalysisPlotTypeSlices || m.fmriAnalysisPlotTypeGlass || m.fmriAnalysisPlotTypeClusters) {
+			m.ShowToast("Select at least one plot type", "warning")
+			return
+		}
+		m.fmriAnalysisPlotTypeHist = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTypeClusters:
+		next := !m.fmriAnalysisPlotTypeClusters
+		if !next && !(m.fmriAnalysisPlotTypeSlices || m.fmriAnalysisPlotTypeGlass || m.fmriAnalysisPlotTypeHist) {
+			m.ShowToast("Select at least one plot type", "warning")
+			return
+		}
+		m.fmriAnalysisPlotTypeClusters = next
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotEffectSize:
+		m.fmriAnalysisPlotEffectSize = !m.fmriAnalysisPlotEffectSize
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotStandardError:
+		m.fmriAnalysisPlotStandardError = !m.fmriAnalysisPlotStandardError
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotMotionQC:
+		m.fmriAnalysisPlotMotionQC = !m.fmriAnalysisPlotMotionQC
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotCarpetQC:
+		m.fmriAnalysisPlotCarpetQC = !m.fmriAnalysisPlotCarpetQC
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotTSNRQC:
+		m.fmriAnalysisPlotTSNRQC = !m.fmriAnalysisPlotTSNRQC
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotDesignQC:
+		m.fmriAnalysisPlotDesignQC = !m.fmriAnalysisPlotDesignQC
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotEmbedImages:
+		m.fmriAnalysisPlotEmbedImages = !m.fmriAnalysisPlotEmbedImages
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPlotSignatures:
+		m.fmriAnalysisPlotSignatures = !m.fmriAnalysisPlotSignatures
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisSignatureDir:
+		m.startTextEdit(textFieldFmriAnalysisSignatureDir)
+	case optFmriTrialSigScopeStimPhases:
+		m.expandedOption = expandedFmriTrialSigStimPhases
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigGroupColumn:
+		if len(m.fmriDiscoveredColumns) > 0 {
+			m.expandedOption = expandedFmriTrialSigGroupColumn
+		} else {
+			m.startTextEdit(textFieldFmriTrialSigGroupColumn)
+		}
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigGroupValues:
+		if strings.TrimSpace(m.fmriTrialSigGroupColumn) == "" {
+			m.ShowToast("Select a group column first", "warning")
+			return
+		}
+		if vals := m.GetFmriDiscoveredColumnValues(m.fmriTrialSigGroupColumn); len(vals) > 0 {
+			m.expandedOption = expandedFmriTrialSigGroupValues
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldFmriTrialSigGroupValues)
+		}
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigGroupScope:
+		m.fmriTrialSigGroupScopeIndex = (m.fmriTrialSigGroupScopeIndex + 1) % 2
+		m.useDefaultAdvanced = false
+
+	// Trial-wise signatures
+	case optFmriTrialSigMethod:
+		m.fmriTrialSigMethodIndex = (m.fmriTrialSigMethodIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigIncludeOtherEvents:
+		m.fmriTrialSigIncludeOtherEvents = !m.fmriTrialSigIncludeOtherEvents
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigMaxTrialsPerRun:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigFixedEffectsWeighting:
+		m.fmriTrialSigFixedEffectsWeighting = (m.fmriTrialSigFixedEffectsWeighting + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigWriteTrialBetas:
+		m.fmriTrialSigWriteTrialBetas = !m.fmriTrialSigWriteTrialBetas
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigWriteTrialVariances:
+		m.fmriTrialSigWriteTrialVariances = !m.fmriTrialSigWriteTrialVariances
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigWriteConditionBetas:
+		m.fmriTrialSigWriteConditionBetas = !m.fmriTrialSigWriteConditionBetas
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigSignatureNPS:
+		next := !m.fmriTrialSigSignatureNPS
+		if !next && !m.fmriTrialSigSignatureSIIPS1 {
+			m.ShowToast("Select at least one signature (NPS/SIIPS1)", "warning")
+			return
+		}
+		m.fmriTrialSigSignatureNPS = next
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigSignatureSIIPS1:
+		next := !m.fmriTrialSigSignatureSIIPS1
+		if !next && !m.fmriTrialSigSignatureNPS {
+			m.ShowToast("Select at least one signature (NPS/SIIPS1)", "warning")
+			return
+		}
+		m.fmriTrialSigSignatureSIIPS1 = next
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigLssOtherRegressors:
+		m.fmriTrialSigLssOtherRegressorsIndex = (m.fmriTrialSigLssOtherRegressorsIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	}
+
+	// Clamp cursor after expand/collapse changes
+	options = m.getFmriAnalysisOptions()
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
+	}
+	m.UpdateAdvancedOffset()
+}
+
+func (m *Model) toggleRawToBidsAdvancedOption() {
+	options := m.getRawToBidsOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optRawMontage:
+		m.startTextEdit(textFieldRawMontage)
+		m.useDefaultAdvanced = false
+	case optRawLineFreq:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optRawOverwrite:
+		m.rawOverwrite = !m.rawOverwrite
+		m.useDefaultAdvanced = false
+	case optRawTrimToFirstVolume:
+		m.rawTrimToFirstVolume = !m.rawTrimToFirstVolume
+		m.useDefaultAdvanced = false
+	case optRawEventPrefixes:
+		m.startTextEdit(textFieldRawEventPrefixes)
+		m.useDefaultAdvanced = false
+	case optRawKeepAnnotations:
+		m.rawKeepAnnotations = !m.rawKeepAnnotations
+		m.useDefaultAdvanced = false
+	}
+}
+
+func (m *Model) toggleFmriRawToBidsAdvancedOption() {
+	options := m.getFmriRawToBidsOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optFmriRawSession:
+		m.startTextEdit(textFieldFmriRawSession)
+		m.useDefaultAdvanced = false
+	case optFmriRawRestTask:
+		m.startTextEdit(textFieldFmriRawRestTask)
+		m.useDefaultAdvanced = false
+	case optFmriRawIncludeRest:
+		m.fmriRawIncludeRest = !m.fmriRawIncludeRest
+		m.useDefaultAdvanced = false
+	case optFmriRawIncludeFieldmaps:
+		m.fmriRawIncludeFieldmaps = !m.fmriRawIncludeFieldmaps
+		m.useDefaultAdvanced = false
+	case optFmriRawDicomMode:
+		m.fmriRawDicomModeIndex = (m.fmriRawDicomModeIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriRawOverwrite:
+		m.fmriRawOverwrite = !m.fmriRawOverwrite
+		m.useDefaultAdvanced = false
+	case optFmriRawCreateEvents:
+		m.fmriRawCreateEvents = !m.fmriRawCreateEvents
+		m.useDefaultAdvanced = false
+	case optFmriRawEventGranularity:
+		m.fmriRawEventGranularity = (m.fmriRawEventGranularity + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriRawOnsetReference:
+		m.fmriRawOnsetRefIndex = (m.fmriRawOnsetRefIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriRawOnsetOffsetS:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriRawDcm2niixPath:
+		m.startTextEdit(textFieldFmriRawDcm2niixPath)
+		m.useDefaultAdvanced = false
+	case optFmriRawDcm2niixArgs:
+		m.startTextEdit(textFieldFmriRawDcm2niixArgs)
+		m.useDefaultAdvanced = false
+	}
+}
