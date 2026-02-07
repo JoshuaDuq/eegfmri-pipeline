@@ -1022,19 +1022,3 @@ Contributions are welcome. To get started:
 4. Run the test suite: `pytest`
 5. Submit a pull request
 
----
-
-## Citation
-
-If you use this pipeline in your research, please cite:
-
-```bibtex
-@software{duque2025eegfmri,
-  author    = {Duquette, Joshua},
-  title     = {EEG--fMRI Analysis Pipeline},
-  year      = {2025},
-  url       = {https://github.com/JoshuaDuq/EEG_fMRI_Pipeline},
-  version   = {1.0.0},
-  license   = {MIT}
-}
-```
