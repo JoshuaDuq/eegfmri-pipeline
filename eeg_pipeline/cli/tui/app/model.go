@@ -1,17 +1,13 @@
 package app
 
 import (
-	"context"
-	"path/filepath"
 	"time"
 
-	"github.com/eeg-pipeline/tui/cloud"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
 	"github.com/eeg-pipeline/tui/views/dashboard"
-	"github.com/eeg-pipeline/tui/views/environment"
 	"github.com/eeg-pipeline/tui/views/execution"
 	"github.com/eeg-pipeline/tui/views/globalsetup"
 	"github.com/eeg-pipeline/tui/views/history"
@@ -26,15 +22,14 @@ import (
 // File layout notes:
 // - `model.go`: core app model/type definitions and top-level Tea entry points.
 // - `model_persistence.go`: repo root discovery and persisted TUI state.
-// - `model_messages.go`: subject/config/cloud message handlers and converters.
+// - `model_messages.go`: subject/config message handlers and converters.
 // - `model_stateflow.go`: per-view update delegation and navigation/execution flow.
 
 // AppState represents the current screen/state of the application
 type AppState int
 
 const (
-	StateEnvSelect AppState = iota
-	StateMainMenu
+	StateMainMenu AppState = iota
 	StatePipelineWizard
 	StateExecution
 	StateGlobalSetup
@@ -49,9 +44,9 @@ const (
 
 // TUIState represents the persistent state of the TUI across sessions
 type TUIState struct {
-	TimeRanges   []types.TimeRange `json:"time_ranges"`
-	LastPipeline int               `json:"last_pipeline"`
-	ROICacheVersion int            `json:"roi_cache_version,omitempty"`
+	TimeRanges      []types.TimeRange `json:"time_ranges"`
+	LastPipeline    int               `json:"last_pipeline"`
+	ROICacheVersion int               `json:"roi_cache_version,omitempty"`
 
 	// Band configuration
 	Bands        []BandState `json:"bands,omitempty"`
@@ -90,7 +85,6 @@ type Model struct {
 	navStack []AppState
 
 	// Sub-models
-	envSelect    environment.Model
 	mainMenu     mainmenu.Model
 	wizard       wizard.Model
 	execution    execution.Model
@@ -104,12 +98,10 @@ type Model struct {
 	execCommand   string
 
 	// Shared state
-	width       int
-	height      int
-	task        string
-	environment environment.Environment
-	cloudConfig cloud.Config
-	repoRoot    string
+	width    int
+	height   int
+	task     string
+	repoRoot string
 
 	// Selected values
 	selectedPipeline types.Pipeline
@@ -126,13 +118,10 @@ func New() Model {
 	repoRoot := findRepoRoot()
 
 	m := Model{
-		state:         StateEnvSelect,
+		state:         StateMainMenu,
 		navStack:      []AppState{},
-		envSelect:     environment.New(),
 		mainMenu:      mainmenu.New(),
 		task:          "thermalactive",
-		environment:   environment.EnvLocal,
-		cloudConfig:   cloud.DefaultConfig(),
 		repoRoot:      repoRoot,
 		subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
 	}
@@ -150,7 +139,6 @@ func New() Model {
 // Init implements tea.Model
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		m.envSelect.Init(),
 		executor.LoadConfigSummary(m.repoRoot),
 	)
 }
@@ -198,13 +186,6 @@ func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case messages.MultigroupStatsDiscoveredMsg:
 		m.handleMultigroupStatsDiscovered(msg)
-		return m, nil
-	case cloud.SyncCompleteMsg:
-		return m.handleCloudSyncComplete(msg)
-	case cloud.RunCompleteMsg:
-		return m.handleCloudRunComplete(msg)
-	case cloud.PullCompleteMsg:
-		m.handleCloudPullComplete(msg)
 		return m, nil
 	case messages.RefreshSubjectsMsg:
 		return m, m.handleRefreshSubjects()
@@ -278,12 +259,7 @@ func (m Model) handleRestart() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handlePullResults() (tea.Model, tea.Cmd) {
-	isCloudExecutionDone := m.state == StateExecution && m.execution.IsDone() && m.environment == environment.EnvGoogleCloud
-	if !isCloudExecutionDone {
-		return m, nil
-	}
-	dataDir := filepath.Join(m.repoRoot, "eeg_pipeline", "data")
-	return m, cloud.PullDerivatives(context.Background(), m.cloudConfig, dataDir)
+	return m, nil
 }
 
 func (m Model) handleOpenDashboard() (tea.Model, tea.Cmd) {
@@ -323,9 +299,6 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) {
 	m.height = msg.Height
 
 	// Propagate to all models
-	newEnv, _ := m.envSelect.Update(msg)
-	m.envSelect = newEnv.(environment.Model)
-
 	newMenu, _ := m.mainMenu.Update(msg)
 	m.mainMenu = newMenu.(mainmenu.Model)
 
@@ -356,8 +329,6 @@ func (m Model) View() string {
 	var content string
 
 	switch m.state {
-	case StateEnvSelect:
-		content = m.envSelect.View()
 	case StateMainMenu:
 		content = m.mainMenu.View()
 	case StatePipelineWizard:
@@ -391,14 +362,4 @@ func (m Model) View() string {
 		Width(m.width).
 		Height(m.height).
 		Render(content)
-}
-
-// IsCloudMode returns true if the user selected cloud environment
-func (m Model) IsCloudMode() bool {
-	return m.environment == environment.EnvGoogleCloud
-}
-
-// GetCloudConfig returns the cloud configuration
-func (m Model) GetCloudConfig() cloud.Config {
-	return m.cloudConfig
 }

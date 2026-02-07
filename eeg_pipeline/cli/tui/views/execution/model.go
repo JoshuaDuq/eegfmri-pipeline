@@ -51,15 +51,6 @@ func (s Status) String() string {
 	return "Unknown"
 }
 
-type CloudStage int
-
-const (
-	StageSyncing CloudStage = iota
-	StageRunning
-	StagePulling
-	StageDone
-)
-
 ///////////////////////////////////////////////////////////////////
 // Model
 ///////////////////////////////////////////////////////////////////
@@ -76,8 +67,6 @@ type Model struct {
 	StartTime      time.Time
 	EndTime        time.Time
 	ExitCode       int
-	IsCloud        bool
-	CloudStage     CloudStage
 	RepoRoot       string
 
 	// Step-level progress tracking
@@ -153,7 +142,6 @@ func New(command string) Model {
 		Progress:         0,
 		OutputLines:      []string{},
 		MaxOutputLines:   styles.MaxScrollbackLines,
-		CloudStage:       StageSyncing,
 		StartTime:        time.Now(),
 		width:            80,
 		height:           24,
@@ -488,7 +476,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.EndTime = time.Now()
 		m.ExitCode = msg.ExitCode
 		m.Progress = 1.0
-		m.CloudStage = StageDone
 		if msg.Success {
 			m.Status = StatusSuccess
 			m.addLog(styles.CheckMark + " Completed successfully")

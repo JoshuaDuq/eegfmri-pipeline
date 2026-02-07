@@ -294,13 +294,9 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%d hr %d min", hours, mins)
 }
 
-// renderHeader renders the top title bar indicating local vs cloud
-// execution and colors it according to the current status.
+// renderHeader renders the top title bar and colors it according to the current status.
 func (m Model) renderHeader() string {
 	title := "Pipeline Execution"
-	if m.IsCloud {
-		title = "Cloud Execution"
-	}
 
 	statusColor := styles.Border
 	switch m.Status {
@@ -382,7 +378,7 @@ func (m Model) averageSubjectDuration() time.Duration {
 }
 
 // renderProgressSection renders the main progress overview including
-// overall completion, current subject/step, metrics and cloud stages.
+// overall completion, current subject/step, and metrics.
 func (m Model) renderProgressSection() string {
 	var b strings.Builder
 
@@ -410,11 +406,6 @@ func (m Model) renderProgressSection() string {
 	// Metrics dashboard (compact heatmap + gauges)
 	if m.height >= 28 {
 		b.WriteString("\n" + m.renderMetricsDashboard(iw) + "\n")
-	}
-
-	// Cloud stages
-	if m.IsCloud {
-		b.WriteString("\n  " + m.renderCloudStages() + "\n")
 	}
 
 	return b.String()
@@ -668,40 +659,6 @@ func (m Model) renderLogSection() string {
 	b.WriteString(m.logViewport.View())
 
 	return b.String()
-}
-
-// renderCloudStages renders a compact multi‑stage indicator used
-// during cloud execution (sync, run, pull).
-func (m Model) renderCloudStages() string {
-	stages := []struct {
-		stage CloudStage
-		name  string
-	}{
-		{StageSyncing, "Sync"},
-		{StageRunning, "Run"},
-		{StagePulling, "Pull"},
-	}
-
-	var parts []string
-	for _, s := range stages {
-		style := lipgloss.NewStyle().Foreground(styles.Muted)
-		marker := "[ ]"
-
-		if s.stage < m.CloudStage {
-			style = style.Foreground(styles.Success)
-			marker = "[" + styles.CheckMark + "]"
-		} else if s.stage == m.CloudStage && m.Status == StatusRunning {
-			style = style.Foreground(styles.Accent).Bold(true)
-			marker = "[" + styles.ActiveMark + "]"
-		} else if m.CloudStage == StageDone {
-			style = style.Foreground(styles.Success)
-			marker = "[" + styles.CheckMark + "]"
-		}
-
-		parts = append(parts, style.Render(marker+" "+s.name))
-	}
-
-	return strings.Join(parts, "   ")
 }
 
 // renderAnimatedProgressBar renders the main progress bar (single accent color; name kept for API).

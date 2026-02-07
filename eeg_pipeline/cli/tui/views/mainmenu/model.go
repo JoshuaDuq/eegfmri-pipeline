@@ -82,8 +82,7 @@ type Model struct {
 	width            int
 	height           int
 
-	Task    string
-	IsCloud bool
+	Task string
 
 	// Help overlay
 	helpOverlay components.HelpOverlay
@@ -355,14 +354,9 @@ func (m Model) renderHeader() string {
 		Foreground(styles.Muted).
 		Render("v1.0")
 
-	var envBadge string
-	if m.IsCloud {
-		envBadge = styles.BadgeAccentStyle.Render("CLOUD")
-	} else {
-		envBadge = lipgloss.NewStyle().
-			Foreground(styles.Success).
-			Render(styles.ActiveMark + " Local")
-	}
+	envBadge := lipgloss.NewStyle().
+		Foreground(styles.Success).
+		Render(styles.ActiveMark + " Local")
 
 	titleRow := "  " + logo + "  " + versionBadge + "  " + envBadge
 

@@ -73,20 +73,20 @@ type SubjectInfo struct {
 
 // SubjectsLoadedMsg is sent when subject discovery completes
 type SubjectsLoadedMsg struct {
-	Subjects                 []SubjectInfo
-	AvailableWindows         []string
+	Subjects                  []SubjectInfo
+	AvailableWindows          []string
 	AvailableWindowsByFeature map[string][]string
-	AvailableEventColumns    []string
-	AvailableChannels        []string
-	UnavailableChannels      []string
-	Error                    error
+	AvailableEventColumns     []string
+	AvailableChannels         []string
+	UnavailableChannels       []string
+	Error                     error
 }
 
 // ColumnsDiscoveredMsg is sent when column discovery from events/trial tables completes
 type ColumnsDiscoveredMsg struct {
 	Columns []string            // Available column names
 	Values  map[string][]string // Unique values for each column
-	Windows []string             // Available windows (for condition effects discovery)
+	Windows []string            // Available windows (for condition effects discovery)
 	Source  string              // "events", "trial_table", or "condition_effects"
 	Error   error               // Error if discovery failed
 }
@@ -173,17 +173,6 @@ type LogMsg struct {
 	Message string
 	Subject string
 }
-
-// =========================================================================
-// Cloud Messages (referenced from cloud package)
-// =========================================================================
-
-// Note: Cloud-related messages are defined in the cloud package to avoid
-// circular dependencies. These include:
-// - VMStatusMsg
-// - SyncCompleteMsg
-// - RunCompleteMsg
-// - PullCompleteMsg
 
 // RefreshSubjectsMsg requests a reload of the subject list
 type RefreshSubjectsMsg struct{}

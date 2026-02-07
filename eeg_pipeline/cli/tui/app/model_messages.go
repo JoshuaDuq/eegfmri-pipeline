@@ -2,14 +2,10 @@ package app
 
 import (
 	"fmt"
-	"path/filepath"
 
-	"github.com/eeg-pipeline/tui/cloud"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/types"
-	"github.com/eeg-pipeline/tui/views/environment"
-	"github.com/eeg-pipeline/tui/views/execution"
 	"github.com/eeg-pipeline/tui/views/wizard"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -209,49 +205,6 @@ func (m *Model) handleMultigroupStatsDiscovered(msg messages.MultigroupStatsDisc
 	m.wizard.SetMultigroupStats(msg.Available, msg.Groups, msg.NFeatures, msg.NSignificant, msg.File)
 }
 
-func (m Model) handleCloudSyncComplete(msg cloud.SyncCompleteMsg) (tea.Model, tea.Cmd) {
-	if msg.Error != nil {
-		m.execution.AddOutput("Sync failed: " + msg.Error.Error())
-		m.execution.SetStatus(execution.StatusFailed)
-		return m, nil
-	}
-
-	m.execution.AddOutput("Sync complete. Running pipeline...")
-	m.execution.CloudStage = execution.StageRunning
-	command := m.wizard.BuildCommand()
-	return m, cloud.RunRemoteCommand(m.execution.GetContext(), m.cloudConfig, command)
-}
-
-func (m Model) handleCloudRunComplete(msg cloud.RunCompleteMsg) (tea.Model, tea.Cmd) {
-	if msg.Error != nil {
-		m.execution.SetStatus(execution.StatusFailed)
-		m.execution.CloudStage = execution.StageDone
-		return m, nil
-	}
-
-	if msg.ExitCode == 0 {
-		m.execution.AddOutput("Pipeline run complete. Pulling results...")
-		m.execution.CloudStage = execution.StagePulling
-		localDataDir := filepath.Join(m.repoRoot, "eeg_pipeline", "data")
-		return m, cloud.PullDerivatives(m.execution.GetContext(), m.cloudConfig, localDataDir)
-	}
-
-	m.execution.SetStatus(execution.StatusFailed)
-	m.execution.CloudStage = execution.StageDone
-	return m, nil
-}
-
-func (m *Model) handleCloudPullComplete(msg cloud.PullCompleteMsg) {
-	m.execution.CloudStage = execution.StageDone
-	if msg.Error != nil {
-		m.execution.AddOutput("Pull failed: " + msg.Error.Error())
-		return
-	}
-
-	m.execution.AddOutput("Results pulled successfully.")
-	m.execution.SetStatus(execution.StatusSuccess)
-}
-
 func (m Model) handleRefreshSubjects() tea.Cmd {
 	if m.state != StatePipelineWizard {
 		return nil
@@ -303,11 +256,7 @@ func (m *Model) shouldUpdateTask(newTask string) bool {
 
 func (m *Model) updateTask(newTask string) {
 	m.task = newTask
-	if m.environment == environment.EnvGoogleCloud {
-		m.mainMenu.Task = m.task + " [Cloud]"
-	} else {
-		m.mainMenu.Task = m.task
-	}
+	m.mainMenu.Task = m.task
 }
 
 func (m *Model) handleConfigKeysLoaded(msg messages.ConfigKeysLoadedMsg) {

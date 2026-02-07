@@ -5,11 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eeg-pipeline/tui/cloud"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/types"
 	"github.com/eeg-pipeline/tui/views/dashboard"
-	"github.com/eeg-pipeline/tui/views/environment"
 	"github.com/eeg-pipeline/tui/views/execution"
 	"github.com/eeg-pipeline/tui/views/globalsetup"
 	"github.com/eeg-pipeline/tui/views/history"
@@ -24,8 +22,6 @@ import (
 
 func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.state {
-	case StateEnvSelect:
-		return m.handleEnvSelectUpdate(msg)
 	case StateMainMenu:
 		return m.handleMainMenuUpdate(msg)
 	case StatePipelineWizard:
@@ -45,23 +41,6 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleQuickActionsOverlay(msg)
 	}
 
-	return m, nil
-}
-
-func (m Model) handleEnvSelectUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var newEnvSelect tea.Model
-	var cmd tea.Cmd
-	newEnvSelect, cmd = m.envSelect.Update(msg)
-	m.envSelect = newEnvSelect.(environment.Model)
-
-	if !m.envSelect.Done {
-		return m, cmd
-	}
-
-	m.environment = m.envSelect.Selected
-	m.cloudConfig = m.envSelect.CloudConfig
-	m.state = StateMainMenu
-	m.updateTask(m.task)
 	return m, nil
 }
 
@@ -321,10 +300,9 @@ func (m Model) handleQuickAction(action quickactions.ActionType) (tea.Model, tea
 	return m, nil
 }
 
-// startExecution starts pipeline execution (local or cloud)
+// startExecution starts pipeline execution locally.
 func (m Model) startExecution(command string) (tea.Model, tea.Cmd) {
 	m.execution = execution.NewWithRoot(command, m.repoRoot)
-	m.execution.IsCloud = m.environment == environment.EnvGoogleCloud
 	m.execution.SetSize(m.width, m.height)
 	m.pushState(StateExecution)
 	m.wizard.ReadyToExecute = false
@@ -333,12 +311,6 @@ func (m Model) startExecution(command string) (tea.Model, tea.Cmd) {
 	m.execStartTime = time.Now()
 	m.execCommand = command
 
-	if m.environment == environment.EnvGoogleCloud {
-		// Cloud mode: sync first, then run
-		m.execution.AddOutput("Syncing code to remote VM...")
-		return m, cloud.SyncToRemote(m.execution.GetContext(), m.cloudConfig, m.repoRoot)
-	}
-
 	// Local mode: run directly
 	return m, m.execution.Start()
 }
@@ -346,12 +318,8 @@ func (m Model) startExecution(command string) (tea.Model, tea.Cmd) {
 // handleEscape handles the escape key
 func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 	switch m.state {
-	case StateEnvSelect:
-		return m, tea.Quit
 	case StateMainMenu:
-		m.state = StateEnvSelect
-		m.envSelect = environment.New()
-		return m, nil
+		return m, tea.Quit
 	case StatePipelineWizard:
 		if m.wizard.GoBack() {
 			return m, tea.ClearScreen

@@ -6,7 +6,6 @@ import (
 	"os/exec"
 
 	"github.com/eeg-pipeline/tui/app"
-	"github.com/eeg-pipeline/tui/cloud"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -46,29 +45,6 @@ func handlePanic() {
 	}
 }
 
-func stopVMIfNeeded(finalModel tea.Model) {
-	model, ok := finalModel.(app.Model)
-	if !ok {
-		return
-	}
-
-	if !model.IsCloudMode() {
-		return
-	}
-
-	cfg := model.GetCloudConfig()
-	if !cloud.IsVMRunning(cfg) {
-		return
-	}
-
-	fmt.Println("\n☁️  Stopping Cloud VM... (this may take a moment)")
-	if err := cloud.StopVMSync(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️  Warning: failed to stop VM: %v\n", err)
-	} else {
-		fmt.Println("✓  Cloud VM stopped successfully.")
-	}
-}
-
 func main() {
 	defer handlePanic()
 
@@ -79,7 +55,7 @@ func main() {
 		tea.WithMouseCellMotion(),
 	)
 
-	finalModel, err := program.Run()
+	_, err := program.Run()
 	resetTerminal()
 
 	if err != nil {
@@ -87,5 +63,4 @@ func main() {
 		os.Exit(1)
 	}
 
-	stopVMIfNeeded(finalModel)
 }
