@@ -1031,7 +1031,7 @@ def extract_connectivity_features(
     getter = getattr(ctx, "get_precomputed_for_family", None)
     if callable(getter):
         precomputed = getter("connectivity")
-    else:
+    if precomputed is None:
         precomputed = getattr(ctx, "precomputed", None)
 
     if precomputed is None:
@@ -2673,7 +2673,7 @@ def extract_directed_connectivity_features(
     getter = getattr(ctx, "get_precomputed_for_family", None)
     if callable(getter):
         precomputed = getter("connectivity")
-    else:
+    if precomputed is None:
         precomputed = getattr(ctx, "precomputed", None)
     if precomputed is None:
         if getattr(ctx, "epochs", None) is None:

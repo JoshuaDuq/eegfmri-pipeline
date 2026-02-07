@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 
+import gc
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -802,6 +803,10 @@ class FeaturePipeline(PipelineBase):
                 f"aper={n_aper}, spectral={n_spectral}, comp={n_comp}, total={n_total}"
                 f", microstates={n_microstates}"
             )
+
+            del ctx, features, unpacked, extra_blocks, combined_df
+            del pow_df_aligned, baseline_df_aligned, conn_df_aligned, aper_df_aligned
+            gc.collect()
 
         if len(time_ranges) > 1:
             self.logger.info(
