@@ -190,6 +190,18 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optERDSBands:
 		m.startTextEdit(textFieldERDSBands)
 		m.useDefaultAdvanced = false
+	case optERDSOnsetThresholdSigma:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optERDSOnsetMinDurationMs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optERDSReboundMinLatencyMs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optERDSInferContralateral:
+		m.erdsInferContralateral = !m.erdsInferContralateral
+		m.useDefaultAdvanced = false
 	case optFeatGroupStorage:
 		m.featGroupStorageExpanded = !m.featGroupStorageExpanded
 	case optSaveSubjectLevelFeatures:

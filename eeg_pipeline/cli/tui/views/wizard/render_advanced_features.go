@@ -1967,6 +1967,31 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Bands"
 			value = erdsBandsVal
 			hint = "e.g. alpha,beta"
+		case optERDSOnsetThresholdSigma:
+			label = "Onset threshold (sigma)"
+			value = fmt.Sprintf("%.2f", m.erdsOnsetThresholdSigma)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSOnsetThresholdSigma) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "ERD onset threshold in baseline SD units"
+		case optERDSOnsetMinDurationMs:
+			label = "Onset min duration (ms)"
+			value = fmt.Sprintf("%.1f", m.erdsOnsetMinDurationMs)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSOnsetMinDurationMs) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "sustained threshold crossing duration"
+		case optERDSReboundMinLatencyMs:
+			label = "Rebound min latency (ms)"
+			value = fmt.Sprintf("%.1f", m.erdsReboundMinLatencyMs)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSReboundMinLatencyMs) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "delay from ERD peak to rebound search"
+		case optERDSInferContralateral:
+			label = "Infer contralateral side"
+			value = m.boolToOnOff(m.erdsInferContralateral)
+			hint = "use stronger somatosensory ERD if side metadata missing"
 
 		// Generic
 		case optMinEpochs:

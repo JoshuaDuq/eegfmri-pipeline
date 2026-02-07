@@ -174,7 +174,18 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("erds") {
 		options = append(options, optFeatGroupERDS)
 		if m.featGroupERDSExpanded {
-			options = append(options, optERDSUseLogRatio, optERDSMinBaselinePower, optERDSMinActivePower, optERDSMinSegmentSec, optERDSBands)
+			options = append(
+				options,
+				optERDSUseLogRatio,
+				optERDSMinBaselinePower,
+				optERDSMinActivePower,
+				optERDSMinSegmentSec,
+				optERDSBands,
+				optERDSOnsetThresholdSigma,
+				optERDSOnsetMinDurationMs,
+				optERDSReboundMinLatencyMs,
+				optERDSInferContralateral,
+			)
 		}
 	}
 

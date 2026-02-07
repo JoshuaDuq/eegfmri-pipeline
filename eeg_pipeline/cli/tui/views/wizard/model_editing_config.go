@@ -2599,6 +2599,10 @@ const (
 	optERDSMinActivePower
 	optERDSMinSegmentSec
 	optERDSBands
+	optERDSOnsetThresholdSigma
+	optERDSOnsetMinDurationMs
+	optERDSReboundMinLatencyMs
+	optERDSInferContralateral
 	optConnOutputLevel
 	optConnGraphMetrics
 	optConnGraphProp

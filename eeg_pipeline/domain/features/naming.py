@@ -71,6 +71,7 @@ class NamingSchema:
         "peak_latency", "peak_freq", "peak_power", "peak_ratio", "peak_residual",
         "center_freq", "edge_freq_95",
         "erd_magnitude", "erd_duration", "ers_magnitude", "ers_duration",
+        "rebound_magnitude", "rebound_latency",
         "percent_mean", "percent_std", "db_mean", "db_std",
         "logratio_mean", "logratio_std", "latency_diff",
         "power_ratio", "log_ratio",

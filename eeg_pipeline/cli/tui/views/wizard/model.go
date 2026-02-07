@@ -1680,11 +1680,15 @@ type Model struct {
 	qualityMuscleBandMax      float64 // Muscle band max
 
 	// ERDS advanced options
-	erdsUseLogRatio      bool    // Use dB instead of percent
-	erdsMinBaselinePower float64 // Minimum baseline power
-	erdsMinActivePower   float64 // Minimum active power
-	erdsMinSegmentSec    float64 // Minimum segment duration
-	erdsBandsSpec        string  // Bands for ERDS (comma-separated)
+	erdsUseLogRatio         bool    // Use dB instead of percent
+	erdsMinBaselinePower    float64 // Minimum baseline power
+	erdsMinActivePower      float64 // Minimum active power
+	erdsMinSegmentSec       float64 // Minimum segment duration
+	erdsBandsSpec           string  // Bands for ERDS (comma-separated)
+	erdsOnsetThresholdSigma float64 // Baseline SD multiplier for ERD onset threshold
+	erdsOnsetMinDurationMs  float64 // Sustained threshold crossing duration
+	erdsReboundMinLatencyMs float64 // Minimum latency from ERD peak to rebound search
+	erdsInferContralateral  bool    // Infer contralateral side when metadata is missing
 
 	// Temporal feature selection (behavior pipeline)
 	temporalFeaturePowerEnabled bool // Power temporal enabled
@@ -2405,11 +2409,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		qualityMuscleBandMax:    80.0,
 
 		// ERDS defaults
-		erdsUseLogRatio:      false,
-		erdsMinBaselinePower: 1.0e-12,
-		erdsMinActivePower:   1.0e-12,
-		erdsMinSegmentSec:    0.5,
-		erdsBandsSpec:        "alpha,beta",
+		erdsUseLogRatio:         false,
+		erdsMinBaselinePower:    1.0e-12,
+		erdsMinActivePower:      1.0e-12,
+		erdsMinSegmentSec:       0.5,
+		erdsBandsSpec:           "alpha,beta",
+		erdsOnsetThresholdSigma: 1.0,
+		erdsOnsetMinDurationMs:  30.0,
+		erdsReboundMinLatencyMs: 100.0,
+		erdsInferContralateral:  true,
 
 		// Temporal feature selection defaults
 		temporalFeaturePowerEnabled: true,

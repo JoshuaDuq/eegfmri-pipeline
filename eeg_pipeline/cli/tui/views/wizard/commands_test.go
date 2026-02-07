@@ -326,6 +326,36 @@ func TestBuildCommand_PlottingGroupScopeAddsAnalysisScopeFlag(t *testing.T) {
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_IncludesERDSPainMarkerFlags(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "erds" {
+			m.selected[i] = true
+			break
+		}
+	}
+
+	m.erdsOnsetThresholdSigma = 1.8
+	m.erdsOnsetMinDurationMs = 45.0
+	m.erdsReboundMinLatencyMs = 180.0
+	m.erdsInferContralateral = false
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--erds-onset-threshold-sigma", "1.80"}) {
+		t.Fatalf("expected --erds-onset-threshold-sigma 1.80 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--erds-onset-min-duration-ms", "45.0"}) {
+		t.Fatalf("expected --erds-onset-min-duration-ms 45.0 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--erds-rebound-min-latency-ms", "180.0"}) {
+		t.Fatalf("expected --erds-rebound-min-latency-ms 180.0 in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-erds-infer-contralateral") {
+		t.Fatalf("expected --no-erds-infer-contralateral in args, got: %#v", args)
+	}
+}
+
 func TestShouldSkipStep_PlottingRoiStepSkippedForBandPowerTopomapsOnly(t *testing.T) {
 	m := Model{}
 	m.Pipeline = types.PipelinePlotting

@@ -926,6 +926,18 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 {
 			m.erdsMinSegmentSec = val
 		}
+	case optERDSOnsetThresholdSigma:
+		if val >= 0 {
+			m.erdsOnsetThresholdSigma = val
+		}
+	case optERDSOnsetMinDurationMs:
+		if val >= 0 {
+			m.erdsOnsetMinDurationMs = val
+		}
+	case optERDSReboundMinLatencyMs:
+		if val >= 0 {
+			m.erdsReboundMinLatencyMs = val
+		}
 	}
 }
 

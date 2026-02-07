@@ -564,6 +564,18 @@ feature_engineering:
     min_active_power: 1.0e-12        # Clamp active power for log computation
     min_segment_sec: 0.5             # Minimum segment duration in seconds
     bands: ["alpha", "beta"]         # Bands for ERDS computation (subset of frequency_bands)
+    # Pain-focused alpha markers (trial-level contralateral somatosensory kinetics)
+    pain_marker_bands: ["alpha"]     # Bands where contralateral pain markers are extracted
+    laterality_columns: ["stim_side", "stimulated_side", "pain_side", "side", "stimulus_side", "hand"]
+    infer_contralateral_when_missing: true
+    somatosensory_left_channels: ["C1", "C3", "C5", "CP1", "CP3", "CP5", "FC1", "FC3", "FC5"]
+    somatosensory_right_channels: ["C2", "C4", "C6", "CP2", "CP4", "CP6", "FC2", "FC4", "FC6"]
+    onset_threshold_sigma: 1.0       # Threshold crossing = sigma * baseline noise (%), with floor below
+    onset_min_threshold_percent: 5.0 # Absolute minimum threshold for ERD onset (%)
+    onset_min_duration_ms: 30.0      # Sustained crossing duration for onset detection
+    rebound_threshold_sigma: 1.0     # Rebound threshold = sigma * baseline noise (%), with floor below
+    rebound_min_threshold_percent: 5.0
+    rebound_min_latency_ms: 100.0    # Search rebound after this delay from ERD peak
 
   quality:
     psd_method: "welch"              # "welch" or "multitaper"

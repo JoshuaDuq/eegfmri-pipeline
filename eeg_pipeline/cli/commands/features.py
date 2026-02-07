@@ -652,6 +652,14 @@ def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
         erds_cfg["min_segment_sec"] = args.erds_min_segment_sec
     if getattr(args, "erds_bands", None) is not None:
         erds_cfg["bands"] = args.erds_bands
+    if getattr(args, "erds_onset_threshold_sigma", None) is not None:
+        erds_cfg["onset_threshold_sigma"] = args.erds_onset_threshold_sigma
+    if getattr(args, "erds_onset_min_duration_ms", None) is not None:
+        erds_cfg["onset_min_duration_ms"] = args.erds_onset_min_duration_ms
+    if getattr(args, "erds_rebound_min_latency_ms", None) is not None:
+        erds_cfg["rebound_min_latency_ms"] = args.erds_rebound_min_latency_ms
+    if getattr(args, "erds_infer_contralateral", None) is not None:
+        erds_cfg["infer_contralateral_when_missing"] = args.erds_infer_contralateral
 
 
 def _apply_validation_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -1125,6 +1133,11 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--erds-min-active-power", type=float, default=None, help="Min active power for ERDS")
     parser.add_argument("--erds-min-segment-sec", type=float, default=None, help="Min segment duration for ERDS")
     parser.add_argument("--erds-bands", nargs="+", default=None, help="Bands for ERDS computation (e.g., alpha beta)")
+    parser.add_argument("--erds-onset-threshold-sigma", type=float, default=None, help="Onset threshold in baseline SD units for trial-level alpha ERD latency")
+    parser.add_argument("--erds-onset-min-duration-ms", type=float, default=None, help="Minimum sustained duration for ERD onset threshold crossing")
+    parser.add_argument("--erds-rebound-min-latency-ms", type=float, default=None, help="Minimum latency after ERD peak before searching alpha rebound")
+    parser.add_argument("--erds-infer-contralateral", action="store_true", default=None, help="Infer contralateral hemisphere when trial laterality metadata is missing")
+    parser.add_argument("--no-erds-infer-contralateral", action="store_false", dest="erds_infer_contralateral")
 
     # Validation and output
     parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")

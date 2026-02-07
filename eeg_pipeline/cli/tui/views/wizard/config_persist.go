@@ -307,6 +307,10 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["erdsMinActivePower"] = m.erdsMinActivePower
 	cfg["erdsMinSegmentSec"] = m.erdsMinSegmentSec
 	cfg["erdsBandsSpec"] = m.erdsBandsSpec
+	cfg["erdsOnsetThresholdSigma"] = m.erdsOnsetThresholdSigma
+	cfg["erdsOnsetMinDurationMs"] = m.erdsOnsetMinDurationMs
+	cfg["erdsReboundMinLatencyMs"] = m.erdsReboundMinLatencyMs
+	cfg["erdsInferContralateral"] = m.erdsInferContralateral
 
 	// Asymmetry & Ratios
 	cfg["asymmetryChannelPairsSpec"] = m.asymmetryChannelPairsSpec
@@ -1270,6 +1274,10 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.erdsMinActivePower = getFloat("erdsMinActivePower", m.erdsMinActivePower)
 	m.erdsMinSegmentSec = getFloat("erdsMinSegmentSec", m.erdsMinSegmentSec)
 	m.erdsBandsSpec = getString("erdsBandsSpec", m.erdsBandsSpec)
+	m.erdsOnsetThresholdSigma = getFloat("erdsOnsetThresholdSigma", m.erdsOnsetThresholdSigma)
+	m.erdsOnsetMinDurationMs = getFloat("erdsOnsetMinDurationMs", m.erdsOnsetMinDurationMs)
+	m.erdsReboundMinLatencyMs = getFloat("erdsReboundMinLatencyMs", m.erdsReboundMinLatencyMs)
+	m.erdsInferContralateral = getBool("erdsInferContralateral", m.erdsInferContralateral)
 
 	// Asymmetry & Ratios
 	m.asymmetryChannelPairsSpec = getString("asymmetryChannelPairsSpec", m.asymmetryChannelPairsSpec)

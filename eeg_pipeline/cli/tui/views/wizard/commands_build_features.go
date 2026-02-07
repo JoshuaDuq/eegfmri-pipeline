@@ -782,6 +782,20 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--erds-bands")
 			args = append(args, splitCSVList(m.erdsBandsSpec)...)
 		}
+		if m.erdsOnsetThresholdSigma != 1.0 {
+			args = append(args, "--erds-onset-threshold-sigma", fmt.Sprintf("%.2f", m.erdsOnsetThresholdSigma))
+		}
+		if m.erdsOnsetMinDurationMs != 30.0 {
+			args = append(args, "--erds-onset-min-duration-ms", fmt.Sprintf("%.1f", m.erdsOnsetMinDurationMs))
+		}
+		if m.erdsReboundMinLatencyMs != 100.0 {
+			args = append(args, "--erds-rebound-min-latency-ms", fmt.Sprintf("%.1f", m.erdsReboundMinLatencyMs))
+		}
+		if m.erdsInferContralateral {
+			args = append(args, "--erds-infer-contralateral")
+		} else {
+			args = append(args, "--no-erds-infer-contralateral")
+		}
 	}
 
 	// Generic & Validation
