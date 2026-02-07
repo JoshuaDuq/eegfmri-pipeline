@@ -135,6 +135,8 @@ def generate_coregistration_transform(
     trans_path : Path or None
         Path to generated transform file
     """
+    # Reserved for future support of subject-specific EEG digitization points.
+    _ = eeg_info_path
     if not check_docker_available():
         raise RuntimeError(
             "Docker is not available. Please install Docker and ensure it is running. "

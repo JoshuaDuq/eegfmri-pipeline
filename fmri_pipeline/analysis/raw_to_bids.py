@@ -556,7 +556,7 @@ def run_fmri_raw_to_bids(
                     if run_label:
                         dest_prefix += f"_run-{run_label}"
 
-                    mapped, jsons = _classify_fieldmap_outputs(tmp_dir)
+                    mapped, _jsons = _classify_fieldmap_outputs(tmp_dir)
                     all_tes: List[float] = []
                     for _suf, _n, _js in mapped:
                         if _js.exists():

@@ -18,7 +18,6 @@ from eeg_pipeline.plotting.core.colorbars import create_difference_colorbar
 from eeg_pipeline.plotting.core.utils import get_font_sizes
 from eeg_pipeline.plotting.io.figures import (
     get_behavior_footer as _get_behavior_footer,
-    get_default_config as _get_default_config,
     get_viz_params,
     plot_topomap_on_ax,
     robust_sym_vlim,
@@ -1009,4 +1008,3 @@ def plot_temporal_correlation_topomaps_by_pain(
             config,
             font_sizes,
         )
-

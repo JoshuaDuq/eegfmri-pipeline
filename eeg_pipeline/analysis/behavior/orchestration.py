@@ -17,7 +17,7 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation, format_correlation_method_label
-from eeg_pipeline.utils.config.loader import get_config_value, get_config_float, get_config_int, get_config_bool, get_config_str
+from eeg_pipeline.utils.config.loader import get_config_value, get_config_float, get_config_int, get_config_bool
 from eeg_pipeline.infra.paths import ensure_dir
 
 
@@ -4841,8 +4841,6 @@ def run_group_level_mixed_effects(
     from eeg_pipeline.infra.tsv import read_parquet
 
     import statsmodels.formula.api as smf
-    from statsmodels.regression.mixed_linear_model import MixedLM
-    
     feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
     if isinstance(feature_files, str):
         feature_files = [feature_files]

@@ -710,6 +710,8 @@ def save_all_features(
     suffix: Optional[str] = None,
 ) -> pd.DataFrame:
     """Save all feature dataframes to disk with validation and deduplication."""
+    # Kept for backward compatibility with historical callers.
+    _ = active_cols
     if logger is None:
         logger = logging.getLogger(__name__)
     if features_dir is None:

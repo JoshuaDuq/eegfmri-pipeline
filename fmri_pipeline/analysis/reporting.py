@@ -92,7 +92,7 @@ def _vif_from_design(X: "np.ndarray") -> "np.ndarray":
         Z = np.delete(X, j, axis=1)
         Z_const = np.column_stack([np.ones(n, dtype=X.dtype), Z])
         try:
-            beta, residuals, rank, _ = np.linalg.lstsq(Z_const, y, rcond=None)
+            beta, residuals, _rank, _ = np.linalg.lstsq(Z_const, y, rcond=None)
             if residuals.size:
                 ss_res = float(residuals.flat[0])
             else:
@@ -1354,7 +1354,7 @@ def run_fmri_plotting_and_report(
                     # Condition number
                     cond = None
                     try:
-                        u, s, vh = np.linalg.svd(X, full_matrices=False)
+                        _u, s, _vh = np.linalg.svd(X, full_matrices=False)
                         if s.size and s.min() > 0:
                             cond = float(s.max() / s.min())
                     except Exception:

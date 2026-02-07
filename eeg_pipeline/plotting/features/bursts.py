@@ -18,9 +18,7 @@ from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from eeg_pipeline.plotting.features.utils import (
     get_named_segments,
-    get_named_bands,
     get_band_names,
-    collect_named_series,
     get_band_color,
     plot_paired_comparison,
     compute_or_load_column_stats,

@@ -1175,15 +1175,14 @@ def plot_pac_by_condition(
                     if not cols:
                         cell_data[col_idx] = None
                         continue
-                        
-                        val_series = pac_trials_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                        v1 = val_series[m1].dropna().values
-                        v2 = val_series[m2].dropna().values
-                        
-                        if len(v1) > 0 and len(v2) > 0:
-                            has_data = True
-                        
-                        cell_data[col_idx] = {"v1": v1, "v2": v2}
+                    val_series = pac_trials_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    v1 = val_series[m1].dropna().values
+                    v2 = val_series[m2].dropna().values
+
+                    if len(v1) > 0 and len(v2) > 0:
+                        has_data = True
+
+                    cell_data[col_idx] = {"v1": v1, "v2": v2}
                     
                     if not has_data:
                         log_if_present(
@@ -1274,4 +1273,3 @@ def plot_pac_by_condition(
                 
                 log_if_present(logger, "info", 
                               f"Saved PAC column comparison plots for {len(roi_names)} ROIs")
-

@@ -50,8 +50,6 @@ from eeg_pipeline.analysis.features.connectivity import (
 )
 from eeg_pipeline.analysis.features.source_localization import (
     extract_source_localization_features,
-    extract_source_connectivity_features,
-    extract_source_localization_from_precomputed,
 )
 from eeg_pipeline.analysis.features.preparation import precompute_data
 from eeg_pipeline.analysis.features.quality import (
@@ -547,7 +545,7 @@ def _extract_pac_features(
                 "Using Hilbert PAC from precomputed analytic signals "
                 "(recommended for scientific validity)"
             )
-            pac_trials_df, pac_cols = extract_pac_from_precomputed(precomputed_pac, ctx.config)
+            pac_trials_df, _pac_cols = extract_pac_from_precomputed(precomputed_pac, ctx.config)
             if pac_trials_df is not None and not pac_trials_df.empty:
                 return None, None, None, pac_trials_df, None
             return None, None, None, None, None
@@ -946,7 +944,7 @@ def extract_all_features(
                 )
 
     if "erds" in ctx.feature_categories and precomputed_data is not None:
-        erds_df, erds_cols, erds_qc = _extract_feature_with_error_handling(
+        erds_df, erds_cols, _erds_qc = _extract_feature_with_error_handling(
             ctx,
             "ERDS",
             extract_erds_from_precomputed,

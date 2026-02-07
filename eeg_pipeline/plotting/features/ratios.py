@@ -19,9 +19,7 @@ from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.roi import get_roi_definitions
 from eeg_pipeline.plotting.features.utils import (
-    collect_named_series,
     compute_or_load_column_stats,
-    get_named_bands,
     get_named_segments,
     plot_paired_comparison,
 )
