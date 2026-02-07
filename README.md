@@ -1,4 +1,4 @@
-# EEG–fMRI Analysis Pipeline
+# EEG–fMRI Analysis Pipeline (still under development)
 
 [![Python ≥ 3.9](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -157,7 +157,7 @@ eeg_pipeline/data/fMRI_data/sub-XXXX/anat/       # T1w anatomical (for FreeSurfe
 
 #### For behavioral data
 
-The pipeline reads behavioral variables from BIDS `*_events.tsv` files. The following columns are auto-detected (configurable via `event_columns` in the YAML config):
+The pipeline reads behavioral variables from BIDS `*_events.tsv` files. The following columns are auto-detected (configurable via `event_columns` in the YAML config and in the TUI):
 
 | Variable | Auto-detected column names |
 |----------|---------------------------|
@@ -405,6 +405,8 @@ Extract a comprehensive set of EEG features from cleaned epochs.
 | `quality` | Data quality metrics (SNR, muscle artifact, line noise) |
 | `sourcelocalization` | Source-space features via LCMV beamformer or eLORETA |
 
+> **Note:** All the feature computations are highly configurable through the TUI.
+
 ```bash
 # Extract all feature categories
 eeg-pipeline features compute --subject 0001
@@ -506,6 +508,8 @@ Correlate EEG features with pain ratings, temperature, and experimental conditio
 | `moderation` | Moderation analysis |
 | `mixed_effects` | Mixed-effects models |
 | `report` | Single-subject summary report |
+
+> **Note:** All the behavior computations are highly configurable through the TUI.
 
 ```bash
 # Run all behavioral analyses
@@ -641,7 +645,7 @@ eeg-pipeline fmri preprocess --subject 0001 \
 
 ---
 
-### 7. fMRI Analysis
+### 7. fMRI Analysis (UNDER DEVELOPMENT)
 
 Subject-level GLM contrasts and trial-wise beta estimation.
 
@@ -687,7 +691,7 @@ eeg-pipeline fmri-analysis first-level --subject 0001 --plots --plot-html-report
 
 ---
 
-### 8. Plotting
+### 8. Plotting (UNDER DEVELOPMENT)
 
 Curated visualization suites driven by a JSON plot catalog.
 
@@ -1018,8 +1022,6 @@ Contributions are welcome. To get started:
 4. Run the test suite: `pytest`
 5. Submit a pull request
 
-Please follow the existing code style (PEP 8, type hints, docstrings) and ensure all tests pass before submitting.
-
 ---
 
 ## Citation
@@ -1028,7 +1030,7 @@ If you use this pipeline in your research, please cite:
 
 ```bibtex
 @software{duque2025eegfmri,
-  author    = {Duque, Joshua},
+  author    = {Duquette, Joshua},
   title     = {EEG--fMRI Analysis Pipeline},
   year      = {2025},
   url       = {https://github.com/JoshuaDuq/EEG_fMRI_Pipeline},
