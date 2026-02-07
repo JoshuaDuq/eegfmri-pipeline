@@ -51,6 +51,15 @@ eeg_pipeline/cli/tui/.gomodcache/
 eeg_pipeline/cli/tui/.gopath/
 bin/
 
+### AI / Agent tooling (local, not shared) ###
+AGENTS.md
+agents.md
+.cursor/
+.codex/
+.aider*
+.continue/
+.copilot/
+
 ### IDEs & OS ###
 .vscode/
 .idea/
