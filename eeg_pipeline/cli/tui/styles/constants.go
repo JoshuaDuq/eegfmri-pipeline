@@ -39,7 +39,7 @@ const (
 	ExecViewportBorderLines    = 2
 	ExecFooterLines            = 4
 	ExecBaseReservedLines      = ExecHeaderLines + ExecInfoPanelLines + ExecProgressSectionLines + ExecLogTitleLines + ExecViewportBorderLines + ExecFooterLines
-	ExecMetricsDashboardLines  = 8
+	ExecMetricsDashboardLines  = 5
 	ExecCompletionSummaryLines = 14
 	ExecCopyModeBannerLines    = 1
 	ExecSearchInputLines       = 1

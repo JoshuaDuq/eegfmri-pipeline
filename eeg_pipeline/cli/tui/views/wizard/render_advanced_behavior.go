@@ -13,9 +13,8 @@ import (
 func (m Model) renderBehaviorAdvancedConfig() string {
 	var b strings.Builder
 
-	b.WriteString(styles.SectionTitleStyle.Render("Advanced configuration") + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
-	// Contextual help text (same as features pipeline)
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 
 	if m.useDefaultAdvanced {
@@ -23,13 +22,13 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	}
 
 	if m.editingNumber {
-		b.WriteString(infoStyle.Render("Enter a value, then press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Enter value, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.editingText {
-		b.WriteString(infoStyle.Render("Type text, then press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Type text, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.expandedOption >= 0 {
-		b.WriteString(infoStyle.Render("Space to select item · ↑↓ to navigate · Esc to close list") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: select  Esc: close list") + "\n")
 	} else {
-		b.WriteString(infoStyle.Render("Space to toggle/expand · ↑↓ to navigate · Enter to proceed") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: toggle/expand  Enter: proceed") + "\n")
 	}
 
 	labelWidth := defaultLabelWidthWide
@@ -1044,18 +1043,17 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		var labelStyle, valueStyle lipgloss.Style
 		if isSectionHeader {
-			// Section headers get special styling (like features pipeline)
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 			valueStyle = lipgloss.NewStyle()
 		} else if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		} else {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		}
 
@@ -1073,11 +1071,13 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		}
 
 		if isSectionHeader {
-			// Section headers don't have a colon after the label
-			b.WriteString(cursor + labelStyle.Render(label) + "  " + hintStyle.Render(hint) + "\n")
+			line := cursor + labelStyle.Render(label) + "  " + hintStyle.Render(hint)
+			b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
 		} else {
-			b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
-			b.WriteString("  " + hintStyle.Render(hint) + "\n")
+			styledLabel := labelStyle.Render(label + ":")
+			styledValue := valueStyle.Render(value)
+			styledHint := hintStyle.Render(hint)
+			b.WriteString(styles.RenderConfigLine(cursor, styledLabel, styledValue, styledHint, labelWidth, m.contentWidth) + "\n")
 		}
 
 		// Render expanded column/value list after the relevant option

@@ -394,17 +394,12 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 }
 
 func (m Model) renderPlottingAdvancedHeader(builder *strings.Builder) {
-	accent := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(styles.SelectedMark + " ")
-	builder.WriteString(accent + styles.SectionTitleStyle.Render("Advanced plot settings") + "\n\n")
+	builder.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 }
 
 func (m Model) renderMinimalView(builder *strings.Builder) string {
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-	builder.WriteString(infoStyle.Render("Default configuration will be used for plotting.") + "\n")
-	builder.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
+	builder.WriteString(infoStyle.Render("Using defaults. Space to customize.") + "\n\n")
 
 	const labelWidth = 22
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
@@ -414,10 +409,7 @@ func (m Model) renderMinimalView(builder *strings.Builder) string {
 	labelStyle := m.buildLabelStyle(labelWidth, isFocused)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
-	builder.WriteString(cursor + labelStyle.Render("configuration:") + " " + valueStyle.Render("using defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
-
-	tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
-	builder.WriteString("\n" + tipStyle.Render("tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
+	builder.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
 	return builder.String()
 }
 
@@ -427,14 +419,14 @@ func (m Model) renderHelpText(builder *strings.Builder) {
 	var helpText string
 	switch {
 	case m.editingNumber || m.editingText:
-		helpText = "Enter a value, then press Enter to confirm or Esc to cancel."
+		helpText = "Enter value, Enter to confirm, Esc to cancel"
 	case m.expandedOption >= 0:
-		helpText = "Space to select item · ↑↓ to navigate · Esc to close list"
+		helpText = "Space: select  Esc: close list"
 	default:
-		helpText = "Space to expand/edit · ↑↓ to navigate · Enter to proceed"
+		helpText = "Space: expand/edit  Enter: proceed"
 	}
 
-	builder.WriteString(infoStyle.Render(helpText) + "\n\n")
+	builder.WriteString(infoStyle.Render(helpText) + "\n")
 }
 
 type renderLine struct {
@@ -529,7 +521,7 @@ func (m Model) renderCursor(isFocused bool) string {
 }
 
 func (m Model) buildLabelStyle(width int, isFocused bool) lipgloss.Style {
-	style := lipgloss.NewStyle().Foreground(styles.Text).Width(width)
+	style := lipgloss.NewStyle().Foreground(styles.Text)
 	if isFocused {
 		style = style.Foreground(styles.Primary).Bold(true)
 	}
@@ -543,7 +535,7 @@ func (m Model) renderGroupLine(opt optionType, label string, expanded bool, hint
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	text := cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, label)) + "  " + hintStyle.Render(hint)
-	return renderLine{text: text}
+	return renderLine{text: styles.TruncateLine(text, m.contentWidth)}
 }
 
 func (m Model) renderValueLine(opt optionType, label string, value string, hint string, focused bool, labelWidth int) renderLine {
@@ -557,7 +549,7 @@ func (m Model) renderValueLine(opt optionType, label string, value string, hint 
 	}
 
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-	text := cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(displayValue) + "  " + hintStyle.Render(hint)
+	text := styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(displayValue), hintStyle.Render(hint), labelWidth, m.contentWidth)
 	return renderLine{text: text}
 }
 
@@ -793,7 +785,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		return []renderLine{m.renderPlotValueLine("temporal_wspace", value, "float (default: 0.8)", focused, labelWidth)}
 	case plotItemConfigFieldComparisonROIs:
 		value := m.getPlotFieldTextValue(cfg.ComparisonROIsSpec, plotDefaults.comparisonROIs, row, plotItemConfigFieldComparisonROIs)
-		hint := "e.g. all Frontal Midline_FrontalCentral"
+		hint := "e.g. all Frontal Sensorimotor_Right ParOccipital_Midline"
 		if len(m.discoveredROIs) > 0 {
 			hint = fmt.Sprintf("Space to select · %d ROIs available", len(m.discoveredROIs))
 		}

@@ -13,6 +13,7 @@ import (
 func (m Model) renderFmriAdvancedConfig() string {
 	var b strings.Builder
 
+	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 
 	if m.useDefaultAdvanced {
@@ -20,11 +21,11 @@ func (m Model) renderFmriAdvancedConfig() string {
 	}
 
 	if m.editingNumber {
-		b.WriteString(infoStyle.Render("Type a number, press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Enter value, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.editingText {
-		b.WriteString(infoStyle.Render("Type text, press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Type text, Enter to confirm, Esc to cancel") + "\n")
 	} else {
-		b.WriteString(infoStyle.Render("Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: toggle/expand  Enter: proceed") + "\n")
 	}
 
 	labelWidth := defaultLabelWidth
@@ -171,9 +172,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 
 		var labelStyle, valueStyle lipgloss.Style
 		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		} else {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
 		}
 		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
@@ -201,9 +202,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Container settings"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupOutput:
@@ -214,9 +215,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Output spaces, formats"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupPerformance:
@@ -227,9 +228,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Threads, memory"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupAnatomical:
@@ -240,9 +241,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "FreeSurfer, skull-strip"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupBold:
@@ -253,9 +254,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Registration, timing"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupQc:
@@ -266,9 +267,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Motion thresholds"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupDenoising:
@@ -279,9 +280,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "ICA-AROMA"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupSurface:
@@ -292,9 +293,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Cortical surface options"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupMultiecho:
@@ -305,9 +306,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Multi-echo BOLD"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupRepro:
@@ -318,9 +319,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Random seeds"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupValidation:
@@ -331,9 +332,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "BIDS validation, errors"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optFmriGroupAdvanced:
@@ -344,9 +345,9 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 			hint = "Extra CLI arguments"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		// Runtime options (indented)
@@ -494,11 +495,11 @@ func (m Model) renderFmriAdvancedConfig() string {
 			hint = "Raw CLI args"
 		}
 
-		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
+		styledHint := ""
 		if hint != "" {
-			b.WriteString("  " + hintStyle.Render(hint))
+			styledHint = hintStyle.Render(hint)
 		}
-		b.WriteString("\n")
+		b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), styledHint, labelWidth, m.contentWidth) + "\n")
 	}
 
 	if showScrollIndicators && endLine < totalLines {
@@ -507,4 +508,3 @@ func (m Model) renderFmriAdvancedConfig() string {
 
 	return b.String()
 }
-

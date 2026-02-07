@@ -285,47 +285,40 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 ///////////////////////////////////////////////////////////////////
 
 func (m Model) View() string {
-	// Help overlay takes precedence
 	if m.showHelp {
 		return m.renderWithOverlay(m.helpOverlay.View())
 	}
 
-	// Render header (fixed at top)
 	header := m.renderHeader()
-	headerHeight := strings.Count(header, "\n") + 3
+	headerHeight := strings.Count(header, "\n") + 2
 
-	// Render footer (fixed at bottom)
 	footer := m.renderFooter()
 	footerHeight := strings.Count(footer, "\n") + 2
 
-	// Calculate available height for main content
 	mainHeight := m.height - headerHeight - footerHeight
 	if mainHeight < 10 {
 		mainHeight = 10
 	}
 
-	// Main Content - Three Section Layout
+	cardWidth := max(m.width-10, 52)
 	prepCol := m.renderPreprocessingColumn()
 	analysisCol := m.renderAnalysisColumn()
 	utilitiesCol := m.renderUtilitiesColumn()
 
-	leftContent := prepCol + "\n" + analysisCol + "\n" + utilitiesCol
+	divider := styles.RenderDivider(cardWidth - 8)
+	leftContent := prepCol + "\n" + divider + "\n\n" + analysisCol + "\n" + divider + "\n\n" + utilitiesCol
 
-	content := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.CardStyle.Width(max(m.width-10, 52)).Render(leftContent),
-	)
+	content := styles.CardStyle.Width(cardWidth).Render(leftContent)
 
-	mainContent := content
 	if m.toast.Visible {
-		mainContent += "\n\n" + m.toast.View()
+		content += "\n" + m.toast.View()
 	}
 
-	// Force main content to fill available height
 	mainContentStyled := lipgloss.NewStyle().
 		Height(mainHeight).
-		Render(mainContent)
+		Render(content)
 
-	return header + "\n\n" + mainContentStyled + "\n" + footer
+	return header + "\n" + mainContentStyled + "\n" + footer
 }
 
 func (m Model) renderWithOverlay(overlay string) string {
@@ -340,55 +333,45 @@ func (m Model) renderWithOverlay(overlay string) string {
 
 func (m Model) renderBaseView() string {
 	header := m.renderHeader()
+	cardWidth := max(m.width-10, 52)
 	prepCol := m.renderPreprocessingColumn()
 	analysisCol := m.renderAnalysisColumn()
 	utilitiesCol := m.renderUtilitiesColumn()
 
-	leftContent := prepCol + "\n" + analysisCol + "\n" + utilitiesCol
-	content := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.CardStyle.Width(max(m.width-10, 52)).Render(leftContent),
-	)
+	divider := styles.RenderDivider(cardWidth - 8)
+	leftContent := prepCol + "\n" + divider + "\n\n" + analysisCol + "\n" + divider + "\n\n" + utilitiesCol
+	content := styles.CardStyle.Width(cardWidth).Render(leftContent)
 
-	return header + "\n\n" + content
+	return header + "\n" + content
 }
 
 func (m Model) renderHeader() string {
-	// EEG waveform motif
-	waveform := lipgloss.NewStyle().Foreground(styles.Border).Render("~∿∿∿~")
-
 	logo := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
-		Render(" EEG Pipeline")
+		Render("EEG Pipeline")
 
 	versionBadge := lipgloss.NewStyle().
 		Foreground(styles.Muted).
-		Background(styles.Border).
-		Padding(0, 1).
 		Render("v1.0")
 
 	var envBadge string
 	if m.IsCloud {
-		envBadge = styles.BadgeAccentStyle.Render(" CLOUD ")
+		envBadge = styles.BadgeAccentStyle.Render("CLOUD")
 	} else {
 		envBadge = lipgloss.NewStyle().
 			Foreground(styles.Success).
-			Background(styles.Surface).
-			Padding(0, 1).
 			Render(styles.ActiveMark + " Local")
 	}
 
-	titleRow := waveform + logo + "  " + versionBadge + "  " + envBadge
+	titleRow := "  " + logo + "  " + versionBadge + "  " + envBadge
 
 	lineWidth := m.width - 4
 	if lineWidth < 0 {
 		lineWidth = 0
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		titleRow,
-		styles.RenderHeaderSeparator(lineWidth),
-	)
+	return titleRow + "\n" + styles.RenderHeaderSeparator(lineWidth)
 }
 
 func (m Model) renderSectionHeader(title string, isActive bool) string {
@@ -401,7 +384,6 @@ func (m Model) renderSectionHeader(title string, isActive bool) string {
 func (m Model) renderPreprocessingColumn() string {
 	var lines []string
 	lines = append(lines, m.renderSectionHeader("Preprocessing", m.currentSection == SectionPreprocessing))
-	lines = append(lines, "")
 
 	for i, p := range preprocessingPipelines {
 		isSelected := m.currentSection == SectionPreprocessing && i == m.prepCursor
@@ -414,7 +396,6 @@ func (m Model) renderPreprocessingColumn() string {
 func (m Model) renderAnalysisColumn() string {
 	var lines []string
 	lines = append(lines, m.renderSectionHeader("Analysis", m.currentSection == SectionAnalysis))
-	lines = append(lines, "")
 
 	for i, p := range analysisPipelines {
 		isSelected := m.currentSection == SectionAnalysis && i == m.analysisCursor
@@ -427,7 +408,6 @@ func (m Model) renderAnalysisColumn() string {
 func (m Model) renderUtilitiesColumn() string {
 	var lines []string
 	lines = append(lines, m.renderSectionHeader("Utilities", m.currentSection == SectionUtilities))
-	lines = append(lines, "")
 
 	for i, u := range utilities {
 		isSelected := m.currentSection == SectionUtilities && i == m.utilityCursor
@@ -438,8 +418,6 @@ func (m Model) renderUtilitiesColumn() string {
 }
 
 func (m Model) renderItem(name, description string, selected bool) string {
-	var item strings.Builder
-
 	cursor := m.cursorPrefix(selected)
 
 	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
@@ -449,10 +427,7 @@ func (m Model) renderItem(name, description string, selected bool) string {
 		descStyle = lipgloss.NewStyle().Foreground(styles.TextDim)
 	}
 
-	item.WriteString(fmt.Sprintf("%s%s\n", cursor, nameStyle.Render(name)))
-	item.WriteString("      " + descStyle.Render(description) + "\n")
-
-	return item.String()
+	return fmt.Sprintf("%s%s  %s", cursor, nameStyle.Render(name), descStyle.Render(description))
 }
 
 func (m Model) renderPipelineItem(p pipelineItem, selected bool) string {
@@ -465,13 +440,20 @@ func (m Model) renderUtilityItem(u utilityItem, selected bool) string {
 
 func (m Model) renderFooter() string {
 	hints := []string{
-		styles.RenderKeyHint("↑↓", "Navigate"),
+		styles.RenderKeyHint("\u2191\u2193", "Navigate"),
 		styles.RenderKeyHint("D", "Dashboard"),
 		styles.RenderKeyHint("H", "History"),
-		styles.RenderKeyHint("⏎", "Select"),
+		styles.RenderKeyHint("\u23ce", "Select"),
 		styles.RenderKeyHint("Q", "Quit"),
 	}
 
-	separator := styles.RenderFooterSeparator()
-	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, separator))
+	width := m.width - 8
+	if width < 20 {
+		width = 20
+	}
+	divider := styles.RenderDivider(width)
+	bar := styles.FooterStyle.Width(width).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	return divider + "\n" + bar
 }
+
+///////////////////////////////////////////////////////////////////

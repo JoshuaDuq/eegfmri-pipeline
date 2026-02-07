@@ -12,7 +12,7 @@ import (
 
 func (m Model) renderMLAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render("Advanced configuration") + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 
@@ -21,13 +21,13 @@ func (m Model) renderMLAdvancedConfig() string {
 	}
 
 	if m.editingNumber {
-		b.WriteString(infoStyle.Render("Type a number, press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Enter value, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.editingText {
-		b.WriteString(infoStyle.Render("Type text, press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Type text, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.expandedOption >= 0 {
-		b.WriteString(infoStyle.Render("Space to select item · ↑↓ to navigate · Esc to close list") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: select  Esc: close list") + "\n")
 	} else {
-		b.WriteString(infoStyle.Render("Space to edit/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: edit/toggle  Enter: proceed") + "\n")
 	}
 
 	labelWidth := defaultLabelWidthWide
@@ -188,9 +188,9 @@ func (m Model) renderMLAdvancedConfig() string {
 
 		var labelStyle, valueStyle lipgloss.Style
 		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		} else {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
 		}
 
 		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
@@ -200,8 +200,7 @@ func (m Model) renderMLAdvancedConfig() string {
 			cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 		}
 
-		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
-		b.WriteString("  " + hintStyle.Render(hint) + "\n")
+		b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), hintStyle.Render(hint), labelWidth, m.contentWidth) + "\n")
 
 		if m.shouldRenderExpandedListAfterOption(opt) {
 			items := m.getExpandedListItems()

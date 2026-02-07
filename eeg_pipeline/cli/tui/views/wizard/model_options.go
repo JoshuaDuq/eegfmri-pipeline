@@ -306,28 +306,30 @@ func (m Model) getFeaturesOptions() []optionType {
 		}
 	}
 
-	// TFR settings (always available for features that use time-frequency)
-	options = append(options, optFeatGroupTFR)
-	if m.featGroupTFRExpanded {
-		options = append(
-			options,
-			optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers,
-			optBandEnvelopePadSec, optBandEnvelopePadCycles,
-			optIAFEnabled,
-		)
-		if m.iafEnabled {
+	// TFR settings only for feature families that use time-frequency representations.
+	if m.hasTimeFrequencyFeatureSelection() {
+		options = append(options, optFeatGroupTFR)
+		if m.featGroupTFRExpanded {
 			options = append(
 				options,
-				optIAFAlphaWidthHz,
-				optIAFSearchRangeMin,
-				optIAFSearchRangeMax,
-				optIAFMinProminence,
-				optIAFRois,
-				optIAFMinCyclesAtFmin,
-				optIAFMinBaselineSec,
-				optIAFAllowFullFallback,
-				optIAFAllowAllChannelsFallback,
+				optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers,
+				optBandEnvelopePadSec, optBandEnvelopePadCycles,
+				optIAFEnabled,
 			)
+			if m.iafEnabled {
+				options = append(
+					options,
+					optIAFAlphaWidthHz,
+					optIAFSearchRangeMin,
+					optIAFSearchRangeMax,
+					optIAFMinProminence,
+					optIAFRois,
+					optIAFMinCyclesAtFmin,
+					optIAFMinBaselineSec,
+					optIAFAllowFullFallback,
+					optIAFAllowAllChannelsFallback,
+				)
+			}
 		}
 	}
 
@@ -344,17 +346,65 @@ func (m Model) getFeaturesOptions() []optionType {
 			optFeatAnalysisMode,
 			optFeatComputeChangeScores,
 			optFeatSaveTfrWithSidecar,
-			optFeatNJobsBands,
-			optFeatNJobsConnectivity,
-			optFeatNJobsAperiodic,
-			optFeatNJobsComplexity,
 		)
+		if m.hasBandFeatureSelection() {
+			options = append(options, optFeatNJobsBands)
+		}
+		if m.hasConnectivityFeatureSelection() {
+			options = append(options, optFeatNJobsConnectivity)
+		}
+		if m.isCategorySelected("aperiodic") {
+			options = append(options, optFeatNJobsAperiodic)
+		}
+		if m.isCategorySelected("complexity") {
+			options = append(options, optFeatNJobsComplexity)
+		}
 		if m.isCategorySelected("itpc") {
 			options = append(options, optItpcNJobs)
 		}
 	}
 
 	return options
+}
+
+func (m Model) hasTimeFrequencyFeatureSelection() bool {
+	tfCategories := []string{
+		"power",
+		"connectivity",
+		"directedconnectivity",
+		"itpc",
+		"pac",
+		"erds",
+		"bursts",
+	}
+	for _, cat := range tfCategories {
+		if m.isCategorySelected(cat) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Model) hasBandFeatureSelection() bool {
+	bandCategories := []string{
+		"power",
+		"ratios",
+		"asymmetry",
+		"spectral",
+		"erds",
+		"bursts",
+		"quality",
+	}
+	for _, cat := range bandCategories {
+		if m.isCategorySelected(cat) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Model) hasConnectivityFeatureSelection() bool {
+	return m.isCategorySelected("connectivity") || m.isCategorySelected("directedconnectivity")
 }
 
 // getPreprocessingOptions returns advanced options for preprocessing with collapsible groups

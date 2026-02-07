@@ -133,6 +133,8 @@ func (m Model) getExpandedListLength() int {
 		return len(m.getExpandedListItems())
 	case expandedSourceLocFmriScopeTrialTypes:
 		return len(m.getExpandedListItems())
+	case expandedIAFRois:
+		return len(m.rois)
 	case expandedItpcConditionValues:
 		if m.itpcConditionColumn == "" {
 			return 0
@@ -317,6 +319,15 @@ func (m Model) getExpandedListItems() []string {
 			return append(items, "(type manually)")
 		}
 		return append(items, vals...)
+	case expandedIAFRois:
+		items := make([]string, 0, len(m.rois))
+		for _, roi := range m.rois {
+			key := strings.TrimSpace(roi.Key)
+			if key != "" {
+				items = append(items, key)
+			}
+		}
+		return items
 	case expandedItpcConditionValues:
 		if m.itpcConditionColumn == "" {
 			return nil
@@ -674,6 +685,8 @@ func (m *Model) handleExpandedListToggle() {
 		default:
 			m.toggleSpaceValue(selectedItem, &m.sourceLocFmriConditionScopeTrialTypes)
 		}
+	case expandedIAFRois:
+		m.toggleColumnValue(selectedItem, &m.iafRoisSpec)
 	case expandedFmriAnalysisCondAColumn:
 		if selectedItem == "(type manually)" {
 			m.expandedOption = expandedNone
@@ -949,6 +962,8 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optSourceLocFmriStimPhasesToModel
 	case expandedSourceLocFmriScopeTrialTypes:
 		return opt == optSourceLocFmriConditionScopeTrialTypes
+	case expandedIAFRois:
+		return opt == optIAFRois
 	case expandedPainResidualCrossfitGroupColumn:
 		return opt == optPainResidualCrossfitGroupColumn
 	case expandedStabilityGroupColumn:
@@ -1078,6 +1093,13 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		}
 		for _, p := range splitSpaceList(m.fmriTrialSigScopeTrialTypes) {
 			if p == item {
+				return true
+			}
+		}
+		return false
+	case expandedIAFRois:
+		for _, roi := range splitCSVList(m.iafRoisSpec) {
+			if roi == item {
 				return true
 			}
 		}
@@ -3406,6 +3428,7 @@ const (
 	expandedFmriAnalysisScopeTrialTypes     = 41
 	expandedFmriTrialSigScopeTrialTypes     = 42
 	expandedSourceLocFmriScopeTrialTypes    = 43
+	expandedIAFRois                         = 44
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline

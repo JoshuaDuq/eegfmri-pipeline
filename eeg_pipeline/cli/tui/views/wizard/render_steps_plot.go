@@ -13,7 +13,7 @@ import (
 func (m Model) renderPlotSelection() string {
 	var b strings.Builder
 
-	b.WriteString(styles.SectionTitleStyle.Render("Plots") + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Plots", m.contentWidth) + "\n")
 
 	visibleItems := []int{}
 	for i, plot := range m.plotItems {
@@ -30,22 +30,10 @@ func (m Model) renderPlotSelection() string {
 		}
 	}
 
-	var statusIndicator string
-	if count >= 1 {
-		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
-	} else {
-		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
-	}
-	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-		fmt.Sprintf("%d of %d selected", count, len(visibleItems))))
-	if count == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
-	}
+	b.WriteString(styles.RenderStatusCount(count, len(visibleItems), "selected"))
 	b.WriteString("\n\n")
 
 	currentGroup := ""
-	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
 	for i, plot := range m.plotItems {
 		if !m.IsPlotCategorySelected(plot.Group) {
 			continue
@@ -54,26 +42,31 @@ func (m Model) renderPlotSelection() string {
 			if currentGroup != "" {
 				b.WriteString("\n")
 			}
-			b.WriteString(groupStyle.Render(styles.SelectedMark+" "+strings.ToUpper(plot.Group)) + "\n")
+			b.WriteString(styles.RenderDimSectionLabel(strings.ToUpper(plot.Group)) + "\n")
 			currentGroup = plot.Group
 		}
 
 		isSelected := m.plotSelected[i]
 		isFocused := i == m.plotCursor
+		cursor := "  "
+		if isFocused {
+			cursor = styles.RenderCursor()
+		}
 		checkbox := styles.RenderCheckbox(isSelected, isFocused)
-		idStyle := lipgloss.NewStyle().Foreground(styles.TextDim).PaddingLeft(1)
+		idStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
 		if isFocused {
-			idStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+			idStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		}
-		b.WriteString(checkbox + idStyle.Render(plot.ID) + nameStyle.Render(" — "+plot.Name) + "\n")
+		line := cursor + checkbox + " " + idStyle.Render(plot.ID) + nameStyle.Render(" \u2014 "+plot.Name)
+		b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
 	}
 
 	if m.plotCursor >= 0 && m.plotCursor < len(m.plotItems) {
 		plot := m.plotItems[m.plotCursor]
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Render(strings.Repeat("─", 50)) + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render("Data requirements:") + "\n")
+		b.WriteString("\n" + styles.RenderDivider(50) + "\n")
+		b.WriteString(styles.RenderDimSectionLabel("Requirements") + "\n")
 
 		reqs := []string{}
 		if plot.RequiresEpochs {
@@ -88,11 +81,11 @@ func (m Model) renderPlotSelection() string {
 		if len(plot.RequiredFiles) > 0 {
 			reqs = append(reqs, plot.RequiredFiles...)
 		}
+		reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
 		if len(reqs) > 0 {
-			reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-			b.WriteString(reqStyle.Render(strings.Join(reqs, ", ")) + "\n")
+			b.WriteString("  " + reqStyle.Render(strings.Join(reqs, ", ")) + "\n")
 		} else {
-			b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(2).Render("Base epochs only") + "\n")
+			b.WriteString("  " + reqStyle.Render("base epochs only") + "\n")
 		}
 
 		readyCount, totalCount, _ := m.plotAvailabilitySummary(plot)
@@ -101,8 +94,7 @@ func (m Model) renderPlotSelection() string {
 			if readyCount < totalCount {
 				statusColor = styles.Warning
 			}
-			statusStyle := lipgloss.NewStyle().Foreground(statusColor).PaddingLeft(2)
-			b.WriteString(statusStyle.Render(fmt.Sprintf("%d/%d subjects ready", readyCount, totalCount)) + "\n")
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(statusColor).Render(fmt.Sprintf("%d/%d subjects ready", readyCount, totalCount)) + "\n")
 		}
 	}
 
@@ -111,20 +103,20 @@ func (m Model) renderPlotSelection() string {
 
 func (m Model) renderPlotConfig() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render("Plot output") + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Plot output", m.contentWidth) + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Configure output formats and resolution. Use Space to toggle/cycle.\n\n"))
+		"  Space: toggle/cycle") + "\n\n")
 
 	options := m.getPlotConfigOptions()
 	labelWidth := 16
 
 	for i, opt := range options {
 		isFocused := i == m.plotConfigCursor
-		cursor := ""
+		cursor := "  "
 		if isFocused {
 			cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 		}
-		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(labelWidth)
+		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		if isFocused {
 			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
 		}
@@ -169,7 +161,7 @@ func (m Model) renderPlotConfig() string {
 			}
 			value = val
 		}
-		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value) + "\n")
+		b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), "", labelWidth, m.contentWidth) + "\n")
 	}
 
 	return b.String()
@@ -177,7 +169,7 @@ func (m Model) renderPlotConfig() string {
 
 func (m Model) renderTimeRange() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render("Time range") + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Time range", m.contentWidth) + "\n")
 
 	var tmin, tmax float64
 	hasMetadata := false
@@ -205,17 +197,26 @@ func (m Model) renderTimeRange() string {
 			for i := range timelineChars {
 				timelineChars[i] = '─'
 			}
+			mapToPos := func(value float64, inclusiveEnd bool) int {
+				scaled := ((value - tmin) / epochDuration) * float64(diagramWidth-1)
+				if inclusiveEnd {
+					// Keep right endpoint visually inclusive when value hits epoch tmax.
+					scaled += 0.999999
+				}
+				pos := int(scaled)
+				if pos < 0 {
+					return 0
+				}
+				if pos >= diagramWidth {
+					return diagramWidth - 1
+				}
+				return pos
+			}
 			for _, tr := range m.TimeRanges {
 				startVal := parseFloat(tr.Tmin, tmin)
 				endVal := parseFloat(tr.Tmax, tmax)
-				startPos := int(((startVal - tmin) / epochDuration) * float64(diagramWidth-1))
-				endPos := int(((endVal - tmin) / epochDuration) * float64(diagramWidth-1))
-				if startPos < 0 {
-					startPos = 0
-				}
-				if endPos >= diagramWidth {
-					endPos = diagramWidth - 1
-				}
+				startPos := mapToPos(startVal, false)
+				endPos := mapToPos(endVal, true)
 				for i := startPos; i <= endPos; i++ {
 					timelineChars[i] = '█'
 				}
@@ -223,24 +224,26 @@ func (m Model) renderTimeRange() string {
 			timeline := string(timelineChars)
 			diagram.WriteString(lipgloss.NewStyle().Foreground(styles.Primary).Render(timeline))
 			diagram.WriteString("\n")
-			diagram.WriteString(fmt.Sprintf("  %-*s%*s\n",
-				diagramWidth/2, lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("%.1fs", tmin)),
-				diagramWidth/2, lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("%.1fs", tmax))))
+			leftLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("%.1fs", tmin))
+			rightLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("%.1fs", tmax))
+			padding := diagramWidth - lipgloss.Width(leftLabel) - lipgloss.Width(rightLabel)
+			if padding < 1 {
+				padding = 1
+			}
+			diagram.WriteString("  " + leftLabel + strings.Repeat(" ", padding) + rightLabel + "\n")
 			b.WriteString(diagram.String() + "\n")
 		}
 	}
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Define time ranges to be computed separately.") + "\n" +
-		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  [+] Add range  [D] Delete range  [Space/Enter] Edit range") + "\n\n")
+		"  +: add  D: delete  Space/Enter: edit") + "\n\n")
 
 	nameWidth := 15
 	valWidth := 10
 	headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 	header := fmt.Sprintf("  %-*s %-*s %-*s", nameWidth, headerStyle.Render("Range name"), valWidth, headerStyle.Render("Start (s)"), valWidth, headerStyle.Render("End (s)"))
 	b.WriteString(header + "\n")
-	b.WriteString("  " + strings.Repeat("─", nameWidth+valWidth*2+2) + "\n")
+	b.WriteString("  " + styles.RenderDivider(nameWidth+valWidth*2+2) + "\n")
 
 	if len(m.TimeRanges) == 0 {
 		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render("  No time ranges defined. Press [A] to add one.") + "\n")
@@ -305,15 +308,9 @@ func (m Model) renderTimeRange() string {
 
 func (m Model) renderFeaturePlotterSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render("Feature plots") + "\n\n")
-	b.WriteString(
-		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  Select which plots to execute within selected Feature suites (e.g., Power).\n",
-		) +
-			lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-				"  Use ↑/↓ to navigate, Space to toggle, and A/N to select all/none.\n\n",
-			),
-	)
+	b.WriteString(styles.RenderStepHeader("Feature plots", m.contentWidth) + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
+		Render("  Space: toggle  A/N: all/none") + "\n\n")
 
 	categories := m.selectedFeaturePlotterCategories()
 	if len(categories) == 0 {
@@ -342,16 +339,7 @@ func (m Model) renderFeaturePlotterSelection() string {
 			selectedCount++
 		}
 	}
-	statusIndicator := lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
-	if selectedCount > 0 {
-		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
-	}
-	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-		fmt.Sprintf("%d of %d selected", selectedCount, len(items)),
-	))
-	if selectedCount == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
-	}
+	b.WriteString(styles.RenderStatusCount(selectedCount, len(items), "selected"))
 	b.WriteString("\n\n")
 
 	type listLine struct {
@@ -360,11 +348,10 @@ func (m Model) renderFeaturePlotterSelection() string {
 	}
 	var lines []listLine
 	cursorLineIdx := 0
-	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	currentCategory := ""
 	for i, p := range items {
 		if p.Category != currentCategory {
-			lines = append(lines, listLine{isHeader: true, text: groupStyle.Render(" " + strings.ToUpper(p.Category) + " ")})
+			lines = append(lines, listLine{isHeader: true, text: styles.RenderDimSectionLabel(strings.ToUpper(p.Category))})
 			currentCategory = p.Category
 		}
 		isFocused := i == m.featurePlotterCursor
@@ -372,12 +359,16 @@ func (m Model) renderFeaturePlotterSelection() string {
 			cursorLineIdx = len(lines)
 		}
 		isSelected := m.featurePlotterSelected[p.ID]
-		checkbox := styles.RenderCheckbox(isSelected, isFocused)
-		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+		cursor := "  "
 		if isFocused {
-			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+			cursor = styles.RenderCursor()
 		}
-		lines = append(lines, listLine{isHeader: false, text: checkbox + nameStyle.Render(p.Name)})
+		checkbox := styles.RenderCheckbox(isSelected, isFocused)
+		nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
+		if isFocused {
+			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+		}
+		lines = append(lines, listLine{isHeader: false, text: styles.TruncateLine(cursor+checkbox+" "+nameStyle.Render(p.Name), m.contentWidth)})
 	}
 
 	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), 10)
@@ -385,7 +376,7 @@ func (m Model) renderFeaturePlotterSelection() string {
 		b.WriteString(styles.RenderScrollUpIndicator(layout.StartIdx) + "\n")
 	}
 	for i := layout.StartIdx; i < layout.EndIdx; i++ {
-		b.WriteString(" " + lines[i].text + "\n")
+		b.WriteString(lines[i].text + "\n")
 	}
 	if layout.ShowScrollDn {
 		remaining := len(lines) - layout.EndIdx

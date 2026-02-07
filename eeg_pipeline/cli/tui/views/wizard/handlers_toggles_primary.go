@@ -790,7 +790,8 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.iafEnabled = !m.iafEnabled
 		m.useDefaultAdvanced = false
 	case optIAFRois:
-		m.ShowToast("IAF ROIs are taken from the ROI selection step", "info")
+		m.expandedOption = expandedIAFRois
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optIAFAllowFullFallback:
 		m.iafAllowFullFallback = !m.iafAllowFullFallback

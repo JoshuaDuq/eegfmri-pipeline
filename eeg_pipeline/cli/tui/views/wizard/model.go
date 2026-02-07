@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eeg-pipeline/tui/animation"
@@ -116,15 +117,14 @@ type ROIDefinition struct {
 }
 
 var defaultROIs = []ROIDefinition{
-	{"Frontal", "Frontal", "Fp1,Fp2,Fpz,AF3,AF4,AF7,AF8,F1,F2,F3,F4,F5,F6,F7,F8"},
-	{"Sensorimotor_Right", "Sensorimotor Right", "FC2,FC4,FC6,C2,C4,C6,CP2,CP4,CP6"},
-	{"Sensorimotor_Left", "Sensorimotor Left", "FC1,FC3,FC5,C1,C3,C5,CP1,CP3,CP5"},
+	{"Frontal", "Frontal", "Fp2,Fpz,AF3,AF7,AF8,F1,F2,F3,F5,F6,F7,F8"},
+	{"Sensorimotor_Right", "Sensorimotor Right (Contralateral)", "FC4,FC6,C2,C6,CP2,CP4,CP6"},
+	{"Sensorimotor_Left", "Sensorimotor Left (Ipsilateral)", "FC5,C1,C3,C5,CP3,CP5"},
 	{"Temporal_Right", "Temporal Right", "FT8,FT10,T8,TP8,TP10"},
 	{"Temporal_Left", "Temporal Left", "FT7,FT9,T7,TP7,TP9"},
 	{"ParOccipital_Right", "ParOccipital Right", "P2,P4,P6,P8,PO4,PO8,O2"},
 	{"ParOccipital_Left", "ParOccipital Left", "P1,P3,P5,P7,PO3,PO7,O1"},
 	{"ParOccipital_Midline", "ParOccipital Midline", "Pz,POz,Oz"},
-	{"Midline_FrontalCentral", "Midline Frontal-Central", "Fz,Cz,CPz"},
 }
 
 // PreprocessingStage represents a preprocessing stage
@@ -1325,10 +1325,9 @@ type Model struct {
 	availableChannels         []string // EEG channels from electrodes.tsv
 	unavailableChannels       []string // Bad channels from preprocessing log
 
-	// Review/Execute
-	ReadyToExecute    bool
-	ConfirmingExecute bool
-	DryRunMode        bool // If true, append --dry-run to command
+	// Execute
+	ReadyToExecute bool
+	DryRunMode     bool // If true, append --dry-run to command
 
 	// Validation
 	validationErrors []string
@@ -1343,8 +1342,9 @@ type Model struct {
 	subjectLoadingSpinner components.Spinner
 	plotLoadingSpinner    components.Spinner
 
-	width  int
-	height int
+	width        int
+	height       int
+	contentWidth int // inner width available for step content (set in View)
 
 	// Advanced configuration (shared)
 	useDefaultAdvanced bool // True = skip advanced config customization
@@ -2152,12 +2152,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		{Key: "Space", Description: "Toggle selection"},
 		{Key: "A", Description: "Select all"},
 		{Key: "N", Description: "Select none"},
-		{Key: "/", Description: "Filter subjects"},
 	})
 	help.AddSection("Actions", []components.HelpItem{
 		{Key: "Enter", Description: "Proceed to next step"},
 		{Key: "?", Description: "Toggle help"},
-		{Key: "R", Description: "Refresh subjects"},
 	})
 	help.AddSection("General", []components.HelpItem{
 		{Key: "Esc", Description: "Go back / Cancel"},
@@ -3232,13 +3230,26 @@ func (m Model) immediateTick() tea.Cmd {
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*styles.TickIntervalMs, func(t time.Time) tea.Msg {
+	return tea.Tick(m.tickInterval(), func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }
 
+func (m Model) tickInterval() time.Duration {
+	// Reduce repaint frequency when the wizard is idle to avoid visible flicker
+	// on configuration pages while preserving responsiveness during interactions.
+	if m.IsEditing() || m.subjectsLoading || (m.featurePlotters == nil && strings.TrimSpace(m.featurePlotterError) == "") || m.toastTicker > 0 {
+		return time.Millisecond * styles.TickIntervalMs
+	}
+	return 500 * time.Millisecond
+}
+
 // CursorBlinkVisible returns true when the cursor should be shown (blink on phase).
 func (m Model) CursorBlinkVisible() bool {
+	if !m.IsEditing() {
+		// Keep cursor steady while browsing options to prevent distracting flicker.
+		return true
+	}
 	return m.animQueue.CursorVisible()
 }
 
@@ -3269,9 +3280,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		m.ticker++
-		m.animQueue.Tick()
-		m.subjectLoadingSpinner.Tick()
-		m.plotLoadingSpinner.Tick()
+		if m.IsEditing() {
+			m.animQueue.Tick()
+		}
+		if m.subjectsLoading {
+			m.subjectLoadingSpinner.Tick()
+		}
+		if m.featurePlotters == nil && strings.TrimSpace(m.featurePlotterError) == "" {
+			m.plotLoadingSpinner.Tick()
+		}
 		m.TickToast()
 		return m, m.tick()
 
@@ -3334,26 +3351,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if isSingleChar := len(msg.String()) == singleCharLength; isSingleChar {
 					m.subjectFilter += msg.String()
 				}
-			}
-			return m, nil
-		}
-
-		if m.ConfirmingExecute {
-			switch msg.String() {
-			case "y", "Y", "enter":
-				m.ConfirmingExecute = false
-				m.DryRunMode = false
-				m.ReadyToExecute = true
-				return m, nil
-			case "d", "D":
-				// Dry-run mode - execute with --dry-run flag
-				m.ConfirmingExecute = false
-				m.DryRunMode = true
-				m.ReadyToExecute = true
-				return m, nil
-			case "n", "N", "esc":
-				m.ConfirmingExecute = false
-				return m, nil
 			}
 			return m, nil
 		}
@@ -3548,11 +3545,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = true
 			m.helpOverlay.Visible = true
-		case "/":
-			if m.CurrentStep == types.StepSelectSubjects {
-				m.filteringSubject = true
-				m.subjectFilter = ""
-			}
 		case "up", "k":
 			m.handleUp()
 		case "down", "j":
@@ -3672,18 +3664,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.removeROI()
 			}
 
-		case "R":
-			// Refresh subjects (only meaningful on subject selection step)
-			if m.CurrentStep == types.StepSelectSubjects {
-				m.subjectsLoading = true
-				return m, func() tea.Msg { return messages.RefreshSubjectsMsg{} }
-			}
-		case "ctrl+r":
-			// Hidden alias for refresh (useful on keyboards without function keys)
-			if m.CurrentStep == types.StepSelectSubjects {
-				m.subjectsLoading = true
-				return m, func() tea.Msg { return messages.RefreshSubjectsMsg{} }
-			}
 		}
 
 	case tea.WindowSizeMsg:

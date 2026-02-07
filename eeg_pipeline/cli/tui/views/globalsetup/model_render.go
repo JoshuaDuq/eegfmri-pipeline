@@ -11,23 +11,23 @@ import (
 // Rendering helpers for the global setup view.
 
 func (m Model) View() string {
-	// Render header
 	title := styles.RenderSectionLabel("Global Setup")
 	section := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("  " + m.sections[m.sectionIndex].label)
-	header := title + section
-	headerHeight := 3
+	lineWidth := m.width - 8
+	if lineWidth < 20 {
+		lineWidth = 20
+	}
+	header := title + section + "\n" + styles.RenderDivider(lineWidth)
+	headerHeight := strings.Count(header, "\n") + 2
 
-	// Render footer
 	footer := m.renderFooter()
 	footerHeight := strings.Count(footer, "\n") + 2
 
-	// Calculate available height for main content
 	mainHeight := m.height - headerHeight - footerHeight
 	if mainHeight < 10 {
 		mainHeight = 10
 	}
 
-	// Build main content
 	var mainContent strings.Builder
 	mainContent.WriteString(m.renderFields())
 
@@ -47,12 +47,11 @@ func (m Model) View() string {
 		mainContent.WriteString("\n  " + m.saveSpinner.View())
 	}
 
-	// Force main content to fill available height
 	mainContentStyled := lipgloss.NewStyle().
 		Height(mainHeight).
 		Render(mainContent.String())
 
-	return header + "\n\n" + mainContentStyled + "\n" + footer
+	return header + "\n" + mainContentStyled + "\n" + footer
 }
 
 func (m Model) renderFooter() string {
@@ -73,17 +72,24 @@ func (m Model) renderFooter() string {
 		}
 	}
 
-	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	width := m.width - 8
+	if width < 20 {
+		width = 20
+	}
+	divider := styles.RenderDivider(width)
+	bar := styles.FooterStyle.Width(width).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	return divider + "\n" + bar
 }
 
 func (m Model) renderFields() string {
 	var b strings.Builder
 	section := m.sections[m.sectionIndex]
 
-	b.WriteString(styles.SectionTitleStyle.Render(section.label) + "\n\n")
+	b.WriteString(styles.SectionTitleStyle.Render(section.label) + "\n")
 	if section.description != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(section.description) + "\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(section.description) + "\n")
 	}
+	b.WriteString("\n")
 
 	fields := m.sectionFields(section.key)
 	for i, field := range fields {

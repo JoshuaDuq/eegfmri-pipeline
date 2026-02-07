@@ -200,3 +200,107 @@ func RenderDimSectionLabel(title string) string {
 	label := lipgloss.NewStyle().Bold(true).Foreground(TextDim).Render(" " + title)
 	return bar + label
 }
+
+// RenderSectionBlock renders a section label followed by a thin separator line.
+func RenderSectionBlock(title string, width int) string {
+	label := RenderSectionLabel(title)
+	if width <= 0 {
+		return label
+	}
+	sep := lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat(SectionDividerChar, width))
+	return label + "\n" + sep
+}
+
+// RenderKeyValue renders a label-value pair with consistent alignment.
+func RenderKeyValue(label, value string, labelWidth int) string {
+	lbl := lipgloss.NewStyle().Foreground(TextDim).Width(labelWidth).Render(label)
+	val := lipgloss.NewStyle().Foreground(Text).Render(value)
+	return lbl + val
+}
+
+// RenderKeyValueAccent renders a label-value pair with the value in accent color.
+func RenderKeyValueAccent(label, value string, labelWidth int) string {
+	lbl := lipgloss.NewStyle().Foreground(TextDim).Width(labelWidth).Render(label)
+	val := lipgloss.NewStyle().Foreground(Accent).Bold(true).Render(value)
+	return lbl + val
+}
+
+// RenderDivider renders a subtle horizontal divider at the given width.
+func RenderDivider(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat(SectionDividerChar, width))
+}
+
+// TruncateLine truncates a plain string to maxWidth characters, appending "..." if truncated.
+func TruncateLine(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	w := lipgloss.Width(s)
+	if w <= maxWidth {
+		return s
+	}
+	if maxWidth <= 3 {
+		return s[:maxWidth]
+	}
+	// Trim rune-by-rune until it fits with ellipsis.
+	runes := []rune(s)
+	for len(runes) > 0 {
+		candidate := string(runes) + "..."
+		if lipgloss.Width(candidate) <= maxWidth {
+			return candidate
+		}
+		runes = runes[:len(runes)-1]
+	}
+	return "..."
+}
+
+// PadRight pads a string with spaces to reach the target visual width.
+// If the string is already wider, it is returned as-is (no truncation).
+func PadRight(s string, targetWidth int) string {
+	w := lipgloss.Width(s)
+	if w >= targetWidth {
+		return s
+	}
+	return s + strings.Repeat(" ", targetWidth-w)
+}
+
+// RenderConfigLine builds a single config option line: cursor + label + value + hint,
+// using manual padding instead of lipgloss .Width() to avoid internal wrapping.
+// The result is truncated to maxWidth.
+func RenderConfigLine(cursor, label, value, hint string, labelWidth, maxWidth int) string {
+	paddedLabel := PadRight(label, labelWidth)
+	line := cursor + paddedLabel + " " + value
+	if hint != "" {
+		line += "  " + hint
+	}
+	return TruncateLine(line, maxWidth)
+}
+
+// RenderStepHeader renders a step section title with a divider underneath.
+func RenderStepHeader(title string, width int) string {
+	header := SectionTitleStyle.Render(title)
+	if width > 0 {
+		return header + "\n" + RenderDivider(width)
+	}
+	return header
+}
+
+// RenderStatusCount renders "N of M selected" with a check/warning prefix.
+func RenderStatusCount(count, total int, noun string) string {
+	var icon string
+	if count >= 1 {
+		icon = lipgloss.NewStyle().Foreground(Success).Render(CheckMark)
+	} else {
+		icon = lipgloss.NewStyle().Foreground(Warning).Render(WarningMark)
+	}
+	summary := lipgloss.NewStyle().Foreground(TextDim).Render(
+		fmt.Sprintf(" %d of %d %s", count, total, noun))
+	result := icon + summary
+	if count == 0 {
+		result += lipgloss.NewStyle().Foreground(Warning).Faint(true).Render(" -- select at least 1")
+	}
+	return result
+}

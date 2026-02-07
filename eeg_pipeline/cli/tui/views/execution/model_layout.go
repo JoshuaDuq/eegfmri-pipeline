@@ -8,7 +8,6 @@ import (
 	"github.com/eeg-pipeline/tui/styles"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Layout sizing, lifecycle helpers, and clipboard export.
@@ -121,12 +120,16 @@ func (m Model) panelWidth() int {
 	return base
 }
 
+func (m Model) sidebarInnerWidth() int {
+	w := m.panelWidth() - 6
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
 func (m Model) renderSidebarCard(content string) string {
-	cardStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Border).
-		Padding(1, 3)
-	return cardStyle.Width(m.panelWidth()).Render(content)
+	return styles.PanelStyle.Width(m.panelWidth()).Render(content)
 }
 
 func (m Model) copyLogToClipboard() tea.Cmd {

@@ -51,6 +51,7 @@ const (
 type TUIState struct {
 	TimeRanges   []types.TimeRange `json:"time_ranges"`
 	LastPipeline int               `json:"last_pipeline"`
+	ROICacheVersion int            `json:"roi_cache_version,omitempty"`
 
 	// Band configuration
 	Bands        []BandState `json:"bands,omitempty"`

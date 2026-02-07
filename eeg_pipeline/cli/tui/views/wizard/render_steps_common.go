@@ -17,14 +17,6 @@ const (
 	configOverhead        = 10
 )
 
-// renderSectionAccent returns a static accent for section titles (clean, scientific).
-func (m Model) renderSectionAccent() string {
-	return lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(styles.SelectedMark + " ")
-}
-
 // calculateScrollWindow returns the visible line range for scrolling.
 func calculateScrollWindow(totalLines, offset, effectiveHeight, overhead int) (startLine, endLine int, showIndicators bool) {
 	maxLines := effectiveHeight - overhead
@@ -50,8 +42,7 @@ func calculateScrollWindow(totalLines, offset, effectiveHeight, overhead int) (s
 func (m Model) renderDefaultConfigView(configType string) string {
 	var b strings.Builder
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-	b.WriteString(infoStyle.Render(fmt.Sprintf("Default configuration will be used for %s.", configType)) + "\n")
-	b.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
+	b.WriteString(infoStyle.Render(fmt.Sprintf("Using defaults for %s. Space to customize.", configType)) + "\n\n")
 
 	labelWidth := defaultLabelWidth
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
@@ -60,14 +51,12 @@ func (m Model) renderDefaultConfigView(configType string) string {
 	if isFocused {
 		cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 	}
-	labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Text)
 	if isFocused {
 		labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
 	}
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	b.WriteString(cursor + labelStyle.Render("configuration:") + " " + valueStyle.Render("using defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
-	tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
-	b.WriteString("\n" + tipStyle.Render("tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
+	b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render("Configuration:"), valueStyle.Render("defaults"), hintStyle.Render("Space to customize"), labelWidth, m.contentWidth) + "\n")
 	return b.String()
 }
 

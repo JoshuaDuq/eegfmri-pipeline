@@ -199,30 +199,19 @@ func (m Model) renderContent() string {
 
 func (m Model) renderHeader() string {
 	title := styles.RenderSectionLabel("Project Dashboard")
-
-	sepLen := headerSeparatorLen
-	if sepLen > 60 {
-		sepLen = 60
-	}
-	return title + "\n" + styles.RenderHeaderSeparator(sepLen)
+	return title + "\n" + styles.RenderDivider(headerSeparatorLen)
 }
 
 func (m Model) renderLoading() string {
-	return "\n\n  " + m.spinner.View() + "\n\n"
+	return "\n  " + m.spinner.View() + "\n"
 }
 
 func (m Model) renderError() string {
-	errorStyle := lipgloss.NewStyle().
-		Foreground(styles.Error).
-		Bold(true)
+	errorStyle := lipgloss.NewStyle().Foreground(styles.Error).Bold(true)
+	messageStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 
-	messageStyle := lipgloss.NewStyle().
-		Foreground(styles.TextDim)
-
-	errorMessage := errorStyle.Render("  " + styles.CrossMark + " Failed to load statistics")
-	errorDetails := messageStyle.Render("  " + m.loadError.Error())
-
-	return "\n\n" + errorMessage + "\n" + errorDetails + "\n\n"
+	return "\n" + errorStyle.Render("  "+styles.CrossMark+" Failed to load statistics") +
+		"\n" + messageStyle.Render("  "+m.loadError.Error()) + "\n"
 }
 
 func (m Model) renderStats() string {
@@ -232,20 +221,16 @@ func (m Model) renderStats() string {
 	b.WriteString(m.renderTaskInfo())
 	b.WriteString("\n\n")
 	b.WriteString(m.renderEegSection())
-	b.WriteString("\n")
-	b.WriteString(styles.SectionDividerStyle.Render("  " + strings.Repeat(styles.SectionDividerChar, 36)))
+	b.WriteString(styles.RenderDivider(40))
 	b.WriteString("\n\n")
 	b.WriteString(m.renderFmriSection())
-	b.WriteString("\n")
 	b.WriteString(m.renderLastUpdate())
 
 	return b.String()
 }
 
 func (m Model) renderTaskInfo() string {
-	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(12).Render("  Task")
-	taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.stats.Task)
-	return taskLabel + taskValue
+	return "  " + styles.RenderKeyValueAccent("Task", m.stats.Task, 10)
 }
 
 func (m Model) renderLastUpdate() string {
@@ -280,8 +265,7 @@ func (m Model) subjectRowColor(label string, count, total int) lipgloss.Color {
 func (m Model) renderEegSection() string {
 	var b strings.Builder
 
-	header := styles.RenderSectionLabel("EEG")
-	b.WriteString("  " + header + "\n\n")
+	b.WriteString("  " + styles.RenderSectionLabel("EEG") + "\n")
 
 	totalSubjects := m.stats.TotalSubjects
 	eegRows := []struct {
@@ -309,8 +293,7 @@ func (m Model) renderEegSection() string {
 func (m Model) renderFmriSection() string {
 	var b strings.Builder
 
-	header := styles.RenderSectionLabel("fMRI")
-	b.WriteString("  " + header + "\n\n")
+	b.WriteString("  " + styles.RenderSectionLabel("fMRI") + "\n")
 
 	totalSubjects := m.stats.TotalSubjects
 	fmriRows := []struct {
@@ -416,8 +399,7 @@ func (m Model) allFeatureCategoriesZero(totalSubjects int) bool {
 func (m Model) renderFeatureCategories() string {
 	var b strings.Builder
 
-	header := styles.RenderDimSectionLabel("Feature Categories")
-	b.WriteString("  " + header + "\n\n")
+	b.WriteString("  " + styles.RenderDimSectionLabel("Feature Categories") + "\n")
 
 	if len(m.stats.FeatureCategories) == 0 {
 		noDataMessage := lipgloss.NewStyle().
@@ -493,5 +475,7 @@ func (m Model) renderFooter() string {
 		styles.RenderKeyHint("Esc", "Back"),
 	}
 
-	return styles.FooterStyle.Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	divider := styles.RenderDivider(50)
+	bar := styles.FooterStyle.Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	return divider + "\n" + bar
 }

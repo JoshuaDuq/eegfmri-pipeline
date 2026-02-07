@@ -85,8 +85,9 @@ func (m Model) View() string {
 	return b.String()
 }
 
-// renderCompletionSummary produces a compact summary card shown
-// once execution has finished, including timing, errors and outputs.
+// renderCompletionSummary produces a polished summary card shown
+// once execution has finished, with status banner, metric tiles,
+// output paths and action buttons.
 func (m Model) renderCompletionSummary() string {
 	var b strings.Builder
 
@@ -97,153 +98,187 @@ func (m Model) renderCompletionSummary() string {
 	switch m.Status {
 	case StatusSuccess:
 		icon = styles.CheckMark
-		statusText = "Completed successfully"
+		statusText = "Pipeline Complete"
 		statusColor = styles.Success
 		borderColor = styles.Success
 	case StatusFailed:
 		icon = styles.CrossMark
-		statusText = "Execution failed"
+		statusText = "Pipeline Failed"
 		statusColor = styles.Error
 		borderColor = styles.Error
 	case StatusCancelled:
-		icon = "⊘"
-		statusText = "Execution cancelled"
+		icon = styles.CrossMark
+		statusText = "Cancelled"
 		statusColor = styles.Warning
 		borderColor = styles.Warning
 	default:
 		return ""
 	}
 
-	// Status line with icon
-	statusLine := lipgloss.NewStyle().
+	pw := m.panelWidth()
+	iw := pw - 6
+
+	// Status banner — full-width colored bar
+	bannerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(statusColor).
-		Render(icon + "  " + statusText)
-	b.WriteString(statusLine + "\n")
+		Foreground(styles.BgDark).
+		Background(statusColor).
+		Padding(0, 2).
+		Width(iw)
+	b.WriteString(bannerStyle.Render(icon+"  "+statusText) + "\n\n")
 
-	// Divider line
-	divWidth := 40
-	div := lipgloss.NewStyle().Foreground(statusColor).Render(strings.Repeat("─", divWidth))
-	b.WriteString(div + "\n\n")
-
-	// Stats in a clean layout
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(14)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
-
-	// Duration
+	// Metric tiles row — compact key stats
 	duration := m.getDuration()
-	durationStr := formatDuration(duration)
-	b.WriteString(labelStyle.Render("duration:") + valueStyle.Render(durationStr) + "\n")
+	tiles := m.buildCompletionTiles(duration)
+	b.WriteString(styles.TruncateLine(m.renderMetricTiles(tiles, iw), iw) + "\n")
 
-	// Subjects processed
-	if m.SubjectTotal > 0 && m.SubjectCurrent > 0 {
-		subjProgress := float64(m.SubjectCurrent) / float64(m.SubjectTotal)
-		subjInfo := fmt.Sprintf("%d of %d (%.0f%%)", m.SubjectCurrent, m.SubjectTotal, subjProgress*100)
-		b.WriteString(labelStyle.Render("subjects:") + valueStyle.Render(subjInfo) + "\n")
+	// Failed subjects detail
+	if len(m.FailedSubjects) > 0 {
+		failStyle := lipgloss.NewStyle().Foreground(styles.Error)
+		b.WriteString(styles.TruncateLine(failStyle.Render(fmt.Sprintf("  Failed: %s", strings.Join(m.FailedSubjects, ", "))), iw) + "\n")
 	}
 
-	// Exit code for failures
-	if m.Status == StatusFailed {
-		exitStyle := lipgloss.NewStyle().Foreground(styles.Error).Bold(true)
-		b.WriteString(labelStyle.Render("Exit code:") + exitStyle.Render(fmt.Sprintf("%d", m.ExitCode)) + "\n")
-	}
-
-	// Error count with visual indicator
+	// Error summary
 	if len(m.ErrorLines) > 0 {
 		errStyle := lipgloss.NewStyle().Foreground(styles.Warning)
-		errText := fmt.Sprintf("%d detected", len(m.ErrorLines))
+		errText := fmt.Sprintf("%d error(s) detected", len(m.ErrorLines))
 		if len(m.ErrorLines) > 5 {
-			errText += " (scroll log to view)"
+			errText += " — scroll log to review"
 		}
-		b.WriteString(labelStyle.Render("errors:") + errStyle.Render(errText) + "\n")
+		b.WriteString(styles.TruncateLine("  "+errStyle.Render(styles.WarningMark+" "+errText), iw) + "\n")
 	}
 
-	// Log lines processed
-	logCount := fmt.Sprintf("%d lines", len(m.OutputLines))
-	if m.LogTruncated {
-		logCount += lipgloss.NewStyle().Foreground(styles.Warning).Render(" (truncated)")
-	}
-	b.WriteString(labelStyle.Render("log:") + valueStyle.Render(logCount) + "\n")
-
-	// Show output paths for successful runs
+	// Output paths (success only)
 	if m.Status == StatusSuccess && m.RepoRoot != "" {
-		b.WriteString("\n")
-		outputHeader := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Output locations:")
-		b.WriteString(outputHeader + "\n")
-
 		outputPaths := m.GetOutputPaths()
-		for i, p := range outputPaths {
-			pathStyle := lipgloss.NewStyle().Foreground(styles.Text)
-			numStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-			b.WriteString(numStyle.Render(fmt.Sprintf("[%d]", i+1)) + " " + pathStyle.Render(p) + "\n")
+		if len(outputPaths) > 0 {
+			b.WriteString("\n")
+			pathLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Output:")
+			b.WriteString(pathLabel + "\n")
+			for _, p := range outputPaths {
+				arrow := lipgloss.NewStyle().Foreground(styles.Accent).Render("  → ")
+				path := lipgloss.NewStyle().Foreground(styles.Text).Render(p)
+				b.WriteString(styles.TruncateLine(arrow+path, iw) + "\n")
+			}
 		}
 	}
 
-	// Add quick action buttons
-	b.WriteString("\n")
-	switch m.Status {
-	case StatusSuccess:
-		// Styled action buttons for success with results browsing
-		enterBtn := lipgloss.NewStyle().
-			Foreground(styles.BgDark).
-			Background(styles.Success).
-			Bold(true).
-			Padding(0, 1).
-			Render("[Enter] Menu")
-		openBtn := lipgloss.NewStyle().
-			Foreground(styles.BgDark).
-			Background(styles.Accent).
-			Bold(true).
-			Padding(0, 1).
-			Render("[O] Open Results")
-		copyBtn := lipgloss.NewStyle().
-			Foreground(styles.Text).
-			Background(styles.Border).
-			Padding(0, 1).
-			Render("[C] Copy Log")
-		b.WriteString(enterBtn + "  " + openBtn + "  " + copyBtn)
-	case StatusFailed:
-		// Prominent action buttons for failure - recovery options highlighted
-		retryBtn := lipgloss.NewStyle().
-			Foreground(styles.BgDark).
-			Background(styles.Warning).
-			Bold(true).
-			Padding(0, 1).
-			Render("[R] Retry")
-		copyBtn := lipgloss.NewStyle().
-			Foreground(styles.BgDark).
-			Background(styles.Error).
-			Bold(true).
-			Padding(0, 1).
-			Render("[C] Copy Log")
-		menuBtn := lipgloss.NewStyle().
-			Foreground(styles.Text).
-			Background(styles.Border).
-			Padding(0, 1).
-			Render("[Enter] Menu")
-		b.WriteString(retryBtn + "  " + copyBtn + "  " + menuBtn)
-	case StatusCancelled:
-		retryBtn := lipgloss.NewStyle().
-			Foreground(styles.BgDark).
-			Background(styles.Accent).
-			Bold(true).
-			Padding(0, 1).
-			Render("[R] Retry")
-		menuBtn := lipgloss.NewStyle().
-			Foreground(styles.Text).
-			Background(styles.Border).
-			Padding(0, 1).
-			Render("[Enter] Menu")
-		b.WriteString(retryBtn + "  " + menuBtn)
-	}
+	// Action buttons
+	b.WriteString("\n" + m.renderCompletionActions())
 
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(1, 2).
-		Width(m.panelWidth())
+		Width(pw)
 
 	return cardStyle.Render(b.String())
+}
+
+// metricTile holds a single metric for the completion tile row.
+type metricTile struct {
+	label string
+	value string
+	color lipgloss.Color
+}
+
+// buildCompletionTiles assembles the metric tiles for the completion summary.
+func (m Model) buildCompletionTiles(duration time.Duration) []metricTile {
+	tiles := []metricTile{
+		{label: "Duration", value: formatDuration(duration), color: styles.Primary},
+	}
+
+	if m.SubjectTotal > 0 && m.SubjectCurrent > 0 {
+		tiles = append(tiles, metricTile{
+			label: "Subjects",
+			value: fmt.Sprintf("%d/%d", m.SubjectCurrent, m.SubjectTotal),
+			color: styles.Accent,
+		})
+	}
+
+	if len(m.SubjectDurations) > 0 {
+		avgSec := m.averageSubjectDuration().Seconds()
+		if avgSec > 0 {
+			rate := 3600.0 / avgSec
+			rateStr := fmt.Sprintf("%.1f/hr", rate)
+			if rate < 1 {
+				rateStr = fmt.Sprintf("%.0fm ea", avgSec/60)
+			}
+			tiles = append(tiles, metricTile{label: "Rate", value: rateStr, color: styles.Primary})
+		}
+	}
+
+	if m.Status == StatusFailed {
+		tiles = append(tiles, metricTile{
+			label: "Exit",
+			value: fmt.Sprintf("%d", m.ExitCode),
+			color: styles.Error,
+		})
+	}
+
+	logVal := fmt.Sprintf("%d", len(m.OutputLines))
+	if m.LogTruncated {
+		logVal += "+"
+	}
+	tiles = append(tiles, metricTile{label: "Log", value: logVal, color: styles.TextDim})
+
+	return tiles
+}
+
+// renderMetricTiles renders a horizontal row of compact metric tiles.
+func (m Model) renderMetricTiles(tiles []metricTile, maxWidth int) string {
+	if len(tiles) == 0 {
+		return ""
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+
+	var parts []string
+	for _, t := range tiles {
+		val := lipgloss.NewStyle().Foreground(t.color).Bold(true).Render(t.value)
+		lbl := labelStyle.Render(t.label)
+		parts = append(parts, "  "+lbl+" "+val)
+	}
+
+	return strings.Join(parts, lipgloss.NewStyle().Foreground(styles.Border).Render("  │  "))
+}
+
+// renderCompletionActions renders the action button bar for the completion card.
+func (m Model) renderCompletionActions() string {
+	btnStyle := func(bg lipgloss.Color) lipgloss.Style {
+		return lipgloss.NewStyle().
+			Foreground(styles.BgDark).
+			Background(bg).
+			Bold(true).
+			Padding(0, 1)
+	}
+	dimBtn := lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Background(styles.Border).
+		Padding(0, 1)
+
+	var buttons []string
+	switch m.Status {
+	case StatusSuccess:
+		buttons = append(buttons,
+			btnStyle(styles.Success).Render("[Enter] Menu"),
+			btnStyle(styles.Accent).Render("[O] Open Results"),
+			dimBtn.Render("[C] Copy Log"),
+		)
+	case StatusFailed:
+		buttons = append(buttons,
+			btnStyle(styles.Warning).Render("[R] Retry"),
+			btnStyle(styles.Error).Render("[C] Copy Log"),
+			dimBtn.Render("[Enter] Menu"),
+		)
+	case StatusCancelled:
+		buttons = append(buttons,
+			btnStyle(styles.Accent).Render("[R] Retry"),
+			dimBtn.Render("[Enter] Menu"),
+		)
+	}
+
+	return "  " + strings.Join(buttons, "  ")
 }
 
 func formatDuration(d time.Duration) string {
@@ -281,55 +316,42 @@ func (m Model) renderHeader() string {
 
 	bar := lipgloss.NewStyle().Foreground(statusColor).Render(styles.SectionIcon)
 	headerText := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render(" " + title)
+	headerLine := lipgloss.PlaceHorizontal(m.width-4, lipgloss.Center, bar+headerText)
 
-	return lipgloss.PlaceHorizontal(m.width-4, lipgloss.Center, bar+headerText)
+	lineWidth := m.width - 4
+	if lineWidth < 0 {
+		lineWidth = 0
+	}
+	return headerLine + "\n" + styles.RenderDivider(lineWidth)
 }
 
-// renderInfoPanel renders high‑level execution metadata such as
-// elapsed time, current subject and failure counts.
+// renderInfoPanel renders a compact timing card with elapsed and ETA.
+// Subject details are in the progress section.
 func (m Model) renderInfoPanel() string {
-	info := strings.Builder{}
+	var rows []string
 
-	info.WriteString(styles.RenderSectionLabel("Summary") + "\n")
+	const labelW = 6
+	iw := m.sidebarInnerWidth()
 
 	if m.StartTime.Unix() > 0 {
 		duration := m.getDuration()
-		timeLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("elapsed:")
-		timeValue := lipgloss.NewStyle().Foreground(styles.Text).Render(formatDuration(duration))
-		info.WriteString(timeLabel + timeValue)
-
+		timeLine := styles.RenderKeyValue("Time", formatDuration(duration), labelW)
 		if m.Status == StatusRunning && m.EstimatedRemaining > 0 {
-			etaLabel := lipgloss.NewStyle().Foreground(styles.TextDim).MarginLeft(2).Render("  ETA:")
-			etaValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(formatDuration(m.EstimatedRemaining))
-			info.WriteString(etaLabel + etaValue)
+			etaStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+			timeLine += lipgloss.NewStyle().Foreground(styles.TextDim).Render("  ETA ") + etaStyle.Render(formatDuration(m.EstimatedRemaining))
 		}
-		info.WriteString("\n")
-	}
-
-	if m.SubjectTotal > 0 && m.CurrentSubject != "" && m.Status == StatusRunning {
-		subjLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("subject:")
-		subjValue := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(m.CurrentSubject)
-		subjProgress := lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-			fmt.Sprintf(" (%d of %d)", m.SubjectCurrent, m.SubjectTotal))
-		info.WriteString(subjLabel + subjValue + subjProgress)
-
-		if len(m.SubjectDurations) > 0 {
-			avgDuration := m.averageSubjectDuration()
-			avgLabel := lipgloss.NewStyle().Foreground(styles.TextDim).MarginLeft(2).Render("  Avg:")
-			avgValue := lipgloss.NewStyle().Foreground(styles.Text).Render(formatDuration(avgDuration))
-			info.WriteString(avgLabel + avgValue)
-		}
-		info.WriteString("\n")
+		rows = append(rows, styles.TruncateLine(timeLine, iw))
 	}
 
 	if len(m.FailedSubjects) > 0 {
-		failLabel := lipgloss.NewStyle().Foreground(styles.Error).Width(10).Render("failed:")
-		failValue := lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render(
-			fmt.Sprintf("%d subject(s)", len(m.FailedSubjects)))
-		info.WriteString(failLabel + failValue + "\n")
+		failStyle := lipgloss.NewStyle().Foreground(styles.Error).Bold(true)
+		line := lipgloss.NewStyle().Foreground(styles.Error).Render(styles.PadRight("Fail", labelW)) +
+			failStyle.Render(fmt.Sprintf("%d subject(s)", len(m.FailedSubjects)))
+		rows = append(rows, styles.TruncateLine(line, iw))
 	}
 
-	return m.renderSidebarCard(info.String())
+	content := strings.Join(rows, "\n")
+	return m.renderSidebarCard(content)
 }
 
 func (m *Model) calculateETA() {
@@ -360,269 +382,255 @@ func (m Model) averageSubjectDuration() time.Duration {
 }
 
 // renderProgressSection renders the main progress overview including
-// overall completion, current subject/step and optional cloud stages.
+// overall completion, current subject/step, metrics and cloud stages.
 func (m Model) renderProgressSection() string {
 	var b strings.Builder
 
-	// Responsive Layout Decision
-	contentWidth := m.contentWidth()
-	isNarrow := contentWidth < 100
-	isShort := m.height < 30
+	iw := m.sidebarInnerWidth()
 
-	// Section header with status icon
-	var progressIcon string
-	var iconStyle lipgloss.Style
-	switch m.Status {
-	case StatusSuccess:
-		progressIcon = styles.CheckMark
-		iconStyle = lipgloss.NewStyle().Foreground(styles.Success)
-	case StatusFailed:
-		progressIcon = styles.CrossMark
-		iconStyle = lipgloss.NewStyle().Foreground(styles.Error)
-	default:
-		progressIcon = styles.ActiveMark
-		iconStyle = lipgloss.NewStyle().Foreground(styles.Accent)
-	}
-
-	b.WriteString(iconStyle.Render(progressIcon) + " " + styles.RenderSectionLabel("Progress") + "\n")
+	b.WriteString(styles.TruncateLine(m.renderStatus()+"  "+styles.RenderSectionLabel("Progress"), iw) + "\n")
 
 	// Overall progress bar
-	progressLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("overall")
-	barWidth := contentWidth - 22
-	if isNarrow {
-		barWidth = contentWidth - 15
+	barWidth := iw - 10
+	if barWidth < 8 {
+		barWidth = 8
 	}
-	b.WriteString("  " + progressLabel + m.renderAnimatedProgressBar(m.Progress, barWidth) + "\n")
+	b.WriteString("  " + m.renderAnimatedProgressBar(m.Progress, barWidth) + "\n")
 
-	// Metrics Dashboard (Responsive)
-	if !isShort {
-		b.WriteString("\n" + m.renderMetricsDashboard() + "\n\n")
-	}
-
-	// Subject counter with visual indicator
+	// Subject tracker: compact dot strip with counter
 	if m.SubjectTotal > 0 && m.SubjectCurrent > 0 {
-		subjectProgress := float64(m.SubjectCurrent) / float64(m.SubjectTotal)
-
-		// Create a mini visual representation (hide on narrow screens)
-		var subjectIcons string
-		if !isNarrow {
-			for i := 0; i < m.SubjectTotal && i < 10; i++ {
-				if i < m.SubjectCurrent {
-					subjectIcons += lipgloss.NewStyle().Foreground(styles.Success).Render("●")
-				} else if i == m.SubjectCurrent {
-					subjectIcons += lipgloss.NewStyle().Foreground(styles.Accent).Render("○")
-				} else {
-					subjectIcons += lipgloss.NewStyle().Foreground(styles.Border).Render("○")
-				}
-			}
-			if m.SubjectTotal > 10 {
-				subjectIcons += lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(" +%d", m.SubjectTotal-10))
-			}
-		}
-
-		subjectText := fmt.Sprintf("Subject %d/%d  ", m.SubjectCurrent, m.SubjectTotal)
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).PaddingLeft(12).Render(subjectText))
-		if !isNarrow {
-			b.WriteString(subjectIcons)
-		}
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("  %.0f%%", subjectProgress*100)) + "\n")
+		b.WriteString(styles.TruncateLine("  "+m.renderSubjectTracker(iw-4), iw) + "\n")
 	}
 
-	// Current step progress with enhanced styling
+	// Current step: inline subject → operation
 	if m.CurrentSubject != "" || m.CurrentOperation != "" {
-		b.WriteString("\n")
-		stepLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("step")
-
-		if m.OperationTotal > 0 {
-			stepProgress := float64(m.OperationCurrent) / float64(m.OperationTotal)
-			b.WriteString("  " + stepLabel + m.renderMiniProgressBar(stepProgress, contentWidth-32))
-
-			// Operation name with step counter
-			opText := fmt.Sprintf(" %s (%d/%d)", m.CurrentOperation, m.OperationCurrent, m.OperationTotal)
-			b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(opText) + "\n")
-		} else {
-			// Just show subject and operation
-			b.WriteString("  " + stepLabel)
-			b.WriteString(lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.CurrentSubject))
-			if m.CurrentOperation != "" {
-				b.WriteString(" " + lipgloss.NewStyle().Foreground(styles.TextDim).Render("→ "+m.CurrentOperation))
-			}
-			b.WriteString("\n")
-		}
+		b.WriteString(styles.TruncateLine("  "+m.renderCurrentStep(iw-4), iw) + "\n")
 	}
 
-	// Cloud stages (if cloud mode)
+	// Metrics dashboard (compact heatmap + gauges)
+	if m.height >= 28 {
+		b.WriteString("\n" + m.renderMetricsDashboard(iw) + "\n")
+	}
+
+	// Cloud stages
 	if m.IsCloud {
-		b.WriteString("\n  " + m.renderCloudStages() + "\n\n")
+		b.WriteString("\n  " + m.renderCloudStages() + "\n")
 	}
-
-	// Status Badge with enhanced styling
-	b.WriteString("\n  " + m.renderStatus() + "\n")
 
 	return b.String()
 }
 
-// renderMetricsDashboard renders memory usage, optional epoch info
-// and per‑core CPU utilization when resource monitoring is active.
-func (m Model) renderMetricsDashboard() string {
+// renderSubjectTracker renders a compact subject progress line with dot indicators.
+func (m Model) renderSubjectTracker(maxWidth int) string {
+	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	pctStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+	subjectProgress := float64(m.SubjectCurrent) / float64(m.SubjectTotal)
+
+	// Dot strip: ●●●○○○ — cap at 20 dots for space
+	maxDots := m.SubjectTotal
+	if maxDots > 20 {
+		maxDots = 20
+	}
+	var dots strings.Builder
+	for i := 0; i < maxDots; i++ {
+		// Map dot index to subject index for >20 subjects
+		mappedIdx := i
+		if m.SubjectTotal > 20 {
+			mappedIdx = i * m.SubjectTotal / 20
+		}
+		switch {
+		case mappedIdx < m.SubjectCurrent-1:
+			// Completed
+			status, isFailed := m.SubjectStatuses[m.subjectIDForIndex(mappedIdx)]
+			if isFailed && status == "failed" {
+				dots.WriteString(lipgloss.NewStyle().Foreground(styles.Error).Render("●"))
+			} else {
+				dots.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("●"))
+			}
+		case mappedIdx == m.SubjectCurrent-1:
+			// Current (running)
+			dots.WriteString(lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("◉"))
+		default:
+			// Pending
+			dots.WriteString(lipgloss.NewStyle().Foreground(styles.Border).Render("○"))
+		}
+	}
+	if m.SubjectTotal > 20 {
+		dots.WriteString(dimStyle.Render(fmt.Sprintf(" +%d", m.SubjectTotal-20)))
+	}
+
+	counter := dimStyle.Render(fmt.Sprintf("%d/%d ", m.SubjectCurrent, m.SubjectTotal))
+	pct := pctStyle.Render(fmt.Sprintf("%.0f%%", subjectProgress*100))
+
+	return counter + dots.String() + " " + pct
+}
+
+// subjectIDForIndex returns the subject ID for a given 0-based index, or empty string.
+func (m Model) subjectIDForIndex(idx int) string {
+	// SubjectStatuses is keyed by subject ID; we don't have an ordered list,
+	// so return empty to skip failed-dot coloring when index can't be resolved.
+	return ""
+}
+
+// renderCurrentStep renders the active subject and operation on one compact line.
+func (m Model) renderCurrentStep(maxWidth int) string {
+	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+	var parts []string
+
+	if m.CurrentSubject != "" {
+		parts = append(parts, accentStyle.Render(m.CurrentSubject))
+	}
+
+	if m.CurrentOperation != "" {
+		opText := m.CurrentOperation
+		if m.OperationTotal > 0 {
+			stepProgress := float64(m.OperationCurrent) / float64(m.OperationTotal)
+			opText += fmt.Sprintf(" %d/%d", m.OperationCurrent, m.OperationTotal)
+			// Inline mini bar (8 chars)
+			barWidth := 8
+			filled := int(stepProgress * float64(barWidth))
+			bar := lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("━", filled))
+			empty := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("─", barWidth-filled))
+			parts = append(parts, dimStyle.Render("→ ")+dimStyle.Render(opText)+" "+bar+empty)
+		} else {
+			parts = append(parts, dimStyle.Render("→ "+opText))
+		}
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// renderMetricsDashboard renders a compact resource dashboard with
+// CPU heatmap, memory gauge, and throughput rate.
+func (m Model) renderMetricsDashboard(maxWidth int) string {
 	if m.Status == StatusPending {
 		return ""
 	}
 
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-	metricBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Border).
-		Padding(1, 2).
-		MarginRight(1)
 
-	// Memory Metric
-	mem := fmt.Sprintf("%.1f GB", m.MemoryUsage)
-	memView := metricBox.Render(labelStyle.Render("MEM: ") + valueStyle.Render(mem))
+	var rows []string
 
-	// Epoch/Iteration Info
-	epochView := ""
+	cpuLine := m.renderCPUHeatmap()
+	rows = append(rows, styles.TruncateLine(cpuLine, maxWidth))
+
+	memLine := "  " + labelStyle.Render("Mem ") + m.renderMemoryGauge(12) + " " + valueStyle.Render(fmt.Sprintf("%.1f GB", m.MemoryUsage))
 	if m.EpochInfo != "" {
-		epochView = metricBox.Render(labelStyle.Render("ITEM: ") + valueStyle.Render(m.EpochInfo))
+		memLine += labelStyle.Render("  Item ") + valueStyle.Render(m.EpochInfo)
+	}
+	rows = append(rows, styles.TruncateLine(memLine, maxWidth))
+
+	if len(m.SubjectDurations) > 0 && m.SubjectTotal > 0 {
+		avgSec := m.averageSubjectDuration().Seconds()
+		if avgSec > 0 {
+			rate := 3600.0 / avgSec
+			rateStr := fmt.Sprintf("%.1f subj/hr", rate)
+			if rate < 1 {
+				rateStr = fmt.Sprintf("%.0f min/subj", avgSec/60)
+			}
+			rows = append(rows, styles.TruncateLine("  "+labelStyle.Render("Rate ")+valueStyle.Render(rateStr)+
+				labelStyle.Render("  Done ")+valueStyle.Render(fmt.Sprintf("%d/%d", len(m.SubjectDurations), m.SubjectTotal)), maxWidth))
+		}
 	}
 
-	// Build top row with memory and epoch
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, memView, epochView)
-
-	// Per-core CPU display
-	cpuCoresView := m.renderPerCoreCPU()
-
-	return topRow + "\n\n" + cpuCoresView
+	return strings.Join(rows, "\n")
 }
 
-// renderPerCoreCPU renders a visual display of per-core CPU usage.
-// Uses fixed-width cells to avoid wrapping and keep rows aligned.
-func (m Model) renderPerCoreCPU() string {
-	if m.NumCPUCores == 0 || len(m.CPUCoreUsages) == 0 {
-		// Fallback to simple display if no per-core data
-		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-		return labelStyle.Render("  CPU: ") + valueStyle.Render(fmt.Sprintf("%.1f%%", m.CPUUsage))
-	}
-
-	var b strings.Builder
-
-	numCores := len(m.CPUCoreUsages)
-	availableWidth := m.contentWidth() - 2 // indent
-	const (
-		minCellWidth = 12
-		maxCellWidth = 18
-		minBarWidth  = 6
-	)
-	if availableWidth < minCellWidth {
-		availableWidth = minCellWidth
-	}
-
-	coresPerRow := availableWidth / minCellWidth
-	if coresPerRow < 1 {
-		coresPerRow = 1
-	}
-	if coresPerRow > numCores {
-		coresPerRow = numCores
-	}
-
-	slotWidth := availableWidth / coresPerRow
-	if slotWidth > maxCellWidth {
-		slotWidth = maxCellWidth
-	}
-
-	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	pctStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	rowStyle := lipgloss.NewStyle().PaddingLeft(2)
-
-	// Render cores in rows using fixed-width cells
-	for row := 0; row*coresPerRow < numCores; row++ {
-		start := row * coresPerRow
-		end := start + coresPerRow
-		if end > numCores {
-			end = numCores
-		}
-
-		var cells []string
-		for i := start; i < end; i++ {
-			coreUsage := m.CPUCoreUsages[i]
-			if coreUsage > 100 {
-				coreUsage = 100
-			}
-			if coreUsage < 0 {
-				coreUsage = 0
-			}
-
-			label := labelStyle.Render(fmt.Sprintf("C%-2d", i))
-			pct := pctStyle.Render(fmt.Sprintf("%3.0f%%", coreUsage))
-			line1 := label + " " + pct
-
-			barWidth := slotWidth - 2
-			if barWidth < minBarWidth {
-				barWidth = minBarWidth
-			}
-			bar := m.renderCoreMiniBar(coreUsage, barWidth)
-			line2 := " " + bar
-
-			cell := lipgloss.NewStyle().Width(slotWidth).Height(2).Render(line1 + "\n" + line2)
-			cells = append(cells, cell)
-		}
-
-		rowLine := rowStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, cells...))
-		b.WriteString(rowLine)
-		if end < numCores {
-			b.WriteString("\n")
-		}
-	}
-
-	// Overall CPU summary
-	b.WriteString("\n\n")
-	totalStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+// renderCPUHeatmap renders a compact single-line heatmap of per-core CPU usage
+// using Unicode block characters (▁▂▃▄▅▆▇█) colored by utilization level.
+func (m Model) renderCPUHeatmap() string {
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	avgUsage := 0.0
+
+	if m.NumCPUCores == 0 || len(m.CPUCoreUsages) == 0 {
+		return "  " + labelStyle.Render("Cpu ") + valueStyle.Render(fmt.Sprintf("%.0f%%", m.CPUUsage))
+	}
+
+	blocks := []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+	var heatmap strings.Builder
 	for _, usage := range m.CPUCoreUsages {
-		avgUsage += usage
+		u := usage
+		if u < 0 {
+			u = 0
+		}
+		if u > 100 {
+			u = 100
+		}
+
+		idx := int(u / 100.0 * float64(len(blocks)-1))
+		if idx >= len(blocks) {
+			idx = len(blocks) - 1
+		}
+
+		var color lipgloss.Color
+		switch {
+		case u < 25:
+			color = styles.Success
+		case u < 50:
+			color = styles.Primary
+		case u < 75:
+			color = styles.Accent
+		case u < 90:
+			color = styles.Warning
+		default:
+			color = styles.Error
+		}
+		heatmap.WriteString(lipgloss.NewStyle().Foreground(color).Render(blocks[idx]))
+	}
+
+	// Aggregate stats
+	numCores := len(m.CPUCoreUsages)
+	avgUsage := 0.0
+	for _, u := range m.CPUCoreUsages {
+		avgUsage += u
 	}
 	if numCores > 0 {
 		avgUsage /= float64(numCores)
 	}
-	b.WriteString("  " + totalStyle.Render("Total: ") + valueStyle.Render(fmt.Sprintf("%.1f%%", m.CPUUsage)))
-	b.WriteString(totalStyle.Render("  Avg/Core: ") + valueStyle.Render(fmt.Sprintf("%.1f%%", avgUsage)))
-	b.WriteString(totalStyle.Render(fmt.Sprintf("  (%d cores)", numCores)))
 
-	return b.String()
+	summary := valueStyle.Render(fmt.Sprintf(" %.0f%%", m.CPUUsage)) +
+		labelStyle.Render(fmt.Sprintf(" avg %.0f%% · %dc", avgUsage, numCores))
+
+	return "  " + labelStyle.Render("CPU ") + heatmap.String() + summary
 }
 
-// renderCoreMiniBar renders a tiny progress bar for a single CPU core
-func (m Model) renderCoreMiniBar(usage float64, width int) string {
-	filled := int(usage / 100.0 * float64(width))
-	if filled < 0 {
-		filled = 0
+// renderMemoryGauge renders a compact memory usage gauge bar.
+func (m Model) renderMemoryGauge(width int) string {
+	// Estimate usage fraction (cap at 32 GB as "full" for visualization)
+	const maxMemGB = 32.0
+	fraction := m.MemoryUsage / maxMemGB
+	if fraction > 1.0 {
+		fraction = 1.0
 	}
+	if fraction < 0 {
+		fraction = 0
+	}
+
+	filled := int(fraction * float64(width))
 	if filled > width {
 		filled = width
 	}
 
-	// Color based on usage level
-	var barColor lipgloss.Color
-	if usage < 30 {
-		barColor = styles.Success // Green for low usage
-	} else if usage < 70 {
-		barColor = styles.Accent // Teal for medium usage
-	} else if usage < 90 {
-		barColor = styles.Warning // Orange for high usage
-	} else {
-		barColor = styles.Error // Red for very high usage
+	var color lipgloss.Color
+	switch {
+	case fraction < 0.5:
+		color = styles.Success
+	case fraction < 0.75:
+		color = styles.Accent
+	case fraction < 0.9:
+		color = styles.Warning
+	default:
+		color = styles.Error
 	}
 
-	filledStyle := lipgloss.NewStyle().Foreground(barColor)
-	emptyStyle := lipgloss.NewStyle().Foreground(styles.Border)
-
-	bar := filledStyle.Render(strings.Repeat("█", filled))
-	bar += emptyStyle.Render(strings.Repeat("░", width-filled))
-
-	return bar
+	bar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("█", filled))
+	empty := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("░", width-filled))
+	return bar + empty
 }
 
 func (m Model) renderLogSection() string {
@@ -656,6 +664,7 @@ func (m Model) renderLogSection() string {
 	}
 
 	b.WriteString(lipgloss.NewStyle().Width(contentWidth).Render(logHeader) + "\n")
+	b.WriteString(styles.RenderDivider(contentWidth) + "\n")
 	b.WriteString(m.logViewport.View())
 
 	return b.String()
@@ -737,32 +746,19 @@ func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 	return bar + pct
 }
 
-// renderMiniProgressBar renders a lightweight, single‑color bar for
-// step‑level progress where space is more constrained.
-func (m Model) renderMiniProgressBar(p float64, width int) string {
-	if width < styles.MinProgressBarWidth {
-		width = styles.MinProgressBarWidth
-	}
-
-	filled := int(p * float64(width))
-	bar := lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("━", filled))
-	empty := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("─", width-filled))
-	return bar + empty
-}
-
 // renderStatus renders a small status badge summarizing the current
 // execution state with an appropriate color and icon.
 func (m Model) renderStatus() string {
 	style := lipgloss.NewStyle().Bold(true).Padding(0, 1)
 	switch m.Status {
 	case StatusRunning:
-		return style.Background(styles.Primary).Foreground(lipgloss.Color("#0F172A")).Render(styles.ActiveMark + " Running ")
+		return style.Background(styles.Primary).Foreground(styles.BgDark).Render(styles.ActiveMark + " Running")
 	case StatusSuccess:
-		return style.Background(styles.Success).Foreground(lipgloss.Color("#0F172A")).Render(styles.CheckMark + " Success ")
+		return style.Background(styles.Success).Foreground(styles.BgDark).Render(styles.CheckMark + " Success")
 	case StatusFailed:
-		return style.Background(styles.Error).Foreground(lipgloss.Color("#0F172A")).Render(styles.CrossMark + " Failed ")
+		return style.Background(styles.Error).Foreground(styles.BgDark).Render(styles.CrossMark + " Failed")
 	case StatusCancelled:
-		return style.Background(styles.Warning).Foreground(lipgloss.Color("#0F172A")).Render(" Cancelled ")
+		return style.Background(styles.Warning).Foreground(styles.BgDark).Render(styles.CrossMark + " Cancelled")
 	default:
 		return style.Foreground(styles.Muted).Render(" Pending ")
 	}
@@ -782,7 +778,6 @@ func (m Model) renderFooter() string {
 	var hints []string
 
 	if m.copyMode {
-		// Footer for copy mode
 		hints = []string{
 			styles.RenderKeyHint("M/Esc", "Exit Copy Mode"),
 			styles.RenderKeyHint("C", "Copy All"),
@@ -800,12 +795,18 @@ func (m Model) renderFooter() string {
 			styles.RenderKeyHint("Ctrl+C", "Cancel"),
 			styles.RenderKeyHint("C", "Copy Log"),
 			styles.RenderKeyHint("M", "Copy Mode"),
-			styles.RenderKeyHint("↑/↓", "Scroll"),
+			styles.RenderKeyHint("\u2191/\u2193", "Scroll"),
 			styles.RenderKeyHint("G/Shift+G", "Top/Bottom"),
 		}
 	}
 
-	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	width := m.width - 8
+	if width < 20 {
+		width = 20
+	}
+	divider := styles.RenderDivider(width)
+	bar := styles.FooterStyle.Width(width).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	return divider + "\n" + bar
 }
 
 ///////////////////////////////////////////////////////////////////

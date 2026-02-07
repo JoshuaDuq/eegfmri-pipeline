@@ -123,16 +123,15 @@ func (m Model) View() string {
 
 	var b strings.Builder
 
-	header := styles.RenderSectionLabel("Quick Actions")
-	b.WriteString(header + "\n")
-	b.WriteString(styles.RenderHeaderSeparator(35) + "\n\n")
+	b.WriteString(styles.RenderSectionLabel("Quick Actions") + "\n")
+	b.WriteString(styles.RenderDivider(35) + "\n\n")
 
 	for i, action := range quickActions {
 		b.WriteString(m.renderAction(action, i == m.cursor) + "\n")
 	}
 
 	b.WriteString("\n")
-
+	b.WriteString(styles.RenderDivider(35) + "\n")
 	footer := lipgloss.NewStyle().Foreground(styles.Muted).Render("shortcuts or ") +
 		styles.RenderKeyHint("\u23ce", "select")
 	b.WriteString(footer)
@@ -153,28 +152,24 @@ func (m Model) renderAction(action Action, isCursor bool) string {
 		Padding(0, 1)
 	if isCursor {
 		shortcutStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#0F172A")).
+			Foreground(styles.BgDark).
 			Background(styles.Primary).
 			Bold(true).
 			Padding(0, 1)
 	}
-	shortcut := shortcutStyle.Render(action.Shortcut)
 
 	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	if isCursor {
 		nameStyle = nameStyle.Foreground(styles.Text).Bold(true)
+		descStyle = descStyle.Foreground(styles.TextDim)
 	}
-	name := nameStyle.Render(action.Name)
 
-	desc := ""
+	line := cursor + shortcutStyle.Render(action.Shortcut) + " " + nameStyle.Render(action.Name)
 	if isCursor {
-		descStyle := lipgloss.NewStyle().
-			Foreground(styles.Muted).
-			PaddingLeft(6)
-		desc = "\n" + descStyle.Render(action.Description)
+		line += "  " + descStyle.Render(action.Description)
 	}
-
-	return cursor + shortcut + " " + name + desc
+	return line
 }
 
 func (m *Model) Show() {

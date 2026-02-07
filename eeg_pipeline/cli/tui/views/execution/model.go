@@ -480,7 +480,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case messages.LogCopiedMsg:
-		m.addLog(lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Log copied to clipboard"))
+		m.addLog(lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " Log copied to clipboard"))
 		return m, nil
 
 	case messages.CommandDoneMsg:

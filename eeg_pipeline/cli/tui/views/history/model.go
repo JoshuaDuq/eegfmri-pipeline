@@ -237,16 +237,12 @@ func (m Model) View() string {
 
 func (m Model) renderHeader() string {
 	title := styles.RenderSectionLabel("Execution History")
-
-	count := lipgloss.NewStyle().
-		Foreground(styles.Muted).
-		Render(fmt.Sprintf("  %d records", len(m.records)))
-
-	return title + count + "\n" + styles.RenderHeaderSeparator(60)
+	count := lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("  %d records", len(m.records)))
+	return title + count + "\n" + styles.RenderDivider(55)
 }
 
 func (m Model) renderLoading() string {
-	return "\n  " + m.spinner.View()
+	return "\n  " + m.spinner.View() + "\n"
 }
 
 func (m Model) renderError() string {
@@ -254,7 +250,7 @@ func (m Model) renderError() string {
 }
 
 func (m Model) renderEmpty() string {
-	return "\n  " + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("No execution history yet. Run a pipeline to see it here.")
+	return "\n  " + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("No execution history yet. Run a pipeline to see it here.") + "\n"
 }
 
 func (m Model) renderHistory() string {
@@ -282,8 +278,6 @@ func (m Model) renderHistory() string {
 }
 
 func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
-	var b strings.Builder
-
 	cursor := "  "
 	if isCursor {
 		cursor = styles.RenderCursorOptional(m.animQueue.CursorVisible())
@@ -300,20 +294,16 @@ func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
 	if isCursor {
 		pipelineStyle = pipelineStyle.Foreground(styles.Primary).Bold(true)
 	}
-	pipeline := pipelineStyle.Render(record.Pipeline)
 
 	modeStyle := lipgloss.NewStyle().Foreground(styles.Muted).Width(10)
-	mode := modeStyle.Render(record.Mode)
-
 	durationStyle := lipgloss.NewStyle().Foreground(styles.Muted).Width(10)
-	duration := durationStyle.Render(formatDuration(record.Duration))
-
-	timeAgo := formatTimeAgo(record.StartTime)
 	timeStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
-	b.WriteString(cursor + statusIcon + " " + pipeline + mode + duration + timeStyle.Render(timeAgo))
-
-	return b.String()
+	return cursor + statusIcon + " " +
+		pipelineStyle.Render(record.Pipeline) +
+		modeStyle.Render(record.Mode) +
+		durationStyle.Render(formatDuration(record.Duration)) +
+		timeStyle.Render(formatTimeAgo(record.StartTime))
 }
 
 func formatDuration(secs float64) string {
@@ -347,12 +337,13 @@ func formatTimeAgo(t time.Time) string {
 
 func (m Model) renderFooter() string {
 	hints := []string{
-		styles.RenderKeyHint("↑↓", "Navigate"),
+		styles.RenderKeyHint("\u2191\u2193", "Navigate"),
 		styles.RenderKeyHint("D", "Delete"),
 		styles.RenderKeyHint("C", "Clear All"),
 		styles.RenderKeyHint("Esc", "Back"),
 	}
 
-	separator := styles.RenderFooterSeparator()
-	return styles.FooterStyle.Render(strings.Join(hints, separator))
+	divider := styles.RenderDivider(50)
+	bar := styles.FooterStyle.Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	return divider + "\n" + bar
 }

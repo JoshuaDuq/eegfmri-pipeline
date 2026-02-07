@@ -11,14 +11,13 @@ import (
 
 func (m Model) renderMergeBehaviorAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render("Advanced configuration") + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
 	if m.editingText {
-		b.WriteString(infoStyle.Render("  Press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("  Enter to confirm, Esc to cancel") + "\n")
 	} else {
-		b.WriteString(infoStyle.Render("  Configure merge-behavior filters.") + "\n")
-		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
+		b.WriteString(infoStyle.Render("  Space: toggle/edit  Enter: proceed") + "\n")
 	}
 
 	labelWidth := defaultLabelWidth
@@ -53,9 +52,9 @@ func (m Model) renderMergeBehaviorAdvancedConfig() string {
 
 		var labelStyle, valueStyle lipgloss.Style
 		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		} else {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
 		}
 
 		if m.useDefaultAdvanced && i > 0 {
@@ -75,8 +74,7 @@ func (m Model) renderMergeBehaviorAdvancedConfig() string {
 			displayVal = "(none)"
 		}
 
-		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(displayVal))
-		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+		b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(opt.label+":"), valueStyle.Render(displayVal), hintStyle.Render(opt.hint), labelWidth, m.contentWidth) + "\n")
 	}
 
 	return b.String()

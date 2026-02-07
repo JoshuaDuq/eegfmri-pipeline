@@ -13,30 +13,17 @@ import (
 func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	var b strings.Builder
 
-	b.WriteString(styles.SectionTitleStyle.Render("Advanced configuration") + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 	if m.editingNumber {
-		b.WriteString(infoStyle.Render("Type a number, press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Enter value, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.editingText {
-		b.WriteString(infoStyle.Render("Type text, press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Type text, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.expandedOption >= 0 {
-		b.WriteString(infoStyle.Render("Space to select item · ↑↓ to navigate · Esc to close list") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: select  Esc: close list") + "\n")
 	} else {
-		mode := "first-level"
-		if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
-			mode = m.modeOptions[m.modeIndex]
-		}
-		switch mode {
-		case "trial-signatures":
-			if m.fmriTrialSigMethodIndex%2 == 1 {
-				b.WriteString(infoStyle.Render("Configure LSS trial-wise betas (one GLM per trial) and pain signature readouts. Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
-			} else {
-				b.WriteString(infoStyle.Render("Configure trial-wise beta-series (one GLM per run) and pain signature readouts. Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
-			}
-		default:
-			b.WriteString(infoStyle.Render("Configure first-level fMRI GLM settings and a single contrast. Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
-		}
+		b.WriteString(infoStyle.Render("Space: toggle/expand  Enter: proceed") + "\n")
 	}
 
 	if m.useDefaultAdvanced {
@@ -246,9 +233,9 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 
 		var labelStyle, valueStyle lipgloss.Style
 		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		} else {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
 		}
 		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
@@ -272,7 +259,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			}
 			hint = "BOLD source + runs"
 			if !isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupContrast:
 			if m.fmriAnalysisGroupContrastExpanded {
@@ -282,7 +269,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			}
 			hint = "Conditions + name"
 			if !isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupGLM:
 			if m.fmriAnalysisGroupGLMExpanded {
@@ -292,7 +279,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			}
 			hint = "HRF, drift, filters"
 			if !isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupConfounds:
 			if m.fmriAnalysisGroupConfoundsExpanded {
@@ -302,7 +289,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			}
 			hint = "Nuisance + QC outputs"
 			if !isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupOutput:
 			if m.fmriAnalysisGroupOutputExpanded {
@@ -312,7 +299,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			}
 			hint = "Map type + paths"
 			if !isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupPlotting:
 			if m.fmriAnalysisGroupPlottingExpanded {
@@ -322,7 +309,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			}
 			hint = "Figures + HTML report"
 			if !isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriTrialSigGroup:
 			if m.fmriTrialSigGroupExpanded {
@@ -332,7 +319,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			}
 			hint = "Beta-series / LSS + signature readouts"
 			if !isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		// Input
@@ -750,12 +737,12 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			hint = "Space to toggle"
 		}
 
-		line := cursor + labelStyle.Render(label) + " " + valueStyle.Render(value+expandIndicator)
+		styledHint := ""
 		if hint != "" {
-			line += "  " + hintStyle.Render(hint)
+			styledHint = hintStyle.Render(hint)
 		}
 		if inRange {
-			b.WriteString(line + "\n")
+			b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(label), valueStyle.Render(value+expandIndicator), styledHint, labelWidth, m.contentWidth) + "\n")
 		}
 		lineIdx++
 		if m.shouldRenderExpandedListAfterOption(opt) {

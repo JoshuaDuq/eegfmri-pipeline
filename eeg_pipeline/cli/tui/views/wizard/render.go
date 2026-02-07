@@ -55,6 +55,7 @@ func (m Model) View() string {
 	w, h := m.effectiveDimensions()
 	containerW, containerH := m.containerDimensions(w, h)
 	innerW := containerW - containerPadH*2 - containerBorder
+	m.contentWidth = innerW
 
 	header := m.renderHeader(innerW)
 	footer := m.renderFooter(innerW)
@@ -65,7 +66,7 @@ func (m Model) View() string {
 	mainContent := m.renderMainContent(h < shortHeightThreshold)
 
 	mainStyled := lipgloss.NewStyle().Width(innerW).Height(mainH).Render(mainContent)
-	innerView := header + "\n\n" + mainStyled + "\n" + footer
+	innerView := header + "\n" + mainStyled + "\n" + footer
 
 	container := lipgloss.NewStyle().
 		Width(containerW).
@@ -122,10 +123,6 @@ func (m Model) renderHelpOverlay() string {
 }
 
 func (m Model) renderMainContent(isShort bool) string {
-	if m.ConfirmingExecute {
-		return m.renderConfirmation()
-	}
-
 	content := m.renderStepContent()
 	if len(m.validationErrors) > 0 && !isShort {
 		content += "\n" + m.renderValidationErrors()
@@ -184,24 +181,59 @@ func (m Model) renderValidationErrors() string {
 }
 
 func (m Model) renderHeader(width int) string {
-	title := m.buildTitleRow()
+	titleRow := m.buildTitleRow(width)
 	breadcrumb := m.buildBreadcrumbRow()
+	progress := m.buildProgressBar(width)
 	centerStyle := lipgloss.NewStyle().Width(width).Align(lipgloss.Center)
-	return centerStyle.Render(title) + "\n" + centerStyle.Render(breadcrumb)
+	return titleRow + "\n" + centerStyle.Render(breadcrumb) + "\n" + progress
 }
 
-func (m Model) buildTitleRow() string {
+func (m Model) buildTitleRow(width int) string {
+	bar := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(styles.SectionIcon)
 	pipelineName := strings.ToUpper(m.Pipeline.String())
-	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(pipelineName)
+	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render(" " + pipelineName)
+	stepCount := lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("  %d/%d", m.stepIndex+1, len(m.steps)))
 
-	parts := []string{title}
+	left := bar + title + stepCount
+
+	var badges []string
 	if badge := m.buildSubjectBadge(); badge != "" {
-		parts = append(parts, badge)
+		badges = append(badges, badge)
 	}
 	if badge := m.buildPresetBadge(); badge != "" {
-		parts = append(parts, badge)
+		badges = append(badges, badge)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Center, strings.Join(parts, "  "))
+
+	if len(badges) == 0 {
+		return left
+	}
+
+	right := strings.Join(badges, "  ")
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 2 {
+		return left + "  " + right
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+func (m Model) buildProgressBar(width int) string {
+	if width <= 0 || len(m.steps) == 0 {
+		return ""
+	}
+	total := len(m.steps)
+	filled := m.stepIndex
+	barWidth := width
+	if barWidth < 4 {
+		barWidth = 4
+	}
+
+	filledW := barWidth * filled / total
+	emptyW := barWidth - filledW
+
+	filledStr := styles.ProgressFilledStyle.Render(strings.Repeat(styles.HeaderSeparatorChar, filledW))
+	emptyStr := styles.ProgressEmptyStyle.Render(strings.Repeat(styles.SectionDividerChar, emptyW))
+	return filledStr + emptyStr
 }
 
 func (m Model) buildSubjectBadge() string {
@@ -210,7 +242,7 @@ func (m Model) buildSubjectBadge() string {
 		return m.badge(fmt.Sprintf("%d subjects", count), styles.Accent)
 	}
 	if len(m.subjects) > 0 {
-		return lipgloss.NewStyle().Foreground(styles.Warning).Render("⚠ no subjects")
+		return lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " no subjects")
 	}
 	return ""
 }
@@ -219,7 +251,7 @@ func (m Model) buildPresetBadge() string {
 	if m.activePreset == "" {
 		return ""
 	}
-	return m.badge("✓ "+m.activePreset, styles.Success)
+	return m.badge(styles.CheckMark+" "+m.activePreset, styles.Success)
 }
 
 func (m Model) badge(text string, bg lipgloss.Color) string {
@@ -236,41 +268,48 @@ func (m Model) buildBreadcrumbRow() string {
 	isCompact := w < narrowWidthThreshold
 
 	var parts []string
-	connector := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+	connectorStyle := lipgloss.NewStyle().Foreground(styles.Border)
+
+	for i, step := range m.steps {
+		name := stepDisplayNames[step]
+		if name == "" {
+			name = step.String()
+		}
+
+		var segment string
+		switch {
+		case i < m.stepIndex:
+			icon := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
+			if isCompact {
+				segment = icon
+			} else {
+				segment = icon + " " + lipgloss.NewStyle().Foreground(styles.TextDim).Render(name)
+			}
+		case i == m.stepIndex:
+			numStyle := lipgloss.NewStyle().Foreground(styles.BgDark).Background(styles.Primary).Bold(true).Padding(0, 1)
+			if isCompact {
+				segment = numStyle.Render(fmt.Sprintf("%d", i+1))
+			} else {
+				segment = numStyle.Render(fmt.Sprintf("%d", i+1)) + " " +
+					lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(name)
+			}
+		default:
+			numStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+			if isCompact {
+				segment = numStyle.Render(fmt.Sprintf("%d", i+1))
+			} else {
+				segment = numStyle.Render(fmt.Sprintf("%d", i+1)) + " " +
+					lipgloss.NewStyle().Foreground(styles.Muted).Render(name)
+			}
+		}
+		parts = append(parts, segment)
+	}
+
+	connector := connectorStyle.Render(" " + styles.SectionDividerChar + " ")
 	if isCompact {
 		connector = " "
 	}
-
-	for i, step := range m.steps {
-		icon, text := m.breadcrumbStep(i, step)
-		if isCompact {
-			parts = append(parts, icon)
-		} else {
-			parts = append(parts, icon+" "+text)
-		}
-	}
-
 	return strings.Join(parts, connector)
-}
-
-func (m Model) breadcrumbStep(idx int, step types.WizardStep) (icon, text string) {
-	name := stepDisplayNames[step]
-	if name == "" {
-		name = step.String()
-	}
-
-	switch {
-	case idx < m.stepIndex:
-		icon = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
-		text = lipgloss.NewStyle().Foreground(styles.TextDim).Render(name)
-	case idx == m.stepIndex:
-		icon = styles.RenderCursorOptional(m.CursorBlinkVisible())
-		text = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(name)
-	default:
-		icon = lipgloss.NewStyle().Foreground(styles.Muted).Render(styles.PendingMark)
-		text = lipgloss.NewStyle().Foreground(styles.Muted).Render(name)
-	}
-	return
 }
 
 func (m Model) renderFooter(width int) string {
@@ -295,8 +334,10 @@ func (m Model) renderFooter(width int) string {
 		hints = m.getStepHints()
 	}
 
-	return styles.FooterStyle.Width(width).Align(lipgloss.Center).
+	divider := styles.RenderDivider(width)
+	bar := styles.FooterStyle.Width(width).Align(lipgloss.Center).
 		Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	return divider + "\n" + bar
 }
 
 func (m Model) renderToast(width int) string {
@@ -311,8 +352,10 @@ func (m Model) renderToast(width int) string {
 	default:
 		toastStyle = toastStyle.Foreground(styles.Accent)
 	}
-	return styles.FooterStyle.Width(width).Align(lipgloss.Center).
-		Render(toastStyle.Render("✓ " + m.toastMessage))
+	divider := styles.RenderDivider(width)
+	bar := styles.FooterStyle.Width(width).Align(lipgloss.Center).
+		Render(toastStyle.Render(styles.CheckMark + " " + m.toastMessage))
+	return divider + "\n" + bar
 }
 
 func (m Model) getStepHints() []string {
@@ -393,18 +436,9 @@ func (m Model) getStepHints() []string {
 			styles.RenderKeyHint("Esc", "Back"),
 		}
 	case types.StepSelectSubjects:
-		if m.filteringSubject {
-			return []string{
-				styles.RenderKeyHint("Type", "Filter"),
-				styles.RenderKeyHint("Enter", "Apply"),
-				styles.RenderKeyHint("Esc", "Clear"),
-			}
-		}
 		return []string{
 			styles.RenderKeyHint("Space", "Toggle"),
 			styles.RenderKeyHint("A/N", "All/None"),
-			styles.RenderKeyHint("/", "Filter"),
-			styles.RenderKeyHint("R", "Refresh"),
 			styles.RenderKeyHint("Enter", "Next"),
 		}
 	default:

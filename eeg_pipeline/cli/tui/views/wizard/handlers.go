@@ -343,7 +343,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	} else {
 		m.validationErrors = m.validate()
 		if len(m.validationErrors) == 0 {
-			m.ConfirmingExecute = true
+			m.ReadyToExecute = true
 		}
 	}
 	return m, tea.ClearScreen
@@ -688,11 +688,6 @@ func (m *Model) selectNone() {
 }
 
 func (m *Model) GoBack() bool {
-	if m.ConfirmingExecute {
-		m.ConfirmingExecute = false
-		return true
-	}
-
 	// If in advanced config with an expanded option, collapse it first
 	if m.CurrentStep == types.StepAdvancedConfig && m.expandedOption >= 0 {
 		m.expandedOption = expandedNone

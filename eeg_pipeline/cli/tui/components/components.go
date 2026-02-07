@@ -50,7 +50,7 @@ func (t Toast) toastColors() (icon string, bgColor, fgColor lipgloss.Color) {
 	case ToastError:
 		return styles.CrossMark, styles.Error, styles.BgDark
 	default:
-		return "ℹ", styles.Accent, styles.BgDark
+		return styles.ActiveMark, styles.Accent, styles.BgDark
 	}
 }
 
@@ -106,11 +106,9 @@ func (h HelpOverlay) View() string {
 
 	var content strings.Builder
 
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Text).
-		MarginBottom(1)
-	content.WriteString(titleStyle.Render(h.Title) + "\n\n")
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Text)
+	content.WriteString(titleStyle.Render(h.Title) + "\n")
+	content.WriteString(styles.RenderDivider(h.Width-8) + "\n\n")
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(styles.Text).
@@ -118,10 +116,7 @@ func (h HelpOverlay) View() string {
 		Bold(true).
 		Padding(0, 1)
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	sectionStyle := lipgloss.NewStyle().
-		Foreground(styles.Primary).
-		Bold(true).
-		MarginTop(1)
+	sectionStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 
 	sectionOrder := []string{"Navigation", "Selection", "Actions", "General"}
 	for _, sectionName := range sectionOrder {
@@ -133,22 +128,14 @@ func (h HelpOverlay) View() string {
 		content.WriteString(sectionStyle.Render(sectionName) + "\n")
 		for _, item := range items {
 			keyText := lipgloss.NewStyle().Width(helpKeyWidth).Render(keyStyle.Render(item.Key))
-			descText := descStyle.Render(item.Description)
-			content.WriteString(keyText + " " + descText + "\n")
+			content.WriteString(keyText + " " + descStyle.Render(item.Description) + "\n")
 		}
 		content.WriteString("\n")
 	}
 
-	dismissHint := lipgloss.NewStyle().Foreground(styles.Muted).Render("? or Esc to close")
-	content.WriteString(dismissHint)
+	content.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("? or Esc to close"))
 
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Border).
-		Padding(1, 3).
-		Width(h.Width)
-
-	return box.Render(content.String())
+	return styles.PanelStyle.Width(h.Width).Render(content.String())
 }
 
 type Spinner struct {
@@ -242,7 +229,7 @@ func (p InfoPanel) View() string {
 	var content strings.Builder
 
 	if p.Title != "" {
-		content.WriteString(styles.RenderSectionLabel(p.Title) + "\n\n")
+		content.WriteString(styles.RenderSectionLabel(p.Title) + "\n")
 	}
 
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(p.LabelWidth)

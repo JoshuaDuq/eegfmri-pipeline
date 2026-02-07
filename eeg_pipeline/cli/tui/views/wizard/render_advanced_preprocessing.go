@@ -13,6 +13,7 @@ import (
 func (m Model) renderPreprocessingAdvancedConfig() string {
 	var b strings.Builder
 
+	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 
 	if m.useDefaultAdvanced {
@@ -20,11 +21,11 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	}
 
 	if m.editingNumber {
-		b.WriteString(infoStyle.Render("Type a number, press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Enter value, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.editingText {
-		b.WriteString(infoStyle.Render("Type text, press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Type text, Enter to confirm, Esc to cancel") + "\n")
 	} else {
-		b.WriteString(infoStyle.Render("Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: toggle/expand  Enter: proceed") + "\n")
 	}
 
 	labelWidth := defaultLabelWidth
@@ -185,9 +186,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 
 		var labelStyle, valueStyle lipgloss.Style
 		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		} else {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
 		}
 		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
@@ -215,9 +216,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			hint = "Choose preprocessing steps"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optPrepGroupGeneral:
@@ -228,9 +229,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			hint = "Montage, parallel jobs, random seed"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optPrepGroupFiltering:
@@ -241,9 +242,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			hint = "Resampling, bandpass, notch filters"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optPrepGroupPyprep:
@@ -254,9 +255,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			hint = "Bad channel detection parameters"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optPrepGroupICA:
@@ -267,9 +268,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			hint = "ICA algorithm and parameters"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		case optPrepGroupEpoching:
@@ -280,9 +281,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			hint = "Epoch timing and rejection criteria"
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		// Stage toggles (indented under Stages group)
@@ -512,11 +513,11 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			hint = "Fail if clean events.tsv cannot be written"
 		}
 
-		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
+		styledHint := ""
 		if hint != "" {
-			b.WriteString("  " + hintStyle.Render(hint))
+			styledHint = hintStyle.Render(hint)
 		}
-		b.WriteString("\n")
+		b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), styledHint, labelWidth, m.contentWidth) + "\n")
 	}
 
 	if showScrollIndicators && endLine < totalLines {
@@ -525,4 +526,3 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 
 	return b.String()
 }
-

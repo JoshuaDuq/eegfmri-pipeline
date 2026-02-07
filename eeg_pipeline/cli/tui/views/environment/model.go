@@ -280,14 +280,13 @@ func (m Model) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 	}
 
-	contentWidth := m.calculateContentWidth()
-	separatorWidth := m.calculateSeparatorWidth(contentWidth)
+	separatorWidth := m.calculateSeparatorWidth(m.calculateContentWidth())
 
-	header := m.renderWelcomeBanner() + "\n\n" + m.renderSystemInfo()
-	headerHeight := strings.Count(header, "\n") + headerHeightPadding
+	header := m.renderWelcomeBanner() + "\n" + m.renderSystemInfo()
+	headerHeight := strings.Count(header, "\n") + 2
 
 	footer := m.renderFooter()
-	footerHeight := strings.Count(footer, "\n") + footerHeightPadding
+	footerHeight := strings.Count(footer, "\n") + 2
 
 	mainHeight := m.height - headerHeight - footerHeight
 	if mainHeight < minMainContentHeight {
@@ -298,23 +297,22 @@ func (m Model) View() string {
 	mainContent.WriteString(m.renderTitle(separatorWidth))
 	mainContent.WriteString("\n\n")
 	mainContent.WriteString(m.renderOptions())
-	mainContent.WriteString("\n")
 
 	if m.showCloudConfirmation {
-		mainContent.WriteString(m.renderCloudConfirmation())
 		mainContent.WriteString("\n")
+		mainContent.WriteString(m.renderCloudConfirmation())
 	}
 
 	if m.isCloudSelected() {
-		mainContent.WriteString(m.renderCloudPanel())
 		mainContent.WriteString("\n")
+		mainContent.WriteString(m.renderCloudPanel())
 	}
 
 	mainContentStyled := lipgloss.NewStyle().
 		Height(mainHeight).
 		Render(mainContent.String())
 
-	return header + "\n\n" + mainContentStyled + "\n" + footer
+	return header + "\n" + mainContentStyled + "\n" + footer
 }
 
 func (m Model) calculateContentWidth() int {
@@ -344,9 +342,14 @@ func (m Model) renderWelcomeBanner() string {
 
 	version := lipgloss.NewStyle().
 		Foreground(styles.Muted).
-		Render(" v1.0")
+		Render("  v1.0")
 
-	return logo + version
+	lineWidth := m.width - 4
+	if lineWidth < 0 {
+		lineWidth = 0
+	}
+
+	return "  " + logo + version + "\n" + styles.RenderHeaderSeparator(lineWidth)
 }
 
 func isRunningOnGCP() bool {
@@ -365,9 +368,6 @@ func isRunningOnGCP() bool {
 }
 
 func (m Model) renderSystemInfo() string {
-	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
-
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "unknown"
@@ -376,25 +376,25 @@ func (m Model) renderSystemInfo() string {
 	cpuCount := runtime.NumCPU()
 	osArch := fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
 
-	var info []string
-
 	envType := "Local"
 	if isRunningOnGCP() {
 		envType = "Virtual Machine"
 	}
-	info = append(info, infoStyle.Render("Environment: ")+valueStyle.Render(envType))
-	info = append(info, infoStyle.Render("Host: ")+valueStyle.Render(hostname))
-	info = append(info, infoStyle.Render("OS: ")+valueStyle.Render(osArch))
-	info = append(info, infoStyle.Render("CPUs: ")+valueStyle.Render(fmt.Sprintf("%d", cpuCount)))
 
-	separator := lipgloss.NewStyle().Foreground(styles.Border).Render("  │  ")
-	return strings.Join(info, separator)
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render("  |  ")
+	parts := []string{
+		styles.RenderKeyValue("Env", envType, 5),
+		styles.RenderKeyValue("Host", hostname, 6),
+		styles.RenderKeyValue("OS", osArch, 4),
+		styles.RenderKeyValue("CPUs", fmt.Sprintf("%d", cpuCount), 6),
+	}
+	return "  " + strings.Join(parts, sep)
 }
 
 func (m Model) renderTitle(separatorWidth int) string {
 	title := styles.RenderSectionLabel("Select Environment")
 	subtitle := lipgloss.NewStyle().Foreground(styles.TextDim).Render("  where should pipelines run?")
-	return title + subtitle + "\n" + styles.RenderHeaderSeparator(separatorWidth)
+	return title + subtitle + "\n" + styles.RenderDivider(separatorWidth)
 }
 
 func (m Model) renderOptions() string {
@@ -404,7 +404,7 @@ func (m Model) renderOptions() string {
 		isFocused := i == m.cursor
 		cursor := "  "
 		marker := styles.RenderRadio(false, false)
-		nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
+		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(optionNameWidth)
 		descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 
 		if isFocused {
@@ -413,10 +413,7 @@ func (m Model) renderOptions() string {
 			nameStyle = nameStyle.Bold(true).Foreground(styles.Primary)
 		}
 
-		paddingNeeded := optionNameWidth - len(opt.name)
-		paddedName := opt.name + strings.Repeat(" ", paddingNeeded)
-
-		line := cursor + marker + " " + nameStyle.Render(paddedName) + descStyle.Render(opt.description)
+		line := cursor + marker + " " + nameStyle.Render(opt.name) + descStyle.Render(opt.description)
 
 		if opt.env == EnvGoogleCloud {
 			line += "  " + m.renderVMStatusBadge()
@@ -467,12 +464,6 @@ func (m Model) renderVMStatusBadge() string {
 }
 
 func (m Model) renderCloudPanel() string {
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Border).
-		Padding(0, 1).
-		Width(m.width - cloudPanelWidthPadding)
-
 	var content strings.Builder
 
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(labelStyleWidth)
@@ -482,11 +473,11 @@ func (m Model) renderCloudPanel() string {
 	content.WriteString(labelStyle.Render("Remote path:") + valueStyle.Render(m.CloudConfig.RemoteBase) + "\n")
 	content.WriteString(labelStyle.Render("GCP instance:") + valueStyle.Render(m.CloudConfig.GCPInstance) + "\n")
 
-	statusLabel := labelStyle.Render("status:")
+	statusLabel := labelStyle.Render("Status:")
 	statusLine := m.renderCloudStatusLine(statusLabel, valueStyle, labelStyle)
 	content.WriteString(statusLine)
 
-	return boxStyle.Render(content.String())
+	return styles.PanelStyle.Width(m.width - cloudPanelWidthPadding).Render(content.String())
 }
 
 func (m Model) renderCloudStatusLine(statusLabel string, valueStyle, labelStyle lipgloss.Style) string {
@@ -528,7 +519,7 @@ func (m Model) renderCloudStatusLine(statusLabel string, valueStyle, labelStyle 
 
 func (m Model) renderFooter() string {
 	hints := []string{
-		styles.RenderKeyHint("↑↓", "Navigate"),
+		styles.RenderKeyHint("\u2191\u2193", "Navigate"),
 		styles.RenderKeyHint("Enter", "Select"),
 	}
 
@@ -541,5 +532,11 @@ func (m Model) renderFooter() string {
 
 	hints = append(hints, styles.RenderKeyHint("Q", "Quit"))
 
-	return styles.FooterStyle.Width(m.width - footerWidthPadding).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	width := m.width - footerWidthPadding
+	if width < 20 {
+		width = 20
+	}
+	divider := styles.RenderDivider(width)
+	bar := styles.FooterStyle.Width(width).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	return divider + "\n" + bar
 }

@@ -4,10 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eeg-pipeline"
-version = "0.0.0"
-description = "EEG analysis pipeline for pain research"
+version = "1.0.0"
+description = "Modular EEG–fMRI analysis pipeline for thermal pain research"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.9"
+authors = [
+    {name = "Joshua Duque"},
+]
+keywords = ["eeg", "fmri", "bids", "mne", "pain", "neuroscience", "preprocessing", "machine-learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+
+[project.urls]
+Repository = "https://github.com/JoshuaDuq/EEG_fMRI_Pipeline"
 
 [project.scripts]
 eeg-pipeline = "eeg_pipeline.cli.main:main"

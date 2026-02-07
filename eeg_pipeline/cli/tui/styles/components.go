@@ -15,12 +15,12 @@ var (
 				MarginBottom(1)
 
 	CardStyle = lipgloss.NewStyle().
-			Padding(1, 3).
+			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(Border)
 
 	CardStyleFocused = lipgloss.NewStyle().
-				Padding(1, 3).
+				Padding(1, 2).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(Primary)
 
@@ -31,10 +31,12 @@ var (
 
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(TextDim).
-			MarginTop(1).
-			Border(lipgloss.NormalBorder(), true, false, false, false).
-			BorderForeground(Border).
 			PaddingTop(1)
+
+	PanelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(Border).
+			Padding(1, 2)
 
 	HeaderLineStyle = lipgloss.NewStyle().Foreground(Border)
 

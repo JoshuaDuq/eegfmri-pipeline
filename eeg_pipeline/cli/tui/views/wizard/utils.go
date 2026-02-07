@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -76,4 +77,26 @@ func formatDays(duration time.Duration) string {
 		return "1 day ago"
 	}
 	return fmt.Sprintf("%d days ago", days)
+}
+
+func featureCategoryLabel(category string) string {
+	switch category {
+	case "erp":
+		return "ERP"
+	case "erds":
+		return "ERDS"
+	case "itpc":
+		return "ITPC"
+	case "pac":
+		return "PAC"
+	case "directedconnectivity":
+		return "Directed Connectivity"
+	case "sourcelocalization":
+		return "Source Localization"
+	default:
+		if category == "" {
+			return category
+		}
+		return strings.ToUpper(category[:1]) + category[1:]
+	}
 }

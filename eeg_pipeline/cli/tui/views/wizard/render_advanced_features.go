@@ -13,9 +13,8 @@ import (
 func (m Model) renderFeaturesAdvancedConfig() string {
 	var b strings.Builder
 
-	b.WriteString(styles.SectionTitleStyle.Render("Advanced configuration") + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
-	// Contextual help text
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 
 	if m.useDefaultAdvanced {
@@ -23,13 +22,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	}
 
 	if m.editingNumber {
-		b.WriteString(infoStyle.Render("Enter a value, then press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Enter value, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.editingText {
-		b.WriteString(infoStyle.Render("Type text, then press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Type text, Enter to confirm, Esc to cancel") + "\n")
 	} else if m.expandedOption >= 0 {
-		b.WriteString(infoStyle.Render("Space to toggle item · Esc to close submenu") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: select  Esc: close submenu") + "\n")
 	} else {
-		b.WriteString(infoStyle.Render("Space to toggle/expand · ↑↓ to navigate · Enter to proceed") + "\n\n")
+		b.WriteString(infoStyle.Render("Space: toggle/expand  Enter: proceed") + "\n")
 	}
 
 	labelWidth := defaultLabelWidth
@@ -203,9 +202,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 		var labelStyle, valueStyle lipgloss.Style
 		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		} else {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
 		}
 
 		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
@@ -242,9 +241,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			// Use distinct styling for section headers
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupDirectedConnectivity:
 			label = "▸ Directed Connectivity"
@@ -266,9 +265,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupAperiodic:
 			label = "▸ Aperiodic"
@@ -278,9 +277,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupComplexity:
 			label = "▸ Complexity"
@@ -290,9 +289,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupBursts:
 			label = "▸ Bursts"
@@ -302,9 +301,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupPower:
 			label = "▸ Power"
@@ -314,9 +313,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupSpectral:
 			label = "▸ Spectral"
@@ -326,9 +325,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupERP:
 			label = "▸ ERP"
@@ -338,9 +337,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupRatios:
 			label = "▸ Ratios"
@@ -350,9 +349,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupAsymmetry:
 			label = "▸ Asymmetry"
@@ -362,9 +361,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupSpatialTransform:
 			label = "▸ Spatial Transform"
@@ -374,9 +373,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optSpatialTransform:
 			label = "Transform"
@@ -405,9 +404,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optTfrFreqMin:
 			label = "Freq Min"
@@ -499,13 +498,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			hint = "minimum PSD peak prominence"
 		case optIAFRois:
 			label = "IAF ROIs"
-			rois := m.SelectedROIs()
+			rois := splitCSVList(m.iafRoisSpec)
 			if len(rois) == 0 {
-				value = "(select ROIs in ROI step)"
+				value = "(none selected)"
 			} else {
 				value = strings.Join(rois, ",")
 			}
-			hint = "derived from ROI selection step"
+			hint = fmt.Sprintf("Space to select \u00b7 %d ROI options", len(m.rois))
 		case optIAFMinCyclesAtFmin:
 			label = "IAF min cycles"
 			value = fmt.Sprintf("%.1f", m.iafMinCyclesAtFmin)
@@ -536,9 +535,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optSaveSubjectLevelFeatures:
 			label = "Save Subject-Level"
@@ -556,9 +555,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFeatGroupSourceLoc:
 			label = "▸ Source Localization"
@@ -568,9 +567,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 
 		// Connectivity settings
@@ -1305,9 +1304,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optItpcMethod:
 			label = "ITPC Method"
@@ -1910,9 +1909,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optQualityPsdMethod:
 			label = "PSD method"
@@ -2017,9 +2016,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value, expandIndicator = "", ""
 			if isFocused {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optERDSUseLogRatio:
 			label = "Use log ratio"
@@ -2137,9 +2136,10 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		}
 
 		if lineIdx >= startLine && lineIdx < endLine {
-			b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value+expandIndicator))
-			b.WriteString("  " + hintStyle.Render(hint))
-			b.WriteString("\n")
+			styledLabel := labelStyle.Render(label + ":")
+			styledValue := valueStyle.Render(value + expandIndicator)
+			styledHint := hintStyle.Render(hint)
+			b.WriteString(styles.RenderConfigLine(cursor, styledLabel, styledValue, styledHint, labelWidth, m.contentWidth) + "\n")
 		}
 		lineIdx++
 
@@ -2398,6 +2398,26 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 				if lineIdx >= startLine && lineIdx < endLine {
 					b.WriteString(subIndent + checkbox + nameStyle.Render(v) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (IAF ROIs)
+		if opt == optIAFRois && m.expandedOption == expandedIAFRois {
+			subIndent := "      " // 6 spaces for sub-items
+			for j, roi := range m.rois {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, roi.Key)
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(roi.Key) + "\n")
 				}
 				lineIdx++
 			}
