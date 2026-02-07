@@ -5,7 +5,7 @@
 [![BIDS](https://img.shields.io/badge/data-BIDS-orange.svg)](https://bids-specification.readthedocs.io/)
 [![MNE-Python](https://img.shields.io/badge/MNE--Python-1.9.0-informational.svg)](https://mne.tools)
 
-A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research. Covers raw data conversion, preprocessing, feature extraction, behavioral analysis, machine learning, fMRI first-level analysis, and publication-ready visualization — all from a unified CLI.
+A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research.  Raw data conversion, preprocessing, feature extraction, behavioral analysis, machine learning, fMRI first-level analysis, and publication-ready visualization — all from a unified CLI.
 
 **This pipeline ships with a dedicated interactive TUI** that provides guided wizards for every stage — no CLI flags to memorize. See [Interactive TUI](#interactive-tui).
 
