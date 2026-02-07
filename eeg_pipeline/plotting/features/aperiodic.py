@@ -42,7 +42,19 @@ TOPO_CONTOURS = 6
 SCATTER_ALPHA = 0.6
 BOX_ALPHA = 0.6
 SCATTER_SIZE = 6
-APERIODIC_METRICS = ["slope", "offset"]
+DEFAULT_APERIODIC_METRICS: List[Tuple[str, str]] = [("broadband", "slope"), ("broadband", "offset")]
+PERIODIC_APERIODIC_STATS: Tuple[str, ...] = ("center_freq", "bandwidth", "peak_height")
+BAND_SORT_ORDER: Tuple[str, ...] = (
+    "delta",
+    "theta",
+    "alpha",
+    "low_beta",
+    "beta",
+    "high_beta",
+    "gamma",
+    "low_gamma",
+    "high_gamma",
+)
 SLOPE_COLOR = "#8E44AD"
 OFFSET_COLOR = "#16A085"
 CONDITION_COLOR_V1 = "#5a7d9a"
@@ -51,9 +63,88 @@ SIGNIFICANT_COLOR = "#d62728"
 NON_SIGNIFICANT_COLOR = "#333333"
 
 
+def _metric_label(band: str, stat: str) -> str:
+    """Build display label for an aperiodic metric."""
+    stat_label = stat.replace("_", " ")
+    if band == "broadband":
+        return stat_label
+    return f"{band} {stat_label}"
+
+
+def _metric_color(stat: str) -> str:
+    if stat == "slope":
+        return SLOPE_COLOR
+    if stat == "offset":
+        return OFFSET_COLOR
+    if stat == "peak_height":
+        return "#C0392B"
+    if stat in {"center_freq", "bandwidth"}:
+        return "#2E86C1"
+    return "gray"
+
+
+def _metric_cmap(stat: str) -> str:
+    if stat == "slope":
+        return "RdBu_r"
+    if stat == "peak_height":
+        return "magma"
+    return "viridis"
+
+
+def _collect_aperiodic_metric_specs(features_df: pd.DataFrame) -> List[Dict[str, str]]:
+    """Collect available aperiodic metrics, including periodic peak summaries."""
+    available_pairs = set()
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid") or parsed.get("group") != "aperiodic":
+            continue
+        stat = str(parsed.get("stat") or "")
+        band = str(parsed.get("band") or "")
+        if not stat:
+            continue
+        available_pairs.add((band, stat))
+
+    specs: List[Dict[str, str]] = []
+    for band, stat in DEFAULT_APERIODIC_METRICS:
+        if (band, stat) in available_pairs:
+            specs.append(
+                {
+                    "key": f"{band}:{stat}",
+                    "band": band,
+                    "stat": stat,
+                    "label": _metric_label(band, stat),
+                    "color": _metric_color(stat),
+                    "cmap": _metric_cmap(stat),
+                }
+            )
+
+    known_bands = [b for b in BAND_SORT_ORDER if any((b, s) in available_pairs for s in PERIODIC_APERIODIC_STATS)]
+    other_bands = sorted(
+        b for (b, s) in available_pairs
+        if s in PERIODIC_APERIODIC_STATS and b not in known_bands and b != "broadband"
+    )
+    for band in known_bands + other_bands:
+        for stat in PERIODIC_APERIODIC_STATS:
+            if (band, stat) not in available_pairs:
+                continue
+            specs.append(
+                {
+                    "key": f"{band}:{stat}",
+                    "band": band,
+                    "stat": stat,
+                    "label": _metric_label(band, stat),
+                    "color": _metric_color(stat),
+                    "cmap": _metric_cmap(stat),
+                }
+            )
+
+    return specs
+
+
 def _extract_aperiodic_data(
     features_df: pd.DataFrame,
     metric: str,
+    band: str,
     info: mne.Info,
     mask: Optional[pd.Series] = None,
     segment: Optional[str] = None,
@@ -62,7 +153,8 @@ def _extract_aperiodic_data(
     
     Args:
         features_df: Features DataFrame
-        metric: Metric name ("slope" or "offset")
+        metric: Metric stat name (e.g., "slope", "center_freq", "peak_height")
+        band: Band name used by NamingSchema ("broadband", "alpha", ...)
         info: MNE Info object
         mask: Optional boolean mask to subset trials
         segment: Optional segment name. If None, searches across all segments.
@@ -85,7 +177,7 @@ def _extract_aperiodic_data(
         col = NamingSchema.build(
             "aperiodic",
             segment,
-            "broadband",
+            band,
             "ch",
             metric,
             channel=ch_name,
@@ -245,14 +337,21 @@ def _find_run_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
     return None
 
 
-def _get_aperiodic_column_name(channel: str, metric: str, features_df: pd.DataFrame, segment: Optional[str] = None) -> Optional[str]:
+def _get_aperiodic_column_name(
+    channel: str,
+    metric: str,
+    features_df: pd.DataFrame,
+    segment: Optional[str] = None,
+    band: str = "broadband",
+) -> Optional[str]:
     """Get aperiodic column name using NamingSchema.
     
     Args:
         channel: Channel name
-        metric: Metric name ("slope" or "offset")
+        metric: Metric stat name
         features_df: Features DataFrame
         segment: Optional segment name. If None, searches across all segments.
+        band: Band name used by NamingSchema.
     
     Returns:
         Column name or None if not found
@@ -266,7 +365,7 @@ def _get_aperiodic_column_name(channel: str, metric: str, features_df: pd.DataFr
             col = NamingSchema.build(
                 "aperiodic",
                 seg,
-                "broadband",
+                band,
                 "ch",
                 metric,
                 channel=channel,
@@ -278,7 +377,7 @@ def _get_aperiodic_column_name(channel: str, metric: str, features_df: pd.DataFr
         col = NamingSchema.build(
             "aperiodic",
             segment,
-            "broadband",
+            band,
             "ch",
             metric,
             channel=channel,
@@ -291,6 +390,7 @@ def _compute_channel_pvalues(
     events_df: pd.DataFrame,
     common_channels: List[str],
     metric: str,
+    band: str,
     pain_mask: np.ndarray,
     nonpain_mask: np.ndarray,
     run_col: Optional[str],
@@ -303,7 +403,8 @@ def _compute_channel_pvalues(
         features_df: Features DataFrame
         events_df: Events DataFrame
         common_channels: List of channel names
-        metric: Metric name ("slope" or "offset")
+        metric: Metric stat name
+        band: Band name used by NamingSchema.
         pain_mask: Boolean mask for pain condition
         nonpain_mask: Boolean mask for nonpain condition
         run_col: Optional run column name
@@ -321,7 +422,7 @@ def _compute_channel_pvalues(
     p_values = []
     
     for channel in common_channels:
-        col = _get_aperiodic_column_name(channel, metric, features_df, segment=segment)
+        col = _get_aperiodic_column_name(channel, metric, features_df, segment=segment, band=band)
         if col is None:
             p_values.append(np.nan)
             continue
@@ -355,6 +456,7 @@ def _extract_pair_data(
     features_df: pd.DataFrame,
     common_channels: List[str],
     metric: str,
+    band: str,
     pain_mask: np.ndarray,
     nonpain_mask: np.ndarray,
     segment: Optional[str] = None,
@@ -364,7 +466,8 @@ def _extract_pair_data(
     Args:
         features_df: Features DataFrame
         common_channels: List of channel names
-        metric: Metric name ("slope" or "offset")
+        metric: Metric stat name
+        band: Band name used by NamingSchema.
         pain_mask: Boolean mask for pain condition
         nonpain_mask: Boolean mask for nonpain condition
         segment: Optional segment name. If None, searches across all segments.
@@ -376,7 +479,7 @@ def _extract_pair_data(
     data_pain = []
     
     for channel in common_channels:
-        col = _get_aperiodic_column_name(channel, metric, features_df, segment=segment)
+        col = _get_aperiodic_column_name(channel, metric, features_df, segment=segment, band=band)
         if col is None:
             continue
         data_nonpain.append(features_df.loc[nonpain_mask, col].mean())
@@ -394,10 +497,10 @@ def plot_aperiodic_topomaps(
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """Plot topomaps for aperiodic slope and offset, split by pain condition.
+    """Plot topomaps for available aperiodic metrics, split by pain condition.
     
-    Plots topomaps for aperiodic slope and offset, split by pain condition
-    when a pain column is available. Also plots a pain-minus-nonpain contrast.
+    Includes core aperiodic parameters (slope/offset) and periodic peak metrics
+    exported by the aperiodic module (e.g., center frequency, bandwidth, peak height).
     
     Args:
         features_df: Features DataFrame
@@ -430,16 +533,35 @@ def plot_aperiodic_topomaps(
         features_df, events_df, config, logger
     )
 
+    metric_specs = _collect_aperiodic_metric_specs(features_df)
+    if not metric_specs:
+        log_if_present(logger, "warning", "No aperiodic metric specifications available for topomap plotting")
+        return
+
     all_pvals: List[float] = []
     per_metric_pvals: Dict[str, List[float]] = {}
     per_metric_common: Dict[str, Dict[str, Any]] = {}
 
-    for metric in APERIODIC_METRICS:
-        data_overall, found_chs_overall = _extract_aperiodic_data(features_df, metric, info, segment=segment)
+    for spec in metric_specs:
+        metric = spec["stat"]
+        band = spec["band"]
+        metric_key = spec["key"]
+        metric_label = spec["label"]
+        data_overall, found_chs_overall = _extract_aperiodic_data(
+            features_df,
+            metric,
+            band,
+            info,
+            segment=segment,
+        )
         if len(data_overall) == 0:
-            log_if_present(logger, "warning", f"No {metric} data found for topomap (segment: {segment}, found {len(found_chs_overall)} channels)")
+            log_if_present(
+                logger,
+                "warning",
+                f"No {metric_label} data found for topomap (segment: {segment}, found {len(found_chs_overall)} channels)",
+            )
             continue
-        per_metric_pvals[metric] = []
+        per_metric_pvals[metric_key] = []
 
         try:
             picks = mne.pick_channels(info.ch_names, found_chs_overall)
@@ -448,11 +570,12 @@ def plot_aperiodic_topomaps(
             log_if_present(
                 logger,
                 "warning",
-                f"Failed to pick channels for {metric} topomap: {e}"
+                f"Failed to pick channels for {metric_label} topomap: {e}"
             )
             continue
 
-        per_metric_common[metric] = {
+        per_metric_common[metric_key] = {
+            "spec": spec,
             "info_subset": info_subset,
             "data_overall": data_overall,
             "found_chs_overall": found_chs_overall,
@@ -461,10 +584,10 @@ def plot_aperiodic_topomaps(
 
         if pain_mask is not None and nonpain_mask is not None:
             data_nonpain, ch_nonpain = _extract_aperiodic_data(
-                features_df, metric, info, mask=nonpain_mask, segment=segment
+                features_df, metric, band, info, mask=nonpain_mask, segment=segment
             )
             data_pain, ch_pain = _extract_aperiodic_data(
-                features_df, metric, info, mask=pain_mask, segment=segment
+                features_df, metric, band, info, mask=pain_mask, segment=segment
             )
             common_chs = [
                 ch for ch in found_chs_overall
@@ -486,6 +609,7 @@ def plot_aperiodic_topomaps(
                         events_df,
                         common_chs,
                         metric,
+                        band,
                         pain_mask,
                         nonpain_mask,
                         run_col,
@@ -493,14 +617,20 @@ def plot_aperiodic_topomaps(
                         segment=segment,
                     )
                     
-                    per_metric_pvals[metric] = p_vals
+                    per_metric_pvals[metric_key] = p_vals
                     all_pvals.extend([p for p in p_vals if np.isfinite(p)])
                     
                     data_nonpain_arr, data_pain_arr = _extract_pair_data(
-                        features_df, common_chs, metric, pain_mask, nonpain_mask, segment=segment
+                        features_df,
+                        common_chs,
+                        metric,
+                        band,
+                        pain_mask,
+                        nonpain_mask,
+                        segment=segment,
                     )
                     
-                    per_metric_common[metric]["pair_data"] = {
+                    per_metric_common[metric_key]["pair_data"] = {
                         "common_chs": common_chs,
                         "data_nonpain": data_nonpain_arr,
                         "data_pain": data_pain_arr,
@@ -510,7 +640,7 @@ def plot_aperiodic_topomaps(
     if all_pvals:
         q_all = fdr_bh(all_pvals, config=config)
         idx = 0
-        for metric, p_vals in per_metric_pvals.items():
+        for metric_key, p_vals in per_metric_pvals.items():
             q_vals = []
             for p in p_vals:
                 if np.isfinite(p):
@@ -518,12 +648,12 @@ def plot_aperiodic_topomaps(
                     idx += 1
                 else:
                     q_vals.append(np.nan)
-            per_metric_qvals[metric] = np.array(q_vals, dtype=float)
+            per_metric_qvals[metric_key] = np.array(q_vals, dtype=float)
 
     alpha = get_fdr_alpha(config)
     
-    metrics = list(per_metric_common.keys())
-    if not metrics:
+    metric_keys = list(per_metric_common.keys())
+    if not metric_keys:
         log_if_present(logger, "warning", f"No aperiodic metrics available for topomap grid (tried segments: {available_segments}, found data for: {list(per_metric_common.keys())})")
         return
     
@@ -531,7 +661,7 @@ def plot_aperiodic_topomaps(
         meta.get("pair_data") is not None for meta in per_metric_common.values()
     )
     n_cols = 4 if has_pain_data else 1
-    n_rows = len(metrics)
+    n_rows = len(metric_keys)
     
     aperiodic_config = plot_cfg.plot_type_configs.get("aperiodic", {})
     width_per_column = float(aperiodic_config.get("width_per_column", 5.0))
@@ -540,18 +670,20 @@ def plot_aperiodic_topomaps(
     fig_height = height_per_row * n_rows
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height), squeeze=False)
     
-    for row_idx, metric in enumerate(metrics):
-        meta = per_metric_common[metric]
+    for row_idx, metric_key in enumerate(metric_keys):
+        meta = per_metric_common[metric_key]
+        spec = meta["spec"]
+        metric_label = spec["label"]
         info_subset = meta["info_subset"]
         data_overall = meta["data_overall"]
-        cmap = "RdBu_r" if metric == "slope" else "viridis"
+        cmap = spec["cmap"]
         
         ax = axes[row_idx, 0]
         mne.viz.plot_topomap(
             data_overall, info_subset, axes=ax, show=False, cmap=cmap,
             contours=TOPO_CONTOURS
         )
-        ax.set_title(f"{metric.capitalize()} - Overall")
+        ax.set_title(f"{metric_label.title()} - Overall")
         
         if not has_pain_data or n_cols == 1:
             for col_idx in range(1, n_cols):
@@ -566,7 +698,7 @@ def plot_aperiodic_topomaps(
             picks_common = mne.pick_channels(info.ch_names, common_chs)
             info_common = mne.pick_info(info, picks_common)
             diff = data_pain - data_nonpain
-            q_vals = per_metric_qvals.get(metric, np.full(len(common_chs), np.nan))
+            q_vals = per_metric_qvals.get(metric_key, np.full(len(common_chs), np.nan))
             sig_mask = np.isfinite(q_vals) & (q_vals < alpha)
             
             cond1_label = str(label1) if label1 is not None else "Condition 1"
@@ -577,14 +709,14 @@ def plot_aperiodic_topomaps(
                 data_nonpain, info_common, axes=ax, show=False, cmap=cmap,
                 contours=TOPO_CONTOURS
             )
-            ax.set_title(f"{metric.capitalize()} - {cond1_label}")
+            ax.set_title(f"{metric_label.title()} - {cond1_label}")
             
             ax = axes[row_idx, 2]
             mne.viz.plot_topomap(
                 data_pain, info_common, axes=ax, show=False, cmap=cmap,
                 contours=TOPO_CONTOURS
             )
-            ax.set_title(f"{metric.capitalize()} - {cond2_label}")
+            ax.set_title(f"{metric_label.title()} - {cond2_label}")
             
             ax = axes[row_idx, 3]
             mask_params = None
@@ -606,7 +738,7 @@ def plot_aperiodic_topomaps(
                 mask=sig_mask,
                 mask_params=mask_params,
             )
-            title = f"{metric.capitalize()} - {cond2_label} minus {cond1_label}"
+            title = f"{metric_label.title()} - {cond2_label} minus {cond1_label}"
             if np.any(sig_mask):
                 q_min = np.nanmin(q_vals[sig_mask])
                 title += f"\\n(FDR<{alpha:.2f}, min q={q_min:.3f})"
@@ -727,7 +859,7 @@ def plot_aperiodic_by_condition(
     config: Any,
     stats_dir: Optional[Path] = None,
 ) -> None:
-    """Compare aperiodic features between conditions per metric (slope/offset).
+    """Compare available aperiodic metrics between conditions.
     
     For window comparisons (paired): Uses the unified plot_paired_comparison helper.
     For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
@@ -740,10 +872,9 @@ def plot_aperiodic_by_condition(
 
     from eeg_pipeline.plotting.features.utils import (
         plot_paired_comparison,
-        apply_fdr_correction,
-        get_named_segments,
     )
     from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
+    from eeg_pipeline.utils.formatting import sanitize_label
 
     compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
     compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
@@ -756,8 +887,13 @@ def plot_aperiodic_by_condition(
         )
     segments = [str(s) for s in segments]
     
-    metrics = APERIODIC_METRICS
-    metric_colors = {"slope": SLOPE_COLOR, "offset": OFFSET_COLOR}
+    metric_specs = _collect_aperiodic_metric_specs(features_df)
+    if not metric_specs:
+        log_if_present(logger, "warning", "No aperiodic metrics available for condition comparison")
+        return
+    metrics = [spec["key"] for spec in metric_specs]
+    metric_labels = {spec["key"]: spec["label"] for spec in metric_specs}
+    metric_colors = {spec["key"]: spec["color"] for spec in metric_specs}
     
     # Get ROI definitions
     rois = get_roi_definitions(config)
@@ -791,7 +927,7 @@ def plot_aperiodic_by_condition(
     ensure_dir(save_dir)
     
     # Helper to get aperiodic columns for a segment/metric/ROI
-    def get_aperiodic_columns(segment, metric, roi_name):
+    def get_aperiodic_columns(segment, stat, band, roi_name):
         """Get aperiodic columns filtered by segment, metric, and ROI."""
         cols = []
         roi_channels = all_channels if roi_name == "all" else get_roi_channels(rois.get(roi_name, []), all_channels)
@@ -805,7 +941,9 @@ def plot_aperiodic_by_condition(
                 continue
             if str(parsed.get("segment") or "") != segment:
                 continue
-            if str(parsed.get("stat") or "") != metric:
+            if str(parsed.get("stat") or "") != stat:
+                continue
+            if str(parsed.get("band") or "") != band:
                 continue
             # Accept global scope or ch scope in ROI
             scope = parsed.get("scope") or ""
@@ -820,7 +958,6 @@ def plot_aperiodic_by_condition(
     # Window comparison (paired) - supports both 2-window and multi-window
     if compare_wins and len(segments) >= 2:
         from eeg_pipeline.plotting.features.utils import plot_multi_window_comparison
-        from eeg_pipeline.utils.formatting import sanitize_label
         
         use_multi_window = len(segments) > 2
         
@@ -831,10 +968,14 @@ def plot_aperiodic_by_condition(
             if use_multi_window:
                 # Multi-window comparison: extract data for all segments
                 data_by_band_multi: Dict[str, Dict[str, np.ndarray]] = {}
-                for metric in metrics:
+                for spec in metric_specs:
+                    metric_key = spec["key"]
+                    metric_label = spec["label"]
+                    stat = spec["stat"]
+                    band = spec["band"]
                     segment_series = {}
                     for seg in segments:
-                        cols = get_aperiodic_columns(seg, metric, roi_name)
+                        cols = get_aperiodic_columns(seg, stat, band, roi_name)
                         if cols:
                             segment_series[seg] = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
                     
@@ -852,7 +993,7 @@ def plot_aperiodic_by_condition(
                             segment_values[seg] = vals
                     
                     if len(segment_values) >= 2:
-                        data_by_band_multi[metric] = segment_values
+                        data_by_band_multi[metric_label] = segment_values
                 
                 if data_by_band_multi:
                     save_path = save_dir / f"sub-{subject}_aperiodic_by_condition{suffix}_multiwindow"
@@ -871,9 +1012,12 @@ def plot_aperiodic_by_condition(
                 # 2-window comparison
                 seg1, seg2 = segments[0], segments[1]
                 data_by_band = {}
-                for metric in metrics:
-                    cols1 = get_aperiodic_columns(seg1, metric, roi_name)
-                    cols2 = get_aperiodic_columns(seg2, metric, roi_name)
+                for spec in metric_specs:
+                    metric_label = spec["label"]
+                    stat = spec["stat"]
+                    band = spec["band"]
+                    cols1 = get_aperiodic_columns(seg1, stat, band, roi_name)
+                    cols2 = get_aperiodic_columns(seg2, stat, band, roi_name)
                     
                     if not cols1 or not cols2:
                         continue
@@ -885,7 +1029,7 @@ def plot_aperiodic_by_condition(
                     v1, v2 = s1[valid_mask].values, s2[valid_mask].values
                     
                     if len(v1) > 0:
-                        data_by_band[metric] = (v1, v2)
+                        data_by_band[metric_label] = (v1, v2)
                 
                 if data_by_band:
                     save_path = save_dir / f"sub-{subject}_aperiodic_by_condition{suffix}_window"
@@ -924,8 +1068,11 @@ def plot_aperiodic_by_condition(
 
             for roi_name in roi_names:
                 data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
-                for metric in metrics:
-                    cols = get_aperiodic_columns(seg_name, metric, roi_name)
+                for spec in metric_specs:
+                    metric_label = spec["label"]
+                    stat = spec["stat"]
+                    band = spec["band"]
+                    cols = get_aperiodic_columns(seg_name, stat, band, roi_name)
                     if not cols:
                         continue
 
@@ -938,7 +1085,7 @@ def plot_aperiodic_by_condition(
                             group_values[label] = vals
 
                     if len(group_values) >= 2:
-                        data_by_band[metric] = group_values
+                        data_by_band[metric_label] = group_values
 
                 if data_by_band:
                     roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
@@ -971,8 +1118,10 @@ def plot_aperiodic_by_condition(
 
             for roi_name in roi_names:
                 cell_data = {}
-                for col_idx, metric in enumerate(metrics):
-                    cols = get_aperiodic_columns(seg_name, metric, roi_name)
+                for col_idx, spec in enumerate(metric_specs):
+                    stat = spec["stat"]
+                    band = spec["band"]
+                    cols = get_aperiodic_columns(seg_name, stat, band, roi_name)
 
                     if not cols:
                         cell_data[col_idx] = None
@@ -1005,6 +1154,7 @@ def plot_aperiodic_by_condition(
                 for col_idx, metric in enumerate(metrics):
                     ax = axes.flatten()[col_idx]
                     data = cell_data.get(col_idx)
+                    metric_label = metric_labels.get(metric, metric)
 
                     if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
                         ax.text(
@@ -1066,7 +1216,7 @@ def plot_aperiodic_by_condition(
                     ax.set_xticks([0, 1])
                     ax.set_xticklabels([label1, label2], fontsize=9)
                     metric_color = metric_colors.get(metric, "gray")
-                    ax.set_title(metric.capitalize(), fontweight="bold", color=metric_color)
+                    ax.set_title(metric_label.title(), fontweight="bold", color=metric_color)
                     ax.spines["top"].set_visible(False)
                     ax.spines["right"].set_visible(False)
 

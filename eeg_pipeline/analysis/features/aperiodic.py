@@ -19,6 +19,7 @@ import pandas as pd
 import mne
 from scipy import stats
 from scipy.optimize import curve_fit
+from scipy.signal import peak_widths
 from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
@@ -43,6 +44,7 @@ _DEFAULT_LINE_WIDTH = 1.0
 _DEFAULT_LINE_HARMONICS = 3
 _KNEEMODEL_MAX_ITERATIONS = 8000
 _KNEEMODEL_MAX_EXPONENT = 5.0
+_MIN_BANDWIDTH_HZ = 1e-6
 
 
 # Data structures for grouping related parameters
@@ -71,6 +73,9 @@ class PSDFitResult(NamedTuple):
     kept_bins: int
     peak_rejected: bool
     fit_indices: np.ndarray
+    peak_center_freqs: np.ndarray
+    peak_bandwidths: np.ndarray
+    peak_heights: np.ndarray
     status: int
 
 
@@ -85,7 +90,18 @@ class KneeFitResult(NamedTuple):
     kept_bins: int
     peak_rejected: bool
     fit_indices: np.ndarray
+    peak_center_freqs: np.ndarray
+    peak_bandwidths: np.ndarray
+    peak_heights: np.ndarray
     status: int
+
+
+class PeakRejectionResult(NamedTuple):
+    """Result from residual-based peak rejection."""
+    keep_mask: np.ndarray
+    peak_rejected: bool
+    residuals: np.ndarray
+    threshold: float
 
 
 # Configuration helpers
@@ -135,6 +151,52 @@ def _validate_psd_data(psd: np.ndarray) -> np.ndarray:
 
 
 # Peak rejection logic (shared between fixed and knee models)
+def _empty_peak_arrays() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return empty peak parameter arrays."""
+    empty = np.array([], dtype=float)
+    return empty, empty.copy(), empty.copy()
+
+
+def _summarize_rejected_residual_peaks(
+    freqs_hz: np.ndarray,
+    residuals: np.ndarray,
+    keep_mask: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract peak center frequency, bandwidth, and height from rejected residual bins.
+
+    This mirrors FOOOF-like behavior: peaks are positive residual components above
+    the fitted aperiodic background. The bandwidth estimate uses full width at
+    half maximum (FWHM) around the peak apex in residual space.
+    """
+    finite_mask = np.isfinite(freqs_hz) & np.isfinite(residuals)
+    rejected = (~keep_mask) & finite_mask & (residuals > 0)
+    if not np.any(rejected):
+        return _empty_peak_arrays()
+
+    rejected_idx = np.flatnonzero(rejected)
+    splits = np.where(np.diff(rejected_idx) > 1)[0] + 1
+    clusters = np.split(rejected_idx, splits)
+    peak_indices = np.array(
+        [cluster[np.argmax(residuals[cluster])] for cluster in clusters if cluster.size > 0],
+        dtype=int,
+    )
+    if peak_indices.size == 0:
+        return _empty_peak_arrays()
+
+    positive_residuals = np.where(finite_mask & (residuals > 0), residuals, 0.0)
+    _, _, left_ips, right_ips = peak_widths(positive_residuals, peak_indices, rel_height=0.5)
+
+    sample_axis = np.arange(freqs_hz.size, dtype=float)
+    left_hz = np.interp(left_ips, sample_axis, freqs_hz)
+    right_hz = np.interp(right_ips, sample_axis, freqs_hz)
+
+    centers = freqs_hz[peak_indices].astype(float)
+    bandwidths = np.maximum(np.abs(right_hz - left_hz), _MIN_BANDWIDTH_HZ).astype(float)
+    heights = residuals[peak_indices].astype(float)
+
+    return centers, bandwidths, heights
+
+
 def _apply_residual_based_peak_rejection(
     log_freqs: np.ndarray,
     log_psd: np.ndarray,
@@ -142,7 +204,7 @@ def _apply_residual_based_peak_rejection(
     min_fit_points: int,
     model: str = "fixed",
     freqs_hz: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, bool]:
+) -> PeakRejectionResult:
     """Apply iterative residual-based peak rejection.
     
     The scientifically correct approach for aperiodic fitting:
@@ -164,15 +226,18 @@ def _apply_residual_based_peak_rejection(
         freqs_hz: Linear frequency values (required for knee model)
     
     Returns:
-        Tuple of (keep_mask, peak_rejected_flag)
+        PeakRejectionResult with final keep mask and residual summary from the
+        final iteration used for rejection.
     """
     n_values = log_psd.size
     keep_mask = np.ones(n_values, dtype=bool)
     peak_rejected = False
+    residuals = np.full(n_values, np.nan, dtype=float)
+    threshold = np.nan
     
     finite_mask = np.isfinite(log_freqs) & np.isfinite(log_psd)
     if np.sum(finite_mask) < min_fit_points:
-        return keep_mask, peak_rejected
+        return PeakRejectionResult(keep_mask, peak_rejected, residuals, threshold)
     
     keep_mask = finite_mask.copy()
     max_iterations = 3
@@ -236,7 +301,7 @@ def _apply_residual_based_peak_rejection(
         
         keep_mask = new_keep
     
-    return keep_mask, peak_rejected
+    return PeakRejectionResult(keep_mask, peak_rejected, residuals, threshold)
 
 
 # Fixed model fitting
@@ -264,37 +329,55 @@ def _fit_single_epoch_channel(
     valid_bins = int(np.sum(finite_mask))
     
     if valid_bins < fit_params.min_fit_points:
+        peak_centers, peak_bandwidths, peak_heights = _empty_peak_arrays()
         return PSDFitResult(
             epoch_idx, channel_idx, np.nan, np.nan,
-            valid_bins, 0, False, np.array([], dtype=int), 1
+            valid_bins, 0, False, np.array([], dtype=int),
+            peak_centers, peak_bandwidths, peak_heights,
+            1
         )
     
     # Use residual-based peak rejection (scientifically correct approach)
-    keep_mask, peak_rejected = _apply_residual_based_peak_rejection(
+    rejection = _apply_residual_based_peak_rejection(
         log_freqs, psd_vals,
         fit_params.peak_rejection_z, fit_params.min_fit_points,
         model="fixed"
     )
+    keep_mask = rejection.keep_mask
     
     kept_indices = np.flatnonzero(keep_mask)
     kept_bins = int(kept_indices.size)
     
     if kept_bins < fit_params.min_fit_points:
+        peak_centers, peak_bandwidths, peak_heights = _empty_peak_arrays()
         return PSDFitResult(
             epoch_idx, channel_idx, np.nan, np.nan,
-            valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 2
+            valid_bins, kept_bins, rejection.peak_rejected, np.array([], dtype=int),
+            peak_centers, peak_bandwidths, peak_heights,
+            2
         )
     
     try:
         offset, slope = _fit_fixed_model(log_freqs, psd_vals, kept_indices)
+        freqs_hz = np.power(10.0, np.asarray(log_freqs, dtype=float))
+        peak_centers, peak_bandwidths, peak_heights = _summarize_rejected_residual_peaks(
+            freqs_hz,
+            np.asarray(rejection.residuals, dtype=float),
+            keep_mask,
+        )
         return PSDFitResult(
             epoch_idx, channel_idx, offset, slope,
-            valid_bins, kept_bins, peak_rejected, kept_indices.astype(int), 0
+            valid_bins, kept_bins, rejection.peak_rejected, kept_indices.astype(int),
+            peak_centers, peak_bandwidths, peak_heights,
+            0
         )
     except (ValueError, np.linalg.LinAlgError):
+        peak_centers, peak_bandwidths, peak_heights = _empty_peak_arrays()
         return PSDFitResult(
             epoch_idx, channel_idx, np.nan, np.nan,
-            valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 3
+            valid_bins, kept_bins, rejection.peak_rejected, np.array([], dtype=int),
+            peak_centers, peak_bandwidths, peak_heights,
+            3
         )
 
 
@@ -347,38 +430,55 @@ def _fit_single_epoch_channel_knee(
     valid_bins = int(np.sum(finite_mask))
     
     if valid_bins < fit_params.min_fit_points:
+        peak_centers, peak_bandwidths, peak_heights = _empty_peak_arrays()
         return KneeFitResult(
             epoch_idx, channel_idx, np.nan, np.nan, np.nan,
-            valid_bins, 0, False, np.array([], dtype=int), 1
+            valid_bins, 0, False, np.array([], dtype=int),
+            peak_centers, peak_bandwidths, peak_heights,
+            1
         )
     
     # Use residual-based peak rejection with knee model
     log_freqs = np.log10(np.maximum(freqs_hz, 1e-6))
-    keep_mask, peak_rejected = _apply_residual_based_peak_rejection(
+    rejection = _apply_residual_based_peak_rejection(
         log_freqs, log_psd_vals,
         fit_params.peak_rejection_z, fit_params.min_fit_points,
         model="knee", freqs_hz=freqs_hz
     )
+    keep_mask = rejection.keep_mask
     
     kept_indices = np.flatnonzero(keep_mask)
     kept_bins = int(kept_indices.size)
     
     if kept_bins < fit_params.min_fit_points:
+        peak_centers, peak_bandwidths, peak_heights = _empty_peak_arrays()
         return KneeFitResult(
             epoch_idx, channel_idx, np.nan, np.nan, np.nan,
-            valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 2
+            valid_bins, kept_bins, rejection.peak_rejected, np.array([], dtype=int),
+            peak_centers, peak_bandwidths, peak_heights,
+            2
         )
     
     try:
         offset, knee, exponent = _fit_knee_model(freqs_hz, log_psd_vals, kept_indices)
+        peak_centers, peak_bandwidths, peak_heights = _summarize_rejected_residual_peaks(
+            np.asarray(freqs_hz, dtype=float),
+            np.asarray(rejection.residuals, dtype=float),
+            keep_mask,
+        )
         return KneeFitResult(
             epoch_idx, channel_idx, offset, exponent, knee,
-            valid_bins, kept_bins, peak_rejected, kept_indices.astype(int), 0
+            valid_bins, kept_bins, rejection.peak_rejected, kept_indices.astype(int),
+            peak_centers, peak_bandwidths, peak_heights,
+            0
         )
     except (ValueError, RuntimeError, np.linalg.LinAlgError):
+        peak_centers, peak_bandwidths, peak_heights = _empty_peak_arrays()
         return KneeFitResult(
             epoch_idx, channel_idx, np.nan, np.nan, np.nan,
-            valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 3
+            valid_bins, kept_bins, rejection.peak_rejected, np.array([], dtype=int),
+            peak_centers, peak_bandwidths, peak_heights,
+            3
         )
 
 
@@ -461,6 +561,14 @@ def _fit_aperiodic_with_qc(
     fit_masks = np.zeros((n_epochs, n_channels, n_freqs), dtype=bool)
     knees = np.full((n_epochs, n_channels), np.nan)
     statuses = np.zeros((n_epochs, n_channels), dtype=int)
+    periodic_peak_centers = np.empty((n_epochs, n_channels), dtype=object)
+    periodic_peak_bandwidths = np.empty((n_epochs, n_channels), dtype=object)
+    periodic_peak_heights = np.empty((n_epochs, n_channels), dtype=object)
+    for ep_idx in range(n_epochs):
+        for ch_idx in range(n_channels):
+            periodic_peak_centers[ep_idx, ch_idx] = np.array([], dtype=float)
+            periodic_peak_bandwidths[ep_idx, ch_idx] = np.array([], dtype=float)
+            periodic_peak_heights[ep_idx, ch_idx] = np.array([], dtype=float)
     
     tasks = [(ep_idx, ch_idx) for ep_idx in range(n_epochs) for ch_idx in range(n_channels)]
     
@@ -468,9 +576,11 @@ def _fit_aperiodic_with_qc(
     if line_noise_mask is not None and line_noise_mask.shape[0] == n_freqs:
         log_freqs_fit = log_freqs[line_noise_mask]
         log_psd_fit = log_psd[:, :, line_noise_mask]
+        fit_index_map = np.flatnonzero(line_noise_mask)
     else:
         log_freqs_fit = log_freqs
         log_psd_fit = log_psd
+        fit_index_map = np.arange(n_freqs, dtype=int)
     
     # Execute fitting (parallel or serial)
     if fit_params.model == "knee":
@@ -503,8 +613,11 @@ def _fit_aperiodic_with_qc(
             kept_bins[res.epoch_idx, res.channel_idx] = res.kept_bins
             peak_rejected[res.epoch_idx, res.channel_idx] = res.peak_rejected
             statuses[res.epoch_idx, res.channel_idx] = int(res.status)
+            periodic_peak_centers[res.epoch_idx, res.channel_idx] = np.asarray(res.peak_center_freqs, dtype=float)
+            periodic_peak_bandwidths[res.epoch_idx, res.channel_idx] = np.asarray(res.peak_bandwidths, dtype=float)
+            periodic_peak_heights[res.epoch_idx, res.channel_idx] = np.asarray(res.peak_heights, dtype=float)
             if res.fit_indices.size > 0:
-                fit_masks[res.epoch_idx, res.channel_idx, res.fit_indices] = True
+                fit_masks[res.epoch_idx, res.channel_idx, fit_index_map[res.fit_indices]] = True
     else:
         if n_jobs != 1:
             results = Parallel(n_jobs=n_jobs)(
@@ -531,13 +644,19 @@ def _fit_aperiodic_with_qc(
             kept_bins[res.epoch_idx, res.channel_idx] = res.kept_bins
             peak_rejected[res.epoch_idx, res.channel_idx] = res.peak_rejected
             statuses[res.epoch_idx, res.channel_idx] = int(res.status)
+            periodic_peak_centers[res.epoch_idx, res.channel_idx] = np.asarray(res.peak_center_freqs, dtype=float)
+            periodic_peak_bandwidths[res.epoch_idx, res.channel_idx] = np.asarray(res.peak_bandwidths, dtype=float)
+            periodic_peak_heights[res.epoch_idx, res.channel_idx] = np.asarray(res.peak_heights, dtype=float)
             if res.fit_indices.size > 0:
-                fit_masks[res.epoch_idx, res.channel_idx, res.fit_indices] = True
+                fit_masks[res.epoch_idx, res.channel_idx, fit_index_map[res.fit_indices]] = True
     
     qc_dict = {
         "model": fit_params.model,
         "knees": knees,
         "status": statuses,
+        "periodic_peak_centers_hz": periodic_peak_centers,
+        "periodic_peak_bandwidths_hz": periodic_peak_bandwidths,
+        "periodic_peak_heights": periodic_peak_heights,
     }
     
     return offsets, slopes, valid_bins, kept_bins, peak_rejected, fit_masks, qc_dict
@@ -961,6 +1080,62 @@ def _compute_power_corrected_band_power(
     return pc_matrix
 
 
+def _compute_periodic_peak_metrics_for_band(
+    peak_centers: np.ndarray,
+    peak_bandwidths: np.ndarray,
+    peak_heights: np.ndarray,
+    band_range: Tuple[float, float],
+    fit_ok: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute strongest periodic peak metrics per band and epoch/channel.
+
+    For each epoch/channel, selects the highest-amplitude oscillatory peak whose
+    center lies inside the requested band.
+    """
+    n_epochs, n_channels = fit_ok.shape
+    center_matrix = np.full((n_epochs, n_channels), np.nan, dtype=float)
+    bandwidth_matrix = np.full((n_epochs, n_channels), np.nan, dtype=float)
+    height_matrix = np.full((n_epochs, n_channels), np.nan, dtype=float)
+
+    band_lo, band_hi = float(band_range[0]), float(band_range[1])
+
+    for epoch_idx in range(n_epochs):
+        for channel_idx in range(n_channels):
+            if not bool(fit_ok[epoch_idx, channel_idx]):
+                continue
+
+            centers = peak_centers[epoch_idx, channel_idx]
+            widths = peak_bandwidths[epoch_idx, channel_idx]
+            heights = peak_heights[epoch_idx, channel_idx]
+
+            if centers is None or widths is None or heights is None:
+                continue
+
+            centers_arr = np.asarray(centers, dtype=float)
+            widths_arr = np.asarray(widths, dtype=float)
+            heights_arr = np.asarray(heights, dtype=float)
+            if centers_arr.size == 0 or widths_arr.size == 0 or heights_arr.size == 0:
+                continue
+
+            valid = (
+                np.isfinite(centers_arr)
+                & np.isfinite(widths_arr)
+                & np.isfinite(heights_arr)
+                & (centers_arr >= band_lo)
+                & (centers_arr <= band_hi)
+            )
+            if not np.any(valid):
+                continue
+
+            band_idx = np.flatnonzero(valid)
+            best_idx = band_idx[int(np.argmax(heights_arr[band_idx]))]
+            center_matrix[epoch_idx, channel_idx] = float(centers_arr[best_idx])
+            bandwidth_matrix[epoch_idx, channel_idx] = float(max(widths_arr[best_idx], _MIN_BANDWIDTH_HZ))
+            height_matrix[epoch_idx, channel_idx] = float(heights_arr[best_idx])
+
+    return center_matrix, bandwidth_matrix, height_matrix
+
+
 # Window mask rebuilding (shared between extract_aperiodic_features and extract_aperiodic_from_precomputed)
 def _rebuild_window_masks(
     windows: Any,
@@ -1294,6 +1469,10 @@ def _extract_aperiodic_for_segment(
     metrics["peakfreq"] = ("alpha", "peakfreq", apf_matrix)
     metrics["tbr"] = ("broadband", "tbr", tbr_matrix)
     metrics["tbr_raw"] = ("broadband", "tbr_raw", tbr_raw_matrix)
+
+    periodic_peak_centers = fit_qc.get("periodic_peak_centers_hz") if isinstance(fit_qc, dict) else None
+    periodic_peak_bandwidths = fit_qc.get("periodic_peak_bandwidths_hz") if isinstance(fit_qc, dict) else None
+    periodic_peak_heights = fit_qc.get("periodic_peak_heights") if isinstance(fit_qc, dict) else None
     
     # Compute power-corrected band power per band with coverage validation
     band_coverage_info: Dict[str, float] = {}
@@ -1310,10 +1489,35 @@ def _extract_aperiodic_for_segment(
         if not is_valid:
             # Band completely outside PSD range - skip with NaN matrix
             pc_matrix = np.full((n_epochs, n_channels), np.nan)
+            center_matrix = np.full((n_epochs, n_channels), np.nan)
+            bandwidth_matrix = np.full((n_epochs, n_channels), np.nan)
+            height_matrix = np.full((n_epochs, n_channels), np.nan)
         else:
             pc_matrix = _compute_power_corrected_band_power(freqs, residuals, band_name, band_range, fit_ok)
+            if (
+                isinstance(periodic_peak_centers, np.ndarray)
+                and isinstance(periodic_peak_bandwidths, np.ndarray)
+                and isinstance(periodic_peak_heights, np.ndarray)
+                and periodic_peak_centers.shape == fit_ok.shape
+                and periodic_peak_bandwidths.shape == fit_ok.shape
+                and periodic_peak_heights.shape == fit_ok.shape
+            ):
+                center_matrix, bandwidth_matrix, height_matrix = _compute_periodic_peak_metrics_for_band(
+                    periodic_peak_centers,
+                    periodic_peak_bandwidths,
+                    periodic_peak_heights,
+                    tuple(band_range),
+                    fit_ok,
+                )
+            else:
+                center_matrix = np.full((n_epochs, n_channels), np.nan)
+                bandwidth_matrix = np.full((n_epochs, n_channels), np.nan)
+                height_matrix = np.full((n_epochs, n_channels), np.nan)
         
         metrics[f"{band_name}_powcorr"] = (band_name, "powcorr", pc_matrix)
+        metrics[f"{band_name}_center_freq"] = (band_name, "center_freq", center_matrix)
+        metrics[f"{band_name}_bandwidth"] = (band_name, "bandwidth", bandwidth_matrix)
+        metrics[f"{band_name}_peak_height"] = (band_name, "peak_height", height_matrix)
     
     # Aggregate features by spatial mode
     data_dict = _aggregate_features_by_spatial_mode(
@@ -1341,6 +1545,9 @@ def _extract_aperiodic_for_segment(
         "valid_bins": valid_bins,
         "kept_bins": kept_bins,
         "peak_rejected": peak_rej,
+        "periodic_peak_centers_hz": periodic_peak_centers,
+        "periodic_peak_bandwidths_hz": periodic_peak_bandwidths,
+        "periodic_peak_heights": periodic_peak_heights,
         "channel_names": ch_names,
         "band_coverage": band_coverage_info,
     }
@@ -1439,6 +1646,9 @@ def extract_aperiodic_features(
         "tbr": "theta/beta ratio computed on aperiodic-adjusted residual power (oscillatory excess ratio)",
         "tbr_raw": "conventional theta/beta ratio computed on raw PSD power",
         "peakfreq": "alpha peak frequency from aperiodic-adjusted residual spectrum (center-of-gravity)",
+        "center_freq": "center frequency (Hz) of strongest oscillatory peak in-band from residual (above aperiodic fit)",
+        "bandwidth": "full-width at half-maximum (Hz) of strongest in-band oscillatory residual peak",
+        "peak_height": "peak amplitude above aperiodic fit (log10 power residual)",
     }
     
     segments_done = sorted([k for k, v in qc_payload.get("segments", {}).items() if v])
@@ -1467,6 +1677,9 @@ def extract_aperiodic_features(
         qc_payload["valid_bins"] = chosen.get("valid_bins")
         qc_payload["kept_bins"] = chosen.get("kept_bins")
         qc_payload["peak_rejected"] = chosen.get("peak_rejected")
+        qc_payload["periodic_peak_centers_hz"] = chosen.get("periodic_peak_centers_hz")
+        qc_payload["periodic_peak_bandwidths_hz"] = chosen.get("periodic_peak_bandwidths_hz")
+        qc_payload["periodic_peak_heights"] = chosen.get("periodic_peak_heights")
         qc_payload["channel_names"] = chosen.get("channel_names")
         qc_payload["psd_fmin"] = chosen.get("psd_fmin")
         qc_payload["psd_fmax"] = chosen.get("psd_fmax")
@@ -1692,6 +1905,10 @@ def extract_aperiodic_from_precomputed(
         if fit_params.model == "knee" and isinstance(knees, np.ndarray):
             metrics["knee"] = ("broadband", "knee", knees)
 
+        periodic_peak_centers = qc.get("periodic_peak_centers_hz") if isinstance(qc, dict) else None
+        periodic_peak_bandwidths = qc.get("periodic_peak_bandwidths_hz") if isinstance(qc, dict) else None
+        periodic_peak_heights = qc.get("periodic_peak_heights") if isinstance(qc, dict) else None
+
         # Power-corrected band power per requested band
         for band_name in bands:
             if band_name not in freq_bands:
@@ -1704,6 +1921,28 @@ def extract_aperiodic_from_precomputed(
                 freqs, residuals, band_name, band_range, fit_ok
             )
             metrics[f"{band_name}_powcorr"] = (band_name, "powcorr", pc_matrix)
+            if (
+                isinstance(periodic_peak_centers, np.ndarray)
+                and isinstance(periodic_peak_bandwidths, np.ndarray)
+                and isinstance(periodic_peak_heights, np.ndarray)
+                and periodic_peak_centers.shape == fit_ok.shape
+                and periodic_peak_bandwidths.shape == fit_ok.shape
+                and periodic_peak_heights.shape == fit_ok.shape
+            ):
+                center_matrix, bandwidth_matrix, height_matrix = _compute_periodic_peak_metrics_for_band(
+                    periodic_peak_centers,
+                    periodic_peak_bandwidths,
+                    periodic_peak_heights,
+                    band_range,
+                    fit_ok,
+                )
+            else:
+                center_matrix = np.full_like(offsets, np.nan, dtype=float)
+                bandwidth_matrix = np.full_like(offsets, np.nan, dtype=float)
+                height_matrix = np.full_like(offsets, np.nan, dtype=float)
+            metrics[f"{band_name}_center_freq"] = (band_name, "center_freq", center_matrix)
+            metrics[f"{band_name}_bandwidth"] = (band_name, "bandwidth", bandwidth_matrix)
+            metrics[f"{band_name}_peak_height"] = (band_name, "peak_height", height_matrix)
 
         aggregated = _aggregate_features_by_spatial_mode(
             metrics,
@@ -1722,6 +1961,9 @@ def extract_aperiodic_from_precomputed(
             "mean_offset": float(np.nanmean(offsets)),
             "fit_ok_fraction": float(np.mean(fit_ok)) if fit_ok.size else np.nan,
             "line_noise_bins_removed": int(n_removed),
+            "periodic_peak_centers_hz": periodic_peak_centers,
+            "periodic_peak_bandwidths_hz": periodic_peak_bandwidths,
+            "periodic_peak_heights": periodic_peak_heights,
         }
     
     if not all_data:
@@ -1736,6 +1978,9 @@ def extract_aperiodic_from_precomputed(
         "tbr": "theta/beta ratio computed on aperiodic-adjusted residual power (oscillatory excess ratio)",
         "tbr_raw": "conventional theta/beta ratio computed on raw PSD power",
         "peakfreq": "alpha peak frequency from aperiodic-adjusted residual spectrum (center-of-gravity)",
+        "center_freq": "center frequency (Hz) of strongest oscillatory peak in-band from residual (above aperiodic fit)",
+        "bandwidth": "full-width at half-maximum (Hz) of strongest in-band oscillatory residual peak",
+        "peak_height": "peak amplitude above aperiodic fit (log10 power residual)",
     }
     return df, list(df.columns), qc_payload
 

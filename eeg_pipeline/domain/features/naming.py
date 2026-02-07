@@ -69,6 +69,7 @@ class NamingSchema:
         "logratio", "bandwidth", "entropy", "geff", "clust", "smallworld",
         # Compound stats (checked by joining from the end)
         "peak_latency", "peak_freq", "peak_power", "peak_ratio", "peak_residual",
+        "peak_height",
         "center_freq", "edge_freq_95",
         "erd_magnitude", "erd_duration", "ers_magnitude", "ers_duration",
         "rebound_magnitude", "rebound_latency",
