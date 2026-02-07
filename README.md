@@ -788,7 +788,7 @@ eeg-pipeline stats
 
 ---
 
-## Interactive TUI
+## Interactive TUI (under development)
 
 A terminal-based UI built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea) for guided pipeline execution. The TUI provides the same capabilities as the CLI but with an interactive, menu-driven interface.
 
