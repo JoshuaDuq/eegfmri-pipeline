@@ -1566,6 +1566,15 @@ type Model struct {
 	connWarnNoSpatialTransform bool    // Warn if no spatial transform
 	connPhaseEstimator         int     // 0: within_epoch, 1: across_epochs
 	connMinSegmentSec          float64 // Minimum segment duration
+	connDynamicEnabled         bool    // Enable dynamic sliding-window connectivity features
+	connDynamicMeasures        int     // 0: wpli+aec, 1: wpli, 2: aec
+	connDynamicAutocorrLag     int     // Lag (in windows) for dynamic autocorrelation
+	connDynamicMinWindows      int     // Minimum windows required for dynamic summaries
+	connDynamicIncludeROIPairs bool    // Include ROI-pair dynamic summaries
+	connDynamicStateEnabled    bool    // Enable dynamic state-transition metrics
+	connDynamicStateNStates    int     // Number of k-means states
+	connDynamicStateMinWindows int     // Minimum windows for state metrics
+	connDynamicStateRandomSeed int     // Random seed for state clustering (-1 = unset)
 
 	// Directed connectivity options (PSI, DTF, PDC)
 	directedConnMeasures          map[int]bool // Selected directed connectivity measures
@@ -2314,6 +2323,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		connWarnNoSpatialTransform: true,
 		connPhaseEstimator:         0, // 0: within_epoch
 		connMinSegmentSec:          1.0,
+		connDynamicEnabled:         false,
+		connDynamicMeasures:        0, // 0: wpli+aec
+		connDynamicAutocorrLag:     1,
+		connDynamicMinWindows:      3,
+		connDynamicIncludeROIPairs: true,
+		connDynamicStateEnabled:    true,
+		connDynamicStateNStates:    3,
+		connDynamicStateMinWindows: 8,
+		connDynamicStateRandomSeed: -1,
 
 		// Directed connectivity defaults
 		directedConnMeasures:          make(map[int]bool),

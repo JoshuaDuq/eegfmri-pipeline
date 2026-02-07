@@ -2623,6 +2623,15 @@ const (
 	optConnWarnNoSpatialTransform
 	optConnPhaseEstimator
 	optConnMinSegmentSec
+	optConnDynamicEnabled
+	optConnDynamicMeasures
+	optConnDynamicAutocorrLag
+	optConnDynamicMinWindows
+	optConnDynamicIncludeROIPairs
+	optConnDynamicStateEnabled
+	optConnDynamicStateNStates
+	optConnDynamicStateMinWindows
+	optConnDynamicStateRandomSeed
 	// Directed connectivity options (PSI, DTF, PDC)
 	optDirectedConnMeasures
 	optDirectedConnOutputLevel

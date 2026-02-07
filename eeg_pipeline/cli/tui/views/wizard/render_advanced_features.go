@@ -702,6 +702,68 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Force within_epoch"
 			value = m.boolToOnOff(m.connForceWithinEpochML)
 			hint = "CV/ML leakage safety"
+		case optConnDynamicEnabled:
+			label = "Dynamic features"
+			value = m.boolToOnOff(m.connDynamicEnabled)
+			hint = "enable sliding-window connectivity dynamics"
+		case optConnDynamicMeasures:
+			label = "Dynamic measures"
+			switch m.connDynamicMeasures {
+			case 1:
+				value = "wpli"
+			case 2:
+				value = "aec"
+			default:
+				value = "wpli+aec"
+			}
+			hint = "measures for dynamic summaries"
+		case optConnDynamicAutocorrLag:
+			label = "Dynamic AC lag"
+			value = fmt.Sprintf("%d", m.connDynamicAutocorrLag)
+			if m.editingNumber && m.isCurrentlyEditing(optConnDynamicAutocorrLag) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "autocorr lag in windows"
+		case optConnDynamicMinWindows:
+			label = "Dynamic min windows"
+			value = fmt.Sprintf("%d", m.connDynamicMinWindows)
+			if m.editingNumber && m.isCurrentlyEditing(optConnDynamicMinWindows) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum windows for dynamic features"
+		case optConnDynamicIncludeROIPairs:
+			label = "Dynamic ROI pairs"
+			value = m.boolToOnOff(m.connDynamicIncludeROIPairs)
+			hint = "emit ROI-pair dynamic summaries"
+		case optConnDynamicStateEnabled:
+			label = "Dynamic states"
+			value = m.boolToOnOff(m.connDynamicStateEnabled)
+			hint = "k-means state transitions"
+		case optConnDynamicStateNStates:
+			label = "State count"
+			value = fmt.Sprintf("%d", m.connDynamicStateNStates)
+			if m.editingNumber && m.isCurrentlyEditing(optConnDynamicStateNStates) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "number of dynamic connectivity states"
+		case optConnDynamicStateMinWindows:
+			label = "State min windows"
+			value = fmt.Sprintf("%d", m.connDynamicStateMinWindows)
+			if m.editingNumber && m.isCurrentlyEditing(optConnDynamicStateMinWindows) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum windows for state metrics"
+		case optConnDynamicStateRandomSeed:
+			label = "State random seed"
+			if m.connDynamicStateRandomSeed < 0 {
+				value = "(auto)"
+			} else {
+				value = fmt.Sprintf("%d", m.connDynamicStateRandomSeed)
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optConnDynamicStateRandomSeed) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "-1 auto, >=0 fixed seed"
 
 		// Directed Connectivity (PSI, DTF, PDC)
 		case optDirectedConnMeasures:

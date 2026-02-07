@@ -32,6 +32,13 @@ try:
 except ImportError:
     spectral_connectivity_epochs = None
 
+try:
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+except ImportError:
+    KMeans = None
+    StandardScaler = None
+
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import get_frequency_bands, get_nested_value
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
@@ -80,6 +87,17 @@ class ConnectivityConfig:
     small_world_n_rand: int
     force_within_epoch_for_ml: bool
     warn_if_no_spatial_transform: bool
+    sliding_window_len: float
+    sliding_window_step: float
+    dynamic_enabled: bool
+    dynamic_measures: List[str]
+    dynamic_autocorr_lag: int
+    dynamic_min_windows: int
+    dynamic_include_roi_pairs: bool
+    dynamic_state_enabled: bool
+    dynamic_state_n_states: int
+    dynamic_state_min_windows: int
+    dynamic_state_random_state: Optional[int]
 
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> "ConnectivityConfig":
@@ -183,6 +201,41 @@ class ConnectivityConfig:
 
         force_within_epoch_for_ml = bool(conn_cfg.get("force_within_epoch_for_ml", True))
         warn_if_no_spatial_transform = bool(conn_cfg.get("warn_if_no_spatial_transform", True))
+        sliding_window_len = float(conn_cfg.get("sliding_window_len", 1.0))
+        sliding_window_step = float(conn_cfg.get("sliding_window_step", 0.5))
+        if not np.isfinite(sliding_window_len) or sliding_window_len <= 0:
+            sliding_window_len = 1.0
+        if not np.isfinite(sliding_window_step) or sliding_window_step <= 0:
+            sliding_window_step = 0.5
+        dynamic_enabled = bool(conn_cfg.get("dynamic_enabled", False))
+        dynamic_measures_cfg = conn_cfg.get("dynamic_measures", ["wpli", "aec"])
+        if isinstance(dynamic_measures_cfg, str):
+            dynamic_measures_cfg = [dynamic_measures_cfg]
+        if not isinstance(dynamic_measures_cfg, (list, tuple)):
+            dynamic_measures_cfg = ["wpli", "aec"]
+        dynamic_measures = [
+            str(m).strip().lower()
+            for m in dynamic_measures_cfg
+            if str(m).strip().lower() in {"wpli", "aec"}
+        ]
+        if not dynamic_measures:
+            dynamic_measures = ["wpli", "aec"]
+        dynamic_autocorr_lag = int(conn_cfg.get("dynamic_autocorr_lag", 1))
+        dynamic_autocorr_lag = max(1, dynamic_autocorr_lag)
+        dynamic_min_windows = int(conn_cfg.get("dynamic_min_windows", 3))
+        dynamic_min_windows = max(2, dynamic_min_windows)
+        dynamic_include_roi_pairs = bool(conn_cfg.get("dynamic_include_roi_pairs", True))
+        dynamic_state_enabled = bool(conn_cfg.get("dynamic_state_enabled", True))
+        dynamic_state_n_states = int(conn_cfg.get("dynamic_state_n_states", 3))
+        dynamic_state_n_states = max(2, dynamic_state_n_states)
+        dynamic_state_min_windows = int(conn_cfg.get("dynamic_state_min_windows", 8))
+        dynamic_state_min_windows = max(3, dynamic_state_min_windows)
+        dynamic_state_random_state_raw = conn_cfg.get("dynamic_state_random_state", None)
+        dynamic_state_random_state = (
+            int(dynamic_state_random_state_raw)
+            if dynamic_state_random_state_raw is not None
+            else None
+        )
 
         return cls(
             measures=measures,
@@ -209,6 +262,17 @@ class ConnectivityConfig:
             small_world_n_rand=small_world_n_rand,
             force_within_epoch_for_ml=force_within_epoch_for_ml,
             warn_if_no_spatial_transform=warn_if_no_spatial_transform,
+            sliding_window_len=sliding_window_len,
+            sliding_window_step=sliding_window_step,
+            dynamic_enabled=dynamic_enabled,
+            dynamic_measures=dynamic_measures,
+            dynamic_autocorr_lag=dynamic_autocorr_lag,
+            dynamic_min_windows=dynamic_min_windows,
+            dynamic_include_roi_pairs=dynamic_include_roi_pairs,
+            dynamic_state_enabled=dynamic_state_enabled,
+            dynamic_state_n_states=dynamic_state_n_states,
+            dynamic_state_min_windows=dynamic_state_min_windows,
+            dynamic_state_random_state=dynamic_state_random_state,
         )
 
 
@@ -653,6 +717,306 @@ def _compute_graph_metrics_for_epochs(
     return pd.DataFrame(graph_rows)
 
 
+def _build_sliding_window_slices(
+    n_times: int,
+    sfreq: float,
+    window_len_sec: float,
+    window_step_sec: float,
+    min_segment_samples: int,
+) -> List[Tuple[int, int]]:
+    """Build sliding-window sample slices for a segment."""
+    if n_times <= 0 or not np.isfinite(sfreq) or sfreq <= 0:
+        return []
+    if window_len_sec <= 0 or window_step_sec <= 0:
+        return []
+
+    win_len = max(1, int(round(float(window_len_sec) * float(sfreq))))
+    win_step = max(1, int(round(float(window_step_sec) * float(sfreq))))
+    win_len = max(win_len, int(min_segment_samples))
+    if win_len > n_times:
+        return []
+
+    windows: List[Tuple[int, int]] = []
+    start = 0
+    while start + win_len <= n_times:
+        end = start + win_len
+        windows.append((start, end))
+        start += win_step
+    return windows
+
+
+def _dense_from_envelope_output(
+    ec_data: np.ndarray,
+    n_epochs: int,
+    n_channels: int,
+) -> Optional[np.ndarray]:
+    """Convert envelope_correlation output to dense (epochs, channels, channels)."""
+    expected_packed = int(n_channels * (n_channels + 1) // 2)
+    dense: Optional[np.ndarray] = None
+
+    if ec_data.ndim >= 1 and ec_data.shape[-1] == 1:
+        ec_data = np.squeeze(ec_data, axis=-1)
+
+    if ec_data.ndim == 4 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
+        dense = np.nanmean(ec_data, axis=-1)
+    elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
+        dense = ec_data
+    elif ec_data.ndim == 3 and ec_data.shape[0] == n_channels and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_epochs:
+        dense = np.moveaxis(ec_data, -1, 0)
+    elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
+        packed = np.nanmean(ec_data, axis=-1)
+        tril = np.tril_indices(n_channels, k=0)
+        dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
+        dense[:, tril[0], tril[1]] = packed
+        dense[:, tril[1], tril[0]] = packed
+    elif ec_data.ndim == 2 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
+        tril = np.tril_indices(n_channels, k=0)
+        dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
+        dense[:, tril[0], tril[1]] = ec_data
+        dense[:, tril[1], tril[0]] = ec_data
+    elif ec_data.ndim == 1 and ec_data.shape[0] == expected_packed:
+        tril = np.tril_indices(n_channels, k=0)
+        dense = np.zeros((1, n_channels, n_channels), dtype=float)
+        dense[:, tril[0], tril[1]] = ec_data[None, :]
+        dense[:, tril[1], tril[0]] = ec_data[None, :]
+        dense = np.repeat(dense, n_epochs, axis=0)
+
+    return dense
+
+
+def _compute_windowed_wpli(
+    analytic_seg: np.ndarray,
+    pair_i: np.ndarray,
+    pair_j: np.ndarray,
+    windows: List[Tuple[int, int]],
+) -> np.ndarray:
+    """Compute windowed wPLI per epoch and channel pair."""
+    n_epochs = int(analytic_seg.shape[0])
+    n_pairs = int(len(pair_i))
+    n_windows = int(len(windows))
+    out = np.full((n_epochs, n_windows, n_pairs), np.nan, dtype=float)
+
+    eps = float(np.finfo(float).eps)
+    for w_idx, (start, end) in enumerate(windows):
+        ai = analytic_seg[:, pair_i, start:end]
+        aj = analytic_seg[:, pair_j, start:end]
+        imag_cross = np.imag(ai * np.conj(aj))
+        num = np.abs(np.nanmean(imag_cross, axis=-1))
+        den = np.nanmean(np.abs(imag_cross), axis=-1)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            out[:, w_idx, :] = np.where(den > eps, num / den, np.nan)
+    return out
+
+
+def _compute_windowed_aec(
+    analytic_seg: np.ndarray,
+    pair_i: np.ndarray,
+    pair_j: np.ndarray,
+    windows: List[Tuple[int, int]],
+    *,
+    conn_cfg: ConnectivityConfig,
+) -> np.ndarray:
+    """Compute windowed AEC per epoch and channel pair."""
+    n_epochs = int(analytic_seg.shape[0])
+    n_channels = int(analytic_seg.shape[1])
+    n_pairs = int(len(pair_i))
+    n_windows = int(len(windows))
+    out = np.full((n_epochs, n_windows, n_pairs), np.nan, dtype=float)
+
+    aec_mode = conn_cfg.aec_mode
+    orthogonalize = "pairwise"
+    if aec_mode in {"none", "raw", "no"}:
+        orthogonalize = False
+    elif aec_mode in {"sym", "symmetric"}:
+        orthogonalize = "sym"
+
+    for w_idx, (start, end) in enumerate(windows):
+        ec = envelope_correlation(
+            analytic_seg[:, :, start:end],
+            orthogonalize=orthogonalize,
+            log=False,
+            absolute=bool(conn_cfg.aec_absolute),
+        )
+        dense = _dense_from_envelope_output(np.asarray(ec.get_data()), n_epochs, n_channels)
+        if dense is None or dense.shape[0] != n_epochs:
+            continue
+        out[:, w_idx, :] = dense[:, pair_i, pair_j]
+    return out
+
+
+def _series_autocorr_lag(
+    values: np.ndarray,
+    lag: int,
+) -> np.ndarray:
+    """Compute lagged autocorrelation along the window axis."""
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim < 2 or lag < 1:
+        return np.full(arr.shape[:-1], np.nan, dtype=float)
+    n_windows = int(arr.shape[-1])
+    if n_windows <= lag:
+        return np.full(arr.shape[:-1], np.nan, dtype=float)
+
+    x = arr[..., :-lag]
+    y = arr[..., lag:]
+    valid = np.isfinite(x) & np.isfinite(y)
+    valid_count = np.sum(valid, axis=-1)
+    x = np.where(valid, x, np.nan)
+    y = np.where(valid, y, np.nan)
+
+    x_mean = np.nanmean(x, axis=-1, keepdims=True)
+    y_mean = np.nanmean(y, axis=-1, keepdims=True)
+    x_center = x - x_mean
+    y_center = y - y_mean
+    num = np.nansum(x_center * y_center, axis=-1)
+    den = np.sqrt(np.nansum(x_center ** 2, axis=-1) * np.nansum(y_center ** 2, axis=-1))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ac = np.where(den > 0, num / den, np.nan)
+    ac = np.where(valid_count >= 3, ac, np.nan)
+    return ac
+
+
+def _window_vector_adjacent_stability(
+    window_vectors: np.ndarray,
+) -> np.ndarray:
+    """Temporal stability of connectivity topology (adjacent-window vector similarity)."""
+    n_epochs = int(window_vectors.shape[0])
+    out = np.full((n_epochs,), np.nan, dtype=float)
+    for ep_idx in range(n_epochs):
+        series = np.asarray(window_vectors[ep_idx], dtype=float)
+        if series.ndim != 2 or series.shape[0] < 2:
+            continue
+        sims: List[float] = []
+        for t_idx in range(series.shape[0] - 1):
+            v1 = series[t_idx]
+            v2 = series[t_idx + 1]
+            mask = np.isfinite(v1) & np.isfinite(v2)
+            if int(np.sum(mask)) < 3:
+                continue
+            r = np.corrcoef(v1[mask], v2[mask])[0, 1]
+            if np.isfinite(r):
+                sims.append(float(r))
+        if sims:
+            out[ep_idx] = float(np.mean(sims))
+    return out
+
+
+def _fit_dynamic_state_labels(
+    window_vectors: np.ndarray,
+    *,
+    n_states: int,
+    random_state: int,
+) -> Optional[np.ndarray]:
+    """Fit k-means states over windowed connectivity vectors."""
+    if KMeans is None or StandardScaler is None:
+        return None
+    if window_vectors.ndim != 3:
+        return None
+
+    n_epochs, n_windows, n_edges = window_vectors.shape
+    flat = window_vectors.reshape(n_epochs * n_windows, n_edges)
+    valid_rows = np.sum(np.isfinite(flat), axis=1) >= max(3, int(0.5 * n_edges))
+    if int(np.sum(valid_rows)) < max(2 * n_states, n_states + 1):
+        return None
+
+    x = flat[valid_rows]
+    col_means = np.nanmean(x, axis=0)
+    col_means = np.where(np.isfinite(col_means), col_means, 0.0)
+    inds = np.where(~np.isfinite(x))
+    if inds[0].size:
+        x[inds] = np.take(col_means, inds[1])
+
+    scaler = StandardScaler(with_mean=True, with_std=True)
+    x_scaled = scaler.fit_transform(x)
+    model = KMeans(n_clusters=n_states, n_init=10, random_state=random_state)
+    labels_valid = model.fit_predict(x_scaled)
+
+    labels = np.full((n_epochs * n_windows,), -1, dtype=int)
+    labels[valid_rows] = labels_valid
+    return labels.reshape(n_epochs, n_windows)
+
+
+def _state_metrics_per_epoch(
+    labels: np.ndarray,
+    *,
+    n_states: int,
+    step_sec: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute switching rate, dwell time, and state entropy per epoch."""
+    n_epochs = int(labels.shape[0])
+    switch_rate = np.full((n_epochs,), np.nan, dtype=float)
+    dwell_sec = np.full((n_epochs,), np.nan, dtype=float)
+    entropy = np.full((n_epochs,), np.nan, dtype=float)
+
+    log_norm = np.log(float(n_states)) if n_states > 1 else np.nan
+
+    for ep_idx in range(n_epochs):
+        seq = labels[ep_idx]
+        seq = seq[seq >= 0]
+        if seq.size < 2:
+            continue
+
+        switches = np.sum(seq[1:] != seq[:-1])
+        switch_rate[ep_idx] = float(switches) / float(max(1, seq.size - 1))
+
+        run_lengths: List[int] = []
+        run_start = 0
+        for idx in range(1, seq.size + 1):
+            if idx == seq.size or seq[idx] != seq[run_start]:
+                run_lengths.append(int(idx - run_start))
+                run_start = idx
+        if run_lengths:
+            dwell_sec[ep_idx] = float(np.mean(run_lengths) * float(step_sec))
+
+        counts = np.bincount(seq, minlength=n_states).astype(float)
+        p = counts / np.sum(counts)
+        p = p[p > 0]
+        if p.size > 0 and np.isfinite(log_norm) and log_norm > 0:
+            entropy[ep_idx] = float((-np.sum(p * np.log(p))) / log_norm)
+
+    return switch_rate, dwell_sec, entropy
+
+
+def _build_roi_pair_index_map(
+    *,
+    config: Any,
+    ch_names: List[str],
+    pair_i: np.ndarray,
+    pair_j: np.ndarray,
+) -> Dict[str, np.ndarray]:
+    """Build mapping from ROI-pair label to channel-pair indices."""
+    from eeg_pipeline.utils.analysis.channels import build_roi_map
+    from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+
+    roi_defs = get_roi_definitions(config)
+    if not roi_defs:
+        return {}
+    roi_map = build_roi_map(ch_names, roi_defs)
+    roi_items = [(name, np.asarray(idxs, dtype=int)) for name, idxs in roi_map.items() if idxs]
+    if not roi_items:
+        return {}
+
+    pair_map: Dict[str, np.ndarray] = {}
+    for a_idx, (roi_a, ch_a) in enumerate(roi_items):
+        set_a = set(ch_a.tolist())
+        for b_idx in range(a_idx, len(roi_items)):
+            roi_b, ch_b = roi_items[b_idx]
+            set_b = set(ch_b.tolist())
+            if a_idx == b_idx:
+                mask = np.array([(int(i) in set_a and int(j) in set_a) for i, j in zip(pair_i, pair_j)], dtype=bool)
+            else:
+                mask = np.array(
+                    [
+                        ((int(i) in set_a and int(j) in set_b) or (int(i) in set_b and int(j) in set_a))
+                        for i, j in zip(pair_i, pair_j)
+                    ],
+                    dtype=bool,
+                )
+            idxs = np.where(mask)[0]
+            if idxs.size > 0:
+                pair_map[f"{roi_a}-{roi_b}"] = idxs
+    return pair_map
+
+
 def extract_connectivity_features(
     ctx: Any,
     bands: List[str],
@@ -920,7 +1284,9 @@ def extract_connectivity_from_precomputed(
         if enabled
     ]
 
-    if not phase_measures and not enable_aec:
+    dynamic_requested = bool(conn_cfg.dynamic_enabled and conn_cfg.dynamic_measures)
+
+    if not phase_measures and not enable_aec and not dynamic_requested:
         if logger is not None:
             logger.warning("Connectivity: no supported measures selected; skipping extraction.")
         return pd.DataFrame(), []
@@ -1065,9 +1431,15 @@ def extract_connectivity_from_precomputed(
             return arr_3d[:, :, mask]
         return arr_3d
 
-    if (spectral_connectivity_time is None) or (envelope_correlation is None):
+    if phase_measures and spectral_connectivity_time is None:
         raise ImportError(
-            "Connectivity extraction requires 'mne-connectivity'. "
+            "Phase-based connectivity extraction requires 'mne-connectivity'. "
+            "Install it with: pip install mne-connectivity"
+        )
+    needs_envelope = bool(enable_aec or (dynamic_requested and "aec" in conn_cfg.dynamic_measures))
+    if needs_envelope and envelope_correlation is None:
+        raise ImportError(
+            "Envelope-based connectivity extraction requires 'mne-connectivity'. "
             "Install it with: pip install mne-connectivity"
         )
 
@@ -1381,22 +1753,217 @@ def extract_connectivity_from_precomputed(
                     continue
                 tasks.append(("aec", (seg_name, band, analytic_seg)))
 
-    if not tasks:
-        return pd.DataFrame(), []
-
     def _run_task(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
         kind, args = task
         if kind == "phase":
             return _phase_task(*args)
         return _aec_task(*args)
+    roi_pair_map: Dict[str, np.ndarray] = {}
+    if conn_cfg.dynamic_enabled and conn_cfg.dynamic_include_roi_pairs and output_level == "full":
+        roi_pair_map = _build_roi_pair_index_map(
+            config=config,
+            ch_names=ch_names,
+            pair_i=pair_i,
+            pair_j=pair_j,
+        )
+
+    def _dynamic_task(
+        seg_name: str,
+        band: str,
+        method: str,
+        analytic_seg: np.ndarray,
+        windows_slices: List[Tuple[int, int]],
+    ) -> pd.DataFrame:
+        n_windows = int(len(windows_slices))
+        if n_windows < int(conn_cfg.dynamic_min_windows):
+            return pd.DataFrame()
+
+        if method == "wpli":
+            window_vals = _compute_windowed_wpli(analytic_seg, pair_i, pair_j, windows_slices)
+        elif method == "aec":
+            window_vals = _compute_windowed_aec(
+                analytic_seg, pair_i, pair_j, windows_slices, conn_cfg=conn_cfg
+            )
+        else:
+            return pd.DataFrame()
+
+        if window_vals.ndim != 3 or window_vals.shape[0] != n_epochs:
+            return pd.DataFrame()
+
+        mean_stat = f"{method}swmean"
+        std_stat = f"{method}swstd"
+        ac_stat = f"{method}swac{int(conn_cfg.dynamic_autocorr_lag)}"
+
+        edge_mean = np.nanmean(window_vals, axis=1)
+        edge_std = np.nanstd(window_vals, axis=1)
+        edge_ac = _series_autocorr_lag(
+            np.moveaxis(window_vals, 1, 2), lag=int(conn_cfg.dynamic_autocorr_lag)
+        )
+
+        parts: List[pd.DataFrame] = []
+        if output_level == "full":
+            cols_mean = [
+                NamingSchema.build(
+                    "conn", seg_name, band, "chpair", mean_stat, channel_pair=pair_name
+                )
+                for pair_name in pair_names
+            ]
+            cols_std = [
+                NamingSchema.build(
+                    "conn", seg_name, band, "chpair", std_stat, channel_pair=pair_name
+                )
+                for pair_name in pair_names
+            ]
+            cols_ac = [
+                NamingSchema.build(
+                    "conn", seg_name, band, "chpair", ac_stat, channel_pair=pair_name
+                )
+                for pair_name in pair_names
+            ]
+            parts.append(pd.DataFrame(edge_mean, columns=cols_mean))
+            parts.append(pd.DataFrame(edge_std, columns=cols_std))
+            parts.append(pd.DataFrame(edge_ac, columns=cols_ac))
+
+            if roi_pair_map:
+                roi_data: Dict[str, np.ndarray] = {}
+                for roi_pair, idxs in roi_pair_map.items():
+                    idxs = np.asarray(idxs, dtype=int)
+                    if idxs.size == 0:
+                        continue
+                    roi_series = np.nanmean(window_vals[:, :, idxs], axis=2)
+                    roi_data[
+                        NamingSchema.build("conn", seg_name, band, "roi", mean_stat, channel=roi_pair)
+                    ] = np.nanmean(roi_series, axis=1)
+                    roi_data[
+                        NamingSchema.build("conn", seg_name, band, "roi", std_stat, channel=roi_pair)
+                    ] = np.nanstd(roi_series, axis=1)
+                    roi_data[
+                        NamingSchema.build("conn", seg_name, band, "roi", ac_stat, channel=roi_pair)
+                    ] = _series_autocorr_lag(
+                        roi_series, lag=int(conn_cfg.dynamic_autocorr_lag)
+                    )
+                if roi_data:
+                    parts.append(pd.DataFrame(roi_data))
+
+        parts.append(
+            pd.DataFrame(
+                {
+                    NamingSchema.build("conn", seg_name, band, "global", mean_stat): np.nanmean(
+                        edge_mean, axis=1
+                    ),
+                    NamingSchema.build("conn", seg_name, band, "global", std_stat): np.nanmean(
+                        edge_std, axis=1
+                    ),
+                    NamingSchema.build("conn", seg_name, band, "global", ac_stat): np.nanmean(
+                        edge_ac, axis=1
+                    ),
+                }
+            )
+        )
+
+        topo_stability = _window_vector_adjacent_stability(window_vals)
+        parts.append(
+            pd.DataFrame(
+                {
+                    NamingSchema.build(
+                        "conn", seg_name, band, "global", f"{method}swtopostab"
+                    ): topo_stability
+                }
+            )
+        )
+
+        if conn_cfg.dynamic_state_enabled and n_windows >= int(conn_cfg.dynamic_state_min_windows):
+            n_states = min(int(conn_cfg.dynamic_state_n_states), max(2, n_windows - 1))
+            random_state = (
+                int(conn_cfg.dynamic_state_random_state)
+                if conn_cfg.dynamic_state_random_state is not None
+                else 0
+            )
+            state_labels = _fit_dynamic_state_labels(
+                window_vals,
+                n_states=n_states,
+                random_state=random_state,
+            )
+            if state_labels is not None:
+                switch_rate, dwell_sec, entropy = _state_metrics_per_epoch(
+                    state_labels,
+                    n_states=n_states,
+                    step_sec=float(conn_cfg.sliding_window_step),
+                )
+                parts.append(
+                    pd.DataFrame(
+                        {
+                            NamingSchema.build(
+                                "conn", seg_name, band, "global", f"{method}swswitch"
+                            ): switch_rate,
+                            NamingSchema.build(
+                                "conn", seg_name, band, "global", f"{method}swdwellsec"
+                            ): dwell_sec,
+                            NamingSchema.build(
+                                "conn", seg_name, band, "global", f"{method}swstateent"
+                            ): entropy,
+                        }
+                    )
+                )
+
+        return pd.concat(parts, axis=1) if parts else pd.DataFrame()
+
+    dynamic_tasks: List[Tuple[str, Tuple[Any, ...]]] = []
+    if conn_cfg.dynamic_enabled:
+        if conn_cfg.dynamic_state_enabled and (KMeans is None or StandardScaler is None) and logger is not None:
+            logger.warning(
+                "Connectivity dynamic states requested, but scikit-learn is unavailable; "
+                "state-transition metrics will be skipped."
+            )
+        for seg_name in segments_use:
+            seg_mask = seg_mask_map.get(seg_name)
+            if seg_mask is None and seg_name == "full":
+                seg_data = precomputed.data
+            else:
+                seg_data = _slice_epochs(precomputed.data, seg_mask)
+            if seg_data is None:
+                continue
+            seg_n_times = int(seg_data.shape[-1])
+            if seg_n_times < min_segment_samples:
+                continue
+            seg_duration = float(seg_n_times) / sfreq
+            if min_segment_sec > 0 and seg_duration < min_segment_sec:
+                continue
+
+            windows_slices = _build_sliding_window_slices(
+                seg_n_times,
+                sfreq,
+                float(conn_cfg.sliding_window_len),
+                float(conn_cfg.sliding_window_step),
+                min_segment_samples,
+            )
+            if len(windows_slices) < int(conn_cfg.dynamic_min_windows):
+                continue
+
+            for band in bands_use:
+                if band not in precomputed.band_data:
+                    continue
+                analytic_full = precomputed.band_data[band].analytic
+                analytic_seg = _slice_epochs(analytic_full, seg_mask)
+                if analytic_seg is None or analytic_seg.shape[-1] != seg_n_times:
+                    continue
+                for method in conn_cfg.dynamic_measures:
+                    dynamic_tasks.append(
+                        ("dynamic", (seg_name, band, method, analytic_seg, windows_slices))
+                    )
+
+    task_times: Dict[str, float] = {"phase": 0.0, "aec": 0.0, "dynamic": 0.0}
+    task_counts: Dict[str, int] = {"phase": 0, "aec": 0, "dynamic": 0}
 
     if logger is not None:
-        logger.info("Running connectivity tasks: n_tasks=%d (threaded=%s)", int(len(tasks)), str(bool(use_task_parallel and len(tasks) > 1)))
+        logger.info(
+            "Running connectivity tasks: n_static=%d, n_dynamic=%d (threaded=%s)",
+            int(len(tasks)),
+            int(len(dynamic_tasks)),
+            str(bool(use_task_parallel and (len(tasks) + len(dynamic_tasks)) > 1)),
+        )
 
-    task_times: Dict[str, float] = {"phase": 0.0, "aec": 0.0}
-    task_counts: Dict[str, int] = {"phase": 0, "aec": 0}
-
-    def _timed_run_task(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
+    def _timed_run_static(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
         kind, _ = task
         t0 = time.perf_counter()
         df_task = _run_task(task)
@@ -1406,14 +1973,43 @@ def extract_connectivity_from_precomputed(
             task_counts[kind] += 1
         return df_task
 
-    if use_task_parallel and len(tasks) > 1:
-        dfs = Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(_timed_run_task)(task) for task in tasks
-        )
-    else:
-        dfs = [_timed_run_task(task) for task in tasks]
+    static_dfs: List[pd.DataFrame] = []
+    if tasks:
+        if use_task_parallel and len(tasks) > 1:
+            static_dfs = Parallel(n_jobs=n_jobs, backend="loky")(
+                delayed(_timed_run_static)(task) for task in tasks
+            )
+        else:
+            static_dfs = [_timed_run_static(task) for task in tasks]
 
-    dfs = [df for df in dfs if df is not None and not df.empty]
+    def _run_dynamic(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
+        _, args = task
+        return _dynamic_task(*args)
+
+    def _timed_run_dynamic(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
+        kind, _ = task
+        t0 = time.perf_counter()
+        df_task = _run_dynamic(task)
+        dt = time.perf_counter() - t0
+        if kind in task_times:
+            task_times[kind] += dt
+            task_counts[kind] += 1
+        return df_task
+
+    dynamic_dfs: List[pd.DataFrame] = []
+    if dynamic_tasks:
+        if use_task_parallel and len(dynamic_tasks) > 1:
+            dynamic_dfs = Parallel(n_jobs=n_jobs, backend="loky")(
+                delayed(_timed_run_dynamic)(task) for task in dynamic_tasks
+            )
+        else:
+            dynamic_dfs = [_timed_run_dynamic(task) for task in dynamic_tasks]
+
+    dfs = [
+        df_task
+        for df_task in (static_dfs + dynamic_dfs)
+        if df_task is not None and not df_task.empty
+    ]
     if not dfs:
         return pd.DataFrame(), []
 
@@ -1421,11 +2017,13 @@ def extract_connectivity_from_precomputed(
     df = pd.concat(dfs, axis=1)
     if logger is not None:
         logger.info(
-            "Connectivity post-processing: task_time_phase=%.2fs (%d), task_time_aec=%.2fs (%d), concat=%.2fs, total=%.2fs, out_shape=(%d,%d)",
+            "Connectivity post-processing: task_time_phase=%.2fs (%d), task_time_aec=%.2fs (%d), task_time_dynamic=%.2fs (%d), concat=%.2fs, total=%.2fs, out_shape=(%d,%d)",
             float(task_times["phase"]),
             int(task_counts["phase"]),
             float(task_times["aec"]),
             int(task_counts["aec"]),
+            float(task_times["dynamic"]),
+            int(task_counts["dynamic"]),
             time.perf_counter() - t_concat0,
             time.perf_counter() - t_total0,
             int(df.shape[0]),

@@ -189,6 +189,15 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["connMinSegmentSec"] = m.connMinSegmentSec
 	cfg["connAECOutput"] = m.connAECOutput
 	cfg["connForceWithinEpochML"] = m.connForceWithinEpochML
+	cfg["connDynamicEnabled"] = m.connDynamicEnabled
+	cfg["connDynamicMeasures"] = m.connDynamicMeasures
+	cfg["connDynamicAutocorrLag"] = m.connDynamicAutocorrLag
+	cfg["connDynamicMinWindows"] = m.connDynamicMinWindows
+	cfg["connDynamicIncludeROIPairs"] = m.connDynamicIncludeROIPairs
+	cfg["connDynamicStateEnabled"] = m.connDynamicStateEnabled
+	cfg["connDynamicStateNStates"] = m.connDynamicStateNStates
+	cfg["connDynamicStateMinWindows"] = m.connDynamicStateMinWindows
+	cfg["connDynamicStateRandomSeed"] = m.connDynamicStateRandomSeed
 
 	// ITPC configuration
 	cfg["itpcMethod"] = m.itpcMethod
@@ -1160,6 +1169,15 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.connMinSegmentSec = getFloat("connMinSegmentSec", m.connMinSegmentSec)
 	m.connAECOutput = getInt("connAECOutput", m.connAECOutput)
 	m.connForceWithinEpochML = getBool("connForceWithinEpochML", m.connForceWithinEpochML)
+	m.connDynamicEnabled = getBool("connDynamicEnabled", m.connDynamicEnabled)
+	m.connDynamicMeasures = getInt("connDynamicMeasures", m.connDynamicMeasures)
+	m.connDynamicAutocorrLag = getInt("connDynamicAutocorrLag", m.connDynamicAutocorrLag)
+	m.connDynamicMinWindows = getInt("connDynamicMinWindows", m.connDynamicMinWindows)
+	m.connDynamicIncludeROIPairs = getBool("connDynamicIncludeROIPairs", m.connDynamicIncludeROIPairs)
+	m.connDynamicStateEnabled = getBool("connDynamicStateEnabled", m.connDynamicStateEnabled)
+	m.connDynamicStateNStates = getInt("connDynamicStateNStates", m.connDynamicStateNStates)
+	m.connDynamicStateMinWindows = getInt("connDynamicStateMinWindows", m.connDynamicStateMinWindows)
+	m.connDynamicStateRandomSeed = getInt("connDynamicStateRandomSeed", m.connDynamicStateRandomSeed)
 
 	// ITPC
 	m.itpcMethod = getInt("itpcMethod", m.itpcMethod)

@@ -700,6 +700,28 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 {
 			m.connMinSegmentSec = val
 		}
+	case optConnDynamicAutocorrLag:
+		if val >= 1 {
+			m.connDynamicAutocorrLag = int(val)
+		}
+	case optConnDynamicMinWindows:
+		if val >= 2 {
+			m.connDynamicMinWindows = int(val)
+		}
+	case optConnDynamicStateNStates:
+		if val >= 2 {
+			m.connDynamicStateNStates = int(val)
+		}
+	case optConnDynamicStateMinWindows:
+		if val >= 3 {
+			m.connDynamicStateMinWindows = int(val)
+		}
+	case optConnDynamicStateRandomSeed:
+		if val >= 0 {
+			m.connDynamicStateRandomSeed = int(val)
+		} else if int(val) == -1 {
+			m.connDynamicStateRandomSeed = -1
+		}
 
 	// Source localization numeric options
 	case optSourceLocReg:

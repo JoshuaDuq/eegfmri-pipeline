@@ -399,6 +399,15 @@ feature_engineering:
     small_world_n_rand: 100
     sliding_window_len: 1.0
     sliding_window_step: 0.5
+    dynamic_enabled: false
+    dynamic_measures: ["wpli", "aec"]   # Sliding-window dynamic metrics per edge/ROI
+    dynamic_autocorr_lag: 1             # Lag (in windows) for temporal autocorrelation
+    dynamic_min_windows: 3              # Minimum windows required to emit dynamic features
+    dynamic_include_roi_pairs: true     # Also emit ROI-pair summaries (mean/std/autocorr)
+    dynamic_state_enabled: true         # K-means connectivity state transitions
+    dynamic_state_n_states: 3           # Number of connectivity states
+    dynamic_state_min_windows: 8        # Minimum windows required for state metrics
+    dynamic_state_random_state: null    # Optional seed for deterministic state clustering
     n_freqs_per_band: 8
     n_cycles: null
     decim: 1

@@ -33,6 +33,15 @@ func (m Model) getFeaturesOptions() []optionType {
 				optConnAECMode,
 				optConnAECOutput,
 				optConnForceWithinEpochML,
+				optConnDynamicEnabled,
+				optConnDynamicMeasures,
+				optConnDynamicAutocorrLag,
+				optConnDynamicMinWindows,
+				optConnDynamicIncludeROIPairs,
+				optConnDynamicStateEnabled,
+				optConnDynamicStateNStates,
+				optConnDynamicStateMinWindows,
+				optConnDynamicStateRandomSeed,
 			)
 		}
 	}

@@ -142,6 +142,24 @@ def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None
         conn_cfg["small_world_n_rand"] = args.conn_small_world_n_rand
     if getattr(args, "conn_enable_aec", None) is not None:
         conn_cfg["enable_aec"] = args.conn_enable_aec
+    if getattr(args, "conn_dynamic_enabled", None) is not None:
+        conn_cfg["dynamic_enabled"] = args.conn_dynamic_enabled
+    if getattr(args, "conn_dynamic_measures", None) is not None:
+        conn_cfg["dynamic_measures"] = args.conn_dynamic_measures
+    if getattr(args, "conn_dynamic_autocorr_lag", None) is not None:
+        conn_cfg["dynamic_autocorr_lag"] = args.conn_dynamic_autocorr_lag
+    if getattr(args, "conn_dynamic_min_windows", None) is not None:
+        conn_cfg["dynamic_min_windows"] = args.conn_dynamic_min_windows
+    if getattr(args, "conn_dynamic_include_roi_pairs", None) is not None:
+        conn_cfg["dynamic_include_roi_pairs"] = args.conn_dynamic_include_roi_pairs
+    if getattr(args, "conn_dynamic_state_enabled", None) is not None:
+        conn_cfg["dynamic_state_enabled"] = args.conn_dynamic_state_enabled
+    if getattr(args, "conn_dynamic_state_n_states", None) is not None:
+        conn_cfg["dynamic_state_n_states"] = args.conn_dynamic_state_n_states
+    if getattr(args, "conn_dynamic_state_min_windows", None) is not None:
+        conn_cfg["dynamic_state_min_windows"] = args.conn_dynamic_state_min_windows
+    if getattr(args, "conn_dynamic_state_random_state", None) is not None:
+        conn_cfg["dynamic_state_random_state"] = args.conn_dynamic_state_random_state
 
 
 def _apply_directedconnectivity_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -864,6 +882,18 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--conn-small-world-n-rand", type=int, default=None, help="Number of random graphs for small-world sigma estimation")
     parser.add_argument("--conn-enable-aec", action="store_true", default=None, help="Enable AEC computation when 'aec' is selected")
     parser.add_argument("--no-conn-enable-aec", action="store_false", dest="conn_enable_aec")
+    parser.add_argument("--conn-dynamic", action="store_true", default=None, dest="conn_dynamic_enabled", help="Enable sliding-window dynamic connectivity features")
+    parser.add_argument("--no-conn-dynamic", action="store_false", dest="conn_dynamic_enabled", help="Disable sliding-window dynamic connectivity features")
+    parser.add_argument("--conn-dynamic-measures", nargs="+", choices=["wpli", "aec"], default=None, help="Dynamic connectivity measures (wpli and/or aec)")
+    parser.add_argument("--conn-dynamic-autocorr-lag", type=int, default=None, help="Lag for dynamic connectivity autocorrelation features")
+    parser.add_argument("--conn-dynamic-min-windows", type=int, default=None, help="Minimum sliding windows required for dynamic connectivity features")
+    parser.add_argument("--conn-dynamic-roi-pairs", action="store_true", default=None, dest="conn_dynamic_include_roi_pairs", help="Include ROI-pair dynamic connectivity summaries")
+    parser.add_argument("--no-conn-dynamic-roi-pairs", action="store_false", dest="conn_dynamic_include_roi_pairs", help="Disable ROI-pair dynamic connectivity summaries")
+    parser.add_argument("--conn-dynamic-states", action="store_true", default=None, dest="conn_dynamic_state_enabled", help="Enable dynamic connectivity state-transition metrics (k-means)")
+    parser.add_argument("--no-conn-dynamic-states", action="store_false", dest="conn_dynamic_state_enabled", help="Disable dynamic connectivity state-transition metrics")
+    parser.add_argument("--conn-dynamic-n-states", type=int, default=None, dest="conn_dynamic_state_n_states", help="Number of k-means connectivity states for dynamic metrics")
+    parser.add_argument("--conn-dynamic-state-min-windows", type=int, default=None, dest="conn_dynamic_state_min_windows", help="Minimum windows required for dynamic state metrics")
+    parser.add_argument("--conn-dynamic-state-random-state", type=int, default=None, dest="conn_dynamic_state_random_state", help="Random seed for dynamic connectivity state clustering")
 
     # Directed connectivity
     parser.add_argument("--directed-connectivity-measures", nargs="+", choices=["psi", "dtf", "pdc"], default=None, help="Directed connectivity measures: psi (Phase Slope Index), dtf (Directed Transfer Function), pdc (Partial Directed Coherence)")

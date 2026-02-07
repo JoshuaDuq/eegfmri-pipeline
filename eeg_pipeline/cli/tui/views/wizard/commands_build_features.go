@@ -652,6 +652,38 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.connMinSegmentSec != 1.0 {
 			args = append(args, "--conn-min-segment-sec", fmt.Sprintf("%.1f", m.connMinSegmentSec))
 		}
+		if m.connDynamicEnabled {
+			args = append(args, "--conn-dynamic")
+		}
+		if m.connDynamicMeasures != 0 {
+			switch m.connDynamicMeasures {
+			case 1:
+				args = append(args, "--conn-dynamic-measures", "wpli")
+			case 2:
+				args = append(args, "--conn-dynamic-measures", "aec")
+			}
+		}
+		if m.connDynamicAutocorrLag != 1 {
+			args = append(args, "--conn-dynamic-autocorr-lag", fmt.Sprintf("%d", m.connDynamicAutocorrLag))
+		}
+		if m.connDynamicMinWindows != 3 {
+			args = append(args, "--conn-dynamic-min-windows", fmt.Sprintf("%d", m.connDynamicMinWindows))
+		}
+		if !m.connDynamicIncludeROIPairs {
+			args = append(args, "--no-conn-dynamic-roi-pairs")
+		}
+		if !m.connDynamicStateEnabled {
+			args = append(args, "--no-conn-dynamic-states")
+		}
+		if m.connDynamicStateNStates != 3 {
+			args = append(args, "--conn-dynamic-n-states", fmt.Sprintf("%d", m.connDynamicStateNStates))
+		}
+		if m.connDynamicStateMinWindows != 8 {
+			args = append(args, "--conn-dynamic-state-min-windows", fmt.Sprintf("%d", m.connDynamicStateMinWindows))
+		}
+		if m.connDynamicStateRandomSeed >= 0 {
+			args = append(args, "--conn-dynamic-state-random-state", fmt.Sprintf("%d", m.connDynamicStateRandomSeed))
+		}
 	}
 
 	// PAC advanced options

@@ -721,6 +721,21 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optConnForceWithinEpochML:
 		m.connForceWithinEpochML = !m.connForceWithinEpochML
 		m.useDefaultAdvanced = false
+	case optConnDynamicEnabled:
+		m.connDynamicEnabled = !m.connDynamicEnabled
+		m.useDefaultAdvanced = false
+	case optConnDynamicMeasures:
+		m.connDynamicMeasures = (m.connDynamicMeasures + 1) % 3 // 0: wpli+aec, 1: wpli, 2: aec
+		m.useDefaultAdvanced = false
+	case optConnDynamicAutocorrLag, optConnDynamicMinWindows, optConnDynamicStateNStates, optConnDynamicStateMinWindows, optConnDynamicStateRandomSeed:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optConnDynamicIncludeROIPairs:
+		m.connDynamicIncludeROIPairs = !m.connDynamicIncludeROIPairs
+		m.useDefaultAdvanced = false
+	case optConnDynamicStateEnabled:
+		m.connDynamicStateEnabled = !m.connDynamicStateEnabled
+		m.useDefaultAdvanced = false
 
 	case optMinEpochs:
 		m.startNumberEdit()
