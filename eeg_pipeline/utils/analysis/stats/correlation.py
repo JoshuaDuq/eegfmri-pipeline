@@ -304,9 +304,21 @@ def run_pain_sensitivity_correlations(
     min_samples: int = 10,
     logger: Optional[logging.Logger] = None,
     config: Optional[Any] = None,
+    n_perm: int = 0,
+    groups: Optional[Union[pd.Series, np.ndarray]] = None,
+    permutation_scheme: str = "shuffle",
+    p_primary_mode: str = "perm_if_available",
+    rng: Optional[np.random.Generator] = None,
 ) -> pd.DataFrame:
     """Correlate features with pain sensitivity index."""
+    from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+
     method_label = format_correlation_method_label(method, robust_method)
+    method_norm = normalize_correlation_method(method, default="spearman")
+    p_primary_mode_norm = str(p_primary_mode or "perm_if_available").strip().lower()
+    if rng is None:
+        seed = int(get_config_value(config, "project.random_state", 42)) if config is not None else 42
+        rng = np.random.default_rng(seed)
     
     feat_aligned, ratings_aligned, temps_aligned = _align_psi_inputs(
         features_df, ratings, temperatures, min_samples, logger
@@ -332,9 +344,12 @@ def run_pain_sensitivity_correlations(
 
     psi_valid = psi.loc[valid_psi]
     feat_valid = feat_aligned.loc[valid_psi]
+    groups_valid = None
+    if groups is not None:
+        groups_valid = align_groups_to_series(psi_valid, groups)
 
     records = []
-    for col in feat_valid.columns:
+    for i, col in enumerate(feat_valid.columns):
         vals = pd.to_numeric(feat_valid[col], errors="coerce").values
         r, p, n = safe_correlation(
             vals,
@@ -343,12 +358,55 @@ def run_pain_sensitivity_correlations(
             min_samples,
             robust_method=robust_method,
         )
+        p_perm = np.nan
+        if n_perm > 0 and np.isfinite(r):
+            valid = np.isfinite(vals) & np.isfinite(psi_valid.values)
+            if int(valid.sum()) >= max(min_samples, 4):
+                x_v = vals[valid]
+                y_v = psi_valid.values[valid]
+                groups_v = groups_valid[valid] if groups_valid is not None else None
+                rng_local = np.random.default_rng(int(rng.integers(0, 2**31)) + i)
+                if robust_method not in (None, "", False):
+                    robust_name = str(robust_method).strip().lower()
+                    r_obs, _ = compute_robust_correlation(x_v, y_v, method=robust_name)
+                    if np.isfinite(r_obs):
+                        extreme = 0
+                        for _ in range(int(n_perm)):
+                            perm_idx = permute_within_groups(
+                                len(y_v), rng_local, groups_v, scheme=permutation_scheme
+                            )
+                            y_perm = y_v[perm_idx]
+                            r_perm, _ = compute_robust_correlation(x_v, y_perm, method=robust_name)
+                            if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
+                                extreme += 1
+                        p_perm = float((extreme + 1) / (int(n_perm) + 1))
+                else:
+                    if method_norm == "spearman":
+                        r_obs, _ = stats.spearmanr(x_v, y_v)
+                    else:
+                        r_obs, _ = stats.pearsonr(x_v, y_v)
+                    if np.isfinite(r_obs):
+                        extreme = 0
+                        for _ in range(int(n_perm)):
+                            perm_idx = permute_within_groups(
+                                len(y_v), rng_local, groups_v, scheme=permutation_scheme
+                            )
+                            y_perm = y_v[perm_idx]
+                            if method_norm == "spearman":
+                                r_perm, _ = stats.spearmanr(x_v, y_perm)
+                            else:
+                                r_perm, _ = stats.pearsonr(x_v, y_perm)
+                            if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
+                                extreme += 1
+                        p_perm = float((extreme + 1) / (int(n_perm) + 1))
 
         if np.isfinite(r):
             records.append({
                 "feature": col,
                 "r_psi": float(r),
                 "p_psi": float(p),
+                "p_perm": float(p_perm) if np.isfinite(p_perm) else np.nan,
+                "n_permutations": int(n_perm) if n_perm > 0 else 0,
                 "n": n,
                 "effect_interpretation": interpret_correlation(r),
                 "method": method,
@@ -366,9 +424,16 @@ def run_pain_sensitivity_correlations(
         return out
 
     out["p_raw"] = pd.to_numeric(out.get("p_psi", np.nan), errors="coerce")
-    out["p_primary"] = out["p_raw"]
-    out["p_kind_primary"] = "p_psi"
-    out["p_primary_source"] = "psi"
+    use_perm_primary = p_primary_mode_norm in {"perm", "permutation", "perm_if_available", "permutation_if_available"}
+    if use_perm_primary and "p_perm" in out.columns:
+        p_perm_col = pd.to_numeric(out["p_perm"], errors="coerce")
+        out["p_primary"] = p_perm_col.where(p_perm_col.notna(), out["p_raw"])
+        out["p_kind_primary"] = np.where(p_perm_col.notna(), "p_perm", "p_psi")
+        out["p_primary_source"] = np.where(p_perm_col.notna(), "psi_perm", "psi")
+    else:
+        out["p_primary"] = out["p_raw"]
+        out["p_kind_primary"] = "p_psi"
+        out["p_primary_source"] = "psi"
     
     alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)) if config else 0.05
     try:

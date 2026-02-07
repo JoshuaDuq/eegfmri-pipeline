@@ -387,16 +387,13 @@ func (m Model) renderSystemInfo() string {
 	info = append(info, infoStyle.Render("OS: ")+valueStyle.Render(osArch))
 	info = append(info, infoStyle.Render("CPUs: ")+valueStyle.Render(fmt.Sprintf("%d", cpuCount)))
 
-	separator := lipgloss.NewStyle().Foreground(styles.Secondary).Render("  │  ")
+	separator := lipgloss.NewStyle().Foreground(styles.Border).Render("  │  ")
 	return strings.Join(info, separator)
 }
 
 func (m Model) renderTitle(separatorWidth int) string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-	subtitleStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-
-	title := titleStyle.Render("Select environment")
-	subtitle := subtitleStyle.Render("  where should pipelines run?")
+	title := styles.RenderSectionLabel("Select Environment")
+	subtitle := lipgloss.NewStyle().Foreground(styles.TextDim).Render("  where should pipelines run?")
 	return title + subtitle + "\n" + styles.RenderHeaderSeparator(separatorWidth)
 }
 
@@ -411,7 +408,7 @@ func (m Model) renderOptions() string {
 		descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 
 		if isFocused {
-			cursor = styles.SelectedMark + " "
+			cursor = styles.RenderCursor()
 			marker = styles.RenderRadio(true, true)
 			nameStyle = nameStyle.Bold(true).Foreground(styles.Primary)
 		}
@@ -472,7 +469,7 @@ func (m Model) renderVMStatusBadge() string {
 func (m Model) renderCloudPanel() string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Secondary).
+		BorderForeground(styles.Border).
 		Padding(0, 1).
 		Width(m.width - cloudPanelWidthPadding)
 

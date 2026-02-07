@@ -20,11 +20,11 @@ import (
 )
 
 const (
-	headerSeparatorLen  = 60
-	subjectLabelWidth   = 14
-	subjectBarWidth     = 25
-	featureLabelWidth   = 24
-	featureBarWidth     = 20
+	headerSeparatorLen = 60
+	subjectLabelWidth  = 14
+	subjectBarWidth    = 25
+	featureLabelWidth  = 24
+	featureBarWidth    = 20
 )
 
 type StatsData struct {
@@ -198,10 +198,7 @@ func (m Model) renderContent() string {
 }
 
 func (m Model) renderHeader() string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Primary).
-		Render("Project dashboard")
+	title := styles.RenderSectionLabel("Project Dashboard")
 
 	sepLen := headerSeparatorLen
 	if sepLen > 60 {
@@ -246,8 +243,8 @@ func (m Model) renderStats() string {
 }
 
 func (m Model) renderTaskInfo() string {
-	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Task: ")
-	taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Render(m.stats.Task)
+	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(12).Render("  Task")
+	taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.stats.Task)
 	return taskLabel + taskValue
 }
 
@@ -283,7 +280,7 @@ func (m Model) subjectRowColor(label string, count, total int) lipgloss.Color {
 func (m Model) renderEegSection() string {
 	var b strings.Builder
 
-	header := styles.SectionTitleStyle.Render("EEG")
+	header := styles.RenderSectionLabel("EEG")
 	b.WriteString("  " + header + "\n\n")
 
 	totalSubjects := m.stats.TotalSubjects
@@ -312,7 +309,7 @@ func (m Model) renderEegSection() string {
 func (m Model) renderFmriSection() string {
 	var b strings.Builder
 
-	header := styles.SectionTitleStyle.Render("fMRI")
+	header := styles.RenderSectionLabel("fMRI")
 	b.WriteString("  " + header + "\n\n")
 
 	totalSubjects := m.stats.TotalSubjects
@@ -387,8 +384,8 @@ func (m Model) renderMiniBar(percentage float64, width int, color lipgloss.Color
 	filledWidth := int(percentage * float64(width))
 	emptyWidth := width - filledWidth
 
-	filledBar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("▓", filledWidth))
-	emptyBar := lipgloss.NewStyle().Foreground(styles.Muted).Render(strings.Repeat("░", emptyWidth))
+	filledBar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("━", filledWidth))
+	emptyBar := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("─", emptyWidth))
 
 	return filledBar + emptyBar
 }
@@ -419,7 +416,7 @@ func (m Model) allFeatureCategoriesZero(totalSubjects int) bool {
 func (m Model) renderFeatureCategories() string {
 	var b strings.Builder
 
-	header := styles.SectionTitleStyle.Render("Feature categories")
+	header := styles.RenderDimSectionLabel("Feature Categories")
 	b.WriteString("  " + header + "\n\n")
 
 	if len(m.stats.FeatureCategories) == 0 {
@@ -496,7 +493,5 @@ func (m Model) renderFooter() string {
 		styles.RenderKeyHint("Esc", "Back"),
 	}
 
-	hintsText := strings.Join(hints, styles.RenderFooterSeparator())
-
-	return styles.FooterStyle.Render(hintsText)
+	return styles.FooterStyle.Render(strings.Join(hints, styles.RenderFooterSeparator()))
 }

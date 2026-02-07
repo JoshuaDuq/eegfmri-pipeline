@@ -253,6 +253,7 @@ def _single_bootstrap_mediation(
     mediator: np.ndarray,
     dependent_var: np.ndarray,
     sample_size: int,
+    groups: Optional[np.ndarray] = None,
 ) -> float:
     """Single bootstrap iteration for mediation analysis.
     
@@ -275,7 +276,22 @@ def _single_bootstrap_mediation(
         Indirect effect (a×b) from bootstrap sample, or np.nan if invalid
     """
     rng = np.random.default_rng(bootstrap_seed)
-    bootstrap_indices = rng.integers(0, sample_size, size=sample_size)
+    if groups is None:
+        bootstrap_indices = rng.integers(0, sample_size, size=sample_size)
+    else:
+        groups_arr = np.asarray(groups)
+        if len(groups_arr) != sample_size:
+            return np.nan
+        sampled_chunks = []
+        for group in np.unique(groups_arr):
+            group_idx = np.where(groups_arr == group)[0]
+            if group_idx.size == 0:
+                continue
+            sampled_chunks.append(rng.choice(group_idx, size=group_idx.size, replace=True))
+        if not sampled_chunks:
+            return np.nan
+        bootstrap_indices = np.concatenate(sampled_chunks)
+        rng.shuffle(bootstrap_indices)
     
     x_boot = independent_var[bootstrap_indices]
     m_boot = mediator[bootstrap_indices]
@@ -293,6 +309,7 @@ def bootstrap_indirect_effect(
     ci_level: float = 0.95,
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
+    groups: Optional[np.ndarray] = None,
 ) -> Tuple[float, float, np.ndarray]:
     """Bootstrap confidence interval for indirect effect (a×b).
     
@@ -339,6 +356,12 @@ def bootstrap_indirect_effect(
     independent_var = X[finite_mask]
     mediator = M[finite_mask]
     dependent_var = Y[finite_mask]
+    groups_valid = None
+    if groups is not None:
+        groups_arr = np.asarray(groups)
+        if len(groups_arr) != len(X):
+            raise ValueError("groups length must match X length for grouped bootstrap.")
+        groups_valid = groups_arr[finite_mask]
     
     if n_jobs == -1:
         n_jobs_actual = max(1, cpu_count() - 1)
@@ -353,14 +376,14 @@ def bootstrap_indirect_effect(
     if should_parallelize:
         bootstrap_results = Parallel(n_jobs=n_jobs_actual, backend="loky")(
             delayed(_single_bootstrap_mediation)(
-                base_seed + i, independent_var, mediator, dependent_var, sample_size
+                base_seed + i, independent_var, mediator, dependent_var, sample_size, groups_valid
             )
             for i in range(n_boot)
         )
     else:
         bootstrap_results = [
             _single_bootstrap_mediation(
-                base_seed + i, independent_var, mediator, dependent_var, sample_size
+                base_seed + i, independent_var, mediator, dependent_var, sample_size, groups_valid
             )
             for i in range(n_boot)
         ]
@@ -388,6 +411,8 @@ def _single_permutation_mediation(
     independent_var: np.ndarray,
     mediator: np.ndarray,
     dependent_var: np.ndarray,
+    groups: Optional[np.ndarray] = None,
+    scheme: str = "shuffle",
 ) -> float:
     """Single permutation iteration for mediation null distribution.
     
@@ -411,8 +436,16 @@ def _single_permutation_mediation(
     float
         Indirect effect (a×b) from permuted sample, or np.nan if invalid
     """
+    from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+
     rng = np.random.default_rng(perm_seed)
-    shuffle_indices = rng.permutation(len(mediator))
+    groups_arr = np.asarray(groups) if groups is not None else None
+    shuffle_indices = permute_within_groups(
+        len(mediator),
+        rng,
+        groups_arr,
+        scheme=scheme,
+    )
     m_shuffled = mediator[shuffle_indices]
     
     result = compute_mediation_paths(independent_var, m_shuffled, dependent_var)
@@ -427,6 +460,8 @@ def permutation_indirect_effect(
     n_perm: int = 1000,
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
+    groups: Optional[np.ndarray] = None,
+    scheme: str = "shuffle",
 ) -> float:
     """Compute permutation p-value for indirect effect (a×b).
     
@@ -473,6 +508,12 @@ def permutation_indirect_effect(
     independent_var = X[finite_mask]
     mediator = M[finite_mask]
     dependent_var = Y[finite_mask]
+    groups_valid = None
+    if groups is not None:
+        groups_arr = np.asarray(groups)
+        if len(groups_arr) != len(X):
+            raise ValueError("groups length must match X length for grouped permutation.")
+        groups_valid = groups_arr[finite_mask]
     
     if n_jobs == -1:
         n_jobs_actual = max(1, cpu_count() - 1)
@@ -487,14 +528,14 @@ def permutation_indirect_effect(
     if should_parallelize:
         null_effects = Parallel(n_jobs=n_jobs_actual, backend="loky")(
             delayed(_single_permutation_mediation)(
-                base_seed + i, independent_var, mediator, dependent_var
+                base_seed + i, independent_var, mediator, dependent_var, groups_valid, scheme
             )
             for i in range(n_perm)
         )
     else:
         null_effects = [
             _single_permutation_mediation(
-                base_seed + i, independent_var, mediator, dependent_var
+                base_seed + i, independent_var, mediator, dependent_var, groups_valid, scheme
             )
             for i in range(n_perm)
         ]
@@ -522,6 +563,8 @@ def run_full_mediation_analysis(
     y_label: str = "Pain Rating",
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
+    groups: Optional[np.ndarray] = None,
+    permutation_scheme: str = "shuffle",
 ) -> MediationResult:
     """Run complete mediation analysis with bootstrap CIs and permutation test.
     
@@ -557,7 +600,7 @@ def run_full_mediation_analysis(
     
     # Bootstrap CI for indirect effect
     ci_low, ci_high, _ = bootstrap_indirect_effect(
-        X, M, Y, n_boot=n_boot, rng=rng, n_jobs=n_jobs
+        X, M, Y, n_boot=n_boot, rng=rng, n_jobs=n_jobs, groups=groups
     )
     result.ci_ab_low = ci_low
     result.ci_ab_high = ci_high
@@ -565,7 +608,7 @@ def run_full_mediation_analysis(
     # Permutation test for indirect effect
     if n_perm > 0 and np.isfinite(result.ab):
         result.p_ab_perm = permutation_indirect_effect(
-            X, M, Y, result.ab, n_perm=n_perm, rng=rng, n_jobs=n_jobs
+            X, M, Y, result.ab, n_perm=n_perm, rng=rng, n_jobs=n_jobs, groups=groups, scheme=permutation_scheme
         )
         result.n_permutations = n_perm
     
@@ -587,6 +630,8 @@ def _analyze_single_feature_mediation(
     x_label: str,
     y_label: str,
     rng_seed: int,
+    groups: Optional[np.ndarray] = None,
+    permutation_scheme: str = "shuffle",
 ) -> Optional[MediationResult]:
     """Analyze mediation for a single feature.
     
@@ -638,6 +683,8 @@ def _analyze_single_feature_mediation(
         y_label=y_label,
         rng=rng,
         n_jobs=1,  # Avoid nested parallelism
+        groups=groups,
+        permutation_scheme=permutation_scheme,
     )
     
     return result
@@ -655,6 +702,8 @@ def analyze_mediation_for_features(
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
     min_effect_size: float = 0.0,
+    groups: Optional[np.ndarray] = None,
+    permutation_scheme: str = "shuffle",
 ) -> List[MediationResult]:
     """Run mediation analysis for multiple neural features.
     
@@ -708,6 +757,11 @@ def analyze_mediation_for_features(
     max_seed_value = 2**31
     base_seed = int(rng.integers(0, max_seed_value))
     n_features = len(feature_df.columns)
+    groups_array = None
+    if groups is not None:
+        groups_array = np.asarray(groups)
+        if len(groups_array) != len(X):
+            raise ValueError("groups length must match X length for mediation analysis.")
     
     should_parallelize = n_jobs_actual > 1 and n_features > PARALLEL_THRESHOLD_FEATURES
     
@@ -723,6 +777,8 @@ def analyze_mediation_for_features(
                 x_label,
                 y_label,
                 base_seed + i,
+                groups_array,
+                permutation_scheme,
             )
             for i, col_name in enumerate(feature_df.columns)
         )
@@ -738,6 +794,8 @@ def analyze_mediation_for_features(
                 x_label,
                 y_label,
                 base_seed + i,
+                groups_array,
+                permutation_scheme,
             )
             for i, col_name in enumerate(feature_df.columns)
         ]

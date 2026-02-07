@@ -236,16 +236,13 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Primary).
-		Render("Execution history")
+	title := styles.RenderSectionLabel("Execution History")
 
 	count := lipgloss.NewStyle().
 		Foreground(styles.Muted).
-		Render(fmt.Sprintf("  (%d records)", len(m.records)))
+		Render(fmt.Sprintf("  %d records", len(m.records)))
 
-	return title + count + "\n" + styles.RenderHeaderSeparator(65)
+	return title + count + "\n" + styles.RenderHeaderSeparator(60)
 }
 
 func (m Model) renderLoading() string {
@@ -299,20 +296,20 @@ func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
 		statusIcon = lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark)
 	}
 
-	pipelineStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(14)
+	pipelineStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(14)
 	if isCursor {
 		pipelineStyle = pipelineStyle.Foreground(styles.Primary).Bold(true)
 	}
 	pipeline := pipelineStyle.Render(record.Pipeline)
 
-	modeStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10)
+	modeStyle := lipgloss.NewStyle().Foreground(styles.Muted).Width(10)
 	mode := modeStyle.Render(record.Mode)
 
 	durationStyle := lipgloss.NewStyle().Foreground(styles.Muted).Width(10)
 	duration := durationStyle.Render(formatDuration(record.Duration))
 
 	timeAgo := formatTimeAgo(record.StartTime)
-	timeStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true)
+	timeStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
 	b.WriteString(cursor + statusIcon + " " + pipeline + mode + duration + timeStyle.Render(timeAgo))
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -276,6 +276,9 @@ def run_mediation_analysis(
     mediator_cols: list[str],
     y_col: str,
     n_bootstrap: int = 1000,
+    n_permutations: int = 0,
+    groups: Optional[np.ndarray] = None,
+    permutation_scheme: str = "shuffle",
     min_effect_size: float = 0.05,
 ) -> pd.DataFrame:
     """Run mediation analysis for multiple potential mediators."""
@@ -298,6 +301,9 @@ def run_mediation_analysis(
         feature_df=mediator_df,
         Y=y_values,
         n_boot=n_bootstrap,
+        n_perm=n_permutations,
+        groups=groups,
+        permutation_scheme=permutation_scheme,
         min_effect_size=min_effect_size,
         x_label=x_col,
         y_label=y_col,
@@ -318,6 +324,9 @@ def run_mediation_analysis(
             "indirect_ci_high": result.ci_ab_high,
             "proportion_mediated": result.proportion_mediated,
             "sobel_p": result.p_ab,
+            "p_ab_perm": result.p_ab_perm,
+            "n_permutations": result.n_permutations,
+            "p_value": result.p_ab_perm if np.isfinite(result.p_ab_perm) else result.p_ab,
             "significant": result.is_significant_mediation(),
         }
         for result in results

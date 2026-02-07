@@ -2,16 +2,19 @@ package styles
 
 import "github.com/charmbracelet/lipgloss"
 
-// Theme: lab-instrument, refined. One dominant accent (teal), sharp highlight (cyan), clear hierarchy.
+// Theme: Modern Research Dashboard.
+// Warm dark background, signature teal brand, generous whitespace feel.
 var (
-	Primary   = lipgloss.Color("#0D9488") // Teal-600 — primary actions, focus, brand
-	Secondary = lipgloss.Color("#475569")  // Slate-600 — section titles, borders
-	Accent    = lipgloss.Color("#22D3EE")  // Cyan-400 — labels, badges, highlights
-	Success   = lipgloss.Color("#10B981")  // Emerald-500
-	Warning   = lipgloss.Color("#F59E0B")  // Amber-500
-	Error     = lipgloss.Color("#EF4444")  // Red-500
-	Muted     = lipgloss.Color("#64748B")  // Slate-500
-	Text      = lipgloss.Color("#F1F5F9")  // Slate-100
-	TextDim   = lipgloss.Color("#94A3B8")  // Slate-400
-	BgDark    = lipgloss.Color("#0F172A")  // Slate-900
+	Primary   = lipgloss.Color("#2DD4BF") // Teal-400 — brand, focus rings, active items
+	Secondary = lipgloss.Color("#475569") // Slate-600 — borders, dividers
+	Accent    = lipgloss.Color("#38BDF8") // Sky-400 — highlights, badges, key hints
+	Success   = lipgloss.Color("#34D399") // Emerald-400
+	Warning   = lipgloss.Color("#FBBF24") // Amber-400
+	Error     = lipgloss.Color("#F87171") // Red-400
+	Muted     = lipgloss.Color("#64748B") // Slate-500
+	Text      = lipgloss.Color("#E2E8F0") // Slate-200 — primary text
+	TextDim   = lipgloss.Color("#94A3B8") // Slate-400 — secondary text
+	BgDark    = lipgloss.Color("#0F172A") // Slate-900 — app background
+	Surface   = lipgloss.Color("#1E293B") // Slate-800 — card/panel background
+	Border    = lipgloss.Color("#334155") // Slate-700 — subtle borders
 )

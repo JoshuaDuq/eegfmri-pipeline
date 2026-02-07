@@ -843,8 +843,12 @@ def _get_stage_runners() -> Dict[str, callable]:
         "regression": lambda ctx, config, outputs: stage_regression(ctx, config),
         "models": lambda ctx, config, outputs: stage_models(ctx, config),
         "stability": lambda ctx, config, outputs: stage_stability(ctx, config),
-        "consistency": lambda ctx, config, outputs: stage_consistency(ctx, config, None),
-        "influence": lambda ctx, config, outputs: stage_influence(ctx, config, None),
+        "consistency": lambda ctx, config, outputs: stage_consistency(
+            ctx, config, _build_results_from_outputs(outputs)
+        ),
+        "influence": lambda ctx, config, outputs: stage_influence(
+            ctx, config, _build_results_from_outputs(outputs)
+        ),
         "condition_column": lambda ctx, config, outputs: stage_condition_column(ctx, config),
         "condition_window": lambda ctx, config, outputs: stage_condition_window(ctx, config),
         "temporal_tfr": lambda ctx, config, outputs: stage_temporal_tfr(ctx),
@@ -1770,6 +1774,11 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
     run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
     if not run_col:
         run_col = "run_id"
+    if primary_unit in {"run", "run_mean", "runmean", "run_level"} and run_col not in df_trials.columns:
+        raise ValueError(
+            f"Run-level correlations requested (primary_unit={primary_unit!r}) "
+            f"but run column '{run_col}' is missing from the trial table."
+        )
     run_adjust_in_correlations = bool(
         get_config_value(ctx.config, "behavior_analysis.run_adjustment.include_in_correlations", run_adjust_enabled)
     )
@@ -1972,7 +1981,12 @@ def stage_correlate_effect_sizes(
     want_partial_cov = "partial_cov" in correlation_types
     want_partial_temp = "partial_temp" in correlation_types
     want_partial_cov_temp = "partial_cov_temp" in correlation_types
-    want_run_mean = "run_mean" in correlation_types
+    primary_unit = str(
+        get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial") or "trial"
+    ).strip().lower()
+    want_run_mean = ("run_mean" in correlation_types) or (
+        primary_unit in {"run", "run_mean", "runmean", "run_level"}
+    )
 
     if robust_method not in (None, "", False):
         if want_partial_cov or want_partial_temp or want_partial_cov_temp:
@@ -2289,11 +2303,12 @@ def stage_correlate_primary_selection(
             p_primary = rec.get("p_raw", np.nan)
             r_primary = rec.get("r_raw", np.nan)
             src = "raw_robust"
-        elif use_run_unit and pd.notna(rec.get("p_run_mean", np.nan)):
+        elif use_run_unit:
+            # Never downgrade run-level inference to trial-level p-values.
             p_kind = "p_run_mean"
             p_primary = rec.get("p_run_mean", np.nan)
             r_primary = rec.get("r_run_mean", np.nan)
-            src = "run_mean"
+            src = "run_mean" if pd.notna(p_primary) else "run_mean_unavailable"
         else:
             want_partial_cov = design.cov_df is not None and not design.cov_df.empty
             want_partial_temp = bool(getattr(config, "control_temperature", True)) and target != "temperature" and design.temperature_series is not None
@@ -2542,6 +2557,43 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         return pd.DataFrame()
 
     method = getattr(config, "method", "spearman")
+    primary_unit = str(
+        get_config_value(ctx.config, "behavior_analysis.pain_sensitivity.primary_unit", "trial") or "trial"
+    ).strip().lower()
+    use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    n_perm = get_config_int(
+        ctx.config,
+        "behavior_analysis.pain_sensitivity.n_permutations",
+        get_config_int(ctx.config, "behavior_analysis.statistics.n_permutations", 0),
+    )
+    p_primary_mode = str(
+        get_config_value(ctx.config, "behavior_analysis.pain_sensitivity.p_primary_mode", "perm_if_available")
+        or "perm_if_available"
+    ).strip().lower()
+    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
+    if use_run_unit and run_col not in df_trials.columns:
+        raise ValueError(
+            f"Run-level pain sensitivity requested but run column '{run_col}' is missing from trial table."
+        )
+    if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and n_perm <= 0:
+        raise ValueError(
+            "Trial-level pain sensitivity requires a valid non-i.i.d inference method. "
+            "Set behavior_analysis.pain_sensitivity.n_permutations > 0, "
+            "use run-level aggregation (behavior_analysis.pain_sensitivity.primary_unit=run_mean), "
+            "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
+
+    if use_run_unit:
+        ctx.logger.info("Pain sensitivity: aggregating to run-level (primary_unit=%s)", primary_unit)
+        psi_feature_cols_run = _get_feature_columns(df_trials, ctx, "pain_sensitivity")
+        agg_cols = [c for c in (psi_feature_cols_run + ["rating", "temperature"]) if c in df_trials.columns]
+        if not agg_cols:
+            ctx.logger.warning("Pain sensitivity: no aggregatable columns found; skipping.")
+            return pd.DataFrame()
+        df_trials = df_trials.groupby(run_col)[agg_cols].mean(numeric_only=True).reset_index()
+
     robust_method_cfg = get_config_value(ctx.config, "behavior_analysis.robust_correlation", None)
     if robust_method_cfg is not None:
         robust_method_cfg = str(robust_method_cfg).strip().lower() or None
@@ -2554,6 +2606,19 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     ctx.logger.info("Pain sensitivity: analyzing %d features", len(psi_feature_cols))
     psi_features = df_trials[psi_feature_cols].copy()
+    groups_for_perm = None
+    if getattr(ctx, "group_ids", None) is not None:
+        groups_candidate = np.asarray(ctx.group_ids)
+        if len(groups_candidate) == len(df_trials):
+            groups_for_perm = groups_candidate
+        else:
+            ctx.logger.warning(
+                "Pain sensitivity: ignoring ctx.group_ids length=%d because trial table has %d rows.",
+                len(groups_candidate),
+                len(df_trials),
+            )
+    if groups_for_perm is None and run_col in df_trials.columns:
+        groups_for_perm = df_trials[run_col].to_numpy()
     psi_df = run_pain_sensitivity_correlations(
         features_df=psi_features,
         ratings=pd.to_numeric(df_trials["rating"], errors="coerce"),
@@ -2563,6 +2628,11 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         min_samples=int(getattr(config, "min_samples", 10)),
         logger=ctx.logger,
         config=ctx.config,
+        n_perm=n_perm,
+        groups=groups_for_perm,
+        permutation_scheme=perm_scheme,
+        p_primary_mode=p_primary_mode,
+        rng=getattr(ctx, "rng", None),
     )
 
     if _is_dataframe_valid(psi_df):
@@ -3088,6 +3158,21 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     primary_unit = str(get_config_value(ctx.config, "behavior_analysis.regression.primary_unit", "trial")).strip().lower()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    n_perm = get_config_int(ctx.config, "behavior_analysis.regression.n_permutations", 0)
+
+    if use_run_unit and run_col not in df_trials.columns:
+        raise ValueError(
+            f"Run-level regression requested (primary_unit={primary_unit!r}) "
+            f"but run column '{run_col}' is missing from trial table."
+        )
+    if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and n_perm <= 0:
+        raise ValueError(
+            "Trial-level regression requires a valid non-i.i.d inference method. "
+            "Set behavior_analysis.regression.n_permutations > 0, "
+            "use run-level aggregation (behavior_analysis.regression.primary_unit=run_mean), "
+            "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
 
     # Aggregate to run-level if requested (avoids pseudo-replication)
     if use_run_unit and run_col in df_trials.columns:
@@ -3099,7 +3184,22 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     groups = None
     if getattr(ctx, "group_ids", None) is not None:
-        groups = np.asarray(ctx.group_ids)
+        groups_candidate = np.asarray(ctx.group_ids)
+        if len(groups_candidate) == len(df_trials):
+            groups = groups_candidate
+        else:
+            ctx.logger.warning(
+                "Regression: ignoring ctx.group_ids length=%d because current data has %d rows.",
+                len(groups_candidate),
+                len(df_trials),
+            )
+    if groups is None:
+        if run_col in df_trials.columns:
+            groups = df_trials[run_col].to_numpy()
+        elif "block" in df_trials.columns:
+            groups = df_trials["block"].to_numpy()
+        elif "run" in df_trials.columns:
+            groups = df_trials["run"].to_numpy()
 
     reg_df, reg_meta = run_trialwise_feature_regressions(
         df_trials,
@@ -3138,6 +3238,59 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     if should_skip:
         ctx.logger.info(f"Models: skipping due to {skip_reason}")
         return pd.DataFrame()
+
+    primary_unit = str(get_config_value(ctx.config, "behavior_analysis.models.primary_unit", "trial") or "trial").strip().lower()
+    use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+
+    if primary_unit in {"trial", "trialwise"} and not allow_iid_trials:
+        raise ValueError(
+            "Trial-level feature-model inference assumes i.i.d trials and is not recommended. "
+            "Use run-level aggregation (behavior_analysis.models.primary_unit=run_mean) "
+            "or set behavior_analysis.statistics.allow_iid_trials=true to override."
+        )
+
+    if use_run_unit:
+        if run_col not in df_trials.columns:
+            raise ValueError(
+                f"Run-level models requested (primary_unit={primary_unit!r}) "
+                f"but run column '{run_col}' is missing from trial table."
+            )
+        ctx.logger.info("Models: aggregating to run-level (primary_unit=%s)", primary_unit)
+        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["rating", "pain_residual"])
+        if isinstance(outcomes_cfg, str):
+            outcomes_cfg = [outcomes_cfg]
+        elif not isinstance(outcomes_cfg, (list, tuple)):
+            outcomes_cfg = ["rating", "pain_residual"]
+        binary_outcome = str(
+            get_config_value(ctx.config, "behavior_analysis.models.binary_outcome", "pain_binary") or "pain_binary"
+        ).strip()
+        extra_cols = [
+            "temperature",
+            "rating",
+            "pain_residual",
+            "pain_binary",
+            "trial_index",
+            "trial_index_within_group",
+            "prev_temperature",
+            "prev_rating",
+            "delta_temperature",
+            "delta_rating",
+        ]
+        agg_cols = [
+            c
+            for c in set(feature_cols + list(outcomes_cfg) + [binary_outcome] + extra_cols)
+            if c in df_trials.columns
+        ]
+        agg_numeric = {c: "mean" for c in agg_cols if c != binary_outcome}
+        grouped = df_trials.groupby(run_col).agg(agg_numeric)
+        if binary_outcome in agg_cols:
+            grouped[binary_outcome] = df_trials.groupby(run_col)[binary_outcome].apply(
+                lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]
+            )
+        df_trials = grouped.reset_index()
+        ctx.logger.info("  Run-level: %d observations", len(df_trials))
 
     model_df, model_meta = run_feature_model_families(
         df_trials,
@@ -3649,11 +3802,19 @@ def stage_condition_column(
         features = df_trials[feature_cols].copy()
         groups = None
         if getattr(ctx, "group_ids", None) is not None:
-            groups = np.asarray(ctx.group_ids)
+            groups_candidate = np.asarray(ctx.group_ids)
+            if len(groups_candidate) == len(df_trials):
+                groups = groups_candidate
+            else:
+                ctx.logger.warning(
+                    "Condition column: ignoring ctx.group_ids length=%d because current data has %d rows.",
+                    len(groups_candidate),
+                    len(df_trials),
+                )
         if groups is None:
             run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
             if run_col and run_col in df_trials.columns:
-                groups = pd.to_numeric(df_trials[run_col], errors="ignore").to_numpy()
+                groups = df_trials[run_col].to_numpy()
 
         column_df = compute_condition_effects(
             features,
@@ -3901,6 +4062,17 @@ def stage_condition_multigroup(
     if not feature_cols:
         ctx.logger.info("Condition multigroup: no feature columns found; skipping.")
         return pd.DataFrame()
+
+    primary_unit = str(
+        get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial") or "trial"
+    ).strip().lower()
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    if primary_unit in {"trial", "trialwise"} and not allow_iid_trials:
+        raise ValueError(
+            "Trial-level multigroup condition comparisons assume i.i.d trials. "
+            "Use run-level aggregation (behavior_analysis.condition.primary_unit=run_mean) "
+            "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
     
     compare_column = str(get_config_value(
         ctx.config, "behavior_analysis.condition.compare_column", "pain"
@@ -3917,6 +4089,20 @@ def stage_condition_multigroup(
     if compare_column not in df_trials.columns:
         ctx.logger.warning(f"Condition multigroup: column '{compare_column}' not found; skipping.")
         return pd.DataFrame()
+
+    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
+    if use_run_unit:
+        if run_col not in df_trials.columns:
+            raise ValueError(
+                f"Run-level multigroup condition comparisons requested but run column '{run_col}' is missing."
+            )
+        ctx.logger.info("Condition multigroup: aggregating to run-level (primary_unit=%s)", primary_unit)
+        df_agg = df_trials.groupby(run_col)[feature_cols].mean(numeric_only=True)
+        df_agg[compare_column] = df_trials.groupby(run_col)[compare_column].apply(
+            lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]
+        )
+        df_trials = df_agg.reset_index()
     
     if isinstance(compare_labels, (list, tuple)) and len(compare_labels) >= len(compare_values):
         group_labels = [str(l).strip() for l in compare_labels[:len(compare_values)]]
@@ -3995,7 +4181,6 @@ def _run_window_comparison(
     window1, window2 = windows[0], windows[1]
 
     run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
-    run_adjust_enabled = get_config_bool(ctx.config, "behavior_analysis.run_adjustment.enabled", False)
     wc_primary_unit = str(
         get_config_value(ctx.config, "behavior_analysis.condition.window_comparison.primary_unit", "trial") or "trial"
     ).strip().lower()
@@ -4007,6 +4192,10 @@ def _run_window_comparison(
             "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
         )
     use_run_unit = wc_primary_unit in {"run", "run_mean", "runmean", "run_level"}
+    if use_run_unit and run_col not in df_trials.columns:
+        raise ValueError(
+            f"Run-level window comparison requested but run column '{run_col}' is missing from trial table."
+        )
 
     from eeg_pipeline.domain.features.naming import NamingSchema
 
@@ -4142,7 +4331,7 @@ def _run_window_comparison(
         stat_run = np.nan
         p_val_run = np.nan
         n_runs = np.nan
-        if use_run_unit and run_adjust_enabled and run_col in df_trials.columns:
+        if use_run_unit and run_col in df_trials.columns:
             df_run = (
                 pd.DataFrame(
                     {
@@ -4204,10 +4393,12 @@ def _run_window_comparison(
     df = pd.DataFrame(records)
 
     # Standardize p-value columns
-    df["p_primary"] = df["p_raw"]
     if use_run_unit and "p_value_run" in df.columns:
-        p_run_valid = pd.to_numeric(df["p_value_run"], errors="coerce")
-        df["p_primary"] = p_run_valid.where(p_run_valid.notna(), df["p_raw"])
+        df["p_primary"] = pd.to_numeric(df["p_value_run"], errors="coerce")
+        df["p_primary_source"] = "run_mean"
+    else:
+        df["p_primary"] = pd.to_numeric(df["p_raw"], errors="coerce")
+        df["p_primary_source"] = "trial"
 
     # Use unified FDR
     df = _compute_unified_fdr(
@@ -4455,8 +4646,14 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     ctx.logger.info("Running mediation analysis...")
     n_bootstrap = get_config_int(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000)
+    n_permutations = get_config_int(ctx.config, "behavior_analysis.mediation.n_permutations", 0)
+    p_primary_mode = str(
+        get_config_value(ctx.config, "behavior_analysis.mediation.p_primary_mode", "perm_if_available") or "perm_if_available"
+    ).strip().lower()
     min_effect_size = get_config_float(ctx.config, "behavior_analysis.mediation.min_effect_size", 0.05)
     max_mediators = get_config_value(ctx.config, "behavior_analysis.mediation.max_mediators", None)
+    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
 
     if max_mediators is not None:
         max_mediators = int(max_mediators)
@@ -4467,15 +4664,79 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         mediators = feature_cols
         ctx.logger.info("Testing all %d features as mediators (no limit)", len(mediators))
 
+    groups_for_resampling = None
+    if getattr(ctx, "group_ids", None) is not None:
+        groups_candidate = np.asarray(ctx.group_ids)
+        if len(groups_candidate) == len(df_trials):
+            groups_for_resampling = groups_candidate
+        else:
+            ctx.logger.warning(
+                "Mediation: ignoring ctx.group_ids length=%d because trial table has %d rows.",
+                len(groups_candidate),
+                len(df_trials),
+            )
+    if groups_for_resampling is None and run_col in df_trials.columns:
+        groups_for_resampling = df_trials[run_col].to_numpy()
+
     result = run_mediation_analysis(
         df_trials,
         "temperature",
         mediators,
         "rating",
         n_bootstrap=n_bootstrap,
+        n_permutations=n_permutations,
+        groups=groups_for_resampling,
+        permutation_scheme=perm_scheme,
         min_effect_size=min_effect_size,
     )
-    return result if result is not None else pd.DataFrame()
+    if result is None or result.empty:
+        return pd.DataFrame()
+
+    med_df = result.copy()
+    if "analysis_kind" not in med_df.columns:
+        med_df["analysis_kind"] = "mediation"
+
+    if "p_raw" not in med_df.columns:
+        med_df["p_raw"] = pd.to_numeric(
+            med_df.get("sobel_p", med_df.get("p_value", np.nan)),
+            errors="coerce",
+        )
+    if "p_ab_perm" not in med_df.columns:
+        med_df["p_ab_perm"] = np.nan
+
+    use_perm = p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}
+    if use_perm:
+        perm_p = pd.to_numeric(med_df["p_ab_perm"], errors="coerce")
+        raw_p = pd.to_numeric(med_df["p_raw"], errors="coerce")
+        med_df["p_primary"] = perm_p.where(perm_p.notna(), raw_p)
+        med_df["p_primary_source"] = np.where(perm_p.notna(), "perm", "sobel")
+    else:
+        med_df["p_primary"] = pd.to_numeric(med_df["p_raw"], errors="coerce")
+        med_df["p_primary_source"] = "sobel"
+
+    mediator_col = "mediator" if "mediator" in med_df.columns else ("feature" if "feature" in med_df.columns else None)
+    if mediator_col is not None:
+        try:
+            med_df["feature_type"] = [
+                _cache.get_feature_type(str(m), ctx.config) for m in med_df[mediator_col].astype(str).tolist()
+            ]
+        except Exception:
+            med_df["feature_type"] = "unknown"
+    else:
+        med_df["feature_type"] = "unknown"
+
+    med_df = _compute_unified_fdr(
+        ctx,
+        config,
+        med_df,
+        p_col="p_primary",
+        family_cols=["feature_type", "analysis_kind"],
+        analysis_type="mediation",
+    )
+    med_df["significant_mediation"] = pd.to_numeric(med_df.get("p_fdr", np.nan), errors="coerce") < float(
+        getattr(config, "fdr_alpha", 0.05)
+    )
+    return med_df
 
 
 def stage_mixed_effects(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
@@ -5023,6 +5284,26 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     max_features = getattr(config, "moderation_max_features", None)  # None = unlimited
     fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
+    n_permutations = get_config_int(ctx.config, "behavior_analysis.moderation.n_permutations", 0)
+    p_primary_mode = str(
+        get_config_value(ctx.config, "behavior_analysis.moderation.p_primary_mode", "perm_if_available") or "perm_if_available"
+    ).strip().lower()
+    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
+
+    groups_for_resampling = None
+    if getattr(ctx, "group_ids", None) is not None:
+        groups_candidate = np.asarray(ctx.group_ids)
+        if len(groups_candidate) == len(df_trials):
+            groups_for_resampling = groups_candidate
+        else:
+            ctx.logger.warning(
+                "Moderation: ignoring ctx.group_ids length=%d because trial table has %d rows.",
+                len(groups_candidate),
+                len(df_trials),
+            )
+    if groups_for_resampling is None and run_col in df_trials.columns:
+        groups_for_resampling = df_trials[run_col].to_numpy()
 
     if max_features is not None and len(feature_cols) > max_features:
         variances = df_trials[feature_cols].var()
@@ -5040,15 +5321,22 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
         valid_mask = np.isfinite(temperature) & np.isfinite(rating) & np.isfinite(feature_values)
         n_valid = int(valid_mask.sum())
+        groups_valid = None
+        if groups_for_resampling is not None and len(groups_for_resampling) == len(valid_mask):
+            groups_valid = np.asarray(groups_for_resampling)[valid_mask]
 
         result = run_moderation_analysis(
             X=temperature[valid_mask],
             W=feature_values[valid_mask],
             Y=rating[valid_mask],
+            n_perm=n_permutations,
             x_label="temperature",
             w_label=str(feat),
             y_label="rating",
             center_predictors=True,
+            rng=getattr(ctx, "rng", None),
+            groups=groups_valid,
+            permutation_scheme=perm_scheme,
         )
 
         rec = {
@@ -5060,6 +5348,8 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             "b3_interaction": result.b3,
             "se_b3": result.se_b3,
             "p_interaction": result.p_b3,
+            "p_interaction_perm": result.p_b3_perm,
+            "n_permutations": int(getattr(result, "n_permutations", n_permutations) or 0),
             "slope_low_w": result.slope_low_w,
             "slope_mean_w": result.slope_mean_w,
             "slope_high_w": result.slope_high_w,
@@ -5073,7 +5363,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             "jn_low": result.jn_low,
             "jn_high": result.jn_high,
             "jn_type": result.jn_type,
-            "significant_moderation": result.is_significant_moderation(fdr_alpha),
+            "significant_moderation_raw": result.is_significant_moderation(fdr_alpha),
         }
         records.append(rec)
 
@@ -5084,9 +5374,16 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         if "analysis_kind" not in mod_df.columns:
             mod_df["analysis_kind"] = "moderation"
 
-        # Ensure p_primary column exists
-        mod_df["p_primary"] = pd.to_numeric(mod_df["p_interaction"], errors="coerce")
-        mod_df["p_raw"] = mod_df["p_primary"]
+        # Ensure primary p-value selection honors permutation setting when available.
+        mod_df["p_raw"] = pd.to_numeric(mod_df["p_interaction"], errors="coerce")
+        use_perm = p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}
+        if use_perm and "p_interaction_perm" in mod_df.columns:
+            p_perm = pd.to_numeric(mod_df["p_interaction_perm"], errors="coerce")
+            mod_df["p_primary"] = p_perm.where(p_perm.notna(), mod_df["p_raw"])
+            mod_df["p_primary_source"] = np.where(p_perm.notna(), "perm", "asymptotic")
+        else:
+            mod_df["p_primary"] = mod_df["p_raw"]
+            mod_df["p_primary_source"] = "asymptotic"
 
         # Use unified FDR
         mod_df = _compute_unified_fdr(
@@ -5097,6 +5394,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             family_cols=["feature_type", "analysis_kind"],
             analysis_type="moderation",
         )
+        mod_df["significant_moderation"] = pd.to_numeric(mod_df.get("p_fdr", np.nan), errors="coerce") < fdr_alpha
 
     out_dir = _get_stats_subfolder(ctx, "moderation")
     out_path = out_dir / f"moderation_results{suffix}{method_suffix}.parquet"

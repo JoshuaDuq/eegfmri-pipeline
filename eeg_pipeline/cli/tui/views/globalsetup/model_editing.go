@@ -96,12 +96,6 @@ func (m Model) sectionFields(section sectionKey) []fieldDef {
 			{fieldSourceRoot, "Source Root", "Raw source data", true},
 			{fieldFreesurferDir, "FreeSurfer Dir", "FreeSurfer SUBJECTS_DIR", true},
 		}
-	case sectionEvents:
-		return []fieldDef{
-			{fieldEventTemp, "Temperature", "Column candidates", false},
-			{fieldEventRating, "Rating", "Column candidates", false},
-			{fieldEventPain, "Pain Binary", "Column candidates", false},
-		}
 	default:
 		return []fieldDef{}
 	}
@@ -125,12 +119,6 @@ func (m Model) fieldValue(key fieldKey) string {
 		return m.sourceRoot
 	case fieldFreesurferDir:
 		return m.freesurferDir
-	case fieldEventTemp:
-		return m.eventTemp
-	case fieldEventRating:
-		return m.eventRating
-	case fieldEventPain:
-		return m.eventPain
 	default:
 		return ""
 	}
@@ -155,12 +143,6 @@ func (m *Model) setFieldValue(key fieldKey, value string) {
 		m.sourceRoot = value
 	case fieldFreesurferDir:
 		m.freesurferDir = value
-	case fieldEventTemp:
-		m.eventTemp = value
-	case fieldEventRating:
-		m.eventRating = value
-	case fieldEventPain:
-		m.eventPain = value
 	}
 }
 
@@ -291,20 +273,6 @@ func (m *Model) buildOverrides() map[string]interface{} {
 		overrides["paths"] = paths
 	}
 
-	eventCols := map[string]interface{}{}
-	if strings.TrimSpace(m.eventTemp) != "" {
-		eventCols["temperature"] = splitList(m.eventTemp)
-	}
-	if strings.TrimSpace(m.eventRating) != "" {
-		eventCols["rating"] = splitList(m.eventRating)
-	}
-	if strings.TrimSpace(m.eventPain) != "" {
-		eventCols["pain_binary"] = splitList(m.eventPain)
-	}
-	if len(eventCols) > 0 {
-		overrides["event_columns"] = eventCols
-	}
-
 	return overrides
 }
 
@@ -332,25 +300,6 @@ func toString(value interface{}, fallback string) string {
 		}
 		return fmt.Sprintf("%v", v)
 	}
-}
-
-func toStringList(value interface{}) []string {
-	switch v := value.(type) {
-	case []string:
-		return v
-	case []interface{}:
-		var out []string
-		for _, item := range v {
-			if item == nil {
-				continue
-			}
-			out = append(out, fmt.Sprintf("%v", item))
-		}
-		return out
-	case string:
-		return splitList(v)
-	}
-	return []string{}
 }
 
 func pathExists(path string) bool {

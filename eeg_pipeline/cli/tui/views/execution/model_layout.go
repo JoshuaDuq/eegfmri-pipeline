@@ -124,7 +124,7 @@ func (m Model) panelWidth() int {
 func (m Model) renderSidebarCard(content string) string {
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Secondary).
+		BorderForeground(styles.Border).
 		Padding(1, 3)
 	return cardStyle.Width(m.panelWidth()).Render(content)
 }

@@ -12,9 +12,9 @@ import (
 
 func (m Model) View() string {
 	// Render header
-	title := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Global setup")
-	section := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.sections[m.sectionIndex].label)
-	header := title + "  " + section
+	title := styles.RenderSectionLabel("Global Setup")
+	section := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("  " + m.sections[m.sectionIndex].label)
+	header := title + section
 	headerHeight := 3
 
 	// Render footer
@@ -80,22 +80,22 @@ func (m Model) renderFields() string {
 	var b strings.Builder
 	section := m.sections[m.sectionIndex]
 
-	b.WriteString(styles.SectionTitleStyle.Render(" "+section.label+" ") + "\n\n")
+	b.WriteString(styles.SectionTitleStyle.Render(section.label) + "\n\n")
 	if section.description != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(section.description) + "\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(section.description) + "\n\n")
 	}
 
 	fields := m.sectionFields(section.key)
 	for i, field := range fields {
 		isFocused := i == m.fieldCursor
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(20)
+		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(20)
 		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(20)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Bold(true).Width(20)
 		}
 
 		cursor := "  "
 		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+			cursor = styles.RenderCursor()
 		}
 
 		value := m.fieldValue(field.key)
@@ -106,24 +106,27 @@ func (m Model) renderFields() string {
 			value = "(not set)"
 		}
 
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-		line := cursor + labelStyle.Render(field.label+":") + " " + valueStyle.Render(value)
+		valueStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+		if value == "(not set)" {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Muted)
+		}
+		line := cursor + labelStyle.Render(field.label) + " " + valueStyle.Render(value)
 
 		if field.isPath && value != "(not set)" {
 			path := m.fieldValue(field.key)
 			if pathExists(path) {
-				line += lipgloss.NewStyle().Foreground(styles.Success).Render("  ✓")
+				line += lipgloss.NewStyle().Foreground(styles.Success).Render("  " + styles.CheckMark)
 			} else {
-				line += lipgloss.NewStyle().Foreground(styles.Warning).Render("  ⚠ (Not found! Please check or enter manually)")
+				line += lipgloss.NewStyle().Foreground(styles.Warning).Render("  " + styles.WarningMark + " not found")
 			}
 		}
 
 		if field.description != "" {
-			line += lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + field.description)
+			line += lipgloss.NewStyle().Foreground(styles.Muted).Render("  " + field.description)
 		}
 
-		if field.isPath {
-			line += lipgloss.NewStyle().Foreground(styles.Muted).Render("  (Press B to browse)")
+		if field.isPath && isFocused {
+			line += lipgloss.NewStyle().Foreground(styles.Border).Render("  [B] browse")
 		}
 
 		b.WriteString(line + "\n")

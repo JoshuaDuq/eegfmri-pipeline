@@ -185,53 +185,53 @@ func (m Model) renderCompletionSummary() string {
 	case StatusSuccess:
 		// Styled action buttons for success with results browsing
 		enterBtn := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(styles.BgDark).
 			Background(styles.Success).
 			Bold(true).
 			Padding(0, 1).
 			Render("[Enter] Menu")
 		openBtn := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(styles.BgDark).
 			Background(styles.Accent).
 			Bold(true).
 			Padding(0, 1).
 			Render("[O] Open Results")
 		copyBtn := lipgloss.NewStyle().
 			Foreground(styles.Text).
-			Background(styles.Secondary).
+			Background(styles.Border).
 			Padding(0, 1).
 			Render("[C] Copy Log")
 		b.WriteString(enterBtn + "  " + openBtn + "  " + copyBtn)
 	case StatusFailed:
 		// Prominent action buttons for failure - recovery options highlighted
 		retryBtn := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(styles.BgDark).
 			Background(styles.Warning).
 			Bold(true).
 			Padding(0, 1).
 			Render("[R] Retry")
 		copyBtn := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
+			Foreground(styles.BgDark).
 			Background(styles.Error).
 			Bold(true).
 			Padding(0, 1).
 			Render("[C] Copy Log")
 		menuBtn := lipgloss.NewStyle().
 			Foreground(styles.Text).
-			Background(styles.Secondary).
+			Background(styles.Border).
 			Padding(0, 1).
 			Render("[Enter] Menu")
 		b.WriteString(retryBtn + "  " + copyBtn + "  " + menuBtn)
 	case StatusCancelled:
 		retryBtn := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(styles.BgDark).
 			Background(styles.Accent).
 			Bold(true).
 			Padding(0, 1).
 			Render("[R] Retry")
 		menuBtn := lipgloss.NewStyle().
 			Foreground(styles.Text).
-			Background(styles.Secondary).
+			Background(styles.Border).
 			Padding(0, 1).
 			Render("[Enter] Menu")
 		b.WriteString(retryBtn + "  " + menuBtn)
@@ -262,29 +262,27 @@ func formatDuration(d time.Duration) string {
 // renderHeader renders the top title bar indicating local vs cloud
 // execution and colors it according to the current status.
 func (m Model) renderHeader() string {
-	title := "Pipeline execution"
+	title := "Pipeline Execution"
 	if m.IsCloud {
-		title = "Cloud execution"
+		title = "Cloud Execution"
 	}
 
-	borderColor := styles.Secondary
+	statusColor := styles.Border
 	switch m.Status {
 	case StatusRunning:
-		borderColor = styles.Accent
+		statusColor = styles.Accent
 	case StatusSuccess:
-		borderColor = styles.Success
+		statusColor = styles.Success
 	case StatusFailed:
-		borderColor = styles.Error
+		statusColor = styles.Error
 	case StatusCancelled:
-		borderColor = styles.Warning
+		statusColor = styles.Warning
 	}
 
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(borderColor).
-		Render(title)
+	bar := lipgloss.NewStyle().Foreground(statusColor).Render(styles.SectionIcon)
+	headerText := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render(" " + title)
 
-	return lipgloss.PlaceHorizontal(m.width-4, lipgloss.Center, header)
+	return lipgloss.PlaceHorizontal(m.width-4, lipgloss.Center, bar+headerText)
 }
 
 // renderInfoPanel renders high‑level execution metadata such as
@@ -292,7 +290,7 @@ func (m Model) renderHeader() string {
 func (m Model) renderInfoPanel() string {
 	info := strings.Builder{}
 
-	info.WriteString(styles.SectionTitleStyle.Render("Summary") + "\n")
+	info.WriteString(styles.RenderSectionLabel("Summary") + "\n")
 
 	if m.StartTime.Unix() > 0 {
 		duration := m.getDuration()
@@ -386,7 +384,7 @@ func (m Model) renderProgressSection() string {
 		iconStyle = lipgloss.NewStyle().Foreground(styles.Accent)
 	}
 
-	b.WriteString(iconStyle.Render(progressIcon) + " " + styles.SectionTitleStyle.Render("Progress") + "\n")
+	b.WriteString(iconStyle.Render(progressIcon) + " " + styles.RenderSectionLabel("Progress") + "\n")
 
 	// Overall progress bar
 	progressLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("overall")
@@ -414,7 +412,7 @@ func (m Model) renderProgressSection() string {
 				} else if i == m.SubjectCurrent {
 					subjectIcons += lipgloss.NewStyle().Foreground(styles.Accent).Render("○")
 				} else {
-					subjectIcons += lipgloss.NewStyle().Foreground(styles.Secondary).Render("○")
+					subjectIcons += lipgloss.NewStyle().Foreground(styles.Border).Render("○")
 				}
 			}
 			if m.SubjectTotal > 10 {
@@ -472,10 +470,10 @@ func (m Model) renderMetricsDashboard() string {
 	}
 
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 	metricBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Secondary).
+		BorderForeground(styles.Border).
 		Padding(1, 2).
 		MarginRight(1)
 
@@ -619,7 +617,7 @@ func (m Model) renderCoreMiniBar(usage float64, width int) string {
 	}
 
 	filledStyle := lipgloss.NewStyle().Foreground(barColor)
-	emptyStyle := lipgloss.NewStyle().Foreground(styles.Secondary)
+	emptyStyle := lipgloss.NewStyle().Foreground(styles.Border)
 
 	bar := filledStyle.Render(strings.Repeat("█", filled))
 	bar += emptyStyle.Render(strings.Repeat("░", width-filled))
@@ -635,14 +633,14 @@ func (m Model) renderLogSection() string {
 	if m.copyMode {
 		copyBanner := lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(styles.BgDark).
 			Background(styles.Accent).
 			Padding(0, 2).
 			Render("Copy mode: Select text with mouse, then Cmd+C. Press M or Esc to exit.")
 		b.WriteString(lipgloss.NewStyle().Width(contentWidth).Render(copyBanner) + "\n")
 	}
 
-	logHeader := styles.SectionTitleStyle.Render("Log")
+	logHeader := styles.RenderSectionLabel("Log")
 	if len(m.OutputLines) > 0 {
 		scrollPct := 0
 		if m.logViewport.TotalLineCount() > 0 {
@@ -715,8 +713,8 @@ func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 		filled = width
 	}
 
-	fillStyle := lipgloss.NewStyle().Foreground(styles.Accent)
-	emptyStyle := lipgloss.NewStyle().Foreground(styles.Secondary)
+	fillStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	emptyStyle := lipgloss.NewStyle().Foreground(styles.Border)
 
 	var fillBlock string
 	if m.Status == StatusRunning {
@@ -747,8 +745,8 @@ func (m Model) renderMiniProgressBar(p float64, width int) string {
 	}
 
 	filled := int(p * float64(width))
-	bar := lipgloss.NewStyle().Foreground(styles.Accent).Render(strings.Repeat("━", filled))
-	empty := lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("─", width-filled))
+	bar := lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("━", filled))
+	empty := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("─", width-filled))
 	return bar + empty
 }
 
@@ -758,13 +756,13 @@ func (m Model) renderStatus() string {
 	style := lipgloss.NewStyle().Bold(true).Padding(0, 1)
 	switch m.Status {
 	case StatusRunning:
-		return style.Background(styles.Accent).Foreground(lipgloss.Color("#000000")).Render(styles.ActiveMark + " Running ")
+		return style.Background(styles.Primary).Foreground(lipgloss.Color("#0F172A")).Render(styles.ActiveMark + " Running ")
 	case StatusSuccess:
-		return style.Background(styles.Success).Foreground(lipgloss.Color("#000000")).Render(styles.CheckMark + " Success ")
+		return style.Background(styles.Success).Foreground(lipgloss.Color("#0F172A")).Render(styles.CheckMark + " Success ")
 	case StatusFailed:
-		return style.Background(styles.Error).Foreground(lipgloss.Color("#FFFFFF")).Render(styles.CrossMark + " Failed ")
+		return style.Background(styles.Error).Foreground(lipgloss.Color("#0F172A")).Render(styles.CrossMark + " Failed ")
 	case StatusCancelled:
-		return style.Background(styles.Muted).Foreground(lipgloss.Color("#FFFFFF")).Render(" Cancelled ")
+		return style.Background(styles.Warning).Foreground(lipgloss.Color("#0F172A")).Render(" Cancelled ")
 	default:
 		return style.Foreground(styles.Muted).Render(" Pending ")
 	}

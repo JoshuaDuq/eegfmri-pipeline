@@ -93,7 +93,7 @@ type Model struct {
 	toast components.Toast
 
 	// Animation
-	ticker   int
+	ticker    int
 	animQueue animation.Queue
 }
 
@@ -353,36 +353,49 @@ func (m Model) renderBaseView() string {
 }
 
 func (m Model) renderHeader() string {
-	logo := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render("EEG Pipeline")
-	version := lipgloss.NewStyle().Foreground(styles.Muted).Render(" v1.0")
+	// EEG waveform motif
+	waveform := lipgloss.NewStyle().Foreground(styles.Border).Render("~∿∿∿~")
+
+	logo := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		Render(" EEG Pipeline")
+
+	versionBadge := lipgloss.NewStyle().
+		Foreground(styles.Muted).
+		Background(styles.Border).
+		Padding(0, 1).
+		Render("v1.0")
 
 	var envBadge string
 	if m.IsCloud {
-		envBadge = "  " + styles.BadgeAccentStyle.Render("Cloud")
+		envBadge = styles.BadgeAccentStyle.Render(" CLOUD ")
 	} else {
-		envBadge = "  " + lipgloss.NewStyle().Foreground(styles.Success).Render(styles.ActiveMark+" LOCAL")
+		envBadge = lipgloss.NewStyle().
+			Foreground(styles.Success).
+			Background(styles.Surface).
+			Padding(0, 1).
+			Render(styles.ActiveMark + " Local")
 	}
+
+	titleRow := waveform + logo + "  " + versionBadge + "  " + envBadge
 
 	lineWidth := m.width - 4
 	if lineWidth < 0 {
 		lineWidth = 0
 	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
-		logo+version+envBadge,
+		titleRow,
 		styles.RenderHeaderSeparator(lineWidth),
 	)
 }
 
 func (m Model) renderSectionHeader(title string, isActive bool) string {
-	prefix := "  "
 	if isActive {
-		prefix = styles.RenderCursorOptional(m.animQueue.CursorVisible())
+		return styles.RenderSectionLabel(title)
 	}
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Secondary)
-	if isActive {
-		titleStyle = titleStyle.Foreground(styles.Primary)
-	}
-	return prefix + titleStyle.Render(title)
+	return styles.RenderDimSectionLabel(title)
 }
 
 func (m Model) renderPreprocessingColumn() string {
@@ -429,15 +442,15 @@ func (m Model) renderItem(name, description string, selected bool) string {
 
 	cursor := m.cursorPrefix(selected)
 
-	nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
+	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	if selected {
 		nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+		descStyle = lipgloss.NewStyle().Foreground(styles.TextDim)
 	}
 
 	item.WriteString(fmt.Sprintf("%s%s\n", cursor, nameStyle.Render(name)))
-
-	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-	item.WriteString("       " + descStyle.Render(description) + "\n")
+	item.WriteString("      " + descStyle.Render(description) + "\n")
 
 	return item.String()
 }
@@ -455,12 +468,10 @@ func (m Model) renderFooter() string {
 		styles.RenderKeyHint("↑↓", "Navigate"),
 		styles.RenderKeyHint("D", "Dashboard"),
 		styles.RenderKeyHint("H", "History"),
-		styles.RenderKeyHint("Enter", "Select"),
+		styles.RenderKeyHint("⏎", "Select"),
 		styles.RenderKeyHint("Q", "Quit"),
 	}
 
 	separator := styles.RenderFooterSeparator()
-	footerContent := strings.Join(hints, separator)
-
-	return styles.FooterStyle.Width(m.width - 8).Render(footerContent)
+	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, separator))
 }

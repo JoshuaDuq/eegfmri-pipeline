@@ -2,7 +2,7 @@ package styles
 
 import "github.com/charmbracelet/lipgloss"
 
-// Component styles: lab-instrument, refined. Clear hierarchy, consistent borders.
+// Component styles: Modern Research Dashboard.
 var (
 	BrandStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -11,35 +11,34 @@ var (
 
 	SectionTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(Secondary).
+				Foreground(Text).
 				MarginBottom(1)
 
 	CardStyle = lipgloss.NewStyle().
-			Padding(1, 2).
+			Padding(1, 3).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Secondary)
+			BorderForeground(Border)
 
 	CardStyleFocused = lipgloss.NewStyle().
-				Padding(1, 2).
+				Padding(1, 3).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(Primary).
-				BorderLeft(true)
+				BorderForeground(Primary)
 
 	BoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Secondary).
-			Padding(0, 1)
+			BorderForeground(Border).
+			Padding(1, 2)
 
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(TextDim).
 			MarginTop(1).
 			Border(lipgloss.NormalBorder(), true, false, false, false).
-			BorderForeground(Secondary).
+			BorderForeground(Border).
 			PaddingTop(1)
 
-	HeaderLineStyle = lipgloss.NewStyle().Foreground(Secondary)
+	HeaderLineStyle = lipgloss.NewStyle().Foreground(Border)
 
-	SectionDividerStyle = lipgloss.NewStyle().Foreground(Muted)
+	SectionDividerStyle = lipgloss.NewStyle().Foreground(Border)
 
 	ProgressFilledStyle = lipgloss.NewStyle().Foreground(Primary)
 	ProgressEmptyStyle  = lipgloss.NewStyle().Foreground(Muted)

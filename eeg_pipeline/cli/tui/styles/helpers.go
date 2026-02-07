@@ -125,12 +125,12 @@ func RenderTerminalTooSmall(width, height int) string {
 	return msg + hint + current
 }
 
-// RenderCursor returns the styled list/focus cursor (SelectedMark + space).
+// RenderCursor returns the styled list/focus cursor.
 func RenderCursor() string {
 	return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(SelectedMark + " ")
 }
 
-// RenderCursorOptional returns the cursor when visible, or two spaces for alignment (for blink).
+// RenderCursorOptional returns the cursor when visible, or matching whitespace for alignment.
 func RenderCursorOptional(visible bool) string {
 	if visible {
 		return RenderCursor()
@@ -145,10 +145,12 @@ func RenderFooterSeparator() string {
 
 func RenderKeyHint(key, label string) string {
 	keyStyle := lipgloss.NewStyle().
-		Foreground(Accent).
-		Bold(true)
-	labelStyle := lipgloss.NewStyle().Foreground(TextDim).PaddingLeft(1)
-	return keyStyle.Render(key) + labelStyle.Render(" "+label)
+		Foreground(Text).
+		Background(Border).
+		Bold(true).
+		Padding(0, 1)
+	labelStyle := lipgloss.NewStyle().Foreground(TextDim)
+	return keyStyle.Render(key) + " " + labelStyle.Render(label)
 }
 
 // RenderHeaderSeparator returns a styled horizontal line (e.g. for under titles).
@@ -161,26 +163,40 @@ func RenderHeaderSeparator(width int) string {
 
 func RenderCheckbox(checked, focused bool) string {
 	if checked && focused {
-		return lipgloss.NewStyle().Foreground(Success).Bold(true).Render("◉")
+		return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("▣")
 	}
 	if checked {
-		return lipgloss.NewStyle().Foreground(Success).Render("●")
+		return lipgloss.NewStyle().Foreground(Success).Render("▣")
 	}
 	if focused {
-		return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("○")
+		return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("□")
 	}
-	return lipgloss.NewStyle().Foreground(Muted).Render("○")
+	return lipgloss.NewStyle().Foreground(Muted).Render("□")
 }
 
 func RenderRadio(selected, focused bool) string {
 	if selected && focused {
-		return lipgloss.NewStyle().Foreground(Accent).Bold(true).Render("◉")
+		return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("◉")
 	}
 	if selected {
-		return lipgloss.NewStyle().Foreground(Primary).Render("●")
+		return lipgloss.NewStyle().Foreground(Primary).Render("◉")
 	}
 	if focused {
 		return lipgloss.NewStyle().Foreground(Primary).Render("○")
 	}
 	return lipgloss.NewStyle().Foreground(Muted).Render("○")
+}
+
+// RenderSectionLabel renders a styled section label with a left accent bar.
+func RenderSectionLabel(title string) string {
+	bar := lipgloss.NewStyle().Foreground(Primary).Render(SectionIcon)
+	label := lipgloss.NewStyle().Bold(true).Foreground(Text).Render(" " + title)
+	return bar + label
+}
+
+// RenderDimSectionLabel renders a section label for inactive sections.
+func RenderDimSectionLabel(title string) string {
+	bar := lipgloss.NewStyle().Foreground(Border).Render(SectionIcon)
+	label := lipgloss.NewStyle().Bold(true).Foreground(TextDim).Render(" " + title)
+	return bar + label
 }

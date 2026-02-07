@@ -42,32 +42,32 @@ func (m Model) renderConfirmation() string {
 	content.WriteString("\n")
 
 	yesBtn := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#000000")).
+		Foreground(styles.BgDark).
 		Background(styles.Success).
 		Bold(true).
 		Padding(0, 2).
 		Render("[Y] Execute")
 
 	dryRunBtn := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#000000")).
+		Foreground(styles.BgDark).
 		Background(styles.Warning).
 		Bold(true).
 		Padding(0, 2).
 		Render("[D] Dry-run")
 
 	noBtn := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
+		Foreground(styles.BgDark).
 		Background(styles.Error).
 		Bold(true).
 		Padding(0, 2).
-		Render("✗ [N] Cancel")
+		Render(styles.CrossMark + " [N] Cancel")
 
 	actions := lipgloss.JoinHorizontal(lipgloss.Left, yesBtn, "  ", dryRunBtn, "  ", noBtn)
 	content.WriteString("  " + actions)
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(styles.Secondary).
+		BorderForeground(styles.Border).
 		Padding(1, 2)
 
 	return boxStyle.Render(content.String())
@@ -342,7 +342,7 @@ func (m Model) renderBandSelection() string {
 
 		freqStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		if isFocused {
-			freqStyle = lipgloss.NewStyle().Foreground(styles.Secondary)
+			freqStyle = lipgloss.NewStyle().Foreground(styles.Muted)
 		}
 		var lowHzDisplay, highHzDisplay string
 		if isEditing && m.editingBandField == 1 {
@@ -406,7 +406,7 @@ func (m Model) renderROISelection() string {
 		}
 		channelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		if isFocused {
-			channelStyle = lipgloss.NewStyle().Foreground(styles.Secondary)
+			channelStyle = lipgloss.NewStyle().Foreground(styles.Muted)
 		}
 		var channelsDisplay string
 		if isEditing && m.editingROIField == 1 {
@@ -651,7 +651,7 @@ func (m Model) renderFeatureFileSelection() string {
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
 		}
 		b.WriteString(checkbox + nameStyle.Render(file.Name))
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  "+file.Description))
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + file.Description))
 
 		if m.featureAvailability != nil {
 			if m.featureAvailability[file.Key] {

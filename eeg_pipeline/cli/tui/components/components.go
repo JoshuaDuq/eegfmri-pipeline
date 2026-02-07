@@ -44,13 +44,13 @@ func (t *Toast) Tick() {
 func (t Toast) toastColors() (icon string, bgColor, fgColor lipgloss.Color) {
 	switch t.Type {
 	case ToastSuccess:
-		return styles.CheckMark, styles.Success, lipgloss.Color("#000000")
+		return styles.CheckMark, styles.Success, styles.BgDark
 	case ToastWarning:
-		return styles.WarningMark, styles.Warning, lipgloss.Color("#000000")
+		return styles.WarningMark, styles.Warning, styles.BgDark
 	case ToastError:
-		return styles.CrossMark, styles.Error, lipgloss.Color("#FFFFFF")
+		return styles.CrossMark, styles.Error, styles.BgDark
 	default:
-		return "ℹ", styles.Accent, lipgloss.Color("#000000")
+		return "ℹ", styles.Accent, styles.BgDark
 	}
 }
 
@@ -63,8 +63,6 @@ func (t Toast) View() string {
 	return lipgloss.NewStyle().
 		Foreground(fgColor).
 		Background(bgColor).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Muted).
 		Padding(0, 2).
 		Bold(true).
 		Render(icon + " " + t.Message)
@@ -110,17 +108,18 @@ func (h HelpOverlay) View() string {
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(styles.Primary).
+		Foreground(styles.Text).
 		MarginBottom(1)
 	content.WriteString(titleStyle.Render(h.Title) + "\n\n")
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(styles.Accent).
+		Foreground(styles.Text).
+		Background(styles.Border).
 		Bold(true).
-		Width(helpKeyWidth)
-	descStyle := lipgloss.NewStyle().Foreground(styles.Text)
+		Padding(0, 1)
+	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(styles.TextDim).
+		Foreground(styles.Primary).
 		Bold(true).
 		MarginTop(1)
 
@@ -133,20 +132,20 @@ func (h HelpOverlay) View() string {
 
 		content.WriteString(sectionStyle.Render(sectionName) + "\n")
 		for _, item := range items {
-			keyText := keyStyle.Render(item.Key)
+			keyText := lipgloss.NewStyle().Width(helpKeyWidth).Render(keyStyle.Render(item.Key))
 			descText := descStyle.Render(item.Description)
-			content.WriteString(keyText + descText + "\n")
+			content.WriteString(keyText + " " + descText + "\n")
 		}
 		content.WriteString("\n")
 	}
 
-	dismissHint := lipgloss.NewStyle().Foreground(styles.Muted).Render("press ? or Esc to close")
+	dismissHint := lipgloss.NewStyle().Foreground(styles.Muted).Render("? or Esc to close")
 	content.WriteString(dismissHint)
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Secondary).
-		Padding(1, 2).
+		BorderForeground(styles.Border).
+		Padding(1, 3).
 		Width(h.Width)
 
 	return box.Render(content.String())
@@ -243,8 +242,7 @@ func (p InfoPanel) View() string {
 	var content strings.Builder
 
 	if p.Title != "" {
-		titleText := " " + p.Title + " "
-		content.WriteString(styles.SectionTitleStyle.Render(titleText) + "\n\n")
+		content.WriteString(styles.RenderSectionLabel(p.Title) + "\n\n")
 	}
 
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(p.LabelWidth)
@@ -256,7 +254,7 @@ func (p InfoPanel) View() string {
 			valueStyle = row.Style
 		}
 
-		labelText := labelStyle.Render(row.Label + ":")
+		labelText := labelStyle.Render(row.Label)
 		valueText := valueStyle.Render(row.Value)
 		content.WriteString(labelText + " " + valueText + "\n")
 	}

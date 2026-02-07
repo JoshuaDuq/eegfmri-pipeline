@@ -123,10 +123,7 @@ func (m Model) View() string {
 
 	var b strings.Builder
 
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Primary).
-		Render("Quick actions")
+	header := styles.RenderSectionLabel("Quick Actions")
 	b.WriteString(header + "\n")
 	b.WriteString(styles.RenderHeaderSeparator(35) + "\n\n")
 
@@ -136,12 +133,11 @@ func (m Model) View() string {
 
 	b.WriteString("\n")
 
-	footer := lipgloss.NewStyle().Foreground(styles.Muted).Render("use shortcuts or ") +
-		lipgloss.NewStyle().Foreground(styles.Primary).Render("Enter") +
-		lipgloss.NewStyle().Foreground(styles.Muted).Render(" to select")
+	footer := lipgloss.NewStyle().Foreground(styles.Muted).Render("shortcuts or ") +
+		styles.RenderKeyHint("\u23ce", "select")
 	b.WriteString(footer)
 
-	return styles.CardStyle.Width(42).Padding(1, 2).Render(b.String())
+	return styles.CardStyle.Width(42).Render(b.String())
 }
 
 func (m Model) renderAction(action Action, isCursor bool) string {
@@ -150,35 +146,32 @@ func (m Model) renderAction(action Action, isCursor bool) string {
 		cursor = styles.RenderCursorOptional(m.animQueue.CursorVisible())
 	}
 
-	shortcutStyle := lipgloss.NewStyle()
+	shortcutStyle := lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Background(styles.Border).
+		Bold(true).
+		Padding(0, 1)
 	if isCursor {
-		shortcutStyle = shortcutStyle.
-			Foreground(lipgloss.Color("#000000")).
-			Background(styles.Accent).
+		shortcutStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#0F172A")).
+			Background(styles.Primary).
 			Bold(true).
 			Padding(0, 1)
-	} else {
-		shortcutStyle = shortcutStyle.
-			Foreground(styles.Accent).
-			Bold(true)
 	}
 	shortcut := shortcutStyle.Render(action.Shortcut)
 
-	nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
-	iconStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	if isCursor {
-		nameStyle = nameStyle.Foreground(styles.Primary).Bold(true)
-		iconStyle = iconStyle.Foreground(styles.Accent)
+		nameStyle = nameStyle.Foreground(styles.Text).Bold(true)
 	}
-	name := iconStyle.Render(action.Icon) + " " + nameStyle.Render(action.Name)
+	name := nameStyle.Render(action.Name)
 
 	desc := ""
 	if isCursor {
 		descStyle := lipgloss.NewStyle().
-			Foreground(styles.TextDim).
-			Italic(true).
+			Foreground(styles.Muted).
 			PaddingLeft(6)
-		desc = "\n" + descStyle.Render("→ "+action.Description)
+		desc = "\n" + descStyle.Render(action.Description)
 	}
 
 	return cursor + shortcut + " " + name + desc

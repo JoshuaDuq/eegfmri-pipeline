@@ -71,7 +71,7 @@ func (m Model) View() string {
 		Width(containerW).
 		Height(containerH).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Secondary).
+		BorderForeground(styles.Border).
 		Padding(containerPadV, containerPadH).
 		Render(innerView)
 
@@ -191,8 +191,8 @@ func (m Model) renderHeader(width int) string {
 }
 
 func (m Model) buildTitleRow() string {
-	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	title := accentStyle.Render(styles.SelectedMark+" ") + styles.BrandStyle.Render(strings.ToUpper(m.Pipeline.String()))
+	pipelineName := strings.ToUpper(m.Pipeline.String())
+	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(pipelineName)
 
 	parts := []string{title}
 	if badge := m.buildSubjectBadge(); badge != "" {
@@ -224,7 +224,7 @@ func (m Model) buildPresetBadge() string {
 
 func (m Model) badge(text string, bg lipgloss.Color) string {
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#000000")).
+		Foreground(styles.BgDark).
 		Background(bg).
 		Bold(true).
 		Padding(0, 1).
@@ -236,7 +236,7 @@ func (m Model) buildBreadcrumbRow() string {
 	isCompact := w < narrowWidthThreshold
 
 	var parts []string
-	connector := lipgloss.NewStyle().Foreground(styles.Secondary).Render(" → ")
+	connector := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
 	if isCompact {
 		connector = " "
 	}

@@ -142,7 +142,7 @@ func New(command string) Model {
 	vp := viewport.New(80, styles.DefaultLogHeight)
 	vp.Style = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Secondary).
+		BorderForeground(styles.Border).
 		Padding(0, 1)
 	vp.MouseWheelEnabled = true
 	vp.MouseWheelDelta = styles.MouseWheelScrollLines

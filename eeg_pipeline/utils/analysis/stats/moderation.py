@@ -359,6 +359,8 @@ def _single_permutation_moderation(
     W: np.ndarray,
     Y: np.ndarray,
     center_predictors: bool,
+    groups: Optional[np.ndarray] = None,
+    scheme: str = "shuffle",
 ) -> float:
     """Single permutation iteration for moderation null distribution.
     
@@ -383,8 +385,16 @@ def _single_permutation_moderation(
     float
         Interaction coefficient (b3) from permuted sample, or np.nan if invalid
     """
+    from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+
     rng = np.random.default_rng(perm_seed)
-    shuffle_indices = rng.permutation(len(Y))
+    groups_arr = np.asarray(groups) if groups is not None else None
+    shuffle_indices = permute_within_groups(
+        len(Y),
+        rng,
+        groups_arr,
+        scheme=scheme,
+    )
     Y_shuffled = Y[shuffle_indices]
     
     result = compute_moderation_effect(X, W, Y_shuffled, center_predictors)
@@ -400,6 +410,8 @@ def permutation_moderation_pvalue(
     center_predictors: bool = True,
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
+    groups: Optional[np.ndarray] = None,
+    scheme: str = "shuffle",
 ) -> float:
     """Compute permutation p-value for moderation interaction effect.
     
@@ -448,6 +460,12 @@ def permutation_moderation_pvalue(
     X_clean = X[valid_mask]
     W_clean = W[valid_mask]
     Y_clean = Y[valid_mask]
+    groups_valid = None
+    if groups is not None:
+        groups_arr = np.asarray(groups)
+        if len(groups_arr) != len(X):
+            raise ValueError("groups length must match X length for grouped moderation permutation.")
+        groups_valid = groups_arr[valid_mask]
     
     if n_jobs == -1:
         n_jobs_actual = max(1, cpu_count() - 1)
@@ -462,14 +480,14 @@ def permutation_moderation_pvalue(
     if should_parallelize:
         null_effects = Parallel(n_jobs=n_jobs_actual, backend="loky")(
             delayed(_single_permutation_moderation)(
-                base_seed + i, X_clean, W_clean, Y_clean, center_predictors
+                base_seed + i, X_clean, W_clean, Y_clean, center_predictors, groups_valid, scheme
             )
             for i in range(n_perm)
         )
     else:
         null_effects = [
             _single_permutation_moderation(
-                base_seed + i, X_clean, W_clean, Y_clean, center_predictors
+                base_seed + i, X_clean, W_clean, Y_clean, center_predictors, groups_valid, scheme
             )
             for i in range(n_perm)
         ]
@@ -497,6 +515,8 @@ def run_moderation_analysis(
     center_predictors: bool = True,
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
+    groups: Optional[np.ndarray] = None,
+    permutation_scheme: str = "shuffle",
 ) -> ModerationResult:
     """Run complete moderation analysis with optional permutation test.
     
@@ -533,7 +553,11 @@ def run_moderation_analysis(
     if n_perm > 0 and np.isfinite(result.b3):
         result.p_b3_perm = permutation_moderation_pvalue(
             X, W, Y, result.b3, n_perm=n_perm,
-            center_predictors=center_predictors, rng=rng, n_jobs=n_jobs
+            center_predictors=center_predictors,
+            rng=rng,
+            n_jobs=n_jobs,
+            groups=groups,
+            scheme=permutation_scheme,
         )
         result.n_permutations = n_perm
     

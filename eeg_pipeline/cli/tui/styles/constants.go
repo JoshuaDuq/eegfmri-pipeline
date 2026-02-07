@@ -52,13 +52,15 @@ const (
 	CrossMark           = "✗"
 	PendingMark         = "○"
 	ActiveMark          = "●"
-	SelectedMark        = "▸"
-	BulletMark          = "•"
+	SelectedMark        = "›"
+	BulletMark          = "·"
 	WarningMark         = "⚠"
-	FooterHintSeparator = "  │  "
+	FooterHintSeparator = "  ·  "
 
-	HeaderSeparatorChar = "─"
+	HeaderSeparatorChar = "━"
 	SectionDividerChar  = "─"
+
+	SectionIcon = "│"
 )
 
 const (

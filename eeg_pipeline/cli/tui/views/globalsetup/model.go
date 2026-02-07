@@ -25,7 +25,6 @@ type sectionKey int
 const (
 	sectionProject sectionKey = iota
 	sectionPaths
-	sectionEvents
 )
 
 type fieldKey int
@@ -39,9 +38,6 @@ const (
 	fieldDerivRoot
 	fieldSourceRoot
 	fieldFreesurferDir
-	fieldEventTemp
-	fieldEventRating
-	fieldEventPain
 )
 
 type sectionDef struct {
@@ -87,10 +83,6 @@ type Model struct {
 	sourceRoot    string
 	freesurferDir string
 
-	eventTemp   string
-	eventRating string
-	eventPain   string
-
 	isLoading     bool
 	isSaving      bool
 	statusMessage string
@@ -117,9 +109,6 @@ func DefaultConfigKeys() []string {
 		"paths.deriv_root",
 		"paths.source_data",
 		"paths.freesurfer_dir",
-		"event_columns.temperature",
-		"event_columns.rating",
-		"event_columns.pain_binary",
 	}
 }
 
@@ -131,7 +120,6 @@ func New(repoRoot string) Model {
 		sections: []sectionDef{
 			{sectionProject, "Project", "Task, random seed, and subject filter"},
 			{sectionPaths, "Paths", "BIDS and data roots"},
-			{sectionEvents, "Events", "Behavior columns"},
 		},
 		isLoading: true,
 	}
@@ -186,15 +174,6 @@ func (m *Model) SetConfigValues(values map[string]interface{}) {
 	}
 	if v, ok := values["paths.freesurfer_dir"]; ok {
 		m.freesurferDir = toString(v, m.freesurferDir)
-	}
-	if v, ok := values["event_columns.temperature"]; ok {
-		m.eventTemp = strings.Join(toStringList(v), ", ")
-	}
-	if v, ok := values["event_columns.rating"]; ok {
-		m.eventRating = strings.Join(toStringList(v), ", ")
-	}
-	if v, ok := values["event_columns.pain_binary"]; ok {
-		m.eventPain = strings.Join(toStringList(v), ", ")
 	}
 }
 
