@@ -292,6 +292,10 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 					if m.sourceLocFmriDriftModel != 1 { // cosine is default
 						args = append(args, "--source-fmri-drift-model", driftModels[m.sourceLocFmriDriftModel])
 					}
+					if strings.TrimSpace(m.sourceLocFmriConditionScopeTrialTypes) != "" {
+						args = append(args, "--source-fmri-condition-scope-trial-types")
+						args = append(args, splitSpaceList(strings.TrimSpace(m.sourceLocFmriConditionScopeTrialTypes))...)
+					}
 					if strings.TrimSpace(m.sourceLocFmriStimPhasesToModel) != "" {
 						args = append(args, "--source-fmri-stim-phases-to-model", strings.TrimSpace(m.sourceLocFmriStimPhasesToModel))
 					}

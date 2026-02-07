@@ -6,8 +6,6 @@ eeg_pipeline.analysis.machine_learning.orchestration.
 
 Compute and visualization are separated (SRP):
 - run_batch(): compute only, writes stable results contract
-- run_batch_with_plots(): compute + visualization (convenience)
-- visualize(): plot from existing results on disk
 
 ML inputs
 ---------
@@ -39,17 +37,12 @@ Usage:
     # Compute only (SRP)
     pipeline.run_batch(["0001", "0002"], mode="regression")
     
-    # Compute + visualize
-    pipeline.run_batch_with_plots(["0001", "0002"], mode="regression")
-    
-    # Visualize from disk
-    pipeline.visualize(results_dir, mode="regression")
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from eeg_pipeline.analysis.machine_learning.orchestration import (
     run_regression_ml,
@@ -61,11 +54,6 @@ from eeg_pipeline.analysis.machine_learning.orchestration import (
     run_incremental_validity_ml,
 )
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.plotting.orchestration.machine_learning import (
-    visualize_regression_from_disk,
-    visualize_time_generalization_from_disk,
-    visualize_classification_from_disk,
-)
 
 
 MLMode = Literal[
@@ -664,57 +652,17 @@ class MLPipeline(PipelineBase):
             for d in results_dirs
         ]
 
-    def _visualize_regression(self, results_dir: Path) -> None:
-        """Visualize regression results."""
-        visualize_regression_from_disk(
-            results_dir=results_dir,
-            config=self.config,
-            logger=self.logger,
-        )
-
-    def _visualize_timegen(self, results_dir: Path) -> None:
-        """Visualize time-generalization results."""
-        visualize_time_generalization_from_disk(
-            results_dir=results_dir,
-            config=self.config,
-            logger=self.logger,
-        )
-
-    def _visualize_classify(self, results_dir: Path) -> None:
-        """Visualize classification results."""
-        visualize_classification_from_disk(
-            results_dir=results_dir,
-            config=self.config,
-            logger=self.logger,
-        )
-
-    def _get_visualization_dispatcher(self) -> Dict[str, Callable[[Path], None]]:
-        """Return visualization dispatch dictionary."""
-        return {
-            "regression": self._visualize_regression,
-            "timegen": self._visualize_timegen,
-            "classify": self._visualize_classify,
-        }
-
     def visualize(
         self,
         results_dir: Path,
         mode: MLMode = "regression",
     ) -> None:
-        """Visualize ML results from disk.
-        
-        Single responsibility: Read results contract and create plots.
-        """
-        dispatcher = self._get_visualization_dispatcher()
-        
-        if mode not in dispatcher:
-            valid_modes = ", ".join(sorted(dispatcher.keys()))
-            raise ValueError(
-                f"Visualization not supported for mode: {mode} "
-                f"(expected one of: {valid_modes})"
-            )
-        
-        dispatcher[mode](results_dir)
+        """Machine-learning plotting has been removed."""
+        _ = (results_dir, mode)
+        raise NotImplementedError(
+            "Machine-learning plotting implementation has been removed. "
+            "Use compute outputs under derivatives/machine_learning directly."
+        )
 
     def run_batch_with_plots(
         self,
@@ -723,17 +671,8 @@ class MLPipeline(PipelineBase):
         mode: MLMode = "regression",
         **kwargs,
     ) -> List[Dict[str, Any]]:
-        """Run ML pipeline with visualization (convenience wrapper).
-        
-        Composes: run_batch + visualize
-        """
-        results = self.run_batch(subjects, task, mode, **kwargs)
-        
-        for r in results:
-            if r.get("status") == "success" and r.get("results_dir"):
-                self.visualize(Path(r["results_dir"]), mode)
-        
-        return results
+        """Backward-compatible alias for run_batch (plotting removed)."""
+        return self.run_batch(subjects, task, mode, **kwargs)
 
 
 __all__ = [

@@ -569,12 +569,14 @@ const (
 	textFieldFmriAnalysisContrastName
 	textFieldFmriAnalysisFormula
 	textFieldFmriAnalysisEventsToModel
+	textFieldFmriAnalysisScopeTrialTypes
 	textFieldFmriAnalysisStimPhasesToModel
 	textFieldFmriAnalysisOutputDir
 	textFieldFmriAnalysisFreesurferDir
 	textFieldFmriAnalysisSignatureDir
 	textFieldFmriTrialSigGroupColumn
 	textFieldFmriTrialSigGroupValues
+	textFieldFmriTrialSigScopeTrialTypes
 	textFieldFmriTrialSigScopeStimPhases
 	textFieldRawMontage
 	textFieldPrepMontage
@@ -588,6 +590,7 @@ const (
 	textFieldRawEventPrefixes
 	textFieldMergeEventPrefixes
 	textFieldMergeEventTypes
+	textFieldMergeQCColumns
 	// fMRI raw-to-bids text fields
 	textFieldFmriRawSession
 	textFieldFmriRawRestTask
@@ -639,6 +642,7 @@ const (
 	textFieldSourceLocFmriContrastFormula
 	textFieldSourceLocFmriContrastName
 	textFieldSourceLocFmriRunsToInclude
+	textFieldSourceLocFmriConditionScopeTrialTypes
 	textFieldSourceLocFmriStimPhasesToModel
 	textFieldSourceLocFmriWindowAName
 	textFieldSourceLocFmriWindowBName
@@ -759,12 +763,6 @@ var defaultPlotItems = []PlotItem{
 	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations*/*/temporal_correlations_by_condition*.npz"}, RequiresStats: true},
 	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"stats/trial_table*/*/trials*.tsv", "stats/trial_table*/*/trials*.parquet"}, RequiresStats: true},
 	{ID: "behavior_pain_probability", Group: "behavior", Name: "Pain Probability", Description: "Pain probability vs dose (binary outcome vs temperature)", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	// Machine Learning
-	{ID: "ml_regression_plots", Group: "machine_learning", Name: "Regression Plots", Description: "LOSO regression diagnostics", RequiredFiles: []string{"machine_learning/regression/loso_predictions.tsv"}},
-	{ID: "ml_timegen_plots", Group: "machine_learning", Name: "Time-Generalization", Description: "Time-generalization matrices", RequiredFiles: []string{"machine_learning/time_generalization/time_generalization_regression.npz"}},
-	{ID: "ml_classification_plots", Group: "machine_learning", Name: "Classification", Description: "LOSO classification diagnostics", RequiredFiles: []string{"machine_learning/classification/loso_predictions.tsv"}},
-	{ID: "ml_within_subject_regression_plots", Group: "machine_learning", Name: "Within-Subject Regression", Description: "Block-aware within-subject regression diagnostics", RequiredFiles: []string{"machine_learning/within_subject_regression/cv_predictions.tsv"}},
-	{ID: "ml_within_subject_classification_plots", Group: "machine_learning", Name: "Within-Subject Classification", Description: "Block-aware within-subject classification diagnostics", RequiredFiles: []string{"machine_learning/within_subject_classification/cv_predictions.tsv"}},
 }
 
 var defaultPlotCategories = []FeatureCategory{
@@ -782,7 +780,6 @@ var defaultPlotCategories = []FeatureCategory{
 	{"erp", "ERP", "Event-related potential waveforms and topographies"},
 	{"tfr", "Time-Frequency", "Time-frequency representations and contrasts"},
 	{"behavior", "Behavior", "EEG-behavior correlations and temporal stats"},
-	{"machine_learning", "Machine Learning", "Machine learning regression, time-generalization, and classification"},
 }
 
 type plotCatalogPayload struct {
@@ -1015,7 +1012,8 @@ type Model struct {
 	fmriAnalysisContrastName      string // e.g., "pain_vs_nonpain"
 	fmriAnalysisFormula           string // Custom formula
 	fmriAnalysisEventsToModel     string // Optional: comma-separated list of trial_type values to include (first-level only)
-	fmriAnalysisStimPhasesToModel string // "": auto (plateau if present), "all", or specific phase(s)
+	fmriAnalysisScopeTrialTypes   string // Optional: space-separated trial_type allow-list for condition selection
+	fmriAnalysisStimPhasesToModel string // Optional: comma-separated stim_phase allow-list (empty = no scoping)
 	fmriAnalysisHrfModel          int    // 0: spm, 1: flobs, 2: fir
 	fmriAnalysisDriftModel        int    // 0: none, 1: cosine, 2: polynomial
 	fmriAnalysisHighPassHz        float64
@@ -1079,7 +1077,8 @@ type Model struct {
 	fmriTrialSigGroupColumn     string // e.g., temperature
 	fmriTrialSigGroupValuesSpec string // space-separated values (e.g., "44.3 45.3 46.3")
 	fmriTrialSigGroupScopeIndex int    // 0: across-runs (average), 1: per-run
-	fmriTrialSigScopeStimPhases string // "": auto (plateau if present), "all", or specific phase(s)
+	fmriTrialSigScopeTrialTypes string // Optional: space-separated trial_type allow-list
+	fmriTrialSigScopeStimPhases string // Optional: space-separated stim_phase allow-list (empty = no scoping)
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
 	plotGroupDefaultsExpanded    bool
@@ -1603,28 +1602,29 @@ type Model struct {
 	sourceLocCreateBemSolution  bool // Auto-create BEM solution via Docker
 
 	// fMRI GLM contrast builder (for fMRI-informed mode)
-	sourceLocFmriContrastEnabled   bool     // Build contrast from BOLD data (vs. load pre-computed)
-	sourceLocFmriContrastType      int      // 0: t-test, 1: paired t-test, 2: F-test, 3: custom formula
-	sourceLocFmriCondAColumn       string   // Condition A column (e.g., "trial_type", "pain_binary")
-	sourceLocFmriCondAValue        string   // Condition A value (e.g., "temp49p3", "1")
-	sourceLocFmriCondBColumn       string   // Condition B column
-	sourceLocFmriCondBValue        string   // Condition B value
-	sourceLocFmriConditions        []string // Discovered conditions from fMRI events files (for backward compat)
-	sourceLocFmriCondIdx1          int      // Index into discovered conditions for Condition A
-	sourceLocFmriCondIdx2          int      // Index into discovered conditions for Condition B
-	sourceLocFmriContrastFormula   string   // Custom formula (e.g., "pain_high - pain_low")
-	sourceLocFmriContrastName      string   // Contrast name (e.g., "pain_vs_baseline")
-	sourceLocFmriRunsToInclude     string   // Comma-separated runs (e.g., "1,2,3")
-	sourceLocFmriAutoDetectRuns    bool     // Auto-detect available BOLD runs
-	sourceLocFmriHrfModel          int      // 0: SPM, 1: FLOBS, 2: FIR
-	sourceLocFmriDriftModel        int      // 0: none, 1: cosine, 2: polynomial
-	sourceLocFmriHighPassHz        float64  // High-pass cutoff (Hz)
-	sourceLocFmriLowPassHz         float64  // Low-pass cutoff (Hz)
-	sourceLocFmriStimPhasesToModel string   // "": auto (plateau if present), "all", or specific phase(s)
-	sourceLocFmriClusterCorrection bool     // Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction)
-	sourceLocFmriClusterPThreshold float64  // Cluster-forming p-threshold
-	sourceLocFmriOutputType        int      // 0: z-score, 1: t-stat, 2: cope, 3: beta
-	sourceLocFmriResampleToFS      bool     // Auto-resample to FreeSurfer space
+	sourceLocFmriContrastEnabled          bool     // Build contrast from BOLD data (vs. load pre-computed)
+	sourceLocFmriContrastType             int      // 0: t-test, 1: paired t-test, 2: F-test, 3: custom formula
+	sourceLocFmriCondAColumn              string   // Condition A column (e.g., "trial_type", "pain_binary")
+	sourceLocFmriCondAValue               string   // Condition A value (e.g., "temp49p3", "1")
+	sourceLocFmriCondBColumn              string   // Condition B column
+	sourceLocFmriCondBValue               string   // Condition B value
+	sourceLocFmriConditions               []string // Discovered conditions from fMRI events files (for backward compat)
+	sourceLocFmriCondIdx1                 int      // Index into discovered conditions for Condition A
+	sourceLocFmriCondIdx2                 int      // Index into discovered conditions for Condition B
+	sourceLocFmriContrastFormula          string   // Custom formula (e.g., "pain_high - pain_low")
+	sourceLocFmriContrastName             string   // Contrast name (e.g., "pain_vs_baseline")
+	sourceLocFmriRunsToInclude            string   // Comma-separated runs (e.g., "1,2,3")
+	sourceLocFmriAutoDetectRuns           bool     // Auto-detect available BOLD runs
+	sourceLocFmriHrfModel                 int      // 0: SPM, 1: FLOBS, 2: FIR
+	sourceLocFmriDriftModel               int      // 0: none, 1: cosine, 2: polynomial
+	sourceLocFmriHighPassHz               float64  // High-pass cutoff (Hz)
+	sourceLocFmriLowPassHz                float64  // Low-pass cutoff (Hz)
+	sourceLocFmriConditionScopeTrialTypes string   // Optional: space-separated trial_type allow-list for condition selection
+	sourceLocFmriStimPhasesToModel        string   // Optional: stim_phase allow-list (empty = no scoping)
+	sourceLocFmriClusterCorrection        bool     // Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction)
+	sourceLocFmriClusterPThreshold        float64  // Cluster-forming p-threshold
+	sourceLocFmriOutputType               int      // 0: z-score, 1: t-stat, 2: cope, 3: beta
+	sourceLocFmriResampleToFS             bool     // Auto-resample to FreeSurfer space
 
 	// fMRI-specific time windows (independent of EEG feature extraction windows)
 	sourceLocFmriWindowAName string  // Name for window A (e.g., "plateau")
@@ -2083,6 +2083,7 @@ type Model struct {
 	rawKeepAnnotations   bool
 	mergeEventPrefixes   string
 	mergeEventTypes      string
+	mergeQCColumns       string
 	// Utilities (fMRI raw-to-bids) advanced config
 	fmriRawSession          string
 	fmriRawRestTask         string
@@ -2334,31 +2335,32 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriRandomSeed:    0,
 
 		// fMRI GLM contrast builder defaults
-		sourceLocFmriContrastEnabled:   false,
-		sourceLocFmriContrastType:      0, // 0: t-test
-		sourceLocFmriCondAColumn:       "trial_type",
-		sourceLocFmriCondAValue:        "",
-		sourceLocFmriCondBColumn:       "trial_type",
-		sourceLocFmriCondBValue:        "",
-		sourceLocFmriContrastFormula:   "",
-		sourceLocFmriContrastName:      "pain_vs_baseline",
-		sourceLocFmriRunsToInclude:     "",
-		sourceLocFmriAutoDetectRuns:    true,
-		sourceLocFmriHrfModel:          0,     // 0: SPM
-		sourceLocFmriDriftModel:        1,     // 1: cosine
-		sourceLocFmriHighPassHz:        0.008, // 128s period
-		sourceLocFmriLowPassHz:         0.0,
-		sourceLocFmriStimPhasesToModel: "", // auto (plateau-only default when present)
-		sourceLocFmriClusterCorrection: true,
-		sourceLocFmriClusterPThreshold: 0.001,
-		sourceLocFmriOutputType:        0, // 0: z-score
-		sourceLocFmriResampleToFS:      true,
-		sourceLocFmriWindowAName:       "plateau",
-		sourceLocFmriWindowATmin:       5.0,
-		sourceLocFmriWindowATmax:       10.0,
-		sourceLocFmriWindowBName:       "baseline",
-		sourceLocFmriWindowBTmin:       -2.0,
-		sourceLocFmriWindowBTmax:       0.0,
+		sourceLocFmriContrastEnabled:          false,
+		sourceLocFmriContrastType:             0, // 0: t-test
+		sourceLocFmriCondAColumn:              "trial_type",
+		sourceLocFmriCondAValue:               "",
+		sourceLocFmriCondBColumn:              "trial_type",
+		sourceLocFmriCondBValue:               "",
+		sourceLocFmriContrastFormula:          "",
+		sourceLocFmriContrastName:             "pain_vs_baseline",
+		sourceLocFmriRunsToInclude:            "",
+		sourceLocFmriAutoDetectRuns:           true,
+		sourceLocFmriHrfModel:                 0,     // 0: SPM
+		sourceLocFmriDriftModel:               1,     // 1: cosine
+		sourceLocFmriHighPassHz:               0.008, // 128s period
+		sourceLocFmriLowPassHz:                0.0,
+		sourceLocFmriConditionScopeTrialTypes: "",
+		sourceLocFmriStimPhasesToModel:        "", // no default scoping
+		sourceLocFmriClusterCorrection:        true,
+		sourceLocFmriClusterPThreshold:        0.001,
+		sourceLocFmriOutputType:               0, // 0: z-score
+		sourceLocFmriResampleToFS:             true,
+		sourceLocFmriWindowAName:              "plateau",
+		sourceLocFmriWindowATmin:              5.0,
+		sourceLocFmriWindowATmax:              10.0,
+		sourceLocFmriWindowBName:              "baseline",
+		sourceLocFmriWindowBTmin:              -2.0,
+		sourceLocFmriWindowBTmax:              0.0,
 
 		// Source localization UI expansion states
 		featGroupSourceLocExpanded:         false,
@@ -2747,6 +2749,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		rawKeepAnnotations:   false,
 		mergeEventPrefixes:   "",
 		mergeEventTypes:      "",
+		mergeQCColumns:       "",
 		// fMRI raw-to-bids defaults
 		fmriRawSession:          "",
 		fmriRawRestTask:         "rest",
@@ -3010,7 +3013,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisContrastName = "pain_vs_nonpain"
 		m.fmriAnalysisFormula = ""
 		m.fmriAnalysisEventsToModel = ""
-		m.fmriAnalysisStimPhasesToModel = "" // auto (plateau-only default when present)
+		m.fmriAnalysisScopeTrialTypes = ""
+		m.fmriAnalysisStimPhasesToModel = "" // no default scoping
 		m.fmriAnalysisHrfModel = 0           // spm
 		m.fmriAnalysisDriftModel = 1         // cosine
 		m.fmriAnalysisHighPassHz = 0.008
@@ -3071,8 +3075,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriTrialSigLssOtherRegressorsIndex = 0 // per-condition
 		m.fmriTrialSigGroupColumn = ""
 		m.fmriTrialSigGroupValuesSpec = ""
-		m.fmriTrialSigGroupScopeIndex = 0  // across-runs (average)
-		m.fmriTrialSigScopeStimPhases = "" // auto (plateau-only default when present)
+		m.fmriTrialSigGroupScopeIndex = 0 // across-runs (average)
+		m.fmriTrialSigScopeTrialTypes = ""
+		m.fmriTrialSigScopeStimPhases = "" // no default scoping
 
 		// Backward-compat: older configs used modeIndex 2=lss.
 		// New mode options are 0=first-level, 1=trial-signatures, with method selected separately.

@@ -32,6 +32,10 @@ func (m Model) renderMergeBehaviorAdvancedConfig() string {
 	if m.editingText && m.editingTextField == textFieldMergeEventTypes {
 		typeVal = m.textBuffer + "█"
 	}
+	qcVal := m.mergeQCColumns
+	if m.editingText && m.editingTextField == textFieldMergeQCColumns {
+		qcVal = m.textBuffer + "█"
+	}
 
 	options := []struct {
 		label string
@@ -41,6 +45,7 @@ func (m Model) renderMergeBehaviorAdvancedConfig() string {
 		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
 		{"Event Prefixes", prefixVal, "Comma-separated (optional)"},
 		{"Event Types", typeVal, "Comma-separated (optional)"},
+		{"QC Columns", qcVal, "Comma-separated (optional)"},
 	}
 
 	for i, opt := range options {
@@ -76,4 +81,3 @@ func (m Model) renderMergeBehaviorAdvancedConfig() string {
 
 	return b.String()
 }
-

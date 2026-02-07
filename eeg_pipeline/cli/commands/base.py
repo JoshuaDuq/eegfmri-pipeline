@@ -510,9 +510,6 @@ def discover_condition_effects_columns(
                                 val2 = df["condition_value2"].iloc[0]
                                 if pd.notna(val1) and pd.notna(val2):
                                     result["values"][cond_col] = [str(val1).strip(), str(val2).strip()]
-                            elif "mean_pain" in df.columns and "mean_nonpain" in df.columns:
-                                # Fallback: infer from column names
-                                result["values"][cond_col] = ["pain", "nonpain"]
                             
                             if file_path not in result["files"]:
                                 result["files"].append(str(file_path))

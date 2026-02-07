@@ -1037,6 +1037,9 @@ func (m *Model) toggleMergeBehaviorAdvancedOption() {
 	case optMergeEventTypes:
 		m.startTextEdit(textFieldMergeEventTypes)
 		m.useDefaultAdvanced = false
+	case optMergeQCColumns:
+		m.startTextEdit(textFieldMergeQCColumns)
+		m.useDefaultAdvanced = false
 	}
 }
 

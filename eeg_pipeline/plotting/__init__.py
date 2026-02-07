@@ -7,7 +7,6 @@ Submodules:
 - features: Feature distribution plots
 - tfr: Time-frequency representation plots
 - behavioral: Brain-behavior correlation plots
-- machine_learning: ML performance plots
 
 Usage:
     # Import specific functions from submodules
@@ -72,13 +71,6 @@ def __getattr__(name: str):
         "plot_temporal_correlation_topomaps_by_pain": "behavioral",
         "visualize_subject_behavior": "behavioral",
         "visualize_behavior_for_subjects": "behavioral",
-        "plot_time_generalization_with_null": "machine_learning",
-        "plot_prediction_scatter": "machine_learning",
-        "plot_per_subject_performance": "machine_learning",
-        "plot_ml_null_hist": "machine_learning",
-        "plot_calibration_curve": "machine_learning",
-        "plot_permutation_null": "machine_learning",
-        "plot_residual_diagnostics": "machine_learning",
     }
 
     if name in _module_map:

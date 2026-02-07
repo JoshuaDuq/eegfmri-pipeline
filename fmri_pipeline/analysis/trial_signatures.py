@@ -121,13 +121,6 @@ class TrialSignatureExtractionConfig:
         scope_trial_types = _norm_scope(self.condition_scope_trial_types)
         scope_stim_phases = _norm_scope(self.condition_scope_stim_phases)
 
-        # Safety default: when selecting trials via non-trial_type columns (e.g., pain_binary_coded),
-        # restrict selection to stimulation events unless the user explicitly overrides.
-        col_a = str(self.condition_a_column or "").strip().lower()
-        col_b = str(self.condition_b_column or "").strip().lower()
-        if scope_trial_types is None and (col_a != "trial_type" or col_b != "trial_type"):
-            scope_trial_types = ("stimulation",)
-
         group_col = (self.signature_group_column or "").strip() or None
         group_vals = None
         if self.signature_group_values:
@@ -522,8 +515,7 @@ def _extract_trials_for_run(
 
     scope_mask = pd.Series([True] * int(len(events_df)), index=events_df.index)
 
-    scope_trial_types_raw = cfg.condition_scope_trial_types
-    scope_trial_types = tuple(scope_trial_types_raw or ())
+    scope_trial_types = tuple(cfg.condition_scope_trial_types or ())
     if scope_trial_types:
         if "trial_type" not in events_df.columns:
             raise ValueError(
@@ -532,24 +524,7 @@ def _extract_trials_for_run(
         allow = {str(v).strip() for v in scope_trial_types if str(v).strip()}
         scope_mask &= events_df["trial_type"].astype(str).str.strip().isin(list(allow))
 
-    scope_stim_phases_raw = cfg.condition_scope_stim_phases
-    scope_stim_phases = tuple(scope_stim_phases_raw or ())
-    if (
-        scope_stim_phases_raw is None
-        and ("stim_phase" in events_df.columns)
-        and (
-            (scope_trial_types_raw is None)
-            or ("stimulation" in {s.lower() for s in scope_trial_types})
-        )
-    ):
-        # Safety default for phase-granularity pain tasks: use plateau only if present.
-        try:
-            phases = set(events_df["stim_phase"].dropna().astype(str).str.strip().tolist())
-            if "plateau" in phases:
-                scope_stim_phases = ("plateau",)
-        except Exception:
-            scope_stim_phases = tuple()
-
+    scope_stim_phases = tuple(cfg.condition_scope_stim_phases or ())
     if scope_stim_phases:
         if "stim_phase" not in events_df.columns:
             raise ValueError(

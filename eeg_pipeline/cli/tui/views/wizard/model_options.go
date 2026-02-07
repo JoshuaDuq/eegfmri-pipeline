@@ -246,7 +246,7 @@ func (m Model) getFeaturesOptions() []optionType {
 						if !m.sourceLocFmriAutoDetectRuns {
 							options = append(options, optSourceLocFmriRunsToInclude)
 						}
-						options = append(options, optSourceLocFmriHrfModel, optSourceLocFmriDriftModel, optSourceLocFmriStimPhasesToModel)
+						options = append(options, optSourceLocFmriHrfModel, optSourceLocFmriDriftModel, optSourceLocFmriConditionScopeTrialTypes, optSourceLocFmriStimPhasesToModel)
 						options = append(options, optSourceLocFmriHighPassHz, optSourceLocFmriLowPassHz)
 						options = append(options, optSourceLocFmriClusterCorrection)
 						if m.sourceLocFmriClusterCorrection {
@@ -564,7 +564,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 	options = append(options, optFmriAnalysisGroupConfounds)
 	if m.fmriAnalysisGroupConfoundsExpanded {
 		if isFirstLevel {
-			options = append(options, optFmriAnalysisEventsToModel, optFmriAnalysisStimPhasesToModel)
+			options = append(options, optFmriAnalysisEventsToModel, optFmriAnalysisScopeTrialTypes, optFmriAnalysisStimPhasesToModel)
 		}
 		options = append(options, optFmriAnalysisConfoundsStrategy)
 		if isFirstLevel {
@@ -644,6 +644,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 				optFmriTrialSigSignatureNPS,
 				optFmriTrialSigSignatureSIIPS1,
 				optFmriAnalysisSignatureDir,
+				optFmriTrialSigScopeTrialTypes,
 				optFmriTrialSigScopeStimPhases,
 				optFmriTrialSigGroupColumn,
 				optFmriTrialSigGroupValues,
@@ -695,6 +696,7 @@ func (m Model) getMergeBehaviorOptions() []optionType {
 		optUseDefaults,
 		optMergeEventPrefixes,
 		optMergeEventTypes,
+		optMergeQCColumns,
 	}
 }
 

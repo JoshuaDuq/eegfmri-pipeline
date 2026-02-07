@@ -148,6 +148,12 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	if m.expandedOption == expandedFmriCondBValue {
 		totalLines += len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn))
 	}
+	if m.expandedOption == expandedSourceLocFmriScopeTrialTypes {
+		totalLines += len(m.getExpandedListItems())
+	}
+	if m.expandedOption == expandedSourceLocFmriStimPhases {
+		totalLines += len(m.getExpandedListItems())
+	}
 	if m.expandedOption == expandedItpcConditionColumn {
 		totalLines += len(m.GetAvailableColumns())
 	}
@@ -1097,11 +1103,31 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "optional; generally avoid for task GLM"
+		case optSourceLocFmriConditionScopeTrialTypes:
+			label = "Condition trial_type Scope"
+			val := strings.TrimSpace(m.sourceLocFmriConditionScopeTrialTypes)
+			if val == "" {
+				val = "(none)"
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriConditionScopeTrialTypes {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if vals := m.GetFmriDiscoveredColumnValues("trial_type"); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in trial_type", len(vals))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedSourceLocFmriScopeTrialTypes {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
 		case optSourceLocFmriStimPhasesToModel:
 			label = "Stim Phase Scope"
 			val := strings.TrimSpace(m.sourceLocFmriStimPhasesToModel)
 			if val == "" {
-				val = "(auto)"
+				val = "(none)"
 			}
 			if m.editingText && m.editingTextField == textFieldSourceLocFmriStimPhasesToModel {
 				val = m.textBuffer + "█"
@@ -2127,6 +2153,28 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 				if lineIdx >= startLine && lineIdx < endLine {
 					b.WriteString(subIndent + checkbox + nameStyle.Render(v) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (fMRI condition trial_type scope)
+		if opt == optSourceLocFmriConditionScopeTrialTypes && m.expandedOption == expandedSourceLocFmriScopeTrialTypes {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
 				}
 				lineIdx++
 			}

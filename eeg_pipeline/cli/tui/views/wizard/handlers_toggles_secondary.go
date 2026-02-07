@@ -502,6 +502,10 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriAnalysisEventsToModel:
 		m.startTextEdit(textFieldFmriAnalysisEventsToModel)
 		m.useDefaultAdvanced = false
+	case optFmriAnalysisScopeTrialTypes:
+		m.expandedOption = expandedFmriAnalysisScopeTrialTypes
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
 	case optFmriAnalysisStimPhasesToModel:
 		m.expandedOption = expandedFmriAnalysisStimPhases
 		m.subCursor = 0
@@ -637,6 +641,10 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.startTextEdit(textFieldFmriAnalysisSignatureDir)
 	case optFmriTrialSigScopeStimPhases:
 		m.expandedOption = expandedFmriTrialSigStimPhases
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigScopeTrialTypes:
+		m.expandedOption = expandedFmriTrialSigScopeTrialTypes
 		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optFmriTrialSigGroupColumn:

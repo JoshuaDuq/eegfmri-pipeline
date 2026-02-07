@@ -41,7 +41,11 @@ class MergePsychopyPipeline(PipelineBase):
         )
 
         if not bool(kwargs.get("dry_run", False)):
-            self._validate_against_fmri_events(subject, task)
+            self._validate_against_fmri_events(
+                subject,
+                task,
+                qc_columns=kwargs.get("qc_columns"),
+            )
 
     def run_batch(
         self,
@@ -68,11 +72,20 @@ class MergePsychopyPipeline(PipelineBase):
 
         if not bool(kwargs.get("dry_run", False)):
             for subj in subjects:
-                self._validate_against_fmri_events(subj, resolved_task)
+                self._validate_against_fmri_events(
+                    subj,
+                    resolved_task,
+                    qc_columns=kwargs.get("qc_columns"),
+                )
 
         return n
 
-    def _validate_against_fmri_events(self, subject: str, task: str) -> None:
+    def _validate_against_fmri_events(
+        self,
+        subject: str,
+        task: str,
+        qc_columns: Optional[List[str]] = None,
+    ) -> None:
         fmri_root = self.config.get("paths.bids_fmri_root")
         if not fmri_root:
             return
@@ -95,6 +108,15 @@ class MergePsychopyPipeline(PipelineBase):
             # Backward-compat: older outputs used a non-BIDS `_bold_events.tsv` suffix.
             fmri_paths = sorted(fmri_dir.glob(f"sub-{subject}_task-{task}_run-*_bold_events.tsv"))
         if not eeg_paths or not fmri_paths:
+            return
+
+        configured_cols: Any = qc_columns
+        if configured_cols is None:
+            configured_cols = self.config.get("alignment.cross_modal_qc_columns", None)
+        if isinstance(configured_cols, str):
+            configured_cols = [c.strip() for c in configured_cols.replace(";", ",").split(",")]
+        cols = [str(c).strip() for c in (configured_cols or []) if str(c).strip()]
+        if not cols:
             return
 
         def run_num(p: Path) -> Optional[int]:
@@ -140,8 +162,7 @@ class MergePsychopyPipeline(PipelineBase):
             eeg_trials = eeg_trials.sort_values("trial_number", kind="mergesort")
             fmri_trials = fmri_trials.sort_values("trial_number", kind="mergesort")
 
-            # Compare core behavioral columns if present in both.
-            cols = ["stimulus_temp", "pain_binary_coded", "vas_final_coded_rating"]
+            # Compare configured behavioral columns if present in both.
             for col in cols:
                 if col not in eeg_trials.columns or col not in fmri_trials.columns:
                     continue

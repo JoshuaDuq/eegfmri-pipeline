@@ -283,6 +283,8 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         contrast_cfg["low_pass_hz"] = args.source_fmri_low_pass
     if getattr(args, "source_fmri_stim_phases_to_model", None) is not None:
         contrast_cfg["stim_phases_to_model"] = args.source_fmri_stim_phases_to_model
+    if getattr(args, "source_fmri_condition_scope_trial_types", None) is not None:
+        contrast_cfg["condition_scope_trial_types"] = args.source_fmri_condition_scope_trial_types
     if getattr(args, "source_fmri_cluster_correction", None) is not None:
         contrast_cfg["cluster_correction"] = args.source_fmri_cluster_correction
     if getattr(args, "source_fmri_cluster_p_threshold", None) is not None:
@@ -891,8 +893,18 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help=(
             "Optional comma-separated allow-list of stimulation sub-phases to include when events.tsv has a stim_phase column. "
-            "If unset, defaults to plateau-only when plateau is present (safety default). "
+            "If unset, no stim_phase scoping is applied. "
             "Use 'all' to disable phase scoping."
+        ),
+    )
+    parser.add_argument(
+        "--source-fmri-condition-scope-trial-types",
+        nargs="+",
+        default=None,
+        metavar="TT",
+        help=(
+            "Optional: restrict which events.tsv trial_type rows are eligible for condition A/B selection "
+            "in source-fMRI contrast building. Use 'all' to disable scoping."
         ),
     )
     parser.add_argument("--source-fmri-cluster-correction", action="store_true", default=None, dest="source_fmri_cluster_correction", help="Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction).")

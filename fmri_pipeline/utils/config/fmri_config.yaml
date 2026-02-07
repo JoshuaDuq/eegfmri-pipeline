@@ -142,7 +142,7 @@ fmri_contrast:
 
   # Optional: restrict condition-based trial selection to specific event phases.
   # Best practice for designs where per-trial columns (e.g., pain_binary_coded) repeat across phases.
-  # If null, the contrast builder defaults to ["stimulation"] when condition_a.column != "trial_type".
+  # If null, no trial_type scoping is applied.
   condition_scope_trial_types: null  # e.g., ["stimulation"]
 
   # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
@@ -152,7 +152,7 @@ fmri_contrast:
   events_to_model: null
 
   # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
-  # If null, defaults to ["plateau"] when plateau is present (safety default for phase-granularity pain tasks).
+  # If null, no stim_phase scoping is applied.
   # Use ["all"] to disable scoping and model all stimulation phases.
   stim_phases_to_model: null
 

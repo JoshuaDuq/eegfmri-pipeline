@@ -1075,16 +1075,10 @@ def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
             print("Error: No subject specified and none found in fMRI directory")
         return
 
-    # Try original task first (e.g. thermalactive); fall back to pain-style mapping.
     task_candidates = [task] if task else []
-    mapped = (task or "").replace("thermal", "pain").replace("active", "")
-    if mapped and mapped not in task_candidates:
-        task_candidates.append(mapped)
-    if not task_candidates or (len(task_candidates) == 1 and not task_candidates[0]):
-        task_candidates = ["pain"]
 
     conditions = []
-    used_task = task_candidates[0]
+    used_task = task or ""
     try:
         for t in task_candidates:
             conditions = discover_available_conditions(fmri_root, subject, t)
@@ -1300,14 +1294,7 @@ def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
         from eeg_pipeline.utils.config.loader import get_project_root
         fmri_root = get_project_root() / fmri_root
 
-    # Try original task first (e.g. thermalactive); BIDS filenames use the actual task.
-    # Fall back to pain-style mapping for datasets that use "pain" in the task entity.
     task_candidates = [task] if task else []
-    mapped = (task or "").replace("thermal", "pain").replace("active", "")
-    if mapped and mapped not in task_candidates:
-        task_candidates.append(mapped)
-    if not task_candidates or (len(task_candidates) == 1 and not task_candidates[0]):
-        task_candidates = ["pain"]
 
     subject = args.subject
     if not subject and fmri_root.exists():

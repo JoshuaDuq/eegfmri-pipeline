@@ -111,6 +111,16 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         default=None,
         help="Custom contrast formula (nilearn syntax), e.g. 'A - B' (used when contrast-type=custom)",
     )
+    contrast_group.add_argument(
+        "--condition-scope-trial-types",
+        nargs="+",
+        default=None,
+        metavar="TT",
+        help=(
+            "Optional: restrict which events.tsv trial_type rows are eligible for condition A/B selection. "
+            "Use 'all' to disable trial_type scoping."
+        ),
+    )
 
     glm_group = parser.add_argument_group("GLM settings")
     glm_group.add_argument(
@@ -158,7 +168,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         default=None,
         help=(
             "Optional comma-separated allow-list of stimulation sub-phases to include when events.tsv has a stim_phase column. "
-            "If unset, defaults to plateau-only when plateau is present (safety default). "
+            "If unset, no stim_phase scoping is applied. "
             "Use 'all' to disable phase scoping."
         ),
     )
@@ -546,8 +556,8 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         metavar="TT",
         help=(
             "Optional: restrict which events.tsv trial_type rows are eligible for trial selection. "
-            "This prevents accidentally mixing phases when selecting by per-trial columns (e.g., pain_binary_coded). "
-            "Use 'all' to disable scoping. Default: stimulation when selecting via non-trial_type columns."
+            "This can prevent mixing phases when selecting by per-trial columns (e.g., pain_binary_coded). "
+            "Use 'all' to disable scoping."
         ),
     )
     trial_group.add_argument(
@@ -557,7 +567,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         metavar="PHASE",
         help=(
             "Optional: restrict which stim_phase values are eligible for trial selection (only when events.tsv has a stim_phase column). "
-            "Use 'all' to disable scoping. Default: plateau if stim_phase exists and plateau is present."
+            "Use 'all' to disable scoping."
         ),
     )
 
@@ -709,6 +719,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             condition_a_value=str(args.cond_a_value).strip() if args.cond_a_value else None,
             condition_b_column=str(args.cond_b_column or "trial_type").strip(),
             condition_b_value=str(args.cond_b_value).strip() if args.cond_b_value else None,
+            condition_scope_trial_types=list(getattr(args, "condition_scope_trial_types", None) or ()) or None,
             formula=str(args.formula).strip() if args.formula else None,
             name=contrast_name,
             runs=list(args.runs) if args.runs else None,

@@ -52,7 +52,7 @@ class ContrastBuilderConfig:
     output_type: str
     resample_to_freesurfer: bool
     # Which trial_type rows are eligible for condition remapping.
-    # If None, defaults to ["stimulation"] when conditioning on a non-trial_type column.
+    # If None, no trial_type scoping is applied.
     condition_scope_trial_types: Optional[List[str]] = None
     # Confounds / QC (optional)
     confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|auto
@@ -63,8 +63,7 @@ class ContrastBuilderConfig:
     # Recommended for multi-phase tasks: ["stimulation", "pain_question", "vas_rating"].
     events_to_model: Optional[List[str]] = None
     # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
-    # If None, defaults to plateau-only when plateau is present (safety default for pain tasks).
-    # Use ["all"] to disable phase scoping.
+    # If None, no stim_phase scoping is applied. Use ["all"] to disable phase scoping.
     stim_phases_to_model: Optional[List[str]] = None
 
 
@@ -225,38 +224,20 @@ def _apply_stimulation_phase_scoping(
     """
     Restrict stimulation events to specific stim_phase values without dropping non-stimulation rows.
 
-    Rationale: In phase-granularity pain tasks, `trial_type="stimulation"` typically appears 3x per
-    trial (ramp_up/plateau/ramp_down). For GLM contrast estimation, a safe default is to model only
-    the plateau when it is present, unless explicitly disabled.
+    Scoping is only applied when allowed_stim_phases is explicitly provided.
     """
     if "trial_type" not in events_df.columns or "stim_phase" not in events_df.columns:
         return events_df
 
     raw = allowed_stim_phases
-    if raw is not None:
-        allow_norm = [str(v).strip().lower() for v in raw if str(v).strip()]
-        if not allow_norm:
-            return events_df
-        if "all" in set(allow_norm):
-            return events_df
-        allow = set(allow_norm)
-    else:
-        # Safety default: plateau-only when stim_phase exists and plateau is present.
-        stim_mask = events_df["trial_type"].astype(str).str.strip().str.lower().eq("stimulation")
-        try:
-            phases = (
-                events_df.loc[stim_mask, "stim_phase"]
-                .dropna()
-                .astype(str)
-                .str.strip()
-                .str.lower()
-                .tolist()
-            )
-            if "plateau" not in set(phases):
-                return events_df
-        except Exception:
-            return events_df
-        allow = {"plateau"}
+    if raw is None:
+        return events_df
+    allow_norm = [str(v).strip().lower() for v in raw if str(v).strip()]
+    if not allow_norm:
+        return events_df
+    if "all" in set(allow_norm):
+        return events_df
+    allow = set(allow_norm)
 
     stim_mask = events_df["trial_type"].astype(str).str.strip().str.lower().eq("stimulation")
     phase_norm = events_df["stim_phase"].fillna("").astype(str).str.strip().str.lower()
@@ -274,7 +255,7 @@ def _apply_stimulation_phase_scoping(
 def discover_available_conditions(
     bids_fmri_root: Path,
     subject: str,
-    task: str = "pain",
+    task: str,
 ) -> List[str]:
     """
     Discover available trial_type conditions from BIDS events files.
@@ -316,7 +297,7 @@ def discover_bold_runs(
     bids_fmri_root: Path,
     bids_derivatives: Optional[Path],
     subject: str,
-    task: str = "pain",
+    task: str,
     runs: Optional[List[int]] = None,
     *,
     cfg: Optional[ContrastBuilderConfig] = None,
@@ -765,17 +746,11 @@ def _remap_events_by_condition_columns(
     val_b = cfg.condition_b_value
     scope_trial_types = cfg.condition_scope_trial_types
 
-    if scope_trial_types is None and col_a and col_a != "trial_type" and "trial_type" in events_df.columns:
-        # Most BIDS task designs include multiple phases (fixation/question/rating) with the
-        # per-trial condition columns repeated across all phases. If we remap all rows, we'd
-        # incorrectly label non-stimulation phases as cond_a/cond_b, harming GLM validity.
-        trial_types = set(events_df["trial_type"].dropna().astype(str).tolist())
-        if "stimulation" in trial_types:
-            scope_trial_types = ["stimulation"]
-
     scope_mask = pd.Series(True, index=events_df.index)
     if scope_trial_types:
-        scope_mask = events_df.get("trial_type", "").astype(str).isin(scope_trial_types)
+        normalized_scope = [str(v).strip() for v in scope_trial_types if str(v).strip()]
+        if normalized_scope and not any(v.lower() in {"all", "*", "@all"} for v in normalized_scope):
+            scope_mask = events_df.get("trial_type", "").astype(str).isin(normalized_scope)
 
     # Validate column A exists (this is always required)
     if col_a not in events_df.columns:

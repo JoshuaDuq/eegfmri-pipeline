@@ -119,6 +119,12 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
     merge_group = parser.add_argument_group("merge-psychopy options")
     merge_group.add_argument("--event-type", action="append")
     merge_group.add_argument(
+        "--qc-column",
+        action="append",
+        default=None,
+        help="Cross-modal EEG↔fMRI QC column to compare (repeatable). If omitted, cross-modal column QC is skipped.",
+    )
+    merge_group.add_argument(
         "--allow-misaligned-trim",
         action="store_true",
         help="Allow behavioral/events count mismatch (trims/pads). Not recommended.",
@@ -212,6 +218,7 @@ def _run_merge_psychopy_mode(
         task=task,
         event_prefixes=args.event_prefix,
         event_types=args.event_type,
+        qc_columns=getattr(args, "qc_column", None),
         dry_run=args.dry_run,
         allow_misaligned_trim=bool(getattr(args, "allow_misaligned_trim", False)),
     )

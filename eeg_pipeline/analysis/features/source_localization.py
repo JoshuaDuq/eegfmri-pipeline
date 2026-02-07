@@ -93,7 +93,7 @@ def _load_fmri_constraint_config(
     bids_derivatives: Optional[Path] = None,
     freesurfer_subjects_dir: Optional[Path] = None,
     subject: Optional[str] = None,
-    task: str = "pain",
+    task: str = "",
 ) -> FMRIConstraintConfig:
     """
     Load fMRI constraint configuration, building stats map if needed.
@@ -133,6 +133,8 @@ def _load_fmri_constraint_config(
             missing_paths.append("freesurfer_subjects_dir (feature_engineering.sourcelocalization.subjects_dir or --source-subjects-dir)")
         if not subject:
             missing_paths.append("subject")
+        if not str(task or "").strip():
+            missing_paths.append("task (project.task or --task)")
 
         if missing_paths:
             raise ValueError(
@@ -988,10 +990,8 @@ def _load_source_localization_config(
         bids_fmri_root = _as_path(_cfg_get(config, "paths.bids_root", None))
 
     ctx_subject = getattr(ctx, "subject", None) or subject.replace("sub-", "")
-    eeg_task = str(_cfg_get(config, "project.task", "pain"))
-    fmri_task = eeg_task.replace("thermal", "").replace("active", "")
-    if not fmri_task:
-        fmri_task = "pain"
+    eeg_task = str(_cfg_get(config, "project.task", "")).strip()
+    fmri_task = eeg_task
 
     fmri_cfg = _load_fmri_constraint_config(
         config,

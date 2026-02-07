@@ -16,7 +16,6 @@ from eeg_pipeline.cli.common import (
     add_path_args,
     create_progress_reporter,
     resolve_task,
-    get_deriv_root,
 )
 from eeg_pipeline.utils.config.loader import ConfigDict
 
@@ -33,7 +32,6 @@ class PlotDefinition:
     behavior_plots: Optional[List[str]] = None
     tfr_plots: Optional[List[str]] = None
     erp_plots: Optional[List[str]] = None
-    ml_mode: Optional[str] = None
     requires_epochs: bool = False
     requires_features: bool = False
     requires_stats: bool = False
@@ -56,7 +54,6 @@ def _load_plot_catalog() -> List[PlotDefinition]:
                 behavior_plots=entry.get("behavior_plots"),
                 tfr_plots=entry.get("tfr_plots"),
                 erp_plots=entry.get("erp_plots"),
-                ml_mode=entry.get("ml_mode"),
                 requires_epochs=bool(entry.get("requires_epochs", False)),
                 requires_features=bool(entry.get("requires_features", False)),
                 requires_stats=bool(entry.get("requires_stats", False)),
@@ -106,7 +103,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         choices=sorted(PLOT_GROUPS.keys()),
         default=None,
         metavar="GROUP",
-        help="Plot groups to render (features, behavior, tfr, erp, machine_learning)",
+        help="Plot groups to render (features, behavior, tfr, erp)",
     )
     parser.add_argument(
         "--all-plots",
@@ -1482,7 +1479,7 @@ def _map_plot_id_to_plotters(plot_id: str, feature_categories: List[str]) -> Opt
 
 def _collect_plot_definitions(
     plot_ids: List[str],
-) -> tuple[Set[str], Set[str], List[str], List[str], List[str], List[str], Set[str]]:
+) -> tuple[Set[str], Set[str], List[str], List[str], List[str], List[str]]:
     """Collect plot definitions and extract categories, plots, and modes."""
     feature_categories: Set[str] = set()
     feature_plot_patterns: Set[str] = set()
@@ -1490,7 +1487,6 @@ def _collect_plot_definitions(
     behavior_plots: List[str] = []
     tfr_plots: List[str] = []
     erp_plots: List[Any] = []
-    ml_modes: Set[str] = set()
 
     for plot_id in plot_ids:
         definition = PLOT_BY_ID.get(plot_id)
@@ -1512,8 +1508,6 @@ def _collect_plot_definitions(
             tfr_plots.extend(definition.tfr_plots)
         if definition.erp_plots:
             erp_plots.append(definition.erp_plots)
-        if definition.ml_mode:
-            ml_modes.add(definition.ml_mode)
 
     flat_erp_plots = []
     for plot in erp_plots:
@@ -1529,7 +1523,6 @@ def _collect_plot_definitions(
         _unique_in_order(tfr_plots),
         _unique_in_order(flat_erp_plots),
         sorted(feature_plotters) if feature_plotters else [],
-        ml_modes,
     )
 
 
@@ -1547,11 +1540,6 @@ def _render_plots_with_per_plot_config(
     from eeg_pipeline.plotting.orchestration.behavior import visualize_behavior_for_subjects
     from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects
     from eeg_pipeline.plotting.orchestration.erp import visualize_erp_for_subjects
-    from eeg_pipeline.plotting.orchestration.machine_learning import (
-        visualize_regression_from_disk,
-        visualize_time_generalization_from_disk,
-        visualize_classification_from_disk,
-    )
 
     total = len(plot_ids)
     for idx, plot_id in enumerate(plot_ids, start=1):
@@ -1608,23 +1596,6 @@ def _render_plots_with_per_plot_config(
                 config=plot_config,
                 plots=_unique_in_order(list(plots_list)),
             )
-        if definition.ml_mode:
-            deriv_root = get_deriv_root(plot_config)
-            if definition.ml_mode == "regression":
-                results_dir = deriv_root / "machine_learning" / "regression"
-                visualize_regression_from_disk(results_dir=results_dir, config=plot_config)
-            elif definition.ml_mode == "regression_within":
-                results_dir = deriv_root / "machine_learning" / "within_subject_regression"
-                visualize_regression_from_disk(results_dir=results_dir, config=plot_config)
-            elif definition.ml_mode == "timegen":
-                results_dir = deriv_root / "machine_learning" / "time_generalization"
-                visualize_time_generalization_from_disk(results_dir=results_dir, config=plot_config)
-            elif definition.ml_mode == "classify":
-                results_dir = deriv_root / "machine_learning" / "classification"
-                visualize_classification_from_disk(results_dir=results_dir, config=plot_config)
-            elif definition.ml_mode == "classify_within":
-                results_dir = deriv_root / "machine_learning" / "within_subject_classification"
-                visualize_classification_from_disk(results_dir=results_dir, config=plot_config)
 
 
 def _render_plots_without_per_plot_config(
@@ -1633,7 +1604,6 @@ def _render_plots_without_per_plot_config(
     behavior_plots: List[str],
     tfr_plots: List[str],
     erp_plots: List[str],
-    ml_modes: Set[str],
     subjects: List[str],
     task: str,
     config: Any,
@@ -1645,18 +1615,12 @@ def _render_plots_without_per_plot_config(
     from eeg_pipeline.plotting.orchestration.behavior import visualize_behavior_for_subjects
     from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects
     from eeg_pipeline.plotting.orchestration.erp import visualize_erp_for_subjects
-    from eeg_pipeline.plotting.orchestration.machine_learning import (
-        visualize_regression_from_disk,
-        visualize_time_generalization_from_disk,
-        visualize_classification_from_disk,
-    )
 
     steps = sum([
         bool(feature_categories),
         bool(behavior_plots),
         bool(tfr_plots),
         bool(erp_plots),
-        bool(ml_modes),
     ])
     step_idx = 0
 
@@ -1701,27 +1665,6 @@ def _render_plots_without_per_plot_config(
             config=config,
             plots=erp_plots,
         )
-
-    if ml_modes:
-        step_idx += 1
-        progress.step("Rendering machine learning plots", current=step_idx, total=steps)
-        deriv_root = get_deriv_root(config)
-        if "regression" in ml_modes:
-            results_dir = deriv_root / "machine_learning" / "regression"
-            visualize_regression_from_disk(results_dir=results_dir, config=config)
-        if "regression_within" in ml_modes:
-            results_dir = deriv_root / "machine_learning" / "within_subject_regression"
-            visualize_regression_from_disk(results_dir=results_dir, config=config)
-        if "timegen" in ml_modes:
-            results_dir = deriv_root / "machine_learning" / "time_generalization"
-            visualize_time_generalization_from_disk(results_dir=results_dir, config=config)
-        if "classify" in ml_modes:
-            results_dir = deriv_root / "machine_learning" / "classification"
-            visualize_classification_from_disk(results_dir=results_dir, config=config)
-        if "classify_within" in ml_modes:
-            results_dir = deriv_root / "machine_learning" / "within_subject_classification"
-            visualize_classification_from_disk(results_dir=results_dir, config=config)
-
 
 def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the plotting command."""
@@ -1784,10 +1727,9 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         tfr_plots,
         erp_plots,
         computed_feature_plotters,
-        ml_modes,
     ) = _collect_plot_definitions(plot_ids)
 
-    if not any([feature_categories, behavior_plots, tfr_plots, erp_plots, ml_modes]):
+    if not any([feature_categories, behavior_plots, tfr_plots, erp_plots]):
         raise ValueError("No plots resolved from selection")
 
     # Use computed plotters if available, otherwise fall back to CLI argument
@@ -1803,7 +1745,6 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         behavior_plots=behavior_plots,
         tfr_plots=tfr_plots,
         erp_plots=erp_plots,
-        ml_modes=ml_modes,
         subjects=subjects,
         task=task,
         config=config,

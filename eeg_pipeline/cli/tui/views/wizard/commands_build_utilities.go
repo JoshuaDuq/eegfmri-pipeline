@@ -115,6 +115,11 @@ func (m Model) buildMergeBehaviorAdvancedArgs() []string {
 			args = append(args, "--event-type", eventType)
 		}
 	}
+	if m.mergeQCColumns != "" {
+		for _, col := range splitListInput(m.mergeQCColumns) {
+			args = append(args, "--qc-column", col)
+		}
+	}
 
 	return args
 }

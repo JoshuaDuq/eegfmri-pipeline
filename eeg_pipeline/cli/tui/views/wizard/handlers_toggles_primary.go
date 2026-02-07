@@ -389,6 +389,10 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSourceLocFmriLowPassHz:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optSourceLocFmriConditionScopeTrialTypes:
+		m.expandedOption = expandedSourceLocFmriScopeTrialTypes
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
 	case optSourceLocFmriStimPhasesToModel:
 		m.expandedOption = expandedSourceLocFmriStimPhases
 		m.subCursor = 0

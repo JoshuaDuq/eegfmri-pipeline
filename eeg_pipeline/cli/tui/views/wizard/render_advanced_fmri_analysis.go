@@ -125,6 +125,14 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		eventsToModelVal = "(all)"
 	}
 
+	scopeTrialTypesVal := strings.TrimSpace(m.fmriAnalysisScopeTrialTypes)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisScopeTrialTypes {
+		scopeTrialTypesVal = m.textBuffer + "█"
+	}
+	if scopeTrialTypesVal == "" {
+		scopeTrialTypesVal = "(none)"
+	}
+
 	hrfOptions := []string{"spm", "flobs", "fir"}
 	hrfVal := hrfOptions[m.fmriAnalysisHrfModel%len(hrfOptions)]
 	driftOptions := []string{"none", "cosine", "polynomial"}
@@ -426,11 +434,24 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			label = "Events to Model"
 			value = eventsToModelVal
 			hint = "Space to edit (comma-separated; empty = all)"
+		case optFmriAnalysisScopeTrialTypes:
+			label = "Condition trial_type Scope"
+			value = scopeTrialTypesVal
+			expandIndicatorHint := ""
+			if vals := m.GetFmriDiscoveredColumnValues("trial_type"); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in trial_type", len(vals))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedFmriAnalysisScopeTrialTypes {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
 		case optFmriAnalysisStimPhasesToModel:
 			label = "Stim Phase Scope"
 			val := strings.TrimSpace(m.fmriAnalysisStimPhasesToModel)
 			if val == "" {
-				val = "(auto)"
+				val = "(none)"
 			}
 			if m.editingText && m.editingTextField == textFieldFmriAnalysisStimPhasesToModel {
 				val = m.textBuffer + "█"
@@ -592,7 +613,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			label = "Stim Phase Scope"
 			val := strings.TrimSpace(m.fmriTrialSigScopeStimPhases)
 			if val == "" {
-				val = "(auto)"
+				val = "(none)"
 			}
 			if m.editingText && m.editingTextField == textFieldFmriTrialSigScopeStimPhases {
 				val = m.textBuffer + "█"
@@ -604,6 +625,26 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			}
 			hint = "Space to select" + expandIndicatorHint
 			if m.expandedOption == expandedFmriTrialSigStimPhases {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optFmriTrialSigScopeTrialTypes:
+			label = "trial_type Scope"
+			val := strings.TrimSpace(m.fmriTrialSigScopeTrialTypes)
+			if val == "" {
+				val = "(none)"
+			}
+			if m.editingText && m.editingTextField == textFieldFmriTrialSigScopeTrialTypes {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if vals := m.GetFmriDiscoveredColumnValues("trial_type"); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in trial_type", len(vals))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedFmriTrialSigScopeTrialTypes {
 				expandIndicator = " [-]"
 			} else {
 				expandIndicator = " [+]"

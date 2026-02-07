@@ -204,6 +204,11 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	ab.args = append(ab.args, "--confounds-strategy", confoundsOptions[m.fmriAnalysisConfoundsStrategy%len(confoundsOptions)])
 	if isFirstLevel {
 		ab.addIfNonEmpty("--events-to-model", strings.TrimSpace(m.fmriAnalysisEventsToModel))
+		scopeTrialTypes := strings.TrimSpace(m.fmriAnalysisScopeTrialTypes)
+		if scopeTrialTypes != "" {
+			ab.args = append(ab.args, "--condition-scope-trial-types")
+			ab.args = append(ab.args, splitSpaceList(scopeTrialTypes)...)
+		}
 		if strings.TrimSpace(m.fmriAnalysisStimPhasesToModel) != "" {
 			ab.args = append(ab.args, "--stim-phases-to-model", strings.TrimSpace(m.fmriAnalysisStimPhasesToModel))
 		}
@@ -264,8 +269,15 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 			ab.args = append(ab.args, sigs...)
 		}
 
-		// Optional: restrict which stim_phase values are eligible for trial selection (signatures only).
-		// Empty => omit flag (CLI default: plateau-only when stim_phase exists and plateau is present).
+		// Optional: restrict which trial_type/stim_phase values are eligible for trial selection.
+		trialTypeScope := strings.TrimSpace(m.fmriTrialSigScopeTrialTypes)
+		if trialTypeScope != "" {
+			ab.args = append(ab.args, "--signature-scope-trial-types")
+			ab.args = append(ab.args, splitSpaceList(trialTypeScope)...)
+		}
+
+		// Optional: restrict which stim_phase values are eligible for trial selection.
+		// Empty => omit flag (no stim_phase scoping).
 		phaseSpec := strings.TrimSpace(m.fmriTrialSigScopeStimPhases)
 		if phaseSpec != "" {
 			ab.args = append(ab.args, "--signature-scope-stim-phases")
