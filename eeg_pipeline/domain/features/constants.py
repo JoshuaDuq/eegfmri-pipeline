@@ -19,6 +19,7 @@ FEATURE_CATEGORIES = [
     "erds",           # Event-related (de)synchronization
     "ratios",         # Band power ratios (theta/beta, etc.)
     "asymmetry",      # Hemispheric power asymmetry
+    "microstates",    # EEG microstate dynamics (A-D)
     # Connectivity & phase
     "connectivity",   # Functional connectivity (wPLI, AEC)
     "directedconnectivity",  # Directed connectivity (PSI, DTF, PDC)

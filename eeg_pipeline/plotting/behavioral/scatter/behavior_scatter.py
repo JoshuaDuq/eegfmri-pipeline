@@ -74,6 +74,7 @@ FEATURE_GROUP_MAP = {
     "spectral": "spectral",
     "ratios": "ratios",
     "asymmetry": "asym",
+    "microstates": "microstates",
 }
 
 FEATURE_FILE_MAP = {
@@ -87,6 +88,7 @@ FEATURE_FILE_MAP = {
     "spectral": ("spectral", "features_spectral"),
     "ratios": ("ratios", "features_ratios"),
     "asymmetry": ("asymmetry", "features_asymmetry"),
+    "microstates": ("microstates", "features_microstates"),
 }
 
 FEATURE_METRICS = {

@@ -198,7 +198,7 @@ time_frequency_analysis:
 
 # 4.3 Feature Extraction
 feature_engineering:
-  feature_categories: ["power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "erp", "bursts"]
+  feature_categories: ["power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "quality", "microstates", "erds", "spectral", "ratios", "asymmetry", "erp", "bursts"]
   spatial_modes: ["roi", "channels", "global"]
   # Controls cross-trial feature computation and leakage constraints:
   # - "group_stats": allow cross-trial estimates (one row per subject/condition as appropriate)
@@ -222,6 +222,7 @@ feature_engineering:
     spectral: "none"         # Peak frequency etc - CSD changes spectral shape
     erp: "none"              # ERP waveforms - CSD changes amplitude/topography
     quality: "none"          # Quality metrics - should match raw data
+    microstates: "none"      # Topographic maps; keep voltage-space interpretation
   spatial_transform_params:
     lambda2: 1.0e-5
     stiffness: 4.0
@@ -577,6 +578,14 @@ feature_engineering:
     snr_noise_band: [40.0, 80.0]     # "Noise" band for SNR computation
     muscle_band: [30.0, 80.0]        # High-frequency band for muscle artifact detection
 
+  microstates:
+    n_states: 4
+    min_peak_distance_ms: 10.0
+    max_gfp_peaks_per_epoch: 400
+    min_duration_ms: 20.0
+    gfp_peak_prominence: 0.0
+    random_state: 42
+
 # 4.4 Behavioral Correlation
 behavior_analysis:
   correlation_method: "spearman"
@@ -897,6 +906,7 @@ behavior_analysis:
       pac: "features_pac_trials.parquet"
       complexity: "features_complexity.parquet"
       quality: "features_quality.parquet"
+      microstates: "features_microstates.parquet"
       erds: "features_erds.parquet"
       spectral: "features_spectral.parquet"
       ratios: "features_ratios.parquet"
@@ -911,6 +921,7 @@ behavior_analysis:
       pac: "pac"
       complexity: "complexity"
       quality: "quality"
+      microstates: "microstates"
       erds: "erds"
       spectral: "spectral"
       ratios: "ratios"
@@ -934,6 +945,8 @@ behavior_analysis:
         subtypes: ["lzc", "pe", "hjorth"]
       quality:
         subtypes: ["snr", "artifact"]
+      microstates:
+        subtypes: ["coverage", "duration", "occurrence", "trans"]
       erds:
         subtypes: ["percent", "db", "slope"]
       ratios:
@@ -953,6 +966,7 @@ behavior_analysis:
       powcorr: "^powcorr_([^_]+)_([^_]+)$"
       conn_graph: "^conn_graph_([^_]+)_([^_]+)_([^_]+)$"
       gfp: "^gfp_([^_]+)$"
+      microstates: "^microstates_([^_]+)_broadband_global_.+$"
       power_segmented: "^power_([^_]+)_([^_]+)_ch_([^_]+)_.+$"
       connectivity_segmented: "^conn_([^_]+)_([^_]+)_([^_]+)_chpair_([^_]+)_.+$"
       itpc_segmented: "^itpc_([^_]+)_ch_([^_]+)_([^_]+)_.+$"

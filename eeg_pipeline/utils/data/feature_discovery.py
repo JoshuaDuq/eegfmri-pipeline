@@ -27,6 +27,7 @@ STANDARD_FEATURE_FILES = {
     "erds": "features_erds.parquet",
     "ratios": "features_ratios.parquet",
     "asymmetry": "features_asymmetry.parquet",
+    "microstates": "features_microstates.parquet",
     # Connectivity & phase
     "connectivity": "features_connectivity.parquet",
     "directedconnectivity": "features_directedconnectivity.parquet",
@@ -49,6 +50,7 @@ FEATURE_FILE_DISPLAY_NAMES = {
     "erds": "Event-Related Desync/Sync",
     "ratios": "Band Power Ratios",
     "asymmetry": "Hemispheric Asymmetry",
+    "microstates": "EEG Microstate Dynamics",
     # Connectivity & phase
     "connectivity": "Connectivity Features",
     "directedconnectivity": "Directed Connectivity (PSI, DTF, PDC)",

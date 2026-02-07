@@ -15,7 +15,7 @@ Feature Groups
 --------------
 Available groups for `extract_precomputed_features`:
     power, erds, spectral, connectivity, complexity,
-    aperiodic, ratios, asymmetry, itpc, pac, quality
+    aperiodic, ratios, asymmetry, itpc, pac, quality, microstates
 
 Naming Convention
 -----------------
@@ -103,6 +103,8 @@ _LAZY_IMPORTS = {
     "compute_icc": "eeg_pipeline.utils.analysis.stats.reliability",
     # Quality
     "compute_trial_quality_metrics": "quality",
+    # Microstates
+    "extract_microstate_features": "microstates",
     # Connectivity
     "extract_connectivity_features": "connectivity",
     "extract_connectivity_from_precomputed": "connectivity",

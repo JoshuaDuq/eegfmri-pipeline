@@ -46,6 +46,7 @@ _FEATURE_FILE_TO_ATTR = {
     "spectral": "spectral_df",
     "ratios": "ratios_df",
     "asymmetry": "asymmetry_df",
+    "microstates": "microstates_df",
     "temporal": "temporal_df",
 }
 
@@ -131,6 +132,7 @@ class BehaviorContext:
     spectral_df: Optional[pd.DataFrame] = None
     ratios_df: Optional[pd.DataFrame] = None
     asymmetry_df: Optional[pd.DataFrame] = None
+    microstates_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
     temperature: Optional[pd.Series] = None
     temperature_column: Optional[str] = None
@@ -376,6 +378,7 @@ class BehaviorContext:
         self.spectral_df = bundle.spectral_df
         self.ratios_df = bundle.ratios_df
         self.asymmetry_df = bundle.asymmetry_df
+        self.microstates_df = bundle.microstates_df
         self.temporal_df = bundle.temporal_df
 
     def iter_feature_tables(self) -> List[Tuple[str, Optional[pd.DataFrame]]]:
@@ -402,6 +405,7 @@ class BehaviorContext:
             "spectral": self.spectral_df,
             "ratios": self.ratios_df,
             "asymmetry": self.asymmetry_df,
+            "microstates": self.microstates_df,
             "temporal": self.temporal_df,
         }
         feature_types = list(FEATURE_CATEGORIES) + ["temporal"]
@@ -433,6 +437,7 @@ class BehaviorContext:
             "erds": "erds_df",
             "ratios": "ratios_df",
             "asymmetry": "asymmetry_df",
+            "microstates": "microstates_df",
             "itpc": "itpc_df",
             "pac": "pac_df",
             "complexity": "complexity_df",

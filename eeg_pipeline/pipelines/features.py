@@ -76,6 +76,7 @@ _FEATURE_ACCUMULATOR_KEYS = [
     "erds",
     "ratios",
     "asymmetry",
+    "microstates",
     "quality",
 ]
 
@@ -107,11 +108,28 @@ def _load_fixed_templates(templates_path: Optional[Path], logger: Any) -> tuple[
     """Load fixed templates from file if path exists."""
     if templates_path is None or not templates_path.exists():
         return None, None
-    
-    data = np.load(templates_path)
-    templates = data["templates"]
-    ch_names = data.get("ch_names")
-    logger.info(f"Loaded fixed templates from {templates_path}")
+
+    try:
+        with np.load(templates_path, allow_pickle=False) as data:
+            if "templates" not in data:
+                logger.warning("Fixed templates file missing 'templates': %s", templates_path)
+                return None, None
+            templates = np.asarray(data["templates"], dtype=float)
+            raw_ch_names = data["ch_names"] if "ch_names" in data else None
+    except Exception as exc:
+        logger.warning("Failed loading fixed templates from %s: %s", templates_path, exc)
+        return None, None
+
+    ch_names: Optional[List[str]] = None
+    if raw_ch_names is not None:
+        ch_names = []
+        for value in np.asarray(raw_ch_names).tolist():
+            if isinstance(value, (bytes, np.bytes_)):
+                ch_names.append(value.decode("utf-8", errors="ignore"))
+            else:
+                ch_names.append(str(value))
+
+    logger.info("Loaded fixed templates from %s", templates_path)
     return templates, ch_names
 
 
@@ -254,6 +272,8 @@ def _unpack_feature_results(features: FeatureExtractionResult) -> Dict[str, Any]
         "asymmetry_cols": features.asymmetry_cols,
         "quality_df": features.quality_df,
         "quality_cols": features.quality_cols,
+        "microstates_df": getattr(features, "microstates_df", None),
+        "microstates_cols": getattr(features, "microstates_cols", []),
         "aper_qc": features.aper_qc,
     }
 
@@ -274,6 +294,7 @@ def _build_extra_blocks(unpacked: Dict[str, Any], features: FeatureExtractionRes
         "source": unpacked["source_df"],
         "ratios": features.ratios_df,
         "asymmetry": features.asymmetry_df,
+        "microstates": unpacked.get("microstates_df"),
         "quality": features.quality_df,
     }
     return {
@@ -301,9 +322,12 @@ def _update_from_aligned_extra(
     unpacked["erds_df"] = extra_blocks.get("erds", unpacked["erds_df"])
     unpacked["dconn_df"] = extra_blocks.get("dconn", unpacked["dconn_df"])
     unpacked["source_df"] = extra_blocks.get("source", unpacked["source_df"])
+    unpacked["microstates_df"] = extra_blocks.get("microstates", unpacked.get("microstates_df"))
     features.ratios_df = extra_blocks.get("ratios", features.ratios_df)
     features.asymmetry_df = extra_blocks.get("asymmetry", features.asymmetry_df)
     features.quality_df = extra_blocks.get("quality", features.quality_df)
+    if hasattr(features, "microstates_df"):
+        features.microstates_df = extra_blocks.get("microstates", features.microstates_df)
 
 
 def _build_feature_qc(features: FeatureExtractionResult, ctx: FeatureContext) -> Dict[str, Any]:
@@ -340,10 +364,13 @@ def _accumulate_features(
         "erds": unpacked["erds_df"],
         "ratios": features.ratios_df,
         "asymmetry": features.asymmetry_df,
+        "microstates": unpacked.get("microstates_df"),
         "quality": features.quality_df,
     }
     
     for key, df in feature_mapping.items():
+        if key not in accumulated:
+            accumulated[key] = []
         if df is not None and not df.empty:
             accumulated[key].append(df)
 
@@ -393,6 +420,7 @@ def _save_merged_features(
         "erds": ("features_erds.parquet", ["erds"]),
         "ratios": ("features_ratios.parquet", ["ratios"]),
         "asymmetry": ("features_asymmetry.parquet", ["asymmetry"]),
+        "microstates": ("features_microstates.parquet", ["microstates"]),
         "quality": ("features_quality.parquet", ["quality"]),
     }
 
@@ -719,6 +747,8 @@ class FeaturePipeline(PipelineBase):
                 ratios_cols=features.ratios_cols,
                 asymmetry_df=features.asymmetry_df,
                 asymmetry_cols=features.asymmetry_cols,
+                microstates_df=unpacked.get("microstates_df"),
+                microstates_cols=unpacked.get("microstates_cols"),
                 quality_df=features.quality_df,
                 quality_cols=features.quality_cols,
                 dconn_df=unpacked["dconn_df"],
@@ -748,6 +778,7 @@ class FeaturePipeline(PipelineBase):
             n_aper = _get_df_cols(aper_df_aligned)
             n_spectral = _get_df_cols(unpacked["spectral_df"])
             n_comp = _get_df_cols(unpacked["comp_df"])
+            n_microstates = _get_df_cols(unpacked.get("microstates_df"))
             n_total = _get_df_cols(combined_df)
 
             extraction_config = {
@@ -769,6 +800,7 @@ class FeaturePipeline(PipelineBase):
                 f"Done {range_info}: sub-{subject}, trials={n_trials}, "
                 f"power={n_pow}, conn={n_conn}, dconn={n_dconn}, source={n_source}, "
                 f"aper={n_aper}, spectral={n_spectral}, comp={n_comp}, total={n_total}"
+                f", microstates={n_microstates}"
             )
 
         if len(time_ranges) > 1:

@@ -190,6 +190,7 @@ class FeatureBundle:
     spectral_df: Optional[pd.DataFrame] = None
     ratios_df: Optional[pd.DataFrame] = None
     asymmetry_df: Optional[pd.DataFrame] = None
+    microstates_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
 
 
@@ -329,6 +330,7 @@ def load_feature_bundle(
     bundle.spectral_df = _load("features_spectral", "spectral")
     bundle.ratios_df = _load("features_ratios", "ratios")
     bundle.asymmetry_df = _load("features_asymmetry", "asymmetry")
+    bundle.microstates_df = _load("features_microstates", "microstates")
     bundle.temporal_df = _load("features_temporal", "temporal")
 
     return bundle
@@ -700,6 +702,8 @@ def save_all_features(
     ratios_cols: Optional[List[str]] = None,
     asymmetry_df: Optional[pd.DataFrame] = None,
     asymmetry_cols: Optional[List[str]] = None,
+    microstates_df: Optional[pd.DataFrame] = None,
+    microstates_cols: Optional[List[str]] = None,
     quality_df: Optional[pd.DataFrame] = None,
     quality_cols: Optional[List[str]] = None,
     dconn_df: Optional[pd.DataFrame] = None,
@@ -762,6 +766,7 @@ def save_all_features(
         (erds_df, erds_cols, "features_erds", "ERDS features"),
         (ratios_df, ratios_cols, "features_ratios", "power ratio features"),
         (asymmetry_df, asymmetry_cols, "features_asymmetry", "asymmetry features"),
+        (microstates_df, microstates_cols, "features_microstates", "microstate dynamics features"),
         (quality_df, quality_cols, "features_quality", "quality metrics"),
         (dconn_df, dconn_cols, "features_directedconnectivity", "directed connectivity features (PSI, DTF, PDC)"),
         (source_df, source_cols, "features_sourcelocalization", "source localization features (LCMV, eLORETA)"),

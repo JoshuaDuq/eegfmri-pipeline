@@ -47,6 +47,9 @@ from eeg_pipeline.plotting.features.ratios import (
 from eeg_pipeline.plotting.features.asymmetry import (
     plot_asymmetry_by_condition,
 )
+from eeg_pipeline.plotting.features.microstates import (
+    plot_microstates_by_condition,
+)
 from eeg_pipeline.plotting.features.phase import (
     plot_itpc_topomaps,
     plot_itpc_by_condition,
@@ -356,6 +359,36 @@ def plot_asymmetry(ctx: FeaturePlotContext, saved_files):
             events_df=ctx.aligned_events,
             subject=ctx.subject,
             save_dir=asym_dir,
+            logger=ctx.logger,
+            config=ctx.config,
+            stats_dir=ctx.stats_dir,
+        )
+
+
+###################################################################
+# Microstates
+###################################################################
+
+
+@VisualizationRegistry.register("microstates")
+def plot_microstates(ctx: FeaturePlotContext, saved_files):
+    if getattr(ctx, "microstates_df", None) is None:
+        return
+
+    micro_dir = ctx.subdir("microstates")
+
+    if ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "microstates_by_condition",
+            "microstates",
+            None,
+            plot_microstates_by_condition,
+            features_df=ctx.microstates_df,
+            events_df=ctx.aligned_events,
+            subject=ctx.subject,
+            save_dir=micro_dir,
             logger=ctx.logger,
             config=ctx.config,
             stats_dir=ctx.stats_dir,
@@ -731,5 +764,4 @@ def erp_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
             ctx.logger,
         )
-
 

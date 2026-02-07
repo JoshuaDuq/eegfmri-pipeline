@@ -367,6 +367,7 @@ var featureFileOptions = []FeatureFile{
 	{"ratios", "Ratios", "Band power ratios"},
 	{"asymmetry", "Asymmetry", "Hemispheric asymmetry"},
 	{"quality", "Quality", "Trial quality metrics"},
+	{"microstates", "Microstates", "EEG microstate dynamics (A-D)"},
 	{"erds", "ERDS", "Event-related desynchronization/sync"},
 	{"spectral", "Spectral", "Peak frequency, spectral edge"},
 }
@@ -383,6 +384,7 @@ var behaviorScatterFeatureTypes = []string{
 	"spectral",
 	"ratios",
 	"asymmetry",
+	"microstates",
 }
 
 // Behavior scatter aggregation modes
@@ -396,29 +398,29 @@ var behaviorScatterAggregationModes = []string{
 // Features not in this list for a given computation won't be shown in the feature selection.
 var computationApplicableFeatures = map[string][]string{
 	// Correlations can use all standard EEG features
-	"correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Multilevel correlations uses the same features as correlations (group-level)
-	"multilevel_correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"multilevel_correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Pain sensitivity uses the same features as correlations
-	"pain_sensitivity": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"pain_sensitivity": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Condition comparison uses trial-level features
-	"condition": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"condition": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Temporal: power, itpc, erds are the temporal-specific features computed from epochs
 	// User selects which to compute in step 3 (feature selection)
 	"temporal": {"power", "itpc", "erds"},
 	// Cluster permutation uses TFR data directly
 	"cluster": {"power"},
 	// Mediation/moderation use correlations features
-	"mediation":     {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"moderation":    {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"mixed_effects": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"mediation":     {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"moderation":    {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"mixed_effects": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Quality & Validation analyses
-	"regression":  {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"stability":   {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"validation":  {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"consistency": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"influence":   {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"report":      {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"regression":  {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"stability":   {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"validation":  {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"consistency": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"influence":   {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"report":      {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 }
 
 type PlotItem struct {
@@ -742,6 +744,8 @@ var defaultPlotItems = []PlotItem{
 	{ID: "ratios_by_condition", Group: "ratios", Name: "Condition Comparison", Description: "Ratio differences between conditions", RequiredFiles: []string{"features_ratios*.tsv", "events.tsv"}, RequiresFeatures: true},
 	// Asymmetry
 	{ID: "asymmetry_by_condition", Group: "asymmetry", Name: "Condition Comparison", Description: "Asymmetry differences between conditions", RequiredFiles: []string{"features_asymmetry*.tsv", "events.tsv"}, RequiresFeatures: true},
+	// Microstates
+	{ID: "microstates_by_condition", Group: "microstates", Name: "Condition Comparison", Description: "Microstate dynamics differences between conditions", RequiredFiles: []string{"features_microstates*.tsv", "events.tsv"}, RequiresFeatures: true},
 	// Bursts
 	{ID: "bursts_by_condition", Group: "bursts", Name: "Condition Comparison", Description: "Burst differences between conditions", RequiredFiles: []string{"features_bursts*.tsv", "events.tsv"}, RequiresFeatures: true},
 	// ERP
@@ -775,6 +779,7 @@ var defaultPlotCategories = []FeatureCategory{
 	{"spectral", "Spectral", "Peak frequency, spectral edge, and entropy"},
 	{"ratios", "Ratios", "Band power ratios (theta/beta, alpha/beta, etc.)"},
 	{"asymmetry", "Asymmetry", "Hemispheric asymmetry indices"},
+	{"microstates", "Microstates", "EEG microstate dynamics and transitions"},
 	{"bursts", "Bursts", "Oscillatory burst dynamics"},
 	{"quality", "Quality", "Data quality diagnostics and outlier detection"},
 	{"erp", "ERP", "Event-related potential waveforms and topographies"},
@@ -2792,7 +2797,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.categories = []string{
 			"power", "spectral", "aperiodic", "erp", "erds", "ratios", "asymmetry",
 			"connectivity", "directedconnectivity", "itpc", "pac",
-			"complexity", "bursts", "quality", "sourcelocalization",
+			"complexity", "bursts", "quality", "microstates", "sourcelocalization",
 		}
 		m.categoryDescs = []string{
 			"Band power (log-ratio)",
@@ -2809,6 +2814,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"Signal complexity",
 			"Oscillatory burst dynamics",
 			"Trial quality metrics",
+			"EEG microstate dynamics (A-D)",
 			"Source localization (LCMV, eLORETA)",
 		}
 		m.steps = []types.WizardStep{

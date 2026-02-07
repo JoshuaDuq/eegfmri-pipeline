@@ -622,6 +622,23 @@ def _apply_quality_overrides(args: argparse.Namespace, config: Any) -> None:
         quality_cfg["muscle_band"] = list(args.quality_muscle_band)
 
 
+def _apply_microstates_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply microstate-related config overrides."""
+    micro_cfg = config.setdefault("feature_engineering", {}).setdefault("microstates", {})
+    if getattr(args, "microstates_n_states", None) is not None:
+        micro_cfg["n_states"] = int(args.microstates_n_states)
+    if getattr(args, "microstates_min_peak_distance_ms", None) is not None:
+        micro_cfg["min_peak_distance_ms"] = float(args.microstates_min_peak_distance_ms)
+    if getattr(args, "microstates_max_gfp_peaks_per_epoch", None) is not None:
+        micro_cfg["max_gfp_peaks_per_epoch"] = int(args.microstates_max_gfp_peaks_per_epoch)
+    if getattr(args, "microstates_min_duration_ms", None) is not None:
+        micro_cfg["min_duration_ms"] = float(args.microstates_min_duration_ms)
+    if getattr(args, "microstates_gfp_peak_prominence", None) is not None:
+        micro_cfg["gfp_peak_prominence"] = float(args.microstates_gfp_peak_prominence)
+    if getattr(args, "microstates_random_state", None) is not None:
+        micro_cfg["random_state"] = int(args.microstates_random_state)
+
+
 def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply ERDS-related config overrides."""
     erds_cfg = config.setdefault("feature_engineering", {}).setdefault("erds", {})
@@ -740,6 +757,7 @@ def _apply_feature_config_overrides(args: argparse.Namespace, config: Any) -> No
     _apply_band_envelope_overrides(args, config)
     _apply_iaf_overrides(args, config)
     _apply_quality_overrides(args, config)
+    _apply_microstates_overrides(args, config)
     _apply_erds_overrides(args, config)
     _apply_execution_overrides(args, config)
     _apply_validation_overrides(args, config)
@@ -1091,6 +1109,15 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--quality-snr-noise-band", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Noise band for SNR computation")
     parser.add_argument("--quality-muscle-band", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Muscle band for artifact detection")
 
+    # Microstates
+    parser.add_argument("--microstates-n-states", type=int, default=None, help="Number of microstate classes (default: 4)")
+    parser.add_argument("--microstates-min-peak-distance-ms", type=float, default=None, help="Minimum GFP peak distance in ms (default: 10)")
+    parser.add_argument("--microstates-max-gfp-peaks-per-epoch", type=int, default=None, help="Maximum GFP peaks sampled per epoch (default: 400)")
+    parser.add_argument("--microstates-min-duration-ms", type=float, default=None, help="Minimum state duration in ms for temporal smoothing")
+    parser.add_argument("--microstates-gfp-peak-prominence", type=float, default=None, help="Optional GFP peak prominence threshold")
+    parser.add_argument("--microstates-random-state", type=int, default=None, help="Random seed for microstate template fitting")
+    parser.add_argument("--fixed-templates-path", type=str, default=None, help="Optional .npz file with fixed microstate templates ('templates' and optional 'ch_names')")
+
     # ERDS
     parser.add_argument("--erds-use-log-ratio", action="store_true", default=None, help="Use dB (log ratio) instead of percent for ERDS")
     parser.add_argument("--no-erds-use-log-ratio", action="store_false", dest="erds_use_log_ratio")
@@ -1174,6 +1201,7 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             tmax=getattr(args, "tmax", None),
             time_ranges=time_ranges or None,
             aggregation_method=getattr(args, "aggregation_method", "mean"),
+            fixed_templates_path=Path(args.fixed_templates_path) if getattr(args, "fixed_templates_path", None) else None,
             progress=progress,
             cli_command=cli_command,
         )

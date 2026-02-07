@@ -49,6 +49,7 @@ _FEATURE_AVAILABILITY_CATEGORIES = [
     "spectral",
     "ratios",
     "asymmetry",
+    "microstates",
 ]
 
 
@@ -128,6 +129,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         "spectral": ["features_spectral*.parquet"],
         "ratios": ["features_ratios*.parquet"],
         "asymmetry": ["features_asymmetry*.parquet"],
+        "microstates": ["features_microstates*.parquet"],
     }
     
     bands = set(FREQUENCY_BANDS)

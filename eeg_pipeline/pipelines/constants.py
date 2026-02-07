@@ -36,6 +36,7 @@ FEATURE_CATEGORIES: List[str] = [
     "spectral",
     "ratios",
     "asymmetry",
+    "microstates",
 ]
 
 
@@ -73,6 +74,7 @@ FEATURE_VISUALIZE_CATEGORIES: List[str] = [
     "spectral",
     "ratios",
     "asymmetry",
+    "microstates",
 ]
 
 

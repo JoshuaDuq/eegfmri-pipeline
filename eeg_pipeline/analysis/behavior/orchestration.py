@@ -1270,6 +1270,7 @@ FEATURE_COLUMN_PREFIXES = (
     "spectral_",
     "ratios_",
     "asymmetry_",
+    "microstates_",
     "temporal_",
 )
 

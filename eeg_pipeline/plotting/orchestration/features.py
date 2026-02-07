@@ -52,6 +52,7 @@ _KNOWN_FEATURE_TYPES = [
     "ratios",
     "spectral",
     "asymmetry",
+    "microstates",
     "temporal",
 ]
 

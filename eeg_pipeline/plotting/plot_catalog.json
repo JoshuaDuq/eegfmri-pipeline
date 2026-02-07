@@ -46,6 +46,11 @@
       "description": "Hemispheric asymmetry indices"
     },
     {
+      "key": "microstates",
+      "label": "Microstates",
+      "description": "EEG microstate dynamics (coverage, duration, transitions)"
+    },
+    {
       "key": "bursts",
       "label": "Bursts",
       "description": "Oscillatory burst dynamics"
@@ -338,6 +343,20 @@
       "requires_features": true
     },
     {
+      "id": "microstates_by_condition",
+      "group": "microstates",
+      "label": "Condition Comparison",
+      "description": "Microstate dynamics differences between conditions",
+      "required_files": [
+        "features_microstates*.parquet",
+        "events.tsv"
+      ],
+      "feature_categories": [
+        "microstates"
+      ],
+      "requires_features": true
+    },
+    {
       "id": "erp_butterfly",
       "group": "erp",
       "label": "Butterfly",
@@ -514,7 +533,7 @@
           "type": "multi_select",
           "label": "Features",
           "description": "EEG features to correlate",
-          "options": ["power", "connectivity", "aperiodic", "complexity", "itpc", "pac", "erds", "spectral", "ratios", "asymmetry"],
+          "options": ["power", "connectivity", "aperiodic", "complexity", "itpc", "pac", "erds", "spectral", "ratios", "asymmetry", "microstates"],
           "default": ["power"]
         },
         "columns": {

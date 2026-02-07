@@ -48,6 +48,7 @@ _FEATURE_TABLE_SPECS: List[Tuple[str, str, List[str], str]] = [
     ("spectral_df", "features_spectral", [".parquet", ".tsv"], "wide"),
     ("ratios_df", "features_ratios", [".parquet", ".tsv"], "wide"),
     ("asymmetry_df", "features_asymmetry", [".parquet", ".tsv"], "wide"),
+    ("microstates_df", "features_microstates", [".parquet", ".tsv"], "wide"),
     ("complexity_df", "features_complexity", [".parquet", ".tsv"], "wide"),
     ("pac_df", "features_pac", [".parquet", ".tsv"], "wide"),
     ("pac_trials_df", "features_pac_trials", [".parquet", ".tsv"], "wide"),
@@ -84,6 +85,7 @@ class FeaturePlotContext:
     spectral_df: Optional[pd.DataFrame] = None
     ratios_df: Optional[pd.DataFrame] = None
     asymmetry_df: Optional[pd.DataFrame] = None
+    microstates_df: Optional[pd.DataFrame] = None
     pac_df: Optional[pd.DataFrame] = None
     complexity_df: Optional[pd.DataFrame] = None
     pac_trials_df: Optional[pd.DataFrame] = None

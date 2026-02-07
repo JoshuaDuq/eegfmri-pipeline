@@ -56,6 +56,7 @@ from eeg_pipeline.analysis.features.quality import (
     compute_trial_quality_metrics,
     extract_quality_features,
 )
+from eeg_pipeline.analysis.features.microstates import extract_microstate_features
 
 from eeg_pipeline.utils.analysis.tfr import (
     compute_tfr_for_subject,
@@ -1012,6 +1013,18 @@ def extract_all_features(
         results.quality_df = qual_df
         results.quality_cols = qual_cols or []
 
+    if "microstates" in ctx.feature_categories:
+        micro_df, micro_cols, _ = _extract_feature_with_error_handling(
+            ctx,
+            "microstates",
+            extract_microstate_features,
+            expected_n_trials,
+            progress,
+            ctx,
+        )
+        results.microstates_df = micro_df
+        results.microstates_cols = micro_cols or []
+
     _apply_spatial_filtering_to_results(ctx, results)
     _add_change_scores_to_results(ctx, results)
 
@@ -1047,6 +1060,7 @@ def _add_change_scores_to_results(
         ("spectral_df", "spectral_cols"),
         ("ratios_df", "ratios_cols"),
         ("asymmetry_df", "asymmetry_cols"),
+        ("microstates_df", "microstates_cols"),
     ]
 
     n_added = 0
@@ -1229,6 +1243,25 @@ def extract_precomputed_features(
             result.features["quality"] = FeatureSet(qual_df, qual_cols, "quality")
         else:
             result.qc["quality"] = {"skipped_reason": "empty_result"}
+
+    if "microstates" in feature_groups:
+        from types import SimpleNamespace
+
+        micro_df, micro_cols = extract_microstate_features(
+            SimpleNamespace(
+                epochs=epochs,
+                windows=None,
+                name=None,
+                config=config,
+                logger=logger,
+                fixed_templates=None,
+                fixed_template_ch_names=None,
+            )
+        )
+        if micro_df is not None and not micro_df.empty:
+            result.features["microstates"] = FeatureSet(micro_df, micro_cols, "microstates")
+        else:
+            result.qc["microstates"] = {"skipped_reason": "empty_result"}
 
     return result
 
