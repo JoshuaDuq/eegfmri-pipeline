@@ -20,35 +20,6 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research
 
 ---
 
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Data Requirements](#data-requirements)
-- [Project Structure](#project-structure)
-- [Pipeline Overview](#pipeline-overview)
-  - [1. Utilities — Data Conversion](#1-utilities--data-conversion)
-  - [2. Preprocessing](#2-preprocessing)
-  - [3. Feature Extraction](#3-feature-extraction)
-  - [4. Behavioral Analysis](#4-behavioral-analysis)
-  - [5. Machine Learning](#5-machine-learning)
-  - [6. fMRI Preprocessing](#6-fmri-preprocessing)
-  - [7. fMRI Analysis](#7-fmri-analysis)
-  - [8. Plotting](#8-plotting)
-  - [9. Validation](#9-validation)
-  - [10. Stats & Info](#10-stats--info)
-- [Interactive TUI](#interactive-tui)
-- [Configuration](#configuration)
-- [Subject Selection](#subject-selection)
-- [Output Formats](#output-formats)
-- [Advanced Topics](#advanced-topics)
-- [Dependencies](#dependencies)
-- [License](#license)
-- [Contributing](#contributing)
-- [Citation](#citation)
-
----
-
 ## Quick Start
 
 ```bash
