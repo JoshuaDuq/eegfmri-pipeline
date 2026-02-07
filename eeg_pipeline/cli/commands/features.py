@@ -376,8 +376,12 @@ def _apply_complexity_overrides(args: argparse.Namespace, config: Any) -> None:
         config["feature_engineering.complexity.pe_order"] = args.pe_order
     if getattr(args, "pe_delay", None) is not None:
         config["feature_engineering.complexity.pe_delay"] = args.pe_delay
-    
+
     complexity_cfg = config.setdefault("feature_engineering", {}).setdefault("complexity", {})
+    if getattr(args, "pe_order", None) is not None:
+        complexity_cfg["pe_order"] = args.pe_order
+    if getattr(args, "pe_delay", None) is not None:
+        complexity_cfg["pe_delay"] = args.pe_delay
     if getattr(args, "complexity_signal_basis", None) is not None:
         complexity_cfg["signal_basis"] = args.complexity_signal_basis
     if getattr(args, "complexity_min_segment_sec", None) is not None:
@@ -386,6 +390,14 @@ def _apply_complexity_overrides(args: argparse.Namespace, config: Any) -> None:
         complexity_cfg["min_samples"] = args.complexity_min_samples
     if getattr(args, "complexity_zscore", None) is not None:
         complexity_cfg["zscore"] = args.complexity_zscore
+    if getattr(args, "complexity_sampen_order", None) is not None:
+        complexity_cfg["sampen_order"] = args.complexity_sampen_order
+    if getattr(args, "complexity_sampen_r", None) is not None:
+        complexity_cfg["sampen_r"] = args.complexity_sampen_r
+    if getattr(args, "complexity_mse_scale_min", None) is not None:
+        complexity_cfg["mse_scale_min"] = args.complexity_mse_scale_min
+    if getattr(args, "complexity_mse_scale_max", None) is not None:
+        complexity_cfg["mse_scale_max"] = args.complexity_mse_scale_max
 
 
 def _apply_erp_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -1097,6 +1109,10 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     # Complexity
     parser.add_argument("--pe-order", type=int, default=None, help="Permutation entropy order (3-7, default: from config)")
     parser.add_argument("--pe-delay", type=int, default=None, help="Permutation entropy delay")
+    parser.add_argument("--complexity-sampen-order", type=int, default=None, help="Sample entropy embedding dimension (default: from config)")
+    parser.add_argument("--complexity-sampen-r", type=float, default=None, help="Sample entropy tolerance as fraction of SD")
+    parser.add_argument("--complexity-mse-scale-min", type=int, default=None, help="Minimum MSE coarse-graining scale")
+    parser.add_argument("--complexity-mse-scale-max", type=int, default=None, help="Maximum MSE coarse-graining scale")
     parser.add_argument("--complexity-signal-basis", choices=["filtered", "envelope"], default=None, help="Complexity signal basis")
     parser.add_argument("--complexity-min-segment-sec", type=float, default=None, help="Minimum segment duration for complexity (sec)")
     parser.add_argument("--complexity-min-samples", type=int, default=None, help="Minimum samples for complexity")

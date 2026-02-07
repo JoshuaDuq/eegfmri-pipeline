@@ -93,7 +93,7 @@ FEATURE_FILE_MAP = {
 
 FEATURE_METRICS = {
     "aperiodic": ["slope", "offset"],
-    "complexity": ["lzc", "pe"],
+    "complexity": ["lzc", "pe", "sampen"],
 }
 
 
@@ -138,6 +138,28 @@ def _load_feature_df(
 def _get_feature_group_name(feature_type: str) -> str:
     """Get the NamingSchema group name for a feature type."""
     return FEATURE_GROUP_MAP.get(feature_type, feature_type)
+
+
+def _get_detected_metrics(
+    features_df: pd.DataFrame,
+    feature_type: str,
+) -> List[Optional[str]]:
+    """Discover available metrics for feature types with metric families."""
+    base_metrics = FEATURE_METRICS.get(feature_type, [None])
+    if feature_type != "complexity":
+        return base_metrics
+
+    stats = set()
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != FEATURE_GROUP_MAP["complexity"]:
+            continue
+        stat = parsed.get("stat")
+        if stat:
+            stats.add(str(stat))
+    return sorted(stats) if stats else base_metrics
 
 
 def _matches_feature_criteria(
@@ -795,7 +817,7 @@ def plot_behavior_scatter(
         feature_dir = scatter_dir / sanitize_label(feature_type)
         ensure_dir(feature_dir)
 
-        metrics_list = FEATURE_METRICS.get(feature_type, [None])
+        metrics_list = _get_detected_metrics(features_df, feature_type)
         if available_bands:
             if available_bands == {"broadband"}:
                 bands_to_plot = ["broadband"]

@@ -7,13 +7,13 @@ These are pure numpy functions with no EEG-specific dependencies.
 
 Categories:
 - GFP: global field power (spatial std over channels)
-- Complexity: permutation entropy, Lempel-Ziv
+- Complexity: permutation entropy, sample entropy, multiscale entropy, Lempel-Ziv
 """
 
 from __future__ import annotations
 
 from math import factorial
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 import numpy as np
 
@@ -106,6 +106,107 @@ def compute_permutation_entropy(
             entropy = entropy / max_entropy
     
     return float(entropy)
+
+
+def _sample_entropy_fallback(x: np.ndarray, order: int, tolerance: float) -> float:
+    """Fallback sample entropy implementation when antropy is unavailable."""
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size < order + 2:
+        return np.nan
+
+    embedded_m = _embed_time_series(x, order=order, delay=1)
+    embedded_m1 = _embed_time_series(x, order=order + 1, delay=1)
+    if embedded_m.size == 0 or embedded_m1.size == 0:
+        return np.nan
+
+    def _count_matches(vectors: np.ndarray) -> int:
+        n = vectors.shape[0]
+        count = 0
+        for i in range(n - 1):
+            dmax = np.max(np.abs(vectors[i + 1 :] - vectors[i]), axis=1)
+            count += int(np.sum(dmax <= tolerance))
+        return count
+
+    b_count = _count_matches(embedded_m)
+    a_count = _count_matches(embedded_m1)
+    if b_count <= 0 or a_count <= 0:
+        return np.nan
+    return float(-np.log(a_count / b_count))
+
+
+def compute_sample_entropy(
+    x: np.ndarray,
+    order: int = 2,
+    r: float = 0.2,
+    tolerance: Optional[float] = None,
+) -> float:
+    """Compute sample entropy using antropy when available."""
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size < order + 2:
+        return np.nan
+
+    if tolerance is None:
+        std = float(np.std(x, ddof=0))
+        tolerance = float(r) * std
+    tolerance = float(tolerance)
+    if not np.isfinite(tolerance) or tolerance <= 0:
+        tolerance = max(float(np.finfo(float).eps), float(r) * float(np.nanstd(x)))
+
+    try:
+        from antropy import sample_entropy as _antropy_sample_entropy
+
+        value = _antropy_sample_entropy(x, order=int(order), tolerance=tolerance, metric="chebyshev")
+        return float(value) if np.isfinite(value) else np.nan
+    except ImportError:
+        return _sample_entropy_fallback(x, order=int(order), tolerance=tolerance)
+    except Exception:
+        return _sample_entropy_fallback(x, order=int(order), tolerance=tolerance)
+
+
+def _coarse_grain(x: np.ndarray, scale: int) -> np.ndarray:
+    """Coarse-grain a signal by non-overlapping averaging."""
+    if scale <= 1:
+        return np.asarray(x, dtype=float)
+
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    n_complete = x.size // scale
+    if n_complete <= 0:
+        return np.array([], dtype=float)
+    trimmed = x[: n_complete * scale]
+    return np.mean(trimmed.reshape(n_complete, scale), axis=1)
+
+
+def compute_multiscale_entropy(
+    x: np.ndarray,
+    scales: Iterable[int] = range(1, 21),
+    order: int = 2,
+    r: float = 0.2,
+) -> Dict[int, float]:
+    """
+    Compute multiscale entropy (MSE) across coarse-graining scales.
+
+    Uses non-overlapping averaging for coarse-graining and sample entropy
+    at each scale.
+    """
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    out: Dict[int, float] = {}
+    min_len = int(order) + 2
+
+    for raw_scale in scales:
+        scale = int(raw_scale)
+        if scale <= 0:
+            continue
+        coarse = _coarse_grain(x, scale)
+        if coarse.size < min_len:
+            out[scale] = np.nan
+            continue
+        out[scale] = float(compute_sample_entropy(coarse, order=int(order), r=float(r)))
+
+    return out
 
 
 def compute_lempel_ziv_complexity(x: np.ndarray, threshold: Optional[float] = None) -> float:

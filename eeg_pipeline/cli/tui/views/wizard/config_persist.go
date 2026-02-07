@@ -118,6 +118,10 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// Complexity configuration
 	cfg["complexityPEOrder"] = m.complexityPEOrder
 	cfg["complexityPEDelay"] = m.complexityPEDelay
+	cfg["complexitySampEnOrder"] = m.complexitySampEnOrder
+	cfg["complexitySampEnR"] = m.complexitySampEnR
+	cfg["complexityMSEScaleMin"] = m.complexityMSEScaleMin
+	cfg["complexityMSEScaleMax"] = m.complexityMSEScaleMax
 	cfg["complexitySignalBasis"] = m.complexitySignalBasis
 	cfg["complexityMinSegmentSec"] = m.complexityMinSegmentSec
 	cfg["complexityMinSamples"] = m.complexityMinSamples
@@ -1085,6 +1089,10 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	// Complexity
 	m.complexityPEOrder = getInt("complexityPEOrder", m.complexityPEOrder)
 	m.complexityPEDelay = getInt("complexityPEDelay", m.complexityPEDelay)
+	m.complexitySampEnOrder = getInt("complexitySampEnOrder", m.complexitySampEnOrder)
+	m.complexitySampEnR = getFloat("complexitySampEnR", m.complexitySampEnR)
+	m.complexityMSEScaleMin = getInt("complexityMSEScaleMin", m.complexityMSEScaleMin)
+	m.complexityMSEScaleMax = getInt("complexityMSEScaleMax", m.complexityMSEScaleMax)
 	m.complexitySignalBasis = getInt("complexitySignalBasis", m.complexitySignalBasis)
 	m.complexityMinSegmentSec = getFloat("complexityMinSegmentSec", m.complexityMinSegmentSec)
 	m.complexityMinSamples = getInt("complexityMinSamples", m.complexityMinSamples)

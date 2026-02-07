@@ -520,9 +520,13 @@ feature_engineering:
     signal_basis: "filtered"         # "filtered" | "envelope"
     pe_order: 3
     pe_delay: 1
+    sampen_order: 2                  # Sample entropy embedding dimension
+    sampen_r: 0.2                    # Sample entropy tolerance as fraction of SD
+    mse_scale_min: 1                 # MSE coarse-graining start scale
+    mse_scale_max: 20                # MSE coarse-graining end scale
     zscore: true
     min_segment_sec: 2.0             # Minimum segment duration (sec)
-    min_samples: 200                 # Minimum samples for stable LZC/PE
+    min_samples: 200                 # Minimum samples for stable LZC/PE/SampEn/MSE
     skip_invalid_segments: true
 
   output:

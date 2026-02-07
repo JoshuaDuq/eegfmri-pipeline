@@ -38,6 +38,10 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	// Prepare values for display
 	peOrderVal := fmt.Sprintf("%d", m.complexityPEOrder)
 	peDelayVal := fmt.Sprintf("%d", m.complexityPEDelay)
+	sampEnOrderVal := fmt.Sprintf("%d", m.complexitySampEnOrder)
+	sampEnRVal := fmt.Sprintf("%.2f", m.complexitySampEnR)
+	mseScaleMinVal := fmt.Sprintf("%d", m.complexityMSEScaleMin)
+	mseScaleMaxVal := fmt.Sprintf("%d", m.complexityMSEScaleMax)
 	burstThreshVal := fmt.Sprintf("%.1f z", m.burstThresholdZ)
 	burstMinDurVal := fmt.Sprintf("%d ms", m.burstMinDuration)
 	erpBaselineVal := m.boolToOnOff(m.erpBaselineCorrection)
@@ -88,6 +92,14 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			peOrderVal = buffer
 		case m.isCurrentlyEditing(optPEDelay):
 			peDelayVal = buffer
+		case m.isCurrentlyEditing(optComplexitySampleEntropyOrder):
+			sampEnOrderVal = buffer
+		case m.isCurrentlyEditing(optComplexitySampleEntropyR):
+			sampEnRVal = buffer
+		case m.isCurrentlyEditing(optComplexityMSEScaleMin):
+			mseScaleMinVal = buffer
+		case m.isCurrentlyEditing(optComplexityMSEScaleMax):
+			mseScaleMaxVal = buffer
 		case m.isCurrentlyEditing(optBurstThreshold):
 			burstThreshVal = buffer
 		case m.isCurrentlyEditing(optBurstMinDuration):
@@ -1486,6 +1498,22 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "PE Delay"
 			value = peDelayVal
 			hint = "sample lag"
+		case optComplexitySampleEntropyOrder:
+			label = "SampEn Order"
+			value = sampEnOrderVal
+			hint = "embedding dimension (m)"
+		case optComplexitySampleEntropyR:
+			label = "SampEn r"
+			value = sampEnRVal
+			hint = "tolerance as SD fraction"
+		case optComplexityMSEScaleMin:
+			label = "MSE scale min"
+			value = mseScaleMinVal
+			hint = "coarse-graining start"
+		case optComplexityMSEScaleMax:
+			label = "MSE scale max"
+			value = mseScaleMaxVal
+			hint = "coarse-graining end"
 		case optComplexitySignalBasis:
 			label = "Signal basis"
 			bases := []string{"filtered", "envelope"}

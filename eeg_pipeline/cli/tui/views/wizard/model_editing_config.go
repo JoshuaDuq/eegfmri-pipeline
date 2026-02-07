@@ -2524,6 +2524,10 @@ const (
 	optAperiodicExcludeLineNoise
 	optPEOrder
 	optPEDelay
+	optComplexitySampleEntropyOrder
+	optComplexitySampleEntropyR
+	optComplexityMSEScaleMin
+	optComplexityMSEScaleMax
 	optComplexitySignalBasis
 	optComplexityMinSegmentSec
 	optComplexityMinSamples

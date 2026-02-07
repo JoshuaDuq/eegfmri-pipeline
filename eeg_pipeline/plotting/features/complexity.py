@@ -8,6 +8,7 @@ Uses violin/strip plots for distributions, shows individual data points.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -32,8 +33,8 @@ from eeg_pipeline.plotting.features.roi import get_roi_definitions
 
 # Constants
 COMPLEXITY_GROUP = "comp"
-DEFAULT_METRICS = ["lzc", "pe"]
-METRIC_LABELS = {"lzc": "LZC", "pe": "PE"}
+DEFAULT_METRICS = ["lzc", "pe", "sampen"]
+METRIC_LABELS = {"lzc": "LZC", "pe": "PE", "sampen": "SampEn"}
 MIN_SEGMENTS_FOR_COMPARISON = 2
 VIOLIN_WIDTH = 0.7
 VIOLIN_ALPHA = 0.6
@@ -55,6 +56,17 @@ SIGNIFICANCE_MARKER = "†"
 SIGNIFICANT_COLOR = "#d62728"
 NON_SIGNIFICANT_COLOR = "#333333"
 SEGMENT_COLORS = {"v1": "#5a7d9a", "v2": "#c44e52"}
+
+
+def _metric_label(metric: str) -> str:
+    """Map metric token to readable label."""
+    metric = str(metric)
+    if metric in METRIC_LABELS:
+        return METRIC_LABELS[metric]
+    m = re.fullmatch(r"mse(\d+)", metric.lower())
+    if m:
+        return f"MSE (scale {int(m.group(1))})"
+    return metric.upper()
 
 
 def _extract_segments_from_data(features_df: pd.DataFrame) -> set[str]:
@@ -296,7 +308,7 @@ def _plot_window_comparison(
     use_multi_window = len(segments) > 2
     
     for metric in metrics:
-        metric_label = METRIC_LABELS.get(metric, metric.upper())
+        metric_label = _metric_label(metric)
         
         for roi_name in roi_names:
             suffix = _create_roi_suffix(roi_name)
@@ -469,7 +481,7 @@ def _plot_column_comparison(
         multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
         
         for metric in metrics:
-            metric_label = METRIC_LABELS.get(metric, metric.upper())
+            metric_label = _metric_label(metric)
             
             for roi_name in roi_names:
                 data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
@@ -522,7 +534,7 @@ def _plot_column_comparison(
     n_trials = len(features_df)
     
     for metric in metrics:
-        metric_label = METRIC_LABELS.get(metric, metric.upper())
+        metric_label = _metric_label(metric)
         
         for roi_name in roi_names:
             cell_data = _prepare_column_comparison_data(
@@ -589,7 +601,8 @@ def plot_complexity_by_condition(
     """Compare complexity metrics between conditions per band.
     
     Complexity uses frequency bands (delta, theta, alpha, beta, gamma) with
-    metrics like lzc (Lempel-Ziv Complexity) and pe (Permutation Entropy).
+    metrics like lzc (Lempel-Ziv), pe (Permutation Entropy), sampen (Sample Entropy),
+    and mseXX (Multiscale Entropy at scale XX).
     
     For window comparisons (paired): Uses the unified plot_paired_comparison helper.
     For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.

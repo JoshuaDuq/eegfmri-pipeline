@@ -596,6 +596,28 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.pacWaveformOffsetMs = val
 	case optPEDelay:
 		m.complexityPEDelay = int(val)
+	case optComplexitySampleEntropyOrder:
+		if val >= 1 {
+			m.complexitySampEnOrder = int(val)
+		}
+	case optComplexitySampleEntropyR:
+		if val > 0 {
+			m.complexitySampEnR = val
+		}
+	case optComplexityMSEScaleMin:
+		if val >= 1 {
+			m.complexityMSEScaleMin = int(val)
+			if m.complexityMSEScaleMax < m.complexityMSEScaleMin {
+				m.complexityMSEScaleMax = m.complexityMSEScaleMin
+			}
+		}
+	case optComplexityMSEScaleMax:
+		if val >= 1 {
+			m.complexityMSEScaleMax = int(val)
+			if m.complexityMSEScaleMax < m.complexityMSEScaleMin {
+				m.complexityMSEScaleMin = m.complexityMSEScaleMax
+			}
+		}
 	case optComplexityMinSegmentSec:
 		if val > 0 {
 			m.complexityMinSegmentSec = val

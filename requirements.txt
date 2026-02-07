@@ -22,6 +22,7 @@ mne_bids_pipeline==1.9.0
 numpy>=1.24.0,<2.0.0
 pandas==2.3.0
 scipy==1.15.3
+antropy>=0.1.9
 pyarrow>=17.0.0
 h5io>=0.1.0
 

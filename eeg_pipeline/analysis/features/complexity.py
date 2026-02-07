@@ -5,6 +5,8 @@ Complexity Feature Extraction
 Computes nonlinear complexity metrics per trial/channel (optionally ROI/global):
 - Lempel–Ziv complexity (LZC)
 - Permutation entropy (PE)
+- Sample entropy (SampEn)
+- Multiscale entropy (MSE; coarse-graining scales)
 
 Scientific notes
 ---------------
@@ -29,7 +31,9 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.signal_metrics import (
     compute_lempel_ziv_complexity as _lempel_ziv_complexity,
+    compute_multiscale_entropy as _multiscale_entropy,
     compute_permutation_entropy as _permutation_entropy,
+    compute_sample_entropy as _sample_entropy,
 )
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.config.loader import get_config_value
@@ -40,6 +44,10 @@ class ComplexityParams:
     signal_basis: str
     pe_order: int
     pe_delay: int
+    sampen_order: int
+    sampen_r: float
+    mse_scale_min: int
+    mse_scale_max: int
     zscore: bool
     min_segment_sec: float
     min_samples: int
@@ -52,18 +60,36 @@ def _extract_params(config: Any) -> ComplexityParams:
 
     pe_order = int(get_config_value(config, "feature_engineering.complexity.pe_order", 3))
     pe_delay = int(get_config_value(config, "feature_engineering.complexity.pe_delay", 1))
+    sampen_order = int(get_config_value(config, "feature_engineering.complexity.sampen_order", 2))
+    sampen_r = float(get_config_value(config, "feature_engineering.complexity.sampen_r", 0.2))
+    mse_scale_min = int(get_config_value(config, "feature_engineering.complexity.mse_scale_min", 1))
+    mse_scale_max = int(get_config_value(config, "feature_engineering.complexity.mse_scale_max", 20))
     zscore = bool(get_config_value(config, "feature_engineering.complexity.zscore", True))
     min_segment_sec = float(get_config_value(config, "feature_engineering.complexity.min_segment_sec", 2.0))
     min_samples = int(get_config_value(config, "feature_engineering.complexity.min_samples", 200))
 
+    pe_order = max(2, pe_order)
+    pe_delay = max(1, pe_delay)
+    sampen_order = max(1, sampen_order)
+    if not np.isfinite(sampen_r) or sampen_r <= 0:
+        sampen_r = 0.2
+    mse_scale_min = max(1, mse_scale_min)
+    mse_scale_max = max(mse_scale_min, mse_scale_max)
+
     # PE needs enough samples for ordinal patterns
     min_needed_for_pe = max(1, (pe_order - 1) * pe_delay + 2)
-    min_samples = max(min_samples, min_needed_for_pe)
+    # MSE at max scale needs enough points for SampEn templates.
+    min_needed_for_mse = max(1, mse_scale_max * (sampen_order + 2))
+    min_samples = max(min_samples, min_needed_for_pe, min_needed_for_mse)
 
     return ComplexityParams(
         signal_basis=signal_basis,
         pe_order=pe_order,
         pe_delay=pe_delay,
+        sampen_order=sampen_order,
+        sampen_r=sampen_r,
+        mse_scale_min=mse_scale_min,
+        mse_scale_max=mse_scale_max,
         zscore=zscore,
         min_segment_sec=min_segment_sec,
         min_samples=min_samples,
@@ -90,6 +116,14 @@ def _pick_basis_array(band_data: Any, basis: str) -> np.ndarray:
     return np.asarray(band_data.filtered, dtype=float)
 
 
+def _mse_scales(params: ComplexityParams) -> List[int]:
+    return list(range(int(params.mse_scale_min), int(params.mse_scale_max) + 1))
+
+
+def _mse_stat_name(scale: int) -> str:
+    return f"mse{int(scale):02d}"
+
+
 def _compute_epoch_complexity(
     ep_idx: int,
     precomputed: PrecomputedData,
@@ -100,6 +134,7 @@ def _compute_epoch_complexity(
     roi_map: Dict[str, List[int]],
 ) -> Dict[str, float]:
     record: Dict[str, float] = {}
+    mse_scales = _mse_scales(params)
 
     sfreq = float(getattr(precomputed, "sfreq", np.nan))
     n_samples = int(np.sum(segment_mask))
@@ -130,6 +165,8 @@ def _compute_epoch_complexity(
         n_channels = len(precomputed.ch_names)
         lzc_per_channel = np.full((n_channels,), np.nan)
         pe_per_channel = np.full((n_channels,), np.nan)
+        sampen_per_channel = np.full((n_channels,), np.nan)
+        mse_per_channel = np.full((n_channels, len(mse_scales)), np.nan)
 
         for ch_idx, ch_name in enumerate(precomputed.ch_names):
             trace = _standardize_trace(trace_matrix[ch_idx], zscore=params.zscore)
@@ -143,6 +180,21 @@ def _compute_epoch_complexity(
                     delay=params.pe_delay,
                 )
             )
+            sampen_per_channel[ch_idx] = float(
+                _sample_entropy(
+                    trace,
+                    order=params.sampen_order,
+                    r=params.sampen_r,
+                )
+            )
+            mse_values = _multiscale_entropy(
+                trace,
+                scales=mse_scales,
+                order=params.sampen_order,
+                r=params.sampen_r,
+            )
+            for scale_idx, scale in enumerate(mse_scales):
+                mse_per_channel[ch_idx, scale_idx] = float(mse_values.get(scale, np.nan))
 
             if "channels" in spatial_modes:
                 record[NamingSchema.build("comp", segment_name, band, "ch", "lzc", channel=ch_name)] = float(
@@ -151,6 +203,20 @@ def _compute_epoch_complexity(
                 record[NamingSchema.build("comp", segment_name, band, "ch", "pe", channel=ch_name)] = float(
                     pe_per_channel[ch_idx]
                 )
+                record[NamingSchema.build("comp", segment_name, band, "ch", "sampen", channel=ch_name)] = float(
+                    sampen_per_channel[ch_idx]
+                )
+                for scale_idx, scale in enumerate(mse_scales):
+                    record[
+                        NamingSchema.build(
+                            "comp",
+                            segment_name,
+                            band,
+                            "ch",
+                            _mse_stat_name(scale),
+                            channel=ch_name,
+                        )
+                    ] = float(mse_per_channel[ch_idx, scale_idx])
 
         if "roi" in spatial_modes and roi_map:
             for roi_name, idxs in roi_map.items():
@@ -162,10 +228,31 @@ def _compute_epoch_complexity(
                 record[NamingSchema.build("comp", segment_name, band, "roi", "pe", channel=roi_name)] = float(
                     np.nanmean(pe_per_channel[idxs])
                 )
+                record[NamingSchema.build("comp", segment_name, band, "roi", "sampen", channel=roi_name)] = float(
+                    np.nanmean(sampen_per_channel[idxs])
+                )
+                for scale_idx, scale in enumerate(mse_scales):
+                    record[
+                        NamingSchema.build(
+                            "comp",
+                            segment_name,
+                            band,
+                            "roi",
+                            _mse_stat_name(scale),
+                            channel=roi_name,
+                        )
+                    ] = float(np.nanmean(mse_per_channel[idxs, scale_idx]))
 
         if "global" in spatial_modes:
             record[NamingSchema.build("comp", segment_name, band, "global", "lzc")] = float(np.nanmean(lzc_per_channel))
             record[NamingSchema.build("comp", segment_name, band, "global", "pe")] = float(np.nanmean(pe_per_channel))
+            record[NamingSchema.build("comp", segment_name, band, "global", "sampen")] = float(
+                np.nanmean(sampen_per_channel)
+            )
+            for scale_idx, scale in enumerate(mse_scales):
+                record[NamingSchema.build("comp", segment_name, band, "global", _mse_stat_name(scale))] = float(
+                    np.nanmean(mse_per_channel[:, scale_idx])
+                )
 
     return record
 
@@ -269,6 +356,10 @@ def extract_complexity_from_precomputed(
     df.attrs["signal_basis"] = params.signal_basis
     df.attrs["pe_order"] = int(params.pe_order)
     df.attrs["pe_delay"] = int(params.pe_delay)
+    df.attrs["sampen_order"] = int(params.sampen_order)
+    df.attrs["sampen_r"] = float(params.sampen_r)
+    df.attrs["mse_scale_min"] = int(params.mse_scale_min)
+    df.attrs["mse_scale_max"] = int(params.mse_scale_max)
     df.attrs["zscore"] = bool(params.zscore)
     df.attrs["min_segment_sec"] = float(params.min_segment_sec)
     df.attrs["min_samples"] = int(params.min_samples)

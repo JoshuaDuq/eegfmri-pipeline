@@ -559,6 +559,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optPEDelay:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optComplexitySampleEntropyOrder, optComplexitySampleEntropyR, optComplexityMSEScaleMin, optComplexityMSEScaleMax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optComplexitySignalBasis:
 		m.complexitySignalBasis++
 		if m.complexitySignalBasis > 1 {

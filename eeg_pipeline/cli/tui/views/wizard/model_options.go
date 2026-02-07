@@ -77,7 +77,19 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("complexity") {
 		options = append(options, optFeatGroupComplexity)
 		if m.featGroupComplexityExpanded {
-			options = append(options, optPEOrder, optPEDelay, optComplexitySignalBasis, optComplexityMinSegmentSec, optComplexityMinSamples, optComplexityZscore)
+			options = append(
+				options,
+				optPEOrder,
+				optPEDelay,
+				optComplexitySampleEntropyOrder,
+				optComplexitySampleEntropyR,
+				optComplexityMSEScaleMin,
+				optComplexityMSEScaleMax,
+				optComplexitySignalBasis,
+				optComplexityMinSegmentSec,
+				optComplexityMinSamples,
+				optComplexityZscore,
+			)
 		}
 	}
 	if m.isCategorySelected("erp") {

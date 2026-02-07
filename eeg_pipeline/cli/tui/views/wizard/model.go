@@ -775,7 +775,7 @@ var defaultPlotCategories = []FeatureCategory{
 	{"aperiodic", "Aperiodic", "1/f spectral slope and offset features"},
 	{"phase", "Phase (ITPC/PAC)", "Phase coherence and phase-amplitude coupling"},
 	{"erds", "ERDS", "Event-related desynchronization/synchronization"},
-	{"complexity", "Complexity", "Lempel-Ziv complexity and permutation entropy"},
+	{"complexity", "Complexity", "Lempel-Ziv, permutation entropy, sample entropy, and multiscale entropy"},
 	{"spectral", "Spectral", "Peak frequency, spectral edge, and entropy"},
 	{"ratios", "Ratios", "Band power ratios (theta/beta, alpha/beta, etc.)"},
 	{"asymmetry", "Asymmetry", "Hemispheric asymmetry indices"},
@@ -1406,8 +1406,12 @@ type Model struct {
 	aperiodicMinPoints int
 
 	// Complexity configuration
-	complexityPEOrder int // Permutation entropy order (3-7)
-	complexityPEDelay int
+	complexityPEOrder     int // Permutation entropy order (3-7)
+	complexityPEDelay     int
+	complexitySampEnOrder int     // Sample entropy embedding dimension
+	complexitySampEnR     float64 // Sample entropy tolerance as SD fraction
+	complexityMSEScaleMin int     // MSE minimum coarse-graining scale
+	complexityMSEScaleMax int     // MSE maximum coarse-graining scale
 
 	// ERP configuration
 	erpBaselineCorrection bool
@@ -2197,8 +2201,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		aperiodicMinR2:     0.6,
 		aperiodicMinPoints: 5,
 		// Complexity defaults
-		complexityPEOrder: 3,
-		complexityPEDelay: 1,
+		complexityPEOrder:     3,
+		complexityPEDelay:     1,
+		complexitySampEnOrder: 2,
+		complexitySampEnR:     0.2,
+		complexityMSEScaleMin: 1,
+		complexityMSEScaleMax: 20,
 		// ERP defaults
 		erpBaselineCorrection: true,
 		erpAllowNoBaseline:    false,

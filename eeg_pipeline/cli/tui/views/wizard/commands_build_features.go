@@ -334,6 +334,10 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	if m.isCategorySelected("complexity") {
 		args = append(args, "--pe-order", fmt.Sprintf("%d", m.complexityPEOrder))
 		args = append(args, "--pe-delay", fmt.Sprintf("%d", m.complexityPEDelay))
+		args = append(args, "--complexity-sampen-order", fmt.Sprintf("%d", m.complexitySampEnOrder))
+		args = append(args, "--complexity-sampen-r", fmt.Sprintf("%.2f", m.complexitySampEnR))
+		args = append(args, "--complexity-mse-scale-min", fmt.Sprintf("%d", m.complexityMSEScaleMin))
+		args = append(args, "--complexity-mse-scale-max", fmt.Sprintf("%d", m.complexityMSEScaleMax))
 	}
 
 	// ERP options
