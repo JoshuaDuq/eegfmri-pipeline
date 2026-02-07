@@ -24,7 +24,7 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research
 
 ```bash
 # 1. Clone and install
-git clone <repo-url> && cd EEG_fMRI_Pipeline
+git clone <repo-url> && cd Pain_fMRI_EEG
 pip install -e .
 
 # 2. Place your data (see "Data Requirements" below)
@@ -184,7 +184,7 @@ paths:
 ## Project Structure
 
 ```
-EEG_fMRI_Pipeline/
+Pain_fMRI_EEG/
 ├── eeg_pipeline/               # Core EEG pipeline package
 │   ├── analysis/               # Analysis modules
 │   │   ├── features/           # Feature extraction (16 categories)
