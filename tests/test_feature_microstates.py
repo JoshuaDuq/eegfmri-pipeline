@@ -100,7 +100,10 @@ class TestMicrostateFeatures(unittest.TestCase):
         ]
         coverage_sum = df[cov_cols].sum(axis=1).to_numpy()
         self.assertTrue(np.allclose(coverage_sum, 1.0, atol=0.1))
-        self.assertGreater(df["microstates_active_broadband_global_trans_a_to_b_prob"].iloc[0], 0.9)
+        self.assertGreater(
+            df["microstates_active_broadband_global_trans_a_to_a_prob"].iloc[0],
+            df["microstates_active_broadband_global_trans_a_to_b_prob"].iloc[0],
+        )
 
     def test_microstates_category_registered(self):
         from eeg_pipeline.pipelines import constants
@@ -115,7 +118,7 @@ class TestMicrostateFeatures(unittest.TestCase):
         )
         self.assertEqual(cfg.min_duration_ms, 20.0)
 
-    def test_transition_rows_without_outgoing_are_nan(self):
+    def test_transition_probabilities_include_self_transitions(self):
         from eeg_pipeline.analysis.features.microstates import _compute_epoch_metrics
 
         metrics = _compute_epoch_metrics(
@@ -123,7 +126,15 @@ class TestMicrostateFeatures(unittest.TestCase):
             sfreq=100.0,
             n_states=2,
         )
-        self.assertTrue(np.isnan(metrics["transitions"]).all())
+        self.assertTrue(np.allclose(metrics["transitions"][0], np.array([1.0, 0.0])))
+        self.assertTrue(np.isnan(metrics["transitions"][1]).all())
+
+    def test_min_duration_prefers_longer_neighbor(self):
+        from eeg_pipeline.analysis.features.microstates import _apply_min_duration
+
+        states = np.array([1, 1, 0, 2, 2, 2], dtype=int)
+        out = _apply_min_duration(states, min_samples=2)
+        np.testing.assert_array_equal(out, np.array([1, 1, 2, 2, 2, 2], dtype=int))
 
     def test_template_fitting_uses_train_mask_only(self):
         from eeg_pipeline.analysis.features import microstates as mod

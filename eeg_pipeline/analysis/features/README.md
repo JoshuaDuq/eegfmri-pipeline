@@ -250,7 +250,7 @@ Functional connectivity between channel pairs using phase-based and amplitude-ba
 **Computation:**
 1. For each segment and band, extract data and compute connectivity matrices using `spectral_connectivity_time` (CWT Morlet mode) or `envelope_correlation`.
 2. Granularity modes: `trial` (per-epoch), `condition` (per-condition group), or `subject` (all epochs).
-3. For `condition`/`subject` granularity with phase measures, across-epochs estimates are used (scientifically valid; avoids averaging per-epoch phase estimates).
+3. For `condition`/`subject` granularity with phase measures, the pipeline uses across-epochs estimation (scientifically valid; avoids averaging per-epoch phase estimates). In CV mode (`train_mask` present), leakage guards keep phase estimation within-epoch unless explicitly overridden.
 
 **Graph metrics** (optional, when `enable_graph_metrics=true`):
 
@@ -441,16 +441,18 @@ EEG microstate dynamics using GFP-peak topographic clustering.
    - **Fixed templates** (recommended): Use pre-defined canonical templates (A/B/C/D style labels when provided).
    - **K-means clustering** (fallback): Fit `n_states` (default 4) cluster centers on GFP-peak topographies using `sklearn.KMeans` with 20 initializations. Output classes use neutral labels (`state1..stateN`) because fitted cluster identities are not guaranteed to be comparable across subjects.
 5. **State assignment:** At every time point, assign the microstate class with highest absolute spatial correlation to the instantaneous topography.
-6. Compute per-trial metrics:
+6. **Minimum-duration smoothing:** Runs shorter than `min_duration_ms` are reassigned using neighboring-run context (longer-neighbor preference; tie split) to avoid directional bias.
+7. Compute per-trial metrics:
 
 | Feature              | Computation                                                     |
 |----------------------|-----------------------------------------------------------------|
 | `coverage_{class}`   | Fraction of time points assigned to each microstate class.      |
 | `duration_{class}`   | Mean duration (ms) of contiguous runs of each class.            |
 | `occurrence_{class}` | Occurrence rate (Hz) of each class.                             |
-| `transition_{i}_{j}` | Transition probability from class `i` to class `j` (`NaN` when class `i` has no outgoing transitions in that trial). |
+| `trans_{i}_to_{j}_prob` | Adjacent-sample transition probability from class `i` to class `j` (diagonal entries encode persistence; `NaN` when class `i` has no outgoing transitions). |
 
 **CV/leakage behavior:** In `trial_ml_safe` mode with `train_mask`, template fitting is restricted to training trials.
+**Statistical note:** Subject-fitted templates induce cross-trial dependence (non-i.i.d. trial rows); fixed templates do not.
 
 ---
 
@@ -494,6 +496,10 @@ Features that aggregate across trials (ITPC, connectivity, bursts, microstates) 
 |-------------------|---------------------------------------------------------------------------------------|
 | `trial_ml_safe`   | Cross-trial features require `train_mask`; test trials are excluded from aggregation.  |
 | `group_stats`     | Cross-trial features use all trials (appropriate for group-level statistical analysis).|
+
+Additional safeguards:
+- Connectivity `condition`/`subject` granularity avoids per-epoch phase averaging by using across-epochs phase estimation outside CV mode.
+- Subject-fitted microstates are flagged as non-i.i.d. in feature provenance metadata.
 
 ## Dependencies
 

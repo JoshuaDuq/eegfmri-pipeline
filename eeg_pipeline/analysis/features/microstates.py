@@ -222,10 +222,33 @@ def _apply_min_duration(states: np.ndarray, min_samples: int) -> np.ndarray:
             continue
         prev_state = runs[run_idx - 1][2] if run_idx > 0 else None
         next_state = runs[run_idx + 1][2] if run_idx < len(runs) - 1 else None
-        replacement = prev_state if prev_state is not None else next_state
-        if replacement is None:
+        prev_len = (runs[run_idx - 1][1] - runs[run_idx - 1][0]) if run_idx > 0 else 0
+        next_len = (
+            (runs[run_idx + 1][1] - runs[run_idx + 1][0]) if run_idx < len(runs) - 1 else 0
+        )
+
+        if prev_state is None and next_state is None:
             continue
-        out[run_start:run_end] = int(replacement)
+        if prev_state is None:
+            out[run_start:run_end] = int(next_state)
+            continue
+        if next_state is None:
+            out[run_start:run_end] = int(prev_state)
+            continue
+        if prev_state == next_state:
+            out[run_start:run_end] = int(prev_state)
+            continue
+
+        if prev_len > next_len:
+            out[run_start:run_end] = int(prev_state)
+            continue
+        if next_len > prev_len:
+            out[run_start:run_end] = int(next_state)
+            continue
+
+        split = run_start + (run_len // 2)
+        out[run_start:split] = int(prev_state)
+        out[split:run_end] = int(next_state)
     return out
 
 
@@ -239,14 +262,6 @@ def _run_lengths(states: np.ndarray) -> List[Tuple[int, int]]:
             runs.append((int(states[start]), idx - start))
             start = idx
     return runs
-
-
-def _collapsed_states(states: np.ndarray) -> np.ndarray:
-    if states.size == 0:
-        return states
-    keep = np.ones(len(states), dtype=bool)
-    keep[1:] = states[1:] != states[:-1]
-    return states[keep]
 
 
 def _compute_epoch_metrics(
@@ -276,11 +291,10 @@ def _compute_epoch_metrics(
             durations_ms[k] = float(np.mean(class_runs) * 1000.0 / sfreq)
             occurrence_hz[k] = float(len(class_runs) / max(epoch_sec, 1e-12))
 
-    collapsed = _collapsed_states(states)
     counts = np.zeros((n_states, n_states), dtype=float)
-    for idx in range(len(collapsed) - 1):
-        src = int(collapsed[idx])
-        dst = int(collapsed[idx + 1])
+    for idx in range(len(states) - 1):
+        src = int(states[idx])
+        dst = int(states[idx + 1])
         counts[src, dst] += 1.0
 
     transitions = np.full_like(counts, np.nan, dtype=float)

@@ -365,7 +365,7 @@ Extract a comprehensive set of EEG features from cleaned epochs.
 | `aperiodic` | 1/f slope and offset via specparam (iterative peak rejection, QC per channel) |
 | `connectivity` | Functional connectivity (wPLI, AEC, PLV) with per-family spatial transforms (default CSD for phase-based metrics) |
 | `directedconnectivity` | Directed connectivity (PSI, DTF, PDC) via MVAR models |
-| `microstates` | Microstate dynamics from fixed templates or subject-fitted clustering: coverage, duration, occurrence, transitions |
+| `microstates` | Microstate dynamics from fixed templates or subject-fitted clustering: coverage, duration, occurrence, transitions (subject-fitted templates are flagged as non-i.i.d. in provenance) |
 | `pac` | Phase-amplitude coupling (theta–gamma, alpha–gamma) with harmonic filtering |
 | `itpc` | Inter-trial phase coherence (fold-safe for ML, condition-aware) |
 | `erp` | Event-related potential components (N1, N2, P2 — configurable windows) |
@@ -962,7 +962,8 @@ eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
 
 - Evoked-subtracted aperiodic features require `train_mask` (including precomputed extraction paths).
 - Dynamic connectivity state-transition metrics (state clustering across trials/windows) are disabled.
-- `phase_estimator=across_epochs` produces broadcast, non-i.i.d. trial rows; prefer `within_epoch` for ML/CV.
+- For connectivity `condition`/`subject` granularity, phase estimation auto-switches to `across_epochs` outside CV to avoid biased per-epoch phase averaging.
+- In CV (`train_mask` present), `phase_estimator=across_epochs` is blocked by default to prevent leakage; prefer `within_epoch` unless you intentionally override.
 
 ---
 

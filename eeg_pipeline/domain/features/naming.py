@@ -272,7 +272,9 @@ def infer_feature_provenance(
     conn_phase_estimator_cfg = str(_config_get(config, "feature_engineering.connectivity.phase_estimator", "within_epoch")).strip().lower()
 
     conn_granularity = str(df_attrs.get("feature_granularity") or conn_granularity_cfg).strip().lower()
+    conn_phase_estimator = str(df_attrs.get("phase_estimator") or conn_phase_estimator_cfg).strip().lower()
     broadcast_warning = df_attrs.get("broadcast_warning")
+    microstate_template_source = str(df_attrs.get("microstate_template_source") or "").strip().lower()
 
     def group_props(group: str) -> Dict[str, Any]:
         group = str(group or "unknown").strip().lower()
@@ -310,7 +312,7 @@ def infer_feature_provenance(
             }
 
         if group in {"conn", "dconn"}:
-            broadcasted = conn_granularity in {"subject", "condition"} or conn_phase_estimator_cfg == "across_epochs"
+            broadcasted = conn_granularity in {"subject", "condition"} or conn_phase_estimator == "across_epochs"
             analysis_unit = conn_granularity if conn_granularity in {"trial", "condition", "subject"} else "trial"
             trialwise_valid = not broadcasted
             reason = "Connectivity is computed within-epoch per trial." if trialwise_valid else "Connectivity is aggregated across epochs and broadcast."
@@ -320,6 +322,31 @@ def infer_feature_provenance(
                 "cross_trial_dependence": broadcasted,
                 "trialwise_valid": trialwise_valid,
                 "reason": reason,
+            }
+
+        if group == "microstates":
+            if microstate_template_source == "subject_fitted":
+                return {
+                    "analysis_unit": "subject",
+                    "broadcasted": False,
+                    "cross_trial_dependence": True,
+                    "trialwise_valid": False,
+                    "reason": "Microstate templates were fitted from pooled trials; per-trial rows are not i.i.d.",
+                }
+            if microstate_template_source == "fixed":
+                return {
+                    "analysis_unit": "trial",
+                    "broadcasted": False,
+                    "cross_trial_dependence": False,
+                    "trialwise_valid": True,
+                    "reason": "Fixed templates were provided externally; trial-level assignments are independent across trials.",
+                }
+            return {
+                "analysis_unit": "trial",
+                "broadcasted": False,
+                "cross_trial_dependence": False,
+                "trialwise_valid": True,
+                "reason": "Microstate template source unknown; assuming fixed-template trial-wise extraction.",
             }
 
         return {
@@ -341,7 +368,7 @@ def infer_feature_provenance(
         "methods": {
             "itpc_method": itpc_method,
             "connectivity_granularity": conn_granularity,
-            "connectivity_phase_estimator": conn_phase_estimator_cfg,
+            "connectivity_phase_estimator": conn_phase_estimator,
         },
         "file_attrs": _make_json_serializable(df_attrs) if df_attrs else {},
         "columns": columns,

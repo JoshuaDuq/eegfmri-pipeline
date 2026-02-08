@@ -24,6 +24,13 @@ _FEATURE_GROUP_ITPC = "itpc"
 _FEATURE_GROUP_APERIODIC = "aperiodic"
 
 
+def _copy_attrs(target: Union[pd.DataFrame, pd.Series], source: Any) -> Union[pd.DataFrame, pd.Series]:
+    attrs = dict(getattr(source, "attrs", {}) or {})
+    if attrs:
+        target.attrs.update(attrs)
+    return target
+
+
 def infer_power_band(column_name: str, *, bands: Optional[List[str]] = None) -> Optional[str]:
     """Infer power band from column name using NamingSchema."""
     column_name_lower = str(column_name).lower()
@@ -134,7 +141,8 @@ def register_feature_block(
 
     lengths[name] = block_length
     if block_length > 0:
-        registry[name] = block_df.reset_index(drop=True)
+        aligned = block_df.reset_index(drop=True)
+        registry[name] = _copy_attrs(aligned, block)
 
 
 def validate_feature_block_lengths(
@@ -294,7 +302,7 @@ def _apply_drop_mask(
         return block
 
     masked_block = block.loc[drop_mask].reset_index(drop=True)
-    return masked_block
+    return _copy_attrs(masked_block, block)
 
 
 def _register_all_blocks(
@@ -334,21 +342,33 @@ def _extract_aligned_blocks(
     """Extract and align blocks from registry."""
     pow_df_aligned = registry.get("power")
     if pow_df_aligned is not None:
-        pow_df_aligned = pow_df_aligned.reset_index(drop=True)
+        pow_df_aligned = _copy_attrs(
+            pow_df_aligned.reset_index(drop=True),
+            pow_df_aligned,
+        )
 
     baseline_df_aligned = registry.get("baseline")
     if baseline_df_aligned is not None:
-        baseline_df_aligned = baseline_df_aligned.reset_index(drop=True)
+        baseline_df_aligned = _copy_attrs(
+            baseline_df_aligned.reset_index(drop=True),
+            baseline_df_aligned,
+        )
     else:
         baseline_df_aligned = pd.DataFrame()
 
     conn_df_aligned = registry.get("connectivity")
     if conn_df_aligned is not None:
-        conn_df_aligned = conn_df_aligned.reset_index(drop=True)
+        conn_df_aligned = _copy_attrs(
+            conn_df_aligned.reset_index(drop=True),
+            conn_df_aligned,
+        )
 
     aper_df_aligned = registry.get("aperiodic")
     if aper_df_aligned is not None:
-        aper_df_aligned = aper_df_aligned.reset_index(drop=True)
+        aper_df_aligned = _copy_attrs(
+            aper_df_aligned.reset_index(drop=True),
+            aper_df_aligned,
+        )
 
     target_block = registry.get("target")
     if target_block is not None:
@@ -481,7 +501,7 @@ def align_feature_dataframes(
         for block_name in extra_blocks.keys():
             block = block_registry.get(block_name)
             if block is not None:
-                block = block.reset_index(drop=True)
+                block = _copy_attrs(block.reset_index(drop=True), block)
             extra_aligned[block_name] = block
 
     retention_stats = {

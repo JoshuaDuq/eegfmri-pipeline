@@ -1126,24 +1126,28 @@ def extract_connectivity_features(
     if not segments:
         segments = ["full"]
 
-    df, cols = extract_connectivity_from_precomputed(
-        precomputed,
-        bands=bands,
-        segments=segments,
-        config=ctx.config,
-        logger=ctx.logger,
-    )
-    if df is None or df.empty:
-        return pd.DataFrame(), []
-
     granularity = conn_cfg.granularity
     phase_estimator = conn_cfg.phase_estimator
+    phase_estimator_effective = phase_estimator
 
     # Guardrail: detect CV/machine learning mode and warn/force within_epoch for phase estimator
     # across_epochs is cross-trial by nature and WILL leak test information in CV
     train_mask = getattr(ctx, "train_mask", None)
 
-    if train_mask is not None and phase_estimator == "across_epochs":
+    if (
+        granularity in {"subject", "condition"}
+        and phase_estimator_effective == "within_epoch"
+        and train_mask is None
+    ):
+        phase_estimator_effective = "across_epochs"
+        if ctx.logger is not None:
+            ctx.logger.info(
+                "Connectivity: auto-setting phase_estimator='across_epochs' for granularity='%s' "
+                "to avoid averaging per-epoch phase-connectivity estimates.",
+                granularity,
+            )
+
+    if train_mask is not None and phase_estimator_effective == "across_epochs":
         if conn_cfg.force_within_epoch_for_ml:
             raise ValueError(
                 "Connectivity: train_mask detected (CV/machine learning mode) with phase_estimator='across_epochs'. "
@@ -1159,9 +1163,22 @@ def extract_connectivity_features(
                     "Consider using phase_estimator='within_epoch' for valid cross-validation."
                 )
 
-    if granularity in {"subject", "condition"} and phase_estimator == "across_epochs":
+    df, cols = extract_connectivity_from_precomputed(
+        precomputed,
+        bands=bands,
+        segments=segments,
+        config=ctx.config,
+        logger=ctx.logger,
+        phase_estimator_override=phase_estimator_effective,
+    )
+    if df is None or df.empty:
+        return pd.DataFrame(), []
+
+    if granularity in {"subject", "condition"} and phase_estimator_effective == "across_epochs":
         n_epochs = int(df.shape[0])
-        groups_map: Dict[str, np.ndarray] = {"__all__": np.arange(n_epochs, dtype=int)}
+        groups_map: Dict[str, np.ndarray] = {}
+        if granularity == "subject":
+            groups_map["__all__"] = np.arange(n_epochs, dtype=int)
         if granularity == "condition":
             events = getattr(ctx, "aligned_events", None)
             if events is not None and not getattr(events, "empty", True) and len(events) == n_epochs:
@@ -1196,6 +1213,9 @@ def extract_connectivity_features(
                         if phase_cols:
                             df.loc[exclude_idx, phase_cols] = np.nan
 
+        if not groups_map:
+            groups_map["__all__"] = np.arange(n_epochs, dtype=int)
+
         _apply_across_epochs_phase_estimates_inplace(
             df,
             precomputed=precomputed,
@@ -1208,13 +1228,13 @@ def extract_connectivity_features(
 
     if granularity == "trial":
         df.attrs["feature_granularity"] = "trial"
-        if phase_estimator == "across_epochs":
+        df.attrs["phase_estimator"] = phase_estimator_effective
+        if phase_estimator_effective == "across_epochs":
             df.attrs["broadcast_warning"] = (
                 "phase_estimator='across_epochs' produces one connectivity estimate per group "
                 "that is broadcast to all trials. Treat rows as non-i.i.d.; aggregate before "
                 "trial-level inference."
             )
-            df.attrs["phase_estimator"] = "across_epochs"
             if ctx.logger is not None:
                 ctx.logger.warning(
                     "Connectivity: granularity='trial' with phase_estimator='across_epochs' "
@@ -1230,6 +1250,7 @@ def extract_connectivity_features(
         out = pd.DataFrame([means.values] * n_epochs, columns=means.index)
         # Mark as broadcast feature to prevent pseudo-replication in downstream stats
         out.attrs["feature_granularity"] = "subject"
+        out.attrs["phase_estimator"] = phase_estimator_effective
         out.attrs["broadcast_warning"] = (
             "These features are subject-level means broadcast to all trials. "
             "Do NOT use as i.i.d. trial observations in correlations/regressions. "
@@ -1287,6 +1308,7 @@ def extract_connectivity_features(
     out.columns = df.columns
     # Mark as broadcast feature to prevent pseudo-replication
     out.attrs["feature_granularity"] = "condition"
+    out.attrs["phase_estimator"] = phase_estimator_effective
     out.attrs["broadcast_warning"] = (
         "These features are condition-level means broadcast to all trials within condition. "
         "Do NOT use as i.i.d. trial observations. Use primary_unit='condition' or aggregate first."
@@ -1305,6 +1327,7 @@ def extract_connectivity_from_precomputed(
     segments: Optional[List[str]] = None,
     config: Any = None,
     logger: Any = None,
+    phase_estimator_override: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Compute connectivity measures from precomputed analytic signals."""
     if not precomputed.band_data:
@@ -1417,6 +1440,10 @@ def extract_connectivity_from_precomputed(
     min_cycles_per_band = conn_cfg.min_cycles_per_band
     min_segment_sec = conn_cfg.min_segment_sec
     phase_estimator = conn_cfg.phase_estimator
+    if phase_estimator_override is not None:
+        override = str(phase_estimator_override).strip().lower()
+        if override in {"within_epoch", "across_epochs"}:
+            phase_estimator = override
 
     if phase_estimator == "across_epochs" and logger is not None:
         logger.info(

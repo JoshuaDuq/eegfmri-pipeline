@@ -144,6 +144,75 @@ class TestConnectivityValidityGuards(unittest.TestCase):
         self.assertIn("broadcast_warning", df.attrs)
         self.assertEqual(df.attrs.get("phase_estimator"), "across_epochs")
 
+    def test_condition_granularity_auto_promotes_phase_estimator_without_train_mask(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "connectivity": {
+                        "measures": ["wpli"],
+                        "granularity": "condition",
+                        "condition_column": "condition",
+                        "phase_estimator": "within_epoch",
+                        "min_epochs_per_group": 1,
+                    }
+                }
+            }
+        )
+        precomputed = _make_precomputed(transform="none", family="connectivity")
+        ctx = _ContextStub(config=config, precomputed=precomputed)
+        ctx._by_family["connectivity"] = precomputed
+        ctx.aligned_events = pd.DataFrame({"condition": ["a", "a", "b", "b"]})
+
+        out_df = pd.DataFrame({"conn_demo": [1.0, 2.0, 3.0, 4.0]})
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.extract_connectivity_from_precomputed",
+                return_value=(out_df, list(out_df.columns)),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.connectivity._apply_across_epochs_phase_estimates_inplace",
+            ) as mock_apply,
+        ):
+            df, _cols = extract_connectivity_features(ctx, ["alpha"])
+
+        mock_apply.assert_called_once()
+        self.assertEqual(df.attrs.get("phase_estimator"), "across_epochs")
+
+    def test_condition_granularity_keeps_within_epoch_with_train_mask(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "connectivity": {
+                        "measures": ["wpli"],
+                        "granularity": "condition",
+                        "condition_column": "condition",
+                        "phase_estimator": "within_epoch",
+                        "min_epochs_per_group": 1,
+                    }
+                }
+            }
+        )
+        precomputed = _make_precomputed(transform="none", family="connectivity")
+        ctx = _ContextStub(config=config, precomputed=precomputed)
+        ctx._by_family["connectivity"] = precomputed
+        ctx.aligned_events = pd.DataFrame({"condition": ["a", "a", "b", "b"]})
+        ctx.train_mask = np.array([True, True, False, False], dtype=bool)
+
+        out_df = pd.DataFrame({"conn_demo": [1.0, 2.0, 3.0, 4.0]})
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.extract_connectivity_from_precomputed",
+                return_value=(out_df, list(out_df.columns)),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.connectivity._apply_across_epochs_phase_estimates_inplace",
+            ) as mock_apply,
+        ):
+            df, _cols = extract_connectivity_features(ctx, ["alpha"])
+
+        mock_apply.assert_not_called()
+        self.assertEqual(df.attrs.get("phase_estimator"), "within_epoch")
+
     def test_directed_connectivity_recomputes_incompatible_precomputed(self):
         config = DotConfig(
             {
