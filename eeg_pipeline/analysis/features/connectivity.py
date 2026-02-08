@@ -49,7 +49,10 @@ from eeg_pipeline.utils.analysis.graph_metrics import (
     threshold_adjacency as _threshold_adjacency,
 )
 
-from eeg_pipeline.analysis.features.preparation import precompute_data
+from eeg_pipeline.analysis.features.preparation import (
+    _get_spatial_transform_type,
+    precompute_data,
+)
 
 
 ###################################################################
@@ -399,6 +402,42 @@ def _warn_if_phase_connectivity_without_spatial_transform(
             "Set feature_engineering.connectivity.warn_if_no_spatial_transform=false to suppress this warning.",
             ", ".join(sorted(set(m.lower() for m in measures) & phase_measures)),
         )
+
+
+def _is_connectivity_precomputed_compatible(
+    precomputed: Any,
+    *,
+    expected_transform: str,
+    bands: List[str],
+) -> Tuple[bool, str]:
+    """Validate that a precomputed object is safe to reuse for connectivity."""
+    if precomputed is None:
+        return False, "missing precomputed object"
+
+    family = str(getattr(precomputed, "feature_family", "") or "").strip().lower()
+    valid_families = {
+        "",
+        "connectivity",
+        "directedconnectivity",
+        "directed_connectivity",
+        "dconn",
+    }
+    if family not in valid_families:
+        return False, f"feature_family='{family}'"
+
+    current_transform = str(getattr(precomputed, "spatial_transform", "none") or "none").strip().lower()
+    expected = str(expected_transform or "none").strip().lower()
+    if expected not in {"none", "csd", "laplacian"}:
+        expected = "none"
+    if current_transform != expected:
+        return False, f"spatial_transform='{current_transform}' (expected '{expected}')"
+
+    band_data = getattr(precomputed, "band_data", {}) or {}
+    missing = [b for b in bands if b not in band_data]
+    if missing:
+        return False, f"missing required bands={missing}"
+
+    return True, ""
 
 
 def _validate_segment_duration_for_connectivity(
@@ -1026,6 +1065,7 @@ def extract_connectivity_features(
 
     conn_cfg = ConnectivityConfig.from_dict(ctx.config)
     _warn_if_phase_connectivity_without_spatial_transform(ctx.config, conn_cfg.measures, ctx.logger)
+    expected_transform = _get_spatial_transform_type(ctx.config, feature_family="connectivity")
 
     precomputed = None
     getter = getattr(ctx, "get_precomputed_for_family", None)
@@ -1033,6 +1073,20 @@ def extract_connectivity_features(
         precomputed = getter("connectivity")
     if precomputed is None:
         precomputed = getattr(ctx, "precomputed", None)
+    if precomputed is not None:
+        compatible, reason = _is_connectivity_precomputed_compatible(
+            precomputed,
+            expected_transform=expected_transform,
+            bands=bands,
+        )
+        if not compatible:
+            if ctx.logger is not None:
+                ctx.logger.warning(
+                    "Connectivity: existing precomputed intermediates are incompatible (%s); "
+                    "recomputing connectivity-specific precomputed data.",
+                    reason,
+                )
+            precomputed = None
 
     if precomputed is None:
         if getattr(ctx, "epochs", None) is None:
@@ -1154,6 +1208,18 @@ def extract_connectivity_features(
 
     if granularity == "trial":
         df.attrs["feature_granularity"] = "trial"
+        if phase_estimator == "across_epochs":
+            df.attrs["broadcast_warning"] = (
+                "phase_estimator='across_epochs' produces one connectivity estimate per group "
+                "that is broadcast to all trials. Treat rows as non-i.i.d.; aggregate before "
+                "trial-level inference."
+            )
+            df.attrs["phase_estimator"] = "across_epochs"
+            if ctx.logger is not None:
+                ctx.logger.warning(
+                    "Connectivity: granularity='trial' with phase_estimator='across_epochs' "
+                    "broadcasts cross-trial estimates to all rows (non-i.i.d.)."
+                )
         return df, cols
 
     n_epochs = int(df.shape[0])
@@ -1252,6 +1318,11 @@ def extract_connectivity_from_precomputed(
         return pd.DataFrame(), []
 
     conn_cfg = ConnectivityConfig.from_dict(config)
+    analysis_mode = str(
+        get_nested_value(config, "feature_engineering.analysis_mode", "group_stats") or "group_stats"
+    ).strip().lower()
+    disable_dynamic_state_metrics = (analysis_mode == "trial_ml_safe")
+    dynamic_state_skip_warned = False
 
     # Resolve phase measures from config
     supported_measures = {"wpli", "imcoh", "aec", "plv", "pli"}
@@ -1776,6 +1847,7 @@ def extract_connectivity_from_precomputed(
         analytic_seg: np.ndarray,
         windows_slices: List[Tuple[int, int]],
     ) -> pd.DataFrame:
+        nonlocal dynamic_state_skip_warned
         n_windows = int(len(windows_slices))
         if n_windows < int(conn_cfg.dynamic_min_windows):
             return pd.DataFrame()
@@ -1875,38 +1947,47 @@ def extract_connectivity_from_precomputed(
         )
 
         if conn_cfg.dynamic_state_enabled and n_windows >= int(conn_cfg.dynamic_state_min_windows):
-            n_states = min(int(conn_cfg.dynamic_state_n_states), max(2, n_windows - 1))
-            random_state = (
-                int(conn_cfg.dynamic_state_random_state)
-                if conn_cfg.dynamic_state_random_state is not None
-                else 0
-            )
-            state_labels = _fit_dynamic_state_labels(
-                window_vals,
-                n_states=n_states,
-                random_state=random_state,
-            )
-            if state_labels is not None:
-                switch_rate, dwell_sec, entropy = _state_metrics_per_epoch(
-                    state_labels,
-                    n_states=n_states,
-                    step_sec=float(conn_cfg.sliding_window_step),
-                )
-                parts.append(
-                    pd.DataFrame(
-                        {
-                            NamingSchema.build(
-                                "conn", seg_name, band, "global", f"{method}swswitch"
-                            ): switch_rate,
-                            NamingSchema.build(
-                                "conn", seg_name, band, "global", f"{method}swdwellsec"
-                            ): dwell_sec,
-                            NamingSchema.build(
-                                "conn", seg_name, band, "global", f"{method}swstateent"
-                            ): entropy,
-                        }
+            if disable_dynamic_state_metrics:
+                if logger is not None and not dynamic_state_skip_warned:
+                    logger.warning(
+                        "Connectivity dynamic state-transition metrics are disabled in "
+                        "analysis_mode='trial_ml_safe' because state clustering pools "
+                        "across trials and can leak fold information."
                     )
+                    dynamic_state_skip_warned = True
+            else:
+                n_states = min(int(conn_cfg.dynamic_state_n_states), max(2, n_windows - 1))
+                random_state = (
+                    int(conn_cfg.dynamic_state_random_state)
+                    if conn_cfg.dynamic_state_random_state is not None
+                    else 0
                 )
+                state_labels = _fit_dynamic_state_labels(
+                    window_vals,
+                    n_states=n_states,
+                    random_state=random_state,
+                )
+                if state_labels is not None:
+                    switch_rate, dwell_sec, entropy = _state_metrics_per_epoch(
+                        state_labels,
+                        n_states=n_states,
+                        step_sec=float(conn_cfg.sliding_window_step),
+                    )
+                    parts.append(
+                        pd.DataFrame(
+                            {
+                                NamingSchema.build(
+                                    "conn", seg_name, band, "global", f"{method}swswitch"
+                                ): switch_rate,
+                                NamingSchema.build(
+                                    "conn", seg_name, band, "global", f"{method}swdwellsec"
+                                ): dwell_sec,
+                                NamingSchema.build(
+                                    "conn", seg_name, band, "global", f"{method}swstateent"
+                                ): entropy,
+                            }
+                        )
+                    )
 
         return pd.concat(parts, axis=1) if parts else pd.DataFrame()
 
@@ -2670,13 +2751,32 @@ def extract_directed_connectivity_features(
     """
     if not bands:
         return pd.DataFrame(), []
+    expected_transform = _get_spatial_transform_type(
+        ctx.config, feature_family="directedconnectivity"
+    )
     
     precomputed = None
     getter = getattr(ctx, "get_precomputed_for_family", None)
     if callable(getter):
-        precomputed = getter("connectivity")
+        precomputed = getter("directedconnectivity")
+        if precomputed is None:
+            precomputed = getter("connectivity")
     if precomputed is None:
         precomputed = getattr(ctx, "precomputed", None)
+    if precomputed is not None:
+        compatible, reason = _is_connectivity_precomputed_compatible(
+            precomputed,
+            expected_transform=expected_transform,
+            bands=bands,
+        )
+        if not compatible:
+            if ctx.logger is not None:
+                ctx.logger.warning(
+                    "Directed connectivity: existing precomputed intermediates are incompatible (%s); "
+                    "recomputing directed-connectivity-specific precomputed data.",
+                    reason,
+                )
+            precomputed = None
     if precomputed is None:
         if getattr(ctx, "epochs", None) is None:
             return pd.DataFrame(), []
@@ -2696,6 +2796,7 @@ def extract_directed_connectivity_features(
         )
         setter = getattr(ctx, "set_precomputed_for_family", None)
         if callable(setter):
+            setter("directedconnectivity", precomputed)
             setter("connectivity", precomputed)
         else:
             ctx.set_precomputed(precomputed)

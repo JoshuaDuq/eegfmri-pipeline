@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -134,6 +135,36 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
 
         self.assertIn("segments", qc)
         self.assertIn("active", qc["segments"])
+
+    def test_trial_ml_safe_requires_train_mask_for_subtract_evoked(self):
+        precomputed = self._build_precomputed()
+        precomputed.config["feature_engineering"]["aperiodic"]["subtract_evoked"] = True
+        precomputed.config["feature_engineering"]["analysis_mode"] = "trial_ml_safe"
+        precomputed.train_mask = None
+
+        with self.assertRaisesRegex(ValueError, "trial_ml_safe mode without train_mask"):
+            extract_aperiodic_from_precomputed(precomputed, ["alpha"])
+
+    def test_subtract_evoked_uses_train_mask_in_precomputed_mode(self):
+        precomputed = self._build_precomputed()
+        precomputed.config["feature_engineering"]["aperiodic"]["subtract_evoked"] = True
+        precomputed.config["feature_engineering"]["analysis_mode"] = "trial_ml_safe"
+        precomputed.train_mask = np.array([True, True, True, True, True, False, False, False, False, False], dtype=bool)
+
+        seen_masks = []
+
+        def _fake_subtract_evoked(data, condition_labels=None, train_mask=None, min_trials_per_condition=2):
+            del condition_labels, min_trials_per_condition
+            seen_masks.append(None if train_mask is None else np.asarray(train_mask, dtype=bool).copy())
+            return data
+
+        with patch("eeg_pipeline.utils.analysis.spectral.subtract_evoked", new=_fake_subtract_evoked):
+            df, cols, _qc = extract_aperiodic_from_precomputed(precomputed, ["alpha"])
+
+        self.assertFalse(df.empty)
+        self.assertTrue(cols)
+        self.assertTrue(seen_masks)
+        np.testing.assert_array_equal(seen_masks[0], precomputed.train_mask)
 
 
 if __name__ == "__main__":

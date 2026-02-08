@@ -363,7 +363,7 @@ Extract a comprehensive set of EEG features from cleaned epochs.
 | `spectral` | Spectral edge frequency, peak frequency, bandwidth |
 | `ratios` | Band power ratios (theta/beta, theta/alpha, alpha/beta, delta/alpha, delta/theta) |
 | `aperiodic` | 1/f slope and offset via specparam (iterative peak rejection, QC per channel) |
-| `connectivity` | Functional connectivity (wPLI, AEC, PLV) with CSD spatial transform |
+| `connectivity` | Functional connectivity (wPLI, AEC, PLV) with per-family spatial transforms (default CSD for phase-based metrics) |
 | `directedconnectivity` | Directed connectivity (PSI, DTF, PDC) via MVAR models |
 | `microstates` | Microstate dynamics from fixed templates or subject-fitted clustering: coverage, duration, occurrence, transitions |
 | `pac` | Phase-amplitude coupling (theta–gamma, alpha–gamma) with harmonic filtering |
@@ -419,7 +419,7 @@ eeg-pipeline features visualize --subject 0001
 | `--pac-pairs` | Phase-amplitude pairs, e.g., `theta:gamma` | theta–gamma, alpha–gamma |
 | `--erp-components` | ERP windows, e.g., `n2=0.20-0.35` | N1, N2, P2 |
 | `--analysis-mode` | `group_stats` or `trial_ml_safe` | `group_stats` |
-| `--microstates-*` | Microstate extraction controls (`n_states`, GFP peak params, min duration, random seed) | from config |
+| `--microstates-*` | Microstate extraction controls (`n_states`, GFP peak params, min duration, random seed) | from config (`min_duration_ms` default: `20`) |
 | `--fixed-templates-path` | `.npz` file with canonical templates (`templates`, optional `ch_names`) | unset |
 | `--compute-change-scores` | Compute baseline→active change scores | enabled |
 | `--source-method` | Source localization: `lcmv` or `eloreta` | `lcmv` |
@@ -951,12 +951,18 @@ eeg-pipeline features compute --subject 0001 --iaf-enabled
 | Mode | Description |
 |------|-------------|
 | `group_stats` | Default. Cross-trial estimates allowed (one row per subject/condition). |
-| `trial_ml_safe` | ML/CV-safe. Forbids cross-trial features unless `train_mask` is provided. Prevents leakage (for microstates, template fitting uses training trials only when `train_mask` is provided). |
+| `trial_ml_safe` | ML/CV-safe. Cross-trial estimators require `train_mask`; leakage-prone paths are blocked or reduced (e.g., microstate template fitting uses training trials only when `train_mask` is provided). |
 
 ```bash
 # For ML pipelines, enforce safety
 eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
 ```
+
+**Leakage guardrails in `trial_ml_safe`:**
+
+- Evoked-subtracted aperiodic features require `train_mask` (including precomputed extraction paths).
+- Dynamic connectivity state-transition metrics (state clustering across trials/windows) are disabled.
+- `phase_estimator=across_epochs` produces broadcast, non-i.i.d. trial rows; prefer `within_epoch` for ML/CV.
 
 ---
 

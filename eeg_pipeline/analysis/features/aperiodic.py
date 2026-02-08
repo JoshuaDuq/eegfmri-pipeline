@@ -1690,6 +1690,9 @@ def extract_aperiodic_features(
 def extract_aperiodic_from_precomputed(
     precomputed: Any,
     bands: List[str],
+    *,
+    analysis_mode: Optional[str] = None,
+    train_mask: Optional[np.ndarray] = None,
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     """Extract aperiodic features from PrecomputedData.
     
@@ -1718,6 +1721,31 @@ def extract_aperiodic_from_precomputed(
     min_fit_points = int(aperiodic_cfg.get("min_fit_points", _DEFAULT_MIN_FIT_POINTS))
     model = str(aperiodic_cfg.get("model", "fixed")).strip().lower()
     subtract_evoked = bool(aperiodic_cfg.get("subtract_evoked", False))
+    mode = str(
+        analysis_mode
+        if analysis_mode is not None
+        else _get_config_value(config, "feature_engineering.analysis_mode", "group_stats")
+    ).strip().lower()
+    if not mode:
+        mode = "group_stats"
+    train_mask_use = train_mask if train_mask is not None else getattr(precomputed, "train_mask", None)
+    if train_mask_use is not None:
+        train_mask_use = np.asarray(train_mask_use, dtype=bool)
+        if train_mask_use.ndim != 1 or train_mask_use.shape[0] != n_epochs:
+            raise ValueError(
+                "Aperiodic precomputed extraction received an invalid train_mask shape "
+                f"(expected ({n_epochs},), got {tuple(train_mask_use.shape)})."
+            )
+    min_trials_per_condition = int(
+        _get_config_value(config, "feature_engineering.power.min_trials_per_condition", 2)
+    )
+    min_trials_per_condition = max(1, min_trials_per_condition)
+    if subtract_evoked and mode == "trial_ml_safe" and train_mask_use is None:
+        raise ValueError(
+            "Aperiodic subtract_evoked=True in trial_ml_safe mode without train_mask. "
+            "Evoked subtraction uses cross-trial averages and can leak in CV. "
+            "Provide train_mask or disable subtract_evoked."
+        )
     
     fit_params = _validate_fit_parameters(peak_rejection_z, min_fit_points, model)
     psd_method, psd_kwargs, fmin, fmax = _parse_psd_config(config)
@@ -1743,6 +1771,7 @@ def extract_aperiodic_from_precomputed(
         "psd_fmin": float(fmin),
         "psd_fmax": float(fmax),
         "subtract_evoked": bool(subtract_evoked),
+        "analysis_mode": mode,
     }
     
     windows = precomputed.windows
@@ -1786,12 +1815,25 @@ def extract_aperiodic_from_precomputed(
         seg_data = data_all[:, :, seg_mask]
         if subtract_evoked:
             from eeg_pipeline.utils.analysis.spectral import subtract_evoked as _subtract_evoked
-            seg_data = _subtract_evoked(seg_data, condition_labels)
+            seg_data = _subtract_evoked(
+                seg_data,
+                condition_labels,
+                train_mask=train_mask_use,
+                min_trials_per_condition=min_trials_per_condition,
+            )
             if logger:
-                logger.info(
-                    "Aperiodic: Computing induced spectra (evoked subtracted) for %s",
-                    seg_name,
-                )
+                if train_mask_use is None:
+                    logger.info(
+                        "Aperiodic: Computing induced spectra (evoked subtracted) for %s",
+                        seg_name,
+                    )
+                else:
+                    logger.info(
+                        "Aperiodic: Computing induced spectra (evoked subtracted, train-only template) for %s "
+                        "(n_train=%d).",
+                        seg_name,
+                        int(np.sum(train_mask_use)),
+                    )
 
         # Compute PSD per segment (no silent skipping)
         if psd_method == "multitaper":

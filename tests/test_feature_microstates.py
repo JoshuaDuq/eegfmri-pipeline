@@ -107,6 +107,14 @@ class TestMicrostateFeatures(unittest.TestCase):
 
         self.assertIn("microstates", constants.FEATURE_CATEGORIES)
 
+    def test_default_min_duration_is_20ms(self):
+        from eeg_pipeline.analysis.features.microstates import _load_microstate_config
+
+        cfg = _load_microstate_config(
+            DotConfig({"feature_engineering": {"microstates": {"n_states": 4}}})
+        )
+        self.assertEqual(cfg.min_duration_ms, 20.0)
+
     def test_transition_rows_without_outgoing_are_nan(self):
         from eeg_pipeline.analysis.features.microstates import _compute_epoch_metrics
 

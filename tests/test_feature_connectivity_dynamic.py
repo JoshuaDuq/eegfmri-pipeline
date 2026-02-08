@@ -233,6 +233,39 @@ class TestDynamicConnectivityFeatures(unittest.TestCase):
         self.assertTrue(backends_seen)
         self.assertIn("threading", backends_seen)
 
+    def test_trial_ml_safe_disables_dynamic_state_metrics(self):
+        precomputed = self._build_precomputed()
+        precomputed.config["feature_engineering"]["analysis_mode"] = "trial_ml_safe"
+
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_time",
+                new=_fake_spectral_connectivity_time,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.envelope_correlation",
+                new=_fake_envelope_correlation,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.connectivity._fit_dynamic_state_labels",
+            ) as mock_state_fit,
+        ):
+            df, cols = extract_connectivity_from_precomputed(
+                precomputed,
+                bands=["alpha"],
+                segments=["full"],
+                config=precomputed.config,
+                logger=precomputed.logger,
+            )
+
+        self.assertFalse(any("swswitch" in c for c in cols))
+        self.assertFalse(any("swdwellsec" in c for c in cols))
+        self.assertFalse(any("swstateent" in c for c in cols))
+        self.assertFalse(any("swswitch" in c for c in df.columns))
+        self.assertFalse(any("swdwellsec" in c for c in df.columns))
+        self.assertFalse(any("swstateent" in c for c in df.columns))
+        mock_state_fit.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
