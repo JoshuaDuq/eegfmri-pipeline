@@ -1448,6 +1448,8 @@ def extract_connectivity_from_precomputed(
     use_task_parallel = bool(n_jobs > 1)
     inner_n_jobs = 1 if use_task_parallel else n_jobs
     graph_n_jobs = 1 if use_task_parallel else n_jobs
+    # Connectivity tasks carry large NumPy arrays; threads avoid per-task process copies.
+    task_parallel_backend = "threading"
 
     output_level = conn_cfg.output_level
     enable_graph_metrics = conn_cfg.enable_graph_metrics
@@ -1976,7 +1978,7 @@ def extract_connectivity_from_precomputed(
     static_dfs: List[pd.DataFrame] = []
     if tasks:
         if use_task_parallel and len(tasks) > 1:
-            static_dfs = Parallel(n_jobs=n_jobs, backend="loky")(
+            static_dfs = Parallel(n_jobs=n_jobs, backend=task_parallel_backend)(
                 delayed(_timed_run_static)(task) for task in tasks
             )
         else:
@@ -1999,7 +2001,7 @@ def extract_connectivity_from_precomputed(
     dynamic_dfs: List[pd.DataFrame] = []
     if dynamic_tasks:
         if use_task_parallel and len(dynamic_tasks) > 1:
-            dynamic_dfs = Parallel(n_jobs=n_jobs, backend="loky")(
+            dynamic_dfs = Parallel(n_jobs=n_jobs, backend=task_parallel_backend)(
                 delayed(_timed_run_dynamic)(task) for task in dynamic_tasks
             )
         else:

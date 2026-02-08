@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import logging
 import unittest
 from unittest.mock import patch
@@ -183,6 +184,54 @@ class TestDynamicConnectivityFeatures(unittest.TestCase):
             self.assertIn(col, cols)
             self.assertIn(col, df.columns)
             self.assertTrue(np.isfinite(np.asarray(df[col], dtype=float)).any(), msg=col)
+
+    def test_task_parallel_uses_thread_backend(self):
+        precomputed = self._build_precomputed()
+        precomputed.config["feature_engineering"]["parallel"]["n_jobs_connectivity"] = 2
+        seg_name = "all"
+        seg_mask = np.ones(precomputed.times.shape[0], dtype=bool)
+        precomputed.windows.masks[seg_name] = seg_mask
+        precomputed.windows.ranges[seg_name] = (
+            float(precomputed.times[0]),
+            float(precomputed.times[-1]),
+        )
+
+        backends_seen = []
+        real_parallel = extract_connectivity_from_precomputed.__globals__["Parallel"]
+
+        def _capture_parallel(*args, **kwargs):
+            backends_seen.append(kwargs.get("backend"))
+            return real_parallel(*args, **kwargs)
+
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_time",
+                new=_fake_spectral_connectivity_time,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.envelope_correlation",
+                new=_fake_envelope_correlation,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.connectivity._fit_dynamic_state_labels",
+                new=_fake_state_labels,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.connectivity.Parallel",
+                new=_capture_parallel,
+            ),
+            patch.dict(os.environ, {"EEG_PIPELINE_N_JOBS": "2"}),
+        ):
+            extract_connectivity_from_precomputed(
+                precomputed,
+                bands=["alpha"],
+                segments=[seg_name],
+                config=precomputed.config,
+                logger=precomputed.logger,
+            )
+
+        self.assertTrue(backends_seen)
+        self.assertIn("threading", backends_seen)
 
 
 if __name__ == "__main__":
