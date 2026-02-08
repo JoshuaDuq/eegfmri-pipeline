@@ -93,9 +93,6 @@ eeg_pipeline/data/derivatives/**
 # Allow external data if it exists
 !eeg_pipeline/data/external/
 !eeg_pipeline/data/external/**
-# Allow signature weight maps under external (SIIPS1 is public; NPS is not distributed)
-!eeg_pipeline/data/external/**/*.nii
-!eeg_pipeline/data/external/**/*.nii.gz
 
 # Specifically ignore common data formats if they escape the data folders
 *.fif

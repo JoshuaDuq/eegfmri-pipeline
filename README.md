@@ -917,6 +917,8 @@ Available signatures: `NPS`, `SIIPS1`. Methods: `beta-series`, `lss`. Metrics: `
 
 **NPS (Neuroimaging Pain Signature):** The NPS weight map is not publicly distributed. To compute NPS expression, obtain the signature weights from the original authors and add them under a weights root (e.g. `path/to/weights/NPS/weights_NSF_grouppred_cvpcr.nii.gz`), then pass that root via `--pain-signature-weights` or your config.
 
+**SIIPS1 (Stimulus Intensity Independent Pain Signature-1):** SIIPS1 weights are publicly available from the [CANlab Neuroimaging_Pattern_Masks](https://github.com/canlab/Neuroimaging_Pattern_Masks) repository. Clone or download the repo, then copy `Multivariate_signature_patterns/2017_Woo_SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz` into your weights root as `SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz`, and pass that root via `--pain-signature-weights` or your config.
+
 ### Spatial Transforms (CSD/Laplacian)
 
 Phase-based features (connectivity, ITPC, PAC) benefit from current source density (CSD) to reduce volume conduction. The pipeline applies CSD **per feature family** by default:
