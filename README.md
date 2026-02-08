@@ -19,25 +19,7 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research
 </table>
 
 ---
-
-
 I have yet to ensure compatibility with windows, feel free to make pull requests for this.
-
-## Detailed Documentation
-
-Each major pipeline component has its own README with exhaustive method descriptions, configuration references, and output specifications. These are rendered automatically when browsing the corresponding directory on GitHub.
-
-| Component | README | Description |
-|-----------|--------|-------------|
-| **EEG Preprocessing** | [`eeg_pipeline/preprocessing/`](eeg_pipeline/preprocessing/README.md) | Bad channel detection, ICA, epoching, artifact rejection |
-| **Feature Extraction** | [`eeg_pipeline/analysis/features/`](eeg_pipeline/analysis/features/README.md) | 16 EEG feature categories with exact computation methods |
-| **Behavioral Analysis** | [`eeg_pipeline/analysis/behavior/`](eeg_pipeline/analysis/behavior/README.md) | Correlations, mediation, moderation, mixed effects |
-| **Machine Learning** | [`eeg_pipeline/analysis/machine_learning/`](eeg_pipeline/analysis/machine_learning/README.md) | LOSO regression, classification, SHAP, time generalization |
-| **fMRI Analysis** | [`fmri_pipeline/`](fmri_pipeline/README.md) | GLM contrasts, trial-wise betas, pain signatures, fMRIPrep |
-| **Interactive TUI** | [`eeg_pipeline/cli/tui/`](eeg_pipeline/cli/tui/README.md) | Build and run the terminal UI |
-| **fMRI Raw-to-BIDS** | [`README/FMRI_RAW_TO_BIDS.md`](README/FMRI_RAW_TO_BIDS.md) | DICOM-to-BIDS conversion guide |
-| **Source Localization** | [`README/SOURCE_LOCALIZATION_TUTORIAL.md`](README/SOURCE_LOCALIZATION_TUTORIAL.md) | fMRI-constrained EEG source localization tutorial |
-
 ---
 
 ## Quick Start
