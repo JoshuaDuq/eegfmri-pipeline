@@ -425,7 +425,7 @@ def ensure_derivatives_dataset_description(
         "DatasetType": "derivative",
         "GeneratedBy": [
             {
-                "Name": "Pain_fMRI_EEG",
+                "Name": "PAIN_EEG_fMRI",
                 "Version": "unknown",
                 "Description": "Custom EEG analysis (ERP, TFR, features, machine learning)",
             }

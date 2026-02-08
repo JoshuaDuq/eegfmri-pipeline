@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/JoshuaDuq/Pain_fMRI_EEG"
+Repository = "https://github.com/JoshuaDuq/PAIN_EEG_fMRI"
 
 [project.scripts]
 eeg-pipeline = "eeg_pipeline.cli.main:main"

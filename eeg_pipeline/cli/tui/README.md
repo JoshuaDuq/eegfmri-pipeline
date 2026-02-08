@@ -14,7 +14,7 @@ A terminal-based user interface for the EEG Pipeline built with Go and [Bubble T
 Navigate to the TUI directory and build/run:
 
 ```bash
-cd path/to/Pain_fMRI_EEG/eeg_pipeline/cli/tui && go mod download && go build -o tui . && ./tui
+cd path/to/PAIN_EEG_fMRI/eeg_pipeline/cli/tui && go mod download && go build -o tui . && ./tui
 ```
 
 ### Step-by-Step
