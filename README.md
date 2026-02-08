@@ -915,6 +915,8 @@ eeg-pipeline ml regression --subject 0001 --subject 0002 \
 
 Available signatures: `NPS`, `SIIPS1`. Methods: `beta-series`, `lss`. Metrics: `dot`, `cosine`, `pearson_r`.
 
+**NPS (Neuroimaging Pain Signature):** The NPS weight map is not publicly distributed. To compute NPS expression, obtain the signature weights from the original authors and add them under a weights root (e.g. `path/to/weights/NPS/weights_NSF_grouppred_cvpcr.nii.gz`), then pass that root via `--pain-signature-weights` or your config.
+
 ### Spatial Transforms (CSD/Laplacian)
 
 Phase-based features (connectivity, ITPC, PAC) benefit from current source density (CSD) to reduce volume conduction. The pipeline applies CSD **per feature family** by default:
