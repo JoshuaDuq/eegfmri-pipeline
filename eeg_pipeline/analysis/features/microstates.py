@@ -283,7 +283,7 @@ def _compute_epoch_metrics(
         dst = int(collapsed[idx + 1])
         counts[src, dst] += 1.0
 
-    transitions = np.zeros_like(counts)
+    transitions = np.full_like(counts, np.nan, dtype=float)
     row_sums = counts.sum(axis=1, keepdims=True)
     nonzero = row_sums[:, 0] > 0
     transitions[nonzero] = counts[nonzero] / row_sums[nonzero]
@@ -296,13 +296,74 @@ def _compute_epoch_metrics(
     }
 
 
-def _class_labels(n_states: int) -> List[str]:
+def _class_labels(n_states: int, *, canonical: bool) -> List[str]:
+    if not canonical:
+        return [f"state{idx + 1}" for idx in range(n_states)]
+
     if n_states <= len(_DEFAULT_CLASS_LABELS):
         return list(_DEFAULT_CLASS_LABELS[:n_states])
     labels = list(_DEFAULT_CLASS_LABELS)
     extra = n_states - len(labels)
     labels.extend(list(ascii_lowercase[len(labels) : len(labels) + extra]))
     return labels
+
+
+def _validate_train_mask(
+    train_mask: Optional[np.ndarray],
+    n_epochs: int,
+) -> Optional[np.ndarray]:
+    if train_mask is None:
+        return None
+
+    tm = np.asarray(train_mask, dtype=bool).ravel()
+    if tm.size != n_epochs:
+        raise ValueError(
+            f"Microstates: train_mask length ({tm.size}) does not match n_epochs ({n_epochs})."
+        )
+    if not np.any(tm):
+        raise ValueError("Microstates: train_mask contains no training trials.")
+    return tm
+
+
+def _build_explicit_pooling_masks(
+    times: np.ndarray,
+    explicit_windows: Optional[Sequence[Dict[str, Any]]],
+) -> Dict[str, np.ndarray]:
+    if not explicit_windows:
+        return {}
+
+    masks: Dict[str, np.ndarray] = {}
+    for idx, window in enumerate(explicit_windows):
+        if not isinstance(window, dict):
+            continue
+        tmin = window.get("tmin")
+        tmax = window.get("tmax")
+        if tmin is None or tmax is None:
+            continue
+
+        try:
+            start = float(tmin)
+            end = float(tmax)
+        except (TypeError, ValueError):
+            continue
+        if start > end:
+            start, end = end, start
+
+        mask = (times >= start) & (times < end)
+        if not np.any(mask):
+            continue
+
+        name = str(window.get("name") or f"window_{idx + 1}")
+        masks[name] = mask
+    return masks
+
+
+def _valid_masks(masks: Dict[str, Optional[np.ndarray]]) -> Dict[str, np.ndarray]:
+    return {
+        name: np.asarray(mask, dtype=bool)
+        for name, mask in masks.items()
+        if mask is not None and np.any(mask)
+    }
 
 
 def _build_column_name(segment: str, stat: str) -> str:
@@ -350,11 +411,24 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
     if not segment_masks:
         return pd.DataFrame(), []
 
+    explicit_windows = getattr(ctx, "explicit_windows", None)
+    pooling_masks = _build_explicit_pooling_masks(epochs.times, explicit_windows)
+    if not pooling_masks:
+        pooling_masks = _valid_masks(getattr(windows, "masks", {}) if windows is not None else {})
+    if not pooling_masks:
+        pooling_masks = _valid_masks(segment_masks)
+    if not pooling_masks:
+        return pd.DataFrame(), []
+
+    n_epochs = data.shape[0]
+    train_mask = _validate_train_mask(getattr(ctx, "train_mask", None), n_epochs)
+    train_indices = np.flatnonzero(train_mask) if train_mask is not None else np.arange(n_epochs)
+
     # Training maps are pooled across segments for consistent templates.
     pooled_peak_maps: List[np.ndarray] = []
-    for epoch_idx in range(data.shape[0]):
+    for epoch_idx in train_indices:
         epoch = data[epoch_idx]
-        for mask in segment_masks.values():
+        for mask in pooling_masks.values():
             if mask is None or not np.any(mask):
                 continue
             segment_epoch = epoch[:, mask]
@@ -372,18 +446,23 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
         selected_ch_names=ch_names,
         n_states=cfg.n_states,
     )
+    using_fixed_templates = templates is not None
     if templates is None:
         templates = _fit_templates_kmeans(
             pooled_matrix,
             n_states=cfg.n_states,
             random_state=cfg.random_state,
         )
+        if logger is not None:
+            logger.warning(
+                "Microstates: fitting subject-specific templates (no fixed templates provided). "
+                "Output labels use neutral names (state1..stateN) and are not directly comparable across subjects."
+            )
 
-    labels = _class_labels(cfg.n_states)
+    labels = _class_labels(cfg.n_states, canonical=using_fixed_templates)
     min_duration_samples = max(1, int(round(cfg.min_duration_ms * sfreq / 1000.0)))
 
     all_rows: Dict[str, List[float]] = {}
-    n_epochs = data.shape[0]
 
     for segment_name, mask in segment_masks.items():
         if mask is None or not np.any(mask):
@@ -423,6 +502,7 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
         return pd.DataFrame(), []
 
     out_df = pd.DataFrame(all_rows)
+    out_df.attrs["microstate_template_source"] = "fixed" if using_fixed_templates else "subject_fitted"
     return out_df, list(out_df.columns)
 
 

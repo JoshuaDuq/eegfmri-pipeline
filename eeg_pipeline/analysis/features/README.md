@@ -430,7 +430,7 @@ Detects oscillatory bursts using band-limited amplitude envelopes from precomput
 
 **Module:** `microstates.py` → `extract_microstate_features`
 
-EEG microstate dynamics using GFP-peak topographic clustering (canonical A–D states).
+EEG microstate dynamics using GFP-peak topographic clustering.
 
 **Method:**
 
@@ -438,8 +438,8 @@ EEG microstate dynamics using GFP-peak topographic clustering (canonical A–D s
 2. Detect GFP peaks using `scipy.signal.find_peaks` with configurable minimum distance and prominence.
 3. Extract topographic maps at GFP peaks; normalize each map (zero-mean, unit-norm, sign-standardized by largest component).
 4. **Template fitting:**
-   - **Fixed templates** (recommended): Use pre-defined canonical microstate templates. Maps are reordered to match templates via spatial correlation.
-   - **K-means clustering** (fallback): Fit `n_states` (default 4) cluster centers on GFP-peak topographies using `sklearn.KMeans` with 20 initializations.
+   - **Fixed templates** (recommended): Use pre-defined canonical templates (A/B/C/D style labels when provided).
+   - **K-means clustering** (fallback): Fit `n_states` (default 4) cluster centers on GFP-peak topographies using `sklearn.KMeans` with 20 initializations. Output classes use neutral labels (`state1..stateN`) because fitted cluster identities are not guaranteed to be comparable across subjects.
 5. **State assignment:** At every time point, assign the microstate class with highest absolute spatial correlation to the instantaneous topography.
 6. Compute per-trial metrics:
 
@@ -448,7 +448,9 @@ EEG microstate dynamics using GFP-peak topographic clustering (canonical A–D s
 | `coverage_{class}`   | Fraction of time points assigned to each microstate class.      |
 | `duration_{class}`   | Mean duration (ms) of contiguous runs of each class.            |
 | `occurrence_{class}` | Occurrence rate (Hz) of each class.                             |
-| `transition_{i}_{j}` | Transition probability from class `i` to class `j`.            |
+| `transition_{i}_{j}` | Transition probability from class `i` to class `j` (`NaN` when class `i` has no outgoing transitions in that trial). |
+
+**CV/leakage behavior:** In `trial_ml_safe` mode with `train_mask`, template fitting is restricted to training trials.
 
 ---
 

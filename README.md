@@ -365,7 +365,7 @@ Extract a comprehensive set of EEG features from cleaned epochs.
 | `aperiodic` | 1/f slope and offset via specparam (iterative peak rejection, QC per channel) |
 | `connectivity` | Functional connectivity (wPLI, AEC, PLV) with CSD spatial transform |
 | `directedconnectivity` | Directed connectivity (PSI, DTF, PDC) via MVAR models |
-| `microstates` | Microstate templates (k-means), coverage, duration, transitions |
+| `microstates` | Microstate dynamics from fixed templates or subject-fitted clustering: coverage, duration, occurrence, transitions |
 | `pac` | Phase-amplitude coupling (theta–gamma, alpha–gamma) with harmonic filtering |
 | `itpc` | Inter-trial phase coherence (fold-safe for ML, condition-aware) |
 | `erp` | Event-related potential components (N1, N2, P2 — configurable windows) |
@@ -419,6 +419,8 @@ eeg-pipeline features visualize --subject 0001
 | `--pac-pairs` | Phase-amplitude pairs, e.g., `theta:gamma` | theta–gamma, alpha–gamma |
 | `--erp-components` | ERP windows, e.g., `n2=0.20-0.35` | N1, N2, P2 |
 | `--analysis-mode` | `group_stats` or `trial_ml_safe` | `group_stats` |
+| `--microstates-*` | Microstate extraction controls (`n_states`, GFP peak params, min duration, random seed) | from config |
+| `--fixed-templates-path` | `.npz` file with canonical templates (`templates`, optional `ch_names`) | unset |
 | `--compute-change-scores` | Compute baseline→active change scores | enabled |
 | `--source-method` | Source localization: `lcmv` or `eloreta` | `lcmv` |
 | `--source-fmri` | Enable fMRI-constrained source localization | disabled |
@@ -949,7 +951,7 @@ eeg-pipeline features compute --subject 0001 --iaf-enabled
 | Mode | Description |
 |------|-------------|
 | `group_stats` | Default. Cross-trial estimates allowed (one row per subject/condition). |
-| `trial_ml_safe` | ML/CV-safe. Forbids cross-trial features unless `train_mask` is provided. Prevents leakage. |
+| `trial_ml_safe` | ML/CV-safe. Forbids cross-trial features unless `train_mask` is provided. Prevents leakage (for microstates, template fitting uses training trials only when `train_mask` is provided). |
 
 ```bash
 # For ML pipelines, enforce safety
@@ -1002,4 +1004,3 @@ Contributions are welcome. To get started:
 3. Make your changes and add tests where applicable
 4. Run the test suite: `pytest`
 5. Submit a pull request
-

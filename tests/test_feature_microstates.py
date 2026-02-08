@@ -1,6 +1,7 @@
 import logging
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import mne
 import numpy as np
@@ -12,6 +13,15 @@ class _WindowStub:
     def __init__(self, mask):
         self.masks = {"active": mask}
         self.name = None
+
+    def get_mask(self, name):
+        return self.masks.get(name)
+
+
+class _NamedWindowStub:
+    def __init__(self, name, masks):
+        self.name = name
+        self.masks = dict(masks)
 
     def get_mask(self, name):
         return self.masks.get(name)
@@ -96,3 +106,175 @@ class TestMicrostateFeatures(unittest.TestCase):
         from eeg_pipeline.pipelines import constants
 
         self.assertIn("microstates", constants.FEATURE_CATEGORIES)
+
+    def test_transition_rows_without_outgoing_are_nan(self):
+        from eeg_pipeline.analysis.features.microstates import _compute_epoch_metrics
+
+        metrics = _compute_epoch_metrics(
+            states=np.array([0, 0, 0, 0], dtype=int),
+            sfreq=100.0,
+            n_states=2,
+        )
+        self.assertTrue(np.isnan(metrics["transitions"]).all())
+
+    def test_template_fitting_uses_train_mask_only(self):
+        from eeg_pipeline.analysis.features import microstates as mod
+
+        epochs, templates, ch_names = self._build_epochs()
+        epoch_data = epochs.get_data()
+        extra = epoch_data[:1].copy()
+        extra[:, :, :] = templates[1][:, None]
+        data3 = np.concatenate([epoch_data, extra], axis=0)
+        epochs3 = mne.EpochsArray(data3, info=epochs.info, tmin=epochs.tmin, verbose=False)
+        epochs3.set_montage("standard_1020")
+
+        mask = np.ones(epochs3.get_data().shape[-1], dtype=bool)
+        train_mask = np.array([True, False, False], dtype=bool)
+        captured: dict[str, np.ndarray] = {}
+
+        def _fake_peak_maps(segment_epoch, _sfreq, _cfg):
+            return segment_epoch[:, :1].T
+
+        def _fake_fit(peak_maps, n_states, random_state):
+            _ = random_state
+            captured["peak_maps"] = peak_maps.copy()
+            return np.tile(peak_maps[:1], (n_states, 1))
+
+        ctx = SimpleNamespace(
+            epochs=epochs3,
+            windows=_WindowStub(mask),
+            name="active",
+            train_mask=train_mask,
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "microstates": {
+                            "n_states": 2,
+                            "min_duration_ms": 0.0,
+                            "min_peak_distance_ms": 5.0,
+                            "max_gfp_peaks_per_epoch": 200,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("microstate-train-mask"),
+            fixed_templates=None,
+            fixed_template_ch_names=ch_names,
+        )
+
+        with patch.object(mod, "_extract_peak_topographies", side_effect=_fake_peak_maps), patch.object(
+            mod, "_fit_templates_kmeans", side_effect=_fake_fit
+        ):
+            mod.extract_microstate_features(ctx)
+
+        self.assertIn("peak_maps", captured)
+        self.assertEqual(captured["peak_maps"].shape[0], int(np.sum(train_mask)))
+
+    def test_explicit_windows_are_used_for_template_pooling(self):
+        from eeg_pipeline.analysis.features import microstates as mod
+
+        ch_names = ["Fp1", "Fp2", "C3"]
+        sfreq = 100.0
+        n_times = 10
+        data = np.zeros((1, len(ch_names), n_times), dtype=float)
+        data[0, :, :5] = np.array([[1.0], [0.0], [0.0]])
+        data[0, :, 5:] = np.array([[0.0], [1.0], [0.0]])
+        info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
+        epochs = mne.EpochsArray(data, info=info, tmin=0.0, verbose=False)
+        epochs.set_montage("standard_1020")
+
+        explicit_windows = [
+            {"name": "early", "tmin": 0.0, "tmax": 0.05},
+            {"name": "late", "tmin": 0.05, "tmax": 0.10},
+        ]
+        early_mask = np.zeros(n_times, dtype=bool)
+        early_mask[:5] = True
+        late_mask = np.zeros(n_times, dtype=bool)
+        late_mask[5:] = True
+
+        calls: list[np.ndarray] = []
+
+        def _fake_peak_maps(segment_epoch, _sfreq, _cfg):
+            return segment_epoch[:, :1].T
+
+        def _fake_fit(peak_maps, n_states, random_state):
+            _ = random_state
+            calls.append(peak_maps.copy())
+            return np.tile(peak_maps[:1], (n_states, 1))
+
+        base_cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "microstates": {
+                        "n_states": 2,
+                        "min_duration_ms": 0.0,
+                        "min_peak_distance_ms": 5.0,
+                        "max_gfp_peaks_per_epoch": 200,
+                    }
+                }
+            }
+        )
+
+        ctx_early = SimpleNamespace(
+            epochs=epochs,
+            windows=_NamedWindowStub("early", {"early": early_mask}),
+            name="early",
+            explicit_windows=explicit_windows,
+            config=base_cfg,
+            logger=logging.getLogger("microstate-explicit-early"),
+            fixed_templates=None,
+            fixed_template_ch_names=None,
+        )
+        ctx_late = SimpleNamespace(
+            epochs=epochs,
+            windows=_NamedWindowStub("late", {"late": late_mask}),
+            name="late",
+            explicit_windows=explicit_windows,
+            config=base_cfg,
+            logger=logging.getLogger("microstate-explicit-late"),
+            fixed_templates=None,
+            fixed_template_ch_names=None,
+        )
+
+        with patch.object(mod, "_extract_peak_topographies", side_effect=_fake_peak_maps), patch.object(
+            mod, "_fit_templates_kmeans", side_effect=_fake_fit
+        ):
+            mod.extract_microstate_features(ctx_early)
+            mod.extract_microstate_features(ctx_late)
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].shape[0], 2)
+        self.assertTrue(np.allclose(calls[0], calls[1]))
+
+    def test_fitted_templates_use_neutral_labels(self):
+        from eeg_pipeline.analysis.features import microstates as mod
+
+        epochs, _, _ = self._build_epochs()
+        mask = np.ones(epochs.get_data().shape[-1], dtype=bool)
+
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=_WindowStub(mask),
+            name="active",
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "microstates": {
+                            "n_states": 2,
+                            "min_duration_ms": 0.0,
+                            "min_peak_distance_ms": 5.0,
+                            "max_gfp_peaks_per_epoch": 200,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("microstate-neutral-labels"),
+            fixed_templates=None,
+            fixed_template_ch_names=None,
+        )
+
+        with patch.object(mod, "_fit_templates_kmeans", return_value=np.array([[1.0] * 6, [0.0] * 6])):
+            df, _ = mod.extract_microstate_features(ctx)
+
+        self.assertIn("microstates_active_broadband_global_coverage_state1", df.columns)
+        self.assertNotIn("microstates_active_broadband_global_coverage_a", df.columns)
