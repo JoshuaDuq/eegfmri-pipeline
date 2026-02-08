@@ -516,8 +516,10 @@ class FeaturePipeline(PipelineBase):
         )
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
 
-        self.logger.info(f"=== Feature extraction: sub-{subject}, task-{task} ===")
-        self.logger.info("Feature categories: %s", ", ".join(feature_categories))
+        self.logger.info("=== Feature extraction: sub-%s, task-%s ===", subject, task)
+        self.logger.info(
+            "Categories (%d): %s", len(feature_categories), ", ".join(feature_categories)
+        )
         progress.subject_start(f"sub-{subject}")
 
         features_dir = deriv_features_path(self.deriv_root, subject)
@@ -528,9 +530,16 @@ class FeaturePipeline(PipelineBase):
         time_ranges = _resolve_time_ranges(explicit_windows, kwargs.get("tmin"), kwargs.get("tmax"))
         total_steps = _calculate_total_steps(len(time_ranges))
         current_step = 0
+        if len(time_ranges) > 1:
+            self.logger.info(
+                "Time ranges (%d): %s",
+                len(time_ranges),
+                ", ".join(tr.get("name", "unnamed") or "unnamed" for tr in time_ranges),
+            )
 
         current_step += 1
         progress.step("Loading epochs", current=current_step, total=total_steps)
+        self.logger.info("Loading cleaned epochs...")
         epochs, aligned_events = load_epochs_for_analysis(
             subject,
             task,
@@ -542,7 +551,7 @@ class FeaturePipeline(PipelineBase):
         )
 
         if epochs is None:
-            self.logger.error(f"No cleaned epochs for sub-{subject}; skipping")
+            self.logger.error("No cleaned epochs for sub-%s; skipping", subject)
             progress.error("no_epochs", f"No cleaned epochs for sub-{subject}")
             return
 
@@ -550,6 +559,12 @@ class FeaturePipeline(PipelineBase):
             self.logger.warning("No events available; skipping")
             progress.error("no_events", "No aligned events")
             return
+
+        self.logger.info(
+            "Epochs loaded: %d trials, %d channels, %.0f Hz, %.3f\u2013%.3fs",
+            len(epochs), len(epochs.ch_names), epochs.info["sfreq"],
+            epochs.times[0], epochs.times[-1],
+        )
 
         original_events = _load_events_df(
             subject,
@@ -559,9 +574,16 @@ class FeaturePipeline(PipelineBase):
             prefer_clean=False,
         )
         if original_events is not None:
+            n_dropped = len(original_events) - len(epochs)
             save_dropped_trials_log(
                 epochs, original_events, features_dir / "metadata" / "dropped_trials.tsv", self.logger
             )
+            if n_dropped > 0:
+                self.logger.info(
+                    "Dropped trials: %d/%d (%.0f%% retained)",
+                    n_dropped, len(original_events),
+                    100 * len(epochs) / len(original_events),
+                )
 
         target_columns = list(self.config.get("event_columns.rating", []) or [])
         target_col = pick_target_column(aligned_events, target_columns=target_columns)
@@ -570,6 +592,10 @@ class FeaturePipeline(PipelineBase):
             return
 
         y = pd.to_numeric(aligned_events[target_col], errors="coerce")
+        n_valid = int(y.notna().sum())
+        self.logger.info(
+            "Target column: '%s' (%d/%d valid values)", target_col, n_valid, len(y)
+        )
 
         fixed_templates_path = kwargs.get("fixed_templates_path")
         fixed_templates, fixed_template_ch_names = _load_fixed_templates(
@@ -669,8 +695,6 @@ class FeaturePipeline(PipelineBase):
                 current=current_step,
                 total=total_steps,
             )
-            self.logger.info(f"Aligning features for {range_info}...")
-
             critical_features = ["target"]
             if "power" in ctx.feature_categories:
                 critical_features.extend(["power", "baseline"])
@@ -700,8 +724,16 @@ class FeaturePipeline(PipelineBase):
             )
 
             if retention_stats is None:
-                self.logger.error(f"Feature alignment failed for {range_info}. Skipping save.")
+                self.logger.error("Feature alignment failed for %s; skipping save", range_info)
                 continue
+
+            n_retained = retention_stats.get("n_retained", len(y_aligned) if y_aligned is not None else 0)
+            n_original = retention_stats.get("n_original", len(y))
+            if n_retained < n_original:
+                self.logger.info(
+                    "Alignment: %d/%d trials retained (%.0f%%)",
+                    n_retained, n_original, 100 * n_retained / max(n_original, 1),
+                )
 
             extra_blocks = retention_stats.get("extra_blocks", {})
             _update_from_aligned_extra(unpacked, features, extra_blocks)
@@ -772,14 +804,6 @@ class FeaturePipeline(PipelineBase):
                     accumulated_y = y_aligned
 
             n_trials = len(y_aligned)
-            n_pow = _get_df_cols(pow_df_aligned)
-            n_conn = _get_df_cols(conn_df_aligned)
-            n_dconn = _get_df_cols(unpacked["dconn_df"])
-            n_source = _get_df_cols(unpacked["source_df"])
-            n_aper = _get_df_cols(aper_df_aligned)
-            n_spectral = _get_df_cols(unpacked["spectral_df"])
-            n_comp = _get_df_cols(unpacked["comp_df"])
-            n_microstates = _get_df_cols(unpacked.get("microstates_df"))
             n_total = _get_df_cols(combined_df)
 
             extraction_config = {
@@ -798,10 +822,8 @@ class FeaturePipeline(PipelineBase):
             _save_extraction_config(extraction_config, features_dir, suffix, self.logger, feature_categories)
 
             self.logger.info(
-                f"Done {range_info}: sub-{subject}, trials={n_trials}, "
-                f"power={n_pow}, conn={n_conn}, dconn={n_dconn}, source={n_source}, "
-                f"aper={n_aper}, spectral={n_spectral}, comp={n_comp}, total={n_total}"
-                f", microstates={n_microstates}"
+                "Saved %s: %d total columns \u00d7 %d trials",
+                range_info, n_total, n_trials,
             )
 
             del ctx, features, unpacked, extra_blocks, combined_df

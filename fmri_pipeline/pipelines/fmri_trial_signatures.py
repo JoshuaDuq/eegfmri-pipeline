@@ -73,11 +73,20 @@ class FmriTrialSignaturePipeline(PipelineBase):
             )
             return
 
+        import time as _time
+
+        sub_label = f"sub-{subject}" if not str(subject).startswith("sub-") else str(subject)
+        self.logger.info(
+            "=== Trial signatures: %s, task-%s, method=%s ===",
+            sub_label, task, cfg.method,
+        )
+
         if progress is not None and hasattr(progress, "subject_start"):
-            progress.subject_start(f"sub-{subject}" if not str(subject).startswith("sub-") else str(subject))
+            progress.subject_start(sub_label)
         if progress is not None and hasattr(progress, "step"):
             progress.step(f"Trial signatures ({cfg.method})")
 
+        t0 = _time.perf_counter()
         res = run_trial_signature_extraction_for_subject(
             bids_fmri_root=Path(bids_fmri_root).expanduser().resolve(),
             bids_derivatives=Path(self.deriv_root).expanduser().resolve(),
@@ -87,8 +96,14 @@ class FmriTrialSignaturePipeline(PipelineBase):
             signature_root=sig_root,
             output_dir=output_dir,
         )
+        elapsed = _time.perf_counter() - t0
+
+        out_path = res.get("output_dir", "")
+        n_trials = res.get("n_trials", "?")
+        n_sigs = res.get("n_signatures", "?")
         self.logger.info(
-            "Trial signatures done for %s: %s", subject, res.get("output_dir", "")
+            "Trial signatures complete for %s: %s trials, %s signatures (%.1fs) -> %s",
+            sub_label, n_trials, n_sigs, elapsed, out_path,
         )
 
     def run_group_level(self, subjects, task=None, **kwargs):  # type: ignore[override]

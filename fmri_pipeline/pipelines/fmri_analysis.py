@@ -184,11 +184,24 @@ class FmriAnalysisPipeline(PipelineBase):
             self.logger.info("Dry-run: would write %s", nifti_path)
             return
 
+        import time as _time
+
+        self.logger.info(
+            "=== fMRI first-level: %s, task-%s, contrast='%s' ===",
+            sub_label, task, contrast_name,
+        )
+        self.logger.info(
+            "Output type: %s, space: %s",
+            output_type_req,
+            getattr(contrast_cfg, "fmriprep_space", "T1w"),
+        )
+
         if progress is not None and hasattr(progress, "subject_start"):
             progress.subject_start(sub_label)
         if progress is not None and hasattr(progress, "step"):
             progress.step("Fit multi-run GLM + compute contrast")
 
+        t_glm = _time.perf_counter()
         contrast_img, run_meta, glm_result, contrast_def, _ = build_contrast_from_runs_detailed(
             bids_fmri_root=Path(str(bids_fmri_root)).expanduser().resolve(),
             bids_derivatives=deriv_root,
@@ -197,11 +210,18 @@ class FmriAnalysisPipeline(PipelineBase):
             cfg=contrast_cfg,
             output_dir=out_dir,
         )
+        glm_elapsed = _time.perf_counter() - t_glm
 
         if isinstance(run_meta, dict) and run_meta.get("output_type"):
             output_type_actual = str(run_meta.get("output_type"))
             nifti_path = out_dir / f"{sub_label}_task-{task}_contrast-{contrast_name}_stat-{output_type_actual}_{cfg_hash}.nii.gz"
             sidecar_path = nifti_path.with_suffix("").with_suffix(".json")
+
+        n_runs = run_meta.get("n_runs", "?") if isinstance(run_meta, dict) else "?"
+        self.logger.info(
+            "GLM fit + contrast: %s runs, shape=%s (%.1fs)",
+            n_runs, contrast_img.shape, glm_elapsed,
+        )
 
         contrast_img_for_plotting = contrast_img
 
@@ -222,6 +242,7 @@ class FmriAnalysisPipeline(PipelineBase):
             contrast_img = resample_to_freesurfer(contrast_img, fs_subject_dir)
 
         nib.save(contrast_img, str(nifti_path))
+        self.logger.info("Saved contrast map: %s", nifti_path.name)
 
         plotting_meta: Optional[dict[str, Any]] = None
         try:
@@ -335,6 +356,12 @@ class FmriAnalysisPipeline(PipelineBase):
         except Exception:
             # Sidecar is best-effort; do not fail the analysis.
             pass
+
+        total_elapsed = _time.perf_counter() - t_glm
+        self.logger.info(
+            "fMRI analysis complete for %s: contrast='%s', stat=%s (%.1fs total)",
+            sub_label, contrast_name, output_type_actual, total_elapsed,
+        )
 
         if progress is not None and hasattr(progress, "subject_done"):
             progress.subject_done(sub_label, success=True)

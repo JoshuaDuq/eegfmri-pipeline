@@ -607,8 +607,13 @@ def _extract_feature_with_error_handling(
     **kwargs,
 ) -> tuple[Optional[pd.DataFrame], Optional[List[str]], Optional[Any]]:
     """Extract a feature category with standardized error handling and validation."""
+    import time as _time
+
     progress.step(message=f"Extracting {feature_name} features...")
+    t0 = _time.perf_counter()
     extraction_result = extractor_func(*args, **kwargs)
+    elapsed = _time.perf_counter() - t0
+
     if isinstance(extraction_result, tuple):
         if len(extraction_result) == 2:
             df, cols = extraction_result
@@ -620,8 +625,15 @@ def _extract_feature_with_error_handling(
     else:
         df, cols, qc = extraction_result, [], None
 
-    if df is not None and not df.empty and len(df) != expected_trials:
-        raise ValueError(f"{feature_name} length mismatch: {len(df)} vs {expected_trials}")
+    if df is not None and not df.empty:
+        if len(df) != expected_trials:
+            raise ValueError(f"{feature_name} length mismatch: {len(df)} vs {expected_trials}")
+        ctx.logger.info(
+            "  ✓ %s: %d columns × %d trials (%.1fs)",
+            feature_name, df.shape[1], len(df), elapsed,
+        )
+    else:
+        ctx.logger.info("  – %s: no features produced (%.1fs)", feature_name, elapsed)
 
     return df, cols, qc
 
@@ -634,8 +646,6 @@ def _apply_spatial_filtering_to_results(
     if not ctx.spatial_modes:
         return
 
-    ctx.logger.info(f"Filtering features by spatial modes: {ctx.spatial_modes}")
-
     feature_attributes = [
         ("pow_df", "pow_cols"),
         ("erp_df", "erp_cols"),
@@ -646,12 +656,25 @@ def _apply_spatial_filtering_to_results(
         ("spectral_df", "spectral_cols"),
     ]
 
+    total_before = 0
+    total_after = 0
     for df_attr, cols_attr in feature_attributes:
         df = getattr(results, df_attr, None)
         if df is not None:
+            total_before += df.shape[1]
             filtered_df = filter_features_by_spatial_modes(df, ctx.spatial_modes, ctx.config)
             setattr(results, df_attr, filtered_df)
             setattr(results, cols_attr, list(filtered_df.columns) if filtered_df is not None else [])
+            total_after += filtered_df.shape[1] if filtered_df is not None else 0
+
+    removed = total_before - total_after
+    if removed > 0:
+        ctx.logger.info(
+            "Spatial filtering (%s): kept %d/%d columns (removed %d)",
+            ", ".join(ctx.spatial_modes), total_after, total_before, removed,
+        )
+    else:
+        ctx.logger.info("Spatial filtering (%s): all %d columns retained", ", ".join(ctx.spatial_modes), total_after)
 
 
 def filter_features_by_spatial_modes(
@@ -709,12 +732,16 @@ def extract_all_features(
     ctx: FeatureContext,
 ) -> FeatureExtractionResult:
     """Extract all requested features from epochs using TFR-based pipeline."""
-    tmin, tmax = ctx.tmin, ctx.tmax
-    if tmin is not None or tmax is not None:
-        ctx.logger.info(f"Feature extraction restricted to time range: tmin={tmin}, tmax={tmax}")
+    import time as _time
 
-    if ctx.spatial_modes:
-        ctx.logger.info(f"Spatial aggregation modes: {', '.join(ctx.spatial_modes)}")
+    t_start = _time.perf_counter()
+    tmin, tmax = ctx.tmin, ctx.tmax
+    range_label = f"[{tmin}, {tmax}]s" if (tmin is not None or tmax is not None) else "full epoch"
+    ctx.logger.info(
+        "Feature extraction: %d categories, %s, spatial=%s",
+        len(ctx.feature_categories), range_label,
+        ", ".join(ctx.spatial_modes) if ctx.spatial_modes else "all",
+    )
 
     power_bands = ctx.bands if ctx.bands else get_frequency_band_names(ctx.config)
     ctx._original_epochs = ctx.epochs
@@ -722,6 +749,12 @@ def extract_all_features(
     working_epochs = _prepare_working_epochs(ctx, tmin, tmax)
     expected_n_trials = len(working_epochs)
     ctx.epochs = working_epochs
+    ctx.logger.info(
+        "Working epochs: %d trials, %d channels, %.0f Hz, %.3f–%.3fs",
+        expected_n_trials, len(working_epochs.ch_names),
+        working_epochs.info["sfreq"],
+        working_epochs.times[0], working_epochs.times[-1],
+    )
 
     # Rebase masks onto cropped time axis while preserving original ranges.
     # Prevents mask/time-length mismatches while allowing baseline-dependent
@@ -767,11 +800,18 @@ def extract_all_features(
             name=ctx.name,
         )
 
+    t_pre = _time.perf_counter()
     precomputed_data = _prepare_precomputed_data(ctx, working_epochs, power_bands, tmin, tmax)
     if precomputed_data is not None:
         precomputed_data = _align_precomputed_windows(ctx, precomputed_data)
         precomputed_data.spatial_modes = list(ctx.spatial_modes) if ctx.spatial_modes else None
         ctx.set_precomputed(precomputed_data)
+        n_bands = len(precomputed_data.frequency_bands) if precomputed_data.frequency_bands else 0
+        ctx.logger.info(
+            "Precomputed intermediates ready: %d bands, transform=%s (%.1fs)",
+            n_bands, getattr(precomputed_data, "spatial_transform", "none"),
+            _time.perf_counter() - t_pre,
+        )
 
     validation = validate_epochs(working_epochs, ctx.config, logger=ctx.logger)
     if not validation.valid:
@@ -786,6 +826,8 @@ def extract_all_features(
 
     tfr_complex = None
     if needs_tfr:
+        t_tfr = _time.perf_counter()
+        ctx.logger.info("Computing TFR...")
         tfr, baseline_df, baseline_cols, baseline_start, baseline_end = _compute_tfr_for_features(
             ctx, tmin, tmax
         )
@@ -798,10 +840,15 @@ def extract_all_features(
         ctx.baseline_df = baseline_df
         ctx.baseline_cols = baseline_cols
 
+        ctx.logger.info(
+            "TFR ready: %d freqs, %d time points (%.1fs)",
+            len(tfr.freqs), len(tfr.times), _time.perf_counter() - t_tfr,
+        )
+
         if any(category in ctx.feature_categories for category in ["itpc", "pac"]):
             tfr_complex = ctx.tfr_complex
     else:
-        ctx.logger.info("Skipping TFR computation (not needed for requested feature categories)")
+        ctx.logger.info("Skipping TFR (not needed for requested categories)")
 
     progress = PipelineProgress(total=len(ctx.feature_categories), logger=ctx.logger, desc="Features")
     progress.start()
@@ -924,9 +971,11 @@ def extract_all_features(
 
     if "pac" in ctx.feature_categories:
         progress.step(message="Computing PAC features...")
+        t_pac = _time.perf_counter()
         pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = _extract_pac_features(
             ctx, precomputed_data, tfr_complex
         )
+        pac_elapsed = _time.perf_counter() - t_pac
 
         if pac_trials_df is not None:
             if len(pac_trials_df) != expected_n_trials:
@@ -943,6 +992,14 @@ def extract_all_features(
                 raise ValueError(
                     f"PAC time-resolved length mismatch: {len(pac_time_df)} vs {expected_n_trials}"
                 )
+            n_pac_cols = pac_trials_df.shape[1]
+            time_info = f", time-resolved={pac_time_df.shape[1]}" if pac_time_df is not None else ""
+            ctx.logger.info(
+                "  \u2713 PAC: %d columns \u00d7 %d trials%s (%.1fs)",
+                n_pac_cols, len(pac_trials_df), time_info, pac_elapsed,
+            )
+        else:
+            ctx.logger.info("  \u2013 PAC: no features produced (%.1fs)", pac_elapsed)
 
     if "erds" in ctx.feature_categories and precomputed_data is not None:
         erds_df, erds_cols, _erds_qc = _extract_feature_with_error_handling(
@@ -1029,6 +1086,22 @@ def extract_all_features(
     _add_change_scores_to_results(ctx, results)
 
     progress.finish()
+
+    total_cols = sum(
+        getattr(getattr(results, attr, None), "shape", (0, 0))[1]
+        for attr in (
+            "pow_df", "conn_df", "dconn_df", "source_df", "aper_df",
+            "erp_df", "phase_df", "pac_trials_df", "pac_time_df",
+            "comp_df", "bursts_df", "spectral_df", "erds_df",
+            "ratios_df", "asymmetry_df", "microstates_df", "quality_df",
+        )
+        if getattr(results, attr, None) is not None
+        and not getattr(getattr(results, attr, None), "empty", True)
+    )
+    ctx.logger.info(
+        "Feature extraction complete: %d total columns, %d trials (%.1fs)",
+        total_cols, expected_n_trials, _time.perf_counter() - t_start,
+    )
     return results
 
 
@@ -1100,8 +1173,13 @@ def _extract_precomputed_feature_group(
     **kwargs,
 ) -> None:
     """Extract a feature group from precomputed data and add to result."""
-    logger.info(f"Extracting {feature_name} features...")
+    import time as _time
+
+    logger.info("Extracting %s features...", feature_name)
+    t0 = _time.perf_counter()
     extraction_result = extractor_func(precomputed, *args, **kwargs)
+    elapsed = _time.perf_counter() - t0
+
     if isinstance(extraction_result, tuple):
         if len(extraction_result) == 2:
             df, cols = extraction_result
@@ -1115,8 +1193,13 @@ def _extract_precomputed_feature_group(
 
     if not df.empty:
         result.features[feature_name] = FeatureSet(df, cols, feature_name)
+        logger.info(
+            "  \u2713 %s: %d columns \u00d7 %d trials (%.1fs)",
+            feature_name, df.shape[1], len(df), elapsed,
+        )
     else:
         result.qc[feature_name] = {"skipped_reason": "empty_result"}
+        logger.info("  \u2013 %s: no features produced (%.1fs)", feature_name, elapsed)
 
 
 def extract_precomputed_features(

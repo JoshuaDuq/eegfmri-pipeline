@@ -397,7 +397,11 @@ def run_regression_ml(
     best_params_path = prepare_best_params_path(results_dir / f"best_params_{model_name}.jsonl", mode="truncate")
     null_path = results_dir / f"loso_null_{model_name}.npz" if n_perm > 0 else None
 
-    logger.info(f"Running regression with model={model_name}")
+    n_subjects = len(np.unique(groups))
+    logger.info(
+        "Regression: model=%s, %d features \u00d7 %d trials, %d subjects, target='%s'",
+        model_name, X.shape[1], X.shape[0], n_subjects, target,
+    )
 
     y_true, y_pred, groups_ordered, test_indices, fold_ids = nested_loso_predictions_matrix(
         X=X,
@@ -532,7 +536,12 @@ def run_regression_ml(
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
 
-    logger.info(f"Saved machine learning results to {results_dir}")
+    p_str = f", p={p_val:.4f}" if np.isfinite(p_val) else ""
+    logger.info(
+        "Regression results: r=%.3f [%.3f, %.3f]%s, R\u00b2=%.3f, RMSE=%.3f",
+        r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
+    )
+    logger.info("Saved results to %s", results_dir)
     return results_dir
 
 
@@ -614,6 +623,12 @@ def run_within_subject_regression_ml(
         groups = groups[finite_blocks]
         meta = meta.loc[finite_blocks].reset_index(drop=True)
         blocks_all = blocks_all[finite_blocks]
+
+    n_subjects = len(np.unique(groups))
+    logger.info(
+        "Within-subject regression: model=%s, %d features \u00d7 %d trials, %d subjects, target='%s'",
+        model or "elasticnet", X.shape[1], X.shape[0], n_subjects, target,
+    )
 
     results_dir = results_root / "within_subject_regression"
     plots_dir = results_dir / "plots"
@@ -881,7 +896,12 @@ def run_within_subject_regression_ml(
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
 
-    logger.info(f"Saved within-subject machine learning results to {results_dir}")
+    p_str = f", p={p_value:.4f}" if np.isfinite(p_value) else ""
+    logger.info(
+        "Within-subject regression results: r=%.3f [%.3f, %.3f]%s, R\u00b2=%.3f, RMSE=%.3f",
+        r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
+    )
+    logger.info("Saved results to %s", results_dir)
     return results_dir
 
 
@@ -896,9 +916,17 @@ def run_time_generalization(
     logger: logging.Logger,
 ) -> None:
     """Run time-generalization machine learning analysis."""
+    import time as _time
+
+    logger.info(
+        "Time generalization: %d subjects, %d permutations",
+        len(subjects), n_perm,
+    )
+
     results_dir = results_root / "time_generalization"
     ensure_dir(results_dir)
 
+    t0 = _time.perf_counter()
     try:
         tg_r, tg_r2, window_centers = time_generalization_regression(
             deriv_root=deriv_root,
@@ -910,10 +938,17 @@ def run_time_generalization(
             seed=rng_seed,
         )
     except Exception as exc:
-        logger.warning(f"Time-generalization failed: {exc}")
+        logger.warning("Time-generalization failed after %.1fs: %s", _time.perf_counter() - t0, exc)
         return
 
-    logger.info(f"Saved time-generalization outputs to {results_dir}")
+    n_windows = len(window_centers) if window_centers is not None else 0
+    logger.info(
+        "Time generalization complete: %d windows, peak r=%.3f (%.1fs)",
+        n_windows,
+        float(np.nanmax(tg_r)) if tg_r is not None and len(tg_r) > 0 else float("nan"),
+        _time.perf_counter() - t0,
+    )
+    logger.info("Saved results to %s", results_dir)
 
 
 ###################################################################
@@ -997,6 +1032,17 @@ def run_classification_ml(
     blocks = None
     if meta is not None and hasattr(meta, "columns") and "block" in meta.columns:
         blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy()
+
+    n_subjects = len(np.unique(groups))
+    n_features_desc = (
+        f"{X.shape[1]}ch \u00d7 {X.shape[2]}t" if X.ndim == 3
+        else f"{X.shape[1]} features"
+    )
+    class_balance = float(np.mean(y_binary)) if len(y_binary) else float("nan")
+    logger.info(
+        "Classification: model=%s, %s, %d trials, %d subjects, target='%s', balance=%.2f",
+        model_type, n_features_desc, len(y_binary), n_subjects, target, class_balance,
+    )
 
     results_dir = results_root / "classification"
     plots_dir = results_dir / "plots"
@@ -1231,8 +1277,16 @@ def run_classification_ml(
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
 
-    logger.info(f"Classification: AUC={result.auc:.3f}, Balanced Acc={result.balanced_accuracy:.3f}")
-    logger.info(f"Saved classification results to {results_dir}")
+    p_info = ""
+    if "p_value" in metrics:
+        p_info = f", p={metrics['p_value']:.4f}"
+    logger.info(
+        "Classification results: AUC=%.3f, balanced_acc=%.3f, F1=%.3f, Brier=%.3f%s",
+        float(auc_for_inference) if np.isfinite(auc_for_inference) else result.auc,
+        float(balanced_accuracy_subject_mean) if np.isfinite(balanced_accuracy_subject_mean) else result.balanced_accuracy,
+        result.f1, brier, p_info,
+    )
+    logger.info("Saved results to %s", results_dir)
     return results_dir
 
 
@@ -1334,6 +1388,17 @@ def run_within_subject_classification_ml(
         groups = groups[finite_blocks]
         meta = meta.loc[finite_blocks].reset_index(drop=True)
         blocks_all = blocks_all[finite_blocks]
+
+    n_subjects = len(np.unique(groups))
+    n_features_desc = (
+        f"{X.shape[1]}ch \u00d7 {X.shape[2]}t" if X.ndim == 3
+        else f"{X.shape[1]} features"
+    )
+    class_balance = float(np.mean(y)) if len(y) else float("nan")
+    logger.info(
+        "Within-subject classification: model=%s, %s, %d trials, %d subjects, target='%s', balance=%.2f",
+        model_type, n_features_desc, len(y), n_subjects, target, class_balance,
+    )
 
     if model_type == "cnn":
         base_pipe = None
@@ -1711,12 +1776,16 @@ def run_within_subject_classification_ml(
     with open(results_dir / "pooled_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2, default=str)
 
+    p_info = ""
+    if "p_value_auc" in metrics:
+        p_info = f", p={metrics['p_value_auc']:.4f}"
     logger.info(
-        "Within-subject classification: AUC=%.3f, BalancedAcc=%.3f (n_subjects=%d).",
-        float(result.auc) if np.isfinite(result.auc) else float("nan"),
-        float(result.balanced_accuracy) if np.isfinite(result.balanced_accuracy) else float("nan"),
-        int(len(np.unique(groups_ordered))),
+        "Within-subject classification results: AUC=%.3f, balanced_acc=%.3f, F1=%.3f%s",
+        float(auc_for_inference) if np.isfinite(auc_for_inference) else result.auc,
+        float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else result.balanced_accuracy,
+        result.f1, p_info,
     )
+    logger.info("Saved results to %s", results_dir)
     return results_dir
 
 
@@ -1981,6 +2050,12 @@ def run_model_comparison_ml(
         feature_stats=feature_stats,
     )
     
+    n_subjects = len(np.unique(groups))
+    logger.info(
+        "Model comparison: %d features \u00d7 %d trials, %d subjects, target='%s'",
+        X.shape[1], X.shape[0], n_subjects, target,
+    )
+
     results_dir = results_root / "model_comparison"
     ensure_dir(results_dir)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
@@ -2016,8 +2091,10 @@ def run_model_comparison_ml(
     
     comparison_records = []
     
+    import time as _time
+
     for model_name, model_spec in models.items():
-        logger.info(f"Running {model_name}...")
+        t_model = _time.perf_counter()
         pipe = model_spec["pipe"]
         param_grid = model_spec["param_grid"]
         
@@ -2061,7 +2138,10 @@ def run_model_comparison_ml(
         # Overall metrics
         from sklearn.metrics import r2_score
         overall_r2 = r2_score(y, y_pred)
-        logger.info(f"  {model_name}: R² = {overall_r2:.4f}")
+        logger.info(
+            "  \u2713 %s: R\u00b2=%.4f (%.1fs)",
+            model_name, overall_r2, _time.perf_counter() - t_model,
+        )
     
     # Save comparison results
     comparison_df = pd.DataFrame(comparison_records)
@@ -2096,7 +2176,12 @@ def run_model_comparison_ml(
         json.dump(summary, f, indent=2)
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
-    logger.info(f"Model comparison saved to {results_dir}")
+    best_model = max(models.keys(), key=lambda m: summary[m]["mean_r2"])
+    logger.info(
+        "Model comparison complete: best=%s (mean R\u00b2=%.4f)",
+        best_model, summary[best_model]["mean_r2"],
+    )
+    logger.info("Saved results to %s", results_dir)
     
     return results_dir
 
@@ -2157,6 +2242,12 @@ def run_incremental_validity_ml(
         feature_stats=feature_stats,
     )
     
+    n_subjects = len(np.unique(groups))
+    logger.info(
+        "Incremental validity: %d features \u00d7 %d trials, %d subjects, target='%s'",
+        X.shape[1], X.shape[0], n_subjects, target,
+    )
+
     results_dir = results_root / "incremental_validity"
     ensure_dir(results_dir)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
@@ -2311,8 +2402,12 @@ def run_incremental_validity_ml(
         json.dump(summary, f, indent=2)
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
-    logger.info(f"Incremental validity: Δ R² = {summary['delta_r2']:.4f}")
-    logger.info(f"Saved to {results_dir}")
+    logger.info(
+        "Incremental validity: baseline R\u00b2=%.4f, full R\u00b2=%.4f, \u0394R\u00b2=%.4f (%d/%d folds positive)",
+        r2_baseline_overall, r2_full_overall, summary["delta_r2"],
+        summary["n_folds_positive_delta"], summary["n_folds_total"],
+    )
+    logger.info("Saved results to %s", results_dir)
     
     return results_dir
 

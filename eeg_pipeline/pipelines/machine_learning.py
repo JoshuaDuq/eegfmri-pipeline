@@ -615,10 +615,15 @@ class MLPipeline(PipelineBase):
         params = self._extract_ml_parameters(kwargs)
         resolved_task = self._validate_inputs(subjects, task, params["cv_scope"])
         
+        import time as _time
+
         self.logger.info(
-            f"Starting ML pipeline (mode={mode}, cv_scope={params['cv_scope']}, "
-            f"model={params['model']}): {len(subjects)} subjects, task={resolved_task}, "
-            f"n_perm={params['n_perm']}, inner_splits={params['inner_splits']}"
+            "=== ML pipeline: mode=%s, cv_scope=%s, model=%s ===",
+            mode, params["cv_scope"], params["model"],
+        )
+        self.logger.info(
+            "Subjects: %d, task: %s, permutations: %d, inner_splits: %d",
+            len(subjects), resolved_task, params["n_perm"], params["inner_splits"],
         )
         
         params["progress"].start("machine_learning", subjects)
@@ -628,6 +633,7 @@ class MLPipeline(PipelineBase):
             valid_modes = ", ".join(sorted(dispatcher.keys()))
             raise ValueError(f"Unknown mode: {mode} (expected one of: {valid_modes})")
         
+        t0 = _time.perf_counter()
         executor = dispatcher[mode]
         results_dir = executor(
             subjects=subjects,
@@ -636,10 +642,14 @@ class MLPipeline(PipelineBase):
             params=params,
             progress=params["progress"],
         )
+        elapsed = _time.perf_counter() - t0
         
         results_dirs = [results_dir] if results_dir is not None else []
         
-        self.logger.info(f"ML pipeline ({mode}) complete.")
+        self.logger.info(
+            "ML pipeline (%s) complete: %s (%.1fs)",
+            mode, results_dir or "no output", elapsed,
+        )
         params["progress"].complete(success=True)
         
         return [

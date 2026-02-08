@@ -1179,25 +1179,55 @@ def run_selected_stages(
             raise KeyError(f"Stage '{name}' has no implementation in STAGE_RUNNERS")
         return runner(ctx, config, outputs)
 
+    import time as _time
+
     for step in progress_steps:
         stage_name = step["name"]
         
         if progress is not None:
             progress.step(stage_name, current=step["index"] + 1, total=step["total"])
         
-        ctx.logger.info("[%d/%d] Running stage: %s", step["index"] + 1, step["total"], stage_name)
-        
+        t0 = _time.perf_counter()
         try:
             output = _run_stage(stage_name)
+            stage_elapsed = _time.perf_counter() - t0
             outputs[stage_name] = output
 
             if results is not None:
                 _update_results_from_stage(results, stage_name, output)
+
+            _log_stage_outcome(ctx.logger, stage_name, output, stage_elapsed,
+                               step["index"] + 1, step["total"])
         except Exception as exc:
-            ctx.logger.error("Stage '%s' failed: %s", stage_name, exc)
+            ctx.logger.error("Stage '%s' failed after %.1fs: %s",
+                             stage_name, _time.perf_counter() - t0, exc)
             raise
 
     return outputs
+
+
+def _log_stage_outcome(
+    logger: Any,
+    stage_name: str,
+    output: Any,
+    elapsed: float,
+    step_num: int,
+    total_steps: int,
+) -> None:
+    """Log concise outcome for a completed behavior stage."""
+    detail = ""
+    if isinstance(output, pd.DataFrame) and not output.empty:
+        detail = f" ({len(output)} rows, {output.shape[1]} cols)"
+    elif isinstance(output, dict):
+        n_keys = len(output)
+        if n_keys > 0:
+            detail = f" ({n_keys} outputs)"
+    elif isinstance(output, (str, Path)) and output:
+        detail = f" -> {Path(str(output)).name}"
+    logger.info(
+        "[%d/%d] \u2713 %s%s (%.1fs)",
+        step_num, total_steps, stage_name, detail, elapsed,
+    )
 
 
 # Stage-to-attribute mapping for results object

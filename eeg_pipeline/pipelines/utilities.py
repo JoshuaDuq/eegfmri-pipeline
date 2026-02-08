@@ -150,10 +150,13 @@ class UtilityPipeline(PipelineBase):
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
         subject_id = f"sub-{subject}"
 
+        import time as _time
+
+        self.logger.info("=== Utilities: %s, task-%s ===", subject_id, resolved_task)
         progress.subject_start(subject_id)
 
         progress.step("Converting to BIDS", current=1, total=2)
-        self.logger.info(f"Processing {subject_id}: raw-to-BIDS")
+        t0 = _time.perf_counter()
         run_raw_to_bids(
             source_root=self.source_root,
             bids_root=self.bids_root,
@@ -161,16 +164,22 @@ class UtilityPipeline(PipelineBase):
             subjects=[subject],
             **raw_to_bids_kwargs,
         )
+        self.logger.info("Raw-to-BIDS complete (%.1fs)", _time.perf_counter() - t0)
 
         progress.step("Merging behavior", current=2, total=2)
-        self.logger.info(f"Processing {subject_id}: merge-behavior")
+        t1 = _time.perf_counter()
         run_merge_behavior(
             bids_root=self.bids_root,
             source_root=self.source_root,
             task=resolved_task,
             **merge_kwargs,
         )
+        self.logger.info("Merge-behavior complete (%.1fs)", _time.perf_counter() - t1)
 
+        self.logger.info(
+            "Utilities done for %s (%.1fs total)",
+            subject_id, _time.perf_counter() - t0,
+        )
         progress.subject_done(subject_id, success=True)
 
     def run_batch(
@@ -187,8 +196,15 @@ class UtilityPipeline(PipelineBase):
 
         progress.start("utilities", subjects)
 
+        import time as _time
+
+        self.logger.info(
+            "=== Batch utilities: %d subjects, task-%s ===",
+            len(subjects), resolved_task,
+        )
+
         progress.step("Converting to BIDS", current=1, total=2)
-        self.logger.info(f"Running raw-to-BIDS for {len(subjects)} subjects")
+        t0 = _time.perf_counter()
         n_converted = run_raw_to_bids(
             source_root=self.source_root,
             bids_root=self.bids_root,
@@ -196,15 +212,23 @@ class UtilityPipeline(PipelineBase):
             subjects=subjects,
             **raw_to_bids_kwargs,
         )
+        self.logger.info(
+            "Raw-to-BIDS: %d/%d subjects converted (%.1fs)",
+            n_converted, len(subjects), _time.perf_counter() - t0,
+        )
 
         progress.step("Merging behavior", current=2, total=2)
-        self.logger.info(f"Running merge-behavior for {len(subjects)} subjects")
+        t1 = _time.perf_counter()
         n_merged = run_merge_behavior(
             bids_root=self.bids_root,
             source_root=self.source_root,
             task=resolved_task,
             subjects=subjects,
             **merge_kwargs,
+        )
+        self.logger.info(
+            "Merge-behavior: %d/%d subjects merged (%.1fs)",
+            n_merged, len(subjects), _time.perf_counter() - t1,
         )
 
         progress.complete(success=True)

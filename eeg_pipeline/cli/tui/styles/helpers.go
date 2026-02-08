@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/truncate"
 )
 
 type ListLayout struct {
@@ -233,28 +234,19 @@ func RenderDivider(width int) string {
 	return lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat(SectionDividerChar, width))
 }
 
-// TruncateLine truncates a plain string to maxWidth characters, appending "..." if truncated.
+// TruncateLine truncates a string to maxWidth visible characters, appending
+// "..." if truncated. Uses ANSI-aware truncation to avoid splitting escape sequences.
 func TruncateLine(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	w := lipgloss.Width(s)
-	if w <= maxWidth {
+	if lipgloss.Width(s) <= maxWidth {
 		return s
 	}
 	if maxWidth <= 3 {
-		return s[:maxWidth]
+		return truncate.String(s, uint(maxWidth))
 	}
-	// Trim rune-by-rune until it fits with ellipsis.
-	runes := []rune(s)
-	for len(runes) > 0 {
-		candidate := string(runes) + "..."
-		if lipgloss.Width(candidate) <= maxWidth {
-			return candidate
-		}
-		runes = runes[:len(runes)-1]
-	}
-	return "..."
+	return truncate.StringWithTail(s, uint(maxWidth), "...")
 }
 
 // PadRight pads a string with spaces to reach the target visual width.

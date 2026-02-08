@@ -2,6 +2,7 @@ package execution
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -46,11 +47,11 @@ func (m Model) View() string {
 
 	if m.useTwoCol {
 		sidebar := strings.Builder{}
-		sidebar.WriteString(m.renderInfoPanel())
-		sidebar.WriteString("\n\n")
 		if m.IsDone() {
 			sidebar.WriteString(m.renderCompletionSummary())
 		} else {
+			sidebar.WriteString(m.renderInfoPanel())
+			sidebar.WriteString("\n\n")
 			sidebar.WriteString(m.renderSidebarCard(m.renderProgressSection()))
 		}
 
@@ -64,16 +65,12 @@ func (m Model) View() string {
 		b.WriteString(m.renderLogSection())
 		b.WriteString("\n")
 
-		// Info Panel
-		b.WriteString(m.renderInfoPanel())
-		b.WriteString("\n")
-
 		if m.IsDone() {
-			// Show completion summary instead of progress section when done
 			b.WriteString(m.renderCompletionSummary())
 			b.WriteString("\n")
 		} else {
-			// Progress Section (only while running)
+			b.WriteString(m.renderInfoPanel())
+			b.WriteString("\n")
 			b.WriteString(m.renderSidebarCard(m.renderProgressSection()))
 			b.WriteString("\n")
 		}
@@ -156,15 +153,19 @@ func (m Model) renderCompletionSummary() string {
 			pathLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Output:")
 			b.WriteString(pathLabel + "\n")
 			for _, p := range outputPaths {
+				display := p
+				if rel, err := filepath.Rel(m.RepoRoot, p); err == nil {
+					display = rel
+				}
 				arrow := lipgloss.NewStyle().Foreground(styles.Accent).Render("  → ")
-				path := lipgloss.NewStyle().Foreground(styles.Text).Render(p)
+				path := lipgloss.NewStyle().Foreground(styles.Text).Render(display)
 				b.WriteString(styles.TruncateLine(arrow+path, iw) + "\n")
 			}
 		}
 	}
 
 	// Action buttons
-	b.WriteString("\n" + m.renderCompletionActions())
+	b.WriteString("\n" + styles.RenderDivider(iw) + "\n\n" + m.renderCompletionActions())
 
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -214,13 +215,13 @@ func (m Model) buildCompletionTiles(duration time.Duration) []metricTile {
 			value: fmt.Sprintf("%d", m.ExitCode),
 			color: styles.Error,
 		})
-	}
 
-	logVal := fmt.Sprintf("%d", len(m.OutputLines))
-	if m.LogTruncated {
-		logVal += "+"
+		logVal := fmt.Sprintf("%d", len(m.OutputLines))
+		if m.LogTruncated {
+			logVal += "+"
+		}
+		tiles = append(tiles, metricTile{label: "Log", value: logVal, color: styles.TextDim})
 	}
-	tiles = append(tiles, metricTile{label: "Log", value: logVal, color: styles.TextDim})
 
 	return tiles
 }

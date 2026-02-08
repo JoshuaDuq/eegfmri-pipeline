@@ -524,9 +524,20 @@ class BehaviorPipeline(PipelineBase):
         
         logger = get_subject_logger("behavior_analysis", subject)
         
-        logger.info(f"{'='*60}")
-        logger.info(f"Behavior Pipeline: sub-{subject}")
-        logger.info(f"{'='*60}")
+        logger.info("=== Behavior analysis: sub-%s, task-%s ===", subject, task)
+        method_label = self.pipeline_config.method_label or self.pipeline_config.method
+        controls = []
+        if self.pipeline_config.control_temperature:
+            controls.append("temperature")
+        if self.pipeline_config.control_trial_order:
+            controls.append("trial_order")
+        logger.info(
+            "Method: %s, controls: %s, bootstrap: %d, permutations: %d",
+            method_label,
+            ", ".join(controls) if controls else "none",
+            self.pipeline_config.bootstrap,
+            self.pipeline_config.n_permutations,
+        )
         
         progress.subject_start(f"sub-{subject}")
 
@@ -597,7 +608,7 @@ class BehaviorPipeline(PipelineBase):
             return results
         
         elapsed = time.perf_counter() - start_time
-        logger.info(f"DAG execution completed in {elapsed:.1f}s")
+        logger.info("Stage execution completed in %.1fs", elapsed)
         
         # Persist metadata (step 3)
         outputs_manifest_path = write_outputs_manifest(ctx, self.pipeline_config, results, {})
@@ -620,23 +631,15 @@ class BehaviorPipeline(PipelineBase):
         n_sig_controlled = summary.get("n_sig_controlled", 0)
         n_sig_fdr = summary.get("n_sig_fdr", 0)
         
-        outputs_log = [
-            f"Complete: {n_features} features",
-            f"  Significant (raw): {n_sig_raw}",
-            f"  Significant (controlled): {n_sig_controlled}",
-            f"  Significant (Global FDR): {n_sig_fdr}",
-        ]
-        
+        cluster_info = ""
         n_clusters = summary.get("n_clusters")
         if n_clusters:
-            outputs_log.append(f"  Clusters identified: {n_clusters}")
-            outputs_log.append(f"  Significant clusters: {summary.get('n_sig_clusters')}")
-            
-        separator = "=" * 60
-        logger.info(separator)
-        for line in outputs_log:
-            logger.info(line)
-        logger.info(separator)
+            n_sig_clusters = summary.get("n_sig_clusters", 0)
+            cluster_info = f", clusters: {n_sig_clusters}/{n_clusters} sig"
+        logger.info(
+            "Results: %d features tested, sig raw=%d, controlled=%d, FDR=%d%s (%.1fs)",
+            n_features, n_sig_raw, n_sig_controlled, n_sig_fdr, cluster_info, elapsed,
+        )
         
         progress.subject_done(f"sub-{subject}", success=True)
         
