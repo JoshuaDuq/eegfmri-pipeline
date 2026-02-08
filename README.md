@@ -19,8 +19,6 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research
 </table>
 
 ---
-I have yet to ensure compatibility with windows, feel free to make pull requests for this.
----
 
 ## Quick Start
 
