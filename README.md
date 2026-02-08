@@ -444,6 +444,8 @@ eeg-pipeline features visualize --subject 0001
 | ParOccipital_Left | P1, P3, P5, P7, PO3, PO7, O1 |
 | ParOccipital_Midline | Pz, POz, Oz |
 
+All of these options can be manually changed in the TUI if desired.
+
 For fMRI-constrained source localization, see [README/SOURCE_LOCALIZATION_TUTORIAL.md](README/SOURCE_LOCALIZATION_TUTORIAL.md).
 
 ---
