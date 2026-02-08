@@ -1,4 +1,4 @@
-# EEG and fMRI Analysis Pipeline (still under development)
+# EEG and fMRI Analysis Pipeline (under development)
 
 [![Python ≥ 3.9](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -17,6 +17,26 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research
     <td align="center"><img src="docs/screenshots/tui_roi_selection.png" width="460" alt="ROI selection"/><br/><b>ROI Configuration</b> — Edit channel groupings live</td>
   </tr>
 </table>
+
+---
+
+
+I have yet to ensure compatibility with windows, feel free to make pull requests for this.
+
+## Detailed Documentation
+
+Each major pipeline component has its own README with exhaustive method descriptions, configuration references, and output specifications. These are rendered automatically when browsing the corresponding directory on GitHub.
+
+| Component | README | Description |
+|-----------|--------|-------------|
+| **EEG Preprocessing** | [`eeg_pipeline/preprocessing/`](eeg_pipeline/preprocessing/README.md) | Bad channel detection, ICA, epoching, artifact rejection |
+| **Feature Extraction** | [`eeg_pipeline/analysis/features/`](eeg_pipeline/analysis/features/README.md) | 16 EEG feature categories with exact computation methods |
+| **Behavioral Analysis** | [`eeg_pipeline/analysis/behavior/`](eeg_pipeline/analysis/behavior/README.md) | Correlations, mediation, moderation, mixed effects |
+| **Machine Learning** | [`eeg_pipeline/analysis/machine_learning/`](eeg_pipeline/analysis/machine_learning/README.md) | LOSO regression, classification, SHAP, time generalization |
+| **fMRI Analysis** | [`fmri_pipeline/`](fmri_pipeline/README.md) | GLM contrasts, trial-wise betas, pain signatures, fMRIPrep |
+| **Interactive TUI** | [`eeg_pipeline/cli/tui/`](eeg_pipeline/cli/tui/README.md) | Build and run the terminal UI |
+| **fMRI Raw-to-BIDS** | [`README/FMRI_RAW_TO_BIDS.md`](README/FMRI_RAW_TO_BIDS.md) | DICOM-to-BIDS conversion guide |
+| **Source Localization** | [`README/SOURCE_LOCALIZATION_TUTORIAL.md`](README/SOURCE_LOCALIZATION_TUTORIAL.md) | fMRI-constrained EEG source localization tutorial |
 
 ---
 
@@ -377,6 +397,8 @@ Extract a comprehensive set of EEG features from cleaned epochs.
 | `sourcelocalization` | Source-space features via LCMV beamformer or eLORETA |
 
 > **Note:** All the feature computations are highly configurable through the TUI.
+>
+> For detailed documentation of every feature's exact computation method, see [eeg_pipeline/analysis/features/README.md](eeg_pipeline/analysis/features/README.md).
 
 ```bash
 # Extract all feature categories
@@ -483,6 +505,8 @@ Correlate EEG features with pain ratings, temperature, and experimental conditio
 | `report` | Single-subject summary report |
 
 > **Note:** All the behavior computations are highly configurable through the TUI.
+>
+> For detailed documentation of every stage's exact computation method, statistical safeguards, and configuration, see [eeg_pipeline/analysis/behavior/README.md](eeg_pipeline/analysis/behavior/README.md).
 
 ```bash
 # Run all behavioral analyses
