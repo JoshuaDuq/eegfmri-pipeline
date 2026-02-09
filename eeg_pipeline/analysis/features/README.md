@@ -106,6 +106,10 @@ Extracts the aperiodic (1/f) component of the power spectrum, separating oscilla
 4. Two model types:
    - **Fixed:** `log10(P) = offset + slope × log10(f)` — linear fit via `np.polyfit`.
    - **Knee:** `log10(P) = offset − log10(knee + f^exponent)` — nonlinear fit via `scipy.optimize.curve_fit`.
+5. Segment-level validity gates:
+   - Minimum segment duration (`min_segment_sec`)
+   - Minimum fit points (`min_fit_points`)
+   - Maximum allowed frequency-bin spacing (`max_freq_resolution_hz`)
 
 **Outputs per segment × scope:**
 
@@ -285,6 +289,7 @@ Directed (causal) connectivity between channel pairs.
 | **PDC** | Partial Directed Coherence — Normalized DTF accounting for indirect pathways.           |
 
 Computation follows the same spatial aggregation, segment handling, and graph metric pipeline as undirected connectivity.
+For DTF/PDC, MVAR order is automatically reduced when segment length/channel count is too small for stable estimation (`min_samples_per_mvar_parameter` safeguard).
 
 ---
 
@@ -332,7 +337,10 @@ Cross-frequency coupling between a low-frequency phase signal and a high-frequen
    MVL = |Σ(amplitude × exp(i × phase))| / Σ(amplitude)
    ```
    (Normalized by total amplitude to prevent bias from amplitude differences.)
-3. **Surrogate-based z-scoring:** Generate `n_surrogates` (default 200) time-shifted surrogates via circular permutation of the amplitude signal. Compute z-score:
+3. **Surrogate-based z-scoring (optional):** If `n_surrogates > 0`, generate null PAC samples using `surrogate_method`:
+   - `trial_shuffle` (default): cross-epoch amplitude shuffling with within-epoch circular shift
+   - `circular_shift`: within-epoch circular shift only
+   Compute z-score:
    ```
    z = (MVL_observed − mean(MVL_surrogates)) / std(MVL_surrogates)
    ```
@@ -440,7 +448,8 @@ EEG microstate dynamics using GFP-peak topographic clustering.
 4. **Template fitting:**
    - **Fixed templates** (recommended): Use pre-defined canonical templates (A/B/C/D style labels when provided).
    - **K-means clustering** (fallback): Fit `n_states` (default 4) cluster centers on GFP-peak topographies using `sklearn.KMeans` with 20 initializations. Output classes use neutral labels (`state1..stateN`) because fitted cluster identities are not guaranteed to be comparable across subjects.
-5. **State assignment:** At every time point, assign the microstate class with highest absolute spatial correlation to the instantaneous topography.
+5. **State assignment (default):** Assign labels at GFP peaks, then backfit sample-wise labels by midpoint segmentation between neighboring labeled peaks (`assign_from_gfp_peaks=true`).
+   - Optional legacy mode: direct sample-wise max-similarity assignment (`assign_from_gfp_peaks=false`).
 6. **Minimum-duration smoothing:** Runs shorter than `min_duration_ms` are reassigned using neighboring-run context (longer-neighbor preference; tie split) to avoid directional bias.
 7. Compute per-trial metrics:
 
@@ -500,6 +509,7 @@ Features that aggregate across trials (ITPC, connectivity, bursts, microstates) 
 Additional safeguards:
 - Connectivity `condition`/`subject` granularity avoids per-epoch phase averaging by using across-epochs phase estimation outside CV mode.
 - Subject-fitted microstates are flagged as non-i.i.d. in feature provenance metadata.
+- Source-space `wpli`/`plv` connectivity outputs are marked as broadcast/non-i.i.d.; in `trial_ml_safe`, cross-epoch estimates use training trials when `train_mask` is available.
 
 ## Dependencies
 

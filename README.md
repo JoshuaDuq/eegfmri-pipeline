@@ -362,11 +362,11 @@ Extract a comprehensive set of EEG features from cleaned epochs.
 | `power` | Band power (delta, theta, alpha, beta, gamma) with baseline normalization |
 | `spectral` | Spectral edge frequency, peak frequency, bandwidth |
 | `ratios` | Band power ratios (theta/beta, theta/alpha, alpha/beta, delta/alpha, delta/theta) |
-| `aperiodic` | 1/f slope and offset via specparam (iterative peak rejection, QC per channel) |
+| `aperiodic` | 1/f slope and offset via specparam-style fitting (iterative peak rejection, QC per channel, duration/frequency-resolution validity gates) |
 | `connectivity` | Functional connectivity (wPLI, AEC, PLV) with per-family spatial transforms (default CSD for phase-based metrics) |
-| `directedconnectivity` | Directed connectivity (PSI, DTF, PDC) via MVAR models |
-| `microstates` | Microstate dynamics from fixed templates or subject-fitted clustering: coverage, duration, occurrence, transitions (subject-fitted templates are flagged as non-i.i.d. in provenance) |
-| `pac` | Phase-amplitude coupling (theta–gamma, alpha–gamma) with harmonic filtering |
+| `directedconnectivity` | Directed connectivity (PSI, DTF, PDC) via MVAR models with automatic order downshift on short segments |
+| `microstates` | Microstate dynamics from fixed templates or subject-fitted clustering: coverage, duration, occurrence, transitions. Default assignment uses GFP-peak labeling with sample-wise backfitting (subject-fitted templates are flagged as non-i.i.d. in provenance). |
+| `pac` | Phase-amplitude coupling (theta–gamma, alpha–gamma) with harmonic filtering and configurable surrogate nulls (`trial_shuffle` default, `circular_shift` fallback). |
 | `itpc` | Inter-trial phase coherence (fold-safe for ML, condition-aware) |
 | `erp` | Event-related potential components (N1, N2, P2 — configurable windows) |
 | `bursts` | Oscillatory burst detection (beta, gamma) with threshold methods |
@@ -419,7 +419,7 @@ eeg-pipeline features visualize --subject 0001
 | `--pac-pairs` | Phase-amplitude pairs, e.g., `theta:gamma` | theta–gamma, alpha–gamma |
 | `--erp-components` | ERP windows, e.g., `n2=0.20-0.35` | N1, N2, P2 |
 | `--analysis-mode` | `group_stats` or `trial_ml_safe` | `group_stats` |
-| `--microstates-*` | Microstate extraction controls (`n_states`, GFP peak params, min duration, random seed) | from config (`min_duration_ms` default: `20`) |
+| `--microstates-*` | Microstate extraction controls (`n_states`, GFP peak params, `assign_from_gfp_peaks`, min duration, random seed) | from config (`min_duration_ms` default: `20`) |
 | `--fixed-templates-path` | `.npz` file with canonical templates (`templates`, optional `ch_names`) | unset |
 | `--compute-change-scores` | Compute baseline→active change scores | enabled |
 | `--source-method` | Source localization: `lcmv` or `eloreta` | `lcmv` |
@@ -964,6 +964,7 @@ eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
 - Dynamic connectivity state-transition metrics (state clustering across trials/windows) are disabled.
 - For connectivity `condition`/`subject` granularity, phase estimation auto-switches to `across_epochs` outside CV to avoid biased per-epoch phase averaging.
 - In CV (`train_mask` present), `phase_estimator=across_epochs` is blocked by default to prevent leakage; prefer `within_epoch` unless you intentionally override.
+- Source-space `wpli`/`plv` connectivity is cross-epoch by definition; outputs are marked as broadcast/non-i.i.d., and in `trial_ml_safe` mode the estimate is fit on `train_mask` trials.
 
 ---
 

@@ -35,6 +35,7 @@ _DEFAULT_MIN_PEAK_DISTANCE_MS = 10.0
 _DEFAULT_MAX_GFP_PEAKS_PER_EPOCH = 400
 _DEFAULT_MIN_DURATION_MS = 20.0
 _DEFAULT_RANDOM_STATE = 42
+_DEFAULT_ASSIGN_FROM_GFP_PEAKS = True
 
 
 @dataclass
@@ -45,6 +46,7 @@ class _MicrostateConfig:
     min_duration_ms: float
     gfp_peak_prominence: float
     random_state: int
+    assign_from_gfp_peaks: bool
 
 
 def _cfg_get(config: Any, key: str, default: Any) -> Any:
@@ -82,6 +84,9 @@ def _load_microstate_config(config: Any) -> _MicrostateConfig:
     random_state = int(
         micro_cfg.get("random_state", _cfg_get(config, "project.random_state", _DEFAULT_RANDOM_STATE))
     )
+    assign_from_gfp_peaks = bool(
+        micro_cfg.get("assign_from_gfp_peaks", _DEFAULT_ASSIGN_FROM_GFP_PEAKS)
+    )
 
     return _MicrostateConfig(
         n_states=n_states,
@@ -90,6 +95,7 @@ def _load_microstate_config(config: Any) -> _MicrostateConfig:
         min_duration_ms=min_duration_ms,
         gfp_peak_prominence=gfp_peak_prominence,
         random_state=random_state,
+        assign_from_gfp_peaks=assign_from_gfp_peaks,
     )
 
 
@@ -121,15 +127,17 @@ def _compute_gfp(epoch_data: np.ndarray) -> np.ndarray:
     return np.nanstd(demeaned, axis=0)
 
 
-def _extract_peak_topographies(
+def _extract_gfp_peak_indices(
     epoch_data: np.ndarray,
     sfreq: float,
     cfg: _MicrostateConfig,
 ) -> np.ndarray:
     if epoch_data.ndim != 2 or epoch_data.shape[1] < 3:
-        return np.empty((0, epoch_data.shape[0]), dtype=float)
+        return np.array([], dtype=int)
 
     gfp = _compute_gfp(epoch_data)
+    if not np.isfinite(gfp).any():
+        return np.array([], dtype=int)
     distance_samples = max(1, int(round(cfg.min_peak_distance_ms * sfreq / 1000.0)))
     peaks, _ = find_peaks(
         gfp,
@@ -141,7 +149,19 @@ def _extract_peak_topographies(
 
     peak_scores = gfp[peaks]
     order = np.argsort(peak_scores)[::-1]
-    peaks = peaks[order[: cfg.max_gfp_peaks_per_epoch]]
+    return peaks[order[: cfg.max_gfp_peaks_per_epoch]].astype(int)
+
+
+def _extract_peak_topographies(
+    epoch_data: np.ndarray,
+    sfreq: float,
+    cfg: _MicrostateConfig,
+) -> np.ndarray:
+    if epoch_data.ndim != 2:
+        return np.empty((0, 0), dtype=float)
+    peaks = _extract_gfp_peak_indices(epoch_data, sfreq, cfg)
+    if peaks.size == 0:
+        return np.empty((0, epoch_data.shape[0]), dtype=float)
 
     topographies = epoch_data[:, peaks].T
     return _normalize_topographies(topographies)
@@ -243,6 +263,69 @@ def _assign_states(sample_maps: np.ndarray, templates: np.ndarray) -> np.ndarray
     normalized = _normalize_topographies(sample_maps)
     sim = np.abs(templates @ normalized.T)
     return np.argmax(sim, axis=0).astype(int)
+
+
+def _backfit_peak_states_to_samples(
+    n_samples: int,
+    peak_indices: np.ndarray,
+    peak_states: np.ndarray,
+) -> np.ndarray:
+    """Convert GFP-peak state labels into sample-wise labels via midpoint backfitting."""
+    if n_samples <= 0:
+        return np.array([], dtype=int)
+
+    peaks = np.asarray(peak_indices, dtype=int).ravel()
+    states = np.asarray(peak_states, dtype=int).ravel()
+    if peaks.size == 0 or states.size == 0:
+        return np.array([], dtype=int)
+
+    order = np.argsort(peaks)
+    peaks = peaks[order]
+    states = states[order]
+    if states.size != peaks.size:
+        limit = min(peaks.size, states.size)
+        peaks = peaks[:limit]
+        states = states[:limit]
+    if peaks.size == 0:
+        return np.array([], dtype=int)
+
+    out = np.empty((int(n_samples),), dtype=int)
+    out[:] = int(states[0])
+    boundaries = np.zeros((peaks.size + 1,), dtype=int)
+    boundaries[0] = 0
+    boundaries[-1] = int(n_samples)
+    if peaks.size > 1:
+        boundaries[1:-1] = ((peaks[:-1] + peaks[1:]) // 2).astype(int)
+
+    for idx, state in enumerate(states):
+        start = int(max(0, boundaries[idx]))
+        end = int(min(n_samples, boundaries[idx + 1]))
+        if end <= start:
+            continue
+        out[start:end] = int(state)
+
+    if peaks[-1] < (n_samples - 1):
+        out[int(boundaries[-2] if peaks.size > 1 else 0) :] = int(states[-1])
+    return out
+
+
+def _assign_states_from_epoch(
+    epoch_data: np.ndarray,
+    templates: np.ndarray,
+    sfreq: float,
+    cfg: _MicrostateConfig,
+) -> np.ndarray:
+    if epoch_data.ndim != 2:
+        return np.array([], dtype=int)
+    if not bool(cfg.assign_from_gfp_peaks):
+        return _assign_states(epoch_data.T, templates)
+
+    peak_indices = _extract_gfp_peak_indices(epoch_data, sfreq, cfg)
+    if peak_indices.size == 0:
+        return np.array([], dtype=int)
+    peak_maps = epoch_data[:, peak_indices].T
+    peak_states = _assign_states(peak_maps, templates)
+    return _backfit_peak_states_to_samples(epoch_data.shape[1], peak_indices, peak_states)
 
 
 def _apply_min_duration(states: np.ndarray, min_samples: int) -> np.ndarray:
@@ -534,8 +617,7 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
 
         for epoch_idx in range(n_epochs):
             epoch = data[epoch_idx][:, mask]
-            sample_maps = epoch.T
-            states = _assign_states(sample_maps, templates)
+            states = _assign_states_from_epoch(epoch, templates, sfreq, cfg)
             states = _apply_min_duration(states, min_duration_samples)
             metrics = _compute_epoch_metrics(states, sfreq, cfg.n_states)
 
@@ -568,6 +650,9 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
     out_df = pd.DataFrame(all_rows)
     out_df.attrs["microstate_template_source"] = "fixed" if using_fixed_templates else "subject_fitted"
     out_df.attrs["microstate_labels_canonical"] = bool(using_fixed_templates and fixed_templates_canonical)
+    out_df.attrs["microstate_assignment_method"] = (
+        "gfp_peak_backfit" if cfg.assign_from_gfp_peaks else "samplewise_max_similarity"
+    )
     return out_df, list(out_df.columns)
 
 

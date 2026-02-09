@@ -380,6 +380,7 @@ feature_engineering:
     min_fit_points: 5
     max_rms: null
     min_segment_sec: 2.0           # Minimum segment duration for stable slope/offset estimation (sec)
+    max_freq_resolution_hz: 1.0    # Skip segments if PSD frequency step is coarser than this
     exclude_line_noise: true       # Exclude line-noise bins before fitting
     line_noise_freqs: [60.0]       # Must match preprocessing.line_freq
     line_noise_width_hz: 1.0
@@ -427,6 +428,7 @@ feature_engineering:
     enable_pdc: false
     output_level: "full"     # "full" | "global_only"
     mvar_order: 10
+    min_samples_per_mvar_parameter: 10  # Auto-reduce order when short windows cannot support stable fits
     n_freqs: 16
     min_segment_samples: 100
 
@@ -507,6 +509,7 @@ feature_engineering:
   pac:
     source: "precomputed"        # "precomputed" (Hilbert PAC, recommended) or "tfr" (wavelet PAC, prone to spurious coupling)
     method: "mvl"
+    surrogate_method: "trial_shuffle"  # "trial_shuffle" (recommended) | "circular_shift"
     pairs: [["theta", "gamma"], ["alpha", "gamma"]]
     phase_range: [4.0, 8.0]
     amp_range: [30.0, 80.0]
@@ -607,6 +610,7 @@ feature_engineering:
     min_peak_distance_ms: 10.0
     max_gfp_peaks_per_epoch: 400
     min_duration_ms: 20.0
+    assign_from_gfp_peaks: true   # If true, assign states at GFP peaks then backfit sample-wise labels
     gfp_peak_prominence: 0.0
     random_state: 42
 

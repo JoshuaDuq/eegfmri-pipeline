@@ -2613,6 +2613,10 @@ def extract_directed_connectivity_from_precomputed(
     mvar_order = int(directed_cfg.get("mvar_order", 10))
     n_freqs = int(directed_cfg.get("n_freqs", 16))
     min_segment_samples = int(directed_cfg.get("min_segment_samples", 100))
+    min_samples_per_mvar_parameter = int(
+        directed_cfg.get("min_samples_per_mvar_parameter", 10)
+    )
+    min_samples_per_mvar_parameter = max(3, min_samples_per_mvar_parameter)
     
     sfreq = float(getattr(precomputed, "sfreq", None))
     
@@ -2689,6 +2693,24 @@ def extract_directed_connectivity_from_precomputed(
             
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
                 continue
+
+            n_times_seg = int(seg_data.shape[-1])
+            max_stable_order = int(
+                max(1, n_times_seg // max(1, min_samples_per_mvar_parameter * n_channels))
+            )
+            mvar_order_eff = int(max(1, min(mvar_order, max_stable_order)))
+            if logger is not None and mvar_order_eff < mvar_order:
+                logger.warning(
+                    "Directed connectivity: reducing MVAR order from %d to %d for segment='%s', band='%s' "
+                    "(n_times=%d, n_channels=%d, min_samples_per_mvar_parameter=%d).",
+                    mvar_order,
+                    mvar_order_eff,
+                    seg_name,
+                    band,
+                    n_times_seg,
+                    n_channels,
+                    min_samples_per_mvar_parameter,
+                )
             
             for ep_idx in range(n_epochs):
                 epoch_data = seg_data[ep_idx]
@@ -2700,7 +2722,7 @@ def extract_directed_connectivity_from_precomputed(
                     fmin,
                     fmax,
                     n_freqs,
-                    mvar_order,
+                    mvar_order_eff,
                     methods,
                 )
                 

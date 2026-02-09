@@ -138,6 +138,19 @@ class TestMicrostateFeatures(unittest.TestCase):
         out = _apply_min_duration(states, min_samples=2)
         np.testing.assert_array_equal(out, np.array([1, 1, 2, 2, 2, 2], dtype=int))
 
+    def test_backfit_peak_states_to_samplewise_segments(self):
+        from eeg_pipeline.analysis.features.microstates import _backfit_peak_states_to_samples
+
+        out = _backfit_peak_states_to_samples(
+            n_samples=10,
+            peak_indices=np.array([2, 7], dtype=int),
+            peak_states=np.array([0, 1], dtype=int),
+        )
+        np.testing.assert_array_equal(
+            out,
+            np.array([0, 0, 0, 0, 1, 1, 1, 1, 1, 1], dtype=int),
+        )
+
     def test_template_fitting_uses_train_mask_only(self):
         from eeg_pipeline.analysis.features import microstates as mod
 

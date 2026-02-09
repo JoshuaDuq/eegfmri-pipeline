@@ -1179,6 +1179,10 @@ def extract_source_localization_features(
             )
         else:
             fwd, src, _ = _setup_forward_model(epochs.info, logger=logger)
+            logger.warning(
+                "Source localization: using fsaverage/template forward model fallback. "
+                "Interpret ROI anatomy cautiously; subject-specific MRI/trans/BEM is recommended."
+            )
             labels = mne.read_labels_from_annot(
                 "fsaverage",
                 parc="aparc",
@@ -1394,6 +1398,10 @@ def extract_source_connectivity_features(
             )
         else:
             fwd, src, _ = _setup_forward_model(epochs.info, logger=logger)
+            logger.warning(
+                "Source connectivity: using fsaverage/template forward model fallback. "
+                "Interpret ROI anatomy cautiously; subject-specific MRI/trans/BEM is recommended."
+            )
             labels = mne.read_labels_from_annot(
                 "fsaverage",
                 parc="aparc",
@@ -1470,8 +1478,25 @@ def extract_source_connectivity_features(
                 records[epoch_idx][col_name] = mean_conn
                 
         elif connectivity_method.lower() in ("wpli", "plv"):
+            roi_data_fit = roi_data
+            if (
+                analysis_mode == "trial_ml_safe"
+                and train_mask is not None
+                and train_mask.shape[0] == n_epochs
+                and np.any(train_mask)
+            ):
+                roi_data_fit = roi_data[train_mask]
+            if roi_data_fit.shape[0] < 2:
+                logger.warning(
+                    "Source connectivity (%s): insufficient epochs for stable cross-epoch estimate (%d); skipping band %s.",
+                    connectivity_method.lower(),
+                    int(roi_data_fit.shape[0]),
+                    band,
+                )
+                continue
+
             con = spectral_connectivity_epochs(
-                roi_data,
+                roi_data_fit,
                 method=connectivity_method.lower(),
                 mode="multitaper",
                 sfreq=sfreq,
@@ -1504,6 +1529,18 @@ def extract_source_connectivity_features(
     features_df.attrs["connectivity_method"] = str(connectivity_method).lower()
     features_df.attrs["fmri_constraint_enabled"] = bool(fmri_cfg.enabled)
     features_df.attrs["fmri_provenance"] = str(fmri_cfg.provenance)
+    conn_method_l = str(connectivity_method).strip().lower()
+    if conn_method_l in {"wpli", "plv"}:
+        features_df.attrs["feature_granularity"] = "subject"
+        features_df.attrs["broadcast_warning"] = (
+            f"Source connectivity method='{conn_method_l}' is estimated across epochs and broadcast to all rows. "
+            "Treat rows as non-i.i.d.; aggregate before trial-level inference."
+        )
+        features_df.attrs["threshold_train_mask_used"] = bool(
+            analysis_mode == "trial_ml_safe"
+            and train_mask is not None
+            and np.any(train_mask)
+        )
     features_df.attrs["train_mask_used_for_covariance"] = bool(
         src_cfg.method == "lcmv"
         and analysis_mode == "trial_ml_safe"

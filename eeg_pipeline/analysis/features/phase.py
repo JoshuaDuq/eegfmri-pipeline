@@ -805,6 +805,10 @@ def _extract_pac_config(config: Any) -> Dict[str, Any]:
     method = str(pac_cfg.get("method", "mvl")).strip().lower()
     if method != "mvl":
         raise ValueError(f"PAC: unsupported method '{method}'. Only 'mvl' is implemented.")
+    surrogate_method = str(pac_cfg.get("surrogate_method", "trial_shuffle")).strip().lower()
+    if surrogate_method not in {"trial_shuffle", "circular_shift"}:
+        pac_cfg = dict(pac_cfg)
+        pac_cfg["surrogate_method"] = "trial_shuffle"
     return pac_cfg
 
 
@@ -865,6 +869,7 @@ def _compute_pac_surrogates(
     epsilon: float,
     n_times: int,
     rng: np.random.Generator,
+    surrogate_method: str = "trial_shuffle",
 ) -> np.ndarray:
     """Compute PAC surrogate distribution for z-scoring.
     
@@ -882,6 +887,22 @@ def _compute_pac_surrogates(
     """
     n_epochs = phase_unit_vectors.shape[0]
     is_per_channel = phase_unit_vectors.ndim == 3
+    method = str(surrogate_method).strip().lower()
+    if method not in {"trial_shuffle", "circular_shift"}:
+        method = "trial_shuffle"
+
+    def _draw_cross_epoch_index_map() -> np.ndarray:
+        if n_epochs <= 1:
+            return np.zeros((n_epochs,), dtype=int)
+        for _ in range(20):
+            perm = rng.permutation(n_epochs)
+            if np.all(perm != np.arange(n_epochs)):
+                return perm.astype(int)
+        return np.roll(np.arange(n_epochs, dtype=int), 1)
+
+    cross_epoch_maps: Optional[List[np.ndarray]] = None
+    if method == "trial_shuffle":
+        cross_epoch_maps = [_draw_cross_epoch_index_map() for _ in range(int(n_surrogates))]
     
     if is_per_channel:
         n_ch = phase_unit_vectors.shape[1]
@@ -892,20 +913,32 @@ def _compute_pac_surrogates(
     for epoch_idx in range(n_epochs):
         if is_per_channel:
             for ch_idx in range(n_ch):
-                epoch_amplitude = amplitudes[epoch_idx, ch_idx]
                 epoch_phase = phase_unit_vectors[epoch_idx, ch_idx]
+                if method == "trial_shuffle" and cross_epoch_maps is not None:
+                    epoch_amplitude = amplitudes[epoch_idx, ch_idx]
+                else:
+                    epoch_amplitude = amplitudes[epoch_idx, ch_idx]
                 
                 if not (np.isfinite(epoch_amplitude).any() and np.isfinite(epoch_phase).any()):
                     continue
                 
-                if normalize:
-                    denominator = np.nansum(epoch_amplitude) + epsilon
-                else:
-                    denominator = float(n_times)
-                
                 for surrogate_idx in range(n_surrogates):
-                    shift = int(rng.integers(1, n_times - 1))
-                    shifted_amplitude = np.roll(epoch_amplitude, shift)
+                    amp_source = epoch_amplitude
+                    if method == "trial_shuffle" and cross_epoch_maps is not None and n_epochs > 1:
+                        donor_epoch = int(cross_epoch_maps[surrogate_idx][epoch_idx])
+                        amp_source = amplitudes[donor_epoch, ch_idx]
+                    if not np.isfinite(amp_source).any():
+                        continue
+
+                    shifted_amplitude = np.asarray(amp_source, dtype=float)
+                    if n_times > 2:
+                        shift = int(rng.integers(1, n_times - 1))
+                        shifted_amplitude = np.roll(shifted_amplitude, shift)
+
+                    if normalize:
+                        denominator = np.nansum(shifted_amplitude) + epsilon
+                    else:
+                        denominator = float(n_times)
                     
                     if normalize:
                         numerator = np.nansum(shifted_amplitude * epoch_phase)
@@ -914,20 +947,29 @@ def _compute_pac_surrogates(
                     
                     surrogates[epoch_idx, ch_idx, surrogate_idx] = float(np.abs(numerator / denominator))
         else:
-            epoch_amplitude = amplitudes[epoch_idx]
             epoch_phase = phase_unit_vectors[epoch_idx]
+            epoch_amplitude = amplitudes[epoch_idx]
             
             if not (np.isfinite(epoch_amplitude).any() and np.isfinite(epoch_phase).any()):
                 continue
             
-            if normalize:
-                denominator = np.nansum(epoch_amplitude) + epsilon
-            else:
-                denominator = float(n_times)
-            
             for surrogate_idx in range(n_surrogates):
-                shift = int(rng.integers(1, n_times - 1))
-                shifted_amplitude = np.roll(epoch_amplitude, shift)
+                amp_source = epoch_amplitude
+                if method == "trial_shuffle" and cross_epoch_maps is not None and n_epochs > 1:
+                    donor_epoch = int(cross_epoch_maps[surrogate_idx][epoch_idx])
+                    amp_source = amplitudes[donor_epoch]
+                if not np.isfinite(amp_source).any():
+                    continue
+
+                shifted_amplitude = np.asarray(amp_source, dtype=float)
+                if n_times > 2:
+                    shift = int(rng.integers(1, n_times - 1))
+                    shifted_amplitude = np.roll(shifted_amplitude, shift)
+
+                if normalize:
+                    denominator = np.nansum(shifted_amplitude) + epsilon
+                else:
+                    denominator = float(n_times)
                 
                 if normalize:
                     numerator = np.nansum(shifted_amplitude * epoch_phase)
@@ -937,6 +979,31 @@ def _compute_pac_surrogates(
                 surrogates[epoch_idx, surrogate_idx] = float(np.abs(numerator / denominator))
     
     return surrogates
+
+
+def _resolve_pac_surrogate_method(
+    pac_cfg: Dict[str, Any],
+    *,
+    n_epochs: int,
+    logger: Optional[logging.Logger],
+) -> str:
+    """Resolve surrogate method with scientific-validity fallback for low epoch counts."""
+    method = str(pac_cfg.get("surrogate_method", "trial_shuffle")).strip().lower()
+    if method not in {"trial_shuffle", "circular_shift"}:
+        if logger is not None:
+            logger.warning(
+                "PAC: unknown surrogate_method=%r; using 'trial_shuffle'.",
+                method,
+            )
+        method = "trial_shuffle"
+
+    if method == "trial_shuffle" and int(n_epochs) < 2:
+        if logger is not None:
+            logger.warning(
+                "PAC: surrogate_method='trial_shuffle' requires >=2 epochs; falling back to 'circular_shift'."
+            )
+        return "circular_shift"
+    return method
 
 
 def _compute_pac_z_scores(
@@ -1372,6 +1439,9 @@ def compute_pac_comodulograms(
     if n_epochs < min_epochs:
         logger.warning("PAC: insufficient epochs (%d < %d); skipping", n_epochs, min_epochs)
         return None, None, None, None, None
+    surrogate_method = _resolve_pac_surrogate_method(
+        pac_cfg, n_epochs=n_epochs, logger=logger
+    )
     
     phase_min, phase_max, amp_min, amp_max = _extract_frequency_ranges(pac_cfg)
     
@@ -1445,7 +1515,8 @@ def compute_pac_comodulograms(
                 
                 surrogates = _compute_pac_surrogates(
                     mean_phase, mean_amplitude, n_surrogates,
-                    normalize, epsilon, n_times, rng
+                    normalize, epsilon, n_times, rng,
+                    surrogate_method=surrogate_method,
                 )
                 pac_z = _compute_pac_z_scores(pac_values, surrogates)
                 
@@ -1732,6 +1803,9 @@ def extract_pac_from_precomputed(
     ch_names = precomputed.ch_names
     n_ch = len(ch_names)  # Required for surrogate and waveform QC loops
     n_epochs = precomputed.data.shape[0]
+    surrogate_method = _resolve_pac_surrogate_method(
+        pac_cfg, n_epochs=n_epochs, logger=logger
+    )
     windows = precomputed.windows
 
     target_name = getattr(windows, "name", None) if windows else None
@@ -1799,7 +1873,8 @@ def extract_pac_from_precomputed(
             if n_surrogates > 0 and n_times > _MIN_TIMES_FOR_SURROGATES:
                 surrogates = _compute_pac_surrogates(
                     phase_unit_vectors, amplitude_data, n_surrogates,
-                    normalize, eps_amp, n_times, rng
+                    normalize, eps_amp, n_times, rng,
+                    surrogate_method=surrogate_method,
                 )
                 pac_z = np.full_like(pac_val, np.nan, dtype=float)
                 for epoch_idx in range(n_epochs):
