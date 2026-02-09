@@ -32,6 +32,7 @@ eeg_pipeline/.venv311/
 ### Testing and Cache ###
 .pytest_cache/
 .matplotlib_cache/
+.matplotlib/
 .coverage
 htmlcov/
 .cache/
