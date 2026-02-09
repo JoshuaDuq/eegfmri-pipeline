@@ -1150,7 +1150,10 @@ def _add_change_scores_to_results(
         if not new_cols:
             continue
 
+        base_attrs = dict(getattr(df, "attrs", {}) or {})
         combined = pd.concat([df, change_df[new_cols]], axis=1)
+        if base_attrs:
+            combined.attrs.update(base_attrs)
         setattr(results, df_attr, combined)
 
         if cols_attr:
@@ -1339,6 +1342,7 @@ def extract_precomputed_features(
                 logger=logger,
                 fixed_templates=None,
                 fixed_template_ch_names=None,
+                fixed_template_labels=None,
             )
         )
         if micro_df is not None and not micro_df.empty:

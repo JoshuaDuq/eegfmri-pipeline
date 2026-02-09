@@ -15,6 +15,7 @@ subject-level K-means templates fitted on GFP peaks.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from string import ascii_lowercase
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -149,31 +150,71 @@ def _extract_peak_topographies(
 def _resolve_fixed_templates(
     fixed_templates: Optional[np.ndarray],
     fixed_template_ch_names: Optional[Sequence[str]],
+    fixed_template_labels: Optional[Sequence[str]],
     selected_ch_names: Sequence[str],
     n_states: int,
-) -> Optional[np.ndarray]:
+) -> Tuple[Optional[np.ndarray], bool]:
     if fixed_templates is None:
-        return None
+        return None, False
 
     templates = np.asarray(fixed_templates, dtype=float)
     if templates.ndim != 2:
-        return None
+        return None, False
     if templates.shape[0] < n_states:
-        return None
+        return None, False
 
     if fixed_template_ch_names is not None and len(fixed_template_ch_names) > 0:
         ch_to_idx = {str(ch): i for i, ch in enumerate(fixed_template_ch_names)}
         channel_indices = []
         for ch in selected_ch_names:
             if ch not in ch_to_idx:
-                return None
+                return None, False
             channel_indices.append(ch_to_idx[ch])
         templates = templates[:, channel_indices]
     elif templates.shape[1] != len(selected_ch_names):
+        return None, False
+
+    canonical_labels = _class_labels(n_states, canonical=True)
+    fixed_labels = list(fixed_template_labels or [])
+    if len(fixed_labels) < n_states:
+        return _normalize_topographies(templates[:n_states]), False
+
+    label_to_idx: Dict[str, int] = {}
+    for idx, raw_label in enumerate(fixed_labels):
+        if idx >= templates.shape[0]:
+            break
+        normalized = _normalize_template_label(raw_label)
+        if normalized is None or normalized in label_to_idx:
+            continue
+        label_to_idx[normalized] = idx
+
+    if any(label not in label_to_idx for label in canonical_labels):
+        return _normalize_topographies(templates[:n_states]), False
+
+    reorder_idx = [label_to_idx[label] for label in canonical_labels]
+    templates = templates[reorder_idx, :]
+    return _normalize_topographies(templates), True
+
+
+def _normalize_template_label(label: object) -> Optional[str]:
+    text = str(label).strip().lower()
+    if not text:
         return None
 
-    templates = templates[:n_states]
-    return _normalize_topographies(templates)
+    if len(text) == 1 and text.isalpha():
+        return text
+
+    num_match = re.fullmatch(r"(?:state|class|microstate)?[_-]?(\d+)", text)
+    if num_match is not None:
+        idx = int(num_match.group(1))
+        if 1 <= idx <= len(ascii_lowercase):
+            return ascii_lowercase[idx - 1]
+        return None
+
+    letter_match = re.fullmatch(r"(?:state|class|microstate)?[_-]?([a-z])", text)
+    if letter_match is not None:
+        return letter_match.group(1)
+    return None
 
 
 def _fit_templates_kmeans(
@@ -454,9 +495,10 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
         return pd.DataFrame(), []
 
     pooled_matrix = np.vstack(pooled_peak_maps)
-    templates = _resolve_fixed_templates(
+    templates, fixed_templates_canonical = _resolve_fixed_templates(
         fixed_templates=getattr(ctx, "fixed_templates", None),
         fixed_template_ch_names=getattr(ctx, "fixed_template_ch_names", None),
+        fixed_template_labels=getattr(ctx, "fixed_template_labels", None),
         selected_ch_names=ch_names,
         n_states=cfg.n_states,
     )
@@ -472,8 +514,16 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
                 "Microstates: fitting subject-specific templates (no fixed templates provided). "
                 "Output labels use neutral names (state1..stateN) and are not directly comparable across subjects."
             )
+    elif not fixed_templates_canonical and logger is not None:
+        logger.warning(
+            "Microstates: fixed templates provided without canonical labels. "
+            "Using neutral state1..stateN labels to avoid incorrect A/B/C/D semantics."
+        )
 
-    labels = _class_labels(cfg.n_states, canonical=using_fixed_templates)
+    labels = _class_labels(
+        cfg.n_states,
+        canonical=bool(using_fixed_templates and fixed_templates_canonical),
+    )
     min_duration_samples = max(1, int(round(cfg.min_duration_ms * sfreq / 1000.0)))
 
     all_rows: Dict[str, List[float]] = {}
@@ -517,6 +567,7 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
 
     out_df = pd.DataFrame(all_rows)
     out_df.attrs["microstate_template_source"] = "fixed" if using_fixed_templates else "subject_fitted"
+    out_df.attrs["microstate_labels_canonical"] = bool(using_fixed_templates and fixed_templates_canonical)
     return out_df, list(out_df.columns)
 
 

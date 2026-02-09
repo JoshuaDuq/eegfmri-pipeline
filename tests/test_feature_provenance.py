@@ -33,6 +33,19 @@ class TestFeatureProvenance(unittest.TestCase):
         self.assertFalse(props["cross_trial_dependence"])
         self.assertTrue(props["trialwise_valid"])
 
+    def test_microstates_unknown_template_source_marked_non_iid(self):
+        col = "microstates_active_broadband_global_coverage_state1"
+        out = infer_feature_provenance(
+            feature_columns=[col],
+            config=DotConfig({}),
+            df_attrs={},
+        )
+        props = out["columns"][col]
+        self.assertEqual(props["analysis_unit"], "unknown")
+        self.assertFalse(props["broadcasted"])
+        self.assertTrue(props["cross_trial_dependence"])
+        self.assertFalse(props["trialwise_valid"])
+
     def test_connectivity_provenance_prefers_df_attrs_phase_estimator(self):
         col = "conn_active_alpha_global_wpli_mean"
         out = infer_feature_provenance(

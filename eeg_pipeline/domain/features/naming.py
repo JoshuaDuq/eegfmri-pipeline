@@ -342,11 +342,11 @@ def infer_feature_provenance(
                     "reason": "Fixed templates were provided externally; trial-level assignments are independent across trials.",
                 }
             return {
-                "analysis_unit": "trial",
+                "analysis_unit": "unknown",
                 "broadcasted": False,
-                "cross_trial_dependence": False,
-                "trialwise_valid": True,
-                "reason": "Microstate template source unknown; assuming fixed-template trial-wise extraction.",
+                "cross_trial_dependence": True,
+                "trialwise_valid": False,
+                "reason": "Microstate template source unknown; cannot assume i.i.d. trial-level independence.",
             }
 
         return {

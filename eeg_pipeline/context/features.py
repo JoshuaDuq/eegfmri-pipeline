@@ -47,6 +47,7 @@ class FeatureContext:
     aligned_events: pd.DataFrame
     fixed_templates: Optional[np.ndarray] = None
     fixed_template_ch_names: Optional[List[str]] = None
+    fixed_template_labels: Optional[List[str]] = None
     feature_categories: List[str] = field(default_factory=lambda: list(FEATURE_CATEGORIES))
     bands: Optional[List[str]] = None
     frequency_bands: Optional[Dict[str, List[float]]] = None

@@ -81,6 +81,7 @@ class TestMicrostateFeatures(unittest.TestCase):
             logger=logging.getLogger("microstate-test"),
             fixed_templates=templates,
             fixed_template_ch_names=ch_names,
+            fixed_template_labels=["a", "b", "c", "d"],
         )
 
         df, cols = extract_microstate_features(ctx)
@@ -104,6 +105,7 @@ class TestMicrostateFeatures(unittest.TestCase):
             df["microstates_active_broadband_global_trans_a_to_a_prob"].iloc[0],
             df["microstates_active_broadband_global_trans_a_to_b_prob"].iloc[0],
         )
+        self.assertTrue(bool(df.attrs.get("microstate_labels_canonical")))
 
     def test_microstates_category_registered(self):
         from eeg_pipeline.pipelines import constants
@@ -297,3 +299,68 @@ class TestMicrostateFeatures(unittest.TestCase):
 
         self.assertIn("microstates_active_broadband_global_coverage_state1", df.columns)
         self.assertNotIn("microstates_active_broadband_global_coverage_a", df.columns)
+
+    def test_fixed_templates_without_labels_use_neutral_labels(self):
+        from eeg_pipeline.analysis.features import microstates as mod
+
+        epochs, templates, ch_names = self._build_epochs()
+        mask = np.ones(epochs.get_data().shape[-1], dtype=bool)
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=_WindowStub(mask),
+            name="active",
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "microstates": {
+                            "n_states": 4,
+                            "min_duration_ms": 0.0,
+                            "min_peak_distance_ms": 5.0,
+                            "max_gfp_peaks_per_epoch": 200,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("microstate-fixed-neutral"),
+            fixed_templates=templates,
+            fixed_template_ch_names=ch_names,
+            fixed_template_labels=None,
+        )
+
+        df, _ = mod.extract_microstate_features(ctx)
+        self.assertIn("microstates_active_broadband_global_coverage_state1", df.columns)
+        self.assertNotIn("microstates_active_broadband_global_coverage_a", df.columns)
+        self.assertFalse(bool(df.attrs.get("microstate_labels_canonical")))
+
+    def test_fixed_template_labels_reorder_to_canonical(self):
+        from eeg_pipeline.analysis.features import microstates as mod
+
+        epochs, templates, ch_names = self._build_epochs()
+        reversed_templates = templates[::-1].copy()
+        mask = np.ones(epochs.get_data().shape[-1], dtype=bool)
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=_WindowStub(mask),
+            name="active",
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "microstates": {
+                            "n_states": 4,
+                            "min_duration_ms": 0.0,
+                            "min_peak_distance_ms": 5.0,
+                            "max_gfp_peaks_per_epoch": 200,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("microstate-fixed-reorder"),
+            fixed_templates=reversed_templates,
+            fixed_template_ch_names=ch_names,
+            fixed_template_labels=["d", "c", "b", "a"],
+        )
+
+        df, _ = mod.extract_microstate_features(ctx)
+        self.assertIn("microstates_active_broadband_global_coverage_a", df.columns)
+        self.assertNotIn("microstates_active_broadband_global_coverage_state1", df.columns)
+        self.assertTrue(bool(df.attrs.get("microstate_labels_canonical")))

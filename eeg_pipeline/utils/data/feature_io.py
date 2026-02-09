@@ -348,11 +348,15 @@ def _assign_columns_safely(
     logger: logging.Logger,
 ) -> pd.DataFrame:
     """Assign column names to dataframe with validation and logging."""
+    attrs = dict(getattr(df, "attrs", {}) or {})
     if column_names is None:
         return df
     if len(column_names) == len(df.columns):
-        df = df.copy()
-        df.columns = column_names
+        out = df.copy()
+        out.columns = column_names
+        if attrs:
+            out.attrs.update(attrs)
+        df = out
     else:
         logger.warning(
             "%s column mismatch: %d names vs %d columns. Using DataFrame names.",

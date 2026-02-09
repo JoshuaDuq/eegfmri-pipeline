@@ -105,21 +105,29 @@ def _calculate_total_steps(n_ranges: int) -> int:
     return 1 + (n_ranges * 3)
 
 
-def _load_fixed_templates(templates_path: Optional[Path], logger: Any) -> tuple[Optional[np.ndarray], Optional[List[str]]]:
+def _load_fixed_templates(
+    templates_path: Optional[Path],
+    logger: Any,
+) -> tuple[Optional[np.ndarray], Optional[List[str]], Optional[List[str]]]:
     """Load fixed templates from file if path exists."""
     if templates_path is None or not templates_path.exists():
-        return None, None
+        return None, None, None
 
     try:
         with np.load(templates_path, allow_pickle=False) as data:
             if "templates" not in data:
                 logger.warning("Fixed templates file missing 'templates': %s", templates_path)
-                return None, None
+                return None, None, None
             templates = np.asarray(data["templates"], dtype=float)
             raw_ch_names = data["ch_names"] if "ch_names" in data else None
+            raw_labels = None
+            for key in ("template_labels", "labels"):
+                if key in data:
+                    raw_labels = data[key]
+                    break
     except Exception as exc:
         logger.warning("Failed loading fixed templates from %s: %s", templates_path, exc)
-        return None, None
+        return None, None, None
 
     ch_names: Optional[List[str]] = None
     if raw_ch_names is not None:
@@ -130,8 +138,17 @@ def _load_fixed_templates(templates_path: Optional[Path], logger: Any) -> tuple[
             else:
                 ch_names.append(str(value))
 
+    labels: Optional[List[str]] = None
+    if raw_labels is not None:
+        labels = []
+        for value in np.asarray(raw_labels).tolist():
+            if isinstance(value, (bytes, np.bytes_)):
+                labels.append(value.decode("utf-8", errors="ignore"))
+            else:
+                labels.append(str(value))
+
     logger.info("Loaded fixed templates from %s", templates_path)
-    return templates, ch_names
+    return templates, ch_names, labels
 
 
 def _precompute_tfr_if_needed(
@@ -388,9 +405,19 @@ def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
         return None
     if len(valid_dfs) == 1:
         return valid_dfs[0]
-    
+
+    common_attrs = dict(getattr(valid_dfs[0], "attrs", {}) or {})
+    for df in valid_dfs[1:]:
+        attrs = dict(getattr(df, "attrs", {}) or {})
+        for key in list(common_attrs.keys()):
+            if attrs.get(key) != common_attrs[key]:
+                common_attrs.pop(key, None)
+
     merged = pd.concat(valid_dfs, axis=1)
-    return merged.loc[:, ~merged.columns.duplicated(keep="first")]
+    merged = merged.loc[:, ~merged.columns.duplicated(keep="first")]
+    if common_attrs:
+        merged.attrs.update(common_attrs)
+    return merged
 
 
 def _save_merged_features(
@@ -598,7 +625,7 @@ class FeaturePipeline(PipelineBase):
         )
 
         fixed_templates_path = kwargs.get("fixed_templates_path")
-        fixed_templates, fixed_template_ch_names = _load_fixed_templates(
+        fixed_templates, fixed_template_ch_names, fixed_template_labels = _load_fixed_templates(
             fixed_templates_path, self.logger
         )
 
@@ -663,6 +690,7 @@ class FeaturePipeline(PipelineBase):
                 aligned_events=aligned_events,
                 fixed_templates=fixed_templates,
                 fixed_template_ch_names=fixed_template_ch_names,
+                fixed_template_labels=fixed_template_labels,
                 feature_categories=feature_categories,
                 bands=kwargs.get("bands"),
                 spatial_modes=spatial_modes,
