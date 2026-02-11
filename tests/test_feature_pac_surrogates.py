@@ -4,7 +4,10 @@ import unittest
 
 import numpy as np
 
-from eeg_pipeline.analysis.features.phase import _compute_pac_surrogates
+from eeg_pipeline.analysis.features.phase import (
+    _compute_pac_surrogates,
+    _resolve_pac_surrogate_context,
+)
 
 
 class TestPacSurrogates(unittest.TestCase):
@@ -53,6 +56,60 @@ class TestPacSurrogates(unittest.TestCase):
             float(np.nanmean(np.abs(surrogates_shuffle[0]))),
             float(np.nanmean(np.abs(surrogates_shift[0]))),
         )
+
+    def test_trial_shuffle_can_restrict_donor_epochs(self):
+        phase = np.ones((3, 4), dtype=np.complex128)
+        amplitudes = np.array(
+            [
+                [1.0, 1.0, 1.0, 1.0],      # epoch 0
+                [2.0, 2.0, 2.0, 2.0],      # epoch 1
+                [100.0, 100.0, 100.0, 100.0],  # epoch 2 (excluded donor)
+            ],
+            dtype=float,
+        )
+
+        rng = np.random.default_rng(7)
+        surrogates = _compute_pac_surrogates(
+            phase,
+            amplitudes,
+            n_surrogates=8,
+            normalize=False,
+            epsilon=1e-12,
+            n_times=4,
+            rng=rng,
+            surrogate_method="trial_shuffle",
+            donor_epoch_indices=np.array([0, 1], dtype=int),
+        )
+
+        # Epoch 0 can only receive donor epoch 1 when self-donors are excluded.
+        self.assertTrue(np.allclose(surrogates[0], 2.0, atol=1e-12, equal_nan=True))
+        # Epoch 1 can only receive donor epoch 0.
+        self.assertTrue(np.allclose(surrogates[1], 1.0, atol=1e-12, equal_nan=True))
+        # Epoch 2 must never receive donor epoch 2 (value=100) when donor pool is [0,1].
+        self.assertTrue(np.nanmax(surrogates[2]) < 10.0)
+
+    def test_trial_ml_safe_without_train_mask_falls_back_to_circular_shift(self):
+        method, donor_idx = _resolve_pac_surrogate_context(
+            {"surrogate_method": "trial_shuffle"},
+            n_epochs=5,
+            analysis_mode="trial_ml_safe",
+            train_mask=None,
+            logger=None,
+        )
+        self.assertEqual(method, "circular_shift")
+        self.assertIsNone(donor_idx)
+
+    def test_trial_ml_safe_with_train_mask_uses_training_donor_pool(self):
+        method, donor_idx = _resolve_pac_surrogate_context(
+            {"surrogate_method": "trial_shuffle"},
+            n_epochs=5,
+            analysis_mode="trial_ml_safe",
+            train_mask=np.array([True, False, True, False, False], dtype=bool),
+            logger=None,
+        )
+        self.assertEqual(method, "trial_shuffle")
+        self.assertIsNotNone(donor_idx)
+        np.testing.assert_array_equal(donor_idx, np.array([0, 2], dtype=int))
 
 
 if __name__ == "__main__":

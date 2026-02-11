@@ -230,11 +230,17 @@ def _compute_snr_from_psd(
     
     signal_mask = (freqs >= signal_low) & (freqs <= signal_high)
     noise_mask = (freqs >= noise_low) & (freqs <= noise_high)
-    
-    signal_power = np.sum(psds[:, signal_mask], axis=1)
-    noise_power = np.sum(psds[:, noise_mask], axis=1)
-    
-    snr_linear = signal_power / (noise_power + EPSILON_STD)
+    df = np.gradient(freqs) if freqs.size > 1 else np.ones_like(freqs, dtype=float)
+
+    signal_bandwidth = float(np.sum(df[signal_mask])) if np.any(signal_mask) else np.nan
+    noise_bandwidth = float(np.sum(df[noise_mask])) if np.any(noise_mask) else np.nan
+    signal_power = np.sum(psds[:, signal_mask] * df[signal_mask], axis=1) if np.any(signal_mask) else np.full(psds.shape[0], np.nan)
+    noise_power = np.sum(psds[:, noise_mask] * df[noise_mask], axis=1) if np.any(noise_mask) else np.full(psds.shape[0], np.nan)
+
+    signal_density = signal_power / max(signal_bandwidth, EPSILON_STD) if np.isfinite(signal_bandwidth) else np.full(psds.shape[0], np.nan)
+    noise_density = noise_power / max(noise_bandwidth, EPSILON_STD) if np.isfinite(noise_bandwidth) else np.full(psds.shape[0], np.nan)
+
+    snr_linear = signal_density / (noise_density + EPSILON_STD)
     snr_db = SNR_DB_MULTIPLIER * np.log10(snr_linear)
     
     return snr_db
@@ -254,8 +260,9 @@ def _compute_muscle_ratio_from_psd(
         raise ValueError(f"Invalid muscle_band: {muscle_band!r}") from exc
     
     muscle_mask = (freqs >= muscle_low) & (freqs <= muscle_high)
-    muscle_power = np.sum(psds[:, muscle_mask], axis=1)
-    total_power = np.sum(psds, axis=1)
+    df = np.gradient(freqs) if freqs.size > 1 else np.ones_like(freqs, dtype=float)
+    muscle_power = np.sum(psds[:, muscle_mask] * df[muscle_mask], axis=1) if np.any(muscle_mask) else np.full(psds.shape[0], np.nan)
+    total_power = np.sum(psds * df[None, :], axis=1)
     
     muscle_ratio = muscle_power / (total_power + EPSILON_STD)
     return muscle_ratio

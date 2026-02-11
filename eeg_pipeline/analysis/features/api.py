@@ -405,6 +405,7 @@ def _compute_tfr_for_features(
         ctx.logger,
         tfr_computed=tfr_power,
         baseline_window=baseline_override,
+        power_bands=getattr(ctx, "frequency_bands", None),
     )
 
     if tfr is None:
@@ -594,6 +595,8 @@ def _extract_pac_features(
             segment_name=segment_label,
             segment_window=segment_window,
             spatial_modes=ctx.spatial_modes,
+            analysis_mode=getattr(ctx, "analysis_mode", None),
+            train_mask=getattr(ctx, "train_mask", None),
         )
     )
     return pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df

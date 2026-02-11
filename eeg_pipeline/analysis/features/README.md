@@ -340,11 +340,13 @@ Cross-frequency coupling between a low-frequency phase signal and a high-frequen
 3. **Surrogate-based z-scoring (optional):** If `n_surrogates > 0`, generate null PAC samples using `surrogate_method`:
    - `trial_shuffle` (default): cross-epoch amplitude shuffling with within-epoch circular shift
    - `circular_shift`: within-epoch circular shift only
+   - In `analysis_mode="trial_ml_safe"`, `trial_shuffle` is restricted to training trials (or falls back to `circular_shift` if no valid training pool is available).
    Compute z-score:
    ```
    z = (MVL_observed − mean(MVL_surrogates)) / std(MVL_surrogates)
    ```
 4. **Harmonic overlap rejection:** Band pairs where the amplitude band overlaps with harmonics of the phase band are skipped by default (configurable).
+5. **Segment validity gates:** PAC is skipped when segment duration is below `max(min_segment_sec, min_cycles_at_fmin / fmin_phase)` for each phase band.
 
 **Outputs per phase-amplitude band pair × segment × scope:**
 - `mvl` — Mean Vector Length (raw PAC strength)

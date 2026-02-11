@@ -514,6 +514,8 @@ feature_engineering:
     phase_range: [4.0, 8.0]
     amp_range: [30.0, 80.0]
     min_epochs: 2
+    min_segment_sec: 1.0
+    min_cycles_at_fmin: 3.0
     normalize: true
     n_surrogates: 0
     random_seed: null

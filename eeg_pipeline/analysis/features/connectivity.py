@@ -2728,9 +2728,17 @@ def extract_directed_connectivity_from_precomputed(
                 for method, conn_matrix in results.items():
                     if conn_matrix is None or not np.isfinite(conn_matrix).any():
                         continue
+
+                    # For DTF/PDC, matrix[target, source] encodes source -> target.
+                    if method in {"dtf", "pdc"}:
+                        fwd_vals = conn_matrix[pair_j, pair_i]  # first channel -> second channel
+                        bwd_vals = conn_matrix[pair_i, pair_j]  # second channel -> first channel
+                    else:
+                        fwd_vals = conn_matrix[pair_i, pair_j]
+                        bwd_vals = conn_matrix[pair_j, pair_i]
                     
                     if output_level == "full":
-                        for idx, (i, j) in enumerate(zip(pair_i, pair_j)):
+                        for idx in range(len(pair_i)):
                             col_fwd = NamingSchema.build(
                                 "dconn", seg_name, band, "chpair",
                                 f"{method}_fwd", channel_pair=pair_names[idx]
@@ -2739,11 +2747,8 @@ def extract_directed_connectivity_from_precomputed(
                                 "dconn", seg_name, band, "chpair",
                                 f"{method}_bwd", channel_pair=pair_names[idx]
                             )
-                            records[ep_idx][col_fwd] = float(conn_matrix[i, j])
-                            records[ep_idx][col_bwd] = float(conn_matrix[j, i])
-                    
-                    upper_vals = conn_matrix[pair_i, pair_j]
-                    lower_vals = conn_matrix[pair_j, pair_i]
+                            records[ep_idx][col_fwd] = float(fwd_vals[idx])
+                            records[ep_idx][col_bwd] = float(bwd_vals[idx])
                     
                     col_mean_fwd = NamingSchema.build(
                         "dconn", seg_name, band, "global", f"{method}_fwd_mean"
@@ -2755,10 +2760,10 @@ def extract_directed_connectivity_from_precomputed(
                         "dconn", seg_name, band, "global", f"{method}_asymmetry"
                     )
                     
-                    records[ep_idx][col_mean_fwd] = float(np.nanmean(upper_vals))
-                    records[ep_idx][col_mean_bwd] = float(np.nanmean(lower_vals))
+                    records[ep_idx][col_mean_fwd] = float(np.nanmean(fwd_vals))
+                    records[ep_idx][col_mean_bwd] = float(np.nanmean(bwd_vals))
                     
-                    asymmetry = np.nanmean(upper_vals) - np.nanmean(lower_vals)
+                    asymmetry = np.nanmean(fwd_vals - bwd_vals)
                     records[ep_idx][col_asymmetry] = float(asymmetry)
     
     if logger is not None:

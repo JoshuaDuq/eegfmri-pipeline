@@ -1092,6 +1092,47 @@ def _require_lcmv_train_mask_if_trial_safe(
     return mask
 
 
+def _resolve_source_connectivity_min_cycles(config: Any) -> float:
+    """Resolve minimum cycle count for source connectivity validity checks."""
+    min_cycles = _cfg_get(config, "feature_engineering.sourcelocalization.min_cycles_per_band", None)
+    if min_cycles is None:
+        min_cycles = _cfg_get(config, "feature_engineering.connectivity.min_cycles_per_band", 3.0)
+    min_cycles_f = _safe_float(min_cycles, 3.0)
+    if not np.isfinite(min_cycles_f) or min_cycles_f <= 0:
+        min_cycles_f = 3.0
+    return max(1.0, float(min_cycles_f))
+
+
+def _validate_source_connectivity_duration(
+    *,
+    n_times: int,
+    sfreq: float,
+    fmin: float,
+    min_cycles: float,
+    band: str,
+    method: str,
+    logger: logging.Logger,
+) -> bool:
+    """Check whether per-epoch duration supports stable band-limited connectivity."""
+    if n_times <= 0 or not np.isfinite(sfreq) or sfreq <= 0 or not np.isfinite(fmin) or fmin <= 0:
+        return False
+    duration_sec = float(n_times) / float(sfreq)
+    min_duration_sec = float(min_cycles) / float(fmin)
+    if duration_sec < min_duration_sec:
+        logger.warning(
+            "Source connectivity (%s): epoch duration %.3fs is shorter than recommended %.3fs "
+            "for band '%s' (%d cycles at %.2f Hz); skipping band.",
+            method,
+            duration_sec,
+            min_duration_sec,
+            band,
+            int(round(min_cycles)),
+            fmin,
+        )
+        return False
+    return True
+
+
 def _enforce_fmri_provenance_policy(
     fmri_cfg: FMRIConstraintConfig,
     logger: logging.Logger,
@@ -1432,6 +1473,7 @@ def extract_source_connectivity_features(
     
     sfreq = epochs.info["sfreq"]
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
+    min_cycles_per_band = _resolve_source_connectivity_min_cycles(config)
     
     if logger:
         logger.info(f"Extracting source-space {connectivity_method.upper()} connectivity")
@@ -1558,6 +1600,17 @@ def extract_source_connectivity_features(
             roi_data, _ = _extract_roi_timecourses_from_vertex_indices(stcs, roi_indices)
         else:
             roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
+
+        if not _validate_source_connectivity_duration(
+            n_times=int(roi_data.shape[-1]) if np.ndim(roi_data) >= 3 else 0,
+            sfreq=float(sfreq),
+            fmin=float(fmin),
+            min_cycles=min_cycles_per_band,
+            band=str(band),
+            method=str(connectivity_method).lower(),
+            logger=logger,
+        ):
+            continue
         
         if connectivity_method.lower() == "aec":
             for epoch_idx in range(n_epochs):

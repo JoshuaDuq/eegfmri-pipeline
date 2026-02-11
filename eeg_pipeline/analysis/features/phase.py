@@ -50,6 +50,53 @@ def _safe_config_get(config: Any, key: str, default: Any = None) -> Any:
         return default
     return result
 
+
+def _positive_float_or_default(value: Any, default: float) -> float:
+    """Return a positive finite float, or a fallback default."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if not np.isfinite(out) or out <= 0:
+        return float(default)
+    return float(out)
+
+
+def _nonnegative_float_or_default(value: Any, default: float) -> float:
+    """Return a non-negative finite float, or a fallback default."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if not np.isfinite(out) or out < 0:
+        return float(default)
+    return float(out)
+
+
+def _segment_duration_seconds(mask: np.ndarray, sfreq_hz: float) -> float:
+    """Compute segment duration in seconds from a boolean mask."""
+    if mask is None:
+        return np.nan
+    try:
+        n = int(np.sum(mask))
+    except Exception:
+        return np.nan
+    if not np.isfinite(sfreq_hz) or sfreq_hz <= 0:
+        return np.nan
+    return float(n) / float(sfreq_hz)
+
+
+def _required_duration_seconds(
+    *,
+    fmin_hz: float,
+    min_segment_sec: float,
+    min_cycles_at_fmin: float,
+) -> float:
+    """Required duration from absolute minimum and cycle-count constraint."""
+    if np.isfinite(fmin_hz) and fmin_hz > 0 and np.isfinite(min_cycles_at_fmin) and min_cycles_at_fmin > 0:
+        return max(float(min_segment_sec), float(min_cycles_at_fmin) / float(fmin_hz))
+    return float(min_segment_sec)
+
 def _get_itpc_method(config: Any) -> str:
     """Get ITPC computation method from config.
     
@@ -870,6 +917,7 @@ def _compute_pac_surrogates(
     n_times: int,
     rng: np.random.Generator,
     surrogate_method: str = "trial_shuffle",
+    donor_epoch_indices: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Compute PAC surrogate distribution for z-scoring.
     
@@ -891,7 +939,28 @@ def _compute_pac_surrogates(
     if method not in {"trial_shuffle", "circular_shift"}:
         method = "trial_shuffle"
 
+    donor_pool: Optional[np.ndarray] = None
+    donor_pool_set = set()
+    if donor_epoch_indices is not None:
+        donor_pool = np.asarray(donor_epoch_indices, dtype=int).ravel()
+        donor_pool = donor_pool[(donor_pool >= 0) & (donor_pool < n_epochs)]
+        donor_pool = np.unique(donor_pool)
+        donor_pool_set = set(donor_pool.tolist())
+
     def _draw_cross_epoch_index_map() -> np.ndarray:
+        if donor_pool is not None:
+            if donor_pool.size == 0:
+                return np.zeros((n_epochs,), dtype=int)
+            out = np.empty((n_epochs,), dtype=int)
+            for epoch_idx in range(n_epochs):
+                candidates = donor_pool
+                if donor_pool.size > 1 and epoch_idx in donor_pool_set:
+                    candidates = donor_pool[donor_pool != epoch_idx]
+                    if candidates.size == 0:
+                        candidates = donor_pool
+                out[epoch_idx] = int(rng.choice(candidates))
+            return out
+
         if n_epochs <= 1:
             return np.zeros((n_epochs,), dtype=int)
         for _ in range(20):
@@ -1004,6 +1073,61 @@ def _resolve_pac_surrogate_method(
             )
         return "circular_shift"
     return method
+
+
+def _resolve_pac_surrogate_context(
+    pac_cfg: Dict[str, Any],
+    *,
+    n_epochs: int,
+    analysis_mode: Optional[str],
+    train_mask: Optional[np.ndarray],
+    logger: Optional[logging.Logger],
+) -> Tuple[str, Optional[np.ndarray]]:
+    """Resolve surrogate strategy and donor pool with CV-leakage guardrails."""
+    method = _resolve_pac_surrogate_method(
+        pac_cfg,
+        n_epochs=n_epochs,
+        logger=logger,
+    )
+    donor_epoch_indices: Optional[np.ndarray] = None
+
+    mode = str(analysis_mode or "").strip().lower()
+    if method != "trial_shuffle":
+        return method, donor_epoch_indices
+
+    if mode != "trial_ml_safe":
+        return method, donor_epoch_indices
+
+    if train_mask is None:
+        if logger is not None:
+            logger.warning(
+                "PAC: trial_ml_safe mode without train_mask; switching surrogate_method "
+                "from 'trial_shuffle' to 'circular_shift' to prevent cross-trial leakage."
+            )
+        return "circular_shift", None
+
+    train_mask_arr = np.asarray(train_mask, dtype=bool).ravel()
+    if train_mask_arr.shape[0] != int(n_epochs):
+        raise ValueError(
+            "PAC: train_mask length mismatch for surrogate guard "
+            f"(n_epochs={int(n_epochs)}, train_mask={train_mask_arr.shape[0]})."
+        )
+
+    donor_epoch_indices = np.flatnonzero(train_mask_arr)
+    if donor_epoch_indices.size < 2:
+        if logger is not None:
+            logger.warning(
+                "PAC: surrogate_method='trial_shuffle' in trial_ml_safe mode requires at least 2 "
+                "training trials; falling back to 'circular_shift'."
+            )
+        return "circular_shift", None
+
+    if logger is not None:
+        logger.info(
+            "PAC: restricting trial_shuffle surrogate donors to training trials only (n_train=%d).",
+            int(donor_epoch_indices.size),
+        )
+    return method, donor_epoch_indices
 
 
 def _compute_pac_z_scores(
@@ -1131,11 +1255,19 @@ def extract_phase_features(
         n_jobs_actual = _normalize_n_jobs(n_jobs)
         logger.info(f"ITPC: n_jobs={n_jobs_actual} (from config: {n_jobs})")
 
+    itpc_cfg = _safe_config_get(config, "feature_engineering.itpc", {})
+    min_segment_sec = _nonnegative_float_or_default(itpc_cfg.get("min_segment_sec", 1.0), 1.0)
+    min_cycles_at_fmin = _positive_float_or_default(itpc_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
+    try:
+        sfreq_hz = float(epochs.info.get("sfreq", np.nan))
+    except Exception:
+        sfreq_hz = np.nan
+    sfreq_hz = _positive_float_or_default(sfreq_hz, np.nan)
+
     condition_labels = None
     condition_values: List[str] = []
     min_trials_per_condition = 10
     if itpc_method == "condition":
-        itpc_cfg = _safe_config_get(config, "feature_engineering.itpc", {})
         condition_column = itpc_cfg.get("condition_column")
         condition_values_cfg = itpc_cfg.get("condition_values", []) or []
         if isinstance(condition_values_cfg, str):
@@ -1212,6 +1344,8 @@ def extract_phase_features(
         return pd.DataFrame(), []
     
     baseline_correction = _get_baseline_correction_mode(config)
+    warned_short_segment = set()
+    warned_short_band = set()
 
     for segment_name in segments:
         segment_mask = segment_masks.get(segment_name)
@@ -1219,6 +1353,20 @@ def extract_phase_features(
             segment_mask = make_mask_for_times(windows, segment_name, times)
             
         if not np.any(segment_mask):
+            continue
+
+        segment_sec = _segment_duration_seconds(segment_mask, sfreq_hz)
+        if np.isfinite(min_segment_sec) and min_segment_sec > 0 and (
+            not np.isfinite(segment_sec) or segment_sec < min_segment_sec
+        ):
+            if segment_name not in warned_short_segment and logger is not None:
+                logger.warning(
+                    "ITPC: segment '%s' too short (%.3fs < %.3fs); skipping segment.",
+                    segment_name,
+                    segment_sec,
+                    min_segment_sec,
+                )
+                warned_short_segment.add(str(segment_name))
             continue
 
         baseline_mask = None
@@ -1237,6 +1385,27 @@ def extract_phase_features(
                 continue
             
             fmin, fmax = freq_bands[band]
+            required_sec = _required_duration_seconds(
+                fmin_hz=float(fmin),
+                min_segment_sec=min_segment_sec,
+                min_cycles_at_fmin=min_cycles_at_fmin,
+            )
+            if not np.isfinite(segment_sec) or segment_sec < required_sec:
+                band_key = (str(segment_name), str(band))
+                if band_key not in warned_short_band and logger is not None:
+                    logger.warning(
+                        "ITPC: segment '%s' too short for band '%s' (%.3fs < %.3fs; "
+                        "min_cycles_at_fmin=%.1f at fmin=%.2fHz).",
+                        segment_name,
+                        band,
+                        segment_sec,
+                        required_sec,
+                        min_cycles_at_fmin,
+                        float(fmin),
+                    )
+                    warned_short_band.add(band_key)
+                continue
+
             frequency_mask = (freqs >= fmin) & (freqs <= fmax)
             if not np.any(frequency_mask):
                 continue
@@ -1409,6 +1578,8 @@ def compute_pac_comodulograms(
     segment_name: str = "full",
     segment_window: Optional[Tuple[float, float]] = None,
     spatial_modes: Optional[List[str]] = None,
+    analysis_mode: Optional[str] = None,
+    train_mask: Optional[np.ndarray] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """
     Compute Phase-Amplitude Coupling (PAC) using Mean Vector Length (MVL).
@@ -1435,13 +1606,35 @@ def compute_pac_comodulograms(
     
     pac_cfg = _extract_pac_config(config)
     n_surrogates = int(pac_cfg.get("n_surrogates", 0))
+    min_segment_sec = _nonnegative_float_or_default(pac_cfg.get("min_segment_sec", 1.0), 1.0)
+    min_cycles_at_fmin = _positive_float_or_default(pac_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
     min_epochs = int(pac_cfg.get("min_epochs", 2))
     if n_epochs < min_epochs:
         logger.warning("PAC: insufficient epochs (%d < %d); skipping", n_epochs, min_epochs)
         return None, None, None, None, None
-    surrogate_method = _resolve_pac_surrogate_method(
-        pac_cfg, n_epochs=n_epochs, logger=logger
+    surrogate_method, surrogate_donor_epochs = _resolve_pac_surrogate_context(
+        pac_cfg,
+        n_epochs=n_epochs,
+        analysis_mode=analysis_mode,
+        train_mask=train_mask,
+        logger=logger,
     )
+    sfreq_hz = _positive_float_or_default(info["sfreq"], np.nan)
+    segment_sec = (
+        float(n_times) / float(sfreq_hz)
+        if np.isfinite(sfreq_hz) and sfreq_hz > 0
+        else np.nan
+    )
+    if np.isfinite(min_segment_sec) and min_segment_sec > 0 and (
+        not np.isfinite(segment_sec) or segment_sec < min_segment_sec
+    ):
+        logger.warning(
+            "PAC: segment '%s' too short (%.3fs < %.3fs); skipping.",
+            segment_name,
+            segment_sec,
+            min_segment_sec,
+        )
+        return None, None, None, None, None
     
     phase_min, phase_max, amp_min, amp_max = _extract_frequency_ranges(pac_cfg)
     
@@ -1483,9 +1676,32 @@ def compute_pac_comodulograms(
     
     pair_channel_data = {}
     pair_channel_data_z = {}
-    
+    warned_short_pairs: set[str] = set()
+
     for channel_idx in range(n_ch):
         for phase_band, amp_band, phase_range, amp_range in valid_pairs:
+            required_sec = _required_duration_seconds(
+                fmin_hz=float(phase_range[0]),
+                min_segment_sec=min_segment_sec,
+                min_cycles_at_fmin=min_cycles_at_fmin,
+            )
+            if not np.isfinite(segment_sec) or segment_sec < required_sec:
+                pair_key = f"{phase_band}_{amp_band}"
+                if pair_key not in warned_short_pairs:
+                    logger.warning(
+                        "PAC: segment '%s' too short for pair %s->%s (%.3fs < %.3fs; "
+                        "min_cycles_at_fmin=%.1f at fmin=%.2fHz).",
+                        segment_name,
+                        phase_band,
+                        amp_band,
+                        segment_sec,
+                        required_sec,
+                        min_cycles_at_fmin,
+                        float(phase_range[0]),
+                    )
+                    warned_short_pairs.add(pair_key)
+                continue
+
             pac_values = _compute_pac_for_channel_band_pair(
                 data, channel_idx, phase_freqs, amp_freqs,
                 phase_indices, amp_indices, phase_range, amp_range,
@@ -1517,6 +1733,7 @@ def compute_pac_comodulograms(
                     mean_phase, mean_amplitude, n_surrogates,
                     normalize, epsilon, n_times, rng,
                     surrogate_method=surrogate_method,
+                    donor_epoch_indices=surrogate_donor_epochs,
                 )
                 pac_z = _compute_pac_z_scores(pac_values, surrogates)
                 
@@ -1590,6 +1807,8 @@ def extract_itpc_from_precomputed(
         )
 
     itpc_cfg = _safe_config_get(cfg, "feature_engineering.itpc", {})
+    min_segment_sec = _nonnegative_float_or_default(itpc_cfg.get("min_segment_sec", 1.0), 1.0)
+    min_cycles_at_fmin = _positive_float_or_default(itpc_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
     condition_column = itpc_cfg.get("condition_column", None)
     condition_values_cfg = itpc_cfg.get("condition_values", []) or []
     if isinstance(condition_values_cfg, str):
@@ -1652,9 +1871,12 @@ def extract_itpc_from_precomputed(
     baseline_correction = _get_baseline_correction_mode(cfg)
     spatial_modes = getattr(precomputed, "spatial_modes", None) or ["roi", "global"]
     roi_map = _build_roi_map_if_needed(spatial_modes, ch_names, cfg)
+    freq_bands = getattr(precomputed, "frequency_bands", None) or get_frequency_bands(cfg)
 
     baseline_mask = masks.get("baseline") if baseline_correction == "subtract" else None
     results = {}
+    warned_short_segment = set()
+    warned_short_band = set()
 
     for band, band_data in precomputed.band_data.items():
         phases = band_data.phase
@@ -1694,6 +1916,44 @@ def extract_itpc_from_precomputed(
 
         for seg_name, mask in masks.items():
             if mask is None or not np.any(mask):
+                continue
+
+            segment_sec = _segment_duration_seconds(mask, float(precomputed.sfreq))
+            if np.isfinite(min_segment_sec) and min_segment_sec > 0 and (
+                not np.isfinite(segment_sec) or segment_sec < min_segment_sec
+            ):
+                if seg_name not in warned_short_segment and logger is not None:
+                    logger.warning(
+                        "ITPC (precomputed): segment '%s' too short (%.3fs < %.3fs); skipping segment.",
+                        seg_name,
+                        segment_sec,
+                        min_segment_sec,
+                    )
+                    warned_short_segment.add(str(seg_name))
+                continue
+
+            fmin_band = float(getattr(band_data, "fmin", np.nan))
+            if not np.isfinite(fmin_band):
+                fmin_band = float(freq_bands.get(band, [np.nan, np.nan])[0])
+            required_sec = _required_duration_seconds(
+                fmin_hz=fmin_band,
+                min_segment_sec=min_segment_sec,
+                min_cycles_at_fmin=min_cycles_at_fmin,
+            )
+            if not np.isfinite(segment_sec) or segment_sec < required_sec:
+                band_key = (str(seg_name), str(band))
+                if band_key not in warned_short_band and logger is not None:
+                    logger.warning(
+                        "ITPC (precomputed): segment '%s' too short for band '%s' (%.3fs < %.3fs; "
+                        "min_cycles_at_fmin=%.1f at fmin=%.2fHz).",
+                        seg_name,
+                        band,
+                        segment_sec,
+                        required_sec,
+                        min_cycles_at_fmin,
+                        fmin_band,
+                    )
+                    warned_short_band.add(band_key)
                 continue
             
             segment_complex = complex_vectors[:, :, mask]
@@ -1785,6 +2045,8 @@ def extract_pac_from_precomputed(
     n_surrogates = int(pac_cfg.get("n_surrogates", 0))
     requested_pairs = pac_cfg.get("pairs", [("theta", "gamma"), ("alpha", "gamma")])
     normalize = bool(pac_cfg.get("normalize", True))
+    min_segment_sec = _nonnegative_float_or_default(pac_cfg.get("min_segment_sec", 1.0), 1.0)
+    min_cycles_at_fmin = _positive_float_or_default(pac_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
     eps_amp = float(_safe_config_get(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
     seed = pac_cfg.get("random_seed", None)
     rng = np.random.default_rng(None if seed in (None, "", 0) else int(seed))
@@ -1803,8 +2065,16 @@ def extract_pac_from_precomputed(
     ch_names = precomputed.ch_names
     n_ch = len(ch_names)  # Required for surrogate and waveform QC loops
     n_epochs = precomputed.data.shape[0]
-    surrogate_method = _resolve_pac_surrogate_method(
-        pac_cfg, n_epochs=n_epochs, logger=logger
+    analysis_mode = str(
+        _safe_config_get(config, "feature_engineering.analysis_mode", "group_stats") or "group_stats"
+    ).strip().lower()
+    train_mask = getattr(precomputed, "train_mask", None)
+    surrogate_method, surrogate_donor_epochs = _resolve_pac_surrogate_context(
+        pac_cfg,
+        n_epochs=n_epochs,
+        analysis_mode=analysis_mode,
+        train_mask=train_mask,
+        logger=logger,
     )
     windows = precomputed.windows
 
@@ -1845,13 +2115,56 @@ def extract_pac_from_precomputed(
     valid_pairs = _get_valid_pac_pairs(
         pairs, tf_bands, allow_harmonic_overlap, max_harm, tol_hz, logger
     )
+    warned_short_segment = set()
+    warned_short_pair = set()
+    sfreq_hz = _positive_float_or_default(getattr(precomputed, "sfreq", np.nan), np.nan)
 
     for segment_name, mask in masks.items():
         if mask is None or not np.any(mask):
             continue
         n_times = int(np.sum(mask))
+        segment_sec = _segment_duration_seconds(mask, sfreq_hz)
+        if np.isfinite(min_segment_sec) and min_segment_sec > 0 and (
+            not np.isfinite(segment_sec) or segment_sec < min_segment_sec
+        ):
+            if segment_name not in warned_short_segment and logger is not None:
+                logger.warning(
+                    "PAC (precomputed): segment '%s' too short (%.3fs < %.3fs); skipping segment.",
+                    segment_name,
+                    segment_sec,
+                    min_segment_sec,
+                )
+                warned_short_segment.add(str(segment_name))
+            continue
 
         for phase_band, amp_band, _, _ in valid_pairs:
+            try:
+                phase_range = tf_bands.get(phase_band, [np.nan, np.nan])
+                fmin_phase = float(phase_range[0])
+            except (TypeError, ValueError, IndexError):
+                fmin_phase = np.nan
+            required_sec = _required_duration_seconds(
+                fmin_hz=fmin_phase,
+                min_segment_sec=min_segment_sec,
+                min_cycles_at_fmin=min_cycles_at_fmin,
+            )
+            if not np.isfinite(segment_sec) or segment_sec < required_sec:
+                pair_key = (str(segment_name), f"{phase_band}_{amp_band}")
+                if pair_key not in warned_short_pair and logger is not None:
+                    logger.warning(
+                        "PAC (precomputed): segment '%s' too short for pair %s->%s (%.3fs < %.3fs; "
+                        "min_cycles_at_fmin=%.1f at fmin=%.2fHz).",
+                        segment_name,
+                        phase_band,
+                        amp_band,
+                        segment_sec,
+                        required_sec,
+                        min_cycles_at_fmin,
+                        fmin_phase,
+                    )
+                    warned_short_pair.add(pair_key)
+                continue
+
             if phase_band not in phases or amp_band not in amplitudes:
                 continue
 
@@ -1875,6 +2188,7 @@ def extract_pac_from_precomputed(
                     phase_unit_vectors, amplitude_data, n_surrogates,
                     normalize, eps_amp, n_times, rng,
                     surrogate_method=surrogate_method,
+                    donor_epoch_indices=surrogate_donor_epochs,
                 )
                 pac_z = np.full_like(pac_val, np.nan, dtype=float)
                 for epoch_idx in range(n_epochs):

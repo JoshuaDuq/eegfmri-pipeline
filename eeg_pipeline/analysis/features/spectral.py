@@ -1254,6 +1254,8 @@ def compute_peak_frequency(
         if prominence < min_prominence:
             use_cog = True
     
+    peak_bin_idx = int(peak_idx)
+
     if use_cog:
         # Center-of-gravity: weighted average frequency (more stable)
         weights = np.maximum(psd_for_peak, 0)
@@ -1261,6 +1263,7 @@ def compute_peak_frequency(
             peak_freq = float(np.average(freqs_band, weights=weights))
             # Find closest frequency bin for power lookup
             closest_idx = np.argmin(np.abs(freqs_band - peak_freq))
+            peak_bin_idx = int(closest_idx)
             peak_power = float(psd_band[closest_idx])
         else:
             peak_freq = float(freqs_band[peak_idx])
@@ -1275,7 +1278,7 @@ def compute_peak_frequency(
     
     if aperiodic_fit is not None:
         # Find the global index for the peak frequency
-        global_peak_idx = np.where(mask)[0][peak_idx]
+        global_peak_idx = np.where(mask)[0][peak_bin_idx]
         aperiodic_at_peak = aperiodic_fit[global_peak_idx]
         
         if np.isfinite(aperiodic_at_peak) and aperiodic_at_peak > 0:

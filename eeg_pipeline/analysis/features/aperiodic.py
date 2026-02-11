@@ -1843,7 +1843,11 @@ def extract_aperiodic_from_precomputed(
         raise ValueError("Aperiodic extraction requires at least one valid time window segment.")
     
     spatial_modes = getattr(precomputed, "spatial_modes", ["roi", "global"])
-    n_jobs = get_n_jobs(config, "aperiodic")
+    n_jobs = get_n_jobs(
+        config,
+        default=-1,
+        config_path="feature_engineering.parallel.n_jobs_aperiodic",
+    )
     condition_labels = getattr(precomputed, "condition_labels", None)
     roi_map = _build_roi_map(ch_names, config) if "roi" in spatial_modes else {}
     freq_bands = get_frequency_bands_for_aperiodic(config)

@@ -5,7 +5,7 @@ import sys
 import types
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -148,6 +148,84 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             "fmri_informed",
         ):
             _load_source_localization_config(ctx, config, method="lcmv")
+
+    def test_wpli_skips_too_short_segments_by_cycle_guard(self):
+        n_epochs = 4
+        roi_data = np.random.default_rng(17).standard_normal((n_epochs, 2, 20))  # 0.2 s at 100 Hz
+
+        spectral_connectivity_mock = Mock(return_value=_FakeCon(np.array([[0.5]], dtype=float)))
+        fake_conn_mod = types.ModuleType("mne_connectivity")
+        fake_conn_mod.spectral_connectivity_epochs = spectral_connectivity_mock
+        fake_conn_mod.envelope_correlation = lambda *_args, **_kwargs: None
+
+        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        src_cfg = SimpleNamespace(
+            method="lcmv",
+            fmri_cfg=fmri_cfg,
+            subjects_dir=None,
+            trans_path=None,
+            bem_path=None,
+            parcellation="aparc",
+            spacing="oct6",
+            subject="fsaverage",
+            mindist_mm=5.0,
+            lcmv_reg=0.05,
+            eloreta_loose=0.2,
+            eloreta_depth=0.8,
+            eloreta_snr=3.0,
+        )
+
+        ctx = SimpleNamespace(
+            epochs=_EpochStub(n_epochs, sfreq=100.0),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "connectivity": {
+                            "min_cycles_per_band": 3.0,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("source-connectivity-cycle-guard"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            name="active",
+            frequency_bands={"alpha": (8.0, 12.0)},
+        )
+
+        with (
+            patch.dict(sys.modules, {"mne_connectivity": fake_conn_mod}),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                return_value=src_cfg,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+                return_value=("fwd", "src", None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                return_value=(["stc"] * n_epochs, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+                return_value=roi_data,
+            ),
+            patch(
+                "mne.read_labels_from_annot",
+                return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+            ),
+        ):
+            df, cols = extract_source_connectivity_features(
+                ctx,
+                bands=["alpha"],
+                method="lcmv",
+                connectivity_method="wpli",
+            )
+
+        spectral_connectivity_mock.assert_not_called()
+        self.assertEqual(cols, [])
+        self.assertTrue(df.empty)
 
 
 if __name__ == "__main__":

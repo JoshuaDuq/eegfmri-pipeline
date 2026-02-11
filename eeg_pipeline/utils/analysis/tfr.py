@@ -443,6 +443,7 @@ def compute_tfr_for_subject(
     logger: logging.Logger,
     tfr_computed: Optional[mne.time_frequency.EpochsTFR] = None,
     baseline_window: Optional[Tuple[float, float]] = None,
+    power_bands: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> Tuple[mne.time_frequency.EpochsTFR, pd.DataFrame, List[str], float, float]:
     freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
 
@@ -520,7 +521,8 @@ def compute_tfr_for_subject(
         )
         return tfr, pd.DataFrame(), [], b_start, b_end
 
-    power_bands = get_frequency_bands(config)
+    if power_bands is None:
+        power_bands = get_frequency_bands(config)
 
     tfr_comment = getattr(tfr, "comment", None)
     if isinstance(tfr_comment, str) and "BASELINED:" in tfr_comment:

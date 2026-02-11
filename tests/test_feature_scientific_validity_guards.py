@@ -10,11 +10,16 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.analysis.features.preparation import _determine_frequency_bands
+from eeg_pipeline.analysis.features.phase import (
+    extract_itpc_from_precomputed,
+    extract_pac_from_precomputed,
+    extract_phase_features,
+)
 from eeg_pipeline.analysis.features.source_localization import (
     extract_source_connectivity_features,
     extract_source_localization_features,
 )
-from eeg_pipeline.types import PrecomputedQC, TimeWindows
+from eeg_pipeline.types import BandData, PrecomputedData, PrecomputedQC, TimeWindows
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_subject
 from tests.pipelines_test_utils import DotConfig
 
@@ -48,6 +53,17 @@ class _TFRStub:
 
     def __len__(self):
         return self._n_epochs
+
+
+class _ComplexTFRStub:
+    def __init__(self, data: np.ndarray, times: np.ndarray, freqs: np.ndarray, sfreq: float):
+        self.data = np.asarray(data)
+        self.times = np.asarray(times, dtype=float)
+        self.freqs = np.asarray(freqs, dtype=float)
+        self.info = {
+            "ch_names": [f"C{idx+1}" for idx in range(self.data.shape[1])],
+            "sfreq": float(sfreq),
+        }
 
 
 class TestScientificValidityGuards(unittest.TestCase):
@@ -302,6 +318,223 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertTrue(baseline_df.empty)
         self.assertEqual(baseline_cols, [])
         self.assertFalse(bool(strict_seen["value"]))
+
+    def test_tfr_baseline_uses_override_band_definitions(self):
+        tfr = _TFRStub(n_epochs=2, times=np.linspace(-1.0, 1.0, 101, dtype=float))
+        aligned_events = pd.DataFrame({"trial": [1, 2]})
+        cfg = DotConfig(
+            {
+                "time_frequency_analysis": {
+                    "baseline_window": [-0.5, -0.1],
+                    "strict_baseline_validation": True,
+                }
+            }
+        )
+        override_bands = {
+            "alpha": [9.0, 11.0],
+            "beta": [14.0, 24.0],
+        }
+        seen = {"bands": None}
+
+        def _fake_extract(_tfr_obj, bands, _baseline_idx, _logger):
+            seen["bands"] = dict(bands)
+            return pd.DataFrame(index=np.arange(2)), []
+
+        with patch(
+            "eeg_pipeline.utils.analysis.tfr._extract_baseline_power_features",
+            side_effect=_fake_extract,
+        ), patch(
+            "eeg_pipeline.utils.analysis.tfr.compute_adaptive_n_cycles",
+            side_effect=lambda freqs, **_kwargs: np.ones_like(freqs, dtype=float),
+        ):
+            _tfr_out, _baseline_df, _baseline_cols, _b_start, _b_end = compute_tfr_for_subject(
+                epochs=object(),
+                aligned_events=aligned_events,
+                subject="sub-01",
+                task="task",
+                config=cfg,
+                deriv_root=Path("."),
+                logger=logging.getLogger("tfr-band-override"),
+                tfr_computed=tfr,
+                power_bands=override_bands,
+            )
+
+        self.assertEqual(seen["bands"], override_bands)
+
+    def test_itpc_tfr_skips_short_segments_by_duration(self):
+        n_epochs, n_ch, n_freqs, n_times = 4, 2, 3, 20  # 0.2 s at 100 Hz
+        sfreq = 100.0
+        times = np.arange(n_times, dtype=float) / sfreq
+        freqs = np.array([8.0, 10.0, 12.0], dtype=float)
+        tfr = _ComplexTFRStub(
+            data=np.ones((n_epochs, n_ch, n_freqs, n_times), dtype=np.complex128),
+            times=times,
+            freqs=freqs,
+            sfreq=sfreq,
+        )
+        mask = np.ones((n_times,), dtype=bool)
+        windows = TimeWindows(
+            masks={"active": mask},
+            ranges={"active": (float(times[0]), float(times[-1]))},
+            times=times,
+            name="active",
+        )
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "itpc": {
+                        "method": "global",
+                        "min_segment_sec": 1.0,
+                        "min_cycles_at_fmin": 3.0,
+                    }
+                }
+            }
+        )
+        ctx = SimpleNamespace(
+            config=cfg,
+            epochs=SimpleNamespace(info={"sfreq": sfreq}, times=times),
+            logger=logging.getLogger("itpc-short-segment"),
+            tfr_complex=tfr,
+            train_mask=None,
+            analysis_mode="group_stats",
+            frequency_bands={"alpha": [8.0, 12.0]},
+            spatial_modes=["channels"],
+            windows=windows,
+            name="active",
+            aligned_events=None,
+        )
+
+        df, cols = extract_phase_features(ctx, bands=["alpha"])
+        self.assertTrue(df.empty)
+        self.assertEqual(cols, [])
+
+    def test_itpc_precomputed_skips_short_segments_by_cycles(self):
+        n_epochs, n_ch, n_times = 4, 2, 20  # 0.2 s at 100 Hz
+        sfreq = 100.0
+        times = np.arange(n_times, dtype=float) / sfreq
+        mask = np.ones((n_times,), dtype=bool)
+        windows = TimeWindows(
+            masks={"active": mask},
+            ranges={"active": (float(times[0]), float(times[-1]))},
+            times=times,
+            name="active",
+        )
+        zeros = np.zeros((n_epochs, n_ch, n_times), dtype=float)
+        phase = np.zeros((n_epochs, n_ch, n_times), dtype=float)
+        analytic = np.exp(1j * phase)
+        band = BandData(
+            band="alpha",
+            fmin=8.0,
+            fmax=12.0,
+            filtered=zeros.copy(),
+            analytic=analytic,
+            envelope=np.ones_like(zeros),
+            phase=phase,
+            power=np.ones_like(zeros),
+        )
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "analysis_mode": "group_stats",
+                    "itpc": {
+                        "method": "global",
+                        "min_segment_sec": 0.0,
+                        "min_cycles_at_fmin": 5.0,
+                    },
+                }
+            }
+        )
+        precomputed = PrecomputedData(
+            data=zeros.copy(),
+            times=times,
+            sfreq=sfreq,
+            ch_names=["C1", "C2"],
+            picks=np.arange(n_ch),
+            windows=windows,
+            band_data={"alpha": band},
+            config=cfg,
+            logger=logging.getLogger("itpc-precomputed-short"),
+            frequency_bands={"alpha": [8.0, 12.0]},
+        )
+
+        df, cols = extract_itpc_from_precomputed(precomputed)
+        self.assertTrue(df.empty)
+        self.assertEqual(cols, [])
+
+    def test_pac_precomputed_skips_short_segments(self):
+        n_epochs, n_ch, n_times = 4, 2, 20  # 0.2 s at 100 Hz
+        sfreq = 100.0
+        times = np.arange(n_times, dtype=float) / sfreq
+        mask = np.ones((n_times,), dtype=bool)
+        windows = TimeWindows(
+            masks={"active": mask},
+            ranges={"active": (float(times[0]), float(times[-1]))},
+            times=times,
+            name="active",
+        )
+
+        phase = np.zeros((n_epochs, n_ch, n_times), dtype=float)
+        analytic = np.exp(1j * phase)
+        power = np.ones((n_epochs, n_ch, n_times), dtype=float)
+        filtered = np.zeros((n_epochs, n_ch, n_times), dtype=float)
+
+        theta = BandData(
+            band="theta",
+            fmin=4.0,
+            fmax=8.0,
+            filtered=filtered.copy(),
+            analytic=analytic.copy(),
+            envelope=np.sqrt(power),
+            phase=phase.copy(),
+            power=power.copy(),
+        )
+        gamma = BandData(
+            band="gamma",
+            fmin=30.0,
+            fmax=80.0,
+            filtered=filtered.copy(),
+            analytic=analytic.copy(),
+            envelope=np.sqrt(power),
+            phase=phase.copy(),
+            power=power.copy(),
+        )
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "analysis_mode": "group_stats",
+                    "pac": {
+                        "method": "mvl",
+                        "pairs": [["theta", "gamma"]],
+                        "n_surrogates": 0,
+                        "min_segment_sec": 1.0,
+                        "min_cycles_at_fmin": 3.0,
+                    },
+                },
+                "time_frequency_analysis": {
+                    "bands": {
+                        "theta": [4.0, 8.0],
+                        "gamma": [30.0, 80.0],
+                    }
+                },
+            }
+        )
+        precomputed = PrecomputedData(
+            data=np.zeros((n_epochs, n_ch, n_times), dtype=float),
+            times=times,
+            sfreq=sfreq,
+            ch_names=["C1", "C2"],
+            picks=np.arange(n_ch),
+            windows=windows,
+            band_data={"theta": theta, "gamma": gamma},
+            config=cfg,
+            logger=logging.getLogger("pac-precomputed-short"),
+            spatial_modes=["channels"],
+        )
+
+        df, cols = extract_pac_from_precomputed(precomputed, cfg)
+        self.assertTrue(df.empty)
+        self.assertEqual(cols, [])
 
 
 if __name__ == "__main__":
