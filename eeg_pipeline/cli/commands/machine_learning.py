@@ -483,6 +483,8 @@ def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     _update_fmri_signature_target_config(args, config)
     if args.require_trial_ml_safe:
         config["machine_learning.data.require_trial_ml_safe"] = True
+        # Keep the ML safety gate and analysis mode consistent for this run.
+        config["feature_engineering.analysis_mode"] = "trial_ml_safe"
     
     pipeline_kwargs = _build_pipeline_kwargs(args, config)
     pipeline = MLPipeline(config=config)

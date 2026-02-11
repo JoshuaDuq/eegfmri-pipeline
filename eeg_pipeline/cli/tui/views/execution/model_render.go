@@ -197,18 +197,6 @@ func (m Model) buildCompletionTiles(duration time.Duration) []metricTile {
 		})
 	}
 
-	if len(m.SubjectDurations) > 0 {
-		avgSec := m.averageSubjectDuration().Seconds()
-		if avgSec > 0 {
-			rate := 3600.0 / avgSec
-			rateStr := fmt.Sprintf("%.1f/hr", rate)
-			if rate < 1 {
-				rateStr = fmt.Sprintf("%.0fm ea", avgSec/60)
-			}
-			tiles = append(tiles, metricTile{label: "Rate", value: rateStr, color: styles.Primary})
-		}
-	}
-
 	if m.Status == StatusFailed {
 		tiles = append(tiles, metricTile{
 			label: "Exit",
@@ -517,16 +505,7 @@ func (m Model) renderMetricsDashboard(maxWidth int) string {
 	rows = append(rows, styles.TruncateLine(memLine, maxWidth))
 
 	if len(m.SubjectDurations) > 0 && m.SubjectTotal > 0 {
-		avgSec := m.averageSubjectDuration().Seconds()
-		if avgSec > 0 {
-			rate := 3600.0 / avgSec
-			rateStr := fmt.Sprintf("%.1f subj/hr", rate)
-			if rate < 1 {
-				rateStr = fmt.Sprintf("%.0f min/subj", avgSec/60)
-			}
-			rows = append(rows, styles.TruncateLine("  "+labelStyle.Render("Rate ")+valueStyle.Render(rateStr)+
-				labelStyle.Render("  Done ")+valueStyle.Render(fmt.Sprintf("%d/%d", len(m.SubjectDurations), m.SubjectTotal)), maxWidth))
-		}
+		rows = append(rows, styles.TruncateLine("  "+labelStyle.Render("Done ")+valueStyle.Render(fmt.Sprintf("%d/%d", len(m.SubjectDurations), m.SubjectTotal)), maxWidth))
 	}
 
 	return strings.Join(rows, "\n")
