@@ -836,6 +836,10 @@ def _handle_subjects_mode(
 
     sources = _map_source_to_discovery_sources(args.source)
     policy = _get_discovery_policy(args.source)
+    if args.status and args.output_json:
+        # TUI subject selection should show newly discovered subjects even when
+        # project.subject_list is stale or narrower than on-disk data.
+        policy = "union"
 
     bids_root_override = None
     if args.source == SOURCE_BIDS_FMRI:

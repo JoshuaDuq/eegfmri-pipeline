@@ -903,9 +903,10 @@ type Model struct {
 	roiCursor   int
 
 	// ROI editing state
-	editingROIIdx   int    // Which ROI is being edited (-1 for none)
-	editingROIField int    // 0: name, 1: channels
-	roiEditBuffer   string // Buffer for the value being typed
+	editingROIIdx    int    // Which ROI is being edited (-1 for none)
+	editingROIField  int    // 0: name, 1: channels
+	roiEditBuffer    string // Buffer for the value being typed
+	roiEditCursorPos int    // Caret index within roiEditBuffer (byte offset)
 
 	// Spatial mode selection (for features pipeline)
 	spatialSelected map[int]bool
@@ -3460,6 +3461,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				m.editingROIIdx = -1
 				m.roiEditBuffer = ""
+				m.roiEditCursorPos = 0
 			case "enter":
 				m.commitROIEdit()
 				// Move to next field or exit
@@ -3469,20 +3471,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.editingROIIdx = -1
 					m.roiEditBuffer = ""
+					m.roiEditCursorPos = 0
 				}
 			case "tab":
 				m.commitROIEdit()
 				m.editingROIField = (m.editingROIField + 1) % 2
 				m.initROIEditBuffer()
+			case "left":
+				m.moveROIEditCursorLeft()
+			case "right":
+				m.moveROIEditCursorRight()
 			case "backspace":
-				if len(m.roiEditBuffer) > 0 {
-					m.roiEditBuffer = m.roiEditBuffer[:len(m.roiEditBuffer)-1]
-				}
+				m.backspaceROIEditBuffer()
 			default:
 				char := msg.String()
 				if len(char) == singleCharLength {
 					// Accept alphanumeric and comma for channels
-					m.roiEditBuffer += char
+					m.insertROIEditChar(char)
 				}
 			}
 			return m, nil

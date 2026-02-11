@@ -71,6 +71,7 @@ class FMRIConstraintConfig:
     stats_map_path: Optional[Path]
     provenance: str  # "independent" | "same_dataset" | "unknown"
     require_provenance: bool
+    allow_same_dataset_provenance: bool
     threshold: float
     tail: str  # "pos" or "abs"
     threshold_mode: str  # "z" or "fdr"
@@ -118,6 +119,9 @@ def _load_fmri_constraint_config(
             f"(got '{provenance}')."
         )
     require_provenance = bool(fmri_cfg.get("require_provenance", True))
+    allow_same_dataset_provenance = bool(
+        fmri_cfg.get("allow_same_dataset_provenance", False)
+    )
 
     contrast_cfg = fmri_cfg.get("contrast", {}) or {}
     contrast_enabled = bool(contrast_cfg.get("enabled", False))
@@ -238,6 +242,7 @@ def _load_fmri_constraint_config(
         stats_map_path=stats_map_path,
         provenance=provenance,
         require_provenance=require_provenance,
+        allow_same_dataset_provenance=allow_same_dataset_provenance,
         threshold=threshold,
         tail=tail,
         threshold_mode=threshold_mode,
@@ -928,6 +933,8 @@ def _compute_roi_envelope(
 @dataclass(frozen=True)
 class SourceLocalizationConfig:
     """Source localization configuration parameters."""
+    mode: str
+    allow_template_fallback: bool
     method: str
     spacing: str
     parcellation: str
@@ -952,6 +959,14 @@ def _load_source_localization_config(
     src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
     if not isinstance(src_cfg, dict):
         src_cfg = {}
+
+    mode = str(src_cfg.get("mode", "eeg_only")).strip().lower()
+    if mode not in {"eeg_only", "fmri_informed"}:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.mode must be one of "
+            "{'eeg_only','fmri_informed'} "
+            f"(got '{mode}')."
+        )
 
     method_use = str(src_cfg.get("method", method)).strip().lower()
     if method_use not in {"lcmv", "eloreta"}:
@@ -1002,7 +1017,18 @@ def _load_source_localization_config(
         task=fmri_task,
     )
 
+    allow_template_fallback = bool(
+        src_cfg.get("allow_template_fallback", mode != "fmri_informed")
+    )
+    if mode == "fmri_informed" and not bool(fmri_cfg.enabled):
+        raise ValueError(
+            "feature_engineering.sourcelocalization.mode='fmri_informed' requires "
+            "feature_engineering.sourcelocalization.fmri.enabled=true."
+        )
+
     return SourceLocalizationConfig(
+        mode=mode,
+        allow_template_fallback=allow_template_fallback,
         method=method_use,
         spacing=spacing,
         parcellation=parcellation,
@@ -1022,6 +1048,82 @@ def _load_source_localization_config(
 ###################################################################
 # Main Extraction Functions
 ###################################################################
+
+
+def _normalize_train_mask(
+    train_mask: Optional[np.ndarray],
+    n_epochs: int,
+) -> Optional[np.ndarray]:
+    """Return a boolean train mask aligned to epochs, or None if unavailable/invalid."""
+    if train_mask is None:
+        return None
+    mask = np.asarray(train_mask, dtype=bool).ravel()
+    if mask.size != int(n_epochs):
+        return None
+    return mask
+
+
+def _require_lcmv_train_mask_if_trial_safe(
+    *,
+    analysis_mode: str,
+    method: str,
+    train_mask: Optional[np.ndarray],
+    n_epochs: int,
+    context_name: str,
+) -> Optional[np.ndarray]:
+    """Enforce leak-safe train-mask requirements for LCMV in trial_ml_safe mode."""
+    mask = _normalize_train_mask(train_mask, n_epochs)
+    method_l = str(method or "").strip().lower()
+    mode_l = str(analysis_mode or "").strip().lower()
+    if mode_l != "trial_ml_safe" or method_l != "lcmv":
+        return mask
+
+    if mask is None:
+        raise ValueError(
+            f"{context_name}: trial_ml_safe + LCMV requires a valid train_mask aligned to epochs. "
+            "Without train-only covariance fitting, cross-trial leakage can bias results."
+        )
+    n_train = int(np.sum(mask))
+    if n_train < 2:
+        raise ValueError(
+            f"{context_name}: trial_ml_safe + LCMV requires at least 2 training epochs in train_mask "
+            f"(got {n_train})."
+        )
+    return mask
+
+
+def _enforce_fmri_provenance_policy(
+    fmri_cfg: FMRIConstraintConfig,
+    logger: logging.Logger,
+    context_name: str,
+) -> None:
+    """Validate provenance constraints for fMRI-informed source features."""
+    if not bool(fmri_cfg.enabled):
+        return
+
+    if bool(fmri_cfg.require_provenance) and str(fmri_cfg.provenance) == "unknown":
+        raise ValueError(
+            f"{context_name}: fMRI constraint enabled but fmri.provenance is unknown. "
+            "Set feature_engineering.sourcelocalization.fmri.provenance to "
+            "'independent' (recommended) or 'same_dataset' with explicit override."
+        )
+
+    if str(fmri_cfg.provenance) != "same_dataset":
+        return
+
+    allow_same_dataset = bool(getattr(fmri_cfg, "allow_same_dataset_provenance", False))
+    if not allow_same_dataset:
+        raise ValueError(
+            f"{context_name}: fmri.provenance='same_dataset' is blocked by default due circularity risk. "
+            "To proceed intentionally, set "
+            "feature_engineering.sourcelocalization.fmri.allow_same_dataset_provenance=true."
+        )
+
+    logger.warning(
+        "%s: using fmri.provenance='same_dataset' with explicit override. "
+        "Interpret downstream EEG-vs-condition analyses cautiously due double-dipping risk.",
+        context_name,
+    )
 
 
 def extract_source_localization_features(
@@ -1060,33 +1162,26 @@ def extract_source_localization_features(
     config = ctx.config
     logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
     analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
-    train_mask = getattr(ctx, "train_mask", None)
-    epochs_fit = None
-    if analysis_mode == "trial_ml_safe" and train_mask is not None:
-        train_mask = np.asarray(train_mask, dtype=bool).ravel()
-        if train_mask.size == len(epochs) and np.any(train_mask):
-            epochs_fit = epochs[train_mask]
+    train_mask_raw = getattr(ctx, "train_mask", None)
 
     src_cfg = _load_source_localization_config(ctx, config, method)
     fmri_cfg = src_cfg.fmri_cfg
 
-    if fmri_cfg.enabled:
-        if fmri_cfg.require_provenance and fmri_cfg.provenance == "unknown":
-            raise ValueError(
-                "Source localization: fMRI constraint enabled but fmri.provenance is unknown. "
-                "Set feature_engineering.sourcelocalization.fmri.provenance to "
-                "'independent' (recommended) or 'same_dataset' (circularity risk)."
-            )
-        if fmri_cfg.provenance == "same_dataset":
-            logger.warning(
-                "Source localization: fMRI constraint provenance is 'same_dataset'. "
-                "This can create circularity/double-dipping if you test EEG features against the same labels/conditions."
-            )
+    _enforce_fmri_provenance_policy(fmri_cfg, logger, "Source localization")
 
     n_epochs = len(epochs)
     if n_epochs < 2:
         logger.warning("Source localization requires at least 2 epochs")
         return pd.DataFrame(), []
+
+    train_mask = _require_lcmv_train_mask_if_trial_safe(
+        analysis_mode=analysis_mode,
+        method=src_cfg.method,
+        train_mask=train_mask_raw,
+        n_epochs=n_epochs,
+        context_name="Source localization",
+    )
+    epochs_fit = epochs[train_mask] if train_mask is not None and src_cfg.method == "lcmv" else None
 
     sfreq = epochs.info["sfreq"]
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
@@ -1178,6 +1273,12 @@ def extract_source_localization_features(
                 verbose=False,
             )
         else:
+            if not bool(getattr(src_cfg, "allow_template_fallback", True)):
+                raise ValueError(
+                    "Source localization template fallback is disabled "
+                    "(feature_engineering.sourcelocalization.allow_template_fallback=false). "
+                    "Provide subject-specific sources via sourcelocalization.subjects_dir, subject, trans, and bem."
+                )
             fwd, src, _ = _setup_forward_model(epochs.info, logger=logger)
             logger.warning(
                 "Source localization: using fsaverage/template forward model fallback. "
@@ -1309,31 +1410,25 @@ def extract_source_connectivity_features(
     config = getattr(ctx, "config", None)
     logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
     analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
-    train_mask = getattr(ctx, "train_mask", None)
-    train_mask = np.asarray(train_mask, dtype=bool).ravel() if train_mask is not None else None
-    if train_mask is not None and train_mask.size != len(epochs):
-        train_mask = None
+    train_mask_raw = getattr(ctx, "train_mask", None)
 
     src_cfg = _load_source_localization_config(ctx, config, method)
     fmri_cfg = src_cfg.fmri_cfg
 
-    if fmri_cfg.enabled:
-        if fmri_cfg.require_provenance and fmri_cfg.provenance == "unknown":
-            raise ValueError(
-                "Source connectivity: fMRI constraint enabled but fmri.provenance is unknown. "
-                "Set feature_engineering.sourcelocalization.fmri.provenance to "
-                "'independent' (recommended) or 'same_dataset' (circularity risk)."
-            )
-        if fmri_cfg.provenance == "same_dataset":
-            logger.warning(
-                "Source connectivity: fMRI constraint provenance is 'same_dataset'. "
-                "This can create circularity/double-dipping if you test EEG features against the same labels/conditions."
-            )
+    _enforce_fmri_provenance_policy(fmri_cfg, logger, "Source connectivity")
 
     n_epochs = len(epochs)
     if n_epochs < 2:
         logger.warning("Source connectivity requires at least 2 epochs")
         return pd.DataFrame(), []
+
+    train_mask = _require_lcmv_train_mask_if_trial_safe(
+        analysis_mode=analysis_mode,
+        method=src_cfg.method,
+        train_mask=train_mask_raw,
+        n_epochs=n_epochs,
+        context_name="Source connectivity",
+    )
     
     sfreq = epochs.info["sfreq"]
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
@@ -1397,6 +1492,12 @@ def extract_source_connectivity_features(
                 verbose=False,
             )
         else:
+            if not bool(getattr(src_cfg, "allow_template_fallback", True)):
+                raise ValueError(
+                    "Source connectivity template fallback is disabled "
+                    "(feature_engineering.sourcelocalization.allow_template_fallback=false). "
+                    "Provide subject-specific sources via sourcelocalization.subjects_dir, subject, trans, and bem."
+                )
             fwd, src, _ = _setup_forward_model(epochs.info, logger=logger)
             logger.warning(
                 "Source connectivity: using fsaverage/template forward model fallback. "
@@ -1495,6 +1596,10 @@ def extract_source_connectivity_features(
                 )
                 continue
 
+            edge_indices = np.triu_indices(n_rois, k=1)
+            if edge_indices[0].size < 1:
+                continue
+
             con = spectral_connectivity_epochs(
                 roi_data_fit,
                 method=connectivity_method.lower(),
@@ -1503,20 +1608,23 @@ def extract_source_connectivity_features(
                 fmin=fmin,
                 fmax=fmax,
                 faverage=True,
+                indices=edge_indices,
                 n_jobs=n_jobs,
                 verbose=False,
             )
-            
-            con_data = con.get_data()
-            
+
+            con_data = np.asarray(con.get_data(), dtype=float)
+            if con_data.ndim >= 3 and con_data.shape[0] == n_rois and con_data.shape[1] == n_rois:
+                edge_values = con_data[:, :, 0][edge_indices]
+            elif con_data.ndim == 2:
+                edge_values = con_data[:, 0]
+            elif con_data.ndim == 1:
+                edge_values = con_data
+            else:
+                edge_values = np.ravel(con_data)
+            mean_conn = float(np.nanmean(edge_values)) if edge_values.size else np.nan
+
             for epoch_idx in range(n_epochs):
-                if con_data.ndim == 3:
-                    epoch_con = con_data[epoch_idx, :, 0]
-                else:
-                    epoch_con = con_data[:, 0]
-                
-                mean_conn = np.nanmean(epoch_con)
-                
                 col_name = f"src_{src_cfg.method}_{band}_{connectivity_method}_global"
                 if col_name not in feature_cols:
                     feature_cols.append(col_name)

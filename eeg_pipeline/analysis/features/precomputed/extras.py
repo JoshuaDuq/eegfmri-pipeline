@@ -87,11 +87,27 @@ def _get_psd_config(config: Any, sfreq: float) -> Dict[str, Any]:
     )
     
     exclude_line = bool(get_config_value(config, "feature_engineering.spectral.exclude_line_noise", True))
-    line_freqs_raw = get_config_value(config, "feature_engineering.spectral.line_noise_freqs", [50.0])
+
+    default_line_freq = get_config_value(config, "preprocessing.line_freq", 50.0)
     try:
-        line_freqs = [float(f) for f in line_freqs_raw] if isinstance(line_freqs_raw, (list, tuple)) else [50.0]
+        default_line_freq = float(default_line_freq)
+        if not (np.isfinite(default_line_freq) and default_line_freq > 0):
+            default_line_freq = 50.0
+    except (TypeError, ValueError):
+        default_line_freq = 50.0
+
+    line_freqs_raw = get_config_value(
+        config,
+        "feature_engineering.spectral.line_noise_freqs",
+        [default_line_freq],
+    )
+    try:
+        if isinstance(line_freqs_raw, (list, tuple)):
+            line_freqs = [float(f) for f in line_freqs_raw]
+        else:
+            line_freqs = [default_line_freq]
     except (ValueError, TypeError):
-        line_freqs = [50.0]
+        line_freqs = [default_line_freq]
     
     line_width = float(get_config_value(config, "feature_engineering.spectral.line_noise_width_hz", 1.0))
     n_harm = int(get_config_value(config, "feature_engineering.spectral.line_noise_harmonics", 3))

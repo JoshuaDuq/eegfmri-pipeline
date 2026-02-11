@@ -181,10 +181,48 @@ def _compute_auc(
     data: np.ndarray,
     times: np.ndarray,
 ) -> np.ndarray:
-    has_finite = np.isfinite(data).any(axis=2)
-    auc_vals = np.trapz(np.nan_to_num(data, nan=0.0), times, axis=2)
-    auc_vals[~has_finite] = np.nan
+    n_epochs, n_series, _ = data.shape
+    auc_vals = np.full((n_epochs, n_series), np.nan, dtype=float)
+
+    for epoch_idx in range(n_epochs):
+        for series_idx in range(n_series):
+            trace = np.asarray(data[epoch_idx, series_idx], dtype=float)
+            valid = np.isfinite(trace) & np.isfinite(times)
+            if not np.any(valid):
+                continue
+
+            valid_indices = np.flatnonzero(valid)
+            if valid_indices.size < 2:
+                continue
+
+            split_points = np.where(np.diff(valid_indices) > 1)[0] + 1
+            contiguous_runs = np.split(valid_indices, split_points)
+
+            total_auc = 0.0
+            has_segment = False
+            for run in contiguous_runs:
+                if run.size < 2:
+                    continue
+                has_segment = True
+                total_auc += float(np.trapz(trace[run], times[run]))
+
+            if has_segment:
+                auc_vals[epoch_idx, series_idx] = total_auc
+
     return auc_vals
+
+
+def _compute_peak_pair_metrics(
+    *,
+    neg_vals: np.ndarray,
+    pos_vals: np.ndarray,
+    neg_times: np.ndarray,
+    pos_times: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute peak-pair metrics from negative/positive component peaks."""
+    ptp_vals = np.abs(pos_vals - neg_vals)
+    latency_diff = pos_times - neg_times
+    return ptp_vals, latency_diff
 
 
 def _append_series_features(
@@ -707,8 +745,12 @@ def extract_erp_features(
                 continue
 
             pair_label = f"{neg_segment}{pos_segment}".replace("_", "")
-            ptp_vals = pos_vals - neg_vals
-            latency_diff = pos_times - neg_times
+            ptp_vals, latency_diff = _compute_peak_pair_metrics(
+                neg_vals=neg_vals,
+                pos_vals=pos_vals,
+                neg_times=neg_times,
+                pos_times=pos_times,
+            )
             channel_names = pos_names if scope != "global" else ["global"]
             
             _append_peak_pair_features(

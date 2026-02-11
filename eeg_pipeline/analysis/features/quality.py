@@ -42,7 +42,16 @@ def _extract_quality_config(config: Any) -> Dict[str, Any]:
     """Extract quality feature configuration from config object."""
     if config is None or not hasattr(config, "get"):
         return {}
-    return config.get("feature_engineering.quality", {})
+    quality_cfg = dict(config.get("feature_engineering.quality", {}) or {})
+    if "line_noise_freqs" not in quality_cfg:
+        line_freq = config.get("preprocessing.line_freq", DEFAULT_LINE_NOISE_FREQ)
+        try:
+            line_freq = float(line_freq)
+            if np.isfinite(line_freq) and line_freq > 0:
+                quality_cfg["line_noise_freqs"] = [line_freq]
+        except (TypeError, ValueError):
+            pass
+    return quality_cfg
 
 
 def _get_psd_method(config: Dict[str, Any]) -> str:

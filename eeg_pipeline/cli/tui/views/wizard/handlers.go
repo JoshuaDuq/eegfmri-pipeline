@@ -1244,6 +1244,7 @@ func (m *Model) initROIEditBuffer() {
 	case 1:
 		m.roiEditBuffer = roi.Channels
 	}
+	m.roiEditCursorPos = len(m.roiEditBuffer)
 }
 
 // commitROIEdit commits the current edit buffer to the ROI field
@@ -1264,6 +1265,49 @@ func (m *Model) commitROIEdit() {
 			m.rois[m.editingROIIdx].Channels = m.roiEditBuffer
 		}
 	}
+}
+
+func (m *Model) moveROIEditCursorLeft() {
+	if m.roiEditCursorPos > 0 {
+		m.roiEditCursorPos--
+	}
+}
+
+func (m *Model) moveROIEditCursorRight() {
+	if m.roiEditCursorPos < len(m.roiEditBuffer) {
+		m.roiEditCursorPos++
+	}
+}
+
+func (m *Model) backspaceROIEditBuffer() {
+	if m.roiEditCursorPos <= 0 || len(m.roiEditBuffer) == 0 {
+		return
+	}
+	before := m.roiEditBuffer[:m.roiEditCursorPos-1]
+	after := m.roiEditBuffer[m.roiEditCursorPos:]
+	m.roiEditBuffer = before + after
+	m.roiEditCursorPos--
+}
+
+func (m *Model) insertROIEditChar(char string) {
+	if len(char) == 0 {
+		return
+	}
+	before := m.roiEditBuffer[:m.roiEditCursorPos]
+	after := m.roiEditBuffer[m.roiEditCursorPos:]
+	m.roiEditBuffer = before + char + after
+	m.roiEditCursorPos += len(char)
+}
+
+func (m Model) roiEditDisplayValue() string {
+	cursor := m.roiEditCursorPos
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(m.roiEditBuffer) {
+		cursor = len(m.roiEditBuffer)
+	}
+	return m.roiEditBuffer[:cursor] + "\u258c" + m.roiEditBuffer[cursor:]
 }
 
 // startROIEdit starts editing the current ROI's channels

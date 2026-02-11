@@ -10,6 +10,7 @@ from unittest.mock import patch
 import numpy as np
 
 from eeg_pipeline.analysis.features.source_localization import (
+    _load_source_localization_config,
     extract_source_connectivity_features,
 )
 from tests.pipelines_test_utils import DotConfig
@@ -49,10 +50,11 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         train_mask = np.array([True, True, False, False], dtype=bool)
         roi_data = np.random.default_rng(3).standard_normal((n_epochs, 2, 80))
 
-        captured = {"n_epochs_fit": None}
+        captured = {"n_epochs_fit": None, "indices": None}
 
         def _fake_spectral_connectivity_epochs(data, **_kwargs):
             captured["n_epochs_fit"] = int(np.asarray(data).shape[0])
+            captured["indices"] = _kwargs.get("indices")
             return _FakeCon(np.array([[0.5]], dtype=float))
 
         fake_conn_mod = types.ModuleType("mne_connectivity")
@@ -119,9 +121,33 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         self.assertTrue(cols)
         self.assertEqual(len(df), n_epochs)
         self.assertEqual(captured["n_epochs_fit"], int(np.sum(train_mask)))
+        self.assertIsNotNone(captured["indices"])
+        row_idx, col_idx = captured["indices"]
+        np.testing.assert_array_equal(row_idx, np.array([0], dtype=int))
+        np.testing.assert_array_equal(col_idx, np.array([1], dtype=int))
         self.assertEqual(df.attrs.get("feature_granularity"), "subject")
         self.assertIn("broadcast_warning", df.attrs)
         self.assertTrue(bool(df.attrs.get("threshold_train_mask_used")))
+        self.assertAlmostEqual(float(df["src_lcmv_alpha_wpli_global"].iloc[0]), 0.5, places=7)
+
+    def test_fmri_informed_mode_requires_enabled_fmri_constraint(self):
+        ctx = SimpleNamespace(subject="0001")
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "mode": "fmri_informed",
+                        "fmri": {"enabled": False, "provenance": "independent"},
+                    }
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "fmri_informed",
+        ):
+            _load_source_localization_config(ctx, config, method="lcmv")
 
 
 if __name__ == "__main__":

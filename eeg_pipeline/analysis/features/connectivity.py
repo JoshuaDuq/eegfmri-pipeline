@@ -1102,6 +1102,7 @@ def extract_connectivity_features(
             windows_spec=ctx.windows,
             feature_family="connectivity",
             train_mask=getattr(ctx, "train_mask", None),
+            analysis_mode=getattr(ctx, "analysis_mode", None),
         )
         setter = getattr(ctx, "set_precomputed_for_family", None)
         if callable(setter):
@@ -2253,12 +2254,10 @@ def _compute_psi_imaginary(
                 )
                 coherency = csd_ij / norm
                 
-                imag_coh = np.imag(coherency)
-                
-                psi_sum = 0.0
-                for f_idx in range(n_freqs - 1):
-                    psi_sum += imag_coh[f_idx] * np.conj(coherency[f_idx + 1])
-                
+                # Standard PSI definition uses adjacent-frequency coherency products:
+                #   PSI = Im( sum_f conj(C(f)) * C(f+1) )
+                # Constant phase-lag across frequency should produce ~0 PSI.
+                psi_sum = np.sum(np.conj(coherency[:-1]) * coherency[1:])
                 psi[ep_idx, i, j] = np.imag(psi_sum)
     
     return psi
@@ -2842,6 +2841,7 @@ def extract_directed_connectivity_features(
             windows_spec=ctx.windows,
             feature_family="directedconnectivity",
             train_mask=getattr(ctx, "train_mask", None),
+            analysis_mode=getattr(ctx, "analysis_mode", None),
         )
         setter = getattr(ctx, "set_precomputed_for_family", None)
         if callable(setter):

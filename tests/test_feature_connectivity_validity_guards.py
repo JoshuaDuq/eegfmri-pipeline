@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.analysis.features.connectivity import (
+    _compute_psi_imaginary,
     extract_connectivity_features,
     extract_directed_connectivity_features,
 )
@@ -78,6 +79,22 @@ def _make_precomputed(*, transform: str, family: str) -> PrecomputedData:
 
 
 class TestConnectivityValidityGuards(unittest.TestCase):
+    def test_psi_is_zero_for_constant_phase_lag(self):
+        """PSI should be ~0 when coherency phase is constant across frequency."""
+        csd = np.zeros((1, 2, 2, 3), dtype=complex)
+
+        # Auto-spectra (normalization denominator).
+        csd[0, 0, 0, :] = 1.0 + 0.0j
+        csd[0, 1, 1, :] = 1.0 + 0.0j
+
+        # Cross-spectrum with constant imaginary coherency (no phase slope).
+        csd[0, 0, 1, :] = 1.0j
+        csd[0, 1, 0, :] = -1.0j
+
+        psi = _compute_psi_imaginary(csd)
+        self.assertEqual(psi.shape, (1, 2, 2))
+        self.assertAlmostEqual(float(psi[0, 0, 1]), 0.0, places=7)
+
     def test_connectivity_recomputes_incompatible_precomputed(self):
         config = DotConfig(
             {

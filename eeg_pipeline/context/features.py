@@ -22,7 +22,14 @@ ANALYSIS_MODE_TRIAL_ML_SAFE = "trial_ml_safe"
 ANALYSIS_MODE_GROUP_STATS = "group_stats"
 VALID_ANALYSIS_MODES = {ANALYSIS_MODE_TRIAL_ML_SAFE, ANALYSIS_MODE_GROUP_STATS}
 
-CROSS_TRIAL_FEATURES = {"itpc", "connectivity", "bursts", "microstates", "aperiodic_evoked"}
+CROSS_TRIAL_FEATURES = {
+    "itpc",
+    "connectivity",
+    "bursts",
+    "microstates",
+    "aperiodic_evoked",
+    "sourcelocalization",
+}
 
 
 @dataclass

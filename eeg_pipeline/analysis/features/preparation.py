@@ -701,6 +701,7 @@ def precompute_data(
     frequency_bands_override: Any = None,
     feature_family: Optional[str] = None,
     train_mask: Optional[np.ndarray] = None,
+    analysis_mode: Optional[str] = None,
 ) -> PrecomputedData:
     """
     Precompute all intermediate data needed by feature extraction modules.
@@ -728,6 +729,9 @@ def precompute_data(
     feature_family : str, optional
         Feature family name (e.g., 'connectivity', 'power') for per-family
         spatial transform selection. If None, uses global setting.
+    analysis_mode : str, optional
+        Analysis mode override (e.g., 'trial_ml_safe'). If omitted, uses
+        feature_engineering.analysis_mode from config when available.
         
     Returns
     -------
@@ -806,6 +810,10 @@ def precompute_data(
     precomputed.gfp = gfp
     precomputed.qc.gfp = gfp_qc
     
+    mode = str(analysis_mode or "").strip().lower()
+    if not mode and hasattr(config, "get"):
+        mode = str(config.get("feature_engineering.analysis_mode", "") or "").strip().lower()
+
     frequency_bands = _determine_frequency_bands(
         config,
         frequency_bands_override,
@@ -815,6 +823,8 @@ def precompute_data(
         precomputed.windows,
         precomputed.qc,
         logger,
+        train_mask=train_mask,
+        analysis_mode=mode,
     )
     precomputed.frequency_bands = frequency_bands
     
@@ -863,6 +873,9 @@ def _determine_frequency_bands(
     windows: Optional[TimeWindows],
     qc: PrecomputedQC,
     logger: Any,
+    *,
+    train_mask: Optional[np.ndarray] = None,
+    analysis_mode: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Determine frequency band definitions, optionally using IAF estimation.
@@ -881,8 +894,38 @@ def _determine_frequency_bands(
         return frequency_bands if frequency_bands else None
     
     baseline_mask = getattr(windows, "baseline_mask", None)
+    n_epochs = int(data.shape[0]) if hasattr(data, "shape") and len(data.shape) >= 1 else 0
+    resolved_mask = None
+    if train_mask is not None:
+        candidate = np.asarray(train_mask, dtype=bool).ravel()
+        if candidate.size == n_epochs:
+            resolved_mask = candidate
+        elif logger:
+            logger.warning(
+                "IAF estimation: ignoring train_mask with mismatched length (%d != %d).",
+                int(candidate.size),
+                int(n_epochs),
+            )
+
+    mode = str(analysis_mode or "").strip().lower()
+    if mode == "trial_ml_safe":
+        if resolved_mask is None:
+            raise ValueError(
+                "IAF estimation in trial_ml_safe mode requires a valid train_mask "
+                "aligned to epochs. Provide train_mask or disable feature_engineering.bands.use_iaf."
+            )
+        if not np.any(resolved_mask):
+            raise ValueError(
+                "IAF estimation in trial_ml_safe mode requires at least one training epoch "
+                "in train_mask."
+            )
+
+    iaf_data = data
+    if resolved_mask is not None and np.any(resolved_mask):
+        iaf_data = data[resolved_mask]
+
     iaf = _estimate_individual_alpha_frequency(
-        data,
+        iaf_data,
         sfreq,
         ch_names,
         baseline_mask,

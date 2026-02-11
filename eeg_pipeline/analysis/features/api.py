@@ -207,6 +207,7 @@ def _prepare_precomputed_data(
         frequency_bands_override=getattr(ctx, "frequency_bands", None),
         feature_family="spectral",
         train_mask=getattr(ctx, "train_mask", None),
+        analysis_mode=getattr(ctx, "analysis_mode", None),
     )
     precomputed_data.evoked_subtracted = bool(precomputed_evoked_subtracted)
     precomputed_data.evoked_subtracted_conditionwise = bool(precomputed_evoked_subtracted_conditionwise)
@@ -534,6 +535,7 @@ def _extract_pac_features(
                 windows_spec=ctx.windows,
                 feature_family="pac",
                 train_mask=getattr(ctx, "train_mask", None),
+                analysis_mode=getattr(ctx, "analysis_mode", None),
             )
             setter = getattr(ctx, "set_precomputed_for_family", None)
             if callable(setter):
@@ -1333,16 +1335,20 @@ def extract_precomputed_features(
     if "microstates" in feature_groups:
         from types import SimpleNamespace
 
+        precomputed_windows = getattr(precomputed, "windows", None)
+        precomputed_window_name = getattr(precomputed_windows, "name", None)
         micro_df, micro_cols = extract_microstate_features(
             SimpleNamespace(
                 epochs=epochs,
-                windows=None,
-                name=None,
+                windows=precomputed_windows,
+                name=precomputed_window_name,
                 config=config,
                 logger=logger,
-                fixed_templates=None,
-                fixed_template_ch_names=None,
-                fixed_template_labels=None,
+                explicit_windows=getattr(precomputed, "explicit_windows", None),
+                train_mask=getattr(precomputed, "train_mask", None),
+                fixed_templates=getattr(precomputed, "fixed_templates", None),
+                fixed_template_ch_names=getattr(precomputed, "fixed_template_ch_names", None),
+                fixed_template_labels=getattr(precomputed, "fixed_template_labels", None),
             )
         )
         if micro_df is not None and not micro_df.empty:

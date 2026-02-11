@@ -446,7 +446,7 @@ feature_engineering:
   # FreeSurfer subject (typically `mri/orig.mgz` space).
   #
   sourcelocalization:
-    mode: "fmri_informed"               # "eeg_only" (template-based) or "fmri_informed" (subject-specific)
+    mode: "eeg_only"                    # "eeg_only" (template-based) or "fmri_informed" (subject-specific)
     method: "lcmv"                 # "lcmv" or "eloreta"
     spacing: "oct6"                # "oct5" | "oct6" | "ico4" | "ico5"
     parcellation: "aparc"          # "aparc" | "aparc.a2009s" | "HCPMMP1"

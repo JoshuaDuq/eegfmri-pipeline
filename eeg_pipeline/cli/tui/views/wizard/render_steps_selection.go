@@ -290,7 +290,7 @@ func (m Model) renderROISelection() string {
 	b.WriteString(styles.RenderStatusCount(count, len(m.rois), "selected"))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
-		Render("  Space: toggle  E: edit  +: add  D: delete") + "\n\n")
+		Render("  Space: toggle  E: edit  Left/Right: move caret  +: add  D: delete") + "\n\n")
 
 	for i, roi := range m.rois {
 		isSelected := m.roiSelected[i]
@@ -307,7 +307,7 @@ func (m Model) renderROISelection() string {
 		}
 		var nameDisplay string
 		if isEditing && m.editingROIField == 0 {
-			nameDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditBuffer + "\u258c")
+			nameDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditDisplayValue())
 		} else {
 			nameDisplay = nameStyle.Render(roi.Name)
 		}
@@ -317,7 +317,7 @@ func (m Model) renderROISelection() string {
 		}
 		var channelsDisplay string
 		if isEditing && m.editingROIField == 1 {
-			channelsDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditBuffer + "\u258c")
+			channelsDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditDisplayValue())
 		} else {
 			channelsDisplay = m.renderChannelsWithUnavailable(roi.Channels, channelStyle, isFocused)
 		}

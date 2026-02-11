@@ -523,8 +523,18 @@ def _parse_line_noise_config(config: Any) -> LineNoiseConfig:
     aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
     
     exclude = bool(aperiodic_cfg.get("exclude_line_noise", True))
-    
-    line_freqs_raw = aperiodic_cfg.get("line_noise_freqs", [_DEFAULT_LINE_FREQ])
+
+    default_line_freq = _DEFAULT_LINE_FREQ
+    if hasattr(config, "get"):
+        try:
+            line_freq_cfg = config.get("preprocessing.line_freq", _DEFAULT_LINE_FREQ)
+            line_freq_val = float(line_freq_cfg)
+            if np.isfinite(line_freq_val) and line_freq_val > 0:
+                default_line_freq = line_freq_val
+        except (TypeError, ValueError):
+            pass
+
+    line_freqs_raw = aperiodic_cfg.get("line_noise_freqs", [default_line_freq])
     if line_freqs_raw is None:
         line_freqs_raw = []
     if not isinstance(line_freqs_raw, (list, tuple)):

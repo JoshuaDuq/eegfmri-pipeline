@@ -470,7 +470,14 @@ def compute_tfr_for_subject(
         tfr_baseline_raw = tuple(baseline_window)
     else:
         tfr_baseline_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
-    tfr_baseline = validate_baseline_window_pre_stimulus(tfr_baseline_raw, logger=logger)
+    strict_baseline_validation = bool(
+        tfr_analysis.get("strict_baseline_validation", True)
+    )
+    tfr_baseline = validate_baseline_window_pre_stimulus(
+        tfr_baseline_raw,
+        logger=logger,
+        strict=strict_baseline_validation,
+    )
     min_baseline_samples = _get_min_baseline_samples(config)
     
     b_start, b_end = tfr_baseline

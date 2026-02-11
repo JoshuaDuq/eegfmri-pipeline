@@ -71,6 +71,33 @@ from eeg_pipeline.types import PrecomputedData
 ###################################################################
 
 
+def _resolve_line_noise_freqs(
+    cfg: Dict[str, Any],
+    config: Any,
+) -> List[float]:
+    """Resolve line-noise fundamentals with fallback to preprocessing.line_freq."""
+    line_freqs_raw = cfg.get("line_noise_freqs", None)
+    if line_freqs_raw is None and hasattr(config, "get"):
+        line_freqs_raw = [config.get("preprocessing.line_freq", 50.0)]
+    elif line_freqs_raw is None:
+        line_freqs_raw = [50.0]
+
+    if not isinstance(line_freqs_raw, (list, tuple)):
+        line_freqs_raw = [line_freqs_raw]
+
+    line_freqs: List[float] = []
+    for value in line_freqs_raw:
+        if value is None:
+            continue
+        try:
+            freq = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(freq) and freq > 0:
+            line_freqs.append(freq)
+    return line_freqs
+
+
 def _extract_tfr_components(tfr: Any) -> Tuple[Any, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[List[str]]]:
     """Extract TFR object and its core components.
     
@@ -506,14 +533,7 @@ def extract_power_features(
         power_cfg.get("exclude_line_noise", spectral_cfg.get("exclude_line_noise", False))
     )
     line_freqs_raw = power_cfg.get("line_noise_freqs", spectral_cfg.get("line_noise_freqs", None))
-    if line_freqs_raw is None:
-        line_freqs_raw = []
-    if not isinstance(line_freqs_raw, (list, tuple)):
-        line_freqs_raw = [line_freqs_raw]
-    try:
-        line_freqs = [float(x) for x in line_freqs_raw if x is not None]
-    except (TypeError, ValueError):
-        line_freqs = []
+    line_freqs = _resolve_line_noise_freqs({"line_noise_freqs": line_freqs_raw}, ctx.config)
     line_width = float(power_cfg.get("line_noise_width_hz", spectral_cfg.get("line_noise_width_hz", 1.0)))
     n_harmonics = int(power_cfg.get("line_noise_harmonics", spectral_cfg.get("line_noise_harmonics", 3)))
 
@@ -1484,15 +1504,7 @@ def extract_spectral_features(
     multitaper_adaptive = bool(spec_cfg.get("multitaper_adaptive", spec_cfg.get("psd_adaptive", False)))
 
     exclude_line = bool(spec_cfg.get("exclude_line_noise", True))
-    line_freqs = spec_cfg.get("line_noise_freqs", [50.0])
-    if line_freqs is None:
-        line_freqs = []
-    if not isinstance(line_freqs, (list, tuple)):
-        raise TypeError(
-            "feature_engineering.spectral.line_noise_freqs must be a list/tuple of numbers "
-            f"(got {type(line_freqs).__name__})."
-        )
-    line_freqs = [float(f) for f in line_freqs]
+    line_freqs = _resolve_line_noise_freqs(spec_cfg, config)
     line_width = float(spec_cfg.get("line_noise_width_hz", 1.0))
     n_harm = int(spec_cfg.get("line_noise_harmonics", 3))
     

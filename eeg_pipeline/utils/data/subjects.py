@@ -11,6 +11,68 @@ from eeg_pipeline.infra.paths import find_clean_epochs_path, resolve_deriv_root
 EEGConfig = ConfigDict
 
 
+def _normalize_subject_id(subject: Any) -> Optional[str]:
+    """Normalize a subject label to an ID without the ``sub-`` prefix."""
+    if subject is None:
+        return None
+
+    subject_id = str(subject).strip()
+    if not subject_id or subject_id.lower() in {"none", "null"}:
+        return None
+
+    if subject_id.startswith("sub-"):
+        subject_id = subject_id[4:]
+
+    return subject_id or None
+
+
+def _subject_match_key(subject_id: str) -> str:
+    """Build a stable comparison key for subject matching across sources."""
+    if subject_id.isdigit():
+        try:
+            return str(int(subject_id))
+        except ValueError:
+            return subject_id
+    return subject_id
+
+
+def _normalize_subject_list(subjects: Any) -> List[str]:
+    """Normalize config/user subject values into a clean, deduplicated list."""
+    if subjects is None:
+        return []
+
+    if isinstance(subjects, (str, int, float)):
+        subjects = [subjects]
+
+    normalized: List[str] = []
+    seen_keys: set[str] = set()
+
+    for raw in subjects:
+        subject_id = _normalize_subject_id(raw)
+        if subject_id is None:
+            continue
+        key = _subject_match_key(subject_id)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        normalized.append(subject_id)
+
+    return normalized
+
+
+def _subject_key_to_preferred_id(subjects: List[str]) -> Dict[str, str]:
+    """Map normalized subject comparison keys to a preferred display ID."""
+    mapping: Dict[str, str] = {}
+    for raw in subjects:
+        subject_id = _normalize_subject_id(raw)
+        if subject_id is None:
+            continue
+        key = _subject_match_key(subject_id)
+        if key not in mapping:
+            mapping[key] = subject_id
+    return mapping
+
+
 def _collect_subjects_from_bids(bids_root: Path) -> List[str]:
     """Collect all subjects from a BIDS directory."""
     if not bids_root.exists():
@@ -19,8 +81,10 @@ def _collect_subjects_from_bids(bids_root: Path) -> List[str]:
     subjects = []
     for sub_dir in sorted(bids_root.glob("sub-*")):
         if sub_dir.is_dir():
-            subjects.append(sub_dir.name[4:])
-    return subjects
+            subject_id = _normalize_subject_id(sub_dir.name)
+            if subject_id is not None:
+                subjects.append(subject_id)
+    return sorted(_subject_key_to_preferred_id(subjects).values())
 
 
 def _collect_subjects_from_source_data(source_root: Path) -> List[str]:
@@ -34,11 +98,10 @@ def _collect_subjects_from_source_data(source_root: Path) -> List[str]:
             continue
         
         name = sub_dir.name
-        if name.startswith("sub-"):
-            subjects.append(name[4:])
-        else:
-            subjects.append(name)
-    return subjects
+        subject_id = _normalize_subject_id(name)
+        if subject_id is not None:
+            subjects.append(subject_id)
+    return sorted(_subject_key_to_preferred_id(subjects).values())
 
 
 def _collect_subjects_from_derivatives_epochs(
@@ -193,28 +256,40 @@ def _apply_intersection_policy(
     logger: logging.Logger,
 ) -> List[str]:
     """Apply intersection policy: subjects present in all sources and config."""
-    all_discovered = [
-        subject for _, subjects in discovered_by_source for subject in subjects
-    ]
+    all_discovered = [subject for _, subjects in discovered_by_source for subject in subjects]
+    discovered_by_key = _subject_key_to_preferred_id(all_discovered)
     
     if subjects_from_config:
-        final_subjects = sorted(set(all_discovered) & set(subjects_from_config))
+        config_keys = {_subject_match_key(s) for s in _normalize_subject_list(subjects_from_config)}
+        final_subjects = sorted(
+            discovered_by_key[key]
+            for key in discovered_by_key
+            if key in config_keys
+        )
         logger.info(
             f"Using intersection: {len(final_subjects)} subjects "
-            f"(discovered={len(set(all_discovered))}, config={len(subjects_from_config)})"
+            f"(discovered={len(discovered_by_key)}, config={len(config_keys)})"
         )
         return final_subjects
     
     if len(discovered_by_source) > 1:
-        subject_sets = [set(subjects) for _, subjects in discovered_by_source]
-        final_subjects = sorted(set.intersection(*subject_sets))
+        subject_key_sets = [
+            {_subject_match_key(s) for s in _normalize_subject_list(subjects)}
+            for _, subjects in discovered_by_source
+        ]
+        final_keys = set.intersection(*subject_key_sets) if subject_key_sets else set()
+        final_subjects = sorted(
+            discovered_by_key[key]
+            for key in final_keys
+            if key in discovered_by_key
+        )
         logger.info(
             f"Using intersection of discovery sources: {len(final_subjects)} subjects "
             f"(from {len(discovered_by_source)} sources)"
         )
         return final_subjects
     
-    final_subjects = sorted(set(all_discovered))
+    final_subjects = sorted(discovered_by_key.values())
     source_name = discovered_by_source[0][0] if discovered_by_source else "unknown"
     logger.info(f"Using discovered subjects: {len(final_subjects)} subjects (from {source_name})")
     return final_subjects
@@ -226,13 +301,18 @@ def _apply_union_policy(
     logger: logging.Logger,
 ) -> List[str]:
     """Apply union policy: all subjects from any source or config."""
-    all_discovered = [
-        subject for _, subjects in discovered_by_source for subject in subjects
-    ]
-    final_subjects = sorted(set(all_discovered) | set(subjects_from_config))
+    all_discovered = [subject for _, subjects in discovered_by_source for subject in subjects]
+    merged_by_key = _subject_key_to_preferred_id(all_discovered)
+
+    for subject_id in _normalize_subject_list(subjects_from_config):
+        key = _subject_match_key(subject_id)
+        if key not in merged_by_key:
+            merged_by_key[key] = subject_id
+
+    final_subjects = sorted(merged_by_key.values())
     logger.info(
         f"Using union: {len(final_subjects)} subjects "
-        f"(discovered={len(set(all_discovered))}, config={len(subjects_from_config)})"
+        f"(discovered={len(_subject_key_to_preferred_id(all_discovered))}, config={len(_normalize_subject_list(subjects_from_config))})"
     )
     return final_subjects
 
@@ -286,7 +366,7 @@ def get_available_subjects(
     if discovery_sources is None:
         discovery_sources = ["derivatives_epochs", "features"]
     
-    subjects_from_config = config.get("project.subject_list") or []
+    subjects_from_config = _normalize_subject_list(config.get("project.subject_list"))
     
     discovered_by_source = _discover_subjects_from_sources(
         discovery_sources=discovery_sources,
