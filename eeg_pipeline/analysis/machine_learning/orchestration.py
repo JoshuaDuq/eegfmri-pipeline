@@ -25,8 +25,6 @@ import pandas as pd
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
 
 from eeg_pipeline.analysis.machine_learning.cv import (
     create_within_subject_folds,
@@ -156,6 +154,26 @@ def _normalize_subject_ids(subjects: List[str]) -> List[str]:
         s_str = str(s).strip()
         out.append(s_str if s_str.startswith("sub-") else f"sub-{s_str}")
     return out
+
+
+def _target_covariate_aliases(target: Optional[str]) -> set[str]:
+    """Return standardized target aliases to guard against predictor leakage."""
+    target_raw = str(target or "").strip()
+    target_key = target_raw.lower()
+    aliases: set[str] = set()
+
+    if target_key in {"", "rating", "pain_rating", "vas"}:
+        aliases.add("rating")
+    elif target_key in {"temperature", "temp"}:
+        aliases.add("temperature")
+    elif target_key in {"pain", "pain_binary", "binary"}:
+        aliases.add("pain_binary")
+    elif target_key in {"fmri_signature", "fmri-signature"}:
+        aliases.add("fmri_signature")
+
+    if target_raw:
+        aliases.add(target_raw)
+    return aliases
 
 
 def _build_regression_model_spec(
@@ -744,11 +762,15 @@ def run_within_subject_regression_ml(
         r2_val = np.nan
 
     p_value = np.nan
-    null_rs = []
+    null_rs: List[float] = []
+    n_perm_completed = 0
     
     if n_perm > 0:
         logger.info(f"Running {n_perm} block-aware permutations for within-subject inference...")
         rng = np.random.default_rng(rng_seed)
+        min_perm_fold_completion = float(
+            get_config_value(config, "machine_learning.cv.min_valid_permutation_fold_fraction", 1.0)
+        )
         
         for perm_idx in range(n_perm):
             y_perm = y.copy()
@@ -811,6 +833,10 @@ def run_within_subject_regression_ml(
                 except Exception:
                     continue
 
+            fold_completion = float(len(perm_fold_records) / max(len(folds), 1))
+            if fold_completion < min_perm_fold_completion:
+                continue
+
             if perm_fold_records:
                 y_true_perm = np.concatenate([r["y_true"] for r in perm_fold_records])
                 y_pred_perm = np.concatenate([r["y_pred"] for r in perm_fold_records])
@@ -825,11 +851,22 @@ def run_within_subject_regression_ml(
             if (perm_idx + 1) % 10 == 0:
                 logger.info(f"Permutation {perm_idx + 1}/{n_perm}")
         
-        if len(null_rs) > 0 and np.isfinite(r_subj):
-            null_rs = np.asarray(null_rs)
-            p_value = float(((np.abs(null_rs) >= np.abs(r_subj)).sum() + 1) / (len(null_rs) + 1))
-            np.savez(results_dir / "within_subject_null.npz", null_r=null_rs, empirical_r=r_subj)
-            logger.info(f"Within-subject permutation p-value: {p_value:.4f} (n_perm={len(null_rs)})")
+        n_perm_completed = int(len(null_rs))
+        completion_rate = (n_perm_completed / int(n_perm)) if int(n_perm) > 0 else 0.0
+        min_completion = float(
+            get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5)
+        )
+        if int(n_perm) > 0 and completion_rate < min_completion:
+            raise RuntimeError(
+                f"Insufficient valid within-subject regression permutations ({n_perm_completed}/{int(n_perm)}, "
+                f"rate={completion_rate:.3f} < required {min_completion:.3f})"
+            )
+
+        if n_perm_completed > 0 and np.isfinite(r_subj):
+            null_rs_arr = np.asarray(null_rs, dtype=float)
+            p_value = float(((np.abs(null_rs_arr) >= np.abs(r_subj)).sum() + 1) / (len(null_rs_arr) + 1))
+            np.savez(results_dir / "within_subject_null.npz", null_r=null_rs_arr, empirical_r=r_subj)
+            logger.info(f"Within-subject permutation p-value: {p_value:.4f} (n_perm={len(null_rs_arr)})")
 
     # Compute pooled r for secondary reporting
     pooled_r, _ = safe_pearsonr(y_true_all, y_pred_all)
@@ -890,6 +927,9 @@ def run_within_subject_regression_ml(
         },
         "n_perm": n_perm if n_perm > 0 else 0,
     }
+    if int(n_perm) > 0:
+        metrics["n_perm_requested"] = int(n_perm)
+        metrics["n_perm_completed"] = int(n_perm_completed)
     baseline_metrics = export_baseline_predictions(y_true_all, np.asarray(groups_ordered), results_dir, task="regression")
     metrics.update(baseline_metrics)
     metrics_path = results_dir / "pooled_metrics.json"
@@ -914,7 +954,7 @@ def run_time_generalization(
     rng_seed: int,
     results_root: Path,
     logger: logging.Logger,
-) -> None:
+) -> Path:
     """Run time-generalization machine learning analysis."""
     import time as _time
 
@@ -939,9 +979,15 @@ def run_time_generalization(
         )
     except Exception as exc:
         logger.warning("Time-generalization failed after %.1fs: %s", _time.perf_counter() - t0, exc)
-        return
+        raise RuntimeError("Time-generalization stage failed.") from exc
 
     n_windows = len(window_centers) if window_centers is not None else 0
+    n_tested_cells = int(np.sum(np.isfinite(tg_r))) if tg_r is not None and len(tg_r) > 0 else 0
+    if n_windows == 0 or n_tested_cells == 0:
+        raise RuntimeError(
+            "Time-generalization produced no valid outputs "
+            f"(n_windows={n_windows}, n_tested_cells={n_tested_cells})."
+        )
     logger.info(
         "Time generalization complete: %d windows, peak r=%.3f (%.1fs)",
         n_windows,
@@ -949,6 +995,7 @@ def run_time_generalization(
         _time.perf_counter() - t0,
     )
     logger.info("Saved results to %s", results_dir)
+    return results_dir
 
 
 ###################################################################
@@ -1135,43 +1182,47 @@ def run_classification_ml(
     if result.y_prob is not None:
         from sklearn.metrics import brier_score_loss
         from sklearn.calibration import calibration_curve
+        probs = np.asarray(result.y_prob, dtype=float)
+        y_true = np.asarray(result.y_true, dtype=float)
+        finite_prob_mask = np.isfinite(probs) & np.isfinite(y_true)
+        probs_finite = probs[finite_prob_mask]
+        y_true_finite = y_true[finite_prob_mask]
 
-        try:
-            brier = float(brier_score_loss(result.y_true, result.y_prob))
-        except Exception:
-            brier = np.nan
+        if len(probs_finite) >= 2 and len(np.unique(y_true_finite)) == 2:
+            try:
+                brier = float(brier_score_loss(y_true_finite, probs_finite))
+            except Exception:
+                brier = np.nan
 
-        try:
-            prob_true, prob_pred = calibration_curve(
-                result.y_true, result.y_prob, n_bins=10, strategy="uniform"
-            )
-            calibration_data = {
-                "prob_true": prob_true.tolist(),
-                "prob_pred": prob_pred.tolist(),
-                "n_bins": 10,
-            }
-            # Expected calibration error (ECE) for uniform bins
-            edges = np.linspace(0.0, 1.0, 11)
-            probs = np.asarray(result.y_prob, dtype=float)
-            y_true = np.asarray(result.y_true, dtype=float)
-            ece_acc = 0.0
-            n = len(probs)
-            for i in range(10):
-                lo, hi = edges[i], edges[i + 1]
-                if i < 9:
-                    mask = (probs >= lo) & (probs < hi)
-                else:
-                    mask = (probs >= lo) & (probs <= hi)
-                if not np.any(mask):
-                    continue
-                w = float(np.mean(mask))
-                frac_pos = float(np.mean(y_true[mask]))
-                avg_p = float(np.mean(probs[mask]))
-                ece_acc += w * abs(frac_pos - avg_p)
-            ece = float(ece_acc) if n > 0 else np.nan
-        except Exception:
-            calibration_data = {}
-            ece = np.nan
+            try:
+                prob_true, prob_pred = calibration_curve(
+                    y_true_finite, probs_finite, n_bins=10, strategy="uniform"
+                )
+                calibration_data = {
+                    "prob_true": prob_true.tolist(),
+                    "prob_pred": prob_pred.tolist(),
+                    "n_bins": 10,
+                }
+                # Expected calibration error (ECE) on finite probabilities only.
+                edges = np.linspace(0.0, 1.0, 11)
+                ece_acc = 0.0
+                n = len(probs_finite)
+                for i in range(10):
+                    lo, hi = edges[i], edges[i + 1]
+                    if i < 9:
+                        mask = (probs_finite >= lo) & (probs_finite < hi)
+                    else:
+                        mask = (probs_finite >= lo) & (probs_finite <= hi)
+                    if not np.any(mask):
+                        continue
+                    w = float(np.sum(mask) / n)
+                    frac_pos = float(np.mean(y_true_finite[mask]))
+                    avg_p = float(np.mean(probs_finite[mask]))
+                    ece_acc += w * abs(frac_pos - avg_p)
+                ece = float(ece_acc) if n > 0 else np.nan
+            except Exception:
+                calibration_data = {}
+                ece = np.nan
     
     # Compute and save metrics
     metrics = {
@@ -1444,7 +1495,7 @@ def run_within_subject_classification_ml(
             if len(unique_train) < 2:
                 maj = int(unique_train[0]) if len(unique_train) == 1 else 0
                 y_pred = np.full(len(y_test), maj, dtype=int)
-                y_prob = np.full(len(y_test), float(maj), dtype=float)
+                y_prob = np.full(len(y_test), np.nan, dtype=float)
                 failed_folds += 1
                 recs.append(
                     {
@@ -1475,7 +1526,7 @@ def run_within_subject_classification_ml(
                 except Exception:
                     maj = int(np.median(y_train)) if len(y_train) else 0
                     y_pred = np.full(len(y_test), maj, dtype=int)
-                    y_prob = np.full(len(y_test), float(maj), dtype=float)
+                    y_prob = np.full(len(y_test), np.nan, dtype=float)
                     failed_folds += 1
             else:
                 best_estimator = clone(base_pipe)
@@ -1520,7 +1571,7 @@ def run_within_subject_classification_ml(
                 except Exception:
                     maj = int(np.median(y_train)) if len(y_train) else 0
                     y_pred = np.full(len(y_test), maj, dtype=int)
-                    y_prob = np.full(len(y_test), float(maj), dtype=float)
+                    y_prob = np.full(len(y_test), np.nan, dtype=float)
                     failed_folds += 1
 
             recs.append(
@@ -1702,6 +1753,9 @@ def run_within_subject_classification_ml(
         logger.info("Running %d permutations for within-subject classification...", int(n_perm))
         rng = np.random.default_rng(rng_seed)
         null_auc = []
+        max_failed_perm_fraction = float(
+            get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
+        )
         for i in range(int(n_perm)):
             y_perm = y.copy()
             for subj in np.unique(groups):
@@ -1718,7 +1772,10 @@ def run_within_subject_classification_ml(
                 else:
                     y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
 
-            perm_records, _ = _run_with_labels(y_perm)
+            perm_records, perm_failed_folds = _run_with_labels(y_perm)
+            perm_failed_fraction = float(perm_failed_folds / max(len(folds), 1))
+            if perm_failed_fraction > max_failed_perm_fraction:
+                continue
             perm_records = sorted(perm_records, key=lambda r: r["fold"])
             y_true_p = np.concatenate([np.asarray(r["y_true"]) for r in perm_records]).astype(int)
             try:
@@ -1831,6 +1888,10 @@ def _run_classification_permutations(
                 perm_scheme = "within_subject"
                 blocks_arr = None
     
+    max_failed_perm_fraction = float(
+        get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
+    )
+
     for i in range(n_perm):
         y_perm = y.copy()
         # Permute within each subject to respect block structure
@@ -1871,6 +1932,11 @@ def _run_classification_permutations(
                     logger=None,
                     harmonization_mode=harmonization_mode,
                 )
+            perm_failed_fold_count = int(getattr(result, "failed_fold_count", 0) or 0)
+            perm_n_folds_total = int(getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups)))
+            perm_failed_fraction = float(perm_failed_fold_count / max(perm_n_folds_total, 1))
+            if perm_failed_fraction > max_failed_perm_fraction:
+                continue
             auc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
             auc_for_inference = auc_subj_mean if np.isfinite(auc_subj_mean) else float(result.auc)
             if np.isfinite(auc_for_inference):
@@ -2030,6 +2096,12 @@ def run_model_comparison_ml(
         model_comparison.tsv: Per-fold metrics for each model
         model_comparison_summary.json: Aggregated comparison statistics
     """
+    if int(n_perm) > 0:
+        raise ValueError(
+            "Model comparison currently supports descriptive fold metrics only and does not implement "
+            "permutation inference. Set n_perm=0 to avoid invalid inferential interpretation."
+        )
+
     if target is None:
         target = get_config_value(config, "machine_learning.targets.regression", None)
 
@@ -2048,6 +2120,13 @@ def run_model_comparison_ml(
         feature_segments=feature_segments,
         feature_scopes=feature_scopes,
         feature_stats=feature_stats,
+    )
+    target_detection = _warn_or_raise_if_binary_like_regression_target(
+        y,
+        target,
+        logger,
+        config,
+        context="Model comparison",
     )
     
     n_subjects = len(np.unique(groups))
@@ -2084,10 +2163,6 @@ def run_model_comparison_ml(
         or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
     )
     outer_folds = list(outer_cv.split(X, y, groups))
-    harmonization_mode = (
-        feature_harmonization
-        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
-    )
     
     comparison_records = []
     
@@ -2112,19 +2187,27 @@ def run_model_comparison_ml(
             )
             
             # Inner CV for hyperparameter tuning (group-aware)
-            inner_cv = create_inner_cv(groups_train, inner_splits)
-            grid_n_jobs = determine_inner_n_jobs(outer_jobs, n_jobs=1)
-            grid = GridSearchCV(
-                clone(pipe), param_grid, cv=inner_cv, scoring="r2", n_jobs=grid_n_jobs, error_score="raise"
-            )
-            grid.fit(X_train, y_train, groups=groups_train)
-            
-            y_pred[test_idx] = grid.predict(X_test)
+            if len(np.unique(groups_train)) >= 2:
+                inner_cv = create_inner_cv(groups_train, inner_splits)
+                grid_n_jobs = determine_inner_n_jobs(outer_jobs, n_jobs=1)
+                grid = GridSearchCV(
+                    clone(pipe), param_grid, cv=inner_cv, scoring="r2", n_jobs=grid_n_jobs, error_score="raise"
+                )
+                grid.fit(X_train, y_train, groups=groups_train)
+                fold_pred = grid.predict(X_test)
+                best_params_repr = str(grid.best_params_)
+            else:
+                est = clone(pipe)
+                est.fit(X_train, y_train)
+                fold_pred = est.predict(X_test)
+                best_params_repr = "{}"
+
+            y_pred[test_idx] = fold_pred
             
             # Record fold metrics
             from sklearn.metrics import r2_score, mean_absolute_error
-            fold_r2 = r2_score(y_test, y_pred[test_idx])
-            fold_mae = mean_absolute_error(y_test, y_pred[test_idx])
+            fold_r2 = r2_score(y_test, fold_pred)
+            fold_mae = mean_absolute_error(y_test, fold_pred)
             
             comparison_records.append({
                 "model": model_name,
@@ -2132,7 +2215,7 @@ def run_model_comparison_ml(
                 "test_subject": groups[test_idx[0]],
                 "r2": fold_r2,
                 "mae": fold_mae,
-                "best_params": str(grid.best_params_),
+                "best_params": best_params_repr,
             })
         
         # Overall metrics
@@ -2152,6 +2235,7 @@ def run_model_comparison_ml(
         "data": {
             "target": target,
             "target_kind": "continuous",
+            "detected_target": target_detection,
             "feature_families": feature_families,
             "feature_bands": feature_bands,
             "feature_segments": feature_segments,
@@ -2223,6 +2307,12 @@ def run_incremental_validity_ml(
         incremental_validity.tsv: Per-fold performance for baseline vs full
         incremental_validity_summary.json: Aggregated Δ statistics
     """
+    if int(n_perm) > 0:
+        raise ValueError(
+            "Incremental validity currently supports descriptive fold metrics only and does not implement "
+            "permutation inference. Set n_perm=0 to avoid invalid inferential interpretation."
+        )
+
     if target is None:
         target = get_config_value(config, "machine_learning.targets.regression", None)
 
@@ -2240,6 +2330,13 @@ def run_incremental_validity_ml(
         feature_segments=feature_segments,
         feature_scopes=feature_scopes,
         feature_stats=feature_stats,
+    )
+    target_detection = _warn_or_raise_if_binary_like_regression_target(
+        y,
+        target,
+        logger,
+        config,
+        context="Incremental validity",
     )
     
     n_subjects = len(np.unique(groups))
@@ -2261,6 +2358,15 @@ def run_incremental_validity_ml(
         else:
             baseline_predictors = ["temperature"]
 
+    # Guard against target leakage through baseline predictors.
+    forbidden_predictors = {v.lower() for v in _target_covariate_aliases(target)}
+    leaking = [p for p in baseline_predictors if str(p).strip().lower() in forbidden_predictors]
+    if leaking:
+        raise ValueError(
+            "Baseline predictors include the selected target, which invalidates incremental-validity estimates: "
+            f"{leaking}. Target={target!r}."
+        )
+
     # Extract baseline predictors from meta (meta uses standardized names: temperature, trial_index, block, etc.)
     missing = [c for c in baseline_predictors if c not in meta.columns]
     if missing:
@@ -2278,14 +2384,17 @@ def run_incremental_validity_ml(
     X_full = np.concatenate([X_baseline, X], axis=1)
     
     from sklearn.model_selection import LeaveOneGroupOut
-    from sklearn.linear_model import Ridge
     from sklearn.metrics import r2_score, mean_absolute_error
-    from eeg_pipeline.analysis.machine_learning.preprocessing import (
-        DropAllNaNColumns,
-        ReplaceInfWithNaN,
-    )
     
     outer_cv = LeaveOneGroupOut()
+    harmonization_mode = (
+        feature_harmonization
+        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    )
+    # Use the same model family/hyperparameter space for baseline and full models
+    # so ΔR² isolates information gain from EEG predictors (not algorithm changes).
+    shared_pipe = create_elasticnet_pipeline(seed=rng_seed, config=config)
+    shared_param_grid = build_elasticnet_param_grid(config)
     
     records = []
     y_pred_baseline = np.zeros(len(y))
@@ -2303,34 +2412,15 @@ def run_incremental_validity_ml(
             harmonization_mode,
         )
         
-        # Baseline model (out-of-fold; tuned under the same group-aware inner CV logic)
-        imputer_strategy = str(get_config_value(config, "machine_learning.preprocessing.imputer_strategy", "median"))
-        baseline_alpha_grid_raw = get_config_value(
-            config,
-            "machine_learning.models.ridge.alpha_grid",
-            [0.01, 0.1, 1.0, 10.0, 100.0],
-        )
-        if isinstance(baseline_alpha_grid_raw, (list, tuple)):
-            baseline_alpha_grid = [float(a) for a in baseline_alpha_grid_raw]
-        else:
-            baseline_alpha_grid = [float(baseline_alpha_grid_raw)]
-
-        base_pipe = Pipeline(
-            [
-                ("finite", ReplaceInfWithNaN()),
-                ("drop_all_nan", DropAllNaNColumns()),
-                ("impute", SimpleImputer(strategy=imputer_strategy)),
-                ("scale", StandardScaler()),
-                ("ridge", Ridge(alpha=1.0, random_state=rng_seed)),
-            ]
-        )
+        # Baseline model (out-of-fold; tuned under the same group-aware inner CV logic).
+        base_pipe = clone(shared_pipe)
         n_train_subjects = len(np.unique(groups_train))
         if n_train_subjects >= 2:
             inner_cv_base = create_inner_cv(groups_train, inner_splits)
             grid_n_jobs_base = determine_inner_n_jobs(outer_n_jobs=1, n_jobs=1)
             base_grid = GridSearchCV(
                 estimator=base_pipe,
-                param_grid={"ridge__alpha": baseline_alpha_grid},
+                param_grid=shared_param_grid,
                 cv=inner_cv_base,
                 scoring="r2",
                 n_jobs=grid_n_jobs_base,
@@ -2343,14 +2433,13 @@ def run_incremental_validity_ml(
             y_pred_baseline[test_idx] = base_pipe.predict(X_baseline[test_idx])
         r2_base = r2_score(y[test_idx], y_pred_baseline[test_idx])
         
-        # Full model (baseline predictors are accounted for by comparing to the baseline model)
-        pipe_full = create_elasticnet_pipeline(seed=rng_seed, config=config)
-        param_grid = build_elasticnet_param_grid(config)
+        # Full model (same family as baseline; adds EEG predictors to baseline columns).
+        pipe_full = clone(shared_pipe)
         if n_train_subjects >= 2:
             inner_cv = create_inner_cv(groups_train, inner_splits)
             grid_n_jobs = determine_inner_n_jobs(outer_n_jobs=1, n_jobs=1)
             grid = GridSearchCV(
-                pipe_full, param_grid, cv=inner_cv, scoring="r2", n_jobs=grid_n_jobs, error_score="raise"
+                pipe_full, shared_param_grid, cv=inner_cv, scoring="r2", n_jobs=grid_n_jobs, error_score="raise"
             )
             grid.fit(X_full_train, y[train_idx], groups=groups_train)
             y_pred_full[test_idx] = grid.predict(X_full_test)
@@ -2380,6 +2469,7 @@ def run_incremental_validity_ml(
         "data": {
             "target": target,
             "target_kind": "continuous",
+            "detected_target": target_detection,
             "baseline_predictors": baseline_predictors,
             "feature_families": feature_families,
             "feature_bands": feature_bands,
@@ -2444,10 +2534,11 @@ def _run_permutation_importance_stage(
     ).strip().lower()
     inner_splits = int(get_config_value(config, "machine_learning.cv.inner_splits", 5))
     logo = LeaveOneGroupOut()
+    fold_splits = list(logo.split(X, y, groups))
     
     all_importances = []
     
-    for fold_idx, (train_idx, test_idx) in enumerate(logo.split(X, y, groups)):
+    for fold_idx, (train_idx, test_idx) in enumerate(fold_splits):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
@@ -2488,6 +2579,22 @@ def _run_permutation_importance_stage(
     if not all_importances:
         logger.warning("No permutation importance results")
         return None
+    n_folds_requested = int(len(fold_splits))
+    n_folds_completed = int(len(all_importances))
+    completion_rate = float(n_folds_completed / max(n_folds_requested, 1))
+    min_completion = float(
+        get_config_value(
+            config,
+            "machine_learning.analysis.permutation_importance.min_valid_fold_fraction",
+            0.8,
+        )
+    )
+    if completion_rate < min_completion:
+        raise RuntimeError(
+            "Insufficient valid permutation-importance folds: "
+            f"completed={n_folds_completed}/{n_folds_requested} "
+            f"(rate={completion_rate:.3f} < required {min_completion:.3f})."
+        )
     
     mean_importance = np.mean(np.stack(all_importances), axis=0)
     std_importance = np.std(np.stack(all_importances), axis=0)
@@ -2586,6 +2693,26 @@ def _run_shap_importance_stage(
         if importance_df.empty:
             logger.warning("SHAP importance computation returned empty results")
             return None
+        n_folds_attempted = int(
+            importance_df["n_folds_attempted"].max()
+            if "n_folds_attempted" in importance_df.columns
+            else len(cv_splits)
+        )
+        n_folds_used = int(
+            importance_df["n_folds_used"].max()
+            if "n_folds_used" in importance_df.columns
+            else n_folds_attempted
+        )
+        completion_rate = float(n_folds_used / max(n_folds_attempted, 1))
+        min_completion = float(
+            get_config_value(config, "machine_learning.analysis.shap.min_valid_fold_fraction", 0.8)
+        )
+        if completion_rate < min_completion:
+            raise RuntimeError(
+                "Insufficient valid SHAP folds: "
+                f"completed={n_folds_used}/{n_folds_attempted} "
+                f"(rate={completion_rate:.3f} < required {min_completion:.3f})."
+            )
         
         output_path = results_dir / "shap_importance.tsv"
         importance_df.to_csv(output_path, sep="\t", index=False)
@@ -2613,6 +2740,8 @@ def _run_shap_importance_stage(
             logger.debug("Grouped SHAP-importance export failed: %s", exc)
         
         return output_path
+    except RuntimeError:
+        raise
     except Exception as e:
         logger.warning(f"SHAP computation failed: {e}")
         return None
@@ -2645,10 +2774,11 @@ def _run_uncertainty_stage(
     ).strip().lower()
     inner_splits = int(get_config_value(config, "machine_learning.cv.inner_splits", 5))
     logo = LeaveOneGroupOut()
+    fold_splits = list(logo.split(X, y, groups))
     
     all_intervals = []
     
-    for fold_idx, (train_idx, test_idx) in enumerate(logo.split(X, y, groups)):
+    for fold_idx, (train_idx, test_idx) in enumerate(fold_splits):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
@@ -2699,6 +2829,18 @@ def _run_uncertainty_stage(
     if not all_intervals:
         logger.warning("No uncertainty results")
         return None
+    n_folds_requested = int(len(fold_splits))
+    n_folds_completed = int(len(all_intervals))
+    completion_rate = float(n_folds_completed / max(n_folds_requested, 1))
+    min_completion = float(
+        get_config_value(config, "machine_learning.analysis.uncertainty.min_valid_fold_fraction", 0.8)
+    )
+    if completion_rate < min_completion:
+        raise RuntimeError(
+            "Insufficient valid uncertainty folds: "
+            f"completed={n_folds_completed}/{n_folds_requested} "
+            f"(rate={completion_rate:.3f} < required {min_completion:.3f})."
+        )
     
     y_pred_all = np.concatenate([r["y_pred"] for r in all_intervals])
     lower_all = np.concatenate([r["lower"] for r in all_intervals])
@@ -2725,6 +2867,10 @@ def _run_uncertainty_stage(
         "empirical_coverage": coverage,
         "mean_width": mean_width,
         "n_folds": len(all_intervals),
+        "n_folds_requested": n_folds_requested,
+        "n_folds_completed": n_folds_completed,
+        "valid_fold_fraction": completion_rate,
+        "min_valid_fold_fraction": min_completion,
     }
     with open(results_dir / "uncertainty_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)

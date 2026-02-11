@@ -198,7 +198,11 @@ def apply_fold_feature_harmonization(
 def create_inner_cv(train_groups: np.ndarray, inner_cv_splits: int) -> GroupKFold:
     """Create inner CV splitter for hyperparameter tuning."""
     n_unique = len(np.unique(train_groups))
-    n_splits = min(inner_cv_splits, n_unique)
+    if n_unique < 2:
+        raise ValueError(
+            "Inner CV requires at least 2 unique groups in the training split."
+        )
+    n_splits = max(2, min(inner_cv_splits, n_unique))
     return GroupKFold(n_splits=n_splits)
 
 
@@ -1008,7 +1012,15 @@ def run_permutation_test(
 
         pred_df = pd.DataFrame({"y_true": y_true_p, "y_pred": y_pred_p, "subject_id": groups_p})
         r_subj, _, _, _ = compute_subject_level_r(pred_df, config)
-        r2 = r2_score(y_true_p, y_pred_p) if len(y_true_p) > 1 else np.nan
+        r2 = np.nan
+        if len(y_true_p) > 1:
+            y_true_arr = np.asarray(y_true_p, dtype=float)
+            y_pred_arr = np.asarray(y_pred_p, dtype=float)
+            if np.all(np.isfinite(y_true_arr)) and np.all(np.isfinite(y_pred_arr)):
+                try:
+                    r2 = float(r2_score(y_true_arr, y_pred_arr))
+                except Exception:
+                    r2 = np.nan
 
         if np.isfinite(r_subj) and np.isfinite(r2):
             null_r.append(float(r_subj))
@@ -1018,8 +1030,12 @@ def run_permutation_test(
             logger.warning(f"Perm {perm + 1}: non-finite (r={r_subj:.3f}, r2={r2:.3f})")
 
     completion_rate = n_completed / null_n_perm if null_n_perm > 0 else 0.0
-    if completion_rate < 0.5:
-        raise RuntimeError(f"Insufficient valid permutations ({n_completed}/{null_n_perm})")
+    min_completion = float(get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5))
+    if completion_rate < min_completion:
+        raise RuntimeError(
+            f"Insufficient valid permutations ({n_completed}/{null_n_perm}, "
+            f"rate={completion_rate:.3f} < required {min_completion:.3f})"
+        )
 
     np.savez(
         null_output_path,

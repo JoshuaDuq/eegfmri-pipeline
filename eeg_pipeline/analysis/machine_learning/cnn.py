@@ -300,7 +300,7 @@ def nested_loso_cnn_classification(
         if len(np.unique(y_train)) < 2:
             maj = int(np.median(y_train)) if len(y_train) > 0 else 0
             y_pred_all[test_idx] = maj
-            y_prob_all[test_idx] = float(maj)
+            y_prob_all[test_idx] = np.nan
             failed_folds += 1
             continue
 
@@ -320,7 +320,7 @@ def nested_loso_cnn_classification(
             log.warning("CNN fold %d failed (%s); falling back to majority prediction.", int(fold_idx), exc)
             maj = int(np.median(y_train)) if len(y_train) > 0 else 0
             y_pred_all[test_idx] = maj
-            y_prob_all[test_idx] = float(maj)
+            y_prob_all[test_idx] = np.nan
             failed_folds += 1
 
     result = ClassificationResult(

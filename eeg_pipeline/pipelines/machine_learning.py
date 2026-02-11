@@ -373,7 +373,7 @@ class MLPipeline(PipelineBase):
             )
 
         progress.step("Time generalization", current=1, total=1)
-        run_time_generalization(
+        results_dir = run_time_generalization(
             subjects=subjects,
             task=task,
             deriv_root=self.deriv_root,
@@ -383,7 +383,7 @@ class MLPipeline(PipelineBase):
             results_root=self.results_root,
             logger=self.logger,
         )
-        return self.results_root / "time_generalization"
+        return results_dir
 
     def _execute_classify(
         self,
@@ -642,9 +642,15 @@ class MLPipeline(PipelineBase):
             params=params,
             progress=params["progress"],
         )
+        if results_dir is None:
+            params["progress"].complete(success=False)
+            raise RuntimeError(
+                f"ML pipeline ({mode}) produced no output. "
+                "Treating this as a failed run to avoid false-success reporting."
+            )
         elapsed = _time.perf_counter() - t0
         
-        results_dirs = [results_dir] if results_dir is not None else []
+        results_dirs = [results_dir]
         
         self.logger.info(
             "ML pipeline (%s) complete: %s (%.1fs)",

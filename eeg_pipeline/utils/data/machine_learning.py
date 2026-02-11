@@ -211,6 +211,26 @@ def _resolve_target_series(
     )
 
 
+def _target_covariate_aliases(target: Optional[str]) -> set[str]:
+    """Return standardized target aliases for covariate leakage checks."""
+    target_raw = str(target or "").strip()
+    target_key = target_raw.lower()
+    aliases: set[str] = set()
+
+    if target_key in {"", "rating", "pain_rating", "vas"}:
+        aliases.add("rating")
+    elif target_key in {"temperature", "temp"}:
+        aliases.add("temperature")
+    elif target_key in {"pain", "pain_binary", "binary"}:
+        aliases.add("pain_binary")
+    elif target_key in {"fmri_signature", "fmri-signature"}:
+        aliases.add("fmri_signature")
+
+    if target_raw:
+        aliases.add(target_raw)
+    return aliases
+
+
 def _fmri_signature_defaults(config: Any) -> dict:
     return {
         "method": str(get_config_value(config, "machine_learning.fmri_signature.method", "beta-series")).strip().lower(),
@@ -1028,6 +1048,14 @@ def load_active_matrix(
     # Optional covariates appended to X (from standardized meta column names).
     cov_cfg = covariates if covariates is not None else _as_list(get_config_value(config, "machine_learning.data.covariates", []))
     if cov_cfg:
+        forbidden_covariates = {v.lower() for v in _target_covariate_aliases(target)}
+        leaking = [c for c in cov_cfg if str(c).strip().lower() in forbidden_covariates]
+        if leaking:
+            raise ValueError(
+                "Covariates include the selected target, which would leak labels into predictors: "
+                f"{leaking}. Target={target!r}."
+            )
+
         strict = bool(get_config_value(config, "machine_learning.data.covariates_strict", False))
         present = [c for c in cov_cfg if c in meta.columns]
         missing = [c for c in cov_cfg if c not in meta.columns]

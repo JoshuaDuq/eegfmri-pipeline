@@ -185,7 +185,10 @@ def _conformal_split(
     Split training data into proper training and calibration sets.
     """
     n = len(X_train)
-    n_cal = max(int(0.2 * n), 50)  # Use 20% for calibration, min 50
+    if n < 2:
+        raise ValueError("Split conformal requires at least 2 training samples.")
+    # Use ~20% for calibration (minimum 1), while preserving at least one proper-train sample.
+    n_cal = min(max(int(0.2 * n), 1), n - 1)
     
     indices = rng.permutation(n)
     cal_idx = indices[:n_cal]

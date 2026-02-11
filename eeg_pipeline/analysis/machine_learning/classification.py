@@ -348,7 +348,7 @@ class ClassificationResult:
         self.recall = float(recall_score(self.y_true, self.y_pred, zero_division=0))
         
         # Confusion matrix
-        self.confusion = confusion_matrix(self.y_true, self.y_pred)
+        self.confusion = confusion_matrix(self.y_true, self.y_pred, labels=[0, 1])
         tn, fp, fn, tp = self.confusion.ravel()
         self.specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else np.nan
         

@@ -56,11 +56,10 @@ class TestMachineLearningCliSafetyOverrides(unittest.TestCase):
             }
         )
 
-        with patch("eeg_pipeline.cli.commands.machine_learning.MLPipeline") as mock_pipeline_cls:
+        with patch("eeg_pipeline.pipelines.machine_learning.MLPipeline") as mock_pipeline_cls:
             mock_pipeline = mock_pipeline_cls.return_value
             mock_pipeline.run_batch.return_value = None
             run_ml(args, ["0001", "0002", "0003"], config)
 
         self.assertTrue(config.get("machine_learning.data.require_trial_ml_safe", False))
         self.assertEqual(config.get("feature_engineering.analysis_mode"), "trial_ml_safe")
-

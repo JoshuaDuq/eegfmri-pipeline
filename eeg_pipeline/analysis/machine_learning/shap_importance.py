@@ -230,7 +230,10 @@ def compute_shap_values(
             bg_idx = rng.choice(len(X), n_bg, replace=False)
             background = X[bg_idx]
             
-            predict_fn = _create_predict_fn(model)
+            # KernelExplainer must consume the same feature space used for background/X.
+            # At this point X has already been transformed through pipeline preprocessing,
+            # so predict_fn must target the extracted estimator (not the full pipeline).
+            predict_fn = _create_predict_fn(estimator)
             explainer = shap.KernelExplainer(predict_fn, background)
             shap_values = explainer.shap_values(X, nsamples=100)
     except Exception as e:

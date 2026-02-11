@@ -492,6 +492,13 @@ def time_generalization_regression(
                     except Exception:
                         continue
             
+            if not np.isfinite(r_mat).any() or not np.any(count_mat > 0):
+                logger.warning(
+                    "Fold %d: no evaluable time-generalization cells after quality filters; skipping fold.",
+                    int(fold),
+                )
+                continue
+
             fold_mats_r.append(r_mat)
             fold_mats_r2.append(r2_mat)
             fold_counts.append(count_mat)
@@ -502,7 +509,7 @@ def time_generalization_regression(
                 f"No successful folds out of {n_folds_total} total folds. "
                 "Cannot compute time-generalization matrices."
             )
-            return np.array([]), np.array([]), np.array([]), np.array([])
+            return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
         
         if n_folds_successful < n_folds_total:
             coverage_pct = 100 * n_folds_successful / n_folds_total
@@ -510,6 +517,20 @@ def time_generalization_regression(
                 f"Only {n_folds_successful}/{n_folds_total} folds ({coverage_pct:.1f}%) succeeded. "
                 f"Time-generalization matrices are based on a subset of folds."
             )
+            min_valid_fold_fraction = float(
+                get_config_value(
+                    config,
+                    "machine_learning.analysis.time_generalization.min_valid_fold_fraction",
+                    0.8,
+                )
+            )
+            completion_rate = float(n_folds_successful / max(n_folds_total, 1))
+            if completion_rate < min_valid_fold_fraction:
+                raise RuntimeError(
+                    "Insufficient valid time-generalization fold coverage: "
+                    f"completed={n_folds_successful}/{n_folds_total} "
+                    f"(rate={completion_rate:.3f} < required {min_valid_fold_fraction:.3f})."
+                )
             if n_folds_successful < min_subjects_for_loso:
                 raise RuntimeError(
                     f"Insufficient fold coverage ({n_folds_successful}/{n_folds_total}) "

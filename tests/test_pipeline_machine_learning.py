@@ -95,7 +95,7 @@ class TestMachineLearningDeep(unittest.TestCase):
             with patch("eeg_pipeline.pipelines.machine_learning.run_regression_ml", return_value=Path("/tmp/r")), patch(
                 "eeg_pipeline.pipelines.machine_learning.run_within_subject_regression_ml", return_value=Path("/tmp/wsr")
             ), patch(
-                "eeg_pipeline.pipelines.machine_learning.run_time_generalization"
+                "eeg_pipeline.pipelines.machine_learning.run_time_generalization", return_value=Path("/tmp/tg")
             ), patch(
                 "eeg_pipeline.pipelines.machine_learning.run_classification_ml", return_value=Path("/tmp/c")
             ), patch(
@@ -113,7 +113,7 @@ class TestMachineLearningDeep(unittest.TestCase):
             ):
                 self.assertEqual(p._execute_regression(["0001", "0002"], "t", "group", params, progress), Path("/tmp/r"))
                 self.assertEqual(p._execute_regression(["0001"], "t", "subject", params, progress), Path("/tmp/wsr"))
-                self.assertEqual(p._execute_timegen(["0001", "0002"], "t", "group", params, progress), p.results_root / "time_generalization")
+                self.assertEqual(p._execute_timegen(["0001", "0002"], "t", "group", params, progress), Path("/tmp/tg"))
                 with self.assertRaises(ValueError):
                     p._execute_timegen(["0001"], "t", "subject", params, progress)
                 self.assertEqual(p._execute_classify(["0001", "0002"], "t", "group", params, progress), Path("/tmp/c"))
@@ -138,3 +138,28 @@ class TestMachineLearningGapfill(unittest.TestCase):
                 out = p.run_batch_with_plots(["0001", "0002"], task="t", mode="regression")
             m.assert_called_once()
             self.assertEqual(out[0]["status"], "success")
+
+        def test_run_batch_raises_when_mode_returns_none(self):
+            from eeg_pipeline.pipelines.machine_learning import MLPipeline
+
+            p = object.__new__(MLPipeline)
+            p.config = DotConfig({})
+            p.logger = Mock()
+
+            progress = Mock()
+            params = {
+                "progress": progress,
+                "cv_scope": "group",
+                "model": "elasticnet",
+                "n_perm": 0,
+                "inner_splits": 3,
+            }
+
+            with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
+                MLPipeline, "_validate_inputs", return_value="thermalactive"
+            ), patch.object(
+                MLPipeline, "_get_mode_dispatcher", return_value={"regression": (lambda **kwargs: None)}
+            ):
+                with self.assertRaisesRegex(RuntimeError, "produced no output"):
+                    p.run_batch(["0001", "0002"], task="thermalactive", mode="regression")
+            progress.complete.assert_called_once_with(success=False)
