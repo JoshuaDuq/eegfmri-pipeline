@@ -817,6 +817,97 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSpatialTransformLambda2, optSpatialTransformStiffness:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	// Per-family spatial transform overrides (cycle through: inherit/none/csd/laplacian)
+	case optSpatialTransformPerFamilyConnectivity:
+		m.spatialTransformPerFamilyConnectivity = (m.spatialTransformPerFamilyConnectivity + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyItpc:
+		m.spatialTransformPerFamilyItpc = (m.spatialTransformPerFamilyItpc + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyPac:
+		m.spatialTransformPerFamilyPac = (m.spatialTransformPerFamilyPac + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyPower:
+		m.spatialTransformPerFamilyPower = (m.spatialTransformPerFamilyPower + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyAperiodic:
+		m.spatialTransformPerFamilyAperiodic = (m.spatialTransformPerFamilyAperiodic + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyBursts:
+		m.spatialTransformPerFamilyBursts = (m.spatialTransformPerFamilyBursts + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyErds:
+		m.spatialTransformPerFamilyErds = (m.spatialTransformPerFamilyErds + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyComplexity:
+		m.spatialTransformPerFamilyComplexity = (m.spatialTransformPerFamilyComplexity + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyRatios:
+		m.spatialTransformPerFamilyRatios = (m.spatialTransformPerFamilyRatios + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyAsymmetry:
+		m.spatialTransformPerFamilyAsymmetry = (m.spatialTransformPerFamilyAsymmetry + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilySpectral:
+		m.spatialTransformPerFamilySpectral = (m.spatialTransformPerFamilySpectral + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyErp:
+		m.spatialTransformPerFamilyErp = (m.spatialTransformPerFamilyErp + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyQuality:
+		m.spatialTransformPerFamilyQuality = (m.spatialTransformPerFamilyQuality + 1) % 4
+		m.useDefaultAdvanced = false
+	case optSpatialTransformPerFamilyMicrostates:
+		m.spatialTransformPerFamilyMicrostates = (m.spatialTransformPerFamilyMicrostates + 1) % 4
+		m.useDefaultAdvanced = false
+	// ITPC/PAC segment validity
+	case optItpcMinSegmentSec, optItpcMinCyclesAtFmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPACMinSegmentSec, optPACMinCyclesAtFmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPACSurrogateMethod:
+		m.pacSurrogateMethod = (m.pacSurrogateMethod + 1) % 2
+		m.useDefaultAdvanced = false
+	// Aperiodic missing
+	case optAperiodicMaxFreqResolutionHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optAperiodicMultitaperAdaptive:
+		m.aperiodicMultitaperAdaptive = !m.aperiodicMultitaperAdaptive
+		m.useDefaultAdvanced = false
+	// Directed connectivity missing
+	case optDirectedConnMinSamplesPerMvarParam:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// ERDS pain markers
+	case optERDSPainMarkerBands:
+		m.startTextEdit(textFieldERDSPainMarkerBands)
+		m.useDefaultAdvanced = false
+	case optERDSLateralityColumns:
+		m.startTextEdit(textFieldERDSLateralityColumns)
+		m.useDefaultAdvanced = false
+	case optERDSSomatosensoryLeftChannels:
+		m.startTextEdit(textFieldERDSSomatosensoryLeftChannels)
+		m.useDefaultAdvanced = false
+	case optERDSSomatosensoryRightChannels:
+		m.startTextEdit(textFieldERDSSomatosensoryRightChannels)
+		m.useDefaultAdvanced = false
+	case optERDSOnsetMinThresholdPercent, optERDSReboundThresholdSigma, optERDSReboundMinThresholdPercent:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// Microstates missing
+	case optMicrostatesAssignFromGfpPeaks:
+		m.microstatesAssignFromGfpPeaks = !m.microstatesAssignFromGfpPeaks
+		m.useDefaultAdvanced = false
+	// Change scores
+	case optChangeScoresTransform:
+		m.changeScoresTransform = (m.changeScoresTransform + 1) % 3
+		m.useDefaultAdvanced = false
+	case optChangeScoresWindowPairs:
+		m.startTextEdit(textFieldChangeScoresWindowPairs)
+		m.useDefaultAdvanced = false
 	// TFR section
 	case optFeatGroupTFR:
 		m.featGroupTFRExpanded = !m.featGroupTFRExpanded
@@ -2067,6 +2158,52 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optBehaviorOverwrite:
 		m.behaviorOverwrite = !m.behaviorOverwrite
+		m.useDefaultAdvanced = false
+
+	// Behavior Statistics
+	case optBehaviorStatsTempControl:
+		m.behaviorStatsTempControl = (m.behaviorStatsTempControl + 1) % 3
+		m.useDefaultAdvanced = false
+	case optBehaviorStatsAllowIIDTrials:
+		m.behaviorStatsAllowIIDTrials = !m.behaviorStatsAllowIIDTrials
+		m.useDefaultAdvanced = false
+	case optBehaviorStatsHierarchicalFDR:
+		m.behaviorStatsHierarchicalFDR = !m.behaviorStatsHierarchicalFDR
+		m.useDefaultAdvanced = false
+	case optBehaviorStatsComputeReliability:
+		m.behaviorStatsComputeReliability = !m.behaviorStatsComputeReliability
+		m.useDefaultAdvanced = false
+	case optBehaviorPermScheme:
+		m.behaviorPermScheme = (m.behaviorPermScheme + 1) % 2
+		m.useDefaultAdvanced = false
+	case optBehaviorPermGroupColumnPreference:
+		m.startTextEdit(textFieldBehaviorPermGroupColumnPreference)
+		m.useDefaultAdvanced = false
+	case optBehaviorExcludeNonTrialwiseFeatures:
+		m.behaviorExcludeNonTrialwiseFeatures = !m.behaviorExcludeNonTrialwiseFeatures
+		m.useDefaultAdvanced = false
+	// Global Statistics & Validation
+	case optGlobalNBootstrap:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionEnabled:
+		m.clusterCorrectionEnabled = !m.clusterCorrectionEnabled
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionAlpha, optClusterCorrectionMinClusterSize:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionTail:
+		m.clusterCorrectionTailGlobal = (m.clusterCorrectionTailGlobal + 1) % 3
+		m.useDefaultAdvanced = false
+	case optValidationMinEpochs, optValidationMinChannels, optValidationMaxAmplitudeUv:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// System / IO
+	case optIOTemperatureRange:
+		m.startTextEdit(textFieldIOTemperatureRange)
+		m.useDefaultAdvanced = false
+	case optIOMaxMissingChannelsFraction:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	}
 

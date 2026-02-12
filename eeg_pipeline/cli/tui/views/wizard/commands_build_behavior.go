@@ -635,5 +635,66 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--also-save-csv")
 	}
 
+	// Behavior Statistics
+	tempControls := []string{"none", "linear", "spline"}
+	if m.behaviorStatsTempControl != 0 {
+		args = append(args, "--stats-temp-control", tempControls[m.behaviorStatsTempControl%len(tempControls)])
+	}
+	if m.behaviorStatsAllowIIDTrials {
+		args = append(args, "--stats-allow-iid-trials")
+	}
+	if m.behaviorStatsHierarchicalFDR {
+		args = append(args, "--stats-hierarchical-fdr")
+	}
+	if m.behaviorStatsComputeReliability {
+		args = append(args, "--stats-compute-reliability")
+	}
+	permSchemes := []string{"shuffle", "circular_shift"}
+	if m.behaviorPermScheme != 0 {
+		args = append(args, "--perm-scheme", permSchemes[m.behaviorPermScheme%len(permSchemes)])
+	}
+	if strings.TrimSpace(m.behaviorPermGroupColumnPreference) != "" {
+		args = append(args, "--perm-group-column-preference", strings.TrimSpace(m.behaviorPermGroupColumnPreference))
+	}
+	if m.behaviorExcludeNonTrialwiseFeatures {
+		args = append(args, "--exclude-non-trialwise-features")
+	}
+
+	// Global Statistics & Validation
+	if m.globalNBootstrap != 1000 {
+		args = append(args, "--global-n-bootstrap", fmt.Sprintf("%d", m.globalNBootstrap))
+	}
+	if m.clusterCorrectionEnabled {
+		args = append(args, "--cluster-correction-enabled")
+		if m.clusterCorrectionAlpha != 0.05 {
+			args = append(args, "--cluster-correction-alpha", fmt.Sprintf("%.4f", m.clusterCorrectionAlpha))
+		}
+		if m.clusterCorrectionMinClusterSize != 2 {
+			args = append(args, "--cluster-correction-min-cluster-size", fmt.Sprintf("%d", m.clusterCorrectionMinClusterSize))
+		}
+		tails := []string{"two-tailed", "upper", "lower"}
+		if m.clusterCorrectionTailGlobal != 0 {
+			args = append(args, "--cluster-correction-tail", tails[m.clusterCorrectionTailGlobal%len(tails)])
+		}
+	}
+	if m.validationMinEpochs != 5 {
+		args = append(args, "--validation-min-epochs", fmt.Sprintf("%d", m.validationMinEpochs))
+	}
+	if m.validationMinChannels != 10 {
+		args = append(args, "--validation-min-channels", fmt.Sprintf("%d", m.validationMinChannels))
+	}
+	if m.validationMaxAmplitudeUv != 500.0 {
+		args = append(args, "--validation-max-amplitude-uv", fmt.Sprintf("%.1f", m.validationMaxAmplitudeUv))
+	}
+
+	// System / IO
+	if strings.TrimSpace(m.ioTemperatureRange) != "" {
+		args = append(args, "--temperature-range")
+		args = append(args, splitCSVList(m.ioTemperatureRange)...)
+	}
+	if m.ioMaxMissingChannelsFraction != 0.1 {
+		args = append(args, "--max-missing-channels-fraction", fmt.Sprintf("%.3f", m.ioMaxMissingChannelsFraction))
+	}
+
 	return args
 }

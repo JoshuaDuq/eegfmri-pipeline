@@ -714,6 +714,38 @@ const (
 	textFieldRidgeAlphaGrid
 	textFieldRfMaxDepthGrid
 	textFieldVarianceThresholdGrid
+
+	// ML new text fields
+	textFieldMLSvmCGrid
+	textFieldMLSvmGammaGrid
+	textFieldMLLrCGrid
+	textFieldMLRfMinSamplesSplitGrid
+	textFieldMLRfMinSamplesLeafGrid
+
+	// EEG Preprocessing new text fields
+	textFieldPrepEcgChannels
+	textFieldPrepAutorejectNInterpolate
+
+	// Event Column Mapping text fields
+	textFieldEventColTemperature
+	textFieldEventColRating
+	textFieldEventColPainBinary
+
+	// Change Scores text fields
+	textFieldChangeScoresWindowPairs
+
+	// ERDS Pain Markers text fields
+	textFieldERDSPainMarkerBands
+	textFieldERDSLateralityColumns
+	textFieldERDSSomatosensoryLeftChannels
+	textFieldERDSSomatosensoryRightChannels
+
+	// Behavior Statistics text fields
+	textFieldBehaviorPermGroupColumnPreference
+
+	// System / IO text fields
+	textFieldIOTemperatureRange
+
 	// Preprocessing advanced config text fields
 	textFieldIcaLabelsToKeep
 )
@@ -2052,6 +2084,154 @@ type Model struct {
 	rfMaxDepthGrid        string // max_depth grid as comma-separated values (use "null" for None)
 	varianceThresholdGrid string // variance_threshold grid (e.g. 0.0 or 0.0,0.01,0.1); use 0.0 only for small train folds
 
+	// ML Preprocessing
+	mlImputer                     int     // 0: median, 1: mean, 2: most_frequent
+	mlPowerTransformerMethod      int     // 0: yeo-johnson, 1: box-cox
+	mlPowerTransformerStandardize bool    // Standardize after power transform
+	mlPCAEnabled                  bool    // Enable PCA dimensionality reduction
+	mlPCANComponents              float64 // Variance threshold (e.g. 0.95) or int
+	mlPCAWhiten                   bool    // PCA whitening
+	mlPCASvdSolver                int     // 0: auto, 1: full, 2: randomized
+	mlPCARngSeed                  int     // PCA random state
+	mlGroupPreprocessingExpanded  bool    // UI expansion state
+
+	// ML Model Hyperparameters - SVM
+	mlSvmKernel      int    // 0: rbf, 1: linear, 2: poly
+	mlSvmCGrid       string // C grid (comma-separated)
+	mlSvmGammaGrid   string // gamma grid (comma-separated)
+	mlSvmClassWeight int    // 0: balanced, 1: none
+
+	// ML Model Hyperparameters - Logistic Regression
+	mlLrPenalty     int    // 0: l2, 1: l1, 2: elasticnet
+	mlLrCGrid       string // C grid (comma-separated)
+	mlLrMaxIter     int    // Max iterations
+	mlLrClassWeight int    // 0: balanced, 1: none
+
+	// ML Model Hyperparameters - Random Forest extras
+	mlRfMinSamplesSplitGrid string // min_samples_split grid (comma-separated)
+	mlRfMinSamplesLeafGrid  string // min_samples_leaf grid (comma-separated)
+	mlRfBootstrap           bool   // Bootstrap sampling
+	mlRfClassWeight         int    // 0: balanced, 1: balanced_subsample, 2: none
+
+	// ML Model Hyperparameters - CNN
+	mlGroupCNNExpanded bool    // UI expansion state
+	mlCnnFilters1      int     // Conv1 filters
+	mlCnnFilters2      int     // Conv2 filters
+	mlCnnKernelSize1   int     // Conv1 kernel size
+	mlCnnKernelSize2   int     // Conv2 kernel size
+	mlCnnPoolSize      int     // Max pool size
+	mlCnnDenseUnits    int     // Dense layer units
+	mlCnnDropoutConv   float64 // Conv dropout rate
+	mlCnnDropoutDense  float64 // Dense dropout rate
+	mlCnnBatchSize     int     // Training batch size
+	mlCnnEpochs        int     // Training epochs
+	mlCnnLearningRate  float64 // Learning rate
+	mlCnnPatience      int     // Early stopping patience
+	mlCnnMinDelta      float64 // Early stopping min delta
+	mlCnnL2Lambda      float64 // L2 regularization
+	mlCnnRandomSeed    int     // CNN random seed
+
+	// ML CV / Evaluation / Analysis
+	mlCvHygieneEnabled               bool    // CV hygiene toggle
+	mlCvPermutationScheme            int     // 0: shuffle, 1: circular_shift
+	mlCvMinValidPermFraction         float64 // Min valid permutation fraction
+	mlCvDefaultNBins                 int     // Default stratification bins
+	mlEvalCIMethod                   int     // 0: bootstrap, 1: fixed_effects
+	mlEvalBootstrapIterations        int     // Bootstrap iterations
+	mlDataCovariatesStrict           bool    // Error on missing covariates
+	mlDataMaxExcludedSubjectFraction float64 // Max excluded subject fraction
+	mlIncrementalBaselineAlpha       float64 // Baseline model alpha
+	mlInterpretabilityGroupedOutputs bool    // Grouped importance tables
+	mlTimeGenMinSubjects             int     // TG min subjects
+	mlTimeGenMinValidPermFraction    float64 // TG min valid perm fraction
+	mlClassMinSubjectsForAUC         int     // Min subjects for AUC inference
+	mlClassMaxFailedFoldFraction     float64 // Max failed fold fraction
+	mlTargetsStrictRegressionCont    bool    // Error on binary-like regression target
+
+	// EEG Preprocessing missing
+	prepEcgChannels            string // ECG channel list (e.g., "ECG")
+	prepAutorejectNInterpolate string // Autoreject interpolation candidates (e.g., "4,8,16")
+
+	// Alignment
+	alignAllowMisalignedTrim bool // Allow misaligned trim
+	alignMinAlignmentSamples int  // Minimum alignment samples
+	alignTrimToFirstVolume   bool // Trim EEG to first volume marker
+	alignFmriOnsetReference  int  // 0: first_iti_start, 1: first_stim_start, 2: as_is
+
+	// Event Column Mapping
+	eventColTemperature string // Temperature column candidates (comma-separated)
+	eventColRating      string // Rating column candidates (comma-separated)
+	eventColPainBinary  string // Pain binary column candidates (comma-separated)
+
+	// Per-Family Spatial Transforms (0: none, 1: csd, 2: laplacian)
+	spatialTransformPerFamilyConnectivity int
+	spatialTransformPerFamilyItpc         int
+	spatialTransformPerFamilyPac          int
+	spatialTransformPerFamilyPower        int
+	spatialTransformPerFamilyAperiodic    int
+	spatialTransformPerFamilyBursts       int
+	spatialTransformPerFamilyErds         int
+	spatialTransformPerFamilyComplexity   int
+	spatialTransformPerFamilyRatios       int
+	spatialTransformPerFamilyAsymmetry    int
+	spatialTransformPerFamilySpectral     int
+	spatialTransformPerFamilyErp          int
+	spatialTransformPerFamilyQuality      int
+	spatialTransformPerFamilyMicrostates  int
+
+	// Change Scores Config
+	changeScoresTransform   int    // 0: difference, 1: percent, 2: log_ratio
+	changeScoresWindowPairs string // Window pairs (e.g., "baseline:active")
+
+	// ITPC/PAC Segment Validity
+	itpcMinSegmentSec   float64 // Min segment duration for ITPC
+	itpcMinCyclesAtFmin float64 // Min cycles at lowest freq for ITPC
+	pacMinSegmentSec    float64 // Min segment duration for PAC
+	pacMinCyclesAtFmin  float64 // Min cycles at lowest freq for PAC
+	pacSurrogateMethod  int     // 0: trial_shuffle, 1: circular_shift
+
+	// Aperiodic Missing
+	aperiodicMaxFreqResolutionHz float64 // Max PSD freq resolution threshold
+	aperiodicMultitaperAdaptive  bool    // Multitaper adaptive flag
+
+	// Directed Connectivity Missing
+	directedConnMinSamplesPerMvarParam int // Auto-reduce MVAR order for short windows
+
+	// ERDS Pain Markers
+	erdsPainMarkerBands            string  // Bands for contralateral pain markers (comma-separated)
+	erdsLateralityColumns          string  // Column names for stimulation side (comma-separated)
+	erdsSomatosensoryLeftChannels  string  // Left somatosensory channels (comma-separated)
+	erdsSomatosensoryRightChannels string  // Right somatosensory channels (comma-separated)
+	erdsOnsetMinThresholdPercent   float64 // Absolute min ERD onset threshold
+	erdsReboundThresholdSigma      float64 // Rebound threshold sigma
+	erdsReboundMinThresholdPercent float64 // Absolute min rebound threshold
+
+	// Microstates Missing
+	microstatesAssignFromGfpPeaks bool // Assign states at GFP peaks then backfit
+
+	// Behavior Statistics
+	behaviorStatsTempControl            int    // 0: spline, 1: linear
+	behaviorStatsAllowIIDTrials         bool   // Allow i.i.d. trial assumptions
+	behaviorStatsHierarchicalFDR        bool   // Hierarchical FDR correction
+	behaviorStatsComputeReliability     bool   // Compute reliability
+	behaviorPermScheme                  int    // 0: circular_shift, 1: shuffle
+	behaviorPermGroupColumnPreference   string // Group column preference order (comma-separated)
+	behaviorExcludeNonTrialwiseFeatures bool   // Drop broadcast features
+
+	// Global Statistics & Validation
+	globalNBootstrap                int     // Global bootstrap count
+	clusterCorrectionEnabled        bool    // Global cluster correction enabled
+	clusterCorrectionAlpha          float64 // Cluster correction alpha
+	clusterCorrectionMinClusterSize int     // Min cluster size
+	clusterCorrectionTailGlobal     int     // 0: two-tailed, 1: upper, -1: lower
+	validationMinEpochs             int     // Min epochs for validation
+	validationMinChannels           int     // Min channels
+	validationMaxAmplitudeUv        float64 // Max amplitude threshold
+
+	// System / IO
+	ioTemperatureRange           string  // Valid temperature range (e.g., "35.0,55.0")
+	ioMaxMissingChannelsFraction float64 // Max missing channels fraction
+
 	// TFR parameters (for features pipeline)
 	tfrFreqMin       float64 // Min frequency for TFR
 	tfrFreqMax       float64 // Max frequency for TFR
@@ -2758,6 +2938,153 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		ridgeAlphaGrid:        "0.01,0.1,1,10,100",
 		rfNEstimators:         500,
 		rfMaxDepthGrid:        "5,10,20,null",
+
+		// ML Preprocessing defaults
+		mlImputer:                     0, // 0: median
+		mlPowerTransformerMethod:      0, // 0: yeo-johnson
+		mlPowerTransformerStandardize: true,
+		mlPCAEnabled:                  false,
+		mlPCANComponents:              0.95,
+		mlPCAWhiten:                   false,
+		mlPCASvdSolver:                0, // 0: auto
+		mlPCARngSeed:                  0,
+
+		// ML SVM defaults
+		mlSvmKernel:      0, // 0: rbf
+		mlSvmCGrid:       "0.01,0.1,1,10,100",
+		mlSvmGammaGrid:   "scale,0.001,0.01,0.1",
+		mlSvmClassWeight: 0, // 0: balanced
+
+		// ML Logistic Regression defaults
+		mlLrPenalty:     0, // 0: l2
+		mlLrCGrid:       "0.01,0.1,1,10,100",
+		mlLrMaxIter:     1000,
+		mlLrClassWeight: 0, // 0: balanced
+
+		// ML Random Forest extras defaults
+		mlRfMinSamplesSplitGrid: "2,5,10",
+		mlRfMinSamplesLeafGrid:  "1,2,4",
+		mlRfBootstrap:           true,
+		mlRfClassWeight:         0, // 0: balanced
+
+		// ML CNN defaults
+		mlCnnFilters1:     32,
+		mlCnnFilters2:     64,
+		mlCnnKernelSize1:  3,
+		mlCnnKernelSize2:  3,
+		mlCnnPoolSize:     2,
+		mlCnnDenseUnits:   128,
+		mlCnnDropoutConv:  0.25,
+		mlCnnDropoutDense: 0.5,
+		mlCnnBatchSize:    32,
+		mlCnnEpochs:       100,
+		mlCnnLearningRate: 0.001,
+		mlCnnPatience:     10,
+		mlCnnMinDelta:     0.001,
+		mlCnnL2Lambda:     0.01,
+		mlCnnRandomSeed:   42,
+
+		// ML CV / Evaluation / Analysis defaults
+		mlCvHygieneEnabled:               true,
+		mlCvPermutationScheme:            0, // 0: shuffle
+		mlCvMinValidPermFraction:         0.8,
+		mlCvDefaultNBins:                 5,
+		mlEvalCIMethod:                   0, // 0: bootstrap
+		mlEvalBootstrapIterations:        1000,
+		mlDataCovariatesStrict:           false,
+		mlDataMaxExcludedSubjectFraction: 0.2,
+		mlIncrementalBaselineAlpha:       0.05,
+		mlInterpretabilityGroupedOutputs: true,
+		mlTimeGenMinSubjects:             5,
+		mlTimeGenMinValidPermFraction:    0.5,
+		mlClassMinSubjectsForAUC:         10,
+		mlClassMaxFailedFoldFraction:     0.2,
+		mlTargetsStrictRegressionCont:    true,
+
+		// EEG Preprocessing missing defaults
+		prepEcgChannels:            "",
+		prepAutorejectNInterpolate: "4,8,16",
+
+		// Alignment defaults
+		alignAllowMisalignedTrim: false,
+		alignMinAlignmentSamples: 5,
+		alignTrimToFirstVolume:   true,
+		alignFmriOnsetReference:  0, // 0: first_iti_start
+
+		// Event Column Mapping defaults
+		eventColTemperature: "stimulus_temp,stimulus_temperature,temp,temperature",
+		eventColRating:      "vas_final_coded_rating,vas_final_rating,vas_rating,pain_intensity,pain_rating,rating",
+		eventColPainBinary:  "pain_binary_coded,pain_binary,pain",
+
+		// Per-Family Spatial Transforms defaults (all 0 = none / inherit global)
+		spatialTransformPerFamilyConnectivity: 0,
+		spatialTransformPerFamilyItpc:         0,
+		spatialTransformPerFamilyPac:          0,
+		spatialTransformPerFamilyPower:        0,
+		spatialTransformPerFamilyAperiodic:    0,
+		spatialTransformPerFamilyBursts:       0,
+		spatialTransformPerFamilyErds:         0,
+		spatialTransformPerFamilyComplexity:   0,
+		spatialTransformPerFamilyRatios:       0,
+		spatialTransformPerFamilyAsymmetry:    0,
+		spatialTransformPerFamilySpectral:     0,
+		spatialTransformPerFamilyErp:          0,
+		spatialTransformPerFamilyQuality:      0,
+		spatialTransformPerFamilyMicrostates:  0,
+
+		// Change Scores defaults
+		changeScoresTransform:   0, // 0: difference
+		changeScoresWindowPairs: "baseline:active",
+
+		// ITPC/PAC Segment Validity defaults
+		itpcMinSegmentSec:   1.0,
+		itpcMinCyclesAtFmin: 3.0,
+		pacMinSegmentSec:    2.0,
+		pacMinCyclesAtFmin:  3.0,
+		pacSurrogateMethod:  0, // 0: trial_shuffle
+
+		// Aperiodic Missing defaults
+		aperiodicMaxFreqResolutionHz: 0.5,
+		aperiodicMultitaperAdaptive:  false,
+
+		// Directed Connectivity Missing defaults
+		directedConnMinSamplesPerMvarParam: 5,
+
+		// ERDS Pain Markers defaults
+		erdsPainMarkerBands:            "alpha,beta",
+		erdsLateralityColumns:          "stimulation_side,stim_side",
+		erdsSomatosensoryLeftChannels:  "C3,CP3,C5,CP5",
+		erdsSomatosensoryRightChannels: "C4,CP4,C6,CP6",
+		erdsOnsetMinThresholdPercent:   10.0,
+		erdsReboundThresholdSigma:      1.0,
+		erdsReboundMinThresholdPercent: 5.0,
+
+		// Microstates Missing defaults
+		microstatesAssignFromGfpPeaks: true,
+
+		// Behavior Statistics defaults
+		behaviorStatsTempControl:            0, // 0: spline
+		behaviorStatsAllowIIDTrials:         false,
+		behaviorStatsHierarchicalFDR:        true,
+		behaviorStatsComputeReliability:     true,
+		behaviorPermScheme:                  0, // 0: circular_shift
+		behaviorPermGroupColumnPreference:   "run_id,block",
+		behaviorExcludeNonTrialwiseFeatures: true,
+
+		// Global Statistics & Validation defaults
+		globalNBootstrap:                1000,
+		clusterCorrectionEnabled:        false,
+		clusterCorrectionAlpha:          0.05,
+		clusterCorrectionMinClusterSize: 2,
+		clusterCorrectionTailGlobal:     0, // two-tailed
+		validationMinEpochs:             5,
+		validationMinChannels:           10,
+		validationMaxAmplitudeUv:        500.0,
+
+		// System / IO defaults
+		ioTemperatureRange:           "35.0,55.0",
+		ioMaxMissingChannelsFraction: 0.3,
+
 		// TFR defaults (from config)
 		tfrFreqMin:       1.0,
 		tfrFreqMax:       100.0,

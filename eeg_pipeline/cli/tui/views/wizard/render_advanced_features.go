@@ -2257,6 +2257,183 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			hint = "-1 = all cores"
 
+		// Per-family spatial transform overrides
+		case optSpatialTransformPerFamilyConnectivity:
+			label, hint = "  ST: connectivity", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyConnectivity)
+		case optSpatialTransformPerFamilyItpc:
+			label, hint = "  ST: itpc", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyItpc)
+		case optSpatialTransformPerFamilyPac:
+			label, hint = "  ST: pac", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyPac)
+		case optSpatialTransformPerFamilyPower:
+			label, hint = "  ST: power", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyPower)
+		case optSpatialTransformPerFamilyAperiodic:
+			label, hint = "  ST: aperiodic", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyAperiodic)
+		case optSpatialTransformPerFamilyBursts:
+			label, hint = "  ST: bursts", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyBursts)
+		case optSpatialTransformPerFamilyErds:
+			label, hint = "  ST: erds", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyErds)
+		case optSpatialTransformPerFamilyComplexity:
+			label, hint = "  ST: complexity", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyComplexity)
+		case optSpatialTransformPerFamilyRatios:
+			label, hint = "  ST: ratios", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyRatios)
+		case optSpatialTransformPerFamilyAsymmetry:
+			label, hint = "  ST: asymmetry", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyAsymmetry)
+		case optSpatialTransformPerFamilySpectral:
+			label, hint = "  ST: spectral", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilySpectral)
+		case optSpatialTransformPerFamilyErp:
+			label, hint = "  ST: erp", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyErp)
+		case optSpatialTransformPerFamilyQuality:
+			label, hint = "  ST: quality", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyQuality)
+		case optSpatialTransformPerFamilyMicrostates:
+			label, hint = "  ST: microstates", "inherit/none/csd/laplacian"
+			value = spatialTransformPerFamilyLabel(m.spatialTransformPerFamilyMicrostates)
+		// ITPC/PAC segment validity
+		case optItpcMinSegmentSec:
+			label = "ITPC min segment (sec)"
+			value = fmt.Sprintf("%.2f", m.itpcMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optItpcMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum valid segment"
+		case optItpcMinCyclesAtFmin:
+			label = "ITPC min cycles at fmin"
+			value = fmt.Sprintf("%.1f", m.itpcMinCyclesAtFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optItpcMinCyclesAtFmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum cycles"
+		case optPACMinSegmentSec:
+			label = "PAC min segment (sec)"
+			value = fmt.Sprintf("%.2f", m.pacMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optPACMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum valid segment"
+		case optPACMinCyclesAtFmin:
+			label = "PAC min cycles at fmin"
+			value = fmt.Sprintf("%.1f", m.pacMinCyclesAtFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optPACMinCyclesAtFmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum cycles"
+		case optPACSurrogateMethod:
+			methods := []string{"swap_phase_amp", "time_shift"}
+			label, hint = "PAC surrogate method", "null distribution method"
+			value = methods[m.pacSurrogateMethod%len(methods)]
+		// Aperiodic missing
+		case optAperiodicMaxFreqResolutionHz:
+			label = "Aperiodic max freq resolution"
+			value = fmt.Sprintf("%.2f Hz", m.aperiodicMaxFreqResolutionHz)
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicMaxFreqResolutionHz) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "multitaper frequency resolution"
+		case optAperiodicMultitaperAdaptive:
+			label, hint = "Aperiodic multitaper adaptive", "adaptive weights"
+			value = m.boolToOnOff(m.aperiodicMultitaperAdaptive)
+		// Directed connectivity missing
+		case optDirectedConnMinSamplesPerMvarParam:
+			label = "DirConn min samples/param"
+			value = fmt.Sprintf("%d", m.directedConnMinSamplesPerMvarParam)
+			if m.editingNumber && m.isCurrentlyEditing(optDirectedConnMinSamplesPerMvarParam) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "MVAR model adequacy"
+		// ERDS pain markers
+		case optERDSPainMarkerBands:
+			label, hint = "ERDS pain marker bands", "e.g. alpha,beta"
+			val := m.erdsPainMarkerBands
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldERDSPainMarkerBands {
+				val = m.textBuffer + "█"
+			}
+			value = val
+		case optERDSLateralityColumns:
+			label, hint = "ERDS laterality columns", "comma-separated"
+			val := m.erdsLateralityColumns
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldERDSLateralityColumns {
+				val = m.textBuffer + "█"
+			}
+			value = val
+		case optERDSSomatosensoryLeftChannels:
+			label, hint = "Somatosensory left channels", "comma-separated"
+			val := m.erdsSomatosensoryLeftChannels
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldERDSSomatosensoryLeftChannels {
+				val = m.textBuffer + "█"
+			}
+			value = val
+		case optERDSSomatosensoryRightChannels:
+			label, hint = "Somatosensory right channels", "comma-separated"
+			val := m.erdsSomatosensoryRightChannels
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldERDSSomatosensoryRightChannels {
+				val = m.textBuffer + "█"
+			}
+			value = val
+		case optERDSOnsetMinThresholdPercent:
+			label = "ERDS onset min threshold %"
+			value = fmt.Sprintf("%.1f", m.erdsOnsetMinThresholdPercent)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSOnsetMinThresholdPercent) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum onset threshold"
+		case optERDSReboundThresholdSigma:
+			label = "ERDS rebound threshold σ"
+			value = fmt.Sprintf("%.2f", m.erdsReboundThresholdSigma)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSReboundThresholdSigma) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "rebound detection threshold"
+		case optERDSReboundMinThresholdPercent:
+			label = "ERDS rebound min threshold %"
+			value = fmt.Sprintf("%.1f", m.erdsReboundMinThresholdPercent)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSReboundMinThresholdPercent) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum rebound threshold"
+		// Microstates missing
+		case optMicrostatesAssignFromGfpPeaks:
+			label, hint = "Assign from GFP peaks", "assign labels from GFP peaks only"
+			value = m.boolToOnOff(m.microstatesAssignFromGfpPeaks)
+		// Change scores
+		case optChangeScoresTransform:
+			transforms := []string{"difference", "ratio", "log_ratio"}
+			label, hint = "Change scores transform", "how to compute change"
+			value = transforms[m.changeScoresTransform%len(transforms)]
+		case optChangeScoresWindowPairs:
+			label, hint = "Change scores window pairs", "e.g. baseline:active"
+			val := m.changeScoresWindowPairs
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldChangeScoresWindowPairs {
+				val = m.textBuffer + "█"
+			}
+			value = val
+
 		default:
 			label = "Unknown"
 			value = ""
@@ -2559,4 +2736,17 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	}
 
 	return b.String()
+}
+
+func spatialTransformPerFamilyLabel(v int) string {
+	switch v % 4 {
+	case 1:
+		return "none"
+	case 2:
+		return "csd"
+	case 3:
+		return "laplacian"
+	default:
+		return "inherit"
+	}
 }

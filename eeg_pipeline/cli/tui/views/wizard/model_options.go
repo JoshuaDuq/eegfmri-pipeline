@@ -212,6 +212,7 @@ func (m Model) getFeaturesOptions() []optionType {
 				optMicrostatesMinDurationMs,
 				optMicrostatesGfpPeakProminence,
 				optMicrostatesRandomState,
+				optMicrostatesAssignFromGfpPeaks,
 			)
 		}
 	}
@@ -229,6 +230,13 @@ func (m Model) getFeaturesOptions() []optionType {
 				optERDSOnsetMinDurationMs,
 				optERDSReboundMinLatencyMs,
 				optERDSInferContralateral,
+				optERDSPainMarkerBands,
+				optERDSLateralityColumns,
+				optERDSSomatosensoryLeftChannels,
+				optERDSSomatosensoryRightChannels,
+				optERDSOnsetMinThresholdPercent,
+				optERDSReboundThresholdSigma,
+				optERDSReboundMinThresholdPercent,
 			)
 		}
 	}
@@ -238,6 +246,23 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optFeatGroupSpatialTransform)
 		if m.featGroupSpatialTransformExpanded {
 			options = append(options, optSpatialTransform, optSpatialTransformLambda2, optSpatialTransformStiffness)
+			// Per-family spatial transform overrides
+			options = append(options,
+				optSpatialTransformPerFamilyConnectivity,
+				optSpatialTransformPerFamilyItpc,
+				optSpatialTransformPerFamilyPac,
+				optSpatialTransformPerFamilyPower,
+				optSpatialTransformPerFamilyAperiodic,
+				optSpatialTransformPerFamilyBursts,
+				optSpatialTransformPerFamilyErds,
+				optSpatialTransformPerFamilyComplexity,
+				optSpatialTransformPerFamilyRatios,
+				optSpatialTransformPerFamilyAsymmetry,
+				optSpatialTransformPerFamilySpectral,
+				optSpatialTransformPerFamilyErp,
+				optSpatialTransformPerFamilyQuality,
+				optSpatialTransformPerFamilyMicrostates,
+			)
 		}
 	}
 
@@ -327,7 +352,13 @@ func (m Model) getFeaturesOptions() []optionType {
 			if m.itpcMethod == 3 {
 				options = append(options, optItpcConditionColumn, optItpcConditionValues, optItpcMinTrialsPerCondition)
 			}
+			options = append(options, optItpcMinSegmentSec, optItpcMinCyclesAtFmin)
 		}
+	}
+
+	// PAC segment validity (shown when PAC is selected)
+	if m.isCategorySelected("pac") {
+		options = append(options, optPACMinSegmentSec, optPACMinCyclesAtFmin, optPACSurrogateMethod)
 	}
 
 	// TFR settings only for feature families that use time-frequency representations.
@@ -362,6 +393,16 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optSaveSubjectLevelFeatures, optFeatAlsoSaveCsv)
 	}
 
+	// Directed connectivity missing
+	if m.isCategorySelected("directedconnectivity") {
+		options = append(options, optDirectedConnMinSamplesPerMvarParam)
+	}
+
+	// Aperiodic missing
+	if m.isCategorySelected("aperiodic") {
+		options = append(options, optAperiodicMaxFreqResolutionHz, optAperiodicMultitaperAdaptive)
+	}
+
 	options = append(options, optFeatGroupExecution)
 	if m.featGroupExecutionExpanded {
 		options = append(
@@ -386,6 +427,11 @@ func (m Model) getFeaturesOptions() []optionType {
 		if m.isCategorySelected("itpc") {
 			options = append(options, optItpcNJobs)
 		}
+	}
+
+	// Change scores config (shown when change scores are enabled)
+	if m.featComputeChangeScores {
+		options = append(options, optChangeScoresTransform, optChangeScoresWindowPairs)
 	}
 
 	return options
@@ -457,6 +503,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 			optPrepChTypes,
 			optPrepEegReference,
 			optPrepEogChannels,
+			optPrepEcgChannels,
 			optPrepRandomState,
 			optPrepTaskIsRest,
 			optPrepNJobs,
@@ -531,6 +578,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepEpochsBaseline,
 				optPrepEpochsReject,
 				optPrepRejectMethod,
+				optPrepAutorejectNInterpolate,
 				optPrepRunSourceEstimation,
 				optPrepWriteCleanEvents,
 				optPrepOverwriteCleanEvents,
@@ -538,6 +586,21 @@ func (m Model) getPreprocessingOptions() []optionType {
 			)
 		}
 	}
+
+	// Alignment group
+	options = append(options,
+		optAlignAllowMisalignedTrim,
+		optAlignMinAlignmentSamples,
+		optAlignTrimToFirstVolume,
+		optAlignFmriOnsetReference,
+	)
+
+	// Event Column Mapping
+	options = append(options,
+		optEventColTemperature,
+		optEventColRating,
+		optEventColPainBinary,
+	)
 
 	return options
 }
@@ -1618,6 +1681,47 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
+	// Behavior Statistics
+	if hasAnyComputation {
+		options = append(options,
+			optBehaviorStatsTempControl,
+			optBehaviorStatsAllowIIDTrials,
+			optBehaviorStatsHierarchicalFDR,
+			optBehaviorStatsComputeReliability,
+			optBehaviorPermScheme,
+			optBehaviorPermGroupColumnPreference,
+			optBehaviorExcludeNonTrialwiseFeatures,
+		)
+	}
+
+	// Global Statistics & Validation
+	if hasAnyComputation {
+		options = append(options,
+			optGlobalNBootstrap,
+			optClusterCorrectionEnabled,
+		)
+		if m.clusterCorrectionEnabled {
+			options = append(options,
+				optClusterCorrectionAlpha,
+				optClusterCorrectionMinClusterSize,
+				optClusterCorrectionTail,
+			)
+		}
+		options = append(options,
+			optValidationMinEpochs,
+			optValidationMinChannels,
+			optValidationMaxAmplitudeUv,
+		)
+	}
+
+	// System / IO
+	if hasAnyComputation {
+		options = append(options,
+			optIOTemperatureRange,
+			optIOMaxMissingChannelsFraction,
+		)
+	}
+
 	return options
 }
 
@@ -1700,13 +1804,115 @@ func (m Model) getMLOptions() []optionType {
 		)
 	}
 
+	// ML Preprocessing group
+	opts = append(opts, optMLGroupPreprocessing)
+	if m.mlGroupPreprocessingExpanded {
+		opts = append(opts,
+			optMLImputer,
+			optMLPowerTransformerMethod,
+			optMLPowerTransformerStandardize,
+			optMLPCAEnabled,
+		)
+		if m.mlPCAEnabled {
+			opts = append(opts,
+				optMLPCANComponents,
+				optMLPCAWhiten,
+				optMLPCASvdSolver,
+				optMLPCARngSeed,
+			)
+		}
+	}
+
+	// SVM hyperparameters (shown when SVM model is selected)
+	if mode == "classify" && m.mlClassificationModel == MLClassificationSVM {
+		opts = append(opts,
+			optMLSvmKernel,
+			optMLSvmCGrid,
+			optMLSvmGammaGrid,
+			optMLSvmClassWeight,
+		)
+	}
+
+	// Logistic Regression hyperparameters
+	if mode == "classify" && m.mlClassificationModel == MLClassificationLR {
+		opts = append(opts,
+			optMLLrPenalty,
+			optMLLrCGrid,
+			optMLLrMaxIter,
+			optMLLrClassWeight,
+		)
+	}
+
+	// Random Forest extras (shown alongside existing RF options)
+	if (mode == "classify" && m.mlClassificationModel == MLClassificationRF) ||
+		(mode != "classify" && mode != "timegen" && mode != "" && m.mlRegressionModel == MLRegressionRF) {
+		opts = append(opts,
+			optMLRfMinSamplesSplitGrid,
+			optMLRfMinSamplesLeafGrid,
+			optMLRfBootstrap,
+		)
+		if mode == "classify" {
+			opts = append(opts, optMLRfClassWeight)
+		}
+	}
+
+	// CNN group (shown for classify mode with CNN model)
+	if mode == "classify" && m.mlClassificationModel == MLClassificationCNN {
+		opts = append(opts, optMLGroupCNN)
+		if m.mlGroupCNNExpanded {
+			opts = append(opts,
+				optMLCnnFilters1,
+				optMLCnnFilters2,
+				optMLCnnKernelSize1,
+				optMLCnnKernelSize2,
+				optMLCnnPoolSize,
+				optMLCnnDenseUnits,
+				optMLCnnDropoutConv,
+				optMLCnnDropoutDense,
+				optMLCnnBatchSize,
+				optMLCnnEpochs,
+				optMLCnnLearningRate,
+				optMLCnnPatience,
+				optMLCnnMinDelta,
+				optMLCnnL2Lambda,
+				optMLCnnRandomSeed,
+			)
+		}
+	}
+
 	opts = append(opts, optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed)
+
+	// CV / Evaluation / Analysis options
+	opts = append(opts,
+		optMLCvHygieneEnabled,
+		optMLCvPermutationScheme,
+		optMLCvMinValidPermFraction,
+		optMLCvDefaultNBins,
+		optMLEvalCIMethod,
+		optMLEvalBootstrapIterations,
+		optMLDataCovariatesStrict,
+		optMLDataMaxExcludedSubjectFraction,
+		optMLTargetsStrictRegressionContinuous,
+		optMLInterpretabilityGroupedOutputs,
+	)
+
+	if mode == "incremental_validity" {
+		opts = append(opts, optMLIncrementalBaselineAlpha)
+	}
 
 	if mode == "uncertainty" {
 		opts = append(opts, optMLUncertaintyAlpha)
 	}
 	if mode == "permutation" {
 		opts = append(opts, optMLPermNRepeats)
+	}
+
+	if mode == "timegen" {
+		opts = append(opts, optMLTimeGenMinSubjects, optMLTimeGenMinValidPermFraction)
+	}
+
+	if mode == "classify" {
+		opts = append(opts, optMLClassMinSubjectsForAUC, optMLClassMaxFailedFoldFraction)
 	}
 
 	return opts

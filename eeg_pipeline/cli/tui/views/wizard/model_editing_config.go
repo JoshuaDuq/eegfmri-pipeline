@@ -1555,6 +1555,47 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.rfMaxDepthGrid
 	case textFieldVarianceThresholdGrid:
 		return m.varianceThresholdGrid
+	// ML new text fields
+	case textFieldMLSvmCGrid:
+		return m.mlSvmCGrid
+	case textFieldMLSvmGammaGrid:
+		return m.mlSvmGammaGrid
+	case textFieldMLLrCGrid:
+		return m.mlLrCGrid
+	case textFieldMLRfMinSamplesSplitGrid:
+		return m.mlRfMinSamplesSplitGrid
+	case textFieldMLRfMinSamplesLeafGrid:
+		return m.mlRfMinSamplesLeafGrid
+	// EEG Preprocessing new text fields
+	case textFieldPrepEcgChannels:
+		return m.prepEcgChannels
+	case textFieldPrepAutorejectNInterpolate:
+		return m.prepAutorejectNInterpolate
+	// Event Column Mapping text fields
+	case textFieldEventColTemperature:
+		return m.eventColTemperature
+	case textFieldEventColRating:
+		return m.eventColRating
+	case textFieldEventColPainBinary:
+		return m.eventColPainBinary
+	// Change Scores text fields
+	case textFieldChangeScoresWindowPairs:
+		return m.changeScoresWindowPairs
+	// ERDS Pain Markers text fields
+	case textFieldERDSPainMarkerBands:
+		return m.erdsPainMarkerBands
+	case textFieldERDSLateralityColumns:
+		return m.erdsLateralityColumns
+	case textFieldERDSSomatosensoryLeftChannels:
+		return m.erdsSomatosensoryLeftChannels
+	case textFieldERDSSomatosensoryRightChannels:
+		return m.erdsSomatosensoryRightChannels
+	// Behavior Statistics text fields
+	case textFieldBehaviorPermGroupColumnPreference:
+		return m.behaviorPermGroupColumnPreference
+	// System / IO text fields
+	case textFieldIOTemperatureRange:
+		return m.ioTemperatureRange
 	// Preprocessing text fields
 	case textFieldIcaLabelsToKeep:
 		return m.icaLabelsToKeep
@@ -2334,6 +2375,47 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.rfMaxDepthGrid = strings.Join(splitLooseList(value), ",")
 	case textFieldVarianceThresholdGrid:
 		m.varianceThresholdGrid = strings.Join(splitLooseList(value), ",")
+	// ML new text fields
+	case textFieldMLSvmCGrid:
+		m.mlSvmCGrid = strings.Join(splitLooseList(value), ",")
+	case textFieldMLSvmGammaGrid:
+		m.mlSvmGammaGrid = strings.Join(splitLooseList(value), ",")
+	case textFieldMLLrCGrid:
+		m.mlLrCGrid = strings.Join(splitLooseList(value), ",")
+	case textFieldMLRfMinSamplesSplitGrid:
+		m.mlRfMinSamplesSplitGrid = strings.Join(splitLooseList(value), ",")
+	case textFieldMLRfMinSamplesLeafGrid:
+		m.mlRfMinSamplesLeafGrid = strings.Join(splitLooseList(value), ",")
+	// EEG Preprocessing new text fields
+	case textFieldPrepEcgChannels:
+		m.prepEcgChannels = value
+	case textFieldPrepAutorejectNInterpolate:
+		m.prepAutorejectNInterpolate = strings.Join(splitLooseList(value), ",")
+	// Event Column Mapping text fields
+	case textFieldEventColTemperature:
+		m.eventColTemperature = strings.Join(splitLooseList(value), ",")
+	case textFieldEventColRating:
+		m.eventColRating = strings.Join(splitLooseList(value), ",")
+	case textFieldEventColPainBinary:
+		m.eventColPainBinary = strings.Join(splitLooseList(value), ",")
+	// Change Scores text fields
+	case textFieldChangeScoresWindowPairs:
+		m.changeScoresWindowPairs = strings.TrimSpace(value)
+	// ERDS Pain Markers text fields
+	case textFieldERDSPainMarkerBands:
+		m.erdsPainMarkerBands = strings.Join(splitLooseList(value), ",")
+	case textFieldERDSLateralityColumns:
+		m.erdsLateralityColumns = strings.Join(splitLooseList(value), ",")
+	case textFieldERDSSomatosensoryLeftChannels:
+		m.erdsSomatosensoryLeftChannels = strings.Join(splitLooseList(value), ",")
+	case textFieldERDSSomatosensoryRightChannels:
+		m.erdsSomatosensoryRightChannels = strings.Join(splitLooseList(value), ",")
+	// Behavior Statistics text fields
+	case textFieldBehaviorPermGroupColumnPreference:
+		m.behaviorPermGroupColumnPreference = strings.Join(splitLooseList(value), ",")
+	// System / IO text fields
+	case textFieldIOTemperatureRange:
+		m.ioTemperatureRange = strings.Join(splitLooseList(value), ",")
 	// Preprocessing text fields
 	case textFieldIcaLabelsToKeep:
 		m.icaLabelsToKeep = strings.Join(strings.Fields(value), "")
@@ -3424,6 +3506,153 @@ const (
 	optSystemNJobs
 	optSystemStrictMode
 	optLoggingLevel
+
+	// === Missing config keys (YAML → TUI gap) ===
+
+	// EEG Preprocessing: ecg_channels, autoreject_n_interpolate
+	optPrepEcgChannels
+	optPrepAutorejectNInterpolate
+
+	// Alignment
+	optAlignAllowMisalignedTrim
+	optAlignMinAlignmentSamples
+	optAlignTrimToFirstVolume
+	optAlignFmriOnsetReference
+
+	// Event Column Mapping
+	optEventColTemperature
+	optEventColRating
+	optEventColPainBinary
+
+	// Per-Family Spatial Transforms
+	optSpatialTransformPerFamilyConnectivity
+	optSpatialTransformPerFamilyItpc
+	optSpatialTransformPerFamilyPac
+	optSpatialTransformPerFamilyPower
+	optSpatialTransformPerFamilyAperiodic
+	optSpatialTransformPerFamilyBursts
+	optSpatialTransformPerFamilyErds
+	optSpatialTransformPerFamilyComplexity
+	optSpatialTransformPerFamilyRatios
+	optSpatialTransformPerFamilyAsymmetry
+	optSpatialTransformPerFamilySpectral
+	optSpatialTransformPerFamilyErp
+	optSpatialTransformPerFamilyQuality
+	optSpatialTransformPerFamilyMicrostates
+
+	// Change Scores Config
+	optChangeScoresTransform
+	optChangeScoresWindowPairs
+
+	// ITPC/PAC Segment Validity
+	optItpcMinSegmentSec
+	optItpcMinCyclesAtFmin
+	optPACMinSegmentSec
+	optPACMinCyclesAtFmin
+	optPACSurrogateMethod
+
+	// Aperiodic Missing
+	optAperiodicMaxFreqResolutionHz
+	optAperiodicMultitaperAdaptive
+
+	// Directed Connectivity Missing
+	optDirectedConnMinSamplesPerMvarParam
+
+	// ERDS Pain Markers
+	optERDSPainMarkerBands
+	optERDSLateralityColumns
+	optERDSSomatosensoryLeftChannels
+	optERDSSomatosensoryRightChannels
+	optERDSOnsetMinThresholdPercent
+	optERDSReboundThresholdSigma
+	optERDSReboundMinThresholdPercent
+
+	// Microstates Missing
+	optMicrostatesAssignFromGfpPeaks
+
+	// ML Preprocessing
+	optMLGroupPreprocessing
+	optMLImputer
+	optMLPowerTransformerMethod
+	optMLPowerTransformerStandardize
+	optMLPCAEnabled
+	optMLPCANComponents
+	optMLPCAWhiten
+	optMLPCASvdSolver
+	optMLPCARngSeed
+
+	// ML Model Hyperparameters - SVM
+	optMLSvmKernel
+	optMLSvmCGrid
+	optMLSvmGammaGrid
+	optMLSvmClassWeight
+	// ML Model Hyperparameters - Logistic Regression
+	optMLLrPenalty
+	optMLLrCGrid
+	optMLLrMaxIter
+	optMLLrClassWeight
+	// ML Model Hyperparameters - Random Forest extras
+	optMLRfMinSamplesSplitGrid
+	optMLRfMinSamplesLeafGrid
+	optMLRfBootstrap
+	optMLRfClassWeight
+	// ML Model Hyperparameters - CNN
+	optMLGroupCNN
+	optMLCnnFilters1
+	optMLCnnFilters2
+	optMLCnnKernelSize1
+	optMLCnnKernelSize2
+	optMLCnnPoolSize
+	optMLCnnDenseUnits
+	optMLCnnDropoutConv
+	optMLCnnDropoutDense
+	optMLCnnBatchSize
+	optMLCnnEpochs
+	optMLCnnLearningRate
+	optMLCnnPatience
+	optMLCnnMinDelta
+	optMLCnnL2Lambda
+	optMLCnnRandomSeed
+
+	// ML CV / Evaluation / Analysis
+	optMLCvHygieneEnabled
+	optMLCvPermutationScheme
+	optMLCvMinValidPermFraction
+	optMLCvDefaultNBins
+	optMLEvalCIMethod
+	optMLEvalBootstrapIterations
+	optMLDataCovariatesStrict
+	optMLDataMaxExcludedSubjectFraction
+	optMLIncrementalBaselineAlpha
+	optMLInterpretabilityGroupedOutputs
+	optMLTimeGenMinSubjects
+	optMLTimeGenMinValidPermFraction
+	optMLClassMinSubjectsForAUC
+	optMLClassMaxFailedFoldFraction
+	optMLTargetsStrictRegressionContinuous
+
+	// Behavior Statistics
+	optBehaviorStatsTempControl
+	optBehaviorStatsAllowIIDTrials
+	optBehaviorStatsHierarchicalFDR
+	optBehaviorStatsComputeReliability
+	optBehaviorPermScheme
+	optBehaviorPermGroupColumnPreference
+	optBehaviorExcludeNonTrialwiseFeatures
+
+	// Global Statistics & Validation
+	optGlobalNBootstrap
+	optClusterCorrectionEnabled
+	optClusterCorrectionAlpha
+	optClusterCorrectionMinClusterSize
+	optClusterCorrectionTail
+	optValidationMinEpochs
+	optValidationMinChannels
+	optValidationMaxAmplitudeUv
+
+	// System / IO
+	optIOTemperatureRange
+	optIOMaxMissingChannelsFraction
 )
 
 const (

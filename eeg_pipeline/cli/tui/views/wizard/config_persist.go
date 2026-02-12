@@ -936,6 +936,156 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["systemStrictMode"] = m.systemStrictMode
 	cfg["loggingLevel"] = m.loggingLevel
 
+	// === Missing config keys (YAML → TUI gap) ===
+
+	// ML Preprocessing
+	cfg["mlImputer"] = m.mlImputer
+	cfg["mlPowerTransformerMethod"] = m.mlPowerTransformerMethod
+	cfg["mlPowerTransformerStandardize"] = m.mlPowerTransformerStandardize
+	cfg["mlPCAEnabled"] = m.mlPCAEnabled
+	cfg["mlPCANComponents"] = m.mlPCANComponents
+	cfg["mlPCAWhiten"] = m.mlPCAWhiten
+	cfg["mlPCASvdSolver"] = m.mlPCASvdSolver
+	cfg["mlPCARngSeed"] = m.mlPCARngSeed
+	cfg["mlGroupPreprocessingExpanded"] = m.mlGroupPreprocessingExpanded
+
+	// ML SVM
+	cfg["mlSvmKernel"] = m.mlSvmKernel
+	cfg["mlSvmCGrid"] = m.mlSvmCGrid
+	cfg["mlSvmGammaGrid"] = m.mlSvmGammaGrid
+	cfg["mlSvmClassWeight"] = m.mlSvmClassWeight
+
+	// ML Logistic Regression
+	cfg["mlLrPenalty"] = m.mlLrPenalty
+	cfg["mlLrCGrid"] = m.mlLrCGrid
+	cfg["mlLrMaxIter"] = m.mlLrMaxIter
+	cfg["mlLrClassWeight"] = m.mlLrClassWeight
+
+	// ML Random Forest extras
+	cfg["mlRfMinSamplesSplitGrid"] = m.mlRfMinSamplesSplitGrid
+	cfg["mlRfMinSamplesLeafGrid"] = m.mlRfMinSamplesLeafGrid
+	cfg["mlRfBootstrap"] = m.mlRfBootstrap
+	cfg["mlRfClassWeight"] = m.mlRfClassWeight
+
+	// ML CNN
+	cfg["mlGroupCNNExpanded"] = m.mlGroupCNNExpanded
+	cfg["mlCnnFilters1"] = m.mlCnnFilters1
+	cfg["mlCnnFilters2"] = m.mlCnnFilters2
+	cfg["mlCnnKernelSize1"] = m.mlCnnKernelSize1
+	cfg["mlCnnKernelSize2"] = m.mlCnnKernelSize2
+	cfg["mlCnnPoolSize"] = m.mlCnnPoolSize
+	cfg["mlCnnDenseUnits"] = m.mlCnnDenseUnits
+	cfg["mlCnnDropoutConv"] = m.mlCnnDropoutConv
+	cfg["mlCnnDropoutDense"] = m.mlCnnDropoutDense
+	cfg["mlCnnBatchSize"] = m.mlCnnBatchSize
+	cfg["mlCnnEpochs"] = m.mlCnnEpochs
+	cfg["mlCnnLearningRate"] = m.mlCnnLearningRate
+	cfg["mlCnnPatience"] = m.mlCnnPatience
+	cfg["mlCnnMinDelta"] = m.mlCnnMinDelta
+	cfg["mlCnnL2Lambda"] = m.mlCnnL2Lambda
+	cfg["mlCnnRandomSeed"] = m.mlCnnRandomSeed
+
+	// ML CV / Evaluation / Analysis
+	cfg["mlCvHygieneEnabled"] = m.mlCvHygieneEnabled
+	cfg["mlCvPermutationScheme"] = m.mlCvPermutationScheme
+	cfg["mlCvMinValidPermFraction"] = m.mlCvMinValidPermFraction
+	cfg["mlCvDefaultNBins"] = m.mlCvDefaultNBins
+	cfg["mlEvalCIMethod"] = m.mlEvalCIMethod
+	cfg["mlEvalBootstrapIterations"] = m.mlEvalBootstrapIterations
+	cfg["mlDataCovariatesStrict"] = m.mlDataCovariatesStrict
+	cfg["mlDataMaxExcludedSubjectFraction"] = m.mlDataMaxExcludedSubjectFraction
+	cfg["mlIncrementalBaselineAlpha"] = m.mlIncrementalBaselineAlpha
+	cfg["mlInterpretabilityGroupedOutputs"] = m.mlInterpretabilityGroupedOutputs
+	cfg["mlTimeGenMinSubjects"] = m.mlTimeGenMinSubjects
+	cfg["mlTimeGenMinValidPermFraction"] = m.mlTimeGenMinValidPermFraction
+	cfg["mlClassMinSubjectsForAUC"] = m.mlClassMinSubjectsForAUC
+	cfg["mlClassMaxFailedFoldFraction"] = m.mlClassMaxFailedFoldFraction
+	cfg["mlTargetsStrictRegressionCont"] = m.mlTargetsStrictRegressionCont
+
+	// EEG Preprocessing missing
+	cfg["prepEcgChannels"] = m.prepEcgChannels
+	cfg["prepAutorejectNInterpolate"] = m.prepAutorejectNInterpolate
+
+	// Alignment
+	cfg["alignAllowMisalignedTrim"] = m.alignAllowMisalignedTrim
+	cfg["alignMinAlignmentSamples"] = m.alignMinAlignmentSamples
+	cfg["alignTrimToFirstVolume"] = m.alignTrimToFirstVolume
+	cfg["alignFmriOnsetReference"] = m.alignFmriOnsetReference
+
+	// Event Column Mapping
+	cfg["eventColTemperature"] = m.eventColTemperature
+	cfg["eventColRating"] = m.eventColRating
+	cfg["eventColPainBinary"] = m.eventColPainBinary
+
+	// Per-Family Spatial Transforms
+	cfg["spatialTransformPerFamilyConnectivity"] = m.spatialTransformPerFamilyConnectivity
+	cfg["spatialTransformPerFamilyItpc"] = m.spatialTransformPerFamilyItpc
+	cfg["spatialTransformPerFamilyPac"] = m.spatialTransformPerFamilyPac
+	cfg["spatialTransformPerFamilyPower"] = m.spatialTransformPerFamilyPower
+	cfg["spatialTransformPerFamilyAperiodic"] = m.spatialTransformPerFamilyAperiodic
+	cfg["spatialTransformPerFamilyBursts"] = m.spatialTransformPerFamilyBursts
+	cfg["spatialTransformPerFamilyErds"] = m.spatialTransformPerFamilyErds
+	cfg["spatialTransformPerFamilyComplexity"] = m.spatialTransformPerFamilyComplexity
+	cfg["spatialTransformPerFamilyRatios"] = m.spatialTransformPerFamilyRatios
+	cfg["spatialTransformPerFamilyAsymmetry"] = m.spatialTransformPerFamilyAsymmetry
+	cfg["spatialTransformPerFamilySpectral"] = m.spatialTransformPerFamilySpectral
+	cfg["spatialTransformPerFamilyErp"] = m.spatialTransformPerFamilyErp
+	cfg["spatialTransformPerFamilyQuality"] = m.spatialTransformPerFamilyQuality
+	cfg["spatialTransformPerFamilyMicrostates"] = m.spatialTransformPerFamilyMicrostates
+
+	// Change Scores
+	cfg["changeScoresTransform"] = m.changeScoresTransform
+	cfg["changeScoresWindowPairs"] = m.changeScoresWindowPairs
+
+	// ITPC/PAC Segment Validity
+	cfg["itpcMinSegmentSec"] = m.itpcMinSegmentSec
+	cfg["itpcMinCyclesAtFmin"] = m.itpcMinCyclesAtFmin
+	cfg["pacMinSegmentSec"] = m.pacMinSegmentSec
+	cfg["pacMinCyclesAtFmin"] = m.pacMinCyclesAtFmin
+	cfg["pacSurrogateMethod"] = m.pacSurrogateMethod
+
+	// Aperiodic Missing
+	cfg["aperiodicMaxFreqResolutionHz"] = m.aperiodicMaxFreqResolutionHz
+	cfg["aperiodicMultitaperAdaptive"] = m.aperiodicMultitaperAdaptive
+
+	// Directed Connectivity Missing
+	cfg["directedConnMinSamplesPerMvarParam"] = m.directedConnMinSamplesPerMvarParam
+
+	// ERDS Pain Markers
+	cfg["erdsPainMarkerBands"] = m.erdsPainMarkerBands
+	cfg["erdsLateralityColumns"] = m.erdsLateralityColumns
+	cfg["erdsSomatosensoryLeftChannels"] = m.erdsSomatosensoryLeftChannels
+	cfg["erdsSomatosensoryRightChannels"] = m.erdsSomatosensoryRightChannels
+	cfg["erdsOnsetMinThresholdPercent"] = m.erdsOnsetMinThresholdPercent
+	cfg["erdsReboundThresholdSigma"] = m.erdsReboundThresholdSigma
+	cfg["erdsReboundMinThresholdPercent"] = m.erdsReboundMinThresholdPercent
+
+	// Microstates Missing
+	cfg["microstatesAssignFromGfpPeaks"] = m.microstatesAssignFromGfpPeaks
+
+	// Behavior Statistics
+	cfg["behaviorStatsTempControl"] = m.behaviorStatsTempControl
+	cfg["behaviorStatsAllowIIDTrials"] = m.behaviorStatsAllowIIDTrials
+	cfg["behaviorStatsHierarchicalFDR"] = m.behaviorStatsHierarchicalFDR
+	cfg["behaviorStatsComputeReliability"] = m.behaviorStatsComputeReliability
+	cfg["behaviorPermScheme"] = m.behaviorPermScheme
+	cfg["behaviorPermGroupColumnPreference"] = m.behaviorPermGroupColumnPreference
+	cfg["behaviorExcludeNonTrialwiseFeatures"] = m.behaviorExcludeNonTrialwiseFeatures
+
+	// Global Statistics & Validation
+	cfg["globalNBootstrap"] = m.globalNBootstrap
+	cfg["clusterCorrectionEnabled"] = m.clusterCorrectionEnabled
+	cfg["clusterCorrectionAlpha"] = m.clusterCorrectionAlpha
+	cfg["clusterCorrectionMinClusterSize"] = m.clusterCorrectionMinClusterSize
+	cfg["clusterCorrectionTailGlobal"] = m.clusterCorrectionTailGlobal
+	cfg["validationMinEpochs"] = m.validationMinEpochs
+	cfg["validationMinChannels"] = m.validationMinChannels
+	cfg["validationMaxAmplitudeUv"] = m.validationMaxAmplitudeUv
+
+	// System / IO
+	cfg["ioTemperatureRange"] = m.ioTemperatureRange
+	cfg["ioMaxMissingChannelsFraction"] = m.ioMaxMissingChannelsFraction
+
 	return cfg
 }
 
@@ -1960,6 +2110,156 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.systemNJobs = getInt("systemNJobs", m.systemNJobs)
 	m.systemStrictMode = getBool("systemStrictMode", m.systemStrictMode)
 	m.loggingLevel = getInt("loggingLevel", m.loggingLevel)
+
+	// === Missing config keys (YAML → TUI gap) ===
+
+	// ML Preprocessing
+	m.mlImputer = getInt("mlImputer", m.mlImputer)
+	m.mlPowerTransformerMethod = getInt("mlPowerTransformerMethod", m.mlPowerTransformerMethod)
+	m.mlPowerTransformerStandardize = getBool("mlPowerTransformerStandardize", m.mlPowerTransformerStandardize)
+	m.mlPCAEnabled = getBool("mlPCAEnabled", m.mlPCAEnabled)
+	m.mlPCANComponents = getFloat("mlPCANComponents", m.mlPCANComponents)
+	m.mlPCAWhiten = getBool("mlPCAWhiten", m.mlPCAWhiten)
+	m.mlPCASvdSolver = getInt("mlPCASvdSolver", m.mlPCASvdSolver)
+	m.mlPCARngSeed = getInt("mlPCARngSeed", m.mlPCARngSeed)
+	m.mlGroupPreprocessingExpanded = getBool("mlGroupPreprocessingExpanded", m.mlGroupPreprocessingExpanded)
+
+	// ML SVM
+	m.mlSvmKernel = getInt("mlSvmKernel", m.mlSvmKernel)
+	m.mlSvmCGrid = getString("mlSvmCGrid", m.mlSvmCGrid)
+	m.mlSvmGammaGrid = getString("mlSvmGammaGrid", m.mlSvmGammaGrid)
+	m.mlSvmClassWeight = getInt("mlSvmClassWeight", m.mlSvmClassWeight)
+
+	// ML Logistic Regression
+	m.mlLrPenalty = getInt("mlLrPenalty", m.mlLrPenalty)
+	m.mlLrCGrid = getString("mlLrCGrid", m.mlLrCGrid)
+	m.mlLrMaxIter = getInt("mlLrMaxIter", m.mlLrMaxIter)
+	m.mlLrClassWeight = getInt("mlLrClassWeight", m.mlLrClassWeight)
+
+	// ML Random Forest extras
+	m.mlRfMinSamplesSplitGrid = getString("mlRfMinSamplesSplitGrid", m.mlRfMinSamplesSplitGrid)
+	m.mlRfMinSamplesLeafGrid = getString("mlRfMinSamplesLeafGrid", m.mlRfMinSamplesLeafGrid)
+	m.mlRfBootstrap = getBool("mlRfBootstrap", m.mlRfBootstrap)
+	m.mlRfClassWeight = getInt("mlRfClassWeight", m.mlRfClassWeight)
+
+	// ML CNN
+	m.mlGroupCNNExpanded = getBool("mlGroupCNNExpanded", m.mlGroupCNNExpanded)
+	m.mlCnnFilters1 = getInt("mlCnnFilters1", m.mlCnnFilters1)
+	m.mlCnnFilters2 = getInt("mlCnnFilters2", m.mlCnnFilters2)
+	m.mlCnnKernelSize1 = getInt("mlCnnKernelSize1", m.mlCnnKernelSize1)
+	m.mlCnnKernelSize2 = getInt("mlCnnKernelSize2", m.mlCnnKernelSize2)
+	m.mlCnnPoolSize = getInt("mlCnnPoolSize", m.mlCnnPoolSize)
+	m.mlCnnDenseUnits = getInt("mlCnnDenseUnits", m.mlCnnDenseUnits)
+	m.mlCnnDropoutConv = getFloat("mlCnnDropoutConv", m.mlCnnDropoutConv)
+	m.mlCnnDropoutDense = getFloat("mlCnnDropoutDense", m.mlCnnDropoutDense)
+	m.mlCnnBatchSize = getInt("mlCnnBatchSize", m.mlCnnBatchSize)
+	m.mlCnnEpochs = getInt("mlCnnEpochs", m.mlCnnEpochs)
+	m.mlCnnLearningRate = getFloat("mlCnnLearningRate", m.mlCnnLearningRate)
+	m.mlCnnPatience = getInt("mlCnnPatience", m.mlCnnPatience)
+	m.mlCnnMinDelta = getFloat("mlCnnMinDelta", m.mlCnnMinDelta)
+	m.mlCnnL2Lambda = getFloat("mlCnnL2Lambda", m.mlCnnL2Lambda)
+	m.mlCnnRandomSeed = getInt("mlCnnRandomSeed", m.mlCnnRandomSeed)
+
+	// ML CV / Evaluation / Analysis
+	m.mlCvHygieneEnabled = getBool("mlCvHygieneEnabled", m.mlCvHygieneEnabled)
+	m.mlCvPermutationScheme = getInt("mlCvPermutationScheme", m.mlCvPermutationScheme)
+	m.mlCvMinValidPermFraction = getFloat("mlCvMinValidPermFraction", m.mlCvMinValidPermFraction)
+	m.mlCvDefaultNBins = getInt("mlCvDefaultNBins", m.mlCvDefaultNBins)
+	m.mlEvalCIMethod = getInt("mlEvalCIMethod", m.mlEvalCIMethod)
+	m.mlEvalBootstrapIterations = getInt("mlEvalBootstrapIterations", m.mlEvalBootstrapIterations)
+	m.mlDataCovariatesStrict = getBool("mlDataCovariatesStrict", m.mlDataCovariatesStrict)
+	m.mlDataMaxExcludedSubjectFraction = getFloat("mlDataMaxExcludedSubjectFraction", m.mlDataMaxExcludedSubjectFraction)
+	m.mlIncrementalBaselineAlpha = getFloat("mlIncrementalBaselineAlpha", m.mlIncrementalBaselineAlpha)
+	m.mlInterpretabilityGroupedOutputs = getBool("mlInterpretabilityGroupedOutputs", m.mlInterpretabilityGroupedOutputs)
+	m.mlTimeGenMinSubjects = getInt("mlTimeGenMinSubjects", m.mlTimeGenMinSubjects)
+	m.mlTimeGenMinValidPermFraction = getFloat("mlTimeGenMinValidPermFraction", m.mlTimeGenMinValidPermFraction)
+	m.mlClassMinSubjectsForAUC = getInt("mlClassMinSubjectsForAUC", m.mlClassMinSubjectsForAUC)
+	m.mlClassMaxFailedFoldFraction = getFloat("mlClassMaxFailedFoldFraction", m.mlClassMaxFailedFoldFraction)
+	m.mlTargetsStrictRegressionCont = getBool("mlTargetsStrictRegressionCont", m.mlTargetsStrictRegressionCont)
+
+	// EEG Preprocessing missing
+	m.prepEcgChannels = getString("prepEcgChannels", m.prepEcgChannels)
+	m.prepAutorejectNInterpolate = getString("prepAutorejectNInterpolate", m.prepAutorejectNInterpolate)
+
+	// Alignment
+	m.alignAllowMisalignedTrim = getBool("alignAllowMisalignedTrim", m.alignAllowMisalignedTrim)
+	m.alignMinAlignmentSamples = getInt("alignMinAlignmentSamples", m.alignMinAlignmentSamples)
+	m.alignTrimToFirstVolume = getBool("alignTrimToFirstVolume", m.alignTrimToFirstVolume)
+	m.alignFmriOnsetReference = getInt("alignFmriOnsetReference", m.alignFmriOnsetReference)
+
+	// Event Column Mapping
+	m.eventColTemperature = getString("eventColTemperature", m.eventColTemperature)
+	m.eventColRating = getString("eventColRating", m.eventColRating)
+	m.eventColPainBinary = getString("eventColPainBinary", m.eventColPainBinary)
+
+	// Per-Family Spatial Transforms
+	m.spatialTransformPerFamilyConnectivity = getInt("spatialTransformPerFamilyConnectivity", m.spatialTransformPerFamilyConnectivity)
+	m.spatialTransformPerFamilyItpc = getInt("spatialTransformPerFamilyItpc", m.spatialTransformPerFamilyItpc)
+	m.spatialTransformPerFamilyPac = getInt("spatialTransformPerFamilyPac", m.spatialTransformPerFamilyPac)
+	m.spatialTransformPerFamilyPower = getInt("spatialTransformPerFamilyPower", m.spatialTransformPerFamilyPower)
+	m.spatialTransformPerFamilyAperiodic = getInt("spatialTransformPerFamilyAperiodic", m.spatialTransformPerFamilyAperiodic)
+	m.spatialTransformPerFamilyBursts = getInt("spatialTransformPerFamilyBursts", m.spatialTransformPerFamilyBursts)
+	m.spatialTransformPerFamilyErds = getInt("spatialTransformPerFamilyErds", m.spatialTransformPerFamilyErds)
+	m.spatialTransformPerFamilyComplexity = getInt("spatialTransformPerFamilyComplexity", m.spatialTransformPerFamilyComplexity)
+	m.spatialTransformPerFamilyRatios = getInt("spatialTransformPerFamilyRatios", m.spatialTransformPerFamilyRatios)
+	m.spatialTransformPerFamilyAsymmetry = getInt("spatialTransformPerFamilyAsymmetry", m.spatialTransformPerFamilyAsymmetry)
+	m.spatialTransformPerFamilySpectral = getInt("spatialTransformPerFamilySpectral", m.spatialTransformPerFamilySpectral)
+	m.spatialTransformPerFamilyErp = getInt("spatialTransformPerFamilyErp", m.spatialTransformPerFamilyErp)
+	m.spatialTransformPerFamilyQuality = getInt("spatialTransformPerFamilyQuality", m.spatialTransformPerFamilyQuality)
+	m.spatialTransformPerFamilyMicrostates = getInt("spatialTransformPerFamilyMicrostates", m.spatialTransformPerFamilyMicrostates)
+
+	// Change Scores
+	m.changeScoresTransform = getInt("changeScoresTransform", m.changeScoresTransform)
+	m.changeScoresWindowPairs = getString("changeScoresWindowPairs", m.changeScoresWindowPairs)
+
+	// ITPC/PAC Segment Validity
+	m.itpcMinSegmentSec = getFloat("itpcMinSegmentSec", m.itpcMinSegmentSec)
+	m.itpcMinCyclesAtFmin = getFloat("itpcMinCyclesAtFmin", m.itpcMinCyclesAtFmin)
+	m.pacMinSegmentSec = getFloat("pacMinSegmentSec", m.pacMinSegmentSec)
+	m.pacMinCyclesAtFmin = getFloat("pacMinCyclesAtFmin", m.pacMinCyclesAtFmin)
+	m.pacSurrogateMethod = getInt("pacSurrogateMethod", m.pacSurrogateMethod)
+
+	// Aperiodic Missing
+	m.aperiodicMaxFreqResolutionHz = getFloat("aperiodicMaxFreqResolutionHz", m.aperiodicMaxFreqResolutionHz)
+	m.aperiodicMultitaperAdaptive = getBool("aperiodicMultitaperAdaptive", m.aperiodicMultitaperAdaptive)
+
+	// Directed Connectivity Missing
+	m.directedConnMinSamplesPerMvarParam = getInt("directedConnMinSamplesPerMvarParam", m.directedConnMinSamplesPerMvarParam)
+
+	// ERDS Pain Markers
+	m.erdsPainMarkerBands = getString("erdsPainMarkerBands", m.erdsPainMarkerBands)
+	m.erdsLateralityColumns = getString("erdsLateralityColumns", m.erdsLateralityColumns)
+	m.erdsSomatosensoryLeftChannels = getString("erdsSomatosensoryLeftChannels", m.erdsSomatosensoryLeftChannels)
+	m.erdsSomatosensoryRightChannels = getString("erdsSomatosensoryRightChannels", m.erdsSomatosensoryRightChannels)
+	m.erdsOnsetMinThresholdPercent = getFloat("erdsOnsetMinThresholdPercent", m.erdsOnsetMinThresholdPercent)
+	m.erdsReboundThresholdSigma = getFloat("erdsReboundThresholdSigma", m.erdsReboundThresholdSigma)
+	m.erdsReboundMinThresholdPercent = getFloat("erdsReboundMinThresholdPercent", m.erdsReboundMinThresholdPercent)
+
+	// Microstates Missing
+	m.microstatesAssignFromGfpPeaks = getBool("microstatesAssignFromGfpPeaks", m.microstatesAssignFromGfpPeaks)
+
+	// Behavior Statistics
+	m.behaviorStatsTempControl = getInt("behaviorStatsTempControl", m.behaviorStatsTempControl)
+	m.behaviorStatsAllowIIDTrials = getBool("behaviorStatsAllowIIDTrials", m.behaviorStatsAllowIIDTrials)
+	m.behaviorStatsHierarchicalFDR = getBool("behaviorStatsHierarchicalFDR", m.behaviorStatsHierarchicalFDR)
+	m.behaviorStatsComputeReliability = getBool("behaviorStatsComputeReliability", m.behaviorStatsComputeReliability)
+	m.behaviorPermScheme = getInt("behaviorPermScheme", m.behaviorPermScheme)
+	m.behaviorPermGroupColumnPreference = getString("behaviorPermGroupColumnPreference", m.behaviorPermGroupColumnPreference)
+	m.behaviorExcludeNonTrialwiseFeatures = getBool("behaviorExcludeNonTrialwiseFeatures", m.behaviorExcludeNonTrialwiseFeatures)
+
+	// Global Statistics & Validation
+	m.globalNBootstrap = getInt("globalNBootstrap", m.globalNBootstrap)
+	m.clusterCorrectionEnabled = getBool("clusterCorrectionEnabled", m.clusterCorrectionEnabled)
+	m.clusterCorrectionAlpha = getFloat("clusterCorrectionAlpha", m.clusterCorrectionAlpha)
+	m.clusterCorrectionMinClusterSize = getInt("clusterCorrectionMinClusterSize", m.clusterCorrectionMinClusterSize)
+	m.clusterCorrectionTailGlobal = getInt("clusterCorrectionTailGlobal", m.clusterCorrectionTailGlobal)
+	m.validationMinEpochs = getInt("validationMinEpochs", m.validationMinEpochs)
+	m.validationMinChannels = getInt("validationMinChannels", m.validationMinChannels)
+	m.validationMaxAmplitudeUv = getFloat("validationMaxAmplitudeUv", m.validationMaxAmplitudeUv)
+
+	// System / IO
+	m.ioTemperatureRange = getString("ioTemperatureRange", m.ioTemperatureRange)
+	m.ioMaxMissingChannelsFraction = getFloat("ioMaxMissingChannelsFraction", m.ioMaxMissingChannelsFraction)
 }
 
 // mapToIntList converts a map[int]bool to a slice of ints (only selected keys).

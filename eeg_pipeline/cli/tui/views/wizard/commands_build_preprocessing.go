@@ -161,5 +161,45 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 		args = append(args, "--no-clean-events-strict")
 	}
 
+	// ECG channels
+	if strings.TrimSpace(m.prepEcgChannels) != "" {
+		args = append(args, "--ecg-channels", m.prepEcgChannels)
+	}
+
+	// Autoreject n_interpolate
+	if strings.TrimSpace(m.prepAutorejectNInterpolate) != "" {
+		args = append(args, "--autoreject-n-interpolate")
+		args = append(args, splitCSVList(m.prepAutorejectNInterpolate)...)
+	}
+
+	// Alignment
+	if m.alignAllowMisalignedTrim {
+		args = append(args, "--allow-misaligned-trim")
+	}
+	if m.alignMinAlignmentSamples != 100 {
+		args = append(args, "--min-alignment-samples", fmt.Sprintf("%d", m.alignMinAlignmentSamples))
+	}
+	if m.alignTrimToFirstVolume {
+		args = append(args, "--trim-to-first-volume")
+	}
+	refs := []string{"first_volume", "scanner_trigger"}
+	if m.alignFmriOnsetReference != 0 {
+		args = append(args, "--fmri-onset-reference", refs[m.alignFmriOnsetReference%len(refs)])
+	}
+
+	// Event Column Mapping
+	if strings.TrimSpace(m.eventColTemperature) != "" {
+		args = append(args, "--event-col-temperature")
+		args = append(args, splitCSVList(m.eventColTemperature)...)
+	}
+	if strings.TrimSpace(m.eventColRating) != "" {
+		args = append(args, "--event-col-rating")
+		args = append(args, splitCSVList(m.eventColRating)...)
+	}
+	if strings.TrimSpace(m.eventColPainBinary) != "" {
+		args = append(args, "--event-col-pain-binary")
+		args = append(args, splitCSVList(m.eventColPainBinary)...)
+	}
+
 	return args
 }

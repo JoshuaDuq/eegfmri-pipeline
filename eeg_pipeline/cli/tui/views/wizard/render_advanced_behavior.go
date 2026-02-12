@@ -1112,6 +1112,91 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optBehaviorOverwrite:
 			return "Overwrite Outputs", m.boolToOnOff(m.behaviorOverwrite), "if off, append timestamp to output folders"
 
+		// Behavior Statistics
+		case optBehaviorStatsTempControl:
+			controls := []string{"none", "linear", "spline"}
+			return "Stats Temp Control", controls[m.behaviorStatsTempControl%len(controls)], "temperature control method"
+		case optBehaviorStatsAllowIIDTrials:
+			return "Allow IID Trials", m.boolToOnOff(m.behaviorStatsAllowIIDTrials), "allow independent trials assumption"
+		case optBehaviorStatsHierarchicalFDR:
+			return "Hierarchical FDR", m.boolToOnOff(m.behaviorStatsHierarchicalFDR), "hierarchical FDR correction"
+		case optBehaviorStatsComputeReliability:
+			return "Compute Reliability", m.boolToOnOff(m.behaviorStatsComputeReliability), "split-half reliability"
+		case optBehaviorPermScheme:
+			schemes := []string{"shuffle", "circular_shift"}
+			return "Perm Scheme", schemes[m.behaviorPermScheme%len(schemes)], "permutation scheme"
+		case optBehaviorPermGroupColumnPreference:
+			val := m.behaviorPermGroupColumnPreference
+			if strings.TrimSpace(val) == "" {
+				val = "(auto)"
+			}
+			if m.editingText && m.editingTextField == textFieldBehaviorPermGroupColumnPreference {
+				val = textDisplay
+			}
+			return "Perm Group Column", val, "preferred grouping column"
+		case optBehaviorExcludeNonTrialwiseFeatures:
+			return "Exclude Non-Trialwise", m.boolToOnOff(m.behaviorExcludeNonTrialwiseFeatures), "exclude non-trialwise features"
+
+		// Global Statistics & Validation
+		case optGlobalNBootstrap:
+			val := fmt.Sprintf("%d", m.globalNBootstrap)
+			if m.editingNumber && m.isCurrentlyEditing(optGlobalNBootstrap) {
+				val = m.numberBuffer + "█"
+			}
+			return "Global N Bootstrap", val, "bootstrap iterations"
+		case optClusterCorrectionEnabled:
+			return "Cluster Correction", m.boolToOnOff(m.clusterCorrectionEnabled), "global cluster correction"
+		case optClusterCorrectionAlpha:
+			val := fmt.Sprintf("%.4f", m.clusterCorrectionAlpha)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionAlpha) {
+				val = m.numberBuffer + "█"
+			}
+			return "Cluster Corr Alpha", val, "cluster correction alpha"
+		case optClusterCorrectionMinClusterSize:
+			val := fmt.Sprintf("%d", m.clusterCorrectionMinClusterSize)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionMinClusterSize) {
+				val = m.numberBuffer + "█"
+			}
+			return "Cluster Min Size", val, "minimum cluster size"
+		case optClusterCorrectionTail:
+			tails := []string{"two-tailed", "upper", "lower"}
+			return "Cluster Corr Tail", tails[m.clusterCorrectionTailGlobal%len(tails)], "tail direction"
+		case optValidationMinEpochs:
+			val := fmt.Sprintf("%d", m.validationMinEpochs)
+			if m.editingNumber && m.isCurrentlyEditing(optValidationMinEpochs) {
+				val = m.numberBuffer + "█"
+			}
+			return "Validation Min Epochs", val, "minimum epochs for validation"
+		case optValidationMinChannels:
+			val := fmt.Sprintf("%d", m.validationMinChannels)
+			if m.editingNumber && m.isCurrentlyEditing(optValidationMinChannels) {
+				val = m.numberBuffer + "█"
+			}
+			return "Validation Min Channels", val, "minimum channels"
+		case optValidationMaxAmplitudeUv:
+			val := fmt.Sprintf("%.1f", m.validationMaxAmplitudeUv)
+			if m.editingNumber && m.isCurrentlyEditing(optValidationMaxAmplitudeUv) {
+				val = m.numberBuffer + "█"
+			}
+			return "Max Amplitude (µV)", val, "amplitude rejection threshold"
+
+		// System / IO
+		case optIOTemperatureRange:
+			val := m.ioTemperatureRange
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldIOTemperatureRange {
+				val = textDisplay
+			}
+			return "Temperature Range", val, "e.g. 32.0,50.0"
+		case optIOMaxMissingChannelsFraction:
+			val := fmt.Sprintf("%.2f", m.ioMaxMissingChannelsFraction)
+			if m.editingNumber && m.isCurrentlyEditing(optIOMaxMissingChannelsFraction) {
+				val = m.numberBuffer + "█"
+			}
+			return "Max Missing Channels Frac", val, "max fraction of missing channels"
+
 		default:
 			return "", "", ""
 		}

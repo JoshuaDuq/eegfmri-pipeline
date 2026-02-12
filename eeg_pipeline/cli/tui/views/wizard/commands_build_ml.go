@@ -157,6 +157,199 @@ func (m Model) buildMLAdvancedArgs() []string {
 		args = append(args, splitLooseList(m.varianceThresholdGrid)...)
 	}
 
+	// ML Preprocessing
+	imputers := []string{"median", "mean", "most_frequent"}
+	if m.mlImputer != 0 {
+		args = append(args, "--imputer", imputers[m.mlImputer%len(imputers)])
+	}
+	ptMethods := []string{"yeo-johnson", "box-cox"}
+	if m.mlPowerTransformerMethod != 0 {
+		args = append(args, "--power-transformer-method", ptMethods[m.mlPowerTransformerMethod%len(ptMethods)])
+	}
+	if !m.mlPowerTransformerStandardize {
+		args = append(args, "--no-power-transformer-standardize")
+	}
+	if m.mlPCAEnabled {
+		args = append(args, "--pca-enabled")
+		if m.mlPCANComponents != 0.95 {
+			args = append(args, "--pca-n-components", fmt.Sprintf("%.6g", m.mlPCANComponents))
+		}
+		if m.mlPCAWhiten {
+			args = append(args, "--pca-whiten")
+		}
+		svdSolvers := []string{"auto", "full", "randomized"}
+		if m.mlPCASvdSolver != 0 {
+			args = append(args, "--pca-svd-solver", svdSolvers[m.mlPCASvdSolver%len(svdSolvers)])
+		}
+		if m.mlPCARngSeed != 0 {
+			args = append(args, "--pca-rng-seed", fmt.Sprintf("%d", m.mlPCARngSeed))
+		}
+	}
+
+	// SVM hyperparameters
+	if mode == "classify" && m.mlClassificationModel == MLClassificationSVM {
+		kernels := []string{"rbf", "linear", "poly"}
+		if m.mlSvmKernel != 0 {
+			args = append(args, "--svm-kernel", kernels[m.mlSvmKernel%len(kernels)])
+		}
+		if m.mlSvmCGrid != "0.01,0.1,1,10,100" {
+			args = append(args, "--svm-c-grid")
+			args = append(args, splitLooseList(m.mlSvmCGrid)...)
+		}
+		if m.mlSvmGammaGrid != "scale,0.001,0.01,0.1" {
+			args = append(args, "--svm-gamma-grid")
+			args = append(args, splitLooseList(m.mlSvmGammaGrid)...)
+		}
+		classWeights := []string{"balanced", "none"}
+		if m.mlSvmClassWeight != 0 {
+			args = append(args, "--svm-class-weight", classWeights[m.mlSvmClassWeight%len(classWeights)])
+		}
+	}
+
+	// Logistic Regression hyperparameters
+	if mode == "classify" && m.mlClassificationModel == MLClassificationLR {
+		penalties := []string{"l2", "l1", "elasticnet"}
+		if m.mlLrPenalty != 0 {
+			args = append(args, "--lr-penalty", penalties[m.mlLrPenalty%len(penalties)])
+		}
+		if m.mlLrCGrid != "0.01,0.1,1,10,100" {
+			args = append(args, "--lr-c-grid")
+			args = append(args, splitLooseList(m.mlLrCGrid)...)
+		}
+		if m.mlLrMaxIter != 1000 {
+			args = append(args, "--lr-max-iter", fmt.Sprintf("%d", m.mlLrMaxIter))
+		}
+		classWeights := []string{"balanced", "none"}
+		if m.mlLrClassWeight != 0 {
+			args = append(args, "--lr-class-weight", classWeights[m.mlLrClassWeight%len(classWeights)])
+		}
+	}
+
+	// Random Forest extras
+	isRF := (mode == "classify" && m.mlClassificationModel == MLClassificationRF) ||
+		(mode != "classify" && mode != "timegen" && mode != "" && m.mlRegressionModel == MLRegressionRF)
+	if isRF {
+		if m.mlRfMinSamplesSplitGrid != "2,5,10" {
+			args = append(args, "--rf-min-samples-split-grid")
+			args = append(args, splitLooseList(m.mlRfMinSamplesSplitGrid)...)
+		}
+		if m.mlRfMinSamplesLeafGrid != "1,2,4" {
+			args = append(args, "--rf-min-samples-leaf-grid")
+			args = append(args, splitLooseList(m.mlRfMinSamplesLeafGrid)...)
+		}
+		if !m.mlRfBootstrap {
+			args = append(args, "--no-rf-bootstrap")
+		}
+		if mode == "classify" {
+			rfWeights := []string{"balanced", "balanced_subsample", "none"}
+			if m.mlRfClassWeight != 0 {
+				args = append(args, "--rf-class-weight", rfWeights[m.mlRfClassWeight%len(rfWeights)])
+			}
+		}
+	}
+
+	// CNN hyperparameters
+	if mode == "classify" && m.mlClassificationModel == MLClassificationCNN {
+		if m.mlCnnFilters1 != 32 {
+			args = append(args, "--cnn-filters1", fmt.Sprintf("%d", m.mlCnnFilters1))
+		}
+		if m.mlCnnFilters2 != 64 {
+			args = append(args, "--cnn-filters2", fmt.Sprintf("%d", m.mlCnnFilters2))
+		}
+		if m.mlCnnKernelSize1 != 3 {
+			args = append(args, "--cnn-kernel-size1", fmt.Sprintf("%d", m.mlCnnKernelSize1))
+		}
+		if m.mlCnnKernelSize2 != 3 {
+			args = append(args, "--cnn-kernel-size2", fmt.Sprintf("%d", m.mlCnnKernelSize2))
+		}
+		if m.mlCnnPoolSize != 2 {
+			args = append(args, "--cnn-pool-size", fmt.Sprintf("%d", m.mlCnnPoolSize))
+		}
+		if m.mlCnnDenseUnits != 128 {
+			args = append(args, "--cnn-dense-units", fmt.Sprintf("%d", m.mlCnnDenseUnits))
+		}
+		if m.mlCnnDropoutConv != 0.25 {
+			args = append(args, "--cnn-dropout-conv", fmt.Sprintf("%.6g", m.mlCnnDropoutConv))
+		}
+		if m.mlCnnDropoutDense != 0.5 {
+			args = append(args, "--cnn-dropout-dense", fmt.Sprintf("%.6g", m.mlCnnDropoutDense))
+		}
+		if m.mlCnnBatchSize != 32 {
+			args = append(args, "--cnn-batch-size", fmt.Sprintf("%d", m.mlCnnBatchSize))
+		}
+		if m.mlCnnEpochs != 100 {
+			args = append(args, "--cnn-epochs", fmt.Sprintf("%d", m.mlCnnEpochs))
+		}
+		if m.mlCnnLearningRate != 0.001 {
+			args = append(args, "--cnn-learning-rate", fmt.Sprintf("%.6g", m.mlCnnLearningRate))
+		}
+		if m.mlCnnPatience != 10 {
+			args = append(args, "--cnn-patience", fmt.Sprintf("%d", m.mlCnnPatience))
+		}
+		if m.mlCnnMinDelta != 0.001 {
+			args = append(args, "--cnn-min-delta", fmt.Sprintf("%.6g", m.mlCnnMinDelta))
+		}
+		if m.mlCnnL2Lambda != 0.01 {
+			args = append(args, "--cnn-l2-lambda", fmt.Sprintf("%.6g", m.mlCnnL2Lambda))
+		}
+		if m.mlCnnRandomSeed != 42 {
+			args = append(args, "--cnn-random-seed", fmt.Sprintf("%d", m.mlCnnRandomSeed))
+		}
+	}
+
+	// CV / Evaluation / Analysis
+	if !m.mlCvHygieneEnabled {
+		args = append(args, "--no-cv-hygiene")
+	}
+	permSchemes := []string{"shuffle", "circular_shift"}
+	if m.mlCvPermutationScheme != 0 {
+		args = append(args, "--cv-permutation-scheme", permSchemes[m.mlCvPermutationScheme%len(permSchemes)])
+	}
+	if m.mlCvMinValidPermFraction != 0.8 {
+		args = append(args, "--cv-min-valid-perm-fraction", fmt.Sprintf("%.6g", m.mlCvMinValidPermFraction))
+	}
+	if m.mlCvDefaultNBins != 5 {
+		args = append(args, "--cv-default-n-bins", fmt.Sprintf("%d", m.mlCvDefaultNBins))
+	}
+	ciMethods := []string{"bootstrap", "fixed_effects"}
+	if m.mlEvalCIMethod != 0 {
+		args = append(args, "--eval-ci-method", ciMethods[m.mlEvalCIMethod%len(ciMethods)])
+	}
+	if m.mlEvalBootstrapIterations != 1000 {
+		args = append(args, "--eval-bootstrap-iterations", fmt.Sprintf("%d", m.mlEvalBootstrapIterations))
+	}
+	if m.mlDataCovariatesStrict {
+		args = append(args, "--data-covariates-strict")
+	}
+	if m.mlDataMaxExcludedSubjectFraction != 0.2 {
+		args = append(args, "--data-max-excluded-subject-fraction", fmt.Sprintf("%.6g", m.mlDataMaxExcludedSubjectFraction))
+	}
+	if !m.mlTargetsStrictRegressionCont {
+		args = append(args, "--no-strict-regression-continuous")
+	}
+	if !m.mlInterpretabilityGroupedOutputs {
+		args = append(args, "--no-interpretability-grouped-outputs")
+	}
+	if mode == "incremental_validity" && m.mlIncrementalBaselineAlpha != 0.05 {
+		args = append(args, "--incremental-baseline-alpha", fmt.Sprintf("%.6g", m.mlIncrementalBaselineAlpha))
+	}
+	if mode == "timegen" {
+		if m.mlTimeGenMinSubjects != 5 {
+			args = append(args, "--timegen-min-subjects", fmt.Sprintf("%d", m.mlTimeGenMinSubjects))
+		}
+		if m.mlTimeGenMinValidPermFraction != 0.5 {
+			args = append(args, "--timegen-min-valid-perm-fraction", fmt.Sprintf("%.6g", m.mlTimeGenMinValidPermFraction))
+		}
+	}
+	if mode == "classify" {
+		if m.mlClassMinSubjectsForAUC != 10 {
+			args = append(args, "--class-min-subjects-for-auc", fmt.Sprintf("%d", m.mlClassMinSubjectsForAUC))
+		}
+		if m.mlClassMaxFailedFoldFraction != 0.2 {
+			args = append(args, "--class-max-failed-fold-fraction", fmt.Sprintf("%.6g", m.mlClassMaxFailedFoldFraction))
+		}
+	}
+
 	return args
 }
 

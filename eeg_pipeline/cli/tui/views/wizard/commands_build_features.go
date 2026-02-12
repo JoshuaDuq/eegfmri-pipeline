@@ -77,6 +77,16 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--pac-pairs")
 			args = append(args, splitCSVList(m.pacPairsSpec)...)
 		}
+		if m.pacMinSegmentSec != 1.0 {
+			args = append(args, "--pac-min-segment-sec", fmt.Sprintf("%.2f", m.pacMinSegmentSec))
+		}
+		if m.pacMinCyclesAtFmin != 3.0 {
+			args = append(args, "--pac-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.pacMinCyclesAtFmin))
+		}
+		surrogates := []string{"swap_phase_amp", "time_shift"}
+		if m.pacSurrogateMethod != 0 {
+			args = append(args, "--pac-surrogate-method", surrogates[m.pacSurrogateMethod%len(surrogates)])
+		}
 	}
 
 	// Aperiodic options
@@ -96,6 +106,12 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 		if m.aperiodicSubtractEvoked {
 			args = append(args, "--aperiodic-subtract-evoked")
+		}
+		if m.aperiodicMaxFreqResolutionHz != 1.0 {
+			args = append(args, "--aperiodic-max-freq-resolution-hz", fmt.Sprintf("%.2f", m.aperiodicMaxFreqResolutionHz))
+		}
+		if m.aperiodicMultitaperAdaptive {
+			args = append(args, "--aperiodic-multitaper-adaptive")
 		}
 	}
 
@@ -120,6 +136,12 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 		if m.itpcNJobs != -1 {
 			args = append(args, "--itpc-n-jobs", fmt.Sprintf("%d", m.itpcNJobs))
+		}
+		if m.itpcMinSegmentSec != 1.0 {
+			args = append(args, "--itpc-min-segment-sec", fmt.Sprintf("%.2f", m.itpcMinSegmentSec))
+		}
+		if m.itpcMinCyclesAtFmin != 3.0 {
+			args = append(args, "--itpc-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.itpcMinCyclesAtFmin))
 		}
 	}
 
@@ -166,6 +188,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 		if m.directedConnMinSegSamples != 100 {
 			args = append(args, "--directed-conn-min-segment-samples", fmt.Sprintf("%d", m.directedConnMinSegSamples))
+		}
+		if m.directedConnMinSamplesPerMvarParam != 10 {
+			args = append(args, "--directed-conn-min-samples-per-mvar-param", fmt.Sprintf("%d", m.directedConnMinSamplesPerMvarParam))
 		}
 	}
 
@@ -867,6 +892,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.microstatesRandomState != 42 {
 			args = append(args, "--microstates-random-state", fmt.Sprintf("%d", m.microstatesRandomState))
 		}
+		if !m.microstatesAssignFromGfpPeaks {
+			args = append(args, "--no-microstates-assign-from-gfp-peaks")
+		}
 	}
 
 	// ERDS options
@@ -902,6 +930,32 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--erds-infer-contralateral")
 		} else {
 			args = append(args, "--no-erds-infer-contralateral")
+		}
+		// ERDS pain markers
+		if strings.TrimSpace(m.erdsPainMarkerBands) != "" {
+			args = append(args, "--erds-pain-marker-bands")
+			args = append(args, splitCSVList(m.erdsPainMarkerBands)...)
+		}
+		if strings.TrimSpace(m.erdsLateralityColumns) != "" {
+			args = append(args, "--erds-laterality-columns")
+			args = append(args, splitCSVList(m.erdsLateralityColumns)...)
+		}
+		if strings.TrimSpace(m.erdsSomatosensoryLeftChannels) != "" {
+			args = append(args, "--erds-somatosensory-left-channels")
+			args = append(args, splitCSVList(m.erdsSomatosensoryLeftChannels)...)
+		}
+		if strings.TrimSpace(m.erdsSomatosensoryRightChannels) != "" {
+			args = append(args, "--erds-somatosensory-right-channels")
+			args = append(args, splitCSVList(m.erdsSomatosensoryRightChannels)...)
+		}
+		if m.erdsOnsetMinThresholdPercent != 10.0 {
+			args = append(args, "--erds-onset-min-threshold-percent", fmt.Sprintf("%.1f", m.erdsOnsetMinThresholdPercent))
+		}
+		if m.erdsReboundThresholdSigma != 1.0 {
+			args = append(args, "--erds-rebound-threshold-sigma", fmt.Sprintf("%.2f", m.erdsReboundThresholdSigma))
+		}
+		if m.erdsReboundMinThresholdPercent != 10.0 {
+			args = append(args, "--erds-rebound-min-threshold-percent", fmt.Sprintf("%.1f", m.erdsReboundMinThresholdPercent))
 		}
 	}
 
@@ -946,6 +1000,40 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	} else {
 		args = append(args, "--no-also-save-csv")
 	}
+
+	// Change scores config
+	if m.featComputeChangeScores {
+		transforms := []string{"difference", "ratio", "log_ratio"}
+		if m.changeScoresTransform != 0 {
+			args = append(args, "--change-scores-transform", transforms[m.changeScoresTransform%len(transforms)])
+		}
+		if strings.TrimSpace(m.changeScoresWindowPairs) != "" {
+			args = append(args, "--change-scores-window-pairs")
+			args = append(args, splitCSVList(m.changeScoresWindowPairs)...)
+		}
+	}
+
+	// Per-family spatial transform overrides
+	stLabels := []string{"inherit", "none", "csd", "laplacian"}
+	appendSTOverride := func(field int, flag string) {
+		if field != 0 {
+			args = append(args, flag, stLabels[field%len(stLabels)])
+		}
+	}
+	appendSTOverride(m.spatialTransformPerFamilyConnectivity, "--spatial-transform-connectivity")
+	appendSTOverride(m.spatialTransformPerFamilyItpc, "--spatial-transform-itpc")
+	appendSTOverride(m.spatialTransformPerFamilyPac, "--spatial-transform-pac")
+	appendSTOverride(m.spatialTransformPerFamilyPower, "--spatial-transform-power")
+	appendSTOverride(m.spatialTransformPerFamilyAperiodic, "--spatial-transform-aperiodic")
+	appendSTOverride(m.spatialTransformPerFamilyBursts, "--spatial-transform-bursts")
+	appendSTOverride(m.spatialTransformPerFamilyErds, "--spatial-transform-erds")
+	appendSTOverride(m.spatialTransformPerFamilyComplexity, "--spatial-transform-complexity")
+	appendSTOverride(m.spatialTransformPerFamilyRatios, "--spatial-transform-ratios")
+	appendSTOverride(m.spatialTransformPerFamilyAsymmetry, "--spatial-transform-asymmetry")
+	appendSTOverride(m.spatialTransformPerFamilySpectral, "--spatial-transform-spectral")
+	appendSTOverride(m.spatialTransformPerFamilyErp, "--spatial-transform-erp")
+	appendSTOverride(m.spatialTransformPerFamilyQuality, "--spatial-transform-quality")
+	appendSTOverride(m.spatialTransformPerFamilyMicrostates, "--spatial-transform-microstates")
 
 	return args
 }

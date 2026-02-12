@@ -1027,6 +1027,46 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 {
 			m.erdsReboundMinLatencyMs = val
 		}
+	// ITPC/PAC segment validity
+	case optItpcMinSegmentSec:
+		if val > 0 {
+			m.itpcMinSegmentSec = val
+		}
+	case optItpcMinCyclesAtFmin:
+		if val > 0 {
+			m.itpcMinCyclesAtFmin = val
+		}
+	case optPACMinSegmentSec:
+		if val > 0 {
+			m.pacMinSegmentSec = val
+		}
+	case optPACMinCyclesAtFmin:
+		if val > 0 {
+			m.pacMinCyclesAtFmin = val
+		}
+	// Aperiodic missing
+	case optAperiodicMaxFreqResolutionHz:
+		if val > 0 {
+			m.aperiodicMaxFreqResolutionHz = val
+		}
+	// Directed connectivity missing
+	case optDirectedConnMinSamplesPerMvarParam:
+		if val >= 1 {
+			m.directedConnMinSamplesPerMvarParam = int(val)
+		}
+	// ERDS pain markers
+	case optERDSOnsetMinThresholdPercent:
+		if val >= 0 {
+			m.erdsOnsetMinThresholdPercent = val
+		}
+	case optERDSReboundThresholdSigma:
+		if val >= 0 {
+			m.erdsReboundThresholdSigma = val
+		}
+	case optERDSReboundMinThresholdPercent:
+		if val >= 0 {
+			m.erdsReboundMinThresholdPercent = val
+		}
 	}
 }
 
@@ -1297,6 +1337,35 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 	case optConditionEffectThreshold:
 		m.conditionEffectThreshold = val
+	// Global Statistics & Validation
+	case optGlobalNBootstrap:
+		if val >= 0 {
+			m.globalNBootstrap = int(val)
+		}
+	case optClusterCorrectionAlpha:
+		if val > 0 && val <= 1 {
+			m.clusterCorrectionAlpha = val
+		}
+	case optClusterCorrectionMinClusterSize:
+		if val >= 1 {
+			m.clusterCorrectionMinClusterSize = int(val)
+		}
+	case optValidationMinEpochs:
+		if val >= 0 {
+			m.validationMinEpochs = int(val)
+		}
+	case optValidationMinChannels:
+		if val >= 0 {
+			m.validationMinChannels = int(val)
+		}
+	case optValidationMaxAmplitudeUv:
+		if val > 0 {
+			m.validationMaxAmplitudeUv = val
+		}
+	case optIOMaxMissingChannelsFraction:
+		if val >= 0 && val <= 1 {
+			m.ioMaxMissingChannelsFraction = val
+		}
 	}
 }
 
@@ -1341,6 +1410,118 @@ func (m *Model) commitMLNumber(val float64) {
 	case optMLFmriSigRoundDecimals:
 		if val >= 0 {
 			m.mlFmriSigRoundDecimals = int(val)
+		}
+	// ML Preprocessing
+	case optMLPCANComponents:
+		if val > 0 {
+			m.mlPCANComponents = val
+		}
+	case optMLPCARngSeed:
+		if val >= 0 {
+			m.mlPCARngSeed = int(val)
+		}
+	// ML LR
+	case optMLLrMaxIter:
+		if val >= 1 {
+			m.mlLrMaxIter = int(val)
+		}
+	// ML CNN
+	case optMLCnnFilters1:
+		if val >= 1 {
+			m.mlCnnFilters1 = int(val)
+		}
+	case optMLCnnFilters2:
+		if val >= 1 {
+			m.mlCnnFilters2 = int(val)
+		}
+	case optMLCnnKernelSize1:
+		if val >= 1 {
+			m.mlCnnKernelSize1 = int(val)
+		}
+	case optMLCnnKernelSize2:
+		if val >= 1 {
+			m.mlCnnKernelSize2 = int(val)
+		}
+	case optMLCnnPoolSize:
+		if val >= 1 {
+			m.mlCnnPoolSize = int(val)
+		}
+	case optMLCnnDenseUnits:
+		if val >= 1 {
+			m.mlCnnDenseUnits = int(val)
+		}
+	case optMLCnnDropoutConv:
+		if val >= 0 && val < 1 {
+			m.mlCnnDropoutConv = val
+		}
+	case optMLCnnDropoutDense:
+		if val >= 0 && val < 1 {
+			m.mlCnnDropoutDense = val
+		}
+	case optMLCnnBatchSize:
+		if val >= 1 {
+			m.mlCnnBatchSize = int(val)
+		}
+	case optMLCnnEpochs:
+		if val >= 1 {
+			m.mlCnnEpochs = int(val)
+		}
+	case optMLCnnLearningRate:
+		if val > 0 {
+			m.mlCnnLearningRate = val
+		}
+	case optMLCnnPatience:
+		if val >= 1 {
+			m.mlCnnPatience = int(val)
+		}
+	case optMLCnnMinDelta:
+		if val >= 0 {
+			m.mlCnnMinDelta = val
+		}
+	case optMLCnnL2Lambda:
+		if val >= 0 {
+			m.mlCnnL2Lambda = val
+		}
+	case optMLCnnRandomSeed:
+		if val >= 0 {
+			m.mlCnnRandomSeed = int(val)
+		}
+	// ML CV / Evaluation / Analysis
+	case optMLCvMinValidPermFraction:
+		if val > 0 && val <= 1 {
+			m.mlCvMinValidPermFraction = val
+		}
+	case optMLCvDefaultNBins:
+		if val >= 2 {
+			m.mlCvDefaultNBins = int(val)
+		}
+	case optMLEvalBootstrapIterations:
+		if val >= 1 {
+			m.mlEvalBootstrapIterations = int(val)
+		}
+	case optMLDataMaxExcludedSubjectFraction:
+		if val >= 0 && val <= 1 {
+			m.mlDataMaxExcludedSubjectFraction = val
+		}
+	case optMLIncrementalBaselineAlpha:
+		if val > 0 && val < 1 {
+			m.mlIncrementalBaselineAlpha = val
+		}
+	case optMLTimeGenMinSubjects:
+		if val >= 1 {
+			m.mlTimeGenMinSubjects = int(val)
+		}
+	case optMLTimeGenMinValidPermFraction:
+		if val > 0 && val <= 1 {
+			m.mlTimeGenMinValidPermFraction = val
+		}
+	case optMLClassMinSubjectsForAUC:
+		if val >= 1 {
+			m.mlClassMinSubjectsForAUC = int(val)
+		}
+	case optMLClassMaxFailedFoldFraction:
+		if val >= 0 && val <= 1 {
+			m.mlClassMaxFailedFoldFraction = val
 		}
 	}
 }
@@ -1421,6 +1602,11 @@ func (m *Model) commitPreprocessingNumber(val float64) {
 	case optPrepEpochsReject:
 		if val >= 0 {
 			m.prepEpochsReject = val
+		}
+	// Alignment
+	case optAlignMinAlignmentSamples:
+		if val >= 0 {
+			m.alignMinAlignmentSamples = int(val)
 		}
 	}
 }

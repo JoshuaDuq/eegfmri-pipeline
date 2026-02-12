@@ -104,6 +104,108 @@ func (m *Model) toggleMLAdvancedOption() {
 	case optVarianceThresholdGrid:
 		m.startTextEdit(textFieldVarianceThresholdGrid)
 		m.useDefaultAdvanced = false
+	// ML Preprocessing group
+	case optMLGroupPreprocessing:
+		m.mlGroupPreprocessingExpanded = !m.mlGroupPreprocessingExpanded
+		m.useDefaultAdvanced = false
+	case optMLImputer:
+		m.mlImputer = (m.mlImputer + 1) % 3
+		m.useDefaultAdvanced = false
+	case optMLPowerTransformerMethod:
+		m.mlPowerTransformerMethod = (m.mlPowerTransformerMethod + 1) % 2
+		m.useDefaultAdvanced = false
+	case optMLPowerTransformerStandardize:
+		m.mlPowerTransformerStandardize = !m.mlPowerTransformerStandardize
+		m.useDefaultAdvanced = false
+	case optMLPCAEnabled:
+		m.mlPCAEnabled = !m.mlPCAEnabled
+		m.useDefaultAdvanced = false
+	case optMLPCANComponents, optMLPCARngSeed:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMLPCAWhiten:
+		m.mlPCAWhiten = !m.mlPCAWhiten
+		m.useDefaultAdvanced = false
+	case optMLPCASvdSolver:
+		m.mlPCASvdSolver = (m.mlPCASvdSolver + 1) % 3
+		m.useDefaultAdvanced = false
+	// SVM
+	case optMLSvmKernel:
+		m.mlSvmKernel = (m.mlSvmKernel + 1) % 3
+		m.useDefaultAdvanced = false
+	case optMLSvmCGrid:
+		m.startTextEdit(textFieldMLSvmCGrid)
+		m.useDefaultAdvanced = false
+	case optMLSvmGammaGrid:
+		m.startTextEdit(textFieldMLSvmGammaGrid)
+		m.useDefaultAdvanced = false
+	case optMLSvmClassWeight:
+		m.mlSvmClassWeight = (m.mlSvmClassWeight + 1) % 2
+		m.useDefaultAdvanced = false
+	// Logistic Regression
+	case optMLLrPenalty:
+		m.mlLrPenalty = (m.mlLrPenalty + 1) % 3
+		m.useDefaultAdvanced = false
+	case optMLLrCGrid:
+		m.startTextEdit(textFieldMLLrCGrid)
+		m.useDefaultAdvanced = false
+	case optMLLrMaxIter:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMLLrClassWeight:
+		m.mlLrClassWeight = (m.mlLrClassWeight + 1) % 2
+		m.useDefaultAdvanced = false
+	// Random Forest extras
+	case optMLRfMinSamplesSplitGrid:
+		m.startTextEdit(textFieldMLRfMinSamplesSplitGrid)
+		m.useDefaultAdvanced = false
+	case optMLRfMinSamplesLeafGrid:
+		m.startTextEdit(textFieldMLRfMinSamplesLeafGrid)
+		m.useDefaultAdvanced = false
+	case optMLRfBootstrap:
+		m.mlRfBootstrap = !m.mlRfBootstrap
+		m.useDefaultAdvanced = false
+	case optMLRfClassWeight:
+		m.mlRfClassWeight = (m.mlRfClassWeight + 1) % 3
+		m.useDefaultAdvanced = false
+	// CNN group
+	case optMLGroupCNN:
+		m.mlGroupCNNExpanded = !m.mlGroupCNNExpanded
+		m.useDefaultAdvanced = false
+	case optMLCnnFilters1, optMLCnnFilters2, optMLCnnKernelSize1, optMLCnnKernelSize2,
+		optMLCnnPoolSize, optMLCnnDenseUnits, optMLCnnBatchSize, optMLCnnEpochs,
+		optMLCnnPatience, optMLCnnRandomSeed:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMLCnnDropoutConv, optMLCnnDropoutDense, optMLCnnLearningRate,
+		optMLCnnMinDelta, optMLCnnL2Lambda:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// CV / Evaluation / Analysis
+	case optMLCvHygieneEnabled:
+		m.mlCvHygieneEnabled = !m.mlCvHygieneEnabled
+		m.useDefaultAdvanced = false
+	case optMLCvPermutationScheme:
+		m.mlCvPermutationScheme = (m.mlCvPermutationScheme + 1) % 2
+		m.useDefaultAdvanced = false
+	case optMLCvMinValidPermFraction, optMLCvDefaultNBins, optMLEvalBootstrapIterations,
+		optMLDataMaxExcludedSubjectFraction, optMLIncrementalBaselineAlpha,
+		optMLTimeGenMinSubjects, optMLTimeGenMinValidPermFraction,
+		optMLClassMinSubjectsForAUC, optMLClassMaxFailedFoldFraction:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMLEvalCIMethod:
+		m.mlEvalCIMethod = (m.mlEvalCIMethod + 1) % 2
+		m.useDefaultAdvanced = false
+	case optMLDataCovariatesStrict:
+		m.mlDataCovariatesStrict = !m.mlDataCovariatesStrict
+		m.useDefaultAdvanced = false
+	case optMLTargetsStrictRegressionContinuous:
+		m.mlTargetsStrictRegressionCont = !m.mlTargetsStrictRegressionCont
+		m.useDefaultAdvanced = false
+	case optMLInterpretabilityGroupedOutputs:
+		m.mlInterpretabilityGroupedOutputs = !m.mlInterpretabilityGroupedOutputs
+		m.useDefaultAdvanced = false
 	}
 }
 
@@ -229,6 +331,37 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.prepOverwriteCleanEvents = !m.prepOverwriteCleanEvents
 	case optPrepCleanEventsStrict:
 		m.prepCleanEventsStrict = !m.prepCleanEventsStrict
+		m.useDefaultAdvanced = false
+	// ECG channels
+	case optPrepEcgChannels:
+		m.startTextEdit(textFieldPrepEcgChannels)
+		m.useDefaultAdvanced = false
+	// Autoreject
+	case optPrepAutorejectNInterpolate:
+		m.startTextEdit(textFieldPrepAutorejectNInterpolate)
+		m.useDefaultAdvanced = false
+	// Alignment
+	case optAlignAllowMisalignedTrim:
+		m.alignAllowMisalignedTrim = !m.alignAllowMisalignedTrim
+		m.useDefaultAdvanced = false
+	case optAlignMinAlignmentSamples:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optAlignTrimToFirstVolume:
+		m.alignTrimToFirstVolume = !m.alignTrimToFirstVolume
+		m.useDefaultAdvanced = false
+	case optAlignFmriOnsetReference:
+		m.alignFmriOnsetReference = (m.alignFmriOnsetReference + 1) % 2
+		m.useDefaultAdvanced = false
+	// Event Column Mapping
+	case optEventColTemperature:
+		m.startTextEdit(textFieldEventColTemperature)
+		m.useDefaultAdvanced = false
+	case optEventColRating:
+		m.startTextEdit(textFieldEventColRating)
+		m.useDefaultAdvanced = false
+	case optEventColPainBinary:
+		m.startTextEdit(textFieldEventColPainBinary)
 		m.useDefaultAdvanced = false
 	}
 

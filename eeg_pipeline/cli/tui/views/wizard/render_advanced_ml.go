@@ -63,6 +63,16 @@ func (m Model) renderMLAdvancedConfig() string {
 			return textFieldRfMaxDepthGrid, true
 		case optVarianceThresholdGrid:
 			return textFieldVarianceThresholdGrid, true
+		case optMLSvmCGrid:
+			return textFieldMLSvmCGrid, true
+		case optMLSvmGammaGrid:
+			return textFieldMLSvmGammaGrid, true
+		case optMLLrCGrid:
+			return textFieldMLLrCGrid, true
+		case optMLRfMinSamplesSplitGrid:
+			return textFieldMLRfMinSamplesSplitGrid, true
+		case optMLRfMinSamplesLeafGrid:
+			return textFieldMLRfMinSamplesLeafGrid, true
 		default:
 			return textFieldNone, false
 		}
@@ -173,6 +183,130 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "RF Max Depth Grid", renderTextOrDefault(m.rfMaxDepthGrid, "(default)"), "use 'null' for None"
 		case optVarianceThresholdGrid:
 			label, value, hint = "Variance Threshold Grid", renderTextOrDefault(m.varianceThresholdGrid, "(default)"), "e.g. 0.0 or 0.0,0.01,0.1; use 0.0 only for small train folds"
+		case optMLGroupPreprocessing:
+			if m.mlGroupPreprocessingExpanded {
+				label = "▾ ML Preprocessing"
+			} else {
+				label = "▸ ML Preprocessing"
+			}
+			value, hint = "", "imputer, scaler, PCA"
+		case optMLImputer:
+			imputers := []string{"median", "mean", "most_frequent"}
+			label, value, hint = "Imputer", imputers[m.mlImputer%len(imputers)], "missing value strategy"
+		case optMLPowerTransformerMethod:
+			methods := []string{"yeo-johnson", "box-cox"}
+			label, value, hint = "Power Transform", methods[m.mlPowerTransformerMethod%len(methods)], "feature normalization"
+		case optMLPowerTransformerStandardize:
+			label, value, hint = "PT Standardize", m.boolToOnOff(m.mlPowerTransformerStandardize), "standardize after transform"
+		case optMLPCAEnabled:
+			label, value, hint = "PCA Enabled", m.boolToOnOff(m.mlPCAEnabled), "dimensionality reduction"
+		case optMLPCANComponents:
+			label, value, hint = "PCA N Components", fmt.Sprintf("%.6g", m.mlPCANComponents), "variance fraction (e.g. 0.95) or int"
+		case optMLPCAWhiten:
+			label, value, hint = "PCA Whiten", m.boolToOnOff(m.mlPCAWhiten), "decorrelate components"
+		case optMLPCASvdSolver:
+			solvers := []string{"auto", "full", "randomized"}
+			label, value, hint = "PCA SVD Solver", solvers[m.mlPCASvdSolver%len(solvers)], "SVD algorithm"
+		case optMLPCARngSeed:
+			label, value, hint = "PCA RNG Seed", fmt.Sprintf("%d", m.mlPCARngSeed), "0=default"
+		case optMLSvmKernel:
+			kernels := []string{"rbf", "linear", "poly"}
+			label, value, hint = "SVM Kernel", kernels[m.mlSvmKernel%len(kernels)], "kernel function"
+		case optMLSvmCGrid:
+			label, value, hint = "SVM C Grid", renderTextOrDefault(m.mlSvmCGrid, "(default)"), "regularization grid"
+		case optMLSvmGammaGrid:
+			label, value, hint = "SVM Gamma Grid", renderTextOrDefault(m.mlSvmGammaGrid, "(default)"), "use 'scale' for auto"
+		case optMLSvmClassWeight:
+			weights := []string{"balanced", "none"}
+			label, value, hint = "SVM Class Weight", weights[m.mlSvmClassWeight%len(weights)], "class balancing"
+		case optMLLrPenalty:
+			penalties := []string{"l2", "l1", "elasticnet"}
+			label, value, hint = "LR Penalty", penalties[m.mlLrPenalty%len(penalties)], "regularization type"
+		case optMLLrCGrid:
+			label, value, hint = "LR C Grid", renderTextOrDefault(m.mlLrCGrid, "(default)"), "inverse regularization"
+		case optMLLrMaxIter:
+			label, value, hint = "LR Max Iterations", fmt.Sprintf("%d", m.mlLrMaxIter), "solver convergence"
+		case optMLLrClassWeight:
+			weights := []string{"balanced", "none"}
+			label, value, hint = "LR Class Weight", weights[m.mlLrClassWeight%len(weights)], "class balancing"
+		case optMLRfMinSamplesSplitGrid:
+			label, value, hint = "RF Min Samples Split", renderTextOrDefault(m.mlRfMinSamplesSplitGrid, "(default)"), "min samples to split node"
+		case optMLRfMinSamplesLeafGrid:
+			label, value, hint = "RF Min Samples Leaf", renderTextOrDefault(m.mlRfMinSamplesLeafGrid, "(default)"), "min samples per leaf"
+		case optMLRfBootstrap:
+			label, value, hint = "RF Bootstrap", m.boolToOnOff(m.mlRfBootstrap), "bootstrap sampling"
+		case optMLRfClassWeight:
+			weights := []string{"balanced", "balanced_subsample", "none"}
+			label, value, hint = "RF Class Weight", weights[m.mlRfClassWeight%len(weights)], "class balancing"
+		case optMLGroupCNN:
+			if m.mlGroupCNNExpanded {
+				label = "▾ CNN Architecture"
+			} else {
+				label = "▸ CNN Architecture"
+			}
+			value, hint = "", "convolutional neural network params"
+		case optMLCnnFilters1:
+			label, value, hint = "Conv1 Filters", fmt.Sprintf("%d", m.mlCnnFilters1), "first conv layer"
+		case optMLCnnFilters2:
+			label, value, hint = "Conv2 Filters", fmt.Sprintf("%d", m.mlCnnFilters2), "second conv layer"
+		case optMLCnnKernelSize1:
+			label, value, hint = "Conv1 Kernel Size", fmt.Sprintf("%d", m.mlCnnKernelSize1), "first conv kernel"
+		case optMLCnnKernelSize2:
+			label, value, hint = "Conv2 Kernel Size", fmt.Sprintf("%d", m.mlCnnKernelSize2), "second conv kernel"
+		case optMLCnnPoolSize:
+			label, value, hint = "Pool Size", fmt.Sprintf("%d", m.mlCnnPoolSize), "max pooling"
+		case optMLCnnDenseUnits:
+			label, value, hint = "Dense Units", fmt.Sprintf("%d", m.mlCnnDenseUnits), "FC layer units"
+		case optMLCnnDropoutConv:
+			label, value, hint = "Conv Dropout", fmt.Sprintf("%.6g", m.mlCnnDropoutConv), "0-1"
+		case optMLCnnDropoutDense:
+			label, value, hint = "Dense Dropout", fmt.Sprintf("%.6g", m.mlCnnDropoutDense), "0-1"
+		case optMLCnnBatchSize:
+			label, value, hint = "Batch Size", fmt.Sprintf("%d", m.mlCnnBatchSize), "training batch"
+		case optMLCnnEpochs:
+			label, value, hint = "Epochs", fmt.Sprintf("%d", m.mlCnnEpochs), "training epochs"
+		case optMLCnnLearningRate:
+			label, value, hint = "Learning Rate", fmt.Sprintf("%.6g", m.mlCnnLearningRate), "optimizer LR"
+		case optMLCnnPatience:
+			label, value, hint = "Early Stop Patience", fmt.Sprintf("%d", m.mlCnnPatience), "epochs without improvement"
+		case optMLCnnMinDelta:
+			label, value, hint = "Early Stop Min Delta", fmt.Sprintf("%.6g", m.mlCnnMinDelta), "minimum improvement"
+		case optMLCnnL2Lambda:
+			label, value, hint = "L2 Lambda", fmt.Sprintf("%.6g", m.mlCnnL2Lambda), "weight decay"
+		case optMLCnnRandomSeed:
+			label, value, hint = "CNN Random Seed", fmt.Sprintf("%d", m.mlCnnRandomSeed), "reproducibility"
+		case optMLCvHygieneEnabled:
+			label, value, hint = "CV Hygiene", m.boolToOnOff(m.mlCvHygieneEnabled), "strict CV data leakage checks"
+		case optMLCvPermutationScheme:
+			schemes := []string{"shuffle", "circular_shift"}
+			label, value, hint = "Perm. Scheme", schemes[m.mlCvPermutationScheme%len(schemes)], "permutation test method"
+		case optMLCvMinValidPermFraction:
+			label, value, hint = "Min Valid Perm Frac", fmt.Sprintf("%.6g", m.mlCvMinValidPermFraction), "min fraction of valid permutations"
+		case optMLCvDefaultNBins:
+			label, value, hint = "Default N Bins", fmt.Sprintf("%d", m.mlCvDefaultNBins), "stratification bins"
+		case optMLEvalCIMethod:
+			methods := []string{"bootstrap", "fixed_effects"}
+			label, value, hint = "CI Method", methods[m.mlEvalCIMethod%len(methods)], "confidence interval method"
+		case optMLEvalBootstrapIterations:
+			label, value, hint = "Bootstrap Iterations", fmt.Sprintf("%d", m.mlEvalBootstrapIterations), "for CI estimation"
+		case optMLDataCovariatesStrict:
+			label, value, hint = "Covariates Strict", m.boolToOnOff(m.mlDataCovariatesStrict), "error on missing covariates"
+		case optMLDataMaxExcludedSubjectFraction:
+			label, value, hint = "Max Excluded Subj Frac", fmt.Sprintf("%.6g", m.mlDataMaxExcludedSubjectFraction), "0-1"
+		case optMLIncrementalBaselineAlpha:
+			label, value, hint = "Baseline Alpha", fmt.Sprintf("%.6g", m.mlIncrementalBaselineAlpha), "incremental validity baseline"
+		case optMLInterpretabilityGroupedOutputs:
+			label, value, hint = "Grouped Outputs", m.boolToOnOff(m.mlInterpretabilityGroupedOutputs), "grouped importance tables"
+		case optMLTargetsStrictRegressionContinuous:
+			label, value, hint = "Strict Regression", m.boolToOnOff(m.mlTargetsStrictRegressionCont), "error on binary-like target"
+		case optMLTimeGenMinSubjects:
+			label, value, hint = "TG Min Subjects", fmt.Sprintf("%d", m.mlTimeGenMinSubjects), "temporal generalization"
+		case optMLTimeGenMinValidPermFraction:
+			label, value, hint = "TG Min Valid Perm", fmt.Sprintf("%.6g", m.mlTimeGenMinValidPermFraction), "0-1"
+		case optMLClassMinSubjectsForAUC:
+			label, value, hint = "Min Subj for AUC", fmt.Sprintf("%d", m.mlClassMinSubjectsForAUC), "AUC inference threshold"
+		case optMLClassMaxFailedFoldFraction:
+			label, value, hint = "Max Failed Fold Frac", fmt.Sprintf("%.6g", m.mlClassMaxFailedFoldFraction), "0-1"
 		default:
 			continue
 		}

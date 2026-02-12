@@ -511,6 +511,85 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			label = "Clean Events Strict"
 			value = m.boolToOnOff(m.prepCleanEventsStrict)
 			hint = "Fail if clean events.tsv cannot be written"
+		// ECG channels
+		case optPrepEcgChannels:
+			label = "ECG Channels"
+			val := m.prepEcgChannels
+			if strings.TrimSpace(val) == "" {
+				val = "(none)"
+			}
+			if m.editingText && m.editingTextField == textFieldPrepEcgChannels {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "space-separated ECG channel names"
+		// Autoreject
+		case optPrepAutorejectNInterpolate:
+			label = "Autoreject N Interpolate"
+			val := m.prepAutorejectNInterpolate
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldPrepAutorejectNInterpolate {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "comma-separated integers"
+		// Alignment
+		case optAlignAllowMisalignedTrim:
+			label = "Allow Misaligned Trim"
+			value = m.boolToOnOff(m.alignAllowMisalignedTrim)
+			hint = "trim misaligned EEG/fMRI"
+		case optAlignMinAlignmentSamples:
+			label = "Min Alignment Samples"
+			value = fmt.Sprintf("%d", m.alignMinAlignmentSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optAlignMinAlignmentSamples) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum overlap samples"
+		case optAlignTrimToFirstVolume:
+			label = "Trim to First Volume"
+			value = m.boolToOnOff(m.alignTrimToFirstVolume)
+			hint = "trim EEG to first fMRI volume"
+		case optAlignFmriOnsetReference:
+			refs := []string{"first_volume", "scanner_trigger"}
+			label = "fMRI Onset Reference"
+			value = refs[m.alignFmriOnsetReference%len(refs)]
+			hint = "alignment reference point"
+		// Event Column Mapping
+		case optEventColTemperature:
+			label = "Temperature Columns"
+			val := m.eventColTemperature
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldEventColTemperature {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "comma-separated column names"
+		case optEventColRating:
+			label = "Rating Columns"
+			val := m.eventColRating
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldEventColRating {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "comma-separated column names"
+		case optEventColPainBinary:
+			label = "Pain Binary Columns"
+			val := m.eventColPainBinary
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldEventColPainBinary {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "comma-separated column names"
 		}
 
 		styledHint := ""
