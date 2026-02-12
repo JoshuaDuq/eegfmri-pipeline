@@ -37,6 +37,31 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.connAECMode < len(aecModes) {
 			args = append(args, "--conn-aec-mode", aecModes[m.connAECMode])
 		}
+		connModes := []string{"cwt_morlet", "multitaper", "fourier"}
+		if m.connMode >= 0 && m.connMode < len(connModes) && m.connMode != 0 {
+			args = append(args, "--conn-mode", connModes[m.connMode])
+		}
+		if !m.connAECAbsolute {
+			args = append(args, "--no-conn-aec-absolute")
+		}
+		if !m.connEnableAEC {
+			args = append(args, "--no-conn-enable-aec")
+		}
+		if m.connNFreqsPerBand != 8 {
+			args = append(args, "--conn-n-freqs-per-band", fmt.Sprintf("%d", m.connNFreqsPerBand))
+		}
+		if m.connNCycles > 0 {
+			args = append(args, "--conn-n-cycles", fmt.Sprintf("%.2f", m.connNCycles))
+		}
+		if m.connDecim != 1 {
+			args = append(args, "--conn-decim", fmt.Sprintf("%d", m.connDecim))
+		}
+		if m.connMinSegSamples != 50 {
+			args = append(args, "--conn-min-segment-samples", fmt.Sprintf("%d", m.connMinSegSamples))
+		}
+		if m.connSmallWorldNRand != 100 {
+			args = append(args, "--conn-small-world-n-rand", fmt.Sprintf("%d", m.connSmallWorldNRand))
+		}
 	}
 
 	// PAC options
@@ -183,6 +208,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.sourceLocMode == 1 {
 			if strings.TrimSpace(m.sourceLocSubject) != "" {
 				args = append(args, "--source-subject", strings.TrimSpace(m.sourceLocSubject))
+			}
+			if strings.TrimSpace(m.sourceLocSubjectsDir) != "" {
+				args = append(args, "--source-subjects-dir", expandUserPath(strings.TrimSpace(m.sourceLocSubjectsDir)))
 			}
 			if m.sourceLocCreateTrans {
 				args = append(args, "--source-create-trans")
@@ -503,12 +531,16 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 
 	// ITPC additional options
-	if m.itpcAllowUnsafeLoo {
-		args = append(args, "--itpc-allow-unsafe-loo")
-	}
-	if m.itpcBaselineCorrection != 0 {
-		modes := []string{"none", "subtract"}
-		args = append(args, "--itpc-baseline-correction", modes[m.itpcBaselineCorrection])
+	if m.isCategorySelected("itpc") {
+		if m.itpcAllowUnsafeLoo {
+			args = append(args, "--itpc-allow-unsafe-loo")
+		} else {
+			args = append(args, "--no-itpc-allow-unsafe-loo")
+		}
+		if m.itpcBaselineCorrection != 0 {
+			modes := []string{"none", "subtract"}
+			args = append(args, "--itpc-baseline-correction", modes[m.itpcBaselineCorrection])
+		}
 	}
 
 	// Spectral advanced options
@@ -534,6 +566,10 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 		if m.spectralFmax != 80.0 {
 			args = append(args, "--spectral-fmax", fmt.Sprintf("%.1f", m.spectralFmax))
+		}
+		if strings.TrimSpace(m.spectralSegmentsSpec) != "" && m.spectralSegmentsSpec != "baseline" {
+			args = append(args, "--spectral-segments")
+			args = append(args, splitSpaceList(m.spectralSegmentsSpec)...)
 		}
 		if !m.spectralExcludeLineNoise {
 			args = append(args, "--no-spectral-exclude-line-noise")
@@ -600,6 +636,8 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--iaf-rois")
 			args = append(args, rois...)
 		}
+	} else {
+		args = append(args, "--no-iaf-enabled")
 	}
 
 	// Aperiodic advanced options
@@ -701,8 +739,13 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.pacNSurrogates != 0 {
 			args = append(args, "--pac-n-surrogates", fmt.Sprintf("%d", m.pacNSurrogates))
 		}
+		if m.pacRandomSeed != 0 {
+			args = append(args, "--pac-random-seed", fmt.Sprintf("%d", m.pacRandomSeed))
+		}
 		if m.pacAllowHarmonicOvrlap {
 			args = append(args, "--pac-allow-harmonic-overlap")
+		} else {
+			args = append(args, "--no-pac-allow-harmonic-overlap")
 		}
 		if m.pacMaxHarmonic != 6 {
 			args = append(args, "--pac-max-harmonic", fmt.Sprintf("%d", m.pacMaxHarmonic))
@@ -804,10 +847,34 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
+	// Microstates options
+	if m.isCategorySelected("microstates") {
+		if m.microstatesNStates != 4 {
+			args = append(args, "--microstates-n-states", fmt.Sprintf("%d", m.microstatesNStates))
+		}
+		if m.microstatesMinPeakDistanceMs != 10.0 {
+			args = append(args, "--microstates-min-peak-distance-ms", fmt.Sprintf("%.1f", m.microstatesMinPeakDistanceMs))
+		}
+		if m.microstatesMaxGfpPeaksPerEpoch != 400 {
+			args = append(args, "--microstates-max-gfp-peaks-per-epoch", fmt.Sprintf("%d", m.microstatesMaxGfpPeaksPerEpoch))
+		}
+		if m.microstatesMinDurationMs != 20.0 {
+			args = append(args, "--microstates-min-duration-ms", fmt.Sprintf("%.1f", m.microstatesMinDurationMs))
+		}
+		if m.microstatesGfpPeakProminence != 0.0 {
+			args = append(args, "--microstates-gfp-peak-prominence", fmt.Sprintf("%.2f", m.microstatesGfpPeakProminence))
+		}
+		if m.microstatesRandomState != 42 {
+			args = append(args, "--microstates-random-state", fmt.Sprintf("%d", m.microstatesRandomState))
+		}
+	}
+
 	// ERDS options
 	if m.isCategorySelected("erds") {
 		if m.erdsUseLogRatio {
 			args = append(args, "--erds-use-log-ratio")
+		} else {
+			args = append(args, "--no-erds-use-log-ratio")
 		}
 		if m.erdsMinBaselinePower != 1.0e-12 {
 			args = append(args, "--erds-min-baseline-power", fmt.Sprintf("%.2e", m.erdsMinBaselinePower))

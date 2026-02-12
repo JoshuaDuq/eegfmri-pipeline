@@ -1391,6 +1391,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.erdsBandsSpec
 	case textFieldSpectralRatioPairs:
 		return m.spectralRatioPairsSpec
+	case textFieldSpectralSegments:
+		return m.spectralSegmentsSpec
 	case textFieldAsymmetryChannelPairs:
 		return m.asymmetryChannelPairsSpec
 	case textFieldAsymmetryActivationBands:
@@ -1401,6 +1403,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.erpComponentsSpec
 	case textFieldSourceLocSubject:
 		return m.sourceLocSubject
+	case textFieldSourceLocSubjectsDir:
+		return m.sourceLocSubjectsDir
 	case textFieldSourceLocTrans:
 		return m.sourceLocTrans
 	case textFieldSourceLocBem:
@@ -1799,6 +1803,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 			m.fmriMemMb = n
 		}
 	}
+	if v, ok := values["feature_engineering.sourcelocalization.subjects_dir"]; ok {
+		if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
+			m.sourceLocSubjectsDir = s
+		}
+	}
 
 	// ML defaults from eeg_config.yaml for TUI hydration.
 	if v, ok := values["machine_learning.targets.regression"]; ok {
@@ -2150,6 +2159,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.erdsBandsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldSpectralRatioPairs:
 		m.spectralRatioPairsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldSpectralSegments:
+		m.spectralSegmentsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldAsymmetryChannelPairs:
 		m.asymmetryChannelPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldAsymmetryActivationBands:
@@ -2160,6 +2171,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.erpComponentsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldSourceLocSubject:
 		m.sourceLocSubject = value
+	case textFieldSourceLocSubjectsDir:
+		m.sourceLocSubjectsDir = value
 	case textFieldSourceLocTrans:
 		m.sourceLocTrans = value
 	case textFieldSourceLocBem:
@@ -2490,6 +2503,7 @@ const (
 	optFeatGroupERP
 	optFeatGroupRatios
 	optFeatGroupAsymmetry
+	optFeatGroupMicrostates
 	optFeatGroupQuality
 	optFeatGroupERDS
 	optFeatGroupSpatialTransform
@@ -2581,6 +2595,7 @@ const (
 	optPowerEmitDb
 	optSpectralEdge
 	optSpectralRatioPairs
+	optSpectralSegments
 	optSpectralIncludeLogRatios
 	optSpectralExcludeLineNoise
 	optSpectralLineNoiseFreq
@@ -2619,6 +2634,13 @@ const (
 	optQualitySnrNoiseBandMax
 	optQualityMuscleBandMin
 	optQualityMuscleBandMax
+	// Microstates options
+	optMicrostatesNStates
+	optMicrostatesMinPeakDistanceMs
+	optMicrostatesMaxGfpPeaksPerEpoch
+	optMicrostatesMinDurationMs
+	optMicrostatesGfpPeakProminence
+	optMicrostatesRandomState
 	// ERDS options
 	optERDSUseLogRatio
 	optERDSMinBaselinePower
@@ -2635,6 +2657,14 @@ const (
 	optConnWindowLen
 	optConnWindowStep
 	optConnAECMode
+	optConnMode
+	optConnAECAbsolute
+	optConnEnableAEC
+	optConnNFreqsPerBand
+	optConnNCycles
+	optConnDecim
+	optConnMinSegmentSamples
+	optConnSmallWorldNRand
 	optConnAECOutput
 	optConnForceWithinEpochML
 	optConnGranularity
@@ -2683,6 +2713,7 @@ const (
 	optSourceLocDepth
 	optSourceLocConnMethod
 	optSourceLocSubject
+	optSourceLocSubjectsDir
 	optSourceLocTrans
 	optSourceLocBem
 	optSourceLocMindistMm
@@ -2752,6 +2783,7 @@ const (
 	optRunAdjustmentColumn
 	optRunAdjustmentIncludeInCorrelations
 	optRunAdjustmentMaxDummies
+	optBehaviorMinSamples
 	optFDRAlpha
 	// Behavior options - Cluster
 	optClusterThreshold
@@ -2767,6 +2799,7 @@ const (
 	// Behavior options - Moderation
 	optModerationMaxFeaturesEnabled
 	optModerationMaxFeatures
+	optModerationMinSamples
 	optModerationPermutations
 	// Behavior options - Mixed Effects
 	optMixedMaxFeatures
@@ -2777,6 +2810,7 @@ const (
 	optConditionCompareColumn
 	optConditionCompareWindows
 	optConditionCompareValues
+	optConditionMinTrials
 	optConditionWindowPrimaryUnit
 	optConditionPermutationPrimary
 	// Behavior options - Trial table / residual
@@ -2794,8 +2828,11 @@ const (
 	optPainResidualSplineDfCandidates
 	optPainResidualModelCompare
 	optPainResidualModelComparePolyDegrees
+	optPainResidualMinSamples
+	optPainResidualModelCompareMinSamples
 	optPainResidualBreakpoint
 	optPainResidualBreakpointCandidates
+	optPainResidualBreakpointMinSamples
 	optPainResidualBreakpointQlow
 	optPainResidualBreakpointQhigh
 	optPainResidualCrossfitEnabled
@@ -2816,11 +2853,13 @@ const (
 	optRegressionTempSplineKnots
 	optRegressionTempSplineQlow
 	optRegressionTempSplineQhigh
+	optRegressionTempSplineMinN
 	optRegressionIncludeTrialOrder
 	optRegressionIncludePrev
 	optRegressionIncludeRunBlock
 	optRegressionIncludeInteraction
 	optRegressionStandardize
+	optRegressionMinSamples
 	optRegressionPermutations
 	optRegressionMaxFeatures
 	// Behavior options - Models
@@ -2829,11 +2868,13 @@ const (
 	optModelsTempSplineKnots
 	optModelsTempSplineQlow
 	optModelsTempSplineQhigh
+	optModelsTempSplineMinN
 	optModelsIncludeTrialOrder
 	optModelsIncludePrev
 	optModelsIncludeRunBlock
 	optModelsIncludeInteraction
 	optModelsStandardize
+	optModelsMinSamples
 	optModelsMaxFeatures
 	optModelsOutcomeRating
 	optModelsOutcomePainResidual
@@ -2849,6 +2890,7 @@ const (
 	optStabilityOutcome
 	optStabilityGroupColumn
 	optStabilityPartialTemp
+	optStabilityMinGroupTrials
 	optStabilityMaxFeatures
 	optStabilityAlpha
 	// Behavior options - Consistency / Influence
@@ -2862,6 +2904,7 @@ const (
 	optInfluenceTempSplineKnots
 	optInfluenceTempSplineQlow
 	optInfluenceTempSplineQhigh
+	optInfluenceTempSplineMinN
 	optInfluenceIncludeTrialOrder
 	optInfluenceIncludeRunBlock
 	optInfluenceIncludeInteraction
@@ -2882,6 +2925,7 @@ const (
 	optCorrelationsPermutationPrimary
 	optCorrelationsTargetColumn
 	optGroupLevelBlockPermutation
+	optPainSensitivityMinTrials
 	// Behavior options - Pain sensitivity / temporal
 	optTemporalResolutionMs
 	optTemporalTimeMinMs

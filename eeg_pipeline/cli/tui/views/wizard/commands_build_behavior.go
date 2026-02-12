@@ -35,6 +35,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	if m.behaviorNJobs != -1 {
 		args = append(args, "--n-jobs", fmt.Sprintf("%d", m.behaviorNJobs))
 	}
+	if m.behaviorMinSamples > 0 {
+		args = append(args, "--min-samples", fmt.Sprintf("%d", m.behaviorMinSamples))
+	}
 
 	if !m.controlTemperature {
 		args = append(args, "--no-control-temperature")
@@ -102,6 +105,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			if m.painResidualMethod >= 0 && m.painResidualMethod < len(methods) && m.painResidualMethod != 0 {
 				args = append(args, "--pain-residual-method", methods[m.painResidualMethod])
 			}
+			if m.painResidualMinSamples != 10 {
+				args = append(args, "--pain-residual-min-samples", fmt.Sprintf("%d", m.painResidualMinSamples))
+			}
 			if m.painResidualPolyDegree != 2 {
 				args = append(args, "--pain-residual-poly-degree", fmt.Sprintf("%d", m.painResidualPolyDegree))
 			}
@@ -114,12 +120,18 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if !m.painResidualModelCompareEnabled {
 			args = append(args, "--no-pain-residual-model-compare")
 		}
+		if m.painResidualModelCompareMinSamples != 10 {
+			args = append(args, "--pain-residual-model-compare-min-samples", fmt.Sprintf("%d", m.painResidualModelCompareMinSamples))
+		}
 		if strings.TrimSpace(m.painResidualModelComparePolyDegrees) != "" && m.painResidualModelComparePolyDegrees != "2,3" {
 			args = append(args, "--pain-residual-model-compare-poly-degrees")
 			args = append(args, splitCSVList(m.painResidualModelComparePolyDegrees)...)
 		}
 		if !m.painResidualBreakpointEnabled {
 			args = append(args, "--no-pain-residual-breakpoint-test")
+		}
+		if m.painResidualBreakpointMinSamples != 12 {
+			args = append(args, "--pain-residual-breakpoint-min-samples", fmt.Sprintf("%d", m.painResidualBreakpointMinSamples))
 		}
 		if m.painResidualBreakpointCandidates != 15 {
 			args = append(args, "--pain-residual-breakpoint-candidates", fmt.Sprintf("%d", m.painResidualBreakpointCandidates))
@@ -184,6 +196,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--regression-temperature-spline-knots", fmt.Sprintf("%d", m.regressionTempSplineKnots))
 			args = append(args, "--regression-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.regressionTempSplineQlow))
 			args = append(args, "--regression-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.regressionTempSplineQhigh))
+			if m.regressionTempSplineMinN != 12 {
+				args = append(args, "--regression-temperature-spline-min-samples", fmt.Sprintf("%d", m.regressionTempSplineMinN))
+			}
 		}
 		if !m.regressionIncludeTrialOrder {
 			args = append(args, "--no-regression-include-trial-order")
@@ -199,6 +214,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if !m.regressionStandardize {
 			args = append(args, "--no-regression-standardize")
+		}
+		if m.regressionMinSamples != 15 {
+			args = append(args, "--regression-min-samples", fmt.Sprintf("%d", m.regressionMinSamples))
 		}
 		if m.regressionPermutations != 0 {
 			args = append(args, "--regression-permutations", fmt.Sprintf("%d", m.regressionPermutations))
@@ -221,6 +239,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--models-temperature-spline-knots", fmt.Sprintf("%d", m.modelsTempSplineKnots))
 			args = append(args, "--models-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.modelsTempSplineQlow))
 			args = append(args, "--models-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.modelsTempSplineQhigh))
+			if m.modelsTempSplineMinN != 12 {
+				args = append(args, "--models-temperature-spline-min-samples", fmt.Sprintf("%d", m.modelsTempSplineMinN))
+			}
 		}
 		if !m.modelsIncludeTrialOrder {
 			args = append(args, "--no-models-include-trial-order")
@@ -236,6 +257,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if !m.modelsStandardize {
 			args = append(args, "--no-models-standardize")
+		}
+		if m.modelsMinSamples != 20 {
+			args = append(args, "--models-min-samples", fmt.Sprintf("%d", m.modelsMinSamples))
 		}
 		if m.modelsMaxFeatures != 100 {
 			args = append(args, "--models-max-features", fmt.Sprintf("%d", m.modelsMaxFeatures))
@@ -302,6 +326,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.stabilityAlpha != 0.05 {
 			args = append(args, "--stability-alpha", fmt.Sprintf("%.4f", m.stabilityAlpha))
 		}
+		if m.stabilityMinGroupN > 0 {
+			args = append(args, "--stability-min-group-trials", fmt.Sprintf("%d", m.stabilityMinGroupN))
+		}
 	}
 
 	// Consistency
@@ -339,6 +366,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--influence-temperature-spline-knots", fmt.Sprintf("%d", m.influenceTempSplineKnots))
 			args = append(args, "--influence-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.influenceTempSplineQlow))
 			args = append(args, "--influence-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.influenceTempSplineQhigh))
+			if m.influenceTempSplineMinN != 12 {
+				args = append(args, "--influence-temperature-spline-min-samples", fmt.Sprintf("%d", m.influenceTempSplineMinN))
+			}
 		}
 		if !m.influenceIncludeTrialOrder {
 			args = append(args, "--no-influence-include-trial-order")
@@ -409,6 +439,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// Pain sensitivity
+	if m.isComputationSelected("pain_sensitivity") {
+		if m.painSensitivityMinTrials > 0 {
+			args = append(args, "--pain-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
+		}
+	}
 
 	// Condition
 	if m.isComputationSelected("condition") {
@@ -422,6 +457,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if strings.TrimSpace(m.conditionCompareWindows) != "" {
 			args = append(args, "--condition-compare-windows")
 			args = append(args, splitSpaceList(m.conditionCompareWindows)...)
+		}
+		if m.conditionMinTrials > 0 {
+			args = append(args, "--condition-min-trials", fmt.Sprintf("%d", m.conditionMinTrials))
 		}
 		if m.conditionWindowPrimaryUnit == 1 {
 			args = append(args, "--condition-window-primary-unit", "run_mean")
@@ -569,6 +607,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Moderation-specific options
 	if m.isComputationSelected("moderation") {
+		if m.moderationMinSamples != 15 {
+			args = append(args, "--moderation-min-samples", fmt.Sprintf("%d", m.moderationMinSamples))
+		}
 		if m.moderationPermutations > 0 {
 			args = append(args, "--moderation-permutations", fmt.Sprintf("%d", m.moderationPermutations))
 		}

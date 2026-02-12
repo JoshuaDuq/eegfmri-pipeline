@@ -31,6 +31,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["featGroupRatiosExpanded"] = m.featGroupRatiosExpanded
 	cfg["featGroupAsymmetryExpanded"] = m.featGroupAsymmetryExpanded
 	cfg["featGroupQualityExpanded"] = m.featGroupQualityExpanded
+	cfg["featGroupMicrostatesExpanded"] = m.featGroupMicrostatesExpanded
 	cfg["featGroupERDSExpanded"] = m.featGroupERDSExpanded
 	cfg["featGroupStorageExpanded"] = m.featGroupStorageExpanded
 	cfg["featGroupExecutionExpanded"] = m.featGroupExecutionExpanded
@@ -159,6 +160,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["powerEmitDb"] = m.powerEmitDb
 	cfg["spectralEdgePercentile"] = m.spectralEdgePercentile
 	cfg["spectralRatioPairsSpec"] = m.spectralRatioPairsSpec
+	cfg["spectralSegmentsSpec"] = m.spectralSegmentsSpec
 	cfg["spectralPsdAdaptive"] = m.spectralPsdAdaptive
 	cfg["spectralMultitaperAdaptive"] = m.spectralMultitaperAdaptive
 	cfg["spectralPsdMethod"] = m.spectralPsdMethod
@@ -179,6 +181,14 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["connWindowLen"] = m.connWindowLen
 	cfg["connWindowStep"] = m.connWindowStep
 	cfg["connAECMode"] = m.connAECMode
+	cfg["connMode"] = m.connMode
+	cfg["connAECAbsolute"] = m.connAECAbsolute
+	cfg["connEnableAEC"] = m.connEnableAEC
+	cfg["connNFreqsPerBand"] = m.connNFreqsPerBand
+	cfg["connNCycles"] = m.connNCycles
+	cfg["connDecim"] = m.connDecim
+	cfg["connMinSegSamples"] = m.connMinSegSamples
+	cfg["connSmallWorldNRand"] = m.connSmallWorldNRand
 	cfg["connGranularity"] = m.connGranularity
 	cfg["connConditionColumn"] = m.connConditionColumn
 	cfg["connConditionValues"] = m.connConditionValues
@@ -220,6 +230,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocDepth"] = m.sourceLocDepth
 	cfg["sourceLocConnMethod"] = m.sourceLocConnMethod
 	cfg["sourceLocSubject"] = m.sourceLocSubject
+	cfg["sourceLocSubjectsDir"] = m.sourceLocSubjectsDir
 	cfg["sourceLocTrans"] = m.sourceLocTrans
 	cfg["sourceLocBem"] = m.sourceLocBem
 	cfg["sourceLocMindistMm"] = m.sourceLocMindistMm
@@ -314,6 +325,14 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["qualityMuscleBandMin"] = m.qualityMuscleBandMin
 	cfg["qualityMuscleBandMax"] = m.qualityMuscleBandMax
 
+	// Microstates configuration
+	cfg["microstatesNStates"] = m.microstatesNStates
+	cfg["microstatesMinPeakDistanceMs"] = m.microstatesMinPeakDistanceMs
+	cfg["microstatesMaxGfpPeaksPerEpoch"] = m.microstatesMaxGfpPeaksPerEpoch
+	cfg["microstatesMinDurationMs"] = m.microstatesMinDurationMs
+	cfg["microstatesGfpPeakProminence"] = m.microstatesGfpPeakProminence
+	cfg["microstatesRandomState"] = m.microstatesRandomState
+
 	// ERDS configuration
 	cfg["erdsUseLogRatio"] = m.erdsUseLogRatio
 	cfg["erdsMinBaselinePower"] = m.erdsMinBaselinePower
@@ -373,6 +392,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["conditionCompareColumn"] = m.conditionCompareColumn
 	cfg["conditionCompareValues"] = m.conditionCompareValues
 	cfg["conditionCompareWindows"] = m.conditionCompareWindows
+	cfg["conditionMinTrials"] = m.conditionMinTrials
 	cfg["conditionFailFast"] = m.conditionFailFast
 	cfg["conditionEffectThreshold"] = m.conditionEffectThreshold
 	cfg["conditionOverwrite"] = m.conditionOverwrite
@@ -393,6 +413,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["temporalERDSMethod"] = m.temporalERDSMethod
 	cfg["controlTemperature"] = m.controlTemperature
 	cfg["controlTrialOrder"] = m.controlTrialOrder
+	cfg["behaviorMinSamples"] = m.behaviorMinSamples
 	cfg["behaviorComputeChangeScores"] = m.behaviorComputeChangeScores
 	cfg["behaviorComputeBayesFactors"] = m.behaviorComputeBayesFactors
 	cfg["behaviorComputeLosoStability"] = m.behaviorComputeLosoStability
@@ -413,10 +434,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["painResidualMethod"] = m.painResidualMethod
 	cfg["painResidualPolyDegree"] = m.painResidualPolyDegree
 	cfg["painResidualSplineDfCandidates"] = m.painResidualSplineDfCandidates
+	cfg["painResidualMinSamples"] = m.painResidualMinSamples
 	cfg["painResidualModelCompareEnabled"] = m.painResidualModelCompareEnabled
 	cfg["painResidualModelComparePolyDegrees"] = m.painResidualModelComparePolyDegrees
+	cfg["painResidualModelCompareMinSamples"] = m.painResidualModelCompareMinSamples
 	cfg["painResidualBreakpointEnabled"] = m.painResidualBreakpointEnabled
 	cfg["painResidualBreakpointCandidates"] = m.painResidualBreakpointCandidates
+	cfg["painResidualBreakpointMinSamples"] = m.painResidualBreakpointMinSamples
 	cfg["painResidualBreakpointQlow"] = m.painResidualBreakpointQlow
 	cfg["painResidualBreakpointQhigh"] = m.painResidualBreakpointQhigh
 	cfg["painResidualCrossfitEnabled"] = m.painResidualCrossfitEnabled
@@ -432,11 +456,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["regressionTempSplineKnots"] = m.regressionTempSplineKnots
 	cfg["regressionTempSplineQlow"] = m.regressionTempSplineQlow
 	cfg["regressionTempSplineQhigh"] = m.regressionTempSplineQhigh
+	cfg["regressionTempSplineMinN"] = m.regressionTempSplineMinN
 	cfg["regressionIncludeTrialOrder"] = m.regressionIncludeTrialOrder
 	cfg["regressionIncludePrev"] = m.regressionIncludePrev
 	cfg["regressionIncludeRunBlock"] = m.regressionIncludeRunBlock
 	cfg["regressionIncludeInteraction"] = m.regressionIncludeInteraction
 	cfg["regressionStandardize"] = m.regressionStandardize
+	cfg["regressionMinSamples"] = m.regressionMinSamples
 	cfg["regressionPermutations"] = m.regressionPermutations
 	cfg["regressionMaxFeatures"] = m.regressionMaxFeatures
 
@@ -446,11 +472,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["modelsTempSplineKnots"] = m.modelsTempSplineKnots
 	cfg["modelsTempSplineQlow"] = m.modelsTempSplineQlow
 	cfg["modelsTempSplineQhigh"] = m.modelsTempSplineQhigh
+	cfg["modelsTempSplineMinN"] = m.modelsTempSplineMinN
 	cfg["modelsIncludeTrialOrder"] = m.modelsIncludeTrialOrder
 	cfg["modelsIncludePrev"] = m.modelsIncludePrev
 	cfg["modelsIncludeRunBlock"] = m.modelsIncludeRunBlock
 	cfg["modelsIncludeInteraction"] = m.modelsIncludeInteraction
 	cfg["modelsStandardize"] = m.modelsStandardize
+	cfg["modelsMinSamples"] = m.modelsMinSamples
 	cfg["modelsMaxFeatures"] = m.modelsMaxFeatures
 	cfg["modelsOutcomeRating"] = m.modelsOutcomeRating
 	cfg["modelsOutcomePainResidual"] = m.modelsOutcomePainResidual
@@ -467,6 +495,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["stabilityOutcome"] = m.stabilityOutcome
 	cfg["stabilityGroupColumn"] = m.stabilityGroupColumn
 	cfg["stabilityPartialTemp"] = m.stabilityPartialTemp
+	cfg["stabilityMinGroupN"] = m.stabilityMinGroupN
 	cfg["stabilityMaxFeatures"] = m.stabilityMaxFeatures
 	cfg["stabilityAlpha"] = m.stabilityAlpha
 
@@ -500,6 +529,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["correlationsPrimaryUnit"] = m.correlationsPrimaryUnit
 	cfg["correlationsPermutationPrimary"] = m.correlationsPermutationPrimary
 	cfg["groupLevelBlockPermutation"] = m.groupLevelBlockPermutation
+	cfg["painSensitivityMinTrials"] = m.painSensitivityMinTrials
 
 	// Mixed Effects & Mediation
 	cfg["mixedEffectsType"] = m.mixedEffectsType
@@ -511,6 +541,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["mediationPermutations"] = m.mediationPermutations
 	cfg["moderationMaxFeaturesEnabled"] = m.moderationMaxFeaturesEnabled
 	cfg["moderationMaxFeatures"] = m.moderationMaxFeatures
+	cfg["moderationMinSamples"] = m.moderationMinSamples
 	cfg["moderationPermutations"] = m.moderationPermutations
 
 	// Cluster tests
@@ -992,6 +1023,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.featGroupRatiosExpanded = getBool("featGroupRatiosExpanded", m.featGroupRatiosExpanded)
 	m.featGroupAsymmetryExpanded = getBool("featGroupAsymmetryExpanded", m.featGroupAsymmetryExpanded)
 	m.featGroupQualityExpanded = getBool("featGroupQualityExpanded", m.featGroupQualityExpanded)
+	m.featGroupMicrostatesExpanded = getBool("featGroupMicrostatesExpanded", m.featGroupMicrostatesExpanded)
 	m.featGroupERDSExpanded = getBool("featGroupERDSExpanded", m.featGroupERDSExpanded)
 	m.featGroupStorageExpanded = getBool("featGroupStorageExpanded", m.featGroupStorageExpanded)
 	m.featGroupExecutionExpanded = getBool("featGroupExecutionExpanded", m.featGroupExecutionExpanded)
@@ -1139,6 +1171,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.powerEmitDb = getBool("powerEmitDb", m.powerEmitDb)
 	m.spectralEdgePercentile = getFloat("spectralEdgePercentile", m.spectralEdgePercentile)
 	m.spectralRatioPairsSpec = getString("spectralRatioPairsSpec", m.spectralRatioPairsSpec)
+	m.spectralSegmentsSpec = getString("spectralSegmentsSpec", m.spectralSegmentsSpec)
 	m.spectralPsdAdaptive = getBool("spectralPsdAdaptive", m.spectralPsdAdaptive)
 	m.spectralMultitaperAdaptive = getBool("spectralMultitaperAdaptive", m.spectralMultitaperAdaptive)
 	m.spectralPsdMethod = getInt("spectralPsdMethod", m.spectralPsdMethod)
@@ -1159,6 +1192,14 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.connWindowLen = getFloat("connWindowLen", m.connWindowLen)
 	m.connWindowStep = getFloat("connWindowStep", m.connWindowStep)
 	m.connAECMode = getInt("connAECMode", m.connAECMode)
+	m.connMode = getInt("connMode", m.connMode)
+	m.connAECAbsolute = getBool("connAECAbsolute", m.connAECAbsolute)
+	m.connEnableAEC = getBool("connEnableAEC", m.connEnableAEC)
+	m.connNFreqsPerBand = getInt("connNFreqsPerBand", m.connNFreqsPerBand)
+	m.connNCycles = getFloat("connNCycles", m.connNCycles)
+	m.connDecim = getInt("connDecim", m.connDecim)
+	m.connMinSegSamples = getInt("connMinSegSamples", m.connMinSegSamples)
+	m.connSmallWorldNRand = getInt("connSmallWorldNRand", m.connSmallWorldNRand)
 	m.connGranularity = getInt("connGranularity", m.connGranularity)
 	m.connConditionColumn = getString("connConditionColumn", m.connConditionColumn)
 	m.connConditionValues = getString("connConditionValues", m.connConditionValues)
@@ -1200,6 +1241,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.sourceLocDepth = getFloat("sourceLocDepth", m.sourceLocDepth)
 	m.sourceLocConnMethod = getInt("sourceLocConnMethod", m.sourceLocConnMethod)
 	m.sourceLocSubject = getString("sourceLocSubject", m.sourceLocSubject)
+	m.sourceLocSubjectsDir = getString("sourceLocSubjectsDir", m.sourceLocSubjectsDir)
 	m.sourceLocTrans = getString("sourceLocTrans", m.sourceLocTrans)
 	m.sourceLocBem = getString("sourceLocBem", m.sourceLocBem)
 	m.sourceLocMindistMm = getFloat("sourceLocMindistMm", m.sourceLocMindistMm)
@@ -1294,6 +1336,14 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.qualityMuscleBandMin = getFloat("qualityMuscleBandMin", m.qualityMuscleBandMin)
 	m.qualityMuscleBandMax = getFloat("qualityMuscleBandMax", m.qualityMuscleBandMax)
 
+	// Microstates configuration
+	m.microstatesNStates = getInt("microstatesNStates", m.microstatesNStates)
+	m.microstatesMinPeakDistanceMs = getFloat("microstatesMinPeakDistanceMs", m.microstatesMinPeakDistanceMs)
+	m.microstatesMaxGfpPeaksPerEpoch = getInt("microstatesMaxGfpPeaksPerEpoch", m.microstatesMaxGfpPeaksPerEpoch)
+	m.microstatesMinDurationMs = getFloat("microstatesMinDurationMs", m.microstatesMinDurationMs)
+	m.microstatesGfpPeakProminence = getFloat("microstatesGfpPeakProminence", m.microstatesGfpPeakProminence)
+	m.microstatesRandomState = getInt("microstatesRandomState", m.microstatesRandomState)
+
 	// ERDS configuration
 	m.erdsUseLogRatio = getBool("erdsUseLogRatio", m.erdsUseLogRatio)
 	m.erdsMinBaselinePower = getFloat("erdsMinBaselinePower", m.erdsMinBaselinePower)
@@ -1353,6 +1403,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.conditionCompareColumn = getString("conditionCompareColumn", m.conditionCompareColumn)
 	m.conditionCompareValues = getString("conditionCompareValues", m.conditionCompareValues)
 	m.conditionCompareWindows = getString("conditionCompareWindows", m.conditionCompareWindows)
+	m.conditionMinTrials = getInt("conditionMinTrials", m.conditionMinTrials)
 	m.conditionFailFast = getBool("conditionFailFast", m.conditionFailFast)
 	m.conditionEffectThreshold = getFloat("conditionEffectThreshold", m.conditionEffectThreshold)
 	m.conditionOverwrite = getBool("conditionOverwrite", m.conditionOverwrite)
@@ -1373,6 +1424,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.temporalERDSMethod = getInt("temporalERDSMethod", m.temporalERDSMethod)
 	m.controlTemperature = getBool("controlTemperature", m.controlTemperature)
 	m.controlTrialOrder = getBool("controlTrialOrder", m.controlTrialOrder)
+	m.behaviorMinSamples = getInt("behaviorMinSamples", m.behaviorMinSamples)
 	m.behaviorComputeChangeScores = getBool("behaviorComputeChangeScores", m.behaviorComputeChangeScores)
 	m.behaviorComputeBayesFactors = getBool("behaviorComputeBayesFactors", m.behaviorComputeBayesFactors)
 	m.behaviorComputeLosoStability = getBool("behaviorComputeLosoStability", m.behaviorComputeLosoStability)
@@ -1399,10 +1451,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.painResidualMethod = getInt("painResidualMethod", m.painResidualMethod)
 	m.painResidualPolyDegree = getInt("painResidualPolyDegree", m.painResidualPolyDegree)
 	m.painResidualSplineDfCandidates = getString("painResidualSplineDfCandidates", m.painResidualSplineDfCandidates)
+	m.painResidualMinSamples = getInt("painResidualMinSamples", m.painResidualMinSamples)
 	m.painResidualModelCompareEnabled = getBool("painResidualModelCompareEnabled", m.painResidualModelCompareEnabled)
 	m.painResidualModelComparePolyDegrees = getString("painResidualModelComparePolyDegrees", m.painResidualModelComparePolyDegrees)
+	m.painResidualModelCompareMinSamples = getInt("painResidualModelCompareMinSamples", m.painResidualModelCompareMinSamples)
 	m.painResidualBreakpointEnabled = getBool("painResidualBreakpointEnabled", m.painResidualBreakpointEnabled)
 	m.painResidualBreakpointCandidates = getInt("painResidualBreakpointCandidates", m.painResidualBreakpointCandidates)
+	m.painResidualBreakpointMinSamples = getInt("painResidualBreakpointMinSamples", m.painResidualBreakpointMinSamples)
 	m.painResidualBreakpointQlow = getFloat("painResidualBreakpointQlow", m.painResidualBreakpointQlow)
 	m.painResidualBreakpointQhigh = getFloat("painResidualBreakpointQhigh", m.painResidualBreakpointQhigh)
 	m.painResidualCrossfitEnabled = getBool("painResidualCrossfitEnabled", m.painResidualCrossfitEnabled)
@@ -1418,11 +1473,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.regressionTempSplineKnots = getInt("regressionTempSplineKnots", m.regressionTempSplineKnots)
 	m.regressionTempSplineQlow = getFloat("regressionTempSplineQlow", m.regressionTempSplineQlow)
 	m.regressionTempSplineQhigh = getFloat("regressionTempSplineQhigh", m.regressionTempSplineQhigh)
+	m.regressionTempSplineMinN = getInt("regressionTempSplineMinN", m.regressionTempSplineMinN)
 	m.regressionIncludeTrialOrder = getBool("regressionIncludeTrialOrder", m.regressionIncludeTrialOrder)
 	m.regressionIncludePrev = getBool("regressionIncludePrev", m.regressionIncludePrev)
 	m.regressionIncludeRunBlock = getBool("regressionIncludeRunBlock", m.regressionIncludeRunBlock)
 	m.regressionIncludeInteraction = getBool("regressionIncludeInteraction", m.regressionIncludeInteraction)
 	m.regressionStandardize = getBool("regressionStandardize", m.regressionStandardize)
+	m.regressionMinSamples = getInt("regressionMinSamples", m.regressionMinSamples)
 	m.regressionPermutations = getInt("regressionPermutations", m.regressionPermutations)
 	m.regressionMaxFeatures = getInt("regressionMaxFeatures", m.regressionMaxFeatures)
 
@@ -1432,11 +1489,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.modelsTempSplineKnots = getInt("modelsTempSplineKnots", m.modelsTempSplineKnots)
 	m.modelsTempSplineQlow = getFloat("modelsTempSplineQlow", m.modelsTempSplineQlow)
 	m.modelsTempSplineQhigh = getFloat("modelsTempSplineQhigh", m.modelsTempSplineQhigh)
+	m.modelsTempSplineMinN = getInt("modelsTempSplineMinN", m.modelsTempSplineMinN)
 	m.modelsIncludeTrialOrder = getBool("modelsIncludeTrialOrder", m.modelsIncludeTrialOrder)
 	m.modelsIncludePrev = getBool("modelsIncludePrev", m.modelsIncludePrev)
 	m.modelsIncludeRunBlock = getBool("modelsIncludeRunBlock", m.modelsIncludeRunBlock)
 	m.modelsIncludeInteraction = getBool("modelsIncludeInteraction", m.modelsIncludeInteraction)
 	m.modelsStandardize = getBool("modelsStandardize", m.modelsStandardize)
+	m.modelsMinSamples = getInt("modelsMinSamples", m.modelsMinSamples)
 	m.modelsMaxFeatures = getInt("modelsMaxFeatures", m.modelsMaxFeatures)
 	m.modelsOutcomeRating = getBool("modelsOutcomeRating", m.modelsOutcomeRating)
 	m.modelsOutcomePainResidual = getBool("modelsOutcomePainResidual", m.modelsOutcomePainResidual)
@@ -1453,6 +1512,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.stabilityOutcome = getInt("stabilityOutcome", m.stabilityOutcome)
 	m.stabilityGroupColumn = getInt("stabilityGroupColumn", m.stabilityGroupColumn)
 	m.stabilityPartialTemp = getBool("stabilityPartialTemp", m.stabilityPartialTemp)
+	m.stabilityMinGroupN = getInt("stabilityMinGroupN", m.stabilityMinGroupN)
 	m.stabilityMaxFeatures = getInt("stabilityMaxFeatures", m.stabilityMaxFeatures)
 	m.stabilityAlpha = getFloat("stabilityAlpha", m.stabilityAlpha)
 
@@ -1486,6 +1546,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.correlationsPrimaryUnit = getInt("correlationsPrimaryUnit", m.correlationsPrimaryUnit)
 	m.correlationsPermutationPrimary = getBool("correlationsPermutationPrimary", m.correlationsPermutationPrimary)
 	m.groupLevelBlockPermutation = getBool("groupLevelBlockPermutation", m.groupLevelBlockPermutation)
+	m.painSensitivityMinTrials = getInt("painSensitivityMinTrials", m.painSensitivityMinTrials)
 
 	// Mixed Effects & Mediation
 	m.mixedEffectsType = getInt("mixedEffectsType", m.mixedEffectsType)
@@ -1497,6 +1558,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.mediationPermutations = getInt("mediationPermutations", m.mediationPermutations)
 	m.moderationMaxFeaturesEnabled = getBool("moderationMaxFeaturesEnabled", m.moderationMaxFeaturesEnabled)
 	m.moderationMaxFeatures = getInt("moderationMaxFeatures", m.moderationMaxFeatures)
+	m.moderationMinSamples = getInt("moderationMinSamples", m.moderationMinSamples)
 	m.moderationPermutations = getInt("moderationPermutations", m.moderationPermutations)
 
 	// Cluster tests

@@ -92,6 +92,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optFeatGroupQuality:
 		m.featGroupQualityExpanded = !m.featGroupQualityExpanded
 		m.useDefaultAdvanced = false
+	case optFeatGroupMicrostates:
+		m.featGroupMicrostatesExpanded = !m.featGroupMicrostatesExpanded
+		m.useDefaultAdvanced = false
 	case optFeatGroupERDS:
 		m.featGroupERDSExpanded = !m.featGroupERDSExpanded
 		m.useDefaultAdvanced = false
@@ -172,6 +175,25 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optQualityMuscleBandMax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// Microstates advanced options
+	case optMicrostatesNStates:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMicrostatesMinPeakDistanceMs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMicrostatesMaxGfpPeaksPerEpoch:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMicrostatesMinDurationMs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMicrostatesGfpPeakProminence:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMicrostatesRandomState:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// ERDS advanced options
@@ -266,6 +288,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optSourceLocSubject:
 		m.startTextEdit(textFieldSourceLocSubject)
+		m.useDefaultAdvanced = false
+	case optSourceLocSubjectsDir:
+		m.startTextEdit(textFieldSourceLocSubjectsDir)
 		m.useDefaultAdvanced = false
 	case optSourceLocTrans:
 		m.browsingField = "sourceLocTrans"
@@ -715,6 +740,18 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optConnAECMode:
 		m.connAECMode = (m.connAECMode + 1) % 3
 		m.useDefaultAdvanced = false
+	case optConnMode:
+		m.connMode = (m.connMode + 1) % 3
+		m.useDefaultAdvanced = false
+	case optConnAECAbsolute:
+		m.connAECAbsolute = !m.connAECAbsolute
+		m.useDefaultAdvanced = false
+	case optConnEnableAEC:
+		m.connEnableAEC = !m.connEnableAEC
+		m.useDefaultAdvanced = false
+	case optConnNFreqsPerBand, optConnNCycles, optConnDecim, optConnMinSegmentSamples, optConnSmallWorldNRand:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optConnAECOutput:
 		m.connAECOutput = (m.connAECOutput + 1) % 3 // 0: r, 1: z, 2: r+z
 		m.useDefaultAdvanced = false
@@ -754,6 +791,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optSpectralRatioPairs:
 		m.startTextEdit(textFieldSpectralRatioPairs)
+		m.useDefaultAdvanced = false
+	case optSpectralSegments:
+		m.startTextEdit(textFieldSpectralSegments)
 		m.useDefaultAdvanced = false
 	case optAperiodicSubtractEvoked:
 		m.aperiodicSubtractEvoked = !m.aperiodicSubtractEvoked
@@ -1400,6 +1440,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupCorrelations:
 		m.behaviorGroupCorrelationsExpanded = !m.behaviorGroupCorrelationsExpanded
 		m.useDefaultAdvanced = false
+	case optBehaviorGroupPainSens:
+		m.behaviorGroupPainSensExpanded = !m.behaviorGroupPainSensExpanded
+		m.useDefaultAdvanced = false
 	case optBehaviorGroupRegression:
 		m.behaviorGroupRegressionExpanded = !m.behaviorGroupRegressionExpanded
 		m.useDefaultAdvanced = false
@@ -1481,6 +1524,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRunAdjustmentMaxDummies:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optBehaviorMinSamples:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optFDRAlpha:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
@@ -1535,10 +1581,13 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optPainResidualModelComparePolyDegrees:
 		m.startTextEdit(textFieldPainResidualModelComparePolyDegrees)
 		m.useDefaultAdvanced = false
+	case optPainResidualMinSamples, optPainResidualModelCompareMinSamples:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optPainResidualBreakpoint:
 		m.painResidualBreakpointEnabled = !m.painResidualBreakpointEnabled
 		m.useDefaultAdvanced = false
-	case optPainResidualBreakpointCandidates, optPainResidualBreakpointQlow, optPainResidualBreakpointQhigh:
+	case optPainResidualBreakpointCandidates, optPainResidualBreakpointMinSamples, optPainResidualBreakpointQlow, optPainResidualBreakpointQhigh:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPainResidualCrossfitEnabled:
@@ -1572,7 +1621,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRegressionTempControl:
 		m.regressionTempControl = (m.regressionTempControl + 1) % 3
 		m.useDefaultAdvanced = false
-	case optRegressionTempSplineKnots, optRegressionTempSplineQlow, optRegressionTempSplineQhigh:
+	case optRegressionTempSplineKnots, optRegressionTempSplineQlow, optRegressionTempSplineQhigh, optRegressionTempSplineMinN:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optRegressionIncludeTrialOrder:
@@ -1590,7 +1639,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRegressionStandardize:
 		m.regressionStandardize = !m.regressionStandardize
 		m.useDefaultAdvanced = false
-	case optRegressionPermutations, optRegressionMaxFeatures:
+	case optRegressionMinSamples, optRegressionPermutations, optRegressionMaxFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -1601,7 +1650,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optModelsTempControl:
 		m.modelsTempControl = (m.modelsTempControl + 1) % 3
 		m.useDefaultAdvanced = false
-	case optModelsTempSplineKnots, optModelsTempSplineQlow, optModelsTempSplineQhigh:
+	case optModelsTempSplineKnots, optModelsTempSplineQlow, optModelsTempSplineQhigh, optModelsTempSplineMinN:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optModelsIncludeTrialOrder:
@@ -1619,7 +1668,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optModelsStandardize:
 		m.modelsStandardize = !m.modelsStandardize
 		m.useDefaultAdvanced = false
-	case optModelsMaxFeatures:
+	case optModelsMinSamples, optModelsMaxFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optModelsOutcomeRating:
@@ -1688,7 +1737,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optStabilityPartialTemp:
 		m.stabilityPartialTemp = !m.stabilityPartialTemp
 		m.useDefaultAdvanced = false
-	case optStabilityMaxFeatures, optStabilityAlpha:
+	case optStabilityMinGroupTrials, optStabilityMaxFeatures, optStabilityAlpha:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -1725,7 +1774,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optInfluenceTempControl:
 		m.influenceTempControl = (m.influenceTempControl + 1) % 3
 		m.useDefaultAdvanced = false
-	case optInfluenceTempSplineKnots, optInfluenceTempSplineQlow, optInfluenceTempSplineQhigh:
+	case optInfluenceTempSplineKnots, optInfluenceTempSplineQlow, optInfluenceTempSplineQhigh, optInfluenceTempSplineMinN:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optInfluenceIncludeTrialOrder:
@@ -1948,7 +1997,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startNumberEdit()
 			m.useDefaultAdvanced = false
 		}
-	case optModerationPermutations:
+	case optModerationMinSamples, optModerationPermutations:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// Mixed effects options
@@ -1986,6 +2035,12 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		} else {
 			m.startTextEdit(textFieldConditionCompareValues)
 		}
+		m.useDefaultAdvanced = false
+	case optConditionMinTrials:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPainSensitivityMinTrials:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optConditionWindowPrimaryUnit:
 		m.conditionWindowPrimaryUnit = (m.conditionWindowPrimaryUnit + 1) % 2

@@ -356,6 +356,197 @@ func TestBuildFeaturesAdvancedArgs_IncludesERDSPainMarkerFlags(t *testing.T) {
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_IncludesMicrostatesFlags(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "microstates" {
+			m.selected[i] = true
+			break
+		}
+	}
+
+	m.microstatesNStates = 6
+	m.microstatesMinPeakDistanceMs = 12.5
+	m.microstatesMaxGfpPeaksPerEpoch = 300
+	m.microstatesMinDurationMs = 25.0
+	m.microstatesGfpPeakProminence = 0.15
+	m.microstatesRandomState = 77
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--microstates-n-states", "6"}) {
+		t.Fatalf("expected --microstates-n-states 6 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--microstates-min-peak-distance-ms", "12.5"}) {
+		t.Fatalf("expected --microstates-min-peak-distance-ms 12.5 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--microstates-max-gfp-peaks-per-epoch", "300"}) {
+		t.Fatalf("expected --microstates-max-gfp-peaks-per-epoch 300 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--microstates-min-duration-ms", "25.0"}) {
+		t.Fatalf("expected --microstates-min-duration-ms 25.0 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--microstates-gfp-peak-prominence", "0.15"}) {
+		t.Fatalf("expected --microstates-gfp-peak-prominence 0.15 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--microstates-random-state", "77"}) {
+		t.Fatalf("expected --microstates-random-state 77 in args, got: %#v", args)
+	}
+}
+
+func TestBuildFeaturesAdvancedArgs_IncludesConnectivityAdvancedFlags(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "connectivity" {
+			m.selected[i] = true
+			break
+		}
+	}
+
+	m.connMode = 2 // fourier
+	m.connAECAbsolute = false
+	m.connEnableAEC = false
+	m.connNFreqsPerBand = 12
+	m.connNCycles = 5.5
+	m.connDecim = 2
+	m.connMinSegSamples = 80
+	m.connSmallWorldNRand = 250
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--conn-mode", "fourier"}) {
+		t.Fatalf("expected --conn-mode fourier in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-conn-aec-absolute") {
+		t.Fatalf("expected --no-conn-aec-absolute in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-conn-enable-aec") {
+		t.Fatalf("expected --no-conn-enable-aec in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--conn-n-freqs-per-band", "12"}) {
+		t.Fatalf("expected --conn-n-freqs-per-band 12 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--conn-n-cycles", "5.50"}) {
+		t.Fatalf("expected --conn-n-cycles 5.50 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--conn-decim", "2"}) {
+		t.Fatalf("expected --conn-decim 2 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--conn-min-segment-samples", "80"}) {
+		t.Fatalf("expected --conn-min-segment-samples 80 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--conn-small-world-n-rand", "250"}) {
+		t.Fatalf("expected --conn-small-world-n-rand 250 in args, got: %#v", args)
+	}
+}
+
+func TestBuildFeaturesAdvancedArgs_IncludesSourceSubjectsDirFlag(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "sourcelocalization" {
+			m.selected[i] = true
+			break
+		}
+	}
+
+	m.sourceLocMode = 1
+	m.sourceLocSubjectsDir = "/tmp/freesurfer_subjects"
+
+	args := m.buildFeaturesAdvancedArgs()
+	if !containsSubsequence(args, []string{"--source-subjects-dir", "/tmp/freesurfer_subjects"}) {
+		t.Fatalf("expected --source-subjects-dir /tmp/freesurfer_subjects in args, got: %#v", args)
+	}
+}
+
+func TestBuildFeaturesAdvancedArgs_IncludesPACRandomSeedFlag(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "pac" {
+			m.selected[i] = true
+			break
+		}
+	}
+
+	m.pacRandomSeed = 123
+
+	args := m.buildFeaturesAdvancedArgs()
+	if !containsSubsequence(args, []string{"--pac-random-seed", "123"}) {
+		t.Fatalf("expected --pac-random-seed 123 in args, got: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		switch comp.Key {
+		case "trial_table", "pain_residual", "regression", "models", "validation", "moderation", "stability", "pain_sensitivity", "condition":
+			m.computationSelected[i] = true
+		}
+	}
+
+	m.painResidualMinSamples = 14
+	m.painResidualModelCompareMinSamples = 11
+	m.painResidualBreakpointMinSamples = 16
+
+	m.regressionTempControl = 2
+	m.regressionTempSplineMinN = 18
+	m.regressionMinSamples = 22
+
+	m.modelsTempControl = 2
+	m.modelsTempSplineMinN = 17
+	m.modelsMinSamples = 25
+
+	m.influenceTempControl = 2
+	m.influenceTempSplineMinN = 19
+
+	m.behaviorMinSamples = 7
+	m.stabilityMinGroupN = 4
+	m.painSensitivityMinTrials = 9
+	m.conditionMinTrials = 6
+	m.moderationMinSamples = 21
+
+	args := m.buildBehaviorAdvancedArgs()
+	if !containsSubsequence(args, []string{"--min-samples", "7"}) {
+		t.Fatalf("expected --min-samples 7 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--pain-residual-min-samples", "14"}) {
+		t.Fatalf("expected --pain-residual-min-samples 14 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--pain-residual-model-compare-min-samples", "11"}) {
+		t.Fatalf("expected --pain-residual-model-compare-min-samples 11 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--pain-residual-breakpoint-min-samples", "16"}) {
+		t.Fatalf("expected --pain-residual-breakpoint-min-samples 16 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--regression-temperature-spline-min-samples", "18"}) {
+		t.Fatalf("expected --regression-temperature-spline-min-samples 18 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--regression-min-samples", "22"}) {
+		t.Fatalf("expected --regression-min-samples 22 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--models-temperature-spline-min-samples", "17"}) {
+		t.Fatalf("expected --models-temperature-spline-min-samples 17 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--models-min-samples", "25"}) {
+		t.Fatalf("expected --models-min-samples 25 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--influence-temperature-spline-min-samples", "19"}) {
+		t.Fatalf("expected --influence-temperature-spline-min-samples 19 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--stability-min-group-trials", "4"}) {
+		t.Fatalf("expected --stability-min-group-trials 4 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--pain-sensitivity-min-trials", "9"}) {
+		t.Fatalf("expected --pain-sensitivity-min-trials 9 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--condition-min-trials", "6"}) {
+		t.Fatalf("expected --condition-min-trials 6 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--moderation-min-samples", "21"}) {
+		t.Fatalf("expected --moderation-min-samples 21 in args, got: %#v", args)
+	}
+}
+
 func TestShouldSkipStep_PlottingRoiStepSkippedForBandPowerTopomapsOnly(t *testing.T) {
 	m := Model{}
 	m.Pipeline = types.PipelinePlotting

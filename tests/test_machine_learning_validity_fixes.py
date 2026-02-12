@@ -15,6 +15,22 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class TestMachineLearningValidityFixes(unittest.TestCase):
+    def test_execute_folds_parallel_handles_userwarning_filter(self):
+        from eeg_pipeline.analysis.machine_learning import cv
+
+        folds = [(0, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int))]
+
+        def _fake_fold_func(fold, train_idx, test_idx):
+            return {
+                "fold": int(fold),
+                "n_train": int(len(train_idx)),
+                "n_test": int(len(test_idx)),
+            }
+
+        out = cv.execute_folds_parallel(folds=folds, fold_func=_fake_fold_func, outer_n_jobs=1)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["fold"], 0)
+
     def test_create_inner_cv_requires_two_groups(self):
         from eeg_pipeline.analysis.machine_learning.cv import create_inner_cv
 

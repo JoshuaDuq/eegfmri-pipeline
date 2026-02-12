@@ -25,12 +25,20 @@ func (m Model) getFeaturesOptions() []optionType {
 				optConnMinEpochsPerGroup,
 				optConnMinCyclesPerBand,
 				optConnMinSegmentSec,
+				optConnMinSegmentSamples,
 				optConnWarnNoSpatialTransform,
 				optConnGraphMetrics,
 				optConnGraphProp,
+				optConnSmallWorldNRand,
 				optConnWindowLen,
 				optConnWindowStep,
+				optConnMode,
 				optConnAECMode,
+				optConnAECAbsolute,
+				optConnEnableAEC,
+				optConnNFreqsPerBand,
+				optConnNCycles,
+				optConnDecim,
 				optConnAECOutput,
 				optConnForceWithinEpochML,
 				optConnDynamicEnabled,
@@ -153,6 +161,7 @@ func (m Model) getFeaturesOptions() []optionType {
 				optSpectralMultitaperAdaptive,
 				optSpectralFmin,
 				optSpectralFmax,
+				optSpectralSegments,
 				optSpectralMinSegmentSec,
 				optSpectralMinCyclesAtFmin,
 				optSpectralExcludeLineNoise,
@@ -190,6 +199,20 @@ func (m Model) getFeaturesOptions() []optionType {
 				optQualityExcludeLineNoise, optQualityLineNoiseFreq, optQualityLineNoiseWidthHz, optQualityLineNoiseHarmonics,
 				optQualitySnrSignalBandMin, optQualitySnrSignalBandMax, optQualitySnrNoiseBandMin, optQualitySnrNoiseBandMax,
 				optQualityMuscleBandMin, optQualityMuscleBandMax)
+		}
+	}
+	if m.isCategorySelected("microstates") {
+		options = append(options, optFeatGroupMicrostates)
+		if m.featGroupMicrostatesExpanded {
+			options = append(
+				options,
+				optMicrostatesNStates,
+				optMicrostatesMinPeakDistanceMs,
+				optMicrostatesMaxGfpPeaksPerEpoch,
+				optMicrostatesMinDurationMs,
+				optMicrostatesGfpPeakProminence,
+				optMicrostatesRandomState,
+			)
 		}
 	}
 	if m.isCategorySelected("erds") {
@@ -237,6 +260,7 @@ func (m Model) getFeaturesOptions() []optionType {
 			if m.sourceLocMode == 1 {
 				// BEM/Trans generation options (Docker-based)
 				// Note: FS License is configured in global paths, subject is from step 1
+				options = append(options, optSourceLocSubjectsDir)
 				options = append(options, optSourceLocCreateTrans, optSourceLocCreateBemModel, optSourceLocCreateBemSolution)
 				// If not auto-creating, user must provide paths
 				if !m.sourceLocCreateTrans {
@@ -1193,7 +1217,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupGeneral)
 		if m.behaviorGroupGeneralExpanded {
 			// RNG Seed and N Jobs are always relevant
-			options = append(options, optRNGSeed, optBehaviorNJobs)
+			options = append(options, optRNGSeed, optBehaviorNJobs, optBehaviorMinSamples)
 
 			// Correlation method and robust correlation - only for correlations, stability, pain_sensitivity
 			needsCorrelationMethod := m.isComputationSelected("correlations") ||
@@ -1297,10 +1321,13 @@ func (m Model) getBehaviorOptions() []optionType {
 				optPainResidualMethod,
 				optPainResidualPolyDegree,
 				optPainResidualSplineDfCandidates,
+				optPainResidualMinSamples,
 				optPainResidualModelCompare,
 				optPainResidualModelComparePolyDegrees,
+				optPainResidualModelCompareMinSamples,
 				optPainResidualBreakpoint,
 				optPainResidualBreakpointCandidates,
+				optPainResidualBreakpointMinSamples,
 				optPainResidualBreakpointQlow,
 				optPainResidualBreakpointQhigh,
 				optPainResidualCrossfitEnabled,
@@ -1350,6 +1377,7 @@ func (m Model) getBehaviorOptions() []optionType {
 					optRegressionTempSplineKnots,
 					optRegressionTempSplineQlow,
 					optRegressionTempSplineQhigh,
+					optRegressionTempSplineMinN,
 				)
 			}
 			options = append(options,
@@ -1358,6 +1386,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optRegressionIncludeRunBlock,
 				optRegressionIncludeInteraction,
 				optRegressionStandardize,
+				optRegressionMinSamples,
 				optRegressionPermutations,
 				optRegressionMaxFeatures,
 			)
@@ -1371,6 +1400,43 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
+	// Models section
+	if m.isComputationSelected("models") {
+		options = append(options, optBehaviorGroupModels)
+		if m.behaviorGroupModelsExpanded {
+			options = append(options,
+				optModelsIncludeTemperature,
+				optModelsTempControl,
+			)
+			if m.modelsTempControl == 2 {
+				options = append(options,
+					optModelsTempSplineKnots,
+					optModelsTempSplineQlow,
+					optModelsTempSplineQhigh,
+					optModelsTempSplineMinN,
+				)
+			}
+			options = append(options,
+				optModelsIncludeTrialOrder,
+				optModelsIncludePrev,
+				optModelsIncludeRunBlock,
+				optModelsIncludeInteraction,
+				optModelsStandardize,
+				optModelsMinSamples,
+				optModelsMaxFeatures,
+				optModelsOutcomeRating,
+				optModelsOutcomePainResidual,
+				optModelsOutcomeTemperature,
+				optModelsOutcomePainBinary,
+				optModelsFamilyOLS,
+				optModelsFamilyRobust,
+				optModelsFamilyQuantile,
+				optModelsFamilyLogit,
+				optModelsBinaryOutcome,
+			)
+		}
+	}
+
 	// Stability section
 	if m.isComputationSelected("stability") {
 		options = append(options, optBehaviorGroupStability)
@@ -1380,6 +1446,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optStabilityOutcome,
 				optStabilityGroupColumn,
 				optStabilityPartialTemp,
+				optStabilityMinGroupTrials,
 				optStabilityMaxFeatures,
 				optStabilityAlpha,
 			)
@@ -1411,6 +1478,7 @@ func (m Model) getBehaviorOptions() []optionType {
 					optInfluenceTempSplineKnots,
 					optInfluenceTempSplineQlow,
 					optInfluenceTempSplineQhigh,
+					optInfluenceTempSplineMinN,
 				)
 			}
 			options = append(options,
@@ -1432,6 +1500,14 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
+	// Pain sensitivity section
+	if m.isComputationSelected("pain_sensitivity") {
+		options = append(options, optBehaviorGroupPainSens)
+		if m.behaviorGroupPainSensExpanded {
+			options = append(options, optPainSensitivityMinTrials)
+		}
+	}
+
 	// Condition section
 	if m.isComputationSelected("condition") {
 		options = append(options, optBehaviorGroupCondition)
@@ -1440,6 +1516,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optConditionCompareColumn,
 				optConditionCompareValues,
 				optConditionCompareWindows,
+				optConditionMinTrials,
 				optConditionWindowPrimaryUnit,
 				optConditionPermutationPrimary,
 				optConditionFailFast,
@@ -1521,7 +1598,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("moderation") {
 		options = append(options, optBehaviorGroupModeration)
 		if m.behaviorGroupModerationExpanded {
-			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures, optModerationPermutations)
+			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures, optModerationMinSamples, optModerationPermutations)
 		}
 	}
 

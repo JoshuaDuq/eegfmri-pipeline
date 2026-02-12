@@ -13,10 +13,10 @@ func hasOption(opts []optionType, want optionType) bool {
 
 func TestGetFeaturesOptions_HidesTFRForNonTimeFrequencySelections(t *testing.T) {
 	m := Model{
-		categories:            []string{"aperiodic", "power"},
-		selected:              map[int]bool{0: true},
-		featGroupTFRExpanded:  true,
-		iafEnabled:            true,
+		categories:           []string{"aperiodic", "power"},
+		selected:             map[int]bool{0: true},
+		featGroupTFRExpanded: true,
+		iafEnabled:           true,
 	}
 
 	opts := m.getFeaturesOptions()
@@ -31,10 +31,10 @@ func TestGetFeaturesOptions_HidesTFRForNonTimeFrequencySelections(t *testing.T) 
 
 func TestGetFeaturesOptions_ShowsTFRForTimeFrequencySelections(t *testing.T) {
 	m := Model{
-		categories:            []string{"aperiodic", "power"},
-		selected:              map[int]bool{1: true},
-		featGroupTFRExpanded:  true,
-		iafEnabled:            true,
+		categories:           []string{"aperiodic", "power"},
+		selected:             map[int]bool{1: true},
+		featGroupTFRExpanded: true,
+		iafEnabled:           true,
 	}
 
 	opts := m.getFeaturesOptions()
@@ -55,21 +55,22 @@ func TestGetFeaturesOptions_NoUnrelatedFeatureGroupsLeak(t *testing.T) {
 	}
 
 	groupForCategory := map[string]optionType{
-		"power":               optFeatGroupPower,
-		"connectivity":        optFeatGroupConnectivity,
+		"power":                optFeatGroupPower,
+		"connectivity":         optFeatGroupConnectivity,
 		"directedconnectivity": optFeatGroupDirectedConnectivity,
-		"sourcelocalization":  optFeatGroupSourceLoc,
-		"aperiodic":           optFeatGroupAperiodic,
-		"itpc":                optFeatGroupITPC,
-		"pac":                 optFeatGroupPAC,
-		"complexity":          optFeatGroupComplexity,
-		"ratios":              optFeatGroupRatios,
-		"asymmetry":           optFeatGroupAsymmetry,
-		"quality":             optFeatGroupQuality,
-		"erds":                optFeatGroupERDS,
-		"spectral":            optFeatGroupSpectral,
-		"erp":                 optFeatGroupERP,
-		"bursts":              optFeatGroupBursts,
+		"sourcelocalization":   optFeatGroupSourceLoc,
+		"aperiodic":            optFeatGroupAperiodic,
+		"itpc":                 optFeatGroupITPC,
+		"pac":                  optFeatGroupPAC,
+		"complexity":           optFeatGroupComplexity,
+		"ratios":               optFeatGroupRatios,
+		"asymmetry":            optFeatGroupAsymmetry,
+		"quality":              optFeatGroupQuality,
+		"microstates":          optFeatGroupMicrostates,
+		"erds":                 optFeatGroupERDS,
+		"spectral":             optFeatGroupSpectral,
+		"erp":                  optFeatGroupERP,
+		"bursts":               optFeatGroupBursts,
 	}
 
 	allFeatureGroups := []optionType{
@@ -85,6 +86,7 @@ func TestGetFeaturesOptions_NoUnrelatedFeatureGroupsLeak(t *testing.T) {
 		optFeatGroupRatios,
 		optFeatGroupAsymmetry,
 		optFeatGroupQuality,
+		optFeatGroupMicrostates,
 		optFeatGroupERDS,
 		optFeatGroupSpatialTransform,
 		optFeatGroupSourceLoc,
@@ -93,13 +95,13 @@ func TestGetFeaturesOptions_NoUnrelatedFeatureGroupsLeak(t *testing.T) {
 	}
 
 	isTFCategory := map[string]bool{
-		"power":               true,
-		"connectivity":        true,
+		"power":                true,
+		"connectivity":         true,
 		"directedconnectivity": true,
-		"itpc":                true,
-		"pac":                 true,
-		"erds":                true,
-		"bursts":              true,
+		"itpc":                 true,
+		"pac":                  true,
+		"erds":                 true,
+		"bursts":               true,
 	}
 
 	for idx, selectedCategory := range categories {
@@ -110,9 +112,9 @@ func TestGetFeaturesOptions_NoUnrelatedFeatureGroupsLeak(t *testing.T) {
 		opts := m.getFeaturesOptions()
 
 		allowed := map[optionType]bool{
-			optUseDefaults:       true,
-			optFeatGroupStorage:  true,
-			optFeatGroupExecution:true,
+			optUseDefaults:        true,
+			optFeatGroupStorage:   true,
+			optFeatGroupExecution: true,
 		}
 		if grp, ok := groupForCategory[selectedCategory]; ok {
 			allowed[grp] = true
@@ -138,8 +140,8 @@ func TestGetFeaturesOptions_ExecutionOptionsAreCategoryScoped(t *testing.T) {
 
 	newModel := func(selectedIdx int) Model {
 		return Model{
-			categories:              categories,
-			selected:                map[int]bool{selectedIdx: true},
+			categories:                 categories,
+			selected:                   map[int]bool{selectedIdx: true},
 			featGroupExecutionExpanded: true,
 		}
 	}

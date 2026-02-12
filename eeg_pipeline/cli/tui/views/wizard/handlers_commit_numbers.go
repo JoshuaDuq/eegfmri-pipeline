@@ -688,6 +688,26 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.connWindowLen = val
 	case optConnWindowStep:
 		m.connWindowStep = val
+	case optConnNFreqsPerBand:
+		if val >= 1 {
+			m.connNFreqsPerBand = int(val)
+		}
+	case optConnNCycles:
+		if val >= 0 {
+			m.connNCycles = val
+		}
+	case optConnDecim:
+		if val >= 1 {
+			m.connDecim = int(val)
+		}
+	case optConnMinSegmentSamples:
+		if val >= 1 {
+			m.connMinSegSamples = int(val)
+		}
+	case optConnSmallWorldNRand:
+		if val >= 0 {
+			m.connSmallWorldNRand = int(val)
+		}
 	case optConnMinEpochsPerGroup:
 		if val >= 1 {
 			m.connMinEpochsPerGroup = int(val)
@@ -957,6 +977,31 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val > 0 {
 			m.qualityMuscleBandMax = val
 		}
+	// Microstates options
+	case optMicrostatesNStates:
+		if val >= 2 {
+			m.microstatesNStates = int(val)
+		}
+	case optMicrostatesMinPeakDistanceMs:
+		if val >= 0 {
+			m.microstatesMinPeakDistanceMs = val
+		}
+	case optMicrostatesMaxGfpPeaksPerEpoch:
+		if val >= 1 {
+			m.microstatesMaxGfpPeaksPerEpoch = int(val)
+		}
+	case optMicrostatesMinDurationMs:
+		if val >= 0 {
+			m.microstatesMinDurationMs = val
+		}
+	case optMicrostatesGfpPeakProminence:
+		if val >= 0 {
+			m.microstatesGfpPeakProminence = val
+		}
+	case optMicrostatesRandomState:
+		if val >= 0 {
+			m.microstatesRandomState = int(val)
+		}
 	// ERDS options
 	case optERDSMinBaselinePower:
 		if val > 0 {
@@ -1015,6 +1060,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 1 {
 			m.runAdjustmentMaxDummies = int(val)
 		}
+	case optBehaviorMinSamples:
+		if val >= 0 {
+			m.behaviorMinSamples = int(val)
+		}
 	case optTrialOrderMaxMissingFraction:
 		if val >= 0 && val <= 1 {
 			m.trialOrderMaxMissingFraction = val
@@ -1053,6 +1102,18 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 3 {
 			m.painResidualCrossfitSplineKnots = int(val)
 		}
+	case optPainResidualMinSamples:
+		if val >= 1 {
+			m.painResidualMinSamples = int(val)
+		}
+	case optPainResidualModelCompareMinSamples:
+		if val >= 1 {
+			m.painResidualModelCompareMinSamples = int(val)
+		}
+	case optPainResidualBreakpointMinSamples:
+		if val >= 1 {
+			m.painResidualBreakpointMinSamples = int(val)
+		}
 
 	// Regression
 	case optRegressionTempSplineKnots:
@@ -1067,9 +1128,17 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val > 0 && val < 1 {
 			m.regressionTempSplineQhigh = val
 		}
+	case optRegressionTempSplineMinN:
+		if val >= 1 {
+			m.regressionTempSplineMinN = int(val)
+		}
 	case optRegressionPermutations:
 		if val >= 0 {
 			m.regressionPermutations = int(val)
+		}
+	case optRegressionMinSamples:
+		if val >= 1 {
+			m.regressionMinSamples = int(val)
 		}
 	case optRegressionMaxFeatures:
 		if val >= 0 {
@@ -1089,9 +1158,17 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val > 0 && val < 1 {
 			m.modelsTempSplineQhigh = val
 		}
+	case optModelsTempSplineMinN:
+		if val >= 1 {
+			m.modelsTempSplineMinN = int(val)
+		}
 	case optModelsMaxFeatures:
 		if val >= 0 {
 			m.modelsMaxFeatures = int(val)
+		}
+	case optModelsMinSamples:
+		if val >= 1 {
+			m.modelsMinSamples = int(val)
 		}
 
 	// Stability
@@ -1102,6 +1179,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optStabilityAlpha:
 		if val > 0 && val <= 1 {
 			m.stabilityAlpha = val
+		}
+	case optStabilityMinGroupTrials:
+		if val >= 0 {
+			m.stabilityMinGroupN = int(val)
 		}
 
 	// Influence
@@ -1116,6 +1197,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optInfluenceTempSplineQhigh:
 		if val > 0 && val < 1 {
 			m.influenceTempSplineQhigh = val
+		}
+	case optInfluenceTempSplineMinN:
+		if val >= 1 {
+			m.influenceTempSplineMinN = int(val)
 		}
 	case optInfluenceMaxFeatures:
 		if val >= 0 {
@@ -1161,6 +1246,18 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optTemporalTfHeatmapTimeResMs:
 		if val >= 1 {
 			m.tfHeatmapTimeResMs = int(val)
+		}
+	case optPainSensitivityMinTrials:
+		if val >= 0 {
+			m.painSensitivityMinTrials = int(val)
+		}
+	case optConditionMinTrials:
+		if val >= 0 {
+			m.conditionMinTrials = int(val)
+		}
+	case optModerationMinSamples:
+		if val >= 1 {
+			m.moderationMinSamples = int(val)
 		}
 	case optClusterMinSize:
 		if val >= 1 {

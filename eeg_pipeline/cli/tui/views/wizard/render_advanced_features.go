@@ -56,6 +56,10 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	if strings.TrimSpace(spectralRatioPairsVal) == "" {
 		spectralRatioPairsVal = "(default)"
 	}
+	spectralSegmentsVal := m.spectralSegmentsSpec
+	if strings.TrimSpace(spectralSegmentsVal) == "" {
+		spectralSegmentsVal = "(default)"
+	}
 	connOutputVal := []string{"full", "global_only"}[m.connOutputLevel]
 	connGraphVal := m.boolToOnOff(m.connGraphMetrics)
 	connGraphPropVal := fmt.Sprintf("%.2f", m.connGraphProp)
@@ -130,6 +134,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			burstBandsVal = buffer
 		case textFieldSpectralRatioPairs:
 			spectralRatioPairsVal = buffer
+		case textFieldSpectralSegments:
+			spectralSegmentsVal = buffer
 		case textFieldAsymmetryChannelPairs:
 			asymPairsVal = buffer
 		case textFieldERPComponents:
@@ -662,6 +668,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "minimum duration"
+		case optConnMinSegmentSamples:
+			label = "Min seg samples"
+			value = fmt.Sprintf("%d", m.connMinSegSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optConnMinSegmentSamples) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum samples per segment"
 		case optConnWarnNoSpatialTransform:
 			label = "Warn (no transform)"
 			value = m.boolToOnOff(m.connWarnNoSpatialTransform)
@@ -674,6 +687,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Graph Threshold"
 			value = connGraphPropVal
 			hint = "top edges density"
+		case optConnSmallWorldNRand:
+			label = "Small-world N rand"
+			value = fmt.Sprintf("%d", m.connSmallWorldNRand)
+			if m.editingNumber && m.isCurrentlyEditing(optConnSmallWorldNRand) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "random graphs for sigma"
 		case optConnWindowLen:
 			label = "Window length"
 			value = connWindowLenVal
@@ -682,10 +702,48 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Window step"
 			value = connWindowStepVal
 			hint = "overlap amount"
+		case optConnMode:
+			label = "TF mode"
+			modes := []string{"cwt_morlet", "multitaper", "fourier"}
+			value = modes[m.connMode]
+			hint = "time-frequency mode for phase measures"
 		case optConnAECMode:
 			label = "AEC Mode"
 			value = connAecVal
 			hint = "orth/none/sym"
+		case optConnAECAbsolute:
+			label = "AEC absolute"
+			value = m.boolToOnOff(m.connAECAbsolute)
+			hint = "absolute envelope correlation"
+		case optConnEnableAEC:
+			label = "Enable AEC"
+			value = m.boolToOnOff(m.connEnableAEC)
+			hint = "compute AEC when selected"
+		case optConnNFreqsPerBand:
+			label = "N freqs/band"
+			value = fmt.Sprintf("%d", m.connNFreqsPerBand)
+			if m.editingNumber && m.isCurrentlyEditing(optConnNFreqsPerBand) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "frequency samples for phase connectivity"
+		case optConnNCycles:
+			label = "N cycles"
+			if m.connNCycles <= 0 {
+				value = "(auto)"
+			} else {
+				value = fmt.Sprintf("%.2f", m.connNCycles)
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optConnNCycles) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "0=auto wavelet cycles"
+		case optConnDecim:
+			label = "Decim"
+			value = fmt.Sprintf("%d", m.connDecim)
+			if m.editingNumber && m.isCurrentlyEditing(optConnDecim) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "decimation factor"
 		case optConnAECOutput:
 			label = "AEC Output"
 			switch m.connAECOutput {
@@ -866,6 +924,17 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.textBuffer + "█"
 			}
 			hint = "FreeSurfer subject name"
+		case optSourceLocSubjectsDir:
+			label = "FS Subjects Dir"
+			if strings.TrimSpace(m.sourceLocSubjectsDir) == "" {
+				value = "(from global paths)"
+			} else {
+				value = m.sourceLocSubjectsDir
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocSubjectsDir {
+				value = m.textBuffer + "█"
+			}
+			hint = "override FreeSurfer SUBJECTS_DIR"
 		case optSourceLocTrans:
 			label = "Coreg trans"
 			if strings.TrimSpace(m.sourceLocTrans) == "" {
@@ -1766,6 +1835,10 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Ratio pairs"
 			value = spectralRatioPairsVal
 			hint = ""
+		case optSpectralSegments:
+			label = "Spectral segments"
+			value = spectralSegmentsVal
+			hint = "e.g. baseline active"
 		case optAperiodicSubtractEvoked:
 			label = "Induced spectra"
 			value = m.boolToOnOff(m.aperiodicSubtractEvoked)
@@ -2006,6 +2079,61 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "muscle artifact upper"
+		// Microstates group header
+		case optFeatGroupMicrostates:
+			label = "▸ Microstates"
+			hint = "Space to toggle"
+			if m.featGroupMicrostatesExpanded {
+				label = "▾ Microstates"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+			}
+		case optMicrostatesNStates:
+			label = "N states"
+			value = fmt.Sprintf("%d", m.microstatesNStates)
+			if m.editingNumber && m.isCurrentlyEditing(optMicrostatesNStates) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "number of microstate classes"
+		case optMicrostatesMinPeakDistanceMs:
+			label = "Min peak distance"
+			value = fmt.Sprintf("%.1f ms", m.microstatesMinPeakDistanceMs)
+			if m.editingNumber && m.isCurrentlyEditing(optMicrostatesMinPeakDistanceMs) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum GFP peak separation"
+		case optMicrostatesMaxGfpPeaksPerEpoch:
+			label = "Max GFP peaks/epoch"
+			value = fmt.Sprintf("%d", m.microstatesMaxGfpPeaksPerEpoch)
+			if m.editingNumber && m.isCurrentlyEditing(optMicrostatesMaxGfpPeaksPerEpoch) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "sampling cap per epoch"
+		case optMicrostatesMinDurationMs:
+			label = "Min duration"
+			value = fmt.Sprintf("%.1f ms", m.microstatesMinDurationMs)
+			if m.editingNumber && m.isCurrentlyEditing(optMicrostatesMinDurationMs) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "temporal smoothing constraint"
+		case optMicrostatesGfpPeakProminence:
+			label = "GFP peak prominence"
+			value = fmt.Sprintf("%.2f", m.microstatesGfpPeakProminence)
+			if m.editingNumber && m.isCurrentlyEditing(optMicrostatesGfpPeakProminence) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "0 disables prominence threshold"
+		case optMicrostatesRandomState:
+			label = "Random state"
+			value = fmt.Sprintf("%d", m.microstatesRandomState)
+			if m.editingNumber && m.isCurrentlyEditing(optMicrostatesRandomState) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "reproducible template seed"
 
 		// ERDS group header
 		case optFeatGroupERDS:

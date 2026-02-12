@@ -620,6 +620,7 @@ const (
 	textFieldPACPairs
 	textFieldBurstBands
 	textFieldSpectralRatioPairs
+	textFieldSpectralSegments
 	textFieldAsymmetryChannelPairs
 	textFieldAsymmetryActivationBands
 	textFieldIAFRois
@@ -633,6 +634,7 @@ const (
 	textFieldConnConditionValues
 	// Source localization advanced config text fields
 	textFieldSourceLocSubject
+	textFieldSourceLocSubjectsDir
 	textFieldSourceLocTrans
 	textFieldSourceLocBem
 	textFieldSourceLocFmriStatsMap
@@ -1385,6 +1387,7 @@ type Model struct {
 	featGroupERPExpanded              bool
 	featGroupRatiosExpanded           bool
 	featGroupAsymmetryExpanded        bool
+	featGroupMicrostatesExpanded      bool
 	featGroupSpatialTransformExpanded bool
 	featGroupStorageExpanded          bool
 	featGroupExecutionExpanded        bool
@@ -1448,6 +1451,7 @@ type Model struct {
 	// Spectral configuration
 	spectralEdgePercentile     float64
 	spectralRatioPairsSpec     string // e.g. theta:beta,alpha:beta
+	spectralSegmentsSpec       string // e.g. baseline,active
 	spectralPsdAdaptive        bool
 	spectralMultitaperAdaptive bool
 
@@ -1490,12 +1494,20 @@ type Model struct {
 	featGroupERDSExpanded bool
 
 	// Connectivity configuration
-	connOutputLevel  int // 0: full, 1: global_only
-	connGraphMetrics bool
-	connGraphProp    float64
-	connWindowLen    float64
-	connWindowStep   float64
-	connAECMode      int // 0: orth, 1: none, 2: sym
+	connOutputLevel     int // 0: full, 1: global_only
+	connGraphMetrics    bool
+	connGraphProp       float64
+	connWindowLen       float64
+	connWindowStep      float64
+	connAECMode         int // 0: orth, 1: none, 2: sym
+	connMode            int // 0: cwt_morlet, 1: multitaper, 2: fourier
+	connAECAbsolute     bool
+	connEnableAEC       bool
+	connNFreqsPerBand   int
+	connNCycles         float64
+	connDecim           int
+	connMinSegSamples   int
+	connSmallWorldNRand int
 
 	// Scientific validity options (new)
 	itpcMethod             int     // 0: global, 1: fold_global, 2: loo, 3: condition
@@ -1598,6 +1610,7 @@ type Model struct {
 	sourceLocDepth             float64 // eLORETA depth weighting
 	sourceLocConnMethod        int     // 0: aec, 1: wpli, 2: plv
 	sourceLocSubject           string  // FreeSurfer subject name (e.g., sub-0001)
+	sourceLocSubjectsDir       string  // FreeSurfer SUBJECTS_DIR override
 	sourceLocTrans             string  // EEG↔MRI transform .fif
 	sourceLocBem               string  // BEM solution .fif
 	sourceLocMindistMm         float64 // MNE mindist (mm)
@@ -1693,6 +1706,14 @@ type Model struct {
 	qualityMuscleBandMin      float64 // Muscle band min
 	qualityMuscleBandMax      float64 // Muscle band max
 
+	// Microstates options
+	microstatesNStates             int
+	microstatesMinPeakDistanceMs   float64
+	microstatesMaxGfpPeaksPerEpoch int
+	microstatesMinDurationMs       float64
+	microstatesGfpPeakProminence   float64
+	microstatesRandomState         int
+
 	// ERDS advanced options
 	erdsUseLogRatio         bool    // Use dB instead of percent
 	erdsMinBaselinePower    float64 // Minimum baseline power
@@ -1727,6 +1748,7 @@ type Model struct {
 	rngSeed               int     // 0 = use project default
 	controlTemperature    bool    // Include temperature as covariate
 	controlTrialOrder     bool    // Include trial order as covariate
+	behaviorMinSamples    int     // 0=unset; behavior_analysis.min_samples.default
 	fdrAlpha              float64 // FDR correction threshold
 	behaviorConfigSection int
 	behaviorNJobs         int // -1 = all
@@ -1786,8 +1808,11 @@ type Model struct {
 	painResidualSplineDfCandidates      string // Comma-separated list (e.g., "3,4,5")
 	painResidualModelCompareEnabled     bool
 	painResidualModelComparePolyDegrees string // Comma-separated list (e.g., "2,3")
+	painResidualMinSamples              int
+	painResidualModelCompareMinSamples  int
 	painResidualBreakpointEnabled       bool
 	painResidualBreakpointCandidates    int
+	painResidualBreakpointMinSamples    int
 	painResidualBreakpointQlow          float64
 	painResidualBreakpointQhigh         float64
 
@@ -1805,11 +1830,13 @@ type Model struct {
 	regressionTempSplineKnots    int
 	regressionTempSplineQlow     float64
 	regressionTempSplineQhigh    float64
+	regressionTempSplineMinN     int
 	regressionIncludeTrialOrder  bool
 	regressionIncludePrev        bool
 	regressionIncludeRunBlock    bool
 	regressionIncludeInteraction bool
 	regressionStandardize        bool
+	regressionMinSamples         int
 	regressionPermutations       int
 	regressionMaxFeatures        int // 0 = no limit
 
@@ -1819,11 +1846,13 @@ type Model struct {
 	modelsTempSplineKnots     int
 	modelsTempSplineQlow      float64
 	modelsTempSplineQhigh     float64
+	modelsTempSplineMinN      int
 	modelsIncludeTrialOrder   bool
 	modelsIncludePrev         bool
 	modelsIncludeRunBlock     bool
 	modelsIncludeInteraction  bool
 	modelsStandardize         bool
+	modelsMinSamples          int
 	modelsMaxFeatures         int
 	modelsOutcomeRating       bool
 	modelsOutcomePainResidual bool
@@ -1840,6 +1869,7 @@ type Model struct {
 	stabilityOutcome     int // 0=auto, 1=rating, 2=pain_residual
 	stabilityGroupColumn int // 0=auto, 1=run, 2=block
 	stabilityPartialTemp bool
+	stabilityMinGroupN   int // 0=unset
 	stabilityMaxFeatures int
 	stabilityAlpha       float64
 
@@ -1875,6 +1905,7 @@ type Model struct {
 	groupLevelBlockPermutation      bool   // Use block-restricted permutations when block/run is available
 
 	// Pain sensitivity
+	painSensitivityMinTrials int // 0=unset
 
 	// Report
 	reportTopN int
@@ -1923,7 +1954,8 @@ type Model struct {
 	// Moderation-specific
 	moderationMaxFeaturesEnabled bool // Enable max features limit
 	moderationMaxFeatures        int  // Max features for moderation
-	moderationPermutations       int  // Permutation iterations for moderation (0=disabled)
+	moderationMinSamples         int
+	moderationPermutations       int // Permutation iterations for moderation (0=disabled)
 	// Mixed effects-specific
 	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
@@ -1931,6 +1963,7 @@ type Model struct {
 	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.pain_binary)
 	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
+	conditionMinTrials       int     // 0=unset; condition.min_trials_per_condition
 	conditionOverwrite       bool    // Overwrite existing condition effects files
 
 	// Column discovery (populated from events files)
@@ -2189,6 +2222,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		featGroupERPExpanded:              false,
 		featGroupRatiosExpanded:           false,
 		featGroupAsymmetryExpanded:        false,
+		featGroupMicrostatesExpanded:      false,
 		featGroupSpatialTransformExpanded: false,
 		featGroupStorageExpanded:          true,
 		featGroupExecutionExpanded:        true,
@@ -2246,15 +2280,24 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Spectral defaults
 		spectralEdgePercentile:     0.95,
 		spectralRatioPairsSpec:     "theta:beta,theta:alpha,alpha:beta,delta:alpha,delta:theta",
+		spectralSegmentsSpec:       "baseline",
 		spectralPsdAdaptive:        false,
 		spectralMultitaperAdaptive: false,
 		// Connectivity defaults
-		connOutputLevel:  0,
-		connGraphMetrics: false,
-		connGraphProp:    0.1,
-		connWindowLen:    1.0,
-		connWindowStep:   0.5,
-		connAECMode:      0,
+		connOutputLevel:     0,
+		connGraphMetrics:    false,
+		connGraphProp:       0.1,
+		connWindowLen:       1.0,
+		connWindowStep:      0.5,
+		connAECMode:         0,
+		connMode:            0,
+		connAECAbsolute:     true,
+		connEnableAEC:       true,
+		connNFreqsPerBand:   8,
+		connNCycles:         0.0,
+		connDecim:           1,
+		connMinSegSamples:   50,
+		connSmallWorldNRand: 100,
 		// Scientific validity defaults (new)
 		itpcMethod:                1,    // 1: fold_global (CV-safe default)
 		itpcConditionColumn:       "",   // Empty = not using condition-based ITPC
@@ -2352,6 +2395,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocDepth:             0.8,   // eLORETA depth weighting
 		sourceLocConnMethod:        0,     // 0: aec
 		sourceLocSubject:           "",
+		sourceLocSubjectsDir:       "",
 		sourceLocTrans:             "",
 		sourceLocBem:               "",
 		sourceLocMindistMm:         5.0,
@@ -2433,6 +2477,14 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		qualityMuscleBandMin:    30.0,
 		qualityMuscleBandMax:    80.0,
 
+		// Microstates defaults
+		microstatesNStates:             4,
+		microstatesMinPeakDistanceMs:   10.0,
+		microstatesMaxGfpPeaksPerEpoch: 400,
+		microstatesMinDurationMs:       20.0,
+		microstatesGfpPeakProminence:   0.0,
+		microstatesRandomState:         42,
+
 		// ERDS defaults
 		erdsUseLogRatio:         false,
 		erdsMinBaselinePower:    1.0e-12,
@@ -2496,6 +2548,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		rngSeed:               0,
 		controlTemperature:    true,
 		controlTrialOrder:     true,
+		behaviorMinSamples:    0,
 		fdrAlpha:              0.05,
 		behaviorConfigSection: 0,
 		behaviorNJobs:         -1,
@@ -2525,8 +2578,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		painResidualSplineDfCandidates:      "3,4,5",
 		painResidualModelCompareEnabled:     true,
 		painResidualModelComparePolyDegrees: "2,3",
+		painResidualMinSamples:              10,
+		painResidualModelCompareMinSamples:  10,
 		painResidualBreakpointEnabled:       true,
 		painResidualBreakpointCandidates:    15,
+		painResidualBreakpointMinSamples:    12,
 		painResidualBreakpointQlow:          0.15,
 		painResidualBreakpointQhigh:         0.85,
 		painResidualCrossfitEnabled:         false,
@@ -2541,11 +2597,13 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionTempSplineKnots:    4,
 		regressionTempSplineQlow:     0.05,
 		regressionTempSplineQhigh:    0.95,
+		regressionTempSplineMinN:     12,
 		regressionIncludeTrialOrder:  true,
 		regressionIncludePrev:        false,
 		regressionIncludeRunBlock:    true,
 		regressionIncludeInteraction: true,
 		regressionStandardize:        true,
+		regressionMinSamples:         15,
 		regressionPermutations:       0,
 		regressionMaxFeatures:        0,
 
@@ -2554,11 +2612,13 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		modelsTempSplineKnots:     4,
 		modelsTempSplineQlow:      0.05,
 		modelsTempSplineQhigh:     0.95,
+		modelsTempSplineMinN:      12,
 		modelsIncludeTrialOrder:   true,
 		modelsIncludePrev:         false,
 		modelsIncludeRunBlock:     true,
 		modelsIncludeInteraction:  true,
 		modelsStandardize:         true,
+		modelsMinSamples:          20,
 		modelsMaxFeatures:         100,
 		modelsOutcomeRating:       true,
 		modelsOutcomePainResidual: true,
@@ -2574,6 +2634,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		stabilityOutcome:     0,
 		stabilityGroupColumn: 0,
 		stabilityPartialTemp: true,
+		stabilityMinGroupN:   0,
 		stabilityMaxFeatures: 50,
 		stabilityAlpha:       0.05,
 
@@ -2587,6 +2648,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		influenceTempSplineKnots:     4,
 		influenceTempSplineQlow:      0.05,
 		influenceTempSplineQhigh:     0.95,
+		influenceTempSplineMinN:      12,
 		influenceIncludeTrialOrder:   true,
 		influenceIncludeRunBlock:     true,
 		influenceIncludeInteraction:  false,
@@ -2603,6 +2665,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		correlationsPrimaryUnit:         0,
 		correlationsPermutationPrimary:  false,
 		groupLevelBlockPermutation:      true,
+		painSensitivityMinTrials:        0,
 
 		reportTopN:                     15,
 		temporalResolutionMs:           50,
@@ -2638,6 +2701,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Moderation defaults
 		moderationMaxFeaturesEnabled: true,
 		moderationMaxFeatures:        50,
+		moderationMinSamples:         15,
 		moderationPermutations:       0, // Disabled by default
 		// Mixed effects defaults
 		mixedMaxFeatures: 50,
@@ -2646,6 +2710,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionFailFast:           true,
 		conditionPermutationPrimary: false,
 		conditionWindowPrimaryUnit:  0,
+		conditionMinTrials:          0,
 		// Column discovery defaults
 		discoveredColumns:              []string{},
 		trialTableColumns:              []string{},

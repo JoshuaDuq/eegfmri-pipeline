@@ -254,7 +254,7 @@ def execute_folds_parallel(
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
-            category=warnings.UserWarning,
+            category=UserWarning,
             module=r"sklearn\.utils\.parallel",
         )
         if should_parallelize_folds(outer_n_jobs, len(folds)):

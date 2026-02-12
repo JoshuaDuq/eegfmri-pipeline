@@ -69,6 +69,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				label = "▾ Correlations"
 			}
 			return label, "", "Space to toggle"
+		case optBehaviorGroupPainSens:
+			label := "▸ Pain Sensitivity"
+			if m.behaviorGroupPainSensExpanded {
+				label = "▾ Pain Sensitivity"
+			}
+			return label, "", "Space to toggle"
 		case optBehaviorGroupRegression:
 			label := "▸ Regression"
 			if m.behaviorGroupRegressionExpanded {
@@ -209,6 +215,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Max Run Dummies", val, "skip if > N levels"
+		case optBehaviorMinSamples:
+			val := "unset"
+			if m.behaviorMinSamples > 0 {
+				val = fmt.Sprintf("%d", m.behaviorMinSamples)
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optBehaviorMinSamples) {
+				val = numberDisplay
+			}
+			return "Default Min Samples", val, "0=unset; behavior min_samples.default"
 		case optFDRAlpha:
 			val := fmt.Sprintf("%.3f", m.fdrAlpha)
 			if m.editingNumber && m.isCurrentlyEditing(optFDRAlpha) {
@@ -290,6 +305,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			return "Spline DF Candidates", val, "comma-separated (e.g., 3,4,5)"
+		case optPainResidualMinSamples:
+			val := fmt.Sprintf("%d", m.painResidualMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualMinSamples) {
+				val = numberDisplay
+			}
+			return "Residual Min Samples", val, "minimum rows for fit"
 		case optPainResidualModelCompare:
 			return "Temp Model Compare", m.boolToOnOff(m.painResidualModelCompareEnabled), "non-gating diagnostics"
 		case optPainResidualModelComparePolyDegrees:
@@ -301,6 +322,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			return "Model Compare Poly Deg", val, "comma-separated (e.g., 2,3)"
+		case optPainResidualModelCompareMinSamples:
+			val := fmt.Sprintf("%d", m.painResidualModelCompareMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualModelCompareMinSamples) {
+				val = numberDisplay
+			}
+			return "Model Compare Min N", val, "minimum rows for comparison"
 		case optPainResidualBreakpoint:
 			return "Breakpoint Test", m.boolToOnOff(m.painResidualBreakpointEnabled), "single-hinge model"
 		case optPainResidualBreakpointCandidates:
@@ -309,6 +336,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Breakpoint Candidates", val, "grid size"
+		case optPainResidualBreakpointMinSamples:
+			val := fmt.Sprintf("%d", m.painResidualBreakpointMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointMinSamples) {
+				val = numberDisplay
+			}
+			return "Breakpoint Min N", val, "minimum rows for hinge test"
 		case optPainResidualBreakpointQlow:
 			val := fmt.Sprintf("%.2f", m.painResidualBreakpointQlow)
 			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointQlow) {
@@ -414,6 +447,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Spline Q High", val, "knot quantile"
+		case optRegressionTempSplineMinN:
+			val := fmt.Sprintf("%d", m.regressionTempSplineMinN)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineMinN) {
+				val = numberDisplay
+			}
+			return "Spline Min Samples", val, "minimum rows for spline basis"
 		case optRegressionIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.regressionIncludeTrialOrder), "add trial_index covariate"
 		case optRegressionIncludePrev:
@@ -424,6 +463,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Feature×Temp", m.boolToOnOff(m.regressionIncludeInteraction), "moderation term"
 		case optRegressionStandardize:
 			return "Standardize", m.boolToOnOff(m.regressionStandardize), "z-score predictors"
+		case optRegressionMinSamples:
+			val := fmt.Sprintf("%d", m.regressionMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionMinSamples) {
+				val = numberDisplay
+			}
+			return "Min Samples", val, "minimum rows for regression"
 		case optRegressionPermutations:
 			val := fmt.Sprintf("%d", m.regressionPermutations)
 			if m.editingNumber && m.isCurrentlyEditing(optRegressionPermutations) {
@@ -467,6 +512,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Spline Q High", val, "knot quantile"
+		case optModelsTempSplineMinN:
+			val := fmt.Sprintf("%d", m.modelsTempSplineMinN)
+			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineMinN) {
+				val = numberDisplay
+			}
+			return "Spline Min Samples", val, "minimum rows for spline basis"
 		case optModelsIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.modelsIncludeTrialOrder), "add trial_index covariate"
 		case optModelsIncludePrev:
@@ -477,6 +528,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Feature×Temp", m.boolToOnOff(m.modelsIncludeInteraction), "moderation term"
 		case optModelsStandardize:
 			return "Standardize", m.boolToOnOff(m.modelsStandardize), "z-score predictors"
+		case optModelsMinSamples:
+			val := fmt.Sprintf("%d", m.modelsMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optModelsMinSamples) {
+				val = numberDisplay
+			}
+			return "Min Samples", val, "minimum rows per model fit"
 		case optModelsMaxFeatures:
 			val := fmt.Sprintf("%d", m.modelsMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optModelsMaxFeatures) {
@@ -533,6 +590,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Group Column", v, "Space to select"
 		case optStabilityPartialTemp:
 			return "Partial Temperature", m.boolToOnOff(m.stabilityPartialTemp), "control temperature"
+		case optStabilityMinGroupTrials:
+			val := "unset"
+			if m.stabilityMinGroupN > 0 {
+				val = fmt.Sprintf("%d", m.stabilityMinGroupN)
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optStabilityMinGroupTrials) {
+				val = numberDisplay
+			}
+			return "Min Group Trials", val, "0=unset"
 		case optStabilityMaxFeatures:
 			val := fmt.Sprintf("%d", m.stabilityMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optStabilityMaxFeatures) {
@@ -592,6 +658,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Spline Q High", val, "knot quantile"
+		case optInfluenceTempSplineMinN:
+			val := fmt.Sprintf("%d", m.influenceTempSplineMinN)
+			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineMinN) {
+				val = numberDisplay
+			}
+			return "Spline Min Samples", val, "minimum rows for spline basis"
 		case optInfluenceIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.influenceIncludeTrialOrder), "add covariate"
 		case optInfluenceIncludeRunBlock:
@@ -662,6 +734,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.conditionCompareColumn)
 			}
 			return "Compare Values", val, hint
+		case optConditionMinTrials:
+			val := "unset"
+			if m.conditionMinTrials > 0 {
+				val = fmt.Sprintf("%d", m.conditionMinTrials)
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optConditionMinTrials) {
+				val = numberDisplay
+			}
+			return "Min Trials/Condition", val, "0=unset"
 		case optConditionWindowPrimaryUnit:
 			v := "trial"
 			if m.conditionWindowPrimaryUnit == 1 {
@@ -680,6 +761,17 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Effect Threshold", val, "Cohen's d cutoff"
+
+		// Temporal
+		case optPainSensitivityMinTrials:
+			val := "unset"
+			if m.painSensitivityMinTrials > 0 {
+				val = fmt.Sprintf("%d", m.painSensitivityMinTrials)
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optPainSensitivityMinTrials) {
+				val = numberDisplay
+			}
+			return "Min Trials", val, "0=unset"
 
 		// Temporal
 		case optTemporalResolutionMs:
@@ -981,6 +1073,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Max Features", val, "max features for moderation"
+		case optModerationMinSamples:
+			val := fmt.Sprintf("%d", m.moderationMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optModerationMinSamples) {
+				val = numberDisplay
+			}
+			return "Min Samples", val, "minimum rows for moderation model"
 		case optModerationPermutations:
 			val := fmt.Sprintf("%d", m.moderationPermutations)
 			if m.editingNumber && m.isCurrentlyEditing(optModerationPermutations) {
