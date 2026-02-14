@@ -125,6 +125,33 @@ class TestPreprocessingCompletion(unittest.TestCase):
             p._run_ica_fitting(["0001"], "t", use_icalabel=True)
         mock_run.assert_called_once()
 
+    def test_run_batch_writes_reproducibility_metadata(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.name = "preprocessing"
+        p.config = DotConfig({"project": {"task": "thermalactive"}})
+        p.logger = Mock()
+        p.bids_root = Path(tempfile.mkdtemp()) / "bids"
+        p.deriv_root = Path(tempfile.mkdtemp())
+
+        with patch.object(PreprocessingPipeline, "_execute_steps"):
+            out = p.run_batch(
+                subjects=["0001"],
+                task="thermalactive",
+                mode="epochs",
+                progress=_NoopProgress(),
+            )
+        self.assertEqual(out[0]["status"], "success")
+
+        metadata_dir = p.deriv_root / "logs" / "run_metadata" / "preprocessing"
+        metadata_files = sorted(metadata_dir.glob("run_*.json"))
+        self.assertTrue(metadata_files)
+
+        payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["specifications"]["mode"], "epochs")
+
     def test_extract_params_and_process_subject(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 

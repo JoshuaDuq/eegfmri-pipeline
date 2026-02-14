@@ -163,3 +163,40 @@ class TestMachineLearningGapfill(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "produced no output"):
                     p.run_batch(["0001", "0002"], task="thermalactive", mode="regression")
             progress.complete.assert_called_once_with(success=False)
+
+        def test_run_batch_writes_reproducibility_metadata(self):
+            from eeg_pipeline.pipelines.machine_learning import MLPipeline
+
+            p = object.__new__(MLPipeline)
+            p.name = "machine_learning"
+            p.config = DotConfig({})
+            p.logger = Mock()
+            p.deriv_root = Path(tempfile.mkdtemp())
+            p.results_root = p.deriv_root / "machine_learning"
+
+            progress = _NoopProgress()
+            params = {
+                "progress": progress,
+                "cv_scope": "group",
+                "model": "elasticnet",
+                "n_perm": 0,
+                "inner_splits": 3,
+            }
+            out_dir = Path(tempfile.mkdtemp())
+
+            with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
+                MLPipeline, "_validate_inputs", return_value="thermalactive"
+            ), patch.object(
+                MLPipeline,
+                "_get_mode_dispatcher",
+                return_value={"regression": (lambda **kwargs: out_dir)},
+            ):
+                out = p.run_batch(["0001"], task="thermalactive", mode="regression")
+
+            self.assertEqual(out[0]["status"], "success")
+            metadata_dir = p.deriv_root / "logs" / "run_metadata" / "machine_learning"
+            metadata_files = sorted(metadata_dir.glob("run_*.json"))
+            self.assertTrue(metadata_files)
+            payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "success")
+            self.assertEqual(payload["specifications"]["mode"], "regression")

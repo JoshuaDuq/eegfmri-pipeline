@@ -53,6 +53,9 @@ class ModerationResult:
     se_b1: float = np.nan
     se_b2: float = np.nan
     se_b3: float = np.nan
+    var_b1: float = np.nan
+    var_b3: float = np.nan
+    cov_b1_b3: float = np.nan
     
     # P-values
     p_b1: float = np.nan
@@ -176,7 +179,7 @@ def compute_moderation_effect(
         W_centered, 
         interaction_term
     ])
-    coefficients_full, se_full, _, r2_full = _ols_regression(
+    coefficients_full, se_full, sigma_squared_full, r2_full = _ols_regression(
         Y_clean, design_matrix_full, compute_r2=True
     )
     
@@ -195,6 +198,17 @@ def compute_moderation_effect(
     result.se_b1 = se_full[1]
     result.se_b2 = se_full[2]
     result.se_b3 = se_full[3]
+    result.var_b1 = result.se_b1**2 if np.isfinite(result.se_b1) else np.nan
+    result.var_b3 = result.se_b3**2 if np.isfinite(result.se_b3) else np.nan
+    result.cov_b1_b3 = np.nan
+    try:
+        xtx_inv = np.linalg.inv(design_matrix_full.T @ design_matrix_full)
+        if np.isfinite(sigma_squared_full):
+            result.var_b1 = float(sigma_squared_full * xtx_inv[1, 1])
+            result.var_b3 = float(sigma_squared_full * xtx_inv[3, 3])
+            result.cov_b1_b3 = float(sigma_squared_full * xtx_inv[1, 3])
+    except (np.linalg.LinAlgError, ValueError):
+        pass
     
     degrees_of_freedom = n_valid - 4
     _compute_p_values(result, degrees_of_freedom)
@@ -262,7 +276,10 @@ def _compute_simple_slopes(
     
     Simple slopes represent the effect of X on Y at different levels of W.
     """
-    degrees_of_freedom = result.n - 4
+    degrees_of_freedom = max(result.n - 4, 1)
+    variance_b1 = result.var_b1 if np.isfinite(result.var_b1) else result.se_b1**2
+    variance_b3 = result.var_b3 if np.isfinite(result.var_b3) else result.se_b3**2
+    covariance_b1_b3 = result.cov_b1_b3 if np.isfinite(result.cov_b1_b3) else 0.0
     
     w_levels = [
         (-SIMPLE_SLOPE_SD_OFFSET * W_std, 'slope_low_w', 'p_slope_low'),
@@ -273,10 +290,16 @@ def _compute_simple_slopes(
     for w_value, slope_attr, p_attr in w_levels:
         conditional_slope = result.b1 + result.b3 * w_value
         
-        # Variance of conditional slope: Var(b1 + b3*w) ≈ Var(b1) + w²*Var(b3)
-        # Approximation assumes Cov(b1, b3) ≈ 0
-        se_conditional_slope = np.sqrt(
-            result.se_b1**2 + (w_value**2) * result.se_b3**2
+        # Exact variance of conditional slope: Var(b1 + b3*w).
+        var_conditional_slope = (
+            variance_b1
+            + (w_value**2) * variance_b3
+            + 2 * w_value * covariance_b1_b3
+        )
+        se_conditional_slope = (
+            float(np.sqrt(var_conditional_slope))
+            if np.isfinite(var_conditional_slope) and var_conditional_slope > 0
+            else np.nan
         )
         
         if se_conditional_slope > 0 and np.isfinite(conditional_slope):
@@ -302,26 +325,30 @@ def _compute_johnson_neyman(
     The Johnson-Neyman technique identifies the range of moderator values
     where the effect of X on Y is statistically significant.
     """
-    if not (np.isfinite(result.b3) and np.isfinite(result.se_b3)):
+    variance_b1 = result.var_b1 if np.isfinite(result.var_b1) else result.se_b1**2
+    variance_b3 = result.var_b3 if np.isfinite(result.var_b3) else result.se_b3**2
+    covariance_b1_b3 = result.cov_b1_b3 if np.isfinite(result.cov_b1_b3) else 0.0
+    if not (np.isfinite(result.b3) and np.isfinite(variance_b3) and np.isfinite(variance_b1)):
         return result
     
     degrees_of_freedom = n_samples - 4
     t_critical = stats.t.ppf(1 - DEFAULT_ALPHA / 2, degrees_of_freedom)
     
     # Conditional effect: slope(W) = b1 + b3*W
-    # Standard error: SE(slope) ≈ sqrt(se_b1² + W²*se_b3²)
+    # Standard error: SE(slope) = sqrt(Var(b1) + 2W*Cov(b1,b3) + W²*Var(b3))
     # Significance when: |b1 + b3*W| / SE(slope) = t_critical
     # This yields a quadratic equation in W: a*W² + b*W + c = 0
     
-    quadratic_coefficient = result.b3**2 - t_critical**2 * result.se_b3**2
-    linear_coefficient = 2 * result.b1 * result.b3
-    constant_coefficient = result.b1**2 - t_critical**2 * result.se_b1**2
+    quadratic_coefficient = result.b3**2 - t_critical**2 * variance_b3
+    linear_coefficient = 2 * (result.b1 * result.b3 - t_critical**2 * covariance_b1_b3)
+    constant_coefficient = result.b1**2 - t_critical**2 * variance_b1
     
     discriminant = linear_coefficient**2 - 4 * quadratic_coefficient * constant_coefficient
     
     if discriminant < 0:
         # No real roots: effect is either always or never significant
-        t_at_mean = abs(result.b1) / result.se_b1 if result.se_b1 > 0 else 0.0
+        se_at_mean = np.sqrt(variance_b1) if variance_b1 > 0 else np.nan
+        t_at_mean = abs(result.b1) / se_at_mean if np.isfinite(se_at_mean) and se_at_mean > 0 else 0.0
         result.jn_type = "always" if t_at_mean > t_critical else "never"
     elif abs(quadratic_coefficient) < 1e-10:
         # Linear case: interaction effect is negligible

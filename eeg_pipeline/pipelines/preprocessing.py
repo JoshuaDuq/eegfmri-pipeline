@@ -133,27 +133,50 @@ class PreprocessingPipeline(PipelineBase):
             List of per-subject status dictionaries
         """
         resolved_task, mode, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
-        
-        progress.start("preprocessing", subjects)
-        
-        steps = self._get_steps_for_mode(mode)
-        
-        self._execute_steps(
-            steps=steps,
+        run_context = self._create_run_metadata_context(
             subjects=subjects,
             task=resolved_task,
-            use_icalabel=use_icalabel,
-            n_jobs=n_jobs,
-            progress=progress,
+            kwargs=kwargs,
         )
-        
-        progress.complete(success=True)
-        
-        return [{
-            "subjects": subjects,
-            "mode": mode,
-            "status": "success",
-        }]
+        run_status = "failed"
+        run_error: Optional[str] = None
+
+        try:
+            progress.start("preprocessing", subjects)
+
+            steps = self._get_steps_for_mode(mode)
+
+            self._execute_steps(
+                steps=steps,
+                subjects=subjects,
+                task=resolved_task,
+                use_icalabel=use_icalabel,
+                n_jobs=n_jobs,
+                progress=progress,
+            )
+
+            progress.complete(success=True)
+            run_status = "success"
+
+            return [{
+                "subjects": subjects,
+                "mode": mode,
+                "status": "success",
+            }]
+        except Exception as exc:
+            run_error = str(exc)
+            raise
+        finally:
+            self._write_run_metadata(
+                run_context,
+                status=run_status,
+                error=run_error,
+                outputs={},
+                summary={
+                    "n_subjects": len(subjects),
+                    "mode": mode,
+                },
+            )
     
     def _normalize_subjects(self, subjects: List[str]) -> Union[str, List[str]]:
         """Normalize subjects list to 'all' string if needed."""

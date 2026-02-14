@@ -43,16 +43,42 @@ class EEGRawToBidsPipeline(PipelineBase):
         **kwargs: Any,
     ) -> int:
         resolved_task = self._validate_batch_inputs(subjects, task)
-        return run_raw_to_bids(
-            source_root=self.source_root,
-            bids_root=self.bids_root,
-            task=resolved_task,
+        run_context = self._create_run_metadata_context(
             subjects=subjects,
-            montage=kwargs.get("montage", "easycap-M1"),
-            line_freq=float(kwargs.get("line_freq", 60.0)),
-            overwrite=bool(kwargs.get("overwrite", False)),
-            do_trim_to_first_volume=bool(kwargs.get("do_trim_to_first_volume", False)),
-            event_prefixes=kwargs.get("event_prefixes"),
-            keep_all_annotations=bool(kwargs.get("keep_all_annotations", False)),
-            _logger=self.logger,
+            task=resolved_task,
+            kwargs=kwargs,
         )
+        run_status = "failed"
+        run_error: Optional[str] = None
+        n_converted = 0
+
+        try:
+            n_converted = run_raw_to_bids(
+                source_root=self.source_root,
+                bids_root=self.bids_root,
+                task=resolved_task,
+                subjects=subjects,
+                montage=kwargs.get("montage", "easycap-M1"),
+                line_freq=float(kwargs.get("line_freq", 60.0)),
+                overwrite=bool(kwargs.get("overwrite", False)),
+                do_trim_to_first_volume=bool(kwargs.get("do_trim_to_first_volume", False)),
+                event_prefixes=kwargs.get("event_prefixes"),
+                keep_all_annotations=bool(kwargs.get("keep_all_annotations", False)),
+                _logger=self.logger,
+            )
+            run_status = "success"
+            return n_converted
+        except Exception as exc:
+            run_error = str(exc)
+            raise
+        finally:
+            self._write_run_metadata(
+                run_context,
+                status=run_status,
+                error=run_error,
+                outputs={},
+                summary={
+                    "n_subjects": len(subjects),
+                    "n_converted": n_converted,
+                },
+            )

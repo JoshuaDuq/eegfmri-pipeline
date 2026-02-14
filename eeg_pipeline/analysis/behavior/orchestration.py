@@ -4062,12 +4062,21 @@ def stage_condition_column(
     compare_col = _resolve_condition_compare_column(df_trials, ctx.config)
     overwrite = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
     if use_run_unit and run_col in df_trials.columns and compare_col in df_trials.columns:
-        ctx.logger.info("Condition: aggregating to run-level (primary_unit=%s)", primary_unit)
-        # For condition column, take mode of condition and mean of features
-        df_agg = df_trials.groupby(run_col)[feature_cols].mean()
-        df_agg[compare_col] = df_trials.groupby(run_col)[compare_col].apply(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0])
-        df_trials = df_agg.reset_index()
-        ctx.logger.info("  Run-level: %d observations", len(df_trials))
+        ctx.logger.info("Condition: aggregating to run×condition level (primary_unit=%s)", primary_unit)
+        group_keys = [run_col, compare_col]
+        df_agg = (
+            df_trials.groupby(group_keys, dropna=True)[feature_cols]
+            .mean(numeric_only=True)
+            .reset_index()
+        )
+        cell_counts = (
+            df_trials.groupby(group_keys, dropna=True)
+            .size()
+            .rename("n_trials_cell")
+            .reset_index()
+        )
+        df_trials = df_agg.merge(cell_counts, on=group_keys, how="left")
+        ctx.logger.info("  Run×condition level: %d observations", len(df_trials))
     
     if not feature_cols:
         ctx.logger.info("Condition column: no feature columns found; skipping.")
@@ -4424,12 +4433,23 @@ def stage_condition_multigroup(
             raise ValueError(
                 f"Run-level multigroup condition comparisons requested but run column '{run_col}' is missing."
             )
-        ctx.logger.info("Condition multigroup: aggregating to run-level (primary_unit=%s)", primary_unit)
-        df_agg = df_trials.groupby(run_col)[feature_cols].mean(numeric_only=True)
-        df_agg[compare_column] = df_trials.groupby(run_col)[compare_column].apply(
-            lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]
+        ctx.logger.info(
+            "Condition multigroup: aggregating to run×condition level (primary_unit=%s)",
+            primary_unit,
         )
-        df_trials = df_agg.reset_index()
+        group_keys = [run_col, compare_column]
+        df_agg = (
+            df_trials.groupby(group_keys, dropna=True)[feature_cols]
+            .mean(numeric_only=True)
+            .reset_index()
+        )
+        cell_counts = (
+            df_trials.groupby(group_keys, dropna=True)
+            .size()
+            .rename("n_trials_cell")
+            .reset_index()
+        )
+        df_trials = df_agg.merge(cell_counts, on=group_keys, how="left")
     
     if isinstance(compare_labels, (list, tuple)) and len(compare_labels) >= len(compare_values):
         group_labels = [str(l).strip() for l in compare_labels[:len(compare_values)]]
@@ -5240,6 +5260,13 @@ def run_group_level_mixed_effects(
             n_subjects
         )
     
+    run_col_cfg = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    run_col_candidates = [run_col_cfg, "run_id", "run", "block"]
+    run_col = next((c for c in run_col_candidates if c and c in combined.columns), None)
+    trial_order_col = next((c for c in ("trial_index_within_group", "trial_index") if c in combined.columns), None)
+    include_temperature = bool(get_config_value(config, "behavior_analysis.mixed_effects.include_temperature", True))
+    max_run_dummies = int(get_config_value(config, "behavior_analysis.run_adjustment.max_dummies", 20))
+
     records: List[Dict[str, Any]] = []
     family_records: List[Dict[str, Any]] = []
     
@@ -5247,23 +5274,47 @@ def run_group_level_mixed_effects(
         feat_type = _cache.get_feature_type(str(feat), config)
         family_id = f"mixed_{feat_type}"
         
-        df_valid = combined[["subject_id", "rating", feat]].dropna()
+        model_cols = ["subject_id", "rating", feat]
+        if include_temperature and "temperature" in combined.columns:
+            model_cols.append("temperature")
+        if trial_order_col is not None:
+            model_cols.append(trial_order_col)
+        if run_col is not None:
+            model_cols.append(run_col)
+        model_cols = list(dict.fromkeys(model_cols))
+
+        df_valid = combined[model_cols].dropna()
         if len(df_valid) < 10 or df_valid["subject_id"].nunique() < 2:
             continue
         
         df_valid = df_valid.rename(columns={feat: "feature_value"})
+        formula_terms = ["feature_value"]
+        covariate_terms: List[str] = []
+        if include_temperature and "temperature" in df_valid.columns and df_valid["temperature"].nunique(dropna=True) > 1:
+            formula_terms.append("temperature")
+            covariate_terms.append("temperature")
+        if trial_order_col is not None and trial_order_col in df_valid.columns and df_valid[trial_order_col].nunique(dropna=True) > 1:
+            formula_terms.append(trial_order_col)
+            covariate_terms.append(trial_order_col)
+        if run_col is not None and run_col in df_valid.columns:
+            n_run_levels = int(df_valid[run_col].nunique(dropna=True))
+            if n_run_levels > 1 and n_run_levels <= max(1, max_run_dummies + 1):
+                formula_terms.append(f"C({run_col})")
+                covariate_terms.append(f"C({run_col})")
+
+        formula = "rating ~ " + " + ".join(formula_terms)
         
         try:
             if random_effects == "slope":
                 model = smf.mixedlm(
-                    "rating ~ feature_value",
+                    formula,
                     df_valid,
                     groups=df_valid["subject_id"],
                     re_formula="~feature_value"
                 )
             else:
                 model = smf.mixedlm(
-                    "rating ~ feature_value",
+                    formula,
                     df_valid,
                     groups=df_valid["subject_id"]
                 )
@@ -5287,6 +5338,8 @@ def run_group_level_mixed_effects(
                 "fixed_z": fixed_z,
                 "fixed_p": fixed_p,
                 "random_effects": random_effects,
+                "formula": formula,
+                "covariates": "|".join(covariate_terms) if covariate_terms else "",
                 "aic": result.aic,
                 "bic": result.bic,
                 "converged": result.converged,
@@ -5299,7 +5352,8 @@ def run_group_level_mixed_effects(
             })
             
         except Exception as exc:
-            raise RuntimeError(f"Mixed-effects failed for feature '{feat}'") from exc
+            logger.warning("Mixed-effects failed for feature '%s': %s", feat, exc)
+            continue
     
     if not records:
         logger.warning("Mixed-effects: no valid results.")
@@ -5364,6 +5418,7 @@ def run_group_level_correlations(
     from eeg_pipeline.infra.paths import deriv_stats_path
     from eeg_pipeline.infra.tsv import read_table
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
+    from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
     
     feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
     if isinstance(feature_files, str):
@@ -5407,6 +5462,7 @@ def run_group_level_correlations(
     
     feature_cols = [c for c in combined.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
     rating = pd.to_numeric(combined["rating"], errors="coerce").to_numpy()
+    subject_all = combined["subject_id"].astype(str).to_numpy()
     
     records: List[Dict[str, Any]] = []
     rng = np.random.default_rng(42)
@@ -5420,50 +5476,69 @@ def run_group_level_correlations(
         
         if valid_mask.sum() < 10:
             continue
-        
+
+        feature_valid = feature_vals[valid_mask]
+        rating_valid = rating[valid_mask]
+        subjects_valid = subject_all[valid_mask]
+        block_valid = combined[block_col].to_numpy()[valid_mask] if block_col is not None else None
+
+        subject_counts = pd.Series(subjects_valid).value_counts()
+        eligible = pd.Series(subjects_valid).map(subject_counts).to_numpy() >= 2
+        if int(eligible.sum()) < 10:
+            continue
+        feature_valid = feature_valid[eligible]
+        rating_valid = rating_valid[eligible]
+        subjects_valid = subjects_valid[eligible]
+        if block_valid is not None:
+            block_valid = block_valid[eligible]
+
+        feature_ws = feature_valid - pd.Series(feature_valid).groupby(pd.Series(subjects_valid)).transform("mean").to_numpy()
+        rating_ws = rating_valid - pd.Series(rating_valid).groupby(pd.Series(subjects_valid)).transform("mean").to_numpy()
+        finite_ws = np.isfinite(feature_ws) & np.isfinite(rating_ws)
+        if int(finite_ws.sum()) < 10:
+            continue
+        feature_ws = feature_ws[finite_ws]
+        rating_ws = rating_ws[finite_ws]
+        subjects_valid = subjects_valid[finite_ws]
+        if block_valid is not None:
+            block_valid = block_valid[finite_ws]
+
         r_obs, _ = compute_correlation(
-            feature_vals[valid_mask],
-            rating[valid_mask],
+            feature_ws,
+            rating_ws,
             method="spearman",
         )
         
         if not np.isfinite(r_obs):
             continue
-        
-        # Block/run-restricted permutation for valid p-values
-        if use_block_permutation and block_col is not None:
-            blocks = combined[block_col].to_numpy()[valid_mask]
-            subjects_arr = combined["subject_id"].to_numpy()[valid_mask]
-            
-            null_rs = []
-            for _ in range(n_perm):
-                rating_perm = rating[valid_mask].copy()
-                
-                # Permute within each subject-block combination
-                for subj in np.unique(subjects_arr):
-                    subj_mask = subjects_arr == subj
-                    for blk in np.unique(blocks[subj_mask]):
-                        block_mask = subj_mask & (blocks == blk)
-                        rating_perm[block_mask] = rng.permutation(rating_perm[block_mask])
-                
-                r_perm, _ = compute_correlation(feature_vals[valid_mask], rating_perm, method="spearman")
-                if np.isfinite(r_perm):
-                    null_rs.append(r_perm)
-            
-            if null_rs:
-                p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (len(null_rs) + 1)
+
+        if use_block_permutation and block_col is not None and block_valid is not None:
+            block_groups = np.array([f"{subj}::{blk}" for subj, blk in zip(subjects_valid, block_valid)], dtype=object)
+            _, block_counts = np.unique(block_groups, return_counts=True)
+            if np.all(block_counts >= 2):
+                perm_groups = block_groups
+                perm_method = "subject_block_restricted"
             else:
-                p_perm = np.nan
+                perm_groups = subjects_valid
+                perm_method = "subject_restricted_fallback"
         else:
-            # Standard permutation (ignores block structure)
-            null_rs = []
-            for _ in range(n_perm):
-                rating_perm = rng.permutation(rating[valid_mask])
-                r_perm, _ = compute_correlation(feature_vals[valid_mask], rating_perm, method="spearman")
+            perm_groups = subjects_valid
+            perm_method = "subject_restricted"
+
+        null_rs = []
+        if int(n_perm) > 0:
+            for _ in range(int(n_perm)):
+                perm_idx = permute_within_groups(
+                    len(rating_ws),
+                    rng,
+                    perm_groups,
+                    scheme="shuffle",
+                )
+                rating_perm = rating_ws[perm_idx]
+                r_perm, _ = compute_correlation(feature_ws, rating_perm, method="spearman")
                 if np.isfinite(r_perm):
                     null_rs.append(r_perm)
-            
-            p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (len(null_rs) + 1) if null_rs else np.nan
+        p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (len(null_rs) + 1) if null_rs else np.nan
         
         records.append({
             "feature": str(feat),
@@ -5471,10 +5546,11 @@ def run_group_level_correlations(
             "family_id": family_id,
             "family_kind": "feature_type",
             "r": r_obs,
-            "n": int(valid_mask.sum()),
-            "n_subjects": combined.loc[valid_mask, "subject_id"].nunique(),
+            "n": int(len(feature_ws)),
+            "n_subjects": int(pd.Series(subjects_valid).nunique()),
+            "estimator": "within_subject_centered_spearman",
             "p_perm": p_perm,
-            "permutation_method": "block_restricted" if use_block_permutation and block_col else "standard",
+            "permutation_method": perm_method,
             "n_perm": n_perm,
         })
     

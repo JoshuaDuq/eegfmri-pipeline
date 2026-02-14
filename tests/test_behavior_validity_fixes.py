@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from tests.pipelines_test_utils import DotConfig
 
@@ -140,6 +141,66 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(captured["min_samples"], 7)
         self.assertEqual(str(out["condition_column"].iloc[0]), "pain_binary")
 
+    def test_condition_run_level_keeps_run_condition_cells(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_condition_column
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "compare_column": "",
+                        "primary_unit": "run_mean",
+                        "compare_values": [],
+                        "permutation": {"enabled": True},
+                    },
+                    "run_adjustment": {"column": "run_id"},
+                },
+                "event_columns": {"pain_binary": ["pain_binary"]},
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "pain_binary": [1, 0, 1, 0],
+                "power_alpha": [0.2, 0.4, 0.8, 1.0],
+            }
+        )
+        captured = {}
+
+        def _fake_effects(features_df, pain_mask, nonpain_mask, min_samples, **kwargs):
+            captured["n_rows"] = len(features_df)
+            return pd.DataFrame(
+                {
+                    "feature": ["power_alpha"],
+                    "hedges_g": [0.5],
+                    "p_value": [0.2],
+                    "p_primary": [0.2],
+                }
+            )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.api.split_by_condition",
+            return_value=(np.array([True, False, True, False]), np.array([False, True, False, True]), 2, 2),
+        ), patch(
+            "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
+            side_effect=_fake_effects,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+            side_effect=lambda _ctx, _cfg, df, **_kw: df,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+            return_value=None,
+        ):
+            stage_condition_column(
+                ctx,
+                SimpleNamespace(fdr_alpha=0.05, n_jobs=1, min_samples=2),
+                df_trials=df_trials,
+                feature_cols=["power_alpha"],
+            )
+
+        self.assertEqual(captured["n_rows"], 4)
+
     def test_group_trial_table_discovery_finds_unsuffixed_trials(self):
         from eeg_pipeline.analysis.behavior.orchestration import _find_trial_table_path
 
@@ -195,6 +256,114 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertGreaterEqual(read_table_mock.call_count, 2)
         self.assertTrue(all(call.args[0].suffix == ".tsv" for call in read_table_mock.call_args_list))
+
+    def test_group_correlations_use_within_subject_centering(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        rng = np.random.default_rng(0)
+        n = 24
+        run_ids = np.repeat([1, 2, 3], 8)
+        df_a = pd.DataFrame(
+            {
+                "rating": 80 + rng.normal(scale=0.8, size=n),
+                "power_alpha": 5 + rng.normal(scale=0.8, size=n),
+                "run_id": run_ids,
+            }
+        )
+        df_b = pd.DataFrame(
+            {
+                "rating": 20 + rng.normal(scale=0.8, size=n),
+                "power_alpha": -5 + rng.normal(scale=0.8, size=n),
+                "run_id": run_ids,
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df_a, df_b],
+        ):
+            out = run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=DotConfig({}),
+                logger=Mock(),
+                use_block_permutation=False,
+                n_perm=40,
+            )
+
+        self.assertFalse(out.empty)
+        self.assertLess(abs(float(out.iloc[0]["r"])), 0.35)
+
+    def test_group_mixed_effects_formula_includes_temperature_and_run_covariates(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_mixed_effects
+
+        n = 20
+        base_df = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, n),
+                "power_alpha": np.linspace(0.1, 1.2, n),
+                "temperature": np.linspace(42, 47, n),
+                "trial_index": np.arange(n),
+                "run_id": np.repeat([1, 2], n // 2),
+            }
+        )
+
+        formulas = []
+
+        class _FakeFit:
+            fe_params = {"feature_value": 0.1}
+            bse = {"feature_value": 0.05}
+            tvalues = {"feature_value": 2.0}
+            pvalues = {"feature_value": 0.04}
+            aic = 1.0
+            bic = 1.5
+            converged = True
+
+        class _FakeModel:
+            def fit(self, reml=True):
+                return _FakeFit()
+
+        def _fake_mixedlm(formula, data, groups, re_formula=None):
+            formulas.append(formula)
+            return _FakeModel()
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[base_df.copy(), base_df.copy()],
+        ), patch(
+            "statsmodels.formula.api.mixedlm",
+            side_effect=_fake_mixedlm,
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+            side_effect=lambda df, **_kw: df.assign(q_within_family=pd.to_numeric(df["fixed_p"], errors="coerce")),
+        ):
+            result = run_group_level_mixed_effects(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=DotConfig({}),
+                logger=Mock(),
+                max_features=1,
+                fdr_alpha=0.05,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertFalse(result.df.empty)
+        self.assertTrue(formulas)
+        self.assertIn("temperature", formulas[0])
+        self.assertIn("trial_index", formulas[0])
+        self.assertIn("C(run_id)", formulas[0])
 
     def test_mediation_requires_non_iid_inference_when_iid_disallowed(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_mediation
@@ -257,6 +426,28 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 stage_moderation(ctx, SimpleNamespace(fdr_alpha=0.05, moderation_max_features=None, method_label="", moderation_min_samples=5))
+
+    def test_moderation_simple_slope_uses_covariance_term(self):
+        from eeg_pipeline.utils.analysis.stats.moderation import compute_moderation_effect
+
+        rng = np.random.default_rng(0)
+        n = 300
+        x = rng.normal(size=n)
+        w = 0.6 * x + rng.normal(scale=0.8, size=n)
+        y = 0.5 + 0.8 * x - 0.4 * w + 0.9 * (x * w) + rng.normal(scale=1.0, size=n)
+
+        result = compute_moderation_effect(x, w, y, center_predictors=True)
+        self.assertTrue(np.isfinite(result.cov_b1_b3))
+
+        w_std = float(np.std(w))
+        slope_high = result.b1 + result.b3 * w_std
+        var_slope_high = result.var_b1 + (w_std**2) * result.var_b3 + 2 * w_std * result.cov_b1_b3
+        self.assertGreater(var_slope_high, 0.0)
+
+        dof = max(result.n - 4, 1)
+        t_value = slope_high / np.sqrt(var_slope_high)
+        expected_p = float(2 * (1 - stats.t.cdf(np.abs(t_value), dof)))
+        self.assertAlmostEqual(float(result.p_slope_high), expected_p, places=7)
 
     def test_condition_effects_respect_min_samples(self):
         from eeg_pipeline.utils.analysis.stats.effect_size import compute_batch_condition_effects

@@ -193,54 +193,80 @@ class UtilityPipeline(PipelineBase):
         merge_kwargs = self._extract_merge_psychopy_kwargs(kwargs)
 
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
-
-        progress.start("utilities", subjects)
+        run_context = self._create_run_metadata_context(
+            subjects=subjects,
+            task=resolved_task,
+            kwargs=kwargs,
+        )
+        run_status = "failed"
+        run_error: Optional[str] = None
+        n_converted = 0
+        n_merged = 0
 
         import time as _time
 
-        self.logger.info(
-            "=== Batch utilities: %d subjects, task-%s ===",
-            len(subjects), resolved_task,
-        )
+        try:
+            progress.start("utilities", subjects)
 
-        progress.step("Converting to BIDS", current=1, total=2)
-        t0 = _time.perf_counter()
-        n_converted = run_raw_to_bids(
-            source_root=self.source_root,
-            bids_root=self.bids_root,
-            task=resolved_task,
-            subjects=subjects,
-            **raw_to_bids_kwargs,
-        )
-        self.logger.info(
-            "Raw-to-BIDS: %d/%d subjects converted (%.1fs)",
-            n_converted, len(subjects), _time.perf_counter() - t0,
-        )
+            self.logger.info(
+                "=== Batch utilities: %d subjects, task-%s ===",
+                len(subjects), resolved_task,
+            )
 
-        progress.step("Merging behavior", current=2, total=2)
-        t1 = _time.perf_counter()
-        n_merged = run_merge_psychopy(
-            bids_root=self.bids_root,
-            source_root=self.source_root,
-            task=resolved_task,
-            subjects=subjects,
-            **merge_kwargs,
-        )
-        self.logger.info(
-            "Merge-psychopy: %d/%d subjects merged (%.1fs)",
-            n_merged, len(subjects), _time.perf_counter() - t1,
-        )
+            progress.step("Converting to BIDS", current=1, total=2)
+            t0 = _time.perf_counter()
+            n_converted = run_raw_to_bids(
+                source_root=self.source_root,
+                bids_root=self.bids_root,
+                task=resolved_task,
+                subjects=subjects,
+                **raw_to_bids_kwargs,
+            )
+            self.logger.info(
+                "Raw-to-BIDS: %d/%d subjects converted (%.1fs)",
+                n_converted, len(subjects), _time.perf_counter() - t0,
+            )
 
-        progress.complete(success=True)
+            progress.step("Merging behavior", current=2, total=2)
+            t1 = _time.perf_counter()
+            n_merged = run_merge_psychopy(
+                bids_root=self.bids_root,
+                source_root=self.source_root,
+                task=resolved_task,
+                subjects=subjects,
+                **merge_kwargs,
+            )
+            self.logger.info(
+                "Merge-psychopy: %d/%d subjects merged (%.1fs)",
+                n_merged, len(subjects), _time.perf_counter() - t1,
+            )
 
-        return [
-            {
-                "subjects": subjects,
-                "n_converted": n_converted,
-                "n_merged": n_merged,
-                "status": "success",
-            }
-        ]
+            progress.complete(success=True)
+            run_status = "success"
+
+            return [
+                {
+                    "subjects": subjects,
+                    "n_converted": n_converted,
+                    "n_merged": n_merged,
+                    "status": "success",
+                }
+            ]
+        except Exception as exc:
+            run_error = str(exc)
+            raise
+        finally:
+            self._write_run_metadata(
+                run_context,
+                status=run_status,
+                error=run_error,
+                outputs={},
+                summary={
+                    "n_subjects": len(subjects),
+                    "n_converted": n_converted,
+                    "n_merged": n_merged,
+                },
+            )
 
     def run_raw_to_bids(
         self,

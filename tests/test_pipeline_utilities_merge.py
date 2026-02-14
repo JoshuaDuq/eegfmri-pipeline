@@ -275,3 +275,78 @@ class TestUtilitiesAndMergeCompletion(unittest.TestCase):
             with patch("eeg_pipeline.pipelines.merge_psychopy.read_tsv", side_effect=RuntimeError("bad")):
                 p._validate_against_fmri_events("0001", "t")
             self.assertTrue(p.logger.warning.called)
+
+        def test_custom_run_batch_pipelines_write_reproducibility_metadata(self):
+            from eeg_pipeline.pipelines.eeg_raw_to_bids import EEGRawToBidsPipeline
+            from eeg_pipeline.pipelines.merge_psychopy import MergePsychopyPipeline
+            from eeg_pipeline.pipelines.utilities import UtilityPipeline
+
+            tmp = Path(tempfile.mkdtemp())
+            deriv_root = tmp / "derivatives"
+            bids_root = tmp / "bids"
+            source_root = tmp / "source"
+
+            cfg = DotConfig(
+                {
+                    "project": {"task": "thermalactive"},
+                    "bids_root": str(bids_root),
+                    "paths": {"source_data": str(source_root)},
+                    "alignment": {"allow_misaligned_trim": False},
+                }
+            )
+
+            p_raw = object.__new__(EEGRawToBidsPipeline)
+            p_raw.name = "eeg_raw_to_bids"
+            p_raw.config = cfg
+            p_raw.logger = Mock()
+            p_raw.deriv_root = deriv_root
+            p_raw.bids_root = bids_root
+            p_raw.source_root = source_root
+
+            with patch("eeg_pipeline.pipelines.eeg_raw_to_bids.run_raw_to_bids", return_value=1):
+                n = p_raw.run_batch(["0001"], task="thermalactive", overwrite=True)
+            self.assertEqual(n, 1)
+
+            raw_meta = sorted((deriv_root / "logs" / "run_metadata" / "eeg_raw_to_bids").glob("run_*.json"))
+            self.assertTrue(raw_meta)
+            raw_payload = json.loads(raw_meta[-1].read_text(encoding="utf-8"))
+            self.assertEqual(raw_payload["status"], "success")
+            self.assertEqual(raw_payload["specifications"]["overwrite"], True)
+
+            p_merge = object.__new__(MergePsychopyPipeline)
+            p_merge.name = "merge_psychopy"
+            p_merge.config = cfg
+            p_merge.logger = Mock()
+            p_merge.deriv_root = deriv_root
+            p_merge.bids_root = bids_root
+            p_merge.source_root = source_root
+
+            with patch("eeg_pipeline.pipelines.merge_psychopy.run_merge_psychopy", return_value=1), patch.object(
+                MergePsychopyPipeline,
+                "_validate_against_fmri_events",
+            ):
+                n = p_merge.run_batch(["0001"], task="thermalactive", dry_run=False)
+            self.assertEqual(n, 1)
+
+            merge_meta = sorted((deriv_root / "logs" / "run_metadata" / "merge_psychopy").glob("run_*.json"))
+            self.assertTrue(merge_meta)
+            merge_payload = json.loads(merge_meta[-1].read_text(encoding="utf-8"))
+            self.assertEqual(merge_payload["status"], "success")
+
+            p_util = object.__new__(UtilityPipeline)
+            p_util.name = "utilities"
+            p_util.config = cfg
+            p_util.logger = Mock()
+            p_util.deriv_root = deriv_root
+            p_util.bids_root = bids_root
+            p_util.source_root = source_root
+
+            with patch("eeg_pipeline.pipelines.utilities.run_raw_to_bids", return_value=1), patch(
+                "eeg_pipeline.pipelines.utilities.run_merge_psychopy", return_value=1
+            ):
+                p_util.run_batch(["0001"], task="thermalactive", progress=_NoopProgress())
+
+            util_meta = sorted((deriv_root / "logs" / "run_metadata" / "utilities").glob("run_*.json"))
+            self.assertTrue(util_meta)
+            util_payload = json.loads(util_meta[-1].read_text(encoding="utf-8"))
+            self.assertEqual(util_payload["status"], "success")

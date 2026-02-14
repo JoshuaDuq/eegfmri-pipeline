@@ -106,3 +106,62 @@ class TestBaseCompletion(unittest.TestCase):
         self.assertEqual(failed, ["0001"])
         self.assertIsNone(d.run_group_level(["0001"], task="x"))
         self.assertIsNone(d.process_subject("0001", "x"))
+
+    def test_base_run_batch_writes_reproducibility_metadata(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def __init__(self):
+                self.name = "dummy"
+                self.config = DotConfig({"project": {"task": "x"}, "paths": {"bids_root": "/tmp/bids"}})
+                self.logger = Mock()
+                self.deriv_root = Path(tempfile.mkdtemp())
+
+            def process_subject(self, subject: str, task: str, **kwargs):
+                return None
+
+        d = Dummy()
+        with patch("eeg_pipeline.pipelines.base.BatchProgress", _NoopBatchProgress):
+            ledger = d.run_batch(["0001"], task="x", progress=_NoopProgress(), example_flag=True)
+        self.assertEqual(ledger[0]["status"], "success")
+
+        metadata_dir = d.deriv_root / "logs" / "run_metadata" / "dummy"
+        metadata_files = sorted(metadata_dir.glob("run_*.json"))
+        self.assertTrue(metadata_files)
+
+        payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
+        self.assertEqual(payload["pipeline"], "dummy")
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["subjects"], ["0001"])
+        self.assertEqual(payload["task"], "x")
+        self.assertEqual(payload["specifications"]["example_flag"], True)
+        self.assertEqual(payload["config"]["project"]["task"], "x")
+
+    def test_base_run_batch_partial_success_records_partial_status(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def __init__(self):
+                self.name = "dummy_partial"
+                self.config = DotConfig({"project": {"task": "x"}})
+                self.logger = Mock()
+                self.deriv_root = Path(tempfile.mkdtemp())
+
+            def process_subject(self, subject: str, task: str, **kwargs):
+                if subject == "0001":
+                    raise RuntimeError("boom")
+                return None
+
+        d = Dummy()
+        with patch("eeg_pipeline.pipelines.base.BatchProgress", _NoopBatchProgress):
+            ledger = d.run_batch(["0001", "0002"], task="x", progress=_NoopProgress())
+
+        self.assertEqual(len(ledger), 2)
+        self.assertEqual(sum(1 for row in ledger if row.get("status") == "failed"), 1)
+
+        metadata_dir = d.deriv_root / "logs" / "run_metadata" / "dummy_partial"
+        metadata_files = sorted(metadata_dir.glob("run_*.json"))
+        self.assertTrue(metadata_files)
+
+        payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
+        self.assertEqual(payload["status"], "partial_success")

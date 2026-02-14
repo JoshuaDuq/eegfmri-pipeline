@@ -10,12 +10,19 @@ Provides a standardized base class for analysis pipelines, handling:
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import platform
+import sys
 import time
 import traceback
 from abc import ABC, abstractmethod
+from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional, Dict
+from uuid import uuid4
 
 from eeg_pipeline.utils.config.loader import load_config
 from eeg_pipeline.infra.logging import (
@@ -92,6 +99,156 @@ class PipelineBase(ABC):
         """Complete progress tracking if available."""
         if progress is not None:
             progress.complete(success=success)
+
+    def _sanitize_metadata_value(self, value: Any, depth: int = 0) -> Any:
+        """Convert arbitrary Python values to JSON-safe metadata payloads."""
+        if depth > 8:
+            return repr(value)
+
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+
+        if isinstance(value, Path):
+            return str(value)
+
+        if is_dataclass(value):
+            try:
+                return self._sanitize_metadata_value(asdict(value), depth + 1)
+            except Exception:
+                return repr(value)
+
+        if isinstance(value, dict):
+            return {
+                str(k): self._sanitize_metadata_value(v, depth + 1)
+                for k, v in value.items()
+            }
+
+        if isinstance(value, (list, tuple, set)):
+            return [self._sanitize_metadata_value(v, depth + 1) for v in value]
+
+        # Compact fallback for arrays/dataframes/objects without serializing full data.
+        if hasattr(value, "shape") and hasattr(value, "dtype"):
+            shape = getattr(value, "shape", None)
+            dtype = getattr(value, "dtype", None)
+            return {
+                "__type__": type(value).__name__,
+                "shape": list(shape) if shape is not None else None,
+                "dtype": str(dtype) if dtype is not None else None,
+            }
+
+        if hasattr(value, "__dict__"):
+            try:
+                return self._sanitize_metadata_value(vars(value), depth + 1)
+            except Exception:
+                return repr(value)
+
+        return repr(value)
+
+    def _create_run_metadata_context(
+        self,
+        *,
+        subjects: List[str],
+        task: Optional[str],
+        kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Prepare metadata context at pipeline run start."""
+        started_at = datetime.now(timezone.utc)
+        run_id = f"{started_at.strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:8]}"
+
+        safe_specs = {
+            key: value
+            for key, value in kwargs.items()
+            if key != "progress"
+        }
+
+        return {
+            "run_id": run_id,
+            "started_at": started_at,
+            "task": task,
+            "subjects": list(subjects),
+            "specifications": self._sanitize_metadata_value(safe_specs),
+        }
+
+    def _write_run_metadata(
+        self,
+        run_context: Dict[str, Any],
+        *,
+        status: str,
+        error: Optional[str] = None,
+        outputs: Optional[Dict[str, Any]] = None,
+        summary: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Path]:
+        """Persist run-level reproducibility metadata as JSON."""
+        pipeline_name = getattr(self, "name", type(self).__name__)
+        logger = getattr(self, "logger", None)
+        deriv_root = getattr(self, "deriv_root", None)
+        if deriv_root is None:
+            if logger is not None:
+                logger.warning(
+                    "Skipping run metadata for %s: deriv_root is not set.",
+                    pipeline_name,
+                )
+            return None
+
+        try:
+            started_at = run_context["started_at"]
+            finished_at = datetime.now(timezone.utc)
+            duration_seconds = round(
+                (finished_at - started_at).total_seconds(),
+                3,
+            )
+
+            metadata_dir = (
+                Path(deriv_root)
+                / "logs"
+                / "run_metadata"
+                / pipeline_name
+            )
+            metadata_dir.mkdir(parents=True, exist_ok=True)
+
+            raw_config: Any = getattr(self, "config", {})
+            if isinstance(raw_config, dict):
+                raw_config = dict(raw_config)
+
+            payload = {
+                "schema_version": "1.0",
+                "run_id": run_context["run_id"],
+                "pipeline": pipeline_name,
+                "status": status,
+                "started_at_utc": started_at.isoformat(),
+                "finished_at_utc": finished_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "task": run_context.get("task"),
+                "subjects": run_context.get("subjects", []),
+                "specifications": run_context.get("specifications", {}),
+                "config": self._sanitize_metadata_value(raw_config),
+                "environment": {
+                    "cwd": os.getcwd(),
+                    "argv": list(sys.argv),
+                    "python_executable": sys.executable,
+                    "python_version": platform.python_version(),
+                    "platform": platform.platform(),
+                },
+                "outputs": self._sanitize_metadata_value(outputs or {}),
+                "summary": self._sanitize_metadata_value(summary or {}),
+            }
+            if error:
+                payload["error"] = str(error)
+
+            out_path = metadata_dir / f"run_{run_context['run_id']}.json"
+            out_path.write_text(
+                json.dumps(payload, indent=2),
+                encoding="utf-8",
+            )
+            return out_path
+        except Exception as exc:
+            if logger is not None:
+                logger.warning(
+                    "Failed writing run metadata for %s: %s",
+                    pipeline_name,
+                    exc,
+                )
+            return None
 
     def _process_single_subject(
         self,
@@ -170,6 +327,13 @@ class PipelineBase(ABC):
         """Run the pipeline for a batch of subjects, returning a per-subject ledger."""
         resolved_task = self._validate_batch_inputs(subjects, task)
         progress = kwargs.get("progress")
+        run_context = self._create_run_metadata_context(
+            subjects=subjects,
+            task=resolved_task,
+            kwargs=kwargs,
+        )
+        run_status = "failed"
+        run_error: Optional[str] = None
 
         if progress is not None:
             progress.start(self.name, subjects)
@@ -183,42 +347,65 @@ class PipelineBase(ABC):
         ledger_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            with BatchProgress(
-                subjects=subjects,
-                logger=self.logger,
-                desc=self.name.title(),
-            ) as batch:
-                for subject in subjects:
-                    start_time = batch.start_subject(subject)
-                    try:
-                        self._process_single_subject(
-                            subject,
-                            resolved_task,
-                            start_time,
-                            ledger,
-                            ledger_dir,
-                            **kwargs,
-                        )
-                        batch.finish_subject(subject, start_time)
-                    except Exception:
-                        batch.finish_subject(subject, start_time)
-                        if fail_fast:
-                            self._complete_progress(progress, success=False)
-                            raise
+            try:
+                with BatchProgress(
+                    subjects=subjects,
+                    logger=self.logger,
+                    desc=self.name.title(),
+                ) as batch:
+                    for subject in subjects:
+                        start_time = batch.start_subject(subject)
+                        try:
+                            self._process_single_subject(
+                                subject,
+                                resolved_task,
+                                start_time,
+                                ledger,
+                                ledger_dir,
+                                **kwargs,
+                            )
+                            batch.finish_subject(subject, start_time)
+                        except Exception:
+                            batch.finish_subject(subject, start_time)
+                            if fail_fast:
+                                self._complete_progress(progress, success=False)
+                                raise
+            finally:
+                self._write_ledger(ledger, resolved_ledger_path)
+
+            failed_subjects = self._handle_batch_failures(
+                ledger, subjects, resolved_ledger_path, progress
+            )
+
+            if len(subjects) >= _MIN_SUBJECTS_FOR_GROUP_ANALYSIS:
+                self.run_group_level(subjects, task=resolved_task, **kwargs)
+
+            all_succeeded = len(failed_subjects) == 0
+            run_status = "success" if all_succeeded else "partial_success"
+            self._complete_progress(progress, success=all_succeeded)
+
+            return ledger
+        except Exception as exc:
+            run_error = str(exc)
+            raise
         finally:
-            self._write_ledger(ledger, resolved_ledger_path)
-
-        failed_subjects = self._handle_batch_failures(
-            ledger, subjects, resolved_ledger_path, progress
-        )
-
-        if len(subjects) >= _MIN_SUBJECTS_FOR_GROUP_ANALYSIS:
-            self.run_group_level(subjects, task=resolved_task, **kwargs)
-
-        all_succeeded = len(failed_subjects) == 0
-        self._complete_progress(progress, success=all_succeeded)
-
-        return ledger
+            summary = {
+                "n_subjects": len(subjects),
+                "n_success": sum(
+                    1 for item in ledger if item.get("status") == "success"
+                ),
+                "n_failed": sum(
+                    1 for item in ledger if item.get("status") == "failed"
+                ),
+            }
+            outputs = {"ledger_path": str(resolved_ledger_path)}
+            self._write_run_metadata(
+                run_context,
+                status=run_status,
+                error=run_error,
+                outputs=outputs,
+                summary=summary,
+            )
 
     @abstractmethod
     def process_subject(self, subject: str, task: str, **kwargs: Any) -> None:

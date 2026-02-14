@@ -54,31 +54,54 @@ class MergePsychopyPipeline(PipelineBase):
         **kwargs: Any,
     ) -> int:
         resolved_task = self._validate_batch_inputs(subjects, task)
+        run_context = self._create_run_metadata_context(
+            subjects=subjects,
+            task=resolved_task,
+            kwargs=kwargs,
+        )
+        run_status = "failed"
+        run_error: Optional[str] = None
+        n_merged = 0
         allow = kwargs.get(
             "allow_misaligned_trim",
             bool(self.config.get("alignment.allow_misaligned_trim", False)),
         )
-        n = run_merge_psychopy(
-            bids_root=self.bids_root,
-            source_root=self.source_root,
-            task=resolved_task,
-            subjects=subjects,
-            event_prefixes=kwargs.get("event_prefixes"),
-            event_types=kwargs.get("event_types"),
-            dry_run=bool(kwargs.get("dry_run", False)),
-            allow_misaligned_trim=bool(allow),
-            _logger=self.logger,
-        )
+        try:
+            n_merged = run_merge_psychopy(
+                bids_root=self.bids_root,
+                source_root=self.source_root,
+                task=resolved_task,
+                subjects=subjects,
+                event_prefixes=kwargs.get("event_prefixes"),
+                event_types=kwargs.get("event_types"),
+                dry_run=bool(kwargs.get("dry_run", False)),
+                allow_misaligned_trim=bool(allow),
+                _logger=self.logger,
+            )
 
-        if not bool(kwargs.get("dry_run", False)):
-            for subj in subjects:
-                self._validate_against_fmri_events(
-                    subj,
-                    resolved_task,
-                    qc_columns=kwargs.get("qc_columns"),
-                )
-
-        return n
+            if not bool(kwargs.get("dry_run", False)):
+                for subj in subjects:
+                    self._validate_against_fmri_events(
+                        subj,
+                        resolved_task,
+                        qc_columns=kwargs.get("qc_columns"),
+                    )
+            run_status = "success"
+            return n_merged
+        except Exception as exc:
+            run_error = str(exc)
+            raise
+        finally:
+            self._write_run_metadata(
+                run_context,
+                status=run_status,
+                error=run_error,
+                outputs={},
+                summary={
+                    "n_subjects": len(subjects),
+                    "n_merged": n_merged,
+                },
+            )
 
     def _validate_against_fmri_events(
         self,

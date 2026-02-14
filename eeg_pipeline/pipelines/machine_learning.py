@@ -631,59 +631,86 @@ class MLPipeline(PipelineBase):
         """
         params = self._extract_ml_parameters(kwargs)
         resolved_task = self._validate_inputs(subjects, task, params["cv_scope"])
-        
-        import time as _time
-
-        self.logger.info(
-            "=== ML pipeline: mode=%s, cv_scope=%s, model=%s ===",
-            mode, params["cv_scope"], params["model"],
-        )
-        self.logger.info(
-            "Subjects: %d, task: %s, permutations: %d, inner_splits: %d",
-            len(subjects), resolved_task, params["n_perm"], params["inner_splits"],
-        )
-        
-        params["progress"].start("machine_learning", subjects)
-        dispatcher = self._get_mode_dispatcher()
-        
-        if mode not in dispatcher:
-            valid_modes = ", ".join(sorted(dispatcher.keys()))
-            raise ValueError(f"Unknown mode: {mode} (expected one of: {valid_modes})")
-        
-        t0 = _time.perf_counter()
-        executor = dispatcher[mode]
-        results_dir = executor(
+        run_context = self._create_run_metadata_context(
             subjects=subjects,
             task=resolved_task,
-            cv_scope=params["cv_scope"],
-            params=params,
-            progress=params["progress"],
+            kwargs={**kwargs, "mode": mode},
         )
-        if results_dir is None:
-            params["progress"].complete(success=False)
-            raise RuntimeError(
-                f"ML pipeline ({mode}) produced no output. "
-                "Treating this as a failed run to avoid false-success reporting."
+        run_status = "failed"
+        run_error: Optional[str] = None
+        results_dir: Optional[Path] = None
+
+        import time as _time
+
+        try:
+            self.logger.info(
+                "=== ML pipeline: mode=%s, cv_scope=%s, model=%s ===",
+                mode, params["cv_scope"], params["model"],
             )
-        elapsed = _time.perf_counter() - t0
-        
-        results_dirs = [results_dir]
-        
-        self.logger.info(
-            "ML pipeline (%s) complete: %s (%.1fs)",
-            mode, results_dir or "no output", elapsed,
-        )
-        params["progress"].complete(success=True)
-        
-        return [
-            {
-                "subjects": subjects,
-                "status": "success",
-                "mode": mode,
-                "results_dir": str(d),
-            }
-            for d in results_dirs
-        ]
+            self.logger.info(
+                "Subjects: %d, task: %s, permutations: %d, inner_splits: %d",
+                len(subjects), resolved_task, params["n_perm"], params["inner_splits"],
+            )
+
+            params["progress"].start("machine_learning", subjects)
+            dispatcher = self._get_mode_dispatcher()
+
+            if mode not in dispatcher:
+                valid_modes = ", ".join(sorted(dispatcher.keys()))
+                raise ValueError(f"Unknown mode: {mode} (expected one of: {valid_modes})")
+
+            t0 = _time.perf_counter()
+            executor = dispatcher[mode]
+            results_dir = executor(
+                subjects=subjects,
+                task=resolved_task,
+                cv_scope=params["cv_scope"],
+                params=params,
+                progress=params["progress"],
+            )
+            if results_dir is None:
+                params["progress"].complete(success=False)
+                raise RuntimeError(
+                    f"ML pipeline ({mode}) produced no output. "
+                    "Treating this as a failed run to avoid false-success reporting."
+                )
+            elapsed = _time.perf_counter() - t0
+
+            results_dirs = [results_dir]
+
+            self.logger.info(
+                "ML pipeline (%s) complete: %s (%.1fs)",
+                mode, results_dir or "no output", elapsed,
+            )
+            params["progress"].complete(success=True)
+            run_status = "success"
+
+            return [
+                {
+                    "subjects": subjects,
+                    "status": "success",
+                    "mode": mode,
+                    "results_dir": str(d),
+                }
+                for d in results_dirs
+            ]
+        except Exception as exc:
+            run_error = str(exc)
+            raise
+        finally:
+            self._write_run_metadata(
+                run_context,
+                status=run_status,
+                error=run_error,
+                outputs={
+                    "results_dir": str(results_dir) if results_dir is not None else None,
+                },
+                summary={
+                    "n_subjects": len(subjects),
+                    "mode": mode,
+                    "cv_scope": params.get("cv_scope"),
+                },
+            )
 
 
 
