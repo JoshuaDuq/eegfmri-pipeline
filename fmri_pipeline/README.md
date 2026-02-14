@@ -81,7 +81,7 @@ fmri_pipeline/
 │   └── fmri_trial_signatures.py   # Trial signature pipeline orchestrator
 └── utils/
     └── config/
-        └── fmri_config.yaml       # Default configuration
+        └── fmri_config.yaml       # Reference fMRI-only config (runtime defaults come from eeg_config.yaml)
 ```
 
 ### Output Layout (per subject)
@@ -543,7 +543,8 @@ For each signature weight map $\mathbf{w}$ and input image $\mathbf{x}$ (after r
 
 ## Configuration Reference
 
-All settings are defined in `fmri_pipeline/utils/config/fmri_config.yaml`. Key sections:
+Runtime settings are loaded from `eeg_pipeline/utils/config/eeg_config.yaml` (including `fmri_preprocessing`, `fmri_contrast`, and `fmri_constraint`).  
+`fmri_pipeline/utils/config/fmri_config.yaml` is kept as a reference/template for fMRI-only workflows.
 
 ### Paths
 

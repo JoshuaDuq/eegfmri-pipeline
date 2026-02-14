@@ -80,10 +80,12 @@ def permute_within_groups(
     min_group_size: int = 2,
     *,
     scheme: str = "shuffle",
+    strict: bool = False,
 ) -> np.ndarray:
     """Generate permutation indices, optionally within groups.
     
-    Raises ValueError if any group has fewer than min_group_size samples.
+    When any group has fewer than ``min_group_size`` samples, falls back to
+    ungrouped permutation unless ``strict=True``.
     """
     scheme = str(scheme or "shuffle").strip().lower()
     if scheme not in {"shuffle", "circular_shift"}:
@@ -102,6 +104,14 @@ def permute_within_groups(
     unique, counts = np.unique(groups, return_counts=True)
     small_groups = unique[counts < min_group_size]
     if len(small_groups) > 0:
+        if not strict:
+            return permute_within_groups(
+                n,
+                rng,
+                groups=None,
+                min_group_size=min_group_size,
+                scheme=scheme,
+            )
         raise ValueError(
             f"Groups {small_groups.tolist()} have fewer than {min_group_size} samples. "
             f"Permutation within groups requires at least {min_group_size} per group."
@@ -588,4 +598,3 @@ def compute_permutation_pvalues_with_cov_temp(
     )
 
     return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
-

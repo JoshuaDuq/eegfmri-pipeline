@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import warnings
 from typing import Any, List
 
 from eeg_pipeline.cli.common import (
@@ -865,14 +866,28 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if getattr(args, "temporal_feature_erds", None) is not None:
         features_cfg["erds"] = bool(args.temporal_feature_erds)
 
-    # Time-frequency heatmap
-    tfheatmap_cfg = ba.setdefault("time_frequency_heatmap", {})
-    if getattr(args, "tf_heatmap_enabled", None) is not None:
-        tfheatmap_cfg["enabled"] = bool(args.tf_heatmap_enabled)
-    if getattr(args, "tf_heatmap_freqs", None) is not None:
-        tfheatmap_cfg["freqs"] = list(args.tf_heatmap_freqs)
-    if getattr(args, "tf_heatmap_time_resolution_ms", None) is not None:
-        tfheatmap_cfg["time_resolution_ms"] = int(args.tf_heatmap_time_resolution_ms)
+    # Deprecated TF-heatmap aliases now map to canonical temporal settings.
+    tf_flag_used = any(
+        getattr(args, name, None) is not None
+        for name in (
+            "tf_heatmap_enabled",
+            "tf_heatmap_freqs",
+            "tf_heatmap_time_resolution_ms",
+        )
+    )
+    if tf_flag_used:
+        warnings.warn(
+            "TF-heatmap flags are deprecated. Use temporal options "
+            "(--temporal-include-tf-grid, --temporal-time-resolution-ms) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if getattr(args, "tf_heatmap_enabled", None) is not None:
+            temporal_cfg["include_tf_grid"] = bool(args.tf_heatmap_enabled)
+        if getattr(args, "tf_heatmap_time_resolution_ms", None) is not None:
+            temporal_cfg["time_resolution_ms"] = int(args.tf_heatmap_time_resolution_ms)
+        if getattr(args, "tf_heatmap_freqs", None) is not None:
+            temporal_cfg["freqs_hz"] = [float(v) for v in (args.tf_heatmap_freqs or [])]
 
     # Cluster
     if getattr(args, "cluster_threshold", None) is not None:

@@ -7,6 +7,8 @@ Builds a per-trial table: clean events.tsv columns + feature columns.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,6 +21,62 @@ import pandas as pd
 class TrialTableBuildResult:
     df: pd.DataFrame
     metadata: Dict[str, Any]
+
+
+TRIAL_TABLE_CONTRACT_VERSION = "1.0"
+
+
+def _schema_entries(df: pd.DataFrame) -> List[Dict[str, str]]:
+    return [
+        {"name": str(col), "dtype": str(df[col].dtype)}
+        for col in df.columns
+    ]
+
+
+def compute_trial_table_schema_hash(df: pd.DataFrame) -> str:
+    payload = json.dumps(_schema_entries(df), separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def build_trial_table_contract(
+    df: pd.DataFrame,
+    *,
+    n_events_rows: int,
+    n_feature_rows: int,
+    feature_signature: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "version": TRIAL_TABLE_CONTRACT_VERSION,
+        "schema_hash": compute_trial_table_schema_hash(df),
+        "n_events_rows": int(n_events_rows),
+        "n_feature_rows": int(n_feature_rows),
+        "feature_signature": str(feature_signature) if feature_signature else None,
+    }
+
+
+def validate_trial_table_contract(
+    df: pd.DataFrame,
+    metadata: Dict[str, Any],
+) -> List[str]:
+    errors: List[str] = []
+    n_trials_meta = metadata.get("n_trials")
+    n_columns_meta = metadata.get("n_columns")
+    if n_trials_meta is not None and int(n_trials_meta) != int(len(df)):
+        errors.append(f"n_trials metadata mismatch: expected {n_trials_meta}, got {len(df)}")
+    if n_columns_meta is not None and int(n_columns_meta) != int(df.shape[1]):
+        errors.append(f"n_columns metadata mismatch: expected {n_columns_meta}, got {df.shape[1]}")
+
+    contract = metadata.get("contract", {}) or {}
+    expected_hash = contract.get("schema_hash")
+    if expected_hash:
+        actual_hash = compute_trial_table_schema_hash(df)
+        if str(expected_hash) != actual_hash:
+            errors.append(
+                "contract schema_hash mismatch: expected "
+                f"{expected_hash}, got {actual_hash}"
+            )
+
+    return errors
 
 
 def build_subject_trial_table(ctx: Any) -> TrialTableBuildResult:
@@ -36,12 +94,19 @@ def build_subject_trial_table(ctx: Any) -> TrialTableBuildResult:
         df = pd.concat([events, features], axis=1)
     else:
         df = events.copy()
+    n_feature_rows = int(len(features)) if features is not None else 0
 
     meta: Dict[str, Any] = {
         "subject": getattr(ctx, "subject", None),
         "task": getattr(ctx, "task", None),
         "n_trials": len(df),
         "n_columns": df.shape[1],
+        "contract": build_trial_table_contract(
+            df,
+            n_events_rows=len(events),
+            n_feature_rows=n_feature_rows,
+            feature_signature=getattr(ctx, "_combined_features_signature", None),
+        ),
     }
     return TrialTableBuildResult(df=df, metadata=meta)
 
@@ -309,8 +374,12 @@ def save_trial_table(
 
 
 __all__ = [
+    "TRIAL_TABLE_CONTRACT_VERSION",
     "TrialTableBuildResult",
     "build_subject_trial_table",
+    "build_trial_table_contract",
+    "compute_trial_table_schema_hash",
+    "validate_trial_table_contract",
     "add_lag_and_delta_features",
     "add_pain_residual",
     "save_trial_table",

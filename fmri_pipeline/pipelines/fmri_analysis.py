@@ -218,9 +218,12 @@ class FmriAnalysisPipeline(PipelineBase):
             sidecar_path = nifti_path.with_suffix("").with_suffix(".json")
 
         n_runs = run_meta.get("n_runs", "?") if isinstance(run_meta, dict) else "?"
+        shape_repr = getattr(contrast_img, "shape", None)
+        if shape_repr is None:
+            shape_repr = "unknown"
         self.logger.info(
             "GLM fit + contrast: %s runs, shape=%s (%.1fs)",
-            n_runs, contrast_img.shape, glm_elapsed,
+            n_runs, shape_repr, glm_elapsed,
         )
 
         contrast_img_for_plotting = contrast_img

@@ -1847,7 +1847,10 @@ def extract_connectivity_from_precomputed(
 
             if enable_aec and band in precomputed.band_data:
                 analytic_full = precomputed.band_data[band].analytic
-                analytic_seg = _slice_epochs(analytic_full, seg_mask)
+                if seg_mask is None and seg_name == "full":
+                    analytic_seg = analytic_full
+                else:
+                    analytic_seg = _slice_epochs(analytic_full, seg_mask)
                 if analytic_seg is None:
                     continue
                 if analytic_seg.shape[-1] < min_segment_samples:
@@ -2055,7 +2058,10 @@ def extract_connectivity_from_precomputed(
                 if band not in precomputed.band_data:
                     continue
                 analytic_full = precomputed.band_data[band].analytic
-                analytic_seg = _slice_epochs(analytic_full, seg_mask)
+                if seg_mask is None and seg_name == "full":
+                    analytic_seg = analytic_full
+                else:
+                    analytic_seg = _slice_epochs(analytic_full, seg_mask)
                 if analytic_seg is None or analytic_seg.shape[-1] != seg_n_times:
                     continue
                 for method in conn_cfg.dynamic_measures:

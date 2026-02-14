@@ -520,6 +520,13 @@ def _load_subject_feature_table(
         require_safe = bool(get_config_value(config, "machine_learning.data.require_trial_ml_safe", False))
         meta = _load_extraction_config(feature_path)
         if not meta:
+            if require_safe:
+                raise ValueError(
+                    f"Feature table for family '{family}' is missing extraction metadata "
+                    f"(expected metadata/extraction_config*.json near {feature_path}). "
+                    "Cannot verify trial_ml_safe provenance while "
+                    "machine_learning.data.require_trial_ml_safe=true."
+                )
             return
         cli = str(meta.get("cli_command") or meta.get("command") or "")
         cfg_path = str(meta.get("_config_path") or "")

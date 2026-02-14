@@ -27,11 +27,11 @@ import pandas as pd
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.utils.analysis.stats.correlation import (
-    normalize_correlation_method,
     format_correlation_method_label,
 )
 from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
 from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.analysis.behavior.orchestration import (
     run_behavior_stages,
     write_analysis_metadata as _write_analysis_metadata_impl,
@@ -121,6 +121,7 @@ class BehaviorPipelineConfig:
     run_stability: bool = True
     run_consistency: bool = True
     run_influence: bool = True
+    run_validation: bool = True
     run_report: bool = True
     run_correlations: bool = True
     run_multilevel_correlations: bool = False
@@ -163,10 +164,7 @@ class BehaviorPipelineConfig:
     
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
-        raw_method = get_config_value(config, "behavior_analysis.statistics.correlation_method", None)
-        if raw_method is None:
-            raw_method = get_config_value(config, "behavior_analysis.correlation_method", "spearman")
-        method = normalize_correlation_method(raw_method, default="spearman")
+        method = resolve_correlation_method(config, default="spearman")
         robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
         if robust_method is not None:
             robust_method = str(robust_method).strip().lower() or None
@@ -201,6 +199,7 @@ class BehaviorPipelineConfig:
             run_stability=bool(get_config_value(config, "behavior_analysis.stability.enabled", True)),
             run_consistency=bool(get_config_value(config, "behavior_analysis.consistency.enabled", True)),
             run_influence=bool(get_config_value(config, "behavior_analysis.influence.enabled", True)),
+            run_validation=bool(get_config_value(config, "behavior_analysis.validation.enabled", True)),
             run_report=bool(get_config_value(config, "behavior_analysis.report.enabled", True)),
             run_correlations=bool(get_config_value(config, "behavior_analysis.correlations.enabled", True)),
             run_condition_comparison=bool(get_config_value(config, "behavior_analysis.condition.enabled", True)),
@@ -506,7 +505,10 @@ class BehaviorPipeline(PipelineBase):
         logger = get_subject_logger("behavior_analysis", subject)
         
         logger.info("=== Behavior analysis: sub-%s, task-%s ===", subject, task)
-        method_label = self.pipeline_config.method_label or self.pipeline_config.method
+        method_label = (
+            getattr(self.pipeline_config, "method_label", None)
+            or getattr(self.pipeline_config, "method", "spearman")
+        )
         controls = []
         if self.pipeline_config.control_temperature:
             controls.append("temperature")
@@ -617,6 +619,7 @@ class BehaviorPipeline(PipelineBase):
         if n_clusters:
             n_sig_clusters = summary.get("n_sig_clusters", 0)
             cluster_info = f", clusters: {n_sig_clusters}/{n_clusters} sig"
+            logger.info("Clusters identified: %d total, %d significant", n_clusters, n_sig_clusters)
         logger.info(
             "Results: %d features tested, sig raw=%d, controlled=%d, FDR=%d%s (%.1fs)",
             n_features, n_sig_raw, n_sig_controlled, n_sig_fdr, cluster_info, elapsed,

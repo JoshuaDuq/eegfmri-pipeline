@@ -100,6 +100,23 @@ class MLPipeline(PipelineBase):
             "Use run_batch() instead."
         )
 
+    def visualize(self, _results_dir: Path) -> None:
+        """Legacy compatibility stub: visualization is not implemented in this pipeline wrapper."""
+        raise NotImplementedError(
+            "Visualization is not implemented in MLPipeline. "
+            "Use analysis outputs directly or plotting commands."
+        )
+
+    def run_batch_with_plots(
+        self,
+        subjects: List[str],
+        task: Optional[str] = None,
+        mode: MLMode = "regression",
+        **kwargs: Any,
+    ) -> List[Dict[str, Any]]:
+        """Backward-compatible alias that delegates to compute-only run_batch()."""
+        return self.run_batch(subjects, task=task, mode=mode, **kwargs)
+
     def _validate_inputs(
         self,
         subjects: List[str],

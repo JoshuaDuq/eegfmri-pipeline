@@ -91,26 +91,21 @@ def _calculate_total_steps(n_ranges: int) -> int:
 def _load_fixed_templates(
     templates_path: Optional[Path],
     logger: Any,
-) -> tuple[Optional[np.ndarray], Optional[List[str]], Optional[List[str]]]:
+) -> tuple[Optional[np.ndarray], Optional[List[str]]]:
     """Load fixed templates from file if path exists."""
     if templates_path is None or not templates_path.exists():
-        return None, None, None
+        return None, None
 
     try:
         with np.load(templates_path, allow_pickle=False) as data:
             if "templates" not in data:
                 logger.warning("Fixed templates file missing 'templates': %s", templates_path)
-                return None, None, None
+                return None, None
             templates = np.asarray(data["templates"], dtype=float)
             raw_ch_names = data["ch_names"] if "ch_names" in data else None
-            raw_labels = None
-            for key in ("template_labels", "labels"):
-                if key in data:
-                    raw_labels = data[key]
-                    break
     except Exception as exc:
         logger.warning("Failed loading fixed templates from %s: %s", templates_path, exc)
-        return None, None, None
+        return None, None
 
     ch_names: Optional[List[str]] = None
     if raw_ch_names is not None:
@@ -121,17 +116,8 @@ def _load_fixed_templates(
             else:
                 ch_names.append(str(value))
 
-    labels: Optional[List[str]] = None
-    if raw_labels is not None:
-        labels = []
-        for value in np.asarray(raw_labels).tolist():
-            if isinstance(value, (bytes, np.bytes_)):
-                labels.append(value.decode("utf-8", errors="ignore"))
-            else:
-                labels.append(str(value))
-
     logger.info("Loaded fixed templates from %s", templates_path)
-    return templates, ch_names, labels
+    return templates, ch_names
 
 
 def _precompute_tfr_if_needed(
@@ -571,10 +557,19 @@ class FeaturePipeline(PipelineBase):
             progress.error("no_events", "No aligned events")
             return
 
+        try:
+            n_trials = len(epochs)
+        except Exception:
+            data_obj = getattr(epochs, "data", None)
+            n_trials = int(data_obj.shape[0]) if hasattr(data_obj, "shape") and len(data_obj.shape) > 0 else 0
+        n_channels = int(len(getattr(epochs, "ch_names", []) or []))
+        sfreq = float(getattr(epochs, "info", {}).get("sfreq", np.nan))
+        times = np.asarray(getattr(epochs, "times", np.array([], dtype=float)), dtype=float)
+        t_start = float(times[0]) if times.size else np.nan
+        t_end = float(times[-1]) if times.size else np.nan
         self.logger.info(
             "Epochs loaded: %d trials, %d channels, %.0f Hz, %.3f\u2013%.3fs",
-            len(epochs), len(epochs.ch_names), epochs.info["sfreq"],
-            epochs.times[0], epochs.times[-1],
+            int(n_trials), int(n_channels), sfreq, t_start, t_end,
         )
 
         original_events = _load_events_df(
@@ -585,7 +580,7 @@ class FeaturePipeline(PipelineBase):
             prefer_clean=False,
         )
         if original_events is not None:
-            n_dropped = len(original_events) - len(epochs)
+            n_dropped = len(original_events) - int(n_trials)
             save_dropped_trials_log(
                 epochs, original_events, features_dir / "metadata" / "dropped_trials.tsv", self.logger
             )
@@ -593,7 +588,7 @@ class FeaturePipeline(PipelineBase):
                 self.logger.info(
                     "Dropped trials: %d/%d (%.0f%% retained)",
                     n_dropped, len(original_events),
-                    100 * len(epochs) / len(original_events),
+                    100 * int(n_trials) / len(original_events),
                 )
 
         target_columns = list(self.config.get("event_columns.rating", []) or [])
@@ -609,9 +604,15 @@ class FeaturePipeline(PipelineBase):
         )
 
         fixed_templates_path = kwargs.get("fixed_templates_path")
-        fixed_templates, fixed_template_ch_names, fixed_template_labels = _load_fixed_templates(
-            fixed_templates_path, self.logger
-        )
+        fixed_template_labels = None
+        loaded_templates = _load_fixed_templates(fixed_templates_path, self.logger)
+        if isinstance(loaded_templates, tuple) and len(loaded_templates) >= 2:
+            fixed_templates = loaded_templates[0]
+            fixed_template_ch_names = loaded_templates[1]
+            if len(loaded_templates) >= 3:
+                fixed_template_labels = loaded_templates[2]
+        else:
+            fixed_templates, fixed_template_ch_names = None, None
 
         tfr_full = _precompute_tfr_if_needed(
             epochs, time_ranges, feature_categories, self.config, self.logger

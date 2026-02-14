@@ -24,7 +24,7 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/JoshuaDuq/PAIN_EEG_fMRI.git && cd PAIN_EEG_fMRI
+git clone https://github.com/JoshuaDuq/Pain_fMRI_EEG.git && cd Pain_fMRI_EEG
 pip install -e .
 
 # 2. Place your data (see "Data Requirements" below)

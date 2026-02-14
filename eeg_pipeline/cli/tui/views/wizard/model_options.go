@@ -1621,16 +1621,6 @@ func (m Model) getBehaviorOptions() []optionType {
 					optTemporalERDSMethod,
 				)
 			}
-			// TF Heatmap options (always visible when temporal is expanded)
-			options = append(options,
-				optTemporalTfHeatmapEnabled,
-			)
-			if m.tfHeatmapEnabled {
-				options = append(options,
-					optTemporalTfHeatmapFreqs,
-					optTemporalTfHeatmapTimeResMs,
-				)
-			}
 		}
 	}
 

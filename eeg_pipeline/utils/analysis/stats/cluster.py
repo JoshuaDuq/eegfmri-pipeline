@@ -1082,8 +1082,13 @@ def _run_cluster_test_core(
     if not epochs.preload:
         epochs.load_data()
 
-    heatmap_config = config.get("behavior_analysis.time_frequency_heatmap", {})
-    roi_selection = heatmap_config.get("roi_selection")
+    temporal_cfg = config.get("behavior_analysis.temporal", {}) or {}
+    legacy_hm_cfg = config.get("behavior_analysis.time_frequency_heatmap", {}) or {}
+    if legacy_hm_cfg:
+        logger.warning(
+            "behavior_analysis.time_frequency_heatmap is deprecated; use behavior_analysis.temporal.* settings."
+        )
+    roi_selection = temporal_cfg.get("roi_selection", legacy_hm_cfg.get("roi_selection"))
     epochs_roi = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
 
     condition_column_config = str(

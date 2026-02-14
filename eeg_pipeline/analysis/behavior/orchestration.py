@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
+from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_targets
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation, format_correlation_method_label
 from eeg_pipeline.utils.config.loader import get_config_value, get_config_float, get_config_int, get_config_bool
 from eeg_pipeline.infra.paths import ensure_dir
@@ -114,6 +115,7 @@ class _ResultCache:
 
         from eeg_pipeline.infra.tsv import read_table
         self._trial_table_df = read_table(trial_table_path)
+        _validate_trial_table_contract_metadata(ctx, trial_table_path, self._trial_table_df)
         self._trial_table_path = trial_table_path
         return self._trial_table_df
 
@@ -572,6 +574,14 @@ _STAGE_SPECS = [
         produces=("temperature_models",),
         group=StageRegistry.GROUP_DATA_PREP,
     ),
+    StageSpec(
+        name="feature_qc",
+        description="Screen feature quality",
+        requires=(StageRegistry.RESOURCE_TRIAL_TABLE,),
+        produces=("feature_qc",),
+        config_key="behavior_analysis.feature_qc.enabled",
+        group=StageRegistry.GROUP_DATA_PREP,
+    ),
     
     # Correlations Pipeline
     StageSpec(
@@ -599,7 +609,7 @@ _STAGE_SPECS = [
     StageSpec(
         name="correlate_primary_selection",
         description="Select primary p-value and effect size for FDR",
-        requires=(StageRegistry.RESOURCE_DESIGN, StageRegistry.RESOURCE_PVALUES),
+        requires=(StageRegistry.RESOURCE_DESIGN, StageRegistry.RESOURCE_EFFECT_SIZES),
         produces=("primary_selection",),
         group=StageRegistry.GROUP_CORRELATIONS,
     ),
@@ -725,6 +735,13 @@ _STAGE_SPECS = [
         config_key="run_mixed_effects",
         group=StageRegistry.GROUP_ADVANCED,
     ),
+    StageSpec(
+        name="hierarchical_fdr_summary",
+        description="Summarize hierarchical FDR across analyses",
+        requires=(),
+        produces=("hierarchical_fdr_summary",),
+        group=StageRegistry.GROUP_VALIDATION,
+    ),
     
     # Validation & Export
     StageSpec(
@@ -834,10 +851,17 @@ def _get_stage_runners() -> Dict[str, callable]:
             ctx, config, outputs.get("correlate_design"), outputs.get("correlate_effect_sizes", [])
         ),
         "correlate_primary_selection": lambda ctx, config, outputs: stage_correlate_primary_selection(
-            ctx, config, outputs.get("correlate_design"), outputs.get("correlate_pvalues", [])
+            ctx,
+            config,
+            outputs.get("correlate_design"),
+            outputs.get("correlate_pvalues") or outputs.get("correlate_effect_sizes", []),
         ),
         "correlate_fdr": lambda ctx, config, outputs: stage_correlate_fdr(
-            ctx, config, outputs.get("correlate_primary_selection") or outputs.get("correlate_pvalues", [])
+            ctx,
+            config,
+            outputs.get("correlate_primary_selection")
+            or outputs.get("correlate_pvalues")
+            or outputs.get("correlate_effect_sizes", []),
         ),
         "pain_sensitivity": lambda ctx, config, outputs: stage_pain_sensitivity(ctx, config),
         "regression": lambda ctx, config, outputs: stage_regression(ctx, config),
@@ -1582,6 +1606,75 @@ def _compute_feature_signature(ctx: BehaviorContext) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _compute_trial_table_input_hash(ctx: BehaviorContext) -> str:
+    """Compute a deterministic input hash for trial-table stage caching."""
+    parts: List[str] = [
+        f"subject={ctx.subject}",
+        f"task={ctx.task}",
+        f"feature_signature={_compute_feature_signature(ctx)}",
+    ]
+
+    events = getattr(ctx, "aligned_events", None)
+    if isinstance(events, pd.DataFrame) and not events.empty:
+        try:
+            events_hash_raw = pd.util.hash_pandas_object(
+                events.reset_index(drop=True),
+                index=True,
+            ).to_numpy(dtype=np.uint64)
+            events_hash = hashlib.sha256(events_hash_raw.tobytes()).hexdigest()
+        except Exception:
+            cols = ",".join(str(c) for c in events.columns)
+            events_hash = f"fallback:{len(events)}:{events.shape[1]}:{cols}"
+        parts.append(f"events_hash={events_hash}")
+    else:
+        parts.append("events_hash=none")
+
+    feature_paths = getattr(ctx, "feature_paths", {}) or {}
+    for name, path in sorted(feature_paths.items()):
+        try:
+            st = Path(path).stat()
+        except Exception:
+            continue
+        parts.append(
+            f"feature_path:{name}:{Path(path).resolve()}:{st.st_size}:{st.st_mtime_ns}"
+        )
+
+    payload = "|".join(parts)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _trial_table_metadata_path(table_path: Path) -> Path:
+    return table_path.parent / f"{table_path.stem}.metadata.json"
+
+
+def _validate_trial_table_contract_metadata(
+    ctx: BehaviorContext,
+    table_path: Path,
+    df: pd.DataFrame,
+) -> None:
+    """Validate trial-table metadata contract (if present)."""
+    from eeg_pipeline.utils.data.trial_table import validate_trial_table_contract
+
+    meta_path = _trial_table_metadata_path(table_path)
+    if not meta_path.exists():
+        ctx.logger.warning("Trial table metadata missing: %s", meta_path)
+        return
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid trial table metadata JSON: {meta_path}") from exc
+
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Invalid trial table metadata payload (not a dict): {meta_path}")
+
+    errors = validate_trial_table_contract(df, metadata)
+    if errors:
+        raise ValueError(
+            f"Trial table contract validation failed for {table_path.name}: "
+            + "; ".join(errors)
+        )
+
+
 def _validate_feature_index_alignment(df: pd.DataFrame, name: str, base_index: pd.Index, logger: Any) -> None:
     """Validate that feature DataFrame index matches base index."""
     if not df.index.equals(base_index):
@@ -1786,14 +1879,18 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
 
     prefer_pain_residual = get_config_bool(ctx.config, "behavior_analysis.correlations.prefer_pain_residual", True)
     default_targets = ["pain_residual", "rating", "temperature"] if prefer_pain_residual else ["rating", "temperature", "pain_residual"]
-    targets_cfg = get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
-    if isinstance(targets_cfg, (list, tuple)) and targets_cfg:
-        targets = [str(t).strip().lower() for t in targets_cfg]
-    else:
-        targets = default_targets
+    targets = resolve_correlation_targets(
+        ctx.config,
+        logger=ctx.logger,
+        default_targets=default_targets,
+    )
     use_cv_resid = get_config_bool(ctx.config, "behavior_analysis.correlations.use_crossfit_pain_residual", False)
     if use_cv_resid and "pain_residual_cv" in df_trials.columns:
-        if not (isinstance(targets_cfg, (list, tuple)) and targets_cfg):
+        has_explicit_targets = bool(
+            get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
+            or get_config_value(ctx.config, "behavior_analysis.targets", None)
+        )
+        if not has_explicit_targets:
             targets = ["pain_residual_cv", *[t for t in targets if t != "pain_residual_cv"]]
     targets = [t for t in targets if t in df_trials.columns]
 
@@ -1838,9 +1935,35 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
     if bool(getattr(config, "control_temperature", True)) and "temperature" in df_trials.columns:
         temperature_series = pd.to_numeric(df_trials["temperature"], errors="coerce")
 
-    groups_for_perm = ctx.group_ids if getattr(ctx, "group_ids", None) is not None else None
+    groups_for_perm = None
+    if getattr(ctx, "group_ids", None) is not None:
+        groups_candidate = np.asarray(ctx.group_ids)
+        if len(groups_candidate) == len(df_trials):
+            groups_for_perm = groups_candidate
+        else:
+            ctx.logger.warning(
+                "Correlations design: ignoring ctx.group_ids length=%d because trial table has %d rows.",
+                len(groups_candidate),
+                len(df_trials),
+            )
     if groups_for_perm is None and run_col in df_trials.columns:
-        groups_for_perm = pd.Series(df_trials[run_col], index=df_trials.index, name=run_col)
+        groups_for_perm = df_trials[run_col].to_numpy()
+    groups_for_perm = _sanitize_permutation_groups(
+        groups_for_perm,
+        ctx.logger,
+        "Correlations",
+    )
+    if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and perm_enabled and groups_for_perm is None:
+        raise ValueError(
+            "Trial-level correlations require grouped permutation labels for non-i.i.d trials. "
+            "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
+            "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
+    groups_for_perm_series = (
+        pd.Series(groups_for_perm, index=df_trials.index, name=run_col)
+        if groups_for_perm is not None
+        else None
+    )
 
     ctx.logger.info(
         "Correlations design: %d features x %d targets, covariates=%s, temp_control=%s",
@@ -1857,7 +1980,7 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
         temperature_series=temperature_series,
         run_col=run_col,
         run_adjust_in_correlations=run_adjust_in_correlations,
-        groups_for_perm=groups_for_perm,
+        groups_for_perm=groups_for_perm_series,
     )
 
 
@@ -2569,6 +2692,33 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     return stage_correlate_fdr(ctx, config, records)
 
 
+def _sanitize_permutation_groups(
+    groups: Optional[np.ndarray],
+    logger: Any,
+    context: str,
+    *,
+    min_group_size: int = 2,
+) -> Optional[np.ndarray]:
+    """Return groups if valid for grouped permutation, otherwise None."""
+    if groups is None:
+        return None
+    groups_array = np.asarray(groups)
+    if groups_array.size == 0:
+        return None
+    unique_groups, counts = np.unique(groups_array, return_counts=True)
+    small_group_count = int((counts < int(min_group_size)).sum())
+    if small_group_count > 0:
+        logger.warning(
+            "%s: disabling grouped permutation because %d/%d groups had fewer than %d samples.",
+            context,
+            small_group_count,
+            len(unique_groups),
+            int(min_group_size),
+        )
+        return None
+    return groups_array
+
+
 def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Compute pain sensitivity correlations (independent stage)."""
     from eeg_pipeline.analysis.behavior.api import run_pain_sensitivity_correlations
@@ -2650,6 +2800,17 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             )
     if groups_for_perm is None and run_col in df_trials.columns:
         groups_for_perm = df_trials[run_col].to_numpy()
+    groups_for_perm = _sanitize_permutation_groups(
+        groups_for_perm,
+        ctx.logger,
+        "Pain sensitivity",
+    )
+    if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and groups_for_perm is None:
+        raise ValueError(
+            "Trial-level pain sensitivity requires grouped permutation labels for non-i.i.d trials. "
+            "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
+            "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
     psi_df = run_pain_sensitivity_correlations(
         features_df=psi_features,
         ratings=pd.to_numeric(df_trials["rating"], errors="coerce"),
@@ -2944,15 +3105,68 @@ def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
     return out_path
 
 
+def _try_reuse_cached_trial_table(
+    ctx: BehaviorContext,
+    *,
+    input_hash: str,
+) -> Optional[Path]:
+    """Reuse existing trial-table artifact when input hash is unchanged."""
+    fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv")).strip().lower()
+    suffix = _feature_suffix_from_context(ctx)
+    fname = f"trials{suffix}"
+    out_dir = _get_stats_subfolder(ctx, "trial_table")
+    out_ext = ".parquet" if fmt == "parquet" else ".tsv"
+    out_path = out_dir / f"{fname}{out_ext}"
+
+    if not out_path.exists():
+        return None
+
+    meta_path = _trial_table_metadata_path(out_path)
+    if not meta_path.exists():
+        return None
+
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(metadata, dict):
+        return None
+
+    contract = metadata.get("contract", {}) or {}
+    if str(contract.get("input_hash", "")) != str(input_hash):
+        return None
+
+    from eeg_pipeline.infra.tsv import read_table
+
+    df_cached = read_table(out_path)
+    _validate_trial_table_contract_metadata(ctx, out_path, df_cached)
+
+    _cache._trial_table_df = df_cached
+    _cache._trial_table_path = out_path
+    ctx.logger.info(
+        "Trial table unchanged (input hash match); reusing existing artifact: %s/%s",
+        out_dir.name,
+        out_path.name,
+    )
+    return out_path
+
+
 def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     """Build and save trial table (composed stage).
     
     Composes: compute_trial_table + write_trial_table
     """
+    input_hash = _compute_trial_table_input_hash(ctx)
+    cached = _try_reuse_cached_trial_table(ctx, input_hash=input_hash)
+    if cached is not None:
+        return cached
+
     result = compute_trial_table(ctx, config)
     if result is None or not _is_dataframe_valid(result.df):
         ctx.logger.warning("Trial table: no data to write")
         return None
+    contract = result.metadata.setdefault("contract", {})
+    contract["input_hash"] = str(input_hash)
     return write_trial_table(ctx, result)
 
 
@@ -3180,7 +3394,12 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     feature_cols = _get_feature_columns(df_trials, ctx)
 
-    should_skip, skip_reason = _check_early_exit_conditions(df_trials, feature_cols, min_features=1, min_trials=10)
+    should_skip, skip_reason = _check_early_exit_conditions(
+        df_trials,
+        feature_cols,
+        min_features=1,
+        min_trials=10,
+    )
     if should_skip:
         ctx.logger.info(f"Regression: skipping due to {skip_reason}")
         return pd.DataFrame()
@@ -3231,6 +3450,17 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             groups = df_trials["block"].to_numpy()
         elif "run" in df_trials.columns:
             groups = df_trials["run"].to_numpy()
+    groups = _sanitize_permutation_groups(
+        groups,
+        ctx.logger,
+        "Regression",
+    )
+    if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and groups is None:
+        raise ValueError(
+            "Trial-level regression with permutation inference requires grouped labels. "
+            "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
+            "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
 
     reg_df, reg_meta = run_trialwise_feature_regressions(
         df_trials,
@@ -3265,7 +3495,12 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     feature_cols = _get_feature_columns(df_trials, ctx)
 
-    should_skip, skip_reason = _check_early_exit_conditions(df_trials, feature_cols, min_features=1, min_trials=10)
+    should_skip, skip_reason = _check_early_exit_conditions(
+        df_trials,
+        feature_cols,
+        min_features=1,
+        min_trials=10,
+    )
     if should_skip:
         ctx.logger.info(f"Models: skipping due to {skip_reason}")
         return pd.DataFrame()
@@ -3376,7 +3611,12 @@ def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     feature_cols = _get_feature_columns(df_trials, ctx)
 
-    should_skip, skip_reason = _check_early_exit_conditions(df_trials, feature_cols, min_features=1, min_trials=10)
+    should_skip, skip_reason = _check_early_exit_conditions(
+        df_trials,
+        feature_cols,
+        min_features=1,
+        min_trials=10,
+    )
     if should_skip:
         ctx.logger.info(f"Stability: skipping due to {skip_reason}")
         return pd.DataFrame()
@@ -3436,7 +3676,12 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
 
     feature_cols = _get_feature_columns(df_trials, ctx)
 
-    should_skip, skip_reason = _check_early_exit_conditions(df_trials, feature_cols, min_features=1, min_trials=10)
+    should_skip, skip_reason = _check_early_exit_conditions(
+        df_trials,
+        feature_cols,
+        min_features=1,
+        min_trials=10,
+    )
     if should_skip:
         ctx.logger.info(f"Influence: skipping due to {skip_reason}")
         return pd.DataFrame()
@@ -3576,19 +3821,36 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
 
 
 def _infer_feature_type(feature: str, config: Any) -> str:
-    from eeg_pipeline.domain.features.registry import classify_feature, get_feature_registry
-    registry = get_feature_registry(config)
-    ftype, _, _ = classify_feature(feature, include_subtype=False, registry=registry)
-    return ftype
+    try:
+        from eeg_pipeline.domain.features.registry import classify_feature, get_feature_registry
+
+        registry = get_feature_registry(config)
+        ftype, _, _ = classify_feature(feature, include_subtype=False, registry=registry)
+        return ftype
+    except Exception:
+        name = str(feature or "").strip().lower()
+        for prefix in FEATURE_COLUMN_PREFIXES:
+            if name.startswith(prefix):
+                return prefix.rstrip("_")
+        return "unknown"
 
 
 def _infer_feature_band(feature: str, config: Any) -> str:
     """Extract frequency band from feature name using naming schema."""
-    from eeg_pipeline.domain.features.registry import classify_feature, get_feature_registry
-    registry = get_feature_registry(config)
-    _, _, meta = classify_feature(feature, include_subtype=True, registry=registry)
-    band = meta.get("band", "N/A")
-    return str(band) if band and band != "N/A" else "broadband"
+    try:
+        from eeg_pipeline.domain.features.registry import classify_feature, get_feature_registry
+
+        registry = get_feature_registry(config)
+        _, _, meta = classify_feature(feature, include_subtype=True, registry=registry)
+        band = meta.get("band", "N/A")
+        return str(band) if band and band != "N/A" else "broadband"
+    except Exception:
+        name = str(feature or "").strip().lower()
+        for band in ("delta", "theta", "alpha", "beta", "gamma"):
+            token = f"_{band}"
+            if token in name:
+                return band
+        return "broadband"
 
 
 def _summarize_covariates_qc(ctx: BehaviorContext) -> Dict[str, Any]:
@@ -3719,6 +3981,24 @@ def write_analysis_metadata(
 ###################################################################
 
 
+def _resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
+    """Resolve configured condition column, falling back to configured pain column."""
+    from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+
+    compare_col = str(
+        get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
+    ).strip()
+    if compare_col and compare_col in df_trials.columns:
+        return compare_col
+
+    fallback_col = get_pain_column_from_config(config, df_trials)
+    if fallback_col and fallback_col in df_trials.columns:
+        return str(fallback_col)
+
+    # Keep configured name for diagnostics if present; otherwise use legacy default.
+    return compare_col or "pain"
+
+
 def stage_condition_column(
     ctx: BehaviorContext,
     config: Any,
@@ -3779,12 +4059,10 @@ def stage_condition_column(
         feature_cols = _get_feature_columns(df_trials, ctx, "condition")
     
     # Aggregate to run-level if requested (avoids pseudo-replication)
-    compare_col = str(get_config_value(ctx.config, "behavior_analysis.condition.compare_column", "pain") or "pain").strip()
+    compare_col = _resolve_condition_compare_column(df_trials, ctx.config)
     overwrite = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
     if use_run_unit and run_col in df_trials.columns and compare_col in df_trials.columns:
         ctx.logger.info("Condition: aggregating to run-level (primary_unit=%s)", primary_unit)
-        agg_cols = feature_cols + [compare_col]
-        agg_cols = [c for c in agg_cols if c in df_trials.columns]
         # For condition column, take mode of condition and mean of features
         df_agg = df_trials.groupby(run_col)[feature_cols].mean()
         df_agg[compare_col] = df_trials.groupby(run_col)[compare_col].apply(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0])
@@ -3795,7 +4073,13 @@ def stage_condition_column(
         ctx.logger.info("Condition column: no feature columns found; skipping.")
         return pd.DataFrame()
 
-    should_skip, skip_reason = _check_early_exit_conditions(df_trials, feature_cols, min_features=1, min_trials=10)
+    min_trials_required = 2 if use_run_unit else 10
+    should_skip, skip_reason = _check_early_exit_conditions(
+        df_trials,
+        feature_cols,
+        min_features=1,
+        min_trials=min_trials_required,
+    )
     if should_skip:
         ctx.logger.info(f"Condition column: skipping due to {skip_reason}")
         return pd.DataFrame()
@@ -3823,10 +4107,13 @@ def stage_condition_column(
             condition_value1, condition_value2 = str(compare_values[0]), str(compare_values[1])
         else:
             # Fallback: extract from actual data values
-            condition_series = df_trials[compare_col]
-            unique_vals = condition_series.dropna().unique()
-            if len(unique_vals) >= 2:
-                condition_value1, condition_value2 = str(unique_vals[0]), str(unique_vals[1])
+            if compare_col in df_trials.columns:
+                condition_series = df_trials[compare_col]
+                unique_vals = condition_series.dropna().unique()
+                if len(unique_vals) >= 2:
+                    condition_value1, condition_value2 = str(unique_vals[0]), str(unique_vals[1])
+                else:
+                    condition_value1, condition_value2 = "1", "0"
             else:
                 condition_value1, condition_value2 = "1", "0"
 
@@ -3846,12 +4133,23 @@ def stage_condition_column(
             run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
             if run_col and run_col in df_trials.columns:
                 groups = df_trials[run_col].to_numpy()
+        groups = _sanitize_permutation_groups(
+            groups,
+            ctx.logger,
+            "Condition column",
+        )
+        if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and perm_enabled and groups is None:
+            raise ValueError(
+                "Trial-level condition comparison requires grouped permutation labels for non-i.i.d trials. "
+                "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
+                "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+            )
 
         column_df = compute_condition_effects(
             features,
             pain_mask,
             nonpain_mask,
-            min_samples=0,
+            min_samples=max(int(getattr(config, "min_samples", 10)), 2),
             fdr_alpha=config.fdr_alpha,
             logger=ctx.logger,
             n_jobs=config.n_jobs,
@@ -3995,7 +4293,7 @@ def stage_condition_window(
         return pd.DataFrame()
 
     suffix = _feature_suffix_from_context(ctx)
-    compare_col = str(get_config_value(ctx.config, "behavior_analysis.condition.compare_column", "pain") or "pain").strip()
+    compare_col = _resolve_condition_compare_column(df_trials, ctx.config)
     out_dir = _get_stats_subfolder(ctx, "condition_effects")
 
     ctx.logger.info(f"Running window comparison: {compare_windows}")
@@ -4105,9 +4403,7 @@ def stage_condition_multigroup(
             "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
         )
     
-    compare_column = str(get_config_value(
-        ctx.config, "behavior_analysis.condition.compare_column", "pain"
-    ) or "pain").strip()
+    compare_column = _resolve_condition_compare_column(df_trials, ctx.config)
     compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
     overwrite = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
     
@@ -4678,6 +4974,7 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     ctx.logger.info("Running mediation analysis...")
     n_bootstrap = get_config_int(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000)
     n_permutations = get_config_int(ctx.config, "behavior_analysis.mediation.n_permutations", 0)
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
     p_primary_mode = str(
         get_config_value(ctx.config, "behavior_analysis.mediation.p_primary_mode", "perm_if_available") or "perm_if_available"
     ).strip().lower()
@@ -4708,6 +5005,24 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             )
     if groups_for_resampling is None and run_col in df_trials.columns:
         groups_for_resampling = df_trials[run_col].to_numpy()
+    groups_for_resampling = _sanitize_permutation_groups(
+        groups_for_resampling,
+        ctx.logger,
+        "Mediation",
+    )
+    if not allow_iid_trials:
+        if n_permutations <= 0:
+            raise ValueError(
+                "Mediation requires non-i.i.d inference under repeated measures. "
+                "Set behavior_analysis.mediation.n_permutations > 0 or set "
+                "behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+            )
+        if groups_for_resampling is None:
+            raise ValueError(
+                "Mediation requires grouped resampling labels for non-i.i.d trials. "
+                "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
+                "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+            )
 
     result = run_mediation_analysis(
         df_trials,
@@ -4793,8 +5108,9 @@ def stage_mixed_effects(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 def _find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] = None) -> Optional[Path]:
     """Find trial table file with feature suffix.
     
-    If feature_files is provided, builds exact filename. Otherwise searches for trials_*.{parquet,tsv}.
-    No fallback to trials.{parquet,tsv} (must include suffix).
+    If feature_files is provided, builds exact filename. Otherwise searches for:
+    - trials_*.{parquet,tsv}
+    - trials.{parquet,tsv}
     """
     trial_table_roots = sorted(p for p in stats_dir.glob("trial_table*") if p.is_dir())
     if not trial_table_roots:
@@ -4822,6 +5138,8 @@ def _find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] =
     for root in trial_table_roots:
         pattern_paths.extend(list(root.glob("*/trials_*.parquet")))
         pattern_paths.extend(list(root.glob("*/trials_*.tsv")))
+        pattern_paths.extend(list(root.glob("*/trials.parquet")))
+        pattern_paths.extend(list(root.glob("*/trials.tsv")))
     if len(pattern_paths) == 0:
         return None
     if len(pattern_paths) > 1:
@@ -4869,7 +5187,7 @@ def run_group_level_mixed_effects(
         Results with coefficients, p-values, and family structure
     """
     from eeg_pipeline.infra.paths import deriv_stats_path
-    from eeg_pipeline.infra.tsv import read_parquet
+    from eeg_pipeline.infra.tsv import read_table
 
     import statsmodels.formula.api as smf
     feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
@@ -4890,7 +5208,7 @@ def run_group_level_mixed_effects(
             logger.warning(f"No trial table for sub-{sub}; skipping.")
             continue
         
-        df = read_parquet(trial_path)
+        df = read_table(trial_path)
         if df.empty:
             continue
         
@@ -5044,7 +5362,7 @@ def run_group_level_correlations(
         Number of permutations
     """
     from eeg_pipeline.infra.paths import deriv_stats_path
-    from eeg_pipeline.infra.tsv import read_parquet
+    from eeg_pipeline.infra.tsv import read_table
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
     
     feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
@@ -5064,7 +5382,7 @@ def run_group_level_correlations(
         if trial_path is None:
             continue
         
-        df = read_parquet(trial_path)
+        df = read_table(trial_path)
         if df is None or df.empty:
             continue
         
@@ -5314,6 +5632,8 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     max_features = getattr(config, "moderation_max_features", None)  # None = unlimited
     fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
     n_permutations = get_config_int(ctx.config, "behavior_analysis.moderation.n_permutations", 0)
+    min_samples = max(int(getattr(config, "moderation_min_samples", 15)), 2)
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
     p_primary_mode = str(
         get_config_value(ctx.config, "behavior_analysis.moderation.p_primary_mode", "perm_if_available") or "perm_if_available"
     ).strip().lower()
@@ -5333,6 +5653,24 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             )
     if groups_for_resampling is None and run_col in df_trials.columns:
         groups_for_resampling = df_trials[run_col].to_numpy()
+    groups_for_resampling = _sanitize_permutation_groups(
+        groups_for_resampling,
+        ctx.logger,
+        "Moderation",
+    )
+    if not allow_iid_trials:
+        if n_permutations <= 0:
+            raise ValueError(
+                "Moderation requires non-i.i.d inference under repeated measures. "
+                "Set behavior_analysis.moderation.n_permutations > 0 or set "
+                "behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+            )
+        if groups_for_resampling is None:
+            raise ValueError(
+                "Moderation requires grouped resampling labels for non-i.i.d trials. "
+                "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
+                "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+            )
 
     if max_features is not None and len(feature_cols) > max_features:
         variances = df_trials[feature_cols].var()
@@ -5350,9 +5688,18 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
         valid_mask = np.isfinite(temperature) & np.isfinite(rating) & np.isfinite(feature_values)
         n_valid = int(valid_mask.sum())
+        if n_valid < min_samples:
+            continue
         groups_valid = None
         if groups_for_resampling is not None and len(groups_for_resampling) == len(valid_mask):
             groups_valid = np.asarray(groups_for_resampling)[valid_mask]
+        groups_valid = _sanitize_permutation_groups(
+            groups_valid,
+            ctx.logger,
+            f"Moderation[{feat}]",
+        )
+        if not allow_iid_trials and groups_valid is None:
+            continue
 
         result = run_moderation_analysis(
             X=temperature[valid_mask],

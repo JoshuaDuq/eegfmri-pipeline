@@ -618,7 +618,9 @@ feature_engineering:
 
 # 4.4 Behavioral Correlation
 behavior_analysis:
-  correlation_method: "spearman"
+  # Deprecated aliases (do not use in new configs):
+  # - behavior_analysis.correlation_method -> behavior_analysis.statistics.correlation_method
+  # - behavior_analysis.targets -> behavior_analysis.correlations.targets
   # Optional robust estimator for correlations:
   # - null/"none": standard Spearman/Pearson
   # - "percentage_bend" | "winsorized" | "shepherd"
@@ -628,7 +630,6 @@ behavior_analysis:
   control_trial_order: true
   bootstrap: 1000
   n_jobs: -1
-  targets: ["pain_rating", "temperature", "pain_binary"]
   # Optional overrides for feature selection (null = auto-discover all available)
   feature_files: null
   feature_categories: null
@@ -880,11 +881,8 @@ behavior_analysis:
       baseline_window: [-0.5, -0.1]    # Baseline window for ERDS (seconds)
       method: "percent"                # ERDS computation method: "percent" or "zscore"
   
-  # Time-frequency heatmap computation
-  time_frequency_heatmap:
-    enabled: true
-    freqs: [4, 8, 13, 30, 45]
-    time_resolution_ms: 100
+  # Deprecated: time_frequency_heatmap.* has been folded into temporal.*.
+  # Keep legacy keys out of new configs; the loader still supports old runs.
   
   # Cluster permutation tests
   cluster:

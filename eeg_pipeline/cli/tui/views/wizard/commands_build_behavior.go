@@ -551,21 +551,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 	}
 
-	// Time-frequency heatmap
-	if !m.tfHeatmapEnabled {
-		args = append(args, "--no-tf-heatmap-enabled")
-	} else {
-		if strings.TrimSpace(m.tfHeatmapFreqsSpec) != "" && m.tfHeatmapFreqsSpec != "4,8,13,30,45" {
-			args = append(args, "--tf-heatmap-freqs")
-			for _, f := range splitCSVList(m.tfHeatmapFreqsSpec) {
-				args = append(args, f)
-			}
-		}
-		if m.tfHeatmapTimeResMs != 100 {
-			args = append(args, "--tf-heatmap-time-resolution-ms", fmt.Sprintf("%d", m.tfHeatmapTimeResMs))
-		}
-	}
-
 	// Cluster-specific options
 	if m.isComputationSelected("cluster") {
 		if m.clusterThreshold != 0.05 {

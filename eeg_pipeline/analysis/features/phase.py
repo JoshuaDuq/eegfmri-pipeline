@@ -1006,12 +1006,9 @@ def _compute_pac_surrogates(
 
                     if normalize:
                         denominator = np.nansum(shifted_amplitude) + epsilon
-                    else:
-                        denominator = float(n_times)
-                    
-                    if normalize:
                         numerator = np.nansum(shifted_amplitude * epoch_phase)
                     else:
+                        denominator = 1.0
                         numerator = np.nanmean(shifted_amplitude * epoch_phase)
                     
                     surrogates[epoch_idx, ch_idx, surrogate_idx] = float(np.abs(numerator / denominator))
@@ -1037,12 +1034,9 @@ def _compute_pac_surrogates(
 
                 if normalize:
                     denominator = np.nansum(shifted_amplitude) + epsilon
-                else:
-                    denominator = float(n_times)
-                
-                if normalize:
                     numerator = np.nansum(shifted_amplitude * epoch_phase)
                 else:
+                    denominator = 1.0
                     numerator = np.nanmean(shifted_amplitude * epoch_phase)
                 
                 surrogates[epoch_idx, surrogate_idx] = float(np.abs(numerator / denominator))

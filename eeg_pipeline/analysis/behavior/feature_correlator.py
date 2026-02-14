@@ -38,6 +38,7 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
 from eeg_pipeline.utils.analysis.stats.reliability import compute_correlation_split_half_reliability
 from eeg_pipeline.utils.config.loader import get_config_value, get_min_samples
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_feature_types
+from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 
 
 def _build_stats_config_snapshot(config: Any) -> Dict[str, Any]:
@@ -100,12 +101,12 @@ class CorrelationConfig:
         ctx : BehaviorContext, optional
             If provided, runtime overrides from context take precedence.
         """
-        raw_method = get_config_value(
-            config, "behavior_analysis.statistics.correlation_method", None
+        logger = getattr(ctx, "logger", None) if ctx is not None else None
+        method = resolve_correlation_method(
+            config,
+            logger=logger,
+            default="spearman",
         )
-        if raw_method is None:
-            raw_method = get_config_value(config, "behavior_analysis.correlation_method", "spearman")
-        method = normalize_correlation_method(raw_method, default="spearman")
         min_samples = get_min_samples(config, "channel")
         fdr_alpha = float(get_config_value(
             config, "behavior_analysis.statistics.fdr_alpha",

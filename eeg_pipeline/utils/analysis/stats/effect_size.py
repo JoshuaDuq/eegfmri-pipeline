@@ -163,6 +163,7 @@ def compute_batch_condition_effects(
     features_df: pd.DataFrame,
     pain_mask: np.ndarray,
     nonpain_mask: np.ndarray,
+    min_samples: int = 5,
     n_perm: int = 0,
     base_seed: int = 42,
     groups: Optional[np.ndarray] = None,
@@ -236,8 +237,11 @@ def compute_batch_condition_effects(
     
     # Build result records
     results: List[Dict[str, Any]] = []
+    min_required = max(int(min_samples), 2)
     
     for i, col in enumerate(feature_columns):
+        if int(n_pain_per_feature[i]) < min_required or int(n_nonpain_per_feature[i]) < min_required:
+            continue
         hg = hedges_g_values[i]
         effect_interp = interpret_effect_size(hg) if np.isfinite(hg) else "unknown"
         
@@ -657,10 +661,15 @@ def compute_condition_effects(
 
     if logger:
         n_significant = df["significant_fdr"].sum()
-        n_large_effect = (df["hedges_g"].abs() >= 0.8).sum()
+        effect_threshold = float(
+            get_config_value(
+                config, "behavior_analysis.condition.effect_size_threshold", 0.8
+            )
+        )
+        n_large_effect = (df["hedges_g"].abs() >= effect_threshold).sum()
         logger.info(
             f"Condition effects summary: {n_significant}/{len(df)} FDR significant, "
-            f"{n_large_effect} large effects (|g|≥0.8)"
+            f"{n_large_effect} large effects (|g|≥{effect_threshold:.3g})"
         )
 
     return df

@@ -96,6 +96,7 @@ def parallel_condition_effects(
             features_df=features_df,
             pain_mask=pain_mask,
             nonpain_mask=nonpain_mask,
+            min_samples=min_samples,
             n_perm=n_perm,
             base_seed=base_seed,
             groups=groups,
@@ -241,6 +242,9 @@ def _compute_single_condition_effect(
 
         pain_valid = pain_values[np.isfinite(pain_values)]
         nonpain_valid = nonpain_values[np.isfinite(nonpain_values)]
+        min_required = max(int(min_samples), 2)
+        if pain_valid.size < min_required or nonpain_valid.size < min_required:
+            return None
 
         mean_pain = float(np.mean(pain_valid))
         mean_nonpain = float(np.mean(nonpain_valid))

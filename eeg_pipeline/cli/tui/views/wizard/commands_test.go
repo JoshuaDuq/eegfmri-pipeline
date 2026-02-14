@@ -44,6 +44,24 @@ func containsSubsequence(items []string, subseq []string) bool {
 	return false
 }
 
+func TestBuildBehaviorAdvancedArgs_OmitsDeprecatedTfHeatmapFlags(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.tfHeatmapEnabled = false
+	m.tfHeatmapFreqsSpec = "4,8,13"
+	m.tfHeatmapTimeResMs = 80
+
+	args := m.buildBehaviorAdvancedArgs()
+	if containsString(args, "--no-tf-heatmap-enabled") {
+		t.Fatalf("did not expect deprecated --no-tf-heatmap-enabled in args: %#v", args)
+	}
+	if containsString(args, "--tf-heatmap-freqs") {
+		t.Fatalf("did not expect deprecated --tf-heatmap-freqs in args: %#v", args)
+	}
+	if containsString(args, "--tf-heatmap-time-resolution-ms") {
+		t.Fatalf("did not expect deprecated --tf-heatmap-time-resolution-ms in args: %#v", args)
+	}
+}
+
 func TestBuildFmriAnalysisAdvancedArgs_DisabledCarpetAndTSNRAddsFlags(t *testing.T) {
 	m := Model{}
 	m.fmriAnalysisPlotsEnabled = true
