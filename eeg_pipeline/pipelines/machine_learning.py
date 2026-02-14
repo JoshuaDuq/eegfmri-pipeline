@@ -42,7 +42,7 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from eeg_pipeline.analysis.machine_learning.orchestration import (
     run_regression_ml,
@@ -668,27 +668,6 @@ class MLPipeline(PipelineBase):
             for d in results_dirs
         ]
 
-    def visualize(
-        self,
-        results_dir: Path,
-        mode: MLMode = "regression",
-    ) -> None:
-        """Machine-learning plotting has been removed."""
-        _ = (results_dir, mode)
-        raise NotImplementedError(
-            "Machine-learning plotting implementation has been removed. "
-            "Use compute outputs under derivatives/machine_learning directly."
-        )
-
-    def run_batch_with_plots(
-        self,
-        subjects: List[str],
-        task: Optional[str] = None,
-        mode: MLMode = "regression",
-        **kwargs,
-    ) -> List[Dict[str, Any]]:
-        """Backward-compatible alias for run_batch (plotting removed)."""
-        return self.run_batch(subjects, task, mode, **kwargs)
 
 
 __all__ = [

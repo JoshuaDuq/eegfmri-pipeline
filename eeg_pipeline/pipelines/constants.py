@@ -4,11 +4,15 @@ Pipeline Constants
 
 Centralized constants for pipeline options, feature categories, and computations.
 Single source of truth for both Python CLI and Go TUI.
+
+FEATURE_CATEGORIES is re-exported from domain.features.constants (canonical).
 """
 
 from __future__ import annotations
 
 from typing import List
+
+from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
 
 
 FREQUENCY_BANDS: List[str] = [
@@ -17,26 +21,6 @@ FREQUENCY_BANDS: List[str] = [
     "alpha",
     "beta",
     "gamma",
-]
-
-
-FEATURE_CATEGORIES: List[str] = [
-    "power",
-    "connectivity",
-    "directedconnectivity",
-    "sourcelocalization",
-    "aperiodic",
-    "erp",
-    "complexity",
-    "bursts",
-    "itpc",
-    "pac",
-    "quality",
-    "erds",
-    "spectral",
-    "ratios",
-    "asymmetry",
-    "microstates",
 ]
 
 

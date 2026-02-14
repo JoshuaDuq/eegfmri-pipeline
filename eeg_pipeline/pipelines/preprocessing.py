@@ -24,7 +24,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from eeg_pipeline.pipelines.base import PipelineBase
 
@@ -155,7 +155,7 @@ class PreprocessingPipeline(PipelineBase):
             "status": "success",
         }]
     
-    def _normalize_subjects(self, subjects: List[str]) -> str | List[str]:
+    def _normalize_subjects(self, subjects: List[str]) -> Union[str, List[str]]:
         """Normalize subjects list to 'all' string if needed."""
         if subjects == ["all"]:
             return "all"
@@ -189,7 +189,7 @@ class PreprocessingPipeline(PipelineBase):
         
         for i, step in enumerate(steps, 1):
             progress.step(step, current=i, total=total_steps)
-            self.logger.info(f"Running step: {step}")
+            self.logger.info("Running step: %s", step)
             
             if step == STEP_BAD_CHANNELS:
                 self._run_bad_channel_detection(
@@ -231,7 +231,7 @@ class PreprocessingPipeline(PipelineBase):
         
         normalized_subjects = self._normalize_subjects(subjects)
         subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
-        self.logger.info(f"Running PyPREP bad channel detection for {subject_count} subject(s)")
+        self.logger.info("Running PyPREP bad channel detection for %s subject(s)", subject_count)
         
         pyprep_cfg = self.config.get("pyprep", {})
         run_bads_detection(
@@ -303,7 +303,7 @@ class PreprocessingPipeline(PipelineBase):
         
         normalized_subjects = self._normalize_subjects(subjects)
         subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
-        self.logger.info(f"Running ICA labeling for {subject_count} subject(s)")
+        self.logger.info("Running ICA labeling for %s subject(s)", subject_count)
         
         icalabel_cfg = self.config.get("icalabel", {})
         run_ica_label(
@@ -420,7 +420,7 @@ class PreprocessingPipeline(PipelineBase):
                 f"--steps={steps}",
             ]
             
-            self.logger.info(f"Running MNE-BIDS pipeline: {steps}")
+            self.logger.info("Running MNE-BIDS pipeline: %s", steps)
             
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
@@ -441,9 +441,9 @@ class PreprocessingPipeline(PipelineBase):
             )
             
             if result.stdout:
-                self.logger.debug(f"MNE-BIDS stdout: {result.stdout}")
+                self.logger.debug("MNE-BIDS stdout: %s", result.stdout)
             if result.stderr:
-                self.logger.warning(f"MNE-BIDS stderr: {result.stderr}")
+                self.logger.warning("MNE-BIDS stderr: %s", result.stderr)
             
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "Unknown error"
@@ -644,17 +644,14 @@ class PreprocessingPipeline(PipelineBase):
         Returns:
             List of unique trial_type values, or None if detection fails.
         """
-        import glob
-        
-        events_pattern = str(self.bids_root / "sub-*" / "eeg" / "*_events.tsv")
-        events_files = glob.glob(events_pattern)
+        events_files = sorted(self.bids_root.glob("sub-*/eeg/*_events.tsv"))
         
         if not events_files:
-            self.logger.debug(f"No events files found matching: {events_pattern}")
+            self.logger.debug("No events files found in %s", self.bids_root)
             return None
         
         try:
-            with open(events_files[0], "r") as f:
+            with open(events_files[0], "r", encoding="utf-8") as f:
                 header = f.readline().strip().split("\t")
                 if "trial_type" not in header:
                     self.logger.debug("No 'trial_type' column in events file")
@@ -691,7 +688,7 @@ class PreprocessingPipeline(PipelineBase):
                     t for t in conditions if any(t.startswith(p) for p in preferred_prefixes)
                 )
                 if preferred:
-                    self.logger.info(f"Auto-detected task conditions from BIDS: {preferred}")
+                    self.logger.info("Auto-detected task conditions from BIDS: %s", preferred)
                     return preferred
 
                 filtered = sorted(
@@ -708,11 +705,11 @@ class PreprocessingPipeline(PipelineBase):
                     )
                     return None
 
-                self.logger.info(f"Auto-detected filtered conditions from BIDS: {filtered}")
+                self.logger.info("Auto-detected filtered conditions from BIDS: %s", filtered)
                 return filtered
                     
         except Exception as e:
-            self.logger.debug(f"Failed to detect conditions: {e}")
+            self.logger.debug("Failed to detect conditions: %s", e)
         
         return None
 

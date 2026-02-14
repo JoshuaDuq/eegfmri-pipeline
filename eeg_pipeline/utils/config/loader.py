@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, Union, Tuple, List
 import json
@@ -156,6 +157,7 @@ class ConfigValidationError(ConfigError):
 _CONFIG: Optional[Dict[str, Any]] = None
 _CONFIG_PATH: Optional[Path] = None
 _CONFIG_MTIME: Optional[float] = None
+_CONFIG_LOCK = threading.Lock()
 
 
 class ConfigDict(dict):
@@ -277,6 +279,7 @@ def load_config(
     
     This is the main entry point for accessing configuration. The config is
     cached and automatically reloaded if the file changes.
+    Thread-safe: concurrent calls are serialized via _CONFIG_LOCK.
     
     Args:
         config_path: Optional path to config file. If None, uses default
@@ -299,10 +302,11 @@ def load_config(
     resolved_path = _resolve_config_path(config_path)
     _validate_config_path(resolved_path)
     
-    if _should_reload_config(resolved_path):
-        config = _load_and_cache_config(resolved_path, apply_thread_limits)
-    else:
-        config = _CONFIG
+    with _CONFIG_LOCK:
+        if _should_reload_config(resolved_path):
+            config = _load_and_cache_config(resolved_path, apply_thread_limits)
+        else:
+            config = _CONFIG
     
     return ConfigDict(config)
 

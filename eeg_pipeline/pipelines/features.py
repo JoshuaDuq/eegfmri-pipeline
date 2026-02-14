@@ -39,6 +39,7 @@ from eeg_pipeline.analysis.features.results import (
 )
 from eeg_pipeline.analysis.features.selection import resolve_feature_categories
 from eeg_pipeline.context.features import FeatureContext
+from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
 from eeg_pipeline.infra.paths import (
     _load_events_df,
     deriv_features_path,
@@ -60,26 +61,8 @@ from eeg_pipeline.utils.data.feature_io import (
 )
 
 
-_FEATURE_ACCUMULATOR_KEYS = [
-    "power",
-    "baseline",
-    "connectivity",
-    "directedconnectivity",
-    "sourcelocalization",
-    "aperiodic",
-    "erp",
-    "itpc",
-    "pac",
-    "pac_time",
-    "complexity",
-    "bursts",
-    "spectral",
-    "erds",
-    "ratios",
-    "asymmetry",
-    "microstates",
-    "quality",
-]
+_ACCUMULATOR_EXTRAS = ["baseline", "pac_time"]
+_FEATURE_ACCUMULATOR_KEYS = list(FEATURE_CATEGORIES) + _ACCUMULATOR_EXTRAS
 
 _TFR_CATEGORIES = {"power", "itpc", "pac"}
 _PRECOMPUTE_CATEGORIES = {
@@ -504,6 +487,7 @@ def _save_extraction_config(
     suffix: Optional[str],
     logger: Any,
     feature_categories: Optional[List[str]] = None,
+    pipeline_config: Optional[Any] = None,
 ) -> None:
     """Save extraction configuration to JSON file in each feature category's metadata folder."""
     from eeg_pipeline.utils.data.feature_io import _get_folder_for_feature
@@ -513,7 +497,7 @@ def _save_extraction_config(
     
     saved_to = []
     for category in categories:
-        folder = _get_folder_for_feature(f"features_{category}")
+        folder = _get_folder_for_feature(f"features_{category}", pipeline_config)
         if folder:
             category_metadata_dir = features_dir / folder / "metadata"
             ensure_dir(category_metadata_dir)
@@ -522,7 +506,7 @@ def _save_extraction_config(
             saved_to.append(str(save_path))
     
     if saved_to:
-        logger.info(f"Saved extraction config to {len(saved_to)} feature category folders")
+        logger.info("Saved extraction config to %d feature category folders", len(saved_to))
 
 
 class FeaturePipeline(PipelineBase):
@@ -669,13 +653,14 @@ class FeaturePipeline(PipelineBase):
 
             if tmin is not None and tmax is not None and tmin > tmax:
                 self.logger.warning(
-                    f"Time range '{name}' has tmin ({tmin}) > tmax ({tmax}). Swapping values."
+                    "Time range '%s' has tmin (%s) > tmax (%s). Swapping values.",
+                    name, tmin, tmax,
                 )
                 tmin, tmax = tmax, tmin
 
             suffix = name
             range_info = f"range '{name}'" if name else "default range"
-            self.logger.info(f"--- Processing {range_info} ({tmin} to {tmax}s) ---")
+            self.logger.info("--- Processing %s (%.3f to %.3fs) ---", range_info, tmin, tmax)
 
             spatial_modes = kwargs.get("spatial_modes") or self.config.get(
                 "feature_engineering.spatial_modes", ["roi", "channels", "global"]
@@ -847,7 +832,7 @@ class FeaturePipeline(PipelineBase):
                 "subject": subject,
                 "task": task,
             }
-            _save_extraction_config(extraction_config, features_dir, suffix, self.logger, feature_categories)
+            _save_extraction_config(extraction_config, features_dir, suffix, self.logger, feature_categories, pipeline_config=self.config)
 
             self.logger.info(
                 "Saved %s: %d total columns \u00d7 %d trials",
@@ -878,7 +863,8 @@ class FeaturePipeline(PipelineBase):
                 "task": task,
             }
             _save_extraction_config(
-                merged_extraction_config, features_dir, None, self.logger, feature_categories
+                merged_extraction_config, features_dir, None, self.logger, feature_categories,
+                pipeline_config=self.config,
             )
             self.logger.info("Saved merged extraction config")
 

@@ -7,12 +7,6 @@ the pipeline for type safety and IDE support.
 
 from __future__ import annotations
 
-import os
-
-# Suppress macOS NumPy compatibility warning
-# Must be set before numpy import
-os.environ.setdefault("NUMPY_SKIP_MACOS_CHECK", "1")
-
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple, runtime_checkable
 

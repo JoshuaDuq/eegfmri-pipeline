@@ -81,7 +81,6 @@ class FeatureContext:
         self._resolve_analysis_mode()
         self._resolve_spatial_modes()
         self._initialize_windows()
-        self._validate_windows()
 
     def _resolve_analysis_mode(self) -> None:
         """Resolve analysis mode from config if using default, then validate."""
@@ -146,11 +145,6 @@ class FeatureContext:
                 spec, logger=self.logger, strict=False
             )
 
-    def _validate_windows(self) -> None:
-        """Validate time windows according to config settings."""
-        if self._windows is None:
-            return
-
     @property
     def windows(self) -> Any:
         """Access centralized time windows."""
@@ -183,35 +177,13 @@ class FeatureContext:
         self.precomputed_by_family[family] = precomputed
         try:
             self.set_precomputed(precomputed)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to set shared precomputed from family '%s': %s", family, exc
+            )
 
     def get_precomputed_for_family(self, family: str) -> Optional[PrecomputedData]:
         if not family:
             return None
         return self.precomputed_by_family.get(family)
 
-    @property
-    def n_epochs(self) -> int:
-        """Number of epochs."""
-        return len(self.epochs) if self.epochs is not None else 0
-
-    @property
-    def n_channels(self) -> int:
-        """Number of channels."""
-        return len(self.epochs.ch_names) if self.epochs is not None else 0
-
-    @property
-    def sfreq(self) -> float:
-        """Sampling frequency."""
-        return self.epochs.info["sfreq"] if self.epochs is not None else 0.0
-
-    @property
-    def ch_names(self) -> List[str]:
-        """Channel names."""
-        return list(self.epochs.ch_names) if self.epochs is not None else []
-
-    @property
-    def times(self) -> np.ndarray:
-        """Time vector."""
-        return self.epochs.times if self.epochs is not None else np.array([])

@@ -426,27 +426,8 @@ class BehaviorContext:
         if not self.feature_categories:
             return
 
-        category_to_attr = {
-            "power": "power_df",
-            "connectivity": "connectivity_df",
-            "directedconnectivity": "directed_connectivity_df",
-            "sourcelocalization": "source_localization_df",
-            "spectral": "spectral_df",
-            "aperiodic": "aperiodic_df",
-            "erp": "erp_df",
-            "erds": "erds_df",
-            "ratios": "ratios_df",
-            "asymmetry": "asymmetry_df",
-            "microstates": "microstates_df",
-            "itpc": "itpc_df",
-            "pac": "pac_df",
-            "complexity": "complexity_df",
-            "bursts": "bursts_df",
-            "quality": "quality_df",
-            "temporal": "temporal_df",
-            "psychometrics": None,
-            "dose_response": None,
-        }
+        _NON_FEATURE_CATEGORIES = {"psychometrics": None, "dose_response": None}
+        category_to_attr = {**_FEATURE_FILE_TO_ATTR, **_NON_FEATURE_CATEGORIES}
         keep_attributes = {
             category_to_attr.get(category)
             for category in self.feature_categories
@@ -610,12 +591,6 @@ class BehaviorContext:
 
     def _build_covariates(self) -> None:
         """Build covariate matrices for partial correlations."""
-        from eeg_pipeline.utils.data.covariates import (
-            build_covariate_matrix,
-            build_covariates_without_temp,
-            extract_temperature_data,
-        )
-
         self._extract_temperature()
         raw_covariates = self._build_raw_covariate_matrix()
         cov_report = self._summarize_covariates(raw_covariates)
@@ -921,8 +896,6 @@ class BehaviorContext:
         preferring smaller units for permutation to be more conservative about
         temporal autocorrelation.
         """
-        from eeg_pipeline.utils.config.loader import get_config_value
-
         self.group_ids = None
         self.group_column = None
         if self.aligned_events is None:

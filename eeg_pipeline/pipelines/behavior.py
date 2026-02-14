@@ -38,31 +38,12 @@ from eeg_pipeline.analysis.behavior.orchestration import (
     write_outputs_manifest,
     get_behavior_output_dir,
 )
+from eeg_pipeline.pipelines.constants import BEHAVIOR_COMPUTATIONS
 
 
 SIGNIFICANCE_THRESHOLD = 0.05
 
-BEHAVIOR_COMPUTATION_FLAGS = [
-    "trial_table",
-    "lag_features",
-    "pain_residual",
-    "temperature_models",
-    "regression",
-    "models",
-    "stability",
-    "consistency",
-    "influence",
-    "report",
-    "correlations",
-    "multilevel_correlations",
-    "pain_sensitivity",
-    "condition",
-    "temporal",
-    "cluster",
-    "mediation",
-    "moderation",
-    "mixed_effects",
-]
+BEHAVIOR_COMPUTATION_FLAGS = list(BEHAVIOR_COMPUTATIONS) + ["multilevel_correlations"]
 
 # Bundled computation aliases for cleaner TUI/CLI
 BEHAVIOR_COMPUTATION_BUNDLES = {
@@ -602,7 +583,7 @@ class BehaviorPipeline(PipelineBase):
                 progress=progress,
             )
         except Exception as exc:
-            logger.error(f"Pipeline failed: {exc}")
+            logger.error("Pipeline failed: %s", exc)
             progress.error("pipeline_failed", str(exc))
             progress.subject_done(f"sub-{subject}", success=False)
             return results
@@ -619,7 +600,7 @@ class BehaviorPipeline(PipelineBase):
                 outputs_manifest=outputs_manifest_path,
             )
         except Exception as e:
-            logger.warning(f"Failed to write analysis metadata: {e}")
+            logger.warning("Failed to write analysis metadata: %s", e)
         
         summary = results.to_summary()
         summary_dir = get_behavior_output_dir(ctx, "summary", ensure=True)
@@ -672,7 +653,6 @@ class BehaviorPipeline(PipelineBase):
         """
         from eeg_pipeline.analysis.behavior.orchestration import (
             run_group_level_analysis,
-            GroupLevelResult,
         )
         from eeg_pipeline.infra.paths import ensure_dir
         
