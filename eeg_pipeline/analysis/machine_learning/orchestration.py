@@ -656,11 +656,19 @@ def run_within_subject_regression_ml(
     
     model_name = model if model else "elasticnet"
 
+    outer_cv_splits = int(
+        get_config_value(
+            config,
+            "machine_learning.cv.outer_splits",
+            get_config_value(config, "machine_learning.cv.default_n_splits", 5),
+        )
+    )
     folds = create_within_subject_folds(
         groups=groups,
         blocks_all=blocks_all,
         inner_cv_splits=inner_splits,
         seed=rng_seed,
+        outer_cv_splits=outer_cv_splits,
         config=config,
         epochs=None,
         apply_hygiene=False,
@@ -1465,11 +1473,19 @@ def run_within_subject_classification_ml(
         param_grid = build_svm_param_grid(config)
         model_type = "svm"
 
+    outer_cv_splits = int(
+        get_config_value(
+            config,
+            "machine_learning.cv.outer_splits",
+            get_config_value(config, "machine_learning.cv.default_n_splits", 5),
+        )
+    )
     folds = create_within_subject_folds(
         groups=groups,
         blocks_all=blocks_all,
         inner_cv_splits=inner_splits,
         seed=rng_seed,
+        outer_cv_splits=outer_cv_splits,
         config=config,
         epochs=None,
         apply_hygiene=False,
@@ -1798,11 +1814,15 @@ def run_within_subject_classification_ml(
                     groups=np.asarray(groups_p),
                 )
                 perm_auc_subj_mean = _subject_mean_metric(perm_result.per_subject_metrics, "auc")
-                perm_auc_for_inference = (
-                    perm_auc_subj_mean if np.isfinite(perm_auc_subj_mean) else float(perm_result.auc)
+                perm_n_subjects_with_auc = _count_finite_subject_metric(
+                    perm_result.per_subject_metrics,
+                    "auc",
                 )
-                if np.isfinite(perm_auc_for_inference):
-                    null_auc.append(float(perm_auc_for_inference))
+                if (
+                    perm_n_subjects_with_auc >= int(min_subjects_auc)
+                    and np.isfinite(perm_auc_subj_mean)
+                ):
+                    null_auc.append(float(perm_auc_subj_mean))
             except Exception:
                 continue
 
@@ -1891,6 +1911,9 @@ def _run_classification_permutations(
     max_failed_perm_fraction = float(
         get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
     )
+    min_subjects_auc = int(
+        get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
+    )
 
     for i in range(n_perm):
         y_perm = y.copy()
@@ -1938,9 +1961,9 @@ def _run_classification_permutations(
             if perm_failed_fraction > max_failed_perm_fraction:
                 continue
             auc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
-            auc_for_inference = auc_subj_mean if np.isfinite(auc_subj_mean) else float(result.auc)
-            if np.isfinite(auc_for_inference):
-                null_aucs.append(float(auc_for_inference))
+            n_subjects_with_auc = _count_finite_subject_metric(result.per_subject_metrics, "auc")
+            if n_subjects_with_auc >= min_subjects_auc and np.isfinite(auc_subj_mean):
+                null_aucs.append(float(auc_subj_mean))
         except Exception:
             continue
         

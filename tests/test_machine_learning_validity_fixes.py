@@ -38,6 +38,24 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least 2 unique groups"):
             create_inner_cv(train_groups, inner_cv_splits=3)
 
+    def test_create_within_subject_folds_respects_outer_cv_splits(self):
+        from eeg_pipeline.analysis.machine_learning.cv import create_within_subject_folds
+
+        groups = np.array(["sub-0001"] * 6, dtype=object)
+        blocks = np.array([0, 0, 1, 1, 2, 2], dtype=float)
+
+        folds = create_within_subject_folds(
+            groups=groups,
+            blocks_all=blocks,
+            inner_cv_splits=5,
+            outer_cv_splits=2,
+            seed=42,
+            config=DotConfig({}),
+            epochs=None,
+            apply_hygiene=False,
+        )
+        self.assertEqual(len(folds), 2)
+
     def test_split_conformal_handles_small_training_sets(self):
         from sklearn.dummy import DummyRegressor
 
@@ -1075,6 +1093,53 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         with patch(
             "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
             return_value=(bad_result, pd.DataFrame()),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Insufficient valid classification permutations"):
+                orch._run_classification_permutations(
+                    X=X,
+                    y=y,
+                    groups=groups,
+                    blocks=None,
+                    model="svm",
+                    inner_splits=2,
+                    seed=42,
+                    n_perm=2,
+                    config=cfg,
+                    logger=Mock(),
+                    harmonization_mode="intersection",
+                )
+
+    def test_group_classification_permutations_do_not_fallback_to_pooled_auc(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "classification": {
+                        "max_failed_fold_fraction": 1.0,
+                        "min_subjects_with_auc_for_inference": 2,
+                    },
+                    "cv": {"min_valid_permutation_fraction": 0.75},
+                }
+            }
+        )
+
+        fake_result = types.SimpleNamespace(
+            failed_fold_count=0,
+            n_folds_total=2,
+            per_subject_metrics={
+                "sub-0001": {"auc": 0.6},
+                "sub-0002": {"accuracy": 1.0},
+            },
+            auc=0.95,
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+            return_value=(fake_result, pd.DataFrame()),
         ):
             with self.assertRaisesRegex(RuntimeError, "Insufficient valid classification permutations"):
                 orch._run_classification_permutations(

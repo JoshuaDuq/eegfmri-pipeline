@@ -615,6 +615,7 @@ def create_within_subject_folds(
     blocks_all: Optional[np.ndarray],
     inner_cv_splits: int,
     seed: int,
+    outer_cv_splits: Optional[int] = None,
     config: Optional[Any] = None,
     epochs: Optional[Any] = None,
     apply_hygiene: bool = True,
@@ -633,7 +634,8 @@ def create_within_subject_folds(
         subject_indices = np.where(groups == subject)[0]
         n_samples = len(subject_indices)
 
-        n_splits = min(inner_cv_splits, n_samples)
+        requested_outer_splits = int(outer_cv_splits) if outer_cv_splits is not None else int(inner_cv_splits)
+        n_splits = min(max(2, requested_outer_splits), n_samples)
 
         if blocks_all is None:
             logger.warning(f"Subject {subject}: missing run_id, skipping")

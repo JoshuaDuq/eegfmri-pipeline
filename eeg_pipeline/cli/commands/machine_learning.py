@@ -481,10 +481,10 @@ def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     _update_path_config(args, config)
     _update_model_config(args, config)
     _update_fmri_signature_target_config(args, config)
-    if args.require_trial_ml_safe:
-        config["machine_learning.data.require_trial_ml_safe"] = True
-        # Keep the ML safety gate and analysis mode consistent for this run.
-        config["feature_engineering.analysis_mode"] = "trial_ml_safe"
+    # Enforce trial-level ML-safe feature computation by default to prevent CV leakage.
+    # --require-trial-ml-safe is retained for backward-compatible CLI ergonomics.
+    config["machine_learning.data.require_trial_ml_safe"] = True
+    config["feature_engineering.analysis_mode"] = "trial_ml_safe"
     
     pipeline_kwargs = _build_pipeline_kwargs(args, config)
     pipeline = MLPipeline(config=config)
