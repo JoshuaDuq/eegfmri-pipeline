@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from eeg_pipeline.utils.config.loader import load_config
+from eeg_pipeline.utils.config.overrides import apply_runtime_overrides
 from eeg_pipeline.utils.data.subjects import parse_subject_args
 from eeg_pipeline.cli.common import get_deriv_root
 from eeg_pipeline.cli.commands import COMMANDS, get_command, Command
@@ -85,16 +86,13 @@ For detailed help on each subcommand:
 
 def update_config_from_args(config: dict[str, Any], args: argparse.Namespace) -> None:
     """Update configuration dictionary with values from command-line arguments."""
-    paths = config.setdefault("paths", {})
-    
-    if getattr(args, "bids_root", None):
-        paths["bids_root"] = args.bids_root
-    if getattr(args, "bids_fmri_root", None):
-        paths["bids_fmri_root"] = args.bids_fmri_root
-    if getattr(args, "source_root", None):
-        paths["source_data"] = args.source_root
-    if getattr(args, "deriv_root", None):
-        paths["deriv_root"] = args.deriv_root
+    apply_runtime_overrides(
+        config,
+        source_root=getattr(args, "source_root", None),
+        bids_root=getattr(args, "bids_root", None),
+        bids_fmri_root=getattr(args, "bids_fmri_root", None),
+        deriv_root=getattr(args, "deriv_root", None),
+    )
 
 
 def get_subjects_for_command(

@@ -1147,7 +1147,7 @@ def _add_change_scores_to_results(
         if df is None or df.empty:
             continue
 
-        change_df = compute_change_features(df)
+        change_df = compute_change_features(df, config=ctx.config)
         if change_df.empty:
             continue
 

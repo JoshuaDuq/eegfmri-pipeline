@@ -101,8 +101,8 @@ func (m Model) buildFmriRawToBidsAdvancedArgs() []string {
 	return args
 }
 
-// buildMergeBehaviorAdvancedArgs returns CLI args for merge-behavior advanced options
-func (m Model) buildMergeBehaviorAdvancedArgs() []string {
+// buildMergePsychopyAdvancedArgs returns CLI args for merge-psychopy advanced options
+func (m Model) buildMergePsychopyAdvancedArgs() []string {
 	var args []string
 
 	if m.mergeEventPrefixes != "" {

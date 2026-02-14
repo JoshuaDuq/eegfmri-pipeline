@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m Model) renderMergeBehaviorAdvancedConfig() string {
+func (m Model) renderMergePsychopyAdvancedConfig() string {
 	var b strings.Builder
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 

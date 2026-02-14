@@ -188,11 +188,11 @@ class TestUtilitiesAndMergeDeep(unittest.TestCase):
 
             progress = SimpleNamespace(subject_start=lambda *a, **k: None, subject_done=lambda *a, **k: None, step=lambda *a, **k: None)
             with patch("eeg_pipeline.pipelines.utilities.run_raw_to_bids", return_value=1) as mock_r2b, patch(
-                "eeg_pipeline.pipelines.utilities.run_merge_behavior", return_value=1
+                "eeg_pipeline.pipelines.utilities.run_merge_psychopy", return_value=1
             ) as mock_merge:
                 p.process_subject("0001", task="thermalactive", progress=progress)
                 p.run_raw_to_bids(task="thermalactive", subjects=["0001"])
-                p.run_merge_behavior(task="thermalactive", subjects=["0001"])
+                p.run_merge_psychopy(task="thermalactive", subjects=["0001"])
             self.assertTrue(mock_r2b.called)
             self.assertTrue(mock_merge.called)
 
@@ -232,13 +232,13 @@ class TestUtilitiesAndMergeDeep(unittest.TestCase):
 
 class TestUtilitiesAndMergeCompletion(unittest.TestCase):
         def test_utility_and_merge_wrapper_functions(self):
-            from eeg_pipeline.pipelines.utilities import run_raw_to_bids, run_merge_behavior, UtilityPipeline
+            from eeg_pipeline.pipelines.utilities import run_raw_to_bids, run_merge_psychopy, UtilityPipeline
 
             with patch("eeg_pipeline.pipelines.utilities._run_raw_to_bids", return_value=2) as m1, patch(
                 "eeg_pipeline.pipelines.utilities._run_merge_psychopy", return_value=3
             ) as m2:
                 self.assertEqual(run_raw_to_bids(Path("/a"), Path("/b"), "t"), 2)
-                self.assertEqual(run_merge_behavior(Path("/b"), Path("/a"), "t"), 3)
+                self.assertEqual(run_merge_psychopy(Path("/b"), Path("/a"), "t"), 3)
             m1.assert_called_once()
             m2.assert_called_once()
 

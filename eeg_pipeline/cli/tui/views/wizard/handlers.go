@@ -991,7 +991,7 @@ func (m *Model) getAdvancedOptionCount() int {
 	case types.PipelineFmriRawToBIDS:
 		return len(m.getFmriRawToBidsOptions())
 	case types.PipelineMergePsychoPyData:
-		return len(m.getMergeBehaviorOptions())
+		return len(m.getMergePsychopyOptions())
 	default:
 		return 1
 	}
@@ -1016,8 +1016,8 @@ func (m *Model) findNextPlottingAdvancedRow(current int, delta int) int {
 }
 
 // toggleAdvancedOption handles Space key for advanced config options
-func (m *Model) toggleMergeBehaviorAdvancedOption() {
-	options := m.getMergeBehaviorOptions()
+func (m *Model) toggleMergePsychopyAdvancedOption() {
+	options := m.getMergePsychopyOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
 		return
 	}

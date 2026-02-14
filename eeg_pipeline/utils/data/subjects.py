@@ -403,7 +403,7 @@ def _determine_discovery_sources(args: Any) -> List[str]:
     if hasattr(args, "mode"):
         if args.mode in {"raw-to-bids", "fmri-raw-to-bids"}:
             return ["source_data"]
-        elif args.mode in {"combine", "merge-behavior", "merge-psychopy", "visualize"}:
+        elif args.mode in {"combine", "merge-psychopy", "visualize"}:
             return ["bids"]
     
     return ["derivatives_epochs"]

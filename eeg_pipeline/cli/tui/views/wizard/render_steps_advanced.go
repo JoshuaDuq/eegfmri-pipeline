@@ -32,7 +32,7 @@ func (m Model) renderAdvancedConfig() string {
 	case types.PipelineFmriRawToBIDS:
 		return m.renderFmriRawToBidsAdvancedConfig()
 	case types.PipelineMergePsychoPyData:
-		return m.renderMergeBehaviorAdvancedConfig()
+		return m.renderMergePsychopyAdvancedConfig()
 	default:
 		return m.renderDefaultAdvancedConfig()
 	}

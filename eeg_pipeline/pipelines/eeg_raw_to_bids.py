@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.analysis.utilities.eeg_raw_to_bids import run_raw_to_bids
+from eeg_pipeline.pipelines.utilities import run_raw_to_bids
 
 
 class EEGRawToBidsPipeline(PipelineBase):

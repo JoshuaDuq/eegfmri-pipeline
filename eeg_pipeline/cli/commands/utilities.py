@@ -1,4 +1,4 @@
-"""Utilities CLI command (raw-to-bids, merge-behavior, clean)."""
+"""Utilities CLI command (raw-to-bids, merge-psychopy, clean)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from eeg_pipeline.cli.common import (
     create_progress_reporter,
     resolve_task,
 )
+from eeg_pipeline.utils.config.overrides import apply_runtime_overrides
 
 
 def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -27,7 +28,7 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
     )
     parser.add_argument(
         "mode",
-        choices=["raw-to-bids", "fmri-raw-to-bids", "merge-psychopy", "merge-behavior", "clean"],
+        choices=["raw-to-bids", "fmri-raw-to-bids", "merge-psychopy", "clean"],
         help="Utility operation mode"
     )
     add_common_subject_args(parser)
@@ -159,19 +160,6 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
     return parser
 
 
-def _update_config_paths(config: Any, source_root: str | None, bids_root: str | None) -> None:
-    """Update config with path overrides if provided."""
-    if source_root:
-        config.setdefault("paths", {})["source_data"] = source_root
-    if bids_root:
-        config.setdefault("paths", {})["bids_root"] = bids_root
-
-
-def _update_config_fmri_paths(config: Any, bids_fmri_root: str | None) -> None:
-    if bids_fmri_root:
-        config.setdefault("paths", {})["bids_fmri_root"] = bids_fmri_root
-
-
 def _run_raw_to_bids_mode(
     task: str,
     subjects: List[str],
@@ -234,14 +222,18 @@ def run_utilities(args: argparse.Namespace, subjects: List[str], config: Any) ->
     progress = create_progress_reporter(args)
     task = resolve_task(args.task, config)
 
-    _update_config_paths(config, args.source_root, args.bids_root)
-    _update_config_fmri_paths(config, getattr(args, "bids_fmri_root", None))
+    apply_runtime_overrides(
+        config,
+        source_root=getattr(args, "source_root", None),
+        bids_root=getattr(args, "bids_root", None),
+        bids_fmri_root=getattr(args, "bids_fmri_root", None),
+    )
 
     if args.mode == "fmri-raw-to-bids":
         return _run_fmri_raw_to_bids_mode(task, subjects, args, config, progress)
     if args.mode == "raw-to-bids":
         return _run_raw_to_bids_mode(task, subjects, args, config, progress)
-    if args.mode in ("merge-psychopy", "merge-behavior"):
+    if args.mode == "merge-psychopy":
         return _run_merge_psychopy_mode(task, subjects, args, config, progress)
 
 

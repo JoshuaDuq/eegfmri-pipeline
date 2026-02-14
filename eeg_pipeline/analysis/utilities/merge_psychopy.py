@@ -23,21 +23,21 @@ from eeg_pipeline.utils.data.preprocessing import (
 logger = logging.getLogger(__name__)
 
 
-def _validate_and_trim_behavior(
-    behavioral_df: pd.DataFrame,
+def _validate_and_trim_psychopy_rows(
+    psychopy_df: pd.DataFrame,
     events_df: pd.DataFrame,
     *,
     allow_misaligned_trim: bool,
     log: logging.Logger,
 ) -> pd.DataFrame:
-    n_behavioral_rows = len(behavioral_df)
+    n_psychopy_rows = len(psychopy_df)
     n_event_rows = len(events_df)
 
-    if n_behavioral_rows == n_event_rows:
-        return behavioral_df.reset_index(drop=True)
+    if n_psychopy_rows == n_event_rows:
+        return psychopy_df.reset_index(drop=True)
 
     msg = (
-        f"Behavior/events count mismatch: behavioral={n_behavioral_rows} "
+        f"PsychoPy/events count mismatch: psychopy={n_psychopy_rows} "
         f"events={n_event_rows}. This can happen if trigger filtering "
         "misses trials, triggers are duplicated, or the wrong behavioral file was selected."
     )
@@ -45,14 +45,14 @@ def _validate_and_trim_behavior(
         raise ValueError(msg)
 
     log.warning("%s Proceeding because allow_misaligned_trim=True.", msg)
-    if n_behavioral_rows > n_event_rows:
-        return behavioral_df.iloc[:n_event_rows].reset_index(drop=True)
-    return behavioral_df.reindex(range(n_event_rows)).reset_index(drop=True)
+    if n_psychopy_rows > n_event_rows:
+        return psychopy_df.iloc[:n_event_rows].reset_index(drop=True)
+    return psychopy_df.reindex(range(n_event_rows)).reset_index(drop=True)
 
 
 def _qc_compare_trial_intervals(
     target_events_df: pd.DataFrame,
-    behavioral_df: pd.DataFrame,
+    psychopy_df: pd.DataFrame,
     *,
     log: logging.Logger,
     warn_threshold_s: float = 0.25,
@@ -70,7 +70,7 @@ def _qc_compare_trial_intervals(
 
     try:
         eeg_onsets = pd.to_numeric(target_events_df["onset"], errors="coerce").to_numpy()
-        beh_onsets = pd.to_numeric(behavioral_df["stim_start_time"], errors="coerce").to_numpy()
+        beh_onsets = pd.to_numeric(psychopy_df["stim_start_time"], errors="coerce").to_numpy()
     except Exception:
         return
 
@@ -104,7 +104,7 @@ def _qc_compare_trial_intervals(
         )
 
 
-def merge_behavior_to_events(
+def merge_psychopy_to_events(
     events_tsv: Path,
     source_root: Path,
     event_prefixes: Optional[List[str]] = None,
@@ -151,13 +151,15 @@ def merge_behavior_to_events(
         return False
 
     try:
-        beh_df = pd.read_csv(beh_csv)
+        psychopy_df = pd.read_csv(beh_csv)
     except (pd.errors.ParserError, OSError) as exc:
         log.error("Failed reading behavior: %s -> %s", beh_csv, exc)
         return False
 
-    if run_num is not None and "run_id" in beh_df.columns:
-        unique_runs = sorted({int(r) for r in pd.to_numeric(beh_df["run_id"], errors="coerce").dropna().unique()})
+    if run_num is not None and "run_id" in psychopy_df.columns:
+        unique_runs = sorted(
+            {int(r) for r in pd.to_numeric(psychopy_df["run_id"], errors="coerce").dropna().unique()}
+        )
         if unique_runs and unique_runs != [int(run_num)]:
             message = f"Behavior run_id mismatch for {beh_csv.name}: found {unique_runs}, expected {run_num}"
             if not allow_misaligned_trim:
@@ -192,26 +194,26 @@ def merge_behavior_to_events(
 
     target_events_df = ev_df.iloc[target_indices].copy()
     try:
-        behavioral_subset = _validate_and_trim_behavior(
-            beh_df,
+        psychopy_subset = _validate_and_trim_psychopy_rows(
+            psychopy_df,
             target_events_df,
             allow_misaligned_trim=allow_misaligned_trim,
             log=log,
         )
     except ValueError as exc:
         run_text = f"run-{run_num} " if run_num is not None else ""
-        log.error("Behavioral/events mismatch for sub-%s %s: %s", sub_label, run_text, exc)
+        log.error("PsychoPy/events mismatch for sub-%s %s: %s", sub_label, run_text, exc)
         return False
 
-    _qc_compare_trial_intervals(target_events_df, behavioral_subset, log=log)
+    _qc_compare_trial_intervals(target_events_df, psychopy_subset, log=log)
 
-    n_matched = len(behavioral_subset)
+    n_matched = len(psychopy_subset)
     event_rows_to_update = target_indices[:n_matched]
 
-    for column in behavioral_subset.columns:
+    for column in psychopy_subset.columns:
         if column not in ev_df.columns:
             ev_df[column] = pd.NA
-        ev_df.loc[event_rows_to_update, column] = behavioral_subset[column].values
+        ev_df.loc[event_rows_to_update, column] = psychopy_subset[column].values
 
     # Populate run_id consistently for run-level events files.
     if run_num is not None:
@@ -231,7 +233,7 @@ def merge_behavior_to_events(
         log.info(
             "[dry-run] Would update: %s with columns: %s from %s",
             events_tsv,
-            list(behavioral_subset.columns),
+            list(psychopy_subset.columns),
             beh_csv.name,
         )
         return True
@@ -287,7 +289,7 @@ def run_merge_psychopy(
     n_ok = 0
     eeg_dirs = []
     for ev in ev_paths:
-        ok = merge_behavior_to_events(
+        ok = merge_psychopy_to_events(
             ev,
             source_root=source_root,
             event_prefixes=event_prefixes,
@@ -313,3 +315,25 @@ def run_merge_psychopy(
 
     log.info("Done. Processed %d event file(s), merged successfully: %d.", len(ev_paths), n_ok)
     return n_ok
+
+
+def merge_behavior_to_events(
+    events_tsv: Path,
+    source_root: Path,
+    event_prefixes: Optional[List[str]] = None,
+    event_types: Optional[List[str]] = None,
+    dry_run: bool = False,
+    allow_misaligned_trim: bool = False,
+    *,
+    _logger: Optional[logging.Logger] = None,
+) -> bool:
+    """Backward-compatible alias for ``merge_psychopy_to_events``."""
+    return merge_psychopy_to_events(
+        events_tsv=events_tsv,
+        source_root=source_root,
+        event_prefixes=event_prefixes,
+        event_types=event_types,
+        dry_run=dry_run,
+        allow_misaligned_trim=allow_misaligned_trim,
+        _logger=_logger,
+    )

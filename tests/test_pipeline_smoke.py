@@ -336,7 +336,7 @@ class TestAllPipelines(unittest.TestCase):
         pipeline.source_root = Path(tempfile.mkdtemp()) / "source"
 
         with patch("eeg_pipeline.pipelines.utilities.run_raw_to_bids", return_value=2), patch(
-            "eeg_pipeline.pipelines.utilities.run_merge_behavior", return_value=2
+            "eeg_pipeline.pipelines.utilities.run_merge_psychopy", return_value=2
         ):
             out = pipeline.run_batch(["0001", "0002"], progress=_DummyProgress())
 
@@ -361,7 +361,7 @@ class TestAllPipelines(unittest.TestCase):
         self.assertEqual(raw_kwargs["montage"], "easycap-M1")
         self.assertEqual(raw_kwargs["line_freq"], 50.0)
 
-        merge_kwargs = pipeline._extract_merge_behavior_kwargs({})
+        merge_kwargs = pipeline._extract_merge_psychopy_kwargs({})
         self.assertTrue(merge_kwargs["allow_misaligned_trim"])
         self.assertEqual(pipeline._resolve_task(None), "thermalactive")
 

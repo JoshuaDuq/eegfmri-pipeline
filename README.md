@@ -236,7 +236,7 @@ eeg-pipeline <command> --help
 
 | Command | Description |
 |---------|-------------|
-| `utilities` | Data conversion (raw→BIDS), merge behavior, clean disk |
+| `utilities` | Data conversion (raw→BIDS), merge PsychoPy, clean disk |
 | `preprocessing` | Bad channels, ICA, epoching |
 | `features` | Extract or visualize 16 EEG feature categories |
 | `behavior` | Behavioral correlations, condition comparisons, mediation |
@@ -259,7 +259,6 @@ Convert raw recordings into BIDS format.
 | `raw-to-bids` | Convert raw EEG (BrainVision .vhdr) to BIDS |
 | `fmri-raw-to-bids` | Convert fMRI DICOMs to BIDS NIfTI + events.tsv |
 | `merge-psychopy` | Merge PsychoPy behavioral logs into BIDS events.tsv |
-| `merge-behavior` | Merge behavioral data into feature tables |
 | `clean` | Clean up intermediate files to free disk space |
 
 ```bash

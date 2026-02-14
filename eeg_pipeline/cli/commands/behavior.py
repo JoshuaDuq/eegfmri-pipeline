@@ -88,6 +88,15 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--no-loso-stability", action="store_false", dest="loso_stability")
     compute_group.add_argument("--compute-bayes-factors", action="store_true", default=None)
     compute_group.add_argument("--no-compute-bayes-factors", action="store_false", dest="compute_bayes_factors")
+    compute_group.add_argument("--stats-hierarchical-fdr", action="store_true", default=None, dest="stats_hierarchical_fdr")
+    compute_group.add_argument("--no-stats-hierarchical-fdr", action="store_false", dest="stats_hierarchical_fdr")
+    compute_group.add_argument("--stats-compute-reliability", action="store_true", default=None, dest="stats_compute_reliability")
+    compute_group.add_argument("--no-stats-compute-reliability", action="store_false", dest="stats_compute_reliability")
+    compute_group.add_argument("--perm-group-column-preference", nargs="+", default=None, metavar="COL", dest="perm_group_column_preference", help="Preferred columns for permutation grouping (e.g. run_id block)")
+    compute_group.add_argument("--exclude-non-trialwise-features", action="store_true", default=None, dest="exclude_non_trialwise_features")
+    compute_group.add_argument("--no-exclude-non-trialwise-features", action="store_false", dest="exclude_non_trialwise_features")
+    compute_group.add_argument("--temperature-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), dest="temperature_range", help="Valid temperature range (e.g. 35.0 55.0)")
+    compute_group.add_argument("--max-missing-channels-fraction", type=float, default=None, help="Max fraction of missing channels allowed")
     compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
     compute_group.add_argument(
         "--validate-only",
@@ -515,6 +524,22 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     if getattr(args, "fdr_alpha", None) is not None:
         stats_cfg["fdr_alpha"] = float(args.fdr_alpha)
+    if getattr(args, "stats_hierarchical_fdr", None) is not None:
+        stats_cfg["hierarchical_fdr"] = bool(args.stats_hierarchical_fdr)
+    if getattr(args, "stats_compute_reliability", None) is not None:
+        stats_cfg["compute_reliability"] = bool(args.stats_compute_reliability)
+    if getattr(args, "perm_group_column_preference", None):
+        parts = []
+        for token in args.perm_group_column_preference:
+            parts.extend(str(token).replace(",", " ").split())
+        if parts:
+            ba.setdefault("permutation", {})["group_column_preference"] = [p.strip() for p in parts if p.strip()]
+    if getattr(args, "exclude_non_trialwise_features", None) is not None:
+        ba.setdefault("features", {})["exclude_non_trialwise_features"] = bool(args.exclude_non_trialwise_features)
+    if getattr(args, "temperature_range", None) is not None:
+        config.setdefault("io", {}).setdefault("constants", {})["temperature_range"] = [float(args.temperature_range[0]), float(args.temperature_range[1])]
+    if getattr(args, "max_missing_channels_fraction", None) is not None:
+        config.setdefault("io", {}).setdefault("constants", {})["max_missing_channels_fraction"] = float(args.max_missing_channels_fraction)
 
     if getattr(args, "compute_change_scores", None) is not None:
         corr_cfg["compute_change_scores"] = bool(args.compute_change_scores)

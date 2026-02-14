@@ -4,7 +4,7 @@ Utilities Pipeline
 
 Pipeline class and orchestration functions for utility tasks:
 - Raw-to-BIDS conversion
-- Behavioral data merge
+- PsychoPy-to-events merge
 
 Usage:
     pipeline = UtilityPipeline(config=config)
@@ -59,7 +59,7 @@ def run_raw_to_bids(
     )
 
 
-def run_merge_behavior(
+def run_merge_psychopy(
     bids_root: Path,
     source_root: Path,
     task: str,
@@ -69,7 +69,7 @@ def run_merge_behavior(
     dry_run: bool = False,
     allow_misaligned_trim: bool = False,
 ) -> int:
-    """Merge behavioral data into BIDS events files."""
+    """Merge PsychoPy behavioral data into BIDS events files."""
     return _run_merge_psychopy(
         bids_root=bids_root,
         source_root=source_root,
@@ -84,7 +84,7 @@ def run_merge_behavior(
 
 
 class UtilityPipeline(PipelineBase):
-    """Pipeline for utility operations (raw-to-BIDS, merge-behavior).
+    """Pipeline for utility operations (raw-to-BIDS, merge-psychopy).
 
     Unlike other pipelines, these utilities operate on source data or
     BIDS raw data rather than per-subject derivatives.
@@ -119,10 +119,10 @@ class UtilityPipeline(PipelineBase):
             "keep_all_annotations": kwargs.get("keep_all_annotations", False),
         }
 
-    def _extract_merge_behavior_kwargs(
+    def _extract_merge_psychopy_kwargs(
         self, kwargs: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Extract and normalize kwargs for merge-behavior operation."""
+        """Extract and normalize kwargs for merge-psychopy operation."""
         return {
             "event_prefixes": kwargs.get("event_prefixes"),
             "event_types": kwargs.get("event_types"),
@@ -140,12 +140,12 @@ class UtilityPipeline(PipelineBase):
     def process_subject(
         self, subject: str, task: Optional[str] = None, **kwargs: Any
     ) -> None:
-        """Process a single subject through raw-to-BIDS and merge-behavior."""
+        """Process a single subject through raw-to-BIDS and merge-psychopy."""
         from eeg_pipeline.cli.common import ProgressReporter
 
         resolved_task = self._resolve_task(task)
         raw_to_bids_kwargs = self._extract_raw_to_bids_kwargs(kwargs)
-        merge_kwargs = self._extract_merge_behavior_kwargs(kwargs)
+        merge_kwargs = self._extract_merge_psychopy_kwargs(kwargs)
 
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
         subject_id = f"sub-{subject}"
@@ -168,13 +168,13 @@ class UtilityPipeline(PipelineBase):
 
         progress.step("Merging behavior", current=2, total=2)
         t1 = _time.perf_counter()
-        run_merge_behavior(
+        run_merge_psychopy(
             bids_root=self.bids_root,
             source_root=self.source_root,
             task=resolved_task,
             **merge_kwargs,
         )
-        self.logger.info("Merge-behavior complete (%.1fs)", _time.perf_counter() - t1)
+        self.logger.info("Merge-psychopy complete (%.1fs)", _time.perf_counter() - t1)
 
         self.logger.info(
             "Utilities done for %s (%.1fs total)",
@@ -190,7 +190,7 @@ class UtilityPipeline(PipelineBase):
 
         resolved_task = self._resolve_task(task)
         raw_to_bids_kwargs = self._extract_raw_to_bids_kwargs(kwargs)
-        merge_kwargs = self._extract_merge_behavior_kwargs(kwargs)
+        merge_kwargs = self._extract_merge_psychopy_kwargs(kwargs)
 
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
 
@@ -219,7 +219,7 @@ class UtilityPipeline(PipelineBase):
 
         progress.step("Merging behavior", current=2, total=2)
         t1 = _time.perf_counter()
-        n_merged = run_merge_behavior(
+        n_merged = run_merge_psychopy(
             bids_root=self.bids_root,
             source_root=self.source_root,
             task=resolved_task,
@@ -227,7 +227,7 @@ class UtilityPipeline(PipelineBase):
             **merge_kwargs,
         )
         self.logger.info(
-            "Merge-behavior: %d/%d subjects merged (%.1fs)",
+            "Merge-psychopy: %d/%d subjects merged (%.1fs)",
             n_merged, len(subjects), _time.perf_counter() - t1,
         )
 
@@ -271,7 +271,7 @@ class UtilityPipeline(PipelineBase):
             **kwargs,
         )
 
-    def run_merge_behavior(
+    def run_merge_psychopy(
         self,
         task: Optional[str] = None,
         subjects: Optional[List[str]] = None,
@@ -279,14 +279,14 @@ class UtilityPipeline(PipelineBase):
         event_types: Optional[List[str]] = None,
         dry_run: bool = False,
     ) -> int:
-        """Merge behavioral data into BIDS events files."""
+        """Merge PsychoPy behavioral data into BIDS events files."""
         resolved_task = self._resolve_task(task)
-        kwargs = self._extract_merge_behavior_kwargs({
+        kwargs = self._extract_merge_psychopy_kwargs({
             "event_prefixes": event_prefixes,
             "event_types": event_types,
             "dry_run": dry_run,
         })
-        return run_merge_behavior(
+        return run_merge_psychopy(
             bids_root=self.bids_root,
             source_root=self.source_root,
             task=resolved_task,
@@ -298,5 +298,5 @@ class UtilityPipeline(PipelineBase):
 __all__ = [
     "UtilityPipeline",
     "run_raw_to_bids",
-    "run_merge_behavior",
+    "run_merge_psychopy",
 ]

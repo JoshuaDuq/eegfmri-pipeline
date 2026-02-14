@@ -672,7 +672,7 @@ func (m Model) BuildCommand() string {
 		case types.PipelineFmriRawToBIDS:
 			parts = append(parts, m.buildFmriRawToBidsAdvancedArgs()...)
 		case types.PipelineMergePsychoPyData:
-			parts = append(parts, m.buildMergeBehaviorAdvancedArgs()...)
+			parts = append(parts, m.buildMergePsychopyAdvancedArgs()...)
 		}
 	}
 

@@ -809,6 +809,15 @@ def _apply_execution_overrides(args: argparse.Namespace, config: Any) -> None:
         config["feature_engineering.analysis_mode"] = args.analysis_mode
     if getattr(args, "compute_change_scores", None) is not None:
         config["feature_engineering.compute_change_scores"] = args.compute_change_scores
+    if getattr(args, "change_scores_transform", None) is not None:
+        transform = str(args.change_scores_transform).strip().lower()
+        if transform == "ratio":
+            transform = "percent"
+        config["feature_engineering.change_scores.transform"] = transform
+    if getattr(args, "change_scores_window_pairs", None):
+        config["feature_engineering.change_scores.window_pairs"] = _parse_pair_tokens(
+            args.change_scores_window_pairs, label="change_scores"
+        )
     if getattr(args, "save_tfr_with_sidecar", None) is not None:
         config["feature_engineering.save_tfr_with_sidecar"] = args.save_tfr_with_sidecar
 
@@ -1189,6 +1198,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")
     parser.add_argument("--compute-change-scores", action="store_true", default=None, dest="compute_change_scores", help="Compute within-subject change score columns")
     parser.add_argument("--no-compute-change-scores", action="store_false", dest="compute_change_scores", help="Disable change score columns")
+    parser.add_argument("--change-scores-transform", choices=["difference", "percent", "log_ratio", "ratio"], default=None, dest="change_scores_transform", help="Change score transform: difference, percent, log_ratio (ratio = percent)")
+    parser.add_argument("--change-scores-window-pairs", nargs="+", default=None, metavar="REF:TARGET", dest="change_scores_window_pairs", help="Window pairs for change scores (e.g. baseline:plateau baseline:active)")
     parser.add_argument("--save-tfr-with-sidecar", action="store_true", default=None, dest="save_tfr_with_sidecar", help="Save TFR arrays alongside feature tables")
     parser.add_argument("--no-save-tfr-with-sidecar", action="store_false", dest="save_tfr_with_sidecar", help="Do not save TFR arrays sidecar")
     parser.add_argument("--n-jobs-bands", type=int, default=None, help="Parallel jobs for band-wise precompute (-1 = all)")

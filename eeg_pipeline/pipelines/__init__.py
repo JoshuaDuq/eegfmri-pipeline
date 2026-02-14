@@ -13,7 +13,7 @@ Pipeline Classes:
 
 Preprocessing Functions:
 - run_raw_to_bids: Convert raw BrainVision to BIDS
-- run_merge_behavior: Merge behavioral data into events
+- run_merge_psychopy: Merge PsychoPy data into events
 """
 
 from eeg_pipeline.pipelines.base import PipelineBase
@@ -33,7 +33,7 @@ from eeg_pipeline.pipelines.eeg_raw_to_bids import EEGRawToBidsPipeline
 from eeg_pipeline.pipelines.merge_psychopy import MergePsychopyPipeline
 from eeg_pipeline.pipelines.utilities import (
     UtilityPipeline,
-    run_merge_behavior,
+    run_merge_psychopy,
     run_raw_to_bids,
 )
 
@@ -43,7 +43,7 @@ __all__ = [
     # Utilities
     "UtilityPipeline",
     "run_raw_to_bids",
-    "run_merge_behavior",
+    "run_merge_psychopy",
     "EEGRawToBidsPipeline",
     "MergePsychopyPipeline",
     # Features

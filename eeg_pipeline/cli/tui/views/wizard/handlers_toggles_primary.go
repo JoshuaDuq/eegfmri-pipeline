@@ -28,7 +28,7 @@ func (m *Model) toggleAdvancedOption() {
 	case types.PipelineFmriRawToBIDS:
 		m.toggleFmriRawToBidsAdvancedOption()
 	case types.PipelineMergePsychoPyData:
-		m.toggleMergeBehaviorAdvancedOption()
+		m.toggleMergePsychopyAdvancedOption()
 	}
 }
 
