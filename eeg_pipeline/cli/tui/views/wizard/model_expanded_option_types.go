@@ -50,4 +50,9 @@ const (
 	expandedFmriTrialSigScopeTrialTypes     = 42
 	expandedSourceLocFmriScopeTrialTypes    = 43
 	expandedIAFRois                         = 44
+	expandedMLFeatureFamilies               = 45
+	expandedMLFeatureBands                  = 46
+	expandedMLFeatureSegments               = 47
+	expandedMLFeatureScopes                 = 48
+	expandedMLFeatureStats                  = 49
 )

@@ -40,7 +40,15 @@ func (m Model) getMLOptions() []optionType {
 		}
 	}
 
-	opts = append(opts, optMLRequireTrialMlSafe)
+	opts = append(
+		opts,
+		optMLRequireTrialMlSafe,
+		optMLPlotsEnabled,
+		optMLPlotFormats,
+		optMLPlotDPI,
+		optMLPlotTopNFeatures,
+		optMLPlotDiagnostics,
+	)
 
 	if mode == "classify" {
 		opts = append(opts, optMLClassificationModel, optMLBinaryThresholdEnabled)

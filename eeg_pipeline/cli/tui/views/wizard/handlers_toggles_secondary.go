@@ -21,7 +21,7 @@ func (m *Model) toggleMLAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed, optRfNEstimators, optMLBinaryThreshold, optMLUncertaintyAlpha, optMLPermNRepeats:
+	case optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed, optRfNEstimators, optMLBinaryThreshold, optMLUncertaintyAlpha, optMLPermNRepeats, optMLPlotDPI, optMLPlotTopNFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optMLTarget:
@@ -63,19 +63,24 @@ func (m *Model) toggleMLAdvancedOption() {
 		m.mlBinaryThresholdEnabled = !m.mlBinaryThresholdEnabled
 		m.useDefaultAdvanced = false
 	case optMLFeatureFamilies:
-		m.startTextEdit(textFieldMLFeatureFamilies)
+		m.expandedOption = expandedMLFeatureFamilies
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optMLFeatureBands:
-		m.startTextEdit(textFieldMLFeatureBands)
+		m.expandedOption = expandedMLFeatureBands
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optMLFeatureSegments:
-		m.startTextEdit(textFieldMLFeatureSegments)
+		m.expandedOption = expandedMLFeatureSegments
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optMLFeatureScopes:
-		m.startTextEdit(textFieldMLFeatureScopes)
+		m.expandedOption = expandedMLFeatureScopes
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optMLFeatureStats:
-		m.startTextEdit(textFieldMLFeatureStats)
+		m.expandedOption = expandedMLFeatureStats
+		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optMLFeatureHarmonization:
 		m.mlFeatureHarmonization = m.mlFeatureHarmonization.Next()
@@ -88,6 +93,15 @@ func (m *Model) toggleMLAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optMLRequireTrialMlSafe:
 		m.mlRequireTrialMlSafe = !m.mlRequireTrialMlSafe
+		m.useDefaultAdvanced = false
+	case optMLPlotsEnabled:
+		m.mlPlotsEnabled = !m.mlPlotsEnabled
+		m.useDefaultAdvanced = false
+	case optMLPlotFormats:
+		m.startTextEdit(textFieldMLPlotFormats)
+		m.useDefaultAdvanced = false
+	case optMLPlotDiagnostics:
+		m.mlPlotDiagnostics = !m.mlPlotDiagnostics
 		m.useDefaultAdvanced = false
 	case optElasticNetAlphaGrid:
 		m.startTextEdit(textFieldElasticNetAlphaGrid)

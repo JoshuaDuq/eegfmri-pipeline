@@ -86,6 +86,51 @@ def _add_model_arguments(parser: argparse.ArgumentParser) -> None:
 def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     """Add ML-specific arguments."""
     parser.add_argument(
+        "--ml-plots",
+        dest="ml_plots",
+        action="store_true",
+        default=None,
+        help="Enable ML output plots (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-ml-plots",
+        dest="ml_plots",
+        action="store_false",
+        help="Disable ML output plots.",
+    )
+    parser.add_argument(
+        "--ml-plot-formats",
+        nargs="+",
+        choices=["png", "pdf", "svg"],
+        default=None,
+        help="ML plot output formats (default: png).",
+    )
+    parser.add_argument(
+        "--ml-plot-dpi",
+        type=int,
+        default=None,
+        help="ML plot DPI (default: 300).",
+    )
+    parser.add_argument(
+        "--ml-plot-top-n-features",
+        type=int,
+        default=None,
+        help="Top-N features to display in SHAP/permutation plots (default: 20).",
+    )
+    parser.add_argument(
+        "--ml-plot-diagnostics",
+        dest="ml_plot_diagnostics",
+        action="store_true",
+        default=None,
+        help="Enable extended ML diagnostics panels (default: enabled).",
+    )
+    parser.add_argument(
+        "--ml-plot-no-diagnostics",
+        dest="ml_plot_diagnostics",
+        action="store_false",
+        help="Disable extended ML diagnostics panels.",
+    )
+    parser.add_argument(
         "--uncertainty-alpha",
         type=float,
         default=0.1,
@@ -368,6 +413,20 @@ def _update_model_config(args: argparse.Namespace, config: Any) -> None:
         ]
 
 
+def _update_ml_plot_config(args: argparse.Namespace, config: Any) -> None:
+    """Update config with ML plotting overrides."""
+    if getattr(args, "ml_plots", None) is not None:
+        config["machine_learning.plotting.enabled"] = bool(args.ml_plots)
+    if getattr(args, "ml_plot_formats", None) is not None:
+        config["machine_learning.plotting.formats"] = [str(v).strip().lower() for v in args.ml_plot_formats]
+    if getattr(args, "ml_plot_dpi", None) is not None:
+        config["machine_learning.plotting.dpi"] = int(args.ml_plot_dpi)
+    if getattr(args, "ml_plot_top_n_features", None) is not None:
+        config["machine_learning.plotting.top_n_features"] = int(args.ml_plot_top_n_features)
+    if getattr(args, "ml_plot_diagnostics", None) is not None:
+        config["machine_learning.plotting.include_diagnostics"] = bool(args.ml_plot_diagnostics)
+
+
 def _update_fmri_signature_target_config(args: argparse.Namespace, config: Any) -> None:
     """Update config for fMRI signature target loading when requested."""
     if getattr(args, "fmri_signature_method", None):
@@ -417,6 +476,10 @@ def _print_dry_run_info(args: argparse.Namespace, subjects: List[str]) -> None:
         print(f"  Covariates: {args.covariates}")
     if args.require_trial_ml_safe:
         print("  Require trial_ml_safe: True")
+    if args.ml_plots is not None:
+        print(f"  ML plots enabled: {bool(args.ml_plots)}")
+    if args.ml_plot_formats:
+        print(f"  ML plot formats: {args.ml_plot_formats}")
 
 
 def _validate_ml_requirements(
@@ -480,6 +543,7 @@ def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     
     _update_path_config(args, config)
     _update_model_config(args, config)
+    _update_ml_plot_config(args, config)
     _update_fmri_signature_target_config(args, config)
     # Enforce trial-level ML-safe feature computation by default to prevent CV leakage.
     # --require-trial-ml-safe is retained for backward-compatible CLI ergonomics.

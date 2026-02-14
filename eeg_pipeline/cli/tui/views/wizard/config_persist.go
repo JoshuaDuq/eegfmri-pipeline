@@ -751,6 +751,11 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["mlRegressionModel"] = int(m.mlRegressionModel)
 	cfg["mlClassificationModel"] = int(m.mlClassificationModel)
 	cfg["mlRequireTrialMlSafe"] = m.mlRequireTrialMlSafe
+	cfg["mlPlotsEnabled"] = m.mlPlotsEnabled
+	cfg["mlPlotFormatsSpec"] = m.mlPlotFormatsSpec
+	cfg["mlPlotDPI"] = m.mlPlotDPI
+	cfg["mlPlotTopNFeatures"] = m.mlPlotTopNFeatures
+	cfg["mlPlotDiagnostics"] = m.mlPlotDiagnostics
 	cfg["mlUncertaintyAlpha"] = m.mlUncertaintyAlpha
 	cfg["mlPermNRepeats"] = m.mlPermNRepeats
 	cfg["elasticNetAlphaGrid"] = m.elasticNetAlphaGrid
@@ -1918,6 +1923,11 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.mlRegressionModel = MLRegressionModel(getInt("mlRegressionModel", int(m.mlRegressionModel)))
 	m.mlClassificationModel = MLClassificationModel(getInt("mlClassificationModel", int(m.mlClassificationModel)))
 	m.mlRequireTrialMlSafe = getBool("mlRequireTrialMlSafe", m.mlRequireTrialMlSafe)
+	m.mlPlotsEnabled = getBool("mlPlotsEnabled", m.mlPlotsEnabled)
+	m.mlPlotFormatsSpec = getString("mlPlotFormatsSpec", m.mlPlotFormatsSpec)
+	m.mlPlotDPI = getInt("mlPlotDPI", m.mlPlotDPI)
+	m.mlPlotTopNFeatures = getInt("mlPlotTopNFeatures", m.mlPlotTopNFeatures)
+	m.mlPlotDiagnostics = getBool("mlPlotDiagnostics", m.mlPlotDiagnostics)
 	m.mlUncertaintyAlpha = getFloat("mlUncertaintyAlpha", m.mlUncertaintyAlpha)
 	m.mlPermNRepeats = getInt("mlPermNRepeats", m.mlPermNRepeats)
 	m.elasticNetAlphaGrid = getString("elasticNetAlphaGrid", m.elasticNetAlphaGrid)

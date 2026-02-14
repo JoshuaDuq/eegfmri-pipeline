@@ -263,6 +263,35 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.mlRequireTrialMlSafe = b
 			}
 		}},
+		{key: "machine_learning.plotting.enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.mlPlotsEnabled = b
+			}
+		}},
+		{key: "machine_learning.plotting.formats", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
+				m.mlPlotFormatsSpec = strings.Join(splitLooseList(spec), " ")
+				return
+			}
+			if s, ok := asString(v); ok && s != "" {
+				m.mlPlotFormatsSpec = strings.Join(splitLooseList(s), " ")
+			}
+		}},
+		{key: "machine_learning.plotting.dpi", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok && n >= 72 {
+				m.mlPlotDPI = n
+			}
+		}},
+		{key: "machine_learning.plotting.top_n_features", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok && n >= 1 {
+				m.mlPlotTopNFeatures = n
+			}
+		}},
+		{key: "machine_learning.plotting.include_diagnostics", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.mlPlotDiagnostics = b
+			}
+		}},
 		{key: "machine_learning.classification.model", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(strings.TrimSpace(s)) {

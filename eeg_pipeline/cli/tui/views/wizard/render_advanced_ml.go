@@ -53,6 +53,8 @@ func (m Model) renderMLAdvancedConfig() string {
 			return textFieldMLCovariates, true
 		case optMLBaselinePredictors:
 			return textFieldMLBaselinePredictors, true
+		case optMLPlotFormats:
+			return textFieldMLPlotFormats, true
 		case optElasticNetAlphaGrid:
 			return textFieldElasticNetAlphaGrid, true
 		case optElasticNetL1RatioGrid:
@@ -88,6 +90,24 @@ func (m Model) renderMLAdvancedConfig() string {
 
 	availableColumns := m.GetAvailableColumns()
 	rows := m.getMLOptions()
+
+	totalLines := len(rows)
+	if m.expandedOption >= 0 {
+		totalLines += len(m.getExpandedListItems())
+	}
+
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = defaultTerminalHeight
+	}
+
+	startLine, endLine, showScrollIndicators := calculateScrollWindow(
+		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
+	if showScrollIndicators && startLine > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startLine)) + "\n")
+	}
+
+	lineIdx := 0
 	for i, opt := range rows {
 		isFocused := i == m.advancedCursor
 
@@ -134,15 +154,25 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optMLFmriSigRoundDecimals:
 			label, value, hint = "Align Round Decimals", fmt.Sprintf("%d", m.mlFmriSigRoundDecimals), "onset/duration rounding for alignment"
 		case optMLFeatureFamilies:
-			label, value, hint = "Feature Families", renderTextOrDefault(m.mlFeatureFamiliesSpec, "(config default)"), "e.g., power aperiodic connectivity"
+			label = "Feature Families"
+			value = renderTextOrDefault(m.mlFeatureFamiliesSpec, "(config default)")
+			hint = fmt.Sprintf("Space to select · %d options", len(m.mlFeatureFamiliesOptions())-1)
 		case optMLFeatureBands:
-			label, value, hint = "Feature Bands", renderTextOrDefault(m.mlFeatureBandsSpec, "(none)"), "NamingSchema band, e.g., alpha beta"
+			label = "Feature Bands"
+			value = renderTextOrDefault(m.mlFeatureBandsSpec, "(none)")
+			hint = fmt.Sprintf("Space to select · %d options", len(m.mlFeatureBandsOptions())-1)
 		case optMLFeatureSegments:
-			label, value, hint = "Feature Segments", renderTextOrDefault(m.mlFeatureSegmentsSpec, "(none)"), "NamingSchema segment, e.g., baseline active"
+			label = "Feature Segments"
+			value = renderTextOrDefault(m.mlFeatureSegmentsSpec, "(none)")
+			hint = fmt.Sprintf("Space to select · %d options", len(m.mlFeatureSegmentsOptions())-1)
 		case optMLFeatureScopes:
-			label, value, hint = "Feature Scopes", renderTextOrDefault(m.mlFeatureScopesSpec, "(none)"), "NamingSchema scope: global roi ch chpair"
+			label = "Feature Scopes"
+			value = renderTextOrDefault(m.mlFeatureScopesSpec, "(none)")
+			hint = fmt.Sprintf("Space to select · %d options", len(m.mlFeatureScopesOptions())-1)
 		case optMLFeatureStats:
-			label, value, hint = "Feature Stats", renderTextOrDefault(m.mlFeatureStatsSpec, "(none)"), "NamingSchema stat, e.g. wpli aec"
+			label = "Feature Stats"
+			value = renderTextOrDefault(m.mlFeatureStatsSpec, "(none)")
+			hint = fmt.Sprintf("Space to select · %d options", len(m.mlFeatureStatsOptions())-1)
 		case optMLFeatureHarmonization:
 			label, value, hint = "Feature Harmonization", m.mlFeatureHarmonization.Display(), "intersection vs union_impute"
 		case optMLCovariates:
@@ -151,6 +181,16 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "Baseline Predictors", renderTextOrDefault(m.mlBaselinePredictorsSpec, "(config default)"), "used for incremental validity"
 		case optMLRequireTrialMlSafe:
 			label, value, hint = "Require trial_ml_safe", m.boolToOnOff(m.mlRequireTrialMlSafe), "fail-fast if feature pipeline isn't ML-safe"
+		case optMLPlotsEnabled:
+			label, value, hint = "ML Plots Enabled", m.boolToOnOff(m.mlPlotsEnabled), "generate ML result plots"
+		case optMLPlotFormats:
+			label, value, hint = "ML Plot Formats", renderTextOrDefault(m.mlPlotFormatsSpec, "(png)"), "space/comma-separated: png pdf svg"
+		case optMLPlotDPI:
+			label, value, hint = "ML Plot DPI", fmt.Sprintf("%d", m.mlPlotDPI), "render resolution"
+		case optMLPlotTopNFeatures:
+			label, value, hint = "Top N Features", fmt.Sprintf("%d", m.mlPlotTopNFeatures), "for SHAP/permutation plots"
+		case optMLPlotDiagnostics:
+			label, value, hint = "Include Diagnostics", m.boolToOnOff(m.mlPlotDiagnostics), "adds ROC/PR/calibration and residual panels"
 		case optMLRegressionModel:
 			label, value, hint = "Regression Model", m.mlRegressionModel.Display(), "elasticnet / ridge / rf"
 		case optMLClassificationModel:
@@ -334,7 +374,10 @@ func (m Model) renderMLAdvancedConfig() string {
 			cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 		}
 
-		b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), hintStyle.Render(hint), labelWidth, m.contentWidth) + "\n")
+		if lineIdx >= startLine && lineIdx < endLine {
+			b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), hintStyle.Render(hint), labelWidth, m.contentWidth) + "\n")
+		}
+		lineIdx++
 
 		if m.shouldRenderExpandedListAfterOption(opt) {
 			items := m.getExpandedListItems()
@@ -347,9 +390,17 @@ func (m Model) renderMLAdvancedConfig() string {
 				if isSubFocused {
 					itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 				}
-				b.WriteString(subIndent + checkbox + " " + itemStyle.Render(item) + "\n")
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + " " + itemStyle.Render(item) + "\n")
+				}
+				lineIdx++
 			}
 		}
+	}
+
+	if showScrollIndicators && endLine < totalLines {
+		remaining := totalLines - endLine
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", remaining)) + "\n")
 	}
 
 	return b.String()

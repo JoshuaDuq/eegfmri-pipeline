@@ -335,6 +335,47 @@ def _fit_within_subject_fold(
     return _fit_default_pipeline(pipe, X_train, y_train, fold, random_state)
 
 
+def _maybe_generate_mode_plots(
+    *,
+    mode: str,
+    results_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+) -> None:
+    """Best-effort plotting hook; never raises into compute stages."""
+    try:
+        from eeg_pipeline.analysis.machine_learning.plotting import generate_ml_mode_plots
+
+        enabled = bool(get_config_value(config, "machine_learning.plotting.enabled", True))
+        if not enabled:
+            return
+        formats_raw = get_config_value(config, "machine_learning.plotting.formats", ["png"])
+        if isinstance(formats_raw, (list, tuple)):
+            formats = [str(v).strip() for v in formats_raw if str(v).strip()]
+        elif isinstance(formats_raw, str):
+            formats = [p for p in formats_raw.replace(",", " ").split() if p]
+        else:
+            formats = ["png"]
+        dpi_val = int(get_config_value(config, "machine_learning.plotting.dpi", 300))
+        top_n = int(get_config_value(config, "machine_learning.plotting.top_n_features", 20))
+        include_diagnostics = bool(
+            get_config_value(config, "machine_learning.plotting.include_diagnostics", True)
+        )
+        outputs = generate_ml_mode_plots(
+            mode=mode,
+            results_dir=results_dir,
+            logger=logger,
+            formats=formats,
+            dpi=dpi_val,
+            top_n_features=top_n,
+            include_diagnostics=include_diagnostics,
+        )
+        if outputs:
+            logger.info("Generated %d ML plot(s) for mode=%s", len(outputs), mode)
+    except Exception as exc:
+        logger.warning("Failed to generate ML plots for mode=%s (continuing): %s", mode, exc)
+
+
 ###################################################################
 # Pipeline-Level Runners
 ###################################################################
@@ -559,6 +600,7 @@ def run_regression_ml(
         "Regression results: r=%.3f [%.3f, %.3f]%s, R\u00b2=%.3f, RMSE=%.3f",
         r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
     )
+    _maybe_generate_mode_plots(mode="regression", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -949,6 +991,7 @@ def run_within_subject_regression_ml(
         "Within-subject regression results: r=%.3f [%.3f, %.3f]%s, R\u00b2=%.3f, RMSE=%.3f",
         r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
     )
+    _maybe_generate_mode_plots(mode="regression", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -1002,6 +1045,7 @@ def run_time_generalization(
         float(np.nanmax(tg_r)) if tg_r is not None and len(tg_r) > 0 else float("nan"),
         _time.perf_counter() - t0,
     )
+    _maybe_generate_mode_plots(mode="timegen", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -1345,6 +1389,7 @@ def run_classification_ml(
         float(balanced_accuracy_subject_mean) if np.isfinite(balanced_accuracy_subject_mean) else result.balanced_accuracy,
         result.f1, brier, p_info,
     )
+    _maybe_generate_mode_plots(mode="classify", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -1862,6 +1907,7 @@ def run_within_subject_classification_ml(
         float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else result.balanced_accuracy,
         result.f1, p_info,
     )
+    _maybe_generate_mode_plots(mode="classify", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     return results_dir
 
@@ -2288,6 +2334,7 @@ def run_model_comparison_ml(
         "Model comparison complete: best=%s (mean R\u00b2=%.4f)",
         best_model, summary[best_model]["mean_r2"],
     )
+    _maybe_generate_mode_plots(mode="model_comparison", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     
     return results_dir
@@ -2520,6 +2567,7 @@ def run_incremental_validity_ml(
         r2_baseline_overall, r2_full_overall, summary["delta_r2"],
         summary["n_folds_positive_delta"], summary["n_folds_total"],
     )
+    _maybe_generate_mode_plots(mode="incremental_validity", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     
     return results_dir
@@ -2656,6 +2704,8 @@ def _run_permutation_importance_stage(
                 )
     except Exception as exc:
         logger.debug("Grouped permutation-importance export failed: %s", exc)
+
+    _maybe_generate_mode_plots(mode="permutation", results_dir=results_dir, logger=logger, config=config)
     
     return output_path
 
@@ -2761,6 +2811,8 @@ def _run_shap_importance_stage(
                     by_group_band_roi.to_csv(results_dir / "shap_importance_by_group_band_roi.tsv", sep="\t", index=False)
         except Exception as exc:
             logger.debug("Grouped SHAP-importance export failed: %s", exc)
+
+        _maybe_generate_mode_plots(mode="shap", results_dir=results_dir, logger=logger, config=config)
         
         return output_path
     except RuntimeError:
@@ -2899,6 +2951,7 @@ def _run_uncertainty_stage(
         json.dump(metrics, f, indent=2)
     
     logger.info(f"Uncertainty: coverage={coverage:.1%}, mean_width={mean_width:.3f}")
+    _maybe_generate_mode_plots(mode="uncertainty", results_dir=results_dir, logger=logger, config=config)
     logger.info(f"Saved uncertainty to {output_path}")
     
     return output_path

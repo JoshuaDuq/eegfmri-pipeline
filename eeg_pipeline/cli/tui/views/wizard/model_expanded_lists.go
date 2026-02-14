@@ -72,6 +72,16 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetAvailableColumns()) + 1 // +1 for "(default)" option
 	case expandedMLTargetColumn:
 		return len(m.GetAvailableColumns()) + 1 // +1 for "(stage default)" option
+	case expandedMLFeatureFamilies:
+		return len(m.mlFeatureFamiliesOptions())
+	case expandedMLFeatureBands:
+		return len(m.mlFeatureBandsOptions())
+	case expandedMLFeatureSegments:
+		return len(m.mlFeatureSegmentsOptions())
+	case expandedMLFeatureScopes:
+		return len(m.mlFeatureScopesOptions())
+	case expandedMLFeatureStats:
+		return len(m.mlFeatureStatsOptions())
 	case expandedItpcConditionColumn:
 		return len(m.GetAvailableColumns())
 	case expandedConnConditionValues:
@@ -232,6 +242,16 @@ func (m Model) getExpandedListItems() []string {
 		return append([]string{"(default)"}, m.GetAvailableColumns()...)
 	case expandedMLTargetColumn:
 		return append([]string{"(stage default)"}, m.GetAvailableColumns()...)
+	case expandedMLFeatureFamilies:
+		return m.mlFeatureFamiliesOptions()
+	case expandedMLFeatureBands:
+		return m.mlFeatureBandsOptions()
+	case expandedMLFeatureSegments:
+		return m.mlFeatureSegmentsOptions()
+	case expandedMLFeatureScopes:
+		return m.mlFeatureScopesOptions()
+	case expandedMLFeatureStats:
+		return m.mlFeatureStatsOptions()
 	case expandedItpcConditionColumn:
 		return m.GetAvailableColumns()
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
@@ -432,6 +452,16 @@ func (m Model) isColumnValueSelected(value string) bool {
 				selectedValues = cfg.BehaviorScatterSegmentSpec
 			}
 		}
+	case expandedMLFeatureFamilies:
+		selectedValues = m.mlFeatureFamiliesSpec
+	case expandedMLFeatureBands:
+		selectedValues = m.mlFeatureBandsSpec
+	case expandedMLFeatureSegments:
+		selectedValues = m.mlFeatureSegmentsSpec
+	case expandedMLFeatureScopes:
+		selectedValues = m.mlFeatureScopesSpec
+	case expandedMLFeatureStats:
+		selectedValues = m.mlFeatureStatsSpec
 	case expandedPlotComparisonColumn:
 		if m.editingPlotID != "" && m.editingPlotField == plotItemConfigFieldDoseResponseResponseColumn {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
@@ -618,6 +648,36 @@ func (m *Model) handleExpandedListToggle() {
 		}
 		m.expandedOption = expandedNone
 		m.subCursor = 0
+	case expandedMLFeatureFamilies:
+		if selectedItem == "(config default)" {
+			m.mlFeatureFamiliesSpec = ""
+		} else {
+			m.toggleSpaceValue(selectedItem, &m.mlFeatureFamiliesSpec)
+		}
+	case expandedMLFeatureBands:
+		if selectedItem == "(none)" {
+			m.mlFeatureBandsSpec = ""
+		} else {
+			m.toggleSpaceValue(selectedItem, &m.mlFeatureBandsSpec)
+		}
+	case expandedMLFeatureSegments:
+		if selectedItem == "(none)" {
+			m.mlFeatureSegmentsSpec = ""
+		} else {
+			m.toggleSpaceValue(selectedItem, &m.mlFeatureSegmentsSpec)
+		}
+	case expandedMLFeatureScopes:
+		if selectedItem == "(none)" {
+			m.mlFeatureScopesSpec = ""
+		} else {
+			m.toggleSpaceValue(selectedItem, &m.mlFeatureScopesSpec)
+		}
+	case expandedMLFeatureStats:
+		if selectedItem == "(none)" {
+			m.mlFeatureStatsSpec = ""
+		} else {
+			m.toggleSpaceValue(selectedItem, &m.mlFeatureStatsSpec)
+		}
 
 	case expandedItpcConditionColumn:
 		m.itpcConditionColumn = selectedItem
@@ -916,6 +976,16 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optTemporalTargetColumn
 	case expandedMLTargetColumn:
 		return opt == optMLTarget
+	case expandedMLFeatureFamilies:
+		return opt == optMLFeatureFamilies
+	case expandedMLFeatureBands:
+		return opt == optMLFeatureBands
+	case expandedMLFeatureSegments:
+		return opt == optMLFeatureSegments
+	case expandedMLFeatureScopes:
+		return opt == optMLFeatureScopes
+	case expandedMLFeatureStats:
+		return opt == optMLFeatureStats
 	case expandedItpcConditionColumn:
 		return opt == optItpcConditionColumn
 	case expandedConnConditionColumn:
@@ -1000,6 +1070,31 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			return m.mlTarget == ""
 		}
 		return m.mlTarget == item
+	case expandedMLFeatureFamilies:
+		if item == "(config default)" {
+			return strings.TrimSpace(m.mlFeatureFamiliesSpec) == ""
+		}
+		return m.isColumnValueSelected(item)
+	case expandedMLFeatureBands:
+		if item == "(none)" {
+			return strings.TrimSpace(m.mlFeatureBandsSpec) == ""
+		}
+		return m.isColumnValueSelected(item)
+	case expandedMLFeatureSegments:
+		if item == "(none)" {
+			return strings.TrimSpace(m.mlFeatureSegmentsSpec) == ""
+		}
+		return m.isColumnValueSelected(item)
+	case expandedMLFeatureScopes:
+		if item == "(none)" {
+			return strings.TrimSpace(m.mlFeatureScopesSpec) == ""
+		}
+		return m.isColumnValueSelected(item)
+	case expandedMLFeatureStats:
+		if item == "(none)" {
+			return strings.TrimSpace(m.mlFeatureStatsSpec) == ""
+		}
+		return m.isColumnValueSelected(item)
 	case expandedItpcConditionColumn:
 		return m.itpcConditionColumn == item
 	case expandedConnConditionColumn:

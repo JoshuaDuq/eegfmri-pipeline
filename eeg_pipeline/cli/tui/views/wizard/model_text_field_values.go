@@ -307,6 +307,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.mlCovariatesSpec
 	case textFieldMLBaselinePredictors:
 		return m.mlBaselinePredictorsSpec
+	case textFieldMLPlotFormats:
+		return m.mlPlotFormatsSpec
 	// Machine Learning hyperparameter text fields
 	case textFieldElasticNetAlphaGrid:
 		return m.elasticNetAlphaGrid
@@ -683,6 +685,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.mlCovariatesSpec = strings.TrimSpace(value)
 	case textFieldMLBaselinePredictors:
 		m.mlBaselinePredictorsSpec = strings.TrimSpace(value)
+	case textFieldMLPlotFormats:
+		m.mlPlotFormatsSpec = strings.Join(splitLooseList(value), " ")
 	// Machine Learning hyperparameter text fields
 	case textFieldElasticNetAlphaGrid:
 		m.elasticNetAlphaGrid = strings.Join(splitLooseList(value), ",")

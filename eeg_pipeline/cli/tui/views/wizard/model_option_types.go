@@ -509,6 +509,11 @@ const (
 	optMLCovariates
 	optMLBaselinePredictors
 	optMLRequireTrialMlSafe
+	optMLPlotsEnabled
+	optMLPlotFormats
+	optMLPlotDPI
+	optMLPlotTopNFeatures
+	optMLPlotDiagnostics
 	optMLUncertaintyAlpha
 	optMLPermNRepeats
 	// Preprocessing group headers (collapsible sections)

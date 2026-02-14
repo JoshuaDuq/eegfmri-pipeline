@@ -1399,6 +1399,14 @@ func (m *Model) commitMLNumber(val float64) {
 		if val >= 1 {
 			m.mlPermNRepeats = int(val)
 		}
+	case optMLPlotDPI:
+		if val >= 72 {
+			m.mlPlotDPI = int(val)
+		}
+	case optMLPlotTopNFeatures:
+		if val >= 1 {
+			m.mlPlotTopNFeatures = int(val)
+		}
 	case optRNGSeed:
 		if val >= 0 {
 			m.rngSeed = int(val)

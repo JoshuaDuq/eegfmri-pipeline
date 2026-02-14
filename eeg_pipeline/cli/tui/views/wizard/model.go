@@ -709,6 +709,7 @@ const (
 	textFieldMLFeatureStats
 	textFieldMLCovariates
 	textFieldMLBaselinePredictors
+	textFieldMLPlotFormats
 	textFieldElasticNetAlphaGrid
 	textFieldElasticNetL1RatioGrid
 	textFieldRidgeAlphaGrid
@@ -2073,6 +2074,12 @@ type Model struct {
 	mlClassificationModel MLClassificationModel
 	mlRequireTrialMlSafe  bool
 
+	mlPlotsEnabled     bool
+	mlPlotFormatsSpec  string
+	mlPlotDPI          int
+	mlPlotTopNFeatures int
+	mlPlotDiagnostics  bool
+
 	mlUncertaintyAlpha float64
 	mlPermNRepeats     int
 
@@ -2929,6 +2936,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlRegressionModel:           MLRegressionElasticNet,
 		mlClassificationModel:       MLClassificationDefault,
 		mlRequireTrialMlSafe:        false,
+		mlPlotsEnabled:              true,
+		mlPlotFormatsSpec:           "png",
+		mlPlotDPI:                   300,
+		mlPlotTopNFeatures:          20,
+		mlPlotDiagnostics:           true,
 		mlUncertaintyAlpha:          0.1,
 		mlPermNRepeats:              10,
 		// Hyperparameter defaults mirror eeg_pipeline/utils/config/eeg_config.yaml

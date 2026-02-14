@@ -273,6 +273,36 @@ func TestBuildMLAdvancedArgs_ClassifyEmitsCNNClassificationModel(t *testing.T) {
 	}
 }
 
+func TestBuildMLAdvancedArgs_EmitsMLPlottingFlags(t *testing.T) {
+	m := Model{}
+	m.modeOptions = []string{"shap"}
+	m.modeIndex = 0
+
+	m.mlPlotsEnabled = false
+	m.mlPlotFormatsSpec = "png pdf"
+	m.mlPlotDPI = 450
+	m.mlPlotTopNFeatures = 30
+	m.mlPlotDiagnostics = false
+
+	args := m.buildMLAdvancedArgs()
+
+	if !containsString(args, "--no-ml-plots") {
+		t.Fatalf("expected --no-ml-plots in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--ml-plot-formats", "png", "pdf"}) {
+		t.Fatalf("expected --ml-plot-formats png pdf in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--ml-plot-dpi", "450"}) {
+		t.Fatalf("expected --ml-plot-dpi 450 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--ml-plot-top-n-features", "30"}) {
+		t.Fatalf("expected --ml-plot-top-n-features 30 in args, got: %#v", args)
+	}
+	if !containsString(args, "--ml-plot-no-diagnostics") {
+		t.Fatalf("expected --ml-plot-no-diagnostics in args, got: %#v", args)
+	}
+}
+
 func TestMLClassificationModelCycleIncludesCNN(t *testing.T) {
 	if got := MLClassificationCNN.CLIValue(); got != "cnn" {
 		t.Fatalf("expected cnn CLI value, got %q", got)
@@ -297,6 +327,11 @@ func TestApplyConfigKeys_HydratesMLSettingsIncludingCNN(t *testing.T) {
 		"machine_learning.data.feature_harmonization":          "intersection",
 		"machine_learning.data.covariates":                     []interface{}{"temperature", "block"},
 		"machine_learning.data.require_trial_ml_safe":          true,
+		"machine_learning.plotting.enabled":                    false,
+		"machine_learning.plotting.formats":                    []interface{}{"png", "pdf"},
+		"machine_learning.plotting.dpi":                        450.0,
+		"machine_learning.plotting.top_n_features":             30.0,
+		"machine_learning.plotting.include_diagnostics":        false,
 		"machine_learning.classification.model":                "cnn",
 		"machine_learning.cv.inner_splits":                     4.0,
 		"machine_learning.models.random_forest.max_depth_grid": []interface{}{5.0, 10.0, nil},
@@ -322,6 +357,21 @@ func TestApplyConfigKeys_HydratesMLSettingsIncludingCNN(t *testing.T) {
 	}
 	if !m.mlRequireTrialMlSafe {
 		t.Fatalf("expected require-trial-ml-safe=true")
+	}
+	if m.mlPlotsEnabled {
+		t.Fatalf("expected mlPlotsEnabled=false")
+	}
+	if m.mlPlotFormatsSpec != "png pdf" {
+		t.Fatalf("unexpected ML plot formats: %q", m.mlPlotFormatsSpec)
+	}
+	if m.mlPlotDPI != 450 {
+		t.Fatalf("expected mlPlotDPI=450, got %d", m.mlPlotDPI)
+	}
+	if m.mlPlotTopNFeatures != 30 {
+		t.Fatalf("expected mlPlotTopNFeatures=30, got %d", m.mlPlotTopNFeatures)
+	}
+	if m.mlPlotDiagnostics {
+		t.Fatalf("expected mlPlotDiagnostics=false")
 	}
 	if m.innerSplits != 4 {
 		t.Fatalf("expected innerSplits=4, got %d", m.innerSplits)

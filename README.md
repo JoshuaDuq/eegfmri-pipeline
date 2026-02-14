@@ -29,21 +29,7 @@ pip install -e .
 
 # 2. Place your data (see "Data Requirements" below)
 
-# 3. Preprocess
-eeg-pipeline preprocessing full --subject 0001
-
-# 4. Extract features
-eeg-pipeline features compute --subject 0001
-
-# 5. Behavioral correlations
-eeg-pipeline behavior compute --subject 0001
-
-# 6. Visualize
-eeg-pipeline features visualize --subject 0001
-eeg-pipeline behavior visualize --subject 0001
-```
-
-Or launch the TUI for a fully guided experience:
+# 3. Launch
 
 ```bash
 cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui

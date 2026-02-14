@@ -99,6 +99,47 @@ func (m Model) buildMLAdvancedArgs() []string {
 		args = append(args, "--require-trial-ml-safe")
 	}
 
+	plotsEnabled := m.mlPlotsEnabled
+	plotFormatsSpec := strings.TrimSpace(m.mlPlotFormatsSpec)
+	plotDPI := m.mlPlotDPI
+	plotTopN := m.mlPlotTopNFeatures
+	plotDiagnostics := m.mlPlotDiagnostics
+	// Keep zero-value Model{} behavior consistent with default settings.
+	if !plotsEnabled && plotFormatsSpec == "" && plotDPI == 0 && plotTopN == 0 && !plotDiagnostics {
+		plotsEnabled = true
+		plotDiagnostics = true
+	}
+	if plotFormatsSpec == "" {
+		plotFormatsSpec = "png"
+	}
+	if plotDPI == 0 {
+		plotDPI = 300
+	}
+	if plotTopN == 0 {
+		plotTopN = 20
+	}
+
+	if !plotsEnabled {
+		args = append(args, "--no-ml-plots")
+	}
+	plotFormats := splitLooseList(plotFormatsSpec)
+	for i := range plotFormats {
+		plotFormats[i] = strings.ToLower(strings.TrimSpace(plotFormats[i]))
+	}
+	if len(plotFormats) > 0 && !(len(plotFormats) == 1 && plotFormats[0] == "png") {
+		args = append(args, "--ml-plot-formats")
+		args = append(args, plotFormats...)
+	}
+	if plotDPI != 300 {
+		args = append(args, "--ml-plot-dpi", fmt.Sprintf("%d", plotDPI))
+	}
+	if plotTopN != 20 {
+		args = append(args, "--ml-plot-top-n-features", fmt.Sprintf("%d", plotTopN))
+	}
+	if !plotDiagnostics {
+		args = append(args, "--ml-plot-no-diagnostics")
+	}
+
 	if mode != "classify" && mode != "timegen" && mode != "model_comparison" && m.mlRegressionModel != MLRegressionElasticNet {
 		args = append(args, "--model", m.mlRegressionModel.CLIValue())
 	}
