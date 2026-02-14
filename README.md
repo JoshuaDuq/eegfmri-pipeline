@@ -75,14 +75,14 @@ After installation, the `eeg-pipeline` command is available globally in the envi
 
 ### What you need to start
 
-The pipeline expects data organized under `eeg_pipeline/data/`. All paths are configurable in `eeg_pipeline/utils/config/eeg_config.yaml`.
+The pipeline expects data organized under `data/` at the repository root. All paths are configurable in `eeg_pipeline/utils/config/eeg_config.yaml`.
 
 #### Option A: Start from raw recordings (use the built-in converter)
 
 Place raw BrainVision EEG files under `source_data/`:
 
 ```
-eeg_pipeline/data/source_data/
+data/source_data/
 └── sub-XXXX/
     └── eeg/
         ├── sub-XXXX_task-thermalactive_run-01_eeg.vhdr
@@ -103,7 +103,7 @@ eeg-pipeline utilities raw-to-bids --subject XXXX
 If your data is already in [BIDS format](https://bids-specification.readthedocs.io/) (e.g., converted with MNE-BIDS, BIDScoin, or another tool), place it directly under `bids_output/`:
 
 ```
-eeg_pipeline/data/bids_output/eeg/
+data/bids_output/eeg/
 ├── dataset_description.json
 ├── participants.tsv
 └── sub-XXXX/
@@ -121,9 +121,9 @@ Skip the `raw-to-bids` step and proceed directly to preprocessing.
 #### For fMRI data (optional)
 
 ```
-eeg_pipeline/data/source_data/sub-XXXX/fmri/    # Raw DICOMs (for fmri-raw-to-bids)
-eeg_pipeline/data/bids_output/fmri/              # BIDS-formatted fMRI (NIfTI + events)
-eeg_pipeline/data/fMRI_data/sub-XXXX/anat/       # T1w anatomical (for FreeSurfer/source localization)
+data/source_data/sub-XXXX/fmri/    # Raw DICOMs (for fmri-raw-to-bids)
+data/bids_output/fmri/              # BIDS-formatted fMRI (NIfTI + events)
+data/fMRI_data/sub-XXXX/anat/       # T1w anatomical (for FreeSurfer/source localization)
 ```
 
 #### For behavioral data
@@ -139,7 +139,7 @@ The pipeline reads behavioral variables from BIDS `*_events.tsv` files. The foll
 ### Default directory layout
 
 ```
-eeg_pipeline/data/
+data/
 ├── source_data/                # Raw recordings (EEG .vhdr, fMRI DICOMs)
 │   └── sub-XXXX/
 │       ├── eeg/                # BrainVision triplets (.vhdr/.vmrk/.eeg)
@@ -172,11 +172,11 @@ All paths are configurable via the `paths` section in `eeg_config.yaml`:
 
 ```yaml
 paths:
-  bids_root: "../../data/bids_output/eeg"
-  bids_fmri_root: "../../data/bids_output/fmri"
-  deriv_root: "../../data/derivatives"
-  source_data: "../../data/source_data"
-  freesurfer_dir: "../../data/derivatives/freesurfer"
+  bids_root: "../../../data/bids_output/eeg"
+  bids_fmri_root: "../../../data/bids_output/fmri"
+  deriv_root: "../../../data/derivatives"
+  source_data: "../../../data/source_data"
+  freesurfer_dir: "../../../data/derivatives/freesurfer"
 ```
 
 ---

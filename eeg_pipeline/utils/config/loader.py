@@ -73,6 +73,8 @@ def _resolve_single_path(value: str, config_dir: Path, project_root: Path) -> st
     path_obj = Path(value).expanduser()
     if path_obj.is_absolute():
         return str(path_obj.resolve())
+    if value.startswith("data/"):
+        return str((project_root / value).resolve())
     if value.startswith("eeg_pipeline/"):
         return str((project_root / value).resolve())
     return str((config_dir / value).resolve())
@@ -80,7 +82,7 @@ def _resolve_single_path(value: str, config_dir: Path, project_root: Path) -> st
 
 def resolve_config_paths(config: Dict[str, Any], config_path: Path) -> Dict[str, Any]:
     config_dir = config_path.parent
-    project_root = Path(__file__).resolve().parents[3]
+    project_root = get_project_root()
     _resolve_paths_recursive(config, config_dir, project_root)
     return config
 
@@ -109,8 +111,14 @@ def _get_overrides_path(config_path: Path) -> Path:
     env_path = os.getenv("EEG_PIPELINE_TUI_OVERRIDES")
     if env_path:
         return Path(env_path).expanduser().resolve()
-    project_root = Path(__file__).resolve().parents[3]
-    return project_root / "eeg_pipeline" / "data" / "derivatives" / ".tui_overrides.json"
+    project_root = get_project_root()
+    preferred = project_root / "data" / "derivatives" / ".tui_overrides.json"
+    legacy = project_root / "eeg_pipeline" / "data" / "derivatives" / ".tui_overrides.json"
+    if preferred.exists():
+        return preferred
+    if legacy.exists():
+        return legacy
+    return preferred
 
 
 def _merge_overrides(base: Dict[str, Any], overrides: Dict[str, Any]) -> None:
@@ -449,8 +457,18 @@ def _get_default_config_path() -> Path:
 
 
 def get_project_root() -> Path:
-    """Return the project/repo root (parent of the eeg_pipeline package)."""
-    return Path(__file__).resolve().parents[3]
+    """Return the project/repo root (parent containing pyproject.toml)."""
+    env_root = os.getenv("EEG_PIPELINE_PROJECT_ROOT")
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "pyproject.toml").exists() and (parent / "eeg_pipeline").exists():
+            return parent
+
+    # Fallback to historical behavior for safety.
+    return here.parents[3]
 
 
 def get_config_int(config: Any, key: str, default: int) -> int:

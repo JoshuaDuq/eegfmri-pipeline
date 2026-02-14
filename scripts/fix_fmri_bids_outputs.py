@@ -496,20 +496,20 @@ def main() -> int:
     parser.add_argument(
         "--fmri-root",
         type=Path,
-        default=Path("eeg_pipeline/data/bids_output/fmri"),
-        help="Path to fMRI BIDS root (default: eeg_pipeline/data/bids_output/fmri)",
+        default=Path("data/bids_output/fmri"),
+        help="Path to fMRI BIDS root (default: data/bids_output/fmri)",
     )
     parser.add_argument(
         "--eeg-root",
         type=Path,
-        default=Path("eeg_pipeline/data/bids_output/eeg"),
-        help="Path to EEG BIDS root (default: eeg_pipeline/data/bids_output/eeg)",
+        default=Path("data/bids_output/eeg"),
+        help="Path to EEG BIDS root (default: data/bids_output/eeg)",
     )
     parser.add_argument(
         "--qc-out",
         type=Path,
-        default=Path("eeg_pipeline/data/derivatives/qc/eeg_fmri_alignment"),
-        help="Output directory for QC tables (default: eeg_pipeline/data/derivatives/qc/eeg_fmri_alignment)",
+        default=Path("data/derivatives/qc/eeg_fmri_alignment"),
+        help="Output directory for QC tables (default: data/derivatives/qc/eeg_fmri_alignment)",
     )
     args = parser.parse_args()
 

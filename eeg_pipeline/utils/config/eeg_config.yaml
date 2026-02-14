@@ -7,11 +7,11 @@ project:
   subject_list: null  # Optional list of subjects to process (null = all found)
 
 paths:
-  bids_root: "../../data/bids_output/eeg"  # BIDS-formatted EEG data directory
-  bids_fmri_root: "../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
-  deriv_root: "../../data/derivatives"  # Processed derivatives output directory
-  source_data: "../../data/source_data"  # Raw source data directory
-  freesurfer_dir: "../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
+  bids_root: "../../../data/bids_output/eeg"  # BIDS-formatted EEG data directory
+  bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
+  deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
+  source_data: "../../../data/source_data"  # Raw source data directory
+  freesurfer_dir: "../../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
   freesurfer_license: "eeg_pipeline/licenses/license_freesurfer.txt"  # Path to FreeSurfer license.txt
 
 ###################################################################
@@ -458,8 +458,8 @@ feature_engineering:
     depth: 0.8                     # eLORETA depth weighting (0..1)
     subjects_dir: null             # e.g., "../../data/freesurfer"
     subject: null                  # e.g., "sub-0001"
-    trans: null                    # e.g., "../../data/derivatives/coreg/sub-0001-trans.fif"
-    bem: null                      # e.g., "../../data/derivatives/bem/sub-0001-bem-sol.fif"
+    trans: null                    # e.g., "../../../data/derivatives/coreg/sub-0001-trans.fif"
+    bem: null                      # e.g., "../../../data/derivatives/bem/sub-0001-bem-sol.fif"
     fmri:
       enabled: false
       stats_map_path: null         # NIfTI statistical map in the subject's FreeSurfer MRI space (e.g., orig.mgz space)

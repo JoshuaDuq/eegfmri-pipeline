@@ -24,5 +24,5 @@ jobs:
 
       - name: Run tests
         run: |
+          python -m compileall -q eeg_pipeline fmri_pipeline scripts tests
           python -m pytest -q
-

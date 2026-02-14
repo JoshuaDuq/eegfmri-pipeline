@@ -23,11 +23,13 @@ def _repo_root() -> Path:
 
 
 def _default_out_dir() -> Path:
-    return _repo_root() / "eeg_pipeline" / "data" / "external" / "atlases"
+    return _repo_root() / "data" / "external" / "atlases"
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Fetch an atlas from TemplateFlow and copy it into eeg_pipeline/data/external/atlases.")
+    p = argparse.ArgumentParser(
+        description="Fetch an atlas from TemplateFlow and copy it into data/external/atlases."
+    )
     p.add_argument("--out-dir", type=str, default=str(_default_out_dir()), help="Output directory for atlas files")
     p.add_argument("--template", type=str, default="MNI152NLin2009cAsym", help="TemplateFlow template (default: MNI152NLin2009cAsym)")
     p.add_argument("--resolution", type=int, default=2, help="Atlas resolution (e.g., 1 or 2 for Schaefer)")

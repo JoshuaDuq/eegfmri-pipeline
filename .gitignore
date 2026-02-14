@@ -77,10 +77,17 @@ columns_sample.txt
 
 ### Data ###
 # Ignore all data by default
+data/**
+!data/**/.gitkeep
 eeg_pipeline/data/**
 !eeg_pipeline/data/**/.gitkeep
 
 # Allow specific metadata files in bids_output
+!data/bids_output/
+data/bids_output/**
+!data/bids_output/README
+!data/bids_output/participants.tsv
+!data/bids_output/participants.json
 !eeg_pipeline/data/bids_output/
 eeg_pipeline/data/bids_output/**
 !eeg_pipeline/data/bids_output/README
@@ -88,10 +95,14 @@ eeg_pipeline/data/bids_output/**
 !eeg_pipeline/data/bids_output/participants.json
 
 # Allow specific metadata files in derivatives
+!data/derivatives/
+data/derivatives/**
 !eeg_pipeline/data/derivatives/
 eeg_pipeline/data/derivatives/**
 
 # Allow external data if it exists
+!data/external/
+!data/external/**
 !eeg_pipeline/data/external/
 !eeg_pipeline/data/external/**
 
