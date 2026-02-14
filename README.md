@@ -63,9 +63,20 @@ After installation, the `eeg-pipeline` command is available globally in the envi
 
 The pipeline expects data organized under `data/` at the repository root. All paths are configurable in `eeg_pipeline/utils/config/eeg_config.yaml`.
 
+### Minimum required data by workflow
+
+| Workflow | Minimum required inputs |
+|----------|-------------------------|
+| EEG preprocessing/features from BIDS | `data/bids_output/eeg/sub-XXXX/eeg/*_eeg.<format>` (plus matching sidecars expected by your BIDS converter) |
+| Behavioral analysis / ML using trial metadata | EEG `*_events.tsv` with at least `onset`, `duration`, `trial_type`; include pain/temperature/rating columns (see below) |
+| EEG raw to BIDS (`utilities raw-to-bids`) | `data/source_data/sub-XXXX/eeg/*.vhdr` (+ matching `.vmrk` and `.eeg`) |
+| Merge PsychoPy into EEG events (`utilities merge-psychopy`) | `data/source_data/sub-XXXX/PsychoPy_Data/*TrialSummary.csv` + existing BIDS EEG `*_events.tsv` |
+| fMRI raw to BIDS (`utilities fmri-raw-to-bids`) | `data/source_data/sub-XXXX/fmri/<dicom-series-dir>/` and (if writing events) `PsychoPy_Data/*TrialSummary.csv` |
+| fMRI first-level analysis (`fmri-analysis`) | `data/bids_output/fmri/sub-XXXX/func/*_bold.nii.gz` + matching `*_events.tsv` with `onset`, `duration`, `trial_type` |
+
 #### Option A: Start from raw recordings (use the built-in converter)
 
-Place raw BrainVision EEG files under `source_data/`:
+Place raw BrainVision EEG files under `source_data/` (subject directory must be `sub-XXXX`):
 
 ```
 data/source_data/
@@ -84,6 +95,16 @@ eeg-pipeline utilities raw-to-bids --subject XXXX
 
 > **Note:** The built-in `raw-to-bids` converter is **paradigm-specific** — it is tailored for the simultaneous EEG–fMRI thermal pain paradigm (BrainVision format, EasyCap M1 montage, volume triggers for EEG–fMRI alignment). If your paradigm differs, you can either **adapt the converter** (`eeg_pipeline/analysis/utilities/eeg_raw_to_bids.py`) or use **Option B** below.
 
+If you want behavioral columns merged into EEG events, also provide PsychoPy trial summaries:
+
+```
+data/source_data/
+└── sub-XXXX/
+    └── PsychoPy_Data/
+        ├── ...run-1...TrialSummary.csv
+        └── ...run-2...TrialSummary.csv
+```
+
 #### Option B: Start from BIDS-compliant data (recommended for other paradigms)
 
 If your data is already in [BIDS format](https://bids-specification.readthedocs.io/) (e.g., converted with MNE-BIDS, BIDScoin, or another tool), place it directly under `bids_output/`:
@@ -97,9 +118,9 @@ data/bids_output/eeg/
         ├── sub-XXXX_task-YYY_run-01_eeg.vhdr   (or .set, .edf, .fif)
         ├── sub-XXXX_task-YYY_run-01_eeg.vmrk
         ├── sub-XXXX_task-YYY_run-01_eeg.eeg
-        ├── sub-XXXX_task-YYY_run-01_events.tsv
-        ├── sub-XXXX_task-YYY_run-01_channels.tsv
-        └── sub-XXXX_task-YYY_run-01_electrodes.tsv
+        ├── sub-XXXX_task-YYY_run-01_events.tsv          # required for behavior/fMRI alignment workflows
+        ├── sub-XXXX_task-YYY_run-01_channels.tsv        # recommended
+        └── sub-XXXX_task-YYY_run-01_electrodes.tsv      # recommended
 ```
 
 Skip the `raw-to-bids` step and proceed directly to preprocessing.
@@ -112,6 +133,16 @@ data/bids_output/fmri/              # BIDS-formatted fMRI (NIfTI + events)
 data/fMRI_data/sub-XXXX/anat/       # T1w anatomical (for FreeSurfer/source localization)
 ```
 
+Minimal BIDS-fMRI run example for `fmri-analysis`:
+
+```
+data/bids_output/fmri/
+└── sub-XXXX/
+    └── func/
+        ├── sub-XXXX_task-thermalactive_run-01_bold.nii.gz
+        └── sub-XXXX_task-thermalactive_run-01_events.tsv
+```
+
 #### For behavioral data
 
 The pipeline reads behavioral variables from BIDS `*_events.tsv` files. The following columns are auto-detected (configurable via `event_columns` in the YAML config and in the TUI):
@@ -121,6 +152,14 @@ The pipeline reads behavioral variables from BIDS `*_events.tsv` files. The foll
 | **Temperature** | `stimulus_temp`, `stimulus_temperature`, `temp`, `temperature` |
 | **Pain rating** | `vas_final_coded_rating`, `vas_final_rating`, `vas_rating`, `pain_intensity`, `pain_rating`, `rating` |
 | **Pain binary** | `pain_binary_coded`, `pain_binary`, `pain` |
+
+For fMRI first-level GLM, each run-level `*_events.tsv` must include:
+
+- `onset`
+- `duration`
+- `trial_type`
+
+For the default contrast setup, include `pain_binary_coded` (or override contrast columns in config/CLI).
 
 ### Default directory layout
 
