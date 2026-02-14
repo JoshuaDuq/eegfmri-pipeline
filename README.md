@@ -11,12 +11,9 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research
 
 ### TUI Showcase
 
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/tui_main_menu.png" width="460" alt="Main menu"/><br/><b>Main Menu</b> — All pipeline stages at a glance</td>
-    <td align="center"><img src="docs/screenshots/tui_roi_selection.png" width="460" alt="ROI selection"/><br/><b>ROI Configuration</b> — Edit channel groupings live</td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/tui_main_menu.png" width="800" alt="Main menu — All pipeline stages at a glance"/>
+</p>
 
 ---
 

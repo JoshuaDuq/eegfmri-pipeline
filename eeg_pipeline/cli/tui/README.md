@@ -92,8 +92,6 @@ include:
 | **Advanced config** | Pipeline-specific parameters (filtering, ICA, epochs, ML models, plot styling, fMRI options) |
 | **Select plots** | Plot catalog with per-plot advanced overrides |
 
-![ROI selection](../../../docs/screenshots/tui_roi_selection.png)
-
 On confirmation the wizard builds a CLI command string and hands it to the
 execution view.
 
