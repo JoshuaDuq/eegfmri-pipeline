@@ -202,8 +202,8 @@ def _resample_mask_to_target(mask_img: Any, target_img: Any) -> Any:
         same_affine = np.allclose(np.asanyarray(mask_img.affine), np.asanyarray(target_img.affine))
         if same_shape and same_affine:
             return mask_img
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Mask/target alignment pre-check failed; falling back to resampling: %s", exc)
     return nilearn_image.resample_to_img(
         mask_img, target_img, interpolation="nearest",
         force_resample=True, copy_header=True,
@@ -428,8 +428,8 @@ def _coerce_condition_value(value: str, series: Any) -> Any:
                     return value
             if pd.api.types.is_bool_dtype(series):
                 return str(value).strip().lower() in ("true", "1", "yes")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Condition value coercion fallback to raw string for value=%r: %s", value, exc)
     return value
 
 

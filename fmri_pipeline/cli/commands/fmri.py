@@ -61,7 +61,7 @@ def setup_fmri(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         "--fs-license-file",
         type=str,
         default=None,
-        help="FreeSurfer license.txt file path (default: eeg_pipeline/licenses/license_freesurfer.txt)",
+        help="FreeSurfer license.txt file path (falls back to paths.freesurfer_license or EEG_PIPELINE_FREESURFER_LICENSE)",
     )
     grp.add_argument(
         "--fs-subjects-dir",

@@ -117,3 +117,6 @@ eeg_pipeline/data/derivatives/**
 *.mat
 *.edf
 *.bdf
+
+### Secrets ###
+eeg_pipeline/licenses/license_*.txt

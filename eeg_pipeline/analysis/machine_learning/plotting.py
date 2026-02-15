@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -141,8 +144,8 @@ def _plot_regression(results_dir: Path, opts: MLPlottingOptions) -> List[Path]:
             m, b = np.polyfit(y_true, y_pred, 1)
             xx = np.linspace(vmin, vmax, 100)
             ax.plot(xx, m * xx + b, color="#d62728", linewidth=1.3, label="Fit")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Skipping regression fit overlay in prediction agreement plot: %s", exc)
     ax.set_xlabel("Observed target")
     ax.set_ylabel("Predicted target")
     ax.set_title("Prediction Agreement")

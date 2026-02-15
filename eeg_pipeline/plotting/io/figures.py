@@ -345,8 +345,8 @@ def _configure_matplotlib_backend() -> None:
         try:
             matplotlib.use("Agg", force=False)
             setattr(matplotlib, backend_key, True)
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Failed to configure matplotlib Agg backend: %s", exc)
 
 
 def setup_matplotlib(config: Optional[Dict[str, Any]] = None) -> None:

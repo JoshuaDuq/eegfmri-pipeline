@@ -338,8 +338,8 @@ def generate_tsnr_qc_images(
                 tsnr_img = nib.Nifti1Image(tsnr_mean.astype("float32"), affine=ref_affine)
                 nii_path = qc_dir / "tsnr_mean.nii.gz"
                 nib.save(tsnr_img, str(nii_path))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to write tSNR NIfTI at %s: %s", qc_dir / "tsnr_mean.nii.gz", exc)
 
         # Pick informative slices (max mask coverage)
         m = tsnr_mean > 0
@@ -699,8 +699,8 @@ def _save_nilearn_display(display: Any, out_path: Path, *, dpi: int = 300) -> No
         import matplotlib.pyplot as plt
 
         plt.close(fig)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to close nilearn display figure: %s", exc)
 
 
 def _stat_summary_from_img(img: Any, mask_img: Optional[Any] = None) -> Dict[str, Any]:
@@ -1442,8 +1442,8 @@ def run_fmri_plotting_and_report(
                 "nibabel": getattr(nibabel, "__version__", None),
                 "numpy": getattr(numpy, "__version__", None),
             }
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to collect package version metadata for report: %s", exc)
 
         report_path = write_fmri_report(
             contrast_dir=contrast_dir,
@@ -1472,7 +1472,7 @@ def run_fmri_plotting_and_report(
         prov_path.parent.mkdir(parents=True, exist_ok=True)
         prov_path.write_text(json.dumps(prov, indent=2, sort_keys=True), encoding="utf-8")
         meta["provenance_json"] = str(prov_path)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to write plotting provenance JSON: %s", exc)
 
     return meta

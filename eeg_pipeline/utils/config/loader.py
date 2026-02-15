@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, Union, Tuple, List
@@ -315,8 +316,10 @@ def load_config(
             config = _load_and_cache_config(resolved_path, apply_thread_limits)
         else:
             config = _CONFIG
-    
-    return ConfigDict(config)
+
+    # Return an isolated per-call copy so runtime overrides/mutations do not
+    # leak back into the shared loader cache.
+    return ConfigDict(copy.deepcopy(config))
 
 
 def _resolve_config_path(config_path: Optional[Union[str, Path]]) -> Path:

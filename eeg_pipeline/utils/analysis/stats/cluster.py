@@ -318,8 +318,11 @@ def resolve_cluster_n_jobs(config: Optional[Any] = None) -> int:
             from eeg_pipeline.utils.config.loader import load_config
 
             config = load_config()
-        except (ImportError, Exception):
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Failed to load config for cluster n_jobs resolution; using defaults: %s",
+                exc,
+            )
 
     default = -1
     if config is not None:

@@ -14,12 +14,14 @@ Requires:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+FS_LICENSE_ENV_VAR = "EEG_PIPELINE_FREESURFER_LICENSE"
 
 
 def _cfg_get(config: Any, key: str, default: Any) -> Any:
@@ -65,7 +67,11 @@ def _auto_detect_fs_license() -> Optional[Path]:
 
 
 def get_fs_license_path(config: Any) -> Optional[Path]:
-    """Get FreeSurfer license path from global config or auto-detect."""
+    """Get FreeSurfer license path from env, config, or auto-detect."""
+    env_license = os.getenv(FS_LICENSE_ENV_VAR)
+    if env_license and str(env_license).strip():
+        return Path(env_license).expanduser()
+
     paths_cfg = _cfg_get(config, "paths", {})
     if isinstance(paths_cfg, dict):
         fs_license = paths_cfg.get("freesurfer_license")
@@ -443,7 +449,7 @@ def ensure_bem_and_trans_files(
     if not fs_license_path or not fs_license_path.exists():
         raise ValueError(
             "FreeSurfer license not found. Set paths.freesurfer_license in eeg_config.yaml "
-            "(default: eeg_pipeline/licenses/license_freesurfer.txt)\n"
+            f"or {FS_LICENSE_ENV_VAR}.\n"
             "Get a free license at: https://surfer.nmr.mgh.harvard.edu/registration.html"
         )
 

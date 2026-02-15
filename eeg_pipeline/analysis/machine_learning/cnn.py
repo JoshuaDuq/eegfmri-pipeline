@@ -6,6 +6,7 @@ Implements an EEGNet-style binary classifier with subject-aware CV support.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional, Tuple
 
 import numpy as np
@@ -14,6 +15,8 @@ from sklearn.model_selection import GroupShuffleSplit, LeaveOneGroupOut, train_t
 
 from eeg_pipeline.analysis.machine_learning.classification import ClassificationResult
 from eeg_pipeline.analysis.machine_learning.config import get_ml_config
+
+logger = logging.getLogger(__name__)
 
 
 def _import_torch():
@@ -48,8 +51,8 @@ def _split_train_val_indices(
             train_idx, val_idx = next(gss.split(np.zeros((n, 1)), y_train, groups=groups_train))
             if len(train_idx) > 0 and len(val_idx) > 0:
                 return np.asarray(train_idx, dtype=int), np.asarray(val_idx, dtype=int)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("GroupShuffleSplit failed; falling back to train_test_split: %s", exc)
 
     idx_all = np.arange(n)
     stratify = y_train if len(np.unique(y_train)) > 1 else None
@@ -61,7 +64,11 @@ def _split_train_val_indices(
             shuffle=True,
             stratify=stratify,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "train_test_split failed for CNN validation split; using full dataset for both train/val: %s",
+            exc,
+        )
         train_idx, val_idx = idx_all, idx_all
     return np.asarray(train_idx, dtype=int), np.asarray(val_idx, dtype=int)
 

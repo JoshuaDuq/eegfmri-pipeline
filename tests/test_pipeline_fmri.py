@@ -304,6 +304,46 @@ class TestFmriPreprocessingGapfill(unittest.TestCase):
         self.assertIn("/bids_filter.json", cmd_str)
         self.assertIn("/fs", cmd_str)
 
+    def test_freesurfer_license_from_env_var(self):
+        from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        bids = tmp / "bids"
+        bids.mkdir(parents=True, exist_ok=True)
+        (bids / "sub-0001").mkdir(parents=True, exist_ok=True)
+        lic = tmp / "env_license.txt"
+        lic.write_text("x", encoding="utf-8")
+
+        p = object.__new__(FmriPreprocessingPipeline)
+        p.deriv_root = tmp / "deriv"
+        p.deriv_root.mkdir(parents=True, exist_ok=True)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "paths": {"bids_fmri_root": str(bids)},
+                "fmri_preprocessing": {"engine": "docker", "fmriprep": {}},
+            }
+        )
+
+        with patch.dict("os.environ", {"EEG_PIPELINE_FREESURFER_LICENSE": str(lic)}), patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing._require_executable"
+        ):
+            p.process_subject("0001", task="", dry_run=True)
+
+
+class TestBemGenerationLicensePath(unittest.TestCase):
+    def test_get_fs_license_path_uses_env_var(self):
+        from fmri_pipeline.analysis.bem_generation import get_fs_license_path
+
+        tmp = Path(tempfile.mkdtemp())
+        lic = tmp / "license.txt"
+        lic.write_text("x", encoding="utf-8")
+
+        with patch.dict("os.environ", {"EEG_PIPELINE_FREESURFER_LICENSE": str(lic)}):
+            resolved = get_fs_license_path(DotConfig({"paths": {}}))
+
+        self.assertEqual(resolved, lic)
+
 class TestFmriDeep(unittest.TestCase):
         def test_fmri_analysis_process_subject_full_non_plotting(self):
             from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline

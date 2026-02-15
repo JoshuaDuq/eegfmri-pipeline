@@ -291,14 +291,21 @@ class FmriAnalysisPipeline(PipelineBase):
                             )
                             try:
                                 nib.save(mni_img, str(mni_nifti_path))
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                self.logger.warning(
+                                    "Failed to cache MNI contrast NIfTI at %s: %s",
+                                    mni_nifti_path,
+                                    exc,
+                                )
 
                             try:
                                 mni_effect = mni_glm.flm.compute_contrast(mni_contrast_def, output_type="effect_size")
                                 mni_variance = mni_glm.flm.compute_contrast(mni_contrast_def, output_type="variance")
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                self.logger.warning(
+                                    "Failed to compute MNI effect/variance maps for plotting: %s",
+                                    exc,
+                                )
                     except Exception as exc:
                         self.logger.warning("Skipping MNI plotting (failed to build MNI contrast): %s", exc)
 
@@ -313,8 +320,11 @@ class FmriAnalysisPipeline(PipelineBase):
                     ):
                         native_effect = glm_result.flm.compute_contrast(contrast_def, output_type="effect_size")
                         native_variance = glm_result.flm.compute_contrast(contrast_def, output_type="variance")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to compute native effect/variance maps for plotting: %s",
+                        exc,
+                    )
 
                 plotting_meta = run_fmri_plotting_and_report(
                     contrast_dir=out_dir,

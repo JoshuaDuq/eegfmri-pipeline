@@ -12,7 +12,7 @@ paths:
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
   source_data: "../../../data/source_data"  # Raw source data directory
   freesurfer_dir: "../../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
-  freesurfer_license: "eeg_pipeline/licenses/license_freesurfer.txt"  # Path to FreeSurfer license.txt
+  freesurfer_license: null  # Path to FreeSurfer license.txt (or set EEG_PIPELINE_FREESURFER_LICENSE env var)
 
 ###################################################################
 # 1b. fMRI PREPROCESSING (fMRIPrep-style)
@@ -23,7 +23,7 @@ fmri_preprocessing:
     image: "nipreps/fmriprep:25.2.4"  # Docker image tag or apptainer URI/path
     output_dir: null  # BIDS derivatives root (null = <deriv_root>/preprocessed/fmri)
     work_dir: null  # Scratch/work directory (null = <deriv_root>/work/fmriprep)
-    fs_license_file: "eeg_pipeline/licenses/license_freesurfer.txt"  # FreeSurfer license.txt (null = paths.freesurfer_license)
+    fs_license_file: null  # FreeSurfer license.txt (null = paths.freesurfer_license or EEG_PIPELINE_FREESURFER_LICENSE)
     fs_subjects_dir: null  # Optional FreeSurfer SUBJECTS_DIR
     output_spaces: ["MNI152NLin2009cAsym", "T1w"]
     ignore: []  # e.g., ["fieldmaps", "slicetiming"]

@@ -552,7 +552,7 @@ Runtime settings are loaded from `eeg_pipeline/utils/config/eeg_config.yaml` (in
 |-----|-------------|
 | `paths.bids_fmri_root` | BIDS root directory containing raw fMRI data |
 | `paths.freesurfer_dir` | FreeSurfer `SUBJECTS_DIR` |
-| `paths.freesurfer_license` | Path to FreeSurfer `license.txt` |
+| `paths.freesurfer_license` | Path to FreeSurfer `license.txt` (or use `EEG_PIPELINE_FREESURFER_LICENSE`) |
 | `paths.signature_dir` | Root directory containing NPS/SIIPS1 weight maps |
 
 ### fMRI Preprocessing (`fmri_preprocessing.fmriprep`)

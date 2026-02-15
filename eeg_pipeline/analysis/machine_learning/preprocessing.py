@@ -7,11 +7,14 @@ training fold only (via ``fit``) and apply them to the corresponding test fold.
 
 from __future__ import annotations
 
+import logging
 from typing import List, Optional, Sequence
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_selection import VarianceThreshold as _SklearnVarianceThreshold
+
+logger = logging.getLogger(__name__)
 
 
 class VarianceThreshold(BaseEstimator, TransformerMixin):
@@ -128,8 +131,8 @@ def transform_feature_names_through_steps(
             try:
                 names = list(step.get_feature_names_out(names))  # type: ignore[call-arg]
                 continue
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Ignoring get_feature_names_out failure for step %r: %s", _name, exc)
         if hasattr(step, "get_support"):
             try:
                 mask = step.get_support()  # type: ignore[call-arg]
@@ -138,8 +141,8 @@ def transform_feature_names_through_steps(
                     if mask_arr.shape[0] == len(names):
                         names = [n for n, keep in zip(names, mask_arr) if bool(keep)]
                         continue
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Ignoring get_support failure for step %r: %s", _name, exc)
     return names
 
 

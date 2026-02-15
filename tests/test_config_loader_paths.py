@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from eeg_pipeline.utils.config import loader
+from eeg_pipeline.utils.config.overrides import apply_runtime_overrides
 
 
 def _reset_loader_cache() -> None:
@@ -43,3 +44,31 @@ def test_overrides_path_falls_back_to_legacy_location(monkeypatch, tmp_path) -> 
     config_path = tmp_path / "eeg_pipeline" / "utils" / "config" / "eeg_config.yaml"
     overrides_path = loader._get_overrides_path(config_path)
     assert overrides_path == legacy
+
+
+def test_load_config_returns_isolated_nested_data(monkeypatch) -> None:
+    _reset_loader_cache()
+    missing_overrides = Path("/tmp/__no_such_tui_overrides__.json")
+    monkeypatch.setenv("EEG_PIPELINE_TUI_OVERRIDES", str(missing_overrides))
+
+    cfg1 = loader.load_config(apply_thread_limits=False)
+    original_deriv_root = cfg1.get("paths.deriv_root")
+
+    cfg1["paths"]["deriv_root"] = "/tmp/should_not_leak"
+    cfg2 = loader.load_config(apply_thread_limits=False)
+
+    assert cfg2.get("paths.deriv_root") == original_deriv_root
+
+
+def test_runtime_overrides_do_not_leak_into_cached_config(monkeypatch) -> None:
+    _reset_loader_cache()
+    missing_overrides = Path("/tmp/__no_such_tui_overrides__.json")
+    monkeypatch.setenv("EEG_PIPELINE_TUI_OVERRIDES", str(missing_overrides))
+
+    cfg = loader.load_config(apply_thread_limits=False)
+    original_task = cfg.get("project.task")
+
+    apply_runtime_overrides(cfg, task="__temp_runtime_task__")
+    fresh_cfg = loader.load_config(apply_thread_limits=False)
+
+    assert fresh_cfg.get("project.task") == original_task

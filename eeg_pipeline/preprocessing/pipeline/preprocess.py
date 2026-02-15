@@ -148,8 +148,15 @@ def run_bads_detection_single_file(
             try:
                 if raw.get_montage() is None and raw.info.get("dig") is None:
                     raw.set_montage(montage)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    **gen_log_kwargs(
+                        message=f"Failed to apply montage '{montage}' for {file}: {exc}",
+                        subject=get_entities_from_fname(file).get("subject"),
+                        session=get_entities_from_fname(file).get("session"),
+                        emoji="⚠️",
+                    )
+                )
 
             if l_pass:
                 raw.filter(None, l_pass, picks="eeg", verbose=False)

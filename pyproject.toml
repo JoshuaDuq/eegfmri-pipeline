@@ -75,7 +75,7 @@ include = ["eeg_pipeline*", "fmri_pipeline*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-eeg_pipeline = ["plotting/plot_catalog.json", "utils/config/*.yaml", "licenses/*.txt"]
+eeg_pipeline = ["plotting/plot_catalog.json", "utils/config/*.yaml"]
 fmri_pipeline = ["utils/config/*.yaml"]
 
 [tool.black]

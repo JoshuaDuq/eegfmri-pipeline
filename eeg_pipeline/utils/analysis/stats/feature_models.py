@@ -10,6 +10,7 @@ and supports multiple outcomes (e.g., `rating`, `pain_residual`, and `pain_binar
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -36,6 +37,7 @@ _QUANTILE_MEDIAN = 0.5
 _DEFAULT_FDR_ALPHA = 0.05
 _MIN_FEATURES_FOR_PARALLEL = 10
 _MIN_BINARY_LEVELS = 2
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -196,8 +198,8 @@ def _fit_logit_model(
             auc_reduced = float(roc_auc_score(y_binary, yhat_reduced))
             if np.isfinite(auc) and np.isfinite(auc_reduced):
                 delta_auc = auc - auc_reduced
-    except (ImportError, ValueError, Exception):
-        pass
+    except Exception as exc:
+        logger.debug("Unable to compute AUC diagnostics for feature=%s: %s", feature, exc)
     
     beta_interaction, p_interaction = _extract_interaction_terms(
         feature_idx, names, model_full.params, model_full.pvalues if hasattr(model_full, "pvalues") else None
@@ -429,8 +431,8 @@ def _process_single_feature_models(
     if has_statsmodels:
         try:
             import statsmodels.api as sm
-        except ImportError:
-            pass
+        except ImportError as exc:
+            logger.debug("statsmodels import failed in run_feature_model_for_target: %s", exc)
 
     for family in families:
         family_lower = str(family).strip().lower()

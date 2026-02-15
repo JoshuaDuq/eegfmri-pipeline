@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -62,6 +63,8 @@ from eeg_pipeline.analysis.machine_learning.preprocessing import (
     ReplaceInfWithNaN,
     VarianceThreshold,
 )
+
+logger = logging.getLogger(__name__)
 
 
 ###################################################################
@@ -380,17 +383,21 @@ class ClassificationResult:
                 }
                 if len(np.unique(y_t)) == 2:
                     rec["balanced_accuracy"] = float(balanced_accuracy_score(y_t, y_p))
-                if self.y_prob is not None and len(np.unique(y_t)) == 2:
-                    try:
-                        subj_prob = self.y_prob[mask]
-                        prob_mask = np.isfinite(subj_prob) & np.isfinite(y_t)
-                        if np.sum(prob_mask) >= 2 and len(np.unique(y_t[prob_mask])) == 2:
-                            rec["auc"] = float(roc_auc_score(y_t[prob_mask], subj_prob[prob_mask]))
-                            rec["average_precision"] = float(
-                                average_precision_score(y_t[prob_mask], subj_prob[prob_mask])
+                    if self.y_prob is not None and len(np.unique(y_t)) == 2:
+                        try:
+                            subj_prob = self.y_prob[mask]
+                            prob_mask = np.isfinite(subj_prob) & np.isfinite(y_t)
+                            if np.sum(prob_mask) >= 2 and len(np.unique(y_t[prob_mask])) == 2:
+                                rec["auc"] = float(roc_auc_score(y_t[prob_mask], subj_prob[prob_mask]))
+                                rec["average_precision"] = float(
+                                    average_precision_score(y_t[prob_mask], subj_prob[prob_mask])
+                                )
+                        except Exception as exc:
+                            logger.debug(
+                                "Skipping per-subject probability metrics for subject=%s: %s",
+                                subj,
+                                exc,
                             )
-                    except Exception:
-                        pass
                 self.per_subject_metrics[str(subj)] = rec
     
     def to_dict(self) -> Dict[str, Any]:

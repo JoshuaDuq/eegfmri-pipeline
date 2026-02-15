@@ -46,8 +46,8 @@ source .venv311/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Install the pipeline (editable)
-pip install -e .
+# Or install directly from pyproject metadata
+# pip install -e ".[ml]"
 ```
 
 After installation, the `eeg-pipeline` command is available globally in the environment.
@@ -639,7 +639,7 @@ eeg-pipeline fmri preprocess --subject 0001 \
 | `--engine` | `docker` or `apptainer` | `docker` |
 | `--fmriprep-image` | Docker image tag or apptainer URI | `nipreps/fmriprep:25.2.4` |
 | `--output-spaces` | Output spaces | `MNI152NLin2009cAsym`, `T1w` |
-| `--fs-license-file` | FreeSurfer license path | `eeg_pipeline/licenses/license_freesurfer.txt` |
+| `--fs-license-file` | FreeSurfer license path | `paths.freesurfer_license` or `EEG_PIPELINE_FREESURFER_LICENSE` |
 | `--fs-subjects-dir` | FreeSurfer SUBJECTS_DIR | auto |
 | `--ignore` | Skip steps (e.g., `fieldmaps slicetiming`) | none |
 
@@ -1014,7 +1014,8 @@ Core scientific stack:
 | **SciPy** | 1.15.3 | Scientific computing |
 | **pandas** | 2.3.0 | Data manipulation |
 
-See `requirements.txt` for the full pinned dependency list.
+`pyproject.toml` is the single source of truth for dependencies.
+`requirements.txt` is a thin compatibility shim that installs `-e ".[ml]"`.
 
 ---
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Collection, Iterable, List, Optional, Set, Union
 
@@ -13,6 +14,8 @@ from eeg_pipeline.pipelines.constants import (
     FEATURE_VISUALIZE_CATEGORIES,
     FREQUENCY_BANDS,
 )
+
+logger = logging.getLogger(__name__)
 
 
 ###################################################################
@@ -161,8 +164,12 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                 for band in bands_in_file:
                     if band not in band_times or mtime_str > band_times[band]:
                         band_times[band] = mtime_str
-            except (OSError, ValueError, ImportError):
-                pass
+            except (OSError, ValueError, ImportError) as exc:
+                logger.debug(
+                    "Failed to read columns from parquet feature file %s: %s",
+                    found_file,
+                    exc,
+                )
         else:
             result["features"][category] = {"available": False, "last_modified": None}
     
@@ -344,8 +351,8 @@ def discover_event_columns(
             if len(unique_vals) <= 50:
                 vals = [str(v) for v in unique_vals if pd.notna(v)]
                 result["values"][col] = sorted(set(vals))
-    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
-        pass
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        logger.debug("Failed to read events file for discovery (%s): %s", events_file, exc)
     
     return result
 
@@ -413,8 +420,10 @@ def discover_trial_table_columns(
             if len(unique_vals) <= 50:
                 vals = [str(v) for v in unique_vals if pd.notna(v)]
                 result["values"][col] = sorted(set(vals))
-    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError, Exception):
-        pass
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        logger.debug("Failed to read trial table for discovery (%s): %s", trial_file, exc)
+    except Exception as exc:
+        logger.warning("Unexpected error while discovering trial table columns (%s): %s", trial_file, exc)
     
     return result
 

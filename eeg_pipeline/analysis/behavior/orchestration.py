@@ -5863,13 +5863,18 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             family_cols=["feature_type", "analysis_kind"],
             analysis_type="moderation",
         )
-        mod_df["significant_moderation"] = pd.to_numeric(mod_df.get("p_fdr", np.nan), errors="coerce") < fdr_alpha
+        if "p_fdr" in mod_df.columns:
+            p_fdr = pd.to_numeric(mod_df["p_fdr"], errors="coerce")
+        else:
+            p_fdr = pd.Series(np.nan, index=mod_df.index, dtype=float)
+        mod_df["p_fdr"] = p_fdr
+        mod_df["significant_moderation"] = p_fdr < fdr_alpha
 
     out_dir = _get_stats_subfolder(ctx, "moderation")
     out_path = out_dir / f"moderation_results{suffix}{method_suffix}.parquet"
     if not mod_df.empty:
         _write_parquet_with_optional_csv(mod_df, out_path, also_save_csv=ctx.also_save_csv)
-        n_sig = int((mod_df["p_fdr"] < fdr_alpha).sum())
+        n_sig = int((pd.to_numeric(mod_df.get("p_fdr", np.nan), errors="coerce") < fdr_alpha).sum())
         ctx.logger.info(
             "Moderation: %d features tested, %d significant (FDR < %.2f)",
             len(mod_df), n_sig, fdr_alpha

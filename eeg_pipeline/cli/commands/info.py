@@ -93,6 +93,7 @@ def _get_unavailable_channels(deriv_root: Path, task: str) -> List[str]:
     """
     import ast
     import pandas as pd
+    logger = logging.getLogger(__name__)
 
     log_path = deriv_root / "preprocessed" / "eeg" / f"pyprep_task_{task}_log.csv"
     if not log_path.exists():
@@ -109,8 +110,8 @@ def _get_unavailable_channels(deriv_root: Path, task: str) -> List[str]:
                 ch_list = ast.literal_eval(str(val))
                 if isinstance(ch_list, list):
                     bad_set.update(ch_list)
-            except (ValueError, SyntaxError):
-                pass
+            except (ValueError, SyntaxError) as exc:
+                logger.debug("Failed to parse bad_channels entry %r from %s: %s", val, log_path, exc)
         return sorted(bad_set)
     except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
         return []

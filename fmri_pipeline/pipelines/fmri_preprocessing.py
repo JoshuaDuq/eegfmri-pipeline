@@ -11,6 +11,8 @@ from typing import Any, List, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
 
+FS_LICENSE_ENV_VAR = "EEG_PIPELINE_FREESURFER_LICENSE"
+
 
 def _require_executable(name: str) -> None:
     if shutil.which(name) is None:
@@ -26,6 +28,17 @@ def _resolve_path(value: Optional[str]) -> Optional[Path]:
     if trimmed == "":
         return None
     return Path(trimmed).expanduser().resolve()
+
+
+def _resolve_fs_license_path(config: Any, fmriprep_cfg: dict[str, Any]) -> Optional[Path]:
+    """Resolve FreeSurfer license path from config or environment."""
+    configured = (
+        _resolve_path(fmriprep_cfg.get("fs_license_file"))
+        or _resolve_path(config.get("paths.freesurfer_license"))
+    )
+    if configured is not None:
+        return configured
+    return _resolve_path(os.getenv(FS_LICENSE_ENV_VAR))
 
 
 def _stream_subprocess(
@@ -102,14 +115,12 @@ class FmriPreprocessingPipeline(PipelineBase):
             output_dir.mkdir(parents=True, exist_ok=True)
             work_dir.mkdir(parents=True, exist_ok=True)
 
-            fs_license = (
-                _resolve_path(fmriprep_cfg.get("fs_license_file"))
-                or _resolve_path(self.config.get("paths.freesurfer_license"))
-            )
+            fs_license = _resolve_fs_license_path(self.config, fmriprep_cfg)
             if fs_license is None:
                 raise ValueError(
-                    "Missing FreeSurfer license file. Set fmri_preprocessing.fmriprep.fs_license_file "
-                    "or paths.freesurfer_license (default: eeg_pipeline/licenses/license_freesurfer.txt)."
+                    "Missing FreeSurfer license file. Set --fs-license-file, "
+                    "fmri_preprocessing.fmriprep.fs_license_file, paths.freesurfer_license, "
+                    f"or {FS_LICENSE_ENV_VAR}."
                 )
             if not fs_license.exists():
                 raise FileNotFoundError(

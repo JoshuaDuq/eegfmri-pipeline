@@ -1,0 +1,5 @@
+# FreeSurfer license placeholder (do not commit real credentials)
+# Put your real license in a local path and point one of:
+# - EEG_PIPELINE_FREESURFER_LICENSE
+# - paths.freesurfer_license
+# - fmri_preprocessing.fmriprep.fs_license_file

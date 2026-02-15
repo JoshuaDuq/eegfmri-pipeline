@@ -574,8 +574,8 @@ def _build_first_level_model(
         smoothing_fwhm = normalize_smoothing_fwhm(getattr(cfg, "smoothing_fwhm", None))
         if smoothing_fwhm is not None:
             kwargs["smoothing_fwhm"] = smoothing_fwhm
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to normalize smoothing_fwhm; continuing without smoothing: %s", exc)
 
     # Some nilearn versions support low_pass; add only if present to avoid TypeError.
     sig = inspect.signature(FirstLevelModel)
@@ -675,10 +675,10 @@ def _write_design_matrices(
                     import matplotlib.pyplot as plt
 
                     plt.close(fig)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as exc:
+                    logger.debug("Failed to close design matrix figure for %s: %s", run_label, exc)
+        except Exception as exc:
+            logger.warning("Failed to render design matrix PNG for %s: %s", run_label, exc)
 
     out: Dict[str, Any] = {}
     if tsv_paths:

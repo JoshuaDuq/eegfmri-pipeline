@@ -33,6 +33,7 @@ DEFAULT_ANNOTATION_LINE_HEIGHT = 0.045
 DEFAULT_ANNOTATION_MIN_SPACING = 0.03
 DEFAULT_ANNOTATION_SPACING_MULTIPLIER = 0.3
 DEFAULT_FIGURE_SIZE = 10.0
+logger = logging.getLogger(__name__)
 
 
 def _get_behavior_fdr_alpha(config: Optional[Any], default: float = DEFAULT_ALPHA) -> float:
@@ -673,8 +674,8 @@ def _plot_uncorrected_markers(
             markeredgewidth=1,
             zorder=10,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Skipping uncorrected significance markers: %s", exc)
 
 
 def _plot_single_band_topomaps(

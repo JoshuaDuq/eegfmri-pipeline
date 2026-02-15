@@ -36,6 +36,8 @@ from eeg_pipeline.utils.config.loader import get_frequency_bands, require_config
 from scipy.stats import mannwhitneyu
 from scipy.stats import wilcoxon
 
+logger = logging.getLogger(__name__)
+
 
 ###################################################################
 # Constants
@@ -242,8 +244,13 @@ def _compute_column_comparison_statistics(
             cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
             all_pvals.append(p)
             pvalue_keys.append((col_idx, p, cohens_d))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Failed Mann-Whitney computation for band=%s (column index %s): %s",
+                band,
+                col_idx,
+                exc,
+            )
     
     qvalues = {}
     n_significant = 0

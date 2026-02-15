@@ -5,7 +5,7 @@
 paths:
   # FreeSurfer license file (required for fMRIPrep and BEM generation)
   # Get a free license at: https://surfer.nmr.mgh.harvard.edu/registration.html
-  freesurfer_license: "eeg_pipeline/licenses/license_freesurfer.txt"
+  freesurfer_license: null  # Set this path or EEG_PIPELINE_FREESURFER_LICENSE
   
   # fMRI BIDS root directory (raw fMRI data)
   bids_fmri_root: null
