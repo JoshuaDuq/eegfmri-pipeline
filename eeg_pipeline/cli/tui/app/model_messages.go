@@ -269,5 +269,9 @@ func (m *Model) handleConfigKeysLoaded(msg messages.ConfigKeysLoadedMsg) {
 		m.global.SetConfigValues(msg.Values)
 	case StatePipelineWizard:
 		m.wizard.ApplyConfigKeys(msg.Values)
+		// Config hydration provides YAML defaults and can arrive after we have
+		// restored persisted wizard state; reapply persisted values so user edits
+		// survive across sessions.
+		m.restoreWizardConfig()
 	}
 }

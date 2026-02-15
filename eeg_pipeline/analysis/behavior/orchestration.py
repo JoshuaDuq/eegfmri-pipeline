@@ -2496,12 +2496,12 @@ def stage_correlate_primary_selection(
                     p_primary = rec.get(perm_key, np.nan)
                     src = f"{src}_perm"
 
-            # If the selected primary statistic is unavailable, fall back to raw.
+            # If the selected primary statistic is unavailable, keep it missing.
+            # Do not silently downgrade controlled/permutation inference to raw.
             if not (pd.notna(p_primary) and np.isfinite(float(p_primary))):
-                p_kind = "p_raw"
-                p_primary = rec.get("p_raw", np.nan)
-                r_primary = rec.get("r_raw", np.nan)
-                src = "raw_fallback"
+                p_primary = np.nan
+                r_primary = np.nan
+                src = f"{src}_missing"
 
         rec["p_kind_primary"] = p_kind
         rec["p_primary"] = p_primary
@@ -2832,12 +2832,21 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         if "analysis_kind" not in psi_df.columns:
             psi_df["analysis_kind"] = "pain_sensitivity"
 
-        # Ensure p_primary column exists
-        p_column = next((col for col in ["p_psi", "p_value", "p"] if col in psi_df.columns), None)
-        if p_column:
-            psi_df["p_primary"] = pd.to_numeric(psi_df[p_column], errors="coerce")
-            psi_df["p_raw"] = psi_df["p_primary"]
+        # Preserve p_primary from run_pain_sensitivity_correlations when available
+        # (e.g., permutation-aware primary selection).
+        if "p_primary" in psi_df.columns:
+            psi_df["p_primary"] = pd.to_numeric(psi_df["p_primary"], errors="coerce")
+        else:
+            p_column = next((col for col in ["p_psi", "p_value", "p"] if col in psi_df.columns), None)
+            if p_column:
+                psi_df["p_primary"] = pd.to_numeric(psi_df[p_column], errors="coerce")
 
+        if "p_raw" not in psi_df.columns:
+            p_raw_col = next((col for col in ["p_psi", "p_value", "p"] if col in psi_df.columns), None)
+            if p_raw_col:
+                psi_df["p_raw"] = pd.to_numeric(psi_df[p_raw_col], errors="coerce")
+
+        if "p_primary" in psi_df.columns:
             # Use unified FDR
             psi_df = _compute_unified_fdr(
                 ctx,
@@ -5074,8 +5083,12 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     if use_perm:
         perm_p = pd.to_numeric(med_df["p_ab_perm"], errors="coerce")
         raw_p = pd.to_numeric(med_df["p_raw"], errors="coerce")
-        med_df["p_primary"] = perm_p.where(perm_p.notna(), raw_p)
-        med_df["p_primary_source"] = np.where(perm_p.notna(), "perm", "sobel")
+        if not allow_iid_trials:
+            med_df["p_primary"] = perm_p.where(perm_p.notna(), np.nan)
+            med_df["p_primary_source"] = np.where(perm_p.notna(), "perm", "perm_missing_required")
+        else:
+            med_df["p_primary"] = perm_p.where(perm_p.notna(), raw_p)
+            med_df["p_primary_source"] = np.where(perm_p.notna(), "perm", "sobel")
     else:
         med_df["p_primary"] = pd.to_numeric(med_df["p_raw"], errors="coerce")
         med_df["p_primary_source"] = "sobel"
@@ -5831,8 +5844,12 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         use_perm = p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}
         if use_perm and "p_interaction_perm" in mod_df.columns:
             p_perm = pd.to_numeric(mod_df["p_interaction_perm"], errors="coerce")
-            mod_df["p_primary"] = p_perm.where(p_perm.notna(), mod_df["p_raw"])
-            mod_df["p_primary_source"] = np.where(p_perm.notna(), "perm", "asymptotic")
+            if not allow_iid_trials:
+                mod_df["p_primary"] = p_perm.where(p_perm.notna(), np.nan)
+                mod_df["p_primary_source"] = np.where(p_perm.notna(), "perm", "perm_missing_required")
+            else:
+                mod_df["p_primary"] = p_perm.where(p_perm.notna(), mod_df["p_raw"])
+                mod_df["p_primary_source"] = np.where(p_perm.notna(), "perm", "asymptotic")
         else:
             mod_df["p_primary"] = mod_df["p_raw"]
             mod_df["p_primary_source"] = "asymptotic"

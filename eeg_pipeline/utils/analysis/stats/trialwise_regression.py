@@ -261,31 +261,40 @@ def _compute_permutation_pvalues(
     """
     if n_permutations <= 0:
         return np.nan, np.nan
-    
+
+    # Restrict permutation to rows valid for this feature to avoid mixing
+    # residuals from dropped trials into the feature-specific test.
+    resid_f = np.asarray(resid_z, dtype=float)[valid_feat]
+    y_hat_f = np.asarray(y_hat_z, dtype=float)[valid_feat]
+    groups_f = None
+    if groups_v is not None:
+        groups_arr = np.asarray(groups_v)
+        if groups_arr.shape[0] == len(valid_feat):
+            groups_f = groups_arr[valid_feat]
+
     rng = np.random.default_rng(rng_seed)
     exceed_feature = 1
     exceed_int = 1
     denom = n_permutations + 1
     has_interaction = "feature_x_temperature" in names
-    
+
     for _ in range(n_permutations):
-        perm_idx = permute_within_groups(len(resid_z), rng, groups_v)
-        y_perm = y_hat_z + resid_z[perm_idx]
-        y_perm_f = y_perm[valid_feat]
+        perm_idx = permute_within_groups(len(resid_f), rng, groups_f)
+        y_perm_f = y_hat_f + resid_f[perm_idx]
         beta_p = _ols_fit(X, y_perm_f)
         if beta_p is None:
             continue
-        
+
         beta_perm_feature = float(beta_p[idx_feature])
         if np.abs(beta_perm_feature) >= np.abs(beta_feature):
             exceed_feature += 1
-        
+
         if has_interaction:
             idx_int = names.index("feature_x_temperature")
             beta_perm_int = float(beta_p[idx_int])
             if np.abs(beta_perm_int) >= np.abs(beta_int):
                 exceed_int += 1
-    
+
     p_perm_feature = exceed_feature / denom
     p_perm_int = exceed_int / denom if has_interaction else np.nan
     return p_perm_feature, p_perm_int
