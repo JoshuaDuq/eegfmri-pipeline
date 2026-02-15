@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
+
 from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
 from fmri_pipeline.analysis.pain_signatures import discover_pain_signature_files, compute_pain_signature_expression, PainSignatureResult
 

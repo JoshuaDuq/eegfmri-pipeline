@@ -65,7 +65,7 @@ def _qc_compare_trial_intervals(
     """
     if "onset" not in target_events_df.columns:
         return
-    if "stim_start_time" not in behavioral_df.columns:
+    if "stim_start_time" not in psychopy_df.columns:
         return
 
     try:

@@ -87,5 +87,4 @@ line-length = 100
 target-version = "py39"
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
-ignore = ["E203"]
+select = ["F821"]

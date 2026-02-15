@@ -17,7 +17,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -25,6 +25,10 @@ import pandas as pd
 from fmri_pipeline.analysis.events_selection import normalize_trial_type_list
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from nibabel.nifti1 import Nifti1Image
+    from nilearn.glm.first_level import FirstLevelModel
 
 
 @dataclass(frozen=True)

@@ -890,7 +890,7 @@ def _extract_pac_pairs_from_dataframe(pac_df: pd.DataFrame, config: Any) -> List
         Sorted list of unique pair names
     """
     from eeg_pipeline.domain.features.naming import NamingSchema
-    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
     
     all_pairs = set()
     for col in pac_df.columns:
@@ -948,7 +948,7 @@ def plot_pac_by_condition(
         return
 
     from eeg_pipeline.domain.features.naming import NamingSchema
-    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import plot_paired_comparison, get_named_segments
     from eeg_pipeline.plotting.features.roi import get_roi_definitions

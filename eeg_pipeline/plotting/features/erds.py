@@ -741,7 +741,7 @@ def plot_erds_by_condition(
     If stats_dir is provided, uses pre-computed statistics from the behavior pipeline.
     """
     from eeg_pipeline.infra.paths import ensure_dir
-    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
     from eeg_pipeline.plotting.features.roi import get_roi_definitions
     from eeg_pipeline.plotting.io.figures import log_if_present
 
