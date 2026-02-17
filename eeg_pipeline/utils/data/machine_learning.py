@@ -621,26 +621,54 @@ def _load_subject_feature_table(
         cli = str(meta.get("cli_command") or meta.get("command") or "")
         cfg_path = str(meta.get("_config_path") or "")
 
-        analysis_mode = _extract_flag_value(cli, "--analysis-mode")
+        analysis_mode_meta = str(meta.get("analysis_mode") or "").strip()
+        analysis_mode_cli = str(_extract_flag_value(cli, "--analysis-mode") or "").strip()
+        analysis_mode = analysis_mode_meta or analysis_mode_cli
         if analysis_mode and analysis_mode.strip().lower() != "trial_ml_safe":
             msg = (
                 f"Feature table for family '{family}' appears to have been extracted with "
-                f"--analysis-mode {analysis_mode!s} (from {cfg_path}). "
+                f"analysis_mode {analysis_mode!s} (from {cfg_path}). "
                 "This can introduce CV leakage for ML. Re-run feature extraction with "
                 "--analysis-mode trial_ml_safe (recommended) and then rerun ML."
             )
             if require_safe:
                 raise ValueError(msg)
             logger.warning(msg)
+        elif not analysis_mode:
+            msg = (
+                f"Feature table for family '{family}' is missing an explicit analysis_mode "
+                f"in extraction metadata ({cfg_path}). Cannot verify trial_ml_safe provenance."
+            )
+            if require_safe:
+                raise ValueError(msg)
+            logger.warning(msg)
 
         if family in {"connectivity", "directedconnectivity", "directed_connectivity", "dconn"}:
-            granularity = _extract_flag_value(cli, "--conn-granularity")
+            granularity_meta = str(meta.get("connectivity_granularity") or "").strip()
+            granularity_cli = str(_extract_flag_value(cli, "--conn-granularity") or "").strip()
+            granularity = granularity_meta or granularity_cli
             if granularity and granularity.strip().lower() in {"condition", "subject"}:
                 msg = (
                     f"Connectivity features were extracted with --conn-granularity {granularity!s} "
                     f"(from {cfg_path}). This produces condition/subject-aggregated features that are "
                     "broadcast to all trials and will leak condition labels into ML. "
                     "Re-run features with --conn-granularity trial (and ideally --analysis-mode trial_ml_safe)."
+                )
+                if require_safe:
+                    raise ValueError(msg)
+                logger.warning(msg)
+            elif granularity and granularity.strip().lower() not in {"trial"}:
+                msg = (
+                    f"Connectivity features use unrecognized granularity={granularity!s} "
+                    f"(from {cfg_path}); cannot verify trial-safe provenance."
+                )
+                if require_safe:
+                    raise ValueError(msg)
+                logger.warning(msg)
+            elif not granularity:
+                msg = (
+                    f"Feature table for family '{family}' is missing explicit connectivity granularity "
+                    f"in extraction metadata ({cfg_path}). Cannot verify connectivity granularity."
                 )
                 if require_safe:
                     raise ValueError(msg)

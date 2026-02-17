@@ -436,7 +436,7 @@ Distribution-free prediction intervals via conformal prediction.
 
 **Method:**
 
-1. Split training data into proper training (80%) and calibration (20%, min 50 samples).
+1. Split training data into proper training (80%) and calibration (20%, min 2 calibration samples; requires at least 5 total training samples).
 2. Fit model on proper training set.
 3. Compute calibration residuals: `rᵢ = |yᵢ − ŷᵢ|` on calibration set.
 4. Conformal quantile: `q̂ = quantile(residuals, ⌈(n+1)(1−α)⌉/n)`.

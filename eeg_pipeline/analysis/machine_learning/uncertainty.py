@@ -17,7 +17,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -147,6 +147,24 @@ def _compute_conformal_quantile(residuals: np.ndarray, alpha: float) -> float:
     return float(np.quantile(residuals, q_level))
 
 
+def _order_stat_quantile(values: np.ndarray, q: float, *, tail: str) -> float:
+    """Conservative finite-sample order-statistic quantile."""
+    arr = np.sort(np.asarray(values, dtype=float))
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return np.nan
+
+    q_clamped = float(np.clip(q, 0.0, 1.0))
+    if tail == "upper":
+        # Conservative upper-tail quantile (ceiling rank).
+        rank = int(np.ceil(q_clamped * arr.size)) - 1
+    else:
+        # Conservative lower-tail quantile (floor rank).
+        rank = int(np.floor(q_clamped * arr.size))
+    rank = int(np.clip(rank, 0, arr.size - 1))
+    return float(arr[rank])
+
+
 def _get_cv_splitter(
     cv_splits: int,
     seed: int,
@@ -185,10 +203,10 @@ def _conformal_split(
     Split training data into proper training and calibration sets.
     """
     n = len(X_train)
-    if n < 2:
-        raise ValueError("Split conformal requires at least 2 training samples.")
-    # Use ~20% for calibration (minimum 1), while preserving at least one proper-train sample.
-    n_cal = min(max(int(0.2 * n), 1), n - 1)
+    if n < 5:
+        raise ValueError("Split conformal requires at least 5 training samples.")
+    # Use ~20% for calibration (minimum 2), while preserving at least 2 proper-train samples.
+    n_cal = min(max(int(0.2 * n), 2), n - 2)
     
     indices = rng.permutation(n)
     cal_idx = indices[:n_cal]
@@ -234,28 +252,52 @@ def _conformal_cv_plus(
     Uses cross-validation residuals for more efficient calibration.
     Supports group-aware CV via GroupKFold or LeaveOneGroupOut.
     """
-    n = len(X_train)
-    split_iter = _get_cv_splitter(cv_splits, seed, groups, X_train, y_train)
-    
-    loo_residuals = np.zeros(n)
-    
+    split_iter = list(_get_cv_splitter(cv_splits, seed, groups, X_train, y_train))
+    n_test = int(len(X_test))
+    lower_chunks: List[np.ndarray] = []
+    upper_chunks: List[np.ndarray] = []
+
     for train_idx, val_idx in split_iter:
+        if len(train_idx) == 0 or len(val_idx) == 0:
+            continue
         model_fold = clone(model)
         model_fold.fit(X_train[train_idx], y_train[train_idx])
-        
-        y_val_pred = model_fold.predict(X_train[val_idx])
-        loo_residuals[val_idx] = np.abs(y_train[val_idx] - y_val_pred)
-    
+
+        y_val_pred = np.asarray(model_fold.predict(X_train[val_idx]), dtype=float)
+        residuals = np.abs(np.asarray(y_train[val_idx], dtype=float) - y_val_pred)
+        residuals = residuals[np.isfinite(residuals)]
+        if residuals.size == 0:
+            continue
+
+        y_test_pred_fold = np.asarray(model_fold.predict(X_test), dtype=float)
+        if y_test_pred_fold.size != n_test:
+            continue
+
+        lower_chunks.append(y_test_pred_fold[:, None] - residuals[None, :])
+        upper_chunks.append(y_test_pred_fold[:, None] + residuals[None, :])
+
+    if not lower_chunks or not upper_chunks:
+        # Safety fallback when fold-wise calibration is impossible.
+        rng = np.random.default_rng(seed)
+        return _conformal_split(model, X_train, y_train, X_test, alpha, rng)
+
+    lower_candidates = np.concatenate(lower_chunks, axis=1)
+    upper_candidates = np.concatenate(upper_chunks, axis=1)
+
+    lower = np.full(n_test, np.nan, dtype=float)
+    upper = np.full(n_test, np.nan, dtype=float)
+    for i in range(n_test):
+        lower[i] = _order_stat_quantile(lower_candidates[i, :], alpha, tail="lower")
+        upper[i] = _order_stat_quantile(upper_candidates[i, :], 1.0 - alpha, tail="upper")
+
     model_full = clone(model)
     model_full.fit(X_train, y_train)
-    y_test_pred = model_full.predict(X_test)
-    
-    q_hat = _compute_conformal_quantile(loo_residuals, alpha)
-    
+    y_test_pred = np.asarray(model_full.predict(X_test), dtype=float)
+
     return PredictionIntervalResult(
         y_pred=y_test_pred,
-        lower=y_test_pred - q_hat,
-        upper=y_test_pred + q_hat,
+        lower=lower,
+        upper=upper,
         alpha=alpha,
     )
 

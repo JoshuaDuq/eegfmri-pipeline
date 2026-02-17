@@ -25,6 +25,7 @@ from eeg_pipeline.utils.data.machine_learning import (
 from eeg_pipeline.utils.data.machine_learning import load_epochs_with_targets
 from eeg_pipeline.analysis.machine_learning.cv import (
     get_min_channels_required,
+    is_effective_permutation,
     safe_pearsonr,
 )
 from eeg_pipeline.utils.config.loader import load_config, get_fisher_z_clip_values, get_config_value
@@ -562,6 +563,10 @@ def time_generalization_regression(
     if n_perm > 0 and len(tg_r) > 0:
         rng = np.random.default_rng(seed)
         expected_shape = tg_r.shape
+        n_effective = 0
+        min_shuffle_fraction = float(
+            get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
+        )
         perm_scheme = str(
             get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject_within_block")
         ).strip().lower()
@@ -583,6 +588,14 @@ def time_generalization_regression(
                 rng=rng,
                 scheme=perm_scheme,
             )
+            effective, _changed_fraction = is_effective_permutation(
+                y_all_arr,
+                y_perm,
+                min_changed_fraction=min_shuffle_fraction,
+            )
+            if not effective:
+                continue
+            n_effective += 1
             tg_r_perm, tg_r2_perm, _, _, _ = _run_time_gen(y_perm)
             if tg_r_perm.size > 0 and tg_r_perm.shape == expected_shape:
                 null_r_list.append(tg_r_perm)
@@ -592,6 +605,12 @@ def time_generalization_regression(
                     f"Permutation {perm_idx + 1}/{n_perm}: Empty or shape-mismatched output "
                     f"(shape={tg_r_perm.shape}, expected={expected_shape}). Skipping."
                 )
+        if n_effective == 0 and int(n_perm) > 0:
+            raise RuntimeError(
+                "No effective time-generalization permutations could be generated. "
+                "Try machine_learning.cv.permutation_scheme='within_subject' and/or lower "
+                "machine_learning.cv.min_label_shuffle_fraction."
+            )
         n_perm_valid = len(null_r_list)
         completion_rate = (n_perm_valid / int(n_perm)) if int(n_perm) > 0 else 0.0
         min_completion = float(

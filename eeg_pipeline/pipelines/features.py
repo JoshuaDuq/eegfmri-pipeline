@@ -867,6 +867,10 @@ class FeaturePipeline(PipelineBase):
                 "cli_command": kwargs.get("cli_command"),
                 "name": name,
                 "spatial_modes": ctx.spatial_modes,
+                "analysis_mode": str(ctx.analysis_mode or "").strip() or "group_stats",
+                "connectivity_granularity": str(
+                    self.config.get("feature_engineering.connectivity.granularity", "trial")
+                ).strip(),
                 "aggregation_method": ctx.aggregation_method,
                 "tmin": ctx.tmin,
                 "tmax": ctx.tmax,
@@ -900,6 +904,16 @@ class FeaturePipeline(PipelineBase):
                 "time_ranges": [tr.get("name") for tr in time_ranges],
                 "spatial_modes": kwargs.get("spatial_modes")
                 or self.config.get("feature_engineering.spatial_modes", ["roi", "global"]),
+                "analysis_mode": str(
+                    kwargs.get(
+                        "analysis_mode",
+                        self.config.get("feature_engineering.analysis_mode", "group_stats"),
+                    )
+                    or "group_stats"
+                ).strip(),
+                "connectivity_granularity": str(
+                    self.config.get("feature_engineering.connectivity.granularity", "trial")
+                ).strip(),
                 "aggregation_method": kwargs.get("aggregation_method", "mean"),
                 "feature_categories": feature_categories,
                 "n_trials": len(accumulated_y) if accumulated_y is not None else 0,

@@ -1034,7 +1034,9 @@ machine_learning:
   cv:
     inner_splits: 5
     hygiene_enabled: true
+    within_subject_ordered_blocks: true  # If true, within-subject CV uses forward block splits when block labels are ordered.
     permutation_scheme: "within_subject_within_block"  # "within_subject" | "within_subject_within_block"
+    min_label_shuffle_fraction: 0.01     # Minimum fraction of labels that must change for a permutation to be considered effective
     min_valid_permutation_fraction: 0.5  # Minimum completed/requested permutations required for valid p-values
     default_n_splits: 5
     default_n_bins: 5
@@ -1042,6 +1044,7 @@ machine_learning:
   evaluation:
     ci_method: "bootstrap"               # "fixed_effects" | "bootstrap"
     bootstrap_iterations: 1000
+    subject_weighting: "equal"           # "equal" (recommended inferential unit = subject) | "trial_count" (legacy)
 
   constants:
     variance_threshold: 0.0

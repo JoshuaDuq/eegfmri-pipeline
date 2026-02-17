@@ -228,6 +228,42 @@ def create_block_aware_cv(
     return GroupKFold(n_splits=effective_splits), effective_splits
 
 
+def permutation_changed_fraction(
+    y_original: np.ndarray,
+    y_permuted: np.ndarray,
+) -> float:
+    """Return the fraction of labels that changed under permutation."""
+    original = np.asarray(y_original)
+    permuted = np.asarray(y_permuted)
+    if original.shape != permuted.shape:
+        raise ValueError(f"Permutation shape mismatch: {original.shape} vs {permuted.shape}")
+    if original.size == 0:
+        return 0.0
+
+    if np.issubdtype(original.dtype, np.number) and np.issubdtype(permuted.dtype, np.number):
+        orig = np.asarray(original, dtype=float)
+        perm = np.asarray(permuted, dtype=float)
+        finite = np.isfinite(orig) & np.isfinite(perm)
+        if not np.any(finite):
+            return 0.0
+        changed = int(np.sum(orig[finite] != perm[finite]))
+        return float(changed / int(np.sum(finite)))
+
+    changed = int(np.sum(original != permuted))
+    return float(changed / int(original.size))
+
+
+def is_effective_permutation(
+    y_original: np.ndarray,
+    y_permuted: np.ndarray,
+    *,
+    min_changed_fraction: float,
+) -> Tuple[bool, float]:
+    """Check whether a permutation changed enough labels to be inferentially useful."""
+    changed_fraction = permutation_changed_fraction(y_original, y_permuted)
+    return bool(changed_fraction >= float(max(0.0, min_changed_fraction))), float(changed_fraction)
+
+
 ###################################################################
 # Fold Execution
 ###################################################################
@@ -445,9 +481,18 @@ def compute_subject_level_r(
     r_vals = np.clip([r for _, r, _ in per_subject], clip_min, clip_max)
     n_trials_vals = np.asarray([n for _, _, n in per_subject], dtype=int)
 
+    weighting_mode = str(
+        get_config_value(config, "machine_learning.evaluation.subject_weighting", "equal")
+    ).strip().lower()
+    if weighting_mode not in {"equal", "trial_count"}:
+        weighting_mode = "equal"
+
     # Fisher z transform and weighted average
     z_vals = np.arctanh(r_vals)
-    weights = np.maximum(n_trials_vals - 3, 1.0)
+    if weighting_mode == "trial_count":
+        weights = np.maximum(n_trials_vals - 3, 1.0)
+    else:
+        weights = np.ones_like(n_trials_vals, dtype=float)
     sum_weights = weights.sum()
     norm_weights = weights / sum_weights
     mean_z = float(np.average(z_vals, weights=norm_weights))
@@ -466,16 +511,23 @@ def compute_subject_level_r(
         for _ in range(n_boot):
             boot_idx = rng.choice(n_subjects, size=n_subjects, replace=True)
             boot_z = z_vals[boot_idx]
-            boot_w = weights[boot_idx]
-            boot_w = boot_w / boot_w.sum()
-            boot_means.append(np.average(boot_z, weights=boot_w))
+            if weighting_mode == "trial_count":
+                boot_w = weights[boot_idx]
+                boot_w = boot_w / boot_w.sum()
+                boot_means.append(np.average(boot_z, weights=boot_w))
+            else:
+                boot_means.append(float(np.mean(boot_z)))
         boot_means = np.array(boot_means)
         ci_low = float(np.tanh(np.percentile(boot_means, 2.5)))
         ci_high = float(np.tanh(np.percentile(boot_means, 97.5)))
     elif len(z_vals) > 1:
-        # Fixed-effects CI: variance = 1 / sum(n_i - 3)
-        # This is the standard meta-analytic fixed-effects variance
-        se = float(np.sqrt(1.0 / sum_weights))
+        if weighting_mode == "trial_count":
+            # Fixed-effects CI: variance = 1 / sum(n_i - 3)
+            # This is the standard meta-analytic fixed-effects variance.
+            se = float(np.sqrt(1.0 / sum_weights))
+        else:
+            # Equal-subject CI from between-subject Fisher-z variability.
+            se = float(np.std(z_vals, ddof=1) / np.sqrt(len(z_vals)))
         if np.isfinite(se) and se > 0:
             delta = 1.96 * se
             ci_low = float(np.tanh(mean_z - delta))
@@ -642,6 +694,52 @@ def create_within_subject_folds(
             continue
 
         subject_blocks = blocks_all[subject_indices]
+        ordered_blocks = bool(
+            get_config_value(config, "machine_learning.cv.within_subject_ordered_blocks", False)
+        )
+        if ordered_blocks:
+            subject_blocks_num = pd.to_numeric(subject_blocks, errors="coerce").to_numpy(dtype=float)
+            ordered_unique = sorted(np.unique(subject_blocks_num[np.isfinite(subject_blocks_num)]))
+            ordered_splits: List[Tuple[np.ndarray, np.ndarray]] = []
+            for idx_block in range(1, len(ordered_unique)):
+                train_block_vals = ordered_unique[:idx_block]
+                test_block_val = ordered_unique[idx_block]
+                train_local_mask = np.isin(subject_blocks_num, train_block_vals)
+                test_local_mask = subject_blocks_num == test_block_val
+                if np.any(train_local_mask) and np.any(test_local_mask):
+                    ordered_splits.append(
+                        (
+                            np.flatnonzero(train_local_mask).astype(int),
+                            np.flatnonzero(test_local_mask).astype(int),
+                        )
+                    )
+
+            if ordered_splits:
+                if len(ordered_splits) > n_splits:
+                    ordered_splits = ordered_splits[-n_splits:]
+                for train_local, test_local in ordered_splits:
+                    fold_counter += 1
+                    train_idx = subject_indices[train_local]
+                    test_idx = subject_indices[test_local]
+
+                    fold_params = None
+                    if apply_hygiene:
+                        fold_params = apply_fold_specific_hygiene(
+                            fold_idx=fold_counter,
+                            train_indices=train_idx,
+                            test_indices=test_idx,
+                            epochs=epochs,
+                            config=config,
+                            log=logger,
+                        )
+
+                    folds.append((fold_counter, train_idx, test_idx, subject, fold_params))
+                continue
+            logger.warning(
+                "Subject %s: ordered within-subject CV requested but no valid ordered block folds were found; falling back to GroupKFold.",
+                subject,
+            )
+
         block_cv, _ = create_block_aware_cv(subject_blocks, n_splits)
 
         if block_cv is None:
@@ -967,6 +1065,10 @@ def run_permutation_test(
     null_r = []
     null_r2 = []
     n_completed = 0
+    n_effective = 0
+    min_shuffle_fraction = float(
+        get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
+    )
 
     perm_scheme = "within_subject_within_block"
     if config is not None:
@@ -1005,6 +1107,21 @@ def run_permutation_test(
             else:
                 y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
 
+        effective, changed_fraction = is_effective_permutation(
+            y,
+            y_perm,
+            min_changed_fraction=min_shuffle_fraction,
+        )
+        if not effective:
+            logger.debug(
+                "Perm %d skipped: ineffective shuffle (changed_fraction=%.4f, required>=%.4f)",
+                int(perm + 1),
+                float(changed_fraction),
+                float(min_shuffle_fraction),
+            )
+            continue
+        n_effective += 1
+
         y_true_p, y_pred_p, groups_p, _, _ = nested_loso_predictions_matrix(
             X=X, y=y_perm, groups=groups, blocks=blocks_arr, pipe=pipe, param_grid=param_grid,
             inner_cv_splits=inner_cv_splits, n_jobs=inner_n_jobs, seed=seed + perm,
@@ -1031,6 +1148,13 @@ def run_permutation_test(
         else:
             logger.warning(f"Perm {perm + 1}: non-finite (r={r_subj:.3f}, r2={r2:.3f})")
 
+    if n_effective == 0:
+        raise RuntimeError(
+            "No effective permutations could be generated under the current permutation scheme. "
+            "Try machine_learning.cv.permutation_scheme='within_subject' and/or lower "
+            "machine_learning.cv.min_label_shuffle_fraction."
+        )
+
     completion_rate = n_completed / null_n_perm if null_n_perm > 0 else 0.0
     min_completion = float(get_config_value(config, "machine_learning.cv.min_valid_permutation_fraction", 0.5))
     if completion_rate < min_completion:
@@ -1045,5 +1169,6 @@ def run_permutation_test(
         null_r2=np.asarray(null_r2),
         n_requested=null_n_perm,
         n_completed=n_completed,
+        n_effective=n_effective,
     )
     logger.info(f"Saved null distributions to {null_output_path}")

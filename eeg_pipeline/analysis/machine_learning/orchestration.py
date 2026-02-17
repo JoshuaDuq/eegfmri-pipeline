@@ -38,6 +38,7 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     nested_loso_predictions_matrix,
     compute_subject_level_r,
     compute_subject_level_errors,
+    is_effective_permutation,
     safe_pearsonr,
 )
 from eeg_pipeline.analysis.machine_learning.pipelines import (
@@ -145,6 +146,76 @@ def _count_finite_subject_metric(
         if np.isfinite(v):
             count += 1
     return int(count)
+
+
+def _subject_metric_values(
+    per_subject_metrics: Optional[Dict[str, Dict[str, Any]]],
+    key: str,
+) -> np.ndarray:
+    """Collect finite per-subject metric values as float array."""
+    if not per_subject_metrics:
+        return np.asarray([], dtype=float)
+    vals: List[float] = []
+    for rec in per_subject_metrics.values():
+        if not isinstance(rec, dict):
+            continue
+        value = rec.get(key)
+        if value is None:
+            continue
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v):
+            vals.append(v)
+    return np.asarray(vals, dtype=float)
+
+
+def _bootstrap_mean_ci(
+    values: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    n_boot: int,
+    alpha: float = 0.05,
+) -> Tuple[float, float]:
+    vals = np.asarray(values, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return np.nan, np.nan
+    if vals.size == 1:
+        v = float(vals[0])
+        return v, v
+
+    boot = np.empty(int(max(10, n_boot)), dtype=float)
+    n = int(vals.size)
+    for i in range(len(boot)):
+        idx = rng.choice(n, size=n, replace=True)
+        boot[i] = float(np.mean(vals[idx]))
+    lo = float(np.percentile(boot, 100.0 * (alpha / 2.0)))
+    hi = float(np.percentile(boot, 100.0 * (1.0 - alpha / 2.0)))
+    return lo, hi
+
+
+def _paired_signflip_p_value(
+    deltas: np.ndarray,
+    *,
+    rng: np.random.Generator,
+    n_perm: int,
+) -> float:
+    vals = np.asarray(deltas, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0 or int(n_perm) <= 0:
+        return np.nan
+
+    observed = float(abs(np.mean(vals)))
+    exceed = 0
+    n = int(vals.size)
+    for _ in range(int(n_perm)):
+        signs = rng.choice(np.array([-1.0, 1.0], dtype=float), size=n, replace=True)
+        stat = float(abs(np.mean(vals * signs)))
+        if stat >= observed:
+            exceed += 1
+    return float((exceed + 1) / (int(n_perm) + 1))
 
 
 def _normalize_subject_ids(subjects: List[str]) -> List[str]:
@@ -855,6 +926,10 @@ def run_within_subject_regression_ml(
     if n_perm > 0:
         logger.info(f"Running {n_perm} block-aware permutations for within-subject inference...")
         rng = np.random.default_rng(rng_seed)
+        n_effective = 0
+        min_shuffle_fraction = float(
+            get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
+        )
         min_perm_fold_completion = float(
             get_config_value(config, "machine_learning.cv.min_valid_permutation_fold_fraction", 1.0)
         )
@@ -872,6 +947,15 @@ def run_within_subject_regression_ml(
                     subj_y[block_indices] = rng.permutation(subj_y[block_indices])
                 
                 y_perm[subj_mask] = subj_y
+
+            effective, _changed_fraction = is_effective_permutation(
+                y,
+                y_perm,
+                min_changed_fraction=min_shuffle_fraction,
+            )
+            if not effective:
+                continue
+            n_effective += 1
             
             perm_fold_records: List[Dict[str, Any]] = []
 
@@ -937,6 +1021,13 @@ def run_within_subject_regression_ml(
             
             if (perm_idx + 1) % 10 == 0:
                 logger.info(f"Permutation {perm_idx + 1}/{n_perm}")
+
+        if n_effective == 0:
+            raise RuntimeError(
+                "No effective permutations could be generated for within-subject regression. "
+                "Try machine_learning.cv.permutation_scheme='within_subject' and/or lower "
+                "machine_learning.cv.min_label_shuffle_fraction."
+            )
         
         n_perm_completed = int(len(null_rs))
         completion_rate = (n_perm_completed / int(n_perm)) if int(n_perm) > 0 else 0.0
@@ -1283,6 +1374,18 @@ def run_classification_ml(
     auc_for_inference = (
         auc_subject_mean if (np.isfinite(auc_subject_mean) and auc_inference_valid) else np.nan
     )
+    n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
+    ci_rng = np.random.default_rng(int(rng_seed) + 301)
+    auc_vals = _subject_metric_values(result.per_subject_metrics, "auc")
+    bal_vals = _subject_metric_values(result.per_subject_metrics, "balanced_accuracy")
+    acc_vals = _subject_metric_values(result.per_subject_metrics, "accuracy")
+    auc_ci_low, auc_ci_high = (
+        _bootstrap_mean_ci(auc_vals, rng=ci_rng, n_boot=n_boot)
+        if auc_inference_valid
+        else (np.nan, np.nan)
+    )
+    bal_ci_low, bal_ci_high = _bootstrap_mean_ci(bal_vals, rng=ci_rng, n_boot=n_boot)
+    acc_ci_low, acc_ci_high = _bootstrap_mean_ci(acc_vals, rng=ci_rng, n_boot=n_boot)
 
     # Compute calibration metrics (Brier score, reliability) when probabilities are available
     calibration_data = {}
@@ -1377,12 +1480,18 @@ def run_classification_ml(
         "max_failed_fold_fraction": float(max_failed_fold_fraction),
         "subject_level": {
             "auc_mean": float(auc_subject_mean) if np.isfinite(auc_subject_mean) else np.nan,
+            "auc_ci_low": auc_ci_low,
+            "auc_ci_high": auc_ci_high,
             "balanced_accuracy_mean": (
                 float(balanced_accuracy_subject_mean)
                 if np.isfinite(balanced_accuracy_subject_mean)
                 else np.nan
             ),
+            "balanced_accuracy_ci_low": bal_ci_low,
+            "balanced_accuracy_ci_high": bal_ci_high,
             "accuracy_mean": float(accuracy_subject_mean) if np.isfinite(accuracy_subject_mean) else np.nan,
+            "accuracy_ci_low": acc_ci_low,
+            "accuracy_ci_high": acc_ci_high,
             "n_subjects_with_auc": int(n_subjects_with_auc),
             "n_subjects_without_auc": int(max(0, n_subjects_total - n_subjects_with_auc)),
             "min_subjects_with_auc_for_inference": int(min_subjects_auc),
@@ -1809,6 +1918,18 @@ def run_within_subject_classification_ml(
             int(min_subjects_auc),
         )
     auc_for_inference = auc_subj_mean if (np.isfinite(auc_subj_mean) and auc_inference_valid) else np.nan
+    n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
+    ci_rng = np.random.default_rng(int(rng_seed) + 401)
+    auc_vals = _subject_metric_values(result.per_subject_metrics, "auc")
+    bal_vals = _subject_metric_values(result.per_subject_metrics, "balanced_accuracy")
+    acc_vals = _subject_metric_values(result.per_subject_metrics, "accuracy")
+    auc_ci_low, auc_ci_high = (
+        _bootstrap_mean_ci(auc_vals, rng=ci_rng, n_boot=n_boot)
+        if auc_inference_valid
+        else (np.nan, np.nan)
+    )
+    bal_ci_low, bal_ci_high = _bootstrap_mean_ci(bal_vals, rng=ci_rng, n_boot=n_boot)
+    acc_ci_low, acc_ci_high = _bootstrap_mean_ci(acc_vals, rng=ci_rng, n_boot=n_boot)
 
     metrics: Dict[str, Any] = {
         "cv_scope": "subject",
@@ -1847,10 +1968,16 @@ def run_within_subject_classification_ml(
         "specificity": result.specificity,
         "subject_level": {
             "auc_mean": float(auc_subj_mean) if np.isfinite(auc_subj_mean) else np.nan,
+            "auc_ci_low": auc_ci_low,
+            "auc_ci_high": auc_ci_high,
             "balanced_accuracy_mean": float(bal_acc_subj_mean)
             if np.isfinite(bal_acc_subj_mean)
             else np.nan,
+            "balanced_accuracy_ci_low": bal_ci_low,
+            "balanced_accuracy_ci_high": bal_ci_high,
             "accuracy_mean": float(acc_subj_mean) if np.isfinite(acc_subj_mean) else np.nan,
+            "accuracy_ci_low": acc_ci_low,
+            "accuracy_ci_high": acc_ci_high,
             "n_subjects_with_auc": int(n_subjects_with_auc),
             "n_subjects_without_auc": int(max(0, n_subjects_total - n_subjects_with_auc)),
             "min_subjects_with_auc_for_inference": int(min_subjects_auc),
@@ -1877,6 +2004,10 @@ def run_within_subject_classification_ml(
         logger.info("Running %d permutations for within-subject classification...", int(n_perm))
         rng = np.random.default_rng(rng_seed)
         null_auc = []
+        n_effective = 0
+        min_shuffle_fraction = float(
+            get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
+        )
         max_failed_perm_fraction = float(
             get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
         )
@@ -1895,6 +2026,15 @@ def run_within_subject_classification_ml(
                             y_perm[bm] = rng.permutation(y_perm[bm])
                 else:
                     y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
+
+            effective, _changed_fraction = is_effective_permutation(
+                y,
+                y_perm,
+                min_changed_fraction=min_shuffle_fraction,
+            )
+            if not effective:
+                continue
+            n_effective += 1
 
             perm_records, perm_failed_folds = _run_with_labels(y_perm)
             perm_failed_fraction = float(perm_failed_folds / max(len(folds), 1))
@@ -1933,6 +2073,13 @@ def run_within_subject_classification_ml(
                     null_auc.append(float(perm_auc_subj_mean))
             except Exception:
                 continue
+
+        if n_effective == 0:
+            raise RuntimeError(
+                "No effective permutations could be generated for within-subject classification. "
+                "Try machine_learning.cv.permutation_scheme='within_subject' and/or lower "
+                "machine_learning.cv.min_label_shuffle_fraction."
+            )
 
         n_completed = len(null_auc)
         completion_rate = (n_completed / int(n_perm)) if int(n_perm) > 0 else 0.0
@@ -1994,6 +2141,10 @@ def _run_classification_permutations(
     
     rng = np.random.default_rng(seed)
     null_aucs = []
+    n_effective = 0
+    min_shuffle_fraction = float(
+        get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
+    )
 
     perm_scheme = "within_subject_within_block"
     try:
@@ -2041,6 +2192,15 @@ def _run_classification_permutations(
                         y_perm[bm] = rng.permutation(y_perm[bm])
             else:
                 y_perm[mask] = rng.permutation(y_perm[mask])
+
+        effective, _changed_fraction = is_effective_permutation(
+            y,
+            y_perm,
+            min_changed_fraction=min_shuffle_fraction,
+        )
+        if not effective:
+            continue
+        n_effective += 1
         
         try:
             if str(model).strip().lower() == "cnn":
@@ -2078,6 +2238,13 @@ def _run_classification_permutations(
         
         if (i + 1) % 10 == 0:
             logger.info(f"Permutation {i + 1}/{n_perm}")
+
+    if n_effective == 0:
+        raise RuntimeError(
+            "No effective permutations could be generated for classification. "
+            "Try machine_learning.cv.permutation_scheme='within_subject' and/or lower "
+            "machine_learning.cv.min_label_shuffle_fraction."
+        )
 
     n_completed = len(null_aucs)
     completion_rate = (n_completed / n_perm) if n_perm > 0 else 0.0
@@ -2228,11 +2395,8 @@ def run_model_comparison_ml(
         model_comparison.tsv: Per-fold metrics for each model
         model_comparison_summary.json: Aggregated comparison statistics
     """
-    if int(n_perm) > 0:
-        raise ValueError(
-            "Model comparison currently supports descriptive fold metrics only and does not implement "
-            "permutation inference. Set n_perm=0 to avoid invalid inferential interpretation."
-        )
+    if int(n_perm) < 0:
+        raise ValueError("n_perm must be >= 0 for model comparison.")
 
     if target is None:
         target = get_config_value(config, "machine_learning.targets.regression", None)
@@ -2322,8 +2486,15 @@ def run_model_comparison_ml(
             if len(np.unique(groups_train)) >= 2:
                 inner_cv = create_inner_cv(groups_train, inner_splits)
                 grid_n_jobs = determine_inner_n_jobs(outer_jobs, n_jobs=1)
+                scoring = create_scoring_dict()
                 grid = GridSearchCV(
-                    clone(pipe), param_grid, cv=inner_cv, scoring="r2", n_jobs=grid_n_jobs, error_score="raise"
+                    clone(pipe),
+                    param_grid,
+                    cv=inner_cv,
+                    scoring=scoring,
+                    n_jobs=grid_n_jobs,
+                    refit="r",
+                    error_score="raise",
                 )
                 grid.fit(X_train, y_train, groups=groups_train)
                 fold_pred = grid.predict(X_test)
@@ -2378,15 +2549,86 @@ def run_model_comparison_ml(
         },
         "subject_selection": subject_selection,
     }
+    n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
+    boot_rng = np.random.default_rng(int(rng_seed) + 101)
     for model_name in models.keys():
         model_rows = comparison_df[comparison_df["model"] == model_name]
+        r2_vals = pd.to_numeric(model_rows["r2"], errors="coerce").to_numpy(dtype=float)
+        mae_vals = pd.to_numeric(model_rows["mae"], errors="coerce").to_numpy(dtype=float)
+        r2_ci_low, r2_ci_high = _bootstrap_mean_ci(
+            r2_vals,
+            rng=boot_rng,
+            n_boot=n_boot,
+        )
+        mae_ci_low, mae_ci_high = _bootstrap_mean_ci(
+            mae_vals,
+            rng=boot_rng,
+            n_boot=n_boot,
+        )
         summary[model_name] = {
             "mean_r2": float(model_rows["r2"].mean()),
             "std_r2": float(model_rows["r2"].std()),
+            "ci_low_r2": r2_ci_low,
+            "ci_high_r2": r2_ci_high,
             "mean_mae": float(model_rows["mae"].mean()),
             "std_mae": float(model_rows["mae"].std()),
+            "ci_low_mae": mae_ci_low,
+            "ci_high_mae": mae_ci_high,
             "n_folds": int(len(model_rows)),
         }
+
+    # Pairwise model-difference inference (subject-paired by held-out fold).
+    pairwise: Dict[str, Any] = {}
+    pair_rng = np.random.default_rng(int(rng_seed) + 102)
+    ordered_models = list(models.keys())
+    for i in range(len(ordered_models)):
+        for j in range(i + 1, len(ordered_models)):
+            m_a = ordered_models[i]
+            m_b = ordered_models[j]
+            a_rows = comparison_df.loc[comparison_df["model"] == m_a, ["test_subject", "r2", "mae"]]
+            b_rows = comparison_df.loc[comparison_df["model"] == m_b, ["test_subject", "r2", "mae"]]
+            merged = a_rows.merge(
+                b_rows,
+                on="test_subject",
+                how="inner",
+                suffixes=("_a", "_b"),
+            )
+            if merged.empty:
+                continue
+
+            delta_r2 = (
+                pd.to_numeric(merged["r2_a"], errors="coerce").to_numpy(dtype=float)
+                - pd.to_numeric(merged["r2_b"], errors="coerce").to_numpy(dtype=float)
+            )
+            delta_mae = (
+                pd.to_numeric(merged["mae_a"], errors="coerce").to_numpy(dtype=float)
+                - pd.to_numeric(merged["mae_b"], errors="coerce").to_numpy(dtype=float)
+            )
+            r2_ci_low, r2_ci_high = _bootstrap_mean_ci(delta_r2, rng=pair_rng, n_boot=n_boot)
+            mae_ci_low, mae_ci_high = _bootstrap_mean_ci(delta_mae, rng=pair_rng, n_boot=n_boot)
+            pair_rec: Dict[str, Any] = {
+                "n_subjects": int(np.sum(np.isfinite(delta_r2))),
+                "mean_delta_r2": float(np.nanmean(delta_r2)) if np.any(np.isfinite(delta_r2)) else np.nan,
+                "ci_low_delta_r2": r2_ci_low,
+                "ci_high_delta_r2": r2_ci_high,
+                "mean_delta_mae": float(np.nanmean(delta_mae)) if np.any(np.isfinite(delta_mae)) else np.nan,
+                "ci_low_delta_mae": mae_ci_low,
+                "ci_high_delta_mae": mae_ci_high,
+            }
+            if int(n_perm) > 0:
+                pair_rec["n_perm"] = int(n_perm)
+                pair_rec["p_value_delta_r2"] = _paired_signflip_p_value(
+                    delta_r2,
+                    rng=pair_rng,
+                    n_perm=int(n_perm),
+                )
+                pair_rec["p_value_delta_mae"] = _paired_signflip_p_value(
+                    delta_mae,
+                    rng=pair_rng,
+                    n_perm=int(n_perm),
+                )
+            pairwise[f"{m_a}_minus_{m_b}"] = pair_rec
+    summary["pairwise_inference"] = pairwise
     
     with open(results_dir / "model_comparison_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
@@ -2440,11 +2682,8 @@ def run_incremental_validity_ml(
         incremental_validity.tsv: Per-fold performance for baseline vs full
         incremental_validity_summary.json: Aggregated Δ statistics
     """
-    if int(n_perm) > 0:
-        raise ValueError(
-            "Incremental validity currently supports descriptive fold metrics only and does not implement "
-            "permutation inference. Set n_perm=0 to avoid invalid inferential interpretation."
-        )
+    if int(n_perm) < 0:
+        raise ValueError("n_perm must be >= 0 for incremental validity.")
 
     if target is None:
         target = get_config_value(config, "machine_learning.targets.regression", None)
@@ -2515,6 +2754,7 @@ def run_incremental_validity_ml(
     
     # Full model includes baseline predictors + EEG features
     X_full = np.concatenate([X_baseline, X], axis=1)
+    n_baseline_features = int(X_baseline.shape[1])
     
     from sklearn.model_selection import LeaveOneGroupOut
     from sklearn.metrics import r2_score, mean_absolute_error
@@ -2538,12 +2778,20 @@ def run_incremental_validity_ml(
         groups_train = groups[train_idx]
         X_full_train = X_full[train_idx]
         X_full_test = X_full[test_idx]
-        X_full_train, X_full_test, _ = apply_fold_feature_harmonization(
+        X_full_train, X_full_test, keep_mask = apply_fold_feature_harmonization(
             X_full_train,
             X_full_test,
             groups_train,
             harmonization_mode,
         )
+        baseline_keep_mask = np.asarray(keep_mask, dtype=bool)[:n_baseline_features]
+        if baseline_keep_mask.size == 0 or not np.any(baseline_keep_mask):
+            raise ValueError(
+                f"Fold {int(fold_idx)}: feature harmonization removed all baseline predictors. "
+                "This invalidates incremental-validity comparison."
+            )
+        X_baseline_train = X_baseline[train_idx][:, baseline_keep_mask]
+        X_baseline_test = X_baseline[test_idx][:, baseline_keep_mask]
         
         # Baseline model (out-of-fold; tuned under the same group-aware inner CV logic).
         base_pipe = clone(shared_pipe)
@@ -2551,19 +2799,21 @@ def run_incremental_validity_ml(
         if n_train_subjects >= 2:
             inner_cv_base = create_inner_cv(groups_train, inner_splits)
             grid_n_jobs_base = determine_inner_n_jobs(outer_n_jobs=1, n_jobs=1)
+            scoring = create_scoring_dict()
             base_grid = GridSearchCV(
                 estimator=base_pipe,
                 param_grid=shared_param_grid,
                 cv=inner_cv_base,
-                scoring="r2",
+                scoring=scoring,
                 n_jobs=grid_n_jobs_base,
+                refit="r",
                 error_score="raise",
             )
-            base_grid.fit(X_baseline[train_idx], y[train_idx], groups=groups_train)
-            y_pred_baseline[test_idx] = base_grid.predict(X_baseline[test_idx])
+            base_grid.fit(X_baseline_train, y[train_idx], groups=groups_train)
+            y_pred_baseline[test_idx] = base_grid.predict(X_baseline_test)
         else:
-            base_pipe.fit(X_baseline[train_idx], y[train_idx])
-            y_pred_baseline[test_idx] = base_pipe.predict(X_baseline[test_idx])
+            base_pipe.fit(X_baseline_train, y[train_idx])
+            y_pred_baseline[test_idx] = base_pipe.predict(X_baseline_test)
         r2_base = r2_score(y[test_idx], y_pred_baseline[test_idx])
         
         # Full model (same family as baseline; adds EEG predictors to baseline columns).
@@ -2571,8 +2821,15 @@ def run_incremental_validity_ml(
         if n_train_subjects >= 2:
             inner_cv = create_inner_cv(groups_train, inner_splits)
             grid_n_jobs = determine_inner_n_jobs(outer_n_jobs=1, n_jobs=1)
+            scoring = create_scoring_dict()
             grid = GridSearchCV(
-                pipe_full, shared_param_grid, cv=inner_cv, scoring="r2", n_jobs=grid_n_jobs, error_score="raise"
+                pipe_full,
+                shared_param_grid,
+                cv=inner_cv,
+                scoring=scoring,
+                n_jobs=grid_n_jobs,
+                refit="r",
+                error_score="raise",
             )
             grid.fit(X_full_train, y[train_idx], groups=groups_train)
             y_pred_full[test_idx] = grid.predict(X_full_test)
@@ -2597,6 +2854,8 @@ def run_incremental_validity_ml(
     # Overall summary
     r2_baseline_overall = r2_score(y, y_pred_baseline)
     r2_full_overall = r2_score(y, y_pred_full)
+    pooled_delta_r2 = float(r2_full_overall - r2_baseline_overall)
+    mean_fold_delta_r2 = float(records_df["delta_r2"].mean())
     
     summary = {
         "data": {
@@ -2612,22 +2871,49 @@ def run_incremental_validity_ml(
             "feature_harmonization": feature_harmonization,
         },
         "subject_selection": subject_selection,
-        "r2_baseline": r2_baseline_overall,
-        "r2_full": r2_full_overall,
-        "delta_r2": r2_full_overall - r2_baseline_overall,
-        "mean_fold_delta_r2": float(records_df["delta_r2"].mean()),
+        # Keep pooled trial-level metrics explicit and secondary.
+        "pooled_trials": {
+            "r2_baseline": float(r2_baseline_overall),
+            "r2_full": float(r2_full_overall),
+            "delta_r2": pooled_delta_r2,
+        },
+        "r2_baseline": float(r2_baseline_overall),
+        "r2_full": float(r2_full_overall),
+        "delta_r2_pooled_trials": pooled_delta_r2,
+        # Primary incremental-validity estimate (subject-level; LOSO fold unit = subject).
+        "delta_r2": mean_fold_delta_r2,
+        "mean_fold_delta_r2": mean_fold_delta_r2,
         "std_fold_delta_r2": float(records_df["delta_r2"].std()),
         "n_folds_positive_delta": int((records_df["delta_r2"] > 0).sum()),
         "n_folds_total": len(records_df),
     }
+
+    delta_vals = pd.to_numeric(records_df["delta_r2"], errors="coerce").to_numpy(dtype=float)
+    n_boot = int(get_config_value(config, "machine_learning.evaluation.bootstrap_iterations", 1000))
+    inf_rng = np.random.default_rng(int(rng_seed) + 201)
+    ci_low, ci_high = _bootstrap_mean_ci(delta_vals, rng=inf_rng, n_boot=n_boot)
+    delta_inference: Dict[str, Any] = {
+        "mean_delta_r2": float(np.nanmean(delta_vals)) if np.any(np.isfinite(delta_vals)) else np.nan,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "n_subjects": int(np.sum(np.isfinite(delta_vals))),
+    }
+    if int(n_perm) > 0:
+        delta_inference["n_perm"] = int(n_perm)
+        delta_inference["p_value"] = _paired_signflip_p_value(
+            delta_vals,
+            rng=inf_rng,
+            n_perm=int(n_perm),
+        )
+    summary["delta_r2_inference"] = delta_inference
     
     with open(results_dir / "incremental_validity_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
     logger.info(
-        "Incremental validity: baseline R\u00b2=%.4f, full R\u00b2=%.4f, \u0394R\u00b2=%.4f (%d/%d folds positive)",
-        r2_baseline_overall, r2_full_overall, summary["delta_r2"],
+        "Incremental validity: subject-level \u0394R\u00b2=%.4f (pooled-trials \u0394R\u00b2=%.4f; %d/%d folds positive)",
+        summary["delta_r2"], summary["pooled_trials"]["delta_r2"],
         summary["n_folds_positive_delta"], summary["n_folds_total"],
     )
     _maybe_generate_mode_plots(mode="incremental_validity", results_dir=results_dir, logger=logger, config=config)
@@ -2959,6 +3245,8 @@ def _run_uncertainty_stage(
                 "upper": result.upper,
                 "coverage": result.coverage,
                 "mean_width": result.mean_width,
+                "subject_id": np.asarray(groups[test_idx], dtype=object),
+                "test_idx": np.asarray(test_idx, dtype=int),
             })
         except Exception as e:
             logger.warning(f"Fold {fold_idx} uncertainty failed: {e}")
@@ -2984,31 +3272,60 @@ def _run_uncertainty_stage(
     lower_all = np.concatenate([r["lower"] for r in all_intervals])
     upper_all = np.concatenate([r["upper"] for r in all_intervals])
     y_test_all = np.concatenate([r["y_test"] for r in all_intervals])
-    
+    subject_all = np.concatenate([np.asarray(r["subject_id"], dtype=object) for r in all_intervals])
+    test_idx_all = np.concatenate([np.asarray(r["test_idx"], dtype=int) for r in all_intervals])
+    fold_all = np.concatenate(
+        [
+            np.full(len(np.asarray(r["y_pred"])), int(r["fold"]), dtype=int)
+            for r in all_intervals
+        ]
+    )
+
     coverage = np.mean((y_test_all >= lower_all) & (y_test_all <= upper_all))
     mean_width = np.mean(upper_all - lower_all)
-    
+
     intervals_df = pd.DataFrame({
+        "fold": fold_all,
+        "subject_id": subject_all,
+        "test_index": test_idx_all,
         "y_pred": y_pred_all,
         "lower": lower_all,
         "upper": upper_all,
         "y_true": y_test_all,
         "in_interval": (y_test_all >= lower_all) & (y_test_all <= upper_all),
     })
-    
+    intervals_df["width"] = intervals_df["upper"] - intervals_df["lower"]
+    per_subject_df = (
+        intervals_df.groupby("subject_id", as_index=False)
+        .agg(
+            coverage=("in_interval", "mean"),
+            mean_width=("width", "mean"),
+            n_trials=("in_interval", "size"),
+        )
+        .sort_values("subject_id")
+        .reset_index(drop=True)
+    )
+
     output_path = results_dir / "prediction_intervals.tsv"
     intervals_df.to_csv(output_path, sep="\t", index=False)
-    
+    per_subject_df.to_csv(results_dir / "per_subject_uncertainty.tsv", sep="\t", index=False)
+
     metrics = {
         "alpha": alpha,
         "target_coverage": 1 - alpha,
-        "empirical_coverage": coverage,
-        "mean_width": mean_width,
+        "empirical_coverage": float(coverage),
+        "mean_width": float(mean_width),
         "n_folds": len(all_intervals),
         "n_folds_requested": n_folds_requested,
         "n_folds_completed": n_folds_completed,
         "valid_fold_fraction": completion_rate,
         "min_valid_fold_fraction": min_completion,
+        "subject_level": {
+            "mean_coverage": float(per_subject_df["coverage"].mean()) if len(per_subject_df) else np.nan,
+            "std_coverage": float(per_subject_df["coverage"].std()) if len(per_subject_df) > 1 else np.nan,
+            "mean_width": float(per_subject_df["mean_width"].mean()) if len(per_subject_df) else np.nan,
+            "n_subjects": int(len(per_subject_df)),
+        },
     }
     with open(results_dir / "uncertainty_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)

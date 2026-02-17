@@ -381,23 +381,28 @@ class ClassificationResult:
                     "accuracy": float(accuracy_score(y_t, y_p)),
                     "n_trials": int(mask.sum()),
                 }
-                if len(np.unique(y_t)) == 2:
-                    rec["balanced_accuracy"] = float(balanced_accuracy_score(y_t, y_p))
-                    if self.y_prob is not None and len(np.unique(y_t)) == 2:
-                        try:
-                            subj_prob = self.y_prob[mask]
-                            prob_mask = np.isfinite(subj_prob) & np.isfinite(y_t)
-                            if np.sum(prob_mask) >= 2 and len(np.unique(y_t[prob_mask])) == 2:
-                                rec["auc"] = float(roc_auc_score(y_t[prob_mask], subj_prob[prob_mask]))
-                                rec["average_precision"] = float(
-                                    average_precision_score(y_t[prob_mask], subj_prob[prob_mask])
-                                )
-                        except Exception as exc:
-                            logger.debug(
-                                "Skipping per-subject probability metrics for subject=%s: %s",
-                                subj,
-                                exc,
+                cm_subj = confusion_matrix(y_t, y_p, labels=[0, 1]).astype(float)
+                support = cm_subj.sum(axis=1)
+                recall = np.full(2, np.nan, dtype=float)
+                valid_support = support > 0
+                recall[valid_support] = np.diag(cm_subj)[valid_support] / support[valid_support]
+                present = recall[np.isfinite(recall)]
+                rec["balanced_accuracy"] = float(np.mean(present)) if present.size > 0 else np.nan
+                if self.y_prob is not None and len(np.unique(y_t)) == 2:
+                    try:
+                        subj_prob = self.y_prob[mask]
+                        prob_mask = np.isfinite(subj_prob) & np.isfinite(y_t)
+                        if np.sum(prob_mask) >= 2 and len(np.unique(y_t[prob_mask])) == 2:
+                            rec["auc"] = float(roc_auc_score(y_t[prob_mask], subj_prob[prob_mask]))
+                            rec["average_precision"] = float(
+                                average_precision_score(y_t[prob_mask], subj_prob[prob_mask])
                             )
+                    except Exception as exc:
+                        logger.debug(
+                            "Skipping per-subject probability metrics for subject=%s: %s",
+                            subj,
+                            exc,
+                        )
                 self.per_subject_metrics[str(subj)] = rec
     
     def to_dict(self) -> Dict[str, Any]:
@@ -501,8 +506,17 @@ def decode_pain_binary(
         cv_splits = list(cv_obj.split(X, y, groups))
     else:
         n_splits = int(cv) if isinstance(cv, int) else 5
-        cv_obj = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-        cv_splits = list(cv_obj.split(X, y))
+        if groups is not None:
+            groups_arr = np.asarray(groups)
+            n_unique_groups = len(np.unique(groups_arr))
+            n_splits = min(n_splits, n_unique_groups)
+            if n_splits < 2:
+                raise ValueError("Grouped classification CV requires at least 2 unique groups")
+            cv_obj = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+            cv_splits = list(cv_obj.split(X, y, groups_arr))
+        else:
+            cv_obj = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+            cv_splits = list(cv_obj.split(X, y))
     
     # Cross-validation predictions
     y_pred = np.zeros(len(y), dtype=int)
