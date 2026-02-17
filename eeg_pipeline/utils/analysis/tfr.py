@@ -15,7 +15,6 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.windowing import time_mask
 from eeg_pipeline.utils.analysis.stats import (
     validate_baseline_window_pre_stimulus,
-    _safe_float,
 )
 
 
@@ -362,7 +361,7 @@ def _extract_baseline_power_features(
     
     results = {}
     ch_names = tfr.info["ch_names"]
-    n_epochs = len(tfr)
+    len(tfr)
     
     freqs = tfr.freqs
     

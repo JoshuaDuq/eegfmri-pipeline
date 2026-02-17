@@ -13,14 +13,12 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from scipy import stats
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path
 from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
-from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.data.columns import get_rating_column_from_config
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
@@ -969,7 +967,7 @@ def plot_aperiodic_by_condition(
                 # Multi-window comparison: extract data for all segments
                 data_by_band_multi: Dict[str, Dict[str, np.ndarray]] = {}
                 for spec in metric_specs:
-                    metric_key = spec["key"]
+                    spec["key"]
                     metric_label = spec["label"]
                     stat = spec["stat"]
                     band = spec["band"]

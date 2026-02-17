@@ -18,8 +18,6 @@ import pandas as pd
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from ..config import get_plot_config
-from ...utils.analysis.stats import fdr_bh
-from eeg_pipeline.utils.formatting import sanitize_label
 
 # Constants
 ITPC_MIN = 0.0
@@ -413,7 +411,7 @@ def _get_roi_names_for_comparison(config: Any, rois: Dict) -> List[str]:
     Returns:
         List of ROI names
     """
-    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value
     
     comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
     if comp_rois:
@@ -890,7 +888,7 @@ def _extract_pac_pairs_from_dataframe(pac_df: pd.DataFrame, config: Any) -> List
         Sorted list of unique pair names
     """
     from eeg_pipeline.domain.features.naming import NamingSchema
-    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value
     
     all_pairs = set()
     for col in pac_df.columns:
@@ -950,7 +948,7 @@ def plot_pac_by_condition(
     from eeg_pipeline.domain.features.naming import NamingSchema
     from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-    from eeg_pipeline.plotting.features.utils import plot_paired_comparison, get_named_segments
+    from eeg_pipeline.plotting.features.utils import plot_paired_comparison
     from eeg_pipeline.plotting.features.roi import get_roi_definitions
 
     compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)

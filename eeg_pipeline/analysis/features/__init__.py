@@ -65,6 +65,7 @@ __all__ = [
     "extract_all_features",
     "ExtractionResult",
     "FeatureSet",
+    "FeatureExtractionResult",
     # Orchestration
     "FeaturePipeline",
     "process_subject",

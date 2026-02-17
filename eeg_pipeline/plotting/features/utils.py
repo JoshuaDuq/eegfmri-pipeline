@@ -1205,8 +1205,6 @@ def plot_multi_group_column_comparison(
         multigroup_stats: Pre-loaded multigroup stats DataFrame (optional, avoids reloading)
     """
     import matplotlib.pyplot as plt
-    from itertools import combinations
-    from eeg_pipeline.plotting.io.figures import save_fig
     
     if not data_by_band:
         return

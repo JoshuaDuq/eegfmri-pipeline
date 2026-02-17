@@ -1,4 +1,3 @@
-import os
 import mne
 import numpy as np
 from mne_bids import BIDSPath, get_entities_from_fname

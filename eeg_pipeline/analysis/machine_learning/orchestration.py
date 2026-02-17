@@ -32,7 +32,6 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     create_inner_cv,
     apply_fold_feature_harmonization,
     create_scoring_dict,
-    get_inner_cv_splits,
     determine_inner_n_jobs,
     grid_search_with_warning_logging,
     _fit_default_pipeline,
@@ -50,7 +49,7 @@ from eeg_pipeline.analysis.machine_learning.pipelines import (
     build_rf_param_grid,
 )
 from eeg_pipeline.utils.data.machine_learning import load_active_matrix, load_epoch_tensor_matrix
-from eeg_pipeline.utils.config.loader import load_config, get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.machine_learning import (
     export_predictions,
@@ -1144,7 +1143,6 @@ def run_classification_ml(
     """
     from eeg_pipeline.analysis.machine_learning.classification import (
         nested_loso_classification,
-        ClassificationResult,
     )
     from eeg_pipeline.analysis.machine_learning.cnn import nested_loso_cnn_classification
     
@@ -1746,7 +1744,7 @@ def run_within_subject_classification_ml(
     )
 
     pred_path = results_dir / "cv_predictions.tsv"
-    pred_df = export_predictions(
+    export_predictions(
         y_true_all,
         y_pred_all,
         groups_ordered,

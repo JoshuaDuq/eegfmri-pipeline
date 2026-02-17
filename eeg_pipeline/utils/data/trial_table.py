@@ -261,9 +261,6 @@ def add_pain_residual(
         else:
             try:
                 from sklearn.model_selection import GroupKFold
-                from sklearn.pipeline import Pipeline
-                from sklearn.linear_model import Ridge
-                from sklearn.preprocessing import SplineTransformer, PolynomialFeatures
             except ImportError as exc:
                 meta["crossfit"]["status"] = "skipped_missing_sklearn"
                 meta["crossfit"]["error"] = str(exc)

@@ -10,6 +10,7 @@ and supports multiple outcomes (e.g., `rating`, `pain_residual`, and `pain_binar
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -594,11 +595,7 @@ def run_feature_model_families(
     )
     meta.update(feature_selection_meta)
 
-    try:
-        import statsmodels.api as sm
-        has_statsmodels = True
-    except ImportError:
-        has_statsmodels = False
+    has_statsmodels = importlib.util.find_spec("statsmodels") is not None
     meta["has_statsmodels"] = has_statsmodels
 
     records: List[Dict[str, Any]] = []

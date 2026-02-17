@@ -7,7 +7,7 @@ import json as json_module
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from eeg_pipeline.cli.common import add_task_arg, resolve_task
 from eeg_pipeline.cli.commands.base import (
@@ -611,7 +611,7 @@ def _process_single_subject(
     source_root: Optional[Path] = None,
 ) -> dict:
     """Process a single subject to build status information."""
-    from eeg_pipeline.utils.data.subjects import get_epoch_metadata, _resolve_source_root
+    from eeg_pipeline.utils.data.subjects import get_epoch_metadata
     from eeg_pipeline.infra.paths import deriv_features_path, deriv_stats_path
     
     available_bands = []
@@ -830,7 +830,6 @@ def _handle_subjects_mode(
     """Handle subjects mode: list available subjects."""
     from eeg_pipeline.utils.data.subjects import (
         get_available_subjects,
-        _collect_subjects_from_bids,
         _collect_subjects_from_derivatives_epochs,
         _collect_subjects_from_features,
     )
@@ -1396,7 +1395,6 @@ def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
 
 def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Handle multigroup-stats mode: discover available multigroup comparisons from precomputed stats."""
-    import pandas as pd
     from eeg_pipeline.infra.paths import resolve_deriv_root
     from eeg_pipeline.infra.tsv import read_tsv
     

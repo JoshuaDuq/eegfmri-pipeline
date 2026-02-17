@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -21,13 +21,10 @@ from eeg_pipeline.infra.paths import (
     _find_clean_events_path,
     deriv_features_path,
     deriv_plots_path,
-    deriv_stats_path,
     ensure_dir,
 )
 from eeg_pipeline.infra.tsv import read_table
-from eeg_pipeline.plotting.behavioral.builders import generate_correlation_scatter
 from eeg_pipeline.plotting.behavioral.scatter.core import (
-    SubjectScatterData,
     _get_scatter_plot_config_from_config,
     _generate_single_scatter,
     ScatterPlotConfig,
@@ -37,7 +34,6 @@ from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.utils import get_named_segments
 from eeg_pipeline.plotting.io.figures import get_band_color
 from eeg_pipeline.utils.analysis.stats import compute_partial_residuals, joint_valid_mask
-from eeg_pipeline.utils.analysis.stats.correlation import format_correlation_method_label
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
 from eeg_pipeline.utils.data import load_subject_scatter_data
 from eeg_pipeline.utils.data.covariates import build_covariate_matrix

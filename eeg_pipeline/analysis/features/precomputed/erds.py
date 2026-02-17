@@ -474,7 +474,7 @@ def extract_erds_from_precomputed(
                     # Use segment-specific active_mask, not windows.active_mask
                     active_power_trace = power[ch_idx, active_mask]
                     active_power_mean, _, _, _ = nanmean_with_fraction(power[ch_idx], active_mask)
-                    safe_active_trace = np.maximum(active_power_trace, min_active_power)
+                    np.maximum(active_power_trace, min_active_power)
                     safe_active_mean = (
                         float(active_power_mean) if np.isfinite(active_power_mean) else min_active_power
                     )

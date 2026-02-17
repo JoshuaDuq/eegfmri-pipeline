@@ -4078,7 +4078,6 @@ def stage_condition_column(
     If compare_values has 3+ values, delegates to multigroup comparison instead.
     """
     from eeg_pipeline.analysis.behavior.api import split_by_condition, compute_condition_effects
-    from eeg_pipeline.infra.tsv import write_parquet
 
     # Check if multigroup comparison is needed (3+ values)
     compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
@@ -4122,7 +4121,7 @@ def stage_condition_column(
     
     # Aggregate to run-level if requested (avoids pseudo-replication)
     compare_col = _resolve_condition_compare_column(df_trials, ctx.config)
-    overwrite = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
+    get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
     if use_run_unit and run_col in df_trials.columns and compare_col in df_trials.columns:
         ctx.logger.info("Condition: aggregating to run×condition level (primary_unit=%s)", primary_unit)
         group_keys = [run_col, compare_col]
@@ -4331,7 +4330,6 @@ def stage_condition_window(
     
     Single responsibility: Window contrast comparison.
     """
-    from eeg_pipeline.infra.tsv import write_parquet
 
     if compare_windows is None:
         compare_windows = get_config_value(
@@ -4478,7 +4476,7 @@ def stage_condition_multigroup(
     
     compare_column = _resolve_condition_compare_column(df_trials, ctx.config)
     compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
-    overwrite = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
+    get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
     
     compare_labels = get_config_value(ctx.config, "behavior_analysis.condition.compare_labels", None)
     
@@ -4584,7 +4582,6 @@ def _run_window_comparison(
     Compares features between two time windows (e.g., baseline vs active).
     Uses vectorized computation for effect sizes and batch processing.
     """
-    from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
     from scipy import stats as sp_stats
 
     if len(windows) < 2:
@@ -4919,7 +4916,6 @@ def stage_temporal_stats(
     """
     from eeg_pipeline.analysis.behavior.api import compute_temporal_from_context
     from eeg_pipeline.utils.analysis.stats.temporal import compute_itpc_temporal_from_context
-    from eeg_pipeline.infra.paths import ensure_dir
     from statsmodels.stats.multitest import multipletests
 
     selected_temporal_features = _resolve_temporal_feature_selection(ctx, selected_features)
@@ -5504,7 +5500,7 @@ def run_group_level_mixed_effects(
         return MixedEffectsResult(df=pd.DataFrame(), metadata={"status": "no_valid_results"})
     
     results_df = pd.DataFrame(records)
-    family_df = pd.DataFrame(family_records)
+    pd.DataFrame(family_records)
     
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
     
@@ -6081,7 +6077,6 @@ def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.Data
     Uses cached FDR results instead of re-reading from disk.
     Single responsibility: Hierarchical FDR summary computation and output.
     """
-    fdr_alpha = config.fdr_alpha
 
     # Get cached FDR results
     cached_fdr = _cache.get_fdr_results()
@@ -6303,7 +6298,6 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
     Consolidates normalization logic into a single stage to avoid duplicate file writes.
     """
     from eeg_pipeline.infra.paths import ensure_dir
-    from eeg_pipeline.infra.tsv import write_tsv
 
     ensure_dir(ctx.stats_dir)
     saved: List[Path] = []

@@ -771,8 +771,8 @@ def _percentage_bend_correlation(
     if mad_x < _EPSILON_STD or mad_y < _EPSILON_STD:
         return stats.spearmanr(x, y)
     
-    omega_x = (beta * (n - 1) + 0.5) / n
-    omega_y = (beta * (n - 1) + 0.5) / n
+    (beta * (n - 1) + 0.5) / n
+    (beta * (n - 1) + 0.5) / n
     
     crit_x = np.percentile(np.abs(x - median_x) / mad_x, 100 * (1 - beta))
     crit_y = np.percentile(np.abs(y - median_y) / mad_y, 100 * (1 - beta))
@@ -838,7 +838,7 @@ def _shepherd_correlation(
     """
     Shepherd's pi correlation (removes bivariate outliers via bootstrap MAD).
     """
-    n = len(x)
+    len(x)
     
     median_x, median_y = np.median(x), np.median(y)
     mad_scale = 1.4826

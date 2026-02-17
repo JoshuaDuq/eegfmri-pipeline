@@ -158,7 +158,7 @@ def apply_fdr_correction_to_roi_pvalues(
     """
     if plot_cfg is None:
         plot_cfg = get_plot_config(None)
-    tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
+    plot_cfg.plot_type_configs.get("tfr", {})
     min_rois_for_fdr = plot_cfg.validation.get("min_rois_for_fdr", 1)
     min_pvalues_for_fdr = plot_cfg.validation.get("min_pvalues_for_fdr", 1)
     

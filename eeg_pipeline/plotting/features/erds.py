@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.plotting.features.utils import get_band_names, get_band_colors
+from eeg_pipeline.plotting.features.utils import get_band_names
 
 
 ###################################################################
@@ -271,7 +271,7 @@ def _determine_roi_names(
     config: Any, rois: Dict[str, Any]
 ) -> List[str]:
     """Determine which ROIs to plot based on config."""
-    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value
 
     comp_rois = get_config_value(
         config, "plotting.comparisons.comparison_rois", []

@@ -13,7 +13,7 @@ Metrics:
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import networkx as nx

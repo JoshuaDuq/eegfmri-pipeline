@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -42,11 +43,7 @@ from eeg_pipeline.analysis.machine_learning.cv import apply_fold_feature_harmoni
 
 def _check_shap_available() -> bool:
     """Check if SHAP is installed."""
-    try:
-        import shap
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("shap") is not None
 
 
 def _generate_feature_names(n_features: int) -> List[str]:
@@ -388,7 +385,7 @@ def compute_shap_for_cv_folds(
                 df = result.importance_df[["feature", "shap_importance"]].copy()
                 df["fold"] = int(fold_idx)
                 fold_importances.append(df)
-        except (RuntimeError, ImportError) as e:
+        except (RuntimeError, ImportError):
             continue
     
     if not fold_importances:

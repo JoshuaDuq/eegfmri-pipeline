@@ -516,7 +516,7 @@ def plot_band_power_by_roi(
     bands = _get_bands_from_config(tfr, config)
     from eeg_pipeline.utils.config.loader import get_frequency_bands
     bands_dict = get_frequency_bands(config)
-    cond_titles = _get_condition_title_labels(label1, label2)
+    _get_condition_title_labels(label1, label2)
     condition_order = ["all", "condition_2", "condition_1"]
     conditions = [c for c in condition_order if c in masks and masks[c].sum() > 0]
 
@@ -947,7 +947,7 @@ def plot_band_power_summary(
 
     bands = _get_bands_from_config(tfr, config)
     from eeg_pipeline.utils.config.loader import get_frequency_bands
-    bands_dict = get_frequency_bands(config)
+    get_frequency_bands(config)
     summary_data = []
 
     for band in bands:

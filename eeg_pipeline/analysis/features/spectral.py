@@ -1190,7 +1190,6 @@ def compute_peak_frequency(
     peak_residual : float
         Log10(power) - log10(aperiodic_fit) at peak frequency
     """
-    from scipy.signal import find_peaks
     from scipy.ndimage import uniform_filter1d
     
     mask = (freqs >= fmin) & (freqs <= fmax)

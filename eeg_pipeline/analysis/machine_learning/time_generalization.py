@@ -403,8 +403,7 @@ def time_generalization_regression(
             count_mat = np.zeros_like(r_mat, dtype=int)
             
             if window_centers_out is None:
-                first_epochs = aligned_epochs[subjects_in_fold[0]]
-                times = first_epochs.times
+                aligned_epochs[subjects_in_fold[0]]
                 window_centers_out = np.array([(w_start + w_end) / 2 for w_start, w_end in windows])
             
             min_samples_per_window = config.get(

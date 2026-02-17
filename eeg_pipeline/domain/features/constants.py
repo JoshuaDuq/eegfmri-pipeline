@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Tuple
 
 if TYPE_CHECKING:
-    from eeg_pipeline.types import PrecomputedData, TimeWindows
-    from eeg_pipeline.context.features import FeatureContext
+    pass
 
 ###################################################################
 # Feature Categories and Groups

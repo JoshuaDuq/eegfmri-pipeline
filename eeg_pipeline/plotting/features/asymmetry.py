@@ -19,7 +19,6 @@ from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
 from eeg_pipeline.plotting.features.utils import (
-    get_named_segments,
     get_band_names,
     plot_paired_comparison,
     compute_or_load_column_stats,
@@ -194,7 +193,7 @@ def plot_asymmetry_by_condition(
             f"compare_columns={comparison_config['compare_columns']}"
         )
     
-    plot_cfg = get_plot_config(config)
+    get_plot_config(config)
     ensure_dir(save_dir)
     
     for metric in metrics:

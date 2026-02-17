@@ -9,24 +9,18 @@ import numpy as np
 import pandas as pd
 import re
 import networkx as nx
-from scipy import stats
 from mne_connectivity.viz import plot_connectivity_circle
 
 from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.infra.logging import get_logger
-from eeg_pipeline.plotting.io.figures import log_if_present, save_fig, get_band_color
-from eeg_pipeline.utils.data.columns import find_column_in_events, find_pain_column_in_events
+from eeg_pipeline.plotting.io.figures import log_if_present, save_fig
 from eeg_pipeline.utils.config.loader import (
     get_config_value,
     get_frequency_band_names,
     require_config_value,
 )
 from ..config import get_plot_config
-from eeg_pipeline.plotting.features.utils import get_fdr_alpha
-from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.analysis.connectivity import (
     build_adjacency_from_edges,
-    build_matrix_from_edges,
     compute_significant_edges,
     parse_connectivity_columns,
 )

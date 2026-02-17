@@ -7,7 +7,7 @@ Implements an EEGNet-style binary classifier with subject-aware CV support.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Tuple
+from typing import Any, Tuple
 
 import numpy as np
 import pandas as pd
@@ -135,7 +135,7 @@ def fit_predict_cnn_binary_classifier(
     X_test_t = torch.tensor(X_test_n[:, None, :, :], dtype=torch.float32)
 
     n_channels = int(X_train.shape[1])
-    n_times = int(X_train.shape[2])
+    int(X_train.shape[2])
 
     temporal_filters = int(cfg.get("cnn_temporal_filters", 8))
     depth_multiplier = int(cfg.get("cnn_depth_multiplier", 2))

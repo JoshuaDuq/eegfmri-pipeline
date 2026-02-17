@@ -1734,14 +1734,12 @@ def extract_aperiodic_features(
     qc_payload["segments_computed"] = segments_done
     
     # Pick first available segment with complete QC for shared QC fields
-    chosen_name = None
     chosen = None
     for seg_name in segments_done:
         seg_qc = qc_payload.get("segments", {}).get(seg_name)
         if seg_qc and isinstance(seg_qc, dict):
             # Check if this segment has the required QC fields
             if all(seg_qc.get(field) is not None for field in ["slopes", "offsets", "r2"]):
-                chosen_name = seg_name
                 chosen = seg_qc
                 break
     

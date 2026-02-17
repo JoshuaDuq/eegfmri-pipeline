@@ -865,7 +865,6 @@ def fit_first_level_glm(
 
     Returns (fitted FirstLevelModel, synthetic_condition_labels).
     """
-    from nilearn.glm.first_level import FirstLevelModel
 
     tr = _get_tr_from_bold(bold_path)
     logger.info("Fitting GLM for %s (TR=%.2fs)", bold_path.name, tr)
@@ -953,7 +952,6 @@ def fit_first_level_glm_multi_run(
 
     Returns MultiRunGLMResult with fitted model and run inclusion details.
     """
-    from nilearn.glm.first_level import FirstLevelModel
 
     if not bold_paths:
         raise ValueError("No BOLD runs provided.")

@@ -8,7 +8,6 @@ Functions for loading clean events.tsv (already aligned to epochs).
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Optional
 
 import mne

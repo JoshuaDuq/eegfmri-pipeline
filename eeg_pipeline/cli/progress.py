@@ -13,7 +13,7 @@ import resource
 import sys
 import time
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 _BYTES_PER_GB = 1024 ** 3

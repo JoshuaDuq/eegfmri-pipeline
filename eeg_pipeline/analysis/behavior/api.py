@@ -50,8 +50,6 @@ from eeg_pipeline.utils.analysis.stats.cluster import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-    import logging
     from eeg_pipeline.context.behavior import BehaviorContext
 
 

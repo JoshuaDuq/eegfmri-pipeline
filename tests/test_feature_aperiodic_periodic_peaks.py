@@ -119,7 +119,7 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
         for col in expected:
             self.assertIn(col, cols)
             self.assertIn(col, df.columns)
-            self.assertTrue(np.isfinite(pd_values := np.asarray(df[col], dtype=float)).any(), msg=col)
+            self.assertTrue(np.isfinite(np.asarray(df[col], dtype=float)).any(), msg=col)
 
         alpha_cf = np.nanmean(np.asarray(df[expected[0]], dtype=float))
         alpha_bw = np.nanmean(np.asarray(df[expected[1]], dtype=float))

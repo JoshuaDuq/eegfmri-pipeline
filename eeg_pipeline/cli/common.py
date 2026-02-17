@@ -11,13 +11,26 @@ import argparse
 from pathlib import Path
 from typing import Any, List, Optional
 
-from eeg_pipeline.cli.progress import create_progress_reporter, ProgressReporter
 from eeg_pipeline.infra.paths import resolve_deriv_root
+from eeg_pipeline.cli.progress import create_progress_reporter, ProgressReporter
 
 
 DEFAULT_TASK_KEY = "project.task"
 MIN_SUBJECTS_KEY = "analysis.min_subjects_for_group"
 MIN_SUBJECTS_FOR_ML = 2
+
+__all__ = [
+    "ProgressReporter",
+    "create_progress_reporter",
+    "add_common_subject_args",
+    "add_task_arg",
+    "add_path_args",
+    "add_output_format_args",
+    "resolve_task",
+    "validate_subjects_not_empty",
+    "validate_min_subjects",
+    "get_deriv_root",
+]
 
 
 def add_common_subject_args(parser: argparse.ArgumentParser) -> None:

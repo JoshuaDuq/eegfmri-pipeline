@@ -853,7 +853,6 @@ def load_epochs_with_targets(
             logger=logger,
         )
 
-    from .epochs import load_epochs_for_analysis
 
     out: List[Tuple[str, mne.Epochs, pd.Series]] = []
     ch_sets: List[set] = []

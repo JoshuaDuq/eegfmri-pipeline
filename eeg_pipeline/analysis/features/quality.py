@@ -14,7 +14,7 @@ Computed on 'baseline' and 'active' windows.
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any
 import numpy as np
 import pandas as pd
 import mne
@@ -397,7 +397,7 @@ def extract_quality_features(
     target_name = getattr(ctx, "name", None)
     logger = getattr(ctx, "logger", None)
     
-    has_config_get = config is not None and hasattr(config, "get")
+    config is not None and hasattr(config, "get")
     
     if target_name and windows is not None:
         mask = windows.get_mask(target_name)

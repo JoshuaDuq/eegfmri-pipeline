@@ -7,7 +7,6 @@ Each function registers with VisualizationRegistry to be called during feature v
 from __future__ import annotations
 
 import fnmatch
-import re
 from typing import Any
 
 import numpy as np
@@ -16,11 +15,9 @@ import mne
 
 from eeg_pipeline.plotting.features.context import FeaturePlotContext, VisualizationRegistry
 from eeg_pipeline.plotting.core.runner import safe_plot
-from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
 from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
-from eeg_pipeline.domain.features.naming import NamingSchema
 
 from eeg_pipeline.plotting.features.aperiodic import (
     plot_aperiodic_topomaps,

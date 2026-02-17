@@ -14,6 +14,15 @@ from typing import List
 
 from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
 
+__all__ = [
+    "FEATURE_CATEGORIES",
+    "FREQUENCY_BANDS",
+    "BEHAVIOR_COMPUTATIONS",
+    "FEATURE_VISUALIZE_CATEGORIES",
+    "BEHAVIOR_VISUALIZE_CATEGORIES",
+]
+
+
 
 FREQUENCY_BANDS: List[str] = [
     "delta",

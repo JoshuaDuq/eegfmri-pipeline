@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 
 from eeg_pipeline.plotting.io.figures import (
     robust_sym_vlim,
-    extract_eeg_picks,
     get_viz_params,
     plot_topomap_on_ax,
 )
@@ -43,7 +42,7 @@ from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
 from ..core.statistics import get_strict_mode, compute_cluster_significance, build_statistical_title
 from ..core.colorbars import create_difference_colorbar
-from ..core.topomaps import build_topomap_diff_label, build_topomap_percentage_label
+from ..core.topomaps import build_topomap_diff_label
 from ..core.annotations import add_roi_annotations, get_sig_marker_text
 from .contrasts import (
     _get_baseline_window,
@@ -51,7 +50,7 @@ from .contrasts import (
     _get_aligned_events_df_for_tfr,
     _prepare_comparison_contrast_data,
 )
-from .channels import _save_fig as _channels_save_fig, _sanitize_label_for_filename
+from .channels import _save_fig as _channels_save_fig
 from eeg_pipeline.utils.config.loader import require_config_value
 
 
@@ -626,8 +625,8 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
 
     window_label = f"{tmin_clip:.1f}–{tmax_clip:.1f}s; {n_windows} windows @ {window_size_ms:.1f}ms"
     from .channels import _sanitize_label_for_filename
-    label_2_sanitized = _sanitize_label_for_filename(label2)
-    label_1_sanitized = _sanitize_label_for_filename(label1)
+    _sanitize_label_for_filename(label2)
+    _sanitize_label_for_filename(label1)
     filename_base = "temporal_topomaps_{label_2}_minus_{label_1}_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
     
     _plot_temporal_topomaps_for_bands(
@@ -696,8 +695,8 @@ def plot_temporal_topomaps_allbands_active(
 
     window_label = f"active {tmin_clip:.0f}–{tmax_clip:.0f}s; {n_windows} windows @ {window_size_eff:.2f}s"
     from .channels import _sanitize_label_for_filename
-    label_2_sanitized = _sanitize_label_for_filename(label2)
-    label_1_sanitized = _sanitize_label_for_filename(label1)
+    _sanitize_label_for_filename(label2)
+    _sanitize_label_for_filename(label1)
     filename_base = "temporal_topomaps_{label_2}_minus_{label_1}_active_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
     
     _plot_temporal_topomaps_for_bands(

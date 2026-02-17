@@ -1427,7 +1427,7 @@ def extract_connectivity_from_precomputed(
         logger.debug("Connectivity extraction: n_jobs=%s", n_jobs)
     n_epochs = int(precomputed.data.shape[0])
 
-    records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
+    [dict() for _ in range(n_epochs)]
 
     pair_i, pair_j = np.triu_indices(n_channels, k=1)
     pair_names = [f"{ch_names[i]}-{ch_names[j]}" for i, j in zip(pair_i, pair_j)]
@@ -1683,7 +1683,7 @@ def extract_connectivity_from_precomputed(
         return df_out
 
     def _aec_task(seg_name: str, band: str, analytic_seg: np.ndarray) -> pd.DataFrame:
-        t0 = time.perf_counter()
+        time.perf_counter()
         aec_mode = conn_cfg.aec_mode
         orthogonalize = "pairwise"
         if aec_mode in {"none", "raw", "no"}:

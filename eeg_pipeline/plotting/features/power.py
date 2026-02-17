@@ -30,7 +30,6 @@ from eeg_pipeline.plotting.features.roi import (
 )
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_and_crop,
-    validate_baseline_indices,
 )
 from eeg_pipeline.utils.config.loader import get_frequency_bands, require_config_value
 from scipy.stats import mannwhitneyu
@@ -365,7 +364,7 @@ def _plot_column_comparison(
     """
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
     from eeg_pipeline.utils.config.loader import get_config_value
-    from .utils import load_precomputed_paired_stats, get_precomputed_qvalues, apply_fdr_correction, plot_multi_group_column_comparison, get_named_segments
+    from .utils import load_precomputed_paired_stats, get_precomputed_qvalues, plot_multi_group_column_comparison, get_named_segments
     
     values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
@@ -1604,9 +1603,7 @@ def plot_band_power_topomaps(
     
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.utils.config.loader import get_config_value
-    from eeg_pipeline.utils.formatting import sanitize_label
 
-    all_channels = epochs_info.ch_names
 
     compare_columns = bool(get_config_value(config, "plotting.comparisons.compare_columns", True))
     comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
@@ -1763,7 +1760,7 @@ def _plot_band_power_topomaps_single_segment(
     unit_label = STAT_TO_LABEL.get(primary_stat, "power")
     value_label = f"mean {unit_label}" if primary_stat else "mean power"
     
-    n_bands = len(valid_bands)
+    len(valid_bands)
     width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
     
     from eeg_pipeline.utils.formatting import sanitize_label

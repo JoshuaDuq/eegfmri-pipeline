@@ -16,7 +16,6 @@ from scipy import stats
 
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.analysis.stats.base import get_config_value, get_epsilon_std
-from eeg_pipeline.utils.analysis.stats.correlation import fisher_z
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
 

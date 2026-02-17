@@ -18,7 +18,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 FS_LICENSE_ENV_VAR = "EEG_PIPELINE_FREESURFER_LICENSE"

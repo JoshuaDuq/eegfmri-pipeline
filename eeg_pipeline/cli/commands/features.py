@@ -17,7 +17,6 @@ from eeg_pipeline.cli.common import (
 )
 from eeg_pipeline.pipelines.constants import (
     FEATURE_CATEGORIES,
-    FREQUENCY_BANDS,
 )
 from eeg_pipeline.domain.features.constants import SPATIAL_MODES
 from eeg_pipeline.cli.commands.base import FEATURE_VISUALIZE_CATEGORIES

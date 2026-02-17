@@ -20,7 +20,6 @@ from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.roi import get_roi_definitions
 from eeg_pipeline.plotting.features.utils import (
     compute_or_load_column_stats,
-    get_named_segments,
     plot_paired_comparison,
 )
 from eeg_pipeline.plotting.io.figures import log_if_present, save_fig

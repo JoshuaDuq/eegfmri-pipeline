@@ -764,7 +764,7 @@ def _run_tf_correlations_core(
 
     sfx = "_spearman" if use_spearman else "_pearson"
     roi = roi_selection
-    roi_sfx = f"_{roi.lower()}" if roi and roi != "null" else ""
+    f"_{roi.lower()}" if roi and roi != "null" else ""
     roi_label = roi or "all"
 
     method = "spearman" if use_spearman else "pearson"
@@ -1464,7 +1464,7 @@ def _extract_trial_itpc(
     if data_sub.size == 0:
         return None
     
-    n_trials, n_ch = data_sub.shape[0], data_sub.shape[1]
+    _n_trials, _n_ch = data_sub.shape[0], data_sub.shape[1]
     
     phase = np.angle(data_sub)
     phase_vectors = np.exp(1j * phase)
@@ -1555,7 +1555,6 @@ def _run_itpc_temporal_by_condition_core(
         bands = all_bands
     
     corr_fn = spearmanr if use_spearman else pearsonr
-    sfx = "_spearman" if use_spearman else "_pearson"
     method = "spearman" if use_spearman else "pearson"
     
     out_dir = stats_dir
@@ -1830,7 +1829,6 @@ def _run_erds_temporal_by_condition_core(
         bands = all_bands
     
     corr_fn = spearmanr if use_spearman else pearsonr
-    sfx = "_spearman" if use_spearman else "_pearson"
     corr_method = "spearman" if use_spearman else "pearson"
     
     out_dir = stats_dir

@@ -1,6 +1,5 @@
 import os
 import mne
-import numpy as np
 import pandas as pd
 from mne_bids import BIDSPath, get_entities_from_fname
 from mne_bids_pipeline._logging import gen_log_kwargs, logger

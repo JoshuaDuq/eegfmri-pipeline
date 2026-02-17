@@ -14,10 +14,25 @@ import numpy as np
 from scipy import stats
 
 from eeg_pipeline.utils.config.loader import (
-    ensure_config,
     get_config_value,
     get_constants,
+    ensure_config,
 )
+
+__all__ = [
+    "get_statistics_constants",
+    "get_fdr_alpha",
+    "get_ci_level",
+    "get_z_critical_value",
+    "get_n_permutations",
+    "get_n_bootstrap",
+    "get_epsilon_std",
+    "get_min_samples_for_correlation",
+    "get_subject_seed",
+    "get_config_value",
+    "ensure_config",
+    "_safe_float",
+]
 
 
 def get_statistics_constants(config=None):
@@ -144,4 +159,3 @@ def _safe_float(value: Any) -> float:
         return f if np.isfinite(f) else float("nan")
     except (TypeError, ValueError):
         return float("nan")
-
