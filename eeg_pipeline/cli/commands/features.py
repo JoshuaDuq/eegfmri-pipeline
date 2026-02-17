@@ -179,6 +179,8 @@ def _apply_directedconnectivity_overrides(args: argparse.Namespace, config: Any)
         dconn_cfg["n_freqs"] = args.directed_conn_n_freqs
     if getattr(args, "directed_conn_min_segment_samples", None) is not None:
         dconn_cfg["min_segment_samples"] = args.directed_conn_min_segment_samples
+    if getattr(args, "directed_conn_min_samples_per_mvar_param", None) is not None:
+        dconn_cfg["min_samples_per_mvar_parameter"] = args.directed_conn_min_samples_per_mvar_param
 
 
 def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -349,6 +351,12 @@ def _apply_pac_overrides(args: argparse.Namespace, config: Any) -> None:
         pac_cfg["waveform_offset_ms"] = args.pac_waveform_offset_ms
     if getattr(args, "pac_random_seed", None) is not None:
         pac_cfg["random_seed"] = args.pac_random_seed
+    if getattr(args, "pac_min_segment_sec", None) is not None:
+        pac_cfg["min_segment_sec"] = args.pac_min_segment_sec
+    if getattr(args, "pac_min_cycles_at_fmin", None) is not None:
+        pac_cfg["min_cycles_at_fmin"] = args.pac_min_cycles_at_fmin
+    if getattr(args, "pac_surrogate_method", None) is not None:
+        pac_cfg["surrogate_method"] = args.pac_surrogate_method
 
 
 def _apply_aperiodic_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -386,6 +394,10 @@ def _apply_aperiodic_overrides(args: argparse.Namespace, config: Any) -> None:
         aperiodic_cfg["line_noise_width_hz"] = args.aperiodic_line_noise_width_hz
     if getattr(args, "aperiodic_line_noise_harmonics", None) is not None:
         aperiodic_cfg["line_noise_harmonics"] = args.aperiodic_line_noise_harmonics
+    if getattr(args, "aperiodic_max_freq_resolution_hz", None) is not None:
+        aperiodic_cfg["max_freq_resolution_hz"] = args.aperiodic_max_freq_resolution_hz
+    if getattr(args, "aperiodic_multitaper_adaptive", None) is not None:
+        aperiodic_cfg["multitaper_adaptive"] = bool(args.aperiodic_multitaper_adaptive)
 
 
 def _apply_complexity_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -591,6 +603,11 @@ def _apply_itpc_overrides(args: argparse.Namespace, config: Any) -> None:
     if getattr(args, "itpc_n_jobs", None) is not None:
         parallel_cfg = config.setdefault("feature_engineering", {}).setdefault("parallel", {})
         parallel_cfg["n_jobs_itpc"] = args.itpc_n_jobs
+    itpc_cfg = config.setdefault("feature_engineering", {}).setdefault("itpc", {})
+    if getattr(args, "itpc_min_segment_sec", None) is not None:
+        itpc_cfg["min_segment_sec"] = args.itpc_min_segment_sec
+    if getattr(args, "itpc_min_cycles_at_fmin", None) is not None:
+        itpc_cfg["min_cycles_at_fmin"] = args.itpc_min_cycles_at_fmin
 
 
 def _apply_band_envelope_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -667,6 +684,8 @@ def _apply_microstates_overrides(args: argparse.Namespace, config: Any) -> None:
         micro_cfg["gfp_peak_prominence"] = float(args.microstates_gfp_peak_prominence)
     if getattr(args, "microstates_random_state", None) is not None:
         micro_cfg["random_state"] = int(args.microstates_random_state)
+    if getattr(args, "microstates_assign_from_gfp_peaks", None) is not None:
+        micro_cfg["assign_from_gfp_peaks"] = bool(args.microstates_assign_from_gfp_peaks)
 
 
 def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -690,6 +709,20 @@ def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
         erds_cfg["rebound_min_latency_ms"] = args.erds_rebound_min_latency_ms
     if getattr(args, "erds_infer_contralateral", None) is not None:
         erds_cfg["infer_contralateral_when_missing"] = args.erds_infer_contralateral
+    if getattr(args, "erds_pain_marker_bands", None) is not None:
+        erds_cfg["pain_marker_bands"] = list(args.erds_pain_marker_bands)
+    if getattr(args, "erds_laterality_columns", None) is not None:
+        erds_cfg["laterality_columns"] = list(args.erds_laterality_columns)
+    if getattr(args, "erds_somatosensory_left_channels", None) is not None:
+        erds_cfg["somatosensory_left_channels"] = list(args.erds_somatosensory_left_channels)
+    if getattr(args, "erds_somatosensory_right_channels", None) is not None:
+        erds_cfg["somatosensory_right_channels"] = list(args.erds_somatosensory_right_channels)
+    if getattr(args, "erds_onset_min_threshold_percent", None) is not None:
+        erds_cfg["onset_min_threshold_percent"] = float(args.erds_onset_min_threshold_percent)
+    if getattr(args, "erds_rebound_threshold_sigma", None) is not None:
+        erds_cfg["rebound_threshold_sigma"] = float(args.erds_rebound_threshold_sigma)
+    if getattr(args, "erds_rebound_min_threshold_percent", None) is not None:
+        erds_cfg["rebound_min_threshold_percent"] = float(args.erds_rebound_min_threshold_percent)
 
 
 def _apply_validation_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -715,6 +748,31 @@ def _apply_spatial_transform_overrides(args: argparse.Namespace, config: Any) ->
         config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["lambda2"] = args.spatial_transform_lambda2
     if getattr(args, "spatial_transform_stiffness", None) is not None:
         config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["stiffness"] = args.spatial_transform_stiffness
+    per_family_cfg = config.setdefault("feature_engineering", {}).setdefault("spatial_transform_per_family", {})
+    for family in (
+        "connectivity",
+        "itpc",
+        "pac",
+        "power",
+        "aperiodic",
+        "bursts",
+        "erds",
+        "complexity",
+        "ratios",
+        "asymmetry",
+        "spectral",
+        "erp",
+        "quality",
+        "microstates",
+    ):
+        arg_name = f"spatial_transform_{family}"
+        value = getattr(args, arg_name, None)
+        if value is None:
+            continue
+        if value == "inherit":
+            per_family_cfg.pop(family, None)
+        else:
+            per_family_cfg[family] = value
 
 
 def _parse_frequency_band_definitions(band_defs: List[str]) -> dict:
@@ -854,6 +912,21 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--spatial-transform", choices=["none", "csd", "laplacian"], default=None, help="Spatial transform to reduce volume conduction: none, csd, laplacian")
     parser.add_argument("--spatial-transform-lambda2", type=float, default=None, help="Lambda2 regularization for CSD/Laplacian (default: 1e-5)")
     parser.add_argument("--spatial-transform-stiffness", type=float, default=None, help="Stiffness for CSD/Laplacian (default: 4.0)")
+    st_choices = ["inherit", "none", "csd", "laplacian"]
+    parser.add_argument("--spatial-transform-connectivity", choices=st_choices, default=None, help="Per-family spatial transform override for connectivity")
+    parser.add_argument("--spatial-transform-itpc", choices=st_choices, default=None, help="Per-family spatial transform override for ITPC")
+    parser.add_argument("--spatial-transform-pac", choices=st_choices, default=None, help="Per-family spatial transform override for PAC")
+    parser.add_argument("--spatial-transform-power", choices=st_choices, default=None, help="Per-family spatial transform override for power")
+    parser.add_argument("--spatial-transform-aperiodic", choices=st_choices, default=None, help="Per-family spatial transform override for aperiodic")
+    parser.add_argument("--spatial-transform-bursts", choices=st_choices, default=None, help="Per-family spatial transform override for bursts")
+    parser.add_argument("--spatial-transform-erds", choices=st_choices, default=None, help="Per-family spatial transform override for ERDS")
+    parser.add_argument("--spatial-transform-complexity", choices=st_choices, default=None, help="Per-family spatial transform override for complexity")
+    parser.add_argument("--spatial-transform-ratios", choices=st_choices, default=None, help="Per-family spatial transform override for ratios")
+    parser.add_argument("--spatial-transform-asymmetry", choices=st_choices, default=None, help="Per-family spatial transform override for asymmetry")
+    parser.add_argument("--spatial-transform-spectral", choices=st_choices, default=None, help="Per-family spatial transform override for spectral")
+    parser.add_argument("--spatial-transform-erp", choices=st_choices, default=None, help="Per-family spatial transform override for ERP")
+    parser.add_argument("--spatial-transform-quality", choices=st_choices, default=None, help="Per-family spatial transform override for quality")
+    parser.add_argument("--spatial-transform-microstates", choices=st_choices, default=None, help="Per-family spatial transform override for microstates")
     parser.add_argument("--tmin", type=float, default=None, help="Start time in seconds for feature extraction window")
     parser.add_argument("--tmax", type=float, default=None, help="End time in seconds for feature extraction window")
     parser.add_argument("--time-range", nargs=3, action="append", metavar=("NAME", "TMIN", "TMAX"), help="Define a named time range (e.g. baseline 0 1). Can be specified multiple times.")
@@ -910,6 +983,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--directed-conn-mvar-order", type=int, default=None, help="MVAR model order for DTF/PDC computation (default: 10)")
     parser.add_argument("--directed-conn-n-freqs", type=int, default=None, help="Number of frequency bins for directed connectivity (default: 16)")
     parser.add_argument("--directed-conn-min-segment-samples", type=int, default=None, help="Minimum segment samples for directed connectivity (default: 100)")
+    parser.add_argument("--directed-conn-min-samples-per-mvar-param", type=int, default=None, help="Minimum samples per MVAR parameter for stable directed connectivity")
 
     # Source localization
     parser.add_argument("--source-method", choices=["lcmv", "eloreta"], default=None, help="Source localization method: lcmv (beamformer) or eloreta (inverse)")
@@ -1011,6 +1085,9 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-pac-compute-waveform-qc", action="store_false", dest="pac_compute_waveform_qc")
     parser.add_argument("--pac-waveform-offset-ms", type=float, default=None, help="Waveform offset in ms for PAC QC")
     parser.add_argument("--pac-random-seed", type=int, default=None, help="Random seed for PAC surrogate testing")
+    parser.add_argument("--pac-min-segment-sec", type=float, default=None, help="Minimum segment duration for PAC (sec)")
+    parser.add_argument("--pac-min-cycles-at-fmin", type=float, default=None, help="Minimum cycles at PAC low-frequency bound")
+    parser.add_argument("--pac-surrogate-method", choices=["trial_shuffle", "circular_shift", "swap_phase_amp", "time_shift"], default=None, help="PAC surrogate generation method")
 
     # Aperiodic
     parser.add_argument("--aperiodic-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Frequency range for aperiodic fit (Hz)")
@@ -1028,6 +1105,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--aperiodic-line-noise-freq", type=float, default=None, help="Line noise frequency for aperiodic")
     parser.add_argument("--aperiodic-line-noise-width-hz", type=float, default=None, help="Line noise frequency band width to exclude from aperiodic fit")
     parser.add_argument("--aperiodic-line-noise-harmonics", type=int, default=None, help="Number of line noise harmonics to exclude from aperiodic fit")
+    parser.add_argument("--aperiodic-max-freq-resolution-hz", type=float, default=None, help="Maximum allowed frequency-bin width for stable aperiodic fits")
+    parser.add_argument("--aperiodic-multitaper-adaptive", action="store_true", default=None, help="Enable adaptive multitaper in aperiodic PSD estimation")
 
     # ERP
     parser.add_argument("--erp-baseline", action="store_true", default=None, help="Enable baseline correction for ERP")
@@ -1126,6 +1205,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--itpc-condition-values", nargs="+", default=None, help="Condition values to include for ITPC when method='condition' (space-separated). Other values are excluded (set to NaN).")
     parser.add_argument("--itpc-min-trials-per-condition", type=int, default=None, help="Minimum trials per condition for reliable ITPC (default: 10)")
     parser.add_argument("--itpc-n-jobs", type=int, default=None, help="Number of parallel jobs for ITPC computation (-1 = all CPUs, default: -1)")
+    parser.add_argument("--itpc-min-segment-sec", type=float, default=None, help="Minimum segment duration for ITPC (sec)")
+    parser.add_argument("--itpc-min-cycles-at-fmin", type=float, default=None, help="Minimum cycles at ITPC low-frequency bound")
 
     # Band envelope
     parser.add_argument("--band-envelope-pad-sec", type=float, default=None, help="Padding in seconds for band envelope")
@@ -1179,6 +1260,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--microstates-min-duration-ms", type=float, default=None, help="Minimum state duration in ms for temporal smoothing")
     parser.add_argument("--microstates-gfp-peak-prominence", type=float, default=None, help="Optional GFP peak prominence threshold")
     parser.add_argument("--microstates-random-state", type=int, default=None, help="Random seed for microstate template fitting")
+    parser.add_argument("--microstates-assign-from-gfp-peaks", action="store_true", default=None, dest="microstates_assign_from_gfp_peaks", help="Assign states at GFP peaks and backfit labels")
+    parser.add_argument("--no-microstates-assign-from-gfp-peaks", action="store_false", dest="microstates_assign_from_gfp_peaks")
     parser.add_argument(
         "--fixed-templates-path",
         type=str,
@@ -1198,6 +1281,13 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--erds-rebound-min-latency-ms", type=float, default=None, help="Minimum latency after ERD peak before searching alpha rebound")
     parser.add_argument("--erds-infer-contralateral", action="store_true", default=None, help="Infer contralateral hemisphere when trial laterality metadata is missing")
     parser.add_argument("--no-erds-infer-contralateral", action="store_false", dest="erds_infer_contralateral")
+    parser.add_argument("--erds-pain-marker-bands", nargs="+", default=None, help="Bands for ERDS pain-marker extraction")
+    parser.add_argument("--erds-laterality-columns", nargs="+", default=None, help="Candidate events.tsv columns for stimulation laterality")
+    parser.add_argument("--erds-somatosensory-left-channels", nargs="+", default=None, help="Left somatosensory channels for pain markers")
+    parser.add_argument("--erds-somatosensory-right-channels", nargs="+", default=None, help="Right somatosensory channels for pain markers")
+    parser.add_argument("--erds-onset-min-threshold-percent", type=float, default=None, help="Minimum percent threshold for ERD onset")
+    parser.add_argument("--erds-rebound-threshold-sigma", type=float, default=None, help="Sigma threshold for ERD rebound detection")
+    parser.add_argument("--erds-rebound-min-threshold-percent", type=float, default=None, help="Minimum percent threshold for ERD rebound")
 
     # Validation and output
     parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")

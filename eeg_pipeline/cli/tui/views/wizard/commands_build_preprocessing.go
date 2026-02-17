@@ -123,6 +123,12 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepTStopBeforeNext != 2 {
 		args = append(args, "--t-stop-before-next", fmt.Sprintf("%d", m.prepTStopBeforeNext))
 	}
+	if strings.TrimSpace(m.prepRenameAnotDict) != "" {
+		args = append(args, "--rename-anot-dict", m.prepRenameAnotDict)
+	}
+	if strings.TrimSpace(m.prepCustomBadDict) != "" {
+		args = append(args, "--custom-bad-dict", m.prepCustomBadDict)
+	}
 
 	// Epoching
 	if strings.TrimSpace(m.prepConditions) != "" {

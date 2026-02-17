@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from typing import Any, List
 
 from eeg_pipeline.cli.common import (
@@ -36,6 +37,7 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--ch-types", type=str, default=None, help="Channel types to include (e.g., 'eeg')")
     prep_group.add_argument("--eeg-reference", type=str, default=None, help="EEG reference type (e.g., 'average')")
     prep_group.add_argument("--eog-channels", type=str, default=None, help="EOG channels (comma-separated, e.g., 'Fp1,Fp2')")
+    prep_group.add_argument("--ecg-channels", type=str, default=None, help="ECG channels (comma-separated, e.g., 'ECG')")
     prep_group.add_argument("--random-state", type=int, default=None, help="Random seed for reproducibility")
     prep_group.add_argument("--task-is-rest", action="store_true", default=False, help="Whether task is resting-state")
     prep_group.add_argument("--use-icalabel", action="store_true", default=True, help="Use mne-icalabel for ICA component classification (default: True)")
@@ -119,6 +121,8 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--repeats", type=int, default=3, help="Number of bad channel detection iterations")
     prep_group.add_argument("--average-reref", action="store_true", default=False, help="Average re-reference before bad channel detection")
     prep_group.add_argument("--file-extension", type=str, default=".vhdr", help="File extension for EEG data")
+    prep_group.add_argument("--rename-anot-dict", type=str, default=None, help="JSON dict for annotation renaming, e.g. '{\"BAD boundary\":\"BAD_boundary\"}'")
+    prep_group.add_argument("--custom-bad-dict", type=str, default=None, help="JSON dict of custom bad channels per task/subject")
     prep_group.add_argument(
         "--consider-previous-bads",
         dest="consider_previous_bads",
@@ -150,6 +154,13 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--reject", type=float, help="Peak-to-peak amplitude rejection threshold (µV)")
     prep_group.add_argument("--reject-method", choices=["none", "autoreject_local", "autoreject_global"], help="Epoch rejection method")
     prep_group.add_argument(
+        "--autoreject-n-interpolate",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Autoreject interpolation candidates (e.g., 4 8 16)",
+    )
+    prep_group.add_argument(
         "--find-breaks",
         dest="find_breaks",
         action="store_true",
@@ -163,6 +174,18 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="Disable automatic break detection",
     )
     prep_group.add_argument("--run-source-estimation", action="store_true", default=False, help="Run source estimation")
+    prep_group.add_argument("--allow-misaligned-trim", action="store_true", default=False, help="Allow trimming when EEG/fMRI trial counts are slightly misaligned")
+    prep_group.add_argument("--min-alignment-samples", type=int, default=None, help="Minimum aligned sample count required after trimming")
+    prep_group.add_argument("--trim-to-first-volume", action="store_true", default=False, help="Trim EEG events to first fMRI volume start when aligning")
+    prep_group.add_argument(
+        "--fmri-onset-reference",
+        choices=["first_volume", "scanner_trigger"],
+        default=None,
+        help="Reference event for fMRI onset alignment",
+    )
+    prep_group.add_argument("--event-col-temperature", nargs="+", type=str, default=None, help="events.tsv candidate columns for temperature")
+    prep_group.add_argument("--event-col-rating", nargs="+", type=str, default=None, help="events.tsv candidate columns for rating")
+    prep_group.add_argument("--event-col-pain-binary", nargs="+", type=str, default=None, help="events.tsv candidate columns for pain-binary split")
 
     add_path_args(parser)
 
@@ -213,6 +236,10 @@ def _update_preprocessing_config(args: argparse.Namespace, config: Any) -> None:
         eog_channels_list = [ch.strip() for ch in args.eog_channels.split(",") if ch.strip()]
         if eog_channels_list:
             eeg_config["eog_channels"] = eog_channels_list
+    if args.ecg_channels:
+        ecg_channels_list = [ch.strip() for ch in args.ecg_channels.split(",") if ch.strip()]
+        if ecg_channels_list:
+            eeg_config["ecg_channels"] = ecg_channels_list
     if args.random_state is not None:
         preprocessing_config["random_state"] = args.random_state
     if args.task_is_rest:
@@ -278,6 +305,34 @@ def _update_epochs_config(args: argparse.Namespace, config: Any) -> None:
         epochs_config["reject"] = None
     if args.reject_method:
         epochs_config["reject_method"] = args.reject_method
+    if args.autoreject_n_interpolate:
+        epochs_config["autoreject_n_interpolate"] = [int(v) for v in args.autoreject_n_interpolate]
+
+
+def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> None:
+    """Update config with alignment + event-column overrides."""
+    alignment_cfg = config.setdefault("alignment", {})
+    event_cols = config.setdefault("event_columns", {})
+    if args.allow_misaligned_trim:
+        alignment_cfg["allow_misaligned_trim"] = True
+    if args.min_alignment_samples is not None:
+        alignment_cfg["min_alignment_samples"] = int(args.min_alignment_samples)
+    if args.trim_to_first_volume:
+        alignment_cfg["trim_to_first_volume"] = True
+    if args.fmri_onset_reference:
+        # Utilities uses first_iti_start/first_stim_start/as_is; map preprocessing shorthand.
+        mapping = {
+            "first_volume": "first_iti_start",
+            "scanner_trigger": "first_stim_start",
+        }
+        alignment_cfg["fmri_onset_reference"] = mapping.get(args.fmri_onset_reference, args.fmri_onset_reference)
+
+    if args.event_col_temperature:
+        event_cols["temperature"] = [str(v).strip() for v in args.event_col_temperature if str(v).strip()]
+    if args.event_col_rating:
+        event_cols["rating"] = [str(v).strip() for v in args.event_col_rating if str(v).strip()]
+    if args.event_col_pain_binary:
+        event_cols["pain_binary"] = [str(v).strip() for v in args.event_col_pain_binary if str(v).strip()]
 
 
 def _resolve_n_jobs(args: argparse.Namespace, config: Any) -> int:
@@ -299,6 +354,22 @@ def _update_pyprep_config(args: argparse.Namespace, config: Any) -> None:
         pyprep_config["average_reref"] = True
     if args.file_extension != ".vhdr":
         pyprep_config["file_extension"] = args.file_extension
+    if args.rename_anot_dict:
+        try:
+            parsed = json.loads(args.rename_anot_dict)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON for --rename-anot-dict: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("--rename-anot-dict must decode to a JSON object")
+        pyprep_config["rename_anot_dict"] = parsed
+    if args.custom_bad_dict:
+        try:
+            parsed = json.loads(args.custom_bad_dict)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON for --custom-bad-dict: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("--custom-bad-dict must decode to a JSON object")
+        pyprep_config["custom_bad_dict"] = parsed
     if args.consider_previous_bads is not None:
         pyprep_config["consider_previous_bads"] = bool(args.consider_previous_bads)
     if not args.overwrite_channels_tsv:
@@ -340,6 +411,7 @@ def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any
     _update_ica_config(args, config)
     _update_icalabel_config(args, config)
     _update_epochs_config(args, config)
+    _update_alignment_event_config(args, config)
     
     pipeline = PreprocessingPipeline(config=config)
     n_jobs = _resolve_n_jobs(args, config)

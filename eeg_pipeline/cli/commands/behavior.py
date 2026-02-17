@@ -57,6 +57,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--robust-correlation", choices=["none", "percentage_bend", "winsorized", "shepherd"], default=None)
     compute_group.add_argument("--bootstrap", type=int, default=None)
     compute_group.add_argument("--n-perm", type=int, default=None)
+    compute_group.add_argument("--global-n-bootstrap", type=int, default=None)
+    compute_group.add_argument("--perm-scheme", choices=["shuffle", "circular_shift"], default=None)
     compute_group.add_argument("--rng-seed", type=int, default=None)
     compute_group.add_argument("--n-jobs", type=int, default=None)
     compute_group.add_argument("--min-samples", type=int, default=None)
@@ -82,6 +84,9 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     compute_group.add_argument("--run-adjustment-max-dummies", type=int, default=None)
     compute_group.add_argument("--fdr-alpha", type=float, default=None)
+    compute_group.add_argument("--stats-temp-control", choices=["linear", "spline"], default=None)
+    compute_group.add_argument("--stats-allow-iid-trials", action="store_true", default=None)
+    compute_group.add_argument("--no-stats-allow-iid-trials", action="store_false", dest="stats_allow_iid_trials")
     compute_group.add_argument("--compute-change-scores", action="store_true", default=None)
     compute_group.add_argument("--no-compute-change-scores", action="store_false", dest="compute_change_scores")
     compute_group.add_argument("--loso-stability", action="store_true", default=None)
@@ -105,6 +110,14 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     compute_group.add_argument("--consistency", action="store_true", default=None, dest="consistency_enabled")
     compute_group.add_argument("--no-consistency", action="store_false", dest="consistency_enabled")
+    compute_group.add_argument("--cluster-correction-enabled", action="store_true", default=None, dest="cluster_correction_enabled")
+    compute_group.add_argument("--no-cluster-correction-enabled", action="store_false", dest="cluster_correction_enabled")
+    compute_group.add_argument("--cluster-correction-alpha", type=float, default=None)
+    compute_group.add_argument("--cluster-correction-min-cluster-size", type=int, default=None)
+    compute_group.add_argument("--cluster-correction-tail", type=int, choices=[-1, 0, 1], default=None)
+    compute_group.add_argument("--validation-min-epochs", type=int, default=None)
+    compute_group.add_argument("--validation-min-channels", type=int, default=None)
+    compute_group.add_argument("--validation-max-amplitude-uv", type=float, default=None)
     
     feature_choices = [
         "power", "connectivity", "directedconnectivity", "sourcelocalization",
@@ -495,10 +508,14 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     if args.bootstrap is not None:
         ba["bootstrap"] = int(args.bootstrap)
+    if getattr(args, "global_n_bootstrap", None) is not None:
+        stats_cfg["default_n_bootstrap"] = int(args.global_n_bootstrap)
 
     if args.n_perm is not None:
         stats_cfg["n_permutations"] = int(args.n_perm)
         ba.setdefault("cluster", {})["n_permutations"] = int(args.n_perm)
+    if getattr(args, "perm_scheme", None) is not None:
+        ba.setdefault("permutation", {})["scheme"] = str(args.perm_scheme).strip().lower()
 
     if getattr(args, "n_jobs", None) is not None:
         ba["n_jobs"] = int(args.n_jobs)
@@ -524,6 +541,10 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     if getattr(args, "fdr_alpha", None) is not None:
         stats_cfg["fdr_alpha"] = float(args.fdr_alpha)
+    if getattr(args, "stats_temp_control", None) is not None:
+        stats_cfg["temperature_control"] = str(args.stats_temp_control).strip().lower()
+    if getattr(args, "stats_allow_iid_trials", None) is not None:
+        stats_cfg["allow_iid_trials"] = bool(args.stats_allow_iid_trials)
     if getattr(args, "stats_hierarchical_fdr", None) is not None:
         stats_cfg["hierarchical_fdr"] = bool(args.stats_hierarchical_fdr)
     if getattr(args, "stats_compute_reliability", None) is not None:
@@ -550,6 +571,21 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     if getattr(args, "consistency_enabled", None) is not None:
         ba.setdefault("consistency", {})["enabled"] = bool(args.consistency_enabled)
+    ccfg = ba.setdefault("cluster_correction", {})
+    if getattr(args, "cluster_correction_enabled", None) is not None:
+        ccfg["enabled"] = bool(args.cluster_correction_enabled)
+    if getattr(args, "cluster_correction_alpha", None) is not None:
+        ccfg["alpha"] = float(args.cluster_correction_alpha)
+    if getattr(args, "cluster_correction_min_cluster_size", None) is not None:
+        ccfg["min_cluster_size"] = int(args.cluster_correction_min_cluster_size)
+    if getattr(args, "cluster_correction_tail", None) is not None:
+        ccfg["tail"] = int(args.cluster_correction_tail)
+    if getattr(args, "validation_min_epochs", None) is not None:
+        config.setdefault("validation", {})["min_epochs"] = int(args.validation_min_epochs)
+    if getattr(args, "validation_min_channels", None) is not None:
+        config.setdefault("validation", {})["min_channels"] = int(args.validation_min_channels)
+    if getattr(args, "validation_max_amplitude_uv", None) is not None:
+        config.setdefault("validation", {})["max_amplitude_uv"] = float(args.validation_max_amplitude_uv)
 
     # Trial table
     tt = ba.setdefault("trial_table", {})

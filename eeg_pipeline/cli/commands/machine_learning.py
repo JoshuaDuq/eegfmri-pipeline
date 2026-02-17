@@ -271,6 +271,62 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
             "'trial_index', 'block'). Defaults to config machine_learning.incremental_validity.baseline_predictors."
         ),
     )
+    parser.add_argument("--imputer", choices=["median", "mean", "most_frequent"], default=None)
+    parser.add_argument("--power-transformer-method", choices=["yeo-johnson", "box-cox"], default=None)
+    parser.add_argument("--power-transformer-standardize", action="store_true", default=None, dest="power_transformer_standardize")
+    parser.add_argument("--no-power-transformer-standardize", action="store_false", dest="power_transformer_standardize")
+    parser.add_argument("--pca-enabled", action="store_true", default=None, dest="pca_enabled")
+    parser.add_argument("--pca-n-components", type=float, default=None, dest="pca_n_components")
+    parser.add_argument("--pca-whiten", action="store_true", default=None, dest="pca_whiten")
+    parser.add_argument("--pca-svd-solver", choices=["auto", "full", "randomized"], default=None, dest="pca_svd_solver")
+    parser.add_argument("--pca-rng-seed", type=int, default=None, dest="pca_rng_seed")
+    parser.add_argument("--svm-kernel", choices=["rbf", "linear", "poly"], default=None)
+    parser.add_argument("--svm-c-grid", nargs="+", type=str, default=None)
+    parser.add_argument("--svm-gamma-grid", nargs="+", type=str, default=None)
+    parser.add_argument("--svm-class-weight", choices=["balanced", "none"], default=None)
+    parser.add_argument("--lr-penalty", choices=["l2", "l1", "elasticnet"], default=None)
+    parser.add_argument("--lr-c-grid", nargs="+", type=str, default=None)
+    parser.add_argument("--lr-max-iter", type=int, default=None)
+    parser.add_argument("--lr-class-weight", choices=["balanced", "none"], default=None)
+    parser.add_argument("--rf-min-samples-split-grid", nargs="+", type=str, default=None)
+    parser.add_argument("--rf-min-samples-leaf-grid", nargs="+", type=str, default=None)
+    parser.add_argument("--rf-bootstrap", action="store_true", default=None, dest="rf_bootstrap")
+    parser.add_argument("--no-rf-bootstrap", action="store_false", dest="rf_bootstrap")
+    parser.add_argument("--rf-class-weight", choices=["balanced", "balanced_subsample", "none"], default=None)
+    parser.add_argument("--cnn-filters1", type=int, default=None)
+    parser.add_argument("--cnn-filters2", type=int, default=None)
+    parser.add_argument("--cnn-kernel-size1", type=int, default=None)
+    parser.add_argument("--cnn-kernel-size2", type=int, default=None)
+    parser.add_argument("--cnn-pool-size", type=int, default=None)
+    parser.add_argument("--cnn-dense-units", type=int, default=None)
+    parser.add_argument("--cnn-dropout-conv", type=float, default=None)
+    parser.add_argument("--cnn-dropout-dense", type=float, default=None)
+    parser.add_argument("--cnn-batch-size", type=int, default=None)
+    parser.add_argument("--cnn-epochs", type=int, default=None)
+    parser.add_argument("--cnn-learning-rate", type=float, default=None)
+    parser.add_argument("--cnn-patience", type=int, default=None)
+    parser.add_argument("--cnn-min-delta", type=float, default=None)
+    parser.add_argument("--cnn-l2-lambda", type=float, default=None)
+    parser.add_argument("--cnn-random-seed", type=int, default=None)
+    parser.add_argument("--cv-hygiene", action="store_true", default=None, dest="cv_hygiene")
+    parser.add_argument("--no-cv-hygiene", action="store_false", dest="cv_hygiene")
+    parser.add_argument("--cv-permutation-scheme", choices=["within_subject", "within_subject_within_block"], default=None)
+    parser.add_argument("--cv-min-valid-perm-fraction", type=float, default=None)
+    parser.add_argument("--cv-default-n-bins", type=int, default=None)
+    parser.add_argument("--eval-ci-method", choices=["bootstrap", "fixed_effects"], default=None)
+    parser.add_argument("--eval-bootstrap-iterations", type=int, default=None)
+    parser.add_argument("--data-covariates-strict", action="store_true", default=None, dest="data_covariates_strict")
+    parser.add_argument("--no-data-covariates-strict", action="store_false", dest="data_covariates_strict")
+    parser.add_argument("--data-max-excluded-subject-fraction", type=float, default=None)
+    parser.add_argument("--incremental-baseline-alpha", type=float, default=None)
+    parser.add_argument("--interpretability-grouped-outputs", action="store_true", default=None, dest="interpretability_grouped_outputs")
+    parser.add_argument("--no-interpretability-grouped-outputs", action="store_false", dest="interpretability_grouped_outputs")
+    parser.add_argument("--timegen-min-subjects", type=int, default=None)
+    parser.add_argument("--timegen-min-valid-perm-fraction", type=float, default=None)
+    parser.add_argument("--class-min-subjects-for-auc", type=int, default=None)
+    parser.add_argument("--class-max-failed-fold-fraction", type=float, default=None)
+    parser.add_argument("--strict-regression-continuous", action="store_true", default=None, dest="strict_regression_continuous")
+    parser.add_argument("--no-strict-regression-continuous", action="store_false", dest="strict_regression_continuous")
 
     fmri_sig = parser.add_argument_group("fMRI signature target (when --target=fmri_signature)")
     fmri_sig.add_argument(
@@ -411,6 +467,114 @@ def _update_model_config(args: argparse.Namespace, config: Any) -> None:
         config["machine_learning.preprocessing.variance_threshold_grid"] = [
             float(v) for v in args.variance_threshold_grid
         ]
+    if getattr(args, "imputer", None) is not None:
+        config["machine_learning.preprocessing.imputer_strategy"] = str(args.imputer)
+    if getattr(args, "power_transformer_method", None) is not None:
+        config["machine_learning.preprocessing.power_transformer_method"] = str(args.power_transformer_method)
+    if getattr(args, "power_transformer_standardize", None) is not None:
+        config["machine_learning.preprocessing.power_transformer_standardize"] = bool(args.power_transformer_standardize)
+    if getattr(args, "pca_enabled", None) is not None:
+        config["machine_learning.preprocessing.pca.enabled"] = bool(args.pca_enabled)
+    if getattr(args, "pca_n_components", None) is not None:
+        config["machine_learning.preprocessing.pca.n_components"] = float(args.pca_n_components)
+    if getattr(args, "pca_whiten", None) is not None:
+        config["machine_learning.preprocessing.pca.whiten"] = bool(args.pca_whiten)
+    if getattr(args, "pca_svd_solver", None) is not None:
+        config["machine_learning.preprocessing.pca.svd_solver"] = str(args.pca_svd_solver)
+    if getattr(args, "pca_rng_seed", None) is not None:
+        config["machine_learning.preprocessing.pca.random_state"] = int(args.pca_rng_seed)
+    if getattr(args, "svm_kernel", None) is not None:
+        config["machine_learning.models.svm.kernel"] = str(args.svm_kernel)
+    if getattr(args, "svm_c_grid", None) is not None:
+        config["machine_learning.models.svm.C_grid"] = [float(v) for v in args.svm_c_grid]
+    if getattr(args, "svm_gamma_grid", None) is not None:
+        gamma_vals = []
+        for v in args.svm_gamma_grid:
+            try:
+                gamma_vals.append(float(v))
+            except (TypeError, ValueError):
+                gamma_vals.append(str(v))
+        config["machine_learning.models.svm.gamma_grid"] = gamma_vals
+    if getattr(args, "svm_class_weight", None) is not None:
+        config["machine_learning.models.svm.class_weight"] = None if args.svm_class_weight == "none" else args.svm_class_weight
+    if getattr(args, "lr_penalty", None) is not None:
+        config["machine_learning.models.logistic_regression.penalty"] = str(args.lr_penalty)
+    if getattr(args, "lr_c_grid", None) is not None:
+        config["machine_learning.models.logistic_regression.C_grid"] = [float(v) for v in args.lr_c_grid]
+    if getattr(args, "lr_max_iter", None) is not None:
+        config["machine_learning.models.logistic_regression.max_iter"] = int(args.lr_max_iter)
+    if getattr(args, "lr_class_weight", None) is not None:
+        config["machine_learning.models.logistic_regression.class_weight"] = None if args.lr_class_weight == "none" else args.lr_class_weight
+    if getattr(args, "rf_min_samples_split_grid", None) is not None:
+        config["machine_learning.models.random_forest.min_samples_split_grid"] = [int(float(v)) for v in args.rf_min_samples_split_grid]
+    if getattr(args, "rf_min_samples_leaf_grid", None) is not None:
+        config["machine_learning.models.random_forest.min_samples_leaf_grid"] = [int(float(v)) for v in args.rf_min_samples_leaf_grid]
+    if getattr(args, "rf_bootstrap", None) is not None:
+        config["machine_learning.models.random_forest.bootstrap"] = bool(args.rf_bootstrap)
+    if getattr(args, "rf_class_weight", None) is not None:
+        config["machine_learning.models.random_forest.class_weight"] = None if args.rf_class_weight == "none" else args.rf_class_weight
+    if getattr(args, "cnn_filters1", None) is not None:
+        config["machine_learning.models.cnn.temporal_filters"] = int(args.cnn_filters1)
+    if getattr(args, "cnn_filters2", None) is not None:
+        config["machine_learning.models.cnn.pointwise_filters"] = int(args.cnn_filters2)
+    if getattr(args, "cnn_kernel_size1", None) is not None:
+        config["machine_learning.models.cnn.kernel_length"] = int(args.cnn_kernel_size1)
+    if getattr(args, "cnn_kernel_size2", None) is not None:
+        config["machine_learning.models.cnn.separable_kernel_length"] = int(args.cnn_kernel_size2)
+    if getattr(args, "cnn_pool_size", None) is not None:
+        config["machine_learning.models.cnn.pool_size"] = int(args.cnn_pool_size)
+    if getattr(args, "cnn_dense_units", None) is not None:
+        config["machine_learning.models.cnn.dense_units"] = int(args.cnn_dense_units)
+    if getattr(args, "cnn_dropout_conv", None) is not None:
+        config["machine_learning.models.cnn.dropout_conv"] = float(args.cnn_dropout_conv)
+    if getattr(args, "cnn_dropout_dense", None) is not None:
+        config["machine_learning.models.cnn.dropout"] = float(args.cnn_dropout_dense)
+    elif getattr(args, "cnn_dropout_conv", None) is not None:
+        config["machine_learning.models.cnn.dropout"] = float(args.cnn_dropout_conv)
+    if getattr(args, "cnn_batch_size", None) is not None:
+        config["machine_learning.models.cnn.batch_size"] = int(args.cnn_batch_size)
+    if getattr(args, "cnn_epochs", None) is not None:
+        config["machine_learning.models.cnn.max_epochs"] = int(args.cnn_epochs)
+    if getattr(args, "cnn_learning_rate", None) is not None:
+        config["machine_learning.models.cnn.learning_rate"] = float(args.cnn_learning_rate)
+    if getattr(args, "cnn_patience", None) is not None:
+        config["machine_learning.models.cnn.patience"] = int(args.cnn_patience)
+    if getattr(args, "cnn_min_delta", None) is not None:
+        config["machine_learning.models.cnn.min_delta"] = float(args.cnn_min_delta)
+    if getattr(args, "cnn_l2_lambda", None) is not None:
+        config["machine_learning.models.cnn.weight_decay"] = float(args.cnn_l2_lambda)
+    if getattr(args, "cnn_random_seed", None) is not None:
+        config["project.random_state"] = int(args.cnn_random_seed)
+    if getattr(args, "cv_hygiene", None) is not None:
+        config["machine_learning.cv.hygiene_enabled"] = bool(args.cv_hygiene)
+    if getattr(args, "cv_permutation_scheme", None) is not None:
+        config["machine_learning.cv.permutation_scheme"] = str(args.cv_permutation_scheme)
+    if getattr(args, "cv_min_valid_perm_fraction", None) is not None:
+        config["machine_learning.cv.min_valid_permutation_fraction"] = float(args.cv_min_valid_perm_fraction)
+    if getattr(args, "cv_default_n_bins", None) is not None:
+        config["machine_learning.cv.default_n_bins"] = int(args.cv_default_n_bins)
+    if getattr(args, "eval_ci_method", None) is not None:
+        config["machine_learning.evaluation.ci_method"] = str(args.eval_ci_method)
+    if getattr(args, "eval_bootstrap_iterations", None) is not None:
+        config["machine_learning.evaluation.bootstrap_iterations"] = int(args.eval_bootstrap_iterations)
+    if getattr(args, "data_covariates_strict", None) is not None:
+        config["machine_learning.data.covariates_strict"] = bool(args.data_covariates_strict)
+    if getattr(args, "data_max_excluded_subject_fraction", None) is not None:
+        config["machine_learning.data.max_excluded_subject_fraction"] = float(args.data_max_excluded_subject_fraction)
+    if getattr(args, "incremental_baseline_alpha", None) is not None:
+        config["machine_learning.incremental_validity.baseline_alpha"] = float(args.incremental_baseline_alpha)
+    if getattr(args, "interpretability_grouped_outputs", None) is not None:
+        config["machine_learning.interpretability.grouped_outputs"] = bool(args.interpretability_grouped_outputs)
+    if getattr(args, "timegen_min_subjects", None) is not None:
+        config["machine_learning.analysis.time_generalization.min_subjects_per_cell"] = int(args.timegen_min_subjects)
+    if getattr(args, "timegen_min_valid_perm_fraction", None) is not None:
+        config["machine_learning.analysis.time_generalization.min_valid_permutation_fraction"] = float(args.timegen_min_valid_perm_fraction)
+    if getattr(args, "class_min_subjects_for_auc", None) is not None:
+        config["machine_learning.classification.min_subjects_with_auc_for_inference"] = int(args.class_min_subjects_for_auc)
+    if getattr(args, "class_max_failed_fold_fraction", None) is not None:
+        config["machine_learning.classification.max_failed_fold_fraction"] = float(args.class_max_failed_fold_fraction)
+    if getattr(args, "strict_regression_continuous", None) is not None:
+        config["machine_learning.targets.strict_regression_target_continuous"] = bool(args.strict_regression_continuous)
 
 
 def _update_ml_plot_config(args: argparse.Namespace, config: Any) -> None:
