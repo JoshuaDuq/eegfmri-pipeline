@@ -279,7 +279,15 @@ def _compute_permutation_pvalues(
     has_interaction = "feature_x_temperature" in names
 
     for _ in range(n_permutations):
-        perm_idx = permute_within_groups(len(resid_f), rng, groups_f)
+        try:
+            perm_idx = permute_within_groups(
+                len(resid_f),
+                rng,
+                groups_f,
+                strict=True,
+            )
+        except ValueError:
+            return np.nan, np.nan
         y_perm_f = y_hat_f + resid_f[perm_idx]
         beta_p = _ols_fit(X, y_perm_f)
         if beta_p is None:

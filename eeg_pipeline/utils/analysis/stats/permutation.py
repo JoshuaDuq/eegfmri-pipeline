@@ -80,12 +80,13 @@ def permute_within_groups(
     min_group_size: int = 2,
     *,
     scheme: str = "shuffle",
-    strict: bool = False,
+    strict: bool = True,
 ) -> np.ndarray:
     """Generate permutation indices, optionally within groups.
     
-    When any group has fewer than ``min_group_size`` samples, falls back to
-    ungrouped permutation unless ``strict=True``.
+    By default, grouped permutations are strict: if any group has fewer than
+    ``min_group_size`` samples, this function raises. Set ``strict=False`` to
+    permit fallback to ungrouped permutation.
     """
     scheme = str(scheme or "shuffle").strip().lower()
     if scheme not in {"shuffle", "circular_shift"}:
@@ -111,6 +112,7 @@ def permute_within_groups(
                 groups=None,
                 min_group_size=min_group_size,
                 scheme=scheme,
+                strict=False,
             )
         raise ValueError(
             f"Groups {small_groups.tolist()} have fewer than {min_group_size} samples. "
@@ -284,12 +286,16 @@ def perm_pval_simple(
     observed_abs = np.abs(observed_correlation)
     n_extreme = 0
     for _ in range(n_perm):
-        perm_indices = permute_within_groups(
-            n_valid,
-            rng,
-            groups_valid,
-            scheme=scheme,
-        )
+        try:
+            perm_indices = permute_within_groups(
+                n_valid,
+                rng,
+                groups_valid,
+                scheme=scheme,
+                strict=True,
+            )
+        except ValueError:
+            return np.nan
         perm_correlation, _ = compute_correlation(
             x_valid[perm_indices], y_valid, method
         )
@@ -356,12 +362,16 @@ def perm_pval_partial_freedman_lane(
     variance_tolerance = _RESIDUAL_VARIANCE_TOLERANCE_FACTOR * max_variance
     
     for _ in range(n_perm):
-        permuted_indices = permute_within_groups(
-            len(y_residuals),
-            rng,
-            groups_array,
-            scheme=scheme,
-        )
+        try:
+            permuted_indices = permute_within_groups(
+                len(y_residuals),
+                rng,
+                groups_array,
+                scheme=scheme,
+                strict=True,
+            )
+        except ValueError:
+            return np.nan
         y_permuted = y_fitted + y_residuals[permuted_indices]
         
         try:
@@ -546,7 +556,16 @@ def perm_pval_mean_difference(
 
     exceed = 1
     for _ in range(int(n_perm)):
-        idx = permute_within_groups(values.size, rng, groups_use, scheme=scheme)
+        try:
+            idx = permute_within_groups(
+                values.size,
+                rng,
+                groups_use,
+                scheme=scheme,
+                strict=True,
+            )
+        except ValueError:
+            return np.nan
         perm_labels = labels[idx]
         perm_stat = float(np.abs(np.nanmean(values[perm_labels]) - np.nanmean(values[~perm_labels])))
         if np.isfinite(perm_stat) and perm_stat >= observed:

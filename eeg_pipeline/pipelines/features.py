@@ -91,33 +91,43 @@ def _calculate_total_steps(n_ranges: int) -> int:
 def _load_fixed_templates(
     templates_path: Optional[Path],
     logger: Any,
-) -> tuple[Optional[np.ndarray], Optional[List[str]]]:
+) -> tuple[Optional[np.ndarray], Optional[List[str]], Optional[List[str]]]:
     """Load fixed templates from file if path exists."""
     if templates_path is None or not templates_path.exists():
-        return None, None
+        return None, None, None
+
+    def _decode_optional_text_array(values: Optional[np.ndarray]) -> Optional[List[str]]:
+        if values is None:
+            return None
+        decoded: List[str] = []
+        for value in np.asarray(values).tolist():
+            if isinstance(value, (bytes, np.bytes_)):
+                decoded.append(value.decode("utf-8", errors="ignore"))
+            else:
+                decoded.append(str(value))
+        return decoded
 
     try:
         with np.load(templates_path, allow_pickle=False) as data:
             if "templates" not in data:
                 logger.warning("Fixed templates file missing 'templates': %s", templates_path)
-                return None, None
+                return None, None, None
             templates = np.asarray(data["templates"], dtype=float)
             raw_ch_names = data["ch_names"] if "ch_names" in data else None
+            raw_labels = None
+            for label_key in ("labels", "template_labels", "state_labels", "class_labels"):
+                if label_key in data:
+                    raw_labels = data[label_key]
+                    break
     except Exception as exc:
         logger.warning("Failed loading fixed templates from %s: %s", templates_path, exc)
-        return None, None
+        return None, None, None
 
-    ch_names: Optional[List[str]] = None
-    if raw_ch_names is not None:
-        ch_names = []
-        for value in np.asarray(raw_ch_names).tolist():
-            if isinstance(value, (bytes, np.bytes_)):
-                ch_names.append(value.decode("utf-8", errors="ignore"))
-            else:
-                ch_names.append(str(value))
+    ch_names = _decode_optional_text_array(raw_ch_names)
+    labels = _decode_optional_text_array(raw_labels)
 
     logger.info("Loaded fixed templates from %s", templates_path)
-    return templates, ch_names
+    return templates, ch_names, labels
 
 
 def _precompute_tfr_if_needed(
@@ -166,8 +176,26 @@ def _precompute_complex_tfr_if_needed(
         _get_spatial_transform_type,
     )
 
-    phase_family = "itpc" if ("itpc" in feature_categories or "phase" in feature_categories) else "pac"
-    phase_transform = _get_spatial_transform_type(config, feature_family=phase_family)
+    itpc_transform = (
+        _get_spatial_transform_type(config, feature_family="itpc")
+        if needs_itpc
+        else "none"
+    )
+    pac_transform = (
+        _get_spatial_transform_type(config, feature_family="pac")
+        if needs_pac_complex
+        else "none"
+    )
+    if needs_itpc and needs_pac_complex and itpc_transform != pac_transform:
+        logger.warning(
+            "Skipping shared complex TFR precompute: ITPC requires spatial_transform='%s' "
+            "but PAC requires '%s'. Each family will compute its own complex TFR.",
+            itpc_transform,
+            pac_transform,
+        )
+        return None
+
+    phase_transform = itpc_transform if needs_itpc else pac_transform
 
     epochs_for_complex = epochs
     if phase_transform in {"csd", "laplacian"}:
@@ -179,7 +207,13 @@ def _precompute_complex_tfr_if_needed(
         )
 
     logger.info("Pre-computing complex TFR on full epochs for multi-range extraction...")
-    return compute_complex_tfr(epochs_for_complex, config, logger)
+    complex_tfr = compute_complex_tfr(epochs_for_complex, config, logger)
+    if complex_tfr is not None:
+        try:
+            setattr(complex_tfr, "_spatial_transform", str(phase_transform))
+        except Exception:
+            pass
+    return complex_tfr
 
 
 def _precompute_intermediates_if_needed(
@@ -270,7 +304,8 @@ def _build_extra_blocks(unpacked: Dict[str, Any], features: FeatureExtractionRes
     extra_blocks = {
         "itpc": unpacked["itpc_df"],
         "itpc_trial": unpacked["itpc_trial_df"],
-        "pac": unpacked["pac_trials_df"] if unpacked["pac_trials_df"] is not None else unpacked["pac_df"],
+        # Align PAC at the per-trial level when available.
+        "pac_trials": unpacked["pac_trials_df"] if unpacked["pac_trials_df"] is not None else unpacked["pac_df"],
         "pac_time": unpacked["pac_time_df"],
         "complexity": unpacked["comp_df"],
         "spectral": unpacked["spectral_df"],
@@ -299,8 +334,11 @@ def _update_from_aligned_extra(
     """Update unpacked dict and features object with filtered extra blocks."""
     unpacked["itpc_df"] = extra_blocks.get("itpc", unpacked["itpc_df"])
     unpacked["itpc_trial_df"] = extra_blocks.get("itpc_trial", unpacked["itpc_trial_df"])
+    # Backward-compatibility: accept legacy key "pac" if present.
+    aligned_pac_trials = extra_blocks.get("pac_trials", extra_blocks.get("pac"))
+    if aligned_pac_trials is not None:
+        unpacked["pac_trials_df"] = aligned_pac_trials
     unpacked["pac_df"] = extra_blocks.get("pac", unpacked["pac_df"])
-    unpacked["pac_trials_df"] = extra_blocks.get("pac_trials", unpacked["pac_trials_df"])
     unpacked["pac_time_df"] = extra_blocks.get("pac_time", unpacked["pac_time_df"])
     unpacked["comp_df"] = extra_blocks.get("complexity", unpacked["comp_df"])
     unpacked["spectral_df"] = extra_blocks.get("spectral", unpacked["spectral_df"])
@@ -410,7 +448,7 @@ def _save_merged_features(
         "aperiodic": ("features_aperiodic.parquet", ["aperiodic"]),
         "erp": ("features_erp.parquet", ["erp"]),
         "itpc": ("features_itpc.parquet", ["itpc"]),
-        "pac": ("features_pac.parquet", ["pac"]),
+        "pac": ("features_pac_trials.parquet", ["pac"]),
         "complexity": ("features_complexity.parquet", ["complexity"]),
         "bursts": ("features_bursts.parquet", ["bursts"]),
         "spectral": ("features_spectral.parquet", ["spectral"]),
@@ -688,6 +726,11 @@ class FeaturePipeline(PipelineBase):
                 tfr_complex=tfr_complex_full,
                 precomputed=precomputed_full,
                 explicit_windows=explicit_windows,
+                train_mask=kwargs.get("train_mask"),
+                analysis_mode=kwargs.get(
+                    "analysis_mode",
+                    self.config.get("feature_engineering.analysis_mode", "group_stats"),
+                ),
             )
             ctx.progress = progress
             ctx.total_steps = total_steps

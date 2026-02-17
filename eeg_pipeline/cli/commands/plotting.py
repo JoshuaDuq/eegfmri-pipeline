@@ -376,7 +376,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         nargs="+",
         action="append",
         default=None,
-        metavar=("PLOT_ID", "KEY", "VALUE"),
+        metavar="ITEM",
         help=(
             "Per-plot overrides; can be repeated. "
             "Example: --plot-item-config tfr_scalpmean compare_windows true. "

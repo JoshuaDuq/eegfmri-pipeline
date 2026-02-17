@@ -306,6 +306,8 @@ class TestFeatureHelpers(unittest.TestCase):
         )
         epochs = SimpleNamespace(times=np.array([0.0, 0.1]), info={"sfreq": 100.0})
 
+        train_mask = np.array([True, False], dtype=bool)
+
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=features_dir
         ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
@@ -328,7 +330,7 @@ class TestFeatureHelpers(unittest.TestCase):
             "eeg_pipeline.pipelines.features._precompute_intermediates_if_needed", return_value=None
         ), patch(
             "eeg_pipeline.pipelines.features.extract_all_features", return_value=fake_features
-        ), patch(
+        ) as mock_extract, patch(
             "eeg_pipeline.pipelines.features._unpack_feature_results", return_value=unpacked
         ), patch(
             "eeg_pipeline.pipelines.features.align_feature_dataframes",
@@ -347,22 +349,39 @@ class TestFeatureHelpers(unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features._save_extraction_config"
         ):
-            pipeline.process_subject("0001", task="thermalactive", progress=progress, feature_categories=["power"])
+            pipeline.process_subject(
+                "0001",
+                task="thermalactive",
+                progress=progress,
+                feature_categories=["power"],
+                train_mask=train_mask,
+                analysis_mode="trial_ml_safe",
+            )
+        ctx_used = mock_extract.call_args.args[0]
+        np.testing.assert_array_equal(ctx_used.train_mask, train_mask)
+        self.assertEqual(ctx_used.analysis_mode, "trial_ml_safe")
 
     def test_load_fixed_templates(self):
         from eeg_pipeline.pipelines.features import _load_fixed_templates
 
         logger = Mock()
-        t, names = _load_fixed_templates(None, logger)
+        t, names, labels = _load_fixed_templates(None, logger)
         self.assertIsNone(t)
         self.assertIsNone(names)
+        self.assertIsNone(labels)
 
         tmp = Path(tempfile.mkdtemp())
         path = tmp / "templates.npz"
-        np.savez(path, templates=np.array([[1, 2]]), ch_names=np.array(["Cz"]))
-        templates, ch_names = _load_fixed_templates(path, logger)
+        np.savez(
+            path,
+            templates=np.array([[1, 2]]),
+            ch_names=np.array(["Cz"]),
+            labels=np.array(["A"]),
+        )
+        templates, ch_names, loaded_labels = _load_fixed_templates(path, logger)
         self.assertEqual(templates.shape, (1, 2))
         self.assertIsNotNone(ch_names)
+        self.assertEqual(loaded_labels, ["A"])
 
     def test_precompute_tfr_helpers(self):
         from eeg_pipeline.pipelines.features import (
@@ -476,6 +495,47 @@ class TestFeatureHelpers(unittest.TestCase):
         self.assertIn("aperiodic", qc)
         self.assertIn("precomputed_intermediates", qc)
 
+    def test_pac_trials_alignment_round_trip(self):
+        from eeg_pipeline.pipelines.features import _build_extra_blocks, _update_from_aligned_extra
+
+        pac_trials_df = pd.DataFrame({"pac_active_theta_gamma_global_mvl": [0.1, 0.2, 0.3]})
+        unpacked = {
+            "itpc_df": pd.DataFrame(),
+            "itpc_trial_df": pd.DataFrame(),
+            "pac_df": pd.DataFrame({"pac_summary": [1.0, 1.0, 1.0]}),
+            "pac_trials_df": pac_trials_df.copy(),
+            "pac_time_df": pd.DataFrame(),
+            "comp_df": pd.DataFrame(),
+            "spectral_df": pd.DataFrame(),
+            "erp_df": pd.DataFrame(),
+            "bursts_df": pd.DataFrame(),
+            "erds_df": pd.DataFrame(),
+            "dconn_df": pd.DataFrame(),
+            "source_df": pd.DataFrame(),
+            "microstates_df": pd.DataFrame(),
+        }
+        features = SimpleNamespace(
+            ratios_df=pd.DataFrame(),
+            asymmetry_df=pd.DataFrame(),
+            quality_df=pd.DataFrame(),
+            microstates_df=pd.DataFrame(),
+        )
+
+        extra = _build_extra_blocks(unpacked, features)
+        self.assertIn("pac_trials", extra)
+
+        aligned_extra = {
+            key: value.iloc[[0, 2]].reset_index(drop=True)
+            for key, value in extra.items()
+        }
+        _update_from_aligned_extra(unpacked, features, aligned_extra)
+
+        self.assertEqual(len(unpacked["pac_trials_df"]), 2)
+        self.assertEqual(
+            list(unpacked["pac_trials_df"]["pac_active_theta_gamma_global_mvl"]),
+            [0.1, 0.3],
+        )
+
     def test_save_merged_and_extraction_config(self):
         from eeg_pipeline.pipelines.features import _save_merged_features, _save_extraction_config
 
@@ -575,6 +635,37 @@ class TestFeatureGapfill(unittest.TestCase):
         self.assertEqual(out, "CTFR")
         apply_spatial.assert_called_once()
         compute_ctfr.assert_called_once()
+
+    def test_precompute_complex_skips_shared_when_itpc_pac_transforms_differ(self):
+        from eeg_pipeline.pipelines.features import _precompute_complex_tfr_if_needed
+
+        epochs = SimpleNamespace()
+        cfg = DotConfig({"feature_engineering": {"pac": {"source": "raw"}}})
+
+        def _transform_for_family(_config, feature_family=None):
+            if feature_family == "itpc":
+                return "csd"
+            if feature_family == "pac":
+                return "none"
+            return "none"
+
+        with patch(
+            "eeg_pipeline.analysis.features.preparation._get_spatial_transform_type",
+            side_effect=_transform_for_family,
+        ), patch(
+            "eeg_pipeline.pipelines.features.compute_complex_tfr",
+            return_value="CTFR",
+        ) as compute_ctfr:
+            out = _precompute_complex_tfr_if_needed(
+                epochs,
+                [{"name": "a"}, {"name": "b"}],
+                ["itpc", "pac"],
+                cfg,
+                Mock(),
+            )
+
+        self.assertIsNone(out)
+        compute_ctfr.assert_not_called()
 
     def test_precompute_complex_pac_precomputed_returns_none(self):
         from eeg_pipeline.pipelines.features import _precompute_complex_tfr_if_needed

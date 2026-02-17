@@ -372,14 +372,23 @@ def run_pain_sensitivity_correlations(
                     if np.isfinite(r_obs):
                         extreme = 0
                         for _ in range(int(n_perm)):
-                            perm_idx = permute_within_groups(
-                                len(y_v), rng_local, groups_v, scheme=permutation_scheme
-                            )
+                            try:
+                                perm_idx = permute_within_groups(
+                                    len(y_v),
+                                    rng_local,
+                                    groups_v,
+                                    scheme=permutation_scheme,
+                                    strict=True,
+                                )
+                            except ValueError:
+                                p_perm = np.nan
+                                break
                             y_perm = y_v[perm_idx]
                             r_perm, _ = compute_robust_correlation(x_v, y_perm, method=robust_name)
                             if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
                                 extreme += 1
-                        p_perm = float((extreme + 1) / (int(n_perm) + 1))
+                        else:
+                            p_perm = float((extreme + 1) / (int(n_perm) + 1))
                 else:
                     if method_norm == "spearman":
                         r_obs, _ = stats.spearmanr(x_v, y_v)
@@ -388,9 +397,17 @@ def run_pain_sensitivity_correlations(
                     if np.isfinite(r_obs):
                         extreme = 0
                         for _ in range(int(n_perm)):
-                            perm_idx = permute_within_groups(
-                                len(y_v), rng_local, groups_v, scheme=permutation_scheme
-                            )
+                            try:
+                                perm_idx = permute_within_groups(
+                                    len(y_v),
+                                    rng_local,
+                                    groups_v,
+                                    scheme=permutation_scheme,
+                                    strict=True,
+                                )
+                            except ValueError:
+                                p_perm = np.nan
+                                break
                             y_perm = y_v[perm_idx]
                             if method_norm == "spearman":
                                 r_perm, _ = stats.spearmanr(x_v, y_perm)
@@ -398,7 +415,8 @@ def run_pain_sensitivity_correlations(
                                 r_perm, _ = stats.pearsonr(x_v, y_perm)
                             if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
                                 extreme += 1
-                        p_perm = float((extreme + 1) / (int(n_perm) + 1))
+                        else:
+                            p_perm = float((extreme + 1) / (int(n_perm) + 1))
 
         if np.isfinite(r):
             records.append({
@@ -424,12 +442,19 @@ def run_pain_sensitivity_correlations(
         return out
 
     out["p_raw"] = pd.to_numeric(out.get("p_psi", np.nan), errors="coerce")
-    use_perm_primary = p_primary_mode_norm in {"perm", "permutation", "perm_if_available", "permutation_if_available"}
+    perm_required = p_primary_mode_norm in {"perm", "permutation"}
+    perm_if_available = p_primary_mode_norm in {"perm_if_available", "permutation_if_available"}
+    use_perm_primary = perm_required or perm_if_available
     if use_perm_primary and "p_perm" in out.columns:
         p_perm_col = pd.to_numeric(out["p_perm"], errors="coerce")
-        out["p_primary"] = p_perm_col.where(p_perm_col.notna(), out["p_raw"])
-        out["p_kind_primary"] = np.where(p_perm_col.notna(), "p_perm", "p_psi")
-        out["p_primary_source"] = np.where(p_perm_col.notna(), "psi_perm", "psi")
+        if perm_required:
+            out["p_primary"] = p_perm_col.where(p_perm_col.notna(), np.nan)
+            out["p_kind_primary"] = np.where(p_perm_col.notna(), "p_perm", "perm_missing_required")
+            out["p_primary_source"] = np.where(p_perm_col.notna(), "psi_perm", "perm_missing_required")
+        else:
+            out["p_primary"] = p_perm_col.where(p_perm_col.notna(), out["p_raw"])
+            out["p_kind_primary"] = np.where(p_perm_col.notna(), "p_perm", "p_psi")
+            out["p_primary_source"] = np.where(p_perm_col.notna(), "psi_perm", "psi")
     else:
         out["p_primary"] = out["p_raw"]
         out["p_kind_primary"] = "p_psi"

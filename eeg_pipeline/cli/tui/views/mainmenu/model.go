@@ -49,6 +49,7 @@ const (
 	UtilityMergePsychopy
 	UtilityRawToBids
 	UtilityFmriRawToBids
+	UtilityPipelineSmokeTest
 )
 
 var utilities = []utilityItem{
@@ -56,6 +57,7 @@ var utilities = []utilityItem{
 	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files"},
 	{"EEG Raw to BIDS", "Convert raw EEG data to BIDS format"},
 	{"fMRI Raw to BIDS", "Convert raw fMRI DICOM series to BIDS format"},
+	{"Pipeline Smoke Test", "Run quick parser/runtime checks across pipeline commands"},
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -274,6 +276,9 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.SelectedPipeline = int(types.PipelineRawToBIDS)
 		case UtilityFmriRawToBids:
 			m.SelectedPipeline = int(types.PipelineFmriRawToBIDS)
+		case UtilityPipelineSmokeTest:
+			m.SelectedUtility = UtilityPipelineSmokeTest
+			return m, nil
 		}
 	}
 	return m, nil

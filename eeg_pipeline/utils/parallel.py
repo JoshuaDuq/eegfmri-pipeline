@@ -71,6 +71,8 @@ def parallel_condition_effects(
     min_samples: int,
     n_jobs: int = -1,
     *,
+    paired: bool = False,
+    pair_ids: Optional[np.ndarray] = None,
     groups: Optional[np.ndarray] = None,
     n_perm: int = 0,
     base_seed: int = 42,
@@ -90,7 +92,7 @@ def parallel_condition_effects(
     n_features = len(feature_columns)
     
     # Use vectorized batch computation for large feature sets (much faster)
-    if n_features >= _MIN_FEATURES_FOR_BATCH_CONDITION:
+    if n_features >= _MIN_FEATURES_FOR_BATCH_CONDITION and not paired:
         return compute_batch_condition_effects(
             feature_columns=feature_columns,
             features_df=features_df,
@@ -120,6 +122,8 @@ def parallel_condition_effects(
                 pain_mask,
                 nonpain_mask,
                 min_samples,
+                paired=paired,
+                pair_ids=pair_ids,
                 groups=groups,
                 n_perm=n_perm,
                 base_seed=base_seed,
@@ -137,6 +141,8 @@ def parallel_condition_effects(
             pain_mask,
             nonpain_mask,
             min_samples,
+            paired=paired,
+            pair_ids=pair_ids,
             groups=groups,
             n_perm=n_perm,
             base_seed=base_seed,
@@ -215,6 +221,67 @@ def _extract_valid_groups(
         return None
 
 
+def _extract_paired_condition_values(
+    values: np.ndarray,
+    pain_mask: np.ndarray,
+    nonpain_mask: np.ndarray,
+    pair_ids: Optional[np.ndarray],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return matched (pain, non-pain) values per pair id."""
+    if pair_ids is None:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    pair_array = np.asarray(pair_ids)
+    if pair_array.shape[0] != values.shape[0]:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    valid_rows = np.isfinite(values) & (pain_mask | nonpain_mask)
+    if not np.any(valid_rows):
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    frame = pd.DataFrame(
+        {
+            "pair_id": pair_array[valid_rows],
+            "is_pain": pain_mask[valid_rows].astype(bool),
+            "value": values[valid_rows].astype(float, copy=False),
+        }
+    )
+    pivot = frame.groupby(["pair_id", "is_pain"], dropna=True)["value"].mean().unstack()
+    if True not in pivot.columns or False not in pivot.columns:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    paired = pivot[[True, False]].dropna()
+    if paired.empty:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    pain_values = paired[True].to_numpy(dtype=float)
+    nonpain_values = paired[False].to_numpy(dtype=float)
+    return pain_values, nonpain_values
+
+
+def _compute_paired_hedges_g(
+    pain_values: np.ndarray,
+    nonpain_values: np.ndarray,
+) -> float:
+    """Bias-corrected paired standardized mean difference (g_z)."""
+    if pain_values.size != nonpain_values.size or pain_values.size < 2:
+        return np.nan
+
+    diffs = np.asarray(pain_values, dtype=float) - np.asarray(nonpain_values, dtype=float)
+    mean_diff = float(np.mean(diffs))
+    std_diff = float(np.std(diffs, ddof=1))
+    if std_diff < _NUMERIC_TOLERANCE:
+        return 0.0 if abs(mean_diff) < _NUMERIC_TOLERANCE else np.nan
+
+    d_z = mean_diff / std_diff
+    degrees_of_freedom = int(diffs.size - 1)
+    if degrees_of_freedom < 2:
+        return float(d_z)
+
+    correction_factor = 1 - (3.0 / (4.0 * degrees_of_freedom - 1.0))
+    return float(d_z * correction_factor)
+
+
 def _compute_single_condition_effect(
     col: str,
     features_df: pd.DataFrame,
@@ -222,6 +289,8 @@ def _compute_single_condition_effect(
     nonpain_mask: np.ndarray,
     min_samples: int,
     *,
+    paired: bool = False,
+    pair_ids: Optional[np.ndarray] = None,
     groups: Optional[np.ndarray] = None,
     n_perm: int = 0,
     base_seed: int = 42,
@@ -243,25 +312,64 @@ def _compute_single_condition_effect(
         pain_valid = pain_values[np.isfinite(pain_values)]
         nonpain_valid = nonpain_values[np.isfinite(nonpain_values)]
         min_required = max(int(min_samples), 2)
-        if pain_valid.size < min_required or nonpain_valid.size < min_required:
-            return None
+        n_pairs = np.nan
 
-        mean_pain = float(np.mean(pain_valid))
-        mean_nonpain = float(np.mean(nonpain_valid))
-        std_pain = float(np.std(pain_valid, ddof=1))
-        std_nonpain = float(np.std(nonpain_valid, ddof=1))
+        if paired:
+            pain_matched, nonpain_matched = _extract_paired_condition_values(
+                values,
+                pain_mask,
+                nonpain_mask,
+                pair_ids,
+            )
+            if pain_matched.size < min_required or nonpain_matched.size < min_required:
+                return None
 
-        hedges_g_value = hedges_g(pain_valid, nonpain_valid)
+            n_pairs = int(min(pain_matched.size, nonpain_matched.size))
+            mean_pain = float(np.mean(pain_matched))
+            mean_nonpain = float(np.mean(nonpain_matched))
+            std_pain = float(np.std(pain_matched, ddof=1))
+            std_nonpain = float(np.std(nonpain_matched, ddof=1))
 
-        has_zero_variance = std_pain < _NUMERIC_TOLERANCE and std_nonpain < _NUMERIC_TOLERANCE
-        has_zero_mean_difference = abs(mean_pain - mean_nonpain) < _NUMERIC_TOLERANCE
+            hedges_g_value = _compute_paired_hedges_g(pain_matched, nonpain_matched)
 
-        if has_zero_variance and has_zero_mean_difference:
-            t_statistic = 0.0
-            p_value = 1.0
-            hedges_g_value = 0.0
+            diff_values = pain_matched - nonpain_matched
+            has_zero_diff_variance = float(np.std(diff_values, ddof=1)) < _NUMERIC_TOLERANCE
+            has_zero_mean_difference = abs(float(np.mean(diff_values))) < _NUMERIC_TOLERANCE
+
+            if has_zero_diff_variance and has_zero_mean_difference:
+                t_statistic = 0.0
+                p_value = 1.0
+                hedges_g_value = 0.0
+            else:
+                t_statistic, p_value = _compute_ttest_statistics(
+                    pain_matched,
+                    nonpain_matched,
+                    paired=True,
+                )
+            n_pain_out = int(n_pairs)
+            n_nonpain_out = int(n_pairs)
         else:
-            t_statistic, p_value = _compute_ttest_statistics(pain_valid, nonpain_valid)
+            if pain_valid.size < min_required or nonpain_valid.size < min_required:
+                return None
+
+            mean_pain = float(np.mean(pain_valid))
+            mean_nonpain = float(np.mean(nonpain_valid))
+            std_pain = float(np.std(pain_valid, ddof=1))
+            std_nonpain = float(np.std(nonpain_valid, ddof=1))
+
+            hedges_g_value = hedges_g(pain_valid, nonpain_valid)
+
+            has_zero_variance = std_pain < _NUMERIC_TOLERANCE and std_nonpain < _NUMERIC_TOLERANCE
+            has_zero_mean_difference = abs(mean_pain - mean_nonpain) < _NUMERIC_TOLERANCE
+
+            if has_zero_variance and has_zero_mean_difference:
+                t_statistic = 0.0
+                p_value = 1.0
+                hedges_g_value = 0.0
+            else:
+                t_statistic, p_value = _compute_ttest_statistics(pain_valid, nonpain_valid)
+            n_pain_out = len(pain_valid)
+            n_nonpain_out = len(nonpain_valid)
 
         p_permutation = np.nan
         if n_perm > 0:
@@ -303,8 +411,10 @@ def _compute_single_condition_effect(
         "p_raw": float(p_value),
         "p_perm": float(p_permutation) if np.isfinite(p_permutation) else np.nan,
         "n_permutations": n_perm if n_perm > 0 else 0,
-        "n_pain": len(pain_valid),
-        "n_nonpain": len(nonpain_valid),
+        "n_pain": int(n_pain_out),
+        "n_nonpain": int(n_nonpain_out),
+        "n_pairs": int(n_pairs) if np.isfinite(n_pairs) else np.nan,
+        "paired_test": bool(paired),
     }
 
 

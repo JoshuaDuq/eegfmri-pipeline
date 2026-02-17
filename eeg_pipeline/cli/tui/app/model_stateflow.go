@@ -12,6 +12,7 @@ import (
 	"github.com/eeg-pipeline/tui/views/globalsetup"
 	"github.com/eeg-pipeline/tui/views/history"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
+	"github.com/eeg-pipeline/tui/views/pipelinesmoke"
 	"github.com/eeg-pipeline/tui/views/quickactions"
 	"github.com/eeg-pipeline/tui/views/wizard"
 
@@ -26,6 +27,8 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMainMenuUpdate(msg)
 	case StatePipelineWizard:
 		return m.handleWizardUpdate(msg)
+	case StatePipelineSmoke:
+		return m.handlePipelineSmokeUpdate(msg)
 	case StateGlobalSetup:
 		return m.handleGlobalSetupUpdate(msg)
 	case StateExecution:
@@ -52,6 +55,10 @@ func (m Model) handleMainMenuUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.mainMenu.SelectedPipeline >= 0 {
 		return m.handlePipelineSelected()
+	}
+
+	if m.mainMenu.SelectedUtility == mainmenu.UtilityPipelineSmokeTest {
+		return m.handlePipelineSmokeSelected()
 	}
 
 	if m.mainMenu.SelectedUtility == mainmenu.UtilityGlobalSetup {
@@ -163,6 +170,36 @@ func (m Model) handleGlobalSetupSelected() (tea.Model, tea.Cmd) {
 		m.global.Init(),
 		executor.LoadConfigKeys(m.repoRoot, globalsetup.DefaultConfigKeys()),
 	)
+}
+
+func (m Model) handlePipelineSmokeSelected() (tea.Model, tea.Cmd) {
+	m.mainMenu.SelectedUtility = -1
+	m.pipelineSmoke = pipelinesmoke.New(m.task)
+	m.pushState(StatePipelineSmoke)
+	return m, tea.Batch(
+		m.pipelineSmoke.Init(),
+		func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+	)
+}
+
+func (m Model) handlePipelineSmokeUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var updated tea.Model
+	var cmd tea.Cmd
+	updated, cmd = m.pipelineSmoke.Update(msg)
+	m.pipelineSmoke = updated.(pipelinesmoke.Model)
+
+	if m.pipelineSmoke.Done {
+		if m.pipelineSmoke.Cancelled {
+			m.pipelineSmoke.Reset()
+			return m.popState()
+		}
+
+		command := m.pipelineSmoke.RunCommand
+		m.pipelineSmoke.Reset()
+		return m.startExecution(command)
+	}
+
+	return m, cmd
 }
 
 func (m Model) handleWizardUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -333,6 +370,8 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 			return m.popState()
 		}
 		return m, nil
+	case StatePipelineSmoke:
+		return m.popState()
 	case StateDashboard, StateHistory:
 		return m.popState()
 	default:

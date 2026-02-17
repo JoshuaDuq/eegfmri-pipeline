@@ -825,6 +825,7 @@ behavior_analysis:
     prefer_pain_residual: true
     use_crossfit_pain_residual: false
     primary_unit: "trial"            # "trial" | "run_mean"
+    min_runs: 5                      # Minimum run count when primary_unit="run_mean"
     p_primary_mode: "perm_if_available"  # "asymptotic" | "perm_if_available"
     permutation:
       enabled: true

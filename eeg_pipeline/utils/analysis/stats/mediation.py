@@ -440,12 +440,16 @@ def _single_permutation_mediation(
 
     rng = np.random.default_rng(perm_seed)
     groups_arr = np.asarray(groups) if groups is not None else None
-    shuffle_indices = permute_within_groups(
-        len(mediator),
-        rng,
-        groups_arr,
-        scheme=scheme,
-    )
+    try:
+        shuffle_indices = permute_within_groups(
+            len(mediator),
+            rng,
+            groups_arr,
+            scheme=scheme,
+            strict=True,
+        )
+    except ValueError:
+        return np.nan
     m_shuffled = mediator[shuffle_indices]
     
     result = compute_mediation_paths(independent_var, m_shuffled, dependent_var)

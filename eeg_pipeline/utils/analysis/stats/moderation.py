@@ -416,12 +416,16 @@ def _single_permutation_moderation(
 
     rng = np.random.default_rng(perm_seed)
     groups_arr = np.asarray(groups) if groups is not None else None
-    shuffle_indices = permute_within_groups(
-        len(Y),
-        rng,
-        groups_arr,
-        scheme=scheme,
-    )
+    try:
+        shuffle_indices = permute_within_groups(
+            len(Y),
+            rng,
+            groups_arr,
+            scheme=scheme,
+            strict=True,
+        )
+    except ValueError:
+        return np.nan
     Y_shuffled = Y[shuffle_indices]
     
     result = compute_moderation_effect(X, W, Y_shuffled, center_predictors)

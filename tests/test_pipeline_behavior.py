@@ -106,6 +106,30 @@ class TestBehaviorDeep(unittest.TestCase):
             self.assertGreater(summary["n_sig_fdr"], 0)
             self.assertEqual(summary["n_clusters"], 2)
 
+        def test_behavior_summary_controlled_counts_use_primary_pvalues(self):
+            from eeg_pipeline.pipelines.behavior import BehaviorPipelineResults
+
+            res = BehaviorPipelineResults(
+                subject="0001",
+                mediation=pd.DataFrame(
+                    {
+                        "sobel_p": [0.01],
+                        "p_primary": [0.30],
+                        "q_global": [0.40],
+                    }
+                ),
+                moderation=pd.DataFrame(
+                    {
+                        "p_interaction": [0.01],
+                        "p_primary": [0.40],
+                        "q_global": [0.60],
+                    }
+                ),
+            )
+            summary = res.to_summary()
+            self.assertEqual(summary["n_sig_raw"], 2)
+            self.assertEqual(summary["n_sig_controlled"], 0)
+
         def test_behavior_process_subject_failure_path(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 

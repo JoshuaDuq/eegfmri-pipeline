@@ -6,6 +6,7 @@ import numpy as np
 
 from eeg_pipeline.analysis.features.phase import (
     _compute_pac_surrogates,
+    _rng_from_seed,
     _resolve_pac_surrogate_context,
 )
 
@@ -110,6 +111,13 @@ class TestPacSurrogates(unittest.TestCase):
         self.assertEqual(method, "trial_shuffle")
         self.assertIsNotNone(donor_idx)
         np.testing.assert_array_equal(donor_idx, np.array([0, 2], dtype=int))
+
+    def test_seed_zero_is_deterministic(self):
+        rng_a = _rng_from_seed(0)
+        rng_b = _rng_from_seed(0)
+        seq_a = rng_a.integers(0, 10_000, size=16)
+        seq_b = rng_b.integers(0, 10_000, size=16)
+        np.testing.assert_array_equal(seq_a, seq_b)
 
 
 if __name__ == "__main__":

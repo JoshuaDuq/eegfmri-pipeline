@@ -762,7 +762,7 @@ def save_all_features(
         (erp_df, erp_cols, "features_erp", "ERP/LEP features"),
         (itpc_df, itpc_cols, "features_itpc", "ITPC features (channel x band x segment)"),
         (pac_df, None, "features_pac", "PAC comodulograms"),
-        (pac_trials_df, None, "features_pac", "PAC per-trial values"),
+        (pac_trials_df, None, "features_pac_trials", "PAC per-trial values"),
         (pac_time_df, None, "features_pac_time", "PAC time-resolved values"),
         (comp_df, comp_cols, "features_complexity", "complexity features"),
         (bursts_df, bursts_cols, "features_bursts", "burst features"),

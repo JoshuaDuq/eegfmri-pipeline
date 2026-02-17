@@ -22,6 +22,9 @@ from eeg_pipeline.utils.config.loader import get_config_value, get_config_float,
 from eeg_pipeline.infra.paths import ensure_dir
 
 
+UNIFIED_FDR_FAMILY_COLUMNS = ["feature_type", "band", "target", "analysis_kind"]
+
+
 def _also_save_csv_from_config(config: Any) -> bool:
     return bool(get_config_value(config, "behavior_analysis.output.also_save_csv", False))
 
@@ -1996,6 +1999,7 @@ def _compute_single_effect_size(
     robust_method: Optional[str],
     method_label: str,
     min_samples: int,
+    run_min_samples: int,
     want_raw: bool,
     want_partial_cov: bool,
     want_partial_temp: bool,
@@ -2086,7 +2090,7 @@ def _compute_single_effect_size(
             run_means["x"].to_numpy(dtype=float),
             run_means["y"].to_numpy(dtype=float),
             method,
-            min_samples=3,
+            min_samples=max(int(run_min_samples), 3),
             robust_method=None,
         )
         rec.update(
@@ -2122,6 +2126,11 @@ def stage_correlate_effect_sizes(
     robust_method = getattr(config, "robust_method", None)
     method_label = getattr(config, "method_label", "")
     min_samples = int(getattr(config, "min_samples", 10))
+    run_min_samples = get_config_int(
+        ctx.config,
+        "behavior_analysis.correlations.min_runs",
+        max(int(min_samples), 3),
+    )
 
     correlation_types = get_config_value(
         ctx.config,
@@ -2184,6 +2193,7 @@ def stage_correlate_effect_sizes(
                 robust_method=robust_method,
                 method_label=method_label,
                 min_samples=min_samples,
+                run_min_samples=run_min_samples,
                 want_raw=want_raw,
                 want_partial_cov=want_partial_cov,
                 want_partial_temp=want_partial_temp,
@@ -2207,6 +2217,7 @@ def stage_correlate_effect_sizes(
                 robust_method=robust_method,
                 method_label=method_label,
                 min_samples=min_samples,
+                run_min_samples=run_min_samples,
                 want_raw=want_raw,
                 want_partial_cov=want_partial_cov,
                 want_partial_temp=want_partial_temp,
@@ -2281,12 +2292,23 @@ def _compute_single_pvalue(
             else:
                 extreme = 0
                 for _ in range(int(n_perm)):
-                    perm_idx = permute_within_groups(len(y_v), rng, groups_v, scheme=perm_scheme)
+                    try:
+                        perm_idx = permute_within_groups(
+                            len(y_v),
+                            rng,
+                            groups_v,
+                            scheme=perm_scheme,
+                            strict=True,
+                        )
+                    except ValueError:
+                        p_perm_raw = np.nan
+                        break
                     y_perm = y_v[perm_idx]
                     r_perm, _ = compute_robust_correlation(x_v, y_perm, method=str(robust_method).strip().lower())
                     if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
                         extreme += 1
-                p_perm_raw = float((extreme + 1) / (int(n_perm) + 1))
+                else:
+                    p_perm_raw = float((extreme + 1) / (int(n_perm) + 1))
 
         result.update({
             "n_permutations": int(n_perm),
@@ -2457,6 +2479,12 @@ def stage_correlate_primary_selection(
             p_primary = rec.get("p_raw", np.nan)
             r_primary = rec.get("r_raw", np.nan)
             src = "raw_robust"
+            if p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}:
+                p_perm_raw = rec.get("p_perm_raw", np.nan)
+                if pd.notna(p_perm_raw):
+                    p_kind = "p_perm_raw"
+                    p_primary = p_perm_raw
+                    src = "raw_robust_perm"
         elif use_run_unit:
             # Never downgrade run-level inference to trial-level p-values.
             p_kind = "p_run_mean"
@@ -2528,44 +2556,61 @@ def _compute_unified_fdr(
 
     Results are cached for downstream stages.
     """
-    from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+    from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh, hierarchical_fdr
 
     if df.empty or p_col not in df.columns:
         return df
 
     df = df.copy()
     fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
-    hierarchical_fdr = get_config_bool(ctx.config, "behavior_analysis.statistics.hierarchical_fdr", True)
+    use_hierarchical_fdr = get_config_bool(ctx.config, "behavior_analysis.statistics.hierarchical_fdr", True)
 
     # Determine family columns (filter to only those that exist in df)
     if family_cols is None:
         family_cols = ["feature_type", "band", "target", "analysis_kind"]
     family_cols = [col for col in family_cols if col in df.columns]
 
-    # Convert p-values to numeric
-    p_vals = pd.to_numeric(df[p_col], errors="coerce").to_numpy()
-
-    # Global FDR (across all tests)
-    df["q_global"] = fdr_bh(p_vals, alpha=fdr_alpha, config=ctx.config)
-
     # Hierarchical/within-family FDR
-    if hierarchical_fdr and family_cols:
+    if use_hierarchical_fdr and family_cols:
         df["fdr_family"] = df[family_cols].astype(str).agg("_".join, axis=1)
-        df["p_fdr"] = np.nan
+        df = hierarchical_fdr(
+            df,
+            p_col=p_col,
+            family_col="fdr_family",
+            alpha=fdr_alpha,
+            config=ctx.config,
+        )
+
+        q_within = pd.to_numeric(
+            df.get("q_within_family", pd.Series(np.nan, index=df.index)),
+            errors="coerce",
+        )
+        gate_pass = (
+            df.get("family_reject_gate", pd.Series(True, index=df.index))
+            .fillna(False)
+            .astype(bool)
+        )
+        # Backward-compatible primary corrected column: gated within-family q-values.
+        # Non-gated families are set to 1.0 so legacy p_fdr<alpha checks remain valid.
+        df["p_fdr"] = np.where(gate_pass.to_numpy(), q_within.to_numpy(), 1.0)
 
         family_stats = []
         for family_id, family_group in df.groupby("fdr_family"):
-            family_p_vals = pd.to_numeric(family_group[p_col], errors="coerce").to_numpy()
-            family_p_fdr = fdr_bh(family_p_vals, alpha=fdr_alpha, config=ctx.config)
-            df.loc[family_group.index, "p_fdr"] = family_p_fdr
-
+            fam_reject = family_group.get("reject_within_family", pd.Series(False, index=family_group.index))
+            fam_gate = family_group.get("family_reject_gate", pd.Series(False, index=family_group.index))
             family_stats.append({
                 "family": family_id,
-                "n_tests": len(family_p_vals),
-                "n_significant": int((family_p_fdr < fdr_alpha).sum()),
+                "n_tests": int(len(family_group)),
+                "n_significant": int(pd.Series(fam_reject).fillna(False).astype(bool).sum()),
+                "gate_rejected": bool(pd.Series(fam_gate).fillna(False).astype(bool).iloc[0]),
             })
 
         # Store in context and cache
+        reject_within = df.get("reject_within_family", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+        q_global = pd.to_numeric(
+            df.get("q_global", pd.Series(np.nan, index=df.index)),
+            errors="coerce",
+        )
         fdr_metadata = {
             "family_columns": family_cols,
             "n_families": len(family_stats),
@@ -2573,8 +2618,8 @@ def _compute_unified_fdr(
             "hierarchical": True,
             "analysis_type": analysis_type,
             "n_total_tests": len(df),
-            "n_sig_global": int((df["q_global"] < fdr_alpha).sum()),
-            "n_sig_within": int((df["p_fdr"] < fdr_alpha).sum()),
+            "n_sig_global": int((q_global < fdr_alpha).sum()),
+            "n_sig_within": int(reject_within.sum()),
         }
         ctx.data_qc["fdr_family_structure"] = fdr_metadata
 
@@ -2586,13 +2631,16 @@ def _compute_unified_fdr(
         }
         _cache.set_fdr_results(cached_fdr)
 
-        n_sig_total = int((df["p_fdr"] < fdr_alpha).sum())
+        n_sig_total = int(reject_within.sum())
         ctx.logger.info(
             "Unified FDR [%s]: %d/%d significant within families, %d/%d globally (alpha=%.2f)",
             analysis_type, n_sig_total, len(df), fdr_metadata["n_sig_global"], len(df), fdr_alpha
         )
     else:
+        # Convert p-values to numeric
+        p_vals = pd.to_numeric(df[p_col], errors="coerce").to_numpy()
         # Flat FDR (no family structure)
+        df["q_global"] = fdr_bh(p_vals, alpha=fdr_alpha, config=ctx.config)
         df["p_fdr"] = df["q_global"]
         df["fdr_family"] = "all"
 
@@ -2666,7 +2714,7 @@ def stage_correlate_fdr(
         config,
         corr_df,
         p_col="p_primary",
-        family_cols=["feature_type", "band", "target", "analysis_kind"],
+        family_cols=UNIFIED_FDR_FAMILY_COLUMNS,
         analysis_type="correlations",
     )
 
@@ -2752,6 +2800,11 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         get_config_value(ctx.config, "behavior_analysis.pain_sensitivity.p_primary_mode", "perm_if_available")
         or "perm_if_available"
     ).strip().lower()
+    if (not allow_iid_trials) and p_primary_mode in {"perm_if_available", "permutation_if_available"}:
+        ctx.logger.info(
+            "Pain sensitivity: forcing p_primary_mode='perm' under non-i.i.d mode (allow_iid_trials=false)."
+        )
+        p_primary_mode = "perm"
     run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
     perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
     if use_run_unit and run_col not in df_trials.columns:
@@ -2853,7 +2906,7 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
                 config,
                 psi_df,
                 p_col="p_primary",
-                family_cols=["feature_type", "band", "analysis_kind"],
+                family_cols=UNIFIED_FDR_FAMILY_COLUMNS,
                 analysis_type="pain_sensitivity",
             )
 
@@ -4173,6 +4226,8 @@ def stage_condition_column(
             n_jobs=config.n_jobs,
             config=ctx.config,
             groups=groups,
+            paired=bool(use_run_unit),
+            pair_ids=df_trials[run_col].to_numpy() if bool(use_run_unit and run_col in df_trials.columns) else None,
         )
 
         if column_df is not None and not column_df.empty:
@@ -4197,7 +4252,7 @@ def stage_condition_column(
                 config,
                 column_df,
                 p_col="p_primary",
-                family_cols=["feature_type", "analysis_kind"],
+                family_cols=UNIFIED_FDR_FAMILY_COLUMNS,
                 analysis_type="condition_column",
             )
 
@@ -4498,6 +4553,8 @@ def stage_condition_multigroup(
         fdr_alpha=config.fdr_alpha,
         logger=ctx.logger,
         config=ctx.config,
+        paired=bool(use_run_unit),
+        pair_ids=df_trials[run_col].to_numpy() if bool(use_run_unit and run_col in df_trials.columns) else None,
     )
     
     if multigroup_df is not None and not multigroup_df.empty:
@@ -4762,7 +4819,7 @@ def _run_window_comparison(
         ctx.config,
         df,
         p_col="p_primary",
-        family_cols=["feature_type", "analysis_kind"],
+        family_cols=UNIFIED_FDR_FAMILY_COLUMNS,
         analysis_type="condition_window",
     )
 
@@ -4785,6 +4842,67 @@ def stage_temporal_tfr(ctx: BehaviorContext) -> Optional[Dict[str, Any]]:
     return compute_time_frequency_from_context(ctx)
 
 
+def _normalize_temporal_feature_name(name: str) -> Optional[str]:
+    key = str(name).strip().lower()
+    alias_map = {
+        "power": "power",
+        "spectral": "power",
+        "temporal": "power",
+        "time_frequency": "power",
+        "timefrequency": "power",
+        "itpc": "itpc",
+        "erds": "erds",
+    }
+    return alias_map.get(key, None)
+
+
+def _resolve_temporal_feature_selection(
+    ctx: BehaviorContext,
+    selected_features: Optional[List[str]] = None,
+) -> List[str]:
+    """Resolve effective temporal features from config toggles and user filters."""
+    default_cfg = {"power": True, "itpc": False, "erds": False}
+    cfg_raw = get_config_value(ctx.config, "behavior_analysis.temporal.features", {}) or {}
+    cfg_enabled: Dict[str, bool] = {
+        feature: bool((cfg_raw or {}).get(feature, default_value))
+        for feature, default_value in default_cfg.items()
+    }
+
+    raw_filters: List[str] = []
+    if selected_features is not None:
+        raw_filters.extend([str(x) for x in selected_features if str(x).strip()])
+    else:
+        if ctx.selected_feature_files:
+            raw_filters.extend([str(x) for x in ctx.selected_feature_files if str(x).strip()])
+        if ctx.feature_categories:
+            raw_filters.extend([str(x) for x in ctx.feature_categories if str(x).strip()])
+        if ctx.computation_features and "temporal" in ctx.computation_features:
+            raw_filters.extend(
+                [str(x) for x in (ctx.computation_features.get("temporal") or []) if str(x).strip()]
+            )
+
+    explicit_filter = False
+    requested: set[str] = set()
+    for item in raw_filters:
+        item_norm = str(item).strip().lower()
+        if not item_norm:
+            continue
+        if item_norm == "all":
+            explicit_filter = True
+            requested.update(default_cfg.keys())
+            continue
+        normalized = _normalize_temporal_feature_name(item_norm)
+        if normalized is not None:
+            explicit_filter = True
+            requested.add(normalized)
+
+    if not explicit_filter:
+        requested = set(default_cfg.keys())
+
+    enabled = [feat for feat in ["power", "itpc", "erds"] if cfg_enabled.get(feat, False) and feat in requested]
+    return enabled
+
+
 def stage_temporal_stats(
     ctx: BehaviorContext,
     selected_features: Optional[List[str]] = None,
@@ -4804,18 +4922,19 @@ def stage_temporal_stats(
     from eeg_pipeline.infra.paths import ensure_dir
     from statsmodels.stats.multitest import multipletests
 
-    if selected_features is None:
-        selected_features = ctx.selected_feature_files or ctx.feature_categories
-    if not selected_features:
-        selected_features = ["power", "itpc", "erds"]
-        ctx.logger.info(f"No feature files specified, defaulting to: {selected_features}")
+    selected_temporal_features = _resolve_temporal_feature_selection(ctx, selected_features)
     
     # Family-wise correction settings
     correction_method = str(get_config_value(
         ctx.config, "behavior_analysis.temporal.correction_method", "fdr"
     )).strip().lower()
     fdr_alpha = get_config_float(ctx.config, "behavior_analysis.statistics.fdr_alpha", 0.05)
-    ctx.logger.info(f"Temporal: using {correction_method} correction (alpha={fdr_alpha})")
+    ctx.logger.info(
+        "Temporal: using %s correction (alpha=%.3f), features=%s",
+        correction_method,
+        fdr_alpha,
+        selected_temporal_features if selected_temporal_features else [],
+    )
 
     results: Dict[str, Optional[Dict[str, Any]]] = {
         "power": None,
@@ -4823,10 +4942,19 @@ def stage_temporal_stats(
         "erds": None,
     }
 
-    ctx.logger.info("Computing temporal correlations by condition...")
-    results["power"] = compute_temporal_from_context(ctx)
+    if not selected_temporal_features:
+        ctx.logger.warning(
+            "Temporal: no enabled features after applying temporal feature toggles and selection filters; skipping."
+        )
+        return results
 
-    if "itpc" in selected_features:
+    if "power" in selected_temporal_features:
+        ctx.logger.info("Computing temporal correlations by condition...")
+        results["power"] = compute_temporal_from_context(ctx)
+    else:
+        ctx.logger.info("Temporal: skipping power feature by configuration/filter.")
+
+    if "itpc" in selected_temporal_features:
         ctx.logger.info("Computing ITPC temporal correlations...")
         itpc_results = compute_itpc_temporal_from_context(ctx)
         results["itpc"] = itpc_results
@@ -4836,7 +4964,7 @@ def stage_temporal_stats(
                 f"{itpc_results.get('n_sig_raw', 0)} significant"
             )
 
-    if "erds" in selected_features:
+    if "erds" in selected_temporal_features:
         from eeg_pipeline.utils.analysis.stats.temporal import compute_erds_temporal_from_context
         ctx.logger.info("Computing ERDS temporal correlations...")
         erds_results = compute_erds_temporal_from_context(ctx)
@@ -4865,6 +4993,7 @@ def stage_temporal_stats(
         
         if "p_raw" in df_temporal.columns:
             p_vals = pd.to_numeric(df_temporal["p_raw"], errors="coerce").fillna(1.0).to_numpy()
+            effective_correction_method = correction_method
             
             if correction_method == "fdr":
                 reject, p_corrected, _, _ = multipletests(p_vals, alpha=fdr_alpha, method="fdr_bh")
@@ -4896,6 +5025,7 @@ def stage_temporal_stats(
                     ctx.logger.warning(
                         "Temporal: cluster correction requested but no p_cluster column present; falling back to FDR."
                     )
+                    effective_correction_method = "fdr"
                     reject, p_corrected, _, _ = multipletests(p_vals, alpha=fdr_alpha, method="fdr_bh")
                     df_temporal["p_fdr"] = p_corrected
                     df_temporal["sig_fdr"] = reject
@@ -4907,7 +5037,8 @@ def stage_temporal_stats(
                 df_temporal["sig_raw"] = p_vals < fdr_alpha
                 df_temporal["p_primary"] = df_temporal["p_raw"]
             
-            df_temporal["correction_method"] = correction_method
+            df_temporal["correction_method_requested"] = correction_method
+            df_temporal["correction_method"] = effective_correction_method
         
         # Save combined temporal correlations using consistent naming (like regular correlations)
         combined_path = out_dir / f"temporal_correlations{method_suffix}.parquet"
@@ -5109,7 +5240,7 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         config,
         med_df,
         p_col="p_primary",
-        family_cols=["feature_type", "analysis_kind"],
+        family_cols=UNIFIED_FDR_FAMILY_COLUMNS,
         analysis_type="mediation",
     )
     med_df["significant_mediation"] = pd.to_numeric(med_df.get("p_fdr", np.nan), errors="coerce") < float(
@@ -5385,7 +5516,10 @@ def run_group_level_mixed_effects(
         config=config,
     )
     
-    n_sig = int((results_df["q_within_family"] < fdr_alpha).sum()) if "q_within_family" in results_df.columns else 0
+    if "reject_within_family" in results_df.columns:
+        n_sig = int(results_df["reject_within_family"].fillna(False).astype(bool).sum())
+    else:
+        n_sig = int((results_df["q_within_family"] < fdr_alpha).sum()) if "q_within_family" in results_df.columns else 0
     
     logger.info("Mixed-effects: %d features tested, %d significant (hierarchical FDR)", len(results_df), n_sig)
     
@@ -5474,97 +5608,153 @@ def run_group_level_correlations(
             break
     
     feature_cols = [c for c in combined.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
-    rating = pd.to_numeric(combined["rating"], errors="coerce").to_numpy()
-    subject_all = combined["subject_id"].astype(str).to_numpy()
-    
+    rating = pd.to_numeric(combined["rating"], errors="coerce").to_numpy(dtype=float)
+    subject_all = combined["subject_id"].astype(str).to_numpy(dtype=object)
+    block_all = combined[block_col].to_numpy() if block_col is not None else None
+
+    unique_subjects = np.unique(subject_all)
+    subject_indices = {subj: np.where(subject_all == subj)[0] for subj in unique_subjects}
+
+    def _aggregate_subject_rs(r_values: List[float]) -> float:
+        arr = np.asarray(r_values, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            return np.nan
+        clipped = np.clip(arr, -0.999999, 0.999999)
+        z_vals = np.arctanh(clipped)
+        return float(np.tanh(np.nanmean(z_vals)))
+
     records: List[Dict[str, Any]] = []
     rng = np.random.default_rng(42)
-    
+
     for feat in feature_cols:
         feat_type = _cache.get_feature_type(str(feat), config)
         family_id = f"corr_{feat_type}"
-        
-        feature_vals = pd.to_numeric(combined[feat], errors="coerce").to_numpy()
-        valid_mask = np.isfinite(rating) & np.isfinite(feature_vals)
-        
-        if valid_mask.sum() < 10:
+
+        feature_vals = pd.to_numeric(combined[feat], errors="coerce").to_numpy(dtype=float)
+        if int((np.isfinite(feature_vals) & np.isfinite(rating)).sum()) < 10:
             continue
 
-        feature_valid = feature_vals[valid_mask]
-        rating_valid = rating[valid_mask]
-        subjects_valid = subject_all[valid_mask]
-        block_valid = combined[block_col].to_numpy()[valid_mask] if block_col is not None else None
+        subject_payloads: List[Dict[str, Any]] = []
+        for subj in unique_subjects:
+            idx = subject_indices[subj]
+            x_sub = feature_vals[idx]
+            y_sub = rating[idx]
+            valid = np.isfinite(x_sub) & np.isfinite(y_sub)
+            if int(valid.sum()) < 3:
+                continue
 
-        subject_counts = pd.Series(subjects_valid).value_counts()
-        eligible = pd.Series(subjects_valid).map(subject_counts).to_numpy() >= 2
-        if int(eligible.sum()) < 10:
+            x_valid = x_sub[valid]
+            y_valid = y_sub[valid]
+            x_ws = x_valid - float(np.nanmean(x_valid))
+            y_ws = y_valid - float(np.nanmean(y_valid))
+
+            finite_ws = np.isfinite(x_ws) & np.isfinite(y_ws)
+            if int(finite_ws.sum()) < 3:
+                continue
+
+            x_ws = x_ws[finite_ws]
+            y_ws = y_ws[finite_ws]
+            if int(len(x_ws)) < 3 or float(np.nanstd(x_ws)) <= CONSTANT_VARIANCE_THRESHOLD:
+                continue
+            if float(np.nanstd(y_ws)) <= CONSTANT_VARIANCE_THRESHOLD:
+                continue
+
+            r_sub, _ = compute_correlation(x_ws, y_ws, method="spearman")
+            if not np.isfinite(r_sub):
+                continue
+
+            block_sub = None
+            can_block_permute = False
+            if block_all is not None:
+                block_sub_full = block_all[idx][valid]
+                block_sub = np.asarray(block_sub_full, dtype=object)[finite_ws]
+                if use_block_permutation and block_sub.size > 0:
+                    _, counts = np.unique(block_sub, return_counts=True)
+                    can_block_permute = bool(np.all(counts >= 2))
+
+            subject_payloads.append(
+                {
+                    "subject": subj,
+                    "x_ws": x_ws,
+                    "y_ws": y_ws,
+                    "r_obs": float(r_sub),
+                    "n_obs": int(len(x_ws)),
+                    "block_sub": block_sub,
+                    "can_block_permute": can_block_permute,
+                }
+            )
+
+        if len(subject_payloads) < 2:
             continue
-        feature_valid = feature_valid[eligible]
-        rating_valid = rating_valid[eligible]
-        subjects_valid = subjects_valid[eligible]
-        if block_valid is not None:
-            block_valid = block_valid[eligible]
 
-        feature_ws = feature_valid - pd.Series(feature_valid).groupby(pd.Series(subjects_valid)).transform("mean").to_numpy()
-        rating_ws = rating_valid - pd.Series(rating_valid).groupby(pd.Series(subjects_valid)).transform("mean").to_numpy()
-        finite_ws = np.isfinite(feature_ws) & np.isfinite(rating_ws)
-        if int(finite_ws.sum()) < 10:
-            continue
-        feature_ws = feature_ws[finite_ws]
-        rating_ws = rating_ws[finite_ws]
-        subjects_valid = subjects_valid[finite_ws]
-        if block_valid is not None:
-            block_valid = block_valid[finite_ws]
-
-        r_obs, _ = compute_correlation(
-            feature_ws,
-            rating_ws,
-            method="spearman",
-        )
-        
+        r_obs = _aggregate_subject_rs([float(p["r_obs"]) for p in subject_payloads])
         if not np.isfinite(r_obs):
             continue
 
-        if use_block_permutation and block_col is not None and block_valid is not None:
-            block_groups = np.array([f"{subj}::{blk}" for subj, blk in zip(subjects_valid, block_valid)], dtype=object)
-            _, block_counts = np.unique(block_groups, return_counts=True)
-            if np.all(block_counts >= 2):
-                perm_groups = block_groups
+        n_block_ready = int(sum(1 for p in subject_payloads if p.get("can_block_permute", False)))
+        if use_block_permutation and block_col is not None:
+            if n_block_ready == len(subject_payloads):
                 perm_method = "subject_block_restricted"
+            elif n_block_ready > 0:
+                perm_method = "subject_block_restricted_partial"
             else:
-                perm_groups = subjects_valid
                 perm_method = "subject_restricted_fallback"
         else:
-            perm_groups = subjects_valid
             perm_method = "subject_restricted"
 
-        null_rs = []
+        null_rs: List[float] = []
+        fallback_used = False
         if int(n_perm) > 0:
             for _ in range(int(n_perm)):
-                perm_idx = permute_within_groups(
-                    len(rating_ws),
-                    rng,
-                    perm_groups,
-                    scheme="shuffle",
-                )
-                rating_perm = rating_ws[perm_idx]
-                r_perm, _ = compute_correlation(feature_ws, rating_perm, method="spearman")
+                perm_subject_rs: List[float] = []
+                for payload in subject_payloads:
+                    y_ws = np.asarray(payload["y_ws"], dtype=float)
+                    x_ws = np.asarray(payload["x_ws"], dtype=float)
+
+                    if payload.get("can_block_permute", False) and payload.get("block_sub") is not None:
+                        try:
+                            perm_idx = permute_within_groups(
+                                len(y_ws),
+                                rng,
+                                np.asarray(payload["block_sub"], dtype=object),
+                                scheme="shuffle",
+                                strict=True,
+                            )
+                        except ValueError:
+                            perm_idx = rng.permutation(len(y_ws))
+                            fallback_used = True
+                    else:
+                        perm_idx = rng.permutation(len(y_ws))
+
+                    y_perm = y_ws[perm_idx]
+                    r_perm_sub, _ = compute_correlation(x_ws, y_perm, method="spearman")
+                    if np.isfinite(r_perm_sub):
+                        perm_subject_rs.append(float(r_perm_sub))
+
+                if len(perm_subject_rs) < 2:
+                    continue
+                r_perm = _aggregate_subject_rs(perm_subject_rs)
                 if np.isfinite(r_perm):
-                    null_rs.append(r_perm)
+                    null_rs.append(float(r_perm))
+
+        if fallback_used and perm_method.startswith("subject_block_restricted"):
+            perm_method = f"{perm_method}_fallback"
+
         p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (len(null_rs) + 1) if null_rs else np.nan
-        
+
         records.append({
             "feature": str(feat),
             "feature_type": feat_type,
             "family_id": family_id,
             "family_kind": "feature_type",
-            "r": r_obs,
-            "n": int(len(feature_ws)),
-            "n_subjects": int(pd.Series(subjects_valid).nunique()),
-            "estimator": "within_subject_centered_spearman",
+            "r": float(r_obs),
+            "n": int(sum(int(p["n_obs"]) for p in subject_payloads)),
+            "n_subjects": int(len(subject_payloads)),
+            "estimator": "subject_balanced_within_subject_centered_spearman",
             "p_perm": p_perm,
             "permutation_method": perm_method,
-            "n_perm": n_perm,
+            "n_perm": int(n_perm),
         })
     
     if not records:
@@ -5860,7 +6050,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             config,
             mod_df,
             p_col="p_primary",
-            family_cols=["feature_type", "analysis_kind"],
+            family_cols=UNIFIED_FDR_FAMILY_COLUMNS,
             analysis_type="moderation",
         )
         if "p_fdr" in mod_df.columns:

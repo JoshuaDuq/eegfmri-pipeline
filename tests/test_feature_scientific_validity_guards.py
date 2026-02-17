@@ -536,6 +536,81 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertTrue(df.empty)
         self.assertEqual(cols, [])
 
+    def test_pac_precomputed_uses_precomputed_frequency_bands_when_config_bands_missing(self):
+        n_epochs, n_ch, n_times = 4, 2, 300
+        sfreq = 100.0
+        times = np.arange(n_times, dtype=float) / sfreq
+        mask = np.ones((n_times,), dtype=bool)
+        windows = TimeWindows(
+            masks={"active": mask},
+            ranges={"active": (float(times[0]), float(times[-1]))},
+            times=times,
+            name="active",
+        )
+
+        rng = np.random.default_rng(17)
+        phase = rng.uniform(-np.pi, np.pi, size=(n_epochs, n_ch, n_times))
+        analytic = np.exp(1j * phase)
+        power = 1.0 + rng.random((n_epochs, n_ch, n_times))
+        filtered = np.real(analytic)
+
+        theta = BandData(
+            band="theta",
+            fmin=4.0,
+            fmax=8.0,
+            filtered=filtered.copy(),
+            analytic=analytic.copy(),
+            envelope=np.sqrt(power),
+            phase=phase.copy(),
+            power=power.copy(),
+        )
+        gamma = BandData(
+            band="gamma",
+            fmin=30.0,
+            fmax=80.0,
+            filtered=filtered.copy(),
+            analytic=analytic.copy(),
+            envelope=np.sqrt(power),
+            phase=phase.copy(),
+            power=power.copy(),
+        )
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "analysis_mode": "group_stats",
+                    "pac": {
+                        "method": "mvl",
+                        "pairs": [["theta", "gamma"]],
+                        "n_surrogates": 0,
+                        "min_segment_sec": 1.0,
+                        "min_cycles_at_fmin": 3.0,
+                        "allow_harmonic_overlap": True,
+                    },
+                    "spatial_modes": ["global"],
+                }
+            }
+        )
+        precomputed = PrecomputedData(
+            data=np.zeros((n_epochs, n_ch, n_times), dtype=float),
+            times=times,
+            sfreq=sfreq,
+            ch_names=["C1", "C2"],
+            picks=np.arange(n_ch),
+            windows=windows,
+            band_data={"theta": theta, "gamma": gamma},
+            config=cfg,
+            logger=logging.getLogger("pac-precomputed-bands"),
+            spatial_modes=["global"],
+            frequency_bands={"theta": [4.0, 8.0], "gamma": [30.0, 80.0]},
+        )
+
+        df, cols = extract_pac_from_precomputed(precomputed, cfg)
+
+        self.assertFalse(df.empty)
+        self.assertTrue(cols)
+        self.assertIn("pac_active_theta_gamma_global_val", df.columns)
+
 
 if __name__ == "__main__":
     unittest.main()

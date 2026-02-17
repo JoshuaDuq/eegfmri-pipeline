@@ -1179,7 +1179,12 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--microstates-min-duration-ms", type=float, default=None, help="Minimum state duration in ms for temporal smoothing")
     parser.add_argument("--microstates-gfp-peak-prominence", type=float, default=None, help="Optional GFP peak prominence threshold")
     parser.add_argument("--microstates-random-state", type=int, default=None, help="Random seed for microstate template fitting")
-    parser.add_argument("--fixed-templates-path", type=str, default=None, help="Optional .npz file with fixed microstate templates ('templates' and optional 'ch_names')")
+    parser.add_argument(
+        "--fixed-templates-path",
+        type=str,
+        default=None,
+        help="Optional .npz file with fixed microstate templates ('templates' and optional 'ch_names'/'labels')",
+    )
 
     # ERDS
     parser.add_argument("--erds-use-log-ratio", action="store_true", default=None, help="Use dB (log ratio) instead of percent for ERDS")

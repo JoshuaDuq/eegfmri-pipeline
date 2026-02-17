@@ -12,6 +12,7 @@ import (
 	"github.com/eeg-pipeline/tui/views/globalsetup"
 	"github.com/eeg-pipeline/tui/views/history"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
+	"github.com/eeg-pipeline/tui/views/pipelinesmoke"
 	"github.com/eeg-pipeline/tui/views/quickactions"
 	"github.com/eeg-pipeline/tui/views/wizard"
 
@@ -31,6 +32,7 @@ type AppState int
 const (
 	StateMainMenu AppState = iota
 	StatePipelineWizard
+	StatePipelineSmoke
 	StateExecution
 	StateGlobalSetup
 	StateDashboard
@@ -85,13 +87,14 @@ type Model struct {
 	navStack []AppState
 
 	// Sub-models
-	mainMenu     mainmenu.Model
-	wizard       wizard.Model
-	execution    execution.Model
-	global       globalsetup.Model
-	dashboard    dashboard.Model
-	historyMdl   history.Model
-	quickActions quickactions.Model
+	mainMenu      mainmenu.Model
+	wizard        wizard.Model
+	pipelineSmoke pipelinesmoke.Model
+	execution     execution.Model
+	global        globalsetup.Model
+	dashboard     dashboard.Model
+	historyMdl    history.Model
+	quickActions  quickactions.Model
 
 	// Execution tracking for history
 	execStartTime time.Time
@@ -121,6 +124,7 @@ func New() Model {
 		state:         StateMainMenu,
 		navStack:      []AppState{},
 		mainMenu:      mainmenu.New(),
+		pipelineSmoke: pipelinesmoke.New("thermalactive"),
 		task:          "thermalactive",
 		repoRoot:      repoRoot,
 		subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
@@ -305,6 +309,9 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) {
 	newWizard, _ := m.wizard.Update(msg)
 	m.wizard = newWizard.(wizard.Model)
 
+	newPipelineSmoke, _ := m.pipelineSmoke.Update(msg)
+	m.pipelineSmoke = newPipelineSmoke.(pipelinesmoke.Model)
+
 	newExec, _ := m.execution.Update(msg)
 	m.execution = newExec.(execution.Model)
 
@@ -333,6 +340,8 @@ func (m Model) View() string {
 		content = m.mainMenu.View()
 	case StatePipelineWizard:
 		content = m.wizard.View()
+	case StatePipelineSmoke:
+		content = m.pipelineSmoke.View()
 	case StateGlobalSetup:
 		content = m.global.View()
 	case StateExecution:

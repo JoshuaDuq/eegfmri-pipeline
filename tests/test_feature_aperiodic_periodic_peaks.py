@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import logging
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 
-from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_from_precomputed
+from eeg_pipeline.analysis.features.aperiodic import (
+    extract_aperiodic_features,
+    extract_aperiodic_from_precomputed,
+)
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.types import PrecomputedData, TimeWindows
 from tests.pipelines_test_utils import DotConfig
@@ -165,6 +170,83 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
         self.assertTrue(cols)
         self.assertTrue(seen_masks)
         np.testing.assert_array_equal(seen_masks[0], precomputed.train_mask)
+
+    def test_extract_aperiodic_features_uses_aligned_event_condition_labels(self):
+        n_epochs = 3
+        n_times = 400
+        times = np.linspace(0.0, 2.0, n_times, endpoint=False)
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "constants": {"min_epochs_for_features": 2},
+                    "aperiodic": {"min_segment_sec": 1.0},
+                }
+            }
+        )
+        captured = {"labels": None}
+
+        def _fake_extract_segment(
+            _epochs,
+            _picks,
+            _ch_names,
+            _seg_name,
+            _tmin,
+            _tmax,
+            _bands,
+            _config,
+            _logger,
+            spatial_modes=None,
+            frequency_bands_override=None,
+            condition_labels=None,
+            train_mask=None,
+            analysis_mode=None,
+        ):
+            del (
+                spatial_modes,
+                frequency_bands_override,
+                train_mask,
+                analysis_mode,
+            )
+            captured["labels"] = None if condition_labels is None else np.asarray(condition_labels).copy()
+            return {
+                "aperiodic_active_alpha_global_slope": np.zeros(n_epochs, dtype=float),
+                "__qc__": {"slopes": [0.0], "offsets": [0.0], "r2": [1.0]},
+            }
+
+        ctx = SimpleNamespace(
+            epochs=SimpleNamespace(info={"sfreq": 200.0}, times=times),
+            logger=logging.getLogger("test-aperiodic-condition-labels"),
+            config=cfg,
+            windows=SimpleNamespace(),
+            name="active",
+            aligned_events=pd.DataFrame({"condition": ["pain", "warm", "pain"]}),
+            spatial_modes=["global"],
+            frequency_bands=None,
+            train_mask=None,
+            analysis_mode="group_stats",
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.features.aperiodic.validate_extractor_inputs",
+            return_value=(True, None),
+        ), patch(
+            "eeg_pipeline.analysis.features.aperiodic.pick_eeg_channels",
+            return_value=(np.array([0], dtype=int), ["Cz"]),
+        ), patch(
+            "eeg_pipeline.analysis.features.aperiodic._rebuild_window_masks",
+            return_value=({"active": np.ones(times.shape[0], dtype=bool)}, None),
+        ), patch(
+            "eeg_pipeline.analysis.features.aperiodic._extract_aperiodic_for_segment",
+            side_effect=_fake_extract_segment,
+        ):
+            df, cols, _qc = extract_aperiodic_features(ctx, bands=["alpha"])
+
+        self.assertFalse(df.empty)
+        self.assertTrue(cols)
+        np.testing.assert_array_equal(
+            captured["labels"],
+            np.asarray(["pain", "warm", "pain"], dtype=object),
+        )
 
 
 if __name__ == "__main__":

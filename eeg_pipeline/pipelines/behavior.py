@@ -308,11 +308,13 @@ class BehaviorPipelineResults:
             summary["n_pain_sensitivity_features"] = len(df)
             
             p_psi = _extract_p_value_column(df, ["p_psi"], ["p_value"])
+            p_primary = _extract_p_value_column(df, ["p_primary"], [])
             p_fdr = _extract_p_value_column(df, ["q_global"], ["q_value"])
             
             n_sig_psi_raw = _count_significant(p_psi)
             n_sig_raw += n_sig_psi_raw
             summary["n_sig_psi_raw"] = n_sig_psi_raw
+            n_sig_controlled += _count_significant(p_primary)
             n_sig_fdr += _count_significant(p_fdr)
 
         if self.condition_effects is not None and not self.condition_effects.empty:
@@ -320,10 +322,12 @@ class BehaviorPipelineResults:
             n_total += len(df)
             summary["n_condition_effects"] = len(df)
             
-            p_raw = _extract_p_value_column(df, ["p_value"], ["p"])
+            p_raw = _extract_p_value_column(df, ["p_raw", "p_value"], ["p"])
+            p_primary = _extract_p_value_column(df, ["p_primary"], [])
             p_fdr = _extract_p_value_column(df, ["q_global"], ["q_value"])
             
             n_sig_raw += _count_significant(p_raw)
+            n_sig_controlled += _count_significant(p_primary)
             n_sig_fdr += _count_significant(p_fdr)
 
         if self.regression is not None and not self.regression.empty:
@@ -331,12 +335,16 @@ class BehaviorPipelineResults:
             n_total += len(df)
             summary["n_regression_features"] = len(df)
             
-            p_raw = _extract_p_value_column(df, ["p_primary"], ["p_feature"])
+            p_raw = _extract_p_value_column(df, ["p_raw", "p_feature"], [])
+            p_primary = _extract_p_value_column(df, ["p_primary"], ["p_feature"])
             p_fdr = _extract_p_value_column(df, ["q_global"], ["p_fdr"])
             
             if p_raw is not None:
                 p_raw_numeric = pd.to_numeric(p_raw, errors="coerce")
                 n_sig_raw += _count_significant(p_raw_numeric)
+            if p_primary is not None:
+                p_primary_numeric = pd.to_numeric(p_primary, errors="coerce")
+                n_sig_controlled += _count_significant(p_primary_numeric)
             if p_fdr is not None:
                 p_fdr_numeric = pd.to_numeric(p_fdr, errors="coerce")
                 n_sig_fdr += _count_significant(p_fdr_numeric)
@@ -350,9 +358,11 @@ class BehaviorPipelineResults:
             summary["n_mediation_mediators"] = len(df)
             
             p_raw = _extract_p_value_column(df, ["sobel_p"], ["p_value"])
+            p_primary = _extract_p_value_column(df, ["p_primary"], [])
             p_fdr = _extract_p_value_column(df, ["q_global"], [])
             
             n_sig_raw += _count_significant(p_raw)
+            n_sig_controlled += _count_significant(p_primary)
             n_sig_fdr += _count_significant(p_fdr)
 
         if self.moderation is not None and not self.moderation.empty:
@@ -361,9 +371,11 @@ class BehaviorPipelineResults:
             summary["n_moderation_features"] = len(df)
             
             p_raw = _extract_p_value_column(df, ["p_interaction"], ["p_value"])
+            p_primary = _extract_p_value_column(df, ["p_primary"], [])
             p_fdr = _extract_p_value_column(df, ["q_global"], ["p_fdr"])
             
             n_sig_raw += _count_significant(p_raw)
+            n_sig_controlled += _count_significant(p_primary)
             if p_fdr is not None:
                 p_fdr_numeric = pd.to_numeric(p_fdr, errors="coerce")
                 n_sig_fdr += _count_significant(p_fdr_numeric)
@@ -374,9 +386,11 @@ class BehaviorPipelineResults:
             summary["n_mixed_effects_features"] = len(df)
             
             p_raw = _extract_p_value_column(df, ["fixed_p"], ["p_value"])
+            p_primary = _extract_p_value_column(df, ["p_primary"], ["fixed_p"])
             p_fdr = _extract_p_value_column(df, ["q_global"], ["fixed_p_fdr"])
             
             n_sig_raw += _count_significant(p_raw)
+            n_sig_controlled += _count_significant(p_primary)
             n_sig_fdr += _count_significant(p_fdr)
 
         if self.tf is not None:
@@ -697,8 +711,12 @@ class BehaviorPipeline(PipelineBase):
             self.logger.info("Mixed-effects: %d significant features", n_sig)
         
         if result.multilevel_correlations is not None and not result.multilevel_correlations.empty:
-            q_values = result.multilevel_correlations.get("q_within_family", pd.Series([1.0]))
-            n_sig = (q_values < SIGNIFICANCE_THRESHOLD).sum()
+            reject = result.multilevel_correlations.get("reject_within_family")
+            if reject is not None:
+                n_sig = int(pd.Series(reject).fillna(False).astype(bool).sum())
+            else:
+                q_values = result.multilevel_correlations.get("q_within_family", pd.Series([1.0]))
+                n_sig = int((pd.to_numeric(q_values, errors="coerce") < SIGNIFICANCE_THRESHOLD).sum())
             self.logger.info("Multilevel correlations: %d significant", n_sig)
         
         self.logger.info("Group-level results saved to: %s", output_dir)

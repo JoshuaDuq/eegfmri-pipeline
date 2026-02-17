@@ -1605,6 +1605,34 @@ def _extract_aperiodic_for_segment(
 
 
 # Public API functions
+def _resolve_condition_labels_from_context(ctx: Any, n_epochs: int) -> Optional[np.ndarray]:
+    """Resolve condition labels from context fields aligned to the epochs axis."""
+    labels = getattr(ctx, "condition_labels", None)
+    if labels is not None:
+        labels_arr = np.asarray(labels)
+        if labels_arr.shape[0] == n_epochs:
+            return labels_arr
+
+    aligned_events = getattr(ctx, "aligned_events", None)
+    if isinstance(aligned_events, pd.DataFrame):
+        for candidate in ("condition", "trial_type"):
+            if candidate in aligned_events.columns:
+                labels_arr = aligned_events[candidate].to_numpy()
+                if labels_arr.shape[0] == n_epochs:
+                    return labels_arr
+                if getattr(ctx, "logger", None):
+                    ctx.logger.warning(
+                        "Aperiodic: skipping condition-wise evoked subtraction labels from '%s' "
+                        "because aligned_events length (%d) != n_epochs (%d).",
+                        candidate,
+                        int(labels_arr.shape[0]),
+                        int(n_epochs),
+                    )
+                break
+
+    return None
+
+
 def extract_aperiodic_features(
     ctx: Any,
     bands: List[str],
@@ -1626,7 +1654,9 @@ def extract_aperiodic_features(
     freq_bands_override = getattr(ctx, "frequency_bands", None)
     sfreq = epochs.info["sfreq"]
     times = epochs.times
+    n_epochs = int(len(epochs))
     min_samples = int(sfreq)
+    condition_labels = _resolve_condition_labels_from_context(ctx, n_epochs)
     
     # Scientific validity: aperiodic fits are unstable on short segments
     aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
@@ -1675,7 +1705,7 @@ def extract_aperiodic_features(
             t_seg[0], t_seg[-1], bands, config, logger,
             spatial_modes=spatial_modes,
             frequency_bands_override=freq_bands_override,
-            condition_labels=getattr(ctx, "condition_labels", None),
+            condition_labels=condition_labels,
             train_mask=getattr(ctx, "train_mask", None),
             analysis_mode=getattr(ctx, "analysis_mode", None),
         )

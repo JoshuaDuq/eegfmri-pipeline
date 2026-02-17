@@ -73,6 +73,38 @@ def _nonnegative_float_or_default(value: Any, default: float) -> float:
     return float(out)
 
 
+def _rng_from_seed(seed: Any) -> np.random.Generator:
+    """Create RNG from seed while keeping `0` as a valid deterministic seed."""
+    if seed is None:
+        return np.random.default_rng()
+    if isinstance(seed, str) and seed.strip() == "":
+        return np.random.default_rng()
+    try:
+        parsed_seed = int(seed)
+    except (TypeError, ValueError):
+        return np.random.default_rng()
+    return np.random.default_rng(parsed_seed)
+
+
+def _normalize_frequency_bands(frequency_bands: Any) -> Dict[str, List[float]]:
+    """Normalize frequency band mapping to `{name: [fmin, fmax]}`."""
+    if not isinstance(frequency_bands, dict):
+        return {}
+
+    normalized: Dict[str, List[float]] = {}
+    for band_name, band_range in frequency_bands.items():
+        if not isinstance(band_range, (list, tuple)) or len(band_range) < 2:
+            continue
+        try:
+            fmin = float(band_range[0])
+            fmax = float(band_range[1])
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(fmin) and np.isfinite(fmax) and fmax > fmin:
+            normalized[str(band_name)] = [fmin, fmax]
+    return normalized
+
+
 def _segment_duration_seconds(mask: np.ndarray, sfreq_hz: float) -> float:
     """Compute segment duration in seconds from a boolean mask."""
     if mask is None:
@@ -1574,6 +1606,7 @@ def compute_pac_comodulograms(
     spatial_modes: Optional[List[str]] = None,
     analysis_mode: Optional[str] = None,
     train_mask: Optional[np.ndarray] = None,
+    frequency_bands: Optional[Dict[str, List[float]]] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """
     Compute Phase-Amplitude Coupling (PAC) using Mean Vector Length (MVL).
@@ -1646,13 +1679,16 @@ def compute_pac_comodulograms(
     
     normalize = bool(pac_cfg.get("normalize", True))
     epsilon = float(_safe_config_get(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
-    
-    seed = pac_cfg.get("random_seed", None)
-    rng = np.random.default_rng(None if seed in (None, "", 0) else int(seed))
+
+    rng = _rng_from_seed(pac_cfg.get("random_seed", None))
     
     ch_names = _get_channel_names_from_tfr(tfr_complex, n_ch, logger)
-    
-    tf_bands = _safe_config_get(config, "time_frequency_analysis.bands", {})
+
+    tf_bands = _normalize_frequency_bands(frequency_bands)
+    if not tf_bands:
+        tf_bands = _normalize_frequency_bands(
+            _safe_config_get(config, "time_frequency_analysis.bands", {})
+        )
     requested_pairs = pac_cfg.get("pairs")
     pairs = _parse_requested_pac_pairs(requested_pairs)
     
@@ -2042,8 +2078,7 @@ def extract_pac_from_precomputed(
     min_segment_sec = _nonnegative_float_or_default(pac_cfg.get("min_segment_sec", 1.0), 1.0)
     min_cycles_at_fmin = _positive_float_or_default(pac_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
     eps_amp = float(_safe_config_get(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
-    seed = pac_cfg.get("random_seed", None)
-    rng = np.random.default_rng(None if seed in (None, "", 0) else int(seed))
+    rng = _rng_from_seed(pac_cfg.get("random_seed", None))
     allow_harmonic_overlap = bool(pac_cfg.get("allow_harmonic_overlap", False))
     max_harm = int(pac_cfg.get("max_harmonic", 6))
     tol_hz = float(pac_cfg.get("harmonic_tolerance_hz", 1.0))
@@ -2053,8 +2088,23 @@ def extract_pac_from_precomputed(
     if spatial_modes is None:
         spatial_modes = _safe_config_get(config, "feature_engineering.spatial_modes", ["roi", "global"])
     
-    # Standard bands for pair lookup
-    tf_bands = _safe_config_get(config, "time_frequency_analysis.bands", {})
+    # Prefer resolved/runtime bands from precomputed intermediates (e.g., IAF-adjusted).
+    tf_bands = _normalize_frequency_bands(getattr(precomputed, "frequency_bands", None))
+    if not tf_bands:
+        tf_bands = _normalize_frequency_bands(
+            _safe_config_get(config, "time_frequency_analysis.bands", {})
+        )
+    if not tf_bands:
+        derived_bands: Dict[str, List[float]] = {}
+        for band_name, band_data in (getattr(precomputed, "band_data", {}) or {}).items():
+            try:
+                fmin = float(getattr(band_data, "fmin", np.nan))
+                fmax = float(getattr(band_data, "fmax", np.nan))
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(fmin) and np.isfinite(fmax) and fmax > fmin:
+                derived_bands[str(band_name)] = [fmin, fmax]
+        tf_bands = derived_bands
     
     ch_names = precomputed.ch_names
     n_ch = len(ch_names)  # Required for surrogate and waveform QC loops

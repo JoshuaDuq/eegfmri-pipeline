@@ -33,7 +33,7 @@ STANDARD_FEATURE_FILES = {
     "directedconnectivity": "features_directedconnectivity.parquet",
     "sourcelocalization": "features_sourcelocalization.parquet",
     "itpc": "features_itpc.parquet",
-    "pac": "features_pac.parquet",
+    "pac": "features_pac_trials.parquet",
     # Exploratory & QC
     "complexity": "features_complexity.parquet",
     "bursts": "features_bursts.parquet",

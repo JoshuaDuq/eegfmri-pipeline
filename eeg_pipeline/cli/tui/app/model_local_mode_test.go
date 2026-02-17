@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/types"
+	"github.com/eeg-pipeline/tui/views/mainmenu"
 	"github.com/eeg-pipeline/tui/views/wizard"
 )
 
@@ -64,5 +65,25 @@ func TestHandleConfigKeysLoaded_ReappliesPersistedWizardConfig(t *testing.T) {
 
 	if got := m.wizard.ExportConfig()["fmriFmriprepImage"]; got != "persisted/image:latest" {
 		t.Fatalf("expected persisted config to win after config hydration, got %v", got)
+	}
+}
+
+func TestHandlePipelineSmokeUtilityOpensSelector(t *testing.T) {
+	m := New()
+	m.state = StateMainMenu
+	m.task = "thermalactive"
+	m.mainMenu.SelectedUtility = mainmenu.UtilityPipelineSmokeTest
+
+	next, cmd := m.handleMainMenuUpdate(tea.KeyMsg{})
+	if cmd == nil {
+		t.Fatalf("expected selector init command")
+	}
+
+	updated, ok := next.(Model)
+	if !ok {
+		t.Fatalf("expected Model, got %T", next)
+	}
+	if updated.state != StatePipelineSmoke {
+		t.Fatalf("expected state %v, got %v", StatePipelineSmoke, updated.state)
 	}
 }

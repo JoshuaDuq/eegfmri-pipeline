@@ -446,7 +446,11 @@ def align_feature_dataframes(
 
         combined_mask &= _create_finite_mask(pow_df, n_trials)
         combined_mask &= _create_finite_mask(baseline_df, n_trials)
+        combined_mask &= _create_finite_mask(conn_df, n_trials)
         combined_mask &= _create_finite_mask(aper_df, n_trials)
+        if extra_blocks:
+            for block_df in extra_blocks.values():
+                combined_mask &= _create_finite_mask(block_df, n_trials)
         combined_mask &= _create_finite_mask(y, n_trials)
 
         drop_mask = combined_mask if not np.all(combined_mask) else None
@@ -457,6 +461,16 @@ def align_feature_dataframes(
         conn_df = _apply_drop_mask(conn_df, drop_mask, "connectivity", logger)
         aper_df = _apply_drop_mask(aper_df, drop_mask, "aperiodic", logger)
         y = _apply_drop_mask(y, drop_mask, "target", logger)
+        if extra_blocks:
+            masked_extra_blocks: Dict[str, Optional[pd.DataFrame]] = {}
+            for block_name, block_df in extra_blocks.items():
+                masked_block = _apply_drop_mask(
+                    block_df, drop_mask, f"extra:{block_name}", logger
+                )
+                if isinstance(masked_block, pd.Series):
+                    masked_block = masked_block.to_frame()
+                masked_extra_blocks[block_name] = masked_block
+            extra_blocks = masked_extra_blocks
 
     block_registry: Dict[str, pd.DataFrame] = {}
     before_lengths: Dict[str, int] = {}

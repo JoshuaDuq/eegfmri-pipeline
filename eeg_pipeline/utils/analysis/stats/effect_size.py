@@ -389,12 +389,20 @@ def _compute_batch_permutation_pvalues(
         from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
 
         valid_groups = groups[valid_indices] if groups is not None else None
-        perm_indices = permute_within_groups(
-            n_valid,
-            rng,
-            valid_groups,
-            scheme=scheme,
-        )
+        try:
+            perm_indices = permute_within_groups(
+                n_valid,
+                rng,
+                valid_groups,
+                scheme=scheme,
+                strict=True,
+            )
+        except ValueError:
+            if logger:
+                logger.warning(
+                    "Condition permutation: grouped permutation invalid after masking; returning NaN permutation p-values."
+                )
+            return np.full(n_features, np.nan)
         perm_labels = valid_labels[perm_indices]
         
         # Compute permuted statistic
@@ -549,27 +557,37 @@ def split_by_condition(
     return _split_by_pain_binary(condition_series, condition_column, logger)
 
 
-def _compute_p_primary_column(
+def _compute_p_primary_columns(
     df: pd.DataFrame,
     p_primary_mode: str,
-) -> pd.Series:
-    """Compute p_primary column based on mode and available p-values."""
+) -> Tuple[pd.Series, pd.Series]:
+    """Compute p_primary and p_primary_source columns."""
     if "p_raw" not in df.columns:
         df["p_raw"] = pd.to_numeric(df.get("p_value", np.nan), errors="coerce")
-    
-    use_permutation = p_primary_mode in {
-        "perm",
-        "permutation",
-        "perm_if_available",
-        "permutation_if_available",
-    }
-    
-    if use_permutation and "p_perm" in df.columns:
+
+    p_raw = pd.to_numeric(df["p_raw"], errors="coerce")
+    mode = str(p_primary_mode or "").strip().lower()
+
+    if mode in {"perm", "permutation"}:
+        if "p_perm" in df.columns:
+            p_permutation = pd.to_numeric(df["p_perm"], errors="coerce")
+            return (
+                p_permutation.where(p_permutation.notna(), np.nan),
+                pd.Series(np.where(p_permutation.notna(), "perm", "perm_missing_required"), index=df.index),
+            )
+        return (
+            pd.Series(np.nan, index=df.index, dtype=float),
+            pd.Series("perm_missing_required", index=df.index),
+        )
+
+    if "p_perm" in df.columns and mode in {"perm_if_available", "permutation_if_available"}:
         p_permutation = pd.to_numeric(df["p_perm"], errors="coerce")
-        p_raw = pd.to_numeric(df["p_raw"], errors="coerce")
-        return p_permutation.where(p_permutation.notna(), p_raw)
-    
-    return pd.to_numeric(df["p_raw"], errors="coerce")
+        return (
+            p_permutation.where(p_permutation.notna(), p_raw),
+            pd.Series(np.where(p_permutation.notna(), "perm", "asymptotic"), index=df.index),
+        )
+
+    return p_raw, pd.Series("asymptotic", index=df.index)
 
 
 def compute_condition_effects(
@@ -582,6 +600,8 @@ def compute_condition_effects(
     n_jobs: int = -1,
     config: Optional[Any] = None,
     groups: Optional[np.ndarray] = None,
+    paired: bool = False,
+    pair_ids: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     """Compute effect sizes for condition comparison (e.g., pain vs non-pain).
     
@@ -638,6 +658,8 @@ def compute_condition_effects(
             nonpain_mask=nonpain_mask,
             min_samples=min_samples,
             n_jobs=n_jobs_actual,
+            paired=paired,
+            pair_ids=pair_ids,
             groups=groups,
             n_perm=n_perm if perm_enabled else 0,
             base_seed=base_seed,
@@ -651,7 +673,10 @@ def compute_condition_effects(
     df = pd.DataFrame(records)
 
     if "p_primary" not in df.columns:
-        df["p_primary"] = _compute_p_primary_column(df, p_primary_mode)
+        p_primary, p_source = _compute_p_primary_columns(df, p_primary_mode)
+        df["p_primary"] = p_primary
+        if "p_primary_source" not in df.columns:
+            df["p_primary_source"] = p_source
 
     p_primary_values = pd.to_numeric(df["p_primary"], errors="coerce").values
     df["q_value"] = fdr_bh(p_primary_values, alpha=fdr_alpha, config=config)
@@ -682,12 +707,13 @@ def compute_multigroup_condition_effects(
     fdr_alpha: float = 0.05,
     logger: Optional[logging.Logger] = None,
     config: Optional[Any] = None,
+    paired: bool = False,
+    pair_ids: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     """Compute pairwise effect sizes for multi-group comparison (3+ groups).
     
-    Performs all pairwise Mann-Whitney U tests between groups with FDR correction
-    across all tests. This is the canonical computation for multi-group comparisons;
-    plotting code should only read from precomputed results.
+    Performs all pairwise tests between groups with FDR correction across all tests.
+    Uses Mann-Whitney U for unpaired mode and Wilcoxon signed-rank for paired mode.
     
     Args:
         features_df: DataFrame with feature columns
@@ -703,11 +729,20 @@ def compute_multigroup_condition_effects(
     """
     from itertools import combinations
     from scipy.stats import mannwhitneyu
-    
+    from scipy.stats import wilcoxon
+
     if len(group_labels) < 2:
         if logger:
             logger.warning("Multi-group comparison requires at least 2 groups")
         return pd.DataFrame()
+
+    pair_ids_array = None
+    if paired:
+        if pair_ids is None:
+            raise ValueError("pair_ids are required when paired=True for multi-group comparisons.")
+        pair_ids_array = np.asarray(pair_ids)
+        if len(pair_ids_array) != len(features_df):
+            raise ValueError("pair_ids length must match features_df rows for paired multi-group comparisons.")
     
     available_groups = [g for g in group_labels if g in group_masks and np.any(group_masks[g])]
     if len(available_groups) < 2:
@@ -743,15 +778,43 @@ def compute_multigroup_condition_effects(
             if n1 < 3 or n2 < 3:
                 continue
             
-            mean1, mean2 = np.mean(v1_clean), np.mean(v2_clean)
-            
-            d = cohens_d(v1_clean, v2_clean, pooled=True, config=config)
-            g = hedges_g(v1_clean, v2_clean, config=config)
-            
-            try:
-                _, p_value = mannwhitneyu(v1_clean, v2_clean, alternative="two-sided")
-            except (ValueError, RuntimeError):
-                p_value = np.nan
+            if paired and pair_ids_array is not None:
+                ids1 = pair_ids_array[mask1]
+                ids2 = pair_ids_array[mask2]
+
+                s1 = pd.Series(v1, index=ids1).groupby(level=0).mean()
+                s2 = pd.Series(v2, index=ids2).groupby(level=0).mean()
+                paired_df = pd.concat([s1.rename("v1"), s2.rename("v2")], axis=1, join="inner").dropna()
+                n_pairs = int(len(paired_df))
+                if n_pairs < 3:
+                    continue
+
+                x1 = paired_df["v1"].to_numpy(dtype=float)
+                x2 = paired_df["v2"].to_numpy(dtype=float)
+                diffs = x1 - x2
+
+                mean1, mean2 = float(np.mean(x1)), float(np.mean(x2))
+                diff_std = float(np.std(diffs, ddof=1)) if n_pairs > 1 else np.nan
+                d = float(np.mean(diffs) / diff_std) if np.isfinite(diff_std) and diff_std > 0 else np.nan
+                g = float(d * (1 - (3 / (4 * n_pairs - 1)))) if np.isfinite(d) and n_pairs > 1 else np.nan
+
+                try:
+                    _, p_value = wilcoxon(x1, x2, alternative="two-sided")
+                except (ValueError, RuntimeError):
+                    p_value = np.nan
+
+                n1 = n_pairs
+                n2 = n_pairs
+            else:
+                n_pairs = np.nan
+                mean1, mean2 = np.mean(v1_clean), np.mean(v2_clean)
+                d = cohens_d(v1_clean, v2_clean, pooled=True, config=config)
+                g = hedges_g(v1_clean, v2_clean, config=config)
+
+                try:
+                    _, p_value = mannwhitneyu(v1_clean, v2_clean, alternative="two-sided")
+                except (ValueError, RuntimeError):
+                    p_value = np.nan
             
             records.append({
                 "feature": feature,
@@ -764,6 +827,8 @@ def compute_multigroup_condition_effects(
                 "cohens_d": d,
                 "hedges_g": g,
                 "p_value": p_value,
+                "paired_test": bool(paired),
+                "n_pairs": n_pairs,
             })
     
     if not records:
