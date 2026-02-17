@@ -215,7 +215,7 @@ def _resolve_target_series(
     )
 
 
-def _target_covariate_aliases(target: Optional[str]) -> set[str]:
+def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = None) -> set[str]:
     """Return standardized target aliases for covariate leakage checks."""
     target_raw = str(target or "").strip()
     target_key = target_raw.lower()
@@ -229,6 +229,19 @@ def _target_covariate_aliases(target: Optional[str]) -> set[str]:
         aliases.add("pain_binary")
     elif target_key in {"fmri_signature", "fmri-signature"}:
         aliases.add("fmri_signature")
+
+    # If target is provided as an explicit events column, map it back to canonical
+    # aliases so leakage checks still block semantically identical predictors.
+    if config is not None:
+        event_alias_map = {
+            "rating": _as_list(get_config_value(config, "event_columns.rating", [])) or [],
+            "temperature": _as_list(get_config_value(config, "event_columns.temperature", [])) or [],
+            "pain_binary": _as_list(get_config_value(config, "event_columns.pain_binary", [])) or [],
+        }
+        for canonical, column_aliases in event_alias_map.items():
+            normalized = {str(c).strip().lower() for c in column_aliases if str(c).strip()}
+            if target_key and target_key in normalized:
+                aliases.add(canonical)
 
     if target_raw:
         aliases.add(target_raw)
@@ -594,7 +607,7 @@ def _load_subject_feature_table(
         return str(m.group(1)).strip()
 
     def _warn_or_raise_if_feature_tables_not_ml_safe(feature_path: Path, family: str) -> None:
-        require_safe = bool(get_config_value(config, "machine_learning.data.require_trial_ml_safe", False))
+        require_safe = bool(get_config_value(config, "machine_learning.data.require_trial_ml_safe", True))
         meta = _load_extraction_config(feature_path)
         if not meta:
             if require_safe:
@@ -992,7 +1005,7 @@ def load_active_matrix(
 
     analysis_mode = str(get_config_value(config, "feature_engineering.analysis_mode", "group_stats")).strip()
     if analysis_mode != "trial_ml_safe":
-        require_safe = bool(get_config_value(config, "machine_learning.data.require_trial_ml_safe", False))
+        require_safe = bool(get_config_value(config, "machine_learning.data.require_trial_ml_safe", True))
         msg = (
             "ML loading features while feature_engineering.analysis_mode='%s'. "
             "If any extracted features use cross-trial estimates, this can leak information across CV folds. "
@@ -1132,7 +1145,7 @@ def load_active_matrix(
     # Optional covariates appended to X (from standardized meta column names).
     cov_cfg = covariates if covariates is not None else _as_list(get_config_value(config, "machine_learning.data.covariates", []))
     if cov_cfg:
-        forbidden_covariates = {v.lower() for v in _target_covariate_aliases(target)}
+        forbidden_covariates = {v.lower() for v in _target_covariate_aliases(target, config=config)}
         leaking = [c for c in cov_cfg if str(c).strip().lower() in forbidden_covariates]
         if leaking:
             raise ValueError(

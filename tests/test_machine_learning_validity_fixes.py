@@ -125,6 +125,41 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     covariates=["rating"],
                 )
 
+    def test_load_active_matrix_blocks_target_covariate_leakage_for_explicit_target_column(self):
+        from eeg_pipeline.utils.data import machine_learning as ml_data
+
+        config = DotConfig(
+            {
+                "feature_engineering": {"analysis_mode": "trial_ml_safe"},
+                "event_columns": {"rating": ["vas_final_rating", "rating"]},
+            }
+        )
+
+        x_df = pd.DataFrame({"power_feature": [1.0, 2.0]})
+        meta_df = pd.DataFrame(
+            {
+                "subject_id": ["sub-0001", "sub-0001"],
+                "rating": [10.0, 20.0],
+                "temperature": [44.0, 45.0],
+                "trial_index": [0, 1],
+            }
+        )
+
+        def _fake_load_subject(*_args, **_kwargs):
+            return x_df.copy(), np.array([10.0, 20.0], dtype=float), "vas_final_rating", meta_df.copy()
+
+        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+            with self.assertRaisesRegex(ValueError, "Covariates include the selected target"):
+                ml_data.load_active_matrix(
+                    subjects=["0001"],
+                    task="thermalactive",
+                    deriv_root=Path("."),
+                    config=config,
+                    feature_families=["power"],
+                    target="vas_final_rating",
+                    covariates=["rating"],
+                )
+
     def test_incremental_validity_blocks_target_baseline_predictor(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
@@ -157,6 +192,41 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                         results_root=Path(td),
                         logger=Mock(),
                         target="rating",
+                        baseline_predictors=["rating"],
+                    )
+
+    def test_incremental_validity_blocks_target_baseline_predictor_for_explicit_target_column(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        config = DotConfig({"event_columns": {"rating": ["vas_final_rating", "rating"]}})
+        X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
+        y = np.array([10.0, 20.0, 30.0, 40.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+                "rating": y,
+                "temperature": [44.0, 45.0, 46.0, 47.0],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+                with self.assertRaisesRegex(
+                    ValueError, "Baseline predictors include the selected target"
+                ):
+                    orch.run_incremental_validity_ml(
+                        subjects=["0001", "0002"],
+                        task="thermalactive",
+                        deriv_root=Path(td),
+                        config=config,
+                        n_perm=0,
+                        inner_splits=3,
+                        rng_seed=42,
+                        results_root=Path(td),
+                        logger=Mock(),
+                        target="vas_final_rating",
                         baseline_predictors=["rating"],
                     )
 
@@ -993,6 +1063,102 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                         results_root=Path(td),
                         logger=Mock(),
                     )
+
+    def test_within_subject_regression_uses_fold_baseline_and_effective_subjects(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
+        y = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+                "block": [0, 1, 0, 0],
+            }
+        )
+        # Only sub-0001 contributes evaluable folds.
+        folds = [
+            (0, np.array([0], dtype=int), np.array([1], dtype=int), "sub-0001", {}),
+        ]
+
+        class _FakePipe:
+            def __init__(self):
+                self.named_steps = {"regressor": types.SimpleNamespace(param_grid={})}
+
+        class _FakeEstimator:
+            def predict(self, X_in: np.ndarray) -> np.ndarray:
+                return np.asarray(X_in[:, 0], dtype=float)
+
+        def _fake_export_predictions(y_true, y_pred, groups_ordered, *_args, **_kwargs):
+            return pd.DataFrame(
+                {
+                    "y_true": np.asarray(y_true, dtype=float),
+                    "y_pred": np.asarray(y_pred, dtype=float),
+                    "subject_id": np.asarray(groups_ordered, dtype=object),
+                }
+            )
+
+        cfg = DotConfig({})
+        with tempfile.TemporaryDirectory() as td:
+            captured_groups_used = {}
+
+            def _capture_subject_selection(_results_dir, _subjects, groups_used, _meta, _config):
+                captured_groups_used["values"] = np.asarray(groups_used, dtype=object).tolist()
+                return {}
+
+            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
+                orch, "create_within_subject_folds", return_value=folds
+            ), patch.object(
+                orch, "create_elasticnet_pipeline", side_effect=lambda **_kwargs: _FakePipe()
+            ), patch.object(
+                orch, "build_elasticnet_param_grid", return_value={}
+            ), patch.object(
+                orch, "_fit_within_subject_fold", return_value=_FakeEstimator()
+            ), patch.object(
+                orch, "export_predictions", side_effect=_fake_export_predictions
+            ), patch.object(
+                orch, "export_indices", return_value=None
+            ), patch.object(
+                orch, "compute_subject_level_r", return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3)
+            ), patch.object(
+                orch,
+                "compute_subject_level_errors",
+                return_value={
+                    "mean_mae": 0.1,
+                    "ci_low_mae": 0.05,
+                    "ci_high_mae": 0.2,
+                    "mean_rmse": 0.2,
+                    "ci_low_rmse": 0.1,
+                    "ci_high_rmse": 0.3,
+                    "per_subject": [],
+                },
+            ), patch.object(
+                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            ), patch.object(
+                orch, "export_subject_selection_report", side_effect=_capture_subject_selection
+            ):
+                out_dir = orch.run_within_subject_regression_ml(
+                    subjects=["0001", "0002"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=0,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                )
+
+            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+                metrics = json.load(f)
+            baseline_df = pd.read_csv(out_dir / "baseline_predictions.tsv", sep="\t")
+
+        self.assertEqual(metrics["n_subjects"], 1)
+        self.assertEqual(captured_groups_used["values"], ["sub-0001"])
+        self.assertEqual(float(baseline_df.loc[0, "y_true"]), 2.0)
+        self.assertEqual(float(baseline_df.loc[0, "y_pred_baseline"]), 1.0)
 
     def test_within_subject_classification_permutations_enforce_failed_fold_fraction(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch

@@ -156,7 +156,7 @@ def _normalize_subject_ids(subjects: List[str]) -> List[str]:
     return out
 
 
-def _target_covariate_aliases(target: Optional[str]) -> set[str]:
+def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = None) -> set[str]:
     """Return standardized target aliases to guard against predictor leakage."""
     target_raw = str(target or "").strip()
     target_key = target_raw.lower()
@@ -170,6 +170,25 @@ def _target_covariate_aliases(target: Optional[str]) -> set[str]:
         aliases.add("pain_binary")
     elif target_key in {"fmri_signature", "fmri-signature"}:
         aliases.add("fmri_signature")
+
+    # If target is an explicit events.tsv column name, map back to canonical
+    # aliases so baseline-predictor leakage guards remain effective.
+    if config is not None:
+        event_alias_map = {
+            "rating": get_config_value(config, "event_columns.rating", []),
+            "temperature": get_config_value(config, "event_columns.temperature", []),
+            "pain_binary": get_config_value(config, "event_columns.pain_binary", []),
+        }
+        for canonical, aliases_raw in event_alias_map.items():
+            if isinstance(aliases_raw, str):
+                alias_list = [aliases_raw]
+            elif isinstance(aliases_raw, (list, tuple)):
+                alias_list = [str(v) for v in aliases_raw]
+            else:
+                alias_list = []
+            normalized = {str(v).strip().lower() for v in alias_list if str(v).strip()}
+            if target_key and target_key in normalized:
+                aliases.add(canonical)
 
     if target_raw:
         aliases.add(target_raw)
@@ -438,7 +457,13 @@ def run_regression_ml(
     plots_dir = results_dir / "plots"
     ensure_dir(results_dir)
     ensure_dir(plots_dir)
-    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
+    subject_selection = export_subject_selection_report(
+        results_dir,
+        subjects,
+        groups,
+        meta,
+        config,
+    )
 
     if model == "ridge":
         pipe = create_ridge_pipeline(seed=rng_seed, config=config)
@@ -694,7 +719,6 @@ def run_within_subject_regression_ml(
     plots_dir = results_dir / "plots"
     ensure_dir(results_dir)
     ensure_dir(plots_dir)
-    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
     
     model_name = model if model else "elasticnet"
 
@@ -756,12 +780,15 @@ def run_within_subject_regression_ml(
             inner_splits=inner_splits,
         )
         y_pred = best_estimator.predict(X_test)
+        fold_mean_baseline = float(np.mean(y_train)) if len(y_train) > 0 else np.nan
+        y_pred_baseline = np.full(len(y_test), fold_mean_baseline, dtype=float)
 
         fold_records.append(
             {
                 "fold": int(fold_counter),
                 "y_true": y_test,
                 "y_pred": y_pred,
+                "y_pred_baseline": y_pred_baseline,
                 "subject_id": [str(subject_id)] * len(y_test),
                 "test_idx": np.asarray(test_idx, dtype=int),
             }
@@ -770,6 +797,9 @@ def run_within_subject_regression_ml(
     fold_records = sorted(fold_records, key=lambda r: r["fold"])
     y_true_all = np.concatenate([np.asarray(r["y_true"]) for r in fold_records])
     y_pred_all = np.concatenate([np.asarray(r["y_pred"]) for r in fold_records])
+    y_pred_baseline_all = np.concatenate(
+        [np.asarray(r["y_pred_baseline"], dtype=float) for r in fold_records]
+    )
     groups_ordered: List[str] = []
     test_indices: List[int] = []
     fold_ids: List[int] = []
@@ -778,6 +808,14 @@ def run_within_subject_regression_ml(
         groups_ordered.extend(rec["subject_id"])
         test_indices.extend(rec["test_idx"].tolist())
         fold_ids.extend([rec["fold"]] * n)
+    groups_ordered_arr = np.asarray(groups_ordered, dtype=object)
+    subject_selection = export_subject_selection_report(
+        results_dir,
+        subjects,
+        groups_ordered_arr,
+        meta,
+        config,
+    )
 
     pred_path = results_dir / "cv_predictions.tsv"
     pred_df = export_predictions(
@@ -951,7 +989,7 @@ def run_within_subject_regression_ml(
             "feature_harmonization": feature_harmonization,
             "covariates": covariates,
         },
-        "n_subjects": len(np.unique(groups)),
+        "n_subjects": len(np.unique(groups_ordered_arr)),
         "n_trials": len(y_true_all),
         "n_features": int(X.shape[1]),
         "subject_selection": subject_selection,
@@ -980,7 +1018,28 @@ def run_within_subject_regression_ml(
     if int(n_perm) > 0:
         metrics["n_perm_requested"] = int(n_perm)
         metrics["n_perm_completed"] = int(n_perm_completed)
-    baseline_metrics = export_baseline_predictions(y_true_all, np.asarray(groups_ordered), results_dir, task="regression")
+    baseline_df = pd.DataFrame(
+        {
+            "subject_id": groups_ordered_arr,
+            "y_true": y_true_all,
+            "y_pred_baseline": y_pred_baseline_all,
+        }
+    )
+    baseline_df.to_csv(results_dir / "baseline_predictions.tsv", sep="\t", index=False)
+    try:
+        from sklearn.metrics import mean_absolute_error, r2_score
+
+        baseline_metrics = {
+            "baseline_r2": float(r2_score(y_true_all, y_pred_baseline_all)),
+            "baseline_mae": float(mean_absolute_error(y_true_all, y_pred_baseline_all)),
+            "baseline_method": "within_subject_fold_mean",
+        }
+    except Exception:
+        baseline_metrics = {
+            "baseline_r2": np.nan,
+            "baseline_mae": np.nan,
+            "baseline_method": "within_subject_fold_mean",
+        }
     metrics.update(baseline_metrics)
     metrics_path = results_dir / "pooled_metrics.json"
     with open(metrics_path, "w") as f:
@@ -1678,7 +1737,13 @@ def run_within_subject_classification_ml(
     plots_dir = results_dir / "plots"
     ensure_dir(results_dir)
     ensure_dir(plots_dir)
-    subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
+    subject_selection = export_subject_selection_report(
+        results_dir,
+        subjects,
+        np.asarray(groups_ordered, dtype=object),
+        meta,
+        config,
+    )
 
     pred_path = results_dir / "cv_predictions.tsv"
     pred_df = export_predictions(
@@ -2429,7 +2494,7 @@ def run_incremental_validity_ml(
             baseline_predictors = ["temperature"]
 
     # Guard against target leakage through baseline predictors.
-    forbidden_predictors = {v.lower() for v in _target_covariate_aliases(target)}
+    forbidden_predictors = {v.lower() for v in _target_covariate_aliases(target, config=config)}
     leaking = [p for p in baseline_predictors if str(p).strip().lower() in forbidden_predictors]
     if leaking:
         raise ValueError(

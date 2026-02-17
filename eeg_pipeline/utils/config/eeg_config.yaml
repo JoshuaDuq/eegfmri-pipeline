@@ -202,7 +202,7 @@ feature_engineering:
   # Controls cross-trial feature computation and leakage constraints:
   # - "group_stats": allow cross-trial estimates (one row per subject/condition as appropriate)
   # - "trial_ml_safe": forbid cross-trial features unless train_mask is provided (ML/CV-safe)
-  analysis_mode: "group_stats"
+  analysis_mode: "trial_ml_safe"
 
   # Per-family spatial transforms: CSD is excellent for phase connectivity but changes
   # the meaning/units/topography of amplitude-derived features. Configure separately.
@@ -1017,7 +1017,7 @@ machine_learning:
     feature_files: {}                    # Optional overrides per family: { power: "features_power.parquet", ... }
     covariates: []                       # Optional extra predictors appended to X (meta names: temperature, trial_index, block, ...)
     covariates_strict: false             # If true, error when requested covariates are missing
-    require_trial_ml_safe: false         # If true, error unless feature_engineering.analysis_mode="trial_ml_safe"
+    require_trial_ml_safe: true          # If true, error unless feature_engineering.analysis_mode="trial_ml_safe"
     max_excluded_subject_fraction: 0.25  # Fail ML matrix build if excluded subjects exceed this fraction of requested subjects
 
   # Targets can be logical names ('rating', 'temperature', 'pain_binary') or explicit events.tsv column names.
