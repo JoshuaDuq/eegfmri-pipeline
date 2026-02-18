@@ -360,6 +360,149 @@ class TestFeatureHelpers(unittest.TestCase):
         np.testing.assert_array_equal(ctx_used.train_mask, train_mask)
         self.assertEqual(ctx_used.analysis_mode, "trial_ml_safe")
 
+    def test_feature_pipeline_auto_writes_canonical_trial_table(self):
+        fake_mne_bids = types.ModuleType("mne_bids")
+        fake_mne_bids.BIDSPath = object
+        fake_pyarrow = types.ModuleType("pyarrow")
+        fake_pyarrow.Table = types.SimpleNamespace(from_pandas=lambda *args, **kwargs: None)
+        fake_pyarrow_csv = types.ModuleType("pyarrow.csv")
+        fake_pyarrow_csv.WriteOptions = lambda **kwargs: None
+        fake_pyarrow_csv.write_csv = lambda *args, **kwargs: None
+        fake_mne = types.ModuleType("mne")
+        fake_seaborn = types.ModuleType("seaborn")
+        with patch.dict(
+            sys.modules,
+            {
+                "yaml": types.ModuleType("yaml"),
+                "mne_bids": fake_mne_bids,
+                "mne": fake_mne,
+                "seaborn": fake_seaborn,
+                "pyarrow": fake_pyarrow,
+                "pyarrow.csv": fake_pyarrow_csv,
+            },
+        ):
+            try:
+                from eeg_pipeline.pipelines.features import FeaturePipeline
+            except ModuleNotFoundError as exc:
+                self.skipTest(f"FeaturePipeline import unavailable in test environment: {exc}")
+
+        tmp = Path(tempfile.mkdtemp())
+        pipeline = object.__new__(FeaturePipeline)
+        pipeline.config = DotConfig(
+            {
+                "project": {"task": "thermalactive"},
+                "event_columns": {"rating": ["rating"]},
+                "bids_root": str(tmp / "bids"),
+            }
+        )
+        pipeline.logger = Mock()
+        pipeline.deriv_root = tmp / "deriv"
+        pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
+
+        aligned_events = pd.DataFrame({"rating": [1.0, 2.0], "condition": ["a", "b"]})
+        features_dir = tmp / "features_out"
+
+        fake_features = SimpleNamespace(
+            aper_qc={"ok": True},
+            ratios_df=pd.DataFrame({"r": [1]}),
+            ratios_cols=["r"],
+            asymmetry_df=pd.DataFrame({"a": [1]}),
+            asymmetry_cols=["a"],
+            quality_df=pd.DataFrame({"q": [1]}),
+            quality_cols=["q"],
+        )
+        unpacked = {
+            "pow_df": pd.DataFrame({"p": [1]}),
+            "pow_cols": ["p"],
+            "baseline_df": pd.DataFrame({"b": [1]}),
+            "baseline_cols": ["b"],
+            "conn_df": pd.DataFrame({"c": [1]}),
+            "conn_cols": ["c"],
+            "dconn_df": pd.DataFrame({"dc": [1]}),
+            "dconn_cols": ["dc"],
+            "source_df": pd.DataFrame({"s": [1]}),
+            "source_cols": ["s"],
+            "aper_df": pd.DataFrame({"ap": [1]}),
+            "aper_cols": ["ap"],
+            "erp_df": pd.DataFrame({"e": [1]}),
+            "erp_cols": ["e"],
+            "itpc_df": pd.DataFrame({"i": [1]}),
+            "itpc_cols": ["i"],
+            "itpc_trial_df": pd.DataFrame({"it": [1]}),
+            "itpc_trial_cols": ["it"],
+            "pac_df": pd.DataFrame({"pa": [1]}),
+            "pac_trials_df": pd.DataFrame({"pat": [1]}),
+            "pac_time_df": pd.DataFrame({"pt": [1]}),
+            "comp_df": pd.DataFrame({"co": [1]}),
+            "comp_cols": ["co"],
+            "bursts_df": pd.DataFrame({"bu": [1]}),
+            "bursts_cols": ["bu"],
+            "spectral_df": pd.DataFrame({"sp": [1]}),
+            "spectral_cols": ["sp"],
+            "erds_df": pd.DataFrame({"er": [1]}),
+            "erds_cols": ["er"],
+            "ratios_df": fake_features.ratios_df,
+            "ratios_cols": fake_features.ratios_cols,
+            "asymmetry_df": fake_features.asymmetry_df,
+            "asymmetry_cols": fake_features.asymmetry_cols,
+            "quality_df": fake_features.quality_df,
+            "quality_cols": fake_features.quality_cols,
+            "aper_qc": fake_features.aper_qc,
+        }
+
+        progress = SimpleNamespace(
+            subject_start=lambda *a, **k: None,
+            step=lambda *a, **k: None,
+            subject_done=lambda *a, **k: None,
+            error=lambda *a, **k: None,
+        )
+        epochs = SimpleNamespace(times=np.array([0.0, 0.1]), info={"sfreq": 100.0})
+
+        with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
+            "eeg_pipeline.pipelines.features.deriv_features_path", return_value=features_dir
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+            "eeg_pipeline.pipelines.features.setup_matplotlib"
+        ), patch(
+            "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned_events)
+        ), patch(
+            "eeg_pipeline.pipelines.features._load_events_df", return_value=None
+        ), patch(
+            "eeg_pipeline.pipelines.features.pick_target_column", return_value="rating"
+        ), patch(
+            "eeg_pipeline.pipelines.features._load_fixed_templates", return_value=(None, None)
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_tfr_if_needed", return_value=None
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_complex_tfr_if_needed", return_value=None
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_intermediates_if_needed", return_value=None
+        ), patch(
+            "eeg_pipeline.pipelines.features.extract_all_features", return_value=fake_features
+        ), patch(
+            "eeg_pipeline.pipelines.features._unpack_feature_results", return_value=unpacked
+        ), patch(
+            "eeg_pipeline.pipelines.features.align_feature_dataframes",
+            return_value=(
+                pd.DataFrame({"p": [1, 2]}),
+                pd.DataFrame({"b": [1, 2]}),
+                pd.DataFrame({"c": [1, 2]}),
+                pd.DataFrame({"ap": [1, 2]}),
+                pd.Series([1.0, 2.0]),
+                {"extra_blocks": {}},
+            ),
+        ), patch(
+            "eeg_pipeline.pipelines.features._build_feature_qc", return_value={"qc": True}
+        ), patch(
+            "eeg_pipeline.pipelines.features.save_all_features", return_value=pd.DataFrame({"power_alpha": [0.1, 0.2]})
+        ), patch(
+            "eeg_pipeline.pipelines.features._save_extraction_config"
+        ), patch(
+            "eeg_pipeline.pipelines.features._save_canonical_trial_table_artifact", create=True
+        ) as save_trial_table_mock:
+            pipeline.process_subject("0001", task="thermalactive", progress=progress, feature_categories=["power"])
+
+        self.assertEqual(save_trial_table_mock.call_count, 1)
+
     def test_load_fixed_templates(self):
         from eeg_pipeline.pipelines.features import _load_fixed_templates
 

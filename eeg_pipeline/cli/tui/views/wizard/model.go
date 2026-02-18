@@ -808,7 +808,7 @@ var defaultPlotItems = []PlotItem{
 	{ID: "behavior_psychometrics", Group: "behavior", Name: "Psychometrics", Description: "Rating distributions and psychometrics", RequiredFiles: []string{"events.tsv"}},
 	{ID: "behavior_scatter", Group: "behavior", Name: "Feature-Behavior Scatter", Description: "Configurable scatter plots correlating any EEG feature with behavioral columns", RequiredFiles: []string{"features_*.tsv", "events.tsv"}, RequiresFeatures: true},
 	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations*/*/temporal_correlations_by_condition*.npz"}, RequiresStats: true},
-	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"stats/trial_table*/*/trials*.tsv", "stats/trial_table*/*/trials*.parquet"}, RequiresStats: true},
+	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"stats/trial_table*/*/trials_*.tsv", "stats/trial_table*/*/trials_*.parquet"}, RequiresStats: true},
 	{ID: "behavior_pain_probability", Group: "behavior", Name: "Pain Probability", Description: "Pain probability vs dose (binary outcome vs temperature)", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 }
 

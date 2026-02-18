@@ -26,12 +26,50 @@ def _load_discovery_function():
             "eeg_pipeline",
             "eeg_pipeline.pipelines",
             "eeg_pipeline.pipelines.constants",
+            "eeg_pipeline.utils",
+            "eeg_pipeline.utils.data",
+            "eeg_pipeline.utils.data.trial_table",
         )
     }
-    try:
+    fake_trial_table = types.ModuleType("eeg_pipeline.utils.data.trial_table")
+    fake_utils_pkg = types.ModuleType("eeg_pipeline.utils")
+    fake_utils_pkg.__path__ = []  # type: ignore[attr-defined]
+    fake_data_pkg = types.ModuleType("eeg_pipeline.utils.data")
+    fake_data_pkg.__path__ = []  # type: ignore[attr-defined]
+
+    def _discover_trial_table_candidates(stats_dir):
+        stats_path = Path(stats_dir)
+        candidates = []
+        candidates.extend(sorted(stats_path.glob("trial_table*/*/trials_*.parquet")))
+        candidates.extend(sorted(stats_path.glob("trial_table*/*/trials_*.tsv")))
+        return candidates
+
+    def _select_preferred_trial_tables(candidates):
+        grouped = {}
+        for path in candidates:
+            key = (str(Path(path).parent), Path(path).stem)
+            grouped.setdefault(key, []).append(Path(path))
+        selected = []
+        for key in sorted(grouped.keys()):
+            options = grouped[key]
+            parquet = [p for p in options if p.suffix == ".parquet"]
+            selected.append(parquet[0] if parquet else sorted(options)[0])
+        return selected
+
+    fake_trial_table.discover_trial_table_candidates = _discover_trial_table_candidates
+    fake_trial_table.select_preferred_trial_tables = _select_preferred_trial_tables
+    fake_data_pkg.trial_table = fake_trial_table
+
+    def _install_fakes() -> None:
         sys.modules.setdefault("eeg_pipeline", types.ModuleType("eeg_pipeline"))
         sys.modules.setdefault("eeg_pipeline.pipelines", types.ModuleType("eeg_pipeline.pipelines"))
         sys.modules["eeg_pipeline.pipelines.constants"] = fake_constants
+        sys.modules["eeg_pipeline.utils"] = fake_utils_pkg
+        sys.modules["eeg_pipeline.utils.data"] = fake_data_pkg
+        sys.modules["eeg_pipeline.utils.data.trial_table"] = fake_trial_table
+
+    try:
+        _install_fakes()
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     finally:
@@ -40,7 +78,30 @@ def _load_discovery_function():
                 sys.modules.pop(key, None)
             else:
                 sys.modules[key] = original
-    return module.discover_trial_table_columns
+
+    def _wrapped_discover_trial_table_columns(*args, **kwargs):
+        runtime_originals = {
+            key: sys.modules.get(key, sentinel)
+            for key in (
+                "eeg_pipeline",
+                "eeg_pipeline.pipelines",
+                "eeg_pipeline.pipelines.constants",
+                "eeg_pipeline.utils",
+                "eeg_pipeline.utils.data",
+                "eeg_pipeline.utils.data.trial_table",
+            )
+        }
+        try:
+            _install_fakes()
+            return module.discover_trial_table_columns(*args, **kwargs)
+        finally:
+            for key, original in runtime_originals.items():
+                if original is sentinel:
+                    sys.modules.pop(key, None)
+                else:
+                    sys.modules[key] = original
+
+    return _wrapped_discover_trial_table_columns
 
 
 class TestDiscoverTrialTableColumns(unittest.TestCase):

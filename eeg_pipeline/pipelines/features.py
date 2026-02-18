@@ -43,6 +43,7 @@ from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
 from eeg_pipeline.infra.paths import (
     _load_events_df,
     deriv_features_path,
+    deriv_stats_path,
     ensure_dir,
 )
 from eeg_pipeline.infra.tsv import write_parquet
@@ -533,6 +534,131 @@ def _save_extraction_config(
         logger.info("Saved extraction config to %d feature category folders", len(saved_to))
 
 
+def _collect_trial_table_feature_tables(
+    *,
+    direct_df: Optional[pd.DataFrame],
+    conn_df_aligned: Optional[pd.DataFrame],
+    aper_df_aligned: Optional[pd.DataFrame],
+    unpacked: Dict[str, Any],
+    features: FeatureExtractionResult,
+) -> List[tuple[str, Optional[pd.DataFrame]]]:
+    """Collect trialwise feature tables for canonical trial-table export."""
+    itpc_trial_or_standard = unpacked.get("itpc_trial_df")
+    if itpc_trial_or_standard is None or getattr(itpc_trial_or_standard, "empty", False):
+        itpc_trial_or_standard = unpacked.get("itpc_df")
+
+    pac_trial_or_standard = unpacked.get("pac_trials_df")
+    if pac_trial_or_standard is None or getattr(pac_trial_or_standard, "empty", False):
+        pac_trial_or_standard = unpacked.get("pac_df")
+
+    return [
+        ("power", direct_df),
+        ("connectivity", conn_df_aligned),
+        ("aperiodic", aper_df_aligned),
+        ("directedconnectivity", unpacked.get("dconn_df")),
+        ("sourcelocalization", unpacked.get("source_df")),
+        ("erp", unpacked.get("erp_df")),
+        ("itpc", itpc_trial_or_standard),
+        ("pac", pac_trial_or_standard),
+        ("complexity", unpacked.get("comp_df")),
+        ("bursts", unpacked.get("bursts_df")),
+        ("quality", getattr(features, "quality_df", None)),
+        ("erds", unpacked.get("erds_df")),
+        ("spectral", unpacked.get("spectral_df")),
+        ("ratios", getattr(features, "ratios_df", None)),
+        ("asymmetry", getattr(features, "asymmetry_df", None)),
+        ("microstates", unpacked.get("microstates_df")),
+        ("temporal", getattr(features, "temporal_df", None)),
+    ]
+
+
+def _save_canonical_trial_table_artifact(
+    *,
+    deriv_root: Path,
+    subject: str,
+    task: str,
+    aligned_events: pd.DataFrame,
+    feature_tables: List[tuple[str, Optional[pd.DataFrame]]],
+    config: Any,
+    logger: Any,
+    suffix: Optional[str] = None,
+) -> Optional[Path]:
+    """Save canonical `stats/trial_table/all/trials_all*.parquet` from extracted features."""
+    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.data.trial_table import (
+        build_trial_table_contract,
+        combine_feature_tables,
+        save_trial_table,
+    )
+
+    if aligned_events is None or aligned_events.empty:
+        logger.warning("Skipping canonical trial table export: aligned events are unavailable.")
+        return None
+
+    events = aligned_events.reset_index(drop=True)
+    n_trials = len(events)
+    trialwise_tables: List[tuple[str, Optional[pd.DataFrame]]] = []
+    for name, df in feature_tables:
+        if df is None or getattr(df, "empty", False):
+            continue
+        if len(df) != n_trials:
+            logger.info(
+                "Skipping non-trialwise block for canonical trial table export: %s (%d vs %d rows)",
+                name,
+                len(df),
+                n_trials,
+            )
+            continue
+        trialwise_tables.append((name, df.reset_index(drop=True)))
+
+    combined_features = combine_feature_tables(trialwise_tables)
+    if combined_features is not None and not combined_features.empty:
+        df_trials = pd.concat([events, combined_features.reset_index(drop=True)], axis=1)
+    else:
+        df_trials = events.copy()
+
+    metadata: Dict[str, Any] = {
+        "subject": subject,
+        "task": task,
+        "n_trials": int(len(df_trials)),
+        "n_columns": int(df_trials.shape[1]),
+        "producer": "feature_extraction",
+        "contract": build_trial_table_contract(
+            df_trials,
+            n_events_rows=int(len(events)),
+            n_feature_rows=int(len(combined_features)) if combined_features is not None else 0,
+            feature_signature=None,
+        ),
+    }
+
+    stats_dir = deriv_stats_path(deriv_root, subject)
+    out_dir = stats_dir / "trial_table" / "all"
+    ensure_dir(out_dir)
+    stem = "trials_all"
+    if suffix:
+        stem = f"{stem}_{suffix}"
+    out_path = out_dir / f"{stem}.parquet"
+
+    class _TableWrapper:
+        def __init__(self, df, metadata):
+            self.df = df
+            self.metadata = metadata
+
+    save_trial_table(_TableWrapper(df_trials, metadata), out_path, format="parquet")
+
+    also_save_csv = bool(get_config_value(config, "feature_engineering.output.also_save_csv", False))
+    if also_save_csv:
+        from eeg_pipeline.infra.tsv import write_csv
+
+        csv_path = out_dir / f"{stem}.csv"
+        write_csv(df_trials, csv_path, index=False)
+
+    meta_path = out_dir / f"{stem}.metadata.json"
+    meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    logger.info("Saved canonical trial table artifact: %s", out_path)
+    return out_path
+
+
 class FeaturePipeline(PipelineBase):
     """Pipeline for EEG feature extraction."""
 
@@ -847,6 +973,25 @@ class FeaturePipeline(PipelineBase):
                 source_cols=unpacked["source_cols"],
                 feature_qc=feature_qc or None,
                 suffix=suffix,
+            )
+
+            trial_table_suffix = suffix if len(time_ranges) > 1 else None
+            trial_feature_tables = _collect_trial_table_feature_tables(
+                direct_df=combined_df,
+                conn_df_aligned=conn_df_aligned,
+                aper_df_aligned=aper_df_aligned,
+                unpacked=unpacked,
+                features=features,
+            )
+            _save_canonical_trial_table_artifact(
+                deriv_root=self.deriv_root,
+                subject=subject,
+                task=task,
+                aligned_events=aligned_events,
+                feature_tables=trial_feature_tables,
+                config=self.config,
+                logger=self.logger,
+                suffix=trial_table_suffix,
             )
 
             if len(time_ranges) > 1:

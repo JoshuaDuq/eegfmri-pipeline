@@ -1646,6 +1646,10 @@ def run_classification_ml(
             "accuracy": float(result.accuracy) if np.isfinite(result.accuracy) else np.nan,
         },
     }
+    if not auc_inference_valid:
+        metrics["auc_reporting_note"] = (
+            "Subject-level AUC inference is invalid for this run; pooled-trial AUC is reported for diagnostics only."
+        )
     
     # Save calibration data separately
     if calibration_data:
@@ -1690,6 +1694,10 @@ def run_classification_ml(
     p_info = ""
     if "p_value" in metrics:
         p_info = f", p={metrics['p_value']:.4f}"
+    if not auc_inference_valid:
+        logger.warning(
+            "Subject-level AUC inference is invalid; pooled-trial AUC is reported for diagnostics only."
+        )
     logger.info(
         "Classification results: AUC=%.3f, balanced_acc=%.3f, F1=%.3f, Brier=%.3f%s",
         float(auc_for_inference) if np.isfinite(auc_for_inference) else result.auc,
@@ -1994,7 +2002,7 @@ def run_within_subject_classification_ml(
     )
 
     pred_path = results_dir / "cv_predictions.tsv"
-    export_predictions(
+    pred_df = export_predictions(
         y_true_all,
         y_pred_all,
         groups_ordered,
@@ -2004,6 +2012,12 @@ def run_within_subject_classification_ml(
         meta.reset_index(drop=True),
         pred_path,
     )
+    if y_prob_all is not None and len(y_prob_all) == len(pred_df):
+        pred_df["y_prob"] = np.asarray(y_prob_all, dtype=float)
+    else:
+        pred_df["y_prob"] = np.full(len(pred_df), np.nan, dtype=float)
+    write_tsv(pred_df, pred_path)
+    write_parquet(pred_df, pred_path.with_suffix(".parquet"))
     export_indices(
         groups_ordered,
         test_indices,
@@ -2134,6 +2148,10 @@ def run_within_subject_classification_ml(
         "class_balance": float(np.mean(y_true_all)) if len(y_true_all) else np.nan,
         "n_perm": int(n_perm) if n_perm else 0,
     }
+    if not auc_inference_valid:
+        metrics["auc_reporting_note"] = (
+            "Subject-level AUC inference is invalid for this run; pooled-trial AUC is reported for diagnostics only."
+        )
 
     # Optional permutation p-value (AUC) under label randomization (full refit per permutation).
     if n_perm and n_perm > 0:
@@ -2246,6 +2264,10 @@ def run_within_subject_classification_ml(
     p_info = ""
     if "p_value_auc" in metrics:
         p_info = f", p={metrics['p_value_auc']:.4f}"
+    if not auc_inference_valid:
+        logger.warning(
+            "Subject-level AUC inference is invalid; pooled-trial AUC is reported for diagnostics only."
+        )
     logger.info(
         "Within-subject classification results: AUC=%.3f, balanced_acc=%.3f, F1=%.3f%s",
         float(auc_for_inference) if np.isfinite(auc_for_inference) else result.auc,
@@ -2759,6 +2781,44 @@ def run_model_comparison_ml(
                     n_perm=int(n_perm),
                 )
             pairwise[f"{m_a}_minus_{m_b}"] = pair_rec
+
+    if int(n_perm) > 0 and pairwise:
+        try:
+            from statsmodels.stats.multitest import multipletests
+        except Exception:
+            multipletests = None
+
+        for raw_key in ("p_value_delta_r2", "p_value_delta_mae"):
+            pair_names: List[str] = []
+            p_values: List[float] = []
+            for pair_name, pair_rec in pairwise.items():
+                value = pair_rec.get(raw_key)
+                if value is None:
+                    continue
+                try:
+                    p_value = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if not np.isfinite(p_value):
+                    continue
+                pair_names.append(pair_name)
+                p_values.append(p_value)
+
+            if not p_values:
+                continue
+
+            adj_key = f"{raw_key}_holm"
+            if multipletests is None:
+                for pair_name, p_value in zip(pair_names, p_values):
+                    pairwise[pair_name][adj_key] = float(p_value)
+            else:
+                _reject, p_adjusted, _alphac_sidak, _alphac_bonf = multipletests(
+                    p_values,
+                    alpha=0.05,
+                    method="holm",
+                )
+                for pair_name, p_adj in zip(pair_names, p_adjusted):
+                    pairwise[pair_name][adj_key] = float(p_adj)
     summary["pairwise_inference"] = pairwise
     
     with open(results_dir / "model_comparison_summary.json", "w") as f:
@@ -2870,14 +2930,24 @@ def run_incremental_validity_ml(
             f"{leaking}. Target={target!r}."
         )
 
+    require_baseline_predictors = bool(
+        get_config_value(config, "machine_learning.incremental_validity.require_baseline_predictors", True)
+    )
+
     # Extract baseline predictors from meta (meta uses standardized names: temperature, trial_index, block, etc.)
     missing = [c for c in baseline_predictors if c not in meta.columns]
     if missing:
-        logger.warning(
-            "Missing baseline predictors in meta: %s. Available meta columns=%s. Falling back to intercept-only baseline.",
-            ",".join(missing),
-            ",".join(list(meta.columns)),
+        msg = (
+            "Missing baseline predictors in meta: %s. Available meta columns=%s."
+            % (",".join(missing), ",".join(list(meta.columns)))
         )
+        if require_baseline_predictors:
+            raise ValueError(
+                msg
+                + " Baseline fallback is disabled by "
+                "machine_learning.incremental_validity.require_baseline_predictors=true."
+            )
+        logger.warning("%s Falling back to intercept-only baseline.", msg)
         X_baseline = np.ones((len(y), 1))
         baseline_predictors = ["intercept_only"]
     else:

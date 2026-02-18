@@ -1029,6 +1029,7 @@ machine_learning:
 
   incremental_validity:
     baseline_predictors: ["temperature"] # Standardized meta names: temperature, trial_index, block
+    require_baseline_predictors: true    # If true, missing baseline predictors raise an error instead of intercept-only fallback
     baseline_alpha: 1.0
 
   cv:

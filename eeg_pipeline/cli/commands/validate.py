@@ -286,8 +286,13 @@ def _validate_behavior(
             })
             continue
 
-        trials_files = list(stats_dir.glob("trial_table*/*/trials*.tsv")) or list(
-            stats_dir.glob("trial_table*/*/trials*.parquet")
+        from eeg_pipeline.utils.data.trial_table import (
+            discover_trial_table_candidates,
+            select_preferred_trial_tables,
+        )
+
+        trials_files = select_preferred_trial_tables(
+            discover_trial_table_candidates(stats_dir)
         )
         if trials_files:
             passed.append(
@@ -297,7 +302,7 @@ def _validate_behavior(
             warnings.append({
                 "type": "behavior",
                 "subject": subject,
-                "message": "Missing trials*.tsv (trial table not found)",
+                "message": "Missing canonical trial table (trial table not found)",
             })
 
         for check_name, patterns, required_cols, any_of_cols in behavior_checks:

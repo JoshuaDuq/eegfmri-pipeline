@@ -2298,3 +2298,189 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertIn("auc_ci_high", subject_level)
         self.assertIn("balanced_accuracy_ci_low", subject_level)
         self.assertIn("balanced_accuracy_ci_high", subject_level)
+
+    def test_incremental_validity_missing_baseline_predictors_fail_fast_by_default(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
+        y = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+                with self.assertRaisesRegex(ValueError, "Missing baseline predictors"):
+                    orch.run_incremental_validity_ml(
+                        subjects=["0001", "0002"],
+                        task="thermalactive",
+                        deriv_root=Path(td),
+                        config=DotConfig({}),
+                        n_perm=0,
+                        inner_splits=2,
+                        rng_seed=42,
+                        results_root=Path(td),
+                        logger=Mock(),
+                        baseline_predictors=["temperature"],
+                    )
+
+    def test_incremental_validity_can_use_intercept_fallback_when_explicitly_enabled(self):
+        from sklearn.dummy import DummyRegressor
+
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
+        y = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+            }
+        )
+        cfg = DotConfig({"machine_learning": {"incremental_validity": {"require_baseline_predictors": False}}})
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ), patch.object(
+                orch, "create_elasticnet_pipeline", return_value=DummyRegressor(strategy="mean")
+            ), patch.object(
+                orch, "build_elasticnet_param_grid", return_value={}
+            ):
+                out_dir = orch.run_incremental_validity_ml(
+                    subjects=["0001", "0002"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=0,
+                    inner_splits=2,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    baseline_predictors=["temperature"],
+                )
+
+            with open(out_dir / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+                summary = json.load(f)
+
+        self.assertEqual(summary["data"]["baseline_predictors"], ["intercept_only"])
+
+    def test_model_comparison_reports_holm_corrected_pairwise_p_values(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        with tempfile.TemporaryDirectory() as td:
+            X = np.array(
+                [
+                    [0.0, 1.0],
+                    [0.1, 1.1],
+                    [0.2, 1.2],
+                    [0.3, 1.3],
+                    [0.4, 1.4],
+                    [0.5, 1.5],
+                ],
+                dtype=float,
+            )
+            y = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], dtype=float)
+            groups = np.array(
+                ["sub-0001", "sub-0001", "sub-0002", "sub-0002", "sub-0003", "sub-0003"],
+                dtype=object,
+            )
+            meta = pd.DataFrame({"subject_id": groups, "trial_id": np.arange(len(groups), dtype=int)})
+
+            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)):
+                out_dir = orch.run_model_comparison_ml(
+                    subjects=["0001", "0002", "0003"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=DotConfig(
+                        {
+                            "machine_learning": {
+                                "preprocessing": {"variance_threshold_grid": [0.0]}
+                            }
+                        }
+                    ),
+                    n_perm=8,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                )
+            with open(out_dir / "model_comparison_summary.json", "r", encoding="utf-8") as f:
+                summary = json.load(f)
+
+        pairwise = summary.get("pairwise_inference", {})
+        self.assertTrue(pairwise)
+        for rec in pairwise.values():
+            self.assertIn("p_value_delta_r2_holm", rec)
+            self.assertIn("p_value_delta_mae_holm", rec)
+
+    def test_within_subject_classification_exports_probabilities_when_available(self):
+        from sklearn.dummy import DummyClassifier
+
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array(
+            [
+                [0.0, 1.0],
+                [0.1, 1.1],
+                [0.2, 1.2],
+                [0.3, 1.3],
+            ],
+            dtype=float,
+        )
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0001", "sub-0001"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [10, 11, 12, 13],
+                "block": [0, 0, 1, 1],
+            }
+        )
+        folds = [
+            (
+                1,
+                np.array([0, 1], dtype=int),
+                np.array([2, 3], dtype=int),
+                "sub-0001",
+                None,
+            )
+        ]
+        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+            ), patch.object(
+                orch, "create_within_subject_folds", return_value=folds
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.create_logistic_pipeline",
+                return_value=DummyClassifier(strategy="most_frequent"),
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.build_logistic_param_grid",
+                return_value={},
+            ):
+                out_dir = orch.run_within_subject_classification_ml(
+                    subjects=["0001"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=0,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    classification_model="lr",
+                )
+
+            pred_df = pd.read_csv(out_dir / "cv_predictions.tsv", sep="\t")
+
+        self.assertIn("y_prob", pred_df.columns)
+        self.assertTrue(np.all(np.isfinite(pred_df["y_prob"].to_numpy(dtype=float))))

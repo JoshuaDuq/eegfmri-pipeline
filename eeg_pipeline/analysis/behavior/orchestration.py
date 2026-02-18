@@ -93,9 +93,9 @@ class _ResultCache:
         if self._trial_table_df is not None:
             return self._trial_table_df
 
-        suffix = _feature_suffix_from_context(ctx)
+        suffix = _trial_table_suffix_from_context(ctx)
         fname = f"trials{suffix}"
-        expected_dir = get_behavior_output_dir(ctx, "trial_table", ensure=False)
+        expected_dir = _trial_table_output_dir(ctx, ensure=False)
         fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv")).strip().lower()
         preferred_ext = ".parquet" if fmt == "parquet" else ".tsv"
         trial_table_path = expected_dir / f"{fname}{preferred_ext}"
@@ -108,13 +108,10 @@ class _ResultCache:
 
         if not trial_table_path.exists():
             feature_files = ctx.selected_feature_files or ctx.feature_categories or None
-            if feature_files:
-                found = _find_trial_table_path(ctx.stats_dir, feature_files=feature_files)
-                if found is None:
-                    return None
-                trial_table_path = found
-            else:
+            found = _find_trial_table_path(ctx.stats_dir, feature_files=feature_files)
+            if found is None:
                 return None
+            trial_table_path = found
 
         from eeg_pipeline.infra.tsv import read_table
         self._trial_table_df = read_table(trial_table_path)
@@ -1460,6 +1457,49 @@ def _feature_folder_from_list(feature_files: List[str]) -> str:
     return _sanitize_path_component("_".join(sorted(items)))
 
 
+def _normalize_trial_table_feature_selection(feature_files: Optional[List[str]]) -> List[str]:
+    """Normalize feature selection for trial-table naming/discovery."""
+    from eeg_pipeline.utils.data.trial_table import normalize_trial_table_feature_selection
+
+    return normalize_trial_table_feature_selection(feature_files)
+
+
+def _trial_table_suffix_from_features(feature_files: Optional[List[str]]) -> str:
+    """Return trial-table filename suffix.
+
+    Multi-category selections are canonicalized to `_all`.
+    """
+    from eeg_pipeline.utils.data.trial_table import trial_table_suffix_from_features
+
+    return trial_table_suffix_from_features(feature_files)
+
+
+def _trial_table_feature_folder_from_features(feature_files: Optional[List[str]]) -> str:
+    """Return trial-table feature folder name.
+
+    Multi-category selections are canonicalized to `all`.
+    """
+    from eeg_pipeline.utils.data.trial_table import trial_table_feature_folder_from_features
+
+    return trial_table_feature_folder_from_features(feature_files)
+
+
+def _trial_table_suffix_from_context(ctx: BehaviorContext) -> str:
+    selected = ctx.selected_feature_files or ctx.feature_categories or []
+    return _trial_table_suffix_from_features(selected)
+
+
+def _trial_table_output_dir(ctx: BehaviorContext, *, ensure: bool = True) -> Path:
+    """Return output directory for trial-table artifacts."""
+    kind_dir = _get_stats_subfolder_with_overwrite(ctx.stats_dir, "trial_table", ctx.overwrite, ensure=ensure)
+    feature_dir = kind_dir / _trial_table_feature_folder_from_features(
+        ctx.selected_feature_files or ctx.feature_categories or []
+    )
+    if ensure:
+        ensure_dir(feature_dir)
+    return feature_dir
+
+
 def get_behavior_output_dir(ctx: BehaviorContext, kind: str, *, ensure: bool = True) -> Path:
     """Return `stats_dir/<kind>/<feature_folder>` (and optionally create it)."""
     kind_dir = _get_stats_subfolder_with_overwrite(ctx.stats_dir, kind, ctx.overwrite, ensure=ensure)
@@ -1730,30 +1770,9 @@ def combine_features(ctx: BehaviorContext) -> pd.DataFrame:
     if ctx._combined_features_df is not None and ctx._combined_features_signature == signature:
         return ctx._combined_features_df
 
-    feature_dataframes = []
-    base_index = None
-    
-    for name, df in ctx.iter_feature_tables():
-        if not _is_dataframe_valid(df):
-            continue
-        
-        if base_index is None:
-            base_index = df.index
-        else:
-            _validate_feature_index_alignment(df, name, base_index, ctx.logger)
-        
-        prefix = f"{name}_"
-        df_renamed = _rename_feature_columns_with_prefix(df, prefix)
-        _check_duplicate_columns(df_renamed, f"within {name}", ctx.logger)
-        
-        if feature_dataframes:
-            _check_cross_table_column_overlap(df_renamed, feature_dataframes, ctx.logger)
-        
-        feature_dataframes.append(df_renamed)
+    from eeg_pipeline.utils.data.trial_table import combine_feature_tables
 
-    combined = pd.concat(feature_dataframes, axis=1) if feature_dataframes else pd.DataFrame()
-    if not combined.empty:
-        _check_duplicate_columns(combined, "after combining", ctx.logger)
+    combined = combine_feature_tables(ctx.iter_feature_tables())
     
     ctx._combined_features_df = combined
     ctx._combined_features_signature = signature
@@ -3137,9 +3156,9 @@ def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
     from eeg_pipeline.utils.data.trial_table import save_trial_table
 
     fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv")).strip().lower()
-    suffix = _feature_suffix_from_context(ctx)
+    suffix = _trial_table_suffix_from_context(ctx)
     fname = f"trials{suffix}"
-    out_dir = _get_stats_subfolder(ctx, "trial_table")
+    out_dir = _trial_table_output_dir(ctx, ensure=True)
     out_ext = ".parquet" if fmt == "parquet" else ".tsv"
     out_path = out_dir / f"{fname}{out_ext}"
 
@@ -3149,7 +3168,8 @@ def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
             self.df = df
             self.metadata = metadata
 
-    save_trial_table(_TableWrapper(result.df, result.metadata), out_path, format=fmt)
+    table_wrapper = _TableWrapper(result.df, result.metadata)
+    save_trial_table(table_wrapper, out_path, format=fmt)
 
     if ctx.also_save_csv:
         from eeg_pipeline.infra.tsv import write_csv
@@ -3174,9 +3194,9 @@ def _try_reuse_cached_trial_table(
 ) -> Optional[Path]:
     """Reuse existing trial-table artifact when input hash is unchanged."""
     fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "tsv")).strip().lower()
-    suffix = _feature_suffix_from_context(ctx)
+    suffix = _trial_table_suffix_from_context(ctx)
     fname = f"trials{suffix}"
-    out_dir = _get_stats_subfolder(ctx, "trial_table")
+    out_dir = _trial_table_output_dir(ctx, ensure=True)
     out_ext = ".parquet" if fmt == "parquet" else ".tsv"
     out_path = out_dir / f"{fname}{out_ext}"
 
@@ -5266,54 +5286,10 @@ def stage_mixed_effects(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
 
 def _find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] = None) -> Optional[Path]:
-    """Find trial table file with feature suffix.
-    
-    If feature_files is provided, builds exact filename. Otherwise searches for:
-    - trials_*.{parquet,tsv}
-    - trials.{parquet,tsv}
-    """
-    trial_table_roots = sorted(p for p in stats_dir.glob("trial_table*") if p.is_dir())
-    if not trial_table_roots:
-        return None
-    
-    def _select_preferred_candidate(existing: List[Path], *, error_context: str) -> Path:
-        grouped: Dict[Tuple[str, str], List[Path]] = {}
-        for path in existing:
-            key = (str(path.parent), path.stem)
-            grouped.setdefault(key, []).append(path)
-        if len(grouped) > 1:
-            raise ValueError(
-                f"Multiple trial table files found in {stats_dir}{error_context}: {existing}. "
-                "Specify feature files to disambiguate."
-            )
-        options = next(iter(grouped.values()))
-        parquet = [p for p in options if p.suffix == ".parquet"]
-        if parquet:
-            return parquet[0]
-        return options[0]
+    """Find trial table path using shared trial-table resolution helpers."""
+    from eeg_pipeline.utils.data.trial_table import find_trial_table_path
 
-    if feature_files:
-        suffix = "_" + "_".join(sorted(str(x) for x in feature_files))
-        fname = f"trials{suffix}"
-        feature_dir = _feature_folder_from_list(feature_files)
-        candidates: List[Path] = []
-        for root in trial_table_roots:
-            candidates.append(root / feature_dir / f"{fname}.parquet")
-            candidates.append(root / feature_dir / f"{fname}.tsv")
-        existing = [p for p in candidates if p.exists()]
-        if len(existing) == 0:
-            return None
-        return _select_preferred_candidate(existing, error_context=f" for {feature_dir}")
-    
-    pattern_paths: List[Path] = []
-    for root in trial_table_roots:
-        pattern_paths.extend(list(root.glob("*/trials_*.parquet")))
-        pattern_paths.extend(list(root.glob("*/trials_*.tsv")))
-        pattern_paths.extend(list(root.glob("*/trials.parquet")))
-        pattern_paths.extend(list(root.glob("*/trials.tsv")))
-    if len(pattern_paths) == 0:
-        return None
-    return _select_preferred_candidate(pattern_paths, error_context="")
+    return find_trial_table_path(stats_dir, feature_files=feature_files)
 
 
 def run_group_level_mixed_effects(

@@ -181,7 +181,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     
     stats_dir = features_path.parent / "stats"
     computation_patterns = {
-        "trial_table": ["trial_table*/*/trials*.tsv", "trial_table*/*/trials*.parquet"],
+        "trial_table": ["trial_table*/*/trials_*.tsv", "trial_table*/*/trials_*.parquet"],
         "lag_features": ["lag_features*/*/trials_with_lags*.tsv", "lag_features*/*/*.metadata.json"],
         "pain_residual": ["pain_residual*/*/trials_with_residual*.tsv", "pain_residual*/*/*.metadata.json"],
         "temperature_models": [
@@ -369,7 +369,6 @@ def discover_trial_table_columns(
     result = {"columns": [], "values": {}, "source": None, "file": None}
     
     trial_files: List[Path] = []
-    patterns = ["trial_table*/*/trials*.tsv", "trial_table*/*/trials*.parquet"]
     
     search_dirs = []
     if subject:
@@ -381,9 +380,15 @@ def discover_trial_table_columns(
     for stats_dir in search_dirs:
         if not stats_dir.exists():
             continue
-        found_in_dir: List[Path] = []
-        for pattern in patterns:
-            found_in_dir.extend(stats_dir.glob(pattern))
+        from eeg_pipeline.utils.data.trial_table import (
+            discover_trial_table_candidates,
+            select_preferred_trial_tables,
+        )
+
+        found_in_dir = select_preferred_trial_tables(
+            discover_trial_table_candidates(stats_dir)
+        )
+
         if found_in_dir:
             trial_files = sorted(set(found_in_dir))
             break

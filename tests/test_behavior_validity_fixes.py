@@ -210,11 +210,11 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(captured["n_rows"], 4)
         self.assertTrue(captured["paired"])
 
-    def test_group_trial_table_discovery_finds_unsuffixed_trials(self):
+    def test_group_trial_table_discovery_finds_canonical_all_trials(self):
         from eeg_pipeline.analysis.behavior.orchestration import _find_trial_table_path
 
         root = Path(tempfile.mkdtemp())
-        trials_path = root / "trial_table" / "all" / "trials.tsv"
+        trials_path = root / "trial_table" / "all" / "trials_all.tsv"
         trials_path.parent.mkdir(parents=True, exist_ok=True)
         trials_path.write_text("rating\tpower_alpha\n1\t0.1\n")
 
@@ -233,6 +233,17 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         found = _find_trial_table_path(root, feature_files=None)
         self.assertEqual(found, parquet_path)
+
+    def test_group_trial_table_discovery_uses_canonical_all_for_multiple_features(self):
+        from eeg_pipeline.analysis.behavior.orchestration import _find_trial_table_path
+
+        root = Path(tempfile.mkdtemp())
+        canonical_path = root / "trial_table" / "all" / "trials_all.parquet"
+        canonical_path.parent.mkdir(parents=True, exist_ok=True)
+        canonical_path.write_bytes(b"PAR1")
+
+        found = _find_trial_table_path(root, feature_files=["power", "connectivity"])
+        self.assertEqual(found, canonical_path)
 
     def test_group_correlations_read_tsv_via_read_table(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
@@ -703,11 +714,11 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ctx = self._ctx(cfg)
         out_dir = ctx.stats_dir / "trial_table" / "all"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / "trials.tsv"
+        out_path = out_dir / "trials_all.tsv"
         df_cached = pd.DataFrame({"rating": [10], "power_alpha": [0.1]})
         df_cached.to_csv(out_path, sep="\t", index=False)
         schema_hash = compute_trial_table_schema_hash(df_cached)
-        (out_dir / "trials.metadata.json").write_text(
+        (out_dir / "trials_all.metadata.json").write_text(
             '{"n_trials": 1, "n_columns": 2, "contract": {"version": "1.0", "schema_hash": "'
             + schema_hash
             + '", "input_hash": "abc"}}',
@@ -732,8 +743,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ctx = self._ctx(cfg)
         out_dir = ctx.stats_dir / "trial_table" / "all"
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "trials.tsv").write_text("rating\tpower_alpha\n10\t0.1\n", encoding="utf-8")
-        (out_dir / "trials.metadata.json").write_text(
+        (out_dir / "trials_all.tsv").write_text("rating\tpower_alpha\n10\t0.1\n", encoding="utf-8")
+        (out_dir / "trials_all.metadata.json").write_text(
             '{"n_trials": 1, "n_columns": 2, "contract": {"version": "1.0", "schema_hash": "definitely_wrong"}}',
             encoding="utf-8",
         )
@@ -741,6 +752,21 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         _cache.clear()
         with self.assertRaises(ValueError):
             _cache.get_trial_table(ctx)
+
+    def test_write_trial_table_uses_canonical_all_name_for_multi_feature_selection(self):
+        from eeg_pipeline.analysis.behavior.orchestration import TrialTableResult, write_trial_table
+
+        cfg = DotConfig({"behavior_analysis": {"trial_table": {"format": "tsv"}}})
+        ctx = self._ctx(cfg)
+        ctx.selected_feature_files = ["power", "connectivity"]
+        result = TrialTableResult(
+            df=pd.DataFrame({"rating": [1.0], "power_alpha": [0.1], "connectivity_imcoh": [0.2]}),
+            metadata={"n_trials": 1, "n_columns": 3, "contract": {"version": "1.0"}},
+        )
+
+        out_path = write_trial_table(ctx, result)
+        self.assertEqual(out_path, ctx.stats_dir / "trial_table" / "all" / "trials_all.tsv")
+        self.assertTrue(out_path.exists())
 
     def test_pain_sensitivity_preserves_permutation_primary_pvalue(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_pain_sensitivity
