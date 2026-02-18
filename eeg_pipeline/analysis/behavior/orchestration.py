@@ -3605,6 +3605,11 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     primary_unit = str(get_config_value(ctx.config, "behavior_analysis.models.primary_unit", "trial") or "trial").strip().lower()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    force_trial_iid_asymptotic = get_config_bool(
+        ctx.config,
+        "behavior_analysis.models.force_trial_iid_asymptotic",
+        False,
+    )
     run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
 
     if primary_unit in {"trial", "trialwise"} and not allow_iid_trials:
@@ -3612,6 +3617,12 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             "Trial-level feature-model inference assumes i.i.d trials and is not recommended. "
             "Use run-level aggregation (behavior_analysis.models.primary_unit=run_mean) "
             "or set behavior_analysis.statistics.allow_iid_trials=true to override."
+        )
+    if primary_unit in {"trial", "trialwise"} and allow_iid_trials and not force_trial_iid_asymptotic:
+        raise ValueError(
+            "Trial-level feature models require explicit override to use asymptotic i.i.d inference. "
+            "Set behavior_analysis.models.force_trial_iid_asymptotic=true to proceed, "
+            "or use run-level aggregation (behavior_analysis.models.primary_unit=run_mean)."
         )
 
     if use_run_unit:
@@ -5549,6 +5560,12 @@ def run_group_level_correlations(
     use_block_permutation: bool = True,
     n_perm: int = 1000,
     fdr_alpha: float = 0.05,
+    target_col: str = "rating",
+    control_temperature: bool = False,
+    control_trial_order: bool = False,
+    control_run_effects: bool = False,
+    max_run_dummies: int = 20,
+    random_state: Optional[int] = None,
 ) -> pd.DataFrame:
     """Run multilevel correlations across subjects with block-aware permutations.
     
@@ -5566,6 +5583,7 @@ def run_group_level_correlations(
     from eeg_pipeline.infra.paths import deriv_stats_path
     from eeg_pipeline.infra.tsv import read_table
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
+    from eeg_pipeline.utils.analysis.stats.partial import compute_partial_corr
     from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
     
     feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
@@ -5598,8 +5616,11 @@ def run_group_level_correlations(
     
     combined = pd.concat(all_trials, ignore_index=True)
     
-    if "rating" not in combined.columns:
-        logger.warning("Multilevel correlations: 'rating' column not found.")
+    target_column = str(target_col or "rating").strip()
+    if not target_column:
+        target_column = "rating"
+    if target_column not in combined.columns:
+        logger.warning("Multilevel correlations: target column '%s' not found.", target_column)
         return pd.DataFrame()
     
     block_col = None
@@ -5609,7 +5630,7 @@ def run_group_level_correlations(
             break
     
     feature_cols = [c for c in combined.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
-    rating = pd.to_numeric(combined["rating"], errors="coerce").to_numpy(dtype=float)
+    rating = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
     subject_all = combined["subject_id"].astype(str).to_numpy(dtype=object)
     block_all = combined[block_col].to_numpy() if block_col is not None else None
 
@@ -5626,7 +5647,15 @@ def run_group_level_correlations(
         return float(np.tanh(np.nanmean(z_vals)))
 
     records: List[Dict[str, Any]] = []
-    rng = np.random.default_rng(42)
+    if random_state is None:
+        seed = get_config_value(config, "project.random_state", 42)
+    else:
+        seed = random_state
+    try:
+        seed_int = int(seed) if seed is not None else None
+    except (TypeError, ValueError):
+        seed_int = None
+    rng = np.random.default_rng(seed_int)
 
     for feat in feature_cols:
         feat_type = _cache.get_feature_type(str(feat), config)
@@ -5637,39 +5666,118 @@ def run_group_level_correlations(
             continue
 
         subject_payloads: List[Dict[str, Any]] = []
+        used_partial = False
         for subj in unique_subjects:
             idx = subject_indices[subj]
-            x_sub = feature_vals[idx]
-            y_sub = rating[idx]
-            valid = np.isfinite(x_sub) & np.isfinite(y_sub)
-            if int(valid.sum()) < 3:
+            subj_df = combined.iloc[idx]
+            x_sub_s = pd.to_numeric(subj_df[str(feat)], errors="coerce")
+            y_sub_s = pd.to_numeric(subj_df[target_column], errors="coerce")
+
+            valid_xy = np.isfinite(x_sub_s.to_numpy(dtype=float)) & np.isfinite(
+                y_sub_s.to_numpy(dtype=float)
+            )
+            if int(valid_xy.sum()) < 3:
                 continue
 
-            x_valid = x_sub[valid]
-            y_valid = y_sub[valid]
-            x_ws = x_valid - float(np.nanmean(x_valid))
-            y_ws = y_valid - float(np.nanmean(y_valid))
+            x_valid = x_sub_s.loc[valid_xy]
+            y_valid = y_sub_s.loc[valid_xy]
 
-            finite_ws = np.isfinite(x_ws) & np.isfinite(y_ws)
-            if int(finite_ws.sum()) < 3:
+            cov_df = pd.DataFrame(index=x_valid.index)
+            if control_temperature and "temperature" in subj_df.columns:
+                cov_df["temperature"] = pd.to_numeric(
+                    subj_df.loc[x_valid.index, "temperature"], errors="coerce"
+                )
+
+            if control_trial_order:
+                for trial_col in (
+                    "trial_index_within_group",
+                    "trial_index",
+                    "trial_in_run",
+                    "trial",
+                    "trial_number",
+                ):
+                    if trial_col in subj_df.columns:
+                        cov_df["trial_index"] = pd.to_numeric(
+                            subj_df.loc[x_valid.index, trial_col], errors="coerce"
+                        )
+                        break
+
+            if control_run_effects and block_col is not None and block_col in subj_df.columns:
+                block_sub_s = subj_df.loc[x_valid.index, block_col]
+                n_levels = int(pd.Series(block_sub_s).nunique(dropna=True))
+                max_levels = max(1, int(max_run_dummies)) + 1
+                if n_levels > 1 and n_levels <= max_levels:
+                    run_dummies = pd.get_dummies(
+                        block_sub_s.astype("category"),
+                        prefix=str(block_col),
+                        drop_first=True,
+                    )
+                    cov_df = pd.concat([cov_df, run_dummies], axis=1)
+
+            if cov_df is not None and not cov_df.empty:
+                cov_df = cov_df.apply(pd.to_numeric, errors="coerce")
+                cov_df = cov_df.replace([np.inf, -np.inf], np.nan)
+                cov_df = cov_df.dropna(axis=1, how="all")
+                if not cov_df.empty:
+                    nonconstant = [
+                        c
+                        for c in cov_df.columns
+                        if int(pd.to_numeric(cov_df[c], errors="coerce").nunique(dropna=True))
+                        > 1
+                    ]
+                    cov_df = cov_df[nonconstant]
+                if cov_df.empty:
+                    cov_df = None
+            else:
+                cov_df = None
+
+            if cov_df is not None and not cov_df.empty:
+                finite_cov = np.all(np.isfinite(cov_df.to_numpy(dtype=float)), axis=1)
+                finite_xy_sub = np.isfinite(x_valid.to_numpy(dtype=float)) & np.isfinite(
+                    y_valid.to_numpy(dtype=float)
+                )
+                valid_final = finite_xy_sub & finite_cov
+            else:
+                valid_final = np.isfinite(x_valid.to_numpy(dtype=float)) & np.isfinite(
+                    y_valid.to_numpy(dtype=float)
+                )
+
+            if int(valid_final.sum()) < 3:
                 continue
 
-            x_ws = x_ws[finite_ws]
-            y_ws = y_ws[finite_ws]
-            if int(len(x_ws)) < 3 or float(np.nanstd(x_ws)) <= CONSTANT_VARIANCE_THRESHOLD:
+            x_final = pd.to_numeric(x_valid.loc[valid_final], errors="coerce")
+            y_final = pd.to_numeric(y_valid.loc[valid_final], errors="coerce")
+            cov_final = cov_df.loc[x_final.index] if cov_df is not None else None
+
+            if int(len(x_final)) < 3 or float(np.nanstd(x_final.to_numpy(dtype=float))) <= CONSTANT_VARIANCE_THRESHOLD:
                 continue
-            if float(np.nanstd(y_ws)) <= CONSTANT_VARIANCE_THRESHOLD:
+            if float(np.nanstd(y_final.to_numpy(dtype=float))) <= CONSTANT_VARIANCE_THRESHOLD:
                 continue
 
-            r_sub, _ = compute_correlation(x_ws, y_ws, method="spearman")
+            if cov_final is not None and not cov_final.empty:
+                r_sub, _p_unused, _n_used = compute_partial_corr(
+                    x_final,
+                    y_final,
+                    cov_final,
+                    method="spearman",
+                )
+                uses_partial = True
+            else:
+                r_sub, _ = compute_correlation(
+                    x_final.to_numpy(dtype=float),
+                    y_final.to_numpy(dtype=float),
+                    method="spearman",
+                )
+                uses_partial = False
             if not np.isfinite(r_sub):
                 continue
+            used_partial = used_partial or uses_partial
 
             block_sub = None
             can_block_permute = False
             if block_all is not None:
-                block_sub_full = block_all[idx][valid]
-                block_sub = np.asarray(block_sub_full, dtype=object)[finite_ws]
+                block_sub_full = block_all[idx][valid_xy]
+                block_sub = np.asarray(block_sub_full, dtype=object)[valid_final]
                 if use_block_permutation and block_sub.size > 0:
                     _, counts = np.unique(block_sub, return_counts=True)
                     can_block_permute = bool(np.all(counts >= 2))
@@ -5677,10 +5785,12 @@ def run_group_level_correlations(
             subject_payloads.append(
                 {
                     "subject": subj,
-                    "x_ws": x_ws,
-                    "y_ws": y_ws,
+                    "x_vals": x_final.to_numpy(dtype=float),
+                    "y_vals": y_final.to_numpy(dtype=float),
+                    "cov_df": cov_final.reset_index(drop=True) if cov_final is not None else None,
+                    "uses_partial": uses_partial,
                     "r_obs": float(r_sub),
-                    "n_obs": int(len(x_ws)),
+                    "n_obs": int(len(x_final)),
                     "block_sub": block_sub,
                     "can_block_permute": can_block_permute,
                 }
@@ -5706,8 +5816,8 @@ def run_group_level_correlations(
                 for _ in range(int(n_perm)):
                     perm_subject_rs: List[float] = []
                     for payload in subject_payloads:
-                        y_ws = np.asarray(payload["y_ws"], dtype=float)
-                        x_ws = np.asarray(payload["x_ws"], dtype=float)
+                        y_vals = np.asarray(payload["y_vals"], dtype=float)
+                        x_vals = np.asarray(payload["x_vals"], dtype=float)
 
                         if block_permutation_requested:
                             if not payload.get("can_block_permute", False) or payload.get("block_sub") is None:
@@ -5715,7 +5825,7 @@ def run_group_level_correlations(
                                 break
                             try:
                                 perm_idx = permute_within_groups(
-                                    len(y_ws),
+                                    len(y_vals),
                                     rng,
                                     np.asarray(payload["block_sub"], dtype=object),
                                     scheme="shuffle",
@@ -5725,10 +5835,19 @@ def run_group_level_correlations(
                                 permutation_failed = True
                                 break
                         else:
-                            perm_idx = rng.permutation(len(y_ws))
+                            perm_idx = rng.permutation(len(y_vals))
 
-                        y_perm = y_ws[perm_idx]
-                        r_perm_sub, _ = compute_correlation(x_ws, y_perm, method="spearman")
+                        y_perm = y_vals[perm_idx]
+                        cov_df_perm = payload.get("cov_df")
+                        if payload.get("uses_partial", False) and isinstance(cov_df_perm, pd.DataFrame) and not cov_df_perm.empty:
+                            r_perm_sub, _p_unused, _n_used = compute_partial_corr(
+                                pd.Series(x_vals),
+                                pd.Series(y_perm),
+                                cov_df_perm,
+                                method="spearman",
+                            )
+                        else:
+                            r_perm_sub, _ = compute_correlation(x_vals, y_perm, method="spearman")
                         if np.isfinite(r_perm_sub):
                             perm_subject_rs.append(float(r_perm_sub))
 
@@ -5748,20 +5867,29 @@ def run_group_level_correlations(
                 else "subject_restricted_failed"
             )
 
-        p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (len(null_rs) + 1) if null_rs else np.nan
+        n_perm_effective = int(len(null_rs))
+        p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (n_perm_effective + 1) if null_rs else np.nan
+        estimator = (
+            "subject_balanced_partial_spearman"
+            if used_partial
+            else "subject_balanced_within_subject_centered_spearman"
+        )
 
         records.append({
             "feature": str(feat),
+            "target": target_column,
             "feature_type": feat_type,
             "family_id": family_id,
             "family_kind": "feature_type",
             "r": float(r_obs),
             "n": int(sum(int(p["n_obs"]) for p in subject_payloads)),
             "n_subjects": int(len(subject_payloads)),
-            "estimator": "subject_balanced_within_subject_centered_spearman",
+            "estimator": estimator,
             "p_perm": p_perm,
             "permutation_method": perm_method,
-            "n_perm": int(n_perm),
+            "n_perm_requested": int(n_perm),
+            "n_perm_effective": n_perm_effective,
+            "n_perm": n_perm_effective,
         })
     
     if not records:
@@ -5849,14 +5977,61 @@ def run_group_level_analysis(
     
     if run_multilevel_correlations:
         logger.info("Running multilevel correlations with block-restricted permutations...")
+        gl_corr_cfg = get_config_value(
+            config,
+            "behavior_analysis.group_level.multilevel_correlations",
+            {},
+        )
+        if not isinstance(gl_corr_cfg, dict):
+            gl_corr_cfg = {}
+        target_col = str(
+            gl_corr_cfg.get("target", get_config_value(config, "behavior_analysis.group_level.target", "rating"))
+            or "rating"
+        ).strip()
+        control_temperature = bool(
+            gl_corr_cfg.get(
+                "control_temperature",
+                get_config_bool(config, "behavior_analysis.control_temperature", True),
+            )
+        )
+        control_trial_order = bool(
+            gl_corr_cfg.get(
+                "control_trial_order",
+                get_config_bool(config, "behavior_analysis.control_trial_order", True),
+            )
+        )
+        control_run_effects = bool(
+            gl_corr_cfg.get(
+                "control_run_effects",
+                get_config_bool(config, "behavior_analysis.run_adjustment.include_in_correlations", False),
+            )
+        )
+        max_run_dummies = int(
+            gl_corr_cfg.get(
+                "max_run_dummies",
+                get_config_int(config, "behavior_analysis.run_adjustment.max_dummies", 20),
+            )
+        )
+        random_state = gl_corr_cfg.get("random_state", get_config_value(config, "project.random_state", None))
         multilevel_df = run_group_level_correlations(
             subjects=subjects,
             deriv_root=deriv_root,
             config=config,
             logger=logger,
-            use_block_permutation=get_config_bool(config, "behavior_analysis.group_level.block_permutation", True),
+            use_block_permutation=bool(
+                gl_corr_cfg.get(
+                    "block_permutation",
+                    get_config_bool(config, "behavior_analysis.group_level.block_permutation", True),
+                )
+            ),
             n_perm=get_config_int(config, "behavior_analysis.statistics.n_permutations", 1000),
             fdr_alpha=get_config_float(config, "behavior_analysis.statistics.fdr_alpha", 0.05),
+            target_col=target_col,
+            control_temperature=control_temperature,
+            control_trial_order=control_trial_order,
+            control_run_effects=control_run_effects,
+            max_run_dummies=max_run_dummies,
+            random_state=random_state,
         )
         
         if output_dir and multilevel_df is not None and not multilevel_df.empty:

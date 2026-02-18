@@ -1857,6 +1857,12 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optModelsBinaryOutcome:
 		m.modelsBinaryOutcome = (m.modelsBinaryOutcome + 1) % 2
 		m.useDefaultAdvanced = false
+	case optModelsPrimaryUnit:
+		m.modelsPrimaryUnit = (m.modelsPrimaryUnit + 1) % 2
+		m.useDefaultAdvanced = false
+	case optModelsForceTrialIIDAsymptotic:
+		m.modelsForceTrialIIDAsymptotic = !m.modelsForceTrialIIDAsymptotic
+		m.useDefaultAdvanced = false
 
 	// Stability
 	case optStabilityMethod:
@@ -1986,6 +1992,21 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optGroupLevelBlockPermutation:
 		m.groupLevelBlockPermutation = !m.groupLevelBlockPermutation
+		m.useDefaultAdvanced = false
+	case optGroupLevelTarget:
+		m.groupLevelTarget = (m.groupLevelTarget + 1) % 3
+		m.useDefaultAdvanced = false
+	case optGroupLevelControlTemperature:
+		m.groupLevelControlTemperature = !m.groupLevelControlTemperature
+		m.useDefaultAdvanced = false
+	case optGroupLevelControlTrialOrder:
+		m.groupLevelControlTrialOrder = !m.groupLevelControlTrialOrder
+		m.useDefaultAdvanced = false
+	case optGroupLevelControlRunEffects:
+		m.groupLevelControlRunEffects = !m.groupLevelControlRunEffects
+		m.useDefaultAdvanced = false
+	case optGroupLevelMaxRunDummies:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
 	// Temporal

@@ -562,6 +562,17 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "rating_median"
 			}
 			return "Binary Outcome", v, "for logit models"
+		case optModelsPrimaryUnit:
+			v := "trial"
+			if m.modelsPrimaryUnit == 1 {
+				v = "run_mean"
+			}
+			return "Primary Unit", v, "trial | run_mean"
+		case optModelsForceTrialIIDAsymptotic:
+			if m.modelsPrimaryUnit != 0 {
+				return "Force Trial IID", "N/A", "only used for trial-level models"
+			}
+			return "Force Trial IID", m.boolToOnOff(m.modelsForceTrialIIDAsymptotic), "explicit asymptotic override"
 
 		// Stability
 		case optStabilityMethod:
@@ -977,6 +988,40 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				return "Block Permutation", "N/A", "enable Group Multilevel Correlations"
 			}
 			return "Block Permutation", m.boolToOnOff(m.groupLevelBlockPermutation), "block-restricted when available"
+		case optGroupLevelTarget:
+			if !m.isComputationSelected("multilevel_correlations") {
+				return "Group Target", "N/A", "enable Group Multilevel Correlations"
+			}
+			targets := []string{"rating", "pain_residual", "temperature"}
+			v := targets[0]
+			if m.groupLevelTarget >= 0 && m.groupLevelTarget < len(targets) {
+				v = targets[m.groupLevelTarget]
+			}
+			return "Group Target", v, "Space to cycle"
+		case optGroupLevelControlTemperature:
+			if !m.isComputationSelected("multilevel_correlations") {
+				return "Ctrl Temperature", "N/A", "enable Group Multilevel Correlations"
+			}
+			return "Ctrl Temperature", m.boolToOnOff(m.groupLevelControlTemperature), "partial Spearman covariate"
+		case optGroupLevelControlTrialOrder:
+			if !m.isComputationSelected("multilevel_correlations") {
+				return "Ctrl Trial Order", "N/A", "enable Group Multilevel Correlations"
+			}
+			return "Ctrl Trial Order", m.boolToOnOff(m.groupLevelControlTrialOrder), "partial Spearman covariate"
+		case optGroupLevelControlRunEffects:
+			if !m.isComputationSelected("multilevel_correlations") {
+				return "Ctrl Run Effects", "N/A", "enable Group Multilevel Correlations"
+			}
+			return "Ctrl Run Effects", m.boolToOnOff(m.groupLevelControlRunEffects), "add run dummies if feasible"
+		case optGroupLevelMaxRunDummies:
+			if !m.isComputationSelected("multilevel_correlations") {
+				return "Max Run Dummies", "N/A", "enable Group Multilevel Correlations"
+			}
+			val := fmt.Sprintf("%d", m.groupLevelMaxRunDummies)
+			if m.editingNumber && m.isCurrentlyEditing(optGroupLevelMaxRunDummies) {
+				val = numberDisplay
+			}
+			return "Max Run Dummies", val, "skip run effects if too many levels"
 
 		// Cluster
 		case optClusterThreshold:

@@ -72,6 +72,7 @@ var behaviorComputations = []Computation{
 	{"correlations", "Correlations", "EEG-rating correlations with bootstrap CIs", "Core"},
 	{"multilevel_correlations", "Group Multilevel Correlations", "Group-level correlations with block-restricted permutations", "Core"},
 	{"regression", "Regression", "Feature regression with optional permutation + model sensitivity", "Core"},
+	{"models", "Model Families", "Per-feature model families (OLS/robust/quantile/logit)", "Core"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., pain vs non-pain)", "Core"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis", "Core"},
 	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity (temperature→rating slope)", "Core"},
@@ -1882,28 +1883,30 @@ type Model struct {
 	regressionMaxFeatures        int // 0 = no limit
 
 	// Models
-	modelsIncludeTemperature  bool
-	modelsTempControl         int // 0=linear, 1=rating_hat, 2=spline
-	modelsTempSplineKnots     int
-	modelsTempSplineQlow      float64
-	modelsTempSplineQhigh     float64
-	modelsTempSplineMinN      int
-	modelsIncludeTrialOrder   bool
-	modelsIncludePrev         bool
-	modelsIncludeRunBlock     bool
-	modelsIncludeInteraction  bool
-	modelsStandardize         bool
-	modelsMinSamples          int
-	modelsMaxFeatures         int
-	modelsOutcomeRating       bool
-	modelsOutcomePainResidual bool
-	modelsOutcomeTemperature  bool
-	modelsOutcomePainBinary   bool
-	modelsFamilyOLS           bool
-	modelsFamilyRobust        bool
-	modelsFamilyQuantile      bool
-	modelsFamilyLogit         bool
-	modelsBinaryOutcome       int // 0=pain_binary, 1=rating_median
+	modelsIncludeTemperature      bool
+	modelsTempControl             int // 0=linear, 1=rating_hat, 2=spline
+	modelsTempSplineKnots         int
+	modelsTempSplineQlow          float64
+	modelsTempSplineQhigh         float64
+	modelsTempSplineMinN          int
+	modelsIncludeTrialOrder       bool
+	modelsIncludePrev             bool
+	modelsIncludeRunBlock         bool
+	modelsIncludeInteraction      bool
+	modelsStandardize             bool
+	modelsMinSamples              int
+	modelsMaxFeatures             int
+	modelsOutcomeRating           bool
+	modelsOutcomePainResidual     bool
+	modelsOutcomeTemperature      bool
+	modelsOutcomePainBinary       bool
+	modelsFamilyOLS               bool
+	modelsFamilyRobust            bool
+	modelsFamilyQuantile          bool
+	modelsFamilyLogit             bool
+	modelsBinaryOutcome           int // 0=pain_binary, 1=rating_median
+	modelsPrimaryUnit             int // 0=trial, 1=run_mean
+	modelsForceTrialIIDAsymptotic bool
 
 	// Stability
 	stabilityMethod      int // 0=spearman, 1=pearson
@@ -1944,6 +1947,11 @@ type Model struct {
 	correlationsPermutationPrimary  bool
 	correlationsTargetColumn        string // Custom target column from events (dropdown)
 	groupLevelBlockPermutation      bool   // Use block-restricted permutations when block/run is available
+	groupLevelTarget                int    // 0=rating, 1=pain_residual, 2=temperature
+	groupLevelControlTemperature    bool
+	groupLevelControlTrialOrder     bool
+	groupLevelControlRunEffects     bool
+	groupLevelMaxRunDummies         int
 
 	// Pain sensitivity
 	painSensitivityMinTrials int // 0=unset
@@ -2802,28 +2810,30 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionPermutations:       0,
 		regressionMaxFeatures:        0,
 
-		modelsIncludeTemperature:  true,
-		modelsTempControl:         0,
-		modelsTempSplineKnots:     4,
-		modelsTempSplineQlow:      0.05,
-		modelsTempSplineQhigh:     0.95,
-		modelsTempSplineMinN:      12,
-		modelsIncludeTrialOrder:   true,
-		modelsIncludePrev:         false,
-		modelsIncludeRunBlock:     true,
-		modelsIncludeInteraction:  true,
-		modelsStandardize:         true,
-		modelsMinSamples:          20,
-		modelsMaxFeatures:         100,
-		modelsOutcomeRating:       true,
-		modelsOutcomePainResidual: true,
-		modelsOutcomeTemperature:  false,
-		modelsOutcomePainBinary:   false,
-		modelsFamilyOLS:           true,
-		modelsFamilyRobust:        true,
-		modelsFamilyQuantile:      true,
-		modelsFamilyLogit:         true,
-		modelsBinaryOutcome:       0,
+		modelsIncludeTemperature:      true,
+		modelsTempControl:             0,
+		modelsTempSplineKnots:         4,
+		modelsTempSplineQlow:          0.05,
+		modelsTempSplineQhigh:         0.95,
+		modelsTempSplineMinN:          12,
+		modelsIncludeTrialOrder:       true,
+		modelsIncludePrev:             false,
+		modelsIncludeRunBlock:         true,
+		modelsIncludeInteraction:      true,
+		modelsStandardize:             true,
+		modelsMinSamples:              20,
+		modelsMaxFeatures:             100,
+		modelsOutcomeRating:           true,
+		modelsOutcomePainResidual:     true,
+		modelsOutcomeTemperature:      false,
+		modelsOutcomePainBinary:       false,
+		modelsFamilyOLS:               true,
+		modelsFamilyRobust:            true,
+		modelsFamilyQuantile:          true,
+		modelsFamilyLogit:             true,
+		modelsBinaryOutcome:           0,
+		modelsPrimaryUnit:             0,
+		modelsForceTrialIIDAsymptotic: false,
 
 		stabilityMethod:      0,
 		stabilityOutcome:     0,
@@ -2860,6 +2870,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		correlationsPrimaryUnit:         0,
 		correlationsPermutationPrimary:  false,
 		groupLevelBlockPermutation:      true,
+		groupLevelTarget:                0,
+		groupLevelControlTemperature:    true,
+		groupLevelControlTrialOrder:     true,
+		groupLevelControlRunEffects:     false,
+		groupLevelMaxRunDummies:         20,
 		painSensitivityMinTrials:        0,
 
 		reportTopN:                     15,

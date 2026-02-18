@@ -1100,6 +1100,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 1 {
 			m.runAdjustmentMaxDummies = int(val)
 		}
+	case optGroupLevelMaxRunDummies:
+		if val >= 1 {
+			m.groupLevelMaxRunDummies = int(val)
+		}
 	case optBehaviorMinSamples:
 		if val >= 0 {
 			m.behaviorMinSamples = int(val)

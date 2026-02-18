@@ -489,6 +489,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["modelsFamilyQuantile"] = m.modelsFamilyQuantile
 	cfg["modelsFamilyLogit"] = m.modelsFamilyLogit
 	cfg["modelsBinaryOutcome"] = m.modelsBinaryOutcome
+	cfg["modelsPrimaryUnit"] = m.modelsPrimaryUnit
+	cfg["modelsForceTrialIIDAsymptotic"] = m.modelsForceTrialIIDAsymptotic
 
 	// Stability
 	cfg["stabilityMethod"] = m.stabilityMethod
@@ -529,6 +531,11 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["correlationsPrimaryUnit"] = m.correlationsPrimaryUnit
 	cfg["correlationsPermutationPrimary"] = m.correlationsPermutationPrimary
 	cfg["groupLevelBlockPermutation"] = m.groupLevelBlockPermutation
+	cfg["groupLevelTarget"] = m.groupLevelTarget
+	cfg["groupLevelControlTemperature"] = m.groupLevelControlTemperature
+	cfg["groupLevelControlTrialOrder"] = m.groupLevelControlTrialOrder
+	cfg["groupLevelControlRunEffects"] = m.groupLevelControlRunEffects
+	cfg["groupLevelMaxRunDummies"] = m.groupLevelMaxRunDummies
 	cfg["painSensitivityMinTrials"] = m.painSensitivityMinTrials
 
 	// Mixed Effects & Mediation
@@ -1661,6 +1668,11 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.modelsFamilyQuantile = getBool("modelsFamilyQuantile", m.modelsFamilyQuantile)
 	m.modelsFamilyLogit = getBool("modelsFamilyLogit", m.modelsFamilyLogit)
 	m.modelsBinaryOutcome = getInt("modelsBinaryOutcome", m.modelsBinaryOutcome)
+	m.modelsPrimaryUnit = getInt("modelsPrimaryUnit", m.modelsPrimaryUnit)
+	m.modelsForceTrialIIDAsymptotic = getBool(
+		"modelsForceTrialIIDAsymptotic",
+		m.modelsForceTrialIIDAsymptotic,
+	)
 
 	// Stability
 	m.stabilityMethod = getInt("stabilityMethod", m.stabilityMethod)
@@ -1701,6 +1713,11 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.correlationsPrimaryUnit = getInt("correlationsPrimaryUnit", m.correlationsPrimaryUnit)
 	m.correlationsPermutationPrimary = getBool("correlationsPermutationPrimary", m.correlationsPermutationPrimary)
 	m.groupLevelBlockPermutation = getBool("groupLevelBlockPermutation", m.groupLevelBlockPermutation)
+	m.groupLevelTarget = getInt("groupLevelTarget", m.groupLevelTarget)
+	m.groupLevelControlTemperature = getBool("groupLevelControlTemperature", m.groupLevelControlTemperature)
+	m.groupLevelControlTrialOrder = getBool("groupLevelControlTrialOrder", m.groupLevelControlTrialOrder)
+	m.groupLevelControlRunEffects = getBool("groupLevelControlRunEffects", m.groupLevelControlRunEffects)
+	m.groupLevelMaxRunDummies = getInt("groupLevelMaxRunDummies", m.groupLevelMaxRunDummies)
 	m.painSensitivityMinTrials = getInt("painSensitivityMinTrials", m.painSensitivityMinTrials)
 
 	// Mixed Effects & Mediation

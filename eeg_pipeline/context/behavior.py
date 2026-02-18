@@ -846,7 +846,13 @@ class BehaviorContext:
             float(trial_series.isna().mean()) if n_samples > 0 else 1.0
         )
         n_unique = int(trial_series.dropna().nunique())
-        is_monotonic = bool(trial_series.dropna().is_monotonic_increasing)
+        is_monotonic_global = bool(trial_series.dropna().is_monotonic_increasing)
+        (
+            is_monotonic_within_group,
+            monotonic_group_column,
+            n_non_monotonic_groups,
+        ) = self._is_trial_order_monotonic_within_groups(trial_series)
+        is_monotonic = bool(is_monotonic_global or is_monotonic_within_group)
 
         is_all_missing = trial_series.isna().all()
         exceeds_missing_threshold = missing_fraction > max_missing
@@ -861,7 +867,54 @@ class BehaviorContext:
             "missing_fraction": missing_fraction,
             "n_unique": n_unique,
             "is_monotonic": is_monotonic,
+            "is_monotonic_global": is_monotonic_global,
+            "is_monotonic_within_group": is_monotonic_within_group,
+            "monotonic_group_column": monotonic_group_column,
+            "n_non_monotonic_groups": int(n_non_monotonic_groups),
         }
+
+    def _is_trial_order_monotonic_within_groups(
+        self, trial_series: pd.Series
+    ) -> Tuple[bool, Optional[str], int]:
+        """Check whether trial order is monotonic within run/block groups."""
+        if self.aligned_events is None or trial_series.empty:
+            return False, None, 0
+
+        configured_run_col = self._get_configured_run_column()
+        candidate_columns = []
+        for candidate in (
+            configured_run_col,
+            "run_id",
+            "run",
+            "block",
+            "session",
+        ):
+            c = str(candidate).strip()
+            if c and c not in candidate_columns:
+                candidate_columns.append(c)
+
+        worst_non_monotonic = 0
+        for group_col in candidate_columns:
+            if group_col not in self.aligned_events.columns:
+                continue
+
+            group_series = self.aligned_events[group_col]
+            non_monotonic_groups = 0
+            group_count = 0
+
+            for _, group_idx in group_series.groupby(group_series).groups.items():
+                group_trial = trial_series.loc[group_idx].dropna()
+                if group_trial.empty:
+                    continue
+                group_count += 1
+                if not bool(group_trial.is_monotonic_increasing):
+                    non_monotonic_groups += 1
+
+            worst_non_monotonic = max(worst_non_monotonic, non_monotonic_groups)
+            if group_count > 0 and non_monotonic_groups == 0:
+                return True, str(group_col), 0
+
+        return False, None, int(worst_non_monotonic)
 
     def _record_trial_order_metadata(
         self,
@@ -877,6 +930,16 @@ class BehaviorContext:
                 "missing_fraction": validation["missing_fraction"],
                 "n_unique_non_nan": validation["n_unique"],
                 "is_monotonic_increasing_non_nan": validation["is_monotonic"],
+                "is_monotonic_increasing_global_non_nan": validation.get(
+                    "is_monotonic_global", validation["is_monotonic"]
+                ),
+                "is_monotonic_within_group": validation.get(
+                    "is_monotonic_within_group", False
+                ),
+                "monotonic_group_column": validation.get("monotonic_group_column"),
+                "n_non_monotonic_groups": int(
+                    validation.get("n_non_monotonic_groups", 0)
+                ),
                 "max_missing_fraction_threshold": max_missing,
             }
         )

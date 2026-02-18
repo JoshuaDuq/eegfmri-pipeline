@@ -302,6 +302,12 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.modelsBinaryOutcome >= 0 && m.modelsBinaryOutcome < len(binOut) && m.modelsBinaryOutcome != 0 {
 			args = append(args, "--models-binary-outcome", binOut[m.modelsBinaryOutcome])
 		}
+		if m.modelsPrimaryUnit == 1 {
+			args = append(args, "--models-primary-unit", "run_mean")
+		}
+		if m.modelsForceTrialIIDAsymptotic {
+			args = append(args, "--models-force-trial-iid-asymptotic")
+		}
 	}
 
 	// Stability
@@ -429,8 +435,26 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// Multilevel correlations (group-level)
-	if m.isComputationSelected("multilevel_correlations") && !m.groupLevelBlockPermutation {
-		args = append(args, "--no-group-level-block-permutation")
+	if m.isComputationSelected("multilevel_correlations") {
+		if !m.groupLevelBlockPermutation {
+			args = append(args, "--no-group-level-block-permutation")
+		}
+		targets := []string{"rating", "pain_residual", "temperature"}
+		if m.groupLevelTarget >= 0 && m.groupLevelTarget < len(targets) && m.groupLevelTarget != 0 {
+			args = append(args, "--group-level-target", targets[m.groupLevelTarget])
+		}
+		if !m.groupLevelControlTemperature {
+			args = append(args, "--no-group-level-control-temperature")
+		}
+		if !m.groupLevelControlTrialOrder {
+			args = append(args, "--no-group-level-control-trial-order")
+		}
+		if !m.groupLevelControlRunEffects {
+			args = append(args, "--no-group-level-control-run-effects")
+		}
+		if m.groupLevelMaxRunDummies != 20 {
+			args = append(args, "--group-level-max-run-dummies", fmt.Sprintf("%d", m.groupLevelMaxRunDummies))
+		}
 	}
 
 	// Report

@@ -402,6 +402,8 @@ const (
 	optModelsFamilyQuantile
 	optModelsFamilyLogit
 	optModelsBinaryOutcome
+	optModelsPrimaryUnit
+	optModelsForceTrialIIDAsymptotic
 	// Behavior options - Stability
 	optStabilityMethod
 	optStabilityOutcome
@@ -442,6 +444,11 @@ const (
 	optCorrelationsPermutationPrimary
 	optCorrelationsTargetColumn
 	optGroupLevelBlockPermutation
+	optGroupLevelTarget
+	optGroupLevelControlTemperature
+	optGroupLevelControlTrialOrder
+	optGroupLevelControlRunEffects
+	optGroupLevelMaxRunDummies
 	optPainSensitivityMinTrials
 	// Behavior options - Pain sensitivity / temporal
 	optTemporalResolutionMs

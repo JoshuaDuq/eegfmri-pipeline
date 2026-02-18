@@ -281,6 +281,19 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     models_group.add_argument("--models-min-samples", type=int, default=None)
     models_group.add_argument("--models-max-features", type=int, default=None)
     models_group.add_argument("--models-binary-outcome", choices=["pain_binary", "rating_median"], default=None)
+    models_group.add_argument("--models-primary-unit", choices=["trial", "run_mean"], default=None)
+    models_group.add_argument(
+        "--models-force-trial-iid-asymptotic",
+        action="store_true",
+        default=None,
+        dest="models_force_trial_iid_asymptotic",
+        help="Explicitly allow trial-level feature models with i.i.d asymptotic inference",
+    )
+    models_group.add_argument(
+        "--no-models-force-trial-iid-asymptotic",
+        action="store_false",
+        dest="models_force_trial_iid_asymptotic",
+    )
 
     stability_group = parser.add_argument_group("Stability options")
     stability_group.add_argument("--stability-method", choices=["spearman", "pearson"], default=None)
@@ -356,6 +369,55 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         "--no-group-level-block-permutation",
         action="store_false",
         dest="group_level_block_permutation",
+    )
+    correlations_group.add_argument(
+        "--group-level-target",
+        choices=["rating", "temperature", "pain_residual"],
+        default=None,
+        help="Target column for multilevel group correlations",
+    )
+    correlations_group.add_argument(
+        "--group-level-control-temperature",
+        action="store_true",
+        default=None,
+        dest="group_level_control_temperature",
+        help="Control temperature in multilevel group correlations",
+    )
+    correlations_group.add_argument(
+        "--no-group-level-control-temperature",
+        action="store_false",
+        dest="group_level_control_temperature",
+    )
+    correlations_group.add_argument(
+        "--group-level-control-trial-order",
+        action="store_true",
+        default=None,
+        dest="group_level_control_trial_order",
+        help="Control trial order in multilevel group correlations",
+    )
+    correlations_group.add_argument(
+        "--no-group-level-control-trial-order",
+        action="store_false",
+        dest="group_level_control_trial_order",
+    )
+    correlations_group.add_argument(
+        "--group-level-control-run-effects",
+        action="store_true",
+        default=None,
+        dest="group_level_control_run_effects",
+        help="Control run effects in multilevel group correlations",
+    )
+    correlations_group.add_argument(
+        "--no-group-level-control-run-effects",
+        action="store_false",
+        dest="group_level_control_run_effects",
+    )
+    correlations_group.add_argument(
+        "--group-level-max-run-dummies",
+        type=int,
+        default=None,
+        dest="group_level_max_run_dummies",
+        help="Maximum run dummy columns for multilevel group-level controls",
     )
 
     report_group = parser.add_argument_group("Report options")
@@ -740,6 +802,10 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         mdl["max_features"] = None if max_f <= 0 else max_f
     if getattr(args, "models_binary_outcome", None) is not None:
         mdl["binary_outcome"] = str(args.models_binary_outcome).strip().lower()
+    if getattr(args, "models_primary_unit", None) is not None:
+        mdl["primary_unit"] = str(args.models_primary_unit).strip().lower()
+    if getattr(args, "models_force_trial_iid_asymptotic", None) is not None:
+        mdl["force_trial_iid_asymptotic"] = bool(args.models_force_trial_iid_asymptotic)
 
     # Stability
     stab = ba.setdefault("stability", {})
@@ -826,8 +892,21 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         corr_cfg.setdefault("permutation", {})["enabled"] = enabled
     if getattr(args, "correlations_target_column", None) is not None:
         corr_cfg["target_column"] = str(args.correlations_target_column).strip()
+    gl_corr_cfg = ba.setdefault("group_level", {}).setdefault("multilevel_correlations", {})
     if getattr(args, "group_level_block_permutation", None) is not None:
-        ba.setdefault("group_level", {})["block_permutation"] = bool(args.group_level_block_permutation)
+        enabled = bool(args.group_level_block_permutation)
+        ba.setdefault("group_level", {})["block_permutation"] = enabled
+        gl_corr_cfg["block_permutation"] = enabled
+    if getattr(args, "group_level_target", None) is not None:
+        gl_corr_cfg["target"] = str(args.group_level_target).strip().lower()
+    if getattr(args, "group_level_control_temperature", None) is not None:
+        gl_corr_cfg["control_temperature"] = bool(args.group_level_control_temperature)
+    if getattr(args, "group_level_control_trial_order", None) is not None:
+        gl_corr_cfg["control_trial_order"] = bool(args.group_level_control_trial_order)
+    if getattr(args, "group_level_control_run_effects", None) is not None:
+        gl_corr_cfg["control_run_effects"] = bool(args.group_level_control_run_effects)
+    if getattr(args, "group_level_max_run_dummies", None) is not None:
+        gl_corr_cfg["max_run_dummies"] = int(args.group_level_max_run_dummies)
 
     # Report
     if getattr(args, "report_top_n", None) is not None:

@@ -628,6 +628,49 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	}
 }
 
+func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		switch comp.Key {
+		case "models", "multilevel_correlations":
+			m.computationSelected[i] = true
+		}
+	}
+
+	m.groupLevelBlockPermutation = false
+	m.groupLevelTarget = 1 // pain_residual
+	m.groupLevelControlTemperature = false
+	m.groupLevelControlTrialOrder = false
+	m.groupLevelControlRunEffects = false
+	m.groupLevelMaxRunDummies = 12
+	m.modelsPrimaryUnit = 1 // run_mean
+	m.modelsForceTrialIIDAsymptotic = true
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--group-level-target", "pain_residual"}) {
+		t.Fatalf("expected --group-level-target pain_residual in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-group-level-control-temperature") {
+		t.Fatalf("expected --no-group-level-control-temperature in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-group-level-control-trial-order") {
+		t.Fatalf("expected --no-group-level-control-trial-order in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-group-level-control-run-effects") {
+		t.Fatalf("expected --no-group-level-control-run-effects in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-level-max-run-dummies", "12"}) {
+		t.Fatalf("expected --group-level-max-run-dummies 12 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--models-primary-unit", "run_mean"}) {
+		t.Fatalf("expected --models-primary-unit run_mean in args, got: %#v", args)
+	}
+	if !containsString(args, "--models-force-trial-iid-asymptotic") {
+		t.Fatalf("expected --models-force-trial-iid-asymptotic in args, got: %#v", args)
+	}
+}
+
 func TestShouldSkipStep_PlottingRoiStepSkippedForBandPowerTopomapsOnly(t *testing.T) {
 	m := Model{}
 	m.Pipeline = types.PipelinePlotting

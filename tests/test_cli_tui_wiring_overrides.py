@@ -184,6 +184,16 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "--stats-temp-control",
                 "spline",
                 "--stats-allow-iid-trials",
+                "--group-level-target",
+                "pain_residual",
+                "--group-level-control-temperature",
+                "--no-group-level-control-trial-order",
+                "--no-group-level-control-run-effects",
+                "--group-level-max-run-dummies",
+                "15",
+                "--models-primary-unit",
+                "run_mean",
+                "--models-force-trial-iid-asymptotic",
                 "--cluster-correction-enabled",
                 "--cluster-correction-alpha",
                 "0.01",
@@ -206,6 +216,25 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("behavior_analysis.permutation.scheme"), "circular_shift")
         self.assertEqual(config.get("behavior_analysis.statistics.temperature_control"), "spline")
         self.assertTrue(config.get("behavior_analysis.statistics.allow_iid_trials", False))
+        self.assertEqual(
+            config.get("behavior_analysis.group_level.multilevel_correlations.target"),
+            "pain_residual",
+        )
+        self.assertTrue(
+            config.get("behavior_analysis.group_level.multilevel_correlations.control_temperature", False)
+        )
+        self.assertFalse(
+            config.get("behavior_analysis.group_level.multilevel_correlations.control_trial_order", True)
+        )
+        self.assertFalse(
+            config.get("behavior_analysis.group_level.multilevel_correlations.control_run_effects", True)
+        )
+        self.assertEqual(
+            config.get("behavior_analysis.group_level.multilevel_correlations.max_run_dummies"),
+            15,
+        )
+        self.assertEqual(config.get("behavior_analysis.models.primary_unit"), "run_mean")
+        self.assertTrue(config.get("behavior_analysis.models.force_trial_iid_asymptotic", False))
         self.assertTrue(config.get("behavior_analysis.cluster_correction.enabled", False))
         self.assertEqual(config.get("behavior_analysis.cluster_correction.alpha"), 0.01)
         self.assertEqual(config.get("behavior_analysis.cluster_correction.min_cluster_size"), 4)

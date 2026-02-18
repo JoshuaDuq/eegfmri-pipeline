@@ -155,7 +155,14 @@ func (m Model) getBehaviorOptions() []optionType {
 			}
 			options = append(options, optCorrelationsMultilevel)
 			if m.isComputationSelected("multilevel_correlations") {
-				options = append(options, optGroupLevelBlockPermutation)
+				options = append(options,
+					optGroupLevelBlockPermutation,
+					optGroupLevelTarget,
+					optGroupLevelControlTemperature,
+					optGroupLevelControlTrialOrder,
+					optGroupLevelControlRunEffects,
+					optGroupLevelMaxRunDummies,
+				)
 			}
 		}
 	}
@@ -230,6 +237,8 @@ func (m Model) getBehaviorOptions() []optionType {
 				optModelsFamilyQuantile,
 				optModelsFamilyLogit,
 				optModelsBinaryOutcome,
+				optModelsPrimaryUnit,
+				optModelsForceTrialIIDAsymptotic,
 			)
 		}
 	}

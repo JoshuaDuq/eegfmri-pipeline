@@ -1371,6 +1371,152 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertLess(abs(float(out.iloc[0]["r"])), 0.3)
 
+    def test_group_correlations_can_partial_temperature(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        rng = np.random.default_rng(7)
+        n = 30
+        run_ids = np.repeat([1, 2, 3], 10)
+        temp_a = np.linspace(41, 47, n)
+        temp_b = np.linspace(42, 48, n)
+
+        df_a = pd.DataFrame(
+            {
+                "rating": temp_a + rng.normal(scale=0.08, size=n),
+                "temperature": temp_a,
+                "power_alpha": temp_a + rng.normal(scale=0.08, size=n),
+                "run_id": run_ids,
+            }
+        )
+        df_b = pd.DataFrame(
+            {
+                "rating": temp_b + rng.normal(scale=0.08, size=n),
+                "temperature": temp_b,
+                "power_alpha": temp_b + rng.normal(scale=0.08, size=n),
+                "run_id": run_ids,
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df_a, df_b],
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+            side_effect=lambda df, **_kwargs: df,
+        ):
+            out = run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=DotConfig({}),
+                logger=Mock(),
+                use_block_permutation=False,
+                n_perm=0,
+                target_col="rating",
+                control_temperature=True,
+                control_trial_order=False,
+                control_run_effects=False,
+            )
+
+        self.assertFalse(out.empty)
+        self.assertLess(abs(float(out.iloc[0]["r"])), 0.25)
+        self.assertIn("partial", str(out.iloc[0]["estimator"]))
+
+    def test_group_correlations_reports_effective_permutation_count(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        n = 24
+        run_ids = np.repeat([1, 2, 3], 8)
+        df_a = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, n),
+                "power_alpha": np.linspace(0.1, 1.2, n),
+                "run_id": run_ids,
+            }
+        )
+        df_b = pd.DataFrame(
+            {
+                "rating": np.linspace(12, 72, n),
+                "power_alpha": np.linspace(0.2, 1.3, n),
+                "run_id": run_ids,
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df_a, df_b],
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+            side_effect=lambda df, **_kwargs: df,
+        ):
+            out = run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=DotConfig({}),
+                logger=Mock(),
+                use_block_permutation=False,
+                n_perm=15,
+            )
+
+        self.assertFalse(out.empty)
+        self.assertIn("n_perm_requested", out.columns)
+        self.assertIn("n_perm_effective", out.columns)
+        self.assertEqual(int(out.iloc[0]["n_perm_requested"]), 15)
+        self.assertEqual(int(out.iloc[0]["n_perm"]), int(out.iloc[0]["n_perm_effective"]))
+        self.assertGreaterEqual(int(out.iloc[0]["n_perm_effective"]), 0)
+        self.assertLessEqual(int(out.iloc[0]["n_perm_effective"]), 15)
+
+    def test_group_correlations_use_project_random_state(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        n = 12
+        df = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, n),
+                "power_alpha": np.linspace(0.1, 1.2, n),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, _sub: Path("/tmp"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df, df],
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+            side_effect=lambda df, **_kwargs: df,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration.np.random.default_rng",
+            wraps=np.random.default_rng,
+        ) as rng_factory:
+            run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=DotConfig({"project": {"random_state": 13}}),
+                logger=Mock(),
+                use_block_permutation=False,
+                n_perm=2,
+            )
+
+        self.assertTrue(rng_factory.called)
+        self.assertEqual(int(rng_factory.call_args.args[0]), 13)
+
     def test_unified_fdr_applies_family_gate_before_within_family_significance(self):
         from eeg_pipeline.analysis.behavior.orchestration import _compute_unified_fdr
 
@@ -1529,6 +1675,65 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
         self.assertEqual(str(out.iloc[0]["p_primary_source"]), "perm_missing_required")
+
+    def test_models_trial_level_requires_explicit_iid_force_override(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_models
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "models": {"enabled": True, "primary_unit": "trial"},
+                    "statistics": {"allow_iid_trials": True},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, 20),
+                "power_alpha": np.linspace(0.1, 1.2, 20),
+                "run_id": np.repeat([1, 2, 3, 4], 5),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            with self.assertRaises(ValueError) as exc:
+                stage_models(ctx, SimpleNamespace())
+
+        self.assertIn("force_trial_iid_asymptotic", str(exc.exception))
+
+    def test_trial_order_accepts_within_run_monotonic_sequence(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="thermalactive",
+            config=DotConfig({"behavior_analysis": {"run_adjustment": {"column": "run_id"}}}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+            control_trial_order=True,
+        )
+        ctx.aligned_events = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "trial_in_run": [1, 2, 1, 2],
+            }
+        )
+        ctx.covariates_df = None
+        ctx.data_qc = {}
+
+        ctx._setup_trial_order_covariate()
+
+        self.assertTrue(ctx.control_trial_order)
+        self.assertIsNotNone(ctx.covariates_df)
+        self.assertIn("trial_index", list(ctx.covariates_df.columns))
 
     def test_condition_window_forwards_configured_min_samples(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_window
