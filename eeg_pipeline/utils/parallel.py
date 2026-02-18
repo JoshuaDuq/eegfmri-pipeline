@@ -282,6 +282,41 @@ def _compute_paired_hedges_g(
     return float(d_z * correction_factor)
 
 
+def _perm_pval_paired_mean_difference(
+    pain_values: np.ndarray,
+    nonpain_values: np.ndarray,
+    *,
+    n_perm: int,
+    rng: np.random.Generator,
+) -> float:
+    """Permutation p-value for paired mean difference using random sign-flips."""
+    if n_perm <= 0:
+        return np.nan
+    pain_arr = np.asarray(pain_values, dtype=float).ravel()
+    nonpain_arr = np.asarray(nonpain_values, dtype=float).ravel()
+    if pain_arr.size != nonpain_arr.size or pain_arr.size < 2:
+        return np.nan
+
+    diffs = pain_arr - nonpain_arr
+    valid = np.isfinite(diffs)
+    diffs = diffs[valid]
+    if diffs.size < 2:
+        return np.nan
+
+    observed = float(np.abs(np.mean(diffs)))
+    if not np.isfinite(observed):
+        return np.nan
+
+    exceed = 1
+    for _ in range(int(n_perm)):
+        signs = rng.choice(np.array([-1.0, 1.0], dtype=float), size=diffs.size, replace=True)
+        perm_stat = float(np.abs(np.mean(diffs * signs)))
+        if np.isfinite(perm_stat) and perm_stat >= observed:
+            exceed += 1
+
+    return float(exceed / (int(n_perm) + 1))
+
+
 def _compute_single_condition_effect(
     col: str,
     features_df: pd.DataFrame,
@@ -313,6 +348,7 @@ def _compute_single_condition_effect(
         nonpain_valid = nonpain_values[np.isfinite(nonpain_values)]
         min_required = max(int(min_samples), 2)
         n_pairs = np.nan
+        p_permutation = np.nan
 
         if paired:
             pain_matched, nonpain_matched = _extract_paired_condition_values(
@@ -346,6 +382,16 @@ def _compute_single_condition_effect(
                     nonpain_matched,
                     paired=True,
                 )
+
+            if n_perm > 0:
+                rng_seed = _generate_column_seed(col, base_seed)
+                rng = np.random.default_rng(rng_seed)
+                p_permutation = _perm_pval_paired_mean_difference(
+                    pain_matched,
+                    nonpain_matched,
+                    n_perm=int(n_perm),
+                    rng=rng,
+                )
             n_pain_out = int(n_pairs)
             n_nonpain_out = int(n_pairs)
         else:
@@ -371,8 +417,7 @@ def _compute_single_condition_effect(
             n_pain_out = len(pain_valid)
             n_nonpain_out = len(nonpain_valid)
 
-        p_permutation = np.nan
-        if n_perm > 0:
+        if n_perm > 0 and not paired:
             finite_mask = np.isfinite(values) & (pain_mask | nonpain_mask)
             finite_values = values[finite_mask].astype(float, copy=False)
             finite_labels = pain_mask[finite_mask].astype(bool, copy=False)

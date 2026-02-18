@@ -30,6 +30,7 @@ from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
 # Constants
 _VALID_CORR_METHODS = {"spearman", "pearson"}
+_VALID_ROBUST_METHODS = {"percentage_bend", "winsorized", "shepherd"}
 _MIN_SAMPLES_CORRELATION = 3
 _MIN_SAMPLES_PSI = 5
 _MIN_SAMPLES_BAYES = 4
@@ -51,6 +52,31 @@ def normalize_correlation_method(method: Optional[str], default: str = "spearman
     except (AttributeError, TypeError):
         return default
     return cleaned if cleaned in _VALID_CORR_METHODS else default
+
+
+def normalize_robust_correlation_method(
+    method: Optional[str],
+    default: Optional[str] = None,
+    *,
+    strict: bool = False,
+) -> Optional[str]:
+    """Normalize robust correlation method names to supported values."""
+    if method in (None, "", False):
+        return default
+    try:
+        cleaned = str(method).strip().lower()
+    except (AttributeError, TypeError):
+        cleaned = ""
+    if cleaned in {"", "none", "null", "false"}:
+        return default
+    if cleaned in _VALID_ROBUST_METHODS:
+        return cleaned
+    if strict:
+        raise ValueError(
+            f"Unsupported robust correlation method: {method!r}. "
+            f"Supported methods: {sorted(_VALID_ROBUST_METHODS)}"
+        )
+    return default
 
 
 def format_correlation_method_label(method: Optional[str], robust_method: Optional[str] = None) -> str:
@@ -742,14 +768,18 @@ def compute_robust_correlation(
     
     x_v, y_v = x[valid], y[valid]
     
-    if method == "percentage_bend":
+    robust_method = normalize_robust_correlation_method(method, strict=True)
+
+    if robust_method == "percentage_bend":
         return _percentage_bend_correlation(x_v, y_v)
-    elif method == "winsorized":
+    elif robust_method == "winsorized":
         return _winsorized_correlation(x_v, y_v)
-    elif method == "shepherd":
+    elif robust_method == "shepherd":
         return _shepherd_correlation(x_v, y_v)
-    else:
-        return stats.spearmanr(x_v, y_v)
+    raise ValueError(
+        f"Unsupported robust correlation method: {method!r}. "
+        f"Supported methods: {sorted(_VALID_ROBUST_METHODS)}"
+    )
 
 
 def _percentage_bend_correlation(

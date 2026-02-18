@@ -212,10 +212,10 @@ class TestBehaviorGapfill(unittest.TestCase):
 
             self.assertIsNone(_resolve_behavior_computation_flags(None))
 
-            cfg = DotConfig({"behavior_analysis": {"correlation_method": "pearson", "robust_correlation": " skipped "}})
+            cfg = DotConfig({"behavior_analysis": {"correlation_method": "pearson", "robust_correlation": " winsorized "}})
             pcfg = BehaviorPipelineConfig.from_config(cfg)
             self.assertEqual(pcfg.method, "pearson")
-            self.assertEqual(pcfg.robust_method, "skipped")
+            self.assertEqual(pcfg.robust_method, "winsorized")
 
             df = pd.DataFrame({"q_value": [0.01]})
             self.assertIsNotNone(_extract_p_value_column(df, ["p"], ["q_value"]))

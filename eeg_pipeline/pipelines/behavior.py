@@ -28,6 +28,7 @@ from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.utils.analysis.stats.correlation import (
     format_correlation_method_label,
+    normalize_robust_correlation_method,
 )
 from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
 from eeg_pipeline.utils.config.loader import get_config_value
@@ -165,9 +166,11 @@ class BehaviorPipelineConfig:
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
         method = resolve_correlation_method(config, default="spearman")
-        robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
-        if robust_method is not None:
-            robust_method = str(robust_method).strip().lower() or None
+        robust_method = normalize_robust_correlation_method(
+            get_config_value(config, "behavior_analysis.robust_correlation", None),
+            default=None,
+            strict=True,
+        )
         method_label = format_correlation_method_label(method, robust_method)
         return cls(
             method=method,

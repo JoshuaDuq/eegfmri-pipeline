@@ -17,7 +17,11 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_targets
-from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation, format_correlation_method_label
+from eeg_pipeline.utils.analysis.stats.correlation import (
+    compute_correlation,
+    format_correlation_method_label,
+    normalize_robust_correlation_method,
+)
 from eeg_pipeline.utils.config.loader import get_config_value, get_config_float, get_config_int, get_config_bool
 from eeg_pipeline.infra.paths import ensure_dir
 
@@ -2493,7 +2497,17 @@ def stage_correlate_primary_selection(
         src = "raw"
 
         robust_method = rec.get("robust_method", None)
-        if robust_method not in (None, "", False):
+        if use_run_unit:
+            # Never downgrade run-level inference to trial-level p-values.
+            p_kind = "p_run_mean"
+            p_primary = rec.get("p_run_mean", np.nan)
+            r_primary = rec.get("r_run_mean", np.nan)
+            src = "run_mean"
+            if not (pd.notna(p_primary) and np.isfinite(float(p_primary))):
+                p_primary = np.nan
+                r_primary = np.nan
+                src = "run_mean_missing"
+        elif robust_method not in (None, "", False):
             p_kind = "p_raw"
             p_primary = rec.get("p_raw", np.nan)
             r_primary = rec.get("r_raw", np.nan)
@@ -2504,12 +2518,6 @@ def stage_correlate_primary_selection(
                     p_kind = "p_perm_raw"
                     p_primary = p_perm_raw
                     src = "raw_robust_perm"
-        elif use_run_unit:
-            # Never downgrade run-level inference to trial-level p-values.
-            p_kind = "p_run_mean"
-            p_primary = rec.get("p_run_mean", np.nan)
-            r_primary = rec.get("r_run_mean", np.nan)
-            src = "run_mean" if pd.notna(p_primary) else "run_mean_unavailable"
         else:
             want_partial_cov = design.cov_df is not None and not design.cov_df.empty
             want_partial_temp = bool(getattr(config, "control_temperature", True)) and target != "temperature" and design.temperature_series is not None
@@ -2848,8 +2856,11 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         df_trials = df_trials.groupby(run_col)[agg_cols].mean(numeric_only=True).reset_index()
 
     robust_method_cfg = get_config_value(ctx.config, "behavior_analysis.robust_correlation", None)
-    if robust_method_cfg is not None:
-        robust_method_cfg = str(robust_method_cfg).strip().lower() or None
+    robust_method_cfg = normalize_robust_correlation_method(
+        robust_method_cfg,
+        default=None,
+        strict=True,
+    )
 
     psi_feature_cols = _get_feature_columns(df_trials, ctx, "pain_sensitivity")
 
@@ -5671,53 +5682,59 @@ def run_group_level_correlations(
             continue
 
         n_block_ready = int(sum(1 for p in subject_payloads if p.get("can_block_permute", False)))
-        if use_block_permutation and block_col is not None:
-            if n_block_ready == len(subject_payloads):
-                perm_method = "subject_block_restricted"
-            elif n_block_ready > 0:
-                perm_method = "subject_block_restricted_partial"
-            else:
-                perm_method = "subject_restricted_fallback"
-        else:
-            perm_method = "subject_restricted"
+        block_permutation_requested = bool(use_block_permutation and block_col is not None)
+        perm_method = "subject_block_restricted" if block_permutation_requested else "subject_restricted"
 
         null_rs: List[float] = []
-        fallback_used = False
+        permutation_failed = False
         if int(n_perm) > 0:
-            for _ in range(int(n_perm)):
-                perm_subject_rs: List[float] = []
-                for payload in subject_payloads:
-                    y_ws = np.asarray(payload["y_ws"], dtype=float)
-                    x_ws = np.asarray(payload["x_ws"], dtype=float)
+            if block_permutation_requested and n_block_ready < len(subject_payloads):
+                perm_method = "subject_block_restricted_unavailable"
+            else:
+                for _ in range(int(n_perm)):
+                    perm_subject_rs: List[float] = []
+                    for payload in subject_payloads:
+                        y_ws = np.asarray(payload["y_ws"], dtype=float)
+                        x_ws = np.asarray(payload["x_ws"], dtype=float)
 
-                    if payload.get("can_block_permute", False) and payload.get("block_sub") is not None:
-                        try:
-                            perm_idx = permute_within_groups(
-                                len(y_ws),
-                                rng,
-                                np.asarray(payload["block_sub"], dtype=object),
-                                scheme="shuffle",
-                                strict=True,
-                            )
-                        except ValueError:
+                        if block_permutation_requested:
+                            if not payload.get("can_block_permute", False) or payload.get("block_sub") is None:
+                                permutation_failed = True
+                                break
+                            try:
+                                perm_idx = permute_within_groups(
+                                    len(y_ws),
+                                    rng,
+                                    np.asarray(payload["block_sub"], dtype=object),
+                                    scheme="shuffle",
+                                    strict=True,
+                                )
+                            except ValueError:
+                                permutation_failed = True
+                                break
+                        else:
                             perm_idx = rng.permutation(len(y_ws))
-                            fallback_used = True
-                    else:
-                        perm_idx = rng.permutation(len(y_ws))
 
-                    y_perm = y_ws[perm_idx]
-                    r_perm_sub, _ = compute_correlation(x_ws, y_perm, method="spearman")
-                    if np.isfinite(r_perm_sub):
-                        perm_subject_rs.append(float(r_perm_sub))
+                        y_perm = y_ws[perm_idx]
+                        r_perm_sub, _ = compute_correlation(x_ws, y_perm, method="spearman")
+                        if np.isfinite(r_perm_sub):
+                            perm_subject_rs.append(float(r_perm_sub))
 
-                if len(perm_subject_rs) < 2:
-                    continue
-                r_perm = _aggregate_subject_rs(perm_subject_rs)
-                if np.isfinite(r_perm):
-                    null_rs.append(float(r_perm))
+                    if permutation_failed:
+                        break
+                    if len(perm_subject_rs) < 2:
+                        continue
+                    r_perm = _aggregate_subject_rs(perm_subject_rs)
+                    if np.isfinite(r_perm):
+                        null_rs.append(float(r_perm))
 
-        if fallback_used and perm_method.startswith("subject_block_restricted"):
-            perm_method = f"{perm_method}_fallback"
+        if permutation_failed:
+            null_rs = []
+            perm_method = (
+                "subject_block_restricted_failed"
+                if block_permutation_requested
+                else "subject_restricted_failed"
+            )
 
         p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (len(null_rs) + 1) if null_rs else np.nan
 
