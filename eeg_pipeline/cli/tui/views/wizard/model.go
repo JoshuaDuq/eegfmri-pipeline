@@ -495,6 +495,10 @@ type PlotItemConfig struct {
 	DoseResponseResponseColumn string
 	DoseResponsePainColumn     string
 	DoseResponseSegment        string
+	DoseResponseBandsSpec      string
+	DoseResponseROIsSpec       string
+	DoseResponseScopesSpec     string
+	DoseResponseStat           string
 }
 
 type plotItemConfigField int
@@ -538,6 +542,10 @@ const (
 	plotItemConfigFieldDoseResponseResponseColumn
 	plotItemConfigFieldDoseResponsePainColumn
 	plotItemConfigFieldDoseResponseSegment
+	plotItemConfigFieldDoseResponseBands
+	plotItemConfigFieldDoseResponseROIs
+	plotItemConfigFieldDoseResponseScopes
+	plotItemConfigFieldDoseResponseStat
 )
 
 type textField int
@@ -2140,7 +2148,7 @@ type Model struct {
 
 	// ML CV / Evaluation / Analysis
 	mlCvHygieneEnabled               bool    // CV hygiene toggle
-	mlCvPermutationScheme            int     // 0: shuffle, 1: circular_shift
+	mlCvPermutationScheme            int     // 0: within_subject, 1: within_subject_within_block
 	mlCvMinValidPermFraction         float64 // Min valid permutation fraction
 	mlCvDefaultNBins                 int     // Default stratification bins
 	mlEvalCIMethod                   int     // 0: bootstrap, 1: fixed_effects
@@ -2998,7 +3006,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// ML CV / Evaluation / Analysis defaults
 		mlCvHygieneEnabled:               true,
-		mlCvPermutationScheme:            0, // 0: shuffle
+		mlCvPermutationScheme:            0, // 0: within_subject
 		mlCvMinValidPermFraction:         0.8,
 		mlCvDefaultNBins:                 5,
 		mlEvalCIMethod:                   0, // 0: bootstrap

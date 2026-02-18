@@ -1039,6 +1039,21 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		if strings.TrimSpace(cfg.DoseResponseSegment) != "" {
 			args = append(args, "--plot-item-config", plotID, "dose_response_segment", strings.TrimSpace(cfg.DoseResponseSegment))
 		}
+		if strings.TrimSpace(cfg.DoseResponseBandsSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_bands")
+			args = append(args, splitSpaceList(cfg.DoseResponseBandsSpec)...)
+		}
+		if strings.TrimSpace(cfg.DoseResponseROIsSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_rois")
+			args = append(args, splitSpaceList(cfg.DoseResponseROIsSpec)...)
+		}
+		if strings.TrimSpace(cfg.DoseResponseScopesSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_scopes")
+			args = append(args, splitSpaceList(cfg.DoseResponseScopesSpec)...)
+		}
+		if strings.TrimSpace(cfg.DoseResponseStat) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_stat", strings.TrimSpace(cfg.DoseResponseStat))
+		}
 		if strings.TrimSpace(cfg.BehaviorTemporalStatsFeatureFolder) != "" {
 			args = append(
 				args,

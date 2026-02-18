@@ -932,6 +932,64 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 			lines = append(lines, expandedLines...)
 		}
 		return lines
+	case plotItemConfigFieldDoseResponseBands:
+		value := m.getPlotFieldTextValue(cfg.DoseResponseBandsSpec, "(all)", row, plotItemConfigFieldDoseResponseBands)
+		bands := m.GetDoseResponseBands(m.getDoseResponseCategoriesForEditingPlot())
+		hint := "Space to select bands · or type manually"
+		if len(bands) > 0 {
+			hint = fmt.Sprintf("Space to select · %d bands", len(bands))
+		}
+		isEditing := m.expandedOption == expandedDoseResponseBands && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponseBands
+		lines := []renderLine{m.renderPlotValueLine("bands", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(bands) > 0 {
+			expandedLines := m.renderExpandedListItems(bands, m.isColumnValueSelected)
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldDoseResponseROIs:
+		value := m.getPlotFieldTextValue(cfg.DoseResponseROIsSpec, "(all)", row, plotItemConfigFieldDoseResponseROIs)
+		rois := m.GetDoseResponseROIs(m.getDoseResponseCategoriesForEditingPlot())
+		hint := "Space to select ROIs · or type manually"
+		if len(rois) > 0 {
+			hint = fmt.Sprintf("Space to select · %d ROIs", len(rois))
+		}
+		isEditing := m.expandedOption == expandedDoseResponseROIs && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponseROIs
+		lines := []renderLine{m.renderPlotValueLine("rois", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(rois) > 0 {
+			expandedLines := m.renderExpandedListItems(rois, m.isColumnValueSelected)
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldDoseResponseScopes:
+		value := m.getPlotFieldTextValue(cfg.DoseResponseScopesSpec, "(all)", row, plotItemConfigFieldDoseResponseScopes)
+		scopes := m.GetDoseResponseScopes(m.getDoseResponseCategoriesForEditingPlot())
+		hint := "Space to select scopes · or type manually"
+		if len(scopes) > 0 {
+			hint = fmt.Sprintf("Space to select · %d scopes", len(scopes))
+		}
+		isEditing := m.expandedOption == expandedDoseResponseScopes && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponseScopes
+		lines := []renderLine{m.renderPlotValueLine("scopes", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(scopes) > 0 {
+			expandedLines := m.renderExpandedListItems(scopes, m.isColumnValueSelected)
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldDoseResponseStat:
+		value := m.getPlotFieldTextValue(cfg.DoseResponseStat, "(default)", row, plotItemConfigFieldDoseResponseStat)
+		stats := m.GetDoseResponseStats(m.getDoseResponseCategoriesForEditingPlot())
+		hint := "Space to select stat · or type manually"
+		if len(stats) > 0 {
+			hint = fmt.Sprintf("Space to select · %d stats", len(stats))
+		}
+		isEditing := m.expandedOption == expandedDoseResponseStat && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponseStat
+		lines := []renderLine{m.renderPlotValueLine("stat", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(stats) > 0 {
+			expandedLines := m.renderExpandedListItems(stats, func(s string) bool {
+				return cfg.DoseResponseStat == s
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
 	default:
 		return []renderLine{{text: fmt.Sprintf("Unknown plot field: %d", row.plotField)}}
 	}

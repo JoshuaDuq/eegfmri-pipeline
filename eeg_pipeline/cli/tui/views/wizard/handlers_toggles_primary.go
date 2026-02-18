@@ -1053,6 +1053,50 @@ func (m *Model) togglePlottingAdvancedOption() {
 				m.startPlotTextEdit(row.plotID, row.plotField)
 			}
 			m.useDefaultAdvanced = false
+		case plotItemConfigFieldDoseResponseBands:
+			bands := m.GetDoseResponseBands(m.getDoseResponseCategoriesForEditingPlot())
+			if len(bands) > 0 {
+				m.expandedOption = expandedDoseResponseBands
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldDoseResponseROIs:
+			rois := m.GetDoseResponseROIs(m.getDoseResponseCategoriesForEditingPlot())
+			if len(rois) > 0 {
+				m.expandedOption = expandedDoseResponseROIs
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldDoseResponseScopes:
+			scopes := m.GetDoseResponseScopes(m.getDoseResponseCategoriesForEditingPlot())
+			if len(scopes) > 0 {
+				m.expandedOption = expandedDoseResponseScopes
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldDoseResponseStat:
+			stats := m.GetDoseResponseStats(m.getDoseResponseCategoriesForEditingPlot())
+			if len(stats) > 0 {
+				m.expandedOption = expandedDoseResponseStat
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
 		case plotItemConfigFieldTfrTopomapActiveWindow, plotItemConfigFieldTfrTopomapWindowSizeMs, plotItemConfigFieldTfrTopomapWindowCount,
 			plotItemConfigFieldTfrTopomapLabelXPosition, plotItemConfigFieldTfrTopomapLabelYPositionBottom,
 			plotItemConfigFieldTfrTopomapLabelYPosition, plotItemConfigFieldTfrTopomapTitleY,

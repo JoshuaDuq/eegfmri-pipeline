@@ -342,7 +342,7 @@ func (m Model) buildMLAdvancedArgs() []string {
 	if !m.mlCvHygieneEnabled {
 		args = append(args, "--no-cv-hygiene")
 	}
-	permSchemes := []string{"shuffle", "circular_shift"}
+	permSchemes := []string{"within_subject", "within_subject_within_block"}
 	if m.mlCvPermutationScheme != 0 {
 		args = append(args, "--cv-permutation-scheme", permSchemes[m.mlCvPermutationScheme%len(permSchemes)])
 	}

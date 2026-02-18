@@ -59,13 +59,8 @@ _STAT_EQUIVALENTS: dict[str, list[str]] = {
     # compatible with a requested `mean` stat for plotting purposes.
     "mean": ["logratio_mean", "logratio", "percent_mean", "db_mean"],
     "std": ["logratio_std", "percent_std", "db_std"],
-    "logratio_mean": ["mean"],
-    "logratio_std": ["std"],
-    "percent_mean": ["mean"],
-    "percent_std": ["std"],
-    "db_mean": ["mean"],
-    "db_std": ["std"],
-    "logratio": ["mean"],
+    # Explicit transforms should not back-match broad `mean`/`std` buckets.
+    "logratio": ["logratio_mean"],
 }
 
 
@@ -437,33 +432,17 @@ def _resolve_dose_response_columns(
         response_overrides = [str(raw_response).strip()] if str(raw_response).strip() else []
 
     if response_overrides:
-        allowed_categories = {
-            "power",
-            "connectivity",
-            "directedconnectivity",
-            "sourcelocalization",
-            "aperiodic",
-            "erp",
-            "itpc",
-            "pac",
-            "complexity",
-            "bursts",
-            "quality",
-            "erds",
-            "spectral",
-            "ratios",
-            "asymmetry",
-            "temporal",
-        }
+        detected_categories = set(_present_feature_categories(trials.columns))
         unknown = [
             r
             for r in response_overrides
-            if r not in trials.columns and r not in allowed_categories
+            if r not in trials.columns and r not in detected_categories
         ]
         if unknown:
             raise ValueError(
                 "Configured response selection contains unknown entries: "
-                f"{unknown}. Available columns include: {list(trials.columns)}"
+                f"{unknown}. Available feature categories: {sorted(detected_categories)}. "
+                f"Available columns include: {list(trials.columns)}"
             )
         responses = response_overrides
     else:
@@ -847,6 +826,8 @@ def _plot_category_features_vs_dose_single_subject(
     stat: str,
     roi_defs: dict[str, Any],
     preferred_band_order: list[str],
+    allowed_scopes: Optional[set[str]],
+    allowed_rois: Optional[set[str]],
     out_dir: Path,
     config: Any,
     logger: logging.Logger,
@@ -864,6 +845,10 @@ def _plot_category_features_vs_dose_single_subject(
     chpair_feats = [pf for pf in feats if pf.scope == "chpair" and pf.identifier]
 
     saved: dict[str, Path] = {}
+    include_global = not allowed_scopes or "global" in allowed_scopes
+    include_roi = not allowed_scopes or "roi" in allowed_scopes
+    include_ch = not allowed_scopes or "ch" in allowed_scopes
+    include_chpair = not allowed_scopes or "chpair" in allowed_scopes or "roipair" in allowed_scopes
 
     def add_panels(scope: str, identifier: str, features: list[ParsedFeature]) -> None:
         bands_found = _sorted_bands({pf.band for pf in features if pf.band}, preferred_order=preferred_band_order)
@@ -893,17 +878,19 @@ def _plot_category_features_vs_dose_single_subject(
         )
 
     # ROI-scoped features: one figure per configured ROI (if present), else all.
-    if roi_feats:
+    if include_roi and roi_feats:
         by_roi: dict[str, list[ParsedFeature]] = {}
         for pf in roi_feats:
             by_roi.setdefault(str(pf.identifier), []).append(pf)
 
         roi_order = [r for r in roi_names if r in by_roi] or sorted(by_roi.keys())
+        if allowed_rois:
+            roi_order = [r for r in roi_order if r in allowed_rois]
         for roi in roi_order:
             add_panels("roi", roi, by_roi[roi])
 
     # Channel-scoped features: aggregate channels into ROIs if possible (keeps output manageable).
-    elif ch_feats and roi_defs:
+    if include_ch and ch_feats and roi_defs and (not roi_feats or "ch" in (allowed_scopes or set())):
         channel_to_rois: dict[str, list[str]] = {}
         for roi, chans in roi_defs.items():
             for ch in chans or []:
@@ -915,6 +902,8 @@ def _plot_category_features_vs_dose_single_subject(
                 by_roi.setdefault(roi, []).append(pf)
 
         roi_order = [r for r in roi_names if r in by_roi] or sorted(by_roi.keys())
+        if allowed_rois:
+            roi_order = [r for r in roi_order if r in allowed_rois]
         for roi in roi_order:
             # Within each ROI, average across all channel-level columns per (band, metric).
             roi_features = by_roi[roi]
@@ -947,7 +936,7 @@ def _plot_category_features_vs_dose_single_subject(
             )
 
     # ROI-pair aggregation for chpair features (optional, capped).
-    if chpair_feats and roi_defs:
+    if include_chpair and chpair_feats and roi_defs:
         channel_to_rois: dict[str, list[str]] = {}
         for roi, chans in roi_defs.items():
             for ch in chans or []:
@@ -978,6 +967,8 @@ def _plot_category_features_vs_dose_single_subject(
                     by_pair.setdefault((a, b), []).append(pf)
 
         pairs = sorted(by_pair.keys())
+        if allowed_rois:
+            pairs = [(a, b) for (a, b) in pairs if a in allowed_rois and b in allowed_rois]
         if len(pairs) > _MAX_ROI_PAIR_PLOTS:
             logger.warning(
                 "Dose-response: capping ROI-pair plots for category=%s at %d (requested %d).",
@@ -991,7 +982,7 @@ def _plot_category_features_vs_dose_single_subject(
             add_panels("roipair", f"{a}__{b}", by_pair[(a, b)])
 
     # Global features: one figure for all metrics by band.
-    if global_feats:
+    if include_global and global_feats:
         add_panels("global", "global", global_feats)
 
     return saved
@@ -1220,6 +1211,17 @@ def _resolve_trial_table_feature_files(config: Any) -> Optional[list[str]]:
     return None
 
 
+def _resolve_optional_str_list(config: Any, key: str) -> Optional[list[str]]:
+    raw = get_config_value(config, key, None)
+    if isinstance(raw, str):
+        value = raw.strip()
+        return [value] if value else None
+    if isinstance(raw, (list, tuple)):
+        items = [str(x).strip() for x in raw if str(x).strip()]
+        return items or None
+    return None
+
+
 def _load_trial_table(deriv_root: Path, subject: str, config: Any) -> tuple[pd.DataFrame, Path]:
     stats_dir = deriv_stats_path(deriv_root, subject)
     feature_files = _resolve_trial_table_feature_files(config)
@@ -1269,8 +1271,21 @@ def visualize_dose_response(
             )
 
     bands = list(get_frequency_band_names(config))
+    selected_bands = _resolve_optional_str_list(config, "plotting.plots.behavior.dose_response.bands")
+    if selected_bands:
+        selected_band_set = {str(b).strip() for b in selected_bands if str(b).strip()}
+        bands = [b for b in bands if str(b) in selected_band_set]
     roi_defs = get_rois(config)
     roi_names = [str(k) for k in roi_defs.keys()]
+    selected_rois = _resolve_optional_str_list(config, "plotting.plots.behavior.dose_response.rois")
+    allowed_roi_set: Optional[set[str]] = None
+    if selected_rois:
+        allowed_roi_set = {str(r).strip() for r in selected_rois if str(r).strip()}
+        roi_names = [r for r in roi_names if r in allowed_roi_set]
+    selected_scopes = _resolve_optional_str_list(config, "plotting.plots.behavior.dose_response.scopes")
+    allowed_scope_set: Optional[set[str]] = None
+    if selected_scopes:
+        allowed_scope_set = {str(s).strip() for s in selected_scopes if str(s).strip()}
 
     segment = str(
         get_config_value(config, "plotting.plots.behavior.dose_response.segment", _DEFAULT_SEGMENT)
@@ -1293,10 +1308,14 @@ def visualize_dose_response(
     saved: dict[str, Path] = {}
     errors: list[Exception] = []
 
+    known_categories = set(CATEGORY_PREFIX_MAP.keys())
+    selected_categories = [r for r in (cols.responses or []) if r in known_categories]
+    generic_responses = [r for r in (cols.responses or []) if r in table.columns]
+
     # Optional generic response plots:
-    # - If a selected entry matches a column name: plot it vs dose.
-    if cols.responses:
-        for resp in cols.responses:
+    # - If a selected entry matches a raw trial-table column name: plot it vs dose.
+    if generic_responses:
+        for resp in generic_responses:
             if resp not in table.columns:
                 continue
             response_series = pd.to_numeric(_require_column(table, resp), errors="coerce")
@@ -1309,6 +1328,8 @@ def visualize_dose_response(
     try:
         if not bands:
             raise ValueError("No frequency bands available in config (time_frequency_analysis.bands).")
+        if allowed_scope_set is not None and "roi" not in allowed_scope_set:
+            raise ValueError("ROI scope not selected.")
         if not roi_names:
             raise ValueError("No ROIs configured in time_frequency_analysis.rois.")
 
@@ -1370,7 +1391,7 @@ def visualize_dose_response(
         logger.warning("Skipping ROI power dose-response plots: %s", exc)
 
     # Category-driven plots (e.g., connectivity, aperiodic, erp, ...).
-    categories = [r for r in (cols.responses or []) if r not in table.columns and r != "power"]
+    categories = list(dict.fromkeys(selected_categories))
     if not categories and not cols.responses and not saved:
         present = set(_present_feature_categories(table.columns))
         categories = sorted((present & set(CATEGORY_PREFIX_MAP.keys())) - {"power"})
@@ -1385,6 +1406,8 @@ def visualize_dose_response(
                 stat=stat,
                 roi_defs=roi_defs,
                 preferred_band_order=[str(b) for b in bands],
+                allowed_scopes=allowed_scope_set,
+                allowed_rois=allowed_roi_set,
                 out_dir=out_dir,
                 config=config,
                 logger=logger,

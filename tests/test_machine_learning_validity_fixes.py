@@ -221,7 +221,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertEqual(result.confusion.shape, (2, 2))
         self.assertTrue(np.isfinite(result.specificity))
 
-    def test_classification_result_includes_single_class_subject_balanced_accuracy(self):
+    def test_classification_result_marks_single_class_subject_balanced_accuracy_nan(self):
         from eeg_pipeline.analysis.machine_learning.classification import ClassificationResult
 
         y_true = np.array([0, 0, 1, 1], dtype=int)
@@ -231,6 +231,8 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         result = ClassificationResult(y_true=y_true, y_pred=y_pred, groups=groups)
         self.assertIn("balanced_accuracy", result.per_subject_metrics["sub-0001"])
         self.assertIn("balanced_accuracy", result.per_subject_metrics["sub-0002"])
+        self.assertTrue(np.isnan(result.per_subject_metrics["sub-0001"]["balanced_accuracy"]))
+        self.assertTrue(np.isnan(result.per_subject_metrics["sub-0002"]["balanced_accuracy"]))
 
     def test_load_active_matrix_blocks_target_covariate_leakage(self):
         from eeg_pipeline.utils.data import machine_learning as ml_data
@@ -731,6 +733,136 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 metrics = json.load(f)
         self.assertAlmostEqual(float(metrics["brier_score"]), 0.01, places=6)
         self.assertAlmostEqual(float(metrics["expected_calibration_error"]), 0.1, places=6)
+
+    def test_classification_primary_balanced_accuracy_stays_subject_level_only(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+        from eeg_pipeline.analysis.machine_learning.classification import ClassificationResult
+
+        X = np.array(
+            [
+                [0.1, 1.0],
+                [0.2, 1.1],
+                [0.3, 1.2],
+                [0.4, 1.3],
+            ],
+            dtype=float,
+        )
+        y = np.array([0, 0, 1, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+                "block": [0, 1, 0, 1],
+            }
+        )
+        result = ClassificationResult(
+            y_true=y,
+            y_pred=y.copy(),
+            y_prob=np.array([0.1, 0.2, 0.8, 0.9], dtype=float),
+            groups=groups,
+            failed_fold_count=0,
+            n_folds_total=2,
+        )
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "classification": {"min_subjects_with_auc_for_inference": 1},
+                    "evaluation": {"bootstrap_iterations": 200},
+                },
+                "project": {"random_state": 7},
+            }
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+                return_value=(result, pd.DataFrame()),
+            ), patch.object(
+                orch, "export_subject_selection_report", return_value={}
+            ), patch.object(
+                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            ):
+                out_dir = orch.run_classification_ml(
+                    subjects=["0001", "0002"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=0,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    classification_model="svm",
+                )
+            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+                metrics = json.load(f)
+        self.assertTrue(np.isnan(float(metrics["balanced_accuracy"])))
+        self.assertTrue(np.isnan(float(metrics["subject_level"]["balanced_accuracy_mean"])))
+
+    def test_group_classification_exports_fold_and_trial_provenance_files(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+        from eeg_pipeline.analysis.machine_learning.classification import ClassificationResult
+
+        X = np.array(
+            [
+                [0.1, 1.0],
+                [0.2, 1.1],
+                [0.3, 1.2],
+                [0.4, 1.3],
+            ],
+            dtype=float,
+        )
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [10, 11, 12, 13],
+                "block": [0, 1, 0, 1],
+            }
+        )
+        result = ClassificationResult(
+            y_true=y,
+            y_pred=np.array([0, 1, 1, 0], dtype=int),
+            y_prob=np.array([0.1, 0.9, 0.8, 0.2], dtype=float),
+            groups=groups,
+            failed_fold_count=0,
+            n_folds_total=2,
+        )
+        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+                return_value=(result, pd.DataFrame()),
+            ), patch.object(
+                orch, "export_subject_selection_report", return_value={}
+            ), patch.object(
+                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            ):
+                out_dir = orch.run_classification_ml(
+                    subjects=["0001", "0002"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=0,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    classification_model="svm",
+                )
+
+            pred_df = pd.read_csv(out_dir / "loso_predictions.tsv", sep="\t")
+            self.assertIn("trial_id", pred_df.columns)
+            self.assertIn("fold", pred_df.columns)
+            self.assertIn("model", pred_df.columns)
+            self.assertTrue((out_dir / "loso_indices.tsv").exists())
 
     def test_regression_permutation_completion_threshold_uses_config(self):
         from sklearn.dummy import DummyRegressor
@@ -1435,6 +1567,61 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertEqual(captured_groups_used["values"], ["sub-0001"])
         self.assertEqual(float(baseline_df.loc[0, "y_true"]), 2.0)
         self.assertEqual(float(baseline_df.loc[0, "y_pred_baseline"]), 1.0)
+
+    def test_within_subject_regression_passes_rf_param_grid_to_inner_cv_helper(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
+        y = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0001", "sub-0001"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+                "block": [0, 0, 1, 1],
+            }
+        )
+        folds = [
+            (1, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int), "sub-0001", {}),
+        ]
+
+        class _FakeEstimator:
+            def predict(self, X_in: np.ndarray) -> np.ndarray:
+                return np.asarray(X_in[:, 0], dtype=float)
+
+        captured: dict[str, object] = {}
+
+        def _fake_fit_within_subject_fold(*, param_grid=None, **_kwargs):
+            captured["param_grid"] = param_grid
+            return _FakeEstimator()
+
+        cfg = DotConfig({})
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
+                orch, "create_within_subject_folds", return_value=folds
+            ), patch.object(
+                orch, "_fit_within_subject_fold", side_effect=_fake_fit_within_subject_fold
+            ), patch.object(
+                orch, "export_subject_selection_report", return_value={}
+            ), patch.object(
+                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            ):
+                orch.run_within_subject_regression_ml(
+                    subjects=["0001"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=0,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    model="rf",
+                )
+
+        self.assertIsInstance(captured.get("param_grid"), dict)
+        self.assertIn("rf__max_depth", captured.get("param_grid", {}))
 
     def test_within_subject_classification_permutations_enforce_failed_fold_fraction(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch

@@ -331,6 +331,8 @@ class ClassificationResult:
     
     # Per-subject metrics (for LOSO)
     per_subject_metrics: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    fold_ids: Optional[np.ndarray] = None
+    test_indices: Optional[np.ndarray] = None
     failed_fold_count: int = 0
     n_folds_total: int = 0
     
@@ -383,11 +385,13 @@ class ClassificationResult:
                 }
                 cm_subj = confusion_matrix(y_t, y_p, labels=[0, 1]).astype(float)
                 support = cm_subj.sum(axis=1)
-                recall = np.full(2, np.nan, dtype=float)
-                valid_support = support > 0
-                recall[valid_support] = np.diag(cm_subj)[valid_support] / support[valid_support]
-                present = recall[np.isfinite(recall)]
-                rec["balanced_accuracy"] = float(np.mean(present)) if present.size > 0 else np.nan
+                if np.sum(support > 0) < 2:
+                    rec["balanced_accuracy"] = np.nan
+                else:
+                    recall = np.full(2, np.nan, dtype=float)
+                    valid_support = support > 0
+                    recall[valid_support] = np.diag(cm_subj)[valid_support] / support[valid_support]
+                    rec["balanced_accuracy"] = float(np.nanmean(recall))
                 if self.y_prob is not None and len(np.unique(y_t)) == 2:
                     try:
                         subj_prob = self.y_prob[mask]
@@ -521,8 +525,10 @@ def decode_pain_binary(
     # Cross-validation predictions
     y_pred = np.zeros(len(y), dtype=int)
     y_prob = np.full(len(y), np.nan, dtype=float)
-    
-    for train_idx, test_idx in cv_splits:
+    fold_ids = np.zeros(len(y), dtype=int)
+    test_indices = np.arange(len(y), dtype=int)
+
+    for fold_idx, (train_idx, test_idx) in enumerate(cv_splits, start=1):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train = y[train_idx]
         groups_train = groups[train_idx] if groups is not None else None
@@ -536,8 +542,9 @@ def decode_pain_binary(
         
         pipe_clone = clone(pipe)
         pipe_clone.fit(X_train, y_train)
-        
+
         y_pred[test_idx] = pipe_clone.predict(X_test)
+        fold_ids[test_idx] = int(fold_idx)
         if hasattr(pipe_clone, "predict_proba"):
             y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
     
@@ -546,6 +553,8 @@ def decode_pain_binary(
         y_pred=y_pred,
         y_prob=y_prob if np.any(np.isfinite(y_prob)) else None,
         groups=groups,
+        fold_ids=fold_ids,
+        test_indices=test_indices,
         failed_fold_count=0,
         n_folds_total=int(len(cv_splits)),
     )
@@ -622,13 +631,16 @@ def nested_loso_classification(
     
     y_pred = np.zeros(len(y), dtype=int)
     y_prob = np.full(len(y), np.nan, dtype=float)
+    fold_ids = np.zeros(len(y), dtype=int)
+    test_indices = np.arange(len(y), dtype=int)
     best_params_records = []
     failed_fold_count = 0
     n_folds_total = len(outer_splits)
-    
+
     for fold, (train_idx, test_idx) in enumerate(outer_splits):
+        fold_number = int(fold + 1)
         test_subject = groups[test_idx[0]]
-        log.info(f"Fold {fold}: testing on subject {test_subject}")
+        log.info(f"Fold {fold_number}: testing on subject {test_subject}")
         
         X_train, X_test = X[train_idx], X[test_idx]
         y_train = y[train_idx]
@@ -642,8 +654,9 @@ def nested_loso_classification(
         
         # Skip if only one class in training
         if len(np.unique(y_train)) < 2:
-            log.warning(f"Fold {fold}: only one class in training, skipping")
+            log.warning(f"Fold {fold_number}: only one class in training, skipping")
             y_pred[test_idx] = int(np.median(y_train))
+            fold_ids[test_idx] = fold_number
             failed_fold_count += 1
             continue
         
@@ -653,14 +666,15 @@ def nested_loso_classification(
         effective_splits = min(inner_splits, n_unique_train_groups)
         
         if effective_splits < 2:
-            log.warning(f"Fold {fold}: <2 groups in training, fitting without inner CV")
+            log.warning(f"Fold {fold_number}: <2 groups in training, fitting without inner CV")
             pipe_clone = clone(pipe)
             pipe_clone.fit(X_train, y_train)
             y_pred[test_idx] = pipe_clone.predict(X_test)
+            fold_ids[test_idx] = fold_number
             if hasattr(pipe_clone, "predict_proba"):
                 y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
             continue
-        
+
         inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
         
         # GridSearch with group-aware inner CV
@@ -677,18 +691,20 @@ def nested_loso_classification(
         try:
             gs.fit(X_train, y_train, groups=train_groups)
             best_params_records.append({
-                "fold": fold,
+                "fold": fold_number,
                 "test_subject": test_subject,
                 **gs.best_params_,
                 "best_score": gs.best_score_,
             })
             
             y_pred[test_idx] = gs.predict(X_test)
+            fold_ids[test_idx] = fold_number
             if hasattr(gs.best_estimator_, "predict_proba"):
                 y_prob[test_idx] = gs.best_estimator_.predict_proba(X_test)[:, 1]
         except Exception as e:
-            log.error(f"Fold {fold} failed: {e}")
+            log.error(f"Fold {fold_number} failed: {e}")
             y_pred[test_idx] = int(np.median(y_train))
+            fold_ids[test_idx] = fold_number
             failed_fold_count += 1
     
     result = ClassificationResult(
@@ -696,6 +712,8 @@ def nested_loso_classification(
         y_pred=y_pred,
         y_prob=y_prob if np.any(np.isfinite(y_prob)) else None,
         groups=groups,
+        fold_ids=fold_ids,
+        test_indices=test_indices,
         failed_fold_count=int(failed_fold_count),
         n_folds_total=int(n_folds_total),
     )

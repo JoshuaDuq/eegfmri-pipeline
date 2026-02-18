@@ -55,4 +55,8 @@ const (
 	expandedMLFeatureSegments               = 47
 	expandedMLFeatureScopes                 = 48
 	expandedMLFeatureStats                  = 49
+	expandedDoseResponseBands               = 50
+	expandedDoseResponseROIs                = 51
+	expandedDoseResponseScopes              = 52
+	expandedDoseResponseStat                = 53
 )

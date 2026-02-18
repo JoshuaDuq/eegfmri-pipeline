@@ -64,6 +64,14 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.DoseResponsePainColumn
 	case plotItemConfigFieldDoseResponseSegment:
 		return cfg.DoseResponseSegment
+	case plotItemConfigFieldDoseResponseBands:
+		return cfg.DoseResponseBandsSpec
+	case plotItemConfigFieldDoseResponseROIs:
+		return cfg.DoseResponseROIsSpec
+	case plotItemConfigFieldDoseResponseScopes:
+		return cfg.DoseResponseScopesSpec
+	case plotItemConfigFieldDoseResponseStat:
+		return cfg.DoseResponseStat
 	default:
 		return ""
 	}
@@ -187,6 +195,14 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 	case plotItemConfigFieldDoseResponseSegment:
 		cfg.DoseResponseSegment = strings.TrimSpace(value)
 		// Segment is a feature window label, not necessarily an events.tsv column.
+	case plotItemConfigFieldDoseResponseBands:
+		cfg.DoseResponseBandsSpec = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldDoseResponseROIs:
+		cfg.DoseResponseROIsSpec = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldDoseResponseScopes:
+		cfg.DoseResponseScopesSpec = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldDoseResponseStat:
+		cfg.DoseResponseStat = strings.TrimSpace(value)
 	default:
 		return
 	}

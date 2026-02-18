@@ -303,6 +303,19 @@ func TestBuildMLAdvancedArgs_EmitsMLPlottingFlags(t *testing.T) {
 	}
 }
 
+func TestBuildMLAdvancedArgs_EmitsWithinSubjectWithinBlockPermutationScheme(t *testing.T) {
+	m := Model{}
+	m.modeOptions = []string{"shap"}
+	m.modeIndex = 0
+	m.mlCvPermutationScheme = 1
+
+	args := m.buildMLAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--cv-permutation-scheme", "within_subject_within_block"}) {
+		t.Fatalf("expected --cv-permutation-scheme within_subject_within_block in args, got: %#v", args)
+	}
+}
+
 func TestMLClassificationModelCycleIncludesCNN(t *testing.T) {
 	if got := MLClassificationCNN.CLIValue(); got != "cnn" {
 		t.Fatalf("expected cnn CLI value, got %q", got)
@@ -663,5 +676,36 @@ func TestBuildPlotItemConfigArgs_BandPowerTopomapsFallsBackToComparisonWindows(t
 	want := []string{"--plot-item-config", "band_power_topomaps", "topomap_windows", "baseline", "plateau"}
 	if !containsSubsequence(args, want) {
 		t.Fatalf("expected topomap_windows to default to comparison windows; args=%#v", args)
+	}
+}
+
+func TestBuildPlotItemConfigArgs_DoseResponseEmitsBandsRoisScopesAndStat(t *testing.T) {
+	m := Model{}
+	m.plotItems = []PlotItem{{ID: "behavior_dose_response", Group: "behavior"}}
+	m.plotSelected = map[int]bool{0: true}
+	m.plotItemConfigs = map[string]PlotItemConfig{
+		"behavior_dose_response": {
+			DoseResponseDoseColumn:     "stimulus_temp",
+			DoseResponseResponseColumn: "power",
+			DoseResponseSegment:        "active",
+			DoseResponseBandsSpec:      "alpha beta",
+			DoseResponseROIsSpec:       "Frontal Sensorimotor_Right",
+			DoseResponseScopesSpec:     "global roi",
+			DoseResponseStat:           "mean",
+		},
+	}
+
+	args := m.buildPlotItemConfigArgs()
+	if !containsSubsequence(args, []string{"--plot-item-config", "behavior_dose_response", "dose_response_bands", "alpha", "beta"}) {
+		t.Fatalf("expected dose_response_bands args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--plot-item-config", "behavior_dose_response", "dose_response_rois", "Frontal", "Sensorimotor_Right"}) {
+		t.Fatalf("expected dose_response_rois args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--plot-item-config", "behavior_dose_response", "dose_response_scopes", "global", "roi"}) {
+		t.Fatalf("expected dose_response_scopes args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--plot-item-config", "behavior_dose_response", "dose_response_stat", "mean"}) {
+		t.Fatalf("expected dose_response_stat args, got: %#v", args)
 	}
 }

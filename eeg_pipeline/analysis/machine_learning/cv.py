@@ -698,7 +698,7 @@ def create_within_subject_folds(
             get_config_value(config, "machine_learning.cv.within_subject_ordered_blocks", False)
         )
         if ordered_blocks:
-            subject_blocks_num = pd.to_numeric(subject_blocks, errors="coerce").to_numpy(dtype=float)
+            subject_blocks_num = np.asarray(pd.to_numeric(subject_blocks, errors="coerce"), dtype=float)
             ordered_unique = sorted(np.unique(subject_blocks_num[np.isfinite(subject_blocks_num)]))
             ordered_splits: List[Tuple[np.ndarray, np.ndarray]] = []
             for idx_block in range(1, len(ordered_unique)):

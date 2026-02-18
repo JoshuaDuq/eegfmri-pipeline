@@ -64,6 +64,14 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetPlottingComparisonWindows())
 	case expandedPlotComparisonROIs:
 		return len(m.discoveredROIs)
+	case expandedDoseResponseBands:
+		return len(m.GetDoseResponseBands(m.getDoseResponseCategoriesForEditingPlot()))
+	case expandedDoseResponseROIs:
+		return len(m.GetDoseResponseROIs(m.getDoseResponseCategoriesForEditingPlot()))
+	case expandedDoseResponseScopes:
+		return len(m.GetDoseResponseScopes(m.getDoseResponseCategoriesForEditingPlot()))
+	case expandedDoseResponseStat:
+		return len(m.GetDoseResponseStats(m.getDoseResponseCategoriesForEditingPlot()))
 	case expandedRunAdjustmentColumn:
 		return len(m.GetAvailableColumns())
 	case expandedCorrelationsTargetColumn:
@@ -234,6 +242,14 @@ func (m Model) getExpandedListItems() []string {
 		return m.GetPlottingComparisonWindows()
 	case expandedPlotComparisonROIs:
 		return m.discoveredROIs
+	case expandedDoseResponseBands:
+		return m.GetDoseResponseBands(m.getDoseResponseCategoriesForEditingPlot())
+	case expandedDoseResponseROIs:
+		return m.GetDoseResponseROIs(m.getDoseResponseCategoriesForEditingPlot())
+	case expandedDoseResponseScopes:
+		return m.GetDoseResponseScopes(m.getDoseResponseCategoriesForEditingPlot())
+	case expandedDoseResponseStat:
+		return m.GetDoseResponseStats(m.getDoseResponseCategoriesForEditingPlot())
 	case expandedRunAdjustmentColumn:
 		return m.GetAvailableColumns()
 	case expandedCorrelationsTargetColumn:
@@ -450,6 +466,30 @@ func (m Model) isColumnValueSelected(value string) bool {
 		if m.editingPlotID != "" {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
 				selectedValues = cfg.BehaviorScatterSegmentSpec
+			}
+		}
+	case expandedDoseResponseBands:
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				selectedValues = cfg.DoseResponseBandsSpec
+			}
+		}
+	case expandedDoseResponseROIs:
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				selectedValues = cfg.DoseResponseROIsSpec
+			}
+		}
+	case expandedDoseResponseScopes:
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				selectedValues = cfg.DoseResponseScopesSpec
+			}
+		}
+	case expandedDoseResponseStat:
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				selectedValues = cfg.DoseResponseStat
 			}
 		}
 	case expandedMLFeatureFamilies:
@@ -914,6 +954,34 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
+	case expandedDoseResponseBands:
+		if m.editingPlotID != "" {
+			cfg := m.ensurePlotItemConfig(m.editingPlotID)
+			m.toggleSpaceValue(selectedItem, &cfg.DoseResponseBandsSpec)
+			m.plotItemConfigs[m.editingPlotID] = cfg
+		}
+	case expandedDoseResponseROIs:
+		if m.editingPlotID != "" {
+			cfg := m.ensurePlotItemConfig(m.editingPlotID)
+			m.toggleSpaceValue(selectedItem, &cfg.DoseResponseROIsSpec)
+			m.plotItemConfigs[m.editingPlotID] = cfg
+		}
+	case expandedDoseResponseScopes:
+		if m.editingPlotID != "" {
+			cfg := m.ensurePlotItemConfig(m.editingPlotID)
+			m.toggleSpaceValue(selectedItem, &cfg.DoseResponseScopesSpec)
+			m.plotItemConfigs[m.editingPlotID] = cfg
+		}
+	case expandedDoseResponseStat:
+		if m.editingPlotID != "" {
+			cfg := m.ensurePlotItemConfig(m.editingPlotID)
+			cfg.DoseResponseStat = selectedItem
+			m.plotItemConfigs[m.editingPlotID] = cfg
+			m.editingPlotID = ""
+			m.editingPlotField = plotItemConfigFieldNone
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
 	case expandedPainResidualCrossfitGroupColumn:
 		switch selectedItem {
 		case "(default: run column)":
@@ -1195,7 +1263,7 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return false
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
 		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues,
-		expandedFmriTrialSigGroupValues:
+		expandedFmriTrialSigGroupValues, expandedDoseResponseBands, expandedDoseResponseROIs, expandedDoseResponseScopes, expandedDoseResponseStat:
 		return m.isColumnValueSelected(item)
 	case expandedBehaviorScatterSegment:
 		// Check plot-specific config
@@ -1279,6 +1347,18 @@ func (m *Model) toggleSpaceValue(value string, target *string) {
 	}
 
 	*target = strings.Join(newValues, " ")
+}
+
+func (m Model) getDoseResponseCategoriesForEditingPlot() []string {
+	if m.editingPlotID != "" {
+		if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+			cats := splitSpaceList(cfg.DoseResponseResponseColumn)
+			if len(cats) > 0 {
+				return cats
+			}
+		}
+	}
+	return m.GetTrialTableFeatureCategories()
 }
 
 ///////////////////////////////////////////////////////////////////

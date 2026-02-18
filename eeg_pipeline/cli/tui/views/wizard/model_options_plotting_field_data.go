@@ -41,6 +41,10 @@ var preComparisonFieldsByPlotID = map[string][]plotItemConfigField{
 		plotItemConfigFieldDoseResponseDoseColumn,
 		plotItemConfigFieldDoseResponseResponseColumn,
 		plotItemConfigFieldDoseResponseSegment,
+		plotItemConfigFieldDoseResponseBands,
+		plotItemConfigFieldDoseResponseROIs,
+		plotItemConfigFieldDoseResponseScopes,
+		plotItemConfigFieldDoseResponseStat,
 	},
 	"behavior_pain_probability": {
 		plotItemConfigFieldDoseResponseDoseColumn,

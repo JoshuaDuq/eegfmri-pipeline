@@ -57,6 +57,7 @@ from eeg_pipeline.infra.machine_learning import (
     export_indices,
     prepare_best_params_path,
 )
+from eeg_pipeline.infra.tsv import write_tsv, write_parquet
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.analysis.machine_learning.time_generalization import time_generalization_regression
 
@@ -218,6 +219,101 @@ def _paired_signflip_p_value(
     return float((exceed + 1) / (int(n_perm) + 1))
 
 
+def _resolve_permutation_scheme(config: Any) -> str:
+    scheme = str(
+        get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject_within_block")
+    ).strip().lower()
+    if scheme not in {"within_subject", "within_subject_within_block"}:
+        scheme = "within_subject_within_block"
+    return scheme
+
+
+def _permute_labels_by_scheme(
+    y: np.ndarray,
+    groups: np.ndarray,
+    *,
+    blocks: Optional[np.ndarray],
+    rng: np.random.Generator,
+    scheme: str,
+) -> np.ndarray:
+    """Permute labels within-subject or within-subject×block."""
+    y_perm = np.asarray(y, dtype=float).copy()
+    groups_arr = np.asarray(groups, dtype=object)
+    blocks_arr = np.asarray(blocks) if blocks is not None else None
+    mode = str(scheme).strip().lower()
+    if mode not in {"within_subject", "within_subject_within_block"}:
+        mode = "within_subject_within_block"
+    if mode == "within_subject_within_block" and blocks_arr is None:
+        mode = "within_subject"
+
+    for subj in np.unique(groups_arr):
+        subj_mask = groups_arr == subj
+        if np.sum(subj_mask) < 2:
+            continue
+        if mode == "within_subject_within_block" and blocks_arr is not None:
+            subj_blocks = blocks_arr[subj_mask]
+            subj_y = y_perm[subj_mask]
+            for block_id in np.unique(subj_blocks):
+                if pd.isna(block_id):
+                    block_mask = pd.isna(subj_blocks)
+                else:
+                    block_mask = subj_blocks == block_id
+                block_indices = np.where(block_mask)[0]
+                if block_indices.size >= 2:
+                    subj_y[block_indices] = rng.permutation(subj_y[block_indices])
+            y_perm[subj_mask] = subj_y
+        else:
+            y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
+    return y_perm
+
+
+def _generate_effective_permutation(
+    y: np.ndarray,
+    groups: np.ndarray,
+    *,
+    blocks: Optional[np.ndarray],
+    rng: np.random.Generator,
+    requested_scheme: str,
+    min_changed_fraction: float,
+) -> Tuple[np.ndarray, bool, float, str]:
+    """
+    Generate one permutation, falling back from subject×block to within-subject
+    when the requested shuffle is ineffective.
+    """
+    y_perm = _permute_labels_by_scheme(
+        y,
+        groups,
+        blocks=blocks,
+        rng=rng,
+        scheme=requested_scheme,
+    )
+    effective, changed_fraction = is_effective_permutation(
+        y,
+        y_perm,
+        min_changed_fraction=min_changed_fraction,
+    )
+    if effective:
+        return y_perm, True, float(changed_fraction), requested_scheme
+
+    if requested_scheme == "within_subject_within_block":
+        y_perm_fallback = _permute_labels_by_scheme(
+            y,
+            groups,
+            blocks=blocks,
+            rng=rng,
+            scheme="within_subject",
+        )
+        effective_fallback, changed_fraction_fallback = is_effective_permutation(
+            y,
+            y_perm_fallback,
+            min_changed_fraction=min_changed_fraction,
+        )
+        if effective_fallback:
+            return y_perm_fallback, True, float(changed_fraction_fallback), "within_subject"
+
+    return y_perm, False, float(changed_fraction), requested_scheme
+
+
 def _normalize_subject_ids(subjects: List[str]) -> List[str]:
     out: List[str] = []
     for s in subjects:
@@ -376,6 +472,7 @@ def _fit_within_subject_fold(
     n_jobs: int,
     logger: logging.Logger,
     inner_splits: int,
+    param_grid: Optional[Dict[str, Any]] = None,
 ) -> Pipeline:
     if blocks_train is not None:
         n_unique_blocks = len(np.unique(blocks_train))
@@ -390,14 +487,14 @@ def _fit_within_subject_fold(
             scoring = create_scoring_dict()
             refit_metric = 'r'
             
-            param_grid = getattr(pipe.named_steps.get("regressor"), "param_grid", None) or {}
+            effective_param_grid = dict(param_grid or {})
             pipe_seeded = clone(pipe)
             regressor_step = pipe_seeded.named_steps.get("regressor")
             if regressor_step is not None and hasattr(regressor_step, "regressor") and hasattr(regressor_step.regressor, "random_state"):
                 regressor_step.regressor.random_state = random_state
             gs = GridSearchCV(
                 estimator=pipe_seeded,
-                param_grid=param_grid,
+                param_grid=effective_param_grid,
                 scoring=scoring,
                 cv=inner_cv_splits,
                 n_jobs=n_jobs,
@@ -834,9 +931,6 @@ def run_within_subject_regression_ml(
             pipe = create_elasticnet_pipeline(seed=rng_seed + int(fold_counter), config=config)
             param_grid = build_elasticnet_param_grid(config)
         
-        if "regressor" in pipe.named_steps:
-            pipe.named_steps["regressor"].param_grid = param_grid
-
         best_estimator = _fit_within_subject_fold(
             pipe=pipe,
             X_train=X_train,
@@ -848,6 +942,7 @@ def run_within_subject_regression_ml(
             n_jobs=1,
             logger=logger,
             inner_splits=inner_splits,
+            param_grid=param_grid,
         )
         y_pred = best_estimator.predict(X_test)
         fold_mean_baseline = float(np.mean(y_train)) if len(y_train) > 0 else np.nan
@@ -927,6 +1022,8 @@ def run_within_subject_regression_ml(
         logger.info(f"Running {n_perm} block-aware permutations for within-subject inference...")
         rng = np.random.default_rng(rng_seed)
         n_effective = 0
+        n_fallback_permutations = 0
+        perm_scheme = _resolve_permutation_scheme(config)
         min_shuffle_fraction = float(
             get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
         )
@@ -935,27 +1032,19 @@ def run_within_subject_regression_ml(
         )
         
         for perm_idx in range(n_perm):
-            y_perm = y.copy()
-            for subj in np.unique(groups):
-                subj_mask = groups == subj
-                subj_blocks = blocks_all[subj_mask]
-                subj_y = y_perm[subj_mask]
-                
-                for block_id in np.unique(subj_blocks):
-                    block_mask = subj_blocks == block_id
-                    block_indices = np.where(block_mask)[0]
-                    subj_y[block_indices] = rng.permutation(subj_y[block_indices])
-                
-                y_perm[subj_mask] = subj_y
-
-            effective, _changed_fraction = is_effective_permutation(
+            y_perm, effective, _changed_fraction, used_scheme = _generate_effective_permutation(
                 y,
-                y_perm,
+                groups,
+                blocks=blocks_all,
+                rng=rng,
+                requested_scheme=perm_scheme,
                 min_changed_fraction=min_shuffle_fraction,
             )
             if not effective:
                 continue
             n_effective += 1
+            if used_scheme != perm_scheme:
+                n_fallback_permutations += 1
             
             perm_fold_records: List[Dict[str, Any]] = []
 
@@ -977,9 +1066,6 @@ def run_within_subject_regression_ml(
                     pipe_p = create_elasticnet_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config)
                     param_grid_p = build_elasticnet_param_grid(config)
 
-                if "regressor" in pipe_p.named_steps:
-                    pipe_p.named_steps["regressor"].param_grid = param_grid_p
-
                 try:
                     best_estimator_p = _fit_within_subject_fold(
                         pipe=pipe_p,
@@ -992,6 +1078,7 @@ def run_within_subject_regression_ml(
                         n_jobs=1,
                         logger=logger,
                         inner_splits=inner_splits,
+                        param_grid=param_grid_p,
                     )
                     y_pred_p = best_estimator_p.predict(X_test_p)
                     perm_fold_records.append(
@@ -1021,6 +1108,13 @@ def run_within_subject_regression_ml(
             
             if (perm_idx + 1) % 10 == 0:
                 logger.info(f"Permutation {perm_idx + 1}/{n_perm}")
+
+        if n_fallback_permutations > 0:
+            logger.info(
+                "Within-subject regression permutations: %d/%d effective shuffles required fallback to within-subject scheme.",
+                int(n_fallback_permutations),
+                int(n_effective),
+            )
 
         if n_effective == 0:
             raise RuntimeError(
@@ -1332,15 +1426,62 @@ def run_classification_ml(
             f"machine_learning.classification.max_failed_fold_fraction={max_failed_fold_fraction:.3f}."
         )
 
-    # Export predictions
-    pred_df = pd.DataFrame({
-        "subject_id": groups,
-        "y_true": result.y_true,
-        "y_pred": result.y_pred,
-        "y_prob": result.y_prob,
-    })
+    # Export predictions/indices with trial-level provenance.
+    groups_for_predictions = np.asarray(
+        result.groups if result.groups is not None else groups,
+        dtype=object,
+    )
+    if len(groups_for_predictions) != len(result.y_true):
+        groups_for_predictions = np.asarray(groups, dtype=object)
+
+    raw_test_indices = getattr(result, "test_indices", None)
+    if raw_test_indices is None:
+        test_indices_arr = np.arange(len(result.y_true), dtype=int)
+    else:
+        test_indices_arr = np.asarray(raw_test_indices, dtype=int)
+        if (
+            len(test_indices_arr) != len(result.y_true)
+            or np.any(test_indices_arr < 0)
+            or np.any(test_indices_arr >= len(meta))
+        ):
+            test_indices_arr = np.arange(len(result.y_true), dtype=int)
+
+    raw_fold_ids = getattr(result, "fold_ids", None)
+    if raw_fold_ids is None:
+        fold_ids_arr = np.ones(len(result.y_true), dtype=int)
+    else:
+        fold_ids_arr = np.asarray(raw_fold_ids, dtype=int)
+        if len(fold_ids_arr) != len(result.y_true):
+            fold_ids_arr = np.ones(len(result.y_true), dtype=int)
+    if np.any(fold_ids_arr <= 0):
+        fold_ids_arr = fold_ids_arr.copy()
+        fold_ids_arr[fold_ids_arr <= 0] = 1
+
     pred_path = results_dir / "loso_predictions.tsv"
-    pred_df.to_csv(pred_path, sep="\t", index=False)
+    pred_df = export_predictions(
+        np.asarray(result.y_true),
+        np.asarray(result.y_pred),
+        groups_for_predictions.tolist(),
+        test_indices_arr.tolist(),
+        fold_ids_arr.tolist(),
+        model_type,
+        meta.reset_index(drop=True),
+        pred_path,
+    )
+    if result.y_prob is not None and len(result.y_prob) == len(pred_df):
+        pred_df["y_prob"] = np.asarray(result.y_prob, dtype=float)
+    else:
+        pred_df["y_prob"] = np.full(len(pred_df), np.nan, dtype=float)
+    write_tsv(pred_df, pred_path)
+    write_parquet(pred_df, pred_path.with_suffix(".parquet"))
+    export_indices(
+        groups_for_predictions.tolist(),
+        test_indices_arr.tolist(),
+        fold_ids_arr.tolist(),
+        meta.reset_index(drop=True),
+        results_dir / "loso_indices.tsv",
+        add_heldout_subject_id=True,
+    )
 
     # Export best params
     if not best_params_df.empty:
@@ -1362,7 +1503,7 @@ def run_classification_ml(
         get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
     )
     n_subjects_with_auc = _count_finite_subject_metric(result.per_subject_metrics, "auc")
-    n_subjects_total = int(len(np.unique(groups)))
+    n_subjects_total = int(len(np.unique(groups_for_predictions)))
     auc_inference_valid = n_subjects_with_auc >= min_subjects_auc
     if not auc_inference_valid:
         logger.warning(
@@ -1455,7 +1596,7 @@ def run_classification_ml(
         "balanced_accuracy": (
             float(balanced_accuracy_subject_mean)
             if np.isfinite(balanced_accuracy_subject_mean)
-            else float(result.balanced_accuracy)
+            else np.nan
         ),
         "accuracy": (
             float(accuracy_subject_mean)
@@ -1468,7 +1609,7 @@ def run_classification_ml(
         "brier_score": brier,
         "expected_calibration_error": ece,
         "model": model_type,
-        "n_subjects": len(np.unique(groups)),
+        "n_subjects": int(len(np.unique(groups_for_predictions))),
         "n_samples": int(len(y_binary)),
         "n_features": int(X.shape[1] * X.shape[2]) if X.ndim == 3 else int(X.shape[1]),
         "n_channels": int(X.shape[1]) if X.ndim == 3 else None,
@@ -1957,7 +2098,7 @@ def run_within_subject_classification_ml(
         "failed_fold_fraction": float(failed_fold_fraction),
         "max_failed_fold_fraction": float(max_failed_fold_fraction),
         "balanced_accuracy": (
-            float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else float(result.balanced_accuracy)
+            float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else np.nan
         ),
         "accuracy": float(acc_subj_mean) if np.isfinite(acc_subj_mean) else float(result.accuracy),
         "auc": float(auc_for_inference) if np.isfinite(auc_for_inference) else np.nan,
@@ -1996,15 +2137,12 @@ def run_within_subject_classification_ml(
 
     # Optional permutation p-value (AUC) under label randomization (full refit per permutation).
     if n_perm and n_perm > 0:
-        perm_scheme = str(
-            get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject_within_block")
-        ).strip().lower()
-        if perm_scheme not in {"within_subject", "within_subject_within_block"}:
-            perm_scheme = "within_subject_within_block"
+        perm_scheme = _resolve_permutation_scheme(config)
         logger.info("Running %d permutations for within-subject classification...", int(n_perm))
         rng = np.random.default_rng(rng_seed)
         null_auc = []
         n_effective = 0
+        n_fallback_permutations = 0
         min_shuffle_fraction = float(
             get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
         )
@@ -2012,29 +2150,19 @@ def run_within_subject_classification_ml(
             get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
         )
         for i in range(int(n_perm)):
-            y_perm = y.copy()
-            for subj in np.unique(groups):
-                subj_mask = groups == subj
-                if perm_scheme == "within_subject_within_block":
-                    subj_blocks = blocks_all[subj_mask]
-                    for b in np.unique(subj_blocks):
-                        if np.isfinite(b):
-                            bm = subj_mask & (blocks_all == b)
-                        else:
-                            bm = subj_mask & (~np.isfinite(blocks_all))
-                        if np.sum(bm) >= 2:
-                            y_perm[bm] = rng.permutation(y_perm[bm])
-                else:
-                    y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
-
-            effective, _changed_fraction = is_effective_permutation(
+            y_perm, effective, _changed_fraction, used_scheme = _generate_effective_permutation(
                 y,
-                y_perm,
+                groups,
+                blocks=blocks_all,
+                rng=rng,
+                requested_scheme=perm_scheme,
                 min_changed_fraction=min_shuffle_fraction,
             )
             if not effective:
                 continue
             n_effective += 1
+            if used_scheme != perm_scheme:
+                n_fallback_permutations += 1
 
             perm_records, perm_failed_folds = _run_with_labels(y_perm)
             perm_failed_fraction = float(perm_failed_folds / max(len(folds), 1))
@@ -2073,6 +2201,13 @@ def run_within_subject_classification_ml(
                     null_auc.append(float(perm_auc_subj_mean))
             except Exception:
                 continue
+
+        if n_fallback_permutations > 0:
+            logger.info(
+                "Within-subject classification permutations: %d/%d effective shuffles required fallback to within-subject scheme.",
+                int(n_fallback_permutations),
+                int(n_effective),
+            )
 
         if n_effective == 0:
             raise RuntimeError(
@@ -2142,6 +2277,7 @@ def _run_classification_permutations(
     rng = np.random.default_rng(seed)
     null_aucs = []
     n_effective = 0
+    n_fallback_permutations = 0
     min_shuffle_fraction = float(
         get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
     )
@@ -2176,31 +2312,19 @@ def _run_classification_permutations(
     )
 
     for i in range(n_perm):
-        y_perm = y.copy()
-        # Permute within each subject to respect block structure
-        for subj in np.unique(groups):
-            mask = groups == subj
-            if perm_scheme == "within_subject_within_block" and blocks_arr is not None:
-                subj_blocks = blocks_arr[mask]
-                # Permute within each block label (including NaN as its own bucket)
-                for b in np.unique(subj_blocks):
-                    if np.isfinite(b):
-                        bm = mask & (blocks_arr == b)
-                    else:
-                        bm = mask & (~np.isfinite(blocks_arr))
-                    if np.sum(bm) >= 2:
-                        y_perm[bm] = rng.permutation(y_perm[bm])
-            else:
-                y_perm[mask] = rng.permutation(y_perm[mask])
-
-        effective, _changed_fraction = is_effective_permutation(
+        y_perm, effective, _changed_fraction, used_scheme = _generate_effective_permutation(
             y,
-            y_perm,
+            groups,
+            blocks=blocks_arr,
+            rng=rng,
+            requested_scheme=perm_scheme,
             min_changed_fraction=min_shuffle_fraction,
         )
         if not effective:
             continue
         n_effective += 1
+        if used_scheme != perm_scheme:
+            n_fallback_permutations += 1
         
         try:
             if str(model).strip().lower() == "cnn":
@@ -2238,6 +2362,13 @@ def _run_classification_permutations(
         
         if (i + 1) % 10 == 0:
             logger.info(f"Permutation {i + 1}/{n_perm}")
+
+    if n_fallback_permutations > 0:
+        logger.info(
+            "Classification permutations: %d/%d effective shuffles required fallback to within-subject scheme.",
+            int(n_fallback_permutations),
+            int(n_effective),
+        )
 
     if n_effective == 0:
         raise RuntimeError(

@@ -316,9 +316,12 @@ def nested_loso_cnn_classification(
 
     y_pred_all = np.zeros(len(y), dtype=int)
     y_prob_all = np.full(len(y), np.nan, dtype=float)
+    fold_ids = np.zeros(len(y), dtype=int)
+    test_indices = np.arange(len(y), dtype=int)
     failed_folds = 0
 
     for fold_idx, (train_idx, test_idx) in enumerate(outer_splits):
+        fold_number = int(fold_idx + 1)
         X_train = X[train_idx]
         X_test = X[test_idx]
         y_train = y[train_idx]
@@ -328,6 +331,7 @@ def nested_loso_cnn_classification(
             maj = int(np.median(y_train)) if len(y_train) > 0 else 0
             y_pred_all[test_idx] = maj
             y_prob_all[test_idx] = np.nan
+            fold_ids[test_idx] = fold_number
             failed_folds += 1
             continue
 
@@ -343,11 +347,13 @@ def nested_loso_cnn_classification(
             )
             y_pred_all[test_idx] = y_pred
             y_prob_all[test_idx] = y_prob
+            fold_ids[test_idx] = fold_number
         except Exception as exc:
             log.warning("CNN fold %d failed (%s); falling back to majority prediction.", int(fold_idx), exc)
             maj = int(np.median(y_train)) if len(y_train) > 0 else 0
             y_pred_all[test_idx] = maj
             y_prob_all[test_idx] = np.nan
+            fold_ids[test_idx] = fold_number
             failed_folds += 1
 
     result = ClassificationResult(
@@ -355,6 +361,8 @@ def nested_loso_cnn_classification(
         y_pred=y_pred_all,
         y_prob=y_prob_all if np.any(np.isfinite(y_prob_all)) else None,
         groups=groups,
+        fold_ids=fold_ids,
+        test_indices=test_indices,
         failed_fold_count=int(failed_folds),
         n_folds_total=int(len(outer_splits)),
     )

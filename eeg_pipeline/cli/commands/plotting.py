@@ -701,6 +701,30 @@ def _apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> 
                 "plotting.plots.behavior.dose_response.segment",
                 values[0],
             )
+        elif key == "dose_response_bands" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.dose_response.bands",
+                list(values),
+            )
+        elif key == "dose_response_rois" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.dose_response.rois",
+                list(values),
+            )
+        elif key == "dose_response_scopes" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.dose_response.scopes",
+                list(values),
+            )
+        elif key == "dose_response_stat" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.dose_response.stat",
+                values[0],
+            )
 
 
 _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
@@ -740,6 +764,10 @@ _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "dose_response_response_column": "plotting.plots.behavior.dose_response.response_column",
     "dose_response_pain_column": "plotting.plots.behavior.dose_response.pain_column",
     "dose_response_segment": "plotting.plots.behavior.dose_response.segment",
+    "dose_response_bands": "plotting.plots.behavior.dose_response.bands",
+    "dose_response_rois": "plotting.plots.behavior.dose_response.rois",
+    "dose_response_scopes": "plotting.plots.behavior.dose_response.scopes",
+    "dose_response_stat": "plotting.plots.behavior.dose_response.stat",
 }
 
 
@@ -775,6 +803,10 @@ def _validate_plot_item_configs(configs: Dict[str, Dict[str, List[str]]]) -> Non
                 "dose_response_response_column",
                 "dose_response_pain_column",
                 "dose_response_segment",
+                "dose_response_bands",
+                "dose_response_rois",
+                "dose_response_scopes",
+                "dose_response_stat",
                 "connectivity_circle_top_fraction",
                 "connectivity_circle_min_lines",
                 "connectivity_network_top_fraction",

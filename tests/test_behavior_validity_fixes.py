@@ -221,6 +221,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         found = _find_trial_table_path(root, feature_files=None)
         self.assertEqual(found, trials_path)
 
+    def test_group_trial_table_discovery_prefers_parquet_when_both_formats_exist(self):
+        from eeg_pipeline.analysis.behavior.orchestration import _find_trial_table_path
+
+        root = Path(tempfile.mkdtemp())
+        parquet_path = root / "trial_table" / "power" / "trials_power.parquet"
+        tsv_path = root / "trial_table" / "power" / "trials_power.tsv"
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        parquet_path.write_bytes(b"PAR1")
+        tsv_path.write_text("rating\tpower\n1\t0.1\n")
+
+        found = _find_trial_table_path(root, feature_files=None)
+        self.assertEqual(found, parquet_path)
+
     def test_group_correlations_read_tsv_via_read_table(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
 

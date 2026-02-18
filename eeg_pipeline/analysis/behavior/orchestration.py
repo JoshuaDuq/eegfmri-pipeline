@@ -5276,6 +5276,22 @@ def _find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] =
     if not trial_table_roots:
         return None
     
+    def _select_preferred_candidate(existing: List[Path], *, error_context: str) -> Path:
+        grouped: Dict[Tuple[str, str], List[Path]] = {}
+        for path in existing:
+            key = (str(path.parent), path.stem)
+            grouped.setdefault(key, []).append(path)
+        if len(grouped) > 1:
+            raise ValueError(
+                f"Multiple trial table files found in {stats_dir}{error_context}: {existing}. "
+                "Specify feature files to disambiguate."
+            )
+        options = next(iter(grouped.values()))
+        parquet = [p for p in options if p.suffix == ".parquet"]
+        if parquet:
+            return parquet[0]
+        return options[0]
+
     if feature_files:
         suffix = "_" + "_".join(sorted(str(x) for x in feature_files))
         fname = f"trials{suffix}"
@@ -5287,12 +5303,7 @@ def _find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] =
         existing = [p for p in candidates if p.exists()]
         if len(existing) == 0:
             return None
-        if len(existing) > 1:
-            raise ValueError(
-                f"Multiple trial table files found in {stats_dir} for {feature_dir}: {existing}. "
-                "Specify a unique stats_dir or clean old outputs to disambiguate."
-            )
-        return existing[0]
+        return _select_preferred_candidate(existing, error_context=f" for {feature_dir}")
     
     pattern_paths: List[Path] = []
     for root in trial_table_roots:
@@ -5302,12 +5313,7 @@ def _find_trial_table_path(stats_dir: Path, feature_files: Optional[List[str]] =
         pattern_paths.extend(list(root.glob("*/trials.tsv")))
     if len(pattern_paths) == 0:
         return None
-    if len(pattern_paths) > 1:
-        raise ValueError(
-            f"Multiple trial table files found in {stats_dir}: {pattern_paths}. "
-            "Specify feature files to disambiguate."
-        )
-    return pattern_paths[0]
+    return _select_preferred_candidate(pattern_paths, error_context="")
 
 
 def run_group_level_mixed_effects(

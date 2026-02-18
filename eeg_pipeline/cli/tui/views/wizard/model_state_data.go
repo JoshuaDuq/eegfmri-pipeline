@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/eeg-pipeline/tui/types"
@@ -336,6 +337,7 @@ func (m Model) GetTrialTableFeatureColumns() []string {
 		"spectral_",
 		"ratios_",
 		"asymmetry_",
+		"microstates_",
 		"temporal_",
 	}
 
@@ -364,6 +366,229 @@ func (m Model) GetTrialTableFeatureCategories() []string {
 	return out
 }
 
+var knownFeatureScopes = map[string]struct{}{
+	"global": {},
+	"roi":    {},
+	"ch":     {},
+	"chpair": {},
+}
+
+var knownFeatureStatsByLength = []string{
+	"peak_latency",
+	"peak_residual",
+	"rebound_magnitude",
+	"rebound_latency",
+	"center_freq",
+	"edge_freq_95",
+	"erd_magnitude",
+	"erd_duration",
+	"ers_magnitude",
+	"ers_duration",
+	"percent_mean",
+	"percent_std",
+	"logratio_mean",
+	"logratio_std",
+	"db_mean",
+	"db_std",
+	"peak_freq",
+	"peak_power",
+	"peak_ratio",
+	"peak_height",
+	"power_ratio",
+	"log_ratio",
+	"latency_diff",
+	"smallworld",
+	"logratio",
+	"bandwidth",
+	"entropy",
+	"slope",
+	"mean",
+	"std",
+	"auc",
+	"ptp",
+	"geff",
+	"clust",
+	"lzc",
+	"pe",
+	"db",
+}
+
+type doseResponseFeatureMetadata struct {
+	bands  map[string]struct{}
+	scopes map[string]struct{}
+	rois   map[string]struct{}
+	stats  map[string]struct{}
+}
+
+func newDoseResponseFeatureMetadata() doseResponseFeatureMetadata {
+	return doseResponseFeatureMetadata{
+		bands:  make(map[string]struct{}),
+		scopes: make(map[string]struct{}),
+		rois:   make(map[string]struct{}),
+		stats:  make(map[string]struct{}),
+	}
+}
+
+func sortedKeys(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func parseDoseResponseFeatureColumn(category string, column string, knownSegments map[string]struct{}) (scope string, band string, roi string, stat string, ok bool) {
+	prefix := strings.TrimSpace(category) + "_"
+	if !strings.HasPrefix(column, prefix) {
+		return "", "", "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(column, prefix), "_")
+	if len(parts) < 3 {
+		return "", "", "", "", false
+	}
+
+	scopeIdx := -1
+	for i, token := range parts {
+		if _, exists := knownFeatureScopes[token]; exists {
+			scopeIdx = i
+			scope = token
+			break
+		}
+	}
+	if scopeIdx < 0 {
+		return "", "", "", "", false
+	}
+
+	segIdx := -1
+	for i := 0; i < scopeIdx; i++ {
+		if _, exists := knownSegments[parts[i]]; exists {
+			segIdx = i
+			break
+		}
+	}
+	if segIdx >= 0 && segIdx+1 < scopeIdx {
+		band = strings.Join(parts[segIdx+1:scopeIdx], "_")
+	} else if scopeIdx > 0 {
+		band = parts[scopeIdx-1]
+	}
+
+	tailParts := parts[scopeIdx+1:]
+	if len(tailParts) == 0 {
+		return scope, band, "", "", true
+	}
+	tail := strings.Join(tailParts, "_")
+	if scope == "global" {
+		return scope, band, "", tail, true
+	}
+
+	for _, candidate := range knownFeatureStatsByLength {
+		if tail == candidate {
+			return scope, band, "", candidate, true
+		}
+		suffix := "_" + candidate
+		if strings.HasSuffix(tail, suffix) {
+			identifier := strings.TrimSuffix(tail, suffix)
+			if scope == "roi" {
+				roi = identifier
+			}
+			return scope, band, roi, candidate, true
+		}
+	}
+
+	// Fallback when stat suffix is unknown: assume final token is stat.
+	lastUnderscore := strings.LastIndex(tail, "_")
+	if lastUnderscore <= 0 || lastUnderscore >= len(tail)-1 {
+		return scope, band, "", tail, true
+	}
+	identifier := tail[:lastUnderscore]
+	stat = tail[lastUnderscore+1:]
+	if scope == "roi" {
+		roi = identifier
+	}
+	return scope, band, roi, stat, true
+}
+
+func (m Model) doseResponseFeatureMetadata(categories []string) doseResponseFeatureMetadata {
+	meta := newDoseResponseFeatureMetadata()
+	if len(m.trialTableColumns) == 0 {
+		return meta
+	}
+
+	catSet := make(map[string]struct{}, len(categories))
+	for _, cat := range categories {
+		c := strings.TrimSpace(cat)
+		if c == "" {
+			continue
+		}
+		catSet[c] = struct{}{}
+	}
+
+	segments := m.GetPlottingComparisonWindows()
+	segmentSet := make(map[string]struct{}, len(segments))
+	for _, seg := range segments {
+		s := strings.TrimSpace(seg)
+		if s != "" {
+			segmentSet[s] = struct{}{}
+		}
+	}
+
+	for _, col := range m.trialTableColumns {
+		c := strings.TrimSpace(col)
+		if c == "" {
+			continue
+		}
+		catIdx := strings.Index(c, "_")
+		if catIdx <= 0 {
+			continue
+		}
+		category := c[:catIdx]
+		if _, include := catSet[category]; !include {
+			continue
+		}
+		scope, band, roi, stat, ok := parseDoseResponseFeatureColumn(category, c, segmentSet)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(scope) != "" {
+			meta.scopes[scope] = struct{}{}
+		}
+		if strings.TrimSpace(band) != "" {
+			meta.bands[band] = struct{}{}
+		}
+		if strings.TrimSpace(roi) != "" {
+			meta.rois[roi] = struct{}{}
+		}
+		if strings.TrimSpace(stat) != "" {
+			meta.stats[stat] = struct{}{}
+		}
+	}
+	return meta
+}
+
+func (m Model) GetDoseResponseBands(categories []string) []string {
+	return sortedKeys(m.doseResponseFeatureMetadata(categories).bands)
+}
+
+func (m Model) GetDoseResponseScopes(categories []string) []string {
+	return sortedKeys(m.doseResponseFeatureMetadata(categories).scopes)
+}
+
+func (m Model) GetDoseResponseROIs(categories []string) []string {
+	meta := m.doseResponseFeatureMetadata(categories)
+	if len(meta.rois) == 0 && len(m.discoveredROIs) > 0 {
+		return append([]string{}, m.discoveredROIs...)
+	}
+	return sortedKeys(meta.rois)
+}
+
+func (m Model) GetDoseResponseStats(categories []string) []string {
+	return sortedKeys(m.doseResponseFeatureMetadata(categories).stats)
+}
+
 func detectFeatureCategoriesFromColumns(columns []string) []string {
 	// Keep in sync with eeg_pipeline.analysis.behavior.orchestration.FEATURE_COLUMN_PREFIXES
 	featurePrefixes := []string{
@@ -382,6 +607,7 @@ func detectFeatureCategoriesFromColumns(columns []string) []string {
 		"spectral_",
 		"ratios_",
 		"asymmetry_",
+		"microstates_",
 		"temporal_",
 	}
 

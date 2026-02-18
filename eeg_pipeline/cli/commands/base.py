@@ -368,7 +368,7 @@ def discover_trial_table_columns(
     deriv_root = Path(deriv_root)
     result = {"columns": [], "values": {}, "source": None, "file": None}
     
-    trial_file = None
+    trial_files: List[Path] = []
     patterns = ["trial_table*/*/trials*.tsv", "trial_table*/*/trials*.parquet"]
     
     search_dirs = []
@@ -381,49 +381,62 @@ def discover_trial_table_columns(
     for stats_dir in search_dirs:
         if not stats_dir.exists():
             continue
+        found_in_dir: List[Path] = []
         for pattern in patterns:
-            files = list(stats_dir.glob(pattern))
-            if files:
-                trial_file = files[0]
-                break
-        if trial_file:
+            found_in_dir.extend(stats_dir.glob(pattern))
+        if found_in_dir:
+            trial_files = sorted(set(found_in_dir))
             break
     
-    if not trial_file:
+    if not trial_files:
         return result
     
-    try:
-        if trial_file.suffix == ".parquet":
-            import pyarrow.parquet as pq
-            # Use increased thrift limit for large trial tables with many columns
-            pf = pq.ParquetFile(
-                trial_file,
-                memory_map=False,
-                thrift_string_size_limit=500_000_000,
-            )
-            # Read only first 500 rows for discovery
-            table = pf.read_row_group(0) if pf.num_row_groups > 0 else pf.read()
-            df = table.slice(0, 500).to_pandas()
-        else:
-            df = pd.read_csv(trial_file, sep="\t", nrows=500)
-        result["columns"] = df.columns.tolist()
+    columns: List[str] = []
+    seen_columns: Set[str] = set()
+    value_sets: dict[str, Set[str]] = {}
+    skip_columns = {"onset", "duration", "sample", "value", "epoch", "trial"}
+
+    for trial_file in trial_files:
+        try:
+            if trial_file.suffix == ".parquet":
+                import pyarrow.parquet as pq
+                # Use increased thrift limit for large trial tables with many columns
+                pf = pq.ParquetFile(
+                    trial_file,
+                    memory_map=False,
+                    thrift_string_size_limit=500_000_000,
+                )
+                # Read only first 500 rows for discovery
+                table = pf.read_row_group(0) if pf.num_row_groups > 0 else pf.read()
+                df = table.slice(0, 500).to_pandas()
+            else:
+                df = pd.read_csv(trial_file, sep="\t", nrows=500)
+
+            for col in df.columns:
+                if col not in seen_columns:
+                    seen_columns.add(col)
+                    columns.append(col)
+
+            for col in df.columns:
+                if col.lower() in skip_columns:
+                    continue
+                if df[col].dtype in ["float64", "float32"] and df[col].nunique() > 20:
+                    continue
+                unique_vals = df[col].dropna().unique()
+                if len(unique_vals) <= 50:
+                    vals = {str(v) for v in unique_vals if pd.notna(v)}
+                    if vals:
+                        value_sets.setdefault(col, set()).update(vals)
+        except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+            logger.debug("Failed to read trial table for discovery (%s): %s", trial_file, exc)
+        except Exception as exc:
+            logger.warning("Unexpected error while discovering trial table columns (%s): %s", trial_file, exc)
+
+    if columns:
+        result["columns"] = columns
+        result["values"] = {col: sorted(vals) for col, vals in value_sets.items()}
         result["source"] = "trial_table"
-        result["file"] = str(trial_file)
-        
-        skip_columns = {"onset", "duration", "sample", "value", "epoch", "trial"}
-        for col in df.columns:
-            if col.lower() in skip_columns:
-                continue
-            if df[col].dtype in ["float64", "float32"] and df[col].nunique() > 20:
-                continue
-            unique_vals = df[col].dropna().unique()
-            if len(unique_vals) <= 50:
-                vals = [str(v) for v in unique_vals if pd.notna(v)]
-                result["values"][col] = sorted(set(vals))
-    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
-        logger.debug("Failed to read trial table for discovery (%s): %s", trial_file, exc)
-    except Exception as exc:
-        logger.warning("Unexpected error while discovering trial table columns (%s): %s", trial_file, exc)
+        result["file"] = str(trial_files[0])
     
     return result
 
