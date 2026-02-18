@@ -396,6 +396,7 @@ def _process_single_regression_feature(
     groups_v: Optional[np.ndarray],
     cfg: "TrialwiseRegressionConfig",
     rng_seed: int,
+    strict_permutation_primary: bool,
     out_col: str,
 ) -> Optional[Dict[str, Any]]:
     """Process a single feature for regression analysis."""
@@ -445,6 +446,14 @@ def _process_single_regression_feature(
         cfg.n_permutations,
         rng_seed,
     )
+    if strict_permutation_primary:
+        p_primary = p_perm_feature if np.isfinite(p_perm_feature) else np.nan
+        p_kind_primary = "p_perm_feature" if np.isfinite(p_perm_feature) else "perm_missing_required"
+        p_primary_source = "permutation" if np.isfinite(p_perm_feature) else "perm_missing_required"
+    else:
+        p_primary = p_perm_feature if np.isfinite(p_perm_feature) else p_feature
+        p_kind_primary = "p_perm_feature" if np.isfinite(p_perm_feature) else "p_feature"
+        p_primary_source = "permutation" if np.isfinite(p_perm_feature) else "hc3"
 
     return {
         "feature": col,
@@ -463,10 +472,10 @@ def _process_single_regression_feature(
         "n_permutations": int(cfg.n_permutations),
         "p_perm_feature": p_perm_feature,
         "p_perm_interaction": p_perm_int,
-        "p_primary": p_perm_feature if np.isfinite(p_perm_feature) else p_feature,
+        "p_primary": p_primary,
         "p_raw": p_feature,
-        "p_kind_primary": "p_perm_feature" if np.isfinite(p_perm_feature) else "p_feature",
-        "p_primary_source": "permutation" if np.isfinite(p_perm_feature) else "hc3",
+        "p_kind_primary": p_kind_primary,
+        "p_primary_source": p_primary_source,
     }
 
 
@@ -476,6 +485,7 @@ def run_trialwise_feature_regressions(
     feature_cols: List[str],
     config: Any,
     groups_for_permutation: Optional[np.ndarray] = None,
+    strict_permutation_primary: bool = False,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Run per-feature regression on a subject's trial table."""
     cfg = TrialwiseRegressionConfig.from_config(config)
@@ -553,6 +563,7 @@ def run_trialwise_feature_regressions(
             groups_v,
             cfg,
             rng_seed + i,
+            strict_permutation_primary,
             out_col,
         )
         for i, col in enumerate(candidates)

@@ -3554,12 +3554,16 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
             "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
         )
+    strict_permutation_primary = bool(
+        primary_unit in {"trial", "trialwise"} and not allow_iid_trials and n_perm > 0
+    )
 
     reg_df, reg_meta = run_trialwise_feature_regressions(
         df_trials,
         feature_cols=feature_cols,
         config=ctx.config,
         groups_for_permutation=groups,
+        strict_permutation_primary=strict_permutation_primary,
     )
     reg_meta["primary_unit"] = primary_unit
     ctx.data_qc["trialwise_regression"] = reg_meta
@@ -4245,6 +4249,8 @@ def stage_condition_column(
                 "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
                 "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
             )
+        strict_non_iid_trial = primary_unit in {"trial", "trialwise"} and not allow_iid_trials
+        p_primary_mode = "perm" if strict_non_iid_trial else None
 
         column_df = compute_condition_effects(
             features,
@@ -4258,6 +4264,7 @@ def stage_condition_column(
             groups=groups,
             paired=bool(use_run_unit),
             pair_ids=df_trials[run_col].to_numpy() if bool(use_run_unit and run_col in df_trials.columns) else None,
+            p_primary_mode=p_primary_mode,
         )
 
         if column_df is not None and not column_df.empty:
@@ -4397,10 +4404,18 @@ def stage_condition_window(
     suffix = _feature_suffix_from_context(ctx)
     compare_col = _resolve_condition_compare_column(df_trials, ctx.config)
     out_dir = _get_stats_subfolder(ctx, "condition_effects")
+    window_min_samples = int(
+        get_config_value(
+            ctx.config,
+            "behavior_analysis.condition.window_comparison.min_samples",
+            getattr(config, "min_samples", 10),
+        )
+        or 0
+    )
 
     ctx.logger.info(f"Running window comparison: {compare_windows}")
     window_df = _run_window_comparison(
-        ctx, df_trials, feature_cols, compare_windows, 0, config.fdr_alpha, suffix
+        ctx, df_trials, feature_cols, compare_windows, window_min_samples, config.fdr_alpha, suffix
     )
     
     if not window_df.empty:
@@ -4738,36 +4753,12 @@ def _run_window_comparison(
     valid_mask = np.isfinite(v1_matrix) & np.isfinite(v2_matrix)
     n_valid_per_pair = valid_mask.sum(axis=0)
 
-    # Compute means and stds vectorized
-    mean_v1 = np.nanmean(v1_matrix, axis=0)
-    mean_v2 = np.nanmean(v2_matrix, axis=0)
-    std_v1 = np.nanstd(v1_matrix, axis=0, ddof=1)
-    std_v2 = np.nanstd(v2_matrix, axis=0, ddof=1)
-
-    # Compute effect sizes vectorized
-    mean_diff, std_diff, cohens_d, hedges_g = _compute_batch_pairwise_effect_sizes(v1_matrix, v2_matrix)
-
     # Wilcoxon tests must be done per-pair (no vectorized scipy version)
     records: List[Dict[str, Any]] = []
 
     for i, base_name in enumerate(common_bases):
         col1 = cols1[i]
         col2 = cols2[i]
-        n_valid = int(n_valid_per_pair[i])
-
-        if n_valid < max(min_samples, 2):
-            continue
-
-        v1_valid = v1_matrix[valid_mask[:, i], i]
-        v2_valid = v2_matrix[valid_mask[:, i], i]
-
-        try:
-            stat, p_val = sp_stats.wilcoxon(v1_valid, v2_valid)
-        except (ValueError, TypeError, sp_stats.Error) as exc:
-            raise RuntimeError(
-                f"Wilcoxon failed for window comparison '{window1}' vs '{window2}' "
-                f"(col1={col1}, col2={col2})"
-            ) from exc
 
         stat_run = np.nan
         p_val_run = np.nan
@@ -4785,17 +4776,38 @@ def _run_window_comparison(
             )
             run_means = df_run.groupby("run", dropna=True)[["v1", "v2"]].mean(numeric_only=True)
             n_runs = int(len(run_means))
-            if n_runs >= 2:
-                try:
-                    stat_run, p_val_run = sp_stats.wilcoxon(
-                        run_means["v1"].to_numpy(),
-                        run_means["v2"].to_numpy(),
-                    )
-                except (ValueError, TypeError, sp_stats.Error, KeyError) as exc:
-                    raise RuntimeError(
-                        f"Run-level Wilcoxon failed for window comparison '{window1}' vs '{window2}' "
-                        f"(col1={col1}, col2={col2}, run_col={run_col})"
-                    ) from exc
+            if n_runs < max(min_samples, 2):
+                continue
+            v1_valid = run_means["v1"].to_numpy(dtype=float)
+            v2_valid = run_means["v2"].to_numpy(dtype=float)
+            try:
+                stat_run, p_val_run = sp_stats.wilcoxon(v1_valid, v2_valid)
+            except (ValueError, TypeError, sp_stats.Error, KeyError) as exc:
+                raise RuntimeError(
+                    f"Run-level Wilcoxon failed for window comparison '{window1}' vs '{window2}' "
+                    f"(col1={col1}, col2={col2}, run_col={run_col})"
+                ) from exc
+            stat, p_val = stat_run, p_val_run
+            n_primary = int(n_runs)
+        else:
+            n_valid = int(n_valid_per_pair[i])
+            if n_valid < max(min_samples, 2):
+                continue
+            v1_valid = v1_matrix[valid_mask[:, i], i]
+            v2_valid = v2_matrix[valid_mask[:, i], i]
+            try:
+                stat, p_val = sp_stats.wilcoxon(v1_valid, v2_valid)
+            except (ValueError, TypeError, sp_stats.Error) as exc:
+                raise RuntimeError(
+                    f"Wilcoxon failed for window comparison '{window1}' vs '{window2}' "
+                    f"(col1={col1}, col2={col2})"
+                ) from exc
+            n_primary = n_valid
+
+        mean_diff_i, std_diff_i, cohens_d_i, hedges_g_i, _ = _compute_pairwise_effect_sizes(
+            v1_valid,
+            v2_valid,
+        )
 
         col1_prefix = next((p for p in prefixes if str(col1).startswith(p)), "")
         col1_raw = str(col1)[len(col1_prefix) :] if col1_prefix else str(col1)
@@ -4810,20 +4822,20 @@ def _run_window_comparison(
                 "comparison_type": "window",
                 "window1": window1,
                 "window2": window2,
-                "n_pairs": n_valid,
+                "n_pairs": n_primary,
                 "n_runs": n_runs,
-                "mean_window1": float(mean_v1[i]),
-                "mean_window2": float(mean_v2[i]),
-                "std_window1": float(std_v1[i]),
-                "std_window2": float(std_v2[i]),
-                "mean_diff": float(mean_diff[i]),
-                "std_diff": float(std_diff[i]) if np.isfinite(std_diff[i]) else np.nan,
+                "mean_window1": float(np.nanmean(v1_valid)),
+                "mean_window2": float(np.nanmean(v2_valid)),
+                "std_window1": float(np.nanstd(v1_valid, ddof=1)),
+                "std_window2": float(np.nanstd(v2_valid, ddof=1)),
+                "mean_diff": float(mean_diff_i),
+                "std_diff": float(std_diff_i) if np.isfinite(std_diff_i) else np.nan,
                 "statistic": float(stat),
                 "p_raw": float(p_val),
                 "statistic_run": float(stat_run) if np.isfinite(stat_run) else np.nan,
                 "p_value_run": float(p_val_run) if np.isfinite(p_val_run) else np.nan,
-                "cohens_d": float(cohens_d[i]),
-                "hedges_g": float(hedges_g[i]),
+                "cohens_d": float(cohens_d_i),
+                "hedges_g": float(hedges_g_i),
             }
         )
 

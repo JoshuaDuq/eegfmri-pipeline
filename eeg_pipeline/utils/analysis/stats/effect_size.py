@@ -601,6 +601,7 @@ def compute_condition_effects(
     groups: Optional[np.ndarray] = None,
     paired: bool = False,
     pair_ids: Optional[np.ndarray] = None,
+    p_primary_mode: Optional[str] = None,
 ) -> pd.DataFrame:
     """Compute effect sizes for condition comparison (e.g., pain vs non-pain).
     
@@ -633,11 +634,14 @@ def compute_condition_effects(
         )
         or 0
     )
-    p_primary_mode = str(
-        get_config_value(
+    p_primary_mode_value = (
+        p_primary_mode
+        if p_primary_mode is not None
+        else get_config_value(
             config, "behavior_analysis.condition.p_primary_mode", "asymptotic"
         )
-    ).strip().lower()
+    )
+    p_primary_mode_resolved = str(p_primary_mode_value).strip().lower()
     scheme = str(
         get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")
     ).strip().lower()
@@ -672,7 +676,7 @@ def compute_condition_effects(
     df = pd.DataFrame(records)
 
     if "p_primary" not in df.columns:
-        p_primary, p_source = _compute_p_primary_columns(df, p_primary_mode)
+        p_primary, p_source = _compute_p_primary_columns(df, p_primary_mode_resolved)
         df["p_primary"] = p_primary
         if "p_primary_source" not in df.columns:
             df["p_primary_source"] = p_source

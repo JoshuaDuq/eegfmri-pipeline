@@ -210,6 +210,73 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(captured["n_rows"], 4)
         self.assertTrue(captured["paired"])
 
+    def test_condition_column_non_iid_forces_strict_permutation_primary_mode(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_condition_column
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "compare_column": "pain_binary",
+                        "primary_unit": "trial",
+                        "compare_values": [1, 0],
+                        "permutation": {"enabled": True},
+                        "p_primary_mode": "asymptotic",
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                    "run_adjustment": {"column": "run_id"},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
+                "pain_binary": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+                "power_alpha": [0.2, 0.4, 0.8, 1.0, 0.3, 0.5, 0.7, 1.1, 0.6, 0.9],
+            }
+        )
+        captured = {}
+
+        def _fake_effects(features_df, pain_mask, nonpain_mask, min_samples, **kwargs):
+            captured["p_primary_mode"] = kwargs.get("p_primary_mode")
+            return pd.DataFrame(
+                {
+                    "feature": ["power_alpha"],
+                    "hedges_g": [0.5],
+                    "p_value": [0.2],
+                    "p_primary": [0.2],
+                }
+            )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.api.split_by_condition",
+            return_value=(
+                np.array([True, False, True, False, True, False, True, False, True, False]),
+                np.array([False, True, False, True, False, True, False, True, False, True]),
+                5,
+                5,
+            ),
+        ), patch(
+            "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
+            side_effect=_fake_effects,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+            side_effect=lambda _ctx, _cfg, df, **_kw: df,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+            return_value=None,
+        ):
+            out = stage_condition_column(
+                ctx,
+                SimpleNamespace(fdr_alpha=0.05, n_jobs=1, min_samples=2),
+                df_trials=df_trials,
+                feature_cols=["power_alpha"],
+            )
+
+        self.assertFalse(out.empty)
+        self.assertEqual(str(captured.get("p_primary_mode")), "perm")
+
     def test_group_trial_table_discovery_finds_canonical_all_trials(self):
         from eeg_pipeline.analysis.behavior.orchestration import _find_trial_table_path
 
@@ -1418,6 +1485,140 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertTrue(calls)
         self.assertTrue(all(n == int(valid_feat.sum()) for n in calls))
+
+    def test_regression_strict_non_iid_marks_missing_when_permutation_unavailable(self):
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "regression": {
+                        "outcome": "rating",
+                        "include_temperature": False,
+                        "include_trial_order": False,
+                        "include_prev_terms": False,
+                        "include_run_block": False,
+                        "include_interaction": False,
+                        "standardize": True,
+                        "min_samples": 5,
+                        "n_permutations": 10,
+                    },
+                    "statistics": {"base_seed": 42},
+                }
+            }
+        )
+        trial_df = pd.DataFrame(
+            {
+                "rating": [1, 2, 3, 4, 5, 6],
+                "power_alpha": [0.2, 0.4, 0.6, 0.8, 1.0, 1.2],
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.trialwise_regression._compute_permutation_pvalues",
+            return_value=(np.nan, np.nan),
+        ):
+            out, _meta = run_trialwise_feature_regressions(
+                trial_df,
+                feature_cols=["power_alpha"],
+                config=cfg,
+                groups_for_permutation=np.array([1, 1, 2, 2, 3, 3], dtype=int),
+                strict_permutation_primary=True,
+            )
+
+        self.assertFalse(out.empty)
+        self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
+        self.assertEqual(str(out.iloc[0]["p_primary_source"]), "perm_missing_required")
+
+    def test_condition_window_forwards_configured_min_samples(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_condition_window
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "compare_windows": ["baseline", "active"],
+                        "window_comparison": {"primary_unit": "trial", "min_samples": 9},
+                    },
+                    "statistics": {"allow_iid_trials": True},
+                },
+                "event_columns": {"pain_binary": ["pain_binary"]},
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "power_baseline_alpha_ch_Fp1_mean": [1.0, 2.0, 3.0, 2.0, 1.0, 4.0, 5.0, 3.0, 2.0, 1.0],
+                "power_active_alpha_ch_Fp1_mean": [1.5, 2.5, 3.5, 2.5, 1.5, 4.5, 5.5, 3.5, 2.5, 1.5],
+            }
+        )
+        captured = {}
+
+        def _fake_window(_ctx, _df, _features, _windows, min_samples, _fdr_alpha, _suffix):
+            captured["min_samples"] = int(min_samples)
+            return pd.DataFrame()
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._run_window_comparison",
+            side_effect=_fake_window,
+        ):
+            stage_condition_window(
+                ctx,
+                SimpleNamespace(fdr_alpha=0.05, min_samples=3),
+                df_trials=df_trials,
+                feature_cols=[
+                    "power_baseline_alpha_ch_Fp1_mean",
+                    "power_active_alpha_ch_Fp1_mean",
+                ],
+                compare_windows=["baseline", "active"],
+            )
+
+        self.assertEqual(int(captured["min_samples"]), 9)
+
+    def test_window_run_level_reports_run_level_descriptives(self):
+        from eeg_pipeline.analysis.behavior.orchestration import _run_window_comparison
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "window_comparison": {"primary_unit": "run_mean"},
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                    "run_adjustment": {"column": "run_id"},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 1, 1, 1, 2],
+                "power_baseline_alpha_ch_Fp1_mean": [1.0, 1.0, 1.0, 1.0, 5.0],
+                "power_active_alpha_ch_Fp1_mean": [2.0, 2.0, 2.0, 2.0, 6.0],
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+            side_effect=lambda _ctx, _cfg, df, **_kw: df,
+        ):
+            out = _run_window_comparison(
+                ctx,
+                df_trials,
+                [
+                    "power_baseline_alpha_ch_Fp1_mean",
+                    "power_active_alpha_ch_Fp1_mean",
+                ],
+                ["baseline", "active"],
+                min_samples=2,
+                fdr_alpha=0.05,
+                suffix="",
+            )
+
+        self.assertFalse(out.empty)
+        self.assertEqual(int(out.iloc[0]["n_pairs"]), 2)
+        self.assertAlmostEqual(float(out.iloc[0]["mean_window1"]), 3.0, places=12)
+        self.assertAlmostEqual(float(out.iloc[0]["mean_window2"]), 4.0, places=12)
 
     def test_paired_condition_permutation_does_not_use_unpaired_label_shuffle(self):
         from eeg_pipeline.utils.parallel import _compute_single_condition_effect
