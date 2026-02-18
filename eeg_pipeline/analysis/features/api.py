@@ -299,8 +299,8 @@ def _compute_complex_tfr_for_transform(
     if tfr_complex is not None:
         try:
             setattr(tfr_complex, "_spatial_transform", str(transform))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to set complex TFR spatial transform metadata: %s", exc)
     return tfr_complex, epochs_for_complex
 
 

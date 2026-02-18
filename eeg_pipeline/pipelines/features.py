@@ -212,8 +212,8 @@ def _precompute_complex_tfr_if_needed(
     if complex_tfr is not None:
         try:
             setattr(complex_tfr, "_spatial_transform", str(phase_transform))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed setting complex TFR spatial transform metadata: %s", exc)
     return complex_tfr
 
 

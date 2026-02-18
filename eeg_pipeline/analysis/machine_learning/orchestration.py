@@ -888,6 +888,10 @@ def run_within_subject_regression_ml(
     ensure_dir(plots_dir)
     
     model_name = model if model else "elasticnet"
+    harmonization_mode = (
+        feature_harmonization
+        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    )
 
     outer_cv_splits = int(
         get_config_value(
@@ -918,8 +922,15 @@ def run_within_subject_regression_ml(
         X_test = X[test_idx]
         y_train = y[train_idx]
         y_test = y[test_idx]
+        groups_train = groups[train_idx]
 
         blocks_train = blocks_all[train_idx] if blocks_all is not None else None
+        X_train, X_test, _ = apply_fold_feature_harmonization(
+            X_train,
+            X_test,
+            groups_train,
+            harmonization_mode,
+        )
 
         if model == "ridge":
             pipe = create_ridge_pipeline(seed=rng_seed + int(fold_counter), config=config)
@@ -1053,8 +1064,15 @@ def run_within_subject_regression_ml(
                 X_test_p = X[test_idx]
                 y_train_p = y_perm[train_idx]
                 y_test_p = y_perm[test_idx]
+                groups_train_p = groups[train_idx]
 
                 blocks_train_p = blocks_all[train_idx] if blocks_all is not None else None
+                X_train_p, X_test_p, _ = apply_fold_feature_harmonization(
+                    X_train_p,
+                    X_test_p,
+                    groups_train_p,
+                    harmonization_mode,
+                )
 
                 if model == "ridge":
                     pipe_p = create_ridge_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config)
@@ -1248,6 +1266,8 @@ def run_time_generalization(
     rng_seed: int,
     results_root: Path,
     logger: logging.Logger,
+    *,
+    target: Optional[str] = None,
 ) -> Path:
     """Run time-generalization machine learning analysis."""
     import time as _time
@@ -1270,6 +1290,7 @@ def run_time_generalization(
             config_dict=config,
             n_perm=n_perm,
             seed=rng_seed,
+            target=target,
         )
     except Exception as exc:
         logger.warning("Time-generalization failed after %.1fs: %s", _time.perf_counter() - t0, exc)
@@ -1340,6 +1361,10 @@ def run_classification_ml(
         model_type = str(classification_model).strip().lower()
     else:
         model_type = str(get_config_value(config, "machine_learning.classification.model", "svm")).strip().lower()
+    harmonization_mode = (
+        feature_harmonization
+        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    )
 
     if model_type == "cnn":
         X, y_binary, groups, feature_names, meta = load_epoch_tensor_matrix(
@@ -1824,6 +1849,10 @@ def run_within_subject_classification_ml(
         model_type = str(classification_model).strip().lower()
     else:
         model_type = str(get_config_value(config, "machine_learning.classification.model", "svm")).strip().lower()
+    harmonization_mode = (
+        feature_harmonization
+        or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection"))
+    )
 
     if model_type == "cnn":
         X, y, groups, _feature_names, meta = load_epoch_tensor_matrix(
@@ -1932,6 +1961,15 @@ def run_within_subject_classification_ml(
             y_train = y_labels[train_idx]
             y_test = y_labels[test_idx]
             blocks_train = blocks_all[train_idx]
+            groups_train = groups[train_idx]
+
+            if model_type != "cnn":
+                X_train, X_test, _ = apply_fold_feature_harmonization(
+                    X_train,
+                    X_test,
+                    groups_train,
+                    harmonization_mode,
+                )
 
             # If training fold has only one class, fall back to majority-class prediction.
             unique_train = np.unique(y_train)

@@ -1654,7 +1654,20 @@ def extract_aperiodic_features(
     freq_bands_override = getattr(ctx, "frequency_bands", None)
     sfreq = epochs.info["sfreq"]
     times = epochs.times
-    n_epochs = int(len(epochs))
+    try:
+        n_epochs = int(len(epochs))
+    except TypeError:
+        aligned_events = getattr(ctx, "aligned_events", None)
+        if isinstance(aligned_events, pd.DataFrame):
+            n_epochs = int(len(aligned_events))
+        else:
+            data_obj = getattr(epochs, "_data", None)
+            if data_obj is None:
+                data_obj = getattr(epochs, "data", None)
+            if hasattr(data_obj, "shape") and len(data_obj.shape) > 0:
+                n_epochs = int(data_obj.shape[0])
+            else:
+                raise TypeError("Aperiodic: unable to determine number of epochs from context.")
     min_samples = int(sfreq)
     condition_labels = _resolve_condition_labels_from_context(ctx, n_epochs)
     

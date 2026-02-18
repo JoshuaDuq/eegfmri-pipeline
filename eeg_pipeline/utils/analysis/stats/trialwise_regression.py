@@ -284,7 +284,6 @@ def _compute_permutation_pvalues(
                 len(resid_f),
                 rng,
                 groups_f,
-                strict=True,
             )
         except ValueError:
             return np.nan, np.nan

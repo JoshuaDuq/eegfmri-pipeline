@@ -529,6 +529,30 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertEqual(tg_r2.size, 0)
         self.assertEqual(window_centers.size, 0)
 
+    def test_time_generalization_passes_explicit_target_to_epoch_loader(self):
+        from eeg_pipeline.analysis.machine_learning import time_generalization as tg
+
+        captured: dict[str, object] = {}
+
+        def _fake_loader(*_args, **kwargs):
+            captured["target"] = kwargs.get("target")
+            raise RuntimeError("stop")
+
+        with patch.object(tg, "load_epochs_with_targets", side_effect=_fake_loader):
+            with self.assertRaisesRegex(RuntimeError, "stop"):
+                tg.time_generalization_regression(
+                    deriv_root=Path("."),
+                    subjects=["0001"],
+                    task="thermalactive",
+                    results_dir=None,
+                    config_dict=DotConfig({}),
+                    n_perm=0,
+                    seed=42,
+                    target="temperature",
+                )
+
+        self.assertEqual(captured.get("target"), "temperature")
+
     def test_uncertainty_requires_minimum_valid_fold_fraction(self):
         from sklearn.dummy import DummyRegressor
 
@@ -1741,6 +1765,100 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertIsInstance(captured.get("param_grid"), dict)
         self.assertIn("rf__max_depth", captured.get("param_grid", {}))
 
+    def test_within_subject_regression_applies_fold_feature_harmonization(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array(
+            [
+                [0.1, 1.0],
+                [0.2, 2.0],
+                [0.3, 3.0],
+                [0.4, 4.0],
+            ],
+            dtype=float,
+        )
+        y = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0001", "sub-0001"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+                "block": [0, 0, 1, 1],
+            }
+        )
+        folds = [
+            (1, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int), "sub-0001", {}),
+        ]
+
+        captured = {"harmonize_calls": 0, "n_test_features": None}
+
+        class _FakeEstimator:
+            def predict(self, X_in: np.ndarray) -> np.ndarray:
+                captured["n_test_features"] = int(X_in.shape[1])
+                return np.asarray(X_in[:, 0], dtype=float)
+
+        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode):
+            _ = (groups_train, harmonization_mode)
+            captured["harmonize_calls"] += 1
+            keep = np.array([False, True], dtype=bool)
+            return X_train[:, keep], X_test[:, keep], keep
+
+        def _fake_export_predictions(y_true, y_pred, groups_ordered, *_args, **_kwargs):
+            return pd.DataFrame(
+                {
+                    "y_true": np.asarray(y_true, dtype=float),
+                    "y_pred": np.asarray(y_pred, dtype=float),
+                    "subject_id": np.asarray(groups_ordered, dtype=object),
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)), patch.object(
+                orch, "create_within_subject_folds", return_value=folds
+            ), patch.object(
+                orch, "apply_fold_feature_harmonization", side_effect=_fake_harmonize
+            ), patch.object(
+                orch, "_fit_within_subject_fold", return_value=_FakeEstimator()
+            ), patch.object(
+                orch, "export_predictions", side_effect=_fake_export_predictions
+            ), patch.object(
+                orch, "export_indices", return_value=None
+            ), patch.object(
+                orch, "compute_subject_level_r", return_value=(0.2, [("sub-0001", 0.2)], 0.1, 0.3)
+            ), patch.object(
+                orch,
+                "compute_subject_level_errors",
+                return_value={
+                    "mean_mae": 0.1,
+                    "ci_low_mae": 0.05,
+                    "ci_high_mae": 0.2,
+                    "mean_rmse": 0.2,
+                    "ci_low_rmse": 0.1,
+                    "ci_high_rmse": 0.3,
+                    "per_subject": [],
+                },
+            ), patch.object(
+                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            ), patch.object(
+                orch, "export_subject_selection_report", return_value={}
+            ):
+                orch.run_within_subject_regression_ml(
+                    subjects=["0001"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=DotConfig({}),
+                    n_perm=0,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    feature_harmonization="intersection",
+                )
+
+        self.assertEqual(captured["harmonize_calls"], 1)
+        self.assertEqual(captured["n_test_features"], 1)
+
     def test_within_subject_classification_permutations_enforce_failed_fold_fraction(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
@@ -2602,3 +2720,85 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
 
         self.assertIn("y_prob", pred_df.columns)
         self.assertTrue(np.all(np.isfinite(pred_df["y_prob"].to_numpy(dtype=float))))
+
+    def test_within_subject_classification_applies_fold_feature_harmonization(self):
+        from sklearn.dummy import DummyClassifier
+
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array(
+            [
+                [0.0, 1.0],
+                [0.1, 1.1],
+                [0.2, 1.2],
+                [0.3, 1.3],
+            ],
+            dtype=float,
+        )
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0001", "sub-0001"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [10, 11, 12, 13],
+                "block": [0, 0, 1, 1],
+            }
+        )
+        folds = [
+            (
+                1,
+                np.array([0, 1], dtype=int),
+                np.array([2, 3], dtype=int),
+                "sub-0001",
+                None,
+            )
+        ]
+        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+
+        calls = {"harmonize": 0}
+
+        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode):
+            _ = (groups_train, harmonization_mode)
+            calls["harmonize"] += 1
+            keep = np.array([False, True], dtype=bool)
+            return X_train[:, keep], X_test[:, keep], keep
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+            ), patch.object(
+                orch, "create_within_subject_folds", return_value=folds
+            ), patch.object(
+                orch, "apply_fold_feature_harmonization", side_effect=_fake_harmonize
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.create_logistic_pipeline",
+                return_value=DummyClassifier(strategy="most_frequent"),
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.build_logistic_param_grid",
+                return_value={},
+            ):
+                orch.run_within_subject_classification_ml(
+                    subjects=["0001"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=0,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    classification_model="lr",
+                    feature_harmonization="intersection",
+                )
+
+        self.assertEqual(calls["harmonize"], 1)
+
+    def test_find_block_column_parses_run_prefixed_labels(self):
+        from eeg_pipeline.utils.data.machine_learning import _find_block_column
+
+        events = pd.DataFrame({"run_id": ["run-01", "run-01", "run-02", "run-02"]})
+        block = _find_block_column(events)
+        self.assertIsNotNone(block)
+        vals = pd.to_numeric(block, errors="coerce").to_numpy(dtype=float)
+        np.testing.assert_allclose(vals, np.array([1.0, 1.0, 2.0, 2.0], dtype=float), atol=1e-12)

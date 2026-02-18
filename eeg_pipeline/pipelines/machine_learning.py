@@ -399,6 +399,7 @@ class MLPipeline(PipelineBase):
             rng_seed=params["rng_seed"],
             results_root=self.results_root,
             logger=self.logger,
+            target=params.get("target"),
         )
         return results_dir
 

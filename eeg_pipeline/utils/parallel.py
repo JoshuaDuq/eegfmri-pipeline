@@ -250,12 +250,12 @@ def _extract_paired_condition_values(
     if True not in pivot.columns or False not in pivot.columns:
         return np.array([], dtype=float), np.array([], dtype=float)
 
-    paired = pivot[[True, False]].dropna()
+    paired = pivot.reindex(columns=[True, False]).dropna()
     if paired.empty:
         return np.array([], dtype=float), np.array([], dtype=float)
 
-    pain_values = paired[True].to_numpy(dtype=float)
-    nonpain_values = paired[False].to_numpy(dtype=float)
+    pain_values = paired.iloc[:, 0].to_numpy(dtype=float)
+    nonpain_values = paired.iloc[:, 1].to_numpy(dtype=float)
     return pain_values, nonpain_values
 
 

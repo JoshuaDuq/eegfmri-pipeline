@@ -291,6 +291,7 @@ def time_generalization_regression(
     config_dict: Optional[dict] = None,
     n_perm: int = 0,
     seed: int = 42,
+    target: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Run time-generalization regression with LOSO cross-validation.
 
@@ -320,6 +321,10 @@ def time_generalization_regression(
         inferential statistics are computed.
     seed
         Seed for the permutation random number generator.
+    target
+        Optional target selector from events.tsv (e.g., ``"rating"``,
+        ``"temperature"``, or explicit column name). Defaults to rating when
+        omitted.
 
     Returns
     -------
@@ -335,7 +340,13 @@ def time_generalization_regression(
         axes of the time-generalization matrices. Empty if no valid windows are
         available.
     """
-    tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
+    tuples, _ = load_epochs_with_targets(
+        deriv_root,
+        subjects=subjects,
+        task=task,
+        target=target,
+        target_kind="continuous",
+    )
     trial_records, y_all_arr, groups_arr, subj_to_epochs, _ = prepare_trial_records_from_epochs(tuples)
     trial_blocks_arr = _extract_trial_blocks_from_records(trial_records, subj_to_epochs)
 

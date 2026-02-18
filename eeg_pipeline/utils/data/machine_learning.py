@@ -50,7 +50,14 @@ def _find_block_column(aligned_events: pd.DataFrame) -> Optional[pd.Series]:
     """Find block/run identifier column from aligned events."""
     for candidate in ("block", "run_id", "run", "session"):
         if candidate in aligned_events.columns:
-            return pd.to_numeric(aligned_events[candidate], errors="coerce")
+            series = aligned_events[candidate]
+            numeric = pd.to_numeric(series, errors="coerce")
+            if np.any(np.isfinite(numeric.to_numpy(dtype=float))):
+                return numeric
+            parsed = pd.Series([_parse_run_label_to_int(v) for v in series], index=series.index, dtype="float64")
+            if np.any(np.isfinite(parsed.to_numpy(dtype=float))):
+                return parsed
+            return numeric
     return None
 
 
@@ -298,6 +305,10 @@ def _parse_run_label_to_int(run_value: Any) -> Optional[int]:
         return None
     # Accept "run-01" or "01"
     m = re.match(r"^run-(\d+)$", s)
+    if m:
+        return int(m.group(1))
+    # Accept generic labels with trailing digits (e.g., "session2", "block_03").
+    m = re.search(r"(\d+)$", s)
     if m:
         return int(m.group(1))
     try:
@@ -853,6 +864,9 @@ def load_epochs_with_targets(
     subjects: Optional[List[str]] = None,
     subject_discovery_policy: Literal["intersection", "union", "config_only"] = "intersection",
     task: str = "",
+    target: Optional[str] = None,
+    target_kind: MLTargetKind = "continuous",
+    binary_threshold: Optional[float] = None,
     bids_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[List[Tuple[str, mne.Epochs, pd.Series]], List[str]]:
@@ -930,15 +944,22 @@ def load_epochs_with_targets(
             logger.warning(f"Clean events.tsv is empty for {sub}; skipping.")
             continue
 
-        rating_columns = config.get("event_columns.rating", [])
-        tgt_col = pick_target_column(
-            aligned, target_columns=list(rating_columns) if rating_columns else []
-        )
-        if tgt_col is None:
-            logger.warning(f"No suitable target column for {sub}; skipping.")
+        try:
+            y_series, _y_col = _resolve_target_series(
+                aligned,
+                target=target,
+                target_kind=target_kind,
+                binary_threshold=binary_threshold,
+                config=config,
+            )
+            if target_kind == "binary":
+                y_series = _ensure_binary_target(
+                    y_series, binary_threshold=binary_threshold, positive_rule=">"
+                )
+            y = pd.to_numeric(y_series, errors="coerce")
+        except ValueError as exc:
+            logger.warning("No suitable target column for %s; skipping (%s).", sub, exc)
             continue
-
-        y = pd.to_numeric(aligned[tgt_col], errors="coerce")
         if len(epochs) != len(y):
             logger.error(
                 f"Epochs-target length mismatch for subject {sub}, task {task}: "
