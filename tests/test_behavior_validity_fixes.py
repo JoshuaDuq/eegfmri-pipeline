@@ -1062,26 +1062,20 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(captured["paired"])
         self.assertEqual(len(captured["pair_ids"]), 6)
 
-    def test_temporal_cluster_fallback_marks_effective_correction_method(self):
+    def test_temporal_cluster_mode_requires_cluster_pvalues(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
                     "temporal": {"correction_method": "cluster"},
-                    "statistics": {"fdr_alpha": 0.05},
+                    "statistics": {"fdr_alpha": 0.05, "allow_iid_trials": True},
                 }
             }
         )
         ctx = self._ctx(cfg)
         ctx.use_spearman = True
         ctx.selected_feature_files = ["power"]
-        captured = {}
-
-        def _capture_write(_ctx, df, path):
-            if "correction_method" in df.columns:
-                captured["df"] = df.copy()
-            return path
 
         with patch(
             "eeg_pipeline.analysis.behavior.api.compute_temporal_from_context",
@@ -1096,17 +1090,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                     }
                 ]
             },
-        ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
-            side_effect=_capture_write,
         ):
-            stage_temporal_stats(ctx)
-
-        self.assertIn("df", captured)
-        self.assertEqual(str(captured["df"].iloc[0]["correction_method"]), "fdr")
+            with self.assertRaisesRegex(ValueError, "p_cluster"):
+                stage_temporal_stats(ctx)
 
     def test_temporal_stats_respects_temporal_feature_toggles(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats
+
+        aligned_events = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "sample_idx": [0, 1, 2, 3],
+            }
+        )
 
         cfg = DotConfig(
             {
@@ -1119,7 +1115,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                         },
                         "correction_method": "fdr",
                     },
-                    "statistics": {"fdr_alpha": 0.05},
+                    "statistics": {"fdr_alpha": 0.05, "allow_iid_trials": True},
                 }
             }
         )
@@ -1127,6 +1123,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ctx.use_spearman = True
         ctx.selected_feature_files = None
         ctx.feature_categories = None
+        ctx.aligned_events = aligned_events
 
         with patch(
             "eeg_pipeline.analysis.behavior.api.compute_temporal_from_context",
@@ -1379,20 +1376,21 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         run_ids = np.repeat([1, 2, 3], 10)
         temp_a = np.linspace(41, 47, n)
         temp_b = np.linspace(42, 48, n)
+        noise_scale = 0.3
 
         df_a = pd.DataFrame(
             {
-                "rating": temp_a + rng.normal(scale=0.08, size=n),
+                "rating": temp_a + rng.normal(scale=noise_scale, size=n),
                 "temperature": temp_a,
-                "power_alpha": temp_a + rng.normal(scale=0.08, size=n),
+                "power_alpha": temp_a + rng.normal(scale=noise_scale, size=n),
                 "run_id": run_ids,
             }
         )
         df_b = pd.DataFrame(
             {
-                "rating": temp_b + rng.normal(scale=0.08, size=n),
+                "rating": temp_b + rng.normal(scale=noise_scale, size=n),
                 "temperature": temp_b,
-                "power_alpha": temp_b + rng.normal(scale=0.08, size=n),
+                "power_alpha": temp_b + rng.normal(scale=noise_scale, size=n),
                 "run_id": run_ids,
             }
         )
@@ -2026,6 +2024,186 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertFalse(out.empty)
         self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
+
+    def test_temporal_stats_requires_cluster_correction_when_iid_disallowed(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "statistics": {"allow_iid_trials": False},
+                    "temporal": {
+                        "correction_method": "fdr",
+                        "features": {"power": True, "itpc": False, "erds": False},
+                    },
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        ctx.use_spearman = True
+        ctx.aligned_events = pd.DataFrame({"run_id": [1, 1, 2, 2]})
+        power_result = {
+            "records": [
+                {
+                    "condition": "pain",
+                    "feature": "power",
+                    "band": "alpha",
+                    "time_start": 0.0,
+                    "time_end": 0.1,
+                    "channel": "Cz",
+                    "r": 0.2,
+                    "p_raw": 0.03,
+                    "p_cluster": 0.03,
+                }
+            ]
+        }
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.api.compute_temporal_from_context",
+            return_value=power_result,
+        ):
+            with self.assertRaises(ValueError):
+                stage_temporal_stats(ctx)
+
+    def test_temporal_stats_cluster_mode_does_not_silently_fallback_without_cluster_pvalues(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "statistics": {"allow_iid_trials": False},
+                    "run_adjustment": {"column": "run_id"},
+                    "temporal": {
+                        "correction_method": "cluster",
+                        "features": {"power": True, "itpc": False, "erds": False},
+                    },
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        ctx.use_spearman = True
+        ctx.aligned_events = pd.DataFrame({"run_id": [1, 1, 2, 2]})
+
+        power_result = {
+            "records": [
+                {
+                    "condition": "pain",
+                    "feature": "power",
+                    "band": "alpha",
+                    "time_start": 0.0,
+                    "time_end": 0.1,
+                    "channel": "Cz",
+                    "r": 0.2,
+                    "p_raw": 0.03,
+                }
+            ]
+        }
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.api.compute_temporal_from_context",
+            return_value=power_result,
+        ):
+            with self.assertRaises(ValueError):
+                stage_temporal_stats(ctx)
+
+    def test_correlate_design_defaults_to_crossfit_pain_residual_when_available(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "statistics": {"allow_iid_trials": False},
+                    "correlations": {"permutation": {"enabled": True}},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 50, 8),
+                "temperature": np.linspace(43, 46, 8),
+                "pain_residual": np.linspace(-1, 1, 8),
+                "pain_residual_cv": np.linspace(-0.8, 0.8, 8),
+                "run_id": np.repeat([1, 2], 4),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            design = stage_correlate_design(
+                ctx,
+                SimpleNamespace(control_temperature=True, control_trial_order=True),
+            )
+
+        self.assertIsNotNone(design)
+        self.assertGreaterEqual(len(design.targets), 1)
+        self.assertEqual(design.targets[0], "pain_residual_cv")
+
+    def test_condition_multigroup_uses_unified_fdr_pipeline(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_condition_multigroup
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "primary_unit": "run_mean",
+                        "compare_column": "pain_level",
+                        "compare_values": [0, 1, 2],
+                    },
+                    "run_adjustment": {"column": "run_id"},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 1, 1, 2, 2, 2],
+                "pain_level": [0, 1, 2, 0, 1, 2],
+                "power_alpha": [0.2, 0.4, 0.6, 0.3, 0.5, 0.7],
+            }
+        )
+
+        base_df = pd.DataFrame(
+            {
+                "feature": ["power_alpha"],
+                "feature_type": ["power"],
+                "band": ["alpha"],
+                "p_value": [0.02],
+                "hedges_g": [0.6],
+            }
+        )
+        captured = {}
+
+        def _capture_fdr(_ctx, _cfg, df, **kwargs):
+            captured["analysis_type"] = kwargs.get("analysis_type")
+            return df.assign(p_fdr=[0.02], q_global=[0.02])
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.effect_size.compute_multigroup_condition_effects",
+            return_value=base_df,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+            side_effect=_capture_fdr,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+            return_value=Path("/tmp/fake.tsv"),
+        ):
+            out = stage_condition_multigroup(
+                ctx,
+                SimpleNamespace(fdr_alpha=0.05),
+                df_trials=df_trials,
+                feature_cols=["power_alpha"],
+            )
+
+        self.assertFalse(out.empty)
+        self.assertEqual(captured.get("analysis_type"), "condition_multigroup")
+        self.assertIn("p_fdr", out.columns)
 
 
 if __name__ == "__main__":

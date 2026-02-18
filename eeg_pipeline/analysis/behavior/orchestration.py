@@ -1910,7 +1910,7 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
         logger=ctx.logger,
         default_targets=default_targets,
     )
-    use_cv_resid = get_config_bool(ctx.config, "behavior_analysis.correlations.use_crossfit_pain_residual", False)
+    use_cv_resid = get_config_bool(ctx.config, "behavior_analysis.correlations.use_crossfit_pain_residual", True)
     if use_cv_resid and "pain_residual_cv" in df_trials.columns:
         has_explicit_targets = bool(
             get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
@@ -4613,6 +4613,24 @@ def stage_condition_multigroup(
     )
     
     if multigroup_df is not None and not multigroup_df.empty:
+        if "p_raw" not in multigroup_df.columns and "p_value" in multigroup_df.columns:
+            multigroup_df["p_raw"] = pd.to_numeric(multigroup_df["p_value"], errors="coerce")
+        if "p_primary" not in multigroup_df.columns:
+            multigroup_df["p_primary"] = pd.to_numeric(multigroup_df.get("p_raw", np.nan), errors="coerce")
+
+        multigroup_df = _compute_unified_fdr(
+            ctx,
+            config,
+            multigroup_df,
+            p_col="p_primary",
+            family_cols=UNIFIED_FDR_FAMILY_COLUMNS,
+            analysis_type="condition_multigroup",
+        )
+        if "p_fdr" in multigroup_df.columns:
+            q_vals = pd.to_numeric(multigroup_df["p_fdr"], errors="coerce")
+            multigroup_df["q_value"] = q_vals
+            multigroup_df["significant_fdr"] = q_vals < float(getattr(config, "fdr_alpha", 0.05))
+
         multigroup_df["compare_column"] = compare_column
         suffix = _feature_suffix_from_context(ctx)
         # Always include condition column name in filename
@@ -4979,6 +4997,33 @@ def stage_temporal_stats(
         ctx.config, "behavior_analysis.temporal.correction_method", "fdr"
     )).strip().lower()
     fdr_alpha = get_config_float(ctx.config, "behavior_analysis.statistics.fdr_alpha", 0.05)
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    if not allow_iid_trials:
+        if correction_method != "cluster":
+            raise ValueError(
+                "Temporal trial-level inference is non-i.i.d by default. "
+                "Set behavior_analysis.temporal.correction_method='cluster' for grouped permutation inference, "
+                "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+            )
+        run_col = str(
+            get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id"
+        ).strip()
+        events = getattr(ctx, "aligned_events", None)
+        if not isinstance(events, pd.DataFrame) or events.empty or run_col not in events.columns:
+            raise ValueError(
+                "Temporal cluster inference requires grouped labels under non-i.i.d mode. "
+                f"Missing run grouping column '{run_col}' in aligned events."
+            )
+        groups = _sanitize_permutation_groups(
+            events[run_col].to_numpy(),
+            ctx.logger,
+            "Temporal",
+        )
+        if groups is None:
+            raise ValueError(
+                "Temporal cluster inference requires valid grouped permutation labels "
+                f"in '{run_col}' (at least 2 samples per group)."
+            )
     ctx.logger.info(
         "Temporal: using %s correction (alpha=%.3f), features=%s",
         correction_method,
@@ -5063,24 +5108,29 @@ def stage_temporal_stats(
                 
             elif correction_method == "cluster":
                 if "p_cluster" in df_temporal.columns:
-                    p_cluster_vals = pd.to_numeric(df_temporal["p_cluster"], errors="coerce").fillna(1.0).to_numpy()
+                    p_cluster_series = pd.to_numeric(df_temporal["p_cluster"], errors="coerce")
+                    p_cluster_vals = p_cluster_series.to_numpy(dtype=float)
+                    p_raw_series = pd.to_numeric(df_temporal.get("p_raw", np.nan), errors="coerce")
+                    expected_rows = p_raw_series.notna().to_numpy()
+                    missing_cluster_rows = expected_rows & ~np.isfinite(p_cluster_vals)
+                    if missing_cluster_rows.any():
+                        raise ValueError(
+                            "Temporal cluster correction requested, but cluster-corrected p-values were missing for "
+                            f"{int(missing_cluster_rows.sum())} temporal tests. "
+                            "Do not fallback to asymptotic/FDR under non-i.i.d settings."
+                        )
                     df_temporal["p_primary"] = p_cluster_vals
                     if "cluster_significant" in df_temporal.columns:
                         df_temporal["sig_cluster"] = df_temporal["cluster_significant"].fillna(False).astype(bool)
                     else:
-                        df_temporal["sig_cluster"] = p_cluster_vals < fdr_alpha
+                        df_temporal["sig_cluster"] = np.isfinite(p_cluster_vals) & (p_cluster_vals < fdr_alpha)
                     n_sig = int(df_temporal["sig_cluster"].sum())
                     ctx.logger.info(f"Temporal cluster: {n_sig}/{len(p_cluster_vals)} significant at alpha={fdr_alpha}")
                 else:
-                    ctx.logger.warning(
-                        "Temporal: cluster correction requested but no p_cluster column present; falling back to FDR."
+                    raise ValueError(
+                        "Temporal cluster correction requested but no p_cluster column is present in temporal outputs. "
+                        "Refusing silent fallback to asymptotic/FDR inference."
                     )
-                    effective_correction_method = "fdr"
-                    reject, p_corrected, _, _ = multipletests(p_vals, alpha=fdr_alpha, method="fdr_bh")
-                    df_temporal["p_fdr"] = p_corrected
-                    df_temporal["sig_fdr"] = reject
-                    df_temporal["p_primary"] = df_temporal["p_fdr"]
-                    df_temporal["correction_note"] = "fdr_fallback_from_cluster_missing_p_cluster"
                 
             elif correction_method == "none":
                 ctx.logger.warning("Temporal: no multiple comparison correction applied (use with caution)")

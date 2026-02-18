@@ -676,7 +676,7 @@ behavior_analysis:
       min_samples: 10
       poly_degrees: [2, 3]
     crossfit:
-      enabled: false
+      enabled: true
       group_column: ""        # "" -> use behavior_analysis.run_adjustment.column
       n_splits: 5
       method: "spline"        # "spline" | "poly" (crossfit uses sklearn splines/poly + ridge)
@@ -823,7 +823,7 @@ behavior_analysis:
     loso_stability: true
     compute_bayes_factors: false
     prefer_pain_residual: true
-    use_crossfit_pain_residual: false
+    use_crossfit_pain_residual: true
     primary_unit: "trial"            # "trial" | "run_mean"
     min_runs: 5                      # Minimum run count when primary_unit="run_mean"
     p_primary_mode: "perm_if_available"  # "asymptotic" | "perm_if_available"
