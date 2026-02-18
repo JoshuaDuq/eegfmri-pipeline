@@ -1499,6 +1499,11 @@ def run_classification_ml(
     auc_subject_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
     balanced_accuracy_subject_mean = _subject_mean_metric(result.per_subject_metrics, "balanced_accuracy")
     accuracy_subject_mean = _subject_mean_metric(result.per_subject_metrics, "accuracy")
+    precision_subject_mean = _subject_mean_metric(result.per_subject_metrics, "precision")
+    recall_subject_mean = _subject_mean_metric(result.per_subject_metrics, "recall")
+    f1_subject_mean = _subject_mean_metric(result.per_subject_metrics, "f1")
+    specificity_subject_mean = _subject_mean_metric(result.per_subject_metrics, "specificity")
+    average_precision_subject_mean = _subject_mean_metric(result.per_subject_metrics, "average_precision")
     min_subjects_auc = int(
         get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
     )
@@ -1520,6 +1525,11 @@ def run_classification_ml(
     auc_vals = _subject_metric_values(result.per_subject_metrics, "auc")
     bal_vals = _subject_metric_values(result.per_subject_metrics, "balanced_accuracy")
     acc_vals = _subject_metric_values(result.per_subject_metrics, "accuracy")
+    precision_vals = _subject_metric_values(result.per_subject_metrics, "precision")
+    recall_vals = _subject_metric_values(result.per_subject_metrics, "recall")
+    f1_vals = _subject_metric_values(result.per_subject_metrics, "f1")
+    specificity_vals = _subject_metric_values(result.per_subject_metrics, "specificity")
+    average_precision_vals = _subject_metric_values(result.per_subject_metrics, "average_precision")
     auc_ci_low, auc_ci_high = (
         _bootstrap_mean_ci(auc_vals, rng=ci_rng, n_boot=n_boot)
         if auc_inference_valid
@@ -1527,6 +1537,15 @@ def run_classification_ml(
     )
     bal_ci_low, bal_ci_high = _bootstrap_mean_ci(bal_vals, rng=ci_rng, n_boot=n_boot)
     acc_ci_low, acc_ci_high = _bootstrap_mean_ci(acc_vals, rng=ci_rng, n_boot=n_boot)
+    precision_ci_low, precision_ci_high = _bootstrap_mean_ci(precision_vals, rng=ci_rng, n_boot=n_boot)
+    recall_ci_low, recall_ci_high = _bootstrap_mean_ci(recall_vals, rng=ci_rng, n_boot=n_boot)
+    f1_ci_low, f1_ci_high = _bootstrap_mean_ci(f1_vals, rng=ci_rng, n_boot=n_boot)
+    specificity_ci_low, specificity_ci_high = _bootstrap_mean_ci(
+        specificity_vals, rng=ci_rng, n_boot=n_boot
+    )
+    average_precision_ci_low, average_precision_ci_high = _bootstrap_mean_ci(
+        average_precision_vals, rng=ci_rng, n_boot=n_boot
+    )
 
     # Compute calibration metrics (Brier score, reliability) when probabilities are available
     calibration_data = {}
@@ -1601,11 +1620,29 @@ def run_classification_ml(
         "accuracy": (
             float(accuracy_subject_mean)
             if np.isfinite(accuracy_subject_mean)
-            else float(result.accuracy)
+            else np.nan
         ),
-        "precision": result.precision,
-        "recall": result.recall,
-        "f1": result.f1,
+        "average_precision": (
+            float(average_precision_subject_mean)
+            if np.isfinite(average_precision_subject_mean)
+            else np.nan
+        ),
+        "precision": (
+            float(precision_subject_mean)
+            if np.isfinite(precision_subject_mean)
+            else np.nan
+        ),
+        "recall": (
+            float(recall_subject_mean)
+            if np.isfinite(recall_subject_mean)
+            else np.nan
+        ),
+        "f1": float(f1_subject_mean) if np.isfinite(f1_subject_mean) else np.nan,
+        "specificity": (
+            float(specificity_subject_mean)
+            if np.isfinite(specificity_subject_mean)
+            else np.nan
+        ),
         "brier_score": brier,
         "expected_calibration_error": ece,
         "model": model_type,
@@ -1633,6 +1670,29 @@ def run_classification_ml(
             "accuracy_mean": float(accuracy_subject_mean) if np.isfinite(accuracy_subject_mean) else np.nan,
             "accuracy_ci_low": acc_ci_low,
             "accuracy_ci_high": acc_ci_high,
+            "average_precision_mean": (
+                float(average_precision_subject_mean)
+                if np.isfinite(average_precision_subject_mean)
+                else np.nan
+            ),
+            "average_precision_ci_low": average_precision_ci_low,
+            "average_precision_ci_high": average_precision_ci_high,
+            "precision_mean": float(precision_subject_mean) if np.isfinite(precision_subject_mean) else np.nan,
+            "precision_ci_low": precision_ci_low,
+            "precision_ci_high": precision_ci_high,
+            "recall_mean": float(recall_subject_mean) if np.isfinite(recall_subject_mean) else np.nan,
+            "recall_ci_low": recall_ci_low,
+            "recall_ci_high": recall_ci_high,
+            "f1_mean": float(f1_subject_mean) if np.isfinite(f1_subject_mean) else np.nan,
+            "f1_ci_low": f1_ci_low,
+            "f1_ci_high": f1_ci_high,
+            "specificity_mean": (
+                float(specificity_subject_mean)
+                if np.isfinite(specificity_subject_mean)
+                else np.nan
+            ),
+            "specificity_ci_low": specificity_ci_low,
+            "specificity_ci_high": specificity_ci_high,
             "n_subjects_with_auc": int(n_subjects_with_auc),
             "n_subjects_without_auc": int(max(0, n_subjects_total - n_subjects_with_auc)),
             "min_subjects_with_auc_for_inference": int(min_subjects_auc),
@@ -1644,6 +1704,13 @@ def run_classification_ml(
             if np.isfinite(result.balanced_accuracy)
             else np.nan,
             "accuracy": float(result.accuracy) if np.isfinite(result.accuracy) else np.nan,
+            "average_precision": float(result.average_precision)
+            if np.isfinite(result.average_precision)
+            else np.nan,
+            "precision": float(result.precision) if np.isfinite(result.precision) else np.nan,
+            "recall": float(result.recall) if np.isfinite(result.recall) else np.nan,
+            "f1": float(result.f1) if np.isfinite(result.f1) else np.nan,
+            "specificity": float(result.specificity) if np.isfinite(result.specificity) else np.nan,
         },
     }
     if not auc_inference_valid:
@@ -1702,7 +1769,7 @@ def run_classification_ml(
         "Classification results: AUC=%.3f, balanced_acc=%.3f, F1=%.3f, Brier=%.3f%s",
         float(auc_for_inference) if np.isfinite(auc_for_inference) else result.auc,
         float(balanced_accuracy_subject_mean) if np.isfinite(balanced_accuracy_subject_mean) else result.balanced_accuracy,
-        result.f1, brier, p_info,
+        float(f1_subject_mean) if np.isfinite(f1_subject_mean) else result.f1, brier, p_info,
     )
     _maybe_generate_mode_plots(mode="classify", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
@@ -2059,6 +2126,11 @@ def run_within_subject_classification_ml(
     auc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
     bal_acc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "balanced_accuracy")
     acc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "accuracy")
+    precision_subj_mean = _subject_mean_metric(result.per_subject_metrics, "precision")
+    recall_subj_mean = _subject_mean_metric(result.per_subject_metrics, "recall")
+    f1_subj_mean = _subject_mean_metric(result.per_subject_metrics, "f1")
+    specificity_subj_mean = _subject_mean_metric(result.per_subject_metrics, "specificity")
+    avg_precision_subj_mean = _subject_mean_metric(result.per_subject_metrics, "average_precision")
     min_subjects_auc = int(
         get_config_value(config, "machine_learning.classification.min_subjects_with_auc_for_inference", 2)
     )
@@ -2078,6 +2150,11 @@ def run_within_subject_classification_ml(
     auc_vals = _subject_metric_values(result.per_subject_metrics, "auc")
     bal_vals = _subject_metric_values(result.per_subject_metrics, "balanced_accuracy")
     acc_vals = _subject_metric_values(result.per_subject_metrics, "accuracy")
+    precision_vals = _subject_metric_values(result.per_subject_metrics, "precision")
+    recall_vals = _subject_metric_values(result.per_subject_metrics, "recall")
+    f1_vals = _subject_metric_values(result.per_subject_metrics, "f1")
+    specificity_vals = _subject_metric_values(result.per_subject_metrics, "specificity")
+    avg_precision_vals = _subject_metric_values(result.per_subject_metrics, "average_precision")
     auc_ci_low, auc_ci_high = (
         _bootstrap_mean_ci(auc_vals, rng=ci_rng, n_boot=n_boot)
         if auc_inference_valid
@@ -2085,6 +2162,15 @@ def run_within_subject_classification_ml(
     )
     bal_ci_low, bal_ci_high = _bootstrap_mean_ci(bal_vals, rng=ci_rng, n_boot=n_boot)
     acc_ci_low, acc_ci_high = _bootstrap_mean_ci(acc_vals, rng=ci_rng, n_boot=n_boot)
+    precision_ci_low, precision_ci_high = _bootstrap_mean_ci(precision_vals, rng=ci_rng, n_boot=n_boot)
+    recall_ci_low, recall_ci_high = _bootstrap_mean_ci(recall_vals, rng=ci_rng, n_boot=n_boot)
+    f1_ci_low, f1_ci_high = _bootstrap_mean_ci(f1_vals, rng=ci_rng, n_boot=n_boot)
+    specificity_ci_low, specificity_ci_high = _bootstrap_mean_ci(
+        specificity_vals, rng=ci_rng, n_boot=n_boot
+    )
+    avg_precision_ci_low, avg_precision_ci_high = _bootstrap_mean_ci(
+        avg_precision_vals, rng=ci_rng, n_boot=n_boot
+    )
 
     metrics: Dict[str, Any] = {
         "cv_scope": "subject",
@@ -2114,13 +2200,17 @@ def run_within_subject_classification_ml(
         "balanced_accuracy": (
             float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else np.nan
         ),
-        "accuracy": float(acc_subj_mean) if np.isfinite(acc_subj_mean) else float(result.accuracy),
+        "accuracy": float(acc_subj_mean) if np.isfinite(acc_subj_mean) else np.nan,
         "auc": float(auc_for_inference) if np.isfinite(auc_for_inference) else np.nan,
-        "average_precision": result.average_precision,
-        "f1": result.f1,
-        "precision": result.precision,
-        "recall": result.recall,
-        "specificity": result.specificity,
+        "average_precision": (
+            float(avg_precision_subj_mean) if np.isfinite(avg_precision_subj_mean) else np.nan
+        ),
+        "f1": float(f1_subj_mean) if np.isfinite(f1_subj_mean) else np.nan,
+        "precision": float(precision_subj_mean) if np.isfinite(precision_subj_mean) else np.nan,
+        "recall": float(recall_subj_mean) if np.isfinite(recall_subj_mean) else np.nan,
+        "specificity": (
+            float(specificity_subj_mean) if np.isfinite(specificity_subj_mean) else np.nan
+        ),
         "subject_level": {
             "auc_mean": float(auc_subj_mean) if np.isfinite(auc_subj_mean) else np.nan,
             "auc_ci_low": auc_ci_low,
@@ -2133,6 +2223,25 @@ def run_within_subject_classification_ml(
             "accuracy_mean": float(acc_subj_mean) if np.isfinite(acc_subj_mean) else np.nan,
             "accuracy_ci_low": acc_ci_low,
             "accuracy_ci_high": acc_ci_high,
+            "average_precision_mean": (
+                float(avg_precision_subj_mean) if np.isfinite(avg_precision_subj_mean) else np.nan
+            ),
+            "average_precision_ci_low": avg_precision_ci_low,
+            "average_precision_ci_high": avg_precision_ci_high,
+            "precision_mean": float(precision_subj_mean) if np.isfinite(precision_subj_mean) else np.nan,
+            "precision_ci_low": precision_ci_low,
+            "precision_ci_high": precision_ci_high,
+            "recall_mean": float(recall_subj_mean) if np.isfinite(recall_subj_mean) else np.nan,
+            "recall_ci_low": recall_ci_low,
+            "recall_ci_high": recall_ci_high,
+            "f1_mean": float(f1_subj_mean) if np.isfinite(f1_subj_mean) else np.nan,
+            "f1_ci_low": f1_ci_low,
+            "f1_ci_high": f1_ci_high,
+            "specificity_mean": (
+                float(specificity_subj_mean) if np.isfinite(specificity_subj_mean) else np.nan
+            ),
+            "specificity_ci_low": specificity_ci_low,
+            "specificity_ci_high": specificity_ci_high,
             "n_subjects_with_auc": int(n_subjects_with_auc),
             "n_subjects_without_auc": int(max(0, n_subjects_total - n_subjects_with_auc)),
             "min_subjects_with_auc_for_inference": int(min_subjects_auc),
@@ -2144,6 +2253,13 @@ def run_within_subject_classification_ml(
             if np.isfinite(result.balanced_accuracy)
             else np.nan,
             "accuracy": float(result.accuracy) if np.isfinite(result.accuracy) else np.nan,
+            "average_precision": float(result.average_precision)
+            if np.isfinite(result.average_precision)
+            else np.nan,
+            "precision": float(result.precision) if np.isfinite(result.precision) else np.nan,
+            "recall": float(result.recall) if np.isfinite(result.recall) else np.nan,
+            "f1": float(result.f1) if np.isfinite(result.f1) else np.nan,
+            "specificity": float(result.specificity) if np.isfinite(result.specificity) else np.nan,
         },
         "class_balance": float(np.mean(y_true_all)) if len(y_true_all) else np.nan,
         "n_perm": int(n_perm) if n_perm else 0,
@@ -2272,7 +2388,7 @@ def run_within_subject_classification_ml(
         "Within-subject classification results: AUC=%.3f, balanced_acc=%.3f, F1=%.3f%s",
         float(auc_for_inference) if np.isfinite(auc_for_inference) else result.auc,
         float(bal_acc_subj_mean) if np.isfinite(bal_acc_subj_mean) else result.balanced_accuracy,
-        result.f1, p_info,
+        float(f1_subj_mean) if np.isfinite(f1_subj_mean) else result.f1, p_info,
     )
     _maybe_generate_mode_plots(mode="classify", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)

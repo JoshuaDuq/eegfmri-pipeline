@@ -39,10 +39,21 @@ def _split_train_val_indices(
     seed: int,
     val_fraction: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    def _disjoint_random_split(n_samples: int) -> Tuple[np.ndarray, np.ndarray]:
+        if n_samples <= 1:
+            idx = np.arange(n_samples, dtype=int)
+            return idx, np.asarray([], dtype=int)
+        n_val = int(round(float(val_fraction) * n_samples))
+        n_val = max(1, min(n_samples - 1, n_val))
+        rng = np.random.default_rng(int(seed))
+        perm = rng.permutation(n_samples)
+        val_idx_local = np.asarray(perm[:n_val], dtype=int)
+        train_idx_local = np.asarray(perm[n_val:], dtype=int)
+        return train_idx_local, val_idx_local
+
     n = len(y_train)
     if n < 6:
-        idx = np.arange(n)
-        return idx, idx
+        return _disjoint_random_split(n)
 
     unique_groups = np.unique(groups_train.astype(str))
     if len(unique_groups) >= 2:
@@ -68,11 +79,10 @@ def _split_train_val_indices(
                 return np.flatnonzero(train_mask).astype(int), np.flatnonzero(val_mask).astype(int)
         except Exception as exc:
             logger.warning(
-                "Deterministic group split failed for CNN validation; using full dataset for both train/val: %s",
+                "Deterministic group split failed for CNN validation; using disjoint random split: %s",
                 exc,
             )
-            idx = np.arange(n)
-            return idx, idx
+            return _disjoint_random_split(n)
 
     idx_all = np.arange(n)
     stratify = y_train if len(np.unique(y_train)) > 1 else None
@@ -86,10 +96,10 @@ def _split_train_val_indices(
         )
     except Exception as exc:
         logger.warning(
-            "train_test_split failed for CNN validation split; using full dataset for both train/val: %s",
+            "train_test_split failed for CNN validation split; using disjoint random split: %s",
             exc,
         )
-        train_idx, val_idx = idx_all, idx_all
+        train_idx, val_idx = _disjoint_random_split(n)
     return np.asarray(train_idx, dtype=int), np.asarray(val_idx, dtype=int)
 
 
@@ -144,6 +154,7 @@ def fit_predict_cnn_binary_classifier(
     y_fit = y_train[train_idx]
     X_val = X_train[val_idx]
     y_val = y_train[val_idx]
+    use_validation = len(val_idx) > 0
 
     X_fit_n, X_val_n = _channelwise_standardize(X_fit, X_val)
     _, X_test_n = _channelwise_standardize(X_fit, X_test)
@@ -238,12 +249,14 @@ def fit_predict_cnn_binary_classifier(
         shuffle=True,
         drop_last=False,
     )
-    val_loader = DataLoader(
-        TensorDataset(X_val_t, y_val_t),
-        batch_size=max(4, min(batch_size, len(X_val_t))),
-        shuffle=False,
-        drop_last=False,
-    )
+    val_loader = None
+    if use_validation:
+        val_loader = DataLoader(
+            TensorDataset(X_val_t, y_val_t),
+            batch_size=max(4, min(batch_size, len(X_val_t))),
+            shuffle=False,
+            drop_last=False,
+        )
 
     best_state = None
     best_val_loss = np.inf
@@ -261,24 +274,25 @@ def fit_predict_cnn_binary_classifier(
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             optimizer.step()
 
-        model.eval()
-        with torch.no_grad():
-            val_losses = []
-            for xb, yb in val_loader:
-                xb = xb.to(device)
-                yb = yb.to(device)
-                logits = model(xb)
-                val_losses.append(float(criterion(logits, yb).detach().cpu()))
-            val_loss = float(np.mean(val_losses)) if val_losses else np.inf
+        if use_validation and val_loader is not None:
+            model.eval()
+            with torch.no_grad():
+                val_losses = []
+                for xb, yb in val_loader:
+                    xb = xb.to(device)
+                    yb = yb.to(device)
+                    logits = model(xb)
+                    val_losses.append(float(criterion(logits, yb).detach().cpu()))
+                val_loss = float(np.mean(val_losses)) if val_losses else np.inf
 
-        if val_loss < (best_val_loss - 1e-6):
-            best_val_loss = val_loss
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-            no_improve = 0
-        else:
-            no_improve += 1
-            if no_improve >= patience:
-                break
+            if val_loss < (best_val_loss - 1e-6):
+                best_val_loss = val_loss
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                no_improve = 0
+            else:
+                no_improve += 1
+                if no_improve >= patience:
+                    break
 
     if best_state is not None:
         model.load_state_dict(best_state)

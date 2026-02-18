@@ -381,9 +381,14 @@ class ClassificationResult:
                 y_t, y_p = self.y_true[mask], self.y_pred[mask]
                 rec: Dict[str, float] = {
                     "accuracy": float(accuracy_score(y_t, y_p)),
+                    "precision": float(precision_score(y_t, y_p, zero_division=0)),
+                    "recall": float(recall_score(y_t, y_p, zero_division=0)),
+                    "f1": float(f1_score(y_t, y_p, zero_division=0)),
                     "n_trials": int(mask.sum()),
                 }
                 cm_subj = confusion_matrix(y_t, y_p, labels=[0, 1]).astype(float)
+                tn, fp, fn, tp = cm_subj.ravel()
+                rec["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else np.nan
                 support = cm_subj.sum(axis=1)
                 if np.sum(support > 0) < 2:
                     rec["balanced_accuracy"] = np.nan

@@ -130,7 +130,7 @@ def compute_prediction_intervals(
     rng = np.random.default_rng(seed)
     
     if method == "split":
-        return _conformal_split(model, X_train, y_train, X_test, alpha, rng)
+        return _conformal_split(model, X_train, y_train, X_test, alpha, rng, groups=groups)
     elif method == "cv_plus":
         return _conformal_cv_plus(model, X_train, y_train, X_test, alpha, cv_splits, seed, groups)
     elif method == "cqr":
@@ -196,6 +196,7 @@ def _conformal_split(
     X_test: np.ndarray,
     alpha: float,
     rng: np.random.Generator,
+    groups: Optional[np.ndarray] = None,
 ) -> PredictionIntervalResult:
     """
     Split conformal prediction.
@@ -205,12 +206,53 @@ def _conformal_split(
     n = len(X_train)
     if n < 5:
         raise ValueError("Split conformal requires at least 5 training samples.")
-    # Use ~20% for calibration (minimum 2), while preserving at least 2 proper-train samples.
-    n_cal = min(max(int(0.2 * n), 2), n - 2)
-    
-    indices = rng.permutation(n)
-    cal_idx = indices[:n_cal]
-    train_idx = indices[n_cal:]
+    groups_arr = None if groups is None else np.asarray(groups)
+    if groups_arr is not None and len(groups_arr) != n:
+        raise ValueError(f"groups length mismatch for split conformal: {len(groups_arr)} vs {n}")
+
+    if groups_arr is None:
+        # Use ~20% for calibration (minimum 2), while preserving at least 2 proper-train samples.
+        n_cal = min(max(int(0.2 * n), 2), n - 2)
+        indices = rng.permutation(n)
+        cal_idx = indices[:n_cal]
+        train_idx = indices[n_cal:]
+    else:
+        # Group-aware split conformal to preserve dependence structure.
+        groups_obj = np.asarray(groups_arr, dtype=object)
+        unique_groups = np.unique(groups_obj)
+        if len(unique_groups) < 2:
+            raise ValueError(
+                "Group-aware split conformal requires at least 2 unique groups "
+                f"(got {len(unique_groups)})."
+            )
+
+        n_cal_groups = max(1, int(round(0.2 * len(unique_groups))))
+        n_cal_groups = min(n_cal_groups, len(unique_groups) - 1)
+
+        try:
+            from sklearn.model_selection import GroupShuffleSplit
+
+            test_size = float(n_cal_groups / len(unique_groups))
+            split_seed = int(rng.integers(0, 2**31 - 1))
+            splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=split_seed)
+            train_idx, cal_idx = next(
+                splitter.split(np.zeros((n, 1), dtype=float), y_train, groups=groups_obj)
+            )
+        except Exception:
+            perm_groups = np.asarray(unique_groups, dtype=object)[
+                rng.permutation(len(unique_groups))
+            ]
+            cal_groups = set(str(g) for g in perm_groups[:n_cal_groups].tolist())
+            cal_mask = np.array([str(g) in cal_groups for g in groups_obj], dtype=bool)
+            train_mask = ~cal_mask
+            train_idx = np.flatnonzero(train_mask).astype(int)
+            cal_idx = np.flatnonzero(cal_mask).astype(int)
+
+        if len(train_idx) < 2 or len(cal_idx) < 2:
+            raise ValueError(
+                "Group-aware split conformal could not form valid train/calibration splits "
+                f"(train={len(train_idx)}, cal={len(cal_idx)})."
+            )
     
     X_proper = X_train[train_idx]
     y_proper = y_train[train_idx]
@@ -279,7 +321,7 @@ def _conformal_cv_plus(
     if not lower_chunks or not upper_chunks:
         # Safety fallback when fold-wise calibration is impossible.
         rng = np.random.default_rng(seed)
-        return _conformal_split(model, X_train, y_train, X_test, alpha, rng)
+        return _conformal_split(model, X_train, y_train, X_test, alpha, rng, groups=groups)
 
     lower_candidates = np.concatenate(lower_chunks, axis=1)
     upper_candidates = np.concatenate(upper_chunks, axis=1)

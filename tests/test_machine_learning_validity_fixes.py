@@ -38,6 +38,23 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertTrue(val_groups)
         self.assertTrue(train_groups.isdisjoint(val_groups))
 
+    def test_cnn_validation_split_is_disjoint_for_small_sample_regimes(self):
+        from eeg_pipeline.analysis.machine_learning import cnn
+
+        groups = np.array(["sub-0001", "sub-0001", "sub-0001", "sub-0001"], dtype=object)
+        y = np.array([0, 1, 0, 1], dtype=int)
+
+        train_idx, val_idx = cnn._split_train_val_indices(
+            groups_train=groups,
+            y_train=y,
+            seed=13,
+            val_fraction=0.25,
+        )
+
+        self.assertGreater(len(train_idx), 0)
+        self.assertGreater(len(val_idx), 0)
+        self.assertEqual(len(np.intersect1d(train_idx, val_idx)), 0)
+
     def test_decode_pain_binary_uses_stratified_group_kfold_for_grouped_numeric_cv(self):
         from eeg_pipeline.analysis.machine_learning import classification as clf
 
@@ -209,6 +226,41 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertAlmostEqual(float(result.y_pred[0]), 5.0, places=8)
         self.assertAlmostEqual(float(result.lower[0]), -10.0, places=8)
         self.assertAlmostEqual(float(result.upper[0]), 20.0, places=8)
+
+    def test_cv_plus_grouped_fallback_requires_multiple_groups(self):
+        from sklearn.base import BaseEstimator, RegressorMixin
+
+        from eeg_pipeline.analysis.machine_learning.uncertainty import _conformal_cv_plus
+
+        class _MeanRegressor(BaseEstimator, RegressorMixin):
+            def fit(self, X, y):
+                _ = X
+                self.mean_ = float(np.mean(y))
+                return self
+
+            def predict(self, X):
+                return np.full(len(X), self.mean_, dtype=float)
+
+        X_train = np.arange(6, dtype=float).reshape(-1, 1)
+        y_train = np.array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0], dtype=float)
+        X_test = np.array([[10.0]], dtype=float)
+        groups = np.array(["sub-0001"] * len(y_train), dtype=object)
+
+        with patch(
+            "eeg_pipeline.analysis.machine_learning.uncertainty._get_cv_splitter",
+            return_value=iter([]),
+        ):
+            with self.assertRaisesRegex(ValueError, "at least 2 unique groups"):
+                _conformal_cv_plus(
+                    model=_MeanRegressor(),
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_test=X_test,
+                    alpha=0.1,
+                    cv_splits=3,
+                    seed=42,
+                    groups=groups,
+                )
 
     def test_classification_result_handles_single_class_confusion_matrix(self):
         from eeg_pipeline.analysis.machine_learning.classification import ClassificationResult
@@ -801,6 +853,72 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 metrics = json.load(f)
         self.assertTrue(np.isnan(float(metrics["balanced_accuracy"])))
         self.assertTrue(np.isnan(float(metrics["subject_level"]["balanced_accuracy_mean"])))
+
+    def test_classification_primary_precision_recall_f1_are_subject_level(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+        from eeg_pipeline.analysis.machine_learning.classification import ClassificationResult
+
+        X = np.array(
+            [
+                [0.1, 1.0],
+                [0.2, 1.1],
+                [0.3, 1.2],
+                [0.4, 1.3],
+            ],
+            dtype=float,
+        )
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+                "block": [0, 1, 0, 1],
+            }
+        )
+        result = ClassificationResult(
+            y_true=y,
+            y_pred=np.array([0, 1, 0, 0], dtype=int),
+            y_prob=np.array([0.1, 0.9, 0.2, 0.4], dtype=float),
+            groups=groups,
+            failed_fold_count=0,
+            n_folds_total=2,
+        )
+        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+                return_value=(result, pd.DataFrame()),
+            ), patch.object(
+                orch, "export_subject_selection_report", return_value={}
+            ), patch.object(
+                orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            ):
+                out_dir = orch.run_classification_ml(
+                    subjects=["0001", "0002"],
+                    task="thermalactive",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=0,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    classification_model="svm",
+                )
+            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+                metrics = json.load(f)
+
+        self.assertAlmostEqual(float(metrics["precision"]), 0.5, places=6)
+        self.assertAlmostEqual(float(metrics["recall"]), 0.5, places=6)
+        self.assertAlmostEqual(float(metrics["f1"]), 0.5, places=6)
+        self.assertAlmostEqual(float(metrics["pooled_trials"]["precision"]), 1.0, places=6)
+        self.assertAlmostEqual(float(metrics["pooled_trials"]["recall"]), 0.5, places=6)
+        self.assertAlmostEqual(float(metrics["pooled_trials"]["f1"]), 2.0 / 3.0, places=6)
 
     def test_group_classification_exports_fold_and_trial_provenance_files(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
