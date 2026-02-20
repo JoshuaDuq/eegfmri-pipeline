@@ -169,6 +169,12 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetAvailableColumns()) + 1
 	case expandedStabilityGroupColumn:
 		return 3
+	case expandedGroupLevelTarget:
+		targets := m.availableGroupLevelTargets()
+		if len(targets) == 0 {
+			return 2
+		}
+		return len(targets) + 1
 	}
 	return 0
 }
@@ -387,8 +393,36 @@ func (m Model) getExpandedListItems() []string {
 		return append(items, cols...)
 	case expandedStabilityGroupColumn:
 		return []string{"(auto)", "run", "block"}
+	case expandedGroupLevelTarget:
+		targets := m.availableGroupLevelTargets()
+		if len(targets) == 0 {
+			return []string{"(default)", "(type manually)"}
+		}
+		return append([]string{"(default)"}, targets...)
 	}
 	return nil
+}
+
+func (m Model) availableGroupLevelTargets() []string {
+	cols := m.GetAvailableColumns()
+	if len(cols) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(cols))
+	seen := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		val := strings.TrimSpace(c)
+		key := strings.ToLower(val)
+		if val == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, val)
+	}
+	return out
 }
 
 // isColumnValueSelected checks if a value is selected for the current column context
@@ -1008,6 +1042,21 @@ func (m *Model) handleExpandedListToggle() {
 		}
 		m.expandedOption = expandedNone
 		m.subCursor = 0
+	case expandedGroupLevelTarget:
+		switch selectedItem {
+		case "(default)":
+			m.groupLevelTarget = ""
+		case "(type manually)":
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldGroupLevelTarget)
+			m.useDefaultAdvanced = false
+			return
+		default:
+			m.groupLevelTarget = selectedItem
+		}
+		m.expandedOption = expandedNone
+		m.subCursor = 0
 	}
 
 	m.useDefaultAdvanced = false
@@ -1100,6 +1149,8 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optPainResidualCrossfitGroupColumn
 	case expandedStabilityGroupColumn:
 		return opt == optStabilityGroupColumn
+	case expandedGroupLevelTarget:
+		return opt == optGroupLevelTarget
 	}
 	return false
 }
@@ -1291,6 +1342,14 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			return m.stabilityGroupColumn == 2
 		}
 		return false
+	case expandedGroupLevelTarget:
+		if item == "(default)" {
+			return strings.TrimSpace(m.groupLevelTarget) == ""
+		}
+		if item == "(type manually)" {
+			return false
+		}
+		return strings.EqualFold(strings.TrimSpace(m.groupLevelTarget), strings.TrimSpace(item))
 	}
 	return false
 }

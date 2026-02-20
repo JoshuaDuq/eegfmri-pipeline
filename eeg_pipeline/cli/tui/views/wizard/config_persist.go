@@ -1,6 +1,9 @@
 package wizard
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // ExportConfig exports all advanced configuration options to a map for persistence.
 // This includes all pipeline-specific settings (features, behavior, preprocessing, fMRI, plotting, ML).
@@ -1713,7 +1716,18 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.correlationsPrimaryUnit = getInt("correlationsPrimaryUnit", m.correlationsPrimaryUnit)
 	m.correlationsPermutationPrimary = getBool("correlationsPermutationPrimary", m.correlationsPermutationPrimary)
 	m.groupLevelBlockPermutation = getBool("groupLevelBlockPermutation", m.groupLevelBlockPermutation)
-	m.groupLevelTarget = getInt("groupLevelTarget", m.groupLevelTarget)
+	m.groupLevelTarget = getString("groupLevelTarget", m.groupLevelTarget)
+	// Backward compatibility for older saved configs using integer enum.
+	if strings.TrimSpace(m.groupLevelTarget) == "" {
+		switch getInt("groupLevelTarget", -1) {
+		case 0:
+			m.groupLevelTarget = "rating"
+		case 1:
+			m.groupLevelTarget = "pain_residual"
+		case 2:
+			m.groupLevelTarget = "temperature"
+		}
+	}
 	m.groupLevelControlTemperature = getBool("groupLevelControlTemperature", m.groupLevelControlTemperature)
 	m.groupLevelControlTrialOrder = getBool("groupLevelControlTrialOrder", m.groupLevelControlTrialOrder)
 	m.groupLevelControlRunEffects = getBool("groupLevelControlRunEffects", m.groupLevelControlRunEffects)

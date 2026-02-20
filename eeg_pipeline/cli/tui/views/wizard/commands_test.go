@@ -679,7 +679,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 	}
 
 	m.groupLevelBlockPermutation = false
-	m.groupLevelTarget = 1 // pain_residual
+	m.groupLevelTarget = "pain_residual"
 	m.groupLevelControlTemperature = false
 	m.groupLevelControlTrialOrder = false
 	m.groupLevelControlRunEffects = false
@@ -825,6 +825,20 @@ func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing
 	}
 	if !containsSubsequence(args, []string{"--moderation-features", "aperiodic", "complexity"}) {
 		t.Fatalf("expected --moderation-features aperiodic complexity in args, got: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_GroupLevelTargetUsesAvailableTargetList(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		m.computationSelected[i] = comp.Key == "multilevel_correlations"
+	}
+	m.discoveredColumns = []string{"temperature", "rating"}
+	m.groupLevelTarget = "temperature"
+
+	args := m.buildBehaviorAdvancedArgs()
+	if !containsSubsequence(args, []string{"--group-level-target", "temperature"}) {
+		t.Fatalf("expected --group-level-target temperature in args, got: %#v", args)
 	}
 }
 

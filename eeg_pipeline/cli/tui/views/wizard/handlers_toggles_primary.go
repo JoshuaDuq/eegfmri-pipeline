@@ -1979,7 +1979,12 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.groupLevelBlockPermutation = !m.groupLevelBlockPermutation
 		m.useDefaultAdvanced = false
 	case optGroupLevelTarget:
-		m.groupLevelTarget = (m.groupLevelTarget + 1) % 3
+		if len(m.availableGroupLevelTargets()) > 0 {
+			m.expandedOption = expandedGroupLevelTarget
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldGroupLevelTarget)
+		}
 		m.useDefaultAdvanced = false
 	case optGroupLevelControlTemperature:
 		m.groupLevelControlTemperature = !m.groupLevelControlTemperature

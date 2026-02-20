@@ -479,9 +479,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			"--group-level-block-permutation",
 			"--no-group-level-block-permutation",
 		)
-		targets := []string{"rating", "pain_residual", "temperature"}
-		if m.groupLevelTarget >= 0 && m.groupLevelTarget < len(targets) && m.groupLevelTarget != 0 {
-			args = append(args, "--group-level-target", targets[m.groupLevelTarget])
+		if col := strings.TrimSpace(m.groupLevelTarget); col != "" {
+			args = append(args, "--group-level-target", col)
 		}
 		appendBoolPair(
 			m.groupLevelControlTemperature,

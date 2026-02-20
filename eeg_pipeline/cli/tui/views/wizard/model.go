@@ -621,6 +621,7 @@ const (
 	textFieldClusterConditionColumn
 	textFieldClusterConditionValues
 	textFieldCorrelationsTargetColumn
+	textFieldGroupLevelTarget
 	textFieldCorrelationsTypes
 	textFieldCorrelationsFeatures
 	textFieldPainSensitivityFeatures
@@ -1953,7 +1954,7 @@ type Model struct {
 	correlationsTargetColumn        string // Custom target column from events (dropdown)
 	correlationsFeaturesSpec        string // Comma-separated feature filters for correlations
 	groupLevelBlockPermutation      bool   // Use block-restricted permutations when block/run is available
-	groupLevelTarget                int    // 0=rating, 1=pain_residual, 2=temperature
+	groupLevelTarget                string // target column for multilevel correlations
 	groupLevelControlTemperature    bool
 	groupLevelControlTrialOrder     bool
 	groupLevelControlRunEffects     bool
@@ -2880,7 +2881,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		correlationsPermutationPrimary:  false,
 		correlationsFeaturesSpec:        "",
 		groupLevelBlockPermutation:      true,
-		groupLevelTarget:                0,
+		groupLevelTarget:                "",
 		groupLevelControlTemperature:    true,
 		groupLevelControlTrialOrder:     true,
 		groupLevelControlRunEffects:     false,

@@ -1022,12 +1022,18 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if !m.isComputationSelected("multilevel_correlations") {
 				return "Group Target", "N/A", "enable Group Multilevel Correlations"
 			}
-			targets := []string{"rating", "pain_residual", "temperature"}
-			v := targets[0]
-			if m.groupLevelTarget >= 0 && m.groupLevelTarget < len(targets) {
-				v = targets[m.groupLevelTarget]
+			v := strings.TrimSpace(m.groupLevelTarget)
+			if v == "" {
+				v = "(default)"
 			}
-			return "Group Target", v, "Space to cycle"
+			if m.editingText && m.editingTextField == textFieldGroupLevelTarget {
+				v = textDisplay
+			}
+			hint := "Space to select"
+			if len(m.availableGroupLevelTargets()) == 0 {
+				hint = "type column name (no discovered targets)"
+			}
+			return "Group Target", v, hint
 		case optGroupLevelControlTemperature:
 			if !m.isComputationSelected("multilevel_correlations") {
 				return "Ctrl Temperature", "N/A", "enable Group Multilevel Correlations"

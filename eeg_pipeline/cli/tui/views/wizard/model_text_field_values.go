@@ -136,6 +136,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.clusterConditionValues
 	case textFieldCorrelationsTargetColumn:
 		return m.correlationsTargetColumn
+	case textFieldGroupLevelTarget:
+		return m.groupLevelTarget
 	case textFieldCorrelationsTypes:
 		return m.correlationsTypesSpec
 	case textFieldCorrelationsFeatures:
@@ -517,6 +519,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.clusterConditionValues = strings.TrimSpace(value)
 	case textFieldCorrelationsTargetColumn:
 		m.correlationsTargetColumn = strings.TrimSpace(value)
+	case textFieldGroupLevelTarget:
+		m.groupLevelTarget = strings.TrimSpace(value)
 	case textFieldCorrelationsTypes:
 		m.correlationsTypesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldCorrelationsFeatures:

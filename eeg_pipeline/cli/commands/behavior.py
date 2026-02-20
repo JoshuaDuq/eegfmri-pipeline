@@ -369,7 +369,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     correlations_group.add_argument(
         "--group-level-target",
-        choices=["rating", "temperature", "pain_residual"],
+        type=str,
         default=None,
         help="Target column for multilevel group correlations",
     )
