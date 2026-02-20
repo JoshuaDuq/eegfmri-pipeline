@@ -1,6 +1,10 @@
 package wizard
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/eeg-pipeline/tui/types"
+)
 
 func hasOption(opts []optionType, want optionType) bool {
 	for _, opt := range opts {
@@ -189,5 +193,75 @@ func TestGetFeaturesOptions_ExecutionOptionsAreCategoryScoped(t *testing.T) {
 	}
 	if hasOption(opts, optFeatNJobsBands) || hasOption(opts, optFeatNJobsConnectivity) || hasOption(opts, optFeatNJobsAperiodic) || hasOption(opts, optFeatNJobsComplexity) {
 		t.Fatalf("did not expect unrelated execution n_jobs options for itpc selection")
+	}
+}
+
+func TestGetBehaviorOptions_HidesGlobalStatsAndIOForNonStatOnlySelections(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "report"
+	}
+
+	opts := m.getBehaviorOptions()
+
+	if hasOption(opts, optBehaviorStatsTempControl) {
+		t.Fatalf("did not expect behavior stats options for report-only selection")
+	}
+	if hasOption(opts, optGlobalNBootstrap) {
+		t.Fatalf("did not expect global stats options for report-only selection")
+	}
+	if hasOption(opts, optValidationMinEpochs) {
+		t.Fatalf("did not expect validation options for report-only selection")
+	}
+	if hasOption(opts, optIOTemperatureRange) {
+		t.Fatalf("did not expect system/io options for report-only selection")
+	}
+}
+
+func TestGetBehaviorOptions_ShowsGlobalStatsAndIOForStatSelections(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "correlations"
+	}
+
+	opts := m.getBehaviorOptions()
+
+	if !hasOption(opts, optBehaviorStatsTempControl) {
+		t.Fatalf("expected behavior stats options for correlations selection")
+	}
+	if !hasOption(opts, optGlobalNBootstrap) {
+		t.Fatalf("expected global stats options for correlations selection")
+	}
+	if !hasOption(opts, optValidationMinEpochs) {
+		t.Fatalf("expected validation options for correlations selection")
+	}
+	if !hasOption(opts, optIOTemperatureRange) {
+		t.Fatalf("expected system/io options for correlations selection")
+	}
+}
+
+func TestGetBehaviorOptions_HidesGlobalStatsAndIOForTrialTableOnly(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "trial_table"
+	}
+
+	opts := m.getBehaviorOptions()
+
+	if hasOption(opts, optBehaviorStatsTempControl) || hasOption(opts, optGlobalNBootstrap) || hasOption(opts, optIOTemperatureRange) {
+		t.Fatalf("did not expect stats/global/io options for trial_table-only selection")
+	}
+}
+
+func TestGetBehaviorOptions_HidesGlobalStatsAndIOForPainResidualOnly(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "pain_residual"
+	}
+
+	opts := m.getBehaviorOptions()
+
+	if hasOption(opts, optBehaviorStatsTempControl) || hasOption(opts, optGlobalNBootstrap) || hasOption(opts, optIOTemperatureRange) {
+		t.Fatalf("did not expect stats/global/io options for pain_residual-only selection")
 	}
 }

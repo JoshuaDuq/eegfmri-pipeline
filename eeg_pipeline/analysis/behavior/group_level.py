@@ -485,7 +485,16 @@ def run_group_level_correlations_impl(
             perm_method = "subject_block_restricted_failed" if block_permutation_requested else "subject_restricted_failed"
 
         n_perm_effective = int(len(null_rs))
-        p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (n_perm_effective + 1) if null_rs else np.nan
+        if null_rs:
+            p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (n_perm_effective + 1)
+            null_rs_sorted = np.sort(null_rs)
+            ci_lower = float(np.percentile(null_rs_sorted, 2.5))
+            ci_upper = float(np.percentile(null_rs_sorted, 97.5))
+        else:
+            p_perm = np.nan
+            ci_lower = np.nan
+            ci_upper = np.nan
+            
         estimator = "subject_balanced_partial_spearman" if used_partial else "subject_balanced_within_subject_centered_spearman"
 
         records.append(
@@ -500,6 +509,8 @@ def run_group_level_correlations_impl(
                 "n_subjects": int(len(subject_payloads)),
                 "estimator": estimator,
                 "p_perm": p_perm,
+                "ci_lower_2_5": ci_lower,
+                "ci_upper_97_5": ci_upper,
                 "permutation_method": perm_method,
                 "n_perm_requested": int(n_perm),
                 "n_perm_effective": n_perm_effective,

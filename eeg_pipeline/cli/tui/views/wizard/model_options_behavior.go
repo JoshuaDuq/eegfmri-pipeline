@@ -8,13 +8,36 @@ func (m Model) getBehaviorOptions() []optionType {
 
 	// Check if any computation is selected
 	hasAnyComputation := len(m.SelectedComputations()) > 0
+	hasSelectedComputation := func(keys ...string) bool {
+		for _, key := range keys {
+			if m.isComputationSelected(key) {
+				return true
+			}
+		}
+		return false
+	}
+	needsBehaviorStatsAndGlobalOptions := hasSelectedComputation(
+		"correlations",
+		"multilevel_correlations",
+		"pain_sensitivity",
+		"regression",
+		"models",
+		"stability",
+		"influence",
+		"condition",
+		"temporal",
+		"cluster",
+		"mediation",
+		"moderation",
+		"mixed_effects",
+	)
 
 	// General section - only show if at least one computation is selected
 	if hasAnyComputation {
 		options = append(options, optBehaviorGroupGeneral)
 		if m.behaviorGroupGeneralExpanded {
 			// RNG Seed and N Jobs are always relevant
-			options = append(options, optRNGSeed, optBehaviorNJobs, optBehaviorMinSamples)
+			options = append(options, optRNGSeed, optBehaviorNJobs, optBehaviorMinSamples, optBehaviorValidateOnly)
 
 			// Correlation method and robust correlation - only for correlations, stability, pain_sensitivity
 			needsCorrelationMethod := m.isComputationSelected("correlations") ||
@@ -143,6 +166,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			if m.isComputationSelected("correlations") {
 				options = append(options,
 					optCorrelationsTargetColumn,
+					optCorrelationsFeatures,
 					optCorrelationsTypes,
 					optCorrelationsPrimaryUnit,
 					optCorrelationsPermutationPrimary,
@@ -306,7 +330,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("pain_sensitivity") {
 		options = append(options, optBehaviorGroupPainSens)
 		if m.behaviorGroupPainSensExpanded {
-			options = append(options, optPainSensitivityMinTrials)
+			options = append(options, optPainSensitivityMinTrials, optPainSensitivityFeatures)
 		}
 	}
 
@@ -318,6 +342,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optConditionCompareColumn,
 				optConditionCompareValues,
 				optConditionCompareWindows,
+				optConditionFeatures,
 				optConditionMinTrials,
 				optConditionWindowPrimaryUnit,
 				optConditionPermutationPrimary,
@@ -338,6 +363,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTemporalTimeMaxMs,
 				optTemporalSmoothMs,
 				optTemporalTargetColumn,
+				optTemporalFeatures,
 				optTemporalSplitByCondition,
 				optTemporalConditionColumn,
 				optTemporalConditionValues,
@@ -372,6 +398,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optClusterThreshold,
 				optClusterMinSize,
 				optClusterTail,
+				optClusterFeatures,
 				optClusterConditionColumn,
 				optClusterConditionValues,
 			)
@@ -382,7 +409,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("mediation") {
 		options = append(options, optBehaviorGroupMediation)
 		if m.behaviorGroupMediationExpanded {
-			options = append(options, optMediationBootstrap, optMediationPermutations, optMediationMinEffect, optMediationMaxMediatorsEnabled, optMediationMaxMediators)
+			options = append(options, optMediationBootstrap, optMediationPermutations, optMediationMinEffect, optMediationFeatures, optMediationMaxMediatorsEnabled, optMediationMaxMediators)
 		}
 	}
 
@@ -390,7 +417,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("moderation") {
 		options = append(options, optBehaviorGroupModeration)
 		if m.behaviorGroupModerationExpanded {
-			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures, optModerationMinSamples, optModerationPermutations)
+			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures, optModerationMinSamples, optModerationPermutations, optModerationFeatures)
 		}
 	}
 
@@ -411,7 +438,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// Behavior Statistics
-	if hasAnyComputation {
+	if needsBehaviorStatsAndGlobalOptions {
 		options = append(options,
 			optBehaviorStatsTempControl,
 			optBehaviorStatsAllowIIDTrials,
@@ -424,7 +451,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// Global Statistics & Validation
-	if hasAnyComputation {
+	if needsBehaviorStatsAndGlobalOptions {
 		options = append(options,
 			optGlobalNBootstrap,
 			optClusterCorrectionEnabled,
@@ -444,7 +471,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// System / IO
-	if hasAnyComputation {
+	if needsBehaviorStatsAndGlobalOptions {
 		options = append(options,
 			optIOTemperatureRange,
 			optIOMaxMissingChannelsFraction,

@@ -71,34 +71,74 @@ logger = logging.getLogger(__name__)
 # Pipeline Factories
 ###################################################################
 
-def _build_base_preprocessing_steps(cfg: Dict[str, Any], include_scaling: bool) -> List[Tuple[str, Any]]:
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.compose import ColumnTransformer
+
+def _build_base_preprocessing_steps(cfg: Dict[str, Any], include_scaling: bool, n_covariates: int = 0) -> List[Tuple[str, Any]]:
     steps: List[Tuple[str, Any]] = [
         ("finite", ReplaceInfWithNaN()),
         ("drop_all_nan", DropAllNaNColumns()),
+    ]
+    
+    # Feature specific steps
+    feature_steps = [
         ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
-        ("var", VarianceThreshold(threshold=cfg["variance_threshold"])),
+        ("var", VarianceThreshold(threshold=cfg["variance_threshold"]))
     ]
     if include_scaling:
-        steps.append(("scale", StandardScaler()))
-        if cfg.get("pca_enabled", False):
-            steps.append(
-                (
-                    "pca",
-                    PCA(
-                        n_components=cfg.get("pca_n_components", 0.95),
-                        whiten=bool(cfg.get("pca_whiten", False)),
-                        random_state=cfg.get("pca_random_state", None),
-                        svd_solver=str(cfg.get("pca_svd_solver", "auto")),
-                    ),
-                )
+        feature_steps.append(("scale", StandardScaler()))
+    if cfg.get("pca_enabled", False):
+        feature_steps.append(
+            (
+                "pca",
+                PCA(
+                    n_components=cfg.get("pca_n_components", 0.95),
+                    whiten=bool(cfg.get("pca_whiten", False)),
+                    random_state=cfg.get("pca_random_state", None),
+                    svd_solver=str(cfg.get("pca_svd_solver", "auto")),
+                ),
             )
+        )
+    feature_pipe = Pipeline(feature_steps)
+
+    if n_covariates > 0:
+        cov_steps = [
+            ("impute", SimpleImputer(strategy="most_frequent"))
+        ]
+        if include_scaling:
+            cov_steps.append(("scale", StandardScaler()))
+        else:
+            from sklearn.preprocessing import FunctionTransformer
+            cov_steps.append(("passthrough", FunctionTransformer(func=None, validate=False)))
+            
+        covariate_pipe = Pipeline(cov_steps)
+        
+        def feature_idx(X):
+            return list(range(X.shape[1] - n_covariates))
+            
+        def cov_idx(X):
+            return list(range(X.shape[1] - n_covariates, X.shape[1]))
+            
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ("eeg", feature_pipe, feature_idx),
+                ("cov", covariate_pipe, cov_idx),
+            ],
+            remainder="drop"
+        )
+        steps.append(("preprocessing", preprocessor))
+    else:
+        steps.extend(feature_steps)
+
     return steps
+
 
 
 def create_svm_pipeline(
     kernel: str = "rbf",
     seed: int = 42,
     config: Any = None,
+    n_covariates: int = 0,
 ) -> Pipeline:
     """
     Create SVM classification pipeline.
@@ -122,7 +162,7 @@ def create_svm_pipeline(
     """
     cfg = get_ml_config(config)
 
-    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True)
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True, n_covariates=n_covariates)
     steps.append(
         (
             "svm",
@@ -141,6 +181,7 @@ def create_logistic_pipeline(
     penalty: str = "l2",
     seed: int = 42,
     config: Any = None,
+    n_covariates: int = 0,
 ) -> Pipeline:
     """
     Create Logistic Regression classification pipeline.
@@ -166,7 +207,7 @@ def create_logistic_pipeline(
 
     solver = "saga" if penalty in ("l1", "elasticnet") else "lbfgs"
 
-    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True)
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True, n_covariates=n_covariates)
     steps.append(
         (
             "lr",
@@ -185,6 +226,7 @@ def create_logistic_pipeline(
 def create_rf_classification_pipeline(
     seed: int = 42,
     config: Any = None,
+    n_covariates: int = 0,
 ) -> Pipeline:
     """
     Create Random Forest classification pipeline.
@@ -206,7 +248,7 @@ def create_rf_classification_pipeline(
     """
     cfg = get_ml_config(config)
 
-    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=False)
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=False, n_covariates=n_covariates)
     steps.append(
         (
             "rf",
@@ -214,7 +256,7 @@ def create_rf_classification_pipeline(
                 n_estimators=cfg["rf_n_estimators"],
                 random_state=seed,
                 class_weight=cfg["rf_class_weight"],
-                n_jobs=-1,
+                n_jobs=1,
             ),
         )
     )
@@ -224,6 +266,7 @@ def create_rf_classification_pipeline(
 def create_ensemble_pipeline(
     seed: int = 42,
     config: Any = None,
+    n_covariates: int = 0,
 ) -> Pipeline:
     """
     Create ensemble classifier combining SVM, LR, and RF.
@@ -250,7 +293,7 @@ def create_ensemble_pipeline(
         n_estimators=cfg["rf_n_estimators"],
         random_state=seed,
         class_weight=cfg["rf_class_weight"],
-        n_jobs=-1,
+        n_jobs=1,
     )
 
     ensemble = VotingClassifier(
@@ -258,7 +301,7 @@ def create_ensemble_pipeline(
         voting="soft",
     )
 
-    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True)
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True, n_covariates=n_covariates)
     steps.append(("ensemble", ensemble))
     return Pipeline(steps)
 
@@ -268,32 +311,35 @@ def create_ensemble_pipeline(
 ###################################################################
 
 
-def build_svm_param_grid(config: Any = None) -> Dict[str, List]:
+def build_svm_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, List]:
     """Build parameter grid for SVM hyperparameter tuning."""
     cfg = get_ml_config(config)
+    var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
     return {
         "svm__C": cfg["svm_C_grid"],
         "svm__gamma": cfg["svm_gamma_grid"],
-        "var__threshold": cfg["variance_threshold_grid"],
+        f"{var_prefix}__threshold": cfg["variance_threshold_grid"],
     }
 
 
-def build_logistic_param_grid(config: Any = None) -> Dict[str, List]:
+def build_logistic_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, List]:
     """Build parameter grid for Logistic Regression."""
     cfg = get_ml_config(config)
+    var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
     return {
         "lr__C": cfg["lr_C_grid"],
-        "var__threshold": cfg["variance_threshold_grid"],
+        f"{var_prefix}__threshold": cfg["variance_threshold_grid"],
     }
 
 
-def build_rf_classification_param_grid(config: Any = None) -> Dict[str, List]:
+def build_rf_classification_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, List]:
     """Build parameter grid for Random Forest classifier."""
     cfg = get_ml_config(config)
+    var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
     return {
         "rf__max_depth": cfg["rf_max_depth_grid"],
         "rf__min_samples_leaf": [1, 3, 5],
-        "var__threshold": cfg["variance_threshold_grid"],
+        f"{var_prefix}__threshold": cfg["variance_threshold_grid"],
     }
 
 
@@ -497,13 +543,13 @@ def decode_pain_binary(
     
     # Create pipeline
     if model == "svm":
-        pipe = create_svm_pipeline(seed=seed, config=config)
+        pipe = create_svm_pipeline(seed=seed, config=config, n_covariates=0)
     elif model == "lr":
-        pipe = create_logistic_pipeline(seed=seed, config=config)
+        pipe = create_logistic_pipeline(seed=seed, config=config, n_covariates=0)
     elif model == "rf":
-        pipe = create_rf_classification_pipeline(seed=seed, config=config)
+        pipe = create_rf_classification_pipeline(seed=seed, config=config, n_covariates=0)
     elif model == "ensemble":
-        pipe = create_ensemble_pipeline(seed=seed, config=config)
+        pipe = create_ensemble_pipeline(seed=seed, config=config, n_covariates=0)
     else:
         raise ValueError(f"Unknown model: {model}")
     
@@ -543,6 +589,7 @@ def decode_pain_binary(
             X_test,
             groups_train if groups_train is not None else np.array(["all"] * len(X_train), dtype=object),
             "intersection" if groups_train is not None else "union_impute",
+            n_covariates=0,
         )
         
         pipe_clone = clone(pipe)
@@ -580,6 +627,7 @@ def nested_loso_classification(
     config: Any = None,
     logger: Any = None,
     harmonization_mode: Optional[str] = None,
+    n_covariates: int = 0,
 ) -> Tuple[ClassificationResult, pd.DataFrame]:
     """
     Nested leave-one-subject-out classification with hyperparameter tuning.
@@ -605,6 +653,8 @@ def nested_loso_classification(
         Configuration
     logger : Any
         Logger instance
+    n_covariates : int
+        Number of covariate columns appended to X
     
     Returns
     -------
@@ -620,14 +670,14 @@ def nested_loso_classification(
     
     # Create pipeline and param grid
     if model == "svm":
-        pipe = create_svm_pipeline(seed=seed, config=config)
-        param_grid = build_svm_param_grid(config)
+        pipe = create_svm_pipeline(seed=seed, config=config, n_covariates=n_covariates)
+        param_grid = build_svm_param_grid(config, n_covariates=n_covariates)
     elif model == "lr":
-        pipe = create_logistic_pipeline(seed=seed, config=config)
-        param_grid = build_logistic_param_grid(config)
+        pipe = create_logistic_pipeline(seed=seed, config=config, n_covariates=n_covariates)
+        param_grid = build_logistic_param_grid(config, n_covariates=n_covariates)
     elif model == "rf":
-        pipe = create_rf_classification_pipeline(seed=seed, config=config)
-        param_grid = build_rf_classification_param_grid(config)
+        pipe = create_rf_classification_pipeline(seed=seed, config=config, n_covariates=n_covariates)
+        param_grid = build_rf_classification_param_grid(config, n_covariates=n_covariates)
     else:
         raise ValueError(f"Unknown model: {model}")
     
@@ -641,6 +691,8 @@ def nested_loso_classification(
     best_params_records = []
     failed_fold_count = 0
     n_folds_total = len(outer_splits)
+    
+    scoring_metric = str(get_config_value(config, "machine_learning.classification.scoring", "average_precision")).strip()
 
     for fold, (train_idx, test_idx) in enumerate(outer_splits):
         fold_number = int(fold + 1)
@@ -655,6 +707,7 @@ def nested_loso_classification(
             X_test,
             train_groups,
             harmonization_mode,
+            n_covariates=n_covariates,
         )
         
         # Skip if only one class in training
@@ -670,23 +723,46 @@ def nested_loso_classification(
         n_unique_train_groups = len(np.unique(train_groups))
         effective_splits = min(inner_splits, n_unique_train_groups)
         
-        if effective_splits < 2:
-            log.warning(f"Fold {fold_number}: <2 groups in training, fitting without inner CV")
-            pipe_clone = clone(pipe)
-            pipe_clone.fit(X_train, y_train)
-            y_pred[test_idx] = pipe_clone.predict(X_test)
-            fold_ids[test_idx] = fold_number
-            if hasattr(pipe_clone, "predict_proba"):
-                y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
-            continue
-
-        inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
+        # Check if minority class has enough samples for StratifiedGroupKFold
+        counts = np.bincount(y_train)
+        min_class_count = np.min(counts) if len(counts) > 0 else 0
+        
+        if effective_splits < 2 or min_class_count < effective_splits:
+            if min_class_count < effective_splits:
+                log.warning(
+                    f"Fold {fold_number}: Minority class count ({min_class_count}) < effective_splits ({effective_splits}). "
+                    "Falling back to StratifiedKFold to avoid ValueError in inner CV."
+                )
+            
+            # If we still can't satisfy StratifiedKFold, reduce splits further
+            safe_splits = max(2, min(inner_splits, min_class_count))
+            if safe_splits < 2:
+                log.warning(f"Fold {fold_number}: Not enough samples for any stratification. Skipping tuning.")
+                try:
+                    pipe_clone = clone(pipe)
+                    pipe_clone.fit(X_train, y_train)
+                    y_pred[test_idx] = pipe_clone.predict(X_test)
+                    fold_ids[test_idx] = fold_number
+                    if hasattr(pipe_clone, "predict_proba"):
+                        y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
+                except Exception as e:
+                    log.error(f"Fold {fold_number} fallback fit failed: {e}")
+                    y_pred[test_idx] = int(np.median(y_train))
+                    fold_ids[test_idx] = fold_number
+                    failed_fold_count += 1
+                continue
+                
+            inner_cv = StratifiedKFold(n_splits=safe_splits, shuffle=True, random_state=seed + fold)
+            cv_groups = None
+        else:
+            inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
+            cv_groups = train_groups
         
         # GridSearch with group-aware inner CV
         gs = GridSearchCV(
             estimator=pipe,
             param_grid=param_grid,
-            scoring="roc_auc",
+            scoring=scoring_metric,
             cv=inner_cv,
             n_jobs=-1,
             refit=True,
@@ -694,7 +770,7 @@ def nested_loso_classification(
         )
         
         try:
-            gs.fit(X_train, y_train, groups=train_groups)
+            gs.fit(X_train, y_train, groups=cv_groups)
             best_params_records.append({
                 "fold": fold_number,
                 "test_subject": test_subject,

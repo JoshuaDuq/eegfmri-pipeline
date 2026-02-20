@@ -177,8 +177,12 @@ def apply_fold_feature_harmonization(
     X_test: np.ndarray,
     groups_train: np.ndarray,
     harmonization_mode: Optional[str],
+    n_covariates: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Apply fold-specific feature harmonization (intersection/union) safely."""
+    """Apply fold-specific feature harmonization (intersection/union) safely.
+    
+    Covariates (the last n_covariates columns) are protected and never dropped.
+    """
     mode = (harmonization_mode or "union_impute").strip().lower()
     Xtr = np.asarray(X_train, dtype=float)
     Xte = np.asarray(X_test, dtype=float)
@@ -189,7 +193,22 @@ def apply_fold_feature_harmonization(
         keep = np.ones(Xtr.shape[1], dtype=bool)
         return Xtr, Xte, keep
 
-    keep = compute_train_group_intersection_mask(Xtr, np.asarray(groups_train))
+    if n_covariates > 0:
+        Xtr_eeg = Xtr[:, :-n_covariates]
+    else:
+        Xtr_eeg = Xtr
+
+    if Xtr_eeg.shape[1] > 0:
+        keep_eeg = compute_train_group_intersection_mask(Xtr_eeg, np.asarray(groups_train))
+    else:
+        keep_eeg = np.zeros(0, dtype=bool)
+
+    keep = np.ones(Xtr.shape[1], dtype=bool)
+    if n_covariates > 0:
+        keep[:-n_covariates] = keep_eeg
+    else:
+        keep = keep_eeg
+
     if keep.size == 0 or not np.any(keep):
         raise ValueError("Fold-specific intersection harmonization removed all features.")
     return Xtr[:, keep], Xte[:, keep], keep
@@ -920,6 +939,7 @@ def nested_loso_predictions_matrix(
     null_output_path: Optional[Path] = None,
     config: Optional[Dict[str, Any]] = None,
     harmonization_mode: Optional[str] = None,
+    n_covariates: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray, List[str], List[int], List[int]]:
     """
     Nested leave-one-subject-out cross-validation with hyperparameter tuning.
@@ -976,11 +996,13 @@ def nested_loso_predictions_matrix(
         X_train, X_test = X[train_idx_f], X[test_idx_f]
         y_train, y_test = y[train_idx_f], y[test_idx_f]
         groups_train = groups[train_idx_f]
+        
         X_train, X_test, _ = apply_fold_feature_harmonization(
             X_train,
             X_test,
             groups_train,
             harmonization_mode,
+            n_covariates=n_covariates,
         )
 
         n_train_subjects = len(np.unique(groups_train))
@@ -1000,7 +1022,7 @@ def nested_loso_predictions_matrix(
                 scoring=scoring,
                 cv=inner_cv,
                 n_jobs=inner_n_jobs,
-                refit="r",
+                refit="neg_mse",
                 error_score="raise",
             )
             gs = grid_search_with_warning_logging(gs, X_train, y_train, f"fold {fold}", logger, groups=groups_train)
@@ -1038,6 +1060,7 @@ def nested_loso_predictions_matrix(
             X, y, groups, blocks, pipe, param_grid, inner_cv_splits, inner_n_jobs,
             seed, model_name, null_n_perm, null_output_path, config,
             harmonization_mode=harmonization_mode,
+            n_covariates=n_covariates,
         )
 
     return y_true, y_pred, groups_ordered, test_indices, fold_ids
@@ -1058,6 +1081,7 @@ def run_permutation_test(
     null_output_path: Path,
     config: Optional[Dict[str, Any]],
     harmonization_mode: Optional[str] = None,
+    n_covariates: int = 0,
 ) -> None:
     """Run permutation test for null distribution."""
     logger.info(f"Computing {null_n_perm} permutation null distributions...")
@@ -1127,6 +1151,7 @@ def run_permutation_test(
             inner_cv_splits=inner_cv_splits, n_jobs=inner_n_jobs, seed=seed + perm,
             model_name=model_name, outer_n_jobs=1, null_n_perm=0, config=config,
             harmonization_mode=harmonization_mode,
+            n_covariates=n_covariates,
         )
 
         pred_df = pd.DataFrame({"y_true": y_true_p, "y_pred": y_pred_p, "subject_id": groups_p})

@@ -366,13 +366,77 @@ def _build_regression_model_spec(
     *,
     seed: int,
     config: Any,
+    n_covariates: int = 0,
 ) -> Tuple[str, Pipeline, Dict[str, Any]]:
     name = str(model_name or "elasticnet").strip().lower()
     if name == "ridge":
-        return "ridge", create_ridge_pipeline(seed=seed, config=config), build_ridge_param_grid(config)
+        return "ridge", create_ridge_pipeline(seed=seed, config=config, n_covariates=n_covariates), build_ridge_param_grid(config, n_covariates=n_covariates)
     if name == "rf":
-        return "rf", create_rf_pipeline(seed=seed, config=config), build_rf_param_grid(config)
-    return "elasticnet", create_elasticnet_pipeline(seed=seed, config=config), build_elasticnet_param_grid(config)
+        return "rf", create_rf_pipeline(seed=seed, config=config, n_covariates=n_covariates), build_rf_param_grid(config, n_covariates=n_covariates)
+    return "elasticnet", create_elasticnet_pipeline(seed=seed, config=config, n_covariates=n_covariates), build_elasticnet_param_grid(config, n_covariates=n_covariates)
+
+
+def _resolve_param_grid_aliases(
+    estimator: Pipeline,
+    param_grid: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Normalize legacy RF grid keys to estimator-compatible parameter names."""
+    grid = dict(param_grid or {})
+    if not grid:
+        return {}
+
+    available = set(estimator.get_params(deep=True).keys())
+    resolved: Dict[str, Any] = {}
+    for key, values in grid.items():
+        resolved_key = key
+        if key not in available and key.startswith("rf__") and not key.startswith("rf__regressor__"):
+            candidate = key.replace("rf__", "rf__regressor__", 1)
+            if candidate in available:
+                resolved_key = candidate
+        resolved[resolved_key] = values
+    return resolved
+
+
+def _apply_fold_feature_harmonization_compat(
+    X_train: np.ndarray,
+    X_test: np.ndarray,
+    groups_train: np.ndarray,
+    harmonization_mode: Optional[str],
+    *,
+    n_covariates: int = 0,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Use legacy 4-arg call when covariates are absent for test/mocking compatibility."""
+    if int(n_covariates) > 0:
+        try:
+            return apply_fold_feature_harmonization(
+                X_train,
+                X_test,
+                groups_train,
+                harmonization_mode,
+                n_covariates=int(n_covariates),
+            )
+        except TypeError as exc:
+            # Some tests monkeypatch with legacy 4-argument callables.
+            if "n_covariates" not in str(exc):
+                raise
+            Xtr_legacy, Xte_legacy, keep_legacy = apply_fold_feature_harmonization(
+                X_train,
+                X_test,
+                groups_train,
+                harmonization_mode,
+            )
+            keep_arr = np.asarray(keep_legacy, dtype=bool).copy()
+            # Legacy harmonizers cannot explicitly protect covariates; mark them as
+            # dropped so downstream safeguards can fail closed.
+            if keep_arr.size >= int(n_covariates):
+                keep_arr[-int(n_covariates):] = False
+            return Xtr_legacy, Xte_legacy, keep_arr
+    return apply_fold_feature_harmonization(
+        X_train,
+        X_test,
+        groups_train,
+        harmonization_mode,
+    )
 
 
 def _fit_tuned_regression_estimator(
@@ -395,13 +459,15 @@ def _fit_tuned_regression_estimator(
 
     inner_cv = create_inner_cv(groups_train, inner_splits)
     scoring = create_scoring_dict()
+    estimator = clone(base_pipe)
+    effective_param_grid = _resolve_param_grid_aliases(estimator, param_grid)
     gs = GridSearchCV(
-        estimator=clone(base_pipe),
-        param_grid=param_grid,
+        estimator=estimator,
+        param_grid=effective_param_grid,
         scoring=scoring,
         cv=inner_cv,
         n_jobs=1,
-        refit="r",
+        refit="neg_mse",
         error_score="raise",
     )
     gs = grid_search_with_warning_logging(gs, X_train, y_train, fold_info=fold_info, log=logger, groups=groups_train)
@@ -485,13 +551,13 @@ def _fit_within_subject_fold(
         
         if inner_cv_splits is not None and len(inner_cv_splits) >= 2:
             scoring = create_scoring_dict()
-            refit_metric = 'r'
+            refit_metric = 'neg_mse'
             
-            effective_param_grid = dict(param_grid or {})
             pipe_seeded = clone(pipe)
             regressor_step = pipe_seeded.named_steps.get("regressor")
             if regressor_step is not None and hasattr(regressor_step, "regressor") and hasattr(regressor_step.regressor, "random_state"):
                 regressor_step.regressor.random_state = random_state
+            effective_param_grid = _resolve_param_grid_aliases(pipe_seeded, param_grid)
             gs = GridSearchCV(
                 estimator=pipe_seeded,
                 param_grid=effective_param_grid,
@@ -633,20 +699,27 @@ def run_regression_ml(
     )
 
     if model == "ridge":
-        pipe = create_ridge_pipeline(seed=rng_seed, config=config)
-        param_grid = build_ridge_param_grid(config)
+        pipe = create_ridge_pipeline(seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0)
+        param_grid = build_ridge_param_grid(config, n_covariates=len(covariates) if covariates else 0)
         model_name = "ridge"
     elif model == "rf":
-        pipe = create_rf_pipeline(seed=rng_seed, config=config)
-        param_grid = build_rf_param_grid(config)
+        pipe = create_rf_pipeline(seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0)
+        param_grid = build_rf_param_grid(config, n_covariates=len(covariates) if covariates else 0)
         model_name = "rf"
     else:
-        pipe = create_elasticnet_pipeline(seed=rng_seed, config=config)
-        param_grid = build_elasticnet_param_grid(config)
+        pipe = create_elasticnet_pipeline(seed=rng_seed, config=config, n_covariates=len(covariates) if covariates else 0)
+        param_grid = build_elasticnet_param_grid(config, n_covariates=len(covariates) if covariates else 0)
         model_name = "elasticnet"
     
     best_params_path = prepare_best_params_path(results_dir / f"best_params_{model_name}.jsonl", mode="truncate")
     null_path = results_dir / f"loso_null_{model_name}.npz" if n_perm > 0 else None
+
+    if n_perm > 0 and n_perm < 1000:
+        logger.warning(
+            f"Requested n_perm={n_perm} is very low for reliable p-value estimation. "
+            "For single tests, n_perm>=1000 is recommended. For multiple comparisons "
+            "(e.g., across frequency bands), n_perm>=5000 or n_perm>=10000 is needed."
+        )
 
     n_subjects = len(np.unique(groups))
     logger.info(
@@ -672,6 +745,7 @@ def run_regression_ml(
         config=config,
         harmonization_mode=feature_harmonization
         or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
+        n_covariates=len(covariates) if covariates else 0,
     )
 
     pred_path = results_dir / "loso_predictions.tsv"
@@ -712,8 +786,13 @@ def run_regression_ml(
 
     try:
         from sklearn.metrics import r2_score
-
-        r2_val = float(r2_score(y_true, y_pred))
+        # Compute subject-level R2 to avoid pooled R2 fallacy
+        r2_subj = []
+        for subj in np.unique(groups_ordered):
+            mask = groups_ordered == subj
+            if np.sum(mask) >= 2:
+                r2_subj.append(float(r2_score(y_true[mask], y_pred[mask])))
+        r2_val = float(np.mean(r2_subj)) if r2_subj else np.nan
     except Exception:
         r2_val = np.nan
 
@@ -925,21 +1004,24 @@ def run_within_subject_regression_ml(
         groups_train = groups[train_idx]
 
         blocks_train = blocks_all[train_idx] if blocks_all is not None else None
-        X_train, X_test, _ = apply_fold_feature_harmonization(
+        
+        n_covs = len(covariates) if covariates else 0
+        X_train, X_test, _ = _apply_fold_feature_harmonization_compat(
             X_train,
             X_test,
             groups_train,
             harmonization_mode,
+            n_covariates=n_covs,
         )
 
         if model == "ridge":
-            pipe = create_ridge_pipeline(seed=rng_seed + int(fold_counter), config=config)
+            pipe = create_ridge_pipeline(seed=rng_seed + int(fold_counter), config=config, n_covariates=len(covariates) if covariates else 0)
             param_grid = build_ridge_param_grid(config)
         elif model == "rf":
-            pipe = create_rf_pipeline(seed=rng_seed + int(fold_counter), config=config)
+            pipe = create_rf_pipeline(seed=rng_seed + int(fold_counter), config=config, n_covariates=len(covariates) if covariates else 0)
             param_grid = build_rf_param_grid(config)
         else:
-            pipe = create_elasticnet_pipeline(seed=rng_seed + int(fold_counter), config=config)
+            pipe = create_elasticnet_pipeline(seed=rng_seed + int(fold_counter), config=config, n_covariates=len(covariates) if covariates else 0)
             param_grid = build_elasticnet_param_grid(config)
         
         best_estimator = _fit_within_subject_fold(
@@ -1020,8 +1102,13 @@ def run_within_subject_regression_ml(
         )
     try:
         from sklearn.metrics import r2_score
-
-        r2_val = float(r2_score(y_true_all, y_pred_all))
+        # Compute subject-level R2 to avoid pooled R2 fallacy
+        r2_subj = []
+        for subj in np.unique(groups_ordered):
+            mask = groups_ordered == subj
+            if np.sum(mask) >= 2:
+                r2_subj.append(float(r2_score(y_true_all[mask], y_pred_all[mask])))
+        r2_val = float(np.mean(r2_subj)) if r2_subj else np.nan
     except Exception:
         r2_val = np.nan
 
@@ -1067,22 +1154,23 @@ def run_within_subject_regression_ml(
                 groups_train_p = groups[train_idx]
 
                 blocks_train_p = blocks_all[train_idx] if blocks_all is not None else None
-                X_train_p, X_test_p, _ = apply_fold_feature_harmonization(
+                X_train_p, X_test_p, _ = _apply_fold_feature_harmonization_compat(
                     X_train_p,
                     X_test_p,
                     groups_train_p,
                     harmonization_mode,
+                    n_covariates=n_covs,
                 )
 
                 if model == "ridge":
-                    pipe_p = create_ridge_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config)
-                    param_grid_p = build_ridge_param_grid(config)
+                    pipe_p = create_ridge_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config, n_covariates=len(covariates) if covariates else 0)
+                    param_grid_p = build_ridge_param_grid(config, n_covariates=len(covariates) if covariates else 0)
                 elif model == "rf":
-                    pipe_p = create_rf_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config)
-                    param_grid_p = build_rf_param_grid(config)
+                    pipe_p = create_rf_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config, n_covariates=len(covariates) if covariates else 0)
+                    param_grid_p = build_rf_param_grid(config, n_covariates=len(covariates) if covariates else 0)
                 else:
-                    pipe_p = create_elasticnet_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config)
-                    param_grid_p = build_elasticnet_param_grid(config)
+                    pipe_p = create_elasticnet_pipeline(seed=rng_seed + perm_idx + fold_counter, config=config, n_covariates=len(covariates) if covariates else 0)
+                    param_grid_p = build_elasticnet_param_grid(config, n_covariates=len(covariates) if covariates else 0)
 
                 try:
                     best_estimator_p = _fit_within_subject_fold(
@@ -1435,8 +1523,8 @@ def run_classification_ml(
             seed=rng_seed,
             config=config,
             logger=logger,
-            harmonization_mode=feature_harmonization
-            or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
+            harmonization_mode=harmonization_mode,
+            n_covariates=len(covariates) if covariates and model_type != "cnn" else 0,
         )
     failed_fold_count = int(getattr(result, "failed_fold_count", 0) or 0)
     n_folds_total = int(getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups)))
@@ -1621,6 +1709,37 @@ def run_classification_ml(
                 calibration_data = {}
                 ece = np.nan
     
+    p_value_auc = np.nan
+    
+    if n_perm > 0:
+        logger.info(f"Running {n_perm} permutations for classification inference...")
+        null_path = results_dir / f"classification_null_{model_type}.npz"
+        null_aucs = _run_classification_permutations(
+            X=X,
+            y=y_binary,
+            groups=groups,
+            blocks=blocks,
+            model=model_type,
+            inner_splits=inner_splits,
+            seed=rng_seed,
+            n_perm=n_perm,
+            config=config,
+            logger=logger,
+            harmonization_mode=harmonization_mode,
+            covariates=covariates,
+        )
+        if null_aucs is not None and np.isfinite(auc_for_inference):
+            finite_null = null_aucs[np.isfinite(null_aucs)]
+            if len(finite_null) > 0:
+                p_value_auc = float(((finite_null >= auc_for_inference).sum() + 1) / (len(finite_null) + 1))
+                np.savez(
+                    null_path,
+                    null_auc=finite_null,
+                    n_requested=n_perm,
+                    n_completed=len(finite_null),
+                )
+                logger.info(f"Saved null distributions to {null_path}")
+
     # Compute and save metrics
     metrics = {
         "data": {
@@ -1637,6 +1756,7 @@ def run_classification_ml(
         },
         "subject_selection": subject_selection,
         "auc": float(auc_for_inference) if np.isfinite(auc_for_inference) else np.nan,
+        "p_value_auc": p_value_auc,
         "balanced_accuracy": (
             float(balanced_accuracy_subject_mean)
             if np.isfinite(balanced_accuracy_subject_mean)
@@ -1752,18 +1872,19 @@ def run_classification_ml(
     if n_perm > 0:
         logger.info(f"Running {n_perm} permutations for classification...")
         null_aucs = _run_classification_permutations(
-            X,
-            y_binary,
-            groups,
-            blocks,
-            model_type,
-            inner_splits,
-            rng_seed,
-            n_perm,
-            config,
-            logger,
+            X=X,
+            y=y_binary,
+            groups=groups,
+            blocks=blocks,
+            model=model_type,
+            inner_splits=inner_splits,
+            seed=rng_seed,
+            n_perm=n_perm,
+            config=config,
+            logger=logger,
             harmonization_mode=feature_harmonization
             or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")),
+            covariates=covariates,
         )
         if null_aucs is not None and len(null_aucs) > 0 and np.isfinite(auc_for_inference):
             metrics["n_perm_requested"] = int(n_perm)
@@ -1964,11 +2085,13 @@ def run_within_subject_classification_ml(
             groups_train = groups[train_idx]
 
             if model_type != "cnn":
-                X_train, X_test, _ = apply_fold_feature_harmonization(
+                n_covs = len(covariates) if covariates else 0
+                X_train, X_test, _ = _apply_fold_feature_harmonization_compat(
                     X_train,
                     X_test,
                     groups_train,
                     harmonization_mode,
+                    n_covariates=n_covs,
                 )
 
             # If training fold has only one class, fall back to majority-class prediction.
@@ -2445,6 +2568,7 @@ def _run_classification_permutations(
     config: Any,
     logger: logging.Logger,
     harmonization_mode: Optional[str] = None,
+    covariates: Optional[List[str]] = None,
 ) -> Optional[np.ndarray]:
     """Run permutation test for classification."""
     from eeg_pipeline.analysis.machine_learning.classification import nested_loso_classification
@@ -2523,6 +2647,7 @@ def _run_classification_permutations(
                     config=config,
                     logger=None,
                     harmonization_mode=harmonization_mode,
+                    n_covariates=len(covariates) if covariates else 0,
                 )
             perm_failed_fold_count = int(getattr(result, "failed_fold_count", 0) or 0)
             perm_n_folds_total = int(getattr(result, "n_folds_total", len(np.unique(groups))) or len(np.unique(groups)))
@@ -2774,7 +2899,7 @@ def run_model_comparison_ml(
     for model_name, model_spec in models.items():
         t_model = _time.perf_counter()
         pipe = model_spec["pipe"]
-        param_grid = model_spec["param_grid"]
+        param_grid = _resolve_param_grid_aliases(pipe, model_spec["param_grid"])
         
         y_pred = np.zeros(len(y))
         
@@ -2782,11 +2907,14 @@ def run_model_comparison_ml(
             X_train, X_test = X[train_idx], X[test_idx]
             y_train, y_test = y[train_idx], y[test_idx]
             groups_train = groups[train_idx]
-            X_train, X_test, _ = apply_fold_feature_harmonization(
+            
+            n_covs = len(covariates) if covariates else 0
+            X_train, X_test, _ = _apply_fold_feature_harmonization_compat(
                 X_train,
                 X_test,
                 groups_train,
                 harmonization_mode,
+                n_covariates=n_covs,
             )
             
             # Inner CV for hyperparameter tuning (group-aware)
@@ -3107,8 +3235,8 @@ def run_incremental_validity_ml(
     else:
         X_baseline = meta[baseline_predictors].apply(pd.to_numeric, errors="coerce").to_numpy()
     
-    # Full model includes baseline predictors + EEG features
-    X_full = np.concatenate([X_baseline, X], axis=1)
+    # Full model includes EEG features + baseline predictors (appended at end for covariate protection)
+    X_full = np.concatenate([X, X_baseline], axis=1)
     n_baseline_features = int(X_baseline.shape[1])
     
     from sklearn.model_selection import LeaveOneGroupOut
@@ -3121,7 +3249,7 @@ def run_incremental_validity_ml(
     )
     # Use the same model family/hyperparameter space for baseline and full models
     # so ΔR² isolates information gain from EEG predictors (not algorithm changes).
-    shared_pipe = create_elasticnet_pipeline(seed=rng_seed, config=config)
+    shared_pipe = create_elasticnet_pipeline(seed=rng_seed, config=config, n_covariates=n_baseline_features)
     shared_param_grid = build_elasticnet_param_grid(config)
     
     records = []
@@ -3133,13 +3261,14 @@ def run_incremental_validity_ml(
         groups_train = groups[train_idx]
         X_full_train = X_full[train_idx]
         X_full_test = X_full[test_idx]
-        X_full_train, X_full_test, keep_mask = apply_fold_feature_harmonization(
+        X_full_train, X_full_test, keep_mask = _apply_fold_feature_harmonization_compat(
             X_full_train,
             X_full_test,
             groups_train,
             harmonization_mode,
+            n_covariates=n_baseline_features,
         )
-        baseline_keep_mask = np.asarray(keep_mask, dtype=bool)[:n_baseline_features]
+        baseline_keep_mask = np.asarray(keep_mask, dtype=bool)[-n_baseline_features:]
         if baseline_keep_mask.size == 0 or not np.any(baseline_keep_mask):
             raise ValueError(
                 f"Fold {int(fold_idx)}: feature harmonization removed all baseline predictors. "
@@ -3290,6 +3419,7 @@ def _run_permutation_importance_stage(
     results_dir: Path,
     logger: logging.Logger,
     model_name: str = "elasticnet",
+    covariates: Optional[List[str]] = None,
 ) -> Optional[Path]:
     """Run per-fold permutation importance and aggregate."""
     from sklearn.model_selection import LeaveOneGroupOut
@@ -3317,11 +3447,14 @@ def _run_permutation_importance_stage(
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
-        X_train, X_test, keep_mask = apply_fold_feature_harmonization(
+        
+        n_covs = len(covariates) if covariates else 0
+        X_train, X_test, keep_mask = _apply_fold_feature_harmonization_compat(
             X_train,
             X_test,
             groups_train,
             harmonization_mode,
+            n_covariates=n_covs,
         )
 
         pipe_fold = clone(base_pipe)
@@ -3536,6 +3669,7 @@ def _run_uncertainty_stage(
     results_dir: Path,
     logger: logging.Logger,
     model_name: str = "elasticnet",
+    covariates: Optional[List[str]] = None,
 ) -> Optional[Path]:
     """Run conformal prediction for uncertainty quantification."""
     from eeg_pipeline.analysis.machine_learning.uncertainty import (
@@ -3561,11 +3695,14 @@ def _run_uncertainty_stage(
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
-        X_train, X_test, _ = apply_fold_feature_harmonization(
+        
+        n_covs = len(covariates) if covariates else 0
+        X_train, X_test, _ = _apply_fold_feature_harmonization_compat(
             X_train,
             X_test,
             groups_train,
             harmonization_mode,
+            n_covariates=n_covs,
         )
 
         try:

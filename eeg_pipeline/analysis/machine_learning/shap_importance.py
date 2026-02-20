@@ -344,11 +344,13 @@ def compute_shap_for_cv_folds(
         model = model_factory()
         keep_mask = np.ones(X_train.shape[1], dtype=bool)
         if groups_train is not None:
+            n_covs = len(covariates) if covariates else 0
             X_train, X_test, keep_mask = apply_fold_feature_harmonization(
                 X_train,
                 X_test,
                 groups_train,
                 harmonization_mode,
+                n_covariates=n_covs,
             )
 
         if param_grid and groups_train is not None and len(np.unique(groups_train)) >= 2:

@@ -1675,6 +1675,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optComputeBayesFactors:
 		m.behaviorComputeBayesFactors = !m.behaviorComputeBayesFactors
 		m.useDefaultAdvanced = false
+	case optBehaviorValidateOnly:
+		m.behaviorValidateOnly = !m.behaviorValidateOnly
+		m.useDefaultAdvanced = false
 
 	// Trial table / residual options
 	case optTrialTableFormat:
@@ -1960,6 +1963,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optCorrelationsTypes:
 		m.startTextEdit(textFieldCorrelationsTypes)
 		m.useDefaultAdvanced = false
+	case optCorrelationsFeatures:
+		m.startTextEdit(textFieldCorrelationsFeatures)
+		m.useDefaultAdvanced = false
 	case optCorrelationsMultilevel:
 		// Toggle multilevel_correlations computation
 		for i, comp := range m.computations {
@@ -1999,6 +2005,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		} else {
 			m.startTextEdit(textFieldTemporalTargetColumn)
 		}
+		m.useDefaultAdvanced = false
+	case optTemporalFeatures:
+		m.startTextEdit(textFieldTemporalFeatures)
 		m.useDefaultAdvanced = false
 	case optTemporalSplitByCondition:
 		m.temporalSplitByCondition = !m.temporalSplitByCondition
@@ -2091,6 +2100,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.clusterTail = 0
 		}
 		m.useDefaultAdvanced = false
+	case optClusterFeatures:
+		m.startTextEdit(textFieldClusterFeatures)
+		m.useDefaultAdvanced = false
 	case optClusterConditionColumn:
 		if len(m.GetAvailableColumns()) > 0 {
 			m.expandedOption = expandedClusterConditionColumn
@@ -2115,6 +2127,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optMediationBootstrap, optMediationMinEffect, optMediationPermutations:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optMediationFeatures:
+		m.startTextEdit(textFieldMediationFeatures)
+		m.useDefaultAdvanced = false
 	case optMediationMaxMediatorsEnabled:
 		m.mediationMaxMediatorsEnabled = !m.mediationMaxMediatorsEnabled
 		m.useDefaultAdvanced = false
@@ -2134,6 +2149,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 	case optModerationMinSamples, optModerationPermutations:
 		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optModerationFeatures:
+		m.startTextEdit(textFieldModerationFeatures)
 		m.useDefaultAdvanced = false
 	// Mixed effects options
 	case optMixedMaxFeatures:
@@ -2159,6 +2177,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startTextEdit(textFieldConditionCompareWindows)
 		}
 		m.useDefaultAdvanced = false
+	case optConditionFeatures:
+		m.startTextEdit(textFieldConditionFeatures)
+		m.useDefaultAdvanced = false
 	case optConditionCompareValues:
 		if m.conditionCompareColumn == "" {
 			m.ShowToast("Select a column first", "warning")
@@ -2176,6 +2197,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPainSensitivityMinTrials:
 		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPainSensitivityFeatures:
+		m.startTextEdit(textFieldPainSensitivityFeatures)
 		m.useDefaultAdvanced = false
 	case optConditionWindowPrimaryUnit:
 		m.conditionWindowPrimaryUnit = (m.conditionWindowPrimaryUnit + 1) % 2

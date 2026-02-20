@@ -138,6 +138,20 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.correlationsTargetColumn
 	case textFieldCorrelationsTypes:
 		return m.correlationsTypesSpec
+	case textFieldCorrelationsFeatures:
+		return m.correlationsFeaturesSpec
+	case textFieldPainSensitivityFeatures:
+		return m.painSensitivityFeaturesSpec
+	case textFieldConditionFeatures:
+		return m.conditionFeaturesSpec
+	case textFieldTemporalFeatures:
+		return m.temporalFeaturesSpec
+	case textFieldClusterFeatures:
+		return m.clusterFeaturesSpec
+	case textFieldMediationFeatures:
+		return m.mediationFeaturesSpec
+	case textFieldModerationFeatures:
+		return m.moderationFeaturesSpec
 	case textFieldItpcConditionColumn:
 		return m.itpcConditionColumn
 	case textFieldItpcConditionValues:
@@ -505,6 +519,20 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.correlationsTargetColumn = strings.TrimSpace(value)
 	case textFieldCorrelationsTypes:
 		m.correlationsTypesSpec = strings.Join(strings.Fields(value), "")
+	case textFieldCorrelationsFeatures:
+		m.correlationsFeaturesSpec = strings.Join(strings.Fields(value), "")
+	case textFieldPainSensitivityFeatures:
+		m.painSensitivityFeaturesSpec = strings.Join(strings.Fields(value), "")
+	case textFieldConditionFeatures:
+		m.conditionFeaturesSpec = strings.Join(strings.Fields(value), "")
+	case textFieldTemporalFeatures:
+		m.temporalFeaturesSpec = strings.Join(strings.Fields(value), "")
+	case textFieldClusterFeatures:
+		m.clusterFeaturesSpec = strings.Join(strings.Fields(value), "")
+	case textFieldMediationFeatures:
+		m.mediationFeaturesSpec = strings.Join(strings.Fields(value), "")
+	case textFieldModerationFeatures:
+		m.moderationFeaturesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldItpcConditionColumn:
 		m.itpcConditionColumn = strings.TrimSpace(value)
 	case textFieldItpcConditionValues:

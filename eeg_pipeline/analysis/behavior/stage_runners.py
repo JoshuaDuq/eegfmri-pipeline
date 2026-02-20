@@ -20,6 +20,7 @@ def build_stage_runners_impl(
     stage_regression_fn: Callable[[Any, Any], Any],
     stage_models_fn: Callable[[Any, Any], Any],
     stage_stability_fn: Callable[[Any, Any], Any],
+    stage_icc_fn: Callable[[Any, Any], Any],
     stage_consistency_fn: Callable[[Any, Any, Any], Any],
     stage_influence_fn: Callable[[Any, Any, Any], Any],
     stage_condition_column_fn: Callable[[Any, Any], Any],
@@ -67,6 +68,7 @@ def build_stage_runners_impl(
         "regression": lambda ctx, config, outputs: stage_regression_fn(ctx, config),
         "models": lambda ctx, config, outputs: stage_models_fn(ctx, config),
         "stability": lambda ctx, config, outputs: stage_stability_fn(ctx, config),
+        "icc": lambda ctx, config, outputs: stage_icc_fn(ctx, config),
         "consistency": lambda ctx, config, outputs: stage_consistency_fn(
             ctx, config, build_results_from_outputs_fn(outputs)
         ),
@@ -109,6 +111,7 @@ def build_stage_runners_from_namespace_impl(
         stage_regression_fn=ns["stage_regression"],
         stage_models_fn=ns["stage_models"],
         stage_stability_fn=ns["stage_stability"],
+        stage_icc_fn=ns["stage_icc"],
         stage_consistency_fn=ns["stage_consistency"],
         stage_influence_fn=ns["stage_influence"],
         stage_condition_column_fn=ns["stage_condition_column"],

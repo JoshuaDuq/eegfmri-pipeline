@@ -41,6 +41,7 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "regression",
     "models",
     "stability",
+    "icc",
     "consistency",
     "influence",
     "report",

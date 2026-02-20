@@ -270,6 +270,9 @@ def perm_pval_simple(
     x_array = np.asarray(x).ravel()
     y_array = np.asarray(y).ravel()
     valid = np.isfinite(x_array) & np.isfinite(y_array)
+    if groups is not None:
+        valid = valid & pd.notna(groups)
+        
     x_valid = x_array[valid]
     y_valid = y_array[valid]
     groups_valid = groups[valid] if groups is not None else None
@@ -327,7 +330,11 @@ def perm_pval_partial_freedman_lane(
     """
     groups_series = _align_groups_to_dataframe(groups, x.index)
     
-    df = pd.concat([x.rename("x"), y.rename("y"), Z], axis=1).dropna()
+    concat_list = [x.rename("x"), y.rename("y"), Z]
+    if groups_series is not None:
+        concat_list.append(groups_series.rename("__group__"))
+        
+    df = pd.concat(concat_list, axis=1).dropna()
     constants = get_statistics_constants(config)
     min_samples = constants.get("min_samples_for_correlation", 5)
     
@@ -337,7 +344,7 @@ def perm_pval_partial_freedman_lane(
     if not has_sufficient_samples or not has_valid_permutations:
         return np.nan
     
-    groups_array = _subset_groups_after_dropna(groups_series, df.index)
+    groups_array = df["__group__"].to_numpy() if groups_series is not None else None
     
     intercept = np.ones(len(df))
     x_values, y_values, z_values = _prepare_ranked_data(df, Z.columns, method)
@@ -541,6 +548,9 @@ def perm_pval_mean_difference(
         raise ValueError("values and labels must have same length")
 
     finite = np.isfinite(values)
+    if groups is not None:
+        finite = finite & pd.notna(groups)
+        
     values = values[finite]
     labels = labels[finite]
     groups_use = groups[finite] if groups is not None else None

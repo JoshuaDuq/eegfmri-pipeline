@@ -434,8 +434,6 @@ def time_generalization_regression(
                     continue
                 
                 train_feat_i_clean = train_feat_i_clean[:, col_mask]
-                imputer = SimpleImputer(strategy='mean')
-                train_feat_i_clean = imputer.fit_transform(train_feat_i_clean)
                 groups_train_i = groups_arr[train_idx_f][finite_mask_train]
                 y_train_i = y_train[finite_mask_train]
 
@@ -450,7 +448,7 @@ def time_generalization_regression(
                             n_splits_inner = min(5, n_unique_groups)
                             inner_cv = GroupKFold(n_splits=n_splits_inner)
                             grid = GridSearchCV(
-                                estimator=Pipeline([("scale", StandardScaler()), ("ridge", Ridge())]),
+                                estimator=Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge())]),
                                 param_grid={"ridge__alpha": alpha_grid},
                                 scoring="r2",
                                 cv=inner_cv,
@@ -465,7 +463,7 @@ def time_generalization_regression(
 
                 if model is None:
                     default_alpha = config.get("machine_learning.analysis.time_generalization.default_alpha", 1.0)
-                    model = Pipeline([("scale", StandardScaler()), ("ridge", Ridge(alpha=default_alpha))])
+                    model = Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge(alpha=default_alpha))])
                     try:
                         model.fit(train_feat_i_clean, y_train_i)
                     except Exception:
@@ -479,7 +477,6 @@ def time_generalization_regression(
                     
                     test_feat_j_clean = test_feat_j[finite_mask_test].copy()
                     test_feat_j_clean = test_feat_j_clean[:, col_mask]
-                    test_feat_j_clean = imputer.transform(test_feat_j_clean)
                     
                     try:
                         y_pred = model.predict(test_feat_j_clean)

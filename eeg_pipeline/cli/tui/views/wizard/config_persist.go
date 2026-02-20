@@ -1072,6 +1072,14 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["microstatesAssignFromGfpPeaks"] = m.microstatesAssignFromGfpPeaks
 
 	// Behavior Statistics
+	cfg["behaviorValidateOnly"] = m.behaviorValidateOnly
+	cfg["correlationsFeaturesSpec"] = m.correlationsFeaturesSpec
+	cfg["painSensitivityFeaturesSpec"] = m.painSensitivityFeaturesSpec
+	cfg["conditionFeaturesSpec"] = m.conditionFeaturesSpec
+	cfg["temporalFeaturesSpec"] = m.temporalFeaturesSpec
+	cfg["clusterFeaturesSpec"] = m.clusterFeaturesSpec
+	cfg["mediationFeaturesSpec"] = m.mediationFeaturesSpec
+	cfg["moderationFeaturesSpec"] = m.moderationFeaturesSpec
 	cfg["behaviorStatsTempControl"] = m.behaviorStatsTempControl
 	cfg["behaviorStatsAllowIIDTrials"] = m.behaviorStatsAllowIIDTrials
 	cfg["behaviorStatsHierarchicalFDR"] = m.behaviorStatsHierarchicalFDR
@@ -2258,6 +2266,14 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.microstatesAssignFromGfpPeaks = getBool("microstatesAssignFromGfpPeaks", m.microstatesAssignFromGfpPeaks)
 
 	// Behavior Statistics
+	m.behaviorValidateOnly = getBool("behaviorValidateOnly", m.behaviorValidateOnly)
+	m.correlationsFeaturesSpec = getString("correlationsFeaturesSpec", m.correlationsFeaturesSpec)
+	m.painSensitivityFeaturesSpec = getString("painSensitivityFeaturesSpec", m.painSensitivityFeaturesSpec)
+	m.conditionFeaturesSpec = getString("conditionFeaturesSpec", m.conditionFeaturesSpec)
+	m.temporalFeaturesSpec = getString("temporalFeaturesSpec", m.temporalFeaturesSpec)
+	m.clusterFeaturesSpec = getString("clusterFeaturesSpec", m.clusterFeaturesSpec)
+	m.mediationFeaturesSpec = getString("mediationFeaturesSpec", m.mediationFeaturesSpec)
+	m.moderationFeaturesSpec = getString("moderationFeaturesSpec", m.moderationFeaturesSpec)
 	m.behaviorStatsTempControl = getInt("behaviorStatsTempControl", m.behaviorStatsTempControl)
 	m.behaviorStatsAllowIIDTrials = getBool("behaviorStatsAllowIIDTrials", m.behaviorStatsAllowIIDTrials)
 	m.behaviorStatsHierarchicalFDR = getBool("behaviorStatsHierarchicalFDR", m.behaviorStatsHierarchicalFDR)

@@ -556,6 +556,12 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--feature-files")
 			parts = append(parts, featureFiles...)
 		}
+
+		bands := m.SelectedBands()
+		if len(bands) > 0 && len(bands) < len(m.bands) {
+			parts = append(parts, "--bands")
+			parts = append(parts, bands...)
+		}
 	} else if m.Pipeline == types.PipelinePreprocessing {
 		mode := m.modeOptions[m.modeIndex]
 		if mode == "partial" {

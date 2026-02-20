@@ -9,6 +9,21 @@ import (
 
 func (m Model) buildBehaviorAdvancedArgs() []string {
 	var args []string
+	appendBoolPair := func(enabled bool, onFlag, offFlag string) {
+		if enabled {
+			args = append(args, onFlag)
+		} else {
+			args = append(args, offFlag)
+		}
+	}
+	appendFeatureSpec := func(flag, spec string) {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			return
+		}
+		args = append(args, flag)
+		args = append(args, splitCSVList(spec)...)
+	}
 
 	// General / statistics
 	if m.correlationMethod != "spearman" {
@@ -39,24 +54,21 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--min-samples", fmt.Sprintf("%d", m.behaviorMinSamples))
 	}
 
-	if !m.controlTemperature {
-		args = append(args, "--no-control-temperature")
-	}
-
-	if !m.controlTrialOrder {
-		args = append(args, "--no-control-trial-order")
-	}
+	appendBoolPair(m.controlTemperature, "--control-temperature", "--no-control-temperature")
+	appendBoolPair(m.controlTrialOrder, "--control-trial-order", "--no-control-trial-order")
 
 	// Run adjustment (subject-level; optional)
+	appendBoolPair(m.runAdjustmentEnabled, "--run-adjustment", "--no-run-adjustment")
 	if m.runAdjustmentEnabled {
-		args = append(args, "--run-adjustment")
 		col := strings.TrimSpace(m.runAdjustmentColumn)
 		if col != "" && col != "run_id" {
 			args = append(args, "--run-adjustment-column", col)
 		}
-		if !m.runAdjustmentIncludeInCorrelations {
-			args = append(args, "--no-run-adjustment-include-in-correlations")
-		}
+		appendBoolPair(
+			m.runAdjustmentIncludeInCorrelations,
+			"--run-adjustment-include-in-correlations",
+			"--no-run-adjustment-include-in-correlations",
+		)
 		if m.runAdjustmentMaxDummies != 20 {
 			args = append(args, "--run-adjustment-max-dummies", fmt.Sprintf("%d", m.runAdjustmentMaxDummies))
 		}
@@ -66,14 +78,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--fdr-alpha", fmt.Sprintf("%.4f", m.fdrAlpha))
 	}
 
-	if !m.behaviorComputeChangeScores {
-		args = append(args, "--no-compute-change-scores")
-	}
-	if !m.behaviorComputeLosoStability {
-		args = append(args, "--no-loso-stability")
-	}
-	if m.behaviorComputeBayesFactors {
-		args = append(args, "--compute-bayes-factors")
+	appendBoolPair(m.behaviorComputeChangeScores, "--compute-change-scores", "--no-compute-change-scores")
+	appendBoolPair(m.behaviorComputeLosoStability, "--loso-stability", "--no-loso-stability")
+	appendBoolPair(m.behaviorComputeBayesFactors, "--compute-bayes-factors", "--no-compute-bayes-factors")
+	if m.behaviorValidateOnly {
+		args = append(args, "--validate-only")
 	}
 
 	// Output options
@@ -87,20 +96,15 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.trialTableFormat >= 0 && m.trialTableFormat < len(formats) && m.trialTableFormat != 0 {
 			args = append(args, "--trial-table-format", formats[m.trialTableFormat])
 		}
-		if !m.trialTableAddLagFeatures {
-			args = append(args, "--no-trial-table-add-lag-features")
-		}
+		appendBoolPair(m.trialTableAddLagFeatures, "--trial-table-add-lag-features", "--no-trial-table-add-lag-features")
 		if m.trialOrderMaxMissingFraction != 0.1 {
 			args = append(args, "--trial-order-max-missing-fraction", fmt.Sprintf("%.3f", m.trialOrderMaxMissingFraction))
 		}
 
-		if !m.featureSummariesEnabled {
-			args = append(args, "--no-feature-summaries")
-		}
+		appendBoolPair(m.featureSummariesEnabled, "--feature-summaries", "--no-feature-summaries")
 
-		if !m.painResidualEnabled {
-			args = append(args, "--no-pain-residual")
-		} else {
+		appendBoolPair(m.painResidualEnabled, "--pain-residual", "--no-pain-residual")
+		if m.painResidualEnabled {
 			methods := []string{"spline", "poly"}
 			if m.painResidualMethod >= 0 && m.painResidualMethod < len(methods) && m.painResidualMethod != 0 {
 				args = append(args, "--pain-residual-method", methods[m.painResidualMethod])
@@ -117,9 +121,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			}
 		}
 
-		if !m.painResidualModelCompareEnabled {
-			args = append(args, "--no-pain-residual-model-compare")
-		}
+		appendBoolPair(
+			m.painResidualModelCompareEnabled,
+			"--pain-residual-model-compare",
+			"--no-pain-residual-model-compare",
+		)
 		if m.painResidualModelCompareMinSamples != 10 {
 			args = append(args, "--pain-residual-model-compare-min-samples", fmt.Sprintf("%d", m.painResidualModelCompareMinSamples))
 		}
@@ -127,9 +133,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--pain-residual-model-compare-poly-degrees")
 			args = append(args, splitCSVList(m.painResidualModelComparePolyDegrees)...)
 		}
-		if !m.painResidualBreakpointEnabled {
-			args = append(args, "--no-pain-residual-breakpoint-test")
-		}
+		appendBoolPair(
+			m.painResidualBreakpointEnabled,
+			"--pain-residual-breakpoint-test",
+			"--no-pain-residual-breakpoint-test",
+		)
 		if m.painResidualBreakpointMinSamples != 12 {
 			args = append(args, "--pain-residual-breakpoint-min-samples", fmt.Sprintf("%d", m.painResidualBreakpointMinSamples))
 		}
@@ -143,6 +151,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--pain-residual-breakpoint-quantile-high", fmt.Sprintf("%.3f", m.painResidualBreakpointQhigh))
 		}
 
+		if m.painResidualEnabled {
+			appendBoolPair(m.painResidualCrossfitEnabled, "--pain-residual-crossfit", "--no-pain-residual-crossfit")
+		}
 		if m.painResidualEnabled && m.painResidualCrossfitEnabled {
 			args = append(args, "--pain-residual-crossfit")
 			if strings.TrimSpace(m.painResidualCrossfitGroupColumn) != "" {
@@ -171,9 +182,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			if m.featureQCMinVariance != 1e-10 {
 				args = append(args, "--feature-qc-min-variance", fmt.Sprintf("%.6e", m.featureQCMinVariance))
 			}
-			if !m.featureQCCheckWithinRunVariance {
-				args = append(args, "--no-feature-qc-check-within-run-variance")
-			}
+			appendBoolPair(
+				m.featureQCCheckWithinRunVariance,
+				"--feature-qc-check-within-run-variance",
+				"--no-feature-qc-check-within-run-variance",
+			)
 		} else {
 			args = append(args, "--no-feature-qc-enabled")
 		}
@@ -185,9 +198,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.regressionOutcome >= 0 && m.regressionOutcome < len(outcomes) && m.regressionOutcome != 0 {
 			args = append(args, "--regression-outcome", outcomes[m.regressionOutcome])
 		}
-		if !m.regressionIncludeTemperature {
-			args = append(args, "--no-regression-include-temperature")
-		}
+		appendBoolPair(
+			m.regressionIncludeTemperature,
+			"--regression-include-temperature",
+			"--no-regression-include-temperature",
+		)
 		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.regressionTempControl >= 0 && m.regressionTempControl < len(tempCtrl) && m.regressionTempControl != 0 {
 			args = append(args, "--regression-temperature-control", tempCtrl[m.regressionTempControl])
@@ -200,21 +215,31 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 				args = append(args, "--regression-temperature-spline-min-samples", fmt.Sprintf("%d", m.regressionTempSplineMinN))
 			}
 		}
-		if !m.regressionIncludeTrialOrder {
-			args = append(args, "--no-regression-include-trial-order")
-		}
-		if m.regressionIncludePrev {
-			args = append(args, "--regression-include-prev-terms")
-		}
-		if !m.regressionIncludeRunBlock {
-			args = append(args, "--no-regression-include-run-block")
-		}
-		if !m.regressionIncludeInteraction {
-			args = append(args, "--no-regression-include-interaction")
-		}
-		if !m.regressionStandardize {
-			args = append(args, "--no-regression-standardize")
-		}
+		appendBoolPair(
+			m.regressionIncludeTrialOrder,
+			"--regression-include-trial-order",
+			"--no-regression-include-trial-order",
+		)
+		appendBoolPair(
+			m.regressionIncludePrev,
+			"--regression-include-prev-terms",
+			"--no-regression-include-prev-terms",
+		)
+		appendBoolPair(
+			m.regressionIncludeRunBlock,
+			"--regression-include-run-block",
+			"--no-regression-include-run-block",
+		)
+		appendBoolPair(
+			m.regressionIncludeInteraction,
+			"--regression-include-interaction",
+			"--no-regression-include-interaction",
+		)
+		appendBoolPair(
+			m.regressionStandardize,
+			"--regression-standardize",
+			"--no-regression-standardize",
+		)
 		if m.regressionMinSamples != 15 {
 			args = append(args, "--regression-min-samples", fmt.Sprintf("%d", m.regressionMinSamples))
 		}
@@ -228,9 +253,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Models
 	if m.isComputationSelected("models") {
-		if !m.modelsIncludeTemperature {
-			args = append(args, "--no-models-include-temperature")
-		}
+		appendBoolPair(
+			m.modelsIncludeTemperature,
+			"--models-include-temperature",
+			"--no-models-include-temperature",
+		)
 		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.modelsTempControl >= 0 && m.modelsTempControl < len(tempCtrl) && m.modelsTempControl != 0 {
 			args = append(args, "--models-temperature-control", tempCtrl[m.modelsTempControl])
@@ -243,21 +270,31 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 				args = append(args, "--models-temperature-spline-min-samples", fmt.Sprintf("%d", m.modelsTempSplineMinN))
 			}
 		}
-		if !m.modelsIncludeTrialOrder {
-			args = append(args, "--no-models-include-trial-order")
-		}
-		if m.modelsIncludePrev {
-			args = append(args, "--models-include-prev-terms")
-		}
-		if !m.modelsIncludeRunBlock {
-			args = append(args, "--no-models-include-run-block")
-		}
-		if !m.modelsIncludeInteraction {
-			args = append(args, "--no-models-include-interaction")
-		}
-		if !m.modelsStandardize {
-			args = append(args, "--no-models-standardize")
-		}
+		appendBoolPair(
+			m.modelsIncludeTrialOrder,
+			"--models-include-trial-order",
+			"--no-models-include-trial-order",
+		)
+		appendBoolPair(
+			m.modelsIncludePrev,
+			"--models-include-prev-terms",
+			"--no-models-include-prev-terms",
+		)
+		appendBoolPair(
+			m.modelsIncludeRunBlock,
+			"--models-include-run-block",
+			"--no-models-include-run-block",
+		)
+		appendBoolPair(
+			m.modelsIncludeInteraction,
+			"--models-include-interaction",
+			"--no-models-include-interaction",
+		)
+		appendBoolPair(
+			m.modelsStandardize,
+			"--models-standardize",
+			"--no-models-standardize",
+		)
 		if m.modelsMinSamples != 20 {
 			args = append(args, "--models-min-samples", fmt.Sprintf("%d", m.modelsMinSamples))
 		}
@@ -305,9 +342,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.modelsPrimaryUnit == 1 {
 			args = append(args, "--models-primary-unit", "run_mean")
 		}
-		if m.modelsForceTrialIIDAsymptotic {
-			args = append(args, "--models-force-trial-iid-asymptotic")
-		}
+		appendBoolPair(
+			m.modelsForceTrialIIDAsymptotic,
+			"--models-force-trial-iid-asymptotic",
+			"--no-models-force-trial-iid-asymptotic",
+		)
 	}
 
 	// Stability
@@ -323,9 +362,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.stabilityGroupColumn > 0 && m.stabilityGroupColumn < len(groupCol) {
 			args = append(args, "--stability-group-column", groupCol[m.stabilityGroupColumn])
 		}
-		if !m.stabilityPartialTemp {
-			args = append(args, "--no-stability-partial-temperature")
-		}
+		appendBoolPair(
+			m.stabilityPartialTemp,
+			"--stability-partial-temperature",
+			"--no-stability-partial-temperature",
+		)
 		if m.stabilityMaxFeatures != 50 {
 			args = append(args, "--stability-max-features", fmt.Sprintf("%d", m.stabilityMaxFeatures))
 		}
@@ -338,8 +379,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// Consistency
-	if m.isComputationSelected("consistency") && !m.consistencyEnabled {
-		args = append(args, "--no-consistency")
+	if m.isComputationSelected("consistency") {
+		appendBoolPair(m.consistencyEnabled, "--consistency", "--no-consistency")
 	}
 
 	// Influence
@@ -361,9 +402,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.influenceMaxFeatures != 20 {
 			args = append(args, "--influence-max-features", fmt.Sprintf("%d", m.influenceMaxFeatures))
 		}
-		if !m.influenceIncludeTemperature {
-			args = append(args, "--no-influence-include-temperature")
-		}
+		appendBoolPair(
+			m.influenceIncludeTemperature,
+			"--influence-include-temperature",
+			"--no-influence-include-temperature",
+		)
 		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.influenceTempControl >= 0 && m.influenceTempControl < len(tempCtrl) && m.influenceTempControl != 0 {
 			args = append(args, "--influence-temperature-control", tempCtrl[m.influenceTempControl])
@@ -376,18 +419,26 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 				args = append(args, "--influence-temperature-spline-min-samples", fmt.Sprintf("%d", m.influenceTempSplineMinN))
 			}
 		}
-		if !m.influenceIncludeTrialOrder {
-			args = append(args, "--no-influence-include-trial-order")
-		}
-		if !m.influenceIncludeRunBlock {
-			args = append(args, "--no-influence-include-run-block")
-		}
-		if m.influenceIncludeInteraction {
-			args = append(args, "--influence-include-interaction")
-		}
-		if !m.influenceStandardize {
-			args = append(args, "--no-influence-standardize")
-		}
+		appendBoolPair(
+			m.influenceIncludeTrialOrder,
+			"--influence-include-trial-order",
+			"--no-influence-include-trial-order",
+		)
+		appendBoolPair(
+			m.influenceIncludeRunBlock,
+			"--influence-include-run-block",
+			"--no-influence-include-run-block",
+		)
+		appendBoolPair(
+			m.influenceIncludeInteraction,
+			"--influence-include-interaction",
+			"--no-influence-include-interaction",
+		)
+		appendBoolPair(
+			m.influenceStandardize,
+			"--influence-standardize",
+			"--no-influence-standardize",
+		)
 		if m.influenceCooksThreshold > 0 {
 			args = append(args, "--influence-cooks-threshold", fmt.Sprintf("%.6f", m.influenceCooksThreshold))
 		}
@@ -398,6 +449,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Correlations (trial-table)
 	if m.isComputationSelected("correlations") {
+		appendFeatureSpec("--correlations-features", m.correlationsFeaturesSpec)
 		if strings.TrimSpace(m.correlationsTypesSpec) != "" && m.correlationsTypesSpec != "partial_cov_temp" {
 			args = append(args, "--correlations-types")
 			args = append(args, splitCSVList(m.correlationsTypesSpec)...)
@@ -405,12 +457,16 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.correlationsPrimaryUnit == 1 {
 			args = append(args, "--correlations-primary-unit", "run_mean")
 		}
-		if m.correlationsPermutationPrimary {
-			args = append(args, "--correlations-permutation-primary")
-		}
-		if m.correlationsUseCrossfitResidual {
-			args = append(args, "--correlations-use-crossfit-pain-residual")
-		}
+		appendBoolPair(
+			m.correlationsPermutationPrimary,
+			"--correlations-permutation-primary",
+			"--no-correlations-permutation-primary",
+		)
+		appendBoolPair(
+			m.correlationsUseCrossfitResidual,
+			"--correlations-use-crossfit-pain-residual",
+			"--no-correlations-use-crossfit-pain-residual",
+		)
 		// Always pass explicit target selection (possibly empty) so the backend
 		// does not silently fall back to built-in defaults.
 		args = append(args, "--correlations-target-column", strings.TrimSpace(m.correlationsTargetColumn))
@@ -418,22 +474,30 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Multilevel correlations (group-level)
 	if m.isComputationSelected("multilevel_correlations") {
-		if !m.groupLevelBlockPermutation {
-			args = append(args, "--no-group-level-block-permutation")
-		}
+		appendBoolPair(
+			m.groupLevelBlockPermutation,
+			"--group-level-block-permutation",
+			"--no-group-level-block-permutation",
+		)
 		targets := []string{"rating", "pain_residual", "temperature"}
 		if m.groupLevelTarget >= 0 && m.groupLevelTarget < len(targets) && m.groupLevelTarget != 0 {
 			args = append(args, "--group-level-target", targets[m.groupLevelTarget])
 		}
-		if !m.groupLevelControlTemperature {
-			args = append(args, "--no-group-level-control-temperature")
-		}
-		if !m.groupLevelControlTrialOrder {
-			args = append(args, "--no-group-level-control-trial-order")
-		}
-		if !m.groupLevelControlRunEffects {
-			args = append(args, "--no-group-level-control-run-effects")
-		}
+		appendBoolPair(
+			m.groupLevelControlTemperature,
+			"--group-level-control-temperature",
+			"--no-group-level-control-temperature",
+		)
+		appendBoolPair(
+			m.groupLevelControlTrialOrder,
+			"--group-level-control-trial-order",
+			"--no-group-level-control-trial-order",
+		)
+		appendBoolPair(
+			m.groupLevelControlRunEffects,
+			"--group-level-control-run-effects",
+			"--no-group-level-control-run-effects",
+		)
 		if m.groupLevelMaxRunDummies != 20 {
 			args = append(args, "--group-level-max-run-dummies", fmt.Sprintf("%d", m.groupLevelMaxRunDummies))
 		}
@@ -446,6 +510,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Pain sensitivity
 	if m.isComputationSelected("pain_sensitivity") {
+		appendFeatureSpec("--pain-sensitivity-features", m.painSensitivityFeaturesSpec)
 		if m.painSensitivityMinTrials > 0 {
 			args = append(args, "--pain-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
 		}
@@ -453,6 +518,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Condition
 	if m.isComputationSelected("condition") {
+		appendFeatureSpec("--condition-features", m.conditionFeaturesSpec)
 		if strings.TrimSpace(m.conditionCompareColumn) != "" {
 			args = append(args, "--condition-compare-column", strings.TrimSpace(m.conditionCompareColumn))
 		}
@@ -470,12 +536,12 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.conditionWindowPrimaryUnit == 1 {
 			args = append(args, "--condition-window-primary-unit", "run_mean")
 		}
-		if m.conditionPermutationPrimary {
-			args = append(args, "--condition-permutation-primary")
-		}
-		if !m.conditionFailFast {
-			args = append(args, "--no-condition-fail-fast")
-		}
+		appendBoolPair(
+			m.conditionPermutationPrimary,
+			"--condition-permutation-primary",
+			"--no-condition-permutation-primary",
+		)
+		appendBoolPair(m.conditionFailFast, "--condition-fail-fast", "--no-condition-fail-fast")
 		if m.conditionEffectThreshold != 0.5 {
 			args = append(args, "--condition-effect-threshold", fmt.Sprintf("%.4f", m.conditionEffectThreshold))
 		}
@@ -488,6 +554,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Temporal
 	if m.isComputationSelected("temporal") {
+		appendFeatureSpec("--temporal-features", m.temporalFeaturesSpec)
 		if m.temporalResolutionMs != 50 {
 			args = append(args, "--temporal-time-resolution-ms", fmt.Sprintf("%d", m.temporalResolutionMs))
 		}
@@ -503,9 +570,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if strings.TrimSpace(m.temporalTargetColumn) != "" {
 			args = append(args, "--temporal-target-column", strings.TrimSpace(m.temporalTargetColumn))
 		}
-		if !m.temporalSplitByCondition {
-			args = append(args, "--no-temporal-split-by-condition")
-		}
+		appendBoolPair(
+			m.temporalSplitByCondition,
+			"--temporal-split-by-condition",
+			"--no-temporal-split-by-condition",
+		)
 		if strings.TrimSpace(m.temporalConditionColumn) != "" {
 			args = append(args, "--temporal-condition-column", strings.TrimSpace(m.temporalConditionColumn))
 		}
@@ -514,27 +583,39 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			spec := strings.ReplaceAll(m.temporalConditionValues, ",", " ")
 			args = append(args, splitSpaceList(spec)...)
 		}
-		if !m.temporalIncludeROIAverages {
-			args = append(args, "--no-temporal-include-roi-averages")
-		}
-		if !m.temporalIncludeTFGrid {
-			args = append(args, "--no-temporal-include-tf-grid")
-		}
+		appendBoolPair(
+			m.temporalIncludeROIAverages,
+			"--temporal-include-roi-averages",
+			"--no-temporal-include-roi-averages",
+		)
+		appendBoolPair(
+			m.temporalIncludeTFGrid,
+			"--temporal-include-tf-grid",
+			"--no-temporal-include-tf-grid",
+		)
 		// Temporal feature selection
-		if !m.temporalFeaturePowerEnabled {
-			args = append(args, "--no-temporal-feature-power")
-		}
-		if m.temporalFeatureITPCEnabled {
-			args = append(args, "--temporal-feature-itpc")
-		}
-		if m.temporalFeatureERDSEnabled {
-			args = append(args, "--temporal-feature-erds")
-		}
+		appendBoolPair(
+			m.temporalFeaturePowerEnabled,
+			"--temporal-feature-power",
+			"--no-temporal-feature-power",
+		)
+		appendBoolPair(
+			m.temporalFeatureITPCEnabled,
+			"--temporal-feature-itpc",
+			"--no-temporal-feature-itpc",
+		)
+		appendBoolPair(
+			m.temporalFeatureERDSEnabled,
+			"--temporal-feature-erds",
+			"--no-temporal-feature-erds",
+		)
 		// ITPC-specific options (only if ITPC is selected in step 3)
 		if m.featureFileSelected["itpc"] || m.temporalFeatureITPCEnabled {
-			if !m.temporalITPCBaselineCorrection {
-				args = append(args, "--no-temporal-itpc-baseline-correction")
-			}
+			appendBoolPair(
+				m.temporalITPCBaselineCorrection,
+				"--temporal-itpc-baseline-correction",
+				"--no-temporal-itpc-baseline-correction",
+			)
 			if m.temporalITPCBaselineMin != -0.5 {
 				args = append(args, "--temporal-itpc-baseline-min", fmt.Sprintf("%.2f", m.temporalITPCBaselineMin))
 			}
@@ -559,6 +640,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Cluster-specific options
 	if m.isComputationSelected("cluster") {
+		appendFeatureSpec("--cluster-features", m.clusterFeaturesSpec)
 		if m.clusterThreshold != 0.05 {
 			args = append(args, "--cluster-threshold", fmt.Sprintf("%.3f", m.clusterThreshold))
 		}
@@ -580,6 +662,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Mediation-specific options
 	if m.isComputationSelected("mediation") {
+		appendFeatureSpec("--mediation-features", m.mediationFeaturesSpec)
 		if m.mediationBootstrap != 1000 {
 			args = append(args, "--mediation-bootstrap", fmt.Sprintf("%d", m.mediationBootstrap))
 		}
@@ -598,6 +681,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Moderation-specific options
 	if m.isComputationSelected("moderation") {
+		appendFeatureSpec("--moderation-features", m.moderationFeaturesSpec)
 		if m.moderationMinSamples != 15 {
 			args = append(args, "--moderation-min-samples", fmt.Sprintf("%d", m.moderationMinSamples))
 		}
@@ -622,24 +706,28 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// Output options
-	if m.alsoSaveCsv {
-		args = append(args, "--also-save-csv")
-	}
+	appendBoolPair(m.alsoSaveCsv, "--also-save-csv", "--no-also-save-csv")
 
 	// Behavior Statistics
 	tempControls := []string{"none", "linear", "spline"}
 	if m.behaviorStatsTempControl != 0 {
 		args = append(args, "--stats-temp-control", tempControls[m.behaviorStatsTempControl%len(tempControls)])
 	}
-	if m.behaviorStatsAllowIIDTrials {
-		args = append(args, "--stats-allow-iid-trials")
-	}
-	if m.behaviorStatsHierarchicalFDR {
-		args = append(args, "--stats-hierarchical-fdr")
-	}
-	if m.behaviorStatsComputeReliability {
-		args = append(args, "--stats-compute-reliability")
-	}
+	appendBoolPair(
+		m.behaviorStatsAllowIIDTrials,
+		"--stats-allow-iid-trials",
+		"--no-stats-allow-iid-trials",
+	)
+	appendBoolPair(
+		m.behaviorStatsHierarchicalFDR,
+		"--stats-hierarchical-fdr",
+		"--no-stats-hierarchical-fdr",
+	)
+	appendBoolPair(
+		m.behaviorStatsComputeReliability,
+		"--stats-compute-reliability",
+		"--no-stats-compute-reliability",
+	)
 	permSchemes := []string{"shuffle", "circular_shift"}
 	if m.behaviorPermScheme != 0 {
 		args = append(args, "--perm-scheme", permSchemes[m.behaviorPermScheme%len(permSchemes)])
@@ -647,9 +735,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	if strings.TrimSpace(m.behaviorPermGroupColumnPreference) != "" {
 		args = append(args, "--perm-group-column-preference", strings.TrimSpace(m.behaviorPermGroupColumnPreference))
 	}
-	if m.behaviorExcludeNonTrialwiseFeatures {
-		args = append(args, "--exclude-non-trialwise-features")
-	}
+	appendBoolPair(
+		m.behaviorExcludeNonTrialwiseFeatures,
+		"--exclude-non-trialwise-features",
+		"--no-exclude-non-trialwise-features",
+	)
 
 	// Global Statistics & Validation
 	if m.globalNBootstrap != 1000 {
@@ -663,10 +753,12 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.clusterCorrectionMinClusterSize != 2 {
 			args = append(args, "--cluster-correction-min-cluster-size", fmt.Sprintf("%d", m.clusterCorrectionMinClusterSize))
 		}
-		tails := []string{"two-tailed", "upper", "lower"}
+		tails := []string{"0", "1", "-1"}
 		if m.clusterCorrectionTailGlobal != 0 {
 			args = append(args, "--cluster-correction-tail", tails[m.clusterCorrectionTailGlobal%len(tails)])
 		}
+	} else {
+		args = append(args, "--no-cluster-correction-enabled")
 	}
 	if m.validationMinEpochs != 5 {
 		args = append(args, "--validation-min-epochs", fmt.Sprintf("%d", m.validationMinEpochs))

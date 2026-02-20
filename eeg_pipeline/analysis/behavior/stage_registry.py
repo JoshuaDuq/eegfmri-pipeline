@@ -200,6 +200,7 @@ class _ResultsFromOutputs:
         self.regression = outputs.get("regression")
         self.models = outputs.get("models")
         self.stability = outputs.get("stability")
+        self.icc = outputs.get("icc")
         self.consistency = outputs.get("consistency")
         self.influence = outputs.get("influence")
         self.trial_table_path = outputs.get("trial_table")
@@ -272,6 +273,7 @@ def config_to_stage_names(pipeline_config: Any) -> List[str]:
         stages.append("models")
     if getattr(pipeline_config, "run_stability", False):
         stages.append("stability")
+        stages.append("icc")
     if getattr(pipeline_config, "run_correlations", True):
         stages.extend(
             [
@@ -419,6 +421,13 @@ _STAGE_SPECS = [
         description="Groupwise stability",
         requires=(StageRegistry.RESOURCE_TRIAL_TABLE,),
         produces=("stability",),
+        group=StageRegistry.GROUP_CORRELATIONS,
+    ),
+    StageSpec(
+        name="icc",
+        description="Run-to-run feature reliability",
+        requires=(StageRegistry.RESOURCE_TRIAL_TABLE,),
+        produces=("icc",),
         group=StageRegistry.GROUP_CORRELATIONS,
     ),
     StageSpec(

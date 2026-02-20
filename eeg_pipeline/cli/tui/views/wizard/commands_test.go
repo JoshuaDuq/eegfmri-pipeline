@@ -712,6 +712,122 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 	}
 }
 
+func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		switch comp.Key {
+		case "trial_table", "correlations", "regression", "models", "validation", "condition":
+			m.computationSelected[i] = true
+		}
+	}
+
+	m.runAdjustmentEnabled = false
+	m.painResidualEnabled = true
+	m.painResidualCrossfitEnabled = false
+	m.regressionIncludePrev = false
+	m.modelsIncludePrev = false
+	m.modelsForceTrialIIDAsymptotic = false
+	m.influenceIncludeInteraction = false
+	m.correlationsPermutationPrimary = false
+	m.correlationsUseCrossfitResidual = false
+	m.conditionPermutationPrimary = false
+	m.behaviorStatsAllowIIDTrials = false
+	m.behaviorStatsHierarchicalFDR = false
+	m.behaviorStatsComputeReliability = false
+	m.behaviorExcludeNonTrialwiseFeatures = false
+	m.clusterCorrectionEnabled = false
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	expectedFlags := []string{
+		"--no-run-adjustment",
+		"--no-pain-residual-crossfit",
+		"--no-regression-include-prev-terms",
+		"--no-models-include-prev-terms",
+		"--no-models-force-trial-iid-asymptotic",
+		"--no-influence-include-interaction",
+		"--no-correlations-permutation-primary",
+		"--no-correlations-use-crossfit-pain-residual",
+		"--no-condition-permutation-primary",
+		"--no-stats-allow-iid-trials",
+		"--no-stats-hierarchical-fdr",
+		"--no-stats-compute-reliability",
+		"--no-exclude-non-trialwise-features",
+		"--no-cluster-correction-enabled",
+	}
+	for _, flag := range expectedFlags {
+		if !containsString(args, flag) {
+			t.Fatalf("expected %s in args, got: %#v", flag, args)
+		}
+	}
+}
+
+func TestBuildCommand_BehaviorComputeIncludesSelectedBands(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.modeOptions = []string{"compute", "visualize"}
+	m.modeIndex = 0
+	m.useDefaultAdvanced = true
+
+	for i := range m.bandSelected {
+		m.bandSelected[i] = false
+	}
+	for i, band := range m.bands {
+		if band.Key == "alpha" {
+			m.bandSelected[i] = true
+		}
+	}
+
+	cmd := m.BuildCommand()
+	if !strings.Contains(cmd, "--bands alpha") {
+		t.Fatalf("expected --bands alpha in command, got: %s", cmd)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		switch comp.Key {
+		case "correlations", "pain_sensitivity", "condition", "temporal", "cluster", "mediation", "moderation":
+			m.computationSelected[i] = true
+		}
+	}
+
+	m.behaviorValidateOnly = true
+	m.correlationsFeaturesSpec = "power,connectivity"
+	m.painSensitivityFeaturesSpec = "erp,itpc"
+	m.conditionFeaturesSpec = "spectral"
+	m.temporalFeaturesSpec = "power,erds"
+	m.clusterFeaturesSpec = "connectivity"
+	m.mediationFeaturesSpec = "quality"
+	m.moderationFeaturesSpec = "aperiodic,complexity"
+
+	args := m.buildBehaviorAdvancedArgs()
+	if !containsString(args, "--validate-only") {
+		t.Fatalf("expected --validate-only in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--correlations-features", "power", "connectivity"}) {
+		t.Fatalf("expected --correlations-features power connectivity in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--pain-sensitivity-features", "erp", "itpc"}) {
+		t.Fatalf("expected --pain-sensitivity-features erp itpc in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--condition-features", "spectral"}) {
+		t.Fatalf("expected --condition-features spectral in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--temporal-features", "power", "erds"}) {
+		t.Fatalf("expected --temporal-features power erds in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--cluster-features", "connectivity"}) {
+		t.Fatalf("expected --cluster-features connectivity in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--mediation-features", "quality"}) {
+		t.Fatalf("expected --mediation-features quality in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--moderation-features", "aperiodic", "complexity"}) {
+		t.Fatalf("expected --moderation-features aperiodic complexity in args, got: %#v", args)
+	}
+}
+
 func TestShouldSkipStep_PlottingRoiStepSkippedForBandPowerTopomapsOnly(t *testing.T) {
 	m := Model{}
 	m.Pipeline = types.PipelinePlotting

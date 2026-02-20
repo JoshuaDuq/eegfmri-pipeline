@@ -236,6 +236,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "LOSO Stability", m.boolToOnOff(m.behaviorComputeLosoStability), "leave-one-out stability"
 		case optComputeBayesFactors:
 			return "Bayes Factors", m.boolToOnOff(m.behaviorComputeBayesFactors), "optional BF reporting"
+		case optBehaviorValidateOnly:
+			return "Validate Only", m.boolToOnOff(m.behaviorValidateOnly), "load and validate without statistics"
 		case optFeatureQCEnabled:
 			return "Feature QC", m.boolToOnOff(m.featureQCEnabled), "pre-filter features (optional gating)"
 		case optFeatureQCMaxMissingPct:
@@ -745,6 +747,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.conditionCompareColumn)
 			}
 			return "Compare Values", val, hint
+		case optConditionFeatures:
+			val := m.conditionFeaturesSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(all)"
+			}
+			if m.editingText && m.editingTextField == textFieldConditionFeatures {
+				val = textDisplay
+			}
+			return "Feature Filters", val, "comma-separated feature families"
 		case optConditionMinTrials:
 			val := "unset"
 			if m.conditionMinTrials > 0 {
@@ -783,6 +794,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Min Trials", val, "0=unset"
+		case optPainSensitivityFeatures:
+			val := m.painSensitivityFeaturesSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(all)"
+			}
+			if m.editingText && m.editingTextField == textFieldPainSensitivityFeatures {
+				val = textDisplay
+			}
+			return "Feature Filters", val, "comma-separated feature families"
 
 		// Temporal
 		case optTemporalResolutionMs:
@@ -822,6 +842,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Target Column", val, hint
+		case optTemporalFeatures:
+			val := m.temporalFeaturesSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(all)"
+			}
+			if m.editingText && m.editingTextField == textFieldTemporalFeatures {
+				val = textDisplay
+			}
+			return "Feature Filters", val, "comma-separated feature families"
 		case optTemporalSplitByCondition:
 			return "Split by Condition", m.boolToOnOff(m.temporalSplitByCondition), "separate files per condition"
 		case optTemporalConditionColumn:
@@ -968,6 +997,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Target Column", val, hint
+		case optCorrelationsFeatures:
+			val := m.correlationsFeaturesSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(all)"
+			}
+			if m.editingText && m.editingTextField == textFieldCorrelationsFeatures {
+				val = textDisplay
+			}
+			return "Feature Filters", val, "comma-separated feature families"
 		case optCorrelationsMultilevel:
 			enabled := m.isComputationSelected("multilevel_correlations")
 			val := "No"
@@ -1037,6 +1075,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "lower"
 			}
 			return "Cluster Tail", v, "test direction"
+		case optClusterFeatures:
+			val := m.clusterFeaturesSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(all)"
+			}
+			if m.editingText && m.editingTextField == textFieldClusterFeatures {
+				val = textDisplay
+			}
+			return "Feature Filters", val, "comma-separated feature families"
 		case optClusterConditionColumn:
 			val := m.clusterConditionColumn
 			if val == "" {
@@ -1086,6 +1133,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Min Effect Size", val, "minimum indirect effect"
+		case optMediationFeatures:
+			val := m.mediationFeaturesSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(all)"
+			}
+			if m.editingText && m.editingTextField == textFieldMediationFeatures {
+				val = textDisplay
+			}
+			return "Feature Filters", val, "comma-separated feature families"
 		case optMediationMaxMediatorsEnabled:
 			return "Limit Max Mediators", m.boolToOnOff(m.mediationMaxMediatorsEnabled), "enable mediator limit"
 		case optMediationMaxMediators:
@@ -1122,6 +1178,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Moderation Permutations", val, "0=disabled"
+		case optModerationFeatures:
+			val := m.moderationFeaturesSpec
+			if strings.TrimSpace(val) == "" {
+				val = "(all)"
+			}
+			if m.editingText && m.editingTextField == textFieldModerationFeatures {
+				val = textDisplay
+			}
+			return "Feature Filters", val, "comma-separated feature families"
 
 		// Mixed effects
 		case optMixedEffectsType:

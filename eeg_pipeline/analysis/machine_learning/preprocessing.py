@@ -42,6 +42,7 @@ class VarianceThreshold(BaseEstimator, TransformerMixin):
                     "in machine_learning.preprocessing, or use more subjects / --cv-scope group."
                 ) from e
             raise
+        self.variances_ = self._vt.variances_
         return self
 
     def transform(self, X):

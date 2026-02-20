@@ -85,6 +85,7 @@ var behaviorComputations = []Computation{
 
 	// Quality & Validation
 	{"stability", "Stability (Run/Block)", "Within-subject stability diagnostics", "Quality"},
+	{"icc", "Reliability (ICC)", "Run-to-run feature reliability", "Quality"},
 	{"validation", "Validation", "Effect consistency + influence diagnostics", "Quality"},
 	{"report", "Subject Report", "Single-subject summary report", "Quality"},
 }
@@ -621,6 +622,13 @@ const (
 	textFieldClusterConditionValues
 	textFieldCorrelationsTargetColumn
 	textFieldCorrelationsTypes
+	textFieldCorrelationsFeatures
+	textFieldPainSensitivityFeatures
+	textFieldConditionFeatures
+	textFieldTemporalFeatures
+	textFieldClusterFeatures
+	textFieldMediationFeatures
+	textFieldModerationFeatures
 	// Frequency band editing text fields
 	textFieldBandName
 	textFieldBandLowHz
@@ -1798,6 +1806,7 @@ type Model struct {
 	behaviorComputeChangeScores  bool
 	behaviorComputeBayesFactors  bool
 	behaviorComputeLosoStability bool
+	behaviorValidateOnly         bool
 
 	// Run adjustment (subject-level; optional)
 	runAdjustmentEnabled               bool
@@ -1942,6 +1951,7 @@ type Model struct {
 	correlationsPrimaryUnit         int // 0=trial, 1=run_mean
 	correlationsPermutationPrimary  bool
 	correlationsTargetColumn        string // Custom target column from events (dropdown)
+	correlationsFeaturesSpec        string // Comma-separated feature filters for correlations
 	groupLevelBlockPermutation      bool   // Use block-restricted permutations when block/run is available
 	groupLevelTarget                int    // 0=rating, 1=pain_residual, 2=temperature
 	groupLevelControlTemperature    bool
@@ -1950,7 +1960,8 @@ type Model struct {
 	groupLevelMaxRunDummies         int
 
 	// Pain sensitivity
-	painSensitivityMinTrials int // 0=unset
+	painSensitivityMinTrials    int    // 0=unset
+	painSensitivityFeaturesSpec string // Comma-separated feature filters for pain sensitivity
 
 	// Report
 	reportTopN int
@@ -1966,6 +1977,7 @@ type Model struct {
 	temporalConditionValues    string // Values to compute (empty = all unique values)
 	temporalIncludeROIAverages bool   // Include ROI-averaged rows in output
 	temporalIncludeTFGrid      bool   // Include individual frequency (TF grid) rows
+	temporalFeaturesSpec       string // Comma-separated feature filters for temporal
 	// ITPC-specific parameters
 	temporalITPCBaselineCorrection bool    // Subtract baseline ITPC
 	temporalITPCBaselineMin        float64 // Baseline window start
@@ -1991,16 +2003,19 @@ type Model struct {
 	clusterTail            int     // 0=two-tailed, 1=upper, -1=lower
 	clusterConditionColumn string  // events.tsv column to split by (empty=event_columns.pain_binary)
 	clusterConditionValues string  // Exactly 2 values (space/comma-separated) to compare
+	clusterFeaturesSpec    string  // Comma-separated feature filters for cluster
 	// Mediation-specific
-	mediationBootstrap           int  // Bootstrap iterations for mediation
-	mediationMaxMediatorsEnabled bool // Enable max mediators limit
-	mediationMaxMediators        int  // Max mediators to test
-	mediationPermutations        int  // Permutation iterations for mediation (0=disabled)
+	mediationBootstrap           int    // Bootstrap iterations for mediation
+	mediationMaxMediatorsEnabled bool   // Enable max mediators limit
+	mediationMaxMediators        int    // Max mediators to test
+	mediationPermutations        int    // Permutation iterations for mediation (0=disabled)
+	mediationFeaturesSpec        string // Comma-separated feature filters for mediation
 	// Moderation-specific
 	moderationMaxFeaturesEnabled bool // Enable max features limit
 	moderationMaxFeatures        int  // Max features for moderation
 	moderationMinSamples         int
-	moderationPermutations       int // Permutation iterations for moderation (0=disabled)
+	moderationPermutations       int    // Permutation iterations for moderation (0=disabled)
+	moderationFeaturesSpec       string // Comma-separated feature filters for moderation
 	// Mixed effects-specific
 	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
@@ -2010,6 +2025,7 @@ type Model struct {
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
 	conditionMinTrials       int     // 0=unset; condition.min_trials_per_condition
 	conditionOverwrite       bool    // Overwrite existing condition effects files
+	conditionFeaturesSpec    string  // Comma-separated feature filters for condition
 
 	// Column discovery (populated from events files)
 	discoveredColumns       []string            // Available columns from events/trial table
@@ -2755,6 +2771,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorComputeChangeScores:        true,
 		behaviorComputeBayesFactors:        false,
 		behaviorComputeLosoStability:       true,
+		behaviorValidateOnly:               false,
 		behaviorOverwrite:                  true, // Default: overwrite existing outputs
 		runAdjustmentEnabled:               false,
 		runAdjustmentColumn:                "run_id",
@@ -2861,6 +2878,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		correlationsUseCrossfitResidual: false,
 		correlationsPrimaryUnit:         0,
 		correlationsPermutationPrimary:  false,
+		correlationsFeaturesSpec:        "",
 		groupLevelBlockPermutation:      true,
 		groupLevelTarget:                0,
 		groupLevelControlTemperature:    true,
@@ -2868,6 +2886,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		groupLevelControlRunEffects:     false,
 		groupLevelMaxRunDummies:         20,
 		painSensitivityMinTrials:        0,
+		painSensitivityFeaturesSpec:     "",
 
 		reportTopN:                     15,
 		temporalResolutionMs:           50,
@@ -2880,6 +2899,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalConditionValues:        "",
 		temporalIncludeROIAverages:     true,
 		temporalIncludeTFGrid:          true,
+		temporalFeaturesSpec:           "",
 		temporalITPCBaselineCorrection: true,
 		temporalITPCBaselineMin:        -0.5,
 		temporalITPCBaselineMax:        -0.01,
@@ -2895,16 +2915,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		clusterTail:            0,
 		clusterConditionColumn: "",
 		clusterConditionValues: "",
+		clusterFeaturesSpec:    "",
 		// Mediation defaults
 		mediationBootstrap:           1000,
 		mediationMaxMediatorsEnabled: true,
 		mediationMaxMediators:        20,
 		mediationPermutations:        0, // Disabled by default
+		mediationFeaturesSpec:        "",
 		// Moderation defaults
 		moderationMaxFeaturesEnabled: true,
 		moderationMaxFeatures:        50,
 		moderationMinSamples:         15,
 		moderationPermutations:       0, // Disabled by default
+		moderationFeaturesSpec:       "",
 		// Mixed effects defaults
 		mixedMaxFeatures: 50,
 		// Condition defaults
@@ -2913,6 +2936,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionPermutationPrimary: false,
 		conditionWindowPrimaryUnit:  0,
 		conditionMinTrials:          0,
+		conditionFeaturesSpec:       "",
 		// Column discovery defaults
 		discoveredColumns:              []string{},
 		trialTableColumns:              []string{},

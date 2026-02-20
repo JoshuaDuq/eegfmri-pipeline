@@ -67,6 +67,7 @@ from eeg_pipeline.analysis.behavior.stages.diagnostics import (
     stage_consistency_impl as _stage_consistency_impl,
     stage_influence_impl as _stage_influence_impl,
     stage_stability_impl as _stage_stability_impl,
+    stage_icc_impl as _stage_icc_impl,
 )
 from eeg_pipeline.analysis.behavior.stages.models import (
     compute_temp_breakpoints_impl as _compute_temp_breakpoints_impl,
@@ -118,6 +119,7 @@ from eeg_pipeline.analysis.behavior.stages.trial_table import (
 )
 from eeg_pipeline.analysis.behavior.stages.correlate import (
     CorrelateDesign as _CorrelateDesign,
+    _compute_single_effect_size as _compute_single_effect_size_impl,
     stage_correlate_design_impl as _stage_correlate_design_impl,
     stage_correlate_effect_sizes_impl as _stage_correlate_effect_sizes_impl,
     stage_correlate_fdr_impl as _stage_correlate_fdr_impl,
@@ -452,6 +454,12 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
     )
 
 
+def _compute_single_effect_size(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+    kwargs.setdefault("feature_type_resolver_fn", _infer_feature_type)
+    kwargs.setdefault("feature_band_resolver_fn", _infer_feature_band)
+    return _compute_single_effect_size_impl(*args, **kwargs)
+
+
 
 
 def stage_correlate_effect_sizes(
@@ -547,17 +555,16 @@ def _sanitize_permutation_groups(
     groups_array = np.asarray(groups)
     if groups_array.size == 0:
         return None
-    unique_groups, counts = np.unique(groups_array, return_counts=True)
+    unique_groups, counts = np.unique(groups_array[pd.notna(groups_array)], return_counts=True)
     small_group_count = int((counts < int(min_group_size)).sum())
     if small_group_count > 0:
         logger.warning(
-            "%s: disabling grouped permutation because %d/%d groups had fewer than %d samples.",
+            "%s: %d/%d groups have fewer than %d samples. Permutation will fail for subsets containing these groups unless strict=False.",
             context,
             small_group_count,
             len(unique_groups),
             int(min_group_size),
         )
-        return None
     return groups_array
 
 
@@ -783,6 +790,21 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Assess within-subject run/block stability of feature→outcome associations (non-gating)."""
     return _stage_stability_impl(
+        ctx,
+        config,
+        build_output_filename_fn=_build_output_filename,
+        load_trial_table_df_fn=_load_trial_table_df,
+        is_dataframe_valid_fn=_is_dataframe_valid,
+        get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
+        check_early_exit_conditions_fn=_check_early_exit_conditions,
+        get_stats_subfolder_fn=_get_stats_subfolder,
+        write_stats_table_fn=_write_stats_table,
+    )
+
+
+def stage_icc(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Assess within-subject run-to-run reliability (ICC) of EEG features."""
+    return _stage_icc_impl(
         ctx,
         config,
         build_output_filename_fn=_build_output_filename,

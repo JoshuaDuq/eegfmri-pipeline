@@ -330,6 +330,7 @@ const (
 	optConditionMinTrials
 	optConditionWindowPrimaryUnit
 	optConditionPermutationPrimary
+	optConditionFeatures
 	// Behavior options - Trial table / residual
 	optTrialTableFormat
 	optTrialTableAddLagFeatures
@@ -363,6 +364,7 @@ const (
 	optComputeChangeScores
 	optComputeBayesFactors
 	optComputeLosoStability
+	optBehaviorValidateOnly
 	// Behavior options - Regression
 	optRegressionOutcome
 	optRegressionIncludeTemperature
@@ -439,6 +441,7 @@ const (
 	optCorrelationsPrimaryUnit
 	optCorrelationsPermutationPrimary
 	optCorrelationsTargetColumn
+	optCorrelationsFeatures
 	optGroupLevelBlockPermutation
 	optGroupLevelTarget
 	optGroupLevelControlTemperature
@@ -446,6 +449,7 @@ const (
 	optGroupLevelControlRunEffects
 	optGroupLevelMaxRunDummies
 	optPainSensitivityMinTrials
+	optPainSensitivityFeatures
 	// Behavior options - Pain sensitivity / temporal
 	optTemporalResolutionMs
 	optTemporalTimeMinMs
@@ -457,6 +461,7 @@ const (
 	optTemporalConditionValues
 	optTemporalIncludeROIAverages
 	optTemporalIncludeTFGrid
+	optTemporalFeatures
 	// Temporal feature selection
 	optTemporalFeaturePower
 	optTemporalFeatureITPC
@@ -473,9 +478,12 @@ const (
 	optTemporalTfHeatmapEnabled
 	optTemporalTfHeatmapFreqs
 	optTemporalTfHeatmapTimeResMs
+	optClusterFeatures
 	// Behavior options - Mixed effects / mediation
 	optMixedEffectsType
 	optMediationMinEffect
+	optMediationFeatures
+	optModerationFeatures
 	// Behavior options - Output
 	optBehaviorGroupOutput
 	optAlsoSaveCsv
