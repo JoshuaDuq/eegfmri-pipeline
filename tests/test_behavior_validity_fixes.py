@@ -712,14 +712,16 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         with self.assertRaises(ValueError):
             BehaviorPipelineConfig.from_config(cfg)
 
-    def test_correlate_design_accepts_legacy_targets_key(self):
+    def test_correlate_design_accepts_canonical_targets_key(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
-                    "targets": ["rating", "temperature"],
-                    "correlations": {"permutation": {"enabled": True}},
+                    "correlations": {
+                        "targets": ["rating", "temperature"],
+                        "permutation": {"enabled": True},
+                    },
                     "statistics": {"allow_iid_trials": False},
                 }
             }
@@ -749,15 +751,13 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(design)
         self.assertEqual(design.targets, ["rating", "temperature"])
 
-    def test_correlate_design_rejects_conflicting_target_keys(self):
+    def test_correlate_design_with_no_explicit_targets_returns_none(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
-                    "targets": ["rating"],
                     "correlations": {
-                        "targets": ["temperature"],
                         "permutation": {"enabled": True},
                     },
                     "statistics": {"allow_iid_trials": False},
@@ -781,11 +781,51 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
             return_value=["power_alpha"],
         ):
-            with self.assertRaises(ValueError):
-                stage_correlate_design(
-                    ctx,
-                    SimpleNamespace(control_temperature=True, control_trial_order=True),
-                )
+            design = stage_correlate_design(
+                ctx,
+                SimpleNamespace(control_temperature=True, control_trial_order=True),
+            )
+        self.assertIsNone(design)
+
+    def test_correlate_design_uses_only_explicit_target_column(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "correlations": {
+                        "target_column": "vas_custom",
+                        "permutation": {"enabled": True},
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 50, 8),
+                "temperature": np.linspace(43, 46, 8),
+                "pain_residual": np.linspace(-1, 1, 8),
+                "vas_custom": np.linspace(0.2, 0.9, 8),
+                "run_id": np.repeat([1, 2], 4),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            design = stage_correlate_design(
+                ctx,
+                SimpleNamespace(control_temperature=True, control_trial_order=True),
+            )
+        self.assertIsNotNone(design)
+        self.assertEqual(design.targets, ["vas_custom"])
 
     def test_trial_table_stage_reuses_cached_output_when_input_hash_matches(self):
         from eeg_pipeline.analysis.behavior.orchestration import _cache, stage_trial_table

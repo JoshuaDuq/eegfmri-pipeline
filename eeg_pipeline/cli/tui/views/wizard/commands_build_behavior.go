@@ -398,24 +398,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Correlations (trial-table)
 	if m.isComputationSelected("correlations") {
-		targets := []string{}
-		if m.correlationsTargetRating {
-			targets = append(targets, "rating")
-		}
-		if m.correlationsTargetTemperature {
-			targets = append(targets, "temperature")
-		}
-		if m.correlationsTargetPainResidual {
-			targets = append(targets, "pain_residual")
-		}
-		defaultTargets := []string{"rating", "temperature", "pain_residual"}
-		if len(targets) > 0 && !(len(targets) == len(defaultTargets) && strings.Join(targets, ",") == strings.Join(defaultTargets, ",")) {
-			args = append(args, "--correlations-targets")
-			args = append(args, targets...)
-		}
-		if !m.correlationsPreferPainResidual {
-			args = append(args, "--no-correlations-prefer-pain-residual")
-		}
 		if strings.TrimSpace(m.correlationsTypesSpec) != "" && m.correlationsTypesSpec != "partial_cov_temp" {
 			args = append(args, "--correlations-types")
 			args = append(args, splitCSVList(m.correlationsTypesSpec)...)
@@ -429,9 +411,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.correlationsUseCrossfitResidual {
 			args = append(args, "--correlations-use-crossfit-pain-residual")
 		}
-		if strings.TrimSpace(m.correlationsTargetColumn) != "" {
-			args = append(args, "--correlations-target-column", m.correlationsTargetColumn)
-		}
+		// Always pass explicit target selection (possibly empty) so the backend
+		// does not silently fall back to built-in defaults.
+		args = append(args, "--correlations-target-column", strings.TrimSpace(m.correlationsTargetColumn))
 	}
 
 	// Multilevel correlations (group-level)

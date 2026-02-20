@@ -142,11 +142,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		if m.behaviorGroupCorrelationsExpanded {
 			if m.isComputationSelected("correlations") {
 				options = append(options,
-					optCorrelationsTargetRating,
-					optCorrelationsTargetTemperature,
-					optCorrelationsTargetPainResidual,
 					optCorrelationsTargetColumn,
-					optCorrelationsPreferPainResidual,
 					optCorrelationsTypes,
 					optCorrelationsPrimaryUnit,
 					optCorrelationsPermutationPrimary,

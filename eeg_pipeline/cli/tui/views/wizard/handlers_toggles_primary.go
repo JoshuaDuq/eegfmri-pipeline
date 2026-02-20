@@ -1940,27 +1940,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Correlations
-	case optCorrelationsTargetRating:
-		m.correlationsTargetRating = !m.correlationsTargetRating
-		if !m.correlationsTargetRating && !m.correlationsTargetTemperature && !m.correlationsTargetPainResidual {
-			m.correlationsTargetRating = true
-		}
-		m.useDefaultAdvanced = false
-	case optCorrelationsTargetTemperature:
-		m.correlationsTargetTemperature = !m.correlationsTargetTemperature
-		if !m.correlationsTargetRating && !m.correlationsTargetTemperature && !m.correlationsTargetPainResidual {
-			m.correlationsTargetTemperature = true
-		}
-		m.useDefaultAdvanced = false
-	case optCorrelationsTargetPainResidual:
-		m.correlationsTargetPainResidual = !m.correlationsTargetPainResidual
-		if !m.correlationsTargetRating && !m.correlationsTargetTemperature && !m.correlationsTargetPainResidual {
-			m.correlationsTargetPainResidual = true
-		}
-		m.useDefaultAdvanced = false
-	case optCorrelationsPreferPainResidual:
-		m.correlationsPreferPainResidual = !m.correlationsPreferPainResidual
-		m.useDefaultAdvanced = false
 	case optCorrelationsUseCrossfitPainResidual:
 		m.correlationsUseCrossfitResidual = !m.correlationsUseCrossfitResidual
 		m.useDefaultAdvanced = false

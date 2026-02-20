@@ -936,14 +936,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Top N Rows", val, "per TSV in report"
 
 		// Correlations
-		case optCorrelationsTargetRating:
-			return "Target: rating", m.boolToOnOff(m.correlationsTargetRating), "include rating"
-		case optCorrelationsTargetTemperature:
-			return "Target: temperature", m.boolToOnOff(m.correlationsTargetTemperature), "include temperature"
-		case optCorrelationsTargetPainResidual:
-			return "Target: pain_residual", m.boolToOnOff(m.correlationsTargetPainResidual), "include residual"
-		case optCorrelationsPreferPainResidual:
-			return "Prefer pain_residual", m.boolToOnOff(m.correlationsPreferPainResidual), "auto target selection"
 		case optCorrelationsTypes:
 			val := m.correlationsTypesSpec
 			if strings.TrimSpace(val) == "" {
@@ -975,7 +967,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if len(availableColumns) > 0 {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
-			return "Custom Target Column", val, hint
+			return "Target Column", val, hint
 		case optCorrelationsMultilevel:
 			enabled := m.isComputationSelected("multilevel_correlations")
 			val := "No"

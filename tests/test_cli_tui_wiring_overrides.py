@@ -243,6 +243,24 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("validation.min_channels"), 16)
         self.assertEqual(config.get("validation.max_amplitude_uv"), 400.0)
 
+    def test_correlations_target_column_sets_single_target_list(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_behavior(subparsers)
+        args = parser.parse_args(
+            [
+                "behavior",
+                "compute",
+                "--correlations-target-column",
+                "vas_custom",
+            ]
+        )
+        config = ConfigDict({"project": {"task": "thermalactive"}})
+        _configure_behavior_compute_mode(args, config)
+
+        self.assertEqual(config.get("behavior_analysis.correlations.target_column"), "vas_custom")
+        self.assertEqual(config.get("behavior_analysis.correlations.targets"), ["vas_custom"])
+
 
 class TestMLTUIWiring(unittest.TestCase):
     def test_unwired_ml_flags_update_config(self):

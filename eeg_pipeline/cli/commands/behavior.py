@@ -330,7 +330,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     pain_sensitivity_group.add_argument("--pain-sensitivity-min-trials", type=int, default=None)
 
     correlations_group = parser.add_argument_group("Correlations (trial-table) options")
-    correlations_group.add_argument("--correlations-targets", nargs="+", choices=["rating", "temperature", "pain_residual"], default=None)
     correlations_group.add_argument(
         "--correlations-types",
         nargs="+",
@@ -339,8 +338,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Correlation types to compute (default from config)",
     )
     correlations_group.add_argument("--correlations-primary-unit", choices=["trial", "run_mean"], default=None)
-    correlations_group.add_argument("--correlations-prefer-pain-residual", action="store_true", default=None, dest="correlations_prefer_pain_residual")
-    correlations_group.add_argument("--no-correlations-prefer-pain-residual", action="store_false", dest="correlations_prefer_pain_residual")
     correlations_group.add_argument("--correlations-use-crossfit-pain-residual", action="store_true", default=None, dest="correlations_use_crossfit_pain_residual")
     correlations_group.add_argument("--no-correlations-use-crossfit-pain-residual", action="store_false", dest="correlations_use_crossfit_pain_residual")
     correlations_group.add_argument(
@@ -874,16 +871,10 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         ba.setdefault("pain_sensitivity", {})["min_trials"] = int(args.pain_sensitivity_min_trials)
 
     # Correlations (trial-table)
-    if getattr(args, "correlations_targets", None) is not None:
-        corr_cfg["targets"] = [
-            str(t).strip().lower() for t in (args.correlations_targets or [])
-        ]
     if getattr(args, "correlations_types", None) is not None:
         corr_cfg["types"] = list(args.correlations_types)
     if getattr(args, "correlations_primary_unit", None) is not None:
         corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
-    if getattr(args, "correlations_prefer_pain_residual", None) is not None:
-        corr_cfg["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
     if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
         corr_cfg["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
     if getattr(args, "correlations_permutation_primary", None) is not None:
@@ -891,7 +882,10 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         corr_cfg["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
         corr_cfg.setdefault("permutation", {})["enabled"] = enabled
     if getattr(args, "correlations_target_column", None) is not None:
-        corr_cfg["target_column"] = str(args.correlations_target_column).strip()
+        target_col = str(args.correlations_target_column).strip()
+        corr_cfg["target_column"] = target_col
+        # Explicit target-column selection should drive correlation targets.
+        corr_cfg["targets"] = [target_col] if target_col else []
     gl_corr_cfg = ba.setdefault("group_level", {}).setdefault("multilevel_correlations", {})
     if getattr(args, "group_level_block_permutation", None) is not None:
         enabled = bool(args.group_level_block_permutation)

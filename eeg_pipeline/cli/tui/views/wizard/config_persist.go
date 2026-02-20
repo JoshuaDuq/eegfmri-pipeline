@@ -521,12 +521,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["influenceLeverageThreshold"] = m.influenceLeverageThreshold
 
 	// Correlations
-	cfg["correlationsTargetRating"] = m.correlationsTargetRating
-	cfg["correlationsTargetTemperature"] = m.correlationsTargetTemperature
-	cfg["correlationsTargetPainResidual"] = m.correlationsTargetPainResidual
 	cfg["correlationsTypesSpec"] = m.correlationsTypesSpec
 	cfg["correlationsTargetColumn"] = m.correlationsTargetColumn
-	cfg["correlationsPreferPainResidual"] = m.correlationsPreferPainResidual
 	cfg["correlationsUseCrossfitResidual"] = m.correlationsUseCrossfitResidual
 	cfg["correlationsPrimaryUnit"] = m.correlationsPrimaryUnit
 	cfg["correlationsPermutationPrimary"] = m.correlationsPermutationPrimary
@@ -1703,12 +1699,8 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.influenceLeverageThreshold = getFloat("influenceLeverageThreshold", m.influenceLeverageThreshold)
 
 	// Correlations
-	m.correlationsTargetRating = getBool("correlationsTargetRating", m.correlationsTargetRating)
-	m.correlationsTargetTemperature = getBool("correlationsTargetTemperature", m.correlationsTargetTemperature)
-	m.correlationsTargetPainResidual = getBool("correlationsTargetPainResidual", m.correlationsTargetPainResidual)
 	m.correlationsTypesSpec = getString("correlationsTypesSpec", m.correlationsTypesSpec)
 	m.correlationsTargetColumn = getString("correlationsTargetColumn", m.correlationsTargetColumn)
-	m.correlationsPreferPainResidual = getBool("correlationsPreferPainResidual", m.correlationsPreferPainResidual)
 	m.correlationsUseCrossfitResidual = getBool("correlationsUseCrossfitResidual", m.correlationsUseCrossfitResidual)
 	m.correlationsPrimaryUnit = getInt("correlationsPrimaryUnit", m.correlationsPrimaryUnit)
 	m.correlationsPermutationPrimary = getBool("correlationsPermutationPrimary", m.correlationsPermutationPrimary)

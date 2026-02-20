@@ -62,6 +62,47 @@ func TestBuildBehaviorAdvancedArgs_OmitsDeprecatedTfHeatmapFlags(t *testing.T) {
 	}
 }
 
+func TestBuildBehaviorAdvancedArgs_UsesSingleExplicitCorrelationTargetColumn(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+
+	// Isolate correlations behavior.
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "correlations"
+	}
+	m.correlationsTargetColumn = "vas_custom"
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if containsString(args, "--correlations-targets") {
+		t.Fatalf("did not expect legacy --correlations-targets in args: %#v", args)
+	}
+	v, ok := argValue(args, "--correlations-target-column")
+	if !ok {
+		t.Fatalf("expected --correlations-target-column in args, got: %#v", args)
+	}
+	if v != "vas_custom" {
+		t.Fatalf("unexpected --correlations-target-column value %q", v)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsEmptyCorrelationTargetColumn(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "correlations"
+	}
+	m.correlationsTargetColumn = ""
+
+	args := m.buildBehaviorAdvancedArgs()
+	v, ok := argValue(args, "--correlations-target-column")
+	if !ok {
+		t.Fatalf("expected --correlations-target-column in args, got: %#v", args)
+	}
+	if v != "" {
+		t.Fatalf("expected empty --correlations-target-column value, got %q", v)
+	}
+}
+
 func TestBuildFmriAnalysisAdvancedArgs_DisabledCarpetAndTSNRAddsFlags(t *testing.T) {
 	m := Model{}
 	m.fmriAnalysisPlotsEnabled = true

@@ -433,11 +433,7 @@ const (
 	// Behavior options - Report
 	optReportTopN
 	// Behavior options - Correlations / pain sensitivity
-	optCorrelationsTargetRating
-	optCorrelationsTargetTemperature
-	optCorrelationsTargetPainResidual
 	optCorrelationsTypes
-	optCorrelationsPreferPainResidual
 	optCorrelationsUseCrossfitPainResidual
 	optCorrelationsMultilevel
 	optCorrelationsPrimaryUnit

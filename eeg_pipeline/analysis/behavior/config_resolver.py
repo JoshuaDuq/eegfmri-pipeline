@@ -81,28 +81,13 @@ def resolve_correlation_targets(
     logger: Any = None,
     default_targets: Optional[List[str]] = None,
 ) -> List[str]:
-    """Resolve correlation targets from canonical key with legacy fallback."""
-    canonical = _normalize_string_list(
-        get_config_value(config, "behavior_analysis.correlations.targets", None)
-    )
-    legacy = _normalize_string_list(get_config_value(config, "behavior_analysis.targets", None))
+    """Resolve correlation targets from canonical key only."""
+    canonical_raw = get_config_value(config, "behavior_analysis.correlations.targets", None)
+    canonical = _normalize_string_list(canonical_raw)
 
-    if canonical and legacy and canonical != legacy:
-        raise ValueError(
-            "Conflicting target config keys: behavior_analysis.correlations.targets "
-            f"({canonical}) != behavior_analysis.targets ({legacy}). "
-            "Use only behavior_analysis.correlations.targets."
-        )
-
-    if canonical:
+    # Treat explicit empty canonical config as intentional (no targets),
+    # rather than silently falling back to defaults.
+    if canonical_raw is not None:
         return canonical
-
-    if legacy:
-        _warn(
-            logger,
-            "behavior_analysis.targets is deprecated; use "
-            "behavior_analysis.correlations.targets instead.",
-        )
-        return legacy
 
     return list(default_targets or [])
