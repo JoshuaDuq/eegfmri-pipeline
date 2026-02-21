@@ -60,11 +60,19 @@ def _extract_estimator_transform_and_feature_names(
     estimator = model
     names = feature_names
 
-    if hasattr(model, "named_steps"):
-        step_names = list(model.named_steps.keys())
-        estimator = model.named_steps[step_names[-1]]
+    # Unwrap TransformedTargetRegressor if it wraps the entire pipeline
+    if hasattr(estimator, "regressor") and hasattr(estimator.regressor, "named_steps"):
+        estimator = estimator.regressor
 
-        steps = [(n, model.named_steps[n]) for n in step_names[:-1]]
+    if hasattr(estimator, "named_steps"):
+        step_names = list(estimator.named_steps.keys())
+        final_estimator = estimator.named_steps[step_names[-1]]
+
+        # If the final estimator is a TransformedTargetRegressor that wraps the inner model
+        if hasattr(final_estimator, "regressor"):
+            final_estimator = final_estimator.regressor
+
+        steps = [(n, estimator.named_steps[n]) for n in step_names[:-1]]
         if names is not None:
             # Apply selector-aware name mapping first (so it follows the fitted support masks).
             names = transform_feature_names_through_steps(steps, names)
@@ -83,6 +91,7 @@ def _extract_estimator_transform_and_feature_names(
             if hasattr(step, "transform"):
                 X_transformed = step.transform(X_transformed)
         X = X_transformed
+        estimator = final_estimator
 
     return estimator, X, names
 
@@ -299,6 +308,7 @@ def compute_shap_for_cv_folds(
     harmonization_mode: Optional[str] = None,
     param_grid: Optional[Dict[str, Any]] = None,
     inner_cv_splits: int = 3,
+    covariates: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     Compute SHAP importance aggregated across CV folds.

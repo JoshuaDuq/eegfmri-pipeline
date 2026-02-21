@@ -38,21 +38,24 @@ def create_elasticnet_pipeline(
         score_func=f_regression,
     )
 
-    regressor = TransformedTargetRegressor(
-        regressor=ElasticNet(
+    steps.append((
+        "regressor",
+        ElasticNet(
             random_state=seed,
             max_iter=cfg["elasticnet_max_iter"],
             tol=cfg["elasticnet_tol"],
             selection=cfg["elasticnet_selection"],
         ),
+    ))
+    pipeline = Pipeline(steps)
+
+    return TransformedTargetRegressor(
+        regressor=pipeline,
         transformer=PowerTransformer(
             method=cfg["power_transformer_method"],
             standardize=cfg["power_transformer_standardize"],
         ),
     )
-
-    steps.append(("regressor", regressor))
-    return Pipeline(steps)
 
 
 def create_ridge_pipeline(
@@ -71,16 +74,16 @@ def create_ridge_pipeline(
         score_func=f_regression,
     )
 
-    regressor = TransformedTargetRegressor(
-        regressor=Ridge(random_state=seed),
+    steps.append(("regressor", Ridge(random_state=seed)))
+    pipeline = Pipeline(steps)
+
+    return TransformedTargetRegressor(
+        regressor=pipeline,
         transformer=PowerTransformer(
             method=cfg["power_transformer_method"],
             standardize=cfg["power_transformer_standardize"],
         ),
     )
-
-    steps.append(("regressor", regressor))
-    return Pipeline(steps)
 
 
 def create_rf_pipeline(
@@ -122,7 +125,7 @@ def build_elasticnet_param_grid(config: Any = None, n_covariates: int = 0) -> Di
     """Build hyperparameter grid for ElasticNet including variance threshold."""
     cfg = get_ml_config(config)
 
-    var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
+    var_prefix = "regressor__preprocessing__eeg__var" if n_covariates > 0 else "regressor__var"
     
     return {
         "regressor__regressor__alpha": cfg["elasticnet_alpha_grid"],
@@ -135,7 +138,7 @@ def build_ridge_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[st
     """Build hyperparameter grid for Ridge regression."""
     cfg = get_ml_config(config)
     
-    var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
+    var_prefix = "regressor__preprocessing__eeg__var" if n_covariates > 0 else "regressor__var"
     
     grid = {"regressor__regressor__alpha": cfg["ridge_alpha_grid"]}
     if "variance_threshold_grid" in cfg:

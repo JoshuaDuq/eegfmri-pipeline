@@ -871,6 +871,21 @@ def run_regression_ml(
         "Regression results: r=%.3f [%.3f, %.3f]%s, R\u00b2=%.3f, RMSE=%.3f",
         r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
     )
+
+    if bool(get_config_value(config, "machine_learning.analysis.permutation_importance.enabled", False)):
+        _run_permutation_importance_stage(
+            X, y, groups, _feature_names, config, rng_seed, 
+            int(get_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats", 5)),
+            results_dir, logger,
+            model_name=model_name, covariates=covariates,
+        )
+
+    if bool(get_config_value(config, "machine_learning.analysis.shap.enabled", True)):
+        _run_shap_importance_stage(
+            X, y, groups, _feature_names, config, rng_seed, results_dir, logger,
+            model_name=model_name, covariates=covariates,
+        )
+
     _maybe_generate_mode_plots(mode="regression", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     return results_dir
@@ -1340,6 +1355,21 @@ def run_within_subject_regression_ml(
         "Within-subject regression results: r=%.3f [%.3f, %.3f]%s, R\u00b2=%.3f, RMSE=%.3f",
         r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
     )
+
+    if bool(get_config_value(config, "machine_learning.analysis.permutation_importance.enabled", False)):
+        _run_permutation_importance_stage(
+            X, y, groups, _feature_names, config, rng_seed, 
+            int(get_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats", 5)),
+            results_dir, logger,
+            model_name=model_name, covariates=covariates,
+        )
+
+    if bool(get_config_value(config, "machine_learning.analysis.shap.enabled", True)):
+        _run_shap_importance_stage(
+            X, y, groups, _feature_names, config, rng_seed, results_dir, logger,
+            model_name=model_name, covariates=covariates,
+        )
+
     _maybe_generate_mode_plots(mode="regression", results_dir=results_dir, logger=logger, config=config)
     logger.info("Saved results to %s", results_dir)
     return results_dir
@@ -3433,6 +3463,7 @@ def _run_permutation_importance_stage(
         model_name,
         seed=seed,
         config=config,
+        n_covariates=len(covariates) if covariates else 0,
     )
     harmonization_mode = str(
         get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")
@@ -3557,6 +3588,7 @@ def _run_shap_importance_stage(
     results_dir: Path,
     logger: logging.Logger,
     model_name: str = "elasticnet",
+    covariates: Optional[List[str]] = None,
 ) -> Optional[Path]:
     """Run per-fold SHAP importance and aggregate."""
     try:
@@ -3581,6 +3613,7 @@ def _run_shap_importance_stage(
         model_name,
         seed=seed,
         config=config,
+        n_covariates=len(covariates) if covariates else 0,
     )
 
     def model_factory():
@@ -3598,6 +3631,7 @@ def _run_shap_importance_stage(
             harmonization_mode=harmonization_mode,
             param_grid=param_grid,
             inner_cv_splits=inner_splits,
+            covariates=covariates,
         )
         
         if importance_df.empty:
