@@ -8,11 +8,16 @@ training fold only (via ``fit``) and apply them to the corresponding test fold.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.compose import ColumnTransformer
+from sklearn.decomposition import PCA
 from sklearn.feature_selection import VarianceThreshold as _SklearnVarianceThreshold
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +252,99 @@ class Deconfounder(BaseEstimator, TransformerMixin):
         return list(input_features)[:n_features]
 
 
+def build_base_preprocessing_steps(
+    cfg: Dict[str, Any],
+    include_scaling: bool,
+    n_covariates: int = 0,
+    config: Any = None,
+    score_func: Optional[Callable] = None,
+) -> List[Tuple[str, Any]]:
+    """Build shared preprocessing steps for regression/classification pipelines."""
+    steps: List[Tuple[str, Any]] = []
+
+    feature_steps: List[Tuple[str, Any]] = [
+        ("finite", ReplaceInfWithNaN()),
+        ("drop_all_nan", DropAllNaNColumns()),
+    ]
+
+    if cfg.get("spatial_regions_allowed"):
+        feature_steps.append(
+            (
+                "spatial_filter",
+                SpatialFeatureSelector(
+                    allowed_regions=cfg["spatial_regions_allowed"],
+                    config=config,
+                ),
+            )
+        )
+
+    feature_steps.extend(
+        [
+            ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
+            ("var", VarianceThreshold(threshold=cfg["variance_threshold"])),
+        ]
+    )
+
+    percentile = float(cfg.get("feature_selection_percentile", 100.0))
+    if percentile < 100.0:
+        from sklearn.feature_selection import SelectPercentile, f_regression
+
+        chosen_score_func = score_func or f_regression
+        feature_steps.append(("k_best", SelectPercentile(chosen_score_func, percentile=percentile)))
+
+    if include_scaling or cfg.get("pca_enabled", False):
+        feature_steps.append(("scale", StandardScaler()))
+    if cfg.get("pca_enabled", False):
+        feature_steps.append(
+            (
+                "pca",
+                PCA(
+                    n_components=cfg.get("pca_n_components", 0.95),
+                    whiten=bool(cfg.get("pca_whiten", False)),
+                    random_state=cfg.get("pca_random_state", None),
+                    svd_solver=str(cfg.get("pca_svd_solver", "auto")),
+                ),
+            )
+        )
+    feature_pipe = Pipeline(feature_steps)
+
+    if n_covariates > 0:
+        cov_steps: List[Tuple[str, Any]] = [
+            ("finite", ReplaceInfWithNaN()),
+            ("impute", SimpleImputer(strategy="most_frequent")),
+        ]
+        if include_scaling:
+            cov_steps.append(("scale", StandardScaler()))
+        else:
+            from sklearn.preprocessing import FunctionTransformer
+
+            cov_steps.append(("passthrough", FunctionTransformer(func=None, validate=False)))
+
+        covariate_pipe = Pipeline(cov_steps)
+
+        def feature_idx(X):
+            return list(range(X.shape[1] - n_covariates))
+
+        def cov_idx(X):
+            return list(range(X.shape[1] - n_covariates, X.shape[1]))
+
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ("eeg", feature_pipe, feature_idx),
+                ("cov", covariate_pipe, cov_idx),
+            ],
+            remainder="drop",
+        )
+        steps.append(("preprocessing", preprocessor))
+
+        if cfg.get("deconfound", False):
+            steps.append(("deconfound", Deconfounder(n_covariates=n_covariates)))
+    else:
+        steps.extend(feature_steps)
+
+    return steps
+
+
 def transform_feature_names_through_steps(
     steps: Sequence[tuple[str, object]],
     feature_names: List[str],
@@ -281,6 +379,7 @@ __all__ = [
     "ReplaceInfWithNaN",
     "DropAllNaNColumns",
     "VarianceThreshold",
+    "build_base_preprocessing_steps",
     "transform_feature_names_through_steps",
     "Deconfounder",
     "SpatialFeatureSelector",

@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import f_classif
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -56,18 +56,12 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import SMOTE
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-from sklearn.decomposition import PCA
 
 from eeg_pipeline.analysis.machine_learning.config import get_ml_config
 from eeg_pipeline.analysis.machine_learning.cv import apply_fold_feature_harmonization
 from eeg_pipeline.analysis.machine_learning.preprocessing import (
-    DropAllNaNColumns,
-    ReplaceInfWithNaN,
-    VarianceThreshold,
-    Deconfounder,
-    SpatialFeatureSelector,
+    build_base_preprocessing_steps,
 )
 from eeg_pipeline.utils.config.loader import get_config_value
 
@@ -78,90 +72,7 @@ logger = logging.getLogger(__name__)
 # Pipeline Factories
 ###################################################################
 
-from sklearn.compose import ColumnTransformer
-from sklearn.feature_selection import SelectPercentile, f_classif
-
-def _build_base_preprocessing_steps(
-    cfg: Dict[str, Any],
-    include_scaling: bool,
-    n_covariates: int = 0,
-    config: Any = None,
-) -> List[Tuple[str, Any]]:
-    steps: List[Tuple[str, Any]] = []
-    
-    # Feature specific steps
-    feature_steps: List[Tuple[str, Any]] = [
-        ("finite", ReplaceInfWithNaN()),
-        ("drop_all_nan", DropAllNaNColumns()),
-    ]
-    
-    if cfg.get("spatial_regions_allowed"):
-        # Must pass config so it can look up ROI definitions
-        feature_steps.append(
-            ("spatial_filter", SpatialFeatureSelector(
-                allowed_regions=cfg["spatial_regions_allowed"],
-                config=config
-            ))
-        )
-        
-    feature_steps.extend([
-        ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
-        ("var", VarianceThreshold(threshold=cfg["variance_threshold"]))
-    ])
-    
-    percentile = float(cfg.get("feature_selection_percentile", 100.0))
-    if percentile < 100.0:
-        feature_steps.append(("k_best", SelectPercentile(f_classif, percentile=percentile)))
-        
-    if include_scaling or cfg.get("pca_enabled", False):
-        feature_steps.append(("scale", StandardScaler()))
-    if cfg.get("pca_enabled", False):
-        feature_steps.append(
-            (
-                "pca",
-                PCA(
-                    n_components=cfg.get("pca_n_components", 0.95),
-                    whiten=bool(cfg.get("pca_whiten", False)),
-                    random_state=cfg.get("pca_random_state", None),
-                    svd_solver=str(cfg.get("pca_svd_solver", "auto")),
-                ),
-            )
-        )
-    feature_pipe = Pipeline(feature_steps)
-
-    if n_covariates > 0:
-        cov_steps: List[Tuple[str, Any]] = [
-            ("finite", ReplaceInfWithNaN()),
-            ("impute", SimpleImputer(strategy="most_frequent"))
-        ]
-        if include_scaling:
-            cov_steps.append(("scale", StandardScaler()))
-        else:
-            from sklearn.preprocessing import FunctionTransformer
-            cov_steps.append(("passthrough", FunctionTransformer(func=None, validate=False)))
-            
-        covariate_pipe = Pipeline(cov_steps)
-        
-        def feature_idx(X):
-            return list(range(X.shape[1] - n_covariates))
-            
-        def cov_idx(X):
-            return list(range(X.shape[1] - n_covariates, X.shape[1]))
-            
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ("eeg", feature_pipe, feature_idx),
-                ("cov", covariate_pipe, cov_idx),
-            ],
-            remainder="drop"
-        )
-        steps.append(("preprocessing", preprocessor))
-        
-        if cfg.get("deconfound", False):
-            steps.append(("deconfound", Deconfounder(n_covariates=n_covariates)))
-    else:
-        steps.extend(feature_steps)
-
+def _append_classification_resampler(steps: List[Tuple[str, Any]], cfg: Dict[str, Any]) -> None:
     resampler = str(cfg.get("classification_resampler", "none")).strip().lower()
     if resampler == "undersample":
         steps.append(
@@ -172,8 +83,6 @@ def _build_base_preprocessing_steps(
         )
     elif resampler == "smote":
         steps.append(("resampler", SMOTE(random_state=int(cfg.get("classification_resampler_seed", 42)))))
-
-    return steps
 
 
 
@@ -205,12 +114,14 @@ def create_svm_pipeline(
     """
     cfg = get_ml_config(config)
 
-    steps = _build_base_preprocessing_steps(
+    steps = build_base_preprocessing_steps(
         cfg=cfg,
         include_scaling=True,
         n_covariates=n_covariates,
         config=config,
+        score_func=f_classif,
     )
+    _append_classification_resampler(steps, cfg)
     steps.append(
         (
             "svm",
@@ -255,12 +166,14 @@ def create_logistic_pipeline(
 
     solver = "saga" if penalty in ("l1", "elasticnet") else "lbfgs"
 
-    steps = _build_base_preprocessing_steps(
+    steps = build_base_preprocessing_steps(
         cfg=cfg,
         include_scaling=True,
         n_covariates=n_covariates,
         config=config,
+        score_func=f_classif,
     )
+    _append_classification_resampler(steps, cfg)
     steps.append(
         (
             "lr",
@@ -301,12 +214,14 @@ def create_rf_classification_pipeline(
     """
     cfg = get_ml_config(config)
 
-    steps = _build_base_preprocessing_steps(
+    steps = build_base_preprocessing_steps(
         cfg=cfg,
         include_scaling=False,
         n_covariates=n_covariates,
         config=config,
+        score_func=f_classif,
     )
+    _append_classification_resampler(steps, cfg)
     steps.append(
         (
             "rf",
@@ -370,12 +285,14 @@ def create_ensemble_pipeline(
             voting="soft",
         )
 
-    steps = _build_base_preprocessing_steps(
+    steps = build_base_preprocessing_steps(
         cfg=cfg,
         include_scaling=True,
         n_covariates=n_covariates,
         config=config,
+        score_func=f_classif,
     )
+    _append_classification_resampler(steps, cfg)
     steps.append(("ensemble", ensemble))
     return ImbPipeline(steps)
 

@@ -9,112 +9,16 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import f_regression
 from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, PowerTransformer
-from sklearn.compose import TransformedTargetRegressor, ColumnTransformer
-from sklearn.decomposition import PCA
-from sklearn.pipeline import FeatureUnion
+from sklearn.preprocessing import PowerTransformer
+from sklearn.compose import TransformedTargetRegressor
 
 from eeg_pipeline.analysis.machine_learning.config import get_ml_config
 from eeg_pipeline.analysis.machine_learning.preprocessing import (
-    DropAllNaNColumns,
-    ReplaceInfWithNaN,
-    VarianceThreshold,
-    Deconfounder,
-    SpatialFeatureSelector,
+    build_base_preprocessing_steps,
 )
-
-
-def _build_base_preprocessing_steps(
-    cfg: Dict[str, Any],
-    include_scaling: bool,
-    n_covariates: int = 0,
-    config: Any = None,
-) -> list[tuple[str, Any]]:
-    """Build the common preprocessing steps shared by all regression pipelines.
-    
-    Covariates (the last `n_covariates` columns) bypass VarianceThreshold and PCA,
-    but still receive imputation and (optionally) scaling.
-    """
-    steps: list[tuple[str, Any]] = []
-    
-    # Feature specific steps
-    feature_steps: list[tuple[str, Any]] = [
-        ("finite", ReplaceInfWithNaN()),
-        ("drop_all_nan", DropAllNaNColumns()),
-    ]
-    
-    if cfg.get("spatial_regions_allowed"):
-        # Must pass config so it can look up ROI definitions
-        feature_steps.append(
-            ("spatial_filter", SpatialFeatureSelector(
-                allowed_regions=cfg["spatial_regions_allowed"],
-                config=config
-            ))
-        )
-        
-    feature_steps.extend([
-        ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
-        ("var", VarianceThreshold(threshold=cfg["variance_threshold"]))
-    ])
-    
-    percentile = float(cfg.get("feature_selection_percentile", 100.0))
-    if percentile < 100.0:
-        from sklearn.feature_selection import SelectPercentile, f_regression
-        feature_steps.append(("k_best", SelectPercentile(f_regression, percentile=percentile)))
-        
-    if include_scaling or cfg.get("pca_enabled", False):
-        feature_steps.append(("scale", StandardScaler()))
-    if cfg.get("pca_enabled", False):
-        feature_steps.append(
-            (
-                "pca",
-                PCA(
-                    n_components=cfg.get("pca_n_components", 0.95),
-                    whiten=bool(cfg.get("pca_whiten", False)),
-                    random_state=cfg.get("pca_random_state", None),
-                    svd_solver=str(cfg.get("pca_svd_solver", "auto")),
-                ),
-            )
-        )
-    feature_pipe = Pipeline(feature_steps)
-
-    if n_covariates > 0:
-        cov_steps: list[tuple[str, Any]] = [
-            ("finite", ReplaceInfWithNaN()),
-            ("impute", SimpleImputer(strategy="most_frequent"))
-        ]
-        if include_scaling:
-            cov_steps.append(("scale", StandardScaler()))
-        else:
-            from sklearn.preprocessing import FunctionTransformer
-            cov_steps.append(("passthrough", FunctionTransformer(func=None, validate=False)))
-            
-        covariate_pipe = Pipeline(cov_steps)
-        
-        def feature_idx(X):
-            return list(range(X.shape[1] - n_covariates))
-            
-        def cov_idx(X):
-            return list(range(X.shape[1] - n_covariates, X.shape[1]))
-            
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ("eeg", feature_pipe, feature_idx),
-                ("cov", covariate_pipe, cov_idx),
-            ],
-            remainder="drop"
-        )
-        steps.append(("preprocessing", preprocessor))
-        
-        if cfg.get("deconfound", False):
-            steps.append(("deconfound", Deconfounder(n_covariates=n_covariates)))
-    else:
-        steps.extend(feature_steps)
-
-    return steps
 
 
 
@@ -126,11 +30,12 @@ def create_elasticnet_pipeline(
     """Create ElasticNet regression pipeline with target transformation."""
     cfg = get_ml_config(config)
 
-    steps = _build_base_preprocessing_steps(
+    steps = build_base_preprocessing_steps(
         cfg=cfg,
         include_scaling=True,
         n_covariates=n_covariates,
         config=config,
+        score_func=f_regression,
     )
 
     regressor = TransformedTargetRegressor(
@@ -158,11 +63,12 @@ def create_ridge_pipeline(
     """Create Ridge regression pipeline with target transformation."""
     cfg = get_ml_config(config)
 
-    steps = _build_base_preprocessing_steps(
+    steps = build_base_preprocessing_steps(
         cfg=cfg,
         include_scaling=True,
         n_covariates=n_covariates,
         config=config,
+        score_func=f_regression,
     )
 
     regressor = TransformedTargetRegressor(
@@ -190,11 +96,12 @@ def create_rf_pipeline(
     if n_estimators is None:
         n_estimators = cfg["rf_n_estimators"]
 
-    steps = _build_base_preprocessing_steps(
+    steps = build_base_preprocessing_steps(
         cfg=cfg,
         include_scaling=False,
         n_covariates=n_covariates,
         config=config,
+        score_func=f_regression,
     )
     steps.append(
         (
