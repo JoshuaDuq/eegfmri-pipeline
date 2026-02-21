@@ -592,7 +592,8 @@ func (m Model) renderSubjectSelection() string {
 	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
-	if m.Pipeline == types.PipelineML {
+	switch m.Pipeline {
+	case types.PipelineML:
 		groupOpt := dimStyle.Render("Group (LOSO)")
 		subjectOpt := dimStyle.Render("Subject (within)")
 		if m.mlScope == MLCVScopeGroup {
@@ -602,7 +603,7 @@ func (m Model) renderSubjectSelection() string {
 		}
 		b.WriteString("  " + labelStyle.Render("Scope:") + " " + groupOpt + "  " + subjectOpt + "  " +
 			hintStyle.Render("[Tab]") + "\n")
-	} else if m.Pipeline == types.PipelinePlotting {
+	case types.PipelinePlotting:
 		groupOpt := dimStyle.Render("Group")
 		subjectOpt := dimStyle.Render("Subject")
 		if m.plottingScope == PlottingScopeGroup {

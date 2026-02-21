@@ -14,6 +14,7 @@ from eeg_pipeline.cli.common import (
     validate_min_subjects,
     create_progress_reporter,
     add_path_args,
+    apply_arg_overrides,
     MIN_SUBJECTS_KEY,
     MIN_SUBJECTS_FOR_ML,
 )
@@ -450,67 +451,71 @@ def _parse_max_depth_values(raw_values: List[str]) -> List[Optional[int]]:
     return parsed
 
 
+_MODEL_CONFIG_OVERRIDES = [
+    ("elasticnet_alpha_grid",             "machine_learning.models.elasticnet.alpha_grid",                                    lambda v: [float(x) for x in v]),
+    ("elasticnet_l1_ratio_grid",          "machine_learning.models.elasticnet.l1_ratio_grid",                                 lambda v: [float(x) for x in v]),
+    ("ridge_alpha_grid",                  "machine_learning.models.ridge.alpha_grid",                                         lambda v: [float(x) for x in v]),
+    ("rf_n_estimators",                   "machine_learning.models.random_forest.n_estimators",                               int),
+    ("rf_min_samples_split_grid",         "machine_learning.models.random_forest.min_samples_split_grid",                     lambda v: [int(float(x)) for x in v]),
+    ("rf_min_samples_leaf_grid",          "machine_learning.models.random_forest.min_samples_leaf_grid",                      lambda v: [int(float(x)) for x in v]),
+    ("rf_bootstrap",                      "machine_learning.models.random_forest.bootstrap",                                  bool),
+    ("variance_threshold_grid",           "machine_learning.preprocessing.variance_threshold_grid",                           lambda v: [float(x) for x in v]),
+    ("imputer",                           "machine_learning.preprocessing.imputer_strategy",                                  str),
+    ("power_transformer_method",          "machine_learning.preprocessing.power_transformer_method",                          str),
+    ("power_transformer_standardize",     "machine_learning.preprocessing.power_transformer_standardize",                     bool),
+    ("pca_enabled",                       "machine_learning.preprocessing.pca.enabled",                                       bool),
+    ("pca_n_components",                  "machine_learning.preprocessing.pca.n_components",                                  float),
+    ("pca_whiten",                        "machine_learning.preprocessing.pca.whiten",                                        bool),
+    ("pca_svd_solver",                    "machine_learning.preprocessing.pca.svd_solver",                                    str),
+    ("pca_rng_seed",                      "machine_learning.preprocessing.pca.random_state",                                  int),
+    ("deconfound",                        "machine_learning.preprocessing.deconfound",                                        bool),
+    ("feature_selection_percentile",      "machine_learning.preprocessing.feature_selection_percentile",                      float),
+    ("ensemble_calibrate",                "machine_learning.classification.calibrate_ensemble",                               bool),
+    ("classification_resampler",          "machine_learning.classification.resampler",                                        str),
+    ("classification_resampler_seed",     "machine_learning.classification.resampler_seed",                                   int),
+    ("svm_kernel",                        "machine_learning.models.svm.kernel",                                               str),
+    ("svm_c_grid",                        "machine_learning.models.svm.C_grid",                                               lambda v: [float(x) for x in v]),
+    ("lr_penalty",                        "machine_learning.models.logistic_regression.penalty",                              str),
+    ("lr_c_grid",                         "machine_learning.models.logistic_regression.C_grid",                               lambda v: [float(x) for x in v]),
+    ("lr_max_iter",                       "machine_learning.models.logistic_regression.max_iter",                             int),
+    ("cnn_filters1",                      "machine_learning.models.cnn.temporal_filters",                                     int),
+    ("cnn_filters2",                      "machine_learning.models.cnn.pointwise_filters",                                    int),
+    ("cnn_kernel_size1",                  "machine_learning.models.cnn.kernel_length",                                        int),
+    ("cnn_kernel_size2",                  "machine_learning.models.cnn.separable_kernel_length",                              int),
+    ("cnn_pool_size",                     "machine_learning.models.cnn.pool_size",                                            int),
+    ("cnn_dense_units",                   "machine_learning.models.cnn.dense_units",                                          int),
+    ("cnn_dropout_conv",                  "machine_learning.models.cnn.dropout_conv",                                         float),
+    ("cnn_dropout_dense",                 "machine_learning.models.cnn.dropout",                                              float),
+    ("cnn_batch_size",                    "machine_learning.models.cnn.batch_size",                                           int),
+    ("cnn_epochs",                        "machine_learning.models.cnn.max_epochs",                                           int),
+    ("cnn_learning_rate",                 "machine_learning.models.cnn.learning_rate",                                        float),
+    ("cnn_patience",                      "machine_learning.models.cnn.patience",                                             int),
+    ("cnn_min_delta",                     "machine_learning.models.cnn.min_delta",                                            float),
+    ("cnn_l2_lambda",                     "machine_learning.models.cnn.weight_decay",                                         float),
+    ("cnn_random_seed",                   "project.random_state",                                                             int),
+    ("cv_hygiene",                        "machine_learning.cv.hygiene_enabled",                                              bool),
+    ("cv_permutation_scheme",             "machine_learning.cv.permutation_scheme",                                           str),
+    ("cv_min_valid_perm_fraction",        "machine_learning.cv.min_valid_permutation_fraction",                               float),
+    ("cv_default_n_bins",                 "machine_learning.cv.default_n_bins",                                               int),
+    ("eval_ci_method",                    "machine_learning.evaluation.ci_method",                                            str),
+    ("eval_bootstrap_iterations",         "machine_learning.evaluation.bootstrap_iterations",                                 int),
+    ("data_covariates_strict",            "machine_learning.data.covariates_strict",                                          bool),
+    ("data_max_excluded_subject_fraction","machine_learning.data.max_excluded_subject_fraction",                              float),
+    ("incremental_baseline_alpha",        "machine_learning.incremental_validity.baseline_alpha",                             float),
+    ("interpretability_grouped_outputs",  "machine_learning.interpretability.grouped_outputs",                                bool),
+    ("timegen_min_subjects",              "machine_learning.analysis.time_generalization.min_subjects_per_cell",              int),
+    ("timegen_min_valid_perm_fraction",   "machine_learning.analysis.time_generalization.min_valid_permutation_fraction",     float),
+    ("class_min_subjects_for_auc",        "machine_learning.classification.min_subjects_with_auc_for_inference",              int),
+    ("class_max_failed_fold_fraction",    "machine_learning.classification.max_failed_fold_fraction",                         float),
+    ("strict_regression_continuous",      "machine_learning.targets.strict_regression_target_continuous",                     bool),
+]
+
+
 def _update_model_config(args: argparse.Namespace, config: Any) -> None:
     """Update config with model-specific hyperparameter overrides."""
-    if args.elasticnet_alpha_grid is not None:
-        alpha_values = [float(v) for v in args.elasticnet_alpha_grid]
-        config["machine_learning.models.elasticnet.alpha_grid"] = alpha_values
-    
-    if args.elasticnet_l1_ratio_grid is not None:
-        l1_ratio_values = [float(v) for v in args.elasticnet_l1_ratio_grid]
-        config["machine_learning.models.elasticnet.l1_ratio_grid"] = l1_ratio_values
-    
-    if args.rf_n_estimators is not None:
-        config["machine_learning.models.random_forest.n_estimators"] = int(
-            args.rf_n_estimators
-        )
-    
     if args.rf_max_depth_grid is not None:
-        max_depth_values = _parse_max_depth_values(args.rf_max_depth_grid)
-        config["machine_learning.models.random_forest.max_depth_grid"] = max_depth_values
-    
-    if args.ridge_alpha_grid is not None:
-        alpha_values = [float(v) for v in args.ridge_alpha_grid]
-        config["machine_learning.models.ridge.alpha_grid"] = alpha_values
+        config["machine_learning.models.random_forest.max_depth_grid"] = _parse_max_depth_values(args.rf_max_depth_grid)
 
-    if args.variance_threshold_grid is not None:
-        config["machine_learning.preprocessing.variance_threshold_grid"] = [
-            float(v) for v in args.variance_threshold_grid
-        ]
-    if getattr(args, "imputer", None) is not None:
-        config["machine_learning.preprocessing.imputer_strategy"] = str(args.imputer)
-    if getattr(args, "power_transformer_method", None) is not None:
-        config["machine_learning.preprocessing.power_transformer_method"] = str(args.power_transformer_method)
-    if getattr(args, "power_transformer_standardize", None) is not None:
-        config["machine_learning.preprocessing.power_transformer_standardize"] = bool(args.power_transformer_standardize)
-    if getattr(args, "pca_enabled", None) is not None:
-        config["machine_learning.preprocessing.pca.enabled"] = bool(args.pca_enabled)
-    if getattr(args, "pca_n_components", None) is not None:
-        config["machine_learning.preprocessing.pca.n_components"] = float(args.pca_n_components)
-    if getattr(args, "pca_whiten", None) is not None:
-        config["machine_learning.preprocessing.pca.whiten"] = bool(args.pca_whiten)
-    if getattr(args, "pca_svd_solver", None) is not None:
-        config["machine_learning.preprocessing.pca.svd_solver"] = str(args.pca_svd_solver)
-    if getattr(args, "pca_rng_seed", None) is not None:
-        config["machine_learning.preprocessing.pca.random_state"] = int(args.pca_rng_seed)
-    if getattr(args, "deconfound", None) is not None:
-        config["machine_learning.preprocessing.deconfound"] = bool(args.deconfound)
-    if getattr(args, "feature_selection_percentile", None) is not None:
-        config["machine_learning.preprocessing.feature_selection_percentile"] = float(args.feature_selection_percentile)
-    if getattr(args, "ensemble_calibrate", None) is not None:
-        config["machine_learning.classification.calibrate_ensemble"] = bool(args.ensemble_calibrate)
-    if getattr(args, "spatial_regions_allowed", None) is not None:
-        config["machine_learning.preprocessing.spatial_regions_allowed"] = [
-            str(v).strip() for v in args.spatial_regions_allowed if str(v).strip()
-        ]
-    if getattr(args, "classification_resampler", None) is not None:
-        config["machine_learning.classification.resampler"] = str(args.classification_resampler)
-    if getattr(args, "classification_resampler_seed", None) is not None:
-        config["machine_learning.classification.resampler_seed"] = int(args.classification_resampler_seed)
-    if getattr(args, "svm_kernel", None) is not None:
-        config["machine_learning.models.svm.kernel"] = str(args.svm_kernel)
-    if getattr(args, "svm_c_grid", None) is not None:
-        config["machine_learning.models.svm.C_grid"] = [float(v) for v in args.svm_c_grid]
     if getattr(args, "svm_gamma_grid", None) is not None:
         gamma_vals = []
         for v in args.svm_gamma_grid:
@@ -519,116 +524,48 @@ def _update_model_config(args: argparse.Namespace, config: Any) -> None:
             except (TypeError, ValueError):
                 gamma_vals.append(str(v))
         config["machine_learning.models.svm.gamma_grid"] = gamma_vals
+
     if getattr(args, "svm_class_weight", None) is not None:
         config["machine_learning.models.svm.class_weight"] = None if args.svm_class_weight == "none" else args.svm_class_weight
-    if getattr(args, "lr_penalty", None) is not None:
-        config["machine_learning.models.logistic_regression.penalty"] = str(args.lr_penalty)
-    if getattr(args, "lr_c_grid", None) is not None:
-        config["machine_learning.models.logistic_regression.C_grid"] = [float(v) for v in args.lr_c_grid]
-    if getattr(args, "lr_max_iter", None) is not None:
-        config["machine_learning.models.logistic_regression.max_iter"] = int(args.lr_max_iter)
     if getattr(args, "lr_class_weight", None) is not None:
         config["machine_learning.models.logistic_regression.class_weight"] = None if args.lr_class_weight == "none" else args.lr_class_weight
-    if getattr(args, "rf_min_samples_split_grid", None) is not None:
-        config["machine_learning.models.random_forest.min_samples_split_grid"] = [int(float(v)) for v in args.rf_min_samples_split_grid]
-    if getattr(args, "rf_min_samples_leaf_grid", None) is not None:
-        config["machine_learning.models.random_forest.min_samples_leaf_grid"] = [int(float(v)) for v in args.rf_min_samples_leaf_grid]
-    if getattr(args, "rf_bootstrap", None) is not None:
-        config["machine_learning.models.random_forest.bootstrap"] = bool(args.rf_bootstrap)
     if getattr(args, "rf_class_weight", None) is not None:
         config["machine_learning.models.random_forest.class_weight"] = None if args.rf_class_weight == "none" else args.rf_class_weight
-    if getattr(args, "cnn_filters1", None) is not None:
-        config["machine_learning.models.cnn.temporal_filters"] = int(args.cnn_filters1)
-    if getattr(args, "cnn_filters2", None) is not None:
-        config["machine_learning.models.cnn.pointwise_filters"] = int(args.cnn_filters2)
-    if getattr(args, "cnn_kernel_size1", None) is not None:
-        config["machine_learning.models.cnn.kernel_length"] = int(args.cnn_kernel_size1)
-    if getattr(args, "cnn_kernel_size2", None) is not None:
-        config["machine_learning.models.cnn.separable_kernel_length"] = int(args.cnn_kernel_size2)
-    if getattr(args, "cnn_pool_size", None) is not None:
-        config["machine_learning.models.cnn.pool_size"] = int(args.cnn_pool_size)
-    if getattr(args, "cnn_dense_units", None) is not None:
-        config["machine_learning.models.cnn.dense_units"] = int(args.cnn_dense_units)
-    if getattr(args, "cnn_dropout_conv", None) is not None:
-        config["machine_learning.models.cnn.dropout_conv"] = float(args.cnn_dropout_conv)
-    if getattr(args, "cnn_dropout_dense", None) is not None:
-        config["machine_learning.models.cnn.dropout"] = float(args.cnn_dropout_dense)
-    elif getattr(args, "cnn_dropout_conv", None) is not None:
-        config["machine_learning.models.cnn.dropout"] = float(args.cnn_dropout_conv)
-    if getattr(args, "cnn_batch_size", None) is not None:
-        config["machine_learning.models.cnn.batch_size"] = int(args.cnn_batch_size)
-    if getattr(args, "cnn_epochs", None) is not None:
-        config["machine_learning.models.cnn.max_epochs"] = int(args.cnn_epochs)
-    if getattr(args, "cnn_learning_rate", None) is not None:
-        config["machine_learning.models.cnn.learning_rate"] = float(args.cnn_learning_rate)
-    if getattr(args, "cnn_patience", None) is not None:
-        config["machine_learning.models.cnn.patience"] = int(args.cnn_patience)
-    if getattr(args, "cnn_min_delta", None) is not None:
-        config["machine_learning.models.cnn.min_delta"] = float(args.cnn_min_delta)
-    if getattr(args, "cnn_l2_lambda", None) is not None:
-        config["machine_learning.models.cnn.weight_decay"] = float(args.cnn_l2_lambda)
-    if getattr(args, "cnn_random_seed", None) is not None:
-        config["project.random_state"] = int(args.cnn_random_seed)
-    if getattr(args, "cv_hygiene", None) is not None:
-        config["machine_learning.cv.hygiene_enabled"] = bool(args.cv_hygiene)
-    if getattr(args, "cv_permutation_scheme", None) is not None:
-        config["machine_learning.cv.permutation_scheme"] = str(args.cv_permutation_scheme)
-    if getattr(args, "cv_min_valid_perm_fraction", None) is not None:
-        config["machine_learning.cv.min_valid_permutation_fraction"] = float(args.cv_min_valid_perm_fraction)
-    if getattr(args, "cv_default_n_bins", None) is not None:
-        config["machine_learning.cv.default_n_bins"] = int(args.cv_default_n_bins)
-    if getattr(args, "eval_ci_method", None) is not None:
-        config["machine_learning.evaluation.ci_method"] = str(args.eval_ci_method)
-    if getattr(args, "eval_bootstrap_iterations", None) is not None:
-        config["machine_learning.evaluation.bootstrap_iterations"] = int(args.eval_bootstrap_iterations)
-    if getattr(args, "data_covariates_strict", None) is not None:
-        config["machine_learning.data.covariates_strict"] = bool(args.data_covariates_strict)
-    if getattr(args, "data_max_excluded_subject_fraction", None) is not None:
-        config["machine_learning.data.max_excluded_subject_fraction"] = float(args.data_max_excluded_subject_fraction)
-    if getattr(args, "incremental_baseline_alpha", None) is not None:
-        config["machine_learning.incremental_validity.baseline_alpha"] = float(args.incremental_baseline_alpha)
-    if getattr(args, "interpretability_grouped_outputs", None) is not None:
-        config["machine_learning.interpretability.grouped_outputs"] = bool(args.interpretability_grouped_outputs)
-    if getattr(args, "timegen_min_subjects", None) is not None:
-        config["machine_learning.analysis.time_generalization.min_subjects_per_cell"] = int(args.timegen_min_subjects)
-    if getattr(args, "timegen_min_valid_perm_fraction", None) is not None:
-        config["machine_learning.analysis.time_generalization.min_valid_permutation_fraction"] = float(args.timegen_min_valid_perm_fraction)
-    if getattr(args, "class_min_subjects_for_auc", None) is not None:
-        config["machine_learning.classification.min_subjects_with_auc_for_inference"] = int(args.class_min_subjects_for_auc)
-    if getattr(args, "class_max_failed_fold_fraction", None) is not None:
-        config["machine_learning.classification.max_failed_fold_fraction"] = float(args.class_max_failed_fold_fraction)
-    if getattr(args, "strict_regression_continuous", None) is not None:
-        config["machine_learning.targets.strict_regression_target_continuous"] = bool(args.strict_regression_continuous)
+
+    if getattr(args, "spatial_regions_allowed", None) is not None:
+        config["machine_learning.preprocessing.spatial_regions_allowed"] = [
+            str(v).strip() for v in args.spatial_regions_allowed if str(v).strip()
+        ]
+
+    apply_arg_overrides(args, config, _MODEL_CONFIG_OVERRIDES)
+
+
+_ML_PLOT_CONFIG_OVERRIDES = [
+    ("ml_plots",              "machine_learning.plotting.enabled",           bool),
+    ("ml_plot_formats",       "machine_learning.plotting.formats",           lambda v: [str(x).strip().lower() for x in v]),
+    ("ml_plot_dpi",           "machine_learning.plotting.dpi",               int),
+    ("ml_plot_top_n_features","machine_learning.plotting.top_n_features",    int),
+    ("ml_plot_diagnostics",   "machine_learning.plotting.include_diagnostics",bool),
+]
+
+_FMRI_SIGNATURE_CONFIG_OVERRIDES = [
+    ("fmri_signature_method",          "machine_learning.fmri_signature.method",          str),
+    ("fmri_signature_contrast_name",   "machine_learning.fmri_signature.contrast_name",   str),
+    ("fmri_signature_name",            "machine_learning.fmri_signature.signature_name",  str),
+    ("fmri_signature_metric",          "machine_learning.fmri_signature.metric",          str),
+    ("fmri_signature_normalization",   "machine_learning.fmri_signature.normalization",   str),
+    ("fmri_signature_round_decimals",  "machine_learning.fmri_signature.round_decimals",  int),
+]
 
 
 def _update_ml_plot_config(args: argparse.Namespace, config: Any) -> None:
     """Update config with ML plotting overrides."""
-    if getattr(args, "ml_plots", None) is not None:
-        config["machine_learning.plotting.enabled"] = bool(args.ml_plots)
-    if getattr(args, "ml_plot_formats", None) is not None:
-        config["machine_learning.plotting.formats"] = [str(v).strip().lower() for v in args.ml_plot_formats]
-    if getattr(args, "ml_plot_dpi", None) is not None:
-        config["machine_learning.plotting.dpi"] = int(args.ml_plot_dpi)
-    if getattr(args, "ml_plot_top_n_features", None) is not None:
-        config["machine_learning.plotting.top_n_features"] = int(args.ml_plot_top_n_features)
-    if getattr(args, "ml_plot_diagnostics", None) is not None:
-        config["machine_learning.plotting.include_diagnostics"] = bool(args.ml_plot_diagnostics)
+    apply_arg_overrides(args, config, _ML_PLOT_CONFIG_OVERRIDES)
 
 
 def _update_fmri_signature_target_config(args: argparse.Namespace, config: Any) -> None:
     """Update config for fMRI signature target loading when requested."""
-    if getattr(args, "fmri_signature_method", None):
-        config["machine_learning.fmri_signature.method"] = str(args.fmri_signature_method)
-    if getattr(args, "fmri_signature_contrast_name", None):
-        config["machine_learning.fmri_signature.contrast_name"] = str(args.fmri_signature_contrast_name)
-    if getattr(args, "fmri_signature_name", None):
-        config["machine_learning.fmri_signature.signature_name"] = str(args.fmri_signature_name)
-    if getattr(args, "fmri_signature_metric", None):
-        config["machine_learning.fmri_signature.metric"] = str(args.fmri_signature_metric)
-    if getattr(args, "fmri_signature_normalization", None):
-        config["machine_learning.fmri_signature.normalization"] = str(args.fmri_signature_normalization)
-    if getattr(args, "fmri_signature_round_decimals", None) is not None:
-        config["machine_learning.fmri_signature.round_decimals"] = int(args.fmri_signature_round_decimals)
+    apply_arg_overrides(args, config, _FMRI_SIGNATURE_CONFIG_OVERRIDES)
 
 
 def _print_stage_list() -> None:

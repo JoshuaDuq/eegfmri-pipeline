@@ -20,6 +20,34 @@ def _subject_label(subject: str) -> str:
     return subject if str(subject).startswith("sub-") else f"sub-{subject}"
 
 
+def _coerce_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_positive_float_attr(cfg: Any, attr_name: str, default: Any = None) -> Optional[float]:
+    try:
+        raw_value = getattr(cfg, attr_name, default)
+    except Exception:
+        return None
+    coerced = _coerce_float(raw_value)
+    if coerced is None or coerced <= 0:
+        return None
+    return coerced
+
+
+def _read_repetition_time(sidecar: Path) -> Optional[float]:
+    try:
+        meta = json.loads(sidecar.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    return _coerce_float(meta.get("RepetitionTime"))
+
+
 def discover_fmriprep_preproc_bold(
     bids_derivatives: Path,
     subject: str,
@@ -70,12 +98,9 @@ def get_tr_from_bold(bold_path: Path) -> float:
     """Extract TR from BOLD sidecar JSON or NIfTI header."""
     sidecar = bold_path.with_suffix("").with_suffix(".json")
     if sidecar.exists():
-        try:
-            meta = json.loads(sidecar.read_text())
-            if "RepetitionTime" in meta:
-                return float(meta["RepetitionTime"])
-        except Exception:
-            pass
+        repetition_time = _read_repetition_time(sidecar)
+        if repetition_time is not None:
+            return repetition_time
 
     import nibabel as nib  # type: ignore
 
@@ -96,23 +121,8 @@ def build_first_level_model(
     """Create a nilearn FirstLevelModel with compatibility guards."""
     from nilearn.glm.first_level import FirstLevelModel  # type: ignore
 
-    low_pass = None
-    try:
-        low_pass_hz = getattr(cfg, "low_pass_hz", None)
-        if low_pass_hz is not None:
-            lp = float(low_pass_hz)
-            if lp > 0:
-                low_pass = lp
-    except Exception:
-        low_pass = None
-
-    high_pass = None
-    try:
-        high_pass_hz = float(getattr(cfg, "high_pass_hz", 0.0))
-        if high_pass_hz > 0:
-            high_pass = high_pass_hz
-    except Exception:
-        high_pass = None
+    low_pass = _coerce_positive_float_attr(cfg, "low_pass_hz")
+    high_pass = _coerce_positive_float_attr(cfg, "high_pass_hz", 0.0)
 
     kwargs: dict[str, Any] = dict(
         t_r=float(tr),
@@ -147,20 +157,24 @@ def build_first_level_model(
 def coerce_condition_value(value: Any, series: Any) -> Any:
     """Coerce a condition value to match a pandas Series dtype (best effort)."""
     try:
-        if pd.api.types.is_integer_dtype(series):
-            try:
-                return int(value)
-            except (ValueError, TypeError):
-                return value
-        if pd.api.types.is_float_dtype(series):
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return value
-        if pd.api.types.is_bool_dtype(series):
-            return str(value).strip().lower() in ("true", "1", "yes")
+        is_integer = pd.api.types.is_integer_dtype(series)
+        is_float = pd.api.types.is_float_dtype(series)
+        is_bool = pd.api.types.is_bool_dtype(series)
     except Exception:
-        pass
+        return value
+
+    if is_integer:
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return value
+    if is_float:
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return value
+    if is_bool:
+        return str(value).strip().lower() in ("true", "1", "yes")
     return value
 
 

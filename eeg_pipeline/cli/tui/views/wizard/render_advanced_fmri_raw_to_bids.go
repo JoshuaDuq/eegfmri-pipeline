@@ -49,11 +49,14 @@ func (m Model) renderFmriRawToBidsAdvancedConfig() string {
 		onsetOffsetVal = m.numberBuffer + "█"
 	}
 
-	dicomMode := "symlink"
-	if m.fmriRawDicomModeIndex == 1 {
+	var dicomMode string
+	switch m.fmriRawDicomModeIndex {
+	case 1:
 		dicomMode = "copy"
-	} else if m.fmriRawDicomModeIndex == 2 {
+	case 2:
 		dicomMode = "skip"
+	default:
+		dicomMode = "symlink"
 	}
 
 	granularity := "phases"
@@ -61,11 +64,14 @@ func (m Model) renderFmriRawToBidsAdvancedConfig() string {
 		granularity = "trial"
 	}
 
-	onsetRef := "as_is"
-	if m.fmriRawOnsetRefIndex == 1 {
+	var onsetRef string
+	switch m.fmriRawOnsetRefIndex {
+	case 1:
 		onsetRef = "first_iti_start"
-	} else if m.fmriRawOnsetRefIndex == 2 {
+	case 2:
 		onsetRef = "first_stim_start"
+	default:
+		onsetRef = "as_is"
 	}
 
 	options := []struct {

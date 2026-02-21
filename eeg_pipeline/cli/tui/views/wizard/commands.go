@@ -574,9 +574,10 @@ func (m Model) BuildCommand() string {
 		}
 	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS || m.Pipeline == types.PipelineFmriRawToBIDS {
 		mode := "merge-psychopy"
-		if m.Pipeline == types.PipelineRawToBIDS {
+		switch m.Pipeline {
+		case types.PipelineRawToBIDS:
 			mode = "raw-to-bids"
-		} else if m.Pipeline == types.PipelineFmriRawToBIDS {
+		case types.PipelineFmriRawToBIDS:
 			mode = "fmri-raw-to-bids"
 		}
 		parts = []string{"eeg-pipeline", "utilities", mode}

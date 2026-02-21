@@ -406,7 +406,7 @@ func (m Model) renderMinimalView(builder *strings.Builder) string {
 
 	isFocused := m.advancedCursor == 0
 	cursor := m.renderCursor(isFocused)
-	labelStyle := m.buildLabelStyle(labelWidth, isFocused)
+	labelStyle := m.buildLabelStyle(isFocused)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
 	builder.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
@@ -520,7 +520,7 @@ func (m Model) renderCursor(isFocused bool) string {
 	return "  "
 }
 
-func (m Model) buildLabelStyle(width int, isFocused bool) lipgloss.Style {
+func (m Model) buildLabelStyle(isFocused bool) lipgloss.Style {
 	style := lipgloss.NewStyle().Foreground(styles.Text)
 	if isFocused {
 		style = style.Foreground(styles.Primary).Bold(true)
@@ -540,7 +540,7 @@ func (m Model) renderGroupLine(opt optionType, label string, expanded bool, hint
 
 func (m Model) renderValueLine(opt optionType, label string, value string, hint string, focused bool, labelWidth int) renderLine {
 	cursor := m.renderCursor(focused)
-	labelStyle := m.buildLabelStyle(labelWidth, focused)
+	labelStyle := m.buildLabelStyle(focused)
 	valueStyle := m.buildValueStyle(opt)
 
 	displayValue := value
@@ -598,7 +598,7 @@ func (m Model) renderPlotHeaderLine(plot PlotItem, expanded bool, focused bool) 
 
 func (m Model) renderPlotValueLine(label string, value string, hint string, focused bool, labelWidth int) renderLine {
 	cursor := m.renderCursor(focused)
-	labelStyle := m.buildLabelStyle(labelWidth, focused)
+	labelStyle := m.buildLabelStyle(focused)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 

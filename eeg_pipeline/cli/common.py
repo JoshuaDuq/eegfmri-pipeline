@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from eeg_pipeline.infra.paths import resolve_deriv_root
 from eeg_pipeline.cli.progress import create_progress_reporter, ProgressReporter
@@ -30,6 +30,9 @@ __all__ = [
     "validate_subjects_not_empty",
     "validate_min_subjects",
     "get_deriv_root",
+    "apply_arg_overrides",
+    "MIN_SUBJECTS_KEY",
+    "MIN_SUBJECTS_FOR_ML",
 ]
 
 
@@ -132,3 +135,19 @@ def validate_min_subjects(
 def get_deriv_root(config: Any) -> Path:
     """Get derivatives root path from config."""
     return resolve_deriv_root(config=config)
+
+
+def apply_arg_overrides(
+    args: argparse.Namespace,
+    config: Any,
+    mapping: Sequence[Tuple[str, str, Callable[[Any], Any]]],
+) -> None:
+    """Apply CLI argument overrides to config from a declarative mapping.
+
+    Each entry is ``(arg_attr, config_key, cast_fn)``. The override is applied
+    only when ``getattr(args, arg_attr)`` is not ``None``.
+    """
+    for arg_attr, config_key, cast_fn in mapping:
+        value = getattr(args, arg_attr, None)
+        if value is not None:
+            config[config_key] = cast_fn(value)

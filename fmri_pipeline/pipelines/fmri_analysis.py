@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
+from fmri_pipeline.utils.signature_paths import discover_signature_root
 from fmri_pipeline.utils.text import safe_slug
 
 
@@ -42,19 +43,7 @@ class FmriAnalysisPipeline(PipelineBase):
         1) config: paths.signature_dir (explicit override)
         2) sibling directory of derivatives: <deriv_root>/../external
         """
-        try:
-            cfg_path = self.config.get("paths.signature_dir")
-        except Exception:
-            cfg_path = None
-        if cfg_path:
-            p = Path(str(cfg_path)).expanduser()
-            return p if p.exists() else None
-
-        try:
-            candidate = Path(self.deriv_root).expanduser().resolve().parent / "external"
-            return candidate if candidate.exists() else None
-        except Exception:
-            return None
+        return discover_signature_root(self.config, self.deriv_root)
 
     def _discover_plot_assets(
         self,

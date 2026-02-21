@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
+from fmri_pipeline.utils.signature_paths import discover_signature_root
 
 
 class FmriTrialSignaturePipeline(PipelineBase):
@@ -23,19 +24,7 @@ class FmriTrialSignaturePipeline(PipelineBase):
         super().__init__(name="fmri_trial_signatures", config=config)
 
     def _discover_signature_root(self) -> Optional[Path]:
-        try:
-            cfg_path = self.config.get("paths.signature_dir")
-        except Exception:
-            cfg_path = None
-        if cfg_path:
-            p = Path(str(cfg_path)).expanduser()
-            return p if p.exists() else None
-
-        try:
-            candidate = Path(self.deriv_root).expanduser().resolve().parent / "external"
-            return candidate if candidate.exists() else None
-        except Exception:
-            return None
+        return discover_signature_root(self.config, self.deriv_root)
 
     def process_subject(
         self,
@@ -109,4 +98,3 @@ class FmriTrialSignaturePipeline(PipelineBase):
     def run_group_level(self, subjects, task=None, **kwargs):  # type: ignore[override]
         # No group-level inference here; downstream EEG ML can aggregate subject TSVs.
         return
-

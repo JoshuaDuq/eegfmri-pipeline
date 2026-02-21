@@ -451,13 +451,14 @@ func (m Model) isColumnValueSelected(value string) bool {
 		// Check plot-specific config first
 		if m.editingPlotID != "" {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				if m.editingPlotField == plotItemConfigFieldComparisonSegment {
+				switch m.editingPlotField {
+				case plotItemConfigFieldComparisonSegment:
 					selectedValues = cfg.ComparisonSegment
-				} else if m.editingPlotField == plotItemConfigFieldDoseResponseSegment {
+				case plotItemConfigFieldDoseResponseSegment:
 					selectedValues = cfg.DoseResponseSegment
-				} else if m.editingPlotField == plotItemConfigFieldTopomapWindow {
+				case plotItemConfigFieldTopomapWindow:
 					selectedValues = cfg.TopomapWindowsSpec
-				} else {
+				default:
 					selectedValues = cfg.ComparisonWindowsSpec
 				}
 			}
@@ -654,7 +655,8 @@ func (m *Model) handleExpandedListToggle() {
 		if m.editingPlotID != "" {
 			plotID := m.editingPlotID
 			cfg := m.ensurePlotItemConfig(plotID)
-			if m.editingPlotField == plotItemConfigFieldComparisonSegment {
+			switch m.editingPlotField {
+			case plotItemConfigFieldComparisonSegment:
 				// Segment is single-select
 				cfg.ComparisonSegment = selectedItem
 				m.plotItemConfigs[plotID] = cfg
@@ -662,7 +664,7 @@ func (m *Model) handleExpandedListToggle() {
 				m.editingPlotField = plotItemConfigFieldNone
 				m.expandedOption = expandedNone
 				m.subCursor = 0
-			} else if m.editingPlotField == plotItemConfigFieldDoseResponseSegment {
+			case plotItemConfigFieldDoseResponseSegment:
 				// Dose-response segment is single-select
 				cfg.DoseResponseSegment = selectedItem
 				m.plotItemConfigs[plotID] = cfg
@@ -670,11 +672,11 @@ func (m *Model) handleExpandedListToggle() {
 				m.editingPlotField = plotItemConfigFieldNone
 				m.expandedOption = expandedNone
 				m.subCursor = 0
-			} else if m.editingPlotField == plotItemConfigFieldTopomapWindow {
+			case plotItemConfigFieldTopomapWindow:
 				// TopomapWindowsSpec is multi-select
 				m.toggleSpaceValue(selectedItem, &cfg.TopomapWindowsSpec)
 				m.plotItemConfigs[plotID] = cfg
-			} else {
+			default:
 				// Windows is multi-select
 				m.toggleSpaceValue(selectedItem, &cfg.ComparisonWindowsSpec)
 				m.plotItemConfigs[plotID] = cfg

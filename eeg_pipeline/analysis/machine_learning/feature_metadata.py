@@ -18,6 +18,19 @@ from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
 from eeg_pipeline.utils.analysis.channels import build_roi_map
 
 
+def _channel_to_roi_map(channels: List[str], roi_defs: Dict[str, Any]) -> Dict[str, str]:
+    """Build channel -> first ROI name mapping from ROI definitions."""
+    if not channels or not isinstance(roi_defs, dict) or not roi_defs:
+        return {}
+    roi_map = build_roi_map(channels, roi_defs)
+    out: Dict[str, str] = {}
+    for roi_name, idxs in roi_map.items():
+        for idx in idxs:
+            ch = channels[int(idx)]
+            out.setdefault(str(ch), str(roi_name))
+    return out
+
+
 def build_feature_metadata(
     feature_names: Sequence[str],
     *,
@@ -50,22 +63,14 @@ def build_feature_metadata(
 
     meta = pd.DataFrame(rows)
 
-    # Optional channel→ROI mapping for channel-scoped features (helps interpretability).
     if config is not None and "channel" in meta.columns:
         channels = sorted({c for c in meta["channel"].dropna().astype(str).tolist() if c})
-        if channels:
-            roi_defs = get_roi_definitions(config) or {}
-            if isinstance(roi_defs, dict) and roi_defs:
-                roi_map = build_roi_map(channels, roi_defs)
-                channel_to_roi: Dict[str, str] = {}
-                for roi_name, idxs in roi_map.items():
-                    for idx in idxs:
-                        ch = channels[int(idx)]
-                        # Prefer first ROI match if overlaps occur.
-                        channel_to_roi.setdefault(str(ch), str(roi_name))
-                if "roi" not in meta.columns:
-                    meta["roi"] = np.nan
-                meta["roi"] = meta["roi"].fillna(meta["channel"].map(channel_to_roi))
+        roi_defs = get_roi_definitions(config) or {}
+        channel_to_roi = _channel_to_roi_map(channels, roi_defs)
+        if channel_to_roi:
+            if "roi" not in meta.columns:
+                meta["roi"] = np.nan
+            meta["roi"] = meta["roi"].fillna(meta["channel"].map(channel_to_roi))
 
     return meta
 

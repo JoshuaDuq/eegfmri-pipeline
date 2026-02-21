@@ -72,3 +72,39 @@ def test_runtime_overrides_do_not_leak_into_cached_config(monkeypatch) -> None:
     fresh_cfg = loader.load_config(apply_thread_limits=False)
 
     assert fresh_cfg.get("project.task") == original_task
+
+
+def test_resolve_single_path_keeps_docker_image_like_values() -> None:
+    config_dir = Path("/tmp/config")
+    project_root = Path("/tmp/project")
+    resolved = loader._resolve_single_path("nipreps/fmriprep:25.2.4", config_dir, project_root)
+    assert resolved == "nipreps/fmriprep:25.2.4"
+
+
+def test_resolve_paths_recursive_skips_non_path_scalar_keys(tmp_path) -> None:
+    config = {
+        "project": {
+            "task": "thermalactive",
+            "random_state": "42",
+            "picks": "eeg",
+            "project_root": "workspace-root",
+        }
+    }
+    loader._resolve_paths_recursive(config, tmp_path / "config", tmp_path / "project")
+    assert config["project"]["task"] == "thermalactive"
+    assert config["project"]["random_state"] == "42"
+    assert config["project"]["picks"] == "eeg"
+    assert config["project"]["project_root"] == "workspace-root"
+
+
+def test_resolve_single_path_uses_project_root_for_known_prefixes(tmp_path) -> None:
+    config_dir = tmp_path / "cfg"
+    project_root = tmp_path / "repo"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    resolved_data = loader._resolve_single_path("data/derivatives", config_dir, project_root)
+    resolved_pkg = loader._resolve_single_path("eeg_pipeline/data", config_dir, project_root)
+
+    assert resolved_data == str((project_root / "data/derivatives").resolve())
+    assert resolved_pkg == str((project_root / "eeg_pipeline/data").resolve())

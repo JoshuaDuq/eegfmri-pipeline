@@ -280,25 +280,6 @@ func (m Model) plotCountsForGroup(group string) (total int, selected int) {
 	return total, selected
 }
 
-// isPlotGroupSelected checks if any plot from the given group(s) is currently selected.
-// Accepts one or more group names and returns true if any plot in those groups is selected.
-func (m Model) isPlotGroupSelected(groups ...string) bool {
-	for i, plot := range m.plotItems {
-		if !m.plotSelected[i] {
-			continue
-		}
-		if !m.IsPlotCategorySelected(plot.Group) {
-			continue
-		}
-		for _, group := range groups {
-			if strings.EqualFold(plot.Group, group) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func (m Model) plotAvailabilitySummary(plot PlotItem) (int, int, map[string]int) {
 	missing := make(map[string]int)
 	total := 0

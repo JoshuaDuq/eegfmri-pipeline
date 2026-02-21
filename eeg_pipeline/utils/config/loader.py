@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import copy
+import json
+import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional, Union, Tuple, List
-import json
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import yaml
-import os
 
 ###################################################################
 # Config Path Resolution
@@ -46,6 +47,14 @@ import os
 ###################################################################
 
 
+_NON_PATH_KEYS = {"project_root", "task", "random_state", "picks"}
+_PROJECT_ROOT_PREFIXES = ("data/", "eeg_pipeline/")
+
+
+def _is_blank(value: str) -> bool:
+    return not value or value.strip() == ""
+
+
 def _looks_like_path_string(value: str) -> bool:
     if value in {".", ".."}:
         return True
@@ -65,18 +74,16 @@ def _looks_like_path_string(value: str) -> bool:
 
 
 def _resolve_single_path(value: str, config_dir: Path, project_root: Path) -> str:
-    if not value or value.strip() == "":
+    if _is_blank(value):
         return value
-    
+
     if not _looks_like_path_string(value):
         return value
-    
+
     path_obj = Path(value).expanduser()
     if path_obj.is_absolute():
         return str(path_obj.resolve())
-    if value.startswith("data/"):
-        return str((project_root / value).resolve())
-    if value.startswith("eeg_pipeline/"):
+    if value.startswith(_PROJECT_ROOT_PREFIXES):
         return str((project_root / value).resolve())
     return str((config_dir / value).resolve())
 
@@ -89,11 +96,9 @@ def resolve_config_paths(config: Dict[str, Any], config_path: Path) -> Dict[str,
 
 
 def _resolve_paths_recursive(obj: Any, config_dir: Path, project_root: Path) -> None:
-    non_path_keys = {"project_root", "task", "random_state", "picks"}
-    
     if isinstance(obj, dict):
         for key, value in obj.items():
-            if isinstance(value, str) and key not in non_path_keys:
+            if isinstance(value, str) and key not in _NON_PATH_KEYS:
                 obj[key] = _resolve_single_path(value, config_dir, project_root)
             elif isinstance(value, (dict, list)):
                 _resolve_paths_recursive(value, config_dir, project_root)
@@ -172,10 +177,10 @@ _CONFIG_LOCK = threading.Lock()
 class ConfigDict(dict):
     def __init__(self, data: Dict[str, Any]):
         super().__init__(data)
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         return get_nested_value(self, key, default)
-    
+
     def __setitem__(self, key: str, value: Any) -> None:
         """Support dot-notation for setting nested values."""
         if "." not in key:
@@ -184,11 +189,11 @@ class ConfigDict(dict):
 
         keys = key.split('.')
         current = self
-        for i, k in enumerate(keys[:-1]):
+        for k in keys[:-1]:
             if k not in current or not isinstance(current[k], dict):
                 current[k] = {}
             current = current[k]
-        
+
         current[keys[-1]] = value
 
     def __getattr__(self, key: str) -> Any:
@@ -201,24 +206,24 @@ class ConfigDict(dict):
         """
         if key.startswith('_'):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
-        
+
         if key in self:
             value = self[key]
             return ConfigDict(value) if isinstance(value, dict) else value
-        
+
         # Check for paths and project sections
         paths_value = get_nested_value(self, f"paths.{key}", None)
         if paths_value is not None:
             return Path(paths_value) if isinstance(paths_value, str) else paths_value
-        
+
         project_value = get_nested_value(self, f"project.{key}", None)
         if project_value is not None:
             return project_value
-        
+
         # Alias 'subjects' to 'project.subject_list'
         if key == "subjects":
             return get_nested_value(self, "project.subject_list", None)
-        
+
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
 
 
@@ -496,28 +501,14 @@ def get_config_str(config: Any, key: str, default: str) -> str:
 
 def get_frequency_bands(config: Any) -> Dict[str, List[float]]:
     """Get frequency band definitions (ranges) from config."""
-    if config is None:
-        return {}
-    
-    if isinstance(config, ConfigDict):
-        bands = config.get("time_frequency_analysis.bands")
-        if bands:
-            return bands
-    elif isinstance(config, dict):
-        bands = get_nested_value(config, "time_frequency_analysis.bands")
-        if bands:
-            return bands
-    
-    return get_default_frequency_bands()
+    bands = get_config_value(config, "time_frequency_analysis.bands", None)
+    return bands if bands else get_default_frequency_bands()
 
 
 def get_frequency_band_names(config: Any) -> List[str]:
     """Get frequency band names (list of strings) from config."""
-    freq_bands = get_frequency_bands(config)
-    if freq_bands:
-        return list(freq_bands.keys())
-    
-    return ["delta", "theta", "alpha", "beta", "gamma"]
+    bands = get_frequency_bands(config)
+    return list(bands.keys()) if bands else ["delta", "theta", "alpha", "beta", "gamma"]
 
 
 ###################################################################

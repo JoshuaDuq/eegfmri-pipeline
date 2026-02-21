@@ -85,6 +85,10 @@ def _append_classification_resampler(steps: List[Tuple[str, Any]], cfg: Dict[str
         steps.append(("resampler", SMOTE(random_state=int(cfg.get("classification_resampler_seed", 42)))))
 
 
+def _variance_param_prefix(n_covariates: int) -> str:
+    """Prefix for variance threshold param in grid (preprocessing has covariate branch)."""
+    return "preprocessing__eeg__var" if n_covariates > 0 else "var"
+
 
 def create_svm_pipeline(
     kernel: str = "rbf",
@@ -274,7 +278,7 @@ def create_ensemble_pipeline(
         ensemble = VotingClassifier(
             estimators=[
                 ("svm", CalibratedClassifierCV(svm, method="sigmoid", cv=2)),
-                ("lr", lr), # L2 logistic regression is natively well calibrated
+                ("lr", lr),
                 ("rf", CalibratedClassifierCV(rf, method="sigmoid", cv=2)),
             ],
             voting="soft",
@@ -305,7 +309,7 @@ def create_ensemble_pipeline(
 def build_svm_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, List]:
     """Build parameter grid for SVM hyperparameter tuning."""
     cfg = get_ml_config(config)
-    var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
+    var_prefix = _variance_param_prefix(n_covariates)
     return {
         "svm__C": cfg["svm_C_grid"],
         "svm__gamma": cfg["svm_gamma_grid"],
@@ -316,7 +320,7 @@ def build_svm_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str,
 def build_logistic_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, List]:
     """Build parameter grid for Logistic Regression."""
     cfg = get_ml_config(config)
-    var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
+    var_prefix = _variance_param_prefix(n_covariates)
     return {
         "lr__C": cfg["lr_C_grid"],
         f"{var_prefix}__threshold": cfg["variance_threshold_grid"],
@@ -326,7 +330,7 @@ def build_logistic_param_grid(config: Any = None, n_covariates: int = 0) -> Dict
 def build_rf_classification_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, List]:
     """Build parameter grid for Random Forest classifier."""
     cfg = get_ml_config(config)
-    var_prefix = "preprocessing__eeg__var" if n_covariates > 0 else "var"
+    var_prefix = _variance_param_prefix(n_covariates)
     return {
         "rf__max_depth": cfg["rf_max_depth_grid"],
         "rf__min_samples_leaf": [1, 3, 5],
@@ -377,82 +381,70 @@ class ClassificationResult:
     def __post_init__(self):
         """Compute all metrics."""
         self._compute_metrics()
-    
+
+    @staticmethod
+    def _metrics_for_subset(
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        y_prob: Optional[np.ndarray] = None,
+    ) -> Dict[str, float]:
+        """Compute scalar metrics for any subset of samples."""
+        rec: Dict[str, float] = {
+            "accuracy": float(accuracy_score(y_true, y_pred)),
+            "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
+            "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+            "precision": float(precision_score(y_true, y_pred, zero_division=0)),
+            "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+            "n_trials": int(len(y_true)),
+        }
+        cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+        tn, fp, fn, tp = cm.ravel()
+        rec["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else np.nan
+        if y_prob is not None and len(np.unique(y_true)) == 2:
+            try:
+                prob_mask = np.isfinite(y_prob) & np.isfinite(y_true)
+                if np.sum(prob_mask) >= 2 and len(np.unique(y_true[prob_mask])) == 2:
+                    rec["auc"] = float(roc_auc_score(y_true[prob_mask], y_prob[prob_mask]))
+                    rec["average_precision"] = float(
+                        average_precision_score(y_true[prob_mask], y_prob[prob_mask])
+                    )
+            except Exception as exc:
+                logger.debug("Skipping probability metrics: %s", exc)
+        return rec
+
     def _compute_metrics(self):
         """Compute classification metrics."""
         if len(self.y_true) == 0:
             return
-        
-        # Basic metrics
-        self.accuracy = float(accuracy_score(self.y_true, self.y_pred))
-        self.balanced_accuracy = float(balanced_accuracy_score(self.y_true, self.y_pred))
-        self.f1 = float(f1_score(self.y_true, self.y_pred, zero_division=0))
-        self.precision = float(precision_score(self.y_true, self.y_pred, zero_division=0))
-        self.recall = float(recall_score(self.y_true, self.y_pred, zero_division=0))
-        
-        # Confusion matrix
+
+        global_m = self._metrics_for_subset(self.y_true, self.y_pred, self.y_prob)
+        self.accuracy = global_m["accuracy"]
+        self.balanced_accuracy = global_m["balanced_accuracy"]
+        self.f1 = global_m["f1"]
+        self.precision = global_m["precision"]
+        self.recall = global_m["recall"]
+        self.specificity = global_m["specificity"]
+        self.auc = global_m.get("auc", np.nan)
+        self.average_precision = global_m.get("average_precision", np.nan)
+
         self.confusion = confusion_matrix(self.y_true, self.y_pred, labels=[0, 1])
-        tn, fp, fn, tp = self.confusion.ravel()
-        self.specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else np.nan
-        
-        # AUC (requires probabilities)
         if self.y_prob is not None:
-            try:
-                prob_mask = np.isfinite(self.y_prob) & np.isfinite(self.y_true)
-                if np.sum(prob_mask) >= 2 and len(np.unique(self.y_true[prob_mask])) == 2:
-                    self.auc = float(roc_auc_score(self.y_true[prob_mask], self.y_prob[prob_mask]))
-                    self.average_precision = float(
-                        average_precision_score(self.y_true[prob_mask], self.y_prob[prob_mask])
-                    )
-                    self.fpr, self.tpr, self.thresholds = roc_curve(
-                        self.y_true[prob_mask], self.y_prob[prob_mask]
-                    )
-            except ValueError:
-                pass
-        
-        # Per-subject metrics
+            prob_mask = np.isfinite(self.y_prob) & np.isfinite(self.y_true)
+            if np.sum(prob_mask) >= 2 and len(np.unique(self.y_true[prob_mask])) == 2:
+                self.fpr, self.tpr, self.thresholds = roc_curve(
+                    self.y_true[prob_mask], self.y_prob[prob_mask]
+                )
+
         if self.groups is not None:
             for subj in np.unique(self.groups):
                 mask = self.groups == subj
                 if mask.sum() < 2:
                     continue
-                y_t, y_p = self.y_true[mask], self.y_pred[mask]
-                rec: Dict[str, float] = {
-                    "accuracy": float(accuracy_score(y_t, y_p)),
-                    "precision": float(precision_score(y_t, y_p, zero_division=0)),
-                    "recall": float(recall_score(y_t, y_p, zero_division=0)),
-                    "f1": float(f1_score(y_t, y_p, zero_division=0)),
-                    "n_trials": int(mask.sum()),
-                }
-                cm_subj = confusion_matrix(y_t, y_p, labels=[0, 1]).astype(float)
-                tn, fp, fn, tp = cm_subj.ravel()
-                rec["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else np.nan
-                support = cm_subj.sum(axis=1)
-                if np.sum(support > 0) < 2:
-                    rec["balanced_accuracy"] = np.nan
-                else:
-                    recall = np.full(2, np.nan, dtype=float)
-                    valid_support = support > 0
-                    recall[valid_support] = np.diag(cm_subj)[valid_support] / support[valid_support]
-                    rec["balanced_accuracy"] = float(np.nanmean(recall))
-                if self.y_prob is not None and len(np.unique(y_t)) == 2:
-                    try:
-                        subj_prob = self.y_prob[mask]
-                        prob_mask = np.isfinite(subj_prob) & np.isfinite(y_t)
-                        if np.sum(prob_mask) >= 2 and len(np.unique(y_t[prob_mask])) == 2:
-                            rec["auc"] = float(roc_auc_score(y_t[prob_mask], subj_prob[prob_mask]))
-                            rec["average_precision"] = float(
-                                average_precision_score(y_t[prob_mask], subj_prob[prob_mask])
-                            )
-                    except Exception as exc:
-                        logger.debug(
-                            "Skipping per-subject probability metrics for subject=%s: %s",
-                            subj,
-                            exc,
-                        )
-                self.per_subject_metrics[str(subj)] = rec
-                
-        # Compute mean subject AUC if available
+                subj_prob = self.y_prob[mask] if self.y_prob is not None else None
+                self.per_subject_metrics[str(subj)] = self._metrics_for_subset(
+                    self.y_true[mask], self.y_pred[mask], subj_prob
+                )
+
         if self.per_subject_metrics:
             aucs = [m["auc"] for m in self.per_subject_metrics.values() if "auc" in m and np.isfinite(m["auc"])]
             if aucs:
