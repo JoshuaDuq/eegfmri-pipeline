@@ -18,7 +18,15 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
     constant_config = resolved_config.get("machine_learning.constants", {})
     preprocessing_config = resolved_config.get("machine_learning.preprocessing", {})
     pca_config = preprocessing_config.get("pca", {}) if isinstance(preprocessing_config, dict) else {}
+    spatial_regions_raw = preprocessing_config.get("spatial_regions_allowed", [])
+    if isinstance(spatial_regions_raw, str):
+        spatial_regions_allowed = [spatial_regions_raw] if spatial_regions_raw.strip() else []
+    elif isinstance(spatial_regions_raw, (list, tuple)):
+        spatial_regions_allowed = [str(v).strip() for v in spatial_regions_raw if str(v).strip()]
+    else:
+        spatial_regions_allowed = []
     model_config = resolved_config.get("machine_learning.models", {})
+    classification_config = resolved_config.get("machine_learning.classification", {})
 
     elasticnet_config = model_config.get("elasticnet", {})
     ridge_config = model_config.get("ridge", {})
@@ -35,11 +43,17 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
         "power_transformer_method": preprocessing_config.get("power_transformer_method", "yeo-johnson"),
         "power_transformer_standardize": preprocessing_config.get("power_transformer_standardize", True),
         "variance_threshold_grid": preprocessing_config.get("variance_threshold_grid", [0.0, 0.01, 0.1]),
+        "deconfound": bool(preprocessing_config.get("deconfound", False)),
+        "spatial_regions_allowed": spatial_regions_allowed,
+        "feature_selection_percentile": float(preprocessing_config.get("feature_selection_percentile", 100.0)),
         "pca_enabled": bool(pca_config.get("enabled", False)),
         "pca_n_components": pca_config.get("n_components", 0.95),
         "pca_whiten": bool(pca_config.get("whiten", False)),
         "pca_svd_solver": pca_config.get("svd_solver", "auto"),
         "pca_random_state": pca_config.get("random_state", None),
+        "classification_resampler": str(classification_config.get("resampler", "none")).strip().lower(),
+        "classification_resampler_seed": int(classification_config.get("resampler_seed", 42)),
+        "calibrate_ensemble": bool(classification_config.get("calibrate_ensemble", False)),
         # ElasticNet regression
         "elasticnet_max_iter": elasticnet_config.get("max_iter", 10000),
         "elasticnet_tol": elasticnet_config.get("tol", 1e-4),

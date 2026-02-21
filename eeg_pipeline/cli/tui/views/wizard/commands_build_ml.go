@@ -227,6 +227,33 @@ func (m Model) buildMLAdvancedArgs() []string {
 		}
 	}
 
+	if m.mlDeconfound {
+		args = append(args, "--deconfound")
+	}
+
+	if m.mlFeatureSelectionPercentile != 100.0 && m.mlFeatureSelectionPercentile > 0.0 {
+		args = append(args, "--feature-selection-percentile", fmt.Sprintf("%.6g", m.mlFeatureSelectionPercentile))
+	}
+
+	if m.mlSpatialRegionsAllowed != "" {
+		args = append(args, "--spatial-regions-allowed")
+		args = append(args, splitLooseList(m.mlSpatialRegionsAllowed)...)
+	}
+
+	if mode == "classify" {
+		resamplers := []string{"none", "undersample", "smote"}
+		if m.mlClassificationResampler != 0 {
+			args = append(args, "--classification-resampler", resamplers[m.mlClassificationResampler%len(resamplers)])
+			if m.mlClassificationResamplerSeed != 42 {
+				args = append(args, "--classification-resampler-seed", fmt.Sprintf("%d", m.mlClassificationResamplerSeed))
+			}
+		}
+
+		if m.mlClassificationModel == MLClassificationEnsemble && m.mlEnsembleCalibrate {
+			args = append(args, "--ensemble-calibrate")
+		}
+	}
+
 	// SVM hyperparameters
 	if mode == "classify" && m.mlClassificationModel == MLClassificationSVM {
 		kernels := []string{"rbf", "linear", "poly"}

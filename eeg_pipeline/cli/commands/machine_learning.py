@@ -280,6 +280,16 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pca-whiten", action="store_true", default=None, dest="pca_whiten")
     parser.add_argument("--pca-svd-solver", choices=["auto", "full", "randomized"], default=None, dest="pca_svd_solver")
     parser.add_argument("--pca-rng-seed", type=int, default=None, dest="pca_rng_seed")
+    parser.add_argument("--deconfound", action="store_true", default=None, dest="deconfound")
+    parser.add_argument("--feature-selection-percentile", type=float, default=None, dest="feature_selection_percentile")
+    parser.add_argument("--ensemble-calibrate", action="store_true", default=None, dest="ensemble_calibrate")
+    parser.add_argument("--spatial-regions-allowed", nargs="+", type=str, default=None)
+    parser.add_argument(
+        "--classification-resampler",
+        choices=["none", "undersample", "smote"],
+        default=None,
+    )
+    parser.add_argument("--classification-resampler-seed", type=int, default=None)
     parser.add_argument("--svm-kernel", choices=["rbf", "linear", "poly"], default=None)
     parser.add_argument("--svm-c-grid", nargs="+", type=str, default=None)
     parser.add_argument("--svm-gamma-grid", nargs="+", type=str, default=None)
@@ -483,6 +493,20 @@ def _update_model_config(args: argparse.Namespace, config: Any) -> None:
         config["machine_learning.preprocessing.pca.svd_solver"] = str(args.pca_svd_solver)
     if getattr(args, "pca_rng_seed", None) is not None:
         config["machine_learning.preprocessing.pca.random_state"] = int(args.pca_rng_seed)
+    if getattr(args, "deconfound", None) is not None:
+        config["machine_learning.preprocessing.deconfound"] = bool(args.deconfound)
+    if getattr(args, "feature_selection_percentile", None) is not None:
+        config["machine_learning.preprocessing.feature_selection_percentile"] = float(args.feature_selection_percentile)
+    if getattr(args, "ensemble_calibrate", None) is not None:
+        config["machine_learning.classification.calibrate_ensemble"] = bool(args.ensemble_calibrate)
+    if getattr(args, "spatial_regions_allowed", None) is not None:
+        config["machine_learning.preprocessing.spatial_regions_allowed"] = [
+            str(v).strip() for v in args.spatial_regions_allowed if str(v).strip()
+        ]
+    if getattr(args, "classification_resampler", None) is not None:
+        config["machine_learning.classification.resampler"] = str(args.classification_resampler)
+    if getattr(args, "classification_resampler_seed", None) is not None:
+        config["machine_learning.classification.resampler_seed"] = int(args.classification_resampler_seed)
     if getattr(args, "svm_kernel", None) is not None:
         config["machine_learning.models.svm.kernel"] = str(args.svm_kernel)
     if getattr(args, "svm_c_grid", None) is not None:

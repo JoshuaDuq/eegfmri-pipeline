@@ -50,7 +50,11 @@ from sklearn.model_selection import (
     LeaveOneGroupOut,
     StratifiedGroupKFold,
     StratifiedKFold,
+    GroupKFold,
 )
+from imblearn.pipeline import Pipeline as ImbPipeline
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import SMOTE
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
@@ -62,7 +66,10 @@ from eeg_pipeline.analysis.machine_learning.preprocessing import (
     DropAllNaNColumns,
     ReplaceInfWithNaN,
     VarianceThreshold,
+    Deconfounder,
+    SpatialFeatureSelector,
 )
+from eeg_pipeline.utils.config.loader import get_config_value
 
 logger = logging.getLogger(__name__)
 
@@ -71,21 +78,42 @@ logger = logging.getLogger(__name__)
 # Pipeline Factories
 ###################################################################
 
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
+from sklearn.feature_selection import SelectPercentile, f_classif
 
-def _build_base_preprocessing_steps(cfg: Dict[str, Any], include_scaling: bool, n_covariates: int = 0) -> List[Tuple[str, Any]]:
-    steps: List[Tuple[str, Any]] = [
+def _build_base_preprocessing_steps(
+    cfg: Dict[str, Any],
+    include_scaling: bool,
+    n_covariates: int = 0,
+    config: Any = None,
+) -> List[Tuple[str, Any]]:
+    steps: List[Tuple[str, Any]] = []
+    
+    # Feature specific steps
+    feature_steps: List[Tuple[str, Any]] = [
         ("finite", ReplaceInfWithNaN()),
         ("drop_all_nan", DropAllNaNColumns()),
     ]
     
-    # Feature specific steps
-    feature_steps = [
+    if cfg.get("spatial_regions_allowed"):
+        # Must pass config so it can look up ROI definitions
+        feature_steps.append(
+            ("spatial_filter", SpatialFeatureSelector(
+                allowed_regions=cfg["spatial_regions_allowed"],
+                config=config
+            ))
+        )
+        
+    feature_steps.extend([
         ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
         ("var", VarianceThreshold(threshold=cfg["variance_threshold"]))
-    ]
-    if include_scaling:
+    ])
+    
+    percentile = float(cfg.get("feature_selection_percentile", 100.0))
+    if percentile < 100.0:
+        feature_steps.append(("k_best", SelectPercentile(f_classif, percentile=percentile)))
+        
+    if include_scaling or cfg.get("pca_enabled", False):
         feature_steps.append(("scale", StandardScaler()))
     if cfg.get("pca_enabled", False):
         feature_steps.append(
@@ -102,7 +130,8 @@ def _build_base_preprocessing_steps(cfg: Dict[str, Any], include_scaling: bool, 
     feature_pipe = Pipeline(feature_steps)
 
     if n_covariates > 0:
-        cov_steps = [
+        cov_steps: List[Tuple[str, Any]] = [
+            ("finite", ReplaceInfWithNaN()),
             ("impute", SimpleImputer(strategy="most_frequent"))
         ]
         if include_scaling:
@@ -127,8 +156,22 @@ def _build_base_preprocessing_steps(cfg: Dict[str, Any], include_scaling: bool, 
             remainder="drop"
         )
         steps.append(("preprocessing", preprocessor))
+        
+        if cfg.get("deconfound", False):
+            steps.append(("deconfound", Deconfounder(n_covariates=n_covariates)))
     else:
         steps.extend(feature_steps)
+
+    resampler = str(cfg.get("classification_resampler", "none")).strip().lower()
+    if resampler == "undersample":
+        steps.append(
+            (
+                "resampler",
+                RandomUnderSampler(random_state=int(cfg.get("classification_resampler_seed", 42))),
+            )
+        )
+    elif resampler == "smote":
+        steps.append(("resampler", SMOTE(random_state=int(cfg.get("classification_resampler_seed", 42)))))
 
     return steps
 
@@ -162,7 +205,12 @@ def create_svm_pipeline(
     """
     cfg = get_ml_config(config)
 
-    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True, n_covariates=n_covariates)
+    steps = _build_base_preprocessing_steps(
+        cfg=cfg,
+        include_scaling=True,
+        n_covariates=n_covariates,
+        config=config,
+    )
     steps.append(
         (
             "svm",
@@ -174,7 +222,7 @@ def create_svm_pipeline(
             ),
         )
     )
-    return Pipeline(steps)
+    return ImbPipeline(steps)
 
 
 def create_logistic_pipeline(
@@ -207,7 +255,12 @@ def create_logistic_pipeline(
 
     solver = "saga" if penalty in ("l1", "elasticnet") else "lbfgs"
 
-    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True, n_covariates=n_covariates)
+    steps = _build_base_preprocessing_steps(
+        cfg=cfg,
+        include_scaling=True,
+        n_covariates=n_covariates,
+        config=config,
+    )
     steps.append(
         (
             "lr",
@@ -220,7 +273,7 @@ def create_logistic_pipeline(
             ),
         )
     )
-    return Pipeline(steps)
+    return ImbPipeline(steps)
 
 
 def create_rf_classification_pipeline(
@@ -248,7 +301,12 @@ def create_rf_classification_pipeline(
     """
     cfg = get_ml_config(config)
 
-    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=False, n_covariates=n_covariates)
+    steps = _build_base_preprocessing_steps(
+        cfg=cfg,
+        include_scaling=False,
+        n_covariates=n_covariates,
+        config=config,
+    )
     steps.append(
         (
             "rf",
@@ -260,7 +318,7 @@ def create_rf_classification_pipeline(
             ),
         )
     )
-    return Pipeline(steps)
+    return ImbPipeline(steps)
 
 
 def create_ensemble_pipeline(
@@ -296,14 +354,30 @@ def create_ensemble_pipeline(
         n_jobs=1,
     )
 
-    ensemble = VotingClassifier(
-        estimators=[("svm", svm), ("lr", lr), ("rf", rf)],
-        voting="soft",
-    )
+    if cfg.get("calibrate_ensemble", False):
+        from sklearn.calibration import CalibratedClassifierCV
+        ensemble = VotingClassifier(
+            estimators=[
+                ("svm", CalibratedClassifierCV(svm, method="sigmoid", cv=2)),
+                ("lr", lr), # L2 logistic regression is natively well calibrated
+                ("rf", CalibratedClassifierCV(rf, method="sigmoid", cv=2)),
+            ],
+            voting="soft",
+        )
+    else:
+        ensemble = VotingClassifier(
+            estimators=[("svm", svm), ("lr", lr), ("rf", rf)],
+            voting="soft",
+        )
 
-    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True, n_covariates=n_covariates)
+    steps = _build_base_preprocessing_steps(
+        cfg=cfg,
+        include_scaling=True,
+        n_covariates=n_covariates,
+        config=config,
+    )
     steps.append(("ensemble", ensemble))
-    return Pipeline(steps)
+    return ImbPipeline(steps)
 
 
 ###################################################################
@@ -377,6 +451,7 @@ class ClassificationResult:
     
     # Per-subject metrics (for LOSO)
     per_subject_metrics: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    mean_subject_auc: float = np.nan
     fold_ids: Optional[np.ndarray] = None
     test_indices: Optional[np.ndarray] = None
     failed_fold_count: int = 0
@@ -459,6 +534,12 @@ class ClassificationResult:
                             exc,
                         )
                 self.per_subject_metrics[str(subj)] = rec
+                
+        # Compute mean subject AUC if available
+        if self.per_subject_metrics:
+            aucs = [m["auc"] for m in self.per_subject_metrics.values() if "auc" in m and np.isfinite(m["auc"])]
+            if aucs:
+                self.mean_subject_auc = float(np.mean(aucs))
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -466,6 +547,7 @@ class ClassificationResult:
             "accuracy": self.accuracy,
             "balanced_accuracy": self.balanced_accuracy,
             "auc": self.auc,
+            "mean_subject_auc": self.mean_subject_auc,
             "average_precision": self.average_precision,
             "f1": self.f1,
             "precision": self.precision,
@@ -478,9 +560,10 @@ class ClassificationResult:
     
     def summary(self) -> str:
         """Human-readable summary."""
+        auc_str = f"{self.mean_subject_auc:.3f} (mean per-subject) / {self.auc:.3f} (pooled)" if np.isfinite(self.mean_subject_auc) else f"{self.auc:.3f} (pooled)"
         return (
             f"Classification Results:\n"
-            f"  AUC: {self.auc:.3f}\n"
+            f"  AUC: {auc_str}\n"
             f"  Balanced Accuracy: {self.balanced_accuracy:.3f}\n"
             f"  F1: {self.f1:.3f}\n"
             f"  Sensitivity: {self.recall:.3f}\n"
@@ -727,33 +810,29 @@ def nested_loso_classification(
         counts = np.bincount(y_train)
         min_class_count = np.min(counts) if len(counts) > 0 else 0
         
-        if effective_splits < 2 or min_class_count < effective_splits:
-            if min_class_count < effective_splits:
-                log.warning(
-                    f"Fold {fold_number}: Minority class count ({min_class_count}) < effective_splits ({effective_splits}). "
-                    "Falling back to StratifiedKFold to avoid ValueError in inner CV."
-                )
+        if effective_splits < 2:
+            log.warning(f"Fold {fold_number}: Not enough groups for inner CV. Skipping tuning.")
+            try:
+                pipe_clone = clone(pipe)
+                pipe_clone.fit(X_train, y_train)
+                y_pred[test_idx] = pipe_clone.predict(X_test)
+                fold_ids[test_idx] = fold_number
+                if hasattr(pipe_clone, "predict_proba"):
+                    y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
+            except Exception as e:
+                log.error(f"Fold {fold_number} fallback fit failed: {e}")
+                y_pred[test_idx] = int(np.median(y_train))
+                fold_ids[test_idx] = fold_number
+                failed_fold_count += 1
+            continue
             
-            # If we still can't satisfy StratifiedKFold, reduce splits further
-            safe_splits = max(2, min(inner_splits, min_class_count))
-            if safe_splits < 2:
-                log.warning(f"Fold {fold_number}: Not enough samples for any stratification. Skipping tuning.")
-                try:
-                    pipe_clone = clone(pipe)
-                    pipe_clone.fit(X_train, y_train)
-                    y_pred[test_idx] = pipe_clone.predict(X_test)
-                    fold_ids[test_idx] = fold_number
-                    if hasattr(pipe_clone, "predict_proba"):
-                        y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
-                except Exception as e:
-                    log.error(f"Fold {fold_number} fallback fit failed: {e}")
-                    y_pred[test_idx] = int(np.median(y_train))
-                    fold_ids[test_idx] = fold_number
-                    failed_fold_count += 1
-                continue
-                
-            inner_cv = StratifiedKFold(n_splits=safe_splits, shuffle=True, random_state=seed + fold)
-            cv_groups = None
+        if min_class_count < effective_splits:
+            log.warning(
+                f"Fold {fold_number}: Minority class count ({min_class_count}) < effective_splits ({effective_splits}). "
+                "Falling back to GroupKFold to maintain subject isolation."
+            )
+            inner_cv = GroupKFold(n_splits=effective_splits)
+            cv_groups = train_groups
         else:
             inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
             cv_groups = train_groups
@@ -766,7 +845,7 @@ def nested_loso_classification(
             cv=inner_cv,
             n_jobs=-1,
             refit=True,
-            error_score="raise",
+            error_score=np.nan,
         )
         
         try:

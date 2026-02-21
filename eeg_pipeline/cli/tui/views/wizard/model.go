@@ -321,6 +321,7 @@ const (
 	MLClassificationLR
 	MLClassificationRF
 	MLClassificationCNN
+	MLClassificationEnsemble
 )
 
 func (c MLClassificationModel) CLIValue() string {
@@ -333,6 +334,8 @@ func (c MLClassificationModel) CLIValue() string {
 		return "rf"
 	case MLClassificationCNN:
 		return "cnn"
+	case MLClassificationEnsemble:
+		return "ensemble"
 	default:
 		return ""
 	}
@@ -347,7 +350,7 @@ func (c MLClassificationModel) Display() string {
 }
 
 func (c MLClassificationModel) Next() MLClassificationModel {
-	return MLClassificationModel((int(c) + 1) % 5)
+	return MLClassificationModel((int(c) + 1) % 6)
 }
 
 // Feature file selection for behavior pipeline
@@ -726,6 +729,7 @@ const (
 	textFieldMLFeatureScopes
 	textFieldMLFeatureStats
 	textFieldMLCovariates
+	textFieldMLSpatialRegionsAllowed
 	textFieldMLBaselinePredictors
 	textFieldMLPlotFormats
 	textFieldElasticNetAlphaGrid
@@ -2129,6 +2133,12 @@ type Model struct {
 	mlPCAWhiten                   bool    // PCA whitening
 	mlPCASvdSolver                int     // 0: auto, 1: full, 2: randomized
 	mlPCARngSeed                  int     // PCA random state
+	mlDeconfound                  bool    // Enable covariate deconfounding
+	mlFeatureSelectionPercentile  float64 // Percentage of features to keep
+	mlEnsembleCalibrate           bool    // Calibrate SVM/RF probability outputs using CalibratedClassifierCV
+	mlSpatialRegionsAllowed       string  // Comma-separated list of ROIs
+	mlClassificationResampler     int     // 0: none, 1: undersample, 2: smote
+	mlClassificationResamplerSeed int     // Random seed for resampler
 	mlGroupPreprocessingExpanded  bool    // UI expansion state
 
 	// ML Model Hyperparameters - SVM
@@ -3000,6 +3010,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlPCAWhiten:                   false,
 		mlPCASvdSolver:                0, // 0: auto
 		mlPCARngSeed:                  0,
+		mlDeconfound:                  false,
+		mlSpatialRegionsAllowed:       "",
+		mlClassificationResampler:     0, // 0: none
+		mlClassificationResamplerSeed: 42,
 
 		// ML SVM defaults
 		mlSvmKernel:      0, // 0: rbf

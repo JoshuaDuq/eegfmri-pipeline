@@ -321,6 +321,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.mlFeatureStatsSpec
 	case textFieldMLCovariates:
 		return m.mlCovariatesSpec
+	case textFieldMLSpatialRegionsAllowed:
+		return m.mlSpatialRegionsAllowed
 	case textFieldMLBaselinePredictors:
 		return m.mlBaselinePredictorsSpec
 	case textFieldMLPlotFormats:
@@ -715,6 +717,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.mlFeatureStatsSpec = strings.TrimSpace(value)
 	case textFieldMLCovariates:
 		m.mlCovariatesSpec = strings.TrimSpace(value)
+	case textFieldMLSpatialRegionsAllowed:
+		m.mlSpatialRegionsAllowed = strings.TrimSpace(value)
 	case textFieldMLBaselinePredictors:
 		m.mlBaselinePredictorsSpec = strings.TrimSpace(value)
 	case textFieldMLPlotFormats:

@@ -1428,9 +1428,17 @@ func (m *Model) commitMLNumber(val float64) {
 		if val > 0 {
 			m.mlPCANComponents = val
 		}
+	case optMLFeatureSelectionPercentile:
+		if val > 0 && val <= 100 {
+			m.mlFeatureSelectionPercentile = val
+		}
 	case optMLPCARngSeed:
 		if val >= 0 {
 			m.mlPCARngSeed = int(val)
+		}
+	case optMLClassificationResamplerSeed:
+		if val >= 0 {
+			m.mlClassificationResamplerSeed = int(val)
 		}
 	// ML LR
 	case optMLLrMaxIter:

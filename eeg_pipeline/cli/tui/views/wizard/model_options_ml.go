@@ -79,8 +79,17 @@ func (m Model) getMLOptions() []optionType {
 			optMLImputer,
 			optMLPowerTransformerMethod,
 			optMLPowerTransformerStandardize,
+			optMLDeconfound,
+			optMLFeatureSelectionPercentile,
+			optMLSpatialRegionsAllowed,
 			optMLPCAEnabled,
 		)
+		if mode == "classify" {
+			opts = append(opts, optMLClassificationResampler)
+			if m.mlClassificationResampler != 0 {
+				opts = append(opts, optMLClassificationResamplerSeed)
+			}
+		}
 		if m.mlPCAEnabled {
 			opts = append(opts,
 				optMLPCANComponents,
@@ -122,6 +131,11 @@ func (m Model) getMLOptions() []optionType {
 		if mode == "classify" {
 			opts = append(opts, optMLRfClassWeight)
 		}
+	}
+
+	// Ensemble extras
+	if mode == "classify" && m.mlClassificationModel == MLClassificationEnsemble {
+		opts = append(opts, optMLEnsembleCalibrate)
 	}
 
 	// CNN group (shown for classify mode with CNN model)

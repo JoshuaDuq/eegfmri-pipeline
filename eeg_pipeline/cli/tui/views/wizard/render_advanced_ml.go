@@ -51,6 +51,8 @@ func (m Model) renderMLAdvancedConfig() string {
 			return textFieldMLFeatureStats, true
 		case optMLCovariates:
 			return textFieldMLCovariates, true
+		case optMLSpatialRegionsAllowed:
+			return textFieldMLSpatialRegionsAllowed, true
 		case optMLBaselinePredictors:
 			return textFieldMLBaselinePredictors, true
 		case optMLPlotFormats:
@@ -238,6 +240,21 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "Power Transform", methods[m.mlPowerTransformerMethod%len(methods)], "feature normalization"
 		case optMLPowerTransformerStandardize:
 			label, value, hint = "PT Standardize", m.boolToOnOff(m.mlPowerTransformerStandardize), "standardize after transform"
+		case optMLDeconfound:
+			label, value, hint = "Deconfound", m.boolToOnOff(m.mlDeconfound), "regress covariates out of EEG features"
+		case optMLFeatureSelectionPercentile:
+			label, value, hint = "Feature Select %", fmt.Sprintf("%.6g", m.mlFeatureSelectionPercentile), "percent to keep (e.g. 10.0 = top 10%); 100.0 = all"
+		case optMLSpatialRegionsAllowed:
+			val := m.mlSpatialRegionsAllowed
+			if val == "" {
+				val = "<all regions>"
+			}
+			label, value, hint = "Spatial ROIs", val, "comma-separated regions to keep"
+		case optMLClassificationResampler:
+			resamplers := []string{"none", "undersample", "smote"}
+			label, value, hint = "Resampler", resamplers[m.mlClassificationResampler%len(resamplers)], "balance classes during training"
+		case optMLClassificationResamplerSeed:
+			label, value, hint = "Resampler Seed", fmt.Sprintf("%d", m.mlClassificationResamplerSeed), "random state for sampling"
 		case optMLPCAEnabled:
 			label, value, hint = "PCA Enabled", m.boolToOnOff(m.mlPCAEnabled), "dimensionality reduction"
 		case optMLPCANComponents:
@@ -278,6 +295,8 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optMLRfClassWeight:
 			weights := []string{"balanced", "balanced_subsample", "none"}
 			label, value, hint = "RF Class Weight", weights[m.mlRfClassWeight%len(weights)], "class balancing"
+		case optMLEnsembleCalibrate:
+			label, value, hint = "Ensemble Calibrate", m.boolToOnOff(m.mlEnsembleCalibrate), "calibrate SVM/RF probabilities (soft voting)"
 		case optMLGroupCNN:
 			if m.mlGroupCNNExpanded {
 				label = "▾ CNN Architecture"

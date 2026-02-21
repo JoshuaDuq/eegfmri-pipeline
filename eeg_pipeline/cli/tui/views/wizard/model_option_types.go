@@ -1031,8 +1031,14 @@ const (
 	optMLPCAWhiten
 	optMLPCASvdSolver
 	optMLPCARngSeed
+	optMLDeconfound
+	optMLFeatureSelectionPercentile
+	optMLEnsembleCalibrate
+	optMLSpatialRegionsAllowed
+	optMLClassificationResampler
+	optMLClassificationResamplerSeed
 
-	// ML Model Hyperparameters - SVM
+	// ML CV and Evaluation Hyperparameters - SVM
 	optMLSvmKernel
 	optMLSvmCGrid
 	optMLSvmGammaGrid

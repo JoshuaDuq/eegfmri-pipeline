@@ -958,6 +958,12 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["mlPCAWhiten"] = m.mlPCAWhiten
 	cfg["mlPCASvdSolver"] = m.mlPCASvdSolver
 	cfg["mlPCARngSeed"] = m.mlPCARngSeed
+	cfg["mlDeconfound"] = m.mlDeconfound
+	cfg["mlFeatureSelectionPercentile"] = m.mlFeatureSelectionPercentile
+	cfg["mlEnsembleCalibrate"] = m.mlEnsembleCalibrate
+	cfg["mlSpatialRegionsAllowed"] = m.mlSpatialRegionsAllowed
+	cfg["mlClassificationResampler"] = m.mlClassificationResampler
+	cfg["mlClassificationResamplerSeed"] = m.mlClassificationResamplerSeed
 	cfg["mlGroupPreprocessingExpanded"] = m.mlGroupPreprocessingExpanded
 
 	// ML SVM
@@ -2163,6 +2169,12 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.mlPCAWhiten = getBool("mlPCAWhiten", m.mlPCAWhiten)
 	m.mlPCASvdSolver = getInt("mlPCASvdSolver", m.mlPCASvdSolver)
 	m.mlPCARngSeed = getInt("mlPCARngSeed", m.mlPCARngSeed)
+	m.mlDeconfound = getBool("mlDeconfound", m.mlDeconfound)
+	m.mlFeatureSelectionPercentile = getFloat("mlFeatureSelectionPercentile", m.mlFeatureSelectionPercentile)
+	m.mlEnsembleCalibrate = getBool("mlEnsembleCalibrate", m.mlEnsembleCalibrate)
+	m.mlSpatialRegionsAllowed = getString("mlSpatialRegionsAllowed", m.mlSpatialRegionsAllowed)
+	m.mlClassificationResampler = getInt("mlClassificationResampler", m.mlClassificationResampler)
+	m.mlClassificationResamplerSeed = getInt("mlClassificationResamplerSeed", m.mlClassificationResamplerSeed)
 	m.mlGroupPreprocessingExpanded = getBool("mlGroupPreprocessingExpanded", m.mlGroupPreprocessingExpanded)
 
 	// ML SVM

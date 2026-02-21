@@ -131,6 +131,21 @@ func (m *Model) toggleMLAdvancedOption() {
 	case optMLPowerTransformerStandardize:
 		m.mlPowerTransformerStandardize = !m.mlPowerTransformerStandardize
 		m.useDefaultAdvanced = false
+	case optMLDeconfound:
+		m.mlDeconfound = !m.mlDeconfound
+		m.useDefaultAdvanced = false
+	case optMLFeatureSelectionPercentile:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMLSpatialRegionsAllowed:
+		m.startTextEdit(textFieldMLSpatialRegionsAllowed)
+		m.useDefaultAdvanced = false
+	case optMLClassificationResampler:
+		m.mlClassificationResampler = (m.mlClassificationResampler + 1) % 3
+		m.useDefaultAdvanced = false
+	case optMLClassificationResamplerSeed:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optMLPCAEnabled:
 		m.mlPCAEnabled = !m.mlPCAEnabled
 		m.useDefaultAdvanced = false
@@ -181,6 +196,10 @@ func (m *Model) toggleMLAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optMLRfClassWeight:
 		m.mlRfClassWeight = (m.mlRfClassWeight + 1) % 3
+		m.useDefaultAdvanced = false
+	// Ensemble extras
+	case optMLEnsembleCalibrate:
+		m.mlEnsembleCalibrate = !m.mlEnsembleCalibrate
 		m.useDefaultAdvanced = false
 	// CNN group
 	case optMLGroupCNN:

@@ -1056,6 +1056,9 @@ machine_learning:
     variance_threshold_grid: [0.0, 0.01, 0.1]
     power_transformer_method: "yeo-johnson"
     power_transformer_standardize: true
+    deconfound: false                      # Regress covariates out of EEG features before classification
+    spatial_regions_allowed: []            # List of ROI names to keep (e.g., ["frontal", "parietal"]); empty = all
+    feature_selection_percentile: 100.0    # Percentage of features to keep (e.g. 10.0 for top 10%); 100.0 = keep all
     pca:
       enabled: false
       n_components: 0.95
@@ -1067,6 +1070,9 @@ machine_learning:
     model: "svm"                         # "svm" | "lr" | "rf" | "cnn"
     min_subjects_with_auc_for_inference: 2  # Require at least this many subjects with defined held-out AUC
     max_failed_fold_fraction: 0.25       # Abort classification if failed folds exceed this fraction of total folds
+    calibrate_ensemble: false            # Calibrate SVM/RF probability outputs using CalibratedClassifierCV
+    resampler: "none"                    # "none" | "undersample" | "smote"
+    resampler_seed: 42                   # Random seed for resampling
 
   interpretability:
     grouped_outputs: true                # Write band/ROI grouped importance tables when available

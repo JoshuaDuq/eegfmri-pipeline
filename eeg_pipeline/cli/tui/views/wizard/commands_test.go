@@ -357,15 +357,18 @@ func TestBuildMLAdvancedArgs_EmitsWithinSubjectWithinBlockPermutationScheme(t *t
 	}
 }
 
-func TestMLClassificationModelCycleIncludesCNN(t *testing.T) {
+func TestMLClassificationModelCycleIncludesCNNAndEnsemble(t *testing.T) {
 	if got := MLClassificationCNN.CLIValue(); got != "cnn" {
 		t.Fatalf("expected cnn CLI value, got %q", got)
 	}
 	if next := MLClassificationRF.Next(); next != MLClassificationCNN {
 		t.Fatalf("expected rf.Next() to be cnn, got %v", next)
 	}
-	if next := MLClassificationCNN.Next(); next != MLClassificationDefault {
-		t.Fatalf("expected cnn.Next() to wrap to default, got %v", next)
+	if next := MLClassificationCNN.Next(); next != MLClassificationEnsemble {
+		t.Fatalf("expected cnn.Next() to be ensemble, got %v", next)
+	}
+	if next := MLClassificationEnsemble.Next(); next != MLClassificationDefault {
+		t.Fatalf("expected ensemble.Next() to wrap to default, got %v", next)
 	}
 }
 

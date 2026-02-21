@@ -468,7 +468,7 @@ def _fit_tuned_regression_estimator(
         cv=inner_cv,
         n_jobs=1,
         refit="neg_mse",
-        error_score="raise",
+        error_score=np.nan,
     )
     gs = grid_search_with_warning_logging(gs, X_train, y_train, fold_info=fold_info, log=logger, groups=groups_train)
     return gs.best_estimator_
@@ -565,7 +565,7 @@ def _fit_within_subject_fold(
                 cv=inner_cv_splits,
                 n_jobs=n_jobs,
                 refit=refit_metric,
-                error_score="raise",
+                error_score=np.nan,
             )
             try:
                 gs = grid_search_with_warning_logging(
@@ -2149,7 +2149,7 @@ def run_within_subject_classification_ml(
                             cv=inner_cv,
                             n_jobs=1,
                             refit=True,
-                            error_score="raise",
+                            error_score=np.nan,
                         )
                         grid.fit(X_train, y_train, groups=blocks_train)
                         best_estimator = grid.best_estimator_
@@ -2929,7 +2929,7 @@ def run_model_comparison_ml(
                     scoring=scoring,
                     n_jobs=grid_n_jobs,
                     refit="r",
-                    error_score="raise",
+                    error_score=np.nan,
                 )
                 grid.fit(X_train, y_train, groups=groups_train)
                 fold_pred = grid.predict(X_test)
@@ -3291,7 +3291,7 @@ def run_incremental_validity_ml(
                 scoring=scoring,
                 n_jobs=grid_n_jobs_base,
                 refit="r",
-                error_score="raise",
+                error_score=np.nan,
             )
             base_grid.fit(X_baseline_train, y[train_idx], groups=groups_train)
             y_pred_baseline[test_idx] = base_grid.predict(X_baseline_test)
@@ -3313,7 +3313,7 @@ def run_incremental_validity_ml(
                 scoring=scoring,
                 n_jobs=grid_n_jobs,
                 refit="r",
-                error_score="raise",
+                error_score=np.nan,
             )
             grid.fit(X_full_train, y[train_idx], groups=groups_train)
             y_pred_full[test_idx] = grid.predict(X_full_test)
