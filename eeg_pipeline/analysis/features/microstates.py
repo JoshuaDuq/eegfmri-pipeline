@@ -27,6 +27,7 @@ from sklearn.cluster import KMeans
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+from eeg_pipeline.utils.config.loader import get_config_value
 
 
 _DEFAULT_CLASS_LABELS = ("a", "b", "c", "d")
@@ -49,19 +50,8 @@ class _MicrostateConfig:
     assign_from_gfp_peaks: bool
 
 
-def _cfg_get(config: Any, key: str, default: Any) -> Any:
-    if config is None:
-        return default
-    getter = getattr(config, "get", None)
-    if callable(getter):
-        return getter(key, default)
-    if isinstance(config, dict):
-        return config.get(key, default)
-    return default
-
-
 def _load_microstate_config(config: Any) -> _MicrostateConfig:
-    micro_cfg = _cfg_get(config, "feature_engineering.microstates", {}) or {}
+    micro_cfg = get_config_value(config, "feature_engineering.microstates", {}) or {}
     n_states = int(micro_cfg.get("n_states", _DEFAULT_N_STATES))
     n_states = int(np.clip(n_states, 2, 12))
 
@@ -82,7 +72,7 @@ def _load_microstate_config(config: Any) -> _MicrostateConfig:
     gfp_peak_prominence = max(0.0, gfp_peak_prominence)
 
     random_state = int(
-        micro_cfg.get("random_state", _cfg_get(config, "project.random_state", _DEFAULT_RANDOM_STATE))
+        micro_cfg.get("random_state", get_config_value(config, "project.random_state", _DEFAULT_RANDOM_STATE))
     )
     assign_from_gfp_peaks = bool(
         micro_cfg.get("assign_from_gfp_peaks", _DEFAULT_ASSIGN_FROM_GFP_PEAKS)

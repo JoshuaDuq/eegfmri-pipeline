@@ -14,6 +14,7 @@ import pandas as pd
 
 from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 
 
@@ -334,25 +335,6 @@ def _compute_min_samples(
     return min_samples_from_duration
 
 
-def _build_roi_map(
-    config: Any,
-    channel_names: List[str],
-    spatial_modes: List[str],
-) -> Dict[str, List[int]]:
-    """Build ROI mapping from configuration if ROI mode is enabled."""
-    if "roi" not in spatial_modes:
-        return {}
-
-    from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
-    from eeg_pipeline.utils.analysis.channels import build_roi_map
-
-    roi_definitions = get_roi_definitions(config)
-    if not roi_definitions:
-        return {}
-
-    return build_roi_map(channel_names, roi_definitions)
-
-
 def _process_channel_features(
     segment_envelope: np.ndarray,
     thresholds: np.ndarray,
@@ -566,7 +548,7 @@ def extract_burst_features(
         return pd.DataFrame(), []
 
     spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
-    roi_map = _build_roi_map(config, precomputed.ch_names, spatial_modes)
+    roi_map = build_roi_map_if_needed(spatial_modes, precomputed.ch_names, config)
 
     n_epochs = precomputed.data.shape[0]
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]

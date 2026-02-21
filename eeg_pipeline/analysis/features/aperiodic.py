@@ -25,7 +25,9 @@ from joblib import Parallel, delayed
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_extractor_inputs
-from eeg_pipeline.utils.config.loader import get_frequency_bands_for_aperiodic
+from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
+from eeg_pipeline.utils.analysis.spectral import compute_frequency_weights
+from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_bands_for_aperiodic
 from eeg_pipeline.utils.analysis.stats import compute_residuals
 from eeg_pipeline.utils.parallel import get_n_jobs
 
@@ -103,13 +105,6 @@ class PeakRejectionResult(NamedTuple):
     residuals: np.ndarray
     threshold: float
 
-
-# Configuration helpers
-def _get_config_value(config: Any, key: str, default: Any = None) -> Any:
-    """Get config value with safe fallback."""
-    if hasattr(config, "get"):
-        return config.get(key, default)
-    return default
 
 
 # Validation functions
@@ -520,7 +515,7 @@ def _build_line_noise_mask(
 
 def _parse_line_noise_config(config: Any) -> LineNoiseConfig:
     """Parse line noise exclusion configuration from config object."""
-    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
+    aperiodic_cfg = get_config_value(config, "feature_engineering.aperiodic", {})
     
     exclude = bool(aperiodic_cfg.get("exclude_line_noise", True))
 
@@ -848,8 +843,8 @@ def _compute_psd(
 
 def _parse_psd_config(config: Any) -> Tuple[str, Dict[str, Any], float, float]:
     """Parse PSD computation configuration."""
-    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
-    constants_cfg = _get_config_value(config, "feature_engineering.constants", {})
+    aperiodic_cfg = get_config_value(config, "feature_engineering.aperiodic", {})
+    constants_cfg = get_config_value(config, "feature_engineering.constants", {})
     
     fmin = float(aperiodic_cfg.get("fmin", constants_cfg.get("aperiodic_fmin", _DEFAULT_FMIN)))
     fmax = float(aperiodic_cfg.get("fmax", constants_cfg.get("aperiodic_fmax", _DEFAULT_FMAX)))
@@ -1023,33 +1018,6 @@ def _validate_band_coverage(
     return True, coverage_fraction
 
 
-def _compute_frequency_weights(freqs: np.ndarray) -> np.ndarray:
-    """Compute frequency bin widths for weighted integration.
-    
-    For uniform grids, all weights are equal. For non-uniform grids (log-spaced,
-    adaptive), weights reflect the frequency range each bin represents.
-    
-    Uses trapezoidal rule: each bin's weight is half the distance to neighbors.
-    """
-    n_freqs = len(freqs)
-    if n_freqs <= 1:
-        return np.ones(n_freqs)
-    
-    weights = np.zeros(n_freqs)
-    
-    # First bin: half distance to next
-    weights[0] = (freqs[1] - freqs[0]) / 2.0
-    
-    # Middle bins: half distance to both neighbors
-    for i in range(1, n_freqs - 1):
-        weights[i] = (freqs[i + 1] - freqs[i - 1]) / 2.0
-    
-    # Last bin: half distance to previous
-    weights[-1] = (freqs[-1] - freqs[-2]) / 2.0
-    
-    return weights
-
-
 def _compute_power_corrected_band_power(
     freqs: np.ndarray,
     residuals: np.ndarray,
@@ -1070,7 +1038,7 @@ def _compute_power_corrected_band_power(
         return pc_matrix
     
     # Compute frequency weights for proper integration
-    all_weights = _compute_frequency_weights(freqs)
+    all_weights = compute_frequency_weights(freqs)
     band_weights = all_weights[band_mask]
     
     # Normalize weights to sum to 1 for weighted average
@@ -1189,19 +1157,6 @@ def _rebuild_window_masks(
                         segments[seg_name] = mask
     
     return segments, error_msg
-
-
-# Spatial aggregation
-def _build_roi_map(ch_names: List[str], config: Any) -> Dict[str, List[int]]:
-    """Build ROI mapping from channel names to indices."""
-    from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
-    from eeg_pipeline.utils.analysis.channels import build_roi_map
-    
-    roi_defs = get_roi_definitions(config)
-    if not roi_defs:
-        return {}
-    
-    return build_roi_map(ch_names, roi_defs)
 
 
 _DEFAULT_MIN_VALID_CHANNELS_ROI = 2
@@ -1328,14 +1283,14 @@ def _extract_aperiodic_for_segment(
     # Build ROI map if needed
     roi_map = {}
     if 'roi' in spatial_modes:
-        roi_map = _build_roi_map(ch_names, config)
+        roi_map = build_roi_map_if_needed(["roi"], ch_names, config)
     
     # Parse configuration
     psd_method, psd_kwargs, fmin, fmax = _parse_psd_config(config)
     line_config = _parse_line_noise_config(config)
     
     # Check if induced spectra (evoked subtraction) is requested
-    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
+    aperiodic_cfg = get_config_value(config, "feature_engineering.aperiodic", {})
     subtract_evoked = bool(aperiodic_cfg.get("subtract_evoked", False))
     
     if subtract_evoked:
@@ -1672,7 +1627,7 @@ def extract_aperiodic_features(
     condition_labels = _resolve_condition_labels_from_context(ctx, n_epochs)
     
     # Scientific validity: aperiodic fits are unstable on short segments
-    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
+    aperiodic_cfg = get_config_value(config, "feature_engineering.aperiodic", {})
     min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", _DEFAULT_MIN_SEGMENT_SEC))
     if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
         min_segment_sec = _DEFAULT_MIN_SEGMENT_SEC
@@ -1805,7 +1760,7 @@ def extract_aperiodic_from_precomputed(
     times = precomputed.times
     data_all = np.asarray(precomputed.data, dtype=float)
     
-    aperiodic_cfg = _get_config_value(config, "feature_engineering.aperiodic", {})
+    aperiodic_cfg = get_config_value(config, "feature_engineering.aperiodic", {})
     min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", _DEFAULT_MIN_SEGMENT_SEC))
     peak_rejection_z = float(aperiodic_cfg.get("peak_rejection_z", _DEFAULT_PEAK_REJECTION_Z))
     min_fit_points = int(aperiodic_cfg.get("min_fit_points", _DEFAULT_MIN_FIT_POINTS))
@@ -1814,7 +1769,7 @@ def extract_aperiodic_from_precomputed(
     mode = str(
         analysis_mode
         if analysis_mode is not None
-        else _get_config_value(config, "feature_engineering.analysis_mode", "group_stats")
+        else get_config_value(config, "feature_engineering.analysis_mode", "group_stats")
     ).strip().lower()
     if not mode:
         mode = "group_stats"
@@ -1827,7 +1782,7 @@ def extract_aperiodic_from_precomputed(
                 f"(expected ({n_epochs},), got {tuple(train_mask_use.shape)})."
             )
     min_trials_per_condition = int(
-        _get_config_value(config, "feature_engineering.power.min_trials_per_condition", 2)
+        get_config_value(config, "feature_engineering.power.min_trials_per_condition", 2)
     )
     min_trials_per_condition = max(1, min_trials_per_condition)
     if subtract_evoked and mode == "trial_ml_safe" and train_mask_use is None:
@@ -1890,7 +1845,7 @@ def extract_aperiodic_from_precomputed(
         config_path="feature_engineering.parallel.n_jobs_aperiodic",
     )
     condition_labels = getattr(precomputed, "condition_labels", None)
-    roi_map = _build_roi_map(ch_names, config) if "roi" in spatial_modes else {}
+    roi_map = build_roi_map_if_needed(spatial_modes, ch_names, config)
     freq_bands = get_frequency_bands_for_aperiodic(config)
     
     for seg_name, seg_mask in segments.items():
@@ -2164,7 +2119,7 @@ def _aggregate_aperiodic_features(
     config: Any,
 ) -> None:
     """Aggregate aperiodic features by spatial mode (legacy function for extract_aperiodic_from_precomputed)."""
-    roi_map = _build_roi_map(ch_names, config) if "roi" in spatial_modes else {}
+    roi_map = build_roi_map_if_needed(spatial_modes, ch_names, config)
     metrics = {
         "slope": ("broadband", "slope", slopes),
         "exponent": ("broadband", "exponent", (-slopes).copy()),

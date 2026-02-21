@@ -15,12 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
-
-
-def _safe_slug(value: str) -> str:
-    value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value.strip())
-    value = "_".join(part for part in value.split("_") if part)
-    return value or "contrast"
+from fmri_pipeline.utils.text import safe_slug
 
 
 def _contrast_hash(cfg: Any) -> str:
@@ -168,7 +163,10 @@ class FmriAnalysisPipeline(PipelineBase):
             else deriv_root / sub_label / "fmri" / "first_level" / f"task-{task}"
         )
 
-        contrast_name = _safe_slug(str(getattr(contrast_cfg, "name", "contrast") or "contrast"))
+        contrast_name = safe_slug(
+            str(getattr(contrast_cfg, "name", "contrast") or "contrast"),
+            default="contrast",
+        )
         out_dir = out_base / f"contrast-{contrast_name}"
         out_dir.mkdir(parents=True, exist_ok=True)
 

@@ -36,6 +36,28 @@ DEFAULT_PSD_FFT_MULTIPLIER = 2.0
 MIN_SAMPLES_FOR_PSD = 64
 
 
+def compute_frequency_weights(frequencies: np.ndarray) -> np.ndarray:
+    """Compute trapezoidal integration weights for a frequency axis."""
+    freqs = np.asarray(frequencies, dtype=float)
+    n_freqs = freqs.size
+    if n_freqs <= 1:
+        return np.ones(n_freqs, dtype=float)
+
+    weights = np.zeros(n_freqs, dtype=float)
+    weights[0] = (freqs[1] - freqs[0]) / 2.0
+    weights[1:-1] = (freqs[2:] - freqs[:-2]) / 2.0
+    weights[-1] = (freqs[-1] - freqs[-2]) / 2.0
+
+    if np.all(np.isfinite(weights)) and np.all(weights > 0):
+        return weights
+
+    fallback = np.gradient(freqs).astype(float)
+    fallback = np.where(np.isfinite(fallback) & (fallback > 0), fallback, np.nan)
+    if np.isfinite(fallback).any():
+        return fallback
+    return np.ones(n_freqs, dtype=float)
+
+
 def _safe_filter_length(n_times: int, sfreq: float, l_freq: float) -> str:
     """Compute filter length that fits within signal, or 'auto' if safe."""
     effective_l_freq = l_freq if l_freq > 0 else DEFAULT_LOW_FREQ_HZ

@@ -20,18 +20,10 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from eeg_pipeline.utils.config.loader import get_config_value
+
 logger = logging.getLogger(__name__)
 FS_LICENSE_ENV_VAR = "EEG_PIPELINE_FREESURFER_LICENSE"
-
-
-def _cfg_get(config: Any, key: str, default: Any) -> Any:
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        return config.get(key, default)
-    if isinstance(config, dict):
-        return config.get(key, default)
-    return default
 
 
 def check_docker_available() -> bool:
@@ -72,7 +64,7 @@ def get_fs_license_path(config: Any) -> Optional[Path]:
     if env_license and str(env_license).strip():
         return Path(env_license).expanduser()
 
-    paths_cfg = _cfg_get(config, "paths", {})
+    paths_cfg = get_config_value(config, "paths", {})
     if isinstance(paths_cfg, dict):
         fs_license = paths_cfg.get("freesurfer_license")
     else:
@@ -86,7 +78,7 @@ def get_fs_license_path(config: Any) -> Optional[Path]:
 
 def get_bem_generation_config(config: Any) -> Dict[str, Any]:
     """Extract BEM/Trans generation config from main config."""
-    src_cfg = _cfg_get(config, "feature_engineering", {})
+    src_cfg = get_config_value(config, "feature_engineering", {})
     if isinstance(src_cfg, dict):
         src_cfg = src_cfg.get("sourcelocalization", {}) or {}
     else:

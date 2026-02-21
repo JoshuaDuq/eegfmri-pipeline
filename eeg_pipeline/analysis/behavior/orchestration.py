@@ -214,7 +214,7 @@ def stage_feature_qc_screen(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         feature_column_prefixes=FEATURE_COLUMN_PREFIXES,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
@@ -313,12 +313,8 @@ def _check_early_exit_conditions(
         feature_cols=feature_cols,
         min_features=min_features,
         min_trials=min_trials,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
     )
-
-
-def _is_dataframe_valid(df: Optional[pd.DataFrame]) -> bool:
-    return _is_dataframe_valid_impl(df)
 
 
 def _get_stats_subfolder(ctx: BehaviorContext, kind: str) -> Path:
@@ -412,7 +408,7 @@ def _augment_dataframe_with_change_scores(df: Optional[pd.DataFrame], config: An
     return _augment_dataframe_with_change_scores_impl(
         df,
         config,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
     )
 
 
@@ -448,7 +444,7 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
     )
@@ -573,7 +569,7 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
         compute_unified_fdr_fn=_compute_unified_fdr,
@@ -672,7 +668,7 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
             input_hash=input_hash,
         ),
         compute_trial_table_fn=compute_trial_table,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         write_trial_table_fn=write_trial_table,
     )
 
@@ -682,7 +678,7 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
@@ -695,7 +691,7 @@ def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
@@ -733,7 +729,7 @@ def write_temperature_models(
         breakpoint,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
     )
 
@@ -744,7 +740,7 @@ def stage_temperature_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         compute_temp_model_comparison_fn=compute_temp_model_comparison,
         compute_temp_breakpoints_fn=compute_temp_breakpoints,
         write_temperature_models_fn=write_temperature_models,
@@ -762,7 +758,7 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         config,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
@@ -778,7 +774,7 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         config,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         attach_temperature_metadata_fn=_attach_temperature_metadata,
@@ -794,7 +790,7 @@ def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         config,
         build_output_filename_fn=_build_output_filename,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         get_stats_subfolder_fn=_get_stats_subfolder,
@@ -809,7 +805,7 @@ def stage_icc(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         config,
         build_output_filename_fn=_build_output_filename,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         get_stats_subfolder_fn=_get_stats_subfolder,
@@ -838,7 +834,7 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
         config,
         results,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         attach_temperature_metadata_fn=_attach_temperature_metadata,
@@ -948,7 +944,7 @@ def stage_condition_column(
         feature_cols=feature_cols,
         stage_condition_multigroup_fn=stage_condition_multigroup,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
@@ -1003,7 +999,7 @@ def stage_condition_window(
         feature_cols=feature_cols,
         compare_windows=compare_windows,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
@@ -1027,7 +1023,7 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_filtered_feature_cols_fn=lambda df, context: _cache.get_filtered_feature_cols(
             [c for c in df.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)],
             context,
@@ -1059,7 +1055,7 @@ def stage_condition_multigroup(
         df_trials=df_trials,
         feature_cols=feature_cols,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         resolve_condition_compare_column_fn=_resolve_condition_compare_column,
         compute_unified_fdr_fn=_compute_unified_fdr,
@@ -1147,7 +1143,7 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
@@ -1264,7 +1260,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid,
+        is_dataframe_valid_fn=_is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,

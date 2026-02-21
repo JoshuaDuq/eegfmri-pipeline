@@ -21,34 +21,11 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.config.loader import get_frequency_bands, get_nested_value
+from eeg_pipeline.utils.config.loader import get_config_float, get_config_int, get_config_value, get_frequency_bands, get_nested_value
 
 if TYPE_CHECKING:
     import mne
 
-
-def _cfg_get(config: Any, key: str, default: Any) -> Any:
-    if config is None:
-        return default
-    if hasattr(config, "get") and not isinstance(config, dict):
-        return config.get(key, default)
-    return get_nested_value(config, key, default)
-
-
-def _safe_float(value: Any, default: float) -> float:
-    """Safely convert value to float, returning default on failure."""
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return default
-
-
-def _safe_int(value: Any, default: int) -> int:
-    """Safely convert value to int, returning default on failure."""
-    try:
-        return int(value)
-    except (ValueError, TypeError):
-        return default
 
 
 def _as_path(value: Any) -> Optional[Path]:
@@ -102,7 +79,7 @@ def _load_fmri_constraint_config(
     If contrast.enabled is True and no stats_map_path exists, the contrast
     builder will be invoked to generate the stats map from BOLD data.
     """
-    src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+    src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
     fmri_cfg = {}
     if isinstance(src_cfg, dict):
         fmri_cfg = src_cfg.get("fmri", {}) or {}
@@ -237,6 +214,47 @@ def _load_fmri_constraint_config(
             raise ValueError(f"Invalid fMRI window_b range: tmin={tmin}, tmax={tmax}.")
         window_b = FMRITimeWindow(name=name, tmin=tmin, tmax=tmax)
 
+    try:
+        cluster_min_voxels = get_config_int(
+            config,
+            "feature_engineering.sourcelocalization.fmri.cluster_min_voxels",
+            50,
+        )
+    except Exception:
+        cluster_min_voxels = 50
+    try:
+        max_clusters = get_config_int(
+            config,
+            "feature_engineering.sourcelocalization.fmri.max_clusters",
+            20,
+        )
+    except Exception:
+        max_clusters = 20
+    try:
+        max_voxels_per_cluster = get_config_int(
+            config,
+            "feature_engineering.sourcelocalization.fmri.max_voxels_per_cluster",
+            2000,
+        )
+    except Exception:
+        max_voxels_per_cluster = 2000
+    try:
+        max_total_voxels = get_config_int(
+            config,
+            "feature_engineering.sourcelocalization.fmri.max_total_voxels",
+            20000,
+        )
+    except Exception:
+        max_total_voxels = 20000
+    try:
+        random_seed = get_config_int(
+            config,
+            "feature_engineering.sourcelocalization.fmri.random_seed",
+            0,
+        )
+    except Exception:
+        random_seed = 0
+
     return FMRIConstraintConfig(
         enabled=enabled or (stats_map_path is not None),
         stats_map_path=stats_map_path,
@@ -248,12 +266,12 @@ def _load_fmri_constraint_config(
         threshold_mode=threshold_mode,
         fdr_q=fdr_q,
         stat_type=stat_type,
-        cluster_min_voxels=_safe_int(fmri_cfg.get("cluster_min_voxels", 50), 50),
+        cluster_min_voxels=cluster_min_voxels,
         cluster_min_volume_mm3=cluster_min_volume_mm3,
-        max_clusters=_safe_int(fmri_cfg.get("max_clusters", 20), 20),
-        max_voxels_per_cluster=_safe_int(fmri_cfg.get("max_voxels_per_cluster", 2000), 2000),
-        max_total_voxels=_safe_int(fmri_cfg.get("max_total_voxels", 20000), 20000),
-        random_seed=_safe_int(fmri_cfg.get("random_seed", 0), 0),
+        max_clusters=max_clusters,
+        max_voxels_per_cluster=max_voxels_per_cluster,
+        max_total_voxels=max_total_voxels,
+        random_seed=random_seed,
         window_a=window_a,
         window_b=window_b,
     )
@@ -956,7 +974,7 @@ def _load_source_localization_config(
     method: str = "lcmv",
 ) -> SourceLocalizationConfig:
     """Load and validate source localization configuration."""
-    src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+    src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
     if not isinstance(src_cfg, dict):
         src_cfg = {}
 
@@ -982,7 +1000,7 @@ def _load_source_localization_config(
 
     subjects_dir_path = _as_path(src_cfg.get("subjects_dir"))
     if subjects_dir_path is None:
-        subjects_dir_path = _as_path(_cfg_get(config, "paths.freesurfer_dir", None))
+        subjects_dir_path = _as_path(get_config_value(config, "paths.freesurfer_dir", None))
 
     subject_from_cfg = src_cfg.get("subject")
     if subject_from_cfg is None or str(subject_from_cfg).strip().lower() in ("none", ""):
@@ -993,19 +1011,34 @@ def _load_source_localization_config(
     trans_path = _as_path(src_cfg.get("trans"))
     bem_path = _as_path(src_cfg.get("bem"))
 
-    mindist_mm = _safe_float(src_cfg.get("mindist_mm", 5.0), 5.0)
-    lcmv_reg = _safe_float(src_cfg.get("reg", 0.05), 0.05)
-    eloreta_snr = _safe_float(src_cfg.get("snr", 3.0), 3.0)
-    eloreta_loose = _safe_float(src_cfg.get("loose", 0.2), 0.2)
-    eloreta_depth = _safe_float(src_cfg.get("depth", 0.8), 0.8)
+    try:
+        mindist_mm = get_config_float(config, "feature_engineering.sourcelocalization.mindist_mm", 5.0)
+    except Exception:
+        mindist_mm = 5.0
+    try:
+        lcmv_reg = get_config_float(config, "feature_engineering.sourcelocalization.reg", 0.05)
+    except Exception:
+        lcmv_reg = 0.05
+    try:
+        eloreta_snr = get_config_float(config, "feature_engineering.sourcelocalization.snr", 3.0)
+    except Exception:
+        eloreta_snr = 3.0
+    try:
+        eloreta_loose = get_config_float(config, "feature_engineering.sourcelocalization.loose", 0.2)
+    except Exception:
+        eloreta_loose = 0.2
+    try:
+        eloreta_depth = get_config_float(config, "feature_engineering.sourcelocalization.depth", 0.8)
+    except Exception:
+        eloreta_depth = 0.8
 
-    bids_fmri_root = _as_path(_cfg_get(config, "paths.bids_fmri_root", None))
-    bids_derivatives = _as_path(_cfg_get(config, "paths.deriv_root", None))
+    bids_fmri_root = _as_path(get_config_value(config, "paths.bids_fmri_root", None))
+    bids_derivatives = _as_path(get_config_value(config, "paths.deriv_root", None))
     if bids_fmri_root is None:
-        bids_fmri_root = _as_path(_cfg_get(config, "paths.bids_root", None))
+        bids_fmri_root = _as_path(get_config_value(config, "paths.bids_root", None))
 
     ctx_subject = getattr(ctx, "subject", None) or subject.replace("sub-", "")
-    eeg_task = str(_cfg_get(config, "project.task", "")).strip()
+    eeg_task = str(get_config_value(config, "project.task", "")).strip()
     fmri_task = eeg_task
 
     fmri_cfg = _load_fmri_constraint_config(
@@ -1094,10 +1127,13 @@ def _require_lcmv_train_mask_if_trial_safe(
 
 def _resolve_source_connectivity_min_cycles(config: Any) -> float:
     """Resolve minimum cycle count for source connectivity validity checks."""
-    min_cycles = _cfg_get(config, "feature_engineering.sourcelocalization.min_cycles_per_band", None)
+    min_cycles = get_config_value(config, "feature_engineering.sourcelocalization.min_cycles_per_band", None)
     if min_cycles is None:
-        min_cycles = _cfg_get(config, "feature_engineering.connectivity.min_cycles_per_band", 3.0)
-    min_cycles_f = _safe_float(min_cycles, 3.0)
+        min_cycles = get_config_value(config, "feature_engineering.connectivity.min_cycles_per_band", 3.0)
+    try:
+        min_cycles_f = float(min_cycles)
+    except (TypeError, ValueError):
+        min_cycles_f = 3.0
     if not np.isfinite(min_cycles_f) or min_cycles_f <= 0:
         min_cycles_f = 3.0
     return max(1.0, float(min_cycles_f))

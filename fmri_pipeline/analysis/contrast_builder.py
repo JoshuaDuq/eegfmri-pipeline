@@ -23,6 +23,16 @@ import numpy as np
 import pandas as pd
 
 from fmri_pipeline.analysis.events_selection import normalize_trial_type_list
+from fmri_pipeline.utils.bold_discovery import (
+    build_first_level_model as _build_first_level_model,
+    coerce_condition_value as _coerce_condition_value,
+    discover_brain_mask_for_bold as _discover_brain_mask_for_bold,
+    discover_fmriprep_preproc_bold as _discover_fmriprep_preproc_bold,
+    get_tr_from_bold as _get_tr_from_bold,
+    select_confound_columns as _select_confound_columns,
+)
+from fmri_pipeline.utils.text import safe_slug as _safe_slug
+from eeg_pipeline.utils.config.loader import get_config_value
 
 logger = logging.getLogger(__name__)
 
@@ -71,23 +81,6 @@ class ContrastBuilderConfig:
     stim_phases_to_model: Optional[List[str]] = None
 
 
-def _safe_slug(value: str) -> str:
-    value = (value or "").strip()
-    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value)
-    cleaned = "_".join(part for part in cleaned.split("_") if part)
-    return cleaned or "contrast"
-
-
-def _cfg_get(config: Any, key: str, default: Any) -> Any:
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        return config.get(key, default)
-    if isinstance(config, dict):
-        return config.get(key, default)
-    return default
-
-
 def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
     """Generate hash from contrast config parameters to detect changes."""
     key_parts = [
@@ -117,7 +110,7 @@ def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
 
 def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     """Load contrast builder configuration from pipeline config."""
-    src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+    src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
     fmri_cfg = {}
     contrast_cfg = {}
 
@@ -458,168 +451,6 @@ def discover_confounds(
 # GLM Fitting
 ###################################################################
 
-def _discover_fmriprep_preproc_bold(
-    bids_derivatives: Path,
-    subject: str,
-    task: str,
-    run_num: int,
-    *,
-    space: Optional[str] = "T1w",
-) -> Optional[Path]:
-    """
-    Discover fMRIPrep preprocessed BOLD for a given run.
-
-    Searches multiple possible fMRIPrep output locations:
-      1. derivatives/fmriprep/sub-*/func/ (standard fMRIPrep layout)
-      2. derivatives/preprocessed/fmri/sub-*/func/ (fmri_preprocessing pipeline default)
-
-    We prefer `space-{space}` outputs if provided, but fall back to any
-    `desc-preproc_bold` if needed.
-    """
-    sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
-
-    search_dirs = [
-        bids_derivatives / "preprocessed" / "fmri" / sub_label / "func",
-        bids_derivatives / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
-        bids_derivatives / "fmriprep" / sub_label / "func",
-    ]
-
-    run_tokens = [f"run-{run_num:02d}", f"run-{run_num}"]
-    patterns: List[str] = []
-    for run_tok in run_tokens:
-        if space:
-            patterns.append(
-                f"{sub_label}_task-{task}_{run_tok}_space-{space}_desc-preproc_bold.nii.gz"
-            )
-        patterns.append(f"{sub_label}_task-{task}_{run_tok}_desc-preproc_bold.nii.gz")
-
-    for func_dir in search_dirs:
-        if not func_dir.exists():
-            continue
-
-        for pattern in patterns:
-            candidate = func_dir / pattern
-            if candidate.exists():
-                return candidate
-
-    return None
-
-
-def _discover_brain_mask_for_bold(bold_path: Path) -> Optional[Path]:
-    """
-    Discover a matching brain mask for a BOLD image (fMRIPrep convention).
-
-    For fMRIPrep outputs, a `*_desc-brain_mask.nii.gz` typically exists alongside:
-      `*_desc-preproc_bold.nii.gz`
-    """
-    name = bold_path.name
-    suffix = "_desc-preproc_bold.nii.gz"
-    if name.endswith(suffix):
-        candidate = bold_path.with_name(name.replace(suffix, "_desc-brain_mask.nii.gz"))
-        if candidate.exists():
-            return candidate
-    return None
-
-
-def _get_tr_from_bold(bold_path: Path) -> float:
-    """Extract TR from BOLD sidecar JSON or NIfTI header."""
-    json_path = bold_path.with_suffix("").with_suffix(".json")
-    if json_path.exists():
-        import json
-        with open(json_path) as f:
-            meta = json.load(f)
-            if "RepetitionTime" in meta:
-                return float(meta["RepetitionTime"])
-
-    import nibabel as nib
-    img = nib.load(str(bold_path))
-    if len(img.header.get_zooms()) >= 4:
-        return float(img.header.get_zooms()[3])
-
-    raise ValueError(f"Could not determine TR for {bold_path}")
-
-
-def _build_first_level_model(
-    *,
-    tr: float,
-    cfg: "ContrastBuilderConfig",
-    mask_img: Optional[Any] = None,
-) -> Any:
-    """Create a nilearn FirstLevelModel with best-effort compatibility across versions."""
-    from nilearn.glm.first_level import FirstLevelModel
-    import inspect
-
-    low_pass = None
-    try:
-        if cfg.low_pass_hz is not None:
-            lp = float(cfg.low_pass_hz)
-            if lp > 0:
-                low_pass = lp
-    except Exception:
-        low_pass = None
-
-    high_pass = cfg.high_pass_hz if float(cfg.high_pass_hz) > 0 else None
-
-    kwargs: dict[str, Any] = dict(
-        t_r=tr,
-        hrf_model=cfg.hrf_model,
-        drift_model=cfg.drift_model,
-        high_pass=high_pass,
-        noise_model="ar1",
-        standardize=True,
-        signal_scaling=0,
-        minimize_memory=False,
-    )
-
-    # Optional spatial smoothing at first-level (mm FWHM).
-    try:
-        from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
-
-        smoothing_fwhm = normalize_smoothing_fwhm(getattr(cfg, "smoothing_fwhm", None))
-        if smoothing_fwhm is not None:
-            kwargs["smoothing_fwhm"] = smoothing_fwhm
-    except Exception as exc:
-        logger.warning("Failed to normalize smoothing_fwhm; continuing without smoothing: %s", exc)
-
-    # Some nilearn versions support low_pass; add only if present to avoid TypeError.
-    sig = inspect.signature(FirstLevelModel)
-    if "low_pass" in sig.parameters:
-        kwargs["low_pass"] = low_pass
-
-    if mask_img is not None:
-        kwargs["mask_img"] = mask_img
-
-    return FirstLevelModel(**kwargs)
-
-
-def _select_confound_columns(
-    confounds_df: pd.DataFrame,
-    cfg: ContrastBuilderConfig,
-) -> Optional[pd.DataFrame]:
-    """Select confound columns for GLM (fMRIPrep confounds convention).
-
-    Notes
-    -----
-    - Defaults are designed to be robust across datasets and nilearn versions.
-    - This is *first-level* nuisance regression; for group-level inference you
-      should also apply appropriate second-level modeling and multiple
-      comparisons correction.
-    """
-    from fmri_pipeline.analysis.confounds_selection import select_fmriprep_confounds_columns
-
-    cols = select_fmriprep_confounds_columns(
-        list(confounds_df.columns),
-        strategy=str(getattr(cfg, "confounds_strategy", "auto") or "auto"),
-    )
-    if not cols:
-        return None
-
-    selected = confounds_df[cols].copy()
-    # fMRIPrep FD has NaN for the first frame; safest is to set to 0.
-    selected = selected.fillna(0)
-    return selected
-
-
 def _run_label_from_bold_path(bold_path: Path, fallback_idx: int) -> str:
     """Extract a BIDS-style run label (e.g., 'run-01') from a BOLD filename."""
     for token in bold_path.name.split("_"):
@@ -833,27 +664,6 @@ def _remap_events_by_condition_columns(
     )
 
 
-def _coerce_condition_value(value: Any, series: pd.Series) -> Any:
-    """
-    Coerce string value to match the dtype of the series.
-
-    Handles cases where CLI passes '1' but column contains integers.
-    """
-    if pd.api.types.is_integer_dtype(series):
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            pass
-    if pd.api.types.is_float_dtype(series):
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            pass
-    if pd.api.types.is_bool_dtype(series):
-        return str(value).strip().lower() in ("true", "1", "yes")
-    return value
-
-
 def fit_first_level_glm(
     bold_path: Path,
     events_path: Path,
@@ -899,7 +709,7 @@ def fit_first_level_glm(
     confounds = None
     if confounds_path is not None and confounds_path.exists():
         confounds_df = pd.read_csv(confounds_path, sep="\t")
-        confounds = _select_confound_columns(confounds_df, cfg)
+        confounds = _select_confound_columns(confounds_df, getattr(cfg, "confounds_strategy", "auto"))
         if confounds is not None:
             logger.info("Using %d confound regressors", confounds.shape[1])
 
@@ -1047,7 +857,7 @@ def fit_first_level_glm_multi_run(
         confounds = None
         if confounds_path is not None and confounds_path.exists():
             confounds_df = pd.read_csv(confounds_path, sep="\t")
-            confounds = _select_confound_columns(confounds_df, cfg)
+            confounds = _select_confound_columns(confounds_df, getattr(cfg, "confounds_strategy", "auto"))
             if confounds is not None:
                 confound_columns.update(list(confounds.columns))
                 logger.info("Run %d: using %d confound regressors", run_idx, confounds.shape[1])
@@ -1299,7 +1109,10 @@ def build_contrast_from_runs_detailed(
     if bool(getattr(cfg, "write_design_matrix", False)) and output_dir is not None:
         try:
             sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
-            prefix = f"{sub_label}_task-{task}_contrast-{_safe_slug(str(getattr(cfg, 'name', 'contrast')))}"
+            prefix = (
+                f"{sub_label}_task-{task}_contrast-"
+                f"{_safe_slug(str(getattr(cfg, 'name', 'contrast')), default='contrast')}"
+            )
             qc_meta = _write_design_matrices(
                 glm_result.flm,
                 glm_result.included_bold_paths,
@@ -1544,7 +1357,7 @@ def build_fmri_contrast(
     # Optional: create a cluster-extent thresholded mask for downstream constraints.
     if cfg.cluster_correction and str(run_meta.get("output_type")) == "z_score":
         try:
-            src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+            src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
             fmri_cfg = src_cfg.get("fmri", {}) if isinstance(src_cfg, dict) else {}
             tail = str(fmri_cfg.get("tail", "pos")).strip().lower()
             min_cluster_voxels = int(fmri_cfg.get("cluster_min_voxels", 50))
@@ -1621,7 +1434,7 @@ def ensure_fmri_stats_map(
 
     Caches the contrast map to avoid rebuilding across multiple time windows.
     """
-    src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+    src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
     fmri_cfg = {}
     if isinstance(src_cfg, dict):
         fmri_cfg = src_cfg.get("fmri", {}) or {}

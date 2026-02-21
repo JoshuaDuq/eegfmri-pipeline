@@ -84,13 +84,6 @@ def _load_aligned_events_and_covariates(
     return aligned_events, temp_series, Z_df_full, Z_df_temp
 
 
-def _build_roi_map(info, config):
-    """Build ROI map from info object."""
-    from ..analysis.tfr import build_rois_from_info
-    
-    return build_rois_from_info(info, config)
-
-
 def load_subject_scatter_data(
     subject: str,
     task: str,
@@ -144,7 +137,9 @@ def load_subject_scatter_data(
             epochs, subject, task, config, logger, partial_covars
         )
         
-        roi_map = _build_roi_map(info, config)
+        from ..analysis.tfr import build_rois_from_info
+
+        roi_map = build_rois_from_info(info, config)
         
         return (
             temporal_df,

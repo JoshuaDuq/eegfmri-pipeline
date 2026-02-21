@@ -29,6 +29,7 @@ from joblib import Parallel, delayed
 from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.types import PrecomputedData
+from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
 from eeg_pipeline.utils.analysis.signal_metrics import (
     compute_lempel_ziv_complexity as _lempel_ziv_complexity,
     compute_multiscale_entropy as _multiscale_entropy,
@@ -257,18 +258,6 @@ def _compute_epoch_complexity(
     return record
 
 
-def _build_roi_map(config: Any, ch_names: List[str], spatial_modes: List[str]) -> Dict[str, List[int]]:
-    if "roi" not in spatial_modes:
-        return {}
-    from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
-    from eeg_pipeline.utils.analysis.channels import build_roi_map
-
-    roi_defs = get_roi_definitions(config)
-    if not roi_defs:
-        return {}
-    return build_roi_map(ch_names, roi_defs)
-
-
 def extract_complexity_from_precomputed(
     precomputed: PrecomputedData,
     n_jobs: int = 1,
@@ -307,7 +296,7 @@ def extract_complexity_from_precomputed(
         return pd.DataFrame(), []
 
     spatial_modes = getattr(precomputed, "spatial_modes", None) or ["roi", "global"]
-    roi_map = _build_roi_map(cfg, precomputed.ch_names, spatial_modes)
+    roi_map = build_roi_map_if_needed(spatial_modes, precomputed.ch_names, cfg)
 
     n_epochs = int(precomputed.data.shape[0])
     n_jobs = int(get_config_value(cfg, "feature_engineering.parallel.n_jobs_complexity", n_jobs))

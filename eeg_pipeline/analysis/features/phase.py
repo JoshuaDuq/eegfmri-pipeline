@@ -18,8 +18,9 @@ from scipy.signal import find_peaks
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_precomputed
+from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times, get_segment_masks
-from eeg_pipeline.utils.config.loader import get_frequency_bands
+from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_bands
 from eeg_pipeline.utils.parallel import get_n_jobs
 
 # Constants
@@ -30,25 +31,6 @@ _MIN_TIMES_FOR_SURROGATES = 3
 _MIN_CHANNELS_FOR_PARALLEL = 4  # Lower threshold for better parallelization
 
 # --- Helpers ---
-
-def _safe_config_get(config: Any, key: str, default: Any = None) -> Any:
-    """Safely get value from config, handling dict-like and object-like configs.
-    
-    If default is a dict and the result is not a dict, returns default.
-    This ensures type consistency when expecting dict values.
-    """
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        result = config.get(key, default)
-    elif isinstance(config, dict):
-        result = config.get(key, default)
-    else:
-        result = default
-    
-    if isinstance(default, dict) and not isinstance(result, dict):
-        return default
-    return result
 
 
 def _positive_float_or_default(value: Any, default: float) -> float:
@@ -141,13 +123,13 @@ def _get_itpc_method(config: Any) -> str:
                    condition-level analyses). Requires condition_column in config.
     - 'loo': Leave-one-out ITPC (per-trial). Requires train_mask and explicit opt-in.
     """
-    method = str(_safe_config_get(config, "feature_engineering.itpc.method", "fold_global")).strip().lower()
+    method = str(get_config_value(config, "feature_engineering.itpc.method", "fold_global")).strip().lower()
     if method not in {"loo", "global", "fold_global", "condition"}:
         raise ValueError(
             "Invalid ITPC method. Supported values are 'loo', 'global', 'fold_global', and 'condition'. "
             f"Got: {method!r}"
         )
-    if method == "loo" and not bool(_safe_config_get(config, "feature_engineering.itpc.allow_unsafe_loo", False)):
+    if method == "loo" and not bool(get_config_value(config, "feature_engineering.itpc.allow_unsafe_loo", False)):
         raise ValueError(
             "ITPC method 'loo' is disabled by default because it creates cross-trial dependence "
             "and can cause leakage in trial-level analyses. Set "
@@ -880,7 +862,9 @@ def _validate_pac_band_pair(
 
 def _extract_pac_config(config: Any) -> Dict[str, Any]:
     """Extract and validate PAC configuration."""
-    pac_cfg = _safe_config_get(config, "feature_engineering.pac", {})
+    pac_cfg = get_config_value(config, "feature_engineering.pac", {})
+    if not isinstance(pac_cfg, dict):
+        pac_cfg = {}
     method = str(pac_cfg.get("method", "mvl")).strip().lower()
     if method != "mvl":
         raise ValueError(f"PAC: unsupported method '{method}'. Only 'mvl' is implemented.")
@@ -1185,30 +1169,13 @@ def _get_channel_names_from_tfr(
     return tfr_ch_names
 
 
-def _build_roi_map_if_needed(
-    spatial_modes: List[str],
-    ch_names: List[str],
-    config: Any,
-) -> Dict[str, List[int]]:
-    """Build ROI map if ROI spatial mode is requested."""
-    if 'roi' not in spatial_modes:
-        return {}
-    
-    from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
-    from eeg_pipeline.utils.analysis.channels import build_roi_map
-    
-    roi_defs = get_roi_definitions(config)
-    if not roi_defs:
-        return {}
-    
-    return build_roi_map(ch_names, roi_defs)
-
-
 # --- Main API ---
 
 def _get_baseline_correction_mode(config: Any) -> str:
     """Extract baseline correction mode from config."""
-    itpc_cfg = _safe_config_get(config, "feature_engineering.itpc", {})
+    itpc_cfg = get_config_value(config, "feature_engineering.itpc", {})
+    if not isinstance(itpc_cfg, dict):
+        itpc_cfg = {}
     baseline_correction = str(itpc_cfg.get("baseline_correction", "none")).strip().lower()
     if baseline_correction not in {"none", "subtract"}:
         return "none"
@@ -1281,7 +1248,9 @@ def extract_phase_features(
         n_jobs_actual = _normalize_n_jobs(n_jobs)
         logger.info(f"ITPC: n_jobs={n_jobs_actual} (from config: {n_jobs})")
 
-    itpc_cfg = _safe_config_get(config, "feature_engineering.itpc", {})
+    itpc_cfg = get_config_value(config, "feature_engineering.itpc", {})
+    if not isinstance(itpc_cfg, dict):
+        itpc_cfg = {}
     min_segment_sec = _nonnegative_float_or_default(itpc_cfg.get("min_segment_sec", 1.0), 1.0)
     min_cycles_at_fmin = _positive_float_or_default(itpc_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
     try:
@@ -1678,7 +1647,7 @@ def compute_pac_comodulograms(
     amp_indices = np.where(amp_mask)[0]
     
     normalize = bool(pac_cfg.get("normalize", True))
-    epsilon = float(_safe_config_get(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
+    epsilon = float(get_config_value(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
 
     rng = _rng_from_seed(pac_cfg.get("random_seed", None))
     
@@ -1687,7 +1656,7 @@ def compute_pac_comodulograms(
     tf_bands = _normalize_frequency_bands(frequency_bands)
     if not tf_bands:
         tf_bands = _normalize_frequency_bands(
-            _safe_config_get(config, "time_frequency_analysis.bands", {})
+            get_config_value(config, "time_frequency_analysis.bands", {})
         )
     requested_pairs = pac_cfg.get("pairs")
     pairs = _parse_requested_pac_pairs(requested_pairs)
@@ -1772,7 +1741,7 @@ def compute_pac_comodulograms(
                 pair_channel_data_z[band_pair_name][:, channel_idx] = pac_z
     
     if spatial_modes is None:
-        spatial_modes = _safe_config_get(config, "feature_engineering.spatial_modes", ["roi", "global"])
+        spatial_modes = get_config_value(config, "feature_engineering.spatial_modes", ["roi", "global"])
     
     roi_map = _build_roi_map_if_needed(spatial_modes, ch_names, config)
     
@@ -1836,7 +1805,9 @@ def extract_itpc_from_precomputed(
             f"ITPC(method='{itpc_method}') in analysis_mode='trial_ml_safe' requires precomputed.train_mask."
         )
 
-    itpc_cfg = _safe_config_get(cfg, "feature_engineering.itpc", {})
+    itpc_cfg = get_config_value(cfg, "feature_engineering.itpc", {})
+    if not isinstance(itpc_cfg, dict):
+        itpc_cfg = {}
     min_segment_sec = _nonnegative_float_or_default(itpc_cfg.get("min_segment_sec", 1.0), 1.0)
     min_cycles_at_fmin = _positive_float_or_default(itpc_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
     condition_column = itpc_cfg.get("condition_column", None)
@@ -2068,7 +2039,9 @@ def extract_pac_from_precomputed(
         return pd.DataFrame(), []
 
     # Get PAC config
-    pac_cfg = _safe_config_get(config, "feature_engineering.pac", {})
+    pac_cfg = get_config_value(config, "feature_engineering.pac", {})
+    if not isinstance(pac_cfg, dict):
+        pac_cfg = {}
     method = str(pac_cfg.get("method", "mvl")).strip().lower()
     if method != "mvl":
         raise ValueError(f"PAC (precomputed): unsupported method '{method}'. Only 'mvl' is implemented.")
@@ -2077,7 +2050,7 @@ def extract_pac_from_precomputed(
     normalize = bool(pac_cfg.get("normalize", True))
     min_segment_sec = _nonnegative_float_or_default(pac_cfg.get("min_segment_sec", 1.0), 1.0)
     min_cycles_at_fmin = _positive_float_or_default(pac_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
-    eps_amp = float(_safe_config_get(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
+    eps_amp = float(get_config_value(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
     rng = _rng_from_seed(pac_cfg.get("random_seed", None))
     allow_harmonic_overlap = bool(pac_cfg.get("allow_harmonic_overlap", False))
     max_harm = int(pac_cfg.get("max_harmonic", 6))
@@ -2086,13 +2059,13 @@ def extract_pac_from_precomputed(
     # Get spatial modes and ROI map
     spatial_modes = getattr(precomputed, "spatial_modes", None)
     if spatial_modes is None:
-        spatial_modes = _safe_config_get(config, "feature_engineering.spatial_modes", ["roi", "global"])
+        spatial_modes = get_config_value(config, "feature_engineering.spatial_modes", ["roi", "global"])
     
     # Prefer resolved/runtime bands from precomputed intermediates (e.g., IAF-adjusted).
     tf_bands = _normalize_frequency_bands(getattr(precomputed, "frequency_bands", None))
     if not tf_bands:
         tf_bands = _normalize_frequency_bands(
-            _safe_config_get(config, "time_frequency_analysis.bands", {})
+            get_config_value(config, "time_frequency_analysis.bands", {})
         )
     if not tf_bands:
         derived_bands: Dict[str, List[float]] = {}
@@ -2110,7 +2083,7 @@ def extract_pac_from_precomputed(
     n_ch = len(ch_names)  # Required for surrogate and waveform QC loops
     n_epochs = precomputed.data.shape[0]
     analysis_mode = str(
-        _safe_config_get(config, "feature_engineering.analysis_mode", "group_stats") or "group_stats"
+        get_config_value(config, "feature_engineering.analysis_mode", "group_stats") or "group_stats"
     ).strip().lower()
     train_mask = getattr(precomputed, "train_mask", None)
     surrogate_method, surrogate_donor_epochs = _resolve_pac_surrogate_context(

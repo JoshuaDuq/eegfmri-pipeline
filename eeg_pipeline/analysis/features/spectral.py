@@ -59,8 +59,9 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import EPSILON_PSD, validate_precomputed
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
-from eeg_pipeline.utils.analysis.channels import pick_eeg_channels, build_roi_map
-from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
+from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
+from eeg_pipeline.utils.analysis.spectral import compute_frequency_weights
 from eeg_pipeline.utils.config.loader import get_frequency_bands, get_feature_constant
 from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
 from eeg_pipeline.types import PrecomputedData
@@ -182,27 +183,6 @@ def _build_baseline_arrays(
     return baseline_arrays
 
 
-def _compute_frequency_weights(band_frequencies: np.ndarray) -> np.ndarray:
-    """Compute frequency weights for weighted averaging.
-    
-    Uses gradient to account for non-uniform frequency spacing (e.g., log-spaced).
-    This prevents bias toward frequency bins with higher density.
-    
-    Args:
-        band_frequencies: Array of frequencies within the band.
-    
-    Returns:
-        Array of weights, same length as band_frequencies.
-    """
-    if band_frequencies.size >= 2 and np.all(np.isfinite(band_frequencies)):
-        weights = np.gradient(band_frequencies).astype(float)
-        weights = np.where(np.isfinite(weights) & (weights > 0), weights, np.nan)
-    else:
-        weights = np.ones((band_frequencies.size,), dtype=float)
-    
-    return weights
-
-
 def _compute_frequency_weighted_power(
     tfr_data: np.ndarray,
     frequency_mask: np.ndarray,
@@ -224,7 +204,7 @@ def _compute_frequency_weighted_power(
     power_freq_time = np.nanmean(band_data, axis=3)
     
     band_frequencies = np.asarray(frequencies[frequency_mask], dtype=float)
-    frequency_weights = _compute_frequency_weights(band_frequencies)
+    frequency_weights = compute_frequency_weights(band_frequencies)
     
     weights_3d = frequency_weights[None, None, :]
     finite_mask = np.isfinite(power_freq_time) & np.isfinite(weights_3d)
@@ -403,32 +383,6 @@ def _build_band_frequency_masks(
             band_masks[band] = frequency_mask
     
     return band_masks
-
-
-def _build_roi_map_if_needed(
-    spatial_modes: List[str],
-    channel_names: List[str],
-    config: Any,
-) -> Dict[str, List[int]]:
-    """Build ROI map if ROI features are requested.
-    
-    Args:
-        spatial_modes: List of spatial aggregation modes.
-        channel_names: List of channel names.
-        config: Configuration object.
-    
-    Returns:
-        Dictionary mapping ROI names to lists of channel indices.
-    """
-    if 'roi' not in spatial_modes:
-        return {}
-    
-    roi_definitions = get_roi_definitions(config)
-    if not roi_definitions:
-        return {}
-    
-    roi_index_map = build_roi_map(channel_names, roi_definitions)
-    return roi_index_map
 
 
 def _validate_baseline_requirements(

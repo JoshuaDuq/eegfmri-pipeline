@@ -47,6 +47,22 @@ def get_roi_definitions(config: Any) -> Dict[str, List[str]]:
     return rois
 
 
+def build_roi_map_if_needed(
+    spatial_modes: List[str],
+    channel_names: List[str],
+    config: Any,
+) -> Dict[str, List[int]]:
+    """Build ROI index map when ROI spatial mode is requested."""
+    if "roi" not in spatial_modes:
+        return {}
+
+    roi_definitions = get_roi_definitions(config)
+    if not roi_definitions:
+        return {}
+
+    return build_roi_map(channel_names, roi_definitions)
+
+
 def _get_aggregation_function(method: str) -> Callable:
     """Return aggregation function for given method."""
     if method == _AGGREGATION_MEDIAN:

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import csv
-import inspect
-import json
 import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -10,7 +8,15 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from fmri_pipeline.analysis.pain_signatures import compute_pain_signature_expression
 from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
-from fmri_pipeline.analysis.confounds_selection import select_fmriprep_confounds_columns
+from fmri_pipeline.utils.bold_discovery import (
+    build_first_level_model as _build_first_level_model,
+    coerce_condition_value as _coerce_condition_value,
+    discover_brain_mask_for_bold as _discover_brain_mask_for_bold,
+    discover_fmriprep_preproc_bold as _discover_fmriprep_preproc_bold,
+    get_tr_from_bold as _get_tr_from_bold,
+    select_confounds as _select_confounds,
+)
+from fmri_pipeline.utils.text import safe_slug as _safe_slug
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +188,6 @@ class TrialInfo:
     extra: Dict[str, str]
 
 
-def _safe_slug(value: str) -> str:
-    value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value).strip())
-    value = "_".join(part for part in value.split("_") if part)
-    return value or "item"
-
-
 def _resample_mask_to_target(mask_img: Any, target_img: Any) -> Any:
     import numpy as np  # type: ignore
 
@@ -226,60 +226,6 @@ def _union_masks_to_target(mask_imgs: Sequence[Any], target_img: Any) -> Any:
     return nib.Nifti1Image(union.astype(np.uint8), ref.affine, ref.header)
 
 
-def _read_json(path: Path) -> Dict[str, Any]:
-    try:
-        return json.loads(path.read_text())
-    except Exception:
-        return {}
-
-
-def _get_tr_from_bold(bold_path: Path) -> float:
-    sidecar = bold_path.with_suffix("").with_suffix(".json")
-    if sidecar.exists():
-        meta = _read_json(sidecar)
-        if "RepetitionTime" in meta:
-            return float(meta["RepetitionTime"])
-
-    import nibabel as nib  # type: ignore
-
-    img = nib.load(str(bold_path))
-    zooms = img.header.get_zooms()
-    if len(zooms) >= 4:
-        return float(zooms[3])
-    raise ValueError(f"Could not determine TR for {bold_path}")
-
-
-def _discover_fmriprep_preproc_bold(
-    *,
-    bids_derivatives: Path,
-    sub_label: str,
-    task: str,
-    run_num: int,
-    space: Optional[str],
-) -> Optional[Path]:
-    search_dirs = [
-        bids_derivatives / "preprocessed" / "fmri" / sub_label / "func",
-        bids_derivatives / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
-        bids_derivatives / "fmriprep" / sub_label / "func",
-    ]
-
-    run_tokens = [f"run-{run_num:02d}", f"run-{run_num}"]
-    patterns: List[str] = []
-    for run_tok in run_tokens:
-        if space:
-            patterns.append(f"{sub_label}_task-{task}_{run_tok}_space-{space}_desc-preproc_bold.nii.gz")
-        patterns.append(f"{sub_label}_task-{task}_{run_tok}_desc-preproc_bold.nii.gz")
-
-    for func_dir in search_dirs:
-        if not func_dir.exists():
-            continue
-        for pat in patterns:
-            p = func_dir / pat
-            if p.exists():
-                return p
-    return None
-
-
 def _discover_confounds(
     *,
     bids_derivatives: Path,
@@ -305,16 +251,6 @@ def _discover_confounds(
             p = d / pat
             if p.exists():
                 return p
-    return None
-
-
-def _discover_brain_mask_for_bold(bold_path: Path) -> Optional[Path]:
-    name = bold_path.name
-    suffix = "_desc-preproc_bold.nii.gz"
-    if name.endswith(suffix):
-        candidate = bold_path.with_name(name.replace(suffix, "_desc-brain_mask.nii.gz"))
-        if candidate.exists():
-            return candidate
     return None
 
 
@@ -379,7 +315,7 @@ def _discover_runs(
         if input_source == "fmriprep" and bids_derivatives is not None:
             bold_path = _discover_fmriprep_preproc_bold(
                 bids_derivatives=bids_derivatives,
-                sub_label=sub_label,
+                subject=sub_label,
                 task=task,
                 run_num=run_num,
                 space=fmriprep_space,
@@ -406,82 +342,6 @@ def _discover_runs(
     if not out:
         raise FileNotFoundError(f"No usable runs found for subject {subject}, task {task}")
     return out
-
-
-def _coerce_condition_value(value: str, series: Any) -> Any:
-    """
-    Coerce CLI string values to the dtype of a pandas Series (best-effort).
-    """
-    try:
-        import pandas as pd  # type: ignore
-
-        if isinstance(series, pd.Series):
-            if pd.api.types.is_integer_dtype(series):
-                try:
-                    return int(value)
-                except Exception:
-                    return value
-            if pd.api.types.is_float_dtype(series):
-                try:
-                    return float(value)
-                except Exception:
-                    return value
-            if pd.api.types.is_bool_dtype(series):
-                return str(value).strip().lower() in ("true", "1", "yes")
-    except Exception as exc:
-        logger.debug("Condition value coercion fallback to raw string for value=%r: %s", value, exc)
-    return value
-
-
-def _select_confounds(confounds_path: Optional[Path], strategy: str) -> tuple[Optional[Any], List[str]]:
-    if confounds_path is None or not confounds_path.exists():
-        return None, []
-
-    try:
-        import pandas as pd  # type: ignore
-
-        df = pd.read_csv(confounds_path, sep="\t")
-        cols = select_fmriprep_confounds_columns(list(df.columns), strategy=strategy)
-        if not cols:
-            return None, []
-        selected = df[cols].copy().fillna(0)
-        return selected, list(selected.columns)
-    except Exception as exc:
-        logger.warning("Failed to read/select confounds from %s (%s)", confounds_path, exc)
-        return None, []
-
-
-def _build_first_level_model(
-    *,
-    tr: float,
-    cfg: TrialSignatureExtractionConfig,
-    mask_img: Optional[Any],
-) -> Any:
-    from nilearn.glm.first_level import FirstLevelModel  # type: ignore
-
-    high_pass = cfg.high_pass_hz if float(cfg.high_pass_hz) > 0 else None
-    low_pass = cfg.low_pass_hz
-
-    kwargs: Dict[str, Any] = dict(
-        t_r=float(tr),
-        hrf_model=cfg.hrf_model,
-        drift_model=cfg.drift_model,
-        high_pass=high_pass,
-        noise_model="ar1",
-        standardize=True,
-        signal_scaling=0,
-        minimize_memory=False,
-    )
-
-    sig = inspect.signature(FirstLevelModel)
-    if "low_pass" in sig.parameters:
-        kwargs["low_pass"] = low_pass
-    if cfg.smoothing_fwhm is not None and "smoothing_fwhm" in sig.parameters:
-        kwargs["smoothing_fwhm"] = cfg.smoothing_fwhm
-    if mask_img is not None and "mask_img" in sig.parameters:
-        kwargs["mask_img"] = mask_img
-
-    return FirstLevelModel(**kwargs)
 
 
 def _make_trial_regressor(run_label: str, trial_index: int, condition: str) -> str:
@@ -828,7 +688,11 @@ def run_trial_signature_extraction_for_subject(
         import nibabel as nib  # type: ignore
 
         events_df = pd.read_csv(events_path, sep="\t")
-        confounds, conf_cols = _select_confounds(confounds_path, cfg.confounds_strategy)
+        confounds, conf_cols = _select_confounds(
+            confounds_path,
+            cfg.confounds_strategy,
+            logger=logger,
+        )
 
         mask_img = None
         mask_path = _discover_brain_mask_for_bold(bold_path)
@@ -853,7 +717,7 @@ def run_trial_signature_extraction_for_subject(
             continue
 
         if cfg.method == "beta-series":
-            flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
+            flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
             flm.fit(bold_path, events=modeled_events, confounds=confounds)
 
             dm = flm.design_matrices_[0]
@@ -955,7 +819,7 @@ def run_trial_signature_extraction_for_subject(
                 )
 
                 lss_events = _build_lss_events(trial=t, all_trials=trials, original_events_df=events_df, cfg=cfg)
-                flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
+                flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
                 flm.fit(bold_path, events=lss_events, confounds=confounds)
 
                 dm = flm.design_matrices_[0]
