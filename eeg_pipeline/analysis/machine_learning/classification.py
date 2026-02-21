@@ -30,6 +30,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import sklearn
+from packaging.version import parse as parse_version
 from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.feature_selection import f_classif
@@ -88,6 +90,28 @@ def _append_classification_resampler(steps: List[Tuple[str, Any]], cfg: Dict[str
 def _variance_param_prefix(n_covariates: int) -> str:
     """Prefix for variance threshold param in grid (preprocessing has covariate branch)."""
     return "preprocessing__eeg__var" if n_covariates > 0 else "var"
+
+
+def _get_lr_kwargs(penalty: str, l1_ratio: float | None = None) -> Dict[str, Any]:
+    """
+    Get backward-compatible kwargs for LogisticRegression.
+    Handles the deprecation of the `penalty` argument in scikit-learn 1.8.0.
+    """
+    kwargs: Dict[str, Any] = {}
+    if parse_version(sklearn.__version__) >= parse_version("1.8.0"):
+        if penalty == "l2":
+            kwargs["l1_ratio"] = 0.0
+        elif penalty == "l1":
+            kwargs["l1_ratio"] = 1.0
+        elif penalty == "elasticnet":
+            kwargs["l1_ratio"] = l1_ratio if l1_ratio is not None else 0.5
+        elif penalty == "none":
+            kwargs["C"] = float("inf")
+    else:
+        kwargs["penalty"] = penalty
+        if penalty == "elasticnet":
+            kwargs["l1_ratio"] = l1_ratio if l1_ratio is not None else 0.5
+    return kwargs
 
 
 def create_svm_pipeline(
@@ -178,16 +202,18 @@ def create_logistic_pipeline(
         score_func=f_classif,
     )
     _append_classification_resampler(steps, cfg)
+    
+    lr_kwargs = _get_lr_kwargs(penalty=penalty, l1_ratio=0.5 if penalty == "elasticnet" else None)
+    
     steps.append(
         (
             "lr",
             LogisticRegression(
-                penalty=penalty,
                 solver=solver,
                 max_iter=cfg["lr_max_iter"],
                 random_state=seed,
                 class_weight=cfg["lr_class_weight"],
-                l1_ratio=0.5 if penalty == "elasticnet" else None,
+                **lr_kwargs,
             ),
         )
     )
