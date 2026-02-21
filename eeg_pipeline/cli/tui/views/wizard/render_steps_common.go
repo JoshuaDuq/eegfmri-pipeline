@@ -13,7 +13,7 @@ import (
 const (
 	defaultLabelWidth     = 22
 	defaultLabelWidthWide = 30
-	configOverhead        = 10
+	configOverhead        = 17
 )
 
 // calculateScrollWindow returns the visible line range for scrolling.

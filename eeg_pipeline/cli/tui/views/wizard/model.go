@@ -2141,6 +2141,10 @@ type Model struct {
 	mlClassificationResampler     int     // 0: none, 1: undersample, 2: smote
 	mlClassificationResamplerSeed int     // Random seed for resampler
 	mlGroupPreprocessingExpanded  bool    // UI expansion state
+	mlGroupDataExpanded           bool    // Data & Features section
+	mlGroupModelExpanded          bool    // Model & Hyperparameters section
+	mlGroupTrainingExpanded       bool    // Training & CV section
+	mlGroupOutputExpanded         bool    // Output & Plots section
 
 	// ML Model Hyperparameters - SVM
 	mlSvmKernel      int    // 0: rbf, 1: linear, 2: poly
@@ -3016,6 +3020,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlSpatialRegionsAllowed:       "",
 		mlClassificationResampler:     0, // 0: none
 		mlClassificationResamplerSeed: 42,
+		mlGroupDataExpanded:           true,
+		mlGroupModelExpanded:          true,
+		mlGroupTrainingExpanded:       true,
+		mlGroupOutputExpanded:         true,
 
 		// ML SVM defaults
 		mlSvmKernel:      0, // 0: rbf

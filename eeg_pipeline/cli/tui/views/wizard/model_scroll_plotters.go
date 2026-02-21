@@ -37,8 +37,8 @@ func (m *Model) UpdateAdvancedOffset() {
 		effectiveHeight = defaultTerminalHeight
 	}
 
-	// Total height minus overhead - must match render functions
-	overheadLines := 10
+	// Overhead must match each pipeline's render function.
+	overheadLines := configOverhead
 	maxLines := effectiveHeight - overheadLines
 	if maxLines < minVisibleLines {
 		maxLines = minVisibleLines
@@ -95,8 +95,20 @@ func (m *Model) UpdateAdvancedOffset() {
 
 	case types.PipelineML:
 		options := m.getMLOptions()
-		totalLines = len(options)
-		cursorLine = m.advancedCursor
+		lineIdx := 0
+		for i, opt := range options {
+			if !isMLRenderedOption(opt) {
+				continue
+			}
+			if i == m.advancedCursor {
+				cursorLine = lineIdx
+			}
+			lineIdx++
+			if m.shouldRenderExpandedListAfterOption(opt) {
+				lineIdx += m.getExpandedListLength()
+			}
+		}
+		totalLines = lineIdx
 
 	default:
 		totalLines = 0
@@ -236,6 +248,11 @@ func (m *Model) UpdateFeaturePlotterOffset() {
 // It ensures the cursor stays within the visible area when scrolling.
 func calculateScrollOffset(cursorLine, currentOffset, totalLines, maxVisibleLines int) int {
 	if totalLines <= 0 {
+		return 0
+	}
+
+	// Everything fits — no scrolling needed, reset any stale offset
+	if totalLines <= maxVisibleLines {
 		return 0
 	}
 

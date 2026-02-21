@@ -1476,7 +1476,7 @@ def load_epoch_tensor_matrix(
 
     for subject_bids, epochs, aligned_events, y_sub, _ch_names in payloads:
         epochs_common = epochs.copy().pick(common_channels)
-        X_sub = epochs_common.get_data(picks="eeg", reject_by_annotation=None).astype(float)
+        X_sub = epochs_common.get_data(picks="eeg").astype(float)
         if X_sub.shape[0] != len(y_sub):
             log.warning("Mismatch X/y for sub-%s; skipping", str(subject_bids))
             continue
@@ -1530,7 +1530,7 @@ def extract_epoch_data_block(
     for idx in indices:
         subject_id, trial_idx = trial_records[int(idx)]
         epochs = aligned_epochs[subject_id]
-        X_i = epochs.get_data(picks="eeg", reject_by_annotation=None)[trial_idx]
+        X_i = epochs.get_data(picks="eeg")[trial_idx]
         X_list.append(X_i)
     return np.stack(X_list, axis=0)
 

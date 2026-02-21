@@ -21,6 +21,14 @@ func (m *Model) toggleMLAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optMLGroupData:
+		m.mlGroupDataExpanded = !m.mlGroupDataExpanded
+	case optMLGroupModel:
+		m.mlGroupModelExpanded = !m.mlGroupModelExpanded
+	case optMLGroupTraining:
+		m.mlGroupTrainingExpanded = !m.mlGroupTrainingExpanded
+	case optMLGroupOutput:
+		m.mlGroupOutputExpanded = !m.mlGroupOutputExpanded
 	case optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed, optRfNEstimators, optMLBinaryThreshold, optMLUncertaintyAlpha, optMLPermNRepeats, optMLPlotDPI, optMLPlotTopNFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
@@ -242,6 +250,13 @@ func (m *Model) toggleMLAdvancedOption() {
 		m.mlInterpretabilityGroupedOutputs = !m.mlInterpretabilityGroupedOutputs
 		m.useDefaultAdvanced = false
 	}
+
+	// Clamp cursor after expand/collapse changes
+	options = m.getMLOptions()
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
+	}
+	m.UpdateAdvancedOffset()
 }
 
 func (m *Model) togglePreprocessingAdvancedOption() {

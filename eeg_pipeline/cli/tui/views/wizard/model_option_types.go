@@ -495,6 +495,11 @@ const (
 	optPlotDPI
 	optPlotSaveDPI
 	optPlotSharedColorbar
+	// Machine Learning section group headers (collapsible)
+	optMLGroupData
+	optMLGroupModel
+	optMLGroupTraining
+	optMLGroupOutput
 	// Machine Learning options
 	optMLNPerm
 	optMLInnerSplits

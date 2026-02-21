@@ -10,6 +10,54 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// isMLRenderedOption returns true for every optionType that produces a visual
+// line in renderMLAdvancedConfig. Options not listed here fall through to
+// default:continue and must not be counted in totalLines.
+func isMLRenderedOption(opt optionType) bool {
+	switch opt {
+	case optUseDefaults,
+		optMLGroupData, optMLGroupModel, optMLGroupTraining, optMLGroupOutput,
+		optMLTarget,
+		optMLFmriSigGroup, optMLFmriSigMethod, optMLFmriSigContrastName,
+		optMLFmriSigSignature, optMLFmriSigMetric, optMLFmriSigNormalization, optMLFmriSigRoundDecimals,
+		optMLFeatureFamilies, optMLFeatureBands, optMLFeatureSegments,
+		optMLFeatureScopes, optMLFeatureStats, optMLFeatureHarmonization,
+		optMLCovariates, optMLBaselinePredictors, optMLRequireTrialMlSafe,
+		optMLRegressionModel, optMLClassificationModel,
+		optMLBinaryThresholdEnabled, optMLBinaryThreshold,
+		optElasticNetAlphaGrid, optElasticNetL1RatioGrid,
+		optRidgeAlphaGrid,
+		optRfNEstimators, optRfMaxDepthGrid,
+		optVarianceThresholdGrid,
+		optMLSvmKernel, optMLSvmCGrid, optMLSvmGammaGrid, optMLSvmClassWeight,
+		optMLLrPenalty, optMLLrCGrid, optMLLrL1RatioGrid, optMLLrMaxIter, optMLLrClassWeight,
+		optMLRfMinSamplesSplitGrid, optMLRfMinSamplesLeafGrid, optMLRfBootstrap, optMLRfClassWeight,
+		optMLEnsembleCalibrate,
+		optMLGroupCNN,
+		optMLCnnFilters1, optMLCnnFilters2, optMLCnnKernelSize1, optMLCnnKernelSize2,
+		optMLCnnPoolSize, optMLCnnDenseUnits, optMLCnnDropoutConv, optMLCnnDropoutDense,
+		optMLCnnBatchSize, optMLCnnEpochs, optMLCnnLearningRate, optMLCnnPatience,
+		optMLCnnMinDelta, optMLCnnL2Lambda, optMLCnnRandomSeed,
+		optMLGroupPreprocessing,
+		optMLImputer, optMLPowerTransformerMethod, optMLPowerTransformerStandardize,
+		optMLDeconfound, optMLFeatureSelectionPercentile, optMLSpatialRegionsAllowed,
+		optMLPCAEnabled, optMLPCANComponents, optMLPCAWhiten, optMLPCASvdSolver, optMLPCARngSeed,
+		optMLClassificationResampler, optMLClassificationResamplerSeed,
+		optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed,
+		optMLCvHygieneEnabled, optMLCvPermutationScheme, optMLCvMinValidPermFraction, optMLCvDefaultNBins,
+		optMLEvalCIMethod, optMLEvalBootstrapIterations,
+		optMLDataCovariatesStrict, optMLDataMaxExcludedSubjectFraction,
+		optMLIncrementalBaselineAlpha,
+		optMLInterpretabilityGroupedOutputs, optMLTargetsStrictRegressionContinuous,
+		optMLTimeGenMinSubjects, optMLTimeGenMinValidPermFraction,
+		optMLClassMinSubjectsForAUC, optMLClassMaxFailedFoldFraction,
+		optMLUncertaintyAlpha, optMLPermNRepeats,
+		optMLPlotsEnabled, optMLPlotFormats, optMLPlotDPI, optMLPlotTopNFeatures, optMLPlotDiagnostics:
+		return true
+	}
+	return false
+}
+
 func (m Model) renderMLAdvancedConfig() string {
 	var b strings.Builder
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
@@ -95,9 +143,15 @@ func (m Model) renderMLAdvancedConfig() string {
 	availableColumns := m.GetAvailableColumns()
 	rows := m.getMLOptions()
 
-	totalLines := len(rows)
-	if m.expandedOption >= 0 {
-		totalLines += len(m.getExpandedListItems())
+	totalLines := 0
+	for _, opt := range rows {
+		if !isMLRenderedOption(opt) {
+			continue
+		}
+		totalLines++
+		if m.shouldRenderExpandedListAfterOption(opt) {
+			totalLines += m.getExpandedListLength()
+		}
 	}
 
 	effectiveHeight := m.height
@@ -370,6 +424,81 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "Min Subj for AUC", fmt.Sprintf("%d", m.mlClassMinSubjectsForAUC), "AUC inference threshold"
 		case optMLClassMaxFailedFoldFraction:
 			label, value, hint = "Max Failed Fold Frac", fmt.Sprintf("%.6g", m.mlClassMaxFailedFoldFraction), "0-1"
+
+		// Section group headers
+		case optMLGroupData:
+			if lineIdx >= startLine && lineIdx < endLine {
+				chevron := "▾"
+				if !m.mlGroupDataExpanded {
+					chevron = "▸"
+				}
+				cursor := "  "
+				if isFocused {
+					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
+				}
+				headerStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				if isFocused {
+					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+				}
+				b.WriteString(cursor + headerStyle.Render(chevron+" Data & Features") + "\n")
+			}
+			lineIdx++
+			continue
+		case optMLGroupModel:
+			if lineIdx >= startLine && lineIdx < endLine {
+				chevron := "▾"
+				if !m.mlGroupModelExpanded {
+					chevron = "▸"
+				}
+				cursor := "  "
+				if isFocused {
+					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
+				}
+				headerStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				if isFocused {
+					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+				}
+				b.WriteString(cursor + headerStyle.Render(chevron+" Model & Hyperparameters") + "\n")
+			}
+			lineIdx++
+			continue
+		case optMLGroupTraining:
+			if lineIdx >= startLine && lineIdx < endLine {
+				chevron := "▾"
+				if !m.mlGroupTrainingExpanded {
+					chevron = "▸"
+				}
+				cursor := "  "
+				if isFocused {
+					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
+				}
+				headerStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				if isFocused {
+					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+				}
+				b.WriteString(cursor + headerStyle.Render(chevron+" Training & CV") + "\n")
+			}
+			lineIdx++
+			continue
+		case optMLGroupOutput:
+			if lineIdx >= startLine && lineIdx < endLine {
+				chevron := "▾"
+				if !m.mlGroupOutputExpanded {
+					chevron = "▸"
+				}
+				cursor := "  "
+				if isFocused {
+					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
+				}
+				headerStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				if isFocused {
+					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+				}
+				b.WriteString(cursor + headerStyle.Render(chevron+" Output & Plots") + "\n")
+			}
+			lineIdx++
+			continue
+
 		default:
 			continue
 		}
