@@ -345,6 +345,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.mlSvmGammaGrid
 	case textFieldMLLrCGrid:
 		return m.mlLrCGrid
+	case textFieldMLLrL1RatioGrid:
+		return m.mlLrL1RatioGrid
 	case textFieldMLRfMinSamplesSplitGrid:
 		return m.mlRfMinSamplesSplitGrid
 	case textFieldMLRfMinSamplesLeafGrid:
@@ -741,6 +743,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.mlSvmGammaGrid = strings.Join(splitLooseList(value), ",")
 	case textFieldMLLrCGrid:
 		m.mlLrCGrid = strings.Join(splitLooseList(value), ",")
+	case textFieldMLLrL1RatioGrid:
+		m.mlLrL1RatioGrid = strings.Join(splitLooseList(value), ",")
 	case textFieldMLRfMinSamplesSplitGrid:
 		m.mlRfMinSamplesSplitGrid = strings.Join(splitLooseList(value), ",")
 	case textFieldMLRfMinSamplesLeafGrid:

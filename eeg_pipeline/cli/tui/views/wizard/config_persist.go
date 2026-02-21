@@ -975,6 +975,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// ML Logistic Regression
 	cfg["mlLrPenalty"] = m.mlLrPenalty
 	cfg["mlLrCGrid"] = m.mlLrCGrid
+	cfg["mlLrL1RatioGrid"] = m.mlLrL1RatioGrid
 	cfg["mlLrMaxIter"] = m.mlLrMaxIter
 	cfg["mlLrClassWeight"] = m.mlLrClassWeight
 
@@ -2186,6 +2187,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	// ML Logistic Regression
 	m.mlLrPenalty = getInt("mlLrPenalty", m.mlLrPenalty)
 	m.mlLrCGrid = getString("mlLrCGrid", m.mlLrCGrid)
+	m.mlLrL1RatioGrid = getString("mlLrL1RatioGrid", m.mlLrL1RatioGrid)
 	m.mlLrMaxIter = getInt("mlLrMaxIter", m.mlLrMaxIter)
 	m.mlLrClassWeight = getInt("mlLrClassWeight", m.mlLrClassWeight)
 

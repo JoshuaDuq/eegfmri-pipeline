@@ -187,6 +187,7 @@ def create_logistic_pipeline(
                 max_iter=cfg["lr_max_iter"],
                 random_state=seed,
                 class_weight=cfg["lr_class_weight"],
+                l1_ratio=0.5 if penalty == "elasticnet" else None,
             ),
         )
     )
@@ -265,6 +266,7 @@ def create_ensemble_pipeline(
         max_iter=cfg["lr_max_iter"],
         random_state=seed,
         class_weight=cfg["lr_class_weight"],
+        l1_ratio=cfg.get("lr_l1_ratio_grid", [0.5])[0] if cfg["lr_penalty"] == "elasticnet" else None,
     )
     rf = RandomForestClassifier(
         n_estimators=cfg["rf_n_estimators"],
@@ -321,10 +323,13 @@ def build_logistic_param_grid(config: Any = None, n_covariates: int = 0) -> Dict
     """Build parameter grid for Logistic Regression."""
     cfg = get_ml_config(config)
     var_prefix = _variance_param_prefix(n_covariates)
-    return {
+    grid = {
         "lr__C": cfg["lr_C_grid"],
         f"{var_prefix}__threshold": cfg["variance_threshold_grid"],
     }
+    if cfg["lr_penalty"] == "elasticnet":
+        grid["lr__l1_ratio"] = cfg["lr_l1_ratio_grid"]
+    return grid
 
 
 def build_rf_classification_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, List]:
@@ -333,7 +338,8 @@ def build_rf_classification_param_grid(config: Any = None, n_covariates: int = 0
     var_prefix = _variance_param_prefix(n_covariates)
     return {
         "rf__max_depth": cfg["rf_max_depth_grid"],
-        "rf__min_samples_leaf": [1, 3, 5],
+        "rf__min_samples_split": cfg["rf_min_samples_split_grid"],
+        "rf__min_samples_leaf": cfg["rf_min_samples_leaf_grid"],
         f"{var_prefix}__threshold": cfg["variance_threshold_grid"],
     }
 

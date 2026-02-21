@@ -177,6 +177,8 @@ func (m *Model) toggleMLAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optMLLrCGrid:
 		m.startTextEdit(textFieldMLLrCGrid)
+	case optMLLrL1RatioGrid:
+		m.startTextEdit(textFieldMLLrL1RatioGrid)
 		m.useDefaultAdvanced = false
 	case optMLLrMaxIter:
 		m.startNumberEdit()

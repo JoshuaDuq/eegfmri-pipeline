@@ -115,6 +115,11 @@ func (m Model) getMLOptions() []optionType {
 		opts = append(opts,
 			optMLLrPenalty,
 			optMLLrCGrid,
+		)
+		if m.mlLrPenalty == 2 {
+			opts = append(opts, optMLLrL1RatioGrid)
+		}
+		opts = append(opts,
 			optMLLrMaxIter,
 			optMLLrClassWeight,
 		)

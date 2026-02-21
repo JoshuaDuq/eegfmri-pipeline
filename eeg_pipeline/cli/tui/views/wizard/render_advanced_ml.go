@@ -73,6 +73,8 @@ func (m Model) renderMLAdvancedConfig() string {
 			return textFieldMLSvmGammaGrid, true
 		case optMLLrCGrid:
 			return textFieldMLLrCGrid, true
+		case optMLLrL1RatioGrid:
+			return textFieldMLLrL1RatioGrid, true
 		case optMLRfMinSamplesSplitGrid:
 			return textFieldMLRfMinSamplesSplitGrid, true
 		case optMLRfMinSamplesLeafGrid:
@@ -281,6 +283,8 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "LR Penalty", penalties[m.mlLrPenalty%len(penalties)], "regularization type"
 		case optMLLrCGrid:
 			label, value, hint = "LR C Grid", renderTextOrDefault(m.mlLrCGrid, "(default)"), "inverse regularization"
+		case optMLLrL1RatioGrid:
+			label, value, hint = "LR L1 Ratio Grid", renderTextOrDefault(m.mlLrL1RatioGrid, "(default)"), "for elasticnet penalty"
 		case optMLLrMaxIter:
 			label, value, hint = "LR Max Iterations", fmt.Sprintf("%d", m.mlLrMaxIter), "solver convergence"
 		case optMLLrClassWeight:

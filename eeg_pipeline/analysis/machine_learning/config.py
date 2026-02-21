@@ -77,6 +77,7 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
         # Logistic Regression classification
         "lr_penalty": lr_config.get("penalty", "l2"),
         "lr_C_grid": lr_config.get("C_grid", [0.01, 0.1, 1.0, 10.0]),
+        "lr_l1_ratio_grid": lr_config.get("l1_ratio_grid", [0.1, 0.5, 0.9]),
         "lr_max_iter": lr_config.get("max_iter", 1000),
         "lr_class_weight": lr_config.get("class_weight", "balanced"),
         # CNN classification (EEGNet-style)

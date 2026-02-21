@@ -106,17 +106,11 @@ def create_rf_pipeline(
     steps.append(
         (
             "rf",
-            TransformedTargetRegressor(
-                regressor=RandomForestRegressor(
-                    n_estimators=n_estimators,
-                    n_jobs=n_jobs,
-                    random_state=seed,
-                    bootstrap=cfg["rf_bootstrap"],
-                ),
-                transformer=PowerTransformer(
-                    method=cfg["power_transformer_method"],
-                    standardize=cfg["power_transformer_standardize"],
-                ),
+            RandomForestRegressor(
+                n_estimators=n_estimators,
+                n_jobs=n_jobs,
+                random_state=seed,
+                bootstrap=cfg["rf_bootstrap"],
             ),
         )
     )

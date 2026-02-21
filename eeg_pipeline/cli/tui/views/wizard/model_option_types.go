@@ -1046,6 +1046,7 @@ const (
 	// ML Model Hyperparameters - Logistic Regression
 	optMLLrPenalty
 	optMLLrCGrid
+	optMLLrL1RatioGrid
 	optMLLrMaxIter
 	optMLLrClassWeight
 	// ML Model Hyperparameters - Random Forest extras

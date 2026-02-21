@@ -742,6 +742,7 @@ const (
 	textFieldMLSvmCGrid
 	textFieldMLSvmGammaGrid
 	textFieldMLLrCGrid
+	textFieldMLLrL1RatioGrid
 	textFieldMLRfMinSamplesSplitGrid
 	textFieldMLRfMinSamplesLeafGrid
 
@@ -2150,6 +2151,7 @@ type Model struct {
 	// ML Model Hyperparameters - Logistic Regression
 	mlLrPenalty     int    // 0: l2, 1: l1, 2: elasticnet
 	mlLrCGrid       string // C grid (comma-separated)
+	mlLrL1RatioGrid string // L1 ratio grid for elasticnet penalty
 	mlLrMaxIter     int    // Max iterations
 	mlLrClassWeight int    // 0: balanced, 1: none
 
@@ -3024,6 +3026,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// ML Logistic Regression defaults
 		mlLrPenalty:     0, // 0: l2
 		mlLrCGrid:       "0.01,0.1,1,10,100",
+		mlLrL1RatioGrid: "0.1,0.5,0.9",
 		mlLrMaxIter:     1000,
 		mlLrClassWeight: 0, // 0: balanced
 

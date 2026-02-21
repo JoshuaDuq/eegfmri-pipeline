@@ -284,6 +284,10 @@ func (m Model) buildMLAdvancedArgs() []string {
 			args = append(args, "--lr-c-grid")
 			args = append(args, splitLooseList(m.mlLrCGrid)...)
 		}
+		if m.mlLrPenalty == 2 && m.mlLrL1RatioGrid != "0.1,0.5,0.9" {
+			args = append(args, "--lr-l1-ratio-grid")
+			args = append(args, splitLooseList(m.mlLrL1RatioGrid)...)
+		}
 		if m.mlLrMaxIter != 1000 {
 			args = append(args, "--lr-max-iter", fmt.Sprintf("%d", m.mlLrMaxIter))
 		}
