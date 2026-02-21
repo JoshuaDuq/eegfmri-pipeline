@@ -55,13 +55,15 @@ def _extract_estimator_transform_and_feature_names(
     model: Any,
     X: np.ndarray,
     feature_names: Optional[List[str]] = None,
-) -> Tuple[Any, np.ndarray, Optional[List[str]]]:
+) -> Tuple[Any, np.ndarray, Optional[List[str]], Optional[Any]]:
     """Extract estimator from pipeline and transform X (and feature names) through preprocessing."""
     estimator = model
     names = feature_names
+    target_transformer = None
 
     # Unwrap TransformedTargetRegressor if it wraps the entire pipeline
     if hasattr(estimator, "regressor") and hasattr(estimator.regressor, "named_steps"):
+        target_transformer = getattr(estimator, "transformer_", None)
         estimator = estimator.regressor
 
     if hasattr(estimator, "named_steps"):
@@ -70,6 +72,8 @@ def _extract_estimator_transform_and_feature_names(
 
         # If the final estimator is a TransformedTargetRegressor that wraps the inner model
         if hasattr(final_estimator, "regressor"):
+            if target_transformer is None:
+                target_transformer = getattr(final_estimator, "transformer_", None)
             final_estimator = final_estimator.regressor
 
         steps = [(n, estimator.named_steps[n]) for n in step_names[:-1]]
@@ -93,7 +97,7 @@ def _extract_estimator_transform_and_feature_names(
         X = X_transformed
         estimator = final_estimator
 
-    return estimator, X, names
+    return estimator, X, names, target_transformer
 
 
 def _create_predict_fn(model: Any):
@@ -218,7 +222,7 @@ def compute_shap_values(
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])
 
-    estimator, X, feature_names = _extract_estimator_transform_and_feature_names(
+    estimator, X, feature_names, target_transformer = _extract_estimator_transform_and_feature_names(
         model, X, feature_names
     )
     
@@ -247,6 +251,19 @@ def compute_shap_values(
     
     expected_value = explainer.expected_value
     shap_values, expected_value = _handle_binary_classification_output(shap_values, expected_value)
+
+    # Convert expected_value back to original target space if a transformation was unwrapped
+    if target_transformer is not None and hasattr(target_transformer, "inverse_transform"):
+        try:
+            if np.isscalar(expected_value):
+                expected_value = float(target_transformer.inverse_transform([[expected_value]])[0, 0])
+            elif isinstance(expected_value, np.ndarray):
+                orig_shape = expected_value.shape
+                expected_value = target_transformer.inverse_transform(
+                    expected_value.reshape(-1, 1)
+                ).reshape(orig_shape)
+        except Exception:
+            pass
     
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])

@@ -1162,7 +1162,14 @@ def run_permutation_test(
             y_pred_arr = np.asarray(y_pred_p, dtype=float)
             if np.all(np.isfinite(y_true_arr)) and np.all(np.isfinite(y_pred_arr)):
                 try:
-                    r2 = float(r2_score(y_true_arr, y_pred_arr))
+                    r2_subj = []
+                    groups_arr_p = np.asarray(groups_p)
+                    for subj in np.unique(groups_arr_p):
+                        mask = groups_arr_p == subj
+                        if np.sum(mask) >= 2:
+                            r2_subj.append(float(r2_score(y_true_arr[mask], y_pred_arr[mask])))
+                    if r2_subj:
+                        r2 = float(np.mean(r2_subj))
                 except Exception:
                     r2 = np.nan
 

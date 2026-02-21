@@ -117,8 +117,15 @@ def create_rf_pipeline(
             ),
         )
     )
+    pipeline = Pipeline(steps)
 
-    return Pipeline(steps)
+    return TransformedTargetRegressor(
+        regressor=pipeline,
+        transformer=PowerTransformer(
+            method=cfg["power_transformer_method"],
+            standardize=cfg["power_transformer_standardize"],
+        ),
+    )
 
 
 def build_elasticnet_param_grid(config: Any = None, n_covariates: int = 0) -> Dict[str, Any]:

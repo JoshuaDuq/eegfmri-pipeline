@@ -370,10 +370,16 @@ def _build_regression_model_spec(
 ) -> Tuple[str, Pipeline, Dict[str, Any]]:
     name = str(model_name or "elasticnet").strip().lower()
     if name == "ridge":
-        return "ridge", create_ridge_pipeline(seed=seed, config=config, n_covariates=n_covariates), build_ridge_param_grid(config, n_covariates=n_covariates)
+        p = create_ridge_pipeline(seed=seed, config=config, n_covariates=n_covariates)
+        g = build_ridge_param_grid(config, n_covariates=n_covariates)
+        return "ridge", p, _resolve_param_grid_aliases(p, g)
     if name == "rf":
-        return "rf", create_rf_pipeline(seed=seed, config=config, n_covariates=n_covariates), build_rf_param_grid(config, n_covariates=n_covariates)
-    return "elasticnet", create_elasticnet_pipeline(seed=seed, config=config, n_covariates=n_covariates), build_elasticnet_param_grid(config, n_covariates=n_covariates)
+        p = create_rf_pipeline(seed=seed, config=config, n_covariates=n_covariates)
+        g = build_rf_param_grid(config, n_covariates=n_covariates)
+        return "rf", p, _resolve_param_grid_aliases(p, g)
+    p = create_elasticnet_pipeline(seed=seed, config=config, n_covariates=n_covariates)
+    g = build_elasticnet_param_grid(config, n_covariates=n_covariates)
+    return "elasticnet", p, _resolve_param_grid_aliases(p, g)
 
 
 def _resolve_param_grid_aliases(
@@ -389,8 +395,9 @@ def _resolve_param_grid_aliases(
     resolved: Dict[str, Any] = {}
     for key, values in grid.items():
         resolved_key = key
-        if key not in available and key.startswith("rf__") and not key.startswith("rf__regressor__"):
-            candidate = key.replace("rf__", "rf__regressor__", 1)
+        # If key is missing, but happens to be wrapped inside TransformedTargetRegressor.regressor (or similar)
+        if key not in available:
+            candidate = f"regressor__{key}"
             if candidate in available:
                 resolved_key = candidate
         resolved[resolved_key] = values
@@ -711,6 +718,8 @@ def run_regression_ml(
         param_grid = build_elasticnet_param_grid(config, n_covariates=len(covariates) if covariates else 0)
         model_name = "elasticnet"
     
+    param_grid = _resolve_param_grid_aliases(pipe, param_grid)
+    
     best_params_path = prepare_best_params_path(results_dir / f"best_params_{model_name}.jsonl", mode="truncate")
     null_path = results_dir / f"loso_null_{model_name}.npz" if n_perm > 0 else None
 
@@ -783,6 +792,11 @@ def run_regression_ml(
             finite = null_rs[np.isfinite(null_rs)]
             if finite.size > 0:
                 p_val = float(((np.abs(finite) >= abs(r_subj)).sum() + 1) / (finite.size + 1))
+        
+        null_r2s = data.get("null_r2")
+        # Define default r2_subj for fallback below, but try to pre-compute if needed, 
+        # or we can wait and use r2_val if we calculate it first.
+        # It's better to postpone p_val_r2 calculation until after r2_val is computed!
 
     try:
         from sklearn.metrics import r2_score
@@ -795,6 +809,18 @@ def run_regression_ml(
         r2_val = float(np.mean(r2_subj)) if r2_subj else np.nan
     except Exception:
         r2_val = np.nan
+        
+    p_val_r2 = np.nan
+    if null_path and null_path.exists():
+        try:
+            data = np.load(null_path)
+            null_r2s = data.get("null_r2")
+            if null_r2s is not None and null_r2s.size > 0 and np.isfinite(r2_val):
+                finite = null_r2s[np.isfinite(null_r2s)]
+                if finite.size > 0:
+                    p_val_r2 = float(((finite >= r2_val).sum() + 1) / (finite.size + 1))
+        except Exception:
+            pass
 
     # Compute and export baseline predictions for sanity check
     baseline_metrics = export_baseline_predictions(y_true, groups_ordered, results_dir, task="regression")
@@ -840,6 +866,8 @@ def run_regression_ml(
             "ci_low": ci_low,
             "ci_high": ci_high,
             "p_value": p_val,
+            "r2": r2_val,
+            "p_value_r2": p_val_r2,
             "n_subjects": len(_per_subj_r),
         },
         "subject_level_errors": {
