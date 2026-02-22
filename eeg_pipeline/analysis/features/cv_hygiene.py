@@ -118,7 +118,11 @@ def _compute_aperiodic_residual(
     if np.sum(fit_mask) < MIN_FREQ_POINTS_FOR_FIT:
         return None
 
-    slope, intercept = np.polyfit(log_freqs[fit_mask], log_power[fit_mask], 1)
+    from eeg_pipeline.analysis.features.spectral import _robust_aperiodic_fit
+    slope, intercept = _robust_aperiodic_fit(log_freqs, log_power, fit_mask)
+    if slope is None or intercept is None:
+        slope, intercept = np.polyfit(log_freqs[fit_mask], log_power[fit_mask], 1)
+
     residual = log_power - (intercept + slope * log_freqs)
     return residual
 

@@ -406,9 +406,9 @@ def _compute_epoch_metrics(
             occurrence_hz[k] = float(len(class_runs) / max(epoch_sec, 1e-12))
 
     counts = np.zeros((n_states, n_states), dtype=float)
-    for idx in range(len(states) - 1):
-        src = int(states[idx])
-        dst = int(states[idx + 1])
+    for idx in range(len(runs) - 1):
+        src = int(runs[idx][0])
+        dst = int(runs[idx + 1][0])
         counts[src, dst] += 1.0
 
     transitions = np.full_like(counts, np.nan, dtype=float)
