@@ -971,6 +971,7 @@ def load_epochs_with_targets(
             logger.warning(f"No trials for {sub}; skipping.")
             continue
 
+        epochs.metadata = aligned
         out.append((sub, epochs, y))
         eeg_channels = [
             ch

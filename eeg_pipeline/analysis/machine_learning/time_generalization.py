@@ -47,9 +47,13 @@ def _extract_trial_blocks_from_records(
 
     for subject_id, epochs in subj_to_epochs.items():
         metadata = getattr(epochs, "metadata", None)
+        if not isinstance(metadata, pd.DataFrame):
+            metadata = getattr(epochs, "_behavioral", None)
+            
         if not isinstance(metadata, pd.DataFrame) or metadata.empty:
             block_series_by_subject[str(subject_id)] = None
             continue
+            
         col = next((c for c in candidate_cols if c in metadata.columns), None)
         if col is None:
             block_series_by_subject[str(subject_id)] = None
