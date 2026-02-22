@@ -864,7 +864,12 @@ class FeatureBehaviorCorrelator:
         effective_config = config
         if config.control_temperature and _is_temperature_target_name(target_name):
             # Scientific validity: never "control for temperature" when temperature is the target.
-            effective_config = replace(config, control_temperature=False, temperature_series=None)
+            effective_config = replace(
+                config,
+                control_temperature=False,
+                temperature_series=None,
+                covariates_df=config.covariates_without_temp_df,
+            )
 
         min_samples_align = get_min_samples(self.config, "default")
         df_aligned, targets_aligned = align_features_and_targets(
@@ -1061,7 +1066,12 @@ class FeatureBehaviorCorrelator:
         
         effective_config = corr_config
         if corr_config.control_temperature and _is_temperature_target_name(target_name):
-            effective_config = replace(corr_config, control_temperature=False, temperature_series=None)
+            effective_config = replace(
+                corr_config,
+                control_temperature=False,
+                temperature_series=None,
+                covariates_df=corr_config.covariates_without_temp_df,
+            )
 
         method_label = format_correlation_method_label(effective_config.method, effective_config.robust_method)
         records: List[Dict[str, Any]] = []

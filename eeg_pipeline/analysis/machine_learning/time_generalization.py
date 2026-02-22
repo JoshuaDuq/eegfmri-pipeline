@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 
+import warnings
 import numpy as np
 import pandas as pd
 from scipy import ndimage
@@ -9,7 +10,8 @@ from sklearn.model_selection import LeaveOneGroupOut, GroupKFold, GridSearchCV
 from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, PowerTransformer
+from sklearn.compose import TransformedTargetRegressor
 from sklearn.impute import SimpleImputer
 from statsmodels.stats.multitest import multipletests
 
@@ -448,8 +450,14 @@ def time_generalization_regression(
                             n_splits_inner = min(5, n_unique_groups)
                             inner_cv = GroupKFold(n_splits=n_splits_inner)
                             grid = GridSearchCV(
-                                estimator=Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge())]),
-                                param_grid={"ridge__alpha": alpha_grid},
+                                estimator=TransformedTargetRegressor(
+                                    regressor=Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge())]),
+                                    transformer=PowerTransformer(
+                                        method=str(config.get("machine_learning.preprocessing.power_transformer_method", "yeo-johnson")),
+                                        standardize=bool(config.get("machine_learning.preprocessing.power_transformer_standardize", True))
+                                    )
+                                ),
+                                param_grid={"regressor__ridge__alpha": alpha_grid},
                                 scoring="r2",
                                 cv=inner_cv,
                                 n_jobs=1,
@@ -463,7 +471,13 @@ def time_generalization_regression(
 
                 if model is None:
                     default_alpha = config.get("machine_learning.analysis.time_generalization.default_alpha", 1.0)
-                    model = Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge(alpha=default_alpha))])
+                    model = TransformedTargetRegressor(
+                        regressor=Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge(alpha=default_alpha))]),
+                        transformer=PowerTransformer(
+                            method=str(config.get("machine_learning.preprocessing.power_transformer_method", "yeo-johnson")),
+                            standardize=bool(config.get("machine_learning.preprocessing.power_transformer_standardize", True))
+                        )
+                    )
                     try:
                         model.fit(train_feat_i_clean, y_train_i)
                     except Exception:
@@ -479,7 +493,10 @@ def time_generalization_regression(
                     test_feat_j_clean = test_feat_j_clean[:, col_mask]
                     
                     try:
-                        y_pred = model.predict(test_feat_j_clean)
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore", category=UserWarning)
+                            y_pred = model.predict(test_feat_j_clean)
+                        
                         finite_mask_pred = np.isfinite(y_pred) & np.isfinite(y_test[finite_mask_test])
                         if np.sum(finite_mask_pred) < min_samples_per_window:
                             continue

@@ -518,8 +518,12 @@ def export_subject_selection_report(
 
     included_df = pd.DataFrame({"subject_id": included_ids})
     excluded_df = pd.DataFrame(excluded_rows, columns=["subject_id", "reason"])
-    included_df.to_csv(results_dir / "included_subjects.tsv", sep="\t", index=False)
-    excluded_df.to_csv(results_dir / "excluded_subjects.tsv", sep="\t", index=False)
+
+    reports_dir = results_dir / "reports"
+    ensure_dir(reports_dir)
+
+    included_df.to_csv(reports_dir / "included_subjects.tsv", sep="\t", index=False)
+    excluded_df.to_csv(reports_dir / "excluded_subjects.tsv", sep="\t", index=False)
 
     n_requested = len(requested_ids)
     n_excluded = len(excluded_ids)
@@ -695,8 +699,15 @@ def run_regression_ml(
 
     results_dir = results_root / "regression"
     plots_dir = results_dir / "plots"
-    ensure_dir(results_dir)
-    ensure_dir(plots_dir)
+    data_dir = results_dir / "data"
+    metrics_dir = results_dir / "metrics"
+    models_dir = results_dir / "models"
+    null_dir = results_dir / "null"
+    reports_dir = results_dir / "reports"
+    importance_dir = results_dir / "importance"
+    
+    for d in [results_dir, plots_dir, data_dir, metrics_dir, models_dir, null_dir, reports_dir, importance_dir]:
+        ensure_dir(d)
     subject_selection = export_subject_selection_report(
         results_dir,
         subjects,
@@ -720,8 +731,8 @@ def run_regression_ml(
     
     param_grid = _resolve_param_grid_aliases(pipe, param_grid)
     
-    best_params_path = prepare_best_params_path(results_dir / f"best_params_{model_name}.jsonl", mode="truncate")
-    null_path = results_dir / f"loso_null_{model_name}.npz" if n_perm > 0 else None
+    best_params_path = prepare_best_params_path(models_dir / f"best_params_{model_name}.jsonl", mode="truncate")
+    null_path = null_dir / f"loso_null_{model_name}.npz" if n_perm > 0 else None
 
     if n_perm > 0 and n_perm < 1000:
         logger.warning(
@@ -757,7 +768,7 @@ def run_regression_ml(
         n_covariates=len(covariates) if covariates else 0,
     )
 
-    pred_path = results_dir / "loso_predictions.tsv"
+    pred_path = data_dir / "loso_predictions.tsv"
     pred_df = export_predictions(
         y_true,
         y_pred,
@@ -773,7 +784,7 @@ def run_regression_ml(
         test_indices,
         fold_ids,
         meta.reset_index(drop=True),
-        results_dir / "loso_indices.tsv",
+        data_dir / "loso_indices.tsv",
         add_heldout_subject_id=True,
     )
 
@@ -781,7 +792,7 @@ def run_regression_ml(
     r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config, ci_method=ci_method)
     if _per_subj_r:
         pd.DataFrame(_per_subj_r, columns=["subject_id", "pearson_r"]).to_csv(
-            results_dir / "per_subject_correlations.tsv", sep="\t", index=False
+            metrics_dir / "per_subject_correlations.tsv", sep="\t", index=False
         )
     p_val = np.nan
 
@@ -839,7 +850,7 @@ def run_regression_ml(
     subj_errors = compute_subject_level_errors(pred_df, config, ci_method=ci_method)
     if subj_errors.get("per_subject"):
         pd.DataFrame(subj_errors["per_subject"]).to_csv(
-            results_dir / "per_subject_errors.tsv", sep="\t", index=False
+            metrics_dir / "per_subject_errors.tsv", sep="\t", index=False
         )
 
     # Structure metrics with subject-level as PRIMARY (statistical unit for LOSO)
@@ -890,7 +901,7 @@ def run_regression_ml(
     # Write reproducibility info
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
 
-    metrics_path = results_dir / "pooled_metrics.json"
+    metrics_path = metrics_dir / "pooled_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
 
@@ -1006,8 +1017,15 @@ def run_within_subject_regression_ml(
 
     results_dir = results_root / "within_subject_regression"
     plots_dir = results_dir / "plots"
-    ensure_dir(results_dir)
-    ensure_dir(plots_dir)
+    data_dir = results_dir / "data"
+    metrics_dir = results_dir / "metrics"
+    models_dir = results_dir / "models"
+    null_dir = results_dir / "null"
+    reports_dir = results_dir / "reports"
+    importance_dir = results_dir / "importance"
+    
+    for d in [results_dir, plots_dir, data_dir, metrics_dir, models_dir, null_dir, reports_dir, importance_dir]:
+        ensure_dir(d)
     
     model_name = model if model else "elasticnet"
     harmonization_mode = (
@@ -1118,7 +1136,7 @@ def run_within_subject_regression_ml(
         config,
     )
 
-    pred_path = results_dir / "cv_predictions.tsv"
+    pred_path = data_dir / "cv_predictions.tsv"
     pred_df = export_predictions(
         y_true_all,
         y_pred_all,
@@ -1134,14 +1152,14 @@ def run_within_subject_regression_ml(
         test_indices,
         fold_ids,
         meta.reset_index(drop=True),
-        results_dir / "cv_indices.tsv",
+        data_dir / "cv_indices.tsv",
     )
 
     ci_method = str(get_config_value(config, "machine_learning.evaluation.ci_method", "bootstrap"))
     r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config, ci_method=ci_method)
     if _per_subj_r:
         pd.DataFrame(_per_subj_r, columns=["subject_id", "pearson_r"]).to_csv(
-            results_dir / "per_subject_correlations.tsv", sep="\t", index=False
+            metrics_dir / "per_subject_correlations.tsv", sep="\t", index=False
         )
     try:
         from sklearn.metrics import r2_score
@@ -1286,7 +1304,7 @@ def run_within_subject_regression_ml(
         if n_perm_completed > 0 and np.isfinite(r_subj):
             null_rs_arr = np.asarray(null_rs, dtype=float)
             p_value = float(((np.abs(null_rs_arr) >= np.abs(r_subj)).sum() + 1) / (len(null_rs_arr) + 1))
-            np.savez(results_dir / "within_subject_null.npz", null_r=null_rs_arr, empirical_r=r_subj)
+            np.savez(null_dir / "within_subject_null.npz", null_r=null_rs_arr, empirical_r=r_subj)
             logger.info(f"Within-subject permutation p-value: {p_value:.4f} (n_perm={len(null_rs_arr)})")
 
     # Compute pooled r for secondary reporting
@@ -1303,7 +1321,7 @@ def run_within_subject_regression_ml(
     subj_errors = compute_subject_level_errors(pred_df, config, ci_method=ci_method)
     if subj_errors.get("per_subject"):
         pd.DataFrame(subj_errors["per_subject"]).to_csv(
-            results_dir / "per_subject_errors.tsv", sep="\t", index=False
+            metrics_dir / "per_subject_errors.tsv", sep="\t", index=False
         )
     
     # Structure metrics with subject-level as PRIMARY
@@ -1358,7 +1376,7 @@ def run_within_subject_regression_ml(
             "y_pred_baseline": y_pred_baseline_all,
         }
     )
-    baseline_df.to_csv(results_dir / "baseline_predictions.tsv", sep="\t", index=False)
+    baseline_df.to_csv(data_dir / "baseline_predictions.tsv", sep="\t", index=False)
     try:
         from sklearn.metrics import mean_absolute_error, r2_score
 
@@ -1374,7 +1392,7 @@ def run_within_subject_regression_ml(
             "baseline_method": "within_subject_fold_mean",
         }
     metrics.update(baseline_metrics)
-    metrics_path = results_dir / "pooled_metrics.json"
+    metrics_path = metrics_dir / "pooled_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
 
@@ -1558,8 +1576,15 @@ def run_classification_ml(
 
     results_dir = results_root / "classification"
     plots_dir = results_dir / "plots"
-    ensure_dir(results_dir)
-    ensure_dir(plots_dir)
+    data_dir = results_dir / "data"
+    metrics_dir = results_dir / "metrics"
+    models_dir = results_dir / "models"
+    null_dir = results_dir / "null"
+    reports_dir = results_dir / "reports"
+    importance_dir = results_dir / "importance"
+    
+    for d in [results_dir, plots_dir, data_dir, metrics_dir, models_dir, null_dir, reports_dir, importance_dir]:
+        ensure_dir(d)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
 
     if model_type == "cnn":
@@ -1628,7 +1653,7 @@ def run_classification_ml(
         fold_ids_arr = fold_ids_arr.copy()
         fold_ids_arr[fold_ids_arr <= 0] = 1
 
-    pred_path = results_dir / "loso_predictions.tsv"
+    pred_path = data_dir / "loso_predictions.tsv"
     pred_df = export_predictions(
         np.asarray(result.y_true),
         np.asarray(result.y_pred),
@@ -1650,13 +1675,13 @@ def run_classification_ml(
         test_indices_arr.tolist(),
         fold_ids_arr.tolist(),
         meta.reset_index(drop=True),
-        results_dir / "loso_indices.tsv",
+        data_dir / "loso_indices.tsv",
         add_heldout_subject_id=True,
     )
 
     # Export best params
     if not best_params_df.empty:
-        best_params_df.to_csv(results_dir / f"best_params_{model_type}.tsv", sep="\t", index=False)
+        best_params_df.to_csv(models_dir / f"best_params_{model_type}.tsv", sep="\t", index=False)
 
     # Export per-subject metrics (LOSO)
     if getattr(result, "per_subject_metrics", None):
@@ -1666,7 +1691,7 @@ def run_classification_ml(
             row.update(rec)
             rows.append(row)
         if rows:
-            pd.DataFrame(rows).to_csv(results_dir / "per_subject_metrics.tsv", sep="\t", index=False)
+            pd.DataFrame(rows).to_csv(metrics_dir / "per_subject_metrics.tsv", sep="\t", index=False)
     auc_subject_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
     balanced_accuracy_subject_mean = _subject_mean_metric(result.per_subject_metrics, "balanced_accuracy")
     accuracy_subject_mean = _subject_mean_metric(result.per_subject_metrics, "accuracy")
@@ -1771,7 +1796,7 @@ def run_classification_ml(
     
     if n_perm > 0:
         logger.info(f"Running {n_perm} permutations for classification inference...")
-        null_path = results_dir / f"classification_null_{model_type}.npz"
+        null_path = null_dir / f"classification_null_{model_type}.npz"
         null_aucs = _run_classification_permutations(
             X=X,
             y=y_binary,
@@ -1923,7 +1948,7 @@ def run_classification_ml(
     
     # Save calibration data separately
     if calibration_data:
-        with open(results_dir / "calibration_data.json", "w") as f:
+        with open(metrics_dir / "calibration_data.json", "w") as f:
             json.dump(calibration_data, f, indent=2)
 
     # Add permutation p-value if available
@@ -1950,7 +1975,7 @@ def run_classification_ml(
             p_val = float(((null_aucs >= auc_for_inference).sum() + 1) / (len(null_aucs) + 1))
             metrics["p_value"] = p_val
             np.savez(
-                results_dir / f"loso_null_{model_type}.npz",
+                null_dir / f"loso_null_{model_type}.npz",
                 null_auc_subject_mean=null_aucs,
                 empirical_auc_subject_mean=auc_for_inference,
             )
@@ -1958,7 +1983,7 @@ def run_classification_ml(
     # Write reproducibility info
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
 
-    metrics_path = results_dir / "pooled_metrics.json"
+    metrics_path = metrics_dir / "pooled_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
 
@@ -2277,8 +2302,15 @@ def run_within_subject_classification_ml(
 
     results_dir = results_root / "within_subject_classification"
     plots_dir = results_dir / "plots"
-    ensure_dir(results_dir)
-    ensure_dir(plots_dir)
+    data_dir = results_dir / "data"
+    metrics_dir = results_dir / "metrics"
+    models_dir = results_dir / "models"
+    null_dir = results_dir / "null"
+    reports_dir = results_dir / "reports"
+    importance_dir = results_dir / "importance"
+    
+    for d in [results_dir, plots_dir, data_dir, metrics_dir, models_dir, null_dir, reports_dir, importance_dir]:
+        ensure_dir(d)
     subject_selection = export_subject_selection_report(
         results_dir,
         subjects,
@@ -2287,7 +2319,7 @@ def run_within_subject_classification_ml(
         config,
     )
 
-    pred_path = results_dir / "cv_predictions.tsv"
+    pred_path = data_dir / "cv_predictions.tsv"
     pred_df = export_predictions(
         y_true_all,
         y_pred_all,
@@ -2309,7 +2341,7 @@ def run_within_subject_classification_ml(
         test_indices,
         fold_ids,
         meta.reset_index(drop=True),
-        results_dir / "cv_indices.tsv",
+        data_dir / "cv_indices.tsv",
     )
 
     result = ClassificationResult(
@@ -2340,7 +2372,7 @@ def run_within_subject_classification_ml(
             row.update(rec)
             rows.append(row)
         if rows:
-            pd.DataFrame(rows).to_csv(results_dir / "per_subject_metrics.tsv", sep="\t", index=False)
+            pd.DataFrame(rows).to_csv(metrics_dir / "per_subject_metrics.tsv", sep="\t", index=False)
 
     auc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "auc")
     bal_acc_subj_mean = _subject_mean_metric(result.per_subject_metrics, "balanced_accuracy")
@@ -2587,13 +2619,13 @@ def run_within_subject_classification_ml(
             p_val = float(((null_auc_arr >= float(auc_for_inference)).sum() + 1) / (len(null_auc_arr) + 1))
             metrics["p_value_auc"] = p_val
             np.savez(
-                results_dir / f"cv_null_{model_type}.npz",
+                null_dir / f"cv_null_{model_type}.npz",
                 null_auc_subject_mean=null_auc_arr,
                 empirical_auc_subject_mean=auc_for_inference,
             )
 
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
-    with open(results_dir / "pooled_metrics.json", "w") as f:
+    with open(metrics_dir / "pooled_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2, default=str)
 
     p_info = ""
@@ -2783,7 +2815,10 @@ def write_reproducibility_info(
         },
     }
     
-    repro_path = results_dir / "reproducibility_info.json"
+    reports_dir = results_dir / "reports"
+    ensure_dir(reports_dir)
+    
+    repro_path = reports_dir / "reproducibility_info.json"
     with open(repro_path, "w") as f:
         json.dump(repro_info, f, indent=2, default=str)
     
@@ -2845,7 +2880,11 @@ def export_baseline_predictions(
         "y_true": y_true,
         "y_pred_baseline": y_pred_baseline,
     })
-    baseline_df.to_csv(results_dir / "baseline_predictions.tsv", sep="\t", index=False)
+    
+    data_dir = results_dir / "data"
+    ensure_dir(data_dir)
+    
+    baseline_df.to_csv(data_dir / "baseline_predictions.tsv", sep="\t", index=False)
     
     return baseline_metrics
 
@@ -3024,7 +3063,7 @@ def run_model_comparison_ml(
     
     # Save comparison results
     comparison_df = pd.DataFrame(comparison_records)
-    comparison_df.to_csv(results_dir / "model_comparison.tsv", sep="\t", index=False)
+    comparison_df.to_csv(metrics_dir / "model_comparison.tsv", sep="\t", index=False)
     
     # Summary statistics (fold-level; outer unit = subject)
     summary: Dict[str, Any] = {
@@ -3161,7 +3200,7 @@ def run_model_comparison_ml(
                     pairwise[pair_name][adj_key] = float(p_adj)
     summary["pairwise_inference"] = pairwise
     
-    with open(results_dir / "model_comparison_summary.json", "w") as f:
+    with open(metrics_dir / "model_comparison_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
@@ -3391,7 +3430,7 @@ def run_incremental_validity_ml(
         })
     
     records_df = pd.DataFrame(records)
-    records_df.to_csv(results_dir / "incremental_validity.tsv", sep="\t", index=False)
+    records_df.to_csv(metrics_dir / "incremental_validity.tsv", sep="\t", index=False)
     
     # Overall summary
     r2_baseline_overall = r2_score(y, y_pred_baseline)
@@ -3449,7 +3488,7 @@ def run_incremental_validity_ml(
         )
     summary["delta_r2_inference"] = delta_inference
     
-    with open(results_dir / "incremental_validity_summary.json", "w") as f:
+    with open(metrics_dir / "incremental_validity_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
@@ -3575,7 +3614,10 @@ def _run_permutation_importance_stage(
     importance_df = importance_df.loc[np.isfinite(importance_df["importance_mean"].to_numpy(dtype=float))]
     importance_df = importance_df.sort_values("importance_mean", ascending=False)
     
-    output_path = results_dir / "permutation_importance.tsv"
+    importance_dir = results_dir / "importance"
+    ensure_dir(importance_dir)
+    
+    output_path = importance_dir / "permutation_importance.tsv"
     importance_df.to_csv(output_path, sep="\t", index=False)
     logger.info(f"Saved permutation importance to {output_path}")
 
@@ -3589,14 +3631,14 @@ def _run_permutation_importance_stage(
                 merged, value_col="importance_mean", group_cols=["group", "band"]
             )
             if not by_group_band.empty:
-                by_group_band.to_csv(results_dir / "permutation_importance_by_group_band.tsv", sep="\t", index=False)
+                by_group_band.to_csv(importance_dir / "permutation_importance_by_group_band.tsv", sep="\t", index=False)
 
             by_group_band_roi = aggregate_importance(
                 merged, value_col="importance_mean", group_cols=["group", "band", "roi"]
             )
             if not by_group_band_roi.empty:
                 by_group_band_roi.to_csv(
-                    results_dir / "permutation_importance_by_group_band_roi.tsv", sep="\t", index=False
+                    importance_dir / "permutation_importance_by_group_band_roi.tsv", sep="\t", index=False
                 )
     except Exception as exc:
         logger.debug("Grouped permutation-importance export failed: %s", exc)
@@ -3686,7 +3728,10 @@ def _run_shap_importance_stage(
                 f"(rate={completion_rate:.3f} < required {min_completion:.3f})."
             )
         
-        output_path = results_dir / "shap_importance.tsv"
+        importance_dir = results_dir / "importance"
+        ensure_dir(importance_dir)
+        
+        output_path = importance_dir / "shap_importance.tsv"
         importance_df.to_csv(output_path, sep="\t", index=False)
         logger.info(f"Saved SHAP importance to {output_path}")
 
@@ -3701,13 +3746,13 @@ def _run_shap_importance_stage(
                     merged, value_col="shap_importance", group_cols=["group", "band"]
                 )
                 if not by_group_band.empty:
-                    by_group_band.to_csv(results_dir / "shap_importance_by_group_band.tsv", sep="\t", index=False)
+                    by_group_band.to_csv(importance_dir / "shap_importance_by_group_band.tsv", sep="\t", index=False)
 
                 by_group_band_roi = aggregate_importance(
                     merged, value_col="shap_importance", group_cols=["group", "band", "roi"]
                 )
                 if not by_group_band_roi.empty:
-                    by_group_band_roi.to_csv(results_dir / "shap_importance_by_group_band_roi.tsv", sep="\t", index=False)
+                    by_group_band_roi.to_csv(importance_dir / "shap_importance_by_group_band_roi.tsv", sep="\t", index=False)
         except Exception as exc:
             logger.debug("Grouped SHAP-importance export failed: %s", exc)
 
@@ -3860,9 +3905,14 @@ def _run_uncertainty_stage(
         .reset_index(drop=True)
     )
 
-    output_path = results_dir / "prediction_intervals.tsv"
+    data_dir = results_dir / "data"
+    metrics_dir = results_dir / "metrics"
+    ensure_dir(data_dir)
+    ensure_dir(metrics_dir)
+
+    output_path = data_dir / "prediction_intervals.tsv"
     intervals_df.to_csv(output_path, sep="\t", index=False)
-    per_subject_df.to_csv(results_dir / "per_subject_uncertainty.tsv", sep="\t", index=False)
+    per_subject_df.to_csv(metrics_dir / "per_subject_uncertainty.tsv", sep="\t", index=False)
 
     metrics = {
         "alpha": alpha,
@@ -3881,7 +3931,7 @@ def _run_uncertainty_stage(
             "n_subjects": int(len(per_subject_df)),
         },
     }
-    with open(results_dir / "uncertainty_metrics.json", "w") as f:
+    with open(metrics_dir / "uncertainty_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
     
     logger.info(f"Uncertainty: coverage={coverage:.1%}, mean_width={mean_width:.3f}")
