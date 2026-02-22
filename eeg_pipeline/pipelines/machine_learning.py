@@ -54,6 +54,7 @@ from eeg_pipeline.analysis.machine_learning.orchestration import (
     run_incremental_validity_ml,
 )
 from eeg_pipeline.pipelines.base import PipelineBase
+from eeg_pipeline.pipelines.progress import ensure_progress_reporter
 
 
 MLMode = Literal[
@@ -149,11 +150,9 @@ class MLPipeline(PipelineBase):
 
     def _extract_ml_parameters(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """Extract and validate ML parameters from kwargs."""
-        from eeg_pipeline.cli.common import ProgressReporter
-        
         return {
             "cv_scope": kwargs.get("cv_scope", "group"),
-            "progress": kwargs.get("progress") or ProgressReporter(enabled=False),
+            "progress": ensure_progress_reporter(kwargs.get("progress")),
             "n_perm": kwargs.get("n_perm", DEFAULT_N_PERM),
             "inner_splits": kwargs.get("inner_splits", DEFAULT_INNER_SPLITS),
             "outer_jobs": kwargs.get("outer_jobs", DEFAULT_OUTER_JOBS),

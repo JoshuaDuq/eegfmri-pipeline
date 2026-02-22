@@ -11,6 +11,11 @@ FORBIDDEN_TRACKED_PREFIXES = (
     "eeg_pipeline/cli/tui/.gomodcache/",
 )
 
+REMOVED_LEGACY_ENTRYPOINTS = (
+    "scripts/eeg_raw_to_bids.py",
+    "scripts/merge_psychopy.py",
+)
+
 
 def _tracked_files() -> list[str]:
     proc = subprocess.run(
@@ -43,4 +48,18 @@ def test_no_tracked_root_organize_ml_script() -> None:
     assert not tracked_and_present, (
         "Root-level organize_ml.py should not be tracked. "
         "Use scripts/devtools/organize_ml.py instead."
+    )
+
+
+def test_removed_legacy_scripts_do_not_reappear() -> None:
+    tracked = _tracked_files()
+    reintroduced = [
+        path
+        for path in REMOVED_LEGACY_ENTRYPOINTS
+        if path in tracked and (REPO_ROOT / path).exists()
+    ]
+    assert not reintroduced, (
+        "Deprecated standalone utility scripts must not be reintroduced. "
+        "Use `eeg-pipeline utilities ...` subcommands instead.\n"
+        f"Found: {reintroduced}"
     )

@@ -228,15 +228,12 @@ class TestUtilitiesAndMergeDeep(unittest.TestCase):
 
 class TestUtilitiesAndMergeCompletion(unittest.TestCase):
         def test_utility_and_merge_wrapper_functions(self):
+            from eeg_pipeline.analysis.utilities.eeg_raw_to_bids import run_raw_to_bids as analysis_raw_to_bids
+            from eeg_pipeline.analysis.utilities.merge_psychopy import run_merge_psychopy as analysis_merge_psychopy
             from eeg_pipeline.pipelines.utilities import run_raw_to_bids, run_merge_psychopy, UtilityPipeline
 
-            with patch("eeg_pipeline.pipelines.utilities._run_raw_to_bids", return_value=2) as m1, patch(
-                "eeg_pipeline.pipelines.utilities._run_merge_psychopy", return_value=3
-            ) as m2:
-                self.assertEqual(run_raw_to_bids(Path("/a"), Path("/b"), "t"), 2)
-                self.assertEqual(run_merge_psychopy(Path("/b"), Path("/a"), "t"), 3)
-            m1.assert_called_once()
-            m2.assert_called_once()
+            self.assertIs(run_raw_to_bids, analysis_raw_to_bids)
+            self.assertIs(run_merge_psychopy, analysis_merge_psychopy)
 
             cfg = DotConfig({"bids_root": "/tmp/bids", "paths": {"source_data": "/tmp/source"}})
             with patch("eeg_pipeline.pipelines.utilities.PipelineBase.__init__", lambda self, name, config=None: setattr(self, "config", config or cfg)):

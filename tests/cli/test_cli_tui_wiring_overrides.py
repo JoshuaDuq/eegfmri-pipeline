@@ -3,22 +3,24 @@ from __future__ import annotations
 import argparse
 import unittest
 
-from eeg_pipeline.cli.commands.behavior import _configure_behavior_compute_mode, setup_behavior
-from eeg_pipeline.cli.commands.features import (
+from eeg_pipeline.cli.commands.behavior_config import _configure_behavior_compute_mode
+from eeg_pipeline.cli.commands.behavior_parser import setup_behavior
+from eeg_pipeline.cli.commands.features_helpers import (
     _apply_erds_overrides,
     _apply_itpc_overrides,
     _apply_microstates_overrides,
     _apply_pac_overrides,
     _apply_spatial_transform_overrides,
 )
-from eeg_pipeline.cli.commands.machine_learning import _update_model_config, setup_ml
-from eeg_pipeline.cli.commands.preprocessing import (
+from eeg_pipeline.cli.commands.machine_learning_overrides import _update_model_config
+from eeg_pipeline.cli.commands.machine_learning_parser import setup_ml
+from eeg_pipeline.cli.commands.preprocessing_overrides import (
     _update_alignment_event_config,
     _update_epochs_config,
     _update_pyprep_config,
     _update_preprocessing_config,
-    setup_preprocessing,
 )
+from eeg_pipeline.cli.commands.preprocessing_parser import setup_preprocessing
 from eeg_pipeline.utils.config.loader import ConfigDict
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import unittest
 
-from eeg_pipeline.cli.commands.features import _apply_connectivity_overrides
+from eeg_pipeline.cli.commands.features_helpers import _apply_connectivity_overrides
 
 
 class TestCliConnectivityDynamicOverrides(unittest.TestCase):

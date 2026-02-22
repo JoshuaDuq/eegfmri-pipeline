@@ -26,6 +26,7 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.pipelines.base import PipelineBase
+from eeg_pipeline.pipelines.progress import ensure_progress_reporter
 from eeg_pipeline.utils.analysis.stats.correlation import (
     format_correlation_method_label,
     normalize_robust_correlation_method,
@@ -505,7 +506,6 @@ class BehaviorPipeline(PipelineBase):
         """
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
         from eeg_pipeline.infra.logging import get_subject_logger
-        from eeg_pipeline.cli.common import ProgressReporter
         from eeg_pipeline.analysis.behavior.orchestration import _cache
         import time
         
@@ -513,7 +513,7 @@ class BehaviorPipeline(PipelineBase):
         _cache.clear()
         
         task = task or self.config.get("project.task", "thermalactive")
-        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        progress = ensure_progress_reporter(kwargs.get("progress"))
         validate_only = bool(kwargs.get("validate_only", False))
         
         stats_dir = deriv_stats_path(self.deriv_root, subject)

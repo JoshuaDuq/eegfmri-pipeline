@@ -10,7 +10,10 @@ def _get_signature_dir_config_value(config: Any) -> Any:
     if config is None:
         return None
     if hasattr(config, "get"):
-        value = config.get("paths.signature_dir")
+        try:
+            value = config.get("paths.signature_dir")
+        except Exception:
+            value = None
         if value is not None:
             return value
     if isinstance(config, dict):

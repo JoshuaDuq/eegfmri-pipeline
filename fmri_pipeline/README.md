@@ -4,6 +4,8 @@ Subject-level fMRI analysis pipeline for thermal pain experiments. Converts raw 
 
 Designed for integration with EEG source localization: the resulting fMRI statistical maps constrain EEG inverse solutions.
 
+For repository-wide documentation entry points, see `docs/index.md`.
+
 ---
 
 ## Table of Contents

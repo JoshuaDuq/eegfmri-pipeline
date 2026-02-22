@@ -423,12 +423,16 @@ class ClassificationResult:
         """Compute scalar metrics for any subset of samples."""
         rec: Dict[str, float] = {
             "accuracy": float(accuracy_score(y_true, y_pred)),
-            "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
             "f1": float(f1_score(y_true, y_pred, zero_division=0)),
             "precision": float(precision_score(y_true, y_pred, zero_division=0)),
             "recall": float(recall_score(y_true, y_pred, zero_division=0)),
             "n_trials": int(len(y_true)),
         }
+        # Subject-level balanced accuracy is undefined for single-class subsets.
+        if len(np.unique(y_true)) < 2:
+            rec["balanced_accuracy"] = np.nan
+        else:
+            rec["balanced_accuracy"] = float(balanced_accuracy_score(y_true, y_pred))
         cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
         tn, fp, fn, tp = cm.ravel()
         rec["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else np.nan

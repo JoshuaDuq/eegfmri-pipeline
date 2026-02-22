@@ -147,6 +147,7 @@ def stage_lag_features_impl(
     get_stats_subfolder_fn: Callable[[Any, str], Path],
     write_parquet_with_optional_csv_fn: Callable[[pd.DataFrame, Path, bool], None],
     write_metadata_file_fn: Callable[[Path, Dict[str, Any]], None],
+    set_trial_table_cache_fn: Optional[Callable[[pd.DataFrame], None]] = None,
 ) -> Optional[Path]:
     """Add lagged and delta variables to the trial table."""
     _ = config
@@ -172,6 +173,8 @@ def stage_lag_features_impl(
     meta_path = out_dir / f"lag_features{suffix}.metadata.json"
     write_metadata_file_fn(meta_path, lag_meta)
     ctx.data_qc["lag_features"] = lag_meta
+    if set_trial_table_cache_fn is not None:
+        set_trial_table_cache_fn(df_augmented)
     ctx.logger.info("Lag features saved: %s/%s", out_dir.name, out_path.name)
 
     return out_path
@@ -187,6 +190,7 @@ def stage_pain_residual_impl(
     get_stats_subfolder_fn: Callable[[Any, str], Path],
     write_parquet_with_optional_csv_fn: Callable[[pd.DataFrame, Path, bool], None],
     write_metadata_file_fn: Callable[[Path, Dict[str, Any]], None],
+    set_trial_table_cache_fn: Optional[Callable[[pd.DataFrame], None]] = None,
 ) -> Optional[Path]:
     """Compute pain residual = rating - f(temperature)."""
     _ = config
@@ -217,6 +221,8 @@ def stage_pain_residual_impl(
     meta_path = out_dir / f"pain_residual{suffix}.metadata.json"
     write_metadata_file_fn(meta_path, resid_meta)
     ctx.data_qc["pain_residual"] = resid_meta
+    if set_trial_table_cache_fn is not None:
+        set_trial_table_cache_fn(df_augmented)
     ctx.logger.info("Pain residual saved: %s/%s", out_dir.name, out_path.name)
 
     return out_path

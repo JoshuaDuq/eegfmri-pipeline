@@ -19,6 +19,11 @@ from fmri_pipeline.utils.signature_paths import discover_signature_root
 from fmri_pipeline.utils.text import safe_slug
 
 
+def _safe_slug(text: str, default: str = "contrast") -> str:
+    """Backward-compatible alias for tests/imports."""
+    return safe_slug(text, default=default)
+
+
 def _contrast_hash(cfg: Any) -> str:
     """Stable hash of key contrast settings for cache-friendly filenames."""
     try:

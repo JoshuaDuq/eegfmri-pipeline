@@ -1,10 +1,8 @@
 import argparse
 import unittest
 
-from eeg_pipeline.cli.commands.behavior import (
-    _configure_behavior_compute_mode,
-    setup_behavior,
-)
+from eeg_pipeline.cli.commands.behavior_config import _configure_behavior_compute_mode
+from eeg_pipeline.cli.commands.behavior_parser import setup_behavior
 from eeg_pipeline.utils.config.loader import ConfigDict
 
 

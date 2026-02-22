@@ -314,7 +314,7 @@ eeg-pipeline utilities clean --target plots --older-than 30 --force
 | `--dicom-mode` | `symlink`, `copy`, or `skip` (fMRI) |
 | `--dcm2niix-path` | Path to dcm2niix binary (fMRI) |
 
-See [README/FMRI_RAW_TO_BIDS.md](README/FMRI_RAW_TO_BIDS.md) for the full fMRI conversion guide.
+See [docs/fmri/raw-to-bids.md](docs/fmri/raw-to-bids.md) for the full fMRI conversion guide.
 
 ---
 
@@ -469,7 +469,7 @@ eeg-pipeline features visualize --subject 0001
 
 All of these options can be manually changed in the TUI if desired.
 
-For fMRI-constrained source localization, see [README/SOURCE_LOCALIZATION_TUTORIAL.md](README/SOURCE_LOCALIZATION_TUTORIAL.md).
+For fMRI-constrained source localization, see [docs/eeg/source-localization.md](docs/eeg/source-localization.md).
 
 ---
 
@@ -909,13 +909,13 @@ eeg-pipeline plotting visualize --subject 0001 --formats png svg pdf
 
 The pipeline supports both template-based (fsaverage) and subject-specific fMRI-constrained source localization with LCMV beamformer or eLORETA. The TUI includes a dedicated wizard that can auto-generate BEM models and coregistration transforms via Docker.
 
-See the full tutorial: [README/SOURCE_LOCALIZATION_TUTORIAL.md](README/SOURCE_LOCALIZATION_TUTORIAL.md)
+See the full tutorial: [docs/eeg/source-localization.md](docs/eeg/source-localization.md)
 
 ### fMRI Raw-to-BIDS Conversion
 
 Detailed guide for converting DICOMs to BIDS with event generation from PsychoPy logs. Requires `dcm2niix` on PATH.
 
-See: [README/FMRI_RAW_TO_BIDS.md](README/FMRI_RAW_TO_BIDS.md)
+See: [docs/fmri/raw-to-bids.md](docs/fmri/raw-to-bids.md)
 
 ### Docker-based FreeSurfer + MNE
 

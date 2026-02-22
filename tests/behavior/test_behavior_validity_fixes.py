@@ -42,6 +42,64 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIn(StageRegistry.RESOURCE_EFFECT_SIZES, primary_spec.requires)
         self.assertNotIn(StageRegistry.RESOURCE_PVALUES, primary_spec.requires)
 
+    def test_lag_and_residual_stages_update_trial_table_cache(self):
+        import pandas as pd
+
+        from eeg_pipeline.analysis.behavior import orchestration as orch
+
+        ctx = self._ctx(
+            DotConfig(
+                {
+                    "behavior_analysis": {
+                        "run_adjustment": {"column": "run_id"},
+                        "pain_residual": {"enabled": True, "crossfit": {"enabled": False}},
+                    }
+                }
+            )
+        )
+
+        base_df = pd.DataFrame(
+            {
+                "epoch": [0, 1, 2, 3],
+                "run_id": [1, 1, 2, 2],
+                "temperature": [46.0, 46.0, 48.0, 48.0],
+                "rating": [10.0, 20.0, 30.0, 40.0],
+                "power_alpha": [0.1, 0.2, 0.3, 0.4],
+            }
+        )
+
+        orch._cache.clear()
+        orch._cache._trial_table_df = base_df
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+            return_value=None,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
+            return_value=None,
+        ):
+            orch.stage_lag_features(ctx, SimpleNamespace())
+            df_after_lags = orch._load_trial_table_df(ctx)
+            self.assertIn("trial_index_within_group", df_after_lags.columns)
+
+            orch.stage_pain_residual(ctx, SimpleNamespace())
+            df_after_resid = orch._load_trial_table_df(ctx)
+            self.assertIn("pain_residual", df_after_resid.columns)
+
+    def test_correlate_design_does_not_auto_resolve_optional_enrichments(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_selected_stages
+
+        ctx = self._ctx(DotConfig({}))
+        plan = run_selected_stages(
+            ctx=ctx,
+            config=SimpleNamespace(),
+            selected_stages=["correlate_design"],
+            dry_run=True,
+        )
+        # Lag and residual enrichment stages are optional and only included
+        # when explicitly requested by config/selection.
+        self.assertNotIn("lag_features", plan["resolved"])
+        self.assertNotIn("pain_residual", plan["resolved"])
     def test_correlate_pvalues_not_reintroduced_when_disabled(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_selected_stages
 
@@ -826,6 +884,89 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             )
         self.assertIsNotNone(design)
         self.assertEqual(design.targets, ["vas_custom"])
+
+    def test_correlate_design_prefers_crossfit_pain_residual_when_available(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "correlations": {
+                        "targets": ["rating", "temperature", "pain_residual"],
+                        "prefer_pain_residual": True,
+                        "use_crossfit_pain_residual": True,
+                        "permutation": {"enabled": True},
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 50, 8),
+                "temperature": np.linspace(43, 46, 8),
+                "pain_residual": np.linspace(-1, 1, 8),
+                "pain_residual_cv": np.linspace(-1.2, 0.8, 8),
+                "run_id": np.repeat([1, 2], 4),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            design = stage_correlate_design(
+                ctx,
+                SimpleNamespace(control_temperature=True, control_trial_order=True),
+            )
+        self.assertIsNotNone(design)
+        self.assertEqual(design.targets, ["pain_residual_cv", "rating", "temperature"])
+
+    def test_correlate_design_prefers_pain_residual_first_when_enabled(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "correlations": {
+                        "targets": ["rating", "temperature", "pain_residual"],
+                        "prefer_pain_residual": True,
+                        "use_crossfit_pain_residual": False,
+                        "permutation": {"enabled": True},
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 50, 8),
+                "temperature": np.linspace(43, 46, 8),
+                "pain_residual": np.linspace(-1, 1, 8),
+                "run_id": np.repeat([1, 2], 4),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            design = stage_correlate_design(
+                ctx,
+                SimpleNamespace(control_temperature=True, control_trial_order=True),
+            )
+        self.assertIsNotNone(design)
+        self.assertEqual(design.targets, ["pain_residual", "rating", "temperature"])
 
     def test_trial_table_stage_reuses_cached_output_when_input_hash_matches(self):
         from eeg_pipeline.analysis.behavior.orchestration import _cache, stage_trial_table

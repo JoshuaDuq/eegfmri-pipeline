@@ -75,13 +75,41 @@ def stage_correlate_design_impl(
             logger=ctx.logger,
             default_targets=[],
         )
-        use_cv_resid = get_config_bool(ctx.config, "behavior_analysis.correlations.use_crossfit_pain_residual", True)
-        if use_cv_resid and "pain_residual_cv" in df_trials.columns:
-            has_explicit_targets = bool(
-                get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
-            )
-            if not has_explicit_targets:
-                targets = ["pain_residual_cv", *[t for t in targets if t != "pain_residual_cv"]]
+        use_cv_resid = get_config_bool(
+            ctx.config,
+            "behavior_analysis.correlations.use_crossfit_pain_residual",
+            True,
+        )
+        has_explicit_targets = bool(
+            get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
+        )
+        if (not has_explicit_targets) and use_cv_resid and "pain_residual_cv" in df_trials.columns:
+            targets = ["pain_residual_cv", *[t for t in targets if t != "pain_residual_cv"]]
+        prefer_pain_residual = get_config_bool(
+            ctx.config,
+            "behavior_analysis.correlations.prefer_pain_residual",
+            False,
+        )
+        if prefer_pain_residual:
+            preferred_target: Optional[str] = None
+            if use_cv_resid and "pain_residual_cv" in df_trials.columns:
+                preferred_target = "pain_residual_cv"
+            elif "pain_residual" in df_trials.columns:
+                preferred_target = "pain_residual"
+            if preferred_target is not None:
+                updated_targets: List[str] = []
+                for target_name in targets:
+                    if target_name == "pain_residual" and preferred_target == "pain_residual_cv":
+                        if preferred_target not in updated_targets:
+                            updated_targets.append(preferred_target)
+                    elif target_name != preferred_target:
+                        updated_targets.append(target_name)
+                if (
+                    preferred_target in updated_targets
+                    or "pain_residual" in targets
+                    or "pain_residual_cv" in targets
+                ):
+                    targets = [preferred_target, *[t for t in updated_targets if t != preferred_target]]
     targets = [t for t in targets if t in df_trials.columns]
 
     if not targets:

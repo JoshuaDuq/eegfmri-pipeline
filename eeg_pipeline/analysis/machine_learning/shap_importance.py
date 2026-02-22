@@ -222,9 +222,13 @@ def compute_shap_values(
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])
 
-    estimator, X, feature_names, target_transformer = _extract_estimator_transform_and_feature_names(
-        model, X, feature_names
-    )
+    extracted = _extract_estimator_transform_and_feature_names(model, X, feature_names)
+    if len(extracted) == 4:
+        estimator, X, feature_names, target_transformer = extracted
+    else:
+        # Backward compatibility with older helper signatures returning 3 values.
+        estimator, X, feature_names = extracted  # type: ignore[misc]
+        target_transformer = None
     
     rng = np.random.default_rng(seed)
     
@@ -263,7 +267,8 @@ def compute_shap_values(
                     expected_value.reshape(-1, 1)
                 ).reshape(orig_shape)
         except Exception:
-            pass
+            # Keep the transformed expected_value when inverse transform is unavailable.
+            expected_value = expected_value
     
     if feature_names is None:
         feature_names = _generate_feature_names(X.shape[1])

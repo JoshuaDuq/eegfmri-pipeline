@@ -89,6 +89,14 @@ def _safe_read_tsv(path: Path) -> Optional[pd.DataFrame]:
         return None
 
 
+def _safe_read_tsv_first(paths: Sequence[Path]) -> Optional[pd.DataFrame]:
+    for path in paths:
+        df = _safe_read_tsv(path)
+        if df is not None:
+            return df
+    return None
+
+
 def _save(fig: Any, base_path: Path, *, opts: MLPlottingOptions) -> List[Path]:
     base_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
@@ -112,9 +120,14 @@ def _finite_xy(df: pd.DataFrame, x_col: str, y_col: str) -> pd.DataFrame:
 def _plot_regression(results_dir: Path, opts: MLPlottingOptions) -> List[Path]:
     plt = _import_pyplot()
     _apply_publication_style(plt, dpi=opts.dpi)
-    pred = _safe_read_tsv(results_dir / "data" / "loso_predictions.tsv")
-    if pred is None:
-        pred = _safe_read_tsv(results_dir / "data" / "cv_predictions.tsv")
+    pred = _safe_read_tsv_first(
+        (
+            results_dir / "data" / "loso_predictions.tsv",
+            results_dir / "loso_predictions.tsv",
+            results_dir / "data" / "cv_predictions.tsv",
+            results_dir / "cv_predictions.tsv",
+        )
+    )
     if pred is None:
         return []
 
@@ -182,9 +195,14 @@ def _plot_classification(results_dir: Path, opts: MLPlottingOptions) -> List[Pat
 
     plt = _import_pyplot()
     _apply_publication_style(plt, dpi=opts.dpi)
-    pred = _safe_read_tsv(results_dir / "data" / "loso_predictions.tsv")
-    if pred is None:
-        pred = _safe_read_tsv(results_dir / "data" / "cv_predictions.tsv")
+    pred = _safe_read_tsv_first(
+        (
+            results_dir / "data" / "loso_predictions.tsv",
+            results_dir / "loso_predictions.tsv",
+            results_dir / "data" / "cv_predictions.tsv",
+            results_dir / "cv_predictions.tsv",
+        )
+    )
     if pred is None:
         return []
     if "y_true" not in pred.columns or "y_pred" not in pred.columns:
@@ -313,7 +331,12 @@ def _plot_time_generalization(results_dir: Path, opts: MLPlottingOptions) -> Lis
 def _plot_model_comparison(results_dir: Path, opts: MLPlottingOptions) -> List[Path]:
     plt = _import_pyplot()
     _apply_publication_style(plt, dpi=opts.dpi)
-    df = _safe_read_tsv(results_dir / "metrics" / "model_comparison.tsv")
+    df = _safe_read_tsv_first(
+        (
+            results_dir / "metrics" / "model_comparison.tsv",
+            results_dir / "model_comparison.tsv",
+        )
+    )
     if df is None or df.empty:
         return []
     if "model" not in df.columns:
@@ -362,7 +385,12 @@ def _plot_model_comparison(results_dir: Path, opts: MLPlottingOptions) -> List[P
 def _plot_incremental_validity(results_dir: Path, opts: MLPlottingOptions) -> List[Path]:
     plt = _import_pyplot()
     _apply_publication_style(plt, dpi=opts.dpi)
-    df = _safe_read_tsv(results_dir / "metrics" / "incremental_validity.tsv")
+    df = _safe_read_tsv_first(
+        (
+            results_dir / "metrics" / "incremental_validity.tsv",
+            results_dir / "incremental_validity.tsv",
+        )
+    )
     if df is None or df.empty:
         return []
     if not {"r2_baseline", "r2_full", "delta_r2"}.issubset(set(df.columns)):
@@ -404,7 +432,12 @@ def _plot_incremental_validity(results_dir: Path, opts: MLPlottingOptions) -> Li
 def _plot_uncertainty(results_dir: Path, opts: MLPlottingOptions) -> List[Path]:
     plt = _import_pyplot()
     _apply_publication_style(plt, dpi=opts.dpi)
-    df = _safe_read_tsv(results_dir / "data" / "prediction_intervals.tsv")
+    df = _safe_read_tsv_first(
+        (
+            results_dir / "data" / "prediction_intervals.tsv",
+            results_dir / "prediction_intervals.tsv",
+        )
+    )
     if df is None or df.empty:
         return []
     needed = {"y_pred", "lower", "upper", "y_true"}
@@ -443,12 +476,22 @@ def _plot_feature_importance(results_dir: Path, opts: MLPlottingOptions, *, mode
     plt = _import_pyplot()
     _apply_publication_style(plt, dpi=opts.dpi)
     if mode == "shap":
-        df = _safe_read_tsv(results_dir / "importance" / "shap_importance.tsv")
+        df = _safe_read_tsv_first(
+            (
+                results_dir / "importance" / "shap_importance.tsv",
+                results_dir / "shap_importance.tsv",
+            )
+        )
         value_col = "shap_importance"
         err_col = "shap_std_across_folds" if df is not None and "shap_std_across_folds" in df.columns else "shap_std"
         out_name = "shap_importance_top_features"
     else:
-        df = _safe_read_tsv(results_dir / "importance" / "permutation_importance.tsv")
+        df = _safe_read_tsv_first(
+            (
+                results_dir / "importance" / "permutation_importance.tsv",
+                results_dir / "permutation_importance.tsv",
+            )
+        )
         value_col = "importance_mean"
         err_col = "importance_std"
         out_name = "permutation_importance_top_features"

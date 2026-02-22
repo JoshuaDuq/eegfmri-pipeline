@@ -15,72 +15,13 @@ Low-level helpers (file discovery, annotation filtering) are in utils/data/prepr
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.analysis.utilities.eeg_raw_to_bids import (
-    run_raw_to_bids as _run_raw_to_bids,
-)
-from eeg_pipeline.analysis.utilities.merge_psychopy import (
-    run_merge_psychopy as _run_merge_psychopy,
-)
-
-
-logger = logging.getLogger(__name__)
-
-
-def run_raw_to_bids(
-    source_root: Path,
-    bids_root: Path,
-    task: str,
-    subjects: Optional[List[str]] = None,
-    montage: str = "easycap-M1",
-    line_freq: float = 60.0,
-    overwrite: bool = False,
-    do_trim_to_first_volume: bool = False,
-    event_prefixes: Optional[List[str]] = None,
-    keep_all_annotations: bool = False,
-) -> int:
-    """Convert raw BrainVision files to BIDS format."""
-    return _run_raw_to_bids(
-        source_root=source_root,
-        bids_root=bids_root,
-        task=task,
-        subjects=subjects,
-        montage=montage,
-        line_freq=line_freq,
-        overwrite=overwrite,
-        do_trim_to_first_volume=do_trim_to_first_volume,
-        event_prefixes=event_prefixes,
-        keep_all_annotations=keep_all_annotations,
-        _logger=logger,
-    )
-
-
-def run_merge_psychopy(
-    bids_root: Path,
-    source_root: Path,
-    task: str,
-    subjects: Optional[List[str]] = None,
-    event_prefixes: Optional[List[str]] = None,
-    event_types: Optional[List[str]] = None,
-    dry_run: bool = False,
-    allow_misaligned_trim: bool = False,
-) -> int:
-    """Merge PsychoPy behavioral data into BIDS events files."""
-    return _run_merge_psychopy(
-        bids_root=bids_root,
-        source_root=source_root,
-        task=task,
-        subjects=subjects,
-        event_prefixes=event_prefixes,
-        event_types=event_types,
-        dry_run=dry_run,
-        allow_misaligned_trim=allow_misaligned_trim,
-        _logger=logger,
-    )
+from eeg_pipeline.analysis.utilities.eeg_raw_to_bids import run_raw_to_bids
+from eeg_pipeline.analysis.utilities.merge_psychopy import run_merge_psychopy
+from eeg_pipeline.pipelines.progress import ensure_progress_reporter
 
 
 class UtilityPipeline(PipelineBase):
@@ -141,13 +82,11 @@ class UtilityPipeline(PipelineBase):
         self, subject: str, task: Optional[str] = None, **kwargs: Any
     ) -> None:
         """Process a single subject through raw-to-BIDS and merge-psychopy."""
-        from eeg_pipeline.cli.common import ProgressReporter
-
         resolved_task = self._resolve_task(task)
         raw_to_bids_kwargs = self._extract_raw_to_bids_kwargs(kwargs)
         merge_kwargs = self._extract_merge_psychopy_kwargs(kwargs)
 
-        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        progress = ensure_progress_reporter(kwargs.get("progress"))
         subject_id = f"sub-{subject}"
 
         import time as _time
@@ -162,6 +101,7 @@ class UtilityPipeline(PipelineBase):
             bids_root=self.bids_root,
             task=resolved_task,
             subjects=[subject],
+            _logger=self.logger,
             **raw_to_bids_kwargs,
         )
         self.logger.info("Raw-to-BIDS complete (%.1fs)", _time.perf_counter() - t0)
@@ -172,6 +112,7 @@ class UtilityPipeline(PipelineBase):
             bids_root=self.bids_root,
             source_root=self.source_root,
             task=resolved_task,
+            _logger=self.logger,
             **merge_kwargs,
         )
         self.logger.info("Merge-psychopy complete (%.1fs)", _time.perf_counter() - t1)
@@ -186,13 +127,11 @@ class UtilityPipeline(PipelineBase):
         self, subjects: List[str], task: Optional[str] = None, **kwargs: Any
     ) -> List[Dict[str, Any]]:
         """Run utilities for multiple subjects."""
-        from eeg_pipeline.cli.common import ProgressReporter
-
         resolved_task = self._resolve_task(task)
         raw_to_bids_kwargs = self._extract_raw_to_bids_kwargs(kwargs)
         merge_kwargs = self._extract_merge_psychopy_kwargs(kwargs)
 
-        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        progress = ensure_progress_reporter(kwargs.get("progress"))
         run_context = self._create_run_metadata_context(
             subjects=subjects,
             task=resolved_task,
@@ -220,6 +159,7 @@ class UtilityPipeline(PipelineBase):
                 bids_root=self.bids_root,
                 task=resolved_task,
                 subjects=subjects,
+                _logger=self.logger,
                 **raw_to_bids_kwargs,
             )
             self.logger.info(
@@ -234,6 +174,7 @@ class UtilityPipeline(PipelineBase):
                 source_root=self.source_root,
                 task=resolved_task,
                 subjects=subjects,
+                _logger=self.logger,
                 **merge_kwargs,
             )
             self.logger.info(
@@ -294,6 +235,7 @@ class UtilityPipeline(PipelineBase):
             bids_root=self.bids_root,
             task=resolved_task,
             subjects=subjects,
+            _logger=self.logger,
             **kwargs,
         )
 
@@ -317,6 +259,7 @@ class UtilityPipeline(PipelineBase):
             source_root=self.source_root,
             task=resolved_task,
             subjects=subjects,
+            _logger=self.logger,
             **kwargs,
         )
 

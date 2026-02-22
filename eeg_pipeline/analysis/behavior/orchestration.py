@@ -674,7 +674,7 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
 
 
 def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
-    return _stage_lag_features_impl(
+    out_path = _stage_lag_features_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
@@ -683,11 +683,17 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
         write_metadata_file_fn=_write_metadata_file,
+        set_trial_table_cache_fn=lambda df: setattr(_cache, "_trial_table_df", df),
     )
+    if out_path is not None and out_path.exists():
+        from eeg_pipeline.infra.tsv import read_table
+
+        _cache._trial_table_df = read_table(out_path)
+    return out_path
 
 
 def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
-    return _stage_pain_residual_impl(
+    out_path = _stage_pain_residual_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
@@ -696,7 +702,13 @@ def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
         write_metadata_file_fn=_write_metadata_file,
+        set_trial_table_cache_fn=lambda df: setattr(_cache, "_trial_table_df", df),
     )
+    if out_path is not None and out_path.exists():
+        from eeg_pipeline.infra.tsv import read_table
+
+        _cache._trial_table_df = read_table(out_path)
+    return out_path
 
 
 def compute_temp_model_comparison(

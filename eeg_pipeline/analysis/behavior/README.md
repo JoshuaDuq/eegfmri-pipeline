@@ -176,7 +176,7 @@ Adds permutation-based p-values to each effect size record.
 3. Two-tailed p-value: `p = (n_extreme + 1) / (n_perm + 1)`.
 4. Permutation p-values are computed for all correlation types (raw, partial_cov, partial_temp, partial_cov_temp).
 
-**Permutation schemes:** `shuffle` (default, within-group), `block` (preserve block structure).
+**Permutation schemes:** `shuffle` (within-group exchangeability), `circular_shift` (within-group circular shift; preserves within-run autocorrelation).
 
 #### 5d. Correlate Primary Selection
 
@@ -207,13 +207,13 @@ Applies Benjamini-Hochberg FDR correction to the primary p-values. Saves the fin
 
 **Module:** `orchestration.py` → `stage_pain_sensitivity`
 
-Correlates EEG features with a **pain sensitivity index (PSI)**: the slope of the temperature→rating relationship per subject.
+Correlates EEG features with a temperature-adjusted pain index derived from the temperature→rating relationship.
 
 **Method:**
 
-1. Compute PSI: Spearman/Pearson correlation between temperature and rating (per subject or across all trials).
-2. Correlate each EEG feature with PSI.
-3. Optional permutation testing with block-restricted permutations.
+1. Fit a simple temperature→rating model and compute residuals (rating minus predicted-from-temperature).
+2. Correlate each EEG feature with this residual index.
+3. Optional permutation testing with within-group permutations (e.g., run/block-restricted).
 4. FDR correction within the pain_sensitivity analysis family.
 
 **Unit of analysis:** Configurable as `trial` (with permutation requirement) or `run_mean` (aggregated per run).
@@ -549,7 +549,7 @@ All behavior analysis settings live under `behavior_analysis` in `eeg_config.yam
 | `moderation.max_features` | Max features for moderation | `50` |
 | `robust_correlation` | Robust method (`percentage_bend`, `winsorized`, `shepherd`) | `none` |
 | `run_adjustment.enabled` | Include run dummies as covariates | `false` |
-| `permutation.scheme` | `shuffle` or `block` | `shuffle` |
+| `permutation.scheme` | `shuffle` or `circular_shift` | `circular_shift` |
 
 ## Dependencies
 

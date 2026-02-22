@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import json
+import shutil
 from typing import Any, Dict, Optional, List, Tuple
 
 import numpy as np
@@ -62,6 +63,25 @@ from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.analysis.machine_learning.time_generalization import time_generalization_regression
 
 logger = get_logger(__name__)
+
+
+def _write_json_with_legacy(payload: Dict[str, Any], primary_path: Path, legacy_path: Path) -> None:
+    with open(primary_path, "w") as f:
+        json.dump(payload, f, indent=2, default=str)
+    if legacy_path != primary_path:
+        with open(legacy_path, "w") as f:
+            json.dump(payload, f, indent=2, default=str)
+
+
+def _write_tsv_with_legacy(df: pd.DataFrame, primary_path: Path, legacy_path: Path) -> None:
+    write_tsv(df, primary_path)
+    if legacy_path != primary_path:
+        write_tsv(df, legacy_path)
+
+
+def _copy_if_exists(src: Path, dst: Path) -> None:
+    if src.exists() and src != dst:
+        shutil.copy2(src, dst)
 
 
 ###################################################################
@@ -779,6 +799,7 @@ def run_regression_ml(
         meta.reset_index(drop=True),
         pred_path,
     )
+    _write_tsv_with_legacy(pred_df, pred_path, results_dir / "loso_predictions.tsv")
     export_indices(
         groups_ordered,
         test_indices,
@@ -787,6 +808,7 @@ def run_regression_ml(
         data_dir / "loso_indices.tsv",
         add_heldout_subject_id=True,
     )
+    _copy_if_exists(data_dir / "loso_indices.tsv", results_dir / "loso_indices.tsv")
 
     ci_method = str(get_config_value(config, "machine_learning.evaluation.ci_method", "bootstrap"))
     r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config, ci_method=ci_method)
@@ -830,8 +852,8 @@ def run_regression_ml(
                 finite = null_r2s[np.isfinite(null_r2s)]
                 if finite.size > 0:
                     p_val_r2 = float(((finite >= r2_val).sum() + 1) / (finite.size + 1))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Unable to compute R2 permutation p-value from %s: %s", null_path, exc)
 
     # Compute and export baseline predictions for sanity check
     baseline_metrics = export_baseline_predictions(y_true, groups_ordered, results_dir, task="regression")
@@ -902,8 +924,7 @@ def run_regression_ml(
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
 
     metrics_path = metrics_dir / "pooled_metrics.json"
-    with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2, default=str)
+    _write_json_with_legacy(metrics, metrics_path, results_dir / "pooled_metrics.json")
 
     p_str = f", p={p_val:.4f}" if np.isfinite(p_val) else ""
     logger.info(
@@ -1147,6 +1168,7 @@ def run_within_subject_regression_ml(
         meta.reset_index(drop=True),
         pred_path,
     )
+    _write_tsv_with_legacy(pred_df, pred_path, results_dir / "cv_predictions.tsv")
     export_indices(
         groups_ordered,
         test_indices,
@@ -1154,6 +1176,7 @@ def run_within_subject_regression_ml(
         meta.reset_index(drop=True),
         data_dir / "cv_indices.tsv",
     )
+    _copy_if_exists(data_dir / "cv_indices.tsv", results_dir / "cv_indices.tsv")
 
     ci_method = str(get_config_value(config, "machine_learning.evaluation.ci_method", "bootstrap"))
     r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config, ci_method=ci_method)
@@ -1377,6 +1400,8 @@ def run_within_subject_regression_ml(
         }
     )
     baseline_df.to_csv(data_dir / "baseline_predictions.tsv", sep="\t", index=False)
+    baseline_df.to_csv(results_dir / "baseline_predictions.tsv", sep="\t", index=False)
+    baseline_df.to_csv(results_dir / "baseline_predictions.tsv", sep="\t", index=False)
     try:
         from sklearn.metrics import mean_absolute_error, r2_score
 
@@ -1393,8 +1418,7 @@ def run_within_subject_regression_ml(
         }
     metrics.update(baseline_metrics)
     metrics_path = metrics_dir / "pooled_metrics.json"
-    with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2, default=str)
+    _write_json_with_legacy(metrics, metrics_path, results_dir / "pooled_metrics.json")
 
     p_str = f", p={p_value:.4f}" if np.isfinite(p_value) else ""
     logger.info(
@@ -1668,7 +1692,7 @@ def run_classification_ml(
         pred_df["y_prob"] = np.asarray(result.y_prob, dtype=float)
     else:
         pred_df["y_prob"] = np.full(len(pred_df), np.nan, dtype=float)
-    write_tsv(pred_df, pred_path)
+    _write_tsv_with_legacy(pred_df, pred_path, results_dir / "loso_predictions.tsv")
     write_parquet(pred_df, pred_path.with_suffix(".parquet"))
     export_indices(
         groups_for_predictions.tolist(),
@@ -1678,6 +1702,7 @@ def run_classification_ml(
         data_dir / "loso_indices.tsv",
         add_heldout_subject_id=True,
     )
+    _copy_if_exists(data_dir / "loso_indices.tsv", results_dir / "loso_indices.tsv")
 
     # Export best params
     if not best_params_df.empty:
@@ -1948,8 +1973,11 @@ def run_classification_ml(
     
     # Save calibration data separately
     if calibration_data:
-        with open(metrics_dir / "calibration_data.json", "w") as f:
-            json.dump(calibration_data, f, indent=2)
+        _write_json_with_legacy(
+            calibration_data,
+            metrics_dir / "calibration_data.json",
+            results_dir / "calibration_data.json",
+        )
 
     # Add permutation p-value if available
     if n_perm > 0:
@@ -1984,8 +2012,7 @@ def run_classification_ml(
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
 
     metrics_path = metrics_dir / "pooled_metrics.json"
-    with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2, default=str)
+    _write_json_with_legacy(metrics, metrics_path, results_dir / "pooled_metrics.json")
 
     p_info = ""
     if "p_value" in metrics:
@@ -2334,7 +2361,7 @@ def run_within_subject_classification_ml(
         pred_df["y_prob"] = np.asarray(y_prob_all, dtype=float)
     else:
         pred_df["y_prob"] = np.full(len(pred_df), np.nan, dtype=float)
-    write_tsv(pred_df, pred_path)
+    _write_tsv_with_legacy(pred_df, pred_path, results_dir / "cv_predictions.tsv")
     write_parquet(pred_df, pred_path.with_suffix(".parquet"))
     export_indices(
         groups_ordered,
@@ -2343,6 +2370,7 @@ def run_within_subject_classification_ml(
         meta.reset_index(drop=True),
         data_dir / "cv_indices.tsv",
     )
+    _copy_if_exists(data_dir / "cv_indices.tsv", results_dir / "cv_indices.tsv")
 
     result = ClassificationResult(
         y_true=y_true_all,
@@ -2625,8 +2653,11 @@ def run_within_subject_classification_ml(
             )
 
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
-    with open(metrics_dir / "pooled_metrics.json", "w") as f:
-        json.dump(metrics, f, indent=2, default=str)
+    _write_json_with_legacy(
+        metrics,
+        metrics_dir / "pooled_metrics.json",
+        results_dir / "pooled_metrics.json",
+    )
 
     p_info = ""
     if "p_value_auc" in metrics:
@@ -2961,7 +2992,9 @@ def run_model_comparison_ml(
     )
 
     results_dir = results_root / "model_comparison"
+    metrics_dir = results_dir / "metrics"
     ensure_dir(results_dir)
+    ensure_dir(metrics_dir)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
     
     # Define model pipelines (shared preprocessing + config)
@@ -3064,6 +3097,7 @@ def run_model_comparison_ml(
     # Save comparison results
     comparison_df = pd.DataFrame(comparison_records)
     comparison_df.to_csv(metrics_dir / "model_comparison.tsv", sep="\t", index=False)
+    comparison_df.to_csv(results_dir / "model_comparison.tsv", sep="\t", index=False)
     
     # Summary statistics (fold-level; outer unit = subject)
     summary: Dict[str, Any] = {
@@ -3200,8 +3234,11 @@ def run_model_comparison_ml(
                     pairwise[pair_name][adj_key] = float(p_adj)
     summary["pairwise_inference"] = pairwise
     
-    with open(metrics_dir / "model_comparison_summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    _write_json_with_legacy(
+        summary,
+        metrics_dir / "model_comparison_summary.json",
+        results_dir / "model_comparison_summary.json",
+    )
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
     best_model = max(models.keys(), key=lambda m: summary[m]["mean_r2"])
@@ -3288,7 +3325,9 @@ def run_incremental_validity_ml(
     )
 
     results_dir = results_root / "incremental_validity"
+    metrics_dir = results_dir / "metrics"
     ensure_dir(results_dir)
+    ensure_dir(metrics_dir)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
     
     if baseline_predictors is None:
@@ -3431,6 +3470,7 @@ def run_incremental_validity_ml(
     
     records_df = pd.DataFrame(records)
     records_df.to_csv(metrics_dir / "incremental_validity.tsv", sep="\t", index=False)
+    records_df.to_csv(results_dir / "incremental_validity.tsv", sep="\t", index=False)
     
     # Overall summary
     r2_baseline_overall = r2_score(y, y_pred_baseline)
@@ -3488,8 +3528,11 @@ def run_incremental_validity_ml(
         )
     summary["delta_r2_inference"] = delta_inference
     
-    with open(metrics_dir / "incremental_validity_summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    _write_json_with_legacy(
+        summary,
+        metrics_dir / "incremental_validity_summary.json",
+        results_dir / "incremental_validity_summary.json",
+    )
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
     logger.info(
@@ -3673,6 +3716,10 @@ def _run_shap_importance_stage(
     
     from sklearn.model_selection import LeaveOneGroupOut
     
+    if len(np.unique(groups)) < 2:
+        logger.info("SHAP importance skipped: requires at least 2 unique groups for LOSO folds.")
+        return None
+
     logo = LeaveOneGroupOut()
     cv_splits = list(logo.split(X, y, groups))
     harmonization_mode = str(
@@ -3912,6 +3959,7 @@ def _run_uncertainty_stage(
 
     output_path = data_dir / "prediction_intervals.tsv"
     intervals_df.to_csv(output_path, sep="\t", index=False)
+    intervals_df.to_csv(results_dir / "prediction_intervals.tsv", sep="\t", index=False)
     per_subject_df.to_csv(metrics_dir / "per_subject_uncertainty.tsv", sep="\t", index=False)
 
     metrics = {
@@ -3931,8 +3979,11 @@ def _run_uncertainty_stage(
             "n_subjects": int(len(per_subject_df)),
         },
     }
-    with open(metrics_dir / "uncertainty_metrics.json", "w") as f:
-        json.dump(metrics, f, indent=2)
+    _write_json_with_legacy(
+        metrics,
+        metrics_dir / "uncertainty_metrics.json",
+        results_dir / "uncertainty_metrics.json",
+    )
     
     logger.info(f"Uncertainty: coverage={coverage:.1%}, mean_width={mean_width:.3f}")
     _maybe_generate_mode_plots(mode="uncertainty", results_dir=results_dir, logger=logger, config=config)

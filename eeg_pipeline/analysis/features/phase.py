@@ -30,6 +30,9 @@ _MIN_EPOCHS_FOR_ITPC = 2
 _MIN_TIMES_FOR_SURROGATES = 3
 _MIN_CHANNELS_FOR_PARALLEL = 4  # Lower threshold for better parallelization
 
+# Backward-compatible local alias used throughout this module.
+_build_roi_map_if_needed = build_roi_map_if_needed
+
 # --- Helpers ---
 
 

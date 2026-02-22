@@ -48,6 +48,7 @@ from eeg_pipeline.infra.paths import (
 )
 from eeg_pipeline.infra.tsv import write_parquet
 from eeg_pipeline.pipelines.base import PipelineBase
+from eeg_pipeline.pipelines.progress import ensure_progress_reporter
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.tfr import compute_complex_tfr, compute_tfr_morlet
@@ -666,8 +667,6 @@ class FeaturePipeline(PipelineBase):
         super().__init__(name="feature_extraction", config=config)
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
-        from eeg_pipeline.cli.common import ProgressReporter
-
         task = task or self.config.get("project.task")
         if task is None:
             raise ValueError("Missing required config value: project.task")
@@ -675,7 +674,7 @@ class FeaturePipeline(PipelineBase):
         feature_categories = resolve_feature_categories(
             self.config, kwargs.get("feature_categories")
         )
-        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        progress = ensure_progress_reporter(kwargs.get("progress"))
 
         self.logger.info("=== Feature extraction: sub-%s, task-%s ===", subject, task)
         self.logger.info(

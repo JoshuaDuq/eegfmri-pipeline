@@ -6,8 +6,8 @@ import re
 from pathlib import Path
 from typing import Any, List, Optional
 
+from eeg_pipeline.analysis.utilities.merge_psychopy import run_merge_psychopy
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.pipelines.utilities import run_merge_psychopy
 from eeg_pipeline.infra.tsv import read_tsv
 
 

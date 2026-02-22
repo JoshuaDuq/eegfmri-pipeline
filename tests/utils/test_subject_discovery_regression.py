@@ -7,7 +7,7 @@ from argparse import Namespace
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from eeg_pipeline.cli.commands.info import SOURCE_BIDS_FMRI, _handle_subjects_mode
+from eeg_pipeline.cli.commands.info_helpers import SOURCE_BIDS_FMRI, _handle_subjects_mode
 from eeg_pipeline.utils.data.subjects import get_available_subjects
 from tests.pipelines_test_utils import DotConfig
 

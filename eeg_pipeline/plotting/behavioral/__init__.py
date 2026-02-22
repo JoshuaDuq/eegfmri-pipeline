@@ -2,7 +2,7 @@
 Behavioral correlation plotting module.
 
 Low-level plotting primitives live here. High-level orchestration/IO is defined in
-`pipelines.viz.behavior` to keep responsibilities separated.
+`eeg_pipeline.plotting.orchestration.behavior` to keep responsibilities separated.
 """
 
 from __future__ import annotations

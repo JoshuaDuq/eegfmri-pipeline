@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from eeg_pipeline.pipelines.base import PipelineBase
+from eeg_pipeline.pipelines.progress import ensure_progress_reporter
 
 
 STEP_BAD_CHANNELS = "bad-channels"
@@ -68,13 +69,11 @@ class PreprocessingPipeline(PipelineBase):
         Returns:
             Tuple of (resolved_task, mode, use_icalabel, n_jobs, progress)
         """
-        from eeg_pipeline.cli.common import ProgressReporter
-        
         resolved_task = task or self.config.get("project.task", "thermalactive")
         mode = kwargs.get("mode", "full")
         use_icalabel = kwargs.get("use_icalabel", True)
         n_jobs = kwargs.get("n_jobs", 1)
-        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        progress = ensure_progress_reporter(kwargs.get("progress"))
         
         return resolved_task, mode, use_icalabel, n_jobs, progress
     
