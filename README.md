@@ -1,6 +1,6 @@
 # EEG and fMRI Analysis Pipeline (under development)
 
-[![Python ≥ 3.9](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org)
+[![Python ≥ 3.11](https://img.shields.io/badge/python-≥3.11-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![BIDS](https://img.shields.io/badge/data-BIDS-orange.svg)](https://bids-specification.readthedocs.io/)
 [![MNE-Python](https://img.shields.io/badge/MNE--Python-1.9.0-informational.svg)](https://mne.tools)
@@ -27,8 +27,6 @@ pip install -e .
 # 2. Place your data (see "Data Requirements" below)
 
 # 3. Launch
-
-```bash
 cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 ```
 
@@ -36,7 +34,7 @@ cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 
 ## Installation
 
-**Requirements:** Python ≥ 3.9
+**Requirements:** Python ≥ 3.11
 
 ```bash
 # Create and activate a virtual environment

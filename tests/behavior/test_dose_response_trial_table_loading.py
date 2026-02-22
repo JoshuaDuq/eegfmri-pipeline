@@ -6,10 +6,11 @@ import unittest
 from pathlib import Path
 
 import pandas as pd
+from tests import REPO_ROOT
 
 
 def _load_dose_response_module():
-    module_path = Path(__file__).resolve().parents[1] / "eeg_pipeline" / "plotting" / "behavioral" / "dose_response.py"
+    module_path = REPO_ROOT / "eeg_pipeline" / "plotting" / "behavioral" / "dose_response.py"
     spec = importlib.util.spec_from_file_location("test_dose_response_module", module_path)
     assert spec is not None and spec.loader is not None
 

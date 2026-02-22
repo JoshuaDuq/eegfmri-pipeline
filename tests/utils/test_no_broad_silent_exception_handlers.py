@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from tests import REPO_ROOT
 
 
 def test_no_broad_silent_exception_handlers() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     targets = [repo_root / "eeg_pipeline", repo_root / "fmri_pipeline", repo_root / "scripts"]
 
     pattern = re.compile(

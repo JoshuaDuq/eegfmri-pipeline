@@ -6,10 +6,11 @@ import types
 from pathlib import Path
 
 import pandas as pd
+from tests import REPO_ROOT
 
 
 def _load_discovery_function():
-    base_path = Path(__file__).resolve().parents[1] / "eeg_pipeline" / "cli" / "commands" / "base.py"
+    base_path = REPO_ROOT / "eeg_pipeline" / "cli" / "commands" / "base.py"
     spec = importlib.util.spec_from_file_location("test_base_module", base_path)
     assert spec is not None and spec.loader is not None
 

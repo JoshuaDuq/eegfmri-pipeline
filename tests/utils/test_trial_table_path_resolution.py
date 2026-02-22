@@ -3,16 +3,11 @@ import unittest
 import importlib.util
 import sys
 from pathlib import Path
+from tests import REPO_ROOT
 
 
 def _load_trial_table_module():
-    module_path = (
-        Path(__file__).resolve().parents[1]
-        / "eeg_pipeline"
-        / "utils"
-        / "data"
-        / "trial_table.py"
-    )
+    module_path = REPO_ROOT / "eeg_pipeline" / "utils" / "data" / "trial_table.py"
     spec = importlib.util.spec_from_file_location("test_trial_table_module", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
