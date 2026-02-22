@@ -87,7 +87,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.pacMinCyclesAtFmin != 3.0 {
 			args = append(args, "--pac-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.pacMinCyclesAtFmin))
 		}
-		surrogates := []string{"swap_phase_amp", "time_shift"}
+		surrogates := []string{"trial_shuffle", "circular_shift", "swap_phase_amp", "time_shift"}
 		if m.pacSurrogateMethod != 0 {
 			args = append(args, "--pac-surrogate-method", surrogates[m.pacSurrogateMethod%len(surrogates)])
 		}

@@ -747,6 +747,33 @@ func TestBuildFeaturesAdvancedArgs_IncludesPACRandomSeedFlag(t *testing.T) {
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_PACSurrogateMethodMapping(t *testing.T) {
+	cases := []struct {
+		methodIndex int
+		want        string
+	}{
+		{1, "circular_shift"},
+		{2, "swap_phase_amp"},
+		{3, "time_shift"},
+	}
+
+	for _, tc := range cases {
+		m := New(types.PipelineFeatures, ".")
+		for i, cat := range m.categories {
+			if cat == "pac" {
+				m.selected[i] = true
+				break
+			}
+		}
+		m.pacSurrogateMethod = tc.methodIndex
+
+		args := m.buildFeaturesAdvancedArgs()
+		if !containsSubsequence(args, []string{"--pac-surrogate-method", tc.want}) {
+			t.Fatalf("methodIndex=%d expected --pac-surrogate-method %s in args, got: %#v", tc.methodIndex, tc.want, args)
+		}
+	}
+}
+
 func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {

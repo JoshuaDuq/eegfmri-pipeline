@@ -874,7 +874,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPACSurrogateMethod:
-		m.pacSurrogateMethod = (m.pacSurrogateMethod + 1) % 2
+		m.pacSurrogateMethod = (m.pacSurrogateMethod + 1) % 4
 		m.useDefaultAdvanced = false
 	// Aperiodic missing
 	case optAperiodicMaxFreqResolutionHz:

@@ -2257,7 +2257,7 @@ type Model struct {
 	itpcMinCyclesAtFmin float64 // Min cycles at lowest freq for ITPC
 	pacMinSegmentSec    float64 // Min segment duration for PAC
 	pacMinCyclesAtFmin  float64 // Min cycles at lowest freq for PAC
-	pacSurrogateMethod  int     // 0: trial_shuffle, 1: circular_shift
+	pacSurrogateMethod  int     // 0: trial_shuffle, 1: circular_shift, 2: swap_phase_amp, 3: time_shift
 
 	// Aperiodic Missing
 	aperiodicMaxFreqResolutionHz float64 // Max PSD freq resolution threshold

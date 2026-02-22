@@ -2397,7 +2397,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			hint = "minimum cycles"
 		case optPACSurrogateMethod:
-			methods := []string{"swap_phase_amp", "time_shift"}
+			methods := []string{"trial_shuffle", "circular_shift", "swap_phase_amp", "time_shift"}
 			label, hint = "PAC surrogate method", "null distribution method"
 			value = methods[m.pacSurrogateMethod%len(methods)]
 		// Aperiodic missing
