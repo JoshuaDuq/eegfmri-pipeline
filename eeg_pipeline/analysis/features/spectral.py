@@ -1031,8 +1031,8 @@ def _robust_aperiodic_fit(
         if len(kept_positive) == 0 or np.all(kept_positive == 0):
             break
         
-        # MAD-based threshold for robust outlier detection
-        mad = stats.median_abs_deviation(kept_positive[kept_positive > 0], scale="normal", nan_policy="omit")
+        # MAD-based threshold for robust outlier detection using all kept residuals
+        mad = stats.median_abs_deviation(residuals[keep_mask], scale="normal", nan_policy="omit")
         if not np.isfinite(mad) or mad < min_mad:
             break
         
@@ -1380,7 +1380,8 @@ def compute_spectral_entropy(
         return np.nan
 
     entropy = -np.sum(probs * np.log(probs))
-    norm = np.log(float(probs.size))
+    # Normalize by the total number of valid frequency bins in the band
+    norm = np.log(float(len(freqs_band)))
     if norm > 0:
         entropy /= norm
     return float(entropy)

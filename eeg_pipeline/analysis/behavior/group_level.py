@@ -495,6 +495,15 @@ def run_group_level_correlations_impl(
             ci_lower = np.nan
             ci_upper = np.nan
             
+        # Parametric fallback using 1-sample t-test on Fisher Z-transformed correlations
+        p_parametric = np.nan
+        r_observed_list = [float(p["r_obs"]) for p in subject_payloads if np.isfinite(float(p["r_obs"]))]
+        if len(r_observed_list) > 1:
+            z_obs = np.arctanh(np.clip(np.asarray(r_observed_list), -0.999999, 0.999999))
+            if np.std(z_obs) > 1e-10:
+                from scipy import stats
+                _, p_parametric = stats.ttest_1samp(z_obs, popmean=0.0)
+            
         estimator = "subject_balanced_partial_spearman" if used_partial else "subject_balanced_within_subject_centered_spearman"
 
         records.append(
@@ -508,6 +517,7 @@ def run_group_level_correlations_impl(
                 "n": int(sum(int(p["n_obs"]) for p in subject_payloads)),
                 "n_subjects": int(len(subject_payloads)),
                 "estimator": estimator,
+                "p_parametric": float(p_parametric),
                 "p_perm": p_perm,
                 "ci_lower_2_5": ci_lower,
                 "ci_upper_97_5": ci_upper,
@@ -522,9 +532,17 @@ def run_group_level_correlations_impl(
         return pd.DataFrame()
 
     results_df = pd.DataFrame(records)
+    
+    results_df["p_primary"] = results_df["p_perm"].copy()
+    results_df["p_primary_kind"] = "p_perm"
+    missing_perm = results_df["p_primary"].isna()
+    if missing_perm.any() and "p_parametric" in results_df.columns:
+        results_df.loc[missing_perm, "p_primary"] = results_df.loc[missing_perm, "p_parametric"]
+        results_df.loc[missing_perm, "p_primary_kind"] = "p_parametric"
+
     return hierarchical_fdr(
         results_df,
-        p_col="p_perm",
+        p_col="p_primary",
         family_col="family_id",
         alpha=fdr_alpha,
         config=config,

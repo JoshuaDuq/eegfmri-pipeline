@@ -458,7 +458,7 @@ eeg-pipeline features visualize --subject 0001
 
 | ROI | Channels |
 |-----|----------|
-| Frontal | Fp2, Fpz, AF3, AF7, AF8, F1–F8 |
+| Frontal | Fp2, Fpz, AF3, AF7, AF8, F1, F2, F3, F5, F6, F7, F8 |
 | Sensorimotor_Right | FC4, FC6, C2, C6, CP2, CP4, CP6 |
 | Sensorimotor_Left | FC5, C1, C3, C5, CP3, CP5 |
 | Temporal_Right | FT8, FT10, T8, TP8, TP10 |

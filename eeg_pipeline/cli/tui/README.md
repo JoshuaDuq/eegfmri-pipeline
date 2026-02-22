@@ -46,6 +46,7 @@ views/
   dashboard/             Read-only project statistics
   history/               Execution history browser
   quickactions/          Command-palette overlay
+  pipelinesmoke/         Pipeline smoke-test selector (CLI parser/runtime checks)
 animation/               Cursor blink and progress pulse loops
 components/              Toast, HelpOverlay, Spinner, ScrollIndicator, InfoPanel
 executor/                Python subprocess launcher, clipboard, file browser
@@ -70,7 +71,7 @@ Three sections, navigated as a single vertical list with wrap-around:
 |---|---|
 | **Preprocessing** | EEG Preprocessing, fMRI Preprocessing |
 | **Analysis** | Features, Behavior, Machine Learning, Plotting, fMRI Analysis |
-| **Utilities** | Global Setup, Merge PsychoPy Data, EEG Raw to BIDS, fMRI Raw to BIDS |
+| **Utilities** | Global Setup, Merge PsychoPy Data, EEG Raw to BIDS, fMRI Raw to BIDS, Pipeline Smoke Test |
 
 Selecting a pipeline or utility opens the corresponding wizard or settings view.
 
@@ -135,6 +136,14 @@ Browsable list of past pipeline executions (persisted in `.cache/history.json`):
 - Pipeline name, mode, duration, relative timestamp, success/failure icon
 - Delete individual records (`D`) or clear all (`C`)
 - Up to 50 entries retained
+
+### Pipeline Smoke Test
+
+A selectable checklist of pipeline commands to run quick parser and runtime checks:
+
+- Covers all pipeline commands: `preprocessing`, `features`, `behavior`, `ml`, `plotting`, `fmri`, `fmri-analysis`, `utilities`, `validate`, `info`, `stats`, and an end-to-end `runtime_version` dispatch check
+- Toggle individual checks with `Space` or all with `A`
+- Runs `scripts/tui_pipeline_smoke.py` with the selected pipeline IDs
 
 ### Quick Actions
 
@@ -241,6 +250,7 @@ A command-palette overlay activated with `Ctrl+K` from the main menu or wizard:
 | Merge PsychoPy Data | `utilities` | `bids` | Merge PsychoPy logs into BIDS events files |
 | EEG Raw to BIDS | `utilities` | `source_data` | Convert raw BrainVision data to BIDS |
 | fMRI Raw to BIDS | `utilities` | `source_data` | Convert raw DICOM series to BIDS |
+| Pipeline Smoke Test | `scripts/tui_pipeline_smoke.py` | — | Quick CLI parser and runtime checks across all pipeline commands |
 
 ---
 
@@ -248,9 +258,9 @@ A command-palette overlay activated with `Ctrl+K` from the main menu or wizard:
 
 The TUI persists state across sessions in two locations:
 
-- **`<deriv_root>/.tui_state.json`** — last selected pipeline, time ranges,
+- **`eeg_pipeline/data/derivatives/.tui_state.json`** — last selected pipeline, time ranges,
   band/ROI/spatial selections, per-pipeline advanced configuration
-- **`<deriv_root>/.tui_overrides.json`** — global setup overrides (task, paths)
+- **`eeg_pipeline/data/derivatives/.tui_overrides.json`** — global setup overrides (task, paths)
 - **`.cache/history.json`** — execution history (up to 50 records)
 
 Subject discovery results are cached in memory per session (keyed by

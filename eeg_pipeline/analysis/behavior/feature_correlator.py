@@ -431,6 +431,16 @@ def _select_primary_correlation(
             record["p_primary"] = record.get("p_partial_cov_temp", np.nan)
             record["r_primary"] = record.get("r_partial_cov_temp", np.nan)
             record["p_primary_source"] = "partial_cov_temp"
+        elif pd.notna(record.get("p_partial_temp", np.nan)):
+            record["p_kind_primary"] = "p_partial_temp"
+            record["p_primary"] = record.get("p_partial_temp", np.nan)
+            record["r_primary"] = record.get("r_partial_temp", np.nan)
+            record["p_primary_source"] = "partial_temp_fallback"
+        elif pd.notna(record.get("p_partial_cov", np.nan)):
+            record["p_kind_primary"] = "p_partial_cov"
+            record["p_primary"] = record.get("p_partial_cov", np.nan)
+            record["r_primary"] = record.get("r_partial_cov", np.nan)
+            record["p_primary_source"] = "partial_cov_fallback"
     elif control_temperature:
         if pd.notna(record.get("p_partial_temp", np.nan)):
             record["p_kind_primary"] = "p_partial_temp"
@@ -1371,7 +1381,7 @@ class FeatureBehaviorCorrelator:
         significance_alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
         n_significant_rating = sum(
             1 for record in rating_records
-            if record.get("p", 1.0) < significance_alpha
+            if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
         )
         self.logger.info(
             f"Complete (rating): {len(rating_records)} correlations, {n_significant_rating} significant "
@@ -1381,7 +1391,7 @@ class FeatureBehaviorCorrelator:
         if temperature_records:
             n_significant_temperature = sum(
                 1 for record in temperature_records
-                if record.get("p", 1.0) < significance_alpha
+                if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
             )
             self.logger.info(
                 f"Complete (temperature): {len(temperature_records)} correlations, {n_significant_temperature} significant "
