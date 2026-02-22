@@ -542,11 +542,157 @@ class BehaviorContext:
             }
             return None
 
+        keyed_alignment, keyed_attempted = self._align_feature_table_by_event_keys(
+            name,
+            df,
+            base_index,
+            alignment_report,
+        )
+        if keyed_attempted:
+            return keyed_alignment
+
         if df.index.equals(base_index):
-            alignment_report[name] = {"status": "aligned"}
+            if self._is_positional_range_index(df.index, base_index):
+                from eeg_pipeline.utils.config.loader import get_config_bool
+
+                strict_positional = bool(
+                    get_config_bool(
+                        self.config,
+                        "behavior_analysis.trial_table.disallow_positional_alignment",
+                        False,
+                    )
+                )
+                if strict_positional:
+                    self.logger.error(
+                        "Feature table '%s' for sub-%s is aligned by positional index only. "
+                        "Set explicit trial/event key columns (for example epoch or trial_index) "
+                        "or disable behavior_analysis.trial_table.disallow_positional_alignment "
+                        "to override.",
+                        name,
+                        self.subject,
+                    )
+                    alignment_report[name] = {
+                        "status": "failed",
+                        "reason": "positional_alignment_disallowed",
+                    }
+                    return None
+
+                self.logger.warning(
+                    "Feature table '%s' for sub-%s is aligned by positional index only. "
+                    "This is vulnerable to silent row-order drift; prefer explicit event-key alignment.",
+                    name,
+                    self.subject,
+                )
+                alignment_report[name] = {"status": "aligned_by_position_only"}
+            else:
+                alignment_report[name] = {"status": "aligned"}
             return df
 
         return self._reindex_feature_table(name, df, base_index, alignment_report)
+
+    def _alignment_key_candidates(self) -> List[Tuple[str, ...]]:
+        """Ordered key candidates for event-level row alignment checks."""
+        return [
+            ("epoch",),
+            ("trial_index",),
+            ("trial",),
+            ("trial_number",),
+            ("onset", "duration"),
+        ]
+
+    def _is_positional_range_index(self, left: pd.Index, right: pd.Index) -> bool:
+        if not isinstance(left, pd.RangeIndex) or not isinstance(right, pd.RangeIndex):
+            return False
+        return (
+            int(left.start) == 0
+            and int(right.start) == 0
+            and int(left.step) == 1
+            and int(right.step) == 1
+            and int(left.stop) == int(right.stop)
+        )
+
+    def _normalize_alignment_keys(self, frame: pd.DataFrame) -> pd.DataFrame:
+        normalized = frame.copy()
+        for col in normalized.columns:
+            series = normalized[col]
+            numeric = pd.to_numeric(series, errors="coerce")
+            if int(numeric.notna().sum()) == int(series.notna().sum()):
+                normalized[col] = numeric
+            else:
+                normalized[col] = series.astype(str).fillna("__nan__")
+        return normalized
+
+    def _align_feature_table_by_event_keys(
+        self,
+        name: str,
+        df: pd.DataFrame,
+        base_index: pd.Index,
+        alignment_report: Dict[str, Any],
+    ) -> Tuple[Optional[pd.DataFrame], bool]:
+        """Try key-based row alignment against aligned events when shared keys exist."""
+        if self.aligned_events is None:
+            return None, False
+
+        attempted = False
+        errors: List[str] = []
+        events = self.aligned_events
+
+        for key_tuple in self._alignment_key_candidates():
+            keys = [k for k in key_tuple if k in events.columns and k in df.columns]
+            if len(keys) != len(key_tuple):
+                continue
+            attempted = True
+
+            events_keys = self._normalize_alignment_keys(events[keys])
+            feature_keys = self._normalize_alignment_keys(df[keys])
+
+            if events_keys.duplicated().any() or feature_keys.duplicated().any():
+                errors.append(f"{'+'.join(keys)}:duplicate_keys")
+                continue
+
+            if feature_keys.equals(events_keys):
+                aligned_df = df.copy()
+                aligned_df.index = base_index
+                alignment_report[name] = {
+                    "status": "aligned_by_event_keys",
+                    "keys": keys,
+                }
+                return aligned_df, True
+
+            events_lookup = events_keys.copy()
+            events_lookup["__row_order__"] = np.arange(len(events_lookup), dtype=int)
+            feature_lookup = feature_keys.copy()
+            feature_lookup["__src_row__"] = np.arange(len(feature_lookup), dtype=int)
+
+            merged = events_lookup.merge(feature_lookup, on=keys, how="left", sort=False)
+            if merged["__src_row__"].isna().any():
+                errors.append(f"{'+'.join(keys)}:missing_feature_rows")
+                continue
+
+            src_order = merged["__src_row__"].to_numpy(dtype=int)
+            aligned_df = df.iloc[src_order].copy()
+            aligned_df.index = base_index
+            alignment_report[name] = {
+                "status": "reindexed_by_event_keys",
+                "keys": keys,
+            }
+            return aligned_df, True
+
+        if attempted:
+            alignment_report[name] = {
+                "status": "failed",
+                "reason": "event_key_alignment_failed",
+                "details": errors[:3],
+            }
+            self.logger.error(
+                "Feature table '%s' for sub-%s could not be aligned by shared event keys. Details: %s",
+                name,
+                self.subject,
+                "; ".join(errors[:3]) if errors else "unknown",
+            )
+            return None, True
+
+        return None, False
 
     def _reindex_feature_table(
         self,

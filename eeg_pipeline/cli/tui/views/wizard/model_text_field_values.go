@@ -114,6 +114,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.conditionCompareWindows
 	case textFieldConditionCompareValues:
 		return m.conditionCompareValues
+	case textFieldConditionCompareLabels:
+		return m.conditionCompareLabels
 	case textFieldTemporalConditionColumn:
 		return m.temporalConditionColumn
 	case textFieldTemporalConditionValues:
@@ -168,6 +170,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.burstBandsSpec
 	case textFieldERDSBands:
 		return m.erdsBandsSpec
+	case textFieldMicrostatesFixedTemplatesPath:
+		return m.microstatesFixedTemplatesPath
 	case textFieldSpectralRatioPairs:
 		return m.spectralRatioPairsSpec
 	case textFieldSpectralSegments:
@@ -501,6 +505,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.conditionCompareWindows = strings.TrimSpace(value)
 	case textFieldConditionCompareValues:
 		m.conditionCompareValues = strings.TrimSpace(value)
+	case textFieldConditionCompareLabels:
+		m.conditionCompareLabels = strings.TrimSpace(value)
 	case textFieldTemporalConditionColumn:
 		m.temporalConditionColumn = strings.TrimSpace(value)
 	case textFieldTemporalConditionValues:
@@ -555,6 +561,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.burstBandsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldERDSBands:
 		m.erdsBandsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldMicrostatesFixedTemplatesPath:
+		m.microstatesFixedTemplatesPath = strings.TrimSpace(value)
 	case textFieldSpectralRatioPairs:
 		m.spectralRatioPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldSpectralSegments:

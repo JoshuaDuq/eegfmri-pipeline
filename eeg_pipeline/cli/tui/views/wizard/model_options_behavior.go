@@ -169,6 +169,9 @@ func (m Model) getBehaviorOptions() []optionType {
 					optCorrelationsFeatures,
 					optCorrelationsTypes,
 					optCorrelationsPrimaryUnit,
+					optCorrelationsMinRuns,
+					optCorrelationsPreferPainResidual,
+					optCorrelationsPermutations,
 					optCorrelationsPermutationPrimary,
 					optCorrelationsUseCrossfitPainResidual,
 				)
@@ -182,6 +185,7 @@ func (m Model) getBehaviorOptions() []optionType {
 					optGroupLevelControlTrialOrder,
 					optGroupLevelControlRunEffects,
 					optGroupLevelMaxRunDummies,
+					optGroupLevelAllowParametricFallback,
 				)
 			}
 		}
@@ -211,6 +215,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optRegressionIncludeInteraction,
 				optRegressionStandardize,
 				optRegressionMinSamples,
+				optRegressionPrimaryUnit,
 				optRegressionPermutations,
 				optRegressionMaxFeatures,
 			)
@@ -330,7 +335,14 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("pain_sensitivity") {
 		options = append(options, optBehaviorGroupPainSens)
 		if m.behaviorGroupPainSensExpanded {
-			options = append(options, optPainSensitivityMinTrials, optPainSensitivityFeatures)
+			options = append(
+				options,
+				optPainSensitivityMinTrials,
+				optPainSensitivityPrimaryUnit,
+				optPainSensitivityPermutations,
+				optPainSensitivityPermutationPrimary,
+				optPainSensitivityFeatures,
+			)
 		}
 	}
 
@@ -341,10 +353,13 @@ func (m Model) getBehaviorOptions() []optionType {
 			options = append(options,
 				optConditionCompareColumn,
 				optConditionCompareValues,
+				optConditionCompareLabels,
 				optConditionCompareWindows,
 				optConditionFeatures,
 				optConditionMinTrials,
+				optConditionPrimaryUnit,
 				optConditionWindowPrimaryUnit,
+				optConditionWindowMinSamples,
 				optConditionPermutationPrimary,
 				optConditionFailFast,
 				optConditionEffectThreshold,
@@ -359,6 +374,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		if m.behaviorGroupTemporalExpanded {
 			options = append(options,
 				optTemporalResolutionMs,
+				optTemporalCorrectionMethod,
 				optTemporalTimeMinMs,
 				optTemporalTimeMaxMs,
 				optTemporalSmoothMs,
@@ -409,7 +425,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("mediation") {
 		options = append(options, optBehaviorGroupMediation)
 		if m.behaviorGroupMediationExpanded {
-			options = append(options, optMediationBootstrap, optMediationPermutations, optMediationMinEffect, optMediationFeatures, optMediationMaxMediatorsEnabled, optMediationMaxMediators)
+			options = append(options, optMediationBootstrap, optMediationPermutations, optMediationPermutationPrimary, optMediationMinEffect, optMediationFeatures, optMediationMaxMediatorsEnabled, optMediationMaxMediators)
 		}
 	}
 
@@ -417,7 +433,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("moderation") {
 		options = append(options, optBehaviorGroupModeration)
 		if m.behaviorGroupModerationExpanded {
-			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures, optModerationMinSamples, optModerationPermutations, optModerationFeatures)
+			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures, optModerationMinSamples, optModerationPermutations, optModerationPermutationPrimary, optModerationFeatures)
 		}
 	}
 
@@ -425,7 +441,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("mixed_effects") {
 		options = append(options, optBehaviorGroupMixedEffects)
 		if m.behaviorGroupMixedEffectsExpanded {
-			options = append(options, optMixedEffectsType, optMixedMaxFeatures)
+			options = append(options, optMixedEffectsType, optMixedIncludeTemperature, optMixedMaxFeatures)
 		}
 	}
 

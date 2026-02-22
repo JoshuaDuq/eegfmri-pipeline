@@ -121,6 +121,7 @@ class BehaviorPipelineConfig:
     run_regression: bool = False
     run_models: bool = False
     run_stability: bool = True
+    run_icc: bool = True
     run_consistency: bool = True
     run_influence: bool = True
     run_validation: bool = True
@@ -201,6 +202,13 @@ class BehaviorPipelineConfig:
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
             run_models=bool(get_config_value(config, "behavior_analysis.models.enabled", False)),
             run_stability=bool(get_config_value(config, "behavior_analysis.stability.enabled", True)),
+            run_icc=bool(
+                get_config_value(
+                    config,
+                    "behavior_analysis.icc.enabled",
+                    get_config_value(config, "behavior_analysis.stability.enabled", True),
+                )
+            ),
             run_consistency=bool(get_config_value(config, "behavior_analysis.consistency.enabled", True)),
             run_influence=bool(get_config_value(config, "behavior_analysis.influence.enabled", True)),
             run_validation=bool(get_config_value(config, "behavior_analysis.validation.enabled", True)),
@@ -474,6 +482,8 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_regression = comp_flags["regression"]
             self.pipeline_config.run_models = comp_flags["models"]
             self.pipeline_config.run_stability = comp_flags["stability"]
+            # Preserve prior behavior where stability implies ICC, while allowing ICC-only selection.
+            self.pipeline_config.run_icc = comp_flags["icc"] or comp_flags["stability"]
             self.pipeline_config.run_consistency = comp_flags["consistency"]
             self.pipeline_config.run_influence = comp_flags["influence"]
             self.pipeline_config.run_report = comp_flags["report"]

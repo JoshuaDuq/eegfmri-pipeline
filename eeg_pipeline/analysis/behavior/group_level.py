@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.analysis.behavior.result_types import GroupLevelResult, MixedEffectsResult
+from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_float, get_config_int, get_config_value
 
@@ -260,6 +261,7 @@ def run_group_level_correlations_impl(
         return pd.DataFrame()
 
     combined = pd.concat(all_trials, ignore_index=True)
+    correlation_method = resolve_correlation_method(config, logger=logger, default="spearman")
 
     target_column = str(target_col or "rating").strip() or "rating"
     if target_column not in combined.columns:
@@ -390,10 +392,19 @@ def run_group_level_correlations_impl(
                 continue
 
             if cov_final is not None and not cov_final.empty:
-                r_sub, _p_unused, _n_used = compute_partial_corr(x_final, y_final, cov_final, method="spearman")
+                r_sub, _p_unused, _n_used = compute_partial_corr(
+                    x_final,
+                    y_final,
+                    cov_final,
+                    method=correlation_method,
+                )
                 uses_partial = True
             else:
-                r_sub, _ = compute_correlation(x_final.to_numpy(dtype=float), y_final.to_numpy(dtype=float), method="spearman")
+                r_sub, _ = compute_correlation(
+                    x_final.to_numpy(dtype=float),
+                    y_final.to_numpy(dtype=float),
+                    method=correlation_method,
+                )
                 uses_partial = False
 
             if not np.isfinite(r_sub):
@@ -471,10 +482,14 @@ def run_group_level_correlations_impl(
                                 pd.Series(x_vals),
                                 pd.Series(y_perm),
                                 cov_df_perm,
-                                method="spearman",
+                                method=correlation_method,
                             )
                         else:
-                            r_perm_sub, _ = compute_correlation(x_vals, y_perm, method="spearman")
+                            r_perm_sub, _ = compute_correlation(
+                                x_vals,
+                                y_perm,
+                                method=correlation_method,
+                            )
 
                         if np.isfinite(r_perm_sub):
                             perm_subject_rs.append(float(r_perm_sub))
@@ -511,7 +526,11 @@ def run_group_level_correlations_impl(
                 from scipy import stats
                 _, p_parametric = stats.ttest_1samp(z_obs, popmean=0.0)
             
-        estimator = "subject_balanced_partial_spearman" if used_partial else "subject_balanced_within_subject_centered_spearman"
+        estimator = (
+            f"subject_balanced_partial_{correlation_method}"
+            if used_partial
+            else f"subject_balanced_within_subject_centered_{correlation_method}"
+        )
 
         records.append(
             {
@@ -611,10 +630,7 @@ def run_group_level_analysis_impl(
         if not isinstance(gl_corr_cfg, dict):
             gl_corr_cfg = {}
 
-        target_col = str(
-            gl_corr_cfg.get("target", get_config_value(config, "behavior_analysis.group_level.target", "rating"))
-            or "rating"
-        ).strip()
+        target_col = str(gl_corr_cfg.get("target", "rating") or "rating").strip()
         control_temperature = bool(
             gl_corr_cfg.get("control_temperature", get_config_bool(config, "behavior_analysis.control_temperature", True))
         )

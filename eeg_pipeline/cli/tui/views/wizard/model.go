@@ -615,6 +615,7 @@ const (
 	textFieldConditionCompareColumn
 	textFieldConditionCompareWindows
 	textFieldConditionCompareValues
+	textFieldConditionCompareLabels
 	textFieldTemporalConditionColumn
 	textFieldTemporalConditionValues
 	textFieldTemporalTargetColumn
@@ -647,6 +648,7 @@ const (
 	textFieldIAFRois
 	textFieldERPComponents
 	textFieldERDSBands
+	textFieldMicrostatesFixedTemplatesPath
 	// ITPC condition-based text fields
 	textFieldItpcConditionColumn
 	textFieldItpcConditionValues
@@ -1513,6 +1515,8 @@ type Model struct {
 
 	// Aggregation
 	aggregationMethod int // 0: mean, 1: median
+	featureTmin       float64
+	featureTmax       float64
 
 	// Generic
 	minEpochsForFeatures int
@@ -1713,6 +1717,8 @@ type Model struct {
 	sourceLocFmriClusterPThreshold        float64  // Cluster-forming p-threshold
 	sourceLocFmriOutputType               int      // 0: z-score, 1: t-stat, 2: cope, 3: beta
 	sourceLocFmriResampleToFS             bool     // Auto-resample to FreeSurfer space
+	sourceLocFmriInputSource              int      // 0: fmriprep, 1: bids_raw
+	sourceLocFmriRequireFmriprep          bool     // Require fMRIPrep for contrast building
 
 	// fMRI-specific time windows (independent of EEG feature extraction windows)
 	sourceLocFmriWindowAName string  // Name for window A (e.g., "plateau")
@@ -1769,6 +1775,7 @@ type Model struct {
 	microstatesMinDurationMs       float64
 	microstatesGfpPeakProminence   float64
 	microstatesRandomState         int
+	microstatesFixedTemplatesPath  string
 
 	// ERDS advanced options
 	erdsUseLogRatio         bool    // Use dB instead of percent
@@ -1790,11 +1797,6 @@ type Model struct {
 	tfHeatmapEnabled   bool   // Enable TF heatmap
 	tfHeatmapFreqsSpec string // Frequencies for heatmap
 	tfHeatmapTimeResMs int    // Time resolution in ms
-
-	// TFR advanced options
-	tfrMaxCycles  float64 // Maximum cycles for wavelets
-	tfrDecimPower int     // Decimation for power TFR
-	tfrDecimPhase int     // Decimation for phase TFR
 
 	// Behavior pipeline advanced config
 	correlationMethod     string  // "spearman" or "pearson"
@@ -1894,6 +1896,7 @@ type Model struct {
 	regressionIncludeInteraction bool
 	regressionStandardize        bool
 	regressionMinSamples         int
+	regressionPrimaryUnit        int // 0=trial, 1=run_mean
 	regressionPermutations       int
 	regressionMaxFeatures        int // 0 = no limit
 
@@ -1952,28 +1955,36 @@ type Model struct {
 	influenceLeverageThreshold   float64 // 0 = default
 
 	// Correlations (trial-table)
-	correlationsTypesSpec           string // Comma-separated list (e.g., "partial_cov_temp,raw")
-	correlationsUseCrossfitResidual bool
-	correlationsPrimaryUnit         int // 0=trial, 1=run_mean
-	correlationsPermutationPrimary  bool
-	correlationsTargetColumn        string // Custom target column from events (dropdown)
-	correlationsFeaturesSpec        string // Comma-separated feature filters for correlations
-	groupLevelBlockPermutation      bool   // Use block-restricted permutations when block/run is available
-	groupLevelTarget                string // target column for multilevel correlations
-	groupLevelControlTemperature    bool
-	groupLevelControlTrialOrder     bool
-	groupLevelControlRunEffects     bool
-	groupLevelMaxRunDummies         int
+	correlationsTypesSpec             string // Comma-separated list (e.g., "partial_cov_temp,raw")
+	correlationsUseCrossfitResidual   bool
+	correlationsPrimaryUnit           int // 0=trial, 1=run_mean
+	correlationsMinRuns               int // minimum runs for run-mean correlations
+	correlationsPreferPainResidual    bool
+	correlationsPermutations          int // 0=use global --n-perm
+	correlationsPermutationPrimary    bool
+	correlationsTargetColumn          string // Custom target column from events (dropdown)
+	correlationsFeaturesSpec          string // Comma-separated feature filters for correlations
+	groupLevelBlockPermutation        bool   // Use block-restricted permutations when block/run is available
+	groupLevelTarget                  string // target column for multilevel correlations
+	groupLevelControlTemperature      bool
+	groupLevelControlTrialOrder       bool
+	groupLevelControlRunEffects       bool
+	groupLevelMaxRunDummies           int
+	groupLevelAllowParametricFallback bool
 
 	// Pain sensitivity
-	painSensitivityMinTrials    int    // 0=unset
-	painSensitivityFeaturesSpec string // Comma-separated feature filters for pain sensitivity
+	painSensitivityMinTrials          int // 0=unset
+	painSensitivityPrimaryUnit        int // 0=trial, 1=run_mean
+	painSensitivityPermutations       int // 0=use global permutation setting
+	painSensitivityPermutationPrimary bool
+	painSensitivityFeaturesSpec       string // Comma-separated feature filters for pain sensitivity
 
 	// Report
 	reportTopN int
 
 	// Temporal
 	temporalResolutionMs       int
+	temporalCorrectionMethod   int // 0=fdr, 1=cluster
 	temporalSmoothMs           int
 	temporalTimeMinMs          int
 	temporalTimeMaxMs          int
@@ -1994,15 +2005,19 @@ type Model struct {
 	temporalERDSMethod      int     // 0=percent, 1=zscore
 
 	// Mixed effects (group-level; still configurable)
-	mixedEffectsType int // 0=intercept, 1=intercept_slope
+	mixedEffectsType        int // 0=intercept, 1=intercept_slope
+	mixedIncludeTemperature bool
 
 	// Mediation
-	mediationMinEffect float64
+	mediationMinEffect          float64
+	mediationPermutationPrimary bool
 
 	// Condition extras
 	conditionFailFast           bool
 	conditionPermutationPrimary bool
+	conditionPrimaryUnit        int // 0=trial, 1=run_mean
 	conditionWindowPrimaryUnit  int // 0=trial, 1=run_mean
+	conditionWindowMinSamples   int
 	// Cluster-specific
 	clusterThreshold       float64 // Forming threshold for clusters
 	clusterMinSize         int     // Minimum cluster size
@@ -2020,7 +2035,8 @@ type Model struct {
 	moderationMaxFeaturesEnabled bool // Enable max features limit
 	moderationMaxFeatures        int  // Max features for moderation
 	moderationMinSamples         int
-	moderationPermutations       int    // Permutation iterations for moderation (0=disabled)
+	moderationPermutations       int // Permutation iterations for moderation (0=disabled)
+	moderationPermutationPrimary bool
 	moderationFeaturesSpec       string // Comma-separated feature filters for moderation
 	// Mixed effects-specific
 	mixedMaxFeatures int // Max features for mixed effects
@@ -2029,6 +2045,7 @@ type Model struct {
 	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.pain_binary)
 	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
+	conditionCompareLabels   string  // Optional labels aligned to compare values
 	conditionMinTrials       int     // 0=unset; condition.min_trials_per_condition
 	conditionOverwrite       bool    // Overwrite existing condition effects files
 	conditionFeaturesSpec    string  // Comma-separated feature filters for condition
@@ -2289,8 +2306,11 @@ type Model struct {
 	tfrFreqMax       float64 // Max frequency for TFR
 	tfrNFreqs        int     // Number of frequency bins
 	tfrMinCycles     float64 // Minimum cycles for wavelet
+	tfrMaxCycles     float64 // Maximum cycles for wavelet
 	tfrNCyclesFactor float64 // Cycles factor
 	tfrDecim         int     // Decimation for power TFR
+	tfrDecimPower    int     // Decimation for power TFR
+	tfrDecimPhase    int     // Decimation for phase TFR
 	tfrWorkers       int     // Workers for parallel TFR (-1 = all)
 
 	// System/global settings
@@ -2665,6 +2685,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriClusterPThreshold:        0.001,
 		sourceLocFmriOutputType:               0, // 0: z-score
 		sourceLocFmriResampleToFS:             true,
+		sourceLocFmriInputSource:              0, // 0: fmriprep
+		sourceLocFmriRequireFmriprep:          true,
 		sourceLocFmriWindowAName:              "plateau",
 		sourceLocFmriWindowATmin:              5.0,
 		sourceLocFmriWindowATmax:              10.0,
@@ -2716,6 +2738,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		microstatesMinDurationMs:       20.0,
 		microstatesGfpPeakProminence:   0.0,
 		microstatesRandomState:         42,
+		microstatesFixedTemplatesPath:  "",
 
 		// ERDS defaults
 		erdsUseLogRatio:         false,
@@ -2740,12 +2763,16 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// TFR advanced defaults
 		tfrMaxCycles:  15.0,
+		tfrDecim:      4,
 		tfrDecimPower: 4,
 		tfrDecimPhase: 1,
 
 		// Validation & Generic
 		minEpochsForFeatures:     10,
 		featAnalysisMode:         0,
+		aggregationMethod:        0,
+		featureTmin:              -7.0,
+		featureTmax:              15.0,
 		featComputeChangeScores:  true,
 		featSaveTfrWithSidecar:   false,
 		featNJobsBands:           -1,
@@ -2837,6 +2864,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionIncludeInteraction: true,
 		regressionStandardize:        true,
 		regressionMinSamples:         15,
+		regressionPrimaryUnit:        0,
 		regressionPermutations:       0,
 		regressionMaxFeatures:        0,
 
@@ -2891,22 +2919,30 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		influenceCooksThreshold:      0.0,
 		influenceLeverageThreshold:   0.0,
 
-		correlationsTypesSpec:           "partial_cov_temp",
-		correlationsUseCrossfitResidual: false,
-		correlationsPrimaryUnit:         0,
-		correlationsPermutationPrimary:  false,
-		correlationsFeaturesSpec:        "",
-		groupLevelBlockPermutation:      true,
-		groupLevelTarget:                "",
-		groupLevelControlTemperature:    true,
-		groupLevelControlTrialOrder:     true,
-		groupLevelControlRunEffects:     false,
-		groupLevelMaxRunDummies:         20,
-		painSensitivityMinTrials:        0,
-		painSensitivityFeaturesSpec:     "",
+		correlationsTypesSpec:             "partial_cov_temp",
+		correlationsUseCrossfitResidual:   false,
+		correlationsPrimaryUnit:           0,
+		correlationsMinRuns:               3,
+		correlationsPreferPainResidual:    false,
+		correlationsPermutations:          0,
+		correlationsPermutationPrimary:    false,
+		correlationsFeaturesSpec:          "",
+		groupLevelBlockPermutation:        true,
+		groupLevelTarget:                  "",
+		groupLevelControlTemperature:      true,
+		groupLevelControlTrialOrder:       true,
+		groupLevelControlRunEffects:       false,
+		groupLevelMaxRunDummies:           20,
+		groupLevelAllowParametricFallback: false,
+		painSensitivityMinTrials:          0,
+		painSensitivityPrimaryUnit:        0,
+		painSensitivityPermutations:       0,
+		painSensitivityPermutationPrimary: true,
+		painSensitivityFeaturesSpec:       "",
 
 		reportTopN:                     15,
 		temporalResolutionMs:           50,
+		temporalCorrectionMethod:       0,
 		temporalSmoothMs:               100,
 		temporalTimeMinMs:              -200,
 		temporalTimeMaxMs:              1000,
@@ -2921,11 +2957,13 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalITPCBaselineMin:        -0.5,
 		temporalITPCBaselineMax:        -0.01,
 		// ERDS defaults
-		temporalERDSBaselineMin: -0.5,
-		temporalERDSBaselineMax: -0.1,
-		temporalERDSMethod:      0, // 0=percent, 1=zscore
-		mixedEffectsType:        0,
-		mediationMinEffect:      0.05,
+		temporalERDSBaselineMin:     -0.5,
+		temporalERDSBaselineMax:     -0.1,
+		temporalERDSMethod:          0, // 0=percent, 1=zscore
+		mixedEffectsType:            0,
+		mixedIncludeTemperature:     true,
+		mediationMinEffect:          0.05,
+		mediationPermutationPrimary: true,
 		// Cluster defaults
 		clusterThreshold:       0.05,
 		clusterMinSize:         2,
@@ -2944,6 +2982,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		moderationMaxFeatures:        50,
 		moderationMinSamples:         15,
 		moderationPermutations:       0, // Disabled by default
+		moderationPermutationPrimary: true,
 		moderationFeaturesSpec:       "",
 		// Mixed effects defaults
 		mixedMaxFeatures: 50,
@@ -2951,7 +2990,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionEffectThreshold:    0.5,
 		conditionFailFast:           true,
 		conditionPermutationPrimary: false,
+		conditionPrimaryUnit:        0,
 		conditionWindowPrimaryUnit:  0,
+		conditionWindowMinSamples:   10,
+		conditionCompareLabels:      "",
 		conditionMinTrials:          0,
 		conditionFeaturesSpec:       "",
 		// Column discovery defaults

@@ -250,6 +250,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     regression_group.add_argument("--regression-standardize", action="store_true", default=None)
     regression_group.add_argument("--no-regression-standardize", action="store_false", dest="regression_standardize")
     regression_group.add_argument("--regression-min-samples", type=int, default=None)
+    regression_group.add_argument("--regression-primary-unit", choices=["trial", "run_mean"], default=None)
     regression_group.add_argument("--regression-permutations", type=int, default=None)
     regression_group.add_argument("--regression-max-features", type=int, default=None)
 
@@ -323,6 +324,20 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     pain_sensitivity_group = parser.add_argument_group("Pain sensitivity options")
     pain_sensitivity_group.add_argument("--pain-sensitivity-min-trials", type=int, default=None)
+    pain_sensitivity_group.add_argument("--pain-sensitivity-primary-unit", choices=["trial", "run_mean"], default=None)
+    pain_sensitivity_group.add_argument("--pain-sensitivity-permutations", type=int, default=None)
+    pain_sensitivity_group.add_argument(
+        "--pain-sensitivity-permutation-primary",
+        action="store_true",
+        default=None,
+        dest="pain_sensitivity_permutation_primary",
+        help="Use permutation-based p_primary when available",
+    )
+    pain_sensitivity_group.add_argument(
+        "--no-pain-sensitivity-permutation-primary",
+        action="store_false",
+        dest="pain_sensitivity_permutation_primary",
+    )
 
     correlations_group = parser.add_argument_group("Correlations (trial-table) options")
     correlations_group.add_argument(
@@ -333,6 +348,31 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Correlation types to compute (default from config)",
     )
     correlations_group.add_argument("--correlations-primary-unit", choices=["trial", "run_mean"], default=None)
+    correlations_group.add_argument(
+        "--correlations-min-runs",
+        type=int,
+        default=None,
+        help="Minimum runs required for run-mean correlation estimates",
+    )
+    correlations_group.add_argument(
+        "--correlations-prefer-pain-residual",
+        action="store_true",
+        default=None,
+        dest="correlations_prefer_pain_residual",
+        help="Prefer pain_residual (or pain_residual_cv) when selecting correlation targets",
+    )
+    correlations_group.add_argument(
+        "--no-correlations-prefer-pain-residual",
+        action="store_false",
+        dest="correlations_prefer_pain_residual",
+    )
+    correlations_group.add_argument(
+        "--correlations-permutations",
+        type=int,
+        default=None,
+        dest="correlations_permutations",
+        help="Override permutation iterations for correlations only (unset=use global --n-perm)",
+    )
     correlations_group.add_argument("--correlations-use-crossfit-pain-residual", action="store_true", default=None, dest="correlations_use_crossfit_pain_residual")
     correlations_group.add_argument("--no-correlations-use-crossfit-pain-residual", action="store_false", dest="correlations_use_crossfit_pain_residual")
     correlations_group.add_argument(
@@ -411,6 +451,18 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="group_level_max_run_dummies",
         help="Maximum run dummy columns for multilevel group-level controls",
     )
+    correlations_group.add_argument(
+        "--group-level-allow-parametric-fallback",
+        action="store_true",
+        default=None,
+        dest="group_level_allow_parametric_fallback",
+        help="Allow parametric fallback when permutation testing is unavailable in multilevel correlations",
+    )
+    correlations_group.add_argument(
+        "--no-group-level-allow-parametric-fallback",
+        action="store_false",
+        dest="group_level_allow_parametric_fallback",
+    )
 
     report_group = parser.add_argument_group("Report options")
     report_group.add_argument("--report-top-n", type=int, default=None, help="Top N rows per analysis table in subject_report*.md")
@@ -422,6 +474,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="events.tsv column to correlate against for temporal analyses (default: rating from event_columns.rating)",
     )
+    temporal_group.add_argument("--temporal-correction-method", choices=["fdr", "cluster"], default=None)
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-max-ms", type=int, default=None)
@@ -471,6 +524,18 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     mediation_group = parser.add_argument_group("Mediation analysis options")
     mediation_group.add_argument("--mediation-bootstrap", type=int, default=None, help="Bootstrap iterations for mediation")
     mediation_group.add_argument("--mediation-permutations", type=int, default=None, help="Permutation iterations for mediation (0=disabled)")
+    mediation_group.add_argument(
+        "--mediation-permutation-primary",
+        action="store_true",
+        default=None,
+        dest="mediation_permutation_primary",
+        help="Use permutation-based p_primary when available",
+    )
+    mediation_group.add_argument(
+        "--no-mediation-permutation-primary",
+        action="store_false",
+        dest="mediation_permutation_primary",
+    )
     mediation_group.add_argument("--mediation-min-effect-size", type=float, default=None, help="Minimum mediation effect size")
     mediation_group.add_argument("--mediation-max-mediators", type=int, default=None, help="Maximum mediators to test")
     
@@ -479,10 +544,24 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     moderation_group.add_argument("--moderation-max-features", type=int, default=None, help="Maximum features for moderation")
     moderation_group.add_argument("--moderation-min-samples", type=int, default=None, help="Minimum samples for moderation")
     moderation_group.add_argument("--moderation-permutations", type=int, default=None, help="Permutation iterations for moderation (0=disabled)")
+    moderation_group.add_argument(
+        "--moderation-permutation-primary",
+        action="store_true",
+        default=None,
+        dest="moderation_permutation_primary",
+        help="Use permutation-based p_primary when available",
+    )
+    moderation_group.add_argument(
+        "--no-moderation-permutation-primary",
+        action="store_false",
+        dest="moderation_permutation_primary",
+    )
     
     # Mixed effects-specific options
     mixed_group = parser.add_argument_group("Mixed effects options")
     mixed_group.add_argument("--mixed-random-effects", choices=["intercept", "intercept_slope"], default=None, help="Random effects specification")
+    mixed_group.add_argument("--mixed-include-temperature", action="store_true", default=None, dest="mixed_include_temperature")
+    mixed_group.add_argument("--no-mixed-include-temperature", action="store_false", dest="mixed_include_temperature")
     mixed_group.add_argument("--mixed-max-features", type=int, default=None, help="Maximum features for mixed effects")
     
     # Condition-specific options
@@ -493,10 +572,13 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--condition-min-trials", type=int, default=None, help="Minimum trials per condition")
     condition_group.add_argument("--condition-compare-column", type=str, default=None, help="events.tsv column to use for condition split (default: event_columns.pain_binary)")
     condition_group.add_argument("--condition-compare-values", nargs="+", default=None, metavar="VALUE", help="Values in the column to compare (e.g., 0 1 or pain nonpain)")
+    condition_group.add_argument("--condition-compare-labels", nargs="+", default=None, metavar="LABEL", help="Optional labels aligned to --condition-compare-values")
     condition_group.add_argument("--condition-overwrite", action="store_true", default=None, dest="condition_overwrite", help="Overwrite existing condition effects files (default)")
     condition_group.add_argument("--no-condition-overwrite", action="store_false", dest="condition_overwrite", help="Include compare_column in filename to avoid overwriting")
+    condition_group.add_argument("--condition-primary-unit", choices=["trial", "run_mean"], default=None)
     condition_group.add_argument("--condition-compare-windows", nargs="+", default=None, metavar="WINDOW", help="Time windows to compare (e.g., baseline active)")
     condition_group.add_argument("--condition-window-primary-unit", choices=["trial", "run_mean"], default=None)
+    condition_group.add_argument("--condition-window-min-samples", type=int, default=None)
     condition_group.add_argument("--condition-permutation-primary", action="store_true", default=None, dest="condition_permutation_primary")
     condition_group.add_argument("--no-condition-permutation-primary", action="store_false", dest="condition_permutation_primary")
 

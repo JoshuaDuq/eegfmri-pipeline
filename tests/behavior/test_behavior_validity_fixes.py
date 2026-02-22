@@ -1179,6 +1179,64 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertEqual(str(captured.get("p_primary_mode")), "perm")
 
+    def test_pain_sensitivity_non_iid_overrides_asymptotic_primary_mode(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_pain_sensitivity
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "pain_sensitivity": {
+                        "n_permutations": 20,
+                        "p_primary_mode": "asymptotic",
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                    "run_adjustment": {"column": "run_id"},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "temperature": np.linspace(40, 46, 12),
+                "rating": np.linspace(10, 70, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+                "power_alpha": np.linspace(0.1, 1.2, 12),
+            }
+        )
+        captured = {}
+
+        def _fake_run_pain_sensitivity_correlations(**kwargs):
+            captured["p_primary_mode"] = kwargs.get("p_primary_mode")
+            return pd.DataFrame(
+                {
+                    "feature": ["power_alpha"],
+                    "feature_type": ["power"],
+                    "band": ["alpha"],
+                    "p_psi": [0.8],
+                    "p_perm": [0.01],
+                    "p_primary": [0.01],
+                    "p_primary_source": ["psi_perm"],
+                }
+            )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ), patch(
+            "eeg_pipeline.analysis.behavior.api.run_pain_sensitivity_correlations",
+            side_effect=_fake_run_pain_sensitivity_correlations,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+            side_effect=lambda _ctx, _cfg, df, **_kw: df,
+        ):
+            out = stage_pain_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
+
+        self.assertFalse(out.empty)
+        self.assertEqual(str(captured.get("p_primary_mode")), "perm")
+
     def test_pain_sensitivity_rejects_unknown_robust_method(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_pain_sensitivity
 
@@ -1507,6 +1565,83 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertAlmostEqual(float(out[0]["p_primary"]), 0.01, places=12)
         self.assertEqual(str(out[0]["p_primary_source"]), "run_mean")
 
+    def test_correlate_primary_selection_non_iid_overrides_asymptotic_to_permutation(self):
+        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "statistics": {"allow_iid_trials": False},
+                    "correlations": {"p_primary_mode": "asymptotic"},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        design = CorrelateDesign(
+            df_trials=pd.DataFrame({"run_id": [1, 1, 2, 2]}),
+            feature_cols=["power_alpha"],
+            targets=["rating"],
+            cov_df=None,
+            temperature_series=None,
+            run_col="run_id",
+            run_adjust_in_correlations=False,
+            groups_for_perm=None,
+        )
+        records = [
+            {
+                "feature": "power_alpha",
+                "target": "rating",
+                "r_raw": 0.3,
+                "p_raw": 0.20,
+                "p_perm_raw": 0.01,
+                "robust_method": None,
+            }
+        ]
+
+        out = stage_correlate_primary_selection(
+            ctx,
+            SimpleNamespace(control_temperature=False, control_trial_order=False),
+            design,
+            records,
+        )
+
+        self.assertEqual(len(out), 1)
+        self.assertAlmostEqual(float(out[0]["p_primary"]), 0.01, places=12)
+        self.assertEqual(str(out[0]["p_kind_primary"]), "p_perm_raw")
+
+    def test_correlate_effect_sizes_rejects_robust_mode_with_covariate_controls(self):
+        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_effect_sizes
+
+        ctx = self._ctx(DotConfig({}))
+        design = CorrelateDesign(
+            df_trials=pd.DataFrame(
+                {
+                    "run_id": [1, 1, 2, 2],
+                    "power_alpha": [0.2, 0.3, 0.4, 0.5],
+                    "rating": [10.0, 20.0, 30.0, 40.0],
+                }
+            ),
+            feature_cols=["power_alpha"],
+            targets=["rating"],
+            cov_df=pd.DataFrame({"trial_index": [0.0, 1.0, 0.0, 1.0]}),
+            temperature_series=pd.Series([44.0, 44.5, 45.0, 45.5]),
+            run_col="run_id",
+            run_adjust_in_correlations=False,
+            groups_for_perm=None,
+        )
+
+        with self.assertRaises(ValueError):
+            stage_correlate_effect_sizes(
+                ctx,
+                SimpleNamespace(
+                    method="spearman",
+                    robust_method="winsorized",
+                    method_label="spearman_winsorized",
+                    min_samples=2,
+                ),
+                design,
+            )
+
     def test_correlate_effect_size_run_mean_respects_min_runs_threshold(self):
         from eeg_pipeline.analysis.behavior.orchestration import _compute_single_effect_size
 
@@ -1734,6 +1869,43 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(rng_factory.called)
         self.assertEqual(int(rng_factory.call_args.args[0]), 13)
 
+    def test_group_correlations_respect_configured_correlation_method(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        n = 12
+        df = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, n),
+                "power_alpha": np.linspace(0.1, 1.2, n),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, _sub: Path("/tmp"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df.copy(), df.copy()],
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+            side_effect=lambda df_in, **_kwargs: df_in,
+        ):
+            out = run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=DotConfig({"behavior_analysis": {"statistics": {"correlation_method": "pearson"}}}),
+                logger=Mock(),
+                use_block_permutation=False,
+                n_perm=0,
+            )
+
+        self.assertFalse(out.empty)
+        self.assertIn("pearson", str(out.iloc[0]["estimator"]))
+
     def test_unified_fdr_applies_family_gate_before_within_family_significance(self):
         from eeg_pipeline.analysis.behavior.orchestration import _compute_unified_fdr
 
@@ -1952,6 +2124,62 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(ctx.covariates_df)
         self.assertIn("trial_index", list(ctx.covariates_df.columns))
 
+    def test_feature_table_alignment_reindexes_by_shared_epoch_key(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="thermalactive",
+            config=DotConfig({}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+        )
+        ctx.aligned_events = pd.DataFrame({"epoch": [2, 1], "rating": [10.0, 20.0]})
+
+        feature_df = pd.DataFrame(
+            {
+                "epoch": [1, 2],
+                "power_alpha": [0.1, 0.9],
+            }
+        )
+        report = {}
+        out = ctx._align_single_feature_table(
+            name="power",
+            df=feature_df,
+            base_index=ctx.aligned_events.index,
+            alignment_report=report,
+        )
+
+        self.assertIsNotNone(out)
+        self.assertEqual([float(v) for v in out["power_alpha"].tolist()], [0.9, 0.1])
+        self.assertEqual(report["power"]["status"], "reindexed_by_event_keys")
+
+    def test_feature_table_alignment_can_disallow_positional_only_matching(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="thermalactive",
+            config=DotConfig({"behavior_analysis": {"trial_table": {"disallow_positional_alignment": True}}}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+        )
+        ctx.aligned_events = pd.DataFrame({"rating": [10.0, 20.0]})
+
+        feature_df = pd.DataFrame({"power_alpha": [0.1, 0.9]})
+        report = {}
+        out = ctx._align_single_feature_table(
+            name="power",
+            df=feature_df,
+            base_index=ctx.aligned_events.index,
+            alignment_report=report,
+        )
+
+        self.assertIsNone(out)
+        self.assertEqual(report["power"]["reason"], "positional_alignment_disallowed")
+
     def test_condition_window_forwards_configured_min_samples(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_window
 
@@ -2121,6 +2349,58 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
 
+    def test_mediation_non_iid_overrides_asymptotic_primary_mode(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_mediation
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "mediation": {
+                        "n_permutations": 20,
+                        "p_primary_mode": "asymptotic",
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                    "run_adjustment": {"column": "run_id"},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "temperature": np.linspace(40, 46, 12),
+                "rating": np.linspace(10, 70, 12),
+                "power_alpha": np.linspace(0.1, 1.2, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+        mediation_df = pd.DataFrame(
+            {
+                "mediator": ["power_alpha"],
+                "sobel_p": [0.01],
+                "p_ab_perm": [np.nan],
+                "p_value": [0.01],
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ), patch(
+            "eeg_pipeline.analysis.behavior.api.run_mediation_analysis",
+            return_value=mediation_df.copy(),
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+            side_effect=lambda _ctx, _cfg, df, **_kw: df,
+        ):
+            out = stage_mediation(ctx, SimpleNamespace(fdr_alpha=0.05))
+
+        self.assertFalse(out.empty)
+        self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
+        self.assertEqual(str(out.iloc[0]["p_primary_source"]), "perm_missing_required")
+
     def test_group_correlations_block_permutation_failure_sets_nan_instead_of_fallback(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
 
@@ -2245,6 +2525,83 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertFalse(out.empty)
         self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
+
+    def test_moderation_non_iid_overrides_asymptotic_primary_mode(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_moderation
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "moderation": {
+                        "n_permutations": 20,
+                        "p_primary_mode": "asymptotic",
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                    "run_adjustment": {"column": "run_id"},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "temperature": np.linspace(40, 46, 12),
+                "rating": np.linspace(10, 70, 12),
+                "power_alpha": np.linspace(0.1, 1.2, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+
+        fake_result = SimpleNamespace(
+            n=12,
+            b1=0.1,
+            b2=0.1,
+            b3=0.2,
+            se_b3=0.05,
+            p_b3=0.01,
+            p_b3_perm=np.nan,
+            n_permutations=20,
+            slope_low_w=0.0,
+            slope_mean_w=0.0,
+            slope_high_w=0.0,
+            p_slope_low=0.5,
+            p_slope_mean=0.5,
+            p_slope_high=0.5,
+            r_squared=0.2,
+            r_squared_change=0.1,
+            f_interaction=4.0,
+            p_f_interaction=0.04,
+            jn_low=np.nan,
+            jn_high=np.nan,
+            jn_type="none",
+            is_significant_moderation=lambda alpha: True,
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.moderation.run_moderation_analysis",
+            return_value=fake_result,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+            side_effect=lambda _ctx, _cfg, df, **_kw: df,
+        ):
+            out = stage_moderation(
+                ctx,
+                SimpleNamespace(
+                    fdr_alpha=0.05,
+                    moderation_max_features=None,
+                    method_label="",
+                    moderation_min_samples=5,
+                ),
+            )
+
+        self.assertFalse(out.empty)
+        self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
+        self.assertEqual(str(out.iloc[0]["p_primary_source"]), "perm_missing_required")
 
     def test_temporal_stats_requires_cluster_correction_when_iid_disallowed(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats

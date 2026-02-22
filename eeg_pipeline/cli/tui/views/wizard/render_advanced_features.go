@@ -442,6 +442,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "wavelet cycles floor"
+		case optTfrMaxCycles:
+			label = "Max Cycles"
+			value = fmt.Sprintf("%.1f", m.tfrMaxCycles)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrMaxCycles) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "wavelet cycles cap"
 		case optTfrNCyclesFactor:
 			label = "Cycles Factor"
 			value = fmt.Sprintf("%.1f", m.tfrNCyclesFactor)
@@ -449,6 +456,27 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "cycles per Hz"
+		case optTfrDecim:
+			label = "Decim (legacy)"
+			value = fmt.Sprintf("%d", m.tfrDecim)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrDecim) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "legacy shared TFR decimation"
+		case optTfrDecimPower:
+			label = "Decim power"
+			value = fmt.Sprintf("%d", m.tfrDecimPower)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrDecimPower) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "power TFR decimation"
+		case optTfrDecimPhase:
+			label = "Decim phase"
+			value = fmt.Sprintf("%d", m.tfrDecimPhase)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrDecimPhase) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "phase TFR decimation"
 		case optTfrWorkers:
 			label = "Workers"
 			value = fmt.Sprintf("%d", m.tfrWorkers)
@@ -1313,6 +1341,15 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = "off"
 			}
 			hint = "auto-resample to FreeSurfer space"
+		case optSourceLocFmriInputSource:
+			label = "Input Source"
+			choices := []string{"fmriprep", "bids_raw"}
+			value = choices[m.sourceLocFmriInputSource%len(choices)]
+			hint = "contrast input source"
+		case optSourceLocFmriRequireFmriprep:
+			label = "Require fMRIPrep"
+			value = m.boolToOnOff(m.sourceLocFmriRequireFmriprep)
+			hint = "enforce fMRIPrep inputs"
 		case optSourceLocFmriWindowAName:
 			label = "Window A Name"
 			if m.sourceLocFmriWindowAName == "" {
@@ -2134,6 +2171,17 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "reproducible template seed"
+		case optMicrostatesFixedTemplatesPath:
+			label = "Fixed templates path"
+			val := strings.TrimSpace(m.microstatesFixedTemplatesPath)
+			if val == "" {
+				val = "(unset)"
+			}
+			if m.editingText && m.editingTextField == textFieldMicrostatesFixedTemplatesPath {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "optional .npz templates file"
 
 		// ERDS group header
 		case optFeatGroupERDS:
@@ -2220,6 +2268,25 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			modes := []string{"group_stats", "trial_ml_safe"}
 			value = modes[m.featAnalysisMode]
 			hint = "group_stats / trial_ml_safe"
+		case optAggregationMethod:
+			label = "Aggregation"
+			methods := []string{"mean", "median"}
+			value = methods[m.aggregationMethod%len(methods)]
+			hint = "ROI/channels aggregation"
+		case optFeatureTmin:
+			label = "Window Tmin"
+			value = fmt.Sprintf("%.3f", m.featureTmin)
+			if m.editingNumber && m.isCurrentlyEditing(optFeatureTmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "global feature window start (s)"
+		case optFeatureTmax:
+			label = "Window Tmax"
+			value = fmt.Sprintf("%.3f", m.featureTmax)
+			if m.editingNumber && m.isCurrentlyEditing(optFeatureTmax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "global feature window end (s)"
 		case optFeatComputeChangeScores:
 			label = "Change scores"
 			value = m.boolToOnOff(m.featComputeChangeScores)

@@ -41,10 +41,14 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.connMode >= 0 && m.connMode < len(connModes) && m.connMode != 0 {
 			args = append(args, "--conn-mode", connModes[m.connMode])
 		}
-		if !m.connAECAbsolute {
+		if m.connAECAbsolute {
+			args = append(args, "--conn-aec-absolute")
+		} else {
 			args = append(args, "--no-conn-aec-absolute")
 		}
-		if !m.connEnableAEC {
+		if m.connEnableAEC {
+			args = append(args, "--conn-enable-aec")
+		} else {
 			args = append(args, "--no-conn-enable-aec")
 		}
 		if m.connNFreqsPerBand != 8 {
@@ -166,7 +170,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--aec-output", "r", "z")
 		}
 		// Force within_epoch for machine learning
-		if !m.connForceWithinEpochML {
+		if m.connForceWithinEpochML {
+			args = append(args, "--conn-force-within-epoch-for-ml")
+		} else {
 			args = append(args, "--no-conn-force-within-epoch-for-ml")
 		}
 	}
@@ -270,7 +276,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 				if m.sourceLocFmriProvenance >= 0 && m.sourceLocFmriProvenance < len(provenances) && m.sourceLocFmriProvenance != 0 {
 					args = append(args, "--source-fmri-provenance", provenances[m.sourceLocFmriProvenance])
 				}
-				if !m.sourceLocFmriRequireProv {
+				if m.sourceLocFmriRequireProv {
+					args = append(args, "--source-fmri-require-provenance")
+				} else {
 					args = append(args, "--no-source-fmri-require-provenance")
 				}
 				if m.sourceLocFmriThreshold != 3.1 {
@@ -370,8 +378,19 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 					}
 					if !m.sourceLocFmriResampleToFS {
 						args = append(args, "--no-source-fmri-resample-to-fs")
+					} else {
+						args = append(args, "--source-fmri-resample-to-fs")
+					}
+					inputSources := []string{"fmriprep", "bids_raw"}
+					args = append(args, "--source-fmri-input-source", inputSources[m.sourceLocFmriInputSource%len(inputSources)])
+					if m.sourceLocFmriRequireFmriprep {
+						args = append(args, "--source-fmri-require-fmriprep")
+					} else {
+						args = append(args, "--no-source-fmri-require-fmriprep")
 					}
 				}
+			} else {
+				args = append(args, "--no-source-fmri")
 			}
 		}
 	}
@@ -541,6 +560,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	if m.tfrNCyclesFactor != 2.0 {
 		args = append(args, "--tfr-n-cycles-factor", fmt.Sprintf("%.1f", m.tfrNCyclesFactor))
 	}
+	if m.tfrDecim != 4 {
+		args = append(args, "--tfr-decim", fmt.Sprintf("%d", m.tfrDecim))
+	}
 	if m.tfrWorkers != -1 {
 		args = append(args, "--tfr-workers", fmt.Sprintf("%d", m.tfrWorkers))
 	}
@@ -570,7 +592,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 
 	// Spectral advanced options
 	if m.isCategorySelected("spectral") || m.isCategorySelected("ratios") {
-		if !m.spectralIncludeLogRatios {
+		if m.spectralIncludeLogRatios {
+			args = append(args, "--spectral-include-log-ratios")
+		} else {
 			args = append(args, "--no-spectral-include-log-ratios")
 		}
 		if m.spectralPsdMethod != 0 {
@@ -596,7 +620,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--spectral-segments")
 			args = append(args, splitSpaceList(m.spectralSegmentsSpec)...)
 		}
-		if !m.spectralExcludeLineNoise {
+		if m.spectralExcludeLineNoise {
+			args = append(args, "--spectral-exclude-line-noise")
+		} else {
 			args = append(args, "--no-spectral-exclude-line-noise")
 		}
 		if m.spectralLineNoiseFreq != 60.0 {
@@ -673,7 +699,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.aperiodicPsdMethod != 0 {
 			args = append(args, "--aperiodic-psd-method", "welch")
 		}
-		if !m.aperiodicExcludeLineNoise {
+		if m.aperiodicExcludeLineNoise {
+			args = append(args, "--aperiodic-exclude-line-noise")
+		} else {
 			args = append(args, "--no-aperiodic-exclude-line-noise")
 		}
 		if m.aperiodicLineNoiseFreq != 60.0 {
@@ -710,7 +738,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.connMinCyclesPerBand != 3.0 {
 			args = append(args, "--conn-min-cycles-per-band", fmt.Sprintf("%.1f", m.connMinCyclesPerBand))
 		}
-		if !m.connWarnNoSpatialTransform {
+		if m.connWarnNoSpatialTransform {
+			args = append(args, "--conn-warn-no-spatial-transform")
+		} else {
 			args = append(args, "--no-conn-warn-no-spatial-transform")
 		}
 		if m.connPhaseEstimator != 0 {
@@ -721,6 +751,8 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 		if m.connDynamicEnabled {
 			args = append(args, "--conn-dynamic")
+		} else {
+			args = append(args, "--no-conn-dynamic")
 		}
 		if m.connDynamicMeasures != 0 {
 			switch m.connDynamicMeasures {
@@ -736,10 +768,14 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.connDynamicMinWindows != 3 {
 			args = append(args, "--conn-dynamic-min-windows", fmt.Sprintf("%d", m.connDynamicMinWindows))
 		}
-		if !m.connDynamicIncludeROIPairs {
+		if m.connDynamicIncludeROIPairs {
+			args = append(args, "--conn-dynamic-roi-pairs")
+		} else {
 			args = append(args, "--no-conn-dynamic-roi-pairs")
 		}
-		if !m.connDynamicStateEnabled {
+		if m.connDynamicStateEnabled {
+			args = append(args, "--conn-dynamic-states")
+		} else {
 			args = append(args, "--no-conn-dynamic-states")
 		}
 		if m.connDynamicStateNStates != 3 {
@@ -758,7 +794,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.pacSource != 0 {
 			args = append(args, "--pac-source", "tfr")
 		}
-		if !m.pacNormalize {
+		if m.pacNormalize {
+			args = append(args, "--pac-normalize")
+		} else {
 			args = append(args, "--no-pac-normalize")
 		}
 		if m.pacNSurrogates != 0 {
@@ -804,7 +842,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.complexityMinSamples != 200 {
 			args = append(args, "--complexity-min-samples", fmt.Sprintf("%d", m.complexityMinSamples))
 		}
-		if !m.complexityZscore {
+		if m.complexityZscore {
+			args = append(args, "--complexity-zscore")
+		} else {
 			args = append(args, "--no-complexity-zscore")
 		}
 	}
@@ -817,7 +857,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.ratiosMinCyclesAtFmin != 3.0 {
 			args = append(args, "--ratios-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.ratiosMinCyclesAtFmin))
 		}
-		if !m.ratiosSkipInvalidSegments {
+		if m.ratiosSkipInvalidSegments {
+			args = append(args, "--ratios-skip-invalid-segments")
+		} else {
 			args = append(args, "--no-ratios-skip-invalid-segments")
 		}
 	}
@@ -830,7 +872,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.asymmetryMinCyclesAtFmin != 3.0 {
 			args = append(args, "--asymmetry-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.asymmetryMinCyclesAtFmin))
 		}
-		if !m.asymmetrySkipInvalidSegments {
+		if m.asymmetrySkipInvalidSegments {
+			args = append(args, "--asymmetry-skip-invalid-segments")
+		} else {
 			args = append(args, "--no-asymmetry-skip-invalid-segments")
 		}
 	}
@@ -849,7 +893,9 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.qualityNfft != 256 {
 			args = append(args, "--quality-n-fft", fmt.Sprintf("%d", m.qualityNfft))
 		}
-		if !m.qualityExcludeLineNoise {
+		if m.qualityExcludeLineNoise {
+			args = append(args, "--quality-exclude-line-noise")
+		} else {
 			args = append(args, "--no-quality-exclude-line-noise")
 		}
 		if m.qualityLineNoiseFreq != 60.0 {
@@ -892,8 +938,13 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.microstatesRandomState != 42 {
 			args = append(args, "--microstates-random-state", fmt.Sprintf("%d", m.microstatesRandomState))
 		}
-		if !m.microstatesAssignFromGfpPeaks {
+		if m.microstatesAssignFromGfpPeaks {
+			args = append(args, "--microstates-assign-from-gfp-peaks")
+		} else {
 			args = append(args, "--no-microstates-assign-from-gfp-peaks")
+		}
+		if strings.TrimSpace(m.microstatesFixedTemplatesPath) != "" {
+			args = append(args, "--fixed-templates-path", expandUserPath(strings.TrimSpace(m.microstatesFixedTemplatesPath)))
 		}
 	}
 
@@ -964,6 +1015,10 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	args = append(args, "--min-epochs", fmt.Sprintf("%d", m.minEpochsForFeatures))
 	analysisModes := []string{"group_stats", "trial_ml_safe"}
 	args = append(args, "--analysis-mode", analysisModes[m.featAnalysisMode])
+	aggregationMethods := []string{"mean", "median"}
+	args = append(args, "--aggregation-method", aggregationMethods[m.aggregationMethod%len(aggregationMethods)])
+	args = append(args, "--tmin", fmt.Sprintf("%.3f", m.featureTmin))
+	args = append(args, "--tmax", fmt.Sprintf("%.3f", m.featureTmax))
 
 	// Execution options
 	if m.featComputeChangeScores {

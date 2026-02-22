@@ -438,6 +438,153 @@ func TestApplyConfigKeys_HydratesMLSettingsIncludingCNN(t *testing.T) {
 	}
 }
 
+func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.ApplyConfigKeys(map[string]interface{}{
+		"behavior_analysis.statistics.correlation_method":                                 "pearson",
+		"behavior_analysis.robust_correlation":                                            "winsorized",
+		"behavior_analysis.bootstrap":                                                     1500.0,
+		"behavior_analysis.statistics.default_n_bootstrap":                                2500.0,
+		"behavior_analysis.statistics.temperature_control":                                "linear",
+		"behavior_analysis.permutation.scheme":                                            "circular_shift",
+		"behavior_analysis.permutation.group_column_preference":                           []interface{}{"run_id", "block"},
+		"behavior_analysis.features.exclude_non_trialwise_features":                       false,
+		"behavior_analysis.temperature_models.model_comparison.enabled":                   false,
+		"behavior_analysis.temperature_models.breakpoint_test.enabled":                    false,
+		"behavior_analysis.correlations.min_runs":                                         6.0,
+		"behavior_analysis.correlations.target_column":                                    "custom_rating",
+		"behavior_analysis.correlations.prefer_pain_residual":                             true,
+		"behavior_analysis.correlations.permutation.n_permutations":                       77.0,
+		"behavior_analysis.pain_sensitivity.primary_unit":                                 "run_mean",
+		"behavior_analysis.pain_sensitivity.n_permutations":                               300.0,
+		"behavior_analysis.pain_sensitivity.p_primary_mode":                               "asymptotic",
+		"behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback": true,
+		"behavior_analysis.condition.primary_unit":                                        "run_mean",
+		"behavior_analysis.condition.compare_labels":                                      []interface{}{"low", "high"},
+		"behavior_analysis.condition.window_comparison.min_samples":                       12.0,
+		"behavior_analysis.mixed_effects.include_temperature":                             false,
+		"behavior_analysis.mediation.p_primary_mode":                                      "asymptotic",
+		"behavior_analysis.moderation.p_primary_mode":                                     "asymptotic",
+		"behavior_analysis.regression.primary_unit":                                       "run_mean",
+		"behavior_analysis.temporal.correction_method":                                    "cluster",
+		"behavior_analysis.cluster_correction.enabled":                                    true,
+		"behavior_analysis.cluster_correction.alpha":                                      0.01,
+		"behavior_analysis.cluster_correction.min_cluster_size":                           4.0,
+		"behavior_analysis.cluster_correction.tail":                                       -1.0,
+		"validation.min_epochs":                                                           30.0,
+		"validation.min_channels":                                                         16.0,
+		"validation.max_amplitude_uv":                                                     400.0,
+		"io.constants.temperature_range":                                                  []interface{}{35.0, 55.0},
+		"io.constants.max_missing_channels_fraction":                                      0.2,
+	})
+
+	if m.correlationMethod != "pearson" {
+		t.Fatalf("expected correlation method pearson, got %q", m.correlationMethod)
+	}
+	if m.robustCorrelation != 2 {
+		t.Fatalf("expected robustCorrelation=2 (winsorized), got %d", m.robustCorrelation)
+	}
+	if m.bootstrapSamples != 1500 {
+		t.Fatalf("expected bootstrapSamples=1500, got %d", m.bootstrapSamples)
+	}
+	if m.globalNBootstrap != 2500 {
+		t.Fatalf("expected globalNBootstrap=2500, got %d", m.globalNBootstrap)
+	}
+	if m.behaviorStatsTempControl != 1 {
+		t.Fatalf("expected behaviorStatsTempControl=1 (linear), got %d", m.behaviorStatsTempControl)
+	}
+	if m.behaviorPermScheme != 1 {
+		t.Fatalf("expected behaviorPermScheme=1 (circular_shift), got %d", m.behaviorPermScheme)
+	}
+	if m.behaviorPermGroupColumnPreference != "run_id,block" {
+		t.Fatalf("unexpected behaviorPermGroupColumnPreference: %q", m.behaviorPermGroupColumnPreference)
+	}
+	if m.behaviorExcludeNonTrialwiseFeatures {
+		t.Fatalf("expected behaviorExcludeNonTrialwiseFeatures=false")
+	}
+	if m.painResidualModelCompareEnabled {
+		t.Fatalf("expected painResidualModelCompareEnabled=false")
+	}
+	if m.painResidualBreakpointEnabled {
+		t.Fatalf("expected painResidualBreakpointEnabled=false")
+	}
+	if m.correlationsMinRuns != 6 {
+		t.Fatalf("expected correlationsMinRuns=6, got %d", m.correlationsMinRuns)
+	}
+	if !m.correlationsPreferPainResidual {
+		t.Fatalf("expected correlationsPreferPainResidual=true")
+	}
+	if m.correlationsPermutations != 77 {
+		t.Fatalf("expected correlationsPermutations=77, got %d", m.correlationsPermutations)
+	}
+	if m.correlationsTargetColumn != "custom_rating" {
+		t.Fatalf("unexpected correlationsTargetColumn: %q", m.correlationsTargetColumn)
+	}
+	if m.painSensitivityPrimaryUnit != 1 {
+		t.Fatalf("expected painSensitivityPrimaryUnit=1 (run_mean), got %d", m.painSensitivityPrimaryUnit)
+	}
+	if m.painSensitivityPermutations != 300 {
+		t.Fatalf("expected painSensitivityPermutations=300, got %d", m.painSensitivityPermutations)
+	}
+	if m.painSensitivityPermutationPrimary {
+		t.Fatalf("expected painSensitivityPermutationPrimary=false")
+	}
+	if !m.groupLevelAllowParametricFallback {
+		t.Fatalf("expected groupLevelAllowParametricFallback=true")
+	}
+	if m.conditionPrimaryUnit != 1 {
+		t.Fatalf("expected conditionPrimaryUnit=1 (run_mean), got %d", m.conditionPrimaryUnit)
+	}
+	if m.conditionCompareLabels != "low,high" {
+		t.Fatalf("unexpected conditionCompareLabels: %q", m.conditionCompareLabels)
+	}
+	if m.conditionWindowMinSamples != 12 {
+		t.Fatalf("expected conditionWindowMinSamples=12, got %d", m.conditionWindowMinSamples)
+	}
+	if m.mixedIncludeTemperature {
+		t.Fatalf("expected mixedIncludeTemperature=false")
+	}
+	if m.mediationPermutationPrimary {
+		t.Fatalf("expected mediationPermutationPrimary=false")
+	}
+	if m.moderationPermutationPrimary {
+		t.Fatalf("expected moderationPermutationPrimary=false")
+	}
+	if m.regressionPrimaryUnit != 1 {
+		t.Fatalf("expected regressionPrimaryUnit=1 (run_mean), got %d", m.regressionPrimaryUnit)
+	}
+	if m.temporalCorrectionMethod != 1 {
+		t.Fatalf("expected temporalCorrectionMethod=1 (cluster), got %d", m.temporalCorrectionMethod)
+	}
+	if !m.clusterCorrectionEnabled {
+		t.Fatalf("expected clusterCorrectionEnabled=true")
+	}
+	if m.clusterCorrectionAlpha != 0.01 {
+		t.Fatalf("expected clusterCorrectionAlpha=0.01, got %v", m.clusterCorrectionAlpha)
+	}
+	if m.clusterCorrectionMinClusterSize != 4 {
+		t.Fatalf("expected clusterCorrectionMinClusterSize=4, got %d", m.clusterCorrectionMinClusterSize)
+	}
+	if m.clusterCorrectionTailGlobal != 2 {
+		t.Fatalf("expected clusterCorrectionTailGlobal=2 (-1), got %d", m.clusterCorrectionTailGlobal)
+	}
+	if m.validationMinEpochs != 30 {
+		t.Fatalf("expected validationMinEpochs=30, got %d", m.validationMinEpochs)
+	}
+	if m.validationMinChannels != 16 {
+		t.Fatalf("expected validationMinChannels=16, got %d", m.validationMinChannels)
+	}
+	if m.validationMaxAmplitudeUv != 400.0 {
+		t.Fatalf("expected validationMaxAmplitudeUv=400.0, got %v", m.validationMaxAmplitudeUv)
+	}
+	if m.ioTemperatureRange != "35,55" {
+		t.Fatalf("unexpected ioTemperatureRange: %q", m.ioTemperatureRange)
+	}
+	if m.ioMaxMissingChannelsFraction != 0.2 {
+		t.Fatalf("expected ioMaxMissingChannelsFraction=0.2, got %v", m.ioMaxMissingChannelsFraction)
+	}
+}
+
 func TestBuildCommand_PlottingGroupScopeAddsAnalysisScopeFlag(t *testing.T) {
 	m := Model{}
 	m.Pipeline = types.PipelinePlotting
@@ -687,6 +834,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 	m.groupLevelControlTrialOrder = false
 	m.groupLevelControlRunEffects = false
 	m.groupLevelMaxRunDummies = 12
+	m.groupLevelAllowParametricFallback = true
 	m.modelsPrimaryUnit = 1 // run_mean
 	m.modelsForceTrialIIDAsymptotic = true
 
@@ -707,11 +855,84 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 	if !containsSubsequence(args, []string{"--group-level-max-run-dummies", "12"}) {
 		t.Fatalf("expected --group-level-max-run-dummies 12 in args, got: %#v", args)
 	}
+	if !containsString(args, "--group-level-allow-parametric-fallback") {
+		t.Fatalf("expected --group-level-allow-parametric-fallback in args, got: %#v", args)
+	}
 	if !containsSubsequence(args, []string{"--models-primary-unit", "run_mean"}) {
 		t.Fatalf("expected --models-primary-unit run_mean in args, got: %#v", args)
 	}
 	if !containsString(args, "--models-force-trial-iid-asymptotic") {
 		t.Fatalf("expected --models-force-trial-iid-asymptotic in args, got: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		switch comp.Key {
+		case "correlations", "pain_sensitivity", "condition", "temporal", "regression", "mediation", "moderation", "mixed_effects":
+			m.computationSelected[i] = true
+		}
+	}
+
+	m.correlationsMinRuns = 5
+	m.painSensitivityPrimaryUnit = 1
+	m.painSensitivityPermutations = 250
+	m.painSensitivityPermutationPrimary = false
+	m.conditionPrimaryUnit = 1
+	m.conditionWindowMinSamples = 14
+	m.conditionCompareLabels = "low,high"
+	m.mixedIncludeTemperature = false
+	m.mediationPermutationPrimary = false
+	m.moderationPermutationPrimary = false
+	m.correlationsPreferPainResidual = true
+	m.correlationsPermutations = 111
+	m.regressionPrimaryUnit = 1
+	m.temporalCorrectionMethod = 1
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--correlations-min-runs", "5"}) {
+		t.Fatalf("expected --correlations-min-runs 5 in args, got: %#v", args)
+	}
+	if !containsString(args, "--correlations-prefer-pain-residual") {
+		t.Fatalf("expected --correlations-prefer-pain-residual in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--correlations-permutations", "111"}) {
+		t.Fatalf("expected --correlations-permutations 111 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--pain-sensitivity-primary-unit", "run_mean"}) {
+		t.Fatalf("expected --pain-sensitivity-primary-unit run_mean in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--pain-sensitivity-permutations", "250"}) {
+		t.Fatalf("expected --pain-sensitivity-permutations 250 in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-pain-sensitivity-permutation-primary") {
+		t.Fatalf("expected --no-pain-sensitivity-permutation-primary in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--condition-primary-unit", "run_mean"}) {
+		t.Fatalf("expected --condition-primary-unit run_mean in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--regression-primary-unit", "run_mean"}) {
+		t.Fatalf("expected --regression-primary-unit run_mean in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--temporal-correction-method", "cluster"}) {
+		t.Fatalf("expected --temporal-correction-method cluster in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--condition-window-min-samples", "14"}) {
+		t.Fatalf("expected --condition-window-min-samples 14 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--condition-compare-labels", "low", "high"}) {
+		t.Fatalf("expected --condition-compare-labels low high in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-mixed-include-temperature") {
+		t.Fatalf("expected --no-mixed-include-temperature in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-mediation-permutation-primary") {
+		t.Fatalf("expected --no-mediation-permutation-primary in args, got: %#v", args)
+	}
+	if !containsString(args, "--no-moderation-permutation-primary") {
+		t.Fatalf("expected --no-moderation-permutation-primary in args, got: %#v", args)
 	}
 }
 

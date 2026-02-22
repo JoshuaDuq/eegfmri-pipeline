@@ -618,9 +618,6 @@ feature_engineering:
 
 # 4.4 Behavioral Correlation
 behavior_analysis:
-  # Deprecated aliases (do not use in new configs):
-  # - behavior_analysis.correlation_method -> behavior_analysis.statistics.correlation_method
-  # - behavior_analysis.targets -> behavior_analysis.correlations.targets
   # Optional robust estimator for correlations:
   # - null/"none": standard Spearman/Pearson
   # - "percentage_bend" | "winsorized" | "shepherd"
@@ -647,6 +644,9 @@ behavior_analysis:
     enabled: true
     format: "parquet"   # "parquet" (default, recommended) or "tsv"
     add_lag_features: true
+    # If true, fail when feature/event alignment can only be verified by positional
+    # row order (no shared event keys like epoch/trial_index available).
+    disallow_positional_alignment: false
 
   # Trial order validation (used when control_trial_order=true)
   trial_order:

@@ -87,10 +87,7 @@ def stage_correlate_design_impl(
             "behavior_analysis.correlations.use_crossfit_pain_residual",
             True,
         )
-        has_explicit_targets = bool(
-            get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
-        )
-        if (not has_explicit_targets) and use_cv_resid and "pain_residual_cv" in df_trials.columns:
+        if (not explicit_target_column) and use_cv_resid and "pain_residual_cv" in df_trials.columns:
             targets = ["pain_residual_cv", *[t for t in targets if t != "pain_residual_cv"]]
         prefer_pain_residual = get_config_bool(
             ctx.config,
@@ -384,7 +381,17 @@ def stage_correlate_effect_sizes_impl(
         primary_unit in {"run", "run_mean", "runmean", "run_level"}
     )
 
+    has_covariate_controls = design.cov_df is not None and not design.cov_df.empty
+    has_temperature_control = bool(
+        design.temperature_series is not None and any(str(t) != "temperature" for t in design.targets)
+    )
+
     if robust_method not in (None, "", False):
+        if has_covariate_controls or has_temperature_control:
+            raise ValueError(
+                "Correlations: robust correlation with covariate/temperature controls is not supported. "
+                "Disable robust correlation or run without partial controls to avoid confounded primary effects."
+            )
         if want_partial_cov or want_partial_temp or want_partial_cov_temp:
             ctx.logger.info(
                 "Correlations: robust_method=%s disables partial correlations; using raw only.",
@@ -703,8 +710,12 @@ def stage_correlate_primary_selection_impl(
     primary_unit = str(get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial")).strip().lower()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
-    if (not use_run_unit) and (not allow_iid_trials) and p_primary_mode in {"perm_if_available", "permutation_if_available"}:
-        ctx.logger.info("Correlations: forcing p_primary_mode='perm' under non-i.i.d mode (allow_iid_trials=false).")
+    if (not use_run_unit) and (not allow_iid_trials):
+        if p_primary_mode not in {"perm", "permutation"}:
+            ctx.logger.warning(
+                "Correlations: overriding p_primary_mode=%r to 'perm' under non-i.i.d trial-level mode.",
+                p_primary_mode,
+            )
         p_primary_mode = "perm"
     strict_perm_mode = p_primary_mode in {"perm", "permutation"}
 
@@ -900,8 +911,12 @@ def stage_pain_sensitivity_impl(
         get_config_value(ctx.config, "behavior_analysis.pain_sensitivity.p_primary_mode", "perm_if_available")
         or "perm_if_available"
     ).strip().lower()
-    if (not allow_iid_trials) and p_primary_mode in {"perm_if_available", "permutation_if_available"}:
-        ctx.logger.info("Pain sensitivity: forcing p_primary_mode='perm' under non-i.i.d mode (allow_iid_trials=false).")
+    if primary_unit in {"trial", "trialwise"} and (not allow_iid_trials):
+        if p_primary_mode not in {"perm", "permutation"}:
+            ctx.logger.warning(
+                "Pain sensitivity: overriding p_primary_mode=%r to 'perm' under non-i.i.d trial-level mode.",
+                p_primary_mode,
+            )
         p_primary_mode = "perm"
     run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
     perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()

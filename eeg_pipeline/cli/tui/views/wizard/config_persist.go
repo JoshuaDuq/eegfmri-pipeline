@@ -275,6 +275,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocFmriClusterPThreshold"] = m.sourceLocFmriClusterPThreshold
 	cfg["sourceLocFmriOutputType"] = m.sourceLocFmriOutputType
 	cfg["sourceLocFmriResampleToFS"] = m.sourceLocFmriResampleToFS
+	cfg["sourceLocFmriInputSource"] = m.sourceLocFmriInputSource
+	cfg["sourceLocFmriRequireFmriprep"] = m.sourceLocFmriRequireFmriprep
 	cfg["sourceLocFmriWindowAName"] = m.sourceLocFmriWindowAName
 	cfg["sourceLocFmriWindowATmin"] = m.sourceLocFmriWindowATmin
 	cfg["sourceLocFmriWindowATmax"] = m.sourceLocFmriWindowATmax
@@ -335,6 +337,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["microstatesMinDurationMs"] = m.microstatesMinDurationMs
 	cfg["microstatesGfpPeakProminence"] = m.microstatesGfpPeakProminence
 	cfg["microstatesRandomState"] = m.microstatesRandomState
+	cfg["microstatesFixedTemplatesPath"] = m.microstatesFixedTemplatesPath
 
 	// ERDS configuration
 	cfg["erdsUseLogRatio"] = m.erdsUseLogRatio
@@ -394,9 +397,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["runAdjustmentMaxDummies"] = m.runAdjustmentMaxDummies
 	cfg["conditionCompareColumn"] = m.conditionCompareColumn
 	cfg["conditionCompareValues"] = m.conditionCompareValues
+	cfg["conditionCompareLabels"] = m.conditionCompareLabels
 	cfg["conditionCompareWindows"] = m.conditionCompareWindows
 	cfg["conditionMinTrials"] = m.conditionMinTrials
 	cfg["conditionFailFast"] = m.conditionFailFast
+	cfg["conditionPrimaryUnit"] = m.conditionPrimaryUnit
+	cfg["conditionWindowPrimaryUnit"] = m.conditionWindowPrimaryUnit
+	cfg["conditionWindowMinSamples"] = m.conditionWindowMinSamples
 	cfg["conditionEffectThreshold"] = m.conditionEffectThreshold
 	cfg["conditionOverwrite"] = m.conditionOverwrite
 	cfg["temporalTargetColumn"] = m.temporalTargetColumn
@@ -466,6 +473,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["regressionIncludeInteraction"] = m.regressionIncludeInteraction
 	cfg["regressionStandardize"] = m.regressionStandardize
 	cfg["regressionMinSamples"] = m.regressionMinSamples
+	cfg["regressionPrimaryUnit"] = m.regressionPrimaryUnit
 	cfg["regressionPermutations"] = m.regressionPermutations
 	cfg["regressionMaxFeatures"] = m.regressionMaxFeatures
 
@@ -528,6 +536,9 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["correlationsTargetColumn"] = m.correlationsTargetColumn
 	cfg["correlationsUseCrossfitResidual"] = m.correlationsUseCrossfitResidual
 	cfg["correlationsPrimaryUnit"] = m.correlationsPrimaryUnit
+	cfg["correlationsMinRuns"] = m.correlationsMinRuns
+	cfg["correlationsPreferPainResidual"] = m.correlationsPreferPainResidual
+	cfg["correlationsPermutations"] = m.correlationsPermutations
 	cfg["correlationsPermutationPrimary"] = m.correlationsPermutationPrimary
 	cfg["groupLevelBlockPermutation"] = m.groupLevelBlockPermutation
 	cfg["groupLevelTarget"] = m.groupLevelTarget
@@ -535,20 +546,27 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["groupLevelControlTrialOrder"] = m.groupLevelControlTrialOrder
 	cfg["groupLevelControlRunEffects"] = m.groupLevelControlRunEffects
 	cfg["groupLevelMaxRunDummies"] = m.groupLevelMaxRunDummies
+	cfg["groupLevelAllowParametricFallback"] = m.groupLevelAllowParametricFallback
 	cfg["painSensitivityMinTrials"] = m.painSensitivityMinTrials
+	cfg["painSensitivityPrimaryUnit"] = m.painSensitivityPrimaryUnit
+	cfg["painSensitivityPermutations"] = m.painSensitivityPermutations
+	cfg["painSensitivityPermutationPrimary"] = m.painSensitivityPermutationPrimary
 
 	// Mixed Effects & Mediation
 	cfg["mixedEffectsType"] = m.mixedEffectsType
+	cfg["mixedIncludeTemperature"] = m.mixedIncludeTemperature
 	cfg["mixedMaxFeatures"] = m.mixedMaxFeatures
 	cfg["mediationMinEffect"] = m.mediationMinEffect
 	cfg["mediationBootstrap"] = m.mediationBootstrap
 	cfg["mediationMaxMediatorsEnabled"] = m.mediationMaxMediatorsEnabled
 	cfg["mediationMaxMediators"] = m.mediationMaxMediators
 	cfg["mediationPermutations"] = m.mediationPermutations
+	cfg["mediationPermutationPrimary"] = m.mediationPermutationPrimary
 	cfg["moderationMaxFeaturesEnabled"] = m.moderationMaxFeaturesEnabled
 	cfg["moderationMaxFeatures"] = m.moderationMaxFeatures
 	cfg["moderationMinSamples"] = m.moderationMinSamples
 	cfg["moderationPermutations"] = m.moderationPermutations
+	cfg["moderationPermutationPrimary"] = m.moderationPermutationPrimary
 
 	// Cluster tests
 	cfg["clusterThreshold"] = m.clusterThreshold
@@ -559,6 +577,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 
 	// Temporal
 	cfg["temporalResolutionMs"] = m.temporalResolutionMs
+	cfg["temporalCorrectionMethod"] = m.temporalCorrectionMethod
 	cfg["temporalSmoothMs"] = m.temporalSmoothMs
 	cfg["temporalTimeMinMs"] = m.temporalTimeMinMs
 	cfg["temporalTimeMaxMs"] = m.temporalTimeMaxMs
@@ -1459,6 +1478,8 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.sourceLocFmriClusterPThreshold = getFloat("sourceLocFmriClusterPThreshold", m.sourceLocFmriClusterPThreshold)
 	m.sourceLocFmriOutputType = getInt("sourceLocFmriOutputType", m.sourceLocFmriOutputType)
 	m.sourceLocFmriResampleToFS = getBool("sourceLocFmriResampleToFS", m.sourceLocFmriResampleToFS)
+	m.sourceLocFmriInputSource = getInt("sourceLocFmriInputSource", m.sourceLocFmriInputSource)
+	m.sourceLocFmriRequireFmriprep = getBool("sourceLocFmriRequireFmriprep", m.sourceLocFmriRequireFmriprep)
 	m.sourceLocFmriWindowAName = getString("sourceLocFmriWindowAName", m.sourceLocFmriWindowAName)
 	m.sourceLocFmriWindowATmin = getFloat("sourceLocFmriWindowATmin", m.sourceLocFmriWindowATmin)
 	m.sourceLocFmriWindowATmax = getFloat("sourceLocFmriWindowATmax", m.sourceLocFmriWindowATmax)
@@ -1519,6 +1540,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.microstatesMinDurationMs = getFloat("microstatesMinDurationMs", m.microstatesMinDurationMs)
 	m.microstatesGfpPeakProminence = getFloat("microstatesGfpPeakProminence", m.microstatesGfpPeakProminence)
 	m.microstatesRandomState = getInt("microstatesRandomState", m.microstatesRandomState)
+	m.microstatesFixedTemplatesPath = getString("microstatesFixedTemplatesPath", m.microstatesFixedTemplatesPath)
 
 	// ERDS configuration
 	m.erdsUseLogRatio = getBool("erdsUseLogRatio", m.erdsUseLogRatio)
@@ -1578,9 +1600,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.runAdjustmentMaxDummies = getInt("runAdjustmentMaxDummies", m.runAdjustmentMaxDummies)
 	m.conditionCompareColumn = getString("conditionCompareColumn", m.conditionCompareColumn)
 	m.conditionCompareValues = getString("conditionCompareValues", m.conditionCompareValues)
+	m.conditionCompareLabels = getString("conditionCompareLabels", m.conditionCompareLabels)
 	m.conditionCompareWindows = getString("conditionCompareWindows", m.conditionCompareWindows)
 	m.conditionMinTrials = getInt("conditionMinTrials", m.conditionMinTrials)
 	m.conditionFailFast = getBool("conditionFailFast", m.conditionFailFast)
+	m.conditionPrimaryUnit = getInt("conditionPrimaryUnit", m.conditionPrimaryUnit)
+	m.conditionWindowPrimaryUnit = getInt("conditionWindowPrimaryUnit", m.conditionWindowPrimaryUnit)
+	m.conditionWindowMinSamples = getInt("conditionWindowMinSamples", m.conditionWindowMinSamples)
 	m.conditionEffectThreshold = getFloat("conditionEffectThreshold", m.conditionEffectThreshold)
 	m.conditionOverwrite = getBool("conditionOverwrite", m.conditionOverwrite)
 	m.temporalTargetColumn = getString("temporalTargetColumn", m.temporalTargetColumn)
@@ -1656,6 +1682,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.regressionIncludeInteraction = getBool("regressionIncludeInteraction", m.regressionIncludeInteraction)
 	m.regressionStandardize = getBool("regressionStandardize", m.regressionStandardize)
 	m.regressionMinSamples = getInt("regressionMinSamples", m.regressionMinSamples)
+	m.regressionPrimaryUnit = getInt("regressionPrimaryUnit", m.regressionPrimaryUnit)
 	m.regressionPermutations = getInt("regressionPermutations", m.regressionPermutations)
 	m.regressionMaxFeatures = getInt("regressionMaxFeatures", m.regressionMaxFeatures)
 
@@ -1721,6 +1748,9 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.correlationsTargetColumn = getString("correlationsTargetColumn", m.correlationsTargetColumn)
 	m.correlationsUseCrossfitResidual = getBool("correlationsUseCrossfitResidual", m.correlationsUseCrossfitResidual)
 	m.correlationsPrimaryUnit = getInt("correlationsPrimaryUnit", m.correlationsPrimaryUnit)
+	m.correlationsMinRuns = getInt("correlationsMinRuns", m.correlationsMinRuns)
+	m.correlationsPreferPainResidual = getBool("correlationsPreferPainResidual", m.correlationsPreferPainResidual)
+	m.correlationsPermutations = getInt("correlationsPermutations", m.correlationsPermutations)
 	m.correlationsPermutationPrimary = getBool("correlationsPermutationPrimary", m.correlationsPermutationPrimary)
 	m.groupLevelBlockPermutation = getBool("groupLevelBlockPermutation", m.groupLevelBlockPermutation)
 	m.groupLevelTarget = getString("groupLevelTarget", m.groupLevelTarget)
@@ -1739,20 +1769,27 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.groupLevelControlTrialOrder = getBool("groupLevelControlTrialOrder", m.groupLevelControlTrialOrder)
 	m.groupLevelControlRunEffects = getBool("groupLevelControlRunEffects", m.groupLevelControlRunEffects)
 	m.groupLevelMaxRunDummies = getInt("groupLevelMaxRunDummies", m.groupLevelMaxRunDummies)
+	m.groupLevelAllowParametricFallback = getBool("groupLevelAllowParametricFallback", m.groupLevelAllowParametricFallback)
 	m.painSensitivityMinTrials = getInt("painSensitivityMinTrials", m.painSensitivityMinTrials)
+	m.painSensitivityPrimaryUnit = getInt("painSensitivityPrimaryUnit", m.painSensitivityPrimaryUnit)
+	m.painSensitivityPermutations = getInt("painSensitivityPermutations", m.painSensitivityPermutations)
+	m.painSensitivityPermutationPrimary = getBool("painSensitivityPermutationPrimary", m.painSensitivityPermutationPrimary)
 
 	// Mixed Effects & Mediation
 	m.mixedEffectsType = getInt("mixedEffectsType", m.mixedEffectsType)
+	m.mixedIncludeTemperature = getBool("mixedIncludeTemperature", m.mixedIncludeTemperature)
 	m.mixedMaxFeatures = getInt("mixedMaxFeatures", m.mixedMaxFeatures)
 	m.mediationMinEffect = getFloat("mediationMinEffect", m.mediationMinEffect)
 	m.mediationBootstrap = getInt("mediationBootstrap", m.mediationBootstrap)
 	m.mediationMaxMediatorsEnabled = getBool("mediationMaxMediatorsEnabled", m.mediationMaxMediatorsEnabled)
 	m.mediationMaxMediators = getInt("mediationMaxMediators", m.mediationMaxMediators)
 	m.mediationPermutations = getInt("mediationPermutations", m.mediationPermutations)
+	m.mediationPermutationPrimary = getBool("mediationPermutationPrimary", m.mediationPermutationPrimary)
 	m.moderationMaxFeaturesEnabled = getBool("moderationMaxFeaturesEnabled", m.moderationMaxFeaturesEnabled)
 	m.moderationMaxFeatures = getInt("moderationMaxFeatures", m.moderationMaxFeatures)
 	m.moderationMinSamples = getInt("moderationMinSamples", m.moderationMinSamples)
 	m.moderationPermutations = getInt("moderationPermutations", m.moderationPermutations)
+	m.moderationPermutationPrimary = getBool("moderationPermutationPrimary", m.moderationPermutationPrimary)
 
 	// Cluster tests
 	m.clusterThreshold = getFloat("clusterThreshold", m.clusterThreshold)
@@ -1763,6 +1800,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 
 	// Temporal
 	m.temporalResolutionMs = getInt("temporalResolutionMs", m.temporalResolutionMs)
+	m.temporalCorrectionMethod = getInt("temporalCorrectionMethod", m.temporalCorrectionMethod)
 	m.temporalSmoothMs = getInt("temporalSmoothMs", m.temporalSmoothMs)
 	m.temporalTimeMinMs = getInt("temporalTimeMinMs", m.temporalTimeMinMs)
 	m.temporalTimeMaxMs = getInt("temporalTimeMaxMs", m.temporalTimeMaxMs)

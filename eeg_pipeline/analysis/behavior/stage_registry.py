@@ -273,6 +273,7 @@ def config_to_stage_names(pipeline_config: Any) -> List[str]:
         stages.append("models")
     if getattr(pipeline_config, "run_stability", False):
         stages.append("stability")
+    if getattr(pipeline_config, "run_icc", False):
         stages.append("icc")
     if getattr(pipeline_config, "run_correlations", True):
         stages.extend(

@@ -158,6 +158,7 @@ const (
 	optMicrostatesMinDurationMs
 	optMicrostatesGfpPeakProminence
 	optMicrostatesRandomState
+	optMicrostatesFixedTemplatesPath
 	// ERDS options
 	optERDSUseLogRatio
 	optERDSMinBaselinePower
@@ -219,6 +220,9 @@ const (
 	optFeatNJobsConnectivity
 	optFeatNJobsAperiodic
 	optFeatNJobsComplexity
+	optAggregationMethod
+	optFeatureTmin
+	optFeatureTmax
 	// Source localization options (LCMV, eLORETA)
 	optSourceLocMode
 	optSourceLocMethod
@@ -271,6 +275,8 @@ const (
 	optSourceLocFmriClusterPThreshold
 	optSourceLocFmriOutputType
 	optSourceLocFmriResampleToFS
+	optSourceLocFmriInputSource
+	optSourceLocFmriRequireFmriprep
 	optSourceLocFmriWindowAName
 	optSourceLocFmriWindowATmin
 	optSourceLocFmriWindowATmax
@@ -313,13 +319,16 @@ const (
 	optMediationMaxMediatorsEnabled
 	optMediationMaxMediators
 	optMediationPermutations
+	optMediationPermutationPrimary
 	// Behavior options - Moderation
 	optModerationMaxFeaturesEnabled
 	optModerationMaxFeatures
 	optModerationMinSamples
 	optModerationPermutations
+	optModerationPermutationPrimary
 	// Behavior options - Mixed Effects
 	optMixedMaxFeatures
+	optMixedIncludeTemperature
 	// Behavior options - Condition
 	optConditionEffectThreshold
 	optConditionFailFast
@@ -327,8 +336,11 @@ const (
 	optConditionCompareColumn
 	optConditionCompareWindows
 	optConditionCompareValues
+	optConditionCompareLabels
 	optConditionMinTrials
+	optConditionPrimaryUnit
 	optConditionWindowPrimaryUnit
+	optConditionWindowMinSamples
 	optConditionPermutationPrimary
 	optConditionFeatures
 	// Behavior options - Trial table / residual
@@ -379,6 +391,7 @@ const (
 	optRegressionIncludeInteraction
 	optRegressionStandardize
 	optRegressionMinSamples
+	optRegressionPrimaryUnit
 	optRegressionPermutations
 	optRegressionMaxFeatures
 	// Behavior options - Models
@@ -439,6 +452,9 @@ const (
 	optCorrelationsUseCrossfitPainResidual
 	optCorrelationsMultilevel
 	optCorrelationsPrimaryUnit
+	optCorrelationsMinRuns
+	optCorrelationsPreferPainResidual
+	optCorrelationsPermutations
 	optCorrelationsPermutationPrimary
 	optCorrelationsTargetColumn
 	optCorrelationsFeatures
@@ -448,10 +464,15 @@ const (
 	optGroupLevelControlTrialOrder
 	optGroupLevelControlRunEffects
 	optGroupLevelMaxRunDummies
+	optGroupLevelAllowParametricFallback
 	optPainSensitivityMinTrials
+	optPainSensitivityPrimaryUnit
+	optPainSensitivityPermutations
+	optPainSensitivityPermutationPrimary
 	optPainSensitivityFeatures
 	// Behavior options - Pain sensitivity / temporal
 	optTemporalResolutionMs
+	optTemporalCorrectionMethod
 	optTemporalTimeMinMs
 	optTemporalTimeMaxMs
 	optTemporalSmoothMs
@@ -810,7 +831,11 @@ const (
 	optTfrFreqMax
 	optTfrNFreqs
 	optTfrMinCycles
+	optTfrMaxCycles
 	optTfrNCyclesFactor
+	optTfrDecim
+	optTfrDecimPower
+	optTfrDecimPhase
 	optTfrWorkers
 	// Band envelope + IAF (features pipeline)
 	optBandEnvelopePadSec

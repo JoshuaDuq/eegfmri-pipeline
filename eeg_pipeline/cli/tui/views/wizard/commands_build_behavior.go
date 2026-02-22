@@ -243,6 +243,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.regressionMinSamples != 15 {
 			args = append(args, "--regression-min-samples", fmt.Sprintf("%d", m.regressionMinSamples))
 		}
+		if m.regressionPrimaryUnit == 1 {
+			args = append(args, "--regression-primary-unit", "run_mean")
+		}
 		if m.regressionPermutations != 0 {
 			args = append(args, "--regression-permutations", fmt.Sprintf("%d", m.regressionPermutations))
 		}
@@ -457,6 +460,17 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.correlationsPrimaryUnit == 1 {
 			args = append(args, "--correlations-primary-unit", "run_mean")
 		}
+		if m.correlationsMinRuns != 3 {
+			args = append(args, "--correlations-min-runs", fmt.Sprintf("%d", m.correlationsMinRuns))
+		}
+		appendBoolPair(
+			m.correlationsPreferPainResidual,
+			"--correlations-prefer-pain-residual",
+			"--no-correlations-prefer-pain-residual",
+		)
+		if m.correlationsPermutations > 0 {
+			args = append(args, "--correlations-permutations", fmt.Sprintf("%d", m.correlationsPermutations))
+		}
 		appendBoolPair(
 			m.correlationsPermutationPrimary,
 			"--correlations-permutation-primary",
@@ -500,6 +514,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.groupLevelMaxRunDummies != 20 {
 			args = append(args, "--group-level-max-run-dummies", fmt.Sprintf("%d", m.groupLevelMaxRunDummies))
 		}
+		appendBoolPair(
+			m.groupLevelAllowParametricFallback,
+			"--group-level-allow-parametric-fallback",
+			"--no-group-level-allow-parametric-fallback",
+		)
 	}
 
 	// Report
@@ -513,6 +532,17 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.painSensitivityMinTrials > 0 {
 			args = append(args, "--pain-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
 		}
+		if m.painSensitivityPrimaryUnit == 1 {
+			args = append(args, "--pain-sensitivity-primary-unit", "run_mean")
+		}
+		if m.painSensitivityPermutations > 0 {
+			args = append(args, "--pain-sensitivity-permutations", fmt.Sprintf("%d", m.painSensitivityPermutations))
+		}
+		appendBoolPair(
+			m.painSensitivityPermutationPrimary,
+			"--pain-sensitivity-permutation-primary",
+			"--no-pain-sensitivity-permutation-primary",
+		)
 	}
 
 	// Condition
@@ -525,6 +555,10 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--condition-compare-values")
 			args = append(args, splitCSVList(m.conditionCompareValues)...)
 		}
+		if strings.TrimSpace(m.conditionCompareLabels) != "" {
+			args = append(args, "--condition-compare-labels")
+			args = append(args, splitCSVList(m.conditionCompareLabels)...)
+		}
 		if strings.TrimSpace(m.conditionCompareWindows) != "" {
 			args = append(args, "--condition-compare-windows")
 			args = append(args, splitSpaceList(m.conditionCompareWindows)...)
@@ -532,8 +566,14 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.conditionMinTrials > 0 {
 			args = append(args, "--condition-min-trials", fmt.Sprintf("%d", m.conditionMinTrials))
 		}
+		if m.conditionPrimaryUnit == 1 {
+			args = append(args, "--condition-primary-unit", "run_mean")
+		}
 		if m.conditionWindowPrimaryUnit == 1 {
 			args = append(args, "--condition-window-primary-unit", "run_mean")
+		}
+		if m.conditionWindowMinSamples != 10 {
+			args = append(args, "--condition-window-min-samples", fmt.Sprintf("%d", m.conditionWindowMinSamples))
 		}
 		appendBoolPair(
 			m.conditionPermutationPrimary,
@@ -556,6 +596,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		appendFeatureSpec("--temporal-features", m.temporalFeaturesSpec)
 		if m.temporalResolutionMs != 50 {
 			args = append(args, "--temporal-time-resolution-ms", fmt.Sprintf("%d", m.temporalResolutionMs))
+		}
+		if m.temporalCorrectionMethod == 1 {
+			args = append(args, "--temporal-correction-method", "cluster")
 		}
 		if m.temporalTimeMinMs != -200 {
 			args = append(args, "--temporal-time-min-ms", fmt.Sprintf("%d", m.temporalTimeMinMs))
@@ -668,6 +711,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.mediationPermutations > 0 {
 			args = append(args, "--mediation-permutations", fmt.Sprintf("%d", m.mediationPermutations))
 		}
+		appendBoolPair(
+			m.mediationPermutationPrimary,
+			"--mediation-permutation-primary",
+			"--no-mediation-permutation-primary",
+		)
 		if m.mediationMinEffect != 0.05 {
 			args = append(args, "--mediation-min-effect-size", fmt.Sprintf("%.4f", m.mediationMinEffect))
 		}
@@ -687,6 +735,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.moderationPermutations > 0 {
 			args = append(args, "--moderation-permutations", fmt.Sprintf("%d", m.moderationPermutations))
 		}
+		appendBoolPair(
+			m.moderationPermutationPrimary,
+			"--moderation-permutation-primary",
+			"--no-moderation-permutation-primary",
+		)
 		if m.moderationMaxFeaturesEnabled {
 			if m.moderationMaxFeatures != 50 {
 				args = append(args, "--moderation-max-features", fmt.Sprintf("%d", m.moderationMaxFeatures))
@@ -699,6 +752,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.mixedEffectsType == 1 {
 			args = append(args, "--mixed-random-effects", "intercept_slope")
 		}
+		appendBoolPair(
+			m.mixedIncludeTemperature,
+			"--mixed-include-temperature",
+			"--no-mixed-include-temperature",
+		)
 		if m.mixedMaxFeatures != 50 {
 			args = append(args, "--mixed-max-features", fmt.Sprintf("%d", m.mixedMaxFeatures))
 		}

@@ -211,6 +211,7 @@ func (m Model) getFeaturesOptions() []optionType {
 				optMicrostatesGfpPeakProminence,
 				optMicrostatesRandomState,
 				optMicrostatesAssignFromGfpPeaks,
+				optMicrostatesFixedTemplatesPath,
 			)
 		}
 	}
@@ -326,6 +327,7 @@ func (m Model) getFeaturesOptions() []optionType {
 							options = append(options, optSourceLocFmriRunsToInclude)
 						}
 						options = append(options, optSourceLocFmriHrfModel, optSourceLocFmriDriftModel, optSourceLocFmriConditionScopeTrialTypes, optSourceLocFmriStimPhasesToModel)
+						options = append(options, optSourceLocFmriInputSource, optSourceLocFmriRequireFmriprep)
 						options = append(options, optSourceLocFmriHighPassHz, optSourceLocFmriLowPassHz)
 						options = append(options, optSourceLocFmriClusterCorrection)
 						if m.sourceLocFmriClusterCorrection {
@@ -365,7 +367,7 @@ func (m Model) getFeaturesOptions() []optionType {
 		if m.featGroupTFRExpanded {
 			options = append(
 				options,
-				optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers,
+				optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrMaxCycles, optTfrNCyclesFactor, optTfrDecim, optTfrDecimPower, optTfrDecimPhase, optTfrWorkers,
 				optBandEnvelopePadSec, optBandEnvelopePadCycles,
 				optIAFEnabled,
 			)
@@ -407,6 +409,9 @@ func (m Model) getFeaturesOptions() []optionType {
 			options,
 			optMinEpochs,
 			optFeatAnalysisMode,
+			optAggregationMethod,
+			optFeatureTmin,
+			optFeatureTmax,
 			optFeatComputeChangeScores,
 			optFeatSaveTfrWithSidecar,
 		)

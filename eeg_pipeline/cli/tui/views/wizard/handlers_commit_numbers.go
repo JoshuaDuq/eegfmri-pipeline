@@ -844,12 +844,32 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 1 {
 			m.tfrMinCycles = val
 		}
+	case optTfrMaxCycles:
+		if val >= 1 {
+			m.tfrMaxCycles = val
+		}
 	case optTfrNCyclesFactor:
 		if val >= 0.5 {
 			m.tfrNCyclesFactor = val
 		}
+	case optTfrDecim:
+		if val >= 1 {
+			m.tfrDecim = int(val)
+		}
+	case optTfrDecimPower:
+		if val >= 1 {
+			m.tfrDecimPower = int(val)
+		}
+	case optTfrDecimPhase:
+		if val >= 1 {
+			m.tfrDecimPhase = int(val)
+		}
 	case optTfrWorkers:
 		m.tfrWorkers = int(val)
+	case optFeatureTmin:
+		m.featureTmin = val
+	case optFeatureTmax:
+		m.featureTmax = val
 	case optItpcNJobs:
 		m.itpcNJobs = int(val)
 	// Asymmetry options
@@ -1104,6 +1124,14 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 1 {
 			m.groupLevelMaxRunDummies = int(val)
 		}
+	case optCorrelationsMinRuns:
+		if val >= 1 {
+			m.correlationsMinRuns = int(val)
+		}
+	case optCorrelationsPermutations:
+		if val >= 0 {
+			m.correlationsPermutations = int(val)
+		}
 	case optBehaviorMinSamples:
 		if val >= 0 {
 			m.behaviorMinSamples = int(val)
@@ -1295,9 +1323,17 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 0 {
 			m.painSensitivityMinTrials = int(val)
 		}
+	case optPainSensitivityPermutations:
+		if val >= 0 {
+			m.painSensitivityPermutations = int(val)
+		}
 	case optConditionMinTrials:
 		if val >= 0 {
 			m.conditionMinTrials = int(val)
+		}
+	case optConditionWindowMinSamples:
+		if val >= 1 {
+			m.conditionWindowMinSamples = int(val)
 		}
 	case optModerationMinSamples:
 		if val >= 1 {

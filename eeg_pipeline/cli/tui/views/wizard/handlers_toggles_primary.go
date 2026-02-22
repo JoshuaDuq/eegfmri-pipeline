@@ -446,6 +446,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSourceLocFmriResampleToFS:
 		m.sourceLocFmriResampleToFS = !m.sourceLocFmriResampleToFS
 		m.useDefaultAdvanced = false
+	case optSourceLocFmriInputSource:
+		m.sourceLocFmriInputSource = (m.sourceLocFmriInputSource + 1) % 2 // 0: fmriprep, 1: bids_raw
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriRequireFmriprep:
+		m.sourceLocFmriRequireFmriprep = !m.sourceLocFmriRequireFmriprep
+		m.useDefaultAdvanced = false
 	case optSourceLocFmriWindowAName:
 		m.startTextEdit(textFieldSourceLocFmriWindowAName)
 		m.useDefaultAdvanced = false
@@ -901,6 +907,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optMicrostatesAssignFromGfpPeaks:
 		m.microstatesAssignFromGfpPeaks = !m.microstatesAssignFromGfpPeaks
 		m.useDefaultAdvanced = false
+	case optMicrostatesFixedTemplatesPath:
+		m.startTextEdit(textFieldMicrostatesFixedTemplatesPath)
+		m.useDefaultAdvanced = false
 	// Change scores
 	case optChangeScoresTransform:
 		m.changeScoresTransform = (m.changeScoresTransform + 1) % 3
@@ -911,7 +920,13 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	// TFR section
 	case optFeatGroupTFR:
 		m.featGroupTFRExpanded = !m.featGroupTFRExpanded
-	case optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers:
+	case optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrMaxCycles, optTfrNCyclesFactor, optTfrDecim, optTfrDecimPower, optTfrDecimPhase, optTfrWorkers:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optAggregationMethod:
+		m.aggregationMethod = (m.aggregationMethod + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFeatureTmin, optFeatureTmax:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optBandEnvelopePadSec, optBandEnvelopePadCycles, optIAFAlphaWidthHz, optIAFSearchRangeMin, optIAFSearchRangeMax, optIAFMinProminence, optIAFMinCyclesAtFmin, optIAFMinBaselineSec:
@@ -1780,6 +1795,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRegressionMinSamples, optRegressionPermutations, optRegressionMaxFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optRegressionPrimaryUnit:
+		m.regressionPrimaryUnit = (m.regressionPrimaryUnit + 1) % 2
+		m.useDefaultAdvanced = false
 
 	// Models
 	case optModelsIncludeTemperature:
@@ -1949,6 +1967,15 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optCorrelationsPrimaryUnit:
 		m.correlationsPrimaryUnit = (m.correlationsPrimaryUnit + 1) % 2
 		m.useDefaultAdvanced = false
+	case optCorrelationsMinRuns:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optCorrelationsPreferPainResidual:
+		m.correlationsPreferPainResidual = !m.correlationsPreferPainResidual
+		m.useDefaultAdvanced = false
+	case optCorrelationsPermutations:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optCorrelationsPermutationPrimary:
 		m.correlationsPermutationPrimary = !m.correlationsPermutationPrimary
 		m.useDefaultAdvanced = false
@@ -1998,10 +2025,16 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optGroupLevelMaxRunDummies:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optGroupLevelAllowParametricFallback:
+		m.groupLevelAllowParametricFallback = !m.groupLevelAllowParametricFallback
+		m.useDefaultAdvanced = false
 
 	// Temporal
 	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs:
 		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optTemporalCorrectionMethod:
+		m.temporalCorrectionMethod = (m.temporalCorrectionMethod + 1) % 2
 		m.useDefaultAdvanced = false
 	case optTemporalTargetColumn:
 		if len(m.GetAvailableColumns()) > 0 {
@@ -2132,6 +2165,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optMediationBootstrap, optMediationMinEffect, optMediationPermutations:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optMediationPermutationPrimary:
+		m.mediationPermutationPrimary = !m.mediationPermutationPrimary
+		m.useDefaultAdvanced = false
 	case optMediationFeatures:
 		m.startTextEdit(textFieldMediationFeatures)
 		m.useDefaultAdvanced = false
@@ -2155,12 +2191,18 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optModerationMinSamples, optModerationPermutations:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optModerationPermutationPrimary:
+		m.moderationPermutationPrimary = !m.moderationPermutationPrimary
+		m.useDefaultAdvanced = false
 	case optModerationFeatures:
 		m.startTextEdit(textFieldModerationFeatures)
 		m.useDefaultAdvanced = false
 	// Mixed effects options
 	case optMixedMaxFeatures:
 		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optMixedIncludeTemperature:
+		m.mixedIncludeTemperature = !m.mixedIncludeTemperature
 		m.useDefaultAdvanced = false
 	case optMixedEffectsType:
 		m.mixedEffectsType = (m.mixedEffectsType + 1) % 2
@@ -2185,6 +2227,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optConditionFeatures:
 		m.startTextEdit(textFieldConditionFeatures)
 		m.useDefaultAdvanced = false
+	case optConditionCompareLabels:
+		m.startTextEdit(textFieldConditionCompareLabels)
+		m.useDefaultAdvanced = false
 	case optConditionCompareValues:
 		if m.conditionCompareColumn == "" {
 			m.ShowToast("Select a column first", "warning")
@@ -2203,11 +2248,26 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optPainSensitivityMinTrials:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optPainSensitivityPrimaryUnit:
+		m.painSensitivityPrimaryUnit = (m.painSensitivityPrimaryUnit + 1) % 2
+		m.useDefaultAdvanced = false
+	case optPainSensitivityPermutations:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPainSensitivityPermutationPrimary:
+		m.painSensitivityPermutationPrimary = !m.painSensitivityPermutationPrimary
+		m.useDefaultAdvanced = false
 	case optPainSensitivityFeatures:
 		m.startTextEdit(textFieldPainSensitivityFeatures)
 		m.useDefaultAdvanced = false
+	case optConditionPrimaryUnit:
+		m.conditionPrimaryUnit = (m.conditionPrimaryUnit + 1) % 2
+		m.useDefaultAdvanced = false
 	case optConditionWindowPrimaryUnit:
 		m.conditionWindowPrimaryUnit = (m.conditionWindowPrimaryUnit + 1) % 2
+		m.useDefaultAdvanced = false
+	case optConditionWindowMinSamples:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optConditionPermutationPrimary:
 		m.conditionPermutationPrimary = !m.conditionPermutationPrimary

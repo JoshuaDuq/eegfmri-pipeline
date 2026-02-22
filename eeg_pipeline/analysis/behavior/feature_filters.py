@@ -106,7 +106,7 @@ def primary_unit_for_computation_impl(ctx: Any, computation_name: Optional[str])
     }
     key = mapping.get(str(computation_name or "").strip().lower(), None)
     if key is None:
-        key = "behavior_analysis.primary_unit"
+        return "trial"
     return str(get_config_value(ctx.config, key, "trial") or "trial").strip().lower()
 
 

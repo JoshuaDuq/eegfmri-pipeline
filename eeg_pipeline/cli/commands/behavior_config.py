@@ -20,6 +20,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     rng_seed = args.rng_seed if args.rng_seed is not None else config.get("project.random_state")
     if rng_seed is not None:
         config.setdefault("project", {})["random_state"] = rng_seed
+        # Behavior stages derive deterministic subject seeds from statistics.base_seed.
+        stats_cfg["base_seed"] = int(rng_seed)
 
     if args.correlation_method:
         stats_cfg["correlation_method"] = args.correlation_method
@@ -147,25 +149,46 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if getattr(args, "pain_residual_poly_degree", None) is not None:
         pr["poly_degree"] = int(args.pain_residual_poly_degree)
 
+    # Temperature-model diagnostics are consumed by behavior_analysis.temperature_models.*
+    # Keep mirrored keys under pain_residual for backward compatibility.
+    tm = ba.setdefault("temperature_models", {})
     mc = pr.setdefault("model_comparison", {})
+    tm_mc = tm.setdefault("model_comparison", {})
     if getattr(args, "pain_residual_model_compare_enabled", None) is not None:
-        mc["enabled"] = bool(args.pain_residual_model_compare_enabled)
+        enabled = bool(args.pain_residual_model_compare_enabled)
+        mc["enabled"] = enabled
+        tm_mc["enabled"] = enabled
     if getattr(args, "pain_residual_model_compare_min_samples", None) is not None:
-        mc["min_samples"] = int(args.pain_residual_model_compare_min_samples)
+        min_samples = int(args.pain_residual_model_compare_min_samples)
+        mc["min_samples"] = min_samples
+        tm_mc["min_samples"] = min_samples
     if getattr(args, "pain_residual_model_compare_poly_degrees", None) is not None:
-        mc["poly_degrees"] = list(args.pain_residual_model_compare_poly_degrees)
+        poly_degrees = list(args.pain_residual_model_compare_poly_degrees)
+        mc["poly_degrees"] = poly_degrees
+        tm_mc["poly_degrees"] = poly_degrees
 
     bp = pr.setdefault("breakpoint_test", {})
+    tm_bp = tm.setdefault("breakpoint_test", {})
     if getattr(args, "pain_residual_breakpoint_enabled", None) is not None:
-        bp["enabled"] = bool(args.pain_residual_breakpoint_enabled)
+        enabled = bool(args.pain_residual_breakpoint_enabled)
+        bp["enabled"] = enabled
+        tm_bp["enabled"] = enabled
     if getattr(args, "pain_residual_breakpoint_min_samples", None) is not None:
-        bp["min_samples"] = int(args.pain_residual_breakpoint_min_samples)
+        min_samples = int(args.pain_residual_breakpoint_min_samples)
+        bp["min_samples"] = min_samples
+        tm_bp["min_samples"] = min_samples
     if getattr(args, "pain_residual_breakpoint_candidates", None) is not None:
-        bp["n_candidates"] = int(args.pain_residual_breakpoint_candidates)
+        candidates = int(args.pain_residual_breakpoint_candidates)
+        bp["n_candidates"] = candidates
+        tm_bp["n_candidates"] = candidates
     if getattr(args, "pain_residual_breakpoint_quantile_low", None) is not None:
-        bp["quantile_low"] = float(args.pain_residual_breakpoint_quantile_low)
+        q_low = float(args.pain_residual_breakpoint_quantile_low)
+        bp["quantile_low"] = q_low
+        tm_bp["quantile_low"] = q_low
     if getattr(args, "pain_residual_breakpoint_quantile_high", None) is not None:
-        bp["quantile_high"] = float(args.pain_residual_breakpoint_quantile_high)
+        q_high = float(args.pain_residual_breakpoint_quantile_high)
+        bp["quantile_high"] = q_high
+        tm_bp["quantile_high"] = q_high
 
     crossfit = pr.setdefault("crossfit", {})
     if getattr(args, "pain_residual_crossfit_enabled", None) is not None:
@@ -214,6 +237,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         reg["standardize"] = bool(args.regression_standardize)
     if getattr(args, "regression_min_samples", None) is not None:
         reg["min_samples"] = int(args.regression_min_samples)
+    if getattr(args, "regression_primary_unit", None) is not None:
+        reg["primary_unit"] = str(args.regression_primary_unit).strip().lower()
     if getattr(args, "regression_permutations", None) is not None:
         reg["n_permutations"] = int(args.regression_permutations)
     if getattr(args, "regression_max_features", None) is not None:
@@ -330,14 +355,29 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         )
 
     # Pain sensitivity
+    psi_cfg = ba.setdefault("pain_sensitivity", {})
     if getattr(args, "pain_sensitivity_min_trials", None) is not None:
-        ba.setdefault("pain_sensitivity", {})["min_trials"] = int(args.pain_sensitivity_min_trials)
+        psi_cfg["min_trials"] = int(args.pain_sensitivity_min_trials)
+    if getattr(args, "pain_sensitivity_primary_unit", None) is not None:
+        psi_cfg["primary_unit"] = str(args.pain_sensitivity_primary_unit).strip().lower()
+    if getattr(args, "pain_sensitivity_permutations", None) is not None:
+        psi_cfg["n_permutations"] = int(args.pain_sensitivity_permutations)
+    if getattr(args, "pain_sensitivity_permutation_primary", None) is not None:
+        psi_cfg["p_primary_mode"] = (
+            "perm_if_available" if bool(args.pain_sensitivity_permutation_primary) else "asymptotic"
+        )
 
     # Correlations (trial-table)
     if getattr(args, "correlations_types", None) is not None:
         corr_cfg["types"] = list(args.correlations_types)
     if getattr(args, "correlations_primary_unit", None) is not None:
         corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
+    if getattr(args, "correlations_min_runs", None) is not None:
+        corr_cfg["min_runs"] = int(args.correlations_min_runs)
+    if getattr(args, "correlations_prefer_pain_residual", None) is not None:
+        corr_cfg["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
+    if getattr(args, "correlations_permutations", None) is not None:
+        corr_cfg.setdefault("permutation", {})["n_permutations"] = int(args.correlations_permutations)
     if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
         corr_cfg["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
     if getattr(args, "correlations_permutation_primary", None) is not None:
@@ -347,8 +387,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if getattr(args, "correlations_target_column", None) is not None:
         target_col = str(args.correlations_target_column).strip()
         corr_cfg["target_column"] = target_col
-        # Explicit target-column selection should drive correlation targets.
-        corr_cfg["targets"] = [target_col] if target_col else []
     gl_corr_cfg = ba.setdefault("group_level", {}).setdefault("multilevel_correlations", {})
     if getattr(args, "group_level_block_permutation", None) is not None:
         enabled = bool(args.group_level_block_permutation)
@@ -364,6 +402,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         gl_corr_cfg["control_run_effects"] = bool(args.group_level_control_run_effects)
     if getattr(args, "group_level_max_run_dummies", None) is not None:
         gl_corr_cfg["max_run_dummies"] = int(args.group_level_max_run_dummies)
+    if getattr(args, "group_level_allow_parametric_fallback", None) is not None:
+        gl_corr_cfg["allow_parametric_fallback"] = bool(args.group_level_allow_parametric_fallback)
 
     # Report
     if getattr(args, "report_top_n", None) is not None:
@@ -381,14 +421,23 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if getattr(args, "condition_compare_values", None) is not None:
         values = [str(v).strip() for v in (args.condition_compare_values or [])]
         ba.setdefault("condition", {})["compare_values"] = values
+    if getattr(args, "condition_compare_labels", None) is not None:
+        labels = [str(v).strip() for v in (args.condition_compare_labels or [])]
+        ba.setdefault("condition", {})["compare_labels"] = labels
     if getattr(args, "condition_overwrite", None) is not None:
         ba.setdefault("condition", {})["overwrite"] = bool(args.condition_overwrite)
+    if getattr(args, "condition_primary_unit", None) is not None:
+        ba.setdefault("condition", {})["primary_unit"] = str(args.condition_primary_unit).strip().lower()
     if getattr(args, "condition_compare_windows", None) is not None:
         windows = [str(w).strip() for w in (args.condition_compare_windows or [])]
         ba.setdefault("condition", {})["compare_windows"] = windows
     if getattr(args, "condition_window_primary_unit", None) is not None:
         ba.setdefault("condition", {}).setdefault("window_comparison", {})["primary_unit"] = (
             str(args.condition_window_primary_unit).strip().lower()
+        )
+    if getattr(args, "condition_window_min_samples", None) is not None:
+        ba.setdefault("condition", {}).setdefault("window_comparison", {})["min_samples"] = int(
+            args.condition_window_min_samples
         )
     if getattr(args, "condition_permutation_primary", None) is not None:
         enabled = bool(args.condition_permutation_primary)
@@ -400,6 +449,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     temporal_cfg = ba.setdefault("temporal", {})
     if getattr(args, "temporal_target_column", None) is not None:
         temporal_cfg["target_column"] = str(args.temporal_target_column).strip()
+    if getattr(args, "temporal_correction_method", None) is not None:
+        temporal_cfg["correction_method"] = str(args.temporal_correction_method).strip().lower()
     if getattr(args, "temporal_split_by_condition", None) is not None:
         temporal_cfg["split_by_condition"] = bool(args.temporal_split_by_condition)
     if getattr(args, "temporal_condition_column", None) is not None:
@@ -505,6 +556,10 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         ba.setdefault("mediation", {})["n_bootstrap"] = int(args.mediation_bootstrap)
     if getattr(args, "mediation_permutations", None) is not None:
         ba.setdefault("mediation", {})["n_permutations"] = int(args.mediation_permutations)
+    if getattr(args, "mediation_permutation_primary", None) is not None:
+        ba.setdefault("mediation", {})["p_primary_mode"] = (
+            "perm_if_available" if bool(args.mediation_permutation_primary) else "asymptotic"
+        )
     if getattr(args, "mediation_min_effect_size", None) is not None:
         ba.setdefault("mediation", {})["min_effect_size"] = float(args.mediation_min_effect_size)
     if getattr(args, "mediation_max_mediators", None) is not None:
@@ -517,9 +572,15 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         ba.setdefault("moderation", {})["min_samples"] = int(args.moderation_min_samples)
     if getattr(args, "moderation_permutations", None) is not None:
         ba.setdefault("moderation", {})["n_permutations"] = int(args.moderation_permutations)
+    if getattr(args, "moderation_permutation_primary", None) is not None:
+        ba.setdefault("moderation", {})["p_primary_mode"] = (
+            "perm_if_available" if bool(args.moderation_permutation_primary) else "asymptotic"
+        )
 
     if getattr(args, "mixed_random_effects", None) is not None:
         ba.setdefault("mixed_effects", {})["random_effects"] = str(args.mixed_random_effects).strip().lower()
+    if getattr(args, "mixed_include_temperature", None) is not None:
+        ba.setdefault("mixed_effects", {})["include_temperature"] = bool(args.mixed_include_temperature)
     if getattr(args, "mixed_max_features", None) is not None:
         ba.setdefault("mixed_effects", {})["max_features"] = int(args.mixed_max_features)
 
@@ -555,4 +616,3 @@ def _build_computation_features(args: argparse.Namespace) -> dict[str, list[str]
         computation_features["moderation"] = args.moderation_features
 
     return computation_features or None
-

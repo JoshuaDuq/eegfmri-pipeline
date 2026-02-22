@@ -82,6 +82,12 @@ def stage_mediation_impl(
     groups_for_resampling = sanitize_permutation_groups_fn(groups_for_resampling, ctx.logger, "Mediation")
 
     if not allow_iid_trials:
+        if p_primary_mode not in {"perm", "permutation"}:
+            ctx.logger.warning(
+                "Mediation: overriding p_primary_mode=%r to 'perm' under non-i.i.d trial-level mode.",
+                p_primary_mode,
+            )
+            p_primary_mode = "perm"
         if n_permutations <= 0:
             raise ValueError(
                 "Mediation requires non-i.i.d inference under repeated measures. "
@@ -235,6 +241,12 @@ def stage_moderation_impl(
     groups_for_resampling = sanitize_permutation_groups_fn(groups_for_resampling, ctx.logger, "Moderation")
 
     if not allow_iid_trials:
+        if p_primary_mode not in {"perm", "permutation"}:
+            ctx.logger.warning(
+                "Moderation: overriding p_primary_mode=%r to 'perm' under non-i.i.d trial-level mode.",
+                p_primary_mode,
+            )
+            p_primary_mode = "perm"
         if n_permutations <= 0:
             raise ValueError(
                 "Moderation requires non-i.i.d inference under repeated measures. "

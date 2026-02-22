@@ -471,6 +471,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Min Samples", val, "minimum rows for regression"
+		case optRegressionPrimaryUnit:
+			v := "trial"
+			if m.regressionPrimaryUnit == 1 {
+				v = "run_mean"
+			}
+			return "Primary Unit", v, "trial | run_mean"
 		case optRegressionPermutations:
 			val := fmt.Sprintf("%d", m.regressionPermutations)
 			if m.editingNumber && m.isCurrentlyEditing(optRegressionPermutations) {
@@ -747,6 +753,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.conditionCompareColumn)
 			}
 			return "Compare Values", val, hint
+		case optConditionCompareLabels:
+			val := m.conditionCompareLabels
+			if val == "" {
+				val = "(optional)"
+			}
+			if m.editingText && m.editingTextField == textFieldConditionCompareLabels {
+				val = textDisplay
+			}
+			return "Compare Labels", val, "optional labels aligned to compare values"
 		case optConditionFeatures:
 			val := m.conditionFeaturesSpec
 			if strings.TrimSpace(val) == "" {
@@ -765,12 +780,24 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Min Trials/Condition", val, "0=unset"
+		case optConditionPrimaryUnit:
+			v := "trial"
+			if m.conditionPrimaryUnit == 1 {
+				v = "run_mean"
+			}
+			return "Primary Unit", v, "trial | run_mean"
 		case optConditionWindowPrimaryUnit:
 			v := "trial"
 			if m.conditionWindowPrimaryUnit == 1 {
 				v = "run_mean"
 			}
 			return "Window Unit", v, "trial | run_mean"
+		case optConditionWindowMinSamples:
+			val := fmt.Sprintf("%d", m.conditionWindowMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optConditionWindowMinSamples) {
+				val = numberDisplay
+			}
+			return "Window Min Samples", val, "minimum rows for window comparison"
 		case optConditionPermutationPrimary:
 			return "Permutation p-primary", m.boolToOnOff(m.conditionPermutationPrimary), "within-run/block when available"
 		case optConditionFailFast:
@@ -794,6 +821,20 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Min Trials", val, "0=unset"
+		case optPainSensitivityPrimaryUnit:
+			v := "trial"
+			if m.painSensitivityPrimaryUnit == 1 {
+				v = "run_mean"
+			}
+			return "Primary Unit", v, "trial | run_mean"
+		case optPainSensitivityPermutations:
+			val := fmt.Sprintf("%d", m.painSensitivityPermutations)
+			if m.editingNumber && m.isCurrentlyEditing(optPainSensitivityPermutations) {
+				val = numberDisplay
+			}
+			return "Permutations", val, "0=use global"
+		case optPainSensitivityPermutationPrimary:
+			return "Permutation p-primary", m.boolToOnOff(m.painSensitivityPermutationPrimary), "perm_if_available | asymptotic"
 		case optPainSensitivityFeatures:
 			val := m.painSensitivityFeaturesSpec
 			if strings.TrimSpace(val) == "" {
@@ -811,6 +852,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Time Resolution (ms)", val, "bin size"
+		case optTemporalCorrectionMethod:
+			v := "fdr"
+			if m.temporalCorrectionMethod == 1 {
+				v = "cluster"
+			}
+			return "Correction", v, "fdr | cluster"
 		case optTemporalTimeMinMs:
 			val := fmt.Sprintf("%d", m.temporalTimeMinMs)
 			if m.editingNumber && m.isCurrentlyEditing(optTemporalTimeMinMs) {
@@ -982,6 +1029,20 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "run_mean"
 			}
 			return "Primary Unit", v, "trial | run_mean"
+		case optCorrelationsMinRuns:
+			val := fmt.Sprintf("%d", m.correlationsMinRuns)
+			if m.editingNumber && m.isCurrentlyEditing(optCorrelationsMinRuns) {
+				val = numberDisplay
+			}
+			return "Min Runs", val, "minimum runs for run-mean stats"
+		case optCorrelationsPreferPainResidual:
+			return "Prefer Pain Residual", m.boolToOnOff(m.correlationsPreferPainResidual), "prefer pain_residual target ordering"
+		case optCorrelationsPermutations:
+			val := fmt.Sprintf("%d", m.correlationsPermutations)
+			if m.editingNumber && m.isCurrentlyEditing(optCorrelationsPermutations) {
+				val = numberDisplay
+			}
+			return "Corr Permutations", val, "0=use global"
 		case optCorrelationsPermutationPrimary:
 			return "Permutation p-primary", m.boolToOnOff(m.correlationsPermutationPrimary), "within-run/block when available"
 		case optCorrelationsTargetColumn:
@@ -1058,6 +1119,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Max Run Dummies", val, "skip run effects if too many levels"
+		case optGroupLevelAllowParametricFallback:
+			if !m.isComputationSelected("multilevel_correlations") {
+				return "Allow Parametric Fallback", "N/A", "enable Group Multilevel Correlations"
+			}
+			return "Allow Parametric Fallback", m.boolToOnOff(m.groupLevelAllowParametricFallback), "fallback when permutation is unavailable"
 
 		// Cluster
 		case optClusterThreshold:
@@ -1133,6 +1199,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Mediation Permutations", val, "0=disabled"
+		case optMediationPermutationPrimary:
+			return "Permutation p-primary", m.boolToOnOff(m.mediationPermutationPrimary), "perm_if_available | asymptotic"
 		case optMediationMinEffect:
 			val := fmt.Sprintf("%.3f", m.mediationMinEffect)
 			if m.editingNumber && m.isCurrentlyEditing(optMediationMinEffect) {
@@ -1184,6 +1252,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Moderation Permutations", val, "0=disabled"
+		case optModerationPermutationPrimary:
+			return "Permutation p-primary", m.boolToOnOff(m.moderationPermutationPrimary), "perm_if_available | asymptotic"
 		case optModerationFeatures:
 			val := m.moderationFeaturesSpec
 			if strings.TrimSpace(val) == "" {
@@ -1201,6 +1271,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "intercept_slope"
 			}
 			return "Random Effects", v, "group-level only"
+		case optMixedIncludeTemperature:
+			return "Include Temperature", m.boolToOnOff(m.mixedIncludeTemperature), "add temperature covariate"
 		case optMixedMaxFeatures:
 			val := fmt.Sprintf("%d", m.mixedMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optMixedMaxFeatures) {
