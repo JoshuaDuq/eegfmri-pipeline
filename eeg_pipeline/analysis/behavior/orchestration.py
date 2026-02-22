@@ -177,6 +177,11 @@ def _write_parquet_with_optional_csv(
         write_csv(df, path.with_suffix(".csv"), index=False)
 
 
+def _also_save_csv_from_config(config: Any) -> bool:
+    """Resolve whether parquet outputs should also be emitted as CSV."""
+    return bool(get_config_bool(config, "behavior_analysis.output.also_save_csv", False))
+
+
 ###################################################################
 # Result Caching Layer
 ###################################################################

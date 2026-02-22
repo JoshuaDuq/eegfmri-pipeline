@@ -59,8 +59,8 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import EPSILON_PSD, validate_precomputed
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
-from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
-from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
+from eeg_pipeline.utils.analysis.channels import build_roi_map, pick_eeg_channels
+from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed, get_roi_definitions
 from eeg_pipeline.utils.analysis.spectral import compute_frequency_weights
 from eeg_pipeline.utils.config.loader import get_frequency_bands, get_feature_constant
 from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
@@ -475,7 +475,7 @@ def extract_power_features(
     frequency_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(ctx.config)
     
     spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
-    roi_map = _build_roi_map_if_needed(spatial_modes, channel_names, ctx.config)
+    roi_map = build_roi_map_if_needed(spatial_modes, channel_names, ctx.config)
     
     band_frequency_masks = _build_band_frequency_masks(bands, frequency_bands, freqs)
     if not band_frequency_masks:

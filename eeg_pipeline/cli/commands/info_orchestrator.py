@@ -18,6 +18,8 @@ from eeg_pipeline.cli.commands.info_helpers import (
     MODE_ROIS,
     MODE_SUBJECTS,
     MODE_VERSION,
+    _extract_subject_id,
+    _get_logger,
     _handle_config_mode,
     _handle_discover_mode,
     _handle_features_mode,

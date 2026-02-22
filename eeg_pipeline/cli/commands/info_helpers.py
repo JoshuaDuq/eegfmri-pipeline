@@ -14,6 +14,7 @@ from eeg_pipeline.cli.commands.base import (
     detect_feature_availability,
     _empty_feature_availability,
 )
+from eeg_pipeline.cli.common import resolve_task
 
 MODE_SUBJECTS = "subjects"
 MODE_FEATURES = "features"
@@ -1378,5 +1379,4 @@ def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str],
         print(f"Groups: {', '.join(result['groups'])}")
         print(f"Features: {result['n_features']}")
         print(f"Significant (FDR): {result['n_significant']}")
-
 
