@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from eeg_pipeline.cli.commands.plotting_catalog import PLOT_BY_ID
 from eeg_pipeline.cli.commands.plotting_config_overrides import apply_all_config_overrides

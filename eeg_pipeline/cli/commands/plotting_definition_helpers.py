@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Set, Dict
+from typing import Any, List, Optional, Set
 
 from eeg_pipeline.cli.commands.plotting_catalog import PLOT_BY_ID
 from eeg_pipeline.cli.commands.plotting_selection import unique_in_order

@@ -361,13 +361,19 @@ def _write_events_tsv_for_run(
             "vas_scale_max": scale_max,
         }
 
-        def add_event(trial_type: str, onset: float, duration: float, **extra: Any) -> None:
+        def add_event(
+            trial_type: str,
+            onset: float,
+            duration: float,
+            _common: dict[str, Any] = common,
+            **extra: Any,
+        ) -> None:
             row = {
                 "onset": round(t(onset), 6),
                 "duration": round(float(duration), 6),
                 "trial_type": trial_type,
             }
-            row.update(common)
+            row.update(_common)
             row.update(extra)
             rows.append(row)
 

@@ -195,6 +195,7 @@ def _fmri_paths(fmri_root: Path, sub_label: str, task: str, run: int) -> Tuple[P
 def _volume_markers_from_eeg_events(eeg_events_path: Path) -> Tuple[int, float]:
     count = 0
     last_onset = 0.0
+    parse_failures = 0
     _, rows = _read_tsv(eeg_events_path)
     for row in rows:
         tt = (row.get("trial_type") or "").strip()
@@ -202,11 +203,14 @@ def _volume_markers_from_eeg_events(eeg_events_path: Path) -> Tuple[int, float]:
             continue
         try:
             onset = float(row.get("onset") or "")
-        except Exception:
+        except (TypeError, ValueError):
+            parse_failures += 1
             continue
         count += 1
         if onset > last_onset:
             last_onset = onset
+    if parse_failures:
+        print(f"Warning: ignored {parse_failures} malformed Volume/* onset row(s) in {eeg_events_path}")
     return count, last_onset
 
 
@@ -222,6 +226,7 @@ def _psychopy_to_scan_offset_s(eeg_events_path: Path) -> float:
     Returns 0.0 if cannot compute.
     """
     deltas: List[float] = []
+    parse_failures = 0
     _, rows = _read_tsv(eeg_events_path)
     for row in rows:
         tt = (row.get("trial_type") or "").strip()
@@ -230,9 +235,14 @@ def _psychopy_to_scan_offset_s(eeg_events_path: Path) -> float:
         try:
             trig_onset = float(row.get("onset") or "")
             stim_start = float(row.get("stim_start_time") or "")
-        except Exception:
+        except (TypeError, ValueError):
+            parse_failures += 1
             continue
         deltas.append(stim_start - trig_onset)
+    if parse_failures:
+        print(
+            f"Warning: ignored {parse_failures} malformed Trig_therm timing row(s) in {eeg_events_path}"
+        )
     if len(deltas) < 3:
         return 0.0
     deltas.sort()
@@ -266,24 +276,30 @@ def _convert_fmri_events_to_scan_timebase(
     if "psychopy_to_scan_offset_s" not in fieldnames:
         fieldnames.append("psychopy_to_scan_offset_s")
 
+    parse_failures = 0
     for row in rows:
         try:
             onset_psy = float(row.get("onset") or "")
-        except Exception:
+        except (TypeError, ValueError):
+            parse_failures += 1
             continue
         row["onset_psychopy"] = f"{onset_psy:.6f}"
         row["psychopy_to_scan_offset_s"] = f"{offset_s:.6f}"
         row["onset"] = f"{(onset_psy - offset_s):.6f}"
+    if parse_failures:
+        print(
+            f"Warning: left {parse_failures} row(s) unconverted due to malformed onset in {fmri_events_path}"
+        )
 
     # Keep ordering stable for downstream tools
     def sort_key(r: Dict[str, str]) -> Tuple[float, float, str]:
         try:
             o = float(r.get("onset") or "")
-        except Exception:
+        except (TypeError, ValueError):
             o = float("inf")
         try:
             tn = float(r.get("trial_number") or "")
-        except Exception:
+        except (TypeError, ValueError):
             tn = float("inf")
         tt = (r.get("trial_type") or "").strip()
         return o, tn, tt
@@ -319,6 +335,7 @@ def _annotate_fmri_events_for_qc(
         return 0, 0, 0, 0.0
 
     trial_end: Dict[str, float] = {}
+    parse_failures = 0
     for row in rows:
         tn = str(row.get("trial_number") or "").strip()
         if not tn:
@@ -326,12 +343,17 @@ def _annotate_fmri_events_for_qc(
         try:
             onset = float(row.get("onset") or "")
             dur = float(row.get("duration") or "")
-        except Exception:
+        except (TypeError, ValueError):
+            parse_failures += 1
             continue
         end = onset + dur
         prev = trial_end.get(tn, float("-inf"))
         if end > prev:
             trial_end[tn] = end
+    if parse_failures:
+        print(
+            f"Warning: skipped {parse_failures} malformed onset/duration row(s) while annotating {fmri_events_path}"
+        )
 
     eeg_tol_s = 0.10
     bold_tol_s = 1e-3
@@ -435,20 +457,22 @@ def _write_eeg_phase_events(
         return
 
     out_rows: List[Dict[str, str]] = []
+    id_parse_failures = 0
     for r in trig_rows:
         try:
             run_id = int(float(r.get("run_id") or "0"))
             trial_number = int(float(r.get("trial_number") or "0"))
-        except Exception:
+        except (TypeError, ValueError):
+            id_parse_failures += 1
             continue
 
-        def f(key: str) -> Optional[float]:
-            v = r.get(key)
+        def f(key: str, _row: Dict[str, str] = r) -> Optional[float]:
+            v = _row.get(key)
             if v is None or str(v).strip() == "":
                 return None
             try:
                 return float(v) - offset_s
-            except Exception:
+            except (TypeError, ValueError):
                 return None
 
         iti_start = f("iti_start_time")
@@ -460,7 +484,14 @@ def _write_eeg_phase_events(
         vas_start = f("vas_start_time")
         vas_end = f("vas_end_time")
 
-        def add(tt: str, onset: Optional[float], end: Optional[float]) -> None:
+        def add(
+            tt: str,
+            onset: Optional[float],
+            end: Optional[float],
+            _row: Dict[str, str] = r,
+            _run_id: int = run_id,
+            _trial_number: int = trial_number,
+        ) -> None:
             if onset is None or end is None:
                 return
             dur = max(0.0, end - onset)
@@ -468,13 +499,13 @@ def _write_eeg_phase_events(
                 "onset": f"{onset:.6f}",
                 "duration": f"{dur:.6f}",
                 "trial_type": tt,
-                "run_id": str(run_id),
-                "trial_number": str(trial_number),
+                "run_id": str(_run_id),
+                "trial_number": str(_trial_number),
             }
             # Copy core behavioral columns if present
             for k in ("stimulus_temp", "selected_surface", "pain_binary_coded", "vas_final_coded_rating"):
-                if k in r and str(r.get(k) or "").strip() != "":
-                    row[k] = str(r.get(k))
+                if k in _row and str(_row.get(k) or "").strip() != "":
+                    row[k] = str(_row.get(k))
             out_rows.append(row)
 
         add("fixation_rest", iti_start, iti_end)
@@ -484,6 +515,10 @@ def _write_eeg_phase_events(
 
         if stim_end is not None and q_start is not None:
             add("fixation_poststim", stim_end, q_start)
+    if id_parse_failures:
+        print(
+            f"Warning: skipped {id_parse_failures} Trig_therm row(s) with malformed run/trial identifiers in {eeg_events_path}"
+        )
 
     out_rows.sort(key=lambda rr: (float(rr["onset"]), int(rr.get("trial_number") or "0"), rr.get("trial_type") or ""))
     out_fields = ["onset", "duration", "trial_type", "run_id", "trial_number", "stimulus_temp", "selected_surface", "pain_binary_coded", "vas_final_coded_rating"]

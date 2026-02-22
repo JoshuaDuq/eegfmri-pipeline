@@ -14,18 +14,11 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.analysis.behavior.result_types import (
-    ClusterResults,
-    ConditionResults,
-    CorrelationDesign,
-    CorrelationResults,
-    FDRResults,
     FeatureQCResult,
     GroupLevelResult,
     MixedEffectsResult,
-    RegressionResults,
     TempBreakpointResult,
     TempModelComparisonResult,
-    TemporalResults,
     TrialTableResult,
 )
 from eeg_pipeline.analysis.behavior.result_cache import BehaviorResultCache
@@ -144,7 +137,6 @@ from eeg_pipeline.analysis.behavior.stage_registry import (
     is_stage_enabled_by_config as _is_stage_enabled_by_config,
 )
 from eeg_pipeline.analysis.behavior.trial_table_helpers import (
-    compute_feature_signature as _compute_feature_signature,
     compute_trial_table_input_hash as _compute_trial_table_input_hash,
     feature_folder_from_context as _feature_folder_from_context,
     find_trial_table_path as _find_trial_table_path,
@@ -157,7 +149,7 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     compute_correlation,
     format_correlation_method_label,
 )
-from eeg_pipeline.utils.config.loader import get_config_value, get_config_float, get_config_int, get_config_bool
+from eeg_pipeline.utils.config.loader import get_config_int, get_config_bool
 from eeg_pipeline.infra.paths import ensure_dir
 
 

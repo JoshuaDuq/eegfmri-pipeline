@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.config.loader import get_config_float, get_config_int, get_config_value, get_frequency_bands, get_nested_value
+from eeg_pipeline.utils.config.loader import get_config_float, get_config_int, get_config_value, get_frequency_bands
 
 if TYPE_CHECKING:
     import mne
