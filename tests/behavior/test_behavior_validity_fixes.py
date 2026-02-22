@@ -778,7 +778,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 "behavior_analysis": {
                     "correlations": {
                         "targets": ["rating", "temperature"],
-                        "permutation": {"enabled": True},
+                        "permutation": {"enabled": True, "n_permutations": 20},
                     },
                     "statistics": {"allow_iid_trials": False},
                 }
@@ -816,7 +816,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "behavior_analysis": {
                     "correlations": {
-                        "permutation": {"enabled": True},
+                        "permutation": {"enabled": True, "n_permutations": 20},
                     },
                     "statistics": {"allow_iid_trials": False},
                 }
@@ -845,6 +845,42 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             )
         self.assertIsNone(design)
 
+    def test_correlate_design_requires_positive_permutation_count_in_non_iid_trial_mode(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "correlations": {
+                        "permutation": {"enabled": True, "n_permutations": 0},
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 50, 8),
+                "temperature": np.linspace(43, 46, 8),
+                "run_id": np.repeat([1, 2], 4),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            with self.assertRaises(ValueError):
+                stage_correlate_design(
+                    ctx,
+                    SimpleNamespace(control_temperature=True, control_trial_order=True),
+                )
+
     def test_correlate_design_uses_only_explicit_target_column(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
 
@@ -853,7 +889,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 "behavior_analysis": {
                     "correlations": {
                         "target_column": "vas_custom",
-                        "permutation": {"enabled": True},
+                        "permutation": {"enabled": True, "n_permutations": 20},
                     },
                     "statistics": {"allow_iid_trials": False},
                 }
@@ -895,7 +931,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                         "targets": ["rating", "temperature", "pain_residual"],
                         "prefer_pain_residual": True,
                         "use_crossfit_pain_residual": True,
-                        "permutation": {"enabled": True},
+                        "permutation": {"enabled": True, "n_permutations": 20},
                     },
                     "statistics": {"allow_iid_trials": False},
                 }
@@ -937,7 +973,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                         "targets": ["rating", "temperature", "pain_residual"],
                         "prefer_pain_residual": True,
                         "use_crossfit_pain_residual": False,
-                        "permutation": {"enabled": True},
+                        "permutation": {"enabled": True, "n_permutations": 20},
                     },
                     "statistics": {"allow_iid_trials": False},
                 }
@@ -1338,6 +1374,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         cfg = DotConfig(
             {
                 "behavior_analysis": {
+                    "statistics": {"allow_iid_trials": False},
                     "correlations": {
                         "p_primary_mode": "perm_if_available",
                     }
@@ -1377,7 +1414,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertEqual(len(out), 1)
         self.assertTrue(np.isnan(float(out[0]["p_primary"])))
-        self.assertEqual(str(out[0]["p_primary_source"]), "partial_cov_temp_missing")
+        self.assertEqual(str(out[0]["p_kind_primary"]), "perm_missing_required")
+        self.assertEqual(str(out[0]["p_primary_source"]), "perm_missing_required")
 
     def test_correlate_primary_selection_uses_robust_permutation_when_available(self):
         from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
@@ -2128,6 +2166,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertFalse(out.empty)
         self.assertTrue(np.isnan(float(out.iloc[0]["p_perm"])))
+        self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
+        self.assertEqual(str(out.iloc[0]["p_primary_kind"]), "perm_missing_required")
         self.assertIn("failed", str(out.iloc[0]["permutation_method"]))
 
     def test_moderation_strict_non_iid_does_not_fallback_to_asymptotic(self):
@@ -2294,7 +2334,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "behavior_analysis": {
                     "statistics": {"allow_iid_trials": False},
-                    "correlations": {"permutation": {"enabled": True}},
+                    "correlations": {"permutation": {"enabled": True, "n_permutations": 20}},
                 }
             }
         )

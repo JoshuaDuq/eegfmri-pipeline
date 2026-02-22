@@ -51,6 +51,7 @@ Computes band power from a Morlet wavelet time-frequency representation (TFR).
 
 **Outputs per band × segment × scope:**
 - `logratio` (or `log10raw` if no baseline is available and `require_baseline=false`)
+- `db` — decibel-scaled version (`logratio × 10`); emitted alongside `logratio` by default (`emit_db=true`)
 
 **Line noise handling:** Frequency bins within `±width` Hz of line noise fundamentals and harmonics are excluded before band averaging.
 
@@ -113,13 +114,21 @@ Extracts the aperiodic (1/f) component of the power spectrum, separating oscilla
 
 **Outputs per segment × scope:**
 
-| Feature       | Description                                                                      |
-|---------------|----------------------------------------------------------------------------------|
-| `slope`       | Log-log PSD slope (typically negative; steeper = more 1/f dominance).            |
-| `offset`      | Broadband power level (y-intercept in log-log space).                            |
-| `exponent`    | 1/f exponent (knee model only; `exponent ≈ −slope` for fixed model).             |
-| `knee`        | Knee frequency (knee model only; frequency where spectrum transitions).          |
-| `powcorr`     | Aperiodic-corrected band power: ratio of observed to fitted background power.    |
+| Feature              | Description                                                                                          |
+|----------------------|------------------------------------------------------------------------------------------------------|
+| `slope`              | Log-log PSD slope (typically negative; steeper = more 1/f dominance).                               |
+| `offset`             | Broadband power level (y-intercept in log-log space).                                               |
+| `exponent`           | 1/f exponent (`−slope`); emitted for both fixed and knee models.                                    |
+| `knee`               | Knee frequency (knee model only; frequency where spectrum transitions).                             |
+| `r2`                 | Goodness-of-fit R² of the aperiodic model.                                                          |
+| `rms`                | Root-mean-square residual of the aperiodic fit.                                                     |
+| `peakfreq`           | Alpha peak frequency from the aperiodic-adjusted residual spectrum (center-of-gravity).             |
+| `tbr`                | Theta/beta ratio computed on the aperiodic-corrected residual power.                                |
+| `tbr_raw`            | Conventional theta/beta ratio computed on raw PSD power.                                            |
+| `{band}_powcorr`     | Per-band aperiodic-corrected power: integrated residual power above the aperiodic fit.              |
+| `{band}_center_freq` | Center frequency (Hz) of the strongest oscillatory peak in-band from the residual spectrum.         |
+| `{band}_bandwidth`   | Full-width at half-maximum (Hz) of the strongest in-band oscillatory residual peak.                 |
+| `{band}_peak_height` | Peak amplitude above the aperiodic fit (log10 power residual) for the strongest in-band peak.      |
 
 **Peak characterization:** Rejected residual peaks are summarized with center frequency, FWHM bandwidth, and height (FOOOF-like parameterization).
 
@@ -180,8 +189,9 @@ Quantifies event-related power changes relative to baseline using band-limited a
 - **ERS rebound magnitude/latency:** Peak positive rebound after the ERD trough, with configurable minimum latency and threshold.
 
 **Outputs per band × segment × scope:**
-- `erds` — ERDS percentage (or log-ratio)
-- `peak_latency`, `erd_magnitude`, `onset_latency`, `rebound_magnitude`, `rebound_latency` (pain markers)
+- `percent_mean` — Mean ERDS percentage across channels (or `log_ratio_mean` when `use_log_ratio=true`)
+- Per-channel: `peak_latency`, `onset_latency`, `erd_magnitude`, `erd_duration`, `ers_magnitude`, `ers_duration`
+- Pain markers (ROI scope, contralateral somatosensory): `peak_latency`, `erd_magnitude`, `onset_latency`, `rebound_magnitude`, `rebound_latency`, `ers_magnitude`
 
 ---
 
@@ -228,10 +238,10 @@ Hemispheric power asymmetry indices for configured left-right channel pairs.
 
 **Default channel pairs:** `(F3, F4)`, `(F7, F8)`, `(C3, C4)`, `(P3, P4)`, `(O1, O2)`.
 
-**Outputs per pair × band × segment:**
+**Outputs per pair × band × segment (scope: `chpair`):**
 - `index` — Normalized asymmetry index `∈ [−1, 1]`
 - `logdiff` — Log-difference (primary metric for frontal alpha asymmetry)
-- `logdiff_activation` — Activation-convention sign flip (optional)
+- `logdiff_activation` — Activation-convention sign flip; disabled by default (`emit_activation_convention=false`)
 
 ---
 
@@ -249,7 +259,7 @@ Functional connectivity between channel pairs using phase-based and amplitude-ba
 | **PLI**   | Phase Lag Index — Fraction of time points with consistent phase lead/lag.                      |
 | **imCoh** | Imaginary part of Coherency — Sensitive only to non-zero-lag interactions.                     |
 | **PLV**   | Phase Locking Value — Magnitude of mean phase difference across time.                          |
-| **AEC**   | Amplitude Envelope Correlation — `mne_connectivity.envelope_correlation` with orthogonalization (`orth` mode by default) to remove zero-lag leakage. Optionally Fisher z-transformed. |
+| **AEC**   | Amplitude Envelope Correlation — orthogonalized amplitude envelope correlation to remove zero-lag leakage. Outputs `aec` (raw r, default) and/or `aec_z` (Fisher-z transformed), controlled by `aec_output` config (`["r"]` by default). |
 
 **Computation:**
 1. For each segment and band, extract data and compute connectivity matrices using `spectral_connectivity_time` (CWT Morlet mode) or `envelope_correlation`.
@@ -258,17 +268,19 @@ Functional connectivity between channel pairs using phase-based and amplitude-ba
 
 **Graph metrics** (optional, when `enable_graph_metrics=true`):
 
-| Metric                | Computation                                                         |
-|-----------------------|---------------------------------------------------------------------|
-| `clustering`          | Weighted clustering coefficient (NetworkX).                         |
-| `efficiency`          | Global efficiency on thresholded adjacency matrix.                  |
-| `participation`       | Participation coefficient (community structure).                    |
-| `small_world_sigma`   | Small-world index σ = (C/C_rand) / (L/L_rand) from random graphs.  |
+| Metric              | Computation                                                         |
+|---------------------|---------------------------------------------------------------------|
+| `{method}_clust`    | Weighted clustering coefficient (NetworkX).                         |
+| `{method}_geff`     | Global efficiency on thresholded adjacency matrix.                  |
+| `{method}_smallworld` | Small-world index σ = (C/C_rand) / (L/L_rand) from random graphs. |
 
 **Dynamic connectivity** (optional, when `dynamic_enabled=true`):
 - Sliding-window connectivity with configurable window length and step.
-- Summary statistics: mean, std, autocorrelation at specified lag.
-- Optional K-means state clustering on windowed connectivity vectors.
+- Per-window summary statistics (stat suffix `{method}sw*`):
+  - `{method}swmean`, `{method}swstd` — mean and std of edge weights across windows
+  - `{method}swac{lag}` — autocorrelation at specified lag
+  - `{method}swtopostab` — adjacent-window topographic stability (global)
+- K-means state clustering (when `dynamic_state_enabled=true`): `{method}swswitch` (state switch rate), `{method}swdwellsec` (mean dwell time), `{method}swstateent` (state entropy)
 
 **Volume conduction warning:** A warning is emitted if phase-based measures are used without CSD/Laplacian spatial transform.
 
@@ -288,8 +300,13 @@ Directed (causal) connectivity between channel pairs.
 | **DTF** | Directed Transfer Function — Multivariate autoregressive model-based directed coupling. |
 | **PDC** | Partial Directed Coherence — Normalized DTF accounting for indirect pathways.           |
 
-Computation follows the same spatial aggregation, segment handling, and graph metric pipeline as undirected connectivity.
 For DTF/PDC, MVAR order is automatically reduced when segment length/channel count is too small for stable estimation (`min_samples_per_mvar_parameter` safeguard).
+
+**Defaults:** PSI is enabled by default; DTF and PDC are disabled by default (`enable_psi=true`, `enable_dtf=false`, `enable_pdc=false`).
+
+**Outputs per method × band × segment (domain prefix: `dconn`):**
+- Per channel pair: `{method}_fwd`, `{method}_bwd`
+- Global: `{method}_fwd_mean`, `{method}_bwd_mean`, `{method}_asymmetry` (mean forward − backward)
 
 ---
 
@@ -323,7 +340,7 @@ Measures the consistency of oscillatory phase across trials at each time-frequen
 
 ### 11. PAC (Phase-Amplitude Coupling)
 
-**Module:** `phase.py` → `extract_pac_features`
+**Module:** `phase.py` → `extract_pac_from_precomputed`
 
 Cross-frequency coupling between a low-frequency phase signal and a high-frequency amplitude signal.
 
@@ -349,8 +366,8 @@ Cross-frequency coupling between a low-frequency phase signal and a high-frequen
 5. **Segment validity gates:** PAC is skipped when segment duration is below `max(min_segment_sec, min_cycles_at_fmin / fmin_phase)` for each phase band.
 
 **Outputs per phase-amplitude band pair × segment × scope:**
-- `mvl` — Mean Vector Length (raw PAC strength)
-- `z` — Surrogate-corrected z-score
+- `val` — Mean Vector Length (raw PAC strength)
+- `z` — Surrogate-corrected z-score (only when `n_surrogates > 0`)
 
 ---
 
@@ -374,7 +391,9 @@ Source-space ROI features using inverse solutions applied to sensor-space EEG.
    - Apply inverse solution only to fMRI-constrained source space.
 
 **Outputs per ROI × band × segment:**
-- Source-space band power, connectivity, and time-course features within anatomically or functionally defined ROIs.
+- `src_{segment}_{method}_{band}_{roi}_power` — Band power within each ROI.
+- `src_{segment}_{method}_{band}_{roi}_envelope` — Mean amplitude envelope within each ROI.
+- `src_{segment}_{method}_{band}_global_power` — Global mean band power across all ROIs.
 
 ---
 
@@ -397,9 +416,9 @@ Nonlinear signal complexity metrics computed per trial, per channel, per band.
 
 **Preprocessing:** Optional z-score standardization per channel per trial (default enabled). Minimum segment duration and sample count gates prevent unstable estimates.
 
-**Outputs per band × segment × scope:**
+**Outputs per band × segment × scope (domain prefix: `comp`):**
 - `lzc`, `pe`, `sampen` — Single-scale metrics
-- `mse01` … `mse20` — Multiscale entropy at each scale
+- `mse01` … `mse20` — Multiscale entropy at each scale (zero-padded two-digit index, e.g. `mse01`, `mse10`, `mse20`)
 
 ---
 
@@ -455,12 +474,12 @@ EEG microstate dynamics using GFP-peak topographic clustering.
 6. **Minimum-duration smoothing:** Runs shorter than `min_duration_ms` are reassigned using neighboring-run context (longer-neighbor preference; tie split) to avoid directional bias.
 7. Compute per-trial metrics:
 
-| Feature              | Computation                                                     |
-|----------------------|-----------------------------------------------------------------|
-| `coverage_{class}`   | Fraction of time points assigned to each microstate class.      |
-| `duration_{class}`   | Mean duration (ms) of contiguous runs of each class.            |
-| `occurrence_{class}` | Occurrence rate (Hz) of each class.                             |
-| `trans_{i}_to_{j}_prob` | Adjacent-sample transition probability from class `i` to class `j` (diagonal entries encode persistence; `NaN` when class `i` has no outgoing transitions). |
+| Feature                  | Computation                                                     |
+|--------------------------|-----------------------------------------------------------------|
+| `coverage_{label}`       | Fraction of time points assigned to each microstate class.      |
+| `duration_ms_{label}`    | Mean duration (ms) of contiguous runs of each class.            |
+| `occurrence_hz_{label}`  | Occurrence rate (Hz) of each class.                             |
+| `trans_{i}_to_{j}_prob`  | Adjacent-sample transition probability from class `i` to class `j` (diagonal entries encode persistence; `NaN` when class `i` has no outgoing transitions). |
 
 **CV/leakage behavior:** In `trial_ml_safe` mode with `train_mask`, template fitting is restricted to training trials.
 **Statistical note:** Subject-fitted templates induce cross-trial dependence (non-i.i.d. trial rows); fixed templates do not.
@@ -480,7 +499,7 @@ Trial-level signal quality metrics for QC and artifact flagging.
 | `variance` | `np.var(data, axis=time)` — Per-channel temporal variance.                                     |
 | `ptp`      | `np.ptp(data, axis=time)` — Peak-to-peak amplitude.                                           |
 | `finite`   | `mean(isfinite(data))` — Fraction of non-NaN/non-Inf samples (missing data indicator).         |
-| `snr`      | `10 × log10(signal_power / noise_power)` — Signal band (default 1–30 Hz) vs noise band (default 40–80 Hz), computed from PSD. |
+| `snr`      | `10 × log10(signal_density / noise_density)` — Bandwidth-normalized PSD power density ratio: signal band (default 1–30 Hz) vs noise band (default 40–80 Hz). |
 | `muscle`   | `Σ PSD(muscle_band) / Σ PSD(total)` — High-frequency power fraction (default muscle band: 30–80 Hz). Elevated values indicate muscle artifact contamination. |
 
 **PSD computation:** Welch (default) or multitaper, with line noise exclusion (fundamentals + harmonics).
@@ -516,7 +535,7 @@ Additional safeguards:
 ## Dependencies
 
 - **MNE-Python** — TFR, PSD, forward models, inverse solutions
-- **mne-connectivity** — wPLI, PLI, imCoh, PLV, AEC, PSI, DTF, PDC
+- **mne-connectivity** — wPLI, PLI, imCoh, PLV, AEC (`spectral_connectivity_time`, `envelope_correlation`); PSI, DTF, PDC use custom CSD/MVAR implementations
 - **NumPy / SciPy** — Numerical computation, signal processing, optimization
 - **scikit-learn** — K-means clustering (microstates, dynamic connectivity states)
 - **NetworkX** — Graph metrics (clustering, efficiency, small-world)

@@ -298,6 +298,13 @@ def run_group_level_correlations_impl(
     except (TypeError, ValueError):
         seed_int = None
     rng = np.random.default_rng(seed_int)
+    allow_parametric_fallback = bool(
+        get_config_value(
+            config,
+            "behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback",
+            False,
+        )
+    )
 
     records: List[Dict[str, Any]] = []
     for feat in feature_cols:
@@ -536,9 +543,11 @@ def run_group_level_correlations_impl(
     results_df["p_primary"] = results_df["p_perm"].copy()
     results_df["p_primary_kind"] = "p_perm"
     missing_perm = results_df["p_primary"].isna()
-    if missing_perm.any() and "p_parametric" in results_df.columns:
+    if allow_parametric_fallback and missing_perm.any() and "p_parametric" in results_df.columns:
         results_df.loc[missing_perm, "p_primary"] = results_df.loc[missing_perm, "p_parametric"]
         results_df.loc[missing_perm, "p_primary_kind"] = "p_parametric"
+    elif missing_perm.any():
+        results_df.loc[missing_perm, "p_primary_kind"] = "perm_missing_required"
 
     return hierarchical_fdr(
         results_df,

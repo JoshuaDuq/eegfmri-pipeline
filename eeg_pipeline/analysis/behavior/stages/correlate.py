@@ -51,10 +51,17 @@ def stage_correlate_design_impl(
     ).strip().lower()
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
     perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
-    if primary_unit in {"trial", "trialwise"} and not perm_enabled and not allow_iid_trials:
+    n_perm = get_config_int(
+        ctx.config,
+        "behavior_analysis.correlations.permutation.n_permutations",
+        get_config_int(ctx.config, "behavior_analysis.statistics.n_permutations", 0),
+    )
+    if primary_unit in {"trial", "trialwise"} and (not perm_enabled or n_perm <= 0) and not allow_iid_trials:
         raise ValueError(
             "Trial-level correlations require a valid non-i.i.d inference method. "
-            "Enable permutation testing (behavior_analysis.correlations.permutation.enabled=true) "
+            "Enable permutation testing with a positive permutation count "
+            "(behavior_analysis.correlations.permutation.enabled=true and "
+            "behavior_analysis.correlations.permutation.n_permutations>0) "
             "or use run-level aggregation (behavior_analysis.correlations.primary_unit=run_mean). "
             "Set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
         )
@@ -695,6 +702,11 @@ def stage_correlate_primary_selection_impl(
     p_primary_mode = str(get_config_value(ctx.config, "behavior_analysis.correlations.p_primary_mode", "perm_if_available")).strip().lower()
     primary_unit = str(get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial")).strip().lower()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    if (not use_run_unit) and (not allow_iid_trials) and p_primary_mode in {"perm_if_available", "permutation_if_available"}:
+        ctx.logger.info("Correlations: forcing p_primary_mode='perm' under non-i.i.d mode (allow_iid_trials=false).")
+        p_primary_mode = "perm"
+    strict_perm_mode = p_primary_mode in {"perm", "permutation"}
 
     for rec in records:
         target = rec.get("target", "")
@@ -724,6 +736,10 @@ def stage_correlate_primary_selection_impl(
                     p_kind = "p_perm_raw"
                     p_primary = p_perm_raw
                     src = "raw_robust_perm"
+                elif strict_perm_mode:
+                    p_kind = "perm_missing_required"
+                    p_primary = np.nan
+                    src = "perm_missing_required"
         else:
             want_partial_cov = design.cov_df is not None and not design.cov_df.empty
             want_partial_temp = bool(getattr(config, "control_temperature", True)) and target != "temperature" and design.temperature_series is not None
@@ -756,11 +772,18 @@ def stage_correlate_primary_selection_impl(
                     p_kind = perm_key
                     p_primary = rec.get(perm_key, np.nan)
                     src = f"{src}_perm"
+                elif strict_perm_mode:
+                    p_kind = "perm_missing_required"
+                    p_primary = np.nan
+                    src = "perm_missing_required"
 
             if not (pd.notna(p_primary) and np.isfinite(float(p_primary))):
                 p_primary = np.nan
-                r_primary = np.nan
-                src = f"{src}_missing"
+                if p_kind == "perm_missing_required":
+                    src = "perm_missing_required"
+                else:
+                    r_primary = np.nan
+                    src = f"{src}_missing"
 
         rec["p_kind_primary"] = p_kind
         rec["p_primary"] = p_primary

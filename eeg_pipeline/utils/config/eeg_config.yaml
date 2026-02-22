@@ -860,7 +860,7 @@ behavior_analysis:
     time_resolution_ms: 50
     time_range_ms: [-200, 1000]
     smooth_window_ms: 100
-    correction_method: "fdr"          # "fdr" | "bonferroni" | "cluster"
+    correction_method: "cluster"      # "fdr" | "bonferroni" | "cluster"
     # Condition-based splitting (similar to condition comparison)
     split_by_condition: true           # If true, compute separate correlations per condition value
     condition_column: ""               # Column to split by (empty = use event_columns.pain_binary)
@@ -912,6 +912,8 @@ behavior_analysis:
   # Group-level analysis controls
   group_level:
     block_permutation: true
+    multilevel_correlations:
+      allow_parametric_fallback: false  # If false, missing permutation p-values remain NaN (strict non-i.i.d)
 
   # Mixed effects modeling
   mixed_effects:
