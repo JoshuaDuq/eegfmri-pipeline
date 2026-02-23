@@ -132,16 +132,16 @@ fmri_contrast:
   
   # Condition A: column and value to select trials
   condition_a:
-    column: "pain_binary_coded" # Column name in events.tsv
+    column: "binary_outcome_coded" # Column name in events.tsv
     value: 1                    # Value to filter for (e.g., "temp49p3", "1")
   
   # Condition B: column and value for comparison (optional)
   condition_b:
-    column: "pain_binary_coded"
+    column: "binary_outcome_coded"
     value: 0
 
   # Optional: restrict condition-based trial selection to specific event phases.
-  # Best practice for designs where per-trial columns (e.g., pain_binary_coded) repeat across phases.
+  # Best practice for designs where per-trial columns (e.g., binary_outcome_coded) repeat across phases.
   # If null, no trial_type scoping is applied.
   condition_scope_trial_types: null  # e.g., ["stimulation"]
 
@@ -160,7 +160,7 @@ fmri_contrast:
   formula: null                # e.g., "condition_a - condition_b"
   
   # Contrast output
-  name: "pain_vs_nonpain"      # Output contrast name
+  name: "contrast"      # Output contrast name
   runs: null                   # List of run numbers (null = auto-detect)
   
   # GLM settings

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
@@ -105,6 +104,8 @@ _GENERAL_OVERRIDE_RULES = (
     ConfigOverrideRule("perm_scheme", "behavior_analysis.permutation.scheme", _to_lower_stripped),
     ConfigOverrideRule("n_jobs", "behavior_analysis.n_jobs", _to_int),
     ConfigOverrideRule("min_samples", "behavior_analysis.min_samples.default", _to_int),
+    ConfigOverrideRule("predictor_column", "behavior_analysis.predictor_column", _to_stripped),
+    ConfigOverrideRule("outcome_column", "behavior_analysis.outcome_column", _to_stripped),
     ConfigOverrideRule("control_temperature", "behavior_analysis.control_temperature", _to_bool),
     ConfigOverrideRule("control_trial_order", "behavior_analysis.control_trial_order", _to_bool),
     ConfigOverrideRule("run_adjustment", "behavior_analysis.run_adjustment.enabled", _to_bool),
@@ -165,37 +166,37 @@ _FEATURE_QC_OVERRIDE_RULES = (
 )
 
 _PAIN_RESIDUAL_OVERRIDE_RULES = (
-    ConfigOverrideRule("pain_residual_enabled", "behavior_analysis.pain_residual.enabled", _to_bool),
-    ConfigOverrideRule("pain_residual_method", "behavior_analysis.pain_residual.method", _to_lower_stripped),
-    ConfigOverrideRule("pain_residual_min_samples", "behavior_analysis.pain_residual.min_samples", _to_int),
+    ConfigOverrideRule("predictor_residual_enabled", "behavior_analysis.predictor_residual.enabled", _to_bool),
+    ConfigOverrideRule("predictor_residual_method", "behavior_analysis.predictor_residual.method", _to_lower_stripped),
+    ConfigOverrideRule("predictor_residual_min_samples", "behavior_analysis.predictor_residual.min_samples", _to_int),
     ConfigOverrideRule(
-        "pain_residual_spline_df_candidates",
-        "behavior_analysis.pain_residual.spline_df_candidates",
+        "predictor_residual_spline_df_candidates",
+        "behavior_analysis.predictor_residual.spline_df_candidates",
         _to_list,
     ),
-    ConfigOverrideRule("pain_residual_poly_degree", "behavior_analysis.pain_residual.poly_degree", _to_int),
+    ConfigOverrideRule("predictor_residual_poly_degree", "behavior_analysis.predictor_residual.poly_degree", _to_int),
 )
 
 _PAIN_RESIDUAL_CROSSFIT_OVERRIDE_RULES = (
-    ConfigOverrideRule("pain_residual_crossfit_enabled", "behavior_analysis.pain_residual.crossfit.enabled", _to_bool),
+    ConfigOverrideRule("predictor_residual_crossfit_enabled", "behavior_analysis.predictor_residual.crossfit.enabled", _to_bool),
     ConfigOverrideRule(
-        "pain_residual_crossfit_group_column",
-        "behavior_analysis.pain_residual.crossfit.group_column",
+        "predictor_residual_crossfit_group_column",
+        "behavior_analysis.predictor_residual.crossfit.group_column",
         _to_stripped,
     ),
     ConfigOverrideRule(
-        "pain_residual_crossfit_n_splits",
-        "behavior_analysis.pain_residual.crossfit.n_splits",
+        "predictor_residual_crossfit_n_splits",
+        "behavior_analysis.predictor_residual.crossfit.n_splits",
         _to_int,
     ),
     ConfigOverrideRule(
-        "pain_residual_crossfit_method",
-        "behavior_analysis.pain_residual.crossfit.method",
+        "predictor_residual_crossfit_method",
+        "behavior_analysis.predictor_residual.crossfit.method",
         _to_lower_stripped,
     ),
     ConfigOverrideRule(
-        "pain_residual_crossfit_spline_n_knots",
-        "behavior_analysis.pain_residual.crossfit.spline_n_knots",
+        "predictor_residual_crossfit_spline_n_knots",
+        "behavior_analysis.predictor_residual.crossfit.spline_n_knots",
         _to_int,
     ),
 )
@@ -341,15 +342,15 @@ _INFLUENCE_TEMP_SPLINE_OVERRIDE_RULES = (
 )
 
 _PAIN_SENSITIVITY_OVERRIDE_RULES = (
-    ConfigOverrideRule("pain_sensitivity_min_trials", "behavior_analysis.pain_sensitivity.min_trials", _to_int),
+    ConfigOverrideRule("predictor_sensitivity_min_trials", "behavior_analysis.predictor_sensitivity.min_trials", _to_int),
     ConfigOverrideRule(
-        "pain_sensitivity_primary_unit",
-        "behavior_analysis.pain_sensitivity.primary_unit",
+        "predictor_sensitivity_primary_unit",
+        "behavior_analysis.predictor_sensitivity.primary_unit",
         _to_lower_stripped,
     ),
     ConfigOverrideRule(
-        "pain_sensitivity_permutations",
-        "behavior_analysis.pain_sensitivity.n_permutations",
+        "predictor_sensitivity_permutations",
+        "behavior_analysis.predictor_sensitivity.n_permutations",
         _to_int,
     ),
 )
@@ -359,8 +360,8 @@ _CORRELATIONS_OVERRIDE_RULES = (
     ConfigOverrideRule("correlations_primary_unit", "behavior_analysis.correlations.primary_unit", _to_lower_stripped),
     ConfigOverrideRule("correlations_min_runs", "behavior_analysis.correlations.min_runs", _to_int),
     ConfigOverrideRule(
-        "correlations_prefer_pain_residual",
-        "behavior_analysis.correlations.prefer_pain_residual",
+        "correlations_prefer_predictor_residual",
+        "behavior_analysis.correlations.prefer_predictor_residual",
         _to_bool,
     ),
     ConfigOverrideRule(
@@ -369,8 +370,8 @@ _CORRELATIONS_OVERRIDE_RULES = (
         _to_int,
     ),
     ConfigOverrideRule(
-        "correlations_use_crossfit_pain_residual",
-        "behavior_analysis.correlations.use_crossfit_pain_residual",
+        "correlations_use_crossfit_predictor_residual",
+        "behavior_analysis.correlations.use_crossfit_predictor_residual",
         _to_bool,
     ),
     ConfigOverrideRule("correlations_target_column", "behavior_analysis.correlations.target_column", _to_stripped),
@@ -455,6 +456,7 @@ _TEMPORAL_OVERRIDE_RULES = (
     ),
     ConfigOverrideRule("temporal_include_tf_grid", "behavior_analysis.temporal.include_tf_grid", _to_bool),
     ConfigOverrideRule("temporal_time_resolution_ms", "behavior_analysis.temporal.time_resolution_ms", _to_int),
+    ConfigOverrideRule("temporal_freqs_hz", "behavior_analysis.temporal.freqs_hz", _to_list),
     ConfigOverrideRule("temporal_smooth_window_ms", "behavior_analysis.temporal.smooth_window_ms", _to_int),
 )
 
@@ -579,59 +581,50 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     _apply_override_rules(args, config, _PAIN_RESIDUAL_OVERRIDE_RULES)
 
     # Temperature-model diagnostics are consumed by behavior_analysis.temperature_models.*
-    # Keep mirrored keys under pain_residual for backward compatibility.
-    if getattr(args, "pain_residual_model_compare_enabled", None) is not None:
-        enabled = bool(args.pain_residual_model_compare_enabled)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.enabled", enabled)
+    if getattr(args, "predictor_residual_model_compare_enabled", None) is not None:
+        enabled = bool(args.predictor_residual_model_compare_enabled)
         _set_nested_config_value(config, "behavior_analysis.temperature_models.model_comparison.enabled", enabled)
-    if getattr(args, "pain_residual_model_compare_min_samples", None) is not None:
-        min_samples = int(args.pain_residual_model_compare_min_samples)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.min_samples", min_samples)
+    if getattr(args, "predictor_residual_model_compare_min_samples", None) is not None:
+        min_samples = int(args.predictor_residual_model_compare_min_samples)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.model_comparison.min_samples",
             min_samples,
         )
-    if getattr(args, "pain_residual_model_compare_poly_degrees", None) is not None:
-        poly_degrees = list(args.pain_residual_model_compare_poly_degrees)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.poly_degrees", poly_degrees)
+    if getattr(args, "predictor_residual_model_compare_poly_degrees", None) is not None:
+        poly_degrees = list(args.predictor_residual_model_compare_poly_degrees)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.model_comparison.poly_degrees",
             poly_degrees,
         )
 
-    if getattr(args, "pain_residual_breakpoint_enabled", None) is not None:
-        enabled = bool(args.pain_residual_breakpoint_enabled)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.enabled", enabled)
+    if getattr(args, "predictor_residual_breakpoint_enabled", None) is not None:
+        enabled = bool(args.predictor_residual_breakpoint_enabled)
         _set_nested_config_value(config, "behavior_analysis.temperature_models.breakpoint_test.enabled", enabled)
-    if getattr(args, "pain_residual_breakpoint_min_samples", None) is not None:
-        min_samples = int(args.pain_residual_breakpoint_min_samples)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.min_samples", min_samples)
+    if getattr(args, "predictor_residual_breakpoint_min_samples", None) is not None:
+        min_samples = int(args.predictor_residual_breakpoint_min_samples)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.breakpoint_test.min_samples",
             min_samples,
         )
-    if getattr(args, "pain_residual_breakpoint_candidates", None) is not None:
-        candidates = int(args.pain_residual_breakpoint_candidates)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.n_candidates", candidates)
+    if getattr(args, "predictor_residual_breakpoint_candidates", None) is not None:
+        candidates = int(args.predictor_residual_breakpoint_candidates)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.breakpoint_test.n_candidates",
             candidates,
         )
-    if getattr(args, "pain_residual_breakpoint_quantile_low", None) is not None:
-        q_low = float(args.pain_residual_breakpoint_quantile_low)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_low", q_low)
+    if getattr(args, "predictor_residual_breakpoint_quantile_low", None) is not None:
+        q_low = float(args.predictor_residual_breakpoint_quantile_low)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.breakpoint_test.quantile_low",
             q_low,
         )
-    if getattr(args, "pain_residual_breakpoint_quantile_high", None) is not None:
-        q_high = float(args.pain_residual_breakpoint_quantile_high)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_high", q_high)
+    if getattr(args, "predictor_residual_breakpoint_quantile_high", None) is not None:
+        q_high = float(args.predictor_residual_breakpoint_quantile_high)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.breakpoint_test.quantile_high",
@@ -679,11 +672,11 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         _apply_override_rules(args, config, _INFLUENCE_TEMP_SPLINE_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _PAIN_SENSITIVITY_OVERRIDE_RULES)
-    if getattr(args, "pain_sensitivity_permutation_primary", None) is not None:
+    if getattr(args, "predictor_sensitivity_permutation_primary", None) is not None:
         _set_nested_config_value(
             config,
-            "behavior_analysis.pain_sensitivity.p_primary_mode",
-            "perm_if_available" if bool(args.pain_sensitivity_permutation_primary) else "asymptotic",
+            "behavior_analysis.predictor_sensitivity.p_primary_mode",
+            "perm_if_available" if bool(args.predictor_sensitivity_permutation_primary) else "asymptotic",
         )
 
     _apply_override_rules(args, config, _CORRELATIONS_OVERRIDE_RULES)
@@ -749,41 +742,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     _apply_override_rules(args, config, _TEMPORAL_FEATURES_OVERRIDE_RULES)
 
-    # Deprecated TF-heatmap aliases now map to canonical temporal settings.
-    tf_flag_used = _has_any_arg(
-        args,
-        (
-            "tf_heatmap_enabled",
-            "tf_heatmap_freqs",
-            "tf_heatmap_time_resolution_ms",
-        ),
-    )
-    if tf_flag_used:
-        warnings.warn(
-            "TF-heatmap flags are deprecated. Use temporal options "
-            "(--temporal-include-tf-grid, --temporal-time-resolution-ms) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if getattr(args, "tf_heatmap_enabled", None) is not None:
-            _set_nested_config_value(
-                config,
-                "behavior_analysis.temporal.include_tf_grid",
-                bool(args.tf_heatmap_enabled),
-            )
-        if getattr(args, "tf_heatmap_time_resolution_ms", None) is not None:
-            _set_nested_config_value(
-                config,
-                "behavior_analysis.temporal.time_resolution_ms",
-                int(args.tf_heatmap_time_resolution_ms),
-            )
-        if getattr(args, "tf_heatmap_freqs", None) is not None:
-            _set_nested_config_value(
-                config,
-                "behavior_analysis.temporal.freqs_hz",
-                [float(v) for v in (args.tf_heatmap_freqs or [])],
-            )
-
     _apply_override_rules(args, config, _CLUSTER_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _MEDIATION_OVERRIDE_RULES)
@@ -817,8 +775,8 @@ def _build_computation_features(args: argparse.Namespace) -> dict[str, list[str]
 
     if getattr(args, "correlations_features", None):
         computation_features["correlations"] = args.correlations_features
-    if getattr(args, "pain_sensitivity_features", None):
-        computation_features["pain_sensitivity"] = args.pain_sensitivity_features
+    if getattr(args, "predictor_sensitivity_features", None):
+        computation_features["predictor_sensitivity"] = args.predictor_sensitivity_features
     if getattr(args, "condition_features", None):
         computation_features["condition"] = args.condition_features
     if getattr(args, "temporal_features", None):

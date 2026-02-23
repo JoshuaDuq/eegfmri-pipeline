@@ -448,20 +448,20 @@ def add_lag_and_delta_features(
     return result_df.reset_index(drop=True), meta
 
 
-def add_pain_residual(
+def add_predictor_residual(
     df: pd.DataFrame,
     config: Any,
     *,
     temperature_col: str = "temperature",
     rating_col: str = "rating",
     out_pred_col: str = "rating_hat_from_temp",
-    out_resid_col: str = "pain_residual",
+    out_resid_col: str = "predictor_residual",
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Add a flexible temperature→rating fit and define pain_residual = rating - f(temp)."""
+    """Add a flexible temperature→rating fit and define predictor_residual = rating - f(temp)."""
     from eeg_pipeline.utils.config.loader import get_config_value
 
     enabled = bool(
-        get_config_value(config, "behavior_analysis.pain_residual.enabled", True)
+        get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)
     )
     meta: Dict[str, Any] = {"enabled": enabled}
     if not enabled:
@@ -474,7 +474,7 @@ def add_pain_residual(
         meta["status"] = "skipped_missing_columns"
         return df, meta
 
-    from eeg_pipeline.utils.analysis.stats.pain_residual import fit_temperature_rating_curve
+    from eeg_pipeline.utils.analysis.stats.predictor_residual import fit_temperature_rating_curve
 
     temperature = pd.to_numeric(df[temperature_col], errors="coerce")
     rating = pd.to_numeric(df[rating_col], errors="coerce")
@@ -488,7 +488,7 @@ def add_pain_residual(
     result[out_resid_col] = residual
     crossfit_enabled = bool(
         get_config_value(
-            config, "behavior_analysis.pain_residual.crossfit.enabled", False
+            config, "behavior_analysis.predictor_residual.crossfit.enabled", False
         )
     )
     if crossfit_enabled:
@@ -497,17 +497,17 @@ def add_pain_residual(
         )
         group_col_raw = get_config_value(
             config,
-            "behavior_analysis.pain_residual.crossfit.group_column",
+            "behavior_analysis.predictor_residual.crossfit.group_column",
             default_group_col,
         )
         group_col = str(group_col_raw or "").strip()
         n_splits_required = int(
             get_config_value(
-                config, "behavior_analysis.pain_residual.crossfit.n_splits", 5
+                config, "behavior_analysis.predictor_residual.crossfit.n_splits", 5
             )
         )
         method_raw = get_config_value(
-            config, "behavior_analysis.pain_residual.crossfit.method", "spline"
+            config, "behavior_analysis.predictor_residual.crossfit.method", "spline"
         )
         method = str(method_raw).strip().lower()
 
@@ -527,7 +527,7 @@ def add_pain_residual(
             valid_mask = valid_mask & groups_series.notna()
 
         min_samples_required = int(
-            get_config_value(config, "behavior_analysis.pain_residual.min_samples", 10)
+            get_config_value(config, "behavior_analysis.predictor_residual.min_samples", 10)
         )
         n_valid_samples = int(valid_mask.sum())
         if n_valid_samples < min_samples_required:
@@ -598,7 +598,7 @@ def _build_crossfit_model(config: Any, method: str) -> Tuple[Any, Dict[str, Any]
 
     if method == "poly":
         degree = int(
-            get_config_value(config, "behavior_analysis.pain_residual.poly_degree", 2)
+            get_config_value(config, "behavior_analysis.predictor_residual.poly_degree", 2)
         )
         degree = max(1, min(degree, 5))
         model = Pipeline(
@@ -611,7 +611,7 @@ def _build_crossfit_model(config: Any, method: str) -> Tuple[Any, Dict[str, Any]
     else:
         n_knots = int(
             get_config_value(
-                config, "behavior_analysis.pain_residual.crossfit.spline_n_knots", 5
+                config, "behavior_analysis.predictor_residual.crossfit.spline_n_knots", 5
             )
         )
         n_knots = max(3, min(n_knots, 12))
@@ -661,6 +661,6 @@ __all__ = [
     "find_trial_table_path",
     "merge_trial_tables",
     "add_lag_and_delta_features",
-    "add_pain_residual",
+    "add_predictor_residual",
     "save_trial_table",
 ]

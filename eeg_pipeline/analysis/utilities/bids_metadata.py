@@ -12,7 +12,7 @@ THERMAL_EVENTS_SCHEMA: dict[str, dict[str, Any]] = {
     "trial_number": {"Description": "Within-run trial index (1-based)."},
     "stimulus_temp": {"Description": "Thermode target temperature.", "Units": "C"},
     "selected_surface": {"Description": "Stimulus surface index (experiment-defined)."},
-    "pain_binary_coded": {"Description": "Pain yes/no response (1=yes, 0=no)."},
+    "binary_outcome_coded": {"Description": "Pain yes/no response (1=yes, 0=no)."},
     "vas_final_coded_rating": {
         "Description": "Final VAS-coded rating (non-pain: 0–99 heat; pain: 100–200 pain)."
     },

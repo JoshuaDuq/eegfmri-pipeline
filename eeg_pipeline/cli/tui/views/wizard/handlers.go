@@ -986,12 +986,6 @@ func (m *Model) getAdvancedOptionCount() int {
 		return len(m.getFmriPreprocessingOptions())
 	case types.PipelineFmriAnalysis:
 		return len(m.getFmriAnalysisOptions())
-	case types.PipelineRawToBIDS:
-		return len(m.getRawToBidsOptions())
-	case types.PipelineFmriRawToBIDS:
-		return len(m.getFmriRawToBidsOptions())
-	case types.PipelineMergePsychoPyData:
-		return len(m.getMergePsychopyOptions())
 	default:
 		return 1
 	}
@@ -1013,29 +1007,6 @@ func (m *Model) findNextPlottingAdvancedRow(current int, delta int) int {
 		}
 	}
 	return current
-}
-
-// toggleAdvancedOption handles Space key for advanced config options
-func (m *Model) toggleMergePsychopyAdvancedOption() {
-	options := m.getMergePsychopyOptions()
-	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
-		return
-	}
-
-	opt := options[m.advancedCursor]
-	switch opt {
-	case optUseDefaults:
-		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optMergeEventPrefixes:
-		m.startTextEdit(textFieldMergeEventPrefixes)
-		m.useDefaultAdvanced = false
-	case optMergeEventTypes:
-		m.startTextEdit(textFieldMergeEventTypes)
-		m.useDefaultAdvanced = false
-	case optMergeQCColumns:
-		m.startTextEdit(textFieldMergeQCColumns)
-		m.useDefaultAdvanced = false
-	}
 }
 
 func (m Model) findNextVisiblePlot(current int, delta int) int {

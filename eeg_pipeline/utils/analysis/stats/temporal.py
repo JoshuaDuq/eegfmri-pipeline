@@ -30,7 +30,7 @@ from eeg_pipeline.utils.analysis.tfr import (
 from eeg_pipeline.utils.analysis.windowing import build_time_windows_fixed_size_clamped
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.tfr_alignment import compute_aligned_data_length
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import write_tsv
 
@@ -577,7 +577,7 @@ def _determine_condition_values(
     requested_values = temporal_cfg.get("condition_values", []) or []
 
     if not condition_column:
-        condition_column = get_pain_column_from_config(config, events)
+        condition_column = get_binary_outcome_column_from_config(config, events)
 
     if split_by_condition and condition_column and condition_column in events.columns:
         condition_vec = events[condition_column].to_numpy()[:n_trials]
@@ -644,12 +644,7 @@ def _run_tf_correlations_core(
         epochs.load_data()
 
     temporal_cfg = config.get("behavior_analysis.temporal", {}) or {}
-    legacy_hm_cfg = config.get("behavior_analysis.time_frequency_heatmap", {}) or {}
-    if legacy_hm_cfg:
-        logger.warning(
-            "behavior_analysis.time_frequency_heatmap is deprecated; use behavior_analysis.temporal.* settings."
-        )
-    roi_selection = temporal_cfg.get("roi_selection", legacy_hm_cfg.get("roi_selection"))
+    roi_selection = temporal_cfg.get("roi_selection")
     epochs_tfr = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
     tfr = compute_tfr_morlet(epochs_tfr, config, logger=logger)
     if tfr is None:
@@ -660,7 +655,7 @@ def _run_tf_correlations_core(
     y_arr = y.to_numpy()
 
     # Apply windowing
-    tw = temporal_cfg.get("time_window", legacy_hm_cfg.get("time_window"))
+    tw = temporal_cfg.get("time_window")
     if tw is None:
         range_ms = temporal_cfg.get("time_range_ms", None)
         if isinstance(range_ms, (list, tuple)) and len(range_ms) >= 2:
@@ -670,7 +665,7 @@ def _run_tf_correlations_core(
         if not tm.any():
             return
         times, power = times[tm], power[:, :, tm]
-    fr = temporal_cfg.get("freq_range", legacy_hm_cfg.get("freq_range"))
+    fr = temporal_cfg.get("freq_range")
     if fr:
         fm = (freqs >= float(fr[0])) & (freqs <= float(fr[1]))
         if not fm.any():
@@ -680,16 +675,12 @@ def _run_tf_correlations_core(
     time_res = None
     if temporal_cfg.get("time_resolution_ms", None) is not None:
         time_res = float(temporal_cfg.get("time_resolution_ms")) / 1000.0
-    elif legacy_hm_cfg.get("time_resolution_ms", None) is not None:
-        time_res = float(legacy_hm_cfg.get("time_resolution_ms")) / 1000.0
-    elif legacy_hm_cfg.get("time_resolution", None) is not None:
-        time_res = float(legacy_hm_cfg.get("time_resolution"))
     if time_res is None:
         time_res = 0.1
     time_edges = np.arange(times[0], times[-1] + float(time_res), float(time_res))
     min_pts = int(config.get("behavior_analysis.statistics.min_samples_roi", 20))
 
-    tf_jobs_cfg = temporal_cfg.get("n_jobs", legacy_hm_cfg.get("n_jobs", None))
+    tf_jobs_cfg = temporal_cfg.get("n_jobs", None)
     global_jobs_cfg = config.get("behavior_analysis.n_jobs", 1)
     n_jobs_corr = tf_jobs_cfg if tf_jobs_cfg is not None else global_jobs_cfg
     try:
@@ -723,7 +714,7 @@ def _run_tf_correlations_core(
         get_config_value(config, "behavior_analysis.cluster.n_permutations", None) or
         get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 100)
     )
-    n_perm = max(n_perm_cfg, int(temporal_cfg.get("n_cluster_perm", legacy_hm_cfg.get("n_cluster_perm", 0))))
+    n_perm = max(n_perm_cfg, int(temporal_cfg.get("n_cluster_perm", 0)))
     c_alpha = float(
         get_config_value(config, "behavior_analysis.cluster.alpha", None) or
         get_config_value(config, "behavior_analysis.cluster_correction.alpha", None) or

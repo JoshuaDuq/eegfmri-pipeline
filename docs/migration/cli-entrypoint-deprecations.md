@@ -6,10 +6,10 @@ removed:
 - `scripts/eeg_raw_to_bids.py`
 - `scripts/merge_psychopy.py`
 
-Use the primary CLI:
+Use the paradigm-specific CLI script:
 
-- `eeg-pipeline utilities raw-to-bids ...`
-- `eeg-pipeline utilities merge-psychopy ...`
+- `python paradigm-specific-scripts/run_paradigm_specific.py eeg-raw-to-bids ...`
+- `python paradigm-specific-scripts/run_paradigm_specific.py merge-psychopy ...`
 
 Rationale:
 

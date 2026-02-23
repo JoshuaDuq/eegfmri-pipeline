@@ -15,7 +15,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
     def _ctx(self, config: DotConfig) -> SimpleNamespace:
         return SimpleNamespace(
             subject="0001",
-            task="thermalactive",
+            task="task",
             config=config,
             logger=Mock(),
             deriv_root=Path(tempfile.mkdtemp()),
@@ -52,7 +52,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 {
                     "behavior_analysis": {
                         "run_adjustment": {"column": "run_id"},
-                        "pain_residual": {"enabled": True, "crossfit": {"enabled": False}},
+                        "predictor_residual": {"enabled": True, "crossfit": {"enabled": False}},
                     }
                 }
             )
@@ -83,9 +83,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             df_after_lags = orch._load_trial_table_df(ctx)
             self.assertIn("trial_index_within_group", df_after_lags.columns)
 
-            orch.stage_pain_residual(ctx, SimpleNamespace())
+            orch.stage_predictor_residual(ctx, SimpleNamespace())
             df_after_resid = orch._load_trial_table_df(ctx)
-            self.assertIn("pain_residual", df_after_resid.columns)
+            self.assertIn("predictor_residual", df_after_resid.columns)
 
     def test_correlate_design_does_not_auto_resolve_optional_enrichments(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_selected_stages
@@ -100,7 +100,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         # Lag and residual enrichment stages are optional and only included
         # when explicitly requested by config/selection.
         self.assertNotIn("lag_features", plan["resolved"])
-        self.assertNotIn("pain_residual", plan["resolved"])
+        self.assertNotIn("predictor_residual", plan["resolved"])
     def test_correlate_pvalues_not_reintroduced_when_disabled(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_selected_stages
 
@@ -133,11 +133,11 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         cfg = DotConfig(
             {
                 "behavior_analysis": {"condition": {"compare_column": ""}},
-                "event_columns": {"pain_binary": ["pain_binary"]},
+                "event_columns": {"binary_outcome": ["binary_outcome"]},
             }
         )
-        df_trials = pd.DataFrame({"pain_binary": [0, 1]})
-        self.assertEqual(_resolve_condition_compare_column(df_trials, cfg), "pain_binary")
+        df_trials = pd.DataFrame({"binary_outcome": [0, 1]})
+        self.assertEqual(_resolve_condition_compare_column(df_trials, cfg), "binary_outcome")
 
     def test_condition_run_mean_aggregation_and_min_samples_forwarded(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_column
@@ -153,14 +153,14 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                     },
                     "run_adjustment": {"column": "run_id"},
                 },
-                "event_columns": {"pain_binary": ["pain_binary"]},
+                "event_columns": {"binary_outcome": ["binary_outcome"]},
             }
         )
         ctx = self._ctx(cfg)
         df_trials = pd.DataFrame(
             {
                 "run_id": [1, 1, 2, 2],
-                "pain_binary": [1, 1, 0, 0],
+                "binary_outcome": [1, 1, 0, 0],
                 "power_alpha": [0.2, 0.4, 0.8, 1.0],
             }
         )
@@ -205,7 +205,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(captured["paired"])
         self.assertIsNotNone(captured["pair_ids"])
         self.assertEqual(len(captured["pair_ids"]), 2)
-        self.assertEqual(str(out["condition_column"].iloc[0]), "pain_binary")
+        self.assertEqual(str(out["condition_column"].iloc[0]), "binary_outcome")
 
     def test_condition_run_level_keeps_run_condition_cells(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_column
@@ -221,14 +221,14 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                     },
                     "run_adjustment": {"column": "run_id"},
                 },
-                "event_columns": {"pain_binary": ["pain_binary"]},
+                "event_columns": {"binary_outcome": ["binary_outcome"]},
             }
         )
         ctx = self._ctx(cfg)
         df_trials = pd.DataFrame(
             {
                 "run_id": [1, 1, 2, 2],
-                "pain_binary": [1, 0, 1, 0],
+                "binary_outcome": [1, 0, 1, 0],
                 "power_alpha": [0.2, 0.4, 0.8, 1.0],
             }
         )
@@ -276,7 +276,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "behavior_analysis": {
                     "condition": {
-                        "compare_column": "pain_binary",
+                        "compare_column": "binary_outcome",
                         "primary_unit": "trial",
                         "compare_values": [1, 0],
                         "permutation": {"enabled": True},
@@ -291,7 +291,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         df_trials = pd.DataFrame(
             {
                 "run_id": [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
-                "pain_binary": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+                "binary_outcome": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
                 "power_alpha": [0.2, 0.4, 0.8, 1.0, 0.3, 0.5, 0.7, 1.1, 0.6, 0.9],
             }
         )
@@ -718,10 +718,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         self.assertEqual(sorted(idx.tolist()), [0, 1, 2, 3])
 
-    def test_pain_sensitivity_perm_mode_marks_missing_when_permutation_unavailable(self):
-        from eeg_pipeline.utils.analysis.stats.correlation import run_pain_sensitivity_correlations
+    def test_predictor_sensitivity_perm_mode_marks_missing_when_permutation_unavailable(self):
+        from eeg_pipeline.utils.analysis.stats.correlation import run_predictor_sensitivity_correlations
 
-        out = run_pain_sensitivity_correlations(
+        out = run_predictor_sensitivity_correlations(
             features_df=pd.DataFrame({"power_alpha": [0.1, 0.2, 0.3, 0.4, 0.6, 0.7]}),
             ratings=pd.Series([10, 20, 30, 40, 50, 60], dtype=float),
             temperatures=pd.Series([44.1, 44.3, 44.6, 45.0, 45.3, 45.6], dtype=float),
@@ -743,7 +743,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         parsed = BehaviorPipelineConfig.from_config(cfg)
         self.assertFalse(parsed.run_validation)
 
-    def test_behavior_pipeline_config_rejects_conflicting_correlation_method_keys(self):
+    def test_behavior_pipeline_config_uses_canonical_correlation_method_key(self):
         from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
 
         cfg = DotConfig(
@@ -754,8 +754,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 }
             }
         )
-        with self.assertRaises(ValueError):
-            BehaviorPipelineConfig.from_config(cfg)
+        parsed = BehaviorPipelineConfig.from_config(cfg)
+        self.assertEqual(parsed.method, "spearman")
 
     def test_behavior_pipeline_config_rejects_unknown_robust_method(self):
         from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
@@ -790,7 +790,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "rating": np.linspace(10, 50, 8),
                 "temperature": np.linspace(43, 46, 8),
-                "pain_residual": np.linspace(-1, 1, 8),
+                "predictor_residual": np.linspace(-1, 1, 8),
                 "run_id": np.repeat([1, 2], 4),
                 "power_alpha": np.linspace(0.1, 0.8, 8),
             }
@@ -901,7 +901,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "rating": np.linspace(10, 50, 8),
                 "temperature": np.linspace(43, 46, 8),
-                "pain_residual": np.linspace(-1, 1, 8),
+                "predictor_residual": np.linspace(-1, 1, 8),
                 "vas_custom": np.linspace(0.2, 0.9, 8),
                 "run_id": np.repeat([1, 2], 4),
                 "power_alpha": np.linspace(0.1, 0.8, 8),
@@ -922,16 +922,16 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(design)
         self.assertEqual(design.targets, ["vas_custom"])
 
-    def test_correlate_design_prefers_crossfit_pain_residual_when_available(self):
+    def test_correlate_design_prefers_crossfit_predictor_residual_when_available(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
                     "correlations": {
-                        "targets": ["rating", "temperature", "pain_residual"],
-                        "prefer_pain_residual": True,
-                        "use_crossfit_pain_residual": True,
+                        "targets": ["rating", "temperature", "predictor_residual"],
+                        "prefer_predictor_residual": True,
+                        "use_crossfit_predictor_residual": True,
                         "permutation": {"enabled": True, "n_permutations": 20},
                     },
                     "statistics": {"allow_iid_trials": False},
@@ -943,8 +943,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "rating": np.linspace(10, 50, 8),
                 "temperature": np.linspace(43, 46, 8),
-                "pain_residual": np.linspace(-1, 1, 8),
-                "pain_residual_cv": np.linspace(-1.2, 0.8, 8),
+                "predictor_residual": np.linspace(-1, 1, 8),
+                "predictor_residual_cv": np.linspace(-1.2, 0.8, 8),
                 "run_id": np.repeat([1, 2], 4),
                 "power_alpha": np.linspace(0.1, 0.8, 8),
             }
@@ -962,18 +962,18 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 SimpleNamespace(control_temperature=True, control_trial_order=True),
             )
         self.assertIsNotNone(design)
-        self.assertEqual(design.targets, ["pain_residual_cv", "rating", "temperature"])
+        self.assertEqual(design.targets, ["predictor_residual_cv", "rating", "temperature"])
 
-    def test_correlate_design_prefers_pain_residual_first_when_enabled(self):
+    def test_correlate_design_prefers_predictor_residual_first_when_enabled(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
                     "correlations": {
-                        "targets": ["rating", "temperature", "pain_residual"],
-                        "prefer_pain_residual": True,
-                        "use_crossfit_pain_residual": False,
+                        "targets": ["rating", "temperature", "predictor_residual"],
+                        "prefer_predictor_residual": True,
+                        "use_crossfit_predictor_residual": False,
                         "permutation": {"enabled": True, "n_permutations": 20},
                     },
                     "statistics": {"allow_iid_trials": False},
@@ -985,7 +985,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "rating": np.linspace(10, 50, 8),
                 "temperature": np.linspace(43, 46, 8),
-                "pain_residual": np.linspace(-1, 1, 8),
+                "predictor_residual": np.linspace(-1, 1, 8),
                 "run_id": np.repeat([1, 2], 4),
                 "power_alpha": np.linspace(0.1, 0.8, 8),
             }
@@ -1003,7 +1003,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 SimpleNamespace(control_temperature=True, control_trial_order=True),
             )
         self.assertIsNotNone(design)
-        self.assertEqual(design.targets, ["pain_residual", "rating", "temperature"])
+        self.assertEqual(design.targets, ["predictor_residual", "rating", "temperature"])
 
     def test_trial_table_stage_reuses_cached_output_when_input_hash_matches(self):
         from eeg_pipeline.analysis.behavior.orchestration import (
@@ -1072,13 +1072,13 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(out_path, ctx.stats_dir / "trial_table" / "all" / "trials_all.tsv")
         self.assertTrue(out_path.exists())
 
-    def test_pain_sensitivity_preserves_permutation_primary_pvalue(self):
-        from eeg_pipeline.analysis.behavior.orchestration import stage_pain_sensitivity
+    def test_predictor_sensitivity_preserves_permutation_primary_pvalue(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_predictor_sensitivity
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
-                    "pain_sensitivity": {
+                    "predictor_sensitivity": {
                         "n_permutations": 20,
                         "p_primary_mode": "perm_if_available",
                     },
@@ -1115,25 +1115,25 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
             return_value=["power_alpha"],
         ), patch(
-            "eeg_pipeline.analysis.behavior.api.run_pain_sensitivity_correlations",
+            "eeg_pipeline.analysis.behavior.api.run_predictor_sensitivity_correlations",
             return_value=psi_df.copy(),
         ), patch(
             "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
             side_effect=lambda _ctx, _cfg, df, **_kw: df,
         ):
-            out = stage_pain_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
+            out = stage_predictor_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
 
         self.assertFalse(out.empty)
         self.assertAlmostEqual(float(out.iloc[0]["p_primary"]), 0.01, places=12)
         self.assertEqual(str(out.iloc[0]["p_primary_source"]), "psi_perm")
 
-    def test_pain_sensitivity_non_iid_forces_strict_permutation_primary_mode(self):
-        from eeg_pipeline.analysis.behavior.orchestration import stage_pain_sensitivity
+    def test_predictor_sensitivity_non_iid_forces_strict_permutation_primary_mode(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_predictor_sensitivity
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
-                    "pain_sensitivity": {
+                    "predictor_sensitivity": {
                         "n_permutations": 20,
                         "p_primary_mode": "perm_if_available",
                     },
@@ -1153,7 +1153,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         captured = {}
 
-        def _fake_run_pain_sensitivity_correlations(**kwargs):
+        def _fake_run_predictor_sensitivity_correlations(**kwargs):
             captured["p_primary_mode"] = kwargs.get("p_primary_mode")
             return pd.DataFrame(
                 {
@@ -1174,24 +1174,24 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
             return_value=["power_alpha"],
         ), patch(
-            "eeg_pipeline.analysis.behavior.api.run_pain_sensitivity_correlations",
-            side_effect=_fake_run_pain_sensitivity_correlations,
+            "eeg_pipeline.analysis.behavior.api.run_predictor_sensitivity_correlations",
+            side_effect=_fake_run_predictor_sensitivity_correlations,
         ), patch(
             "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
             side_effect=lambda _ctx, _cfg, df, **_kw: df,
         ):
-            out = stage_pain_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
+            out = stage_predictor_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
 
         self.assertFalse(out.empty)
         self.assertEqual(str(captured.get("p_primary_mode")), "perm")
 
-    def test_pain_sensitivity_non_iid_overrides_asymptotic_primary_mode(self):
-        from eeg_pipeline.analysis.behavior.orchestration import stage_pain_sensitivity
+    def test_predictor_sensitivity_non_iid_overrides_asymptotic_primary_mode(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_predictor_sensitivity
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
-                    "pain_sensitivity": {
+                    "predictor_sensitivity": {
                         "n_permutations": 20,
                         "p_primary_mode": "asymptotic",
                     },
@@ -1211,7 +1211,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         captured = {}
 
-        def _fake_run_pain_sensitivity_correlations(**kwargs):
+        def _fake_run_predictor_sensitivity_correlations(**kwargs):
             captured["p_primary_mode"] = kwargs.get("p_primary_mode")
             return pd.DataFrame(
                 {
@@ -1232,25 +1232,25 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
             return_value=["power_alpha"],
         ), patch(
-            "eeg_pipeline.analysis.behavior.api.run_pain_sensitivity_correlations",
-            side_effect=_fake_run_pain_sensitivity_correlations,
+            "eeg_pipeline.analysis.behavior.api.run_predictor_sensitivity_correlations",
+            side_effect=_fake_run_predictor_sensitivity_correlations,
         ), patch(
             "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
             side_effect=lambda _ctx, _cfg, df, **_kw: df,
         ):
-            out = stage_pain_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
+            out = stage_predictor_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
 
         self.assertFalse(out.empty)
         self.assertEqual(str(captured.get("p_primary_mode")), "perm")
 
-    def test_pain_sensitivity_rejects_unknown_robust_method(self):
-        from eeg_pipeline.analysis.behavior.orchestration import stage_pain_sensitivity
+    def test_predictor_sensitivity_rejects_unknown_robust_method(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_predictor_sensitivity
 
         cfg = DotConfig(
             {
                 "behavior_analysis": {
                     "robust_correlation": "not_a_method",
-                    "pain_sensitivity": {
+                    "predictor_sensitivity": {
                         "n_permutations": 20,
                         "p_primary_mode": "perm_if_available",
                     },
@@ -1277,7 +1277,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             return_value=["power_alpha"],
         ):
             with self.assertRaises(ValueError):
-                stage_pain_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
+                stage_predictor_sensitivity(ctx, SimpleNamespace(method="spearman", min_samples=5, fdr_alpha=0.05))
 
     def test_stage_condition_multigroup_run_mean_uses_paired_ids(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_multigroup
@@ -1452,6 +1452,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=pd.DataFrame({"trial_index": [0.0, 1.0]}),
             temperature_series=pd.Series([45.0, 46.0]),
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1498,6 +1499,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=None,
             temperature_series=None,
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1544,6 +1546,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=None,
             temperature_series=None,
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1589,6 +1592,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=None,
             temperature_series=None,
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1631,6 +1635,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=pd.DataFrame({"trial_index": [0.0, 1.0, 0.0, 1.0]}),
             temperature_series=pd.Series([44.0, 44.5, 45.0, 45.5]),
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1665,6 +1670,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             df_trials=df_trials,
             cov_df=None,
             temperature_series=None,
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             method="spearman",
@@ -2108,7 +2114,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         ctx = BehaviorContext(
             subject="0001",
-            task="thermalactive",
+            task="task",
             config=DotConfig({"behavior_analysis": {"run_adjustment": {"column": "run_id"}}}),
             logger=Mock(),
             deriv_root=Path(tempfile.mkdtemp()),
@@ -2135,7 +2141,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         ctx = BehaviorContext(
             subject="0001",
-            task="thermalactive",
+            task="task",
             config=DotConfig({}),
             logger=Mock(),
             deriv_root=Path(tempfile.mkdtemp()),
@@ -2166,7 +2172,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         ctx = BehaviorContext(
             subject="0001",
-            task="thermalactive",
+            task="task",
             config=DotConfig({"behavior_analysis": {"trial_table": {"disallow_positional_alignment": True}}}),
             logger=Mock(),
             deriv_root=Path(tempfile.mkdtemp()),
@@ -2198,7 +2204,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                     },
                     "statistics": {"allow_iid_trials": True},
                 },
-                "event_columns": {"pain_binary": ["pain_binary"]},
+                "event_columns": {"binary_outcome": ["binary_outcome"]},
             }
         )
         ctx = self._ctx(cfg)
@@ -2690,7 +2696,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             with self.assertRaises(ValueError):
                 stage_temporal_stats(ctx)
 
-    def test_correlate_design_defaults_to_crossfit_pain_residual_when_available(self):
+    def test_correlate_design_defaults_to_crossfit_predictor_residual_when_available(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
 
         cfg = DotConfig(
@@ -2706,8 +2712,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "rating": np.linspace(10, 50, 8),
                 "temperature": np.linspace(43, 46, 8),
-                "pain_residual": np.linspace(-1, 1, 8),
-                "pain_residual_cv": np.linspace(-0.8, 0.8, 8),
+                "predictor_residual": np.linspace(-1, 1, 8),
+                "predictor_residual_cv": np.linspace(-0.8, 0.8, 8),
                 "run_id": np.repeat([1, 2], 4),
                 "power_alpha": np.linspace(0.1, 0.8, 8),
             }
@@ -2727,7 +2733,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertIsNotNone(design)
         self.assertGreaterEqual(len(design.targets), 1)
-        self.assertEqual(design.targets[0], "pain_residual_cv")
+        self.assertEqual(design.targets[0], "predictor_residual_cv")
 
     def test_condition_multigroup_uses_unified_fdr_pipeline(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_multigroup

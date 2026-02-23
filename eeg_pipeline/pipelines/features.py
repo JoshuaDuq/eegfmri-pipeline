@@ -7,7 +7,7 @@ Single source of truth for feature extraction orchestration.
 Usage:
     # Single subject
     pipeline = FeaturePipeline(config=config)
-    pipeline.process_subject("0001", "thermalactive")
+    pipeline.process_subject("0001", "task")
 
     # Multiple subjects
     pipeline.run_batch(["0001", "0002"])
@@ -336,11 +336,9 @@ def _update_from_aligned_extra(
     """Update unpacked dict and features object with filtered extra blocks."""
     unpacked["itpc_df"] = extra_blocks.get("itpc", unpacked["itpc_df"])
     unpacked["itpc_trial_df"] = extra_blocks.get("itpc_trial", unpacked["itpc_trial_df"])
-    # Backward-compatibility: accept legacy key "pac" if present.
-    aligned_pac_trials = extra_blocks.get("pac_trials", extra_blocks.get("pac"))
+    aligned_pac_trials = extra_blocks.get("pac_trials")
     if aligned_pac_trials is not None:
         unpacked["pac_trials_df"] = aligned_pac_trials
-    unpacked["pac_df"] = extra_blocks.get("pac", unpacked["pac_df"])
     unpacked["pac_time_df"] = extra_blocks.get("pac_time", unpacked["pac_time_df"])
     unpacked["comp_df"] = extra_blocks.get("complexity", unpacked["comp_df"])
     unpacked["spectral_df"] = extra_blocks.get("spectral", unpacked["spectral_df"])
@@ -755,6 +753,13 @@ class FeaturePipeline(PipelineBase):
                 )
 
         target_columns = list(self.config.get("event_columns.rating", []) or [])
+        explicit_outcome = str(
+            self.config.get("behavior_analysis.outcome_column", "") or ""
+        ).strip()
+        if explicit_outcome:
+            target_columns = [explicit_outcome] + [
+                c for c in target_columns if str(c) != explicit_outcome
+            ]
         target_col = pick_target_column(aligned_events, target_columns=target_columns)
         if target_col is None:
             self.logger.warning("No target column found; skipping")
@@ -763,7 +768,7 @@ class FeaturePipeline(PipelineBase):
         y = pd.to_numeric(aligned_events[target_col], errors="coerce")
         n_valid = int(y.notna().sum())
         self.logger.info(
-            "Target column: '%s' (%d/%d valid values)", target_col, n_valid, len(y)
+            "Target outcome column: '%s' (%d/%d valid values)", target_col, n_valid, len(y)
         )
 
         fixed_templates_path = kwargs.get("fixed_templates_path")

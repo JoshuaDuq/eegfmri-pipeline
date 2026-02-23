@@ -9,7 +9,7 @@ Pipeline class for EEG preprocessing orchestration:
 
 Usage:
     pipeline = PreprocessingPipeline(config=config)
-    pipeline.run_batch(subjects, task="thermalactive", mode="full")
+    pipeline.run_batch(subjects, task="task", mode="full")
 
 Modes:
 - full: Complete preprocessing (bad channels → ICA → epochs)
@@ -69,7 +69,7 @@ class PreprocessingPipeline(PipelineBase):
         Returns:
             Tuple of (resolved_task, mode, use_icalabel, n_jobs, progress)
         """
-        resolved_task = task or self.config.get("project.task", "thermalactive")
+        resolved_task = task or self.config.get("project.task", "task")
         mode = kwargs.get("mode", "full")
         use_icalabel = kwargs.get("use_icalabel", True)
         n_jobs = kwargs.get("n_jobs", 1)

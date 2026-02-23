@@ -50,12 +50,12 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
                 "stim_temp",
                 "--event-col-rating",
                 "rating",
-                "--event-col-pain-binary",
-                "pain_binary",
+                "--event-col-binary-outcome",
+                "binary_outcome",
                 "--rename-anot-dict",
                 "{\"BAD boundary\":\"BAD_boundary\"}",
                 "--custom-bad-dict",
-                "{\"thermalactive\":{\"0001\":[\"TP8\"]}}",
+                "{\"task\":{\"0001\":[\"TP8\"]}}",
             ]
         )
         config = ConfigDict({})
@@ -73,9 +73,9 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("alignment.fmri_onset_reference"), "first_stim_start")
         self.assertEqual(config.get("event_columns.temperature"), ["temperature", "stim_temp"])
         self.assertEqual(config.get("event_columns.rating"), ["rating"])
-        self.assertEqual(config.get("event_columns.pain_binary"), ["pain_binary"])
+        self.assertEqual(config.get("event_columns.binary_outcome"), ["binary_outcome"])
         self.assertEqual(config["pyprep"]["rename_anot_dict"]["BAD boundary"], "BAD_boundary")
-        self.assertEqual(config["pyprep"]["custom_bad_dict"]["thermalactive"]["0001"], ["TP8"])
+        self.assertEqual(config["pyprep"]["custom_bad_dict"]["task"]["0001"], ["TP8"])
 
 
 class TestFeaturesTUIWiring(unittest.TestCase):
@@ -181,13 +181,17 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "compute",
                 "--global-n-bootstrap",
                 "2500",
+                "--predictor-column",
+                "stim_temp",
+                "--outcome-column",
+                "vas_custom",
                 "--perm-scheme",
                 "circular_shift",
                 "--stats-temp-control",
                 "spline",
                 "--stats-allow-iid-trials",
                 "--group-level-target",
-                "pain_residual",
+                "predictor_residual",
                 "--group-level-control-temperature",
                 "--no-group-level-control-trial-order",
                 "--no-group-level-control-run-effects",
@@ -196,14 +200,14 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "--group-level-allow-parametric-fallback",
                 "--correlations-min-runs",
                 "5",
-                "--correlations-prefer-pain-residual",
+                "--correlations-prefer-predictor-residual",
                 "--correlations-permutations",
                 "111",
-                "--pain-sensitivity-primary-unit",
+                "--predictor-sensitivity-primary-unit",
                 "run_mean",
-                "--pain-sensitivity-permutations",
+                "--predictor-sensitivity-permutations",
                 "250",
-                "--no-pain-sensitivity-permutation-primary",
+                "--no-predictor-sensitivity-permutation-primary",
                 "--models-primary-unit",
                 "run_mean",
                 "--models-force-trial-iid-asymptotic",
@@ -236,17 +240,19 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "400",
             ]
         )
-        config = ConfigDict({"project": {"task": "thermalactive"}})
+        config = ConfigDict({"project": {"task": "task"}})
         _configure_behavior_compute_mode(args, config)
 
         self.assertEqual(config.get("behavior_analysis.statistics.default_n_bootstrap"), 2500)
+        self.assertEqual(config.get("behavior_analysis.predictor_column"), "stim_temp")
+        self.assertEqual(config.get("behavior_analysis.outcome_column"), "vas_custom")
         self.assertEqual(config.get("behavior_analysis.permutation.scheme"), "circular_shift")
         self.assertEqual(config.get("behavior_analysis.statistics.temperature_control"), "spline")
         self.assertEqual(config.get("behavior_analysis.statistics.base_seed"), 42)
         self.assertTrue(config.get("behavior_analysis.statistics.allow_iid_trials", False))
         self.assertEqual(
             config.get("behavior_analysis.group_level.multilevel_correlations.target"),
-            "pain_residual",
+            "predictor_residual",
         )
         self.assertTrue(
             config.get("behavior_analysis.group_level.multilevel_correlations.control_temperature", False)
@@ -265,11 +271,11 @@ class TestBehaviorTUIWiring(unittest.TestCase):
             config.get("behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback", False)
         )
         self.assertEqual(config.get("behavior_analysis.correlations.min_runs"), 5)
-        self.assertTrue(config.get("behavior_analysis.correlations.prefer_pain_residual", False))
+        self.assertTrue(config.get("behavior_analysis.correlations.prefer_predictor_residual", False))
         self.assertEqual(config.get("behavior_analysis.correlations.permutation.n_permutations"), 111)
-        self.assertEqual(config.get("behavior_analysis.pain_sensitivity.primary_unit"), "run_mean")
-        self.assertEqual(config.get("behavior_analysis.pain_sensitivity.n_permutations"), 250)
-        self.assertEqual(config.get("behavior_analysis.pain_sensitivity.p_primary_mode"), "asymptotic")
+        self.assertEqual(config.get("behavior_analysis.predictor_sensitivity.primary_unit"), "run_mean")
+        self.assertEqual(config.get("behavior_analysis.predictor_sensitivity.n_permutations"), 250)
+        self.assertEqual(config.get("behavior_analysis.predictor_sensitivity.p_primary_mode"), "asymptotic")
         self.assertEqual(config.get("behavior_analysis.models.primary_unit"), "run_mean")
         self.assertTrue(config.get("behavior_analysis.models.force_trial_iid_asymptotic", False))
         self.assertEqual(config.get("behavior_analysis.condition.primary_unit"), "run_mean")
@@ -300,7 +306,7 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "vas_custom",
             ]
         )
-        config = ConfigDict({"project": {"task": "thermalactive"}})
+        config = ConfigDict({"project": {"task": "task"}})
         _configure_behavior_compute_mode(args, config)
 
         self.assertEqual(config.get("behavior_analysis.correlations.target_column"), "vas_custom")

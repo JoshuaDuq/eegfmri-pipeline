@@ -71,7 +71,7 @@ Three sections, navigated as a single vertical list with wrap-around:
 |---|---|
 | **Preprocessing** | EEG Preprocessing, fMRI Preprocessing |
 | **Analysis** | Features, Behavior, Machine Learning, Plotting, fMRI Analysis |
-| **Utilities** | Global Setup, Merge PsychoPy Data, EEG Raw to BIDS, fMRI Raw to BIDS, Pipeline Smoke Test |
+| **Utilities** | Global Setup, Pipeline Smoke Test |
 
 Selecting a pipeline or utility opens the corresponding wizard or settings view.
 
@@ -141,7 +141,7 @@ Browsable list of past pipeline executions (persisted in `.cache/history.json`):
 
 A selectable checklist of pipeline commands to run quick parser and runtime checks:
 
-- Covers all pipeline commands: `preprocessing`, `features`, `behavior`, `ml`, `plotting`, `fmri`, `fmri-analysis`, `utilities`, `validate`, `info`, `stats`, and an end-to-end `runtime_version` dispatch check
+- Covers all pipeline commands: `preprocessing`, `features`, `behavior`, `ml`, `plotting`, `fmri`, `fmri-analysis`, `validate`, `info`, `stats`, and an end-to-end `runtime_version` dispatch check
 - Toggle individual checks with `Space` or all with `A`
 - Runs `scripts/tui_pipeline_smoke.py` with the selected pipeline IDs
 
@@ -247,10 +247,7 @@ A command-palette overlay activated with `Ctrl+K` from the main menu or wizard:
 | Machine Learning | `ml` | `features` | LOSO regression (ElasticNet/Ridge/RF), classification (SVM/LR/RF/CNN), time generalization |
 | Plotting | `plotting` | `all` | 40+ plot types across power, connectivity, TFR, ERP, behavior, and more |
 | fMRI Analysis | `fmri-analysis` | `bids_fmri` | First-level contrasts, trial-wise pain signatures |
-| Merge PsychoPy Data | `utilities` | `bids` | Merge PsychoPy logs into BIDS events files |
-| EEG Raw to BIDS | `utilities` | `source_data` | Convert raw BrainVision data to BIDS |
-| fMRI Raw to BIDS | `utilities` | `source_data` | Convert raw DICOM series to BIDS |
-| Pipeline Smoke Test | `scripts/tui_pipeline_smoke.py` | — | Quick CLI parser and runtime checks across all pipeline commands |
+| Pipeline Smoke Test | `scripts/tui_pipeline_smoke.py` | — | Quick CLI parser and runtime checks across all pipeline commands (excludes paradigm-specific scripts) |
 
 ---
 

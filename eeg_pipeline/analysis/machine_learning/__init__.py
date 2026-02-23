@@ -59,7 +59,7 @@ from eeg_pipeline.analysis.machine_learning.classification import (
     create_logistic_pipeline,
     create_rf_classification_pipeline,
     create_ensemble_pipeline,
-    decode_pain_binary,
+    decode_binary_outcome,
     nested_loso_classification,
     ClassificationResult,
 )
@@ -117,7 +117,7 @@ __all__ = [
     "create_logistic_pipeline",
     "create_rf_classification_pipeline",
     "create_ensemble_pipeline",
-    "decode_pain_binary",
+    "decode_binary_outcome",
     "nested_loso_classification",
     "ClassificationResult",
     "fit_predict_cnn_binary_classifier",

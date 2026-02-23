@@ -306,9 +306,9 @@ def _resolve_connectivity_condition_column(
 
     candidates = []
     if hasattr(config, "get"):
-        candidates = config.get("event_columns.pain_binary", []) or []
+        candidates = config.get("event_columns.binary_outcome", []) or []
     elif isinstance(config, dict):
-        candidates = get_nested_value(config, "event_columns.pain_binary", []) or []
+        candidates = get_nested_value(config, "event_columns.binary_outcome", []) or []
     if isinstance(candidates, (list, tuple)):
         for c in candidates:
             c = str(c).strip()
@@ -318,7 +318,7 @@ def _resolve_connectivity_condition_column(
     raise ValueError(
         "Connectivity granularity='condition' requested but no condition column found in aligned_events. "
         "Set feature_engineering.connectivity.condition_column explicitly (recommended), or ensure one of "
-        "{'condition','trial_type'} exists, or list a valid column in event_columns.pain_binary."
+        "{'condition','trial_type'} exists, or list a valid column in event_columns.binary_outcome."
     )
 
 

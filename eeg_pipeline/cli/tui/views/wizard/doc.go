@@ -25,9 +25,6 @@
 //   - render_advanced_preprocessing.go    — Preprocessing pipeline
 //   - render_advanced_fmri.go            — fMRI preprocessing pipeline
 //   - render_advanced_fmri_analysis.go   — fMRI analysis pipeline
-//   - render_advanced_raw_to_bids.go     — EEG raw-to-BIDS pipeline
-//   - render_advanced_fmri_raw_to_bids.go — fMRI raw-to-BIDS pipeline
-//   - render_advanced_merge.go           — Merge PsychoPy data pipeline
 //
 // Plotting
 //   - plotting_advanced.go — Plot categories and global styling (renderPlottingAdvancedConfigV2)

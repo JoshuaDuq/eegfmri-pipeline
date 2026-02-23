@@ -10,6 +10,7 @@ from eeg_pipeline.analysis.behavior.result_types import GroupLevelResult, MixedE
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_float, get_config_int, get_config_value
+from eeg_pipeline.utils.data.columns import resolve_outcome_column, resolve_predictor_column
 
 
 def run_group_level_mixed_effects_impl(
@@ -63,8 +64,12 @@ def run_group_level_mixed_effects_impl(
     combined = pd.concat(all_trials, ignore_index=True)
     logger.info("Mixed-effects: %d subjects, %d total trials", len(all_trials), len(combined))
 
-    if "rating" not in combined.columns:
-        raise KeyError("Mixed-effects requires a 'rating' column in the combined trial table.")
+    outcome_column = resolve_outcome_column(combined, config) or "rating"
+    predictor_column = resolve_predictor_column(combined, config) or "temperature"
+    if outcome_column not in combined.columns:
+        raise KeyError(
+            f"Mixed-effects requires outcome column '{outcome_column}' in the combined trial table."
+        )
 
     feature_cols = [c for c in combined.columns if str(c).startswith(tuple(feature_prefixes))]
 
@@ -85,7 +90,7 @@ def run_group_level_mixed_effects_impl(
     run_col_candidates = [run_col_cfg, "run_id", "run", "block"]
     run_col = next((c for c in run_col_candidates if c and c in combined.columns), None)
     trial_order_col = next((c for c in ("trial_index_within_group", "trial_index") if c in combined.columns), None)
-    include_temperature = bool(get_config_value(config, "behavior_analysis.mixed_effects.include_temperature", True))
+    include_predictor = bool(get_config_value(config, "behavior_analysis.mixed_effects.include_temperature", True))
     max_run_dummies = int(get_config_value(config, "behavior_analysis.run_adjustment.max_dummies", 20))
 
     records: List[Dict[str, Any]] = []
@@ -94,9 +99,13 @@ def run_group_level_mixed_effects_impl(
         feat_type = feature_type_resolver(str(feat), config)
         family_id = f"mixed_{feat_type}"
 
-        model_cols = ["subject_id", "rating", feat]
-        if include_temperature and "temperature" in combined.columns:
-            model_cols.append("temperature")
+        model_cols = ["subject_id", outcome_column, feat]
+        if (
+            include_predictor
+            and predictor_column != outcome_column
+            and predictor_column in combined.columns
+        ):
+            model_cols.append(predictor_column)
         if trial_order_col is not None:
             model_cols.append(trial_order_col)
         if run_col is not None:
@@ -110,9 +119,13 @@ def run_group_level_mixed_effects_impl(
         df_valid = df_valid.rename(columns={feat: "feature_value"})
         formula_terms = ["feature_value"]
         covariate_terms: List[str] = []
-        if include_temperature and "temperature" in df_valid.columns and df_valid["temperature"].nunique(dropna=True) > 1:
-            formula_terms.append("temperature")
-            covariate_terms.append("temperature")
+        if (
+            include_predictor
+            and predictor_column in df_valid.columns
+            and df_valid[predictor_column].nunique(dropna=True) > 1
+        ):
+            formula_terms.append(predictor_column)
+            covariate_terms.append(predictor_column)
         if trial_order_col is not None and trial_order_col in df_valid.columns and df_valid[trial_order_col].nunique(dropna=True) > 1:
             formula_terms.append(trial_order_col)
             covariate_terms.append(trial_order_col)
@@ -122,7 +135,7 @@ def run_group_level_mixed_effects_impl(
                 formula_terms.append(f"C({run_col})")
                 covariate_terms.append(f"C({run_col})")
 
-        formula = "rating ~ " + " + ".join(formula_terms)
+        formula = f"{outcome_column} ~ " + " + ".join(formula_terms)
 
         try:
             if random_effects == "slope":
@@ -159,6 +172,8 @@ def run_group_level_mixed_effects_impl(
                     "aic": result.aic,
                     "bic": result.bic,
                     "converged": result.converged,
+                    "outcome_column": outcome_column,
+                    "predictor_column": predictor_column,
                 }
             )
 
@@ -263,10 +278,12 @@ def run_group_level_correlations_impl(
     combined = pd.concat(all_trials, ignore_index=True)
     correlation_method = resolve_correlation_method(config, logger=logger, default="spearman")
 
-    target_column = str(target_col or "rating").strip() or "rating"
+    resolved_target = resolve_outcome_column(combined, config) or "rating"
+    target_column = str(target_col or resolved_target).strip() or resolved_target
     if target_column not in combined.columns:
         logger.warning("Multilevel correlations: target column '%s' not found.", target_column)
         return pd.DataFrame()
+    predictor_column = resolve_predictor_column(combined, config) or "temperature"
 
     block_col = None
     for cand in ("block", "run_id", "run", "session"):
@@ -333,8 +350,15 @@ def run_group_level_correlations_impl(
             y_valid = y_sub_s.loc[valid_xy]
 
             cov_df = pd.DataFrame(index=x_valid.index)
-            if control_temperature and "temperature" in subj_df.columns:
-                cov_df["temperature"] = pd.to_numeric(subj_df.loc[x_valid.index, "temperature"], errors="coerce")
+            if (
+                control_temperature
+                and predictor_column in subj_df.columns
+                and target_column != predictor_column
+            ):
+                cov_df[predictor_column] = pd.to_numeric(
+                    subj_df.loc[x_valid.index, predictor_column],
+                    errors="coerce",
+                )
 
             if control_trial_order:
                 for trial_col in (
@@ -630,7 +654,8 @@ def run_group_level_analysis_impl(
         if not isinstance(gl_corr_cfg, dict):
             gl_corr_cfg = {}
 
-        target_col = str(gl_corr_cfg.get("target", "rating") or "rating").strip()
+        default_target = str(get_config_value(config, "behavior_analysis.outcome_column", "") or "rating").strip() or "rating"
+        target_col = str(gl_corr_cfg.get("target", default_target) or default_target).strip()
         control_temperature = bool(
             gl_corr_cfg.get("control_temperature", get_config_bool(config, "behavior_analysis.control_temperature", True))
         )

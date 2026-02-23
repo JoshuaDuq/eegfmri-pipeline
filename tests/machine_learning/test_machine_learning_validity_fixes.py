@@ -55,7 +55,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertGreater(len(val_idx), 0)
         self.assertEqual(len(np.intersect1d(train_idx, val_idx)), 0)
 
-    def test_decode_pain_binary_uses_stratified_group_kfold_for_grouped_numeric_cv(self):
+    def test_decode_binary_outcome_uses_stratified_group_kfold_for_grouped_numeric_cv(self):
         from eeg_pipeline.analysis.machine_learning import classification as clf
 
         X = np.array(
@@ -106,7 +106,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 return self._inner.split(X_in, y_in, groups_in)
 
         with patch.object(clf, "StratifiedGroupKFold", _TrackingStratifiedGroupKFold):
-            result = clf.decode_pain_binary(
+            result = clf.decode_binary_outcome(
                 X=X,
                 y=y,
                 cv=3,
@@ -312,7 +312,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Covariates include the selected target"):
                 ml_data.load_active_matrix(
                     subjects=["0001"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path("."),
                     config=config,
                     feature_families=["power"],
@@ -347,7 +347,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Covariates include the selected target"):
                 ml_data.load_active_matrix(
                     subjects=["0001"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path("."),
                     config=config,
                     feature_families=["power"],
@@ -378,7 +378,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 ):
                     orch.run_incremental_validity_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=config,
                         n_perm=0,
@@ -413,7 +413,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 ):
                     orch.run_incremental_validity_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=config,
                         n_perm=0,
@@ -433,7 +433,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Time-generalization stage failed"):
                     orch.run_time_generalization(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=DotConfig({}),
                         n_perm=0,
@@ -454,7 +454,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "produced no valid outputs"):
                     orch.run_time_generalization(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=DotConfig({}),
                         n_perm=0,
@@ -519,7 +519,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             tg_r, tg_r2, window_centers = tg.time_generalization_regression(
                 deriv_root=Path("."),
                 subjects=["0001", "0002"],
-                task="thermalactive",
+                task="task",
                 results_dir=None,
                 config_dict=cfg,
                 n_perm=0,
@@ -543,7 +543,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 tg.time_generalization_regression(
                     deriv_root=Path("."),
                     subjects=["0001"],
-                    task="thermalactive",
+                    task="task",
                     results_dir=None,
                     config_dict=DotConfig({}),
                     n_perm=0,
@@ -685,7 +685,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             self.assertIn("test_index", pred_df.columns)
             self.assertIn("in_interval", pred_df.columns)
 
-            with open(Path(td) / "uncertainty_metrics.json", "r", encoding="utf-8") as f:
+            with open(Path(td) / "metrics" / "uncertainty_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
             self.assertIn("subject_level", metrics)
             self.assertIn("mean_coverage", metrics["subject_level"])
@@ -794,7 +794,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -805,7 +805,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                     classification_model="svm",
                 )
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
         self.assertAlmostEqual(float(metrics["brier_score"]), 0.01, places=6)
         self.assertAlmostEqual(float(metrics["expected_calibration_error"]), 0.1, places=6)
@@ -862,7 +862,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -873,7 +873,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                     classification_model="svm",
                 )
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
         self.assertTrue(np.isnan(float(metrics["balanced_accuracy"])))
         self.assertTrue(np.isnan(float(metrics["subject_level"]["balanced_accuracy_mean"])))
@@ -923,7 +923,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -934,7 +934,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                     classification_model="svm",
                 )
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
 
         self.assertAlmostEqual(float(metrics["precision"]), 0.5, places=6)
@@ -988,7 +988,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -1000,7 +1000,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     classification_model="svm",
                 )
 
-            pred_df = pd.read_csv(out_dir / "loso_predictions.tsv", sep="\t")
+            pred_df = pd.read_csv(out_dir / "data" / "loso_predictions.tsv", sep="\t")
             self.assertIn("trial_id", pred_df.columns)
             self.assertIn("fold", pred_df.columns)
             self.assertIn("model", pred_df.columns)
@@ -1072,7 +1072,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)):
                 out_dir = orch.run_model_comparison_ml(
                     subjects=["0001", "0002"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=DotConfig(
                         {
@@ -1088,7 +1088,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     results_root=Path(td),
                     logger=Mock(),
                 )
-            with open(out_dir / "model_comparison_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "model_comparison_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
             self.assertIn("pairwise_inference", summary)
             self.assertTrue(summary["pairwise_inference"])
@@ -1116,7 +1116,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_incremental_validity_ml(
                     subjects=["0001", "0002"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=DotConfig({}),
                     n_perm=8,
@@ -1125,7 +1125,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     results_root=Path(td),
                     logger=Mock(),
                 )
-            with open(out_dir / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
             self.assertIn("delta_r2_inference", summary)
             self.assertIn("p_value", summary["delta_r2_inference"])
@@ -1144,7 +1144,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "regression target appears binary-like"):
                     orch.run_model_comparison_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=cfg,
                         n_perm=0,
@@ -1176,7 +1176,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "regression target appears binary-like"):
                     orch.run_incremental_validity_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=cfg,
                         n_perm=0,
@@ -1276,7 +1276,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Insufficient valid within-subject regression permutations"):
                     orch.run_within_subject_regression_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=cfg,
                         n_perm=4,
@@ -1411,7 +1411,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 tg.time_generalization_regression(
                     deriv_root=Path("."),
                     subjects=["0001", "0002", "0003"],
-                    task="thermalactive",
+                    task="task",
                     results_dir=None,
                     config_dict=cfg,
                     n_perm=0,
@@ -1603,7 +1603,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Insufficient valid within-subject regression permutations"):
                     orch.run_within_subject_regression_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=cfg,
                         n_perm=2,
@@ -1690,7 +1690,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_within_subject_regression_ml(
                     subjects=["0001", "0002"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -1701,7 +1701,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                 )
 
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
             baseline_df = pd.read_csv(out_dir / "baseline_predictions.tsv", sep="\t")
 
@@ -1750,7 +1750,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 orch.run_within_subject_regression_ml(
                     subjects=["0001"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -1797,8 +1797,8 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 captured["n_test_features"] = int(X_in.shape[1])
                 return np.asarray(X_in[:, 0], dtype=float)
 
-        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode):
-            _ = (groups_train, harmonization_mode)
+        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode, n_covariates=0):
+            _ = (groups_train, harmonization_mode, n_covariates)
             captured["harmonize_calls"] += 1
             keep = np.array([False, True], dtype=bool)
             return X_train[:, keep], X_test[:, keep], keep
@@ -1844,7 +1844,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 orch.run_within_subject_regression_ml(
                     subjects=["0001"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=DotConfig({}),
                     n_perm=0,
@@ -1920,7 +1920,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Insufficient valid within-subject classification permutations"):
                     orch.run_within_subject_classification_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=cfg,
                         n_perm=2,
@@ -2045,7 +2045,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Cannot verify trial_ml_safe provenance"):
                     ml_data._load_subject_feature_table(
                         subject="0001",
-                        task="thermalactive",
+                        task="task",
                         deriv_root=deriv_root,
                         config=cfg,
                         feature_families=["power"],
@@ -2080,7 +2080,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 df, cols = ml_data._load_subject_feature_table(
                     subject="0001",
-                    task="thermalactive",
+                    task="task",
                     deriv_root=deriv_root,
                     config=cfg,
                     feature_families=["power"],
@@ -2114,7 +2114,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Cannot verify connectivity granularity"):
                     ml_data._load_subject_feature_table(
                         subject="0001",
-                        task="thermalactive",
+                        task="task",
                         deriv_root=deriv_root,
                         config=cfg,
                         feature_families=["connectivity"],
@@ -2136,9 +2136,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        def _drop_baseline_columns(X_train, X_test, groups_train, harmonization_mode):
-            _ = (groups_train, harmonization_mode)
-            keep = np.array([False, True], dtype=bool)
+        def _drop_baseline_columns(X_train, X_test, groups_train, harmonization_mode, n_covariates=0):
+            _ = (groups_train, harmonization_mode, n_covariates)
+            keep = np.array([True, False], dtype=bool)
             return X_train[:, keep], X_test[:, keep], keep
 
         with tempfile.TemporaryDirectory() as td:
@@ -2148,7 +2148,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "removed all baseline predictors"):
                     orch.run_incremental_validity_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=cfg,
                         n_perm=0,
@@ -2234,7 +2234,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 orch.run_model_comparison_ml(
                     subjects=["0001", "0002", "0003"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=DotConfig({}),
                     n_perm=0,
@@ -2302,7 +2302,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 orch.run_incremental_validity_ml(
                     subjects=["0001", "0002", "0003"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=DotConfig({}),
                     n_perm=0,
@@ -2374,7 +2374,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_incremental_validity_ml(
                     subjects=["0001", "0002", "0003"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=DotConfig({}),
                     n_perm=0,
@@ -2384,7 +2384,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                 )
 
-            with open(out_dir / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
 
         self.assertAlmostEqual(float(summary["mean_fold_delta_r2"]), 0.4, places=8)
@@ -2514,7 +2514,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_classification_ml(
                     subjects=["0001", "0002", "0003"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -2526,7 +2526,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     classification_model="svm",
                 )
 
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
 
         subject_level = metrics.get("subject_level", {})
@@ -2553,7 +2553,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Missing baseline predictors"):
                     orch.run_incremental_validity_ml(
                         subjects=["0001", "0002"],
-                        task="thermalactive",
+                        task="task",
                         deriv_root=Path(td),
                         config=DotConfig({}),
                         n_perm=0,
@@ -2590,7 +2590,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_incremental_validity_ml(
                     subjects=["0001", "0002"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -2601,7 +2601,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     baseline_predictors=["temperature"],
                 )
 
-            with open(out_dir / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
 
         self.assertEqual(summary["data"]["baseline_predictors"], ["intercept_only"])
@@ -2631,7 +2631,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)):
                 out_dir = orch.run_model_comparison_ml(
                     subjects=["0001", "0002", "0003"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=DotConfig(
                         {
@@ -2647,7 +2647,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     results_root=Path(td),
                     logger=Mock(),
                 )
-            with open(out_dir / "model_comparison_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "model_comparison_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
 
         pairwise = summary.get("pairwise_inference", {})
@@ -2704,7 +2704,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 out_dir = orch.run_within_subject_classification_ml(
                     subjects=["0001"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,
@@ -2716,7 +2716,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     classification_model="lr",
                 )
 
-            pred_df = pd.read_csv(out_dir / "cv_predictions.tsv", sep="\t")
+            pred_df = pd.read_csv(out_dir / "data" / "cv_predictions.tsv", sep="\t")
 
         self.assertIn("y_prob", pred_df.columns)
         self.assertTrue(np.all(np.isfinite(pred_df["y_prob"].to_numpy(dtype=float))))
@@ -2757,8 +2757,8 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
 
         calls = {"harmonize": 0}
 
-        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode):
-            _ = (groups_train, harmonization_mode)
+        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode, n_covariates=0):
+            _ = (groups_train, harmonization_mode, n_covariates)
             calls["harmonize"] += 1
             keep = np.array([False, True], dtype=bool)
             return X_train[:, keep], X_test[:, keep], keep
@@ -2779,7 +2779,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             ):
                 orch.run_within_subject_classification_ml(
                     subjects=["0001"],
-                    task="thermalactive",
+                    task="task",
                     deriv_root=Path(td),
                     config=cfg,
                     n_perm=0,

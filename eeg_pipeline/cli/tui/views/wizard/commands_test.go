@@ -103,6 +103,23 @@ func TestBuildBehaviorAdvancedArgs_EmitsEmptyCorrelationTargetColumn(t *testing.
 	}
 }
 
+func TestBuildBehaviorAdvancedArgs_EmitsCanonicalColumns(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.behaviorOutcomeColumn = "vas_custom"
+	m.behaviorPredictorColumn = "stimulus_intensity"
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	outcome, ok := argValue(args, "--outcome-column")
+	if !ok || outcome != "vas_custom" {
+		t.Fatalf("expected --outcome-column vas_custom, got args: %#v", args)
+	}
+	predictor, ok := argValue(args, "--predictor-column")
+	if !ok || predictor != "stimulus_intensity" {
+		t.Fatalf("expected --predictor-column stimulus_intensity, got args: %#v", args)
+	}
+}
+
 func TestBuildFmriAnalysisAdvancedArgs_DisabledCarpetAndTSNRAddsFlags(t *testing.T) {
 	m := Model{}
 	m.fmriAnalysisPlotsEnabled = true
@@ -273,7 +290,7 @@ func TestBuildMLAdvancedArgs_FmriSignatureTargetEmitsFlags(t *testing.T) {
 
 	m.mlTarget = "fmri_signature"
 	m.mlFmriSigMethodIndex = 1 // lss
-	m.mlFmriSigContrastName = "pain_vs_nonpain"
+	m.mlFmriSigContrastName = "contrast"
 	m.mlFmriSigSignatureIndex = 0 // NPS
 	m.mlFmriSigMetricIndex = 2    // pearson_r
 	m.mlFmriSigNormalizationIndex = 1
@@ -378,7 +395,7 @@ func TestApplyConfigKeys_HydratesMLSettingsIncludingCNN(t *testing.T) {
 	m.modeIndex = 0
 
 	m.ApplyConfigKeys(map[string]interface{}{
-		"machine_learning.targets.classification":              "pain_binary",
+		"machine_learning.targets.classification":              "binary_outcome",
 		"machine_learning.targets.binary_threshold":            30.0,
 		"machine_learning.data.feature_families":               []interface{}{"power", "connectivity"},
 		"machine_learning.data.feature_harmonization":          "intersection",
@@ -394,8 +411,8 @@ func TestApplyConfigKeys_HydratesMLSettingsIncludingCNN(t *testing.T) {
 		"machine_learning.models.random_forest.max_depth_grid": []interface{}{5.0, 10.0, nil},
 	})
 
-	if m.mlTarget != "pain_binary" {
-		t.Fatalf("expected mlTarget pain_binary, got %q", m.mlTarget)
+	if m.mlTarget != "binary_outcome" {
+		t.Fatalf("expected mlTarget binary_outcome, got %q", m.mlTarget)
 	}
 	if !m.mlBinaryThresholdEnabled || m.mlBinaryThreshold != 30.0 {
 		t.Fatalf("expected binary threshold enabled at 30.0, got enabled=%v value=%v", m.mlBinaryThresholdEnabled, m.mlBinaryThreshold)
@@ -453,11 +470,11 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"behavior_analysis.temperature_models.breakpoint_test.enabled":                    false,
 		"behavior_analysis.correlations.min_runs":                                         6.0,
 		"behavior_analysis.correlations.target_column":                                    "custom_rating",
-		"behavior_analysis.correlations.prefer_pain_residual":                             true,
+		"behavior_analysis.correlations.prefer_predictor_residual":                             true,
 		"behavior_analysis.correlations.permutation.n_permutations":                       77.0,
-		"behavior_analysis.pain_sensitivity.primary_unit":                                 "run_mean",
-		"behavior_analysis.pain_sensitivity.n_permutations":                               300.0,
-		"behavior_analysis.pain_sensitivity.p_primary_mode":                               "asymptotic",
+		"behavior_analysis.predictor_sensitivity.primary_unit":                                 "run_mean",
+		"behavior_analysis.predictor_sensitivity.n_permutations":                               300.0,
+		"behavior_analysis.predictor_sensitivity.p_primary_mode":                               "asymptotic",
 		"behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback": true,
 		"behavior_analysis.condition.primary_unit":                                        "run_mean",
 		"behavior_analysis.condition.compare_labels":                                      []interface{}{"low", "high"},
@@ -778,7 +795,7 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
-		case "trial_table", "pain_residual", "regression", "models", "validation", "moderation", "stability", "pain_sensitivity", "condition":
+		case "trial_table", "predictor_residual", "regression", "models", "validation", "moderation", "stability", "predictor_sensitivity", "condition":
 			m.computationSelected[i] = true
 		}
 	}
@@ -835,8 +852,8 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	if !containsSubsequence(args, []string{"--stability-min-group-trials", "4"}) {
 		t.Fatalf("expected --stability-min-group-trials 4 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--pain-sensitivity-min-trials", "9"}) {
-		t.Fatalf("expected --pain-sensitivity-min-trials 9 in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--predictor-sensitivity-min-trials", "9"}) {
+		t.Fatalf("expected --predictor-sensitivity-min-trials 9 in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--condition-min-trials", "6"}) {
 		t.Fatalf("expected --condition-min-trials 6 in args, got: %#v", args)
@@ -856,7 +873,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 	}
 
 	m.groupLevelBlockPermutation = false
-	m.groupLevelTarget = "pain_residual"
+	m.groupLevelTarget = "predictor_residual"
 	m.groupLevelControlTemperature = false
 	m.groupLevelControlTrialOrder = false
 	m.groupLevelControlRunEffects = false
@@ -867,8 +884,8 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 
 	args := m.buildBehaviorAdvancedArgs()
 
-	if !containsSubsequence(args, []string{"--group-level-target", "pain_residual"}) {
-		t.Fatalf("expected --group-level-target pain_residual in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--group-level-target", "predictor_residual"}) {
+		t.Fatalf("expected --group-level-target predictor_residual in args, got: %#v", args)
 	}
 	if !containsString(args, "--no-group-level-control-temperature") {
 		t.Fatalf("expected --no-group-level-control-temperature in args, got: %#v", args)
@@ -897,7 +914,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testi
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
-		case "correlations", "pain_sensitivity", "condition", "temporal", "regression", "mediation", "moderation", "mixed_effects":
+		case "correlations", "predictor_sensitivity", "condition", "temporal", "regression", "mediation", "moderation", "mixed_effects":
 			m.computationSelected[i] = true
 		}
 	}
@@ -922,20 +939,20 @@ func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testi
 	if !containsSubsequence(args, []string{"--correlations-min-runs", "5"}) {
 		t.Fatalf("expected --correlations-min-runs 5 in args, got: %#v", args)
 	}
-	if !containsString(args, "--correlations-prefer-pain-residual") {
-		t.Fatalf("expected --correlations-prefer-pain-residual in args, got: %#v", args)
+	if !containsString(args, "--correlations-prefer-predictor-residual") {
+		t.Fatalf("expected --correlations-prefer-predictor-residual in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--correlations-permutations", "111"}) {
 		t.Fatalf("expected --correlations-permutations 111 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--pain-sensitivity-primary-unit", "run_mean"}) {
-		t.Fatalf("expected --pain-sensitivity-primary-unit run_mean in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--predictor-sensitivity-primary-unit", "run_mean"}) {
+		t.Fatalf("expected --predictor-sensitivity-primary-unit run_mean in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--pain-sensitivity-permutations", "250"}) {
-		t.Fatalf("expected --pain-sensitivity-permutations 250 in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--predictor-sensitivity-permutations", "250"}) {
+		t.Fatalf("expected --predictor-sensitivity-permutations 250 in args, got: %#v", args)
 	}
-	if !containsString(args, "--no-pain-sensitivity-permutation-primary") {
-		t.Fatalf("expected --no-pain-sensitivity-permutation-primary in args, got: %#v", args)
+	if !containsString(args, "--no-predictor-sensitivity-permutation-primary") {
+		t.Fatalf("expected --no-predictor-sensitivity-permutation-primary in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--condition-primary-unit", "run_mean"}) {
 		t.Fatalf("expected --condition-primary-unit run_mean in args, got: %#v", args)
@@ -998,7 +1015,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 		"--no-models-force-trial-iid-asymptotic",
 		"--no-influence-include-interaction",
 		"--no-correlations-permutation-primary",
-		"--no-correlations-use-crossfit-pain-residual",
+		"--no-correlations-use-crossfit-predictor-residual",
 		"--no-condition-permutation-primary",
 		"--no-stats-allow-iid-trials",
 		"--no-stats-hierarchical-fdr",
@@ -1038,7 +1055,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
-		case "correlations", "pain_sensitivity", "condition", "temporal", "cluster", "mediation", "moderation":
+		case "correlations", "predictor_sensitivity", "condition", "temporal", "cluster", "mediation", "moderation":
 			m.computationSelected[i] = true
 		}
 	}
@@ -1059,8 +1076,8 @@ func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing
 	if !containsSubsequence(args, []string{"--correlations-features", "power", "connectivity"}) {
 		t.Fatalf("expected --correlations-features power connectivity in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--pain-sensitivity-features", "erp", "itpc"}) {
-		t.Fatalf("expected --pain-sensitivity-features erp itpc in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--predictor-sensitivity-features", "erp", "itpc"}) {
+		t.Fatalf("expected --predictor-sensitivity-features erp itpc in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--condition-features", "spectral"}) {
 		t.Fatalf("expected --condition-features spectral in args, got: %#v", args)

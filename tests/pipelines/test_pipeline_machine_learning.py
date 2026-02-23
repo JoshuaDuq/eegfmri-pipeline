@@ -123,7 +123,7 @@ class TestMachineLearningDeep(unittest.TestCase):
                 self.assertEqual(p._execute_permutation(["0001"], "t", "group", params, progress), Path("/tmp/p"))
 
 class TestMachineLearningGapfill(unittest.TestCase):
-        def test_ml_missing_task_visualize_and_alias(self):
+        def test_ml_missing_task_and_visualize(self):
             from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
             p = object.__new__(MLPipeline)
@@ -132,10 +132,6 @@ class TestMachineLearningGapfill(unittest.TestCase):
                 p._validate_inputs(["0001", "0002"], None, "group")
             with self.assertRaises(NotImplementedError):
                 p.visualize(Path(tempfile.mkdtemp()))
-            with patch.object(MLPipeline, "run_batch", return_value=[{"status": "success"}]) as m:
-                out = p.run_batch_with_plots(["0001", "0002"], task="t", mode="regression")
-            m.assert_called_once()
-            self.assertEqual(out[0]["status"], "success")
 
         def test_run_batch_raises_when_mode_returns_none(self):
             from eeg_pipeline.pipelines.machine_learning import MLPipeline
@@ -154,12 +150,12 @@ class TestMachineLearningGapfill(unittest.TestCase):
             }
 
             with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
-                MLPipeline, "_validate_inputs", return_value="thermalactive"
+                MLPipeline, "_validate_inputs", return_value="task"
             ), patch.object(
                 MLPipeline, "_get_mode_dispatcher", return_value={"regression": (lambda **kwargs: None)}
             ):
                 with self.assertRaisesRegex(RuntimeError, "produced no output"):
-                    p.run_batch(["0001", "0002"], task="thermalactive", mode="regression")
+                    p.run_batch(["0001", "0002"], task="task", mode="regression")
             progress.complete.assert_called_once_with(success=False)
 
         def test_run_batch_writes_reproducibility_metadata(self):
@@ -183,13 +179,13 @@ class TestMachineLearningGapfill(unittest.TestCase):
             out_dir = Path(tempfile.mkdtemp())
 
             with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
-                MLPipeline, "_validate_inputs", return_value="thermalactive"
+                MLPipeline, "_validate_inputs", return_value="task"
             ), patch.object(
                 MLPipeline,
                 "_get_mode_dispatcher",
                 return_value={"regression": (lambda **kwargs: out_dir)},
             ):
-                out = p.run_batch(["0001"], task="thermalactive", mode="regression")
+                out = p.run_batch(["0001"], task="task", mode="regression")
 
             self.assertEqual(out[0]["status"], "success")
             metadata_dir = p.deriv_root / "logs" / "run_metadata" / "machine_learning"

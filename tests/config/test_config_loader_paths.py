@@ -34,7 +34,7 @@ def test_overrides_path_defaults_to_repo_data_derivatives(monkeypatch, tmp_path)
     assert overrides_path == tmp_path / "data" / "derivatives" / ".tui_overrides.json"
 
 
-def test_overrides_path_falls_back_to_legacy_location(monkeypatch, tmp_path) -> None:
+def test_overrides_path_ignores_legacy_location(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("EEG_PIPELINE_TUI_OVERRIDES", raising=False)
     monkeypatch.setattr(loader, "get_project_root", lambda: tmp_path)
     legacy = tmp_path / "eeg_pipeline" / "data" / "derivatives" / ".tui_overrides.json"
@@ -43,7 +43,7 @@ def test_overrides_path_falls_back_to_legacy_location(monkeypatch, tmp_path) -> 
 
     config_path = tmp_path / "eeg_pipeline" / "utils" / "config" / "eeg_config.yaml"
     overrides_path = loader._get_overrides_path(config_path)
-    assert overrides_path == legacy
+    assert overrides_path == tmp_path / "data" / "derivatives" / ".tui_overrides.json"
 
 
 def test_load_config_returns_isolated_nested_data(monkeypatch) -> None:
@@ -84,14 +84,14 @@ def test_resolve_single_path_keeps_docker_image_like_values() -> None:
 def test_resolve_paths_recursive_skips_non_path_scalar_keys(tmp_path) -> None:
     config = {
         "project": {
-            "task": "thermalactive",
+            "task": "task",
             "random_state": "42",
             "picks": "eeg",
             "project_root": "workspace-root",
         }
     }
     loader._resolve_paths_recursive(config, tmp_path / "config", tmp_path / "project")
-    assert config["project"]["task"] == "thermalactive"
+    assert config["project"]["task"] == "task"
     assert config["project"]["random_state"] == "42"
     assert config["project"]["picks"] == "eeg"
     assert config["project"]["project_root"] == "workspace-root"

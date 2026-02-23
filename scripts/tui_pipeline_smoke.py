@@ -34,7 +34,6 @@ def _cases(task: str) -> List[SmokeCase]:
         SmokeCase("plotting", ["-m", "eeg_pipeline.cli.main", "plotting", "visualize", "--help"]),
         SmokeCase("fmri_preprocessing", ["-m", "eeg_pipeline.cli.main", "fmri", "preprocess", "--help"]),
         SmokeCase("fmri_analysis", ["-m", "eeg_pipeline.cli.main", "fmri-analysis", "first-level", "--help"]),
-        SmokeCase("utilities", ["-m", "eeg_pipeline.cli.main", "utilities", "raw-to-bids", "--help"]),
         SmokeCase("validate", ["-m", "eeg_pipeline.cli.main", "validate", "quick", "--help"]),
         SmokeCase("info", ["-m", "eeg_pipeline.cli.main", "info", "subjects", "--help"]),
         SmokeCase("stats", ["-m", "eeg_pipeline.cli.main", "stats", "--help"]),

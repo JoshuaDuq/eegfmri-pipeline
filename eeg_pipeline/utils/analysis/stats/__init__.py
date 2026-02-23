@@ -30,7 +30,7 @@ Modules:
     - influence: Influence diagnostics
     - splines: Spline fitting
     - temperature_models: Temperature-rating models
-    - pain_residual: Pain residual computation
+    - predictor_residual: Pain residual computation
     - mixed_effects: Mixed effects models
 """
 

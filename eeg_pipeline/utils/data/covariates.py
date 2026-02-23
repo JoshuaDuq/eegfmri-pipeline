@@ -103,12 +103,13 @@ def extract_temperature_data(
     """Extract temperature series and column name from aligned events."""
     if aligned_events is None:
         return None, None
-    
-    temperature_columns = config.get("event_columns.temperature")
-    temperature_column = _pick_first_column(aligned_events, temperature_columns)
-    if not temperature_column:
+
+    from eeg_pipeline.utils.data.columns import resolve_predictor_column
+
+    temperature_column = resolve_predictor_column(aligned_events, config)
+    if temperature_column is None or temperature_column not in aligned_events.columns:
         return None, None
-    
+
     temperature_series = pd.to_numeric(
         aligned_events[temperature_column], errors="coerce"
     )

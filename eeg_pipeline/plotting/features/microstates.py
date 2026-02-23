@@ -73,8 +73,8 @@ def _comparison_masks(events_df: pd.DataFrame, config: Any) -> Optional[Tuple[np
     if comparison is not None:
         return comparison
 
-    # Fallback to pain_binary if explicit comparison config is missing.
-    candidate_columns = ("pain_binary", "pain_binary_coded", "pain")
+    # Fallback to binary_outcome if explicit comparison config is missing.
+    candidate_columns = ("binary_outcome", "binary_outcome_coded", "pain")
     for column in candidate_columns:
         if column not in events_df.columns:
             continue

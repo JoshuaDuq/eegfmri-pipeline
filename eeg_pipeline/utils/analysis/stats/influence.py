@@ -97,7 +97,7 @@ class InfluenceConfig:
     @classmethod
     def from_config(cls, config: Any) -> "InfluenceConfig":
         """Create config from configuration object."""
-        default_outcomes = ["rating", "pain_residual"]
+        default_outcomes = ["rating", "predictor_residual"]
         outcomes = _get_config_value(config, "behavior_analysis.influence.outcomes", default_outcomes)
         if not isinstance(outcomes, (list, tuple)) or not outcomes:
             outcomes = default_outcomes

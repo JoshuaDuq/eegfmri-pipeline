@@ -65,7 +65,7 @@ class TestDoseResponsePlotting(unittest.TestCase):
             saved = visualize_dose_response(
                 subject="0000",
                 deriv_root=deriv_root,
-                task="thermalactive",
+                task="task",
                 config=config,
                 logger=logger,
             )
@@ -127,7 +127,7 @@ class TestDoseResponsePlotting(unittest.TestCase):
             saved = visualize_dose_response(
                 subject="0000",
                 deriv_root=deriv_root,
-                task="thermalactive",
+                task="task",
                 config=config,
                 logger=logger,
             )

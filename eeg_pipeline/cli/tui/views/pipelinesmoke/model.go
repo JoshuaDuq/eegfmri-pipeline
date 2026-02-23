@@ -28,7 +28,6 @@ var smokeItems = []smokeItem{
 	{ID: "plotting", Name: "Plotting", Description: "CLI parser/help smoke"},
 	{ID: "fmri_preprocessing", Name: "fMRI Preprocessing", Description: "CLI parser/help smoke"},
 	{ID: "fmri_analysis", Name: "fMRI Analysis", Description: "CLI parser/help smoke"},
-	{ID: "utilities", Name: "Utilities", Description: "CLI parser/help smoke"},
 	{ID: "validate", Name: "Validate", Description: "CLI parser/help smoke"},
 	{ID: "info", Name: "Info", Description: "CLI parser/help smoke"},
 	{ID: "stats", Name: "Stats", Description: "CLI parser/help smoke"},

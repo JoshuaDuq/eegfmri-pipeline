@@ -57,6 +57,18 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--rng-seed", type=int, default=None)
     compute_group.add_argument("--n-jobs", type=int, default=None)
     compute_group.add_argument("--min-samples", type=int, default=None)
+    compute_group.add_argument(
+        "--predictor-column",
+        type=str,
+        default=None,
+        help="Canonical predictor column for behavior analyses (e.g., dose, intensity, temperature)",
+    )
+    compute_group.add_argument(
+        "--outcome-column",
+        type=str,
+        default=None,
+        help="Canonical outcome column for behavior analyses (e.g., rating, arousal, confidence)",
+    )
     compute_group.add_argument("--control-temperature", action="store_true", default=None)
     compute_group.add_argument("--no-control-temperature", action="store_false", dest="control_temperature")
     compute_group.add_argument("--control-trial-order", action="store_true", default=None)
@@ -124,7 +136,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Feature categories for correlations analysis"
     )
     compute_group.add_argument(
-        "--pain-sensitivity-features", nargs="+", choices=feature_choices, default=None,
+        "--predictor-sensitivity-features", nargs="+", choices=feature_choices, default=None,
         help="Feature categories for pain sensitivity analysis"
     )
     compute_group.add_argument(
@@ -194,8 +206,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
 
     residual_group = parser.add_argument_group("Pain residual / temperature-model diagnostics")
-    residual_group.add_argument("--pain-residual", action="store_true", default=None, dest="pain_residual_enabled")
-    residual_group.add_argument("--no-pain-residual", action="store_false", dest="pain_residual_enabled")
+    residual_group.add_argument("--pain-residual", action="store_true", default=None, dest="predictor_residual_enabled")
+    residual_group.add_argument("--no-pain-residual", action="store_false", dest="predictor_residual_enabled")
     residual_group.add_argument("--pain-residual-method", choices=["spline", "poly"], default=None)
     residual_group.add_argument("--pain-residual-min-samples", type=int, default=None)
     residual_group.add_argument(
@@ -206,8 +218,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Candidate spline degrees of freedom for temperature→rating residual model (e.g., 3 4 5)",
     )
     residual_group.add_argument("--pain-residual-poly-degree", type=int, default=None)
-    residual_group.add_argument("--pain-residual-model-compare", action="store_true", default=None, dest="pain_residual_model_compare_enabled")
-    residual_group.add_argument("--no-pain-residual-model-compare", action="store_false", dest="pain_residual_model_compare_enabled")
+    residual_group.add_argument("--pain-residual-model-compare", action="store_true", default=None, dest="predictor_residual_model_compare_enabled")
+    residual_group.add_argument("--no-pain-residual-model-compare", action="store_false", dest="predictor_residual_model_compare_enabled")
     residual_group.add_argument("--pain-residual-model-compare-min-samples", type=int, default=None)
     residual_group.add_argument(
         "--pain-residual-model-compare-poly-degrees",
@@ -216,22 +228,22 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="Polynomial degrees to compare in pain-residual model comparison (e.g., 2 3)",
     )
-    residual_group.add_argument("--pain-residual-breakpoint-test", action="store_true", default=None, dest="pain_residual_breakpoint_enabled")
-    residual_group.add_argument("--no-pain-residual-breakpoint-test", action="store_false", dest="pain_residual_breakpoint_enabled")
+    residual_group.add_argument("--pain-residual-breakpoint-test", action="store_true", default=None, dest="predictor_residual_breakpoint_enabled")
+    residual_group.add_argument("--no-pain-residual-breakpoint-test", action="store_false", dest="predictor_residual_breakpoint_enabled")
     residual_group.add_argument("--pain-residual-breakpoint-min-samples", type=int, default=None)
     residual_group.add_argument("--pain-residual-breakpoint-candidates", type=int, default=None)
     residual_group.add_argument("--pain-residual-breakpoint-quantile-low", type=float, default=None)
     residual_group.add_argument("--pain-residual-breakpoint-quantile-high", type=float, default=None)
     # Optional cross-fit residualization (out-of-run prediction)
-    residual_group.add_argument("--pain-residual-crossfit", action="store_true", default=None, dest="pain_residual_crossfit_enabled")
-    residual_group.add_argument("--no-pain-residual-crossfit", action="store_false", dest="pain_residual_crossfit_enabled")
+    residual_group.add_argument("--pain-residual-crossfit", action="store_true", default=None, dest="predictor_residual_crossfit_enabled")
+    residual_group.add_argument("--no-pain-residual-crossfit", action="store_false", dest="predictor_residual_crossfit_enabled")
     residual_group.add_argument("--pain-residual-crossfit-group-column", type=str, default=None)
     residual_group.add_argument("--pain-residual-crossfit-n-splits", type=int, default=None)
     residual_group.add_argument("--pain-residual-crossfit-method", choices=["spline", "poly"], default=None)
     residual_group.add_argument("--pain-residual-crossfit-spline-n-knots", type=int, default=None)
 
     regression_group = parser.add_argument_group("Trialwise regression options")
-    regression_group.add_argument("--regression-outcome", choices=["rating", "pain_residual", "temperature"], default=None)
+    regression_group.add_argument("--regression-outcome", choices=["rating", "predictor_residual", "temperature"], default=None)
     regression_group.add_argument("--regression-include-temperature", action="store_true", default=None)
     regression_group.add_argument("--no-regression-include-temperature", action="store_false", dest="regression_include_temperature")
     regression_group.add_argument("--regression-temperature-control", choices=["linear", "rating_hat", "spline"], default=None)
@@ -255,7 +267,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     regression_group.add_argument("--regression-max-features", type=int, default=None)
 
     models_group = parser.add_argument_group("Model families options")
-    models_group.add_argument("--models-outcomes", nargs="+", choices=["rating", "pain_residual", "temperature", "pain_binary"], default=None)
+    models_group.add_argument("--models-outcomes", nargs="+", choices=["rating", "predictor_residual", "temperature", "binary_outcome"], default=None)
     models_group.add_argument("--models-families", nargs="+", choices=["ols_hc3", "robust_rlm", "quantile_50", "logit"], default=None)
     models_group.add_argument("--models-include-temperature", action="store_true", default=None)
     models_group.add_argument("--no-models-include-temperature", action="store_false", dest="models_include_temperature")
@@ -276,7 +288,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     models_group.add_argument("--no-models-standardize", action="store_false", dest="models_standardize")
     models_group.add_argument("--models-min-samples", type=int, default=None)
     models_group.add_argument("--models-max-features", type=int, default=None)
-    models_group.add_argument("--models-binary-outcome", choices=["pain_binary", "rating_median"], default=None)
+    models_group.add_argument("--models-binary-outcome", choices=["binary_outcome", "rating_median"], default=None)
     models_group.add_argument("--models-primary-unit", choices=["trial", "run_mean"], default=None)
     models_group.add_argument(
         "--models-force-trial-iid-asymptotic",
@@ -293,7 +305,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     stability_group = parser.add_argument_group("Stability options")
     stability_group.add_argument("--stability-method", choices=["spearman", "pearson"], default=None)
-    stability_group.add_argument("--stability-outcome", choices=["auto", "rating", "pain_residual"], default=None)
+    stability_group.add_argument("--stability-outcome", choices=["auto", "rating", "predictor_residual"], default=None)
     stability_group.add_argument("--stability-group-column", choices=["auto", "run", "block"], default=None)
     stability_group.add_argument("--stability-partial-temperature", action="store_true", default=None)
     stability_group.add_argument("--no-stability-partial-temperature", action="store_false", dest="stability_partial_temperature")
@@ -302,7 +314,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     stability_group.add_argument("--stability-alpha", type=float, default=None)
 
     influence_group = parser.add_argument_group("Influence diagnostics options")
-    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["rating", "pain_residual", "temperature"], default=None)
+    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["rating", "predictor_residual", "temperature"], default=None)
     influence_group.add_argument("--influence-max-features", type=int, default=None)
     influence_group.add_argument("--influence-include-temperature", action="store_true", default=None)
     influence_group.add_argument("--no-influence-include-temperature", action="store_false", dest="influence_include_temperature")
@@ -322,21 +334,21 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     influence_group.add_argument("--influence-cooks-threshold", type=float, default=None)
     influence_group.add_argument("--influence-leverage-threshold", type=float, default=None)
 
-    pain_sensitivity_group = parser.add_argument_group("Pain sensitivity options")
-    pain_sensitivity_group.add_argument("--pain-sensitivity-min-trials", type=int, default=None)
-    pain_sensitivity_group.add_argument("--pain-sensitivity-primary-unit", choices=["trial", "run_mean"], default=None)
-    pain_sensitivity_group.add_argument("--pain-sensitivity-permutations", type=int, default=None)
-    pain_sensitivity_group.add_argument(
-        "--pain-sensitivity-permutation-primary",
+    predictor_sensitivity_group = parser.add_argument_group("Predictor sensitivity options")
+    predictor_sensitivity_group.add_argument("--predictor-sensitivity-min-trials", type=int, default=None)
+    predictor_sensitivity_group.add_argument("--predictor-sensitivity-primary-unit", choices=["trial", "run_mean"], default=None)
+    predictor_sensitivity_group.add_argument("--predictor-sensitivity-permutations", type=int, default=None)
+    predictor_sensitivity_group.add_argument(
+        "--predictor-sensitivity-permutation-primary",
         action="store_true",
         default=None,
-        dest="pain_sensitivity_permutation_primary",
+        dest="predictor_sensitivity_permutation_primary",
         help="Use permutation-based p_primary when available",
     )
-    pain_sensitivity_group.add_argument(
-        "--no-pain-sensitivity-permutation-primary",
+    predictor_sensitivity_group.add_argument(
+        "--no-predictor-sensitivity-permutation-primary",
         action="store_false",
-        dest="pain_sensitivity_permutation_primary",
+        dest="predictor_sensitivity_permutation_primary",
     )
 
     correlations_group = parser.add_argument_group("Correlations (trial-table) options")
@@ -355,16 +367,16 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Minimum runs required for run-mean correlation estimates",
     )
     correlations_group.add_argument(
-        "--correlations-prefer-pain-residual",
+        "--correlations-prefer-predictor-residual",
         action="store_true",
         default=None,
-        dest="correlations_prefer_pain_residual",
-        help="Prefer pain_residual (or pain_residual_cv) when selecting correlation targets",
+        dest="correlations_prefer_predictor_residual",
+        help="Prefer predictor_residual (or predictor_residual_cv) when selecting correlation targets",
     )
     correlations_group.add_argument(
-        "--no-correlations-prefer-pain-residual",
+        "--no-correlations-prefer-predictor-residual",
         action="store_false",
-        dest="correlations_prefer_pain_residual",
+        dest="correlations_prefer_predictor_residual",
     )
     correlations_group.add_argument(
         "--correlations-permutations",
@@ -373,8 +385,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="correlations_permutations",
         help="Override permutation iterations for correlations only (unset=use global --n-perm)",
     )
-    correlations_group.add_argument("--correlations-use-crossfit-pain-residual", action="store_true", default=None, dest="correlations_use_crossfit_pain_residual")
-    correlations_group.add_argument("--no-correlations-use-crossfit-pain-residual", action="store_false", dest="correlations_use_crossfit_pain_residual")
+    correlations_group.add_argument("--correlations-use-crossfit-predictor-residual", action="store_true", default=None, dest="correlations_use_crossfit_predictor_residual")
+    correlations_group.add_argument("--no-correlations-use-crossfit-predictor-residual", action="store_false", dest="correlations_use_crossfit_predictor_residual")
     correlations_group.add_argument(
         "--correlations-permutation-primary",
         action="store_true",
@@ -476,12 +488,13 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     temporal_group.add_argument("--temporal-correction-method", choices=["fdr", "cluster"], default=None)
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
+    temporal_group.add_argument("--temporal-freqs-hz", nargs="+", type=float, default=None, help="Frequency bins for temporal TF analyses (Hz)")
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-max-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-smooth-window-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-split-by-condition", action="store_true", default=None, dest="temporal_split_by_condition")
     temporal_group.add_argument("--no-temporal-split-by-condition", action="store_false", dest="temporal_split_by_condition")
-    temporal_group.add_argument("--temporal-condition-column", type=str, default=None, help="events.tsv column to split/filter by (default: event_columns.pain_binary)")
+    temporal_group.add_argument("--temporal-condition-column", type=str, default=None, help="events.tsv column to split/filter by (default: event_columns.binary_outcome)")
     temporal_group.add_argument("--temporal-condition-values", nargs="+", default=None, metavar="VALUE", help="Subset of values to compute (empty = all unique values)")
     temporal_group.add_argument("--temporal-include-roi-averages", action="store_true", default=None, dest="temporal_include_roi_averages", help="Include ROI-averaged rows in output")
     temporal_group.add_argument("--no-temporal-include-roi-averages", action="store_false", dest="temporal_include_roi_averages", help="Exclude ROI-averaged rows from output")
@@ -504,20 +517,12 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     temporal_group.add_argument("--temporal-erds-baseline-max", type=float, default=None, help="ERDS baseline window end (seconds)")
     temporal_group.add_argument("--temporal-erds-method", choices=["percent", "zscore"], default=None, help="ERDS computation method")
     
-    # Time-frequency heatmap options
-    tfheatmap_group = parser.add_argument_group("Time-frequency heatmap options")
-    tfheatmap_group.add_argument("--tf-heatmap-enabled", action="store_true", default=None, help="Enable TF heatmap computation")
-    tfheatmap_group.add_argument("--no-tf-heatmap-enabled", action="store_false", dest="tf_heatmap_enabled", help="Disable TF heatmap computation")
-    tfheatmap_group.add_argument("--tf-heatmap-freqs", nargs="+", type=float, default=None, help="Frequencies for TF heatmap")
-    tfheatmap_group.add_argument("--tf-heatmap-time-resolution-ms", type=int, default=None, help="Time resolution for TF heatmap (ms)")
-    
-    
     # Cluster-specific options
     cluster_group = parser.add_argument_group("Cluster permutation options")
     cluster_group.add_argument("--cluster-threshold", type=float, default=None, help="Cluster forming threshold")
     cluster_group.add_argument("--cluster-min-size", type=int, default=None, help="Minimum cluster size")
     cluster_group.add_argument("--cluster-tail", type=int, choices=[-1, 0, 1], default=None, help="Test tail: 0=two-tailed, 1=upper, -1=lower")
-    cluster_group.add_argument("--cluster-condition-column", type=str, default=None, help="events.tsv column to split by (default: event_columns.pain_binary)")
+    cluster_group.add_argument("--cluster-condition-column", type=str, default=None, help="events.tsv column to split by (default: event_columns.binary_outcome)")
     cluster_group.add_argument("--cluster-condition-values", nargs="+", default=None, metavar="VALUE", help="Exactly 2 values to compare (e.g., 0 1 or pain nonpain)")
     
     # Mediation-specific options
@@ -570,7 +575,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--no-condition-fail-fast", action="store_false", dest="condition_fail_fast")
     condition_group.add_argument("--condition-effect-threshold", type=float, default=None, help="Minimum effect size (Cohen's d) to report")
     condition_group.add_argument("--condition-min-trials", type=int, default=None, help="Minimum trials per condition")
-    condition_group.add_argument("--condition-compare-column", type=str, default=None, help="events.tsv column to use for condition split (default: event_columns.pain_binary)")
+    condition_group.add_argument("--condition-compare-column", type=str, default=None, help="events.tsv column to use for condition split (default: event_columns.binary_outcome)")
     condition_group.add_argument("--condition-compare-values", nargs="+", default=None, metavar="VALUE", help="Values in the column to compare (e.g., 0 1 or pain nonpain)")
     condition_group.add_argument("--condition-compare-labels", nargs="+", default=None, metavar="LABEL", help="Optional labels aligned to --condition-compare-values")
     condition_group.add_argument("--condition-overwrite", action="store_true", default=None, dest="condition_overwrite", help="Overwrite existing condition effects files (default)")

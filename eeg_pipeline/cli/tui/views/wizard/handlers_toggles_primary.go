@@ -23,12 +23,6 @@ func (m *Model) toggleAdvancedOption() {
 		m.toggleFmriAdvancedOption()
 	case types.PipelineFmriAnalysis:
 		m.toggleFmriAnalysisAdvancedOption()
-	case types.PipelineRawToBIDS:
-		m.toggleRawToBidsAdvancedOption()
-	case types.PipelineFmriRawToBIDS:
-		m.toggleFmriRawToBidsAdvancedOption()
-	case types.PipelineMergePsychoPyData:
-		m.toggleMergePsychopyAdvancedOption()
 	}
 }
 
@@ -1683,6 +1677,22 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.subCursor = 0
 		} else {
 			m.startTextEdit(textFieldRunAdjustmentColumn)
+		}
+		m.useDefaultAdvanced = false
+	case optBehaviorOutcomeColumn:
+		if len(m.GetAvailableColumns()) > 0 {
+			m.expandedOption = expandedBehaviorOutcomeColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldBehaviorOutcomeColumn)
+		}
+		m.useDefaultAdvanced = false
+	case optBehaviorPredictorColumn:
+		if len(m.GetAvailableColumns()) > 0 {
+			m.expandedOption = expandedBehaviorPredictorColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldBehaviorPredictorColumn)
 		}
 		m.useDefaultAdvanced = false
 	case optRunAdjustmentIncludeInCorrelations:

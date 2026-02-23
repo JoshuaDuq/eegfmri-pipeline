@@ -9,7 +9,7 @@ import pandas as pd
 _STAGE_TO_ATTR_MAP = {
     "trial_table": "trial_table_path",
     "correlate_fdr": "correlations",
-    "pain_sensitivity": "pain_sensitivity",
+    "predictor_sensitivity": "predictor_sensitivity",
     "regression": "regression",
     "models": "models",
     "stability": "stability",

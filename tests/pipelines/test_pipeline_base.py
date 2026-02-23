@@ -20,7 +20,7 @@ class TestBaseCompletion(unittest.TestCase):
             def process_subject(self, subject: str, task: str, **kwargs):
                 return None
 
-        fake_cfg = DotConfig({"project": {"task": "thermalactive"}})
+        fake_cfg = DotConfig({"project": {"task": "task"}})
         fake_root = Path(tempfile.mkdtemp())
 
         with patch("eeg_pipeline.pipelines.base.load_config", return_value=fake_cfg), patch(

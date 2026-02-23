@@ -178,7 +178,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=None,
         help=(
-            "Target to predict. Can be a logical name ('rating', 'temperature', 'pain_binary') "
+            "Target to predict. Can be a logical name ('rating', 'temperature', 'binary_outcome') "
             "or an explicit events.tsv column name. Use --target=fmri_signature to predict trial-wise "
             "NPS/SIIPS1 expression from fMRI beta-series/LSS. Defaults depend on stage."
         ),
@@ -337,7 +337,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         "--fmri-signature-contrast-name",
         type=str,
         default=None,
-        help="Contrast name folder under fmri/(beta_series|lss)/task-*/contrast-*/ (default: pain_vs_nonpain).",
+        help="Contrast name folder under fmri/(beta_series|lss)/task-*/contrast-*/ (default: contrast).",
     )
     fmri_sig.add_argument(
         "--fmri-signature-name",

@@ -508,8 +508,8 @@ def _sanitize_permutation_groups(
     return groups_array
 
 
-def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    return _stages_correlate.stage_pain_sensitivity_impl(
+def stage_predictor_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    return _stages_correlate.stage_predictor_sensitivity_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
@@ -639,9 +639,9 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     return out_path
 
 
-def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
+def stage_predictor_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     cache = _get_cache(ctx)
-    out_path = _stages_trial_table.stage_pain_residual_impl(
+    out_path = _stages_trial_table.stage_predictor_residual_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,

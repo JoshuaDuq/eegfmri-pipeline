@@ -525,7 +525,7 @@ def _resolve_task(task: Optional[str], config: Any) -> str:
     """
     if task is not None:
         return task
-    return config.get("project.task", "thermalactive")
+    return config.get("project.task", "task")
 
 
 def _log_visualization_start(

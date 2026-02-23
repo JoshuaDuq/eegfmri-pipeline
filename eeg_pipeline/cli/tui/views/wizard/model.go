@@ -66,21 +66,21 @@ var behaviorComputations = []Computation{
 	// Data Preparation
 	{"trial_table", "Trial Table", "Build canonical per-trial analysis table", "DataPrep"},
 	{"lag_features", "Lag Features", "Add temporal dynamics (prev_*, delta_*) for habituation", "DataPrep"},
-	{"pain_residual", "Pain Residual + Diagnostics", "Compute pain_residual and temperature model diagnostics", "DataPrep"},
+	{"predictor_residual", "Residual + Diagnostics", "Compute residualized outcome and predictor model diagnostics", "DataPrep"},
 
 	// Core Analyses
-	{"correlations", "Correlations", "EEG-rating correlations with bootstrap CIs", "Core"},
+	{"correlations", "Correlations", "EEG-outcome correlations with bootstrap CIs", "Core"},
 	{"multilevel_correlations", "Group Multilevel Correlations", "Group-level correlations with block-restricted permutations", "Core"},
 	{"regression", "Regression", "Feature regression with optional permutation + model sensitivity", "Core"},
 	{"models", "Model Families", "Per-feature model families (OLS/robust/quantile/logit)", "Core"},
-	{"condition", "Condition Comparison", "Compare conditions (e.g., pain vs non-pain)", "Core"},
+	{"condition", "Condition Comparison", "Compare conditions (e.g., condition A vs condition B)", "Core"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis", "Core"},
-	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity (temperature→rating slope)", "Core"},
+	{"predictor_sensitivity", "Predictor Sensitivity", "Individual sensitivity (predictor→outcome slope)", "Core"},
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests", "Core"},
 
 	// Advanced/Causal Analyses
-	{"mediation", "Mediation Analysis", "Path analysis: does EEG mediate temperature→rating?", "Advanced"},
-	{"moderation", "Moderation Analysis", "Does EEG moderate the temperature→rating effect?", "Advanced"},
+	{"mediation", "Mediation Analysis", "Path analysis: does EEG mediate predictor→outcome?", "Advanced"},
+	{"moderation", "Moderation Analysis", "Does EEG moderate the predictor→outcome effect?", "Advanced"},
 	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling (group-level)", "Advanced"},
 
 	// Quality & Validation
@@ -406,8 +406,8 @@ var computationApplicableFeatures = map[string][]string{
 	"correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Multilevel correlations uses the same features as correlations (group-level)
 	"multilevel_correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	// Pain sensitivity uses the same features as correlations
-	"pain_sensitivity": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	// Predictor sensitivity uses the same features as correlations
+	"predictor_sensitivity": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Condition comparison uses trial-level features
 	"condition": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Temporal: power, itpc, erds are the temporal-specific features computed from epochs
@@ -593,7 +593,6 @@ const (
 	textFieldFmriTrialSigGroupValues
 	textFieldFmriTrialSigScopeTrialTypes
 	textFieldFmriTrialSigScopeStimPhases
-	textFieldRawMontage
 	textFieldPrepMontage
 	textFieldPrepChTypes
 	textFieldPrepEegReference
@@ -602,15 +601,6 @@ const (
 	textFieldPrepFileExtension
 	textFieldPrepRenameAnotDict
 	textFieldPrepCustomBadDict
-	textFieldRawEventPrefixes
-	textFieldMergeEventPrefixes
-	textFieldMergeEventTypes
-	textFieldMergeQCColumns
-	// fMRI raw-to-bids text fields
-	textFieldFmriRawSession
-	textFieldFmriRawRestTask
-	textFieldFmriRawDcm2niixPath
-	textFieldFmriRawDcm2niixArgs
 	// Behavior advanced config text fields
 	textFieldConditionCompareColumn
 	textFieldConditionCompareWindows
@@ -621,6 +611,8 @@ const (
 	textFieldTemporalTargetColumn
 	textFieldTfHeatmapFreqs
 	textFieldRunAdjustmentColumn
+	textFieldBehaviorOutcomeColumn
+	textFieldBehaviorPredictorColumn
 	textFieldPainResidualCrossfitGroupColumn
 	textFieldClusterConditionColumn
 	textFieldClusterConditionValues
@@ -1071,11 +1063,11 @@ type Model struct {
 	fmriAnalysisRequireFmriprep   bool   // Fail if fMRIPrep outputs missing
 	fmriAnalysisRunsSpec          string // Space-separated ints (e.g., "1 2 3") or empty for auto
 	fmriAnalysisContrastType      int    // 0: t-test, 1: custom
-	fmriAnalysisCondAColumn       string // Condition A: events column (e.g. trial_type, pain_binary_coded)
+	fmriAnalysisCondAColumn       string // Condition A: events column (e.g. trial_type, binary_outcome_coded)
 	fmriAnalysisCondAValue        string // Condition A: value in that column
 	fmriAnalysisCondBColumn       string // Condition B: events column
 	fmriAnalysisCondBValue        string // Condition B: value in that column
-	fmriAnalysisContrastName      string // e.g., "pain_vs_nonpain"
+	fmriAnalysisContrastName      string // e.g., "contrast"
 	fmriAnalysisFormula           string // Custom formula
 	fmriAnalysisEventsToModel     string // Optional: comma-separated list of trial_type values to include (first-level only)
 	fmriAnalysisScopeTrialTypes   string // Optional: space-separated trial_type allow-list for condition selection
@@ -1696,11 +1688,11 @@ type Model struct {
 	// fMRI GLM contrast builder (for fMRI-informed mode)
 	sourceLocFmriContrastEnabled          bool     // Build contrast from BOLD data (vs. load pre-computed)
 	sourceLocFmriContrastType             int      // 0: t-test, 1: paired t-test, 2: F-test, 3: custom formula
-	sourceLocFmriCondAColumn              string   // Condition A column (e.g., "trial_type", "pain_binary")
+	sourceLocFmriCondAColumn              string   // Condition A column (e.g., "trial_type", "binary_outcome")
 	sourceLocFmriCondAValue               string   // Condition A value (e.g., "temp49p3", "1")
 	sourceLocFmriCondBColumn              string   // Condition B column
 	sourceLocFmriCondBValue               string   // Condition B value
-	sourceLocFmriConditions               []string // Discovered conditions from fMRI events files (for backward compat)
+	sourceLocFmriConditions               []string // Discovered conditions from fMRI events files
 	sourceLocFmriCondIdx1                 int      // Index into discovered conditions for Condition A
 	sourceLocFmriCondIdx2                 int      // Index into discovered conditions for Condition B
 	sourceLocFmriContrastFormula          string   // Custom formula (e.g., "pain_high - pain_low")
@@ -1799,17 +1791,19 @@ type Model struct {
 	tfHeatmapTimeResMs int    // Time resolution in ms
 
 	// Behavior pipeline advanced config
-	correlationMethod     string  // "spearman" or "pearson"
-	robustCorrelation     int     // 0=none, 1=percentage_bend, 2=winsorized, 3=shepherd
-	bootstrapSamples      int     // 0 = disabled, 1000+ recommended
-	nPermutations         int     // For cluster tests
-	rngSeed               int     // 0 = use project default
-	controlTemperature    bool    // Include temperature as covariate
-	controlTrialOrder     bool    // Include trial order as covariate
-	behaviorMinSamples    int     // 0=unset; behavior_analysis.min_samples.default
-	fdrAlpha              float64 // FDR correction threshold
-	behaviorConfigSection int
-	behaviorNJobs         int // -1 = all
+	correlationMethod       string  // "spearman" or "pearson"
+	robustCorrelation       int     // 0=none, 1=percentage_bend, 2=winsorized, 3=shepherd
+	bootstrapSamples        int     // 0 = disabled, 1000+ recommended
+	nPermutations           int     // For cluster tests
+	rngSeed                 int     // 0 = use project default
+	controlTemperature      bool    // Include temperature as covariate
+	controlTrialOrder       bool    // Include trial order as covariate
+	behaviorOutcomeColumn   string  // Canonical outcome column (blank=auto)
+	behaviorPredictorColumn string  // Canonical predictor column (blank=auto)
+	behaviorMinSamples      int     // 0=unset; behavior_analysis.min_samples.default
+	fdrAlpha                float64 // FDR correction threshold
+	behaviorConfigSection   int
+	behaviorNJobs           int // -1 = all
 
 	behaviorComputeChangeScores  bool
 	behaviorComputeBayesFactors  bool
@@ -1886,7 +1880,7 @@ type Model struct {
 	painResidualCrossfitSplineKnots int
 
 	// Regression
-	regressionOutcome            int // 0=rating, 1=pain_residual, 2=temperature
+	regressionOutcome            int // 0=rating, 1=predictor_residual, 2=temperature
 	regressionIncludeTemperature bool
 	regressionTempControl        int // 0=linear, 1=rating_hat, 2=spline
 	regressionTempSplineKnots    int
@@ -1925,13 +1919,13 @@ type Model struct {
 	modelsFamilyRobust            bool
 	modelsFamilyQuantile          bool
 	modelsFamilyLogit             bool
-	modelsBinaryOutcome           int // 0=pain_binary, 1=rating_median
+	modelsBinaryOutcome           int // 0=binary_outcome, 1=rating_median
 	modelsPrimaryUnit             int // 0=trial, 1=run_mean
 	modelsForceTrialIIDAsymptotic bool
 
 	// Stability
 	stabilityMethod      int // 0=spearman, 1=pearson
-	stabilityOutcome     int // 0=auto, 1=rating, 2=pain_residual
+	stabilityOutcome     int // 0=auto, 1=rating, 2=predictor_residual
 	stabilityGroupColumn int // 0=auto, 1=run, 2=block
 	stabilityPartialTemp bool
 	stabilityMinGroupN   int // 0=unset
@@ -1993,7 +1987,7 @@ type Model struct {
 	temporalTimeMaxMs          int
 	temporalTargetColumn       string // events.tsv column to correlate against (empty=default rating)
 	temporalSplitByCondition   bool   // If true, compute separate correlations per condition value
-	temporalConditionColumn    string // Column to split by (empty = use event_columns.pain_binary)
+	temporalConditionColumn    string // Column to split by (empty = use event_columns.binary_outcome)
 	temporalConditionValues    string // Values to compute (empty = all unique values)
 	temporalIncludeROIAverages bool   // Include ROI-averaged rows in output
 	temporalIncludeTFGrid      bool   // Include individual frequency (TF grid) rows
@@ -2025,7 +2019,7 @@ type Model struct {
 	clusterThreshold       float64 // Forming threshold for clusters
 	clusterMinSize         int     // Minimum cluster size
 	clusterTail            int     // 0=two-tailed, 1=upper, -1=lower
-	clusterConditionColumn string  // events.tsv column to split by (empty=event_columns.pain_binary)
+	clusterConditionColumn string  // events.tsv column to split by (empty=event_columns.binary_outcome)
 	clusterConditionValues string  // Exactly 2 values (space/comma-separated) to compare
 	clusterFeaturesSpec    string  // Comma-separated feature filters for cluster
 	// Mediation-specific
@@ -2045,7 +2039,7 @@ type Model struct {
 	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
 	conditionEffectThreshold float64 // Min effect size to report
-	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.pain_binary)
+	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.binary_outcome)
 	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
 	conditionCompareLabels   string  // Optional labels aligned to compare values
@@ -2106,7 +2100,7 @@ type Model struct {
 	// ML: fMRI signature target settings (used when mlTarget == "fmri_signature")
 	mlFmriSigGroupExpanded      bool
 	mlFmriSigMethodIndex        int    // 0: beta-series, 1: lss
-	mlFmriSigContrastName       string // e.g., pain_vs_nonpain
+	mlFmriSigContrastName       string // e.g., contrast
 	mlFmriSigSignatureIndex     int    // 0: NPS, 1: SIIPS1
 	mlFmriSigMetricIndex        int    // 0: dot, 1: cosine, 2: pearson_r
 	mlFmriSigNormalizationIndex int    // 0: none, 1..: zscore/robust options
@@ -2384,30 +2378,6 @@ type Model struct {
 	prepGroupPyprepExpanded    bool
 	prepGroupICAExpanded       bool
 	prepGroupEpochingExpanded  bool
-
-	// Utilities (raw-to-bids/merge) advanced config
-	rawMontage           string
-	rawLineFreq          int
-	rawOverwrite         bool
-	rawTrimToFirstVolume bool
-	rawEventPrefixes     string
-	rawKeepAnnotations   bool
-	mergeEventPrefixes   string
-	mergeEventTypes      string
-	mergeQCColumns       string
-	// Utilities (fMRI raw-to-bids) advanced config
-	fmriRawSession          string
-	fmriRawRestTask         string
-	fmriRawIncludeRest      bool
-	fmriRawIncludeFieldmaps bool
-	fmriRawDicomModeIndex   int // 0=symlink, 1=copy, 2=skip
-	fmriRawOverwrite        bool
-	fmriRawCreateEvents     bool
-	fmriRawEventGranularity int     // 0=phases, 1=trial
-	fmriRawOnsetRefIndex    int     // 0=as_is, 1=first_iti_start, 2=first_stim_start
-	fmriRawOnsetOffsetS     float64 // seconds
-	fmriRawDcm2niixPath     string
-	fmriRawDcm2niixArgs     string // Comma-separated
 
 	// Preset system
 	activePreset   string // Name of currently applied preset (empty if custom)
@@ -2803,17 +2773,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		qualityLineNoiseWidthHz:   1.0,
 		qualityLineNoiseHarmonics: 3,
 		// Behavior defaults
-		correlationMethod:     "spearman",
-		robustCorrelation:     0,
-		bootstrapSamples:      1000,
-		nPermutations:         1000,
-		rngSeed:               0,
-		controlTemperature:    true,
-		controlTrialOrder:     true,
-		behaviorMinSamples:    0,
-		fdrAlpha:              0.05,
-		behaviorConfigSection: 0,
-		behaviorNJobs:         -1,
+		correlationMethod:       "spearman",
+		robustCorrelation:       0,
+		bootstrapSamples:        1000,
+		nPermutations:           1000,
+		rngSeed:                 0,
+		controlTemperature:      true,
+		controlTrialOrder:       true,
+		behaviorOutcomeColumn:   "",
+		behaviorPredictorColumn: "",
+		behaviorMinSamples:      0,
+		fdrAlpha:                0.05,
+		behaviorConfigSection:   0,
+		behaviorNJobs:           -1,
 
 		behaviorComputeChangeScores:        true,
 		behaviorComputeBayesFactors:        false,
@@ -3019,7 +2991,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlTarget:                    "",
 		mlFmriSigGroupExpanded:      true,
 		mlFmriSigMethodIndex:        0,
-		mlFmriSigContrastName:       "pain_vs_nonpain",
+		mlFmriSigContrastName:       "contrast",
 		mlFmriSigSignatureIndex:     0,
 		mlFmriSigMetricIndex:        0,
 		mlFmriSigNormalizationIndex: 0,
@@ -3136,7 +3108,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Event Column Mapping defaults
 		eventColTemperature: "stimulus_temp,stimulus_temperature,temp,temperature",
 		eventColRating:      "vas_final_coded_rating,vas_final_rating,vas_rating,pain_intensity,pain_rating,rating",
-		eventColPainBinary:  "pain_binary_coded,pain_binary,pain",
+		eventColPainBinary:  "binary_outcome_coded,binary_outcome,pain",
 
 		// Per-Family Spatial Transforms defaults (all 0 = none / inherit global)
 		spatialTransformPerFamilyConnectivity: 0,
@@ -3291,30 +3263,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		prepGroupPyprepExpanded:    false,
 		prepGroupICAExpanded:       false,
 		prepGroupEpochingExpanded:  false,
-
-		// Utilities defaults
-		rawMontage:           "easycap-M1",
-		rawLineFreq:          60,
-		rawOverwrite:         false,
-		rawTrimToFirstVolume: true,
-		rawEventPrefixes:     "",
-		rawKeepAnnotations:   false,
-		mergeEventPrefixes:   "",
-		mergeEventTypes:      "",
-		mergeQCColumns:       "",
-		// fMRI raw-to-bids defaults
-		fmriRawSession:          "",
-		fmriRawRestTask:         "rest",
-		fmriRawIncludeRest:      true,
-		fmriRawIncludeFieldmaps: true,
-		fmriRawDicomModeIndex:   0, // symlink
-		fmriRawOverwrite:        false,
-		fmriRawCreateEvents:     true,
-		fmriRawEventGranularity: 0, // phases
-		fmriRawOnsetRefIndex:    1, // first_iti_start (recommended for simultaneous EEG-fMRI)
-		fmriRawOnsetOffsetS:     0.0,
-		fmriRawDcm2niixPath:     "",
-		fmriRawDcm2niixArgs:     "",
 	}
 
 	// Align default measure selections with eeg_config.yaml.
@@ -3393,9 +3341,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Default selections organized by analysis purpose
 		defaultComps := map[string]bool{
 			// Data Preparation
-			"trial_table":   false,
-			"lag_features":  false,
-			"pain_residual": false,
+			"trial_table":        false,
+			"lag_features":       false,
+			"predictor_residual": false,
 
 			// Core Analyses
 			"correlations":            false,
@@ -3403,7 +3351,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"regression":              false,
 			"condition":               false,
 			"temporal":                false,
-			"pain_sensitivity":        false,
+			"predictor_sensitivity":   false,
 			"cluster":                 false,
 
 			// Advanced/Causal Analyses
@@ -3563,7 +3511,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisCondAValue = ""
 		m.fmriAnalysisCondBColumn = "trial_type"
 		m.fmriAnalysisCondBValue = ""
-		m.fmriAnalysisContrastName = "pain_vs_nonpain"
+		m.fmriAnalysisContrastName = "contrast"
 		m.fmriAnalysisFormula = ""
 		m.fmriAnalysisEventsToModel = ""
 		m.fmriAnalysisScopeTrialTypes = ""
@@ -3632,38 +3580,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriTrialSigScopeTrialTypes = ""
 		m.fmriTrialSigScopeStimPhases = "" // no default scoping
 
-		// Backward-compat: older configs used modeIndex 2=lss.
-		// New mode options are 0=first-level, 1=trial-signatures, with method selected separately.
-		if m.modeIndex == 2 {
-			m.modeIndex = 1
-			m.fmriTrialSigMethodIndex = 1 // lss
-		}
 		if m.modeIndex < 0 || m.modeIndex >= len(m.modeOptions) {
 			m.modeIndex = 0
-		}
-
-	case types.PipelineMergePsychoPyData:
-		m.modeOptions = []string{"merge-psychopy"}
-		m.modeDescriptions = []string{"Merge PsychoPy TrialSummary into BIDS events.tsv"}
-		m.steps = []types.WizardStep{
-			types.StepSelectSubjects,
-			types.StepAdvancedConfig,
-		}
-
-	case types.PipelineRawToBIDS:
-		m.modeOptions = []string{"raw-to-bids"}
-		m.modeDescriptions = []string{"Convert raw EEG data to BIDS format"}
-		m.steps = []types.WizardStep{
-			types.StepSelectSubjects,
-			types.StepAdvancedConfig,
-		}
-
-	case types.PipelineFmriRawToBIDS:
-		m.modeOptions = []string{"fmri-raw-to-bids"}
-		m.modeDescriptions = []string{"Convert raw fMRI DICOM series to BIDS format"}
-		m.steps = []types.WizardStep{
-			types.StepSelectSubjects,
-			types.StepAdvancedConfig,
 		}
 
 	case types.PipelinePlotting:

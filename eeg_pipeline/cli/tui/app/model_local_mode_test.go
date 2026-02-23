@@ -71,7 +71,7 @@ func TestHandleConfigKeysLoaded_ReappliesPersistedWizardConfig(t *testing.T) {
 func TestHandlePipelineSmokeUtilityOpensSelector(t *testing.T) {
 	m := New()
 	m.state = StateMainMenu
-	m.task = "thermalactive"
+	m.task = "task"
 	m.mainMenu.SelectedUtility = mainmenu.UtilityPipelineSmokeTest
 
 	next, cmd := m.handleMainMenuUpdate(tea.KeyMsg{})

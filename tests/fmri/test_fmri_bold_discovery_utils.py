@@ -22,13 +22,13 @@ def test_discover_fmriprep_preproc_bold_accepts_zero_padded_and_non_padded_runs(
     func_dir = tmp_path / "fmriprep" / "sub-0001" / "func"
     func_dir.mkdir(parents=True, exist_ok=True)
 
-    bold_path = func_dir / "sub-0001_task-thermalactive_run-1_desc-preproc_bold.nii.gz"
+    bold_path = func_dir / "sub-0001_task-task_run-1_desc-preproc_bold.nii.gz"
     bold_path.write_bytes(b"")
 
     discovered = discover_fmriprep_preproc_bold(
         bids_derivatives=tmp_path,
         subject="0001",
-        task="thermalactive",
+        task="task",
         run_num=1,
         space=None,
     )
@@ -36,7 +36,7 @@ def test_discover_fmriprep_preproc_bold_accepts_zero_padded_and_non_padded_runs(
 
 
 def test_get_tr_from_bold_prefers_sidecar_repetition_time(tmp_path: Path) -> None:
-    bold_path = tmp_path / "sub-0001_task-thermalactive_run-01_desc-preproc_bold.nii.gz"
+    bold_path = tmp_path / "sub-0001_task-task_run-01_desc-preproc_bold.nii.gz"
     bold_path.write_bytes(b"")
     sidecar = bold_path.with_suffix("").with_suffix(".json")
     sidecar.write_text(json.dumps({"RepetitionTime": "1.75"}), encoding="utf-8")
@@ -46,7 +46,7 @@ def test_get_tr_from_bold_prefers_sidecar_repetition_time(tmp_path: Path) -> Non
 
 
 def test_get_tr_from_bold_falls_back_to_nifti_when_sidecar_is_invalid(tmp_path: Path) -> None:
-    bold_path = tmp_path / "sub-0001_task-thermalactive_run-01_desc-preproc_bold.nii.gz"
+    bold_path = tmp_path / "sub-0001_task-task_run-01_desc-preproc_bold.nii.gz"
     bold_path.write_bytes(b"")
     sidecar = bold_path.with_suffix("").with_suffix(".json")
     sidecar.write_text("{", encoding="utf-8")

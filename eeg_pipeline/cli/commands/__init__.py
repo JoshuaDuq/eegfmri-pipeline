@@ -32,7 +32,6 @@ from eeg_pipeline.cli.commands.machine_learning import setup_ml, run_ml
 from eeg_pipeline.cli.commands.plotting import setup_plotting, run_plotting
 from eeg_pipeline.cli.commands.preprocessing import setup_preprocessing, run_preprocessing
 from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
-from eeg_pipeline.cli.commands.utilities import setup_utilities, run_utilities
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
 from fmri_pipeline.cli.commands.fmri import setup_fmri, run_fmri
 from fmri_pipeline.cli.commands.fmri_analysis import setup_fmri_analysis, run_fmri_analysis
@@ -87,11 +86,6 @@ COMMANDS: List[Command] = [
         setup=setup_stats,
         run=run_stats,
         requires_subjects=False,
-    ),
-    Command(
-        name="utilities",
-        setup=setup_utilities,
-        run=run_utilities,
     ),
     Command(
         name="validate",

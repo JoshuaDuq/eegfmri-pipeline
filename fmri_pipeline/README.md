@@ -165,7 +165,7 @@ Converts per-series DICOM directories into a BIDS-compliant fMRI dataset.
    - **plateau**: 7.5 s
    - **ramp_down**: 2 s
 
-   Each event row carries per-trial metadata: `stimulus_temp`, `selected_surface`, `pain_binary_coded`, `vas_final_coded_rating`, `vas_scale_min`, `vas_scale_max`.
+   Each event row carries per-trial metadata: `stimulus_temp`, `selected_surface`, `binary_outcome_coded`, `vas_final_coded_rating`, `vas_scale_min`, `vas_scale_max`.
 
 5. **Onset alignment** — Configurable via `onset_reference`:
    - `as_is` — Raw PsychoPy timestamps (default)
@@ -582,15 +582,15 @@ Runtime settings are loaded from `eeg_pipeline/utils/config/eeg_config.yaml` (in
 | `fmriprep_space` | `T1w` | fMRIPrep output space for BOLD |
 | `require_fmriprep` | `true` | Fail if preprocessed BOLD is missing |
 | `type` | `t-test` | Contrast type |
-| `condition_a.column` | `pain_binary_coded` | Events column for condition A |
+| `condition_a.column` | `binary_outcome_coded` | Events column for condition A |
 | `condition_a.value` | `1` | Value to select condition A trials |
-| `condition_b.column` | `pain_binary_coded` | Events column for condition B |
+| `condition_b.column` | `binary_outcome_coded` | Events column for condition B |
 | `condition_b.value` | `0` | Value to select condition B trials |
 | `condition_scope_trial_types` | `null` | Restrict condition selection to specific trial types |
 | `events_to_model` | `null` | Restrict which event types enter the GLM |
 | `stim_phases_to_model` | `null` | Restrict stimulation sub-phases |
 | `formula` | `null` | Custom contrast formula (overrides conditions) |
-| `name` | `pain_vs_nonpain` | Contrast output name |
+| `name` | `contrast` | Contrast output name |
 | `runs` | `null` (auto) | Specific run numbers to include |
 | `hrf_model` | `spm` | HRF model |
 | `drift_model` | `cosine` | Drift model |

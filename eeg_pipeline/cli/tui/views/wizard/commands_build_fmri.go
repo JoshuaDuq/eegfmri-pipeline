@@ -401,5 +401,3 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 
 	return ab.build()
 }
-
-// buildRawToBidsAdvancedArgs returns CLI args for raw-to-bids advanced options

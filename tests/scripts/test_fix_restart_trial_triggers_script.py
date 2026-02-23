@@ -18,7 +18,7 @@ class TestFixRestartTrialTriggersScript(unittest.TestCase):
         psycho_dir.mkdir(parents=True, exist_ok=True)
         eeg_dir.mkdir(parents=True, exist_ok=True)
 
-        events_path = eeg_dir / "sub-0002_task-thermalactive_run-1_events.tsv"
+        events_path = eeg_dir / "sub-0002_task-task_run-1_events.tsv"
         behavior_path = psycho_dir / "sub0001_ThermalPainEEGFMRI_run1_2026-02-09_11h11.44.706_TrialSummary.csv"
 
         event_onsets = [
@@ -73,7 +73,7 @@ class TestFixRestartTrialTriggersScript(unittest.TestCase):
             "--subject",
             "0002",
             "--task",
-            "thermalactive",
+            "task",
             "--run",
             "1",
         ]

@@ -27,7 +27,13 @@ def _validate_event_columns(
         logger.warning("No event_columns found in config; skipping validation")
         return
 
-    missing_columns = _find_missing_event_columns(events_df, event_cols_config)
+    required_groups = config.get("event_columns.required", None)
+    missing_columns = _find_missing_event_columns(
+        events_df,
+        event_cols_config,
+        required_groups=required_groups,
+        config=config,
+    )
     if missing_columns:
         available = list(events_df.columns)
         error_msg = (
@@ -40,10 +46,35 @@ def _validate_event_columns(
 
 
 def _find_missing_event_columns(
-    events_df: pd.DataFrame, event_cols_config: Dict[str, Any]
+    events_df: pd.DataFrame,
+    event_cols_config: Dict[str, Any],
+    *,
+    required_groups: Optional[Any] = None,
+    config: Optional[EEGConfig] = None,
 ) -> list[str]:
+    required_set: Optional[set[str]] = None
+    if isinstance(required_groups, (list, tuple, set)):
+        required_set = {str(item).strip() for item in required_groups if str(item).strip()}
+        if len(required_set) == 0:
+            return []
+
     missing_columns = []
     for logical_name, candidates in event_cols_config.items():
+        if required_set is not None and str(logical_name) not in required_set:
+            continue
+        explicit_key = None
+        if logical_name == "rating":
+            explicit_key = "behavior_analysis.outcome_column"
+        elif logical_name == "temperature":
+            explicit_key = "behavior_analysis.predictor_column"
+        if (
+            explicit_key is not None
+            and config is not None
+            and hasattr(config, "get")
+        ):
+            explicit_col = str(config.get(explicit_key, "") or "").strip()
+            if explicit_col and explicit_col in events_df.columns:
+                continue
         if not isinstance(candidates, (list, tuple)):
             continue
         found = any(col in events_df.columns for col in candidates)

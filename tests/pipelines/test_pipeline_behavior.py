@@ -40,7 +40,7 @@ class TestBehaviorDeep(unittest.TestCase):
             p.feature_files = None
             p.computation_features = {}
             p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = DotConfig({"project": {"task": "thermalactive"}})
+            p.config = DotConfig({"project": {"task": "task"}})
             p.logger = Mock()
 
             fake_paths = types.SimpleNamespace(
@@ -87,7 +87,7 @@ class TestBehaviorDeep(unittest.TestCase):
             res = BehaviorPipelineResults(
                 subject="0001",
                 correlations=pd.DataFrame({"p_raw": [0.01, 0.2], "p_primary": [0.04, 0.6], "q_global": [0.03, 0.2]}),
-                pain_sensitivity=pd.DataFrame({"p_psi": [0.01], "q_global": [0.04]}),
+                predictor_sensitivity=pd.DataFrame({"p_psi": [0.01], "q_global": [0.04]}),
                 condition_effects=pd.DataFrame({"p_value": [0.02], "q_global": [0.03]}),
                 regression=pd.DataFrame({"p_primary": [0.01], "q_global": [0.04], "hedges_g": [0.9]}),
                 mediation=pd.DataFrame({"sobel_p": [0.01], "q_global": [0.04]}),
@@ -151,7 +151,7 @@ class TestBehaviorDeep(unittest.TestCase):
             p.feature_files = None
             p.computation_features = {}
             p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = DotConfig({"project": {"task": "thermalactive"}})
+            p.config = DotConfig({"project": {"task": "task"}})
             p.logger = Mock()
 
             fake_paths = types.SimpleNamespace(
@@ -212,7 +212,7 @@ class TestBehaviorGapfill(unittest.TestCase):
 
             self.assertIsNone(_resolve_behavior_computation_flags(None))
 
-            cfg = DotConfig({"behavior_analysis": {"correlation_method": "pearson", "robust_correlation": " winsorized "}})
+            cfg = DotConfig({"behavior_analysis": {"statistics": {"correlation_method": "pearson"}, "robust_correlation": " winsorized "}})
             pcfg = BehaviorPipelineConfig.from_config(cfg)
             self.assertEqual(pcfg.method, "pearson")
             self.assertEqual(pcfg.robust_method, "winsorized")
@@ -262,7 +262,7 @@ class TestBehaviorGapfill(unittest.TestCase):
             p.feature_files = None
             p.computation_features = {}
             p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = DotConfig({"project": {"task": "thermalactive"}})
+            p.config = DotConfig({"project": {"task": "task"}})
             p.logger = Mock()
 
             stats_dir = Path(tempfile.mkdtemp())
@@ -309,7 +309,7 @@ class TestBehaviorGapfill(unittest.TestCase):
             p.feature_files = None
             p.computation_features = {}
             p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = DotConfig({"project": {"task": "thermalactive"}})
+            p.config = DotConfig({"project": {"task": "task"}})
             p.logger = Mock()
 
             stats_dir = Path(tempfile.mkdtemp())

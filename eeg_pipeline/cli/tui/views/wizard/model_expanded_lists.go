@@ -74,6 +74,10 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetDoseResponseStats(m.getDoseResponseCategoriesForEditingPlot()))
 	case expandedRunAdjustmentColumn:
 		return len(m.GetAvailableColumns())
+	case expandedBehaviorOutcomeColumn:
+		return len(m.GetAvailableColumns()) + 1 // +1 for "(default)" option
+	case expandedBehaviorPredictorColumn:
+		return len(m.GetAvailableColumns()) + 1 // +1 for "(default)" option
 	case expandedCorrelationsTargetColumn:
 		return len(m.GetAvailableColumns()) + 1 // +1 for "(none)" option
 	case expandedTemporalTargetColumn:
@@ -258,6 +262,10 @@ func (m Model) getExpandedListItems() []string {
 		return m.GetDoseResponseStats(m.getDoseResponseCategoriesForEditingPlot())
 	case expandedRunAdjustmentColumn:
 		return m.GetAvailableColumns()
+	case expandedBehaviorOutcomeColumn:
+		return append([]string{"(default)"}, m.GetAvailableColumns()...)
+	case expandedBehaviorPredictorColumn:
+		return append([]string{"(default)"}, m.GetAvailableColumns()...)
 	case expandedCorrelationsTargetColumn:
 		return append([]string{"(none)"}, m.GetAvailableColumns()...)
 	case expandedTemporalTargetColumn:
@@ -698,6 +706,24 @@ func (m *Model) handleExpandedListToggle() {
 		m.expandedOption = expandedNone
 		m.subCursor = 0
 
+	case expandedBehaviorOutcomeColumn:
+		if selectedItem == "(default)" {
+			m.behaviorOutcomeColumn = ""
+		} else {
+			m.behaviorOutcomeColumn = selectedItem
+		}
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
+	case expandedBehaviorPredictorColumn:
+		if selectedItem == "(default)" {
+			m.behaviorPredictorColumn = ""
+		} else {
+			m.behaviorPredictorColumn = selectedItem
+		}
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
 	case expandedCorrelationsTargetColumn:
 		if selectedItem == "(none)" {
 			m.correlationsTargetColumn = ""
@@ -1089,6 +1115,10 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optPlotComparisonWindows
 	case expandedRunAdjustmentColumn:
 		return opt == optRunAdjustmentColumn
+	case expandedBehaviorOutcomeColumn:
+		return opt == optBehaviorOutcomeColumn
+	case expandedBehaviorPredictorColumn:
+		return opt == optBehaviorPredictorColumn
 	case expandedCorrelationsTargetColumn:
 		return opt == optCorrelationsTargetColumn
 	case expandedTemporalTargetColumn:
@@ -1176,6 +1206,16 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.plotComparisonColumn == item
 	case expandedRunAdjustmentColumn:
 		return m.runAdjustmentColumn == item
+	case expandedBehaviorOutcomeColumn:
+		if item == "(default)" {
+			return strings.TrimSpace(m.behaviorOutcomeColumn) == ""
+		}
+		return m.behaviorOutcomeColumn == item
+	case expandedBehaviorPredictorColumn:
+		if item == "(default)" {
+			return strings.TrimSpace(m.behaviorPredictorColumn) == ""
+		}
+		return m.behaviorPredictorColumn == item
 	case expandedCorrelationsTargetColumn:
 		if item == "(none)" {
 			return m.correlationsTargetColumn == ""

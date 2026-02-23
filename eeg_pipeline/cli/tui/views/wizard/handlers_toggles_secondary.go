@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-// Secondary advanced-toggle handlers (ML/preprocessing/utilities).
+// Secondary advanced-toggle handlers (ML/preprocessing/fMRI analysis).
 
 func (m *Model) toggleMLAdvancedOption() {
 	if m.expandedOption >= 0 {
@@ -903,84 +903,4 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
 	}
 	m.UpdateAdvancedOffset()
-}
-
-func (m *Model) toggleRawToBidsAdvancedOption() {
-	options := m.getRawToBidsOptions()
-	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
-		return
-	}
-
-	opt := options[m.advancedCursor]
-	switch opt {
-	case optUseDefaults:
-		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optRawMontage:
-		m.startTextEdit(textFieldRawMontage)
-		m.useDefaultAdvanced = false
-	case optRawLineFreq:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optRawOverwrite:
-		m.rawOverwrite = !m.rawOverwrite
-		m.useDefaultAdvanced = false
-	case optRawTrimToFirstVolume:
-		m.rawTrimToFirstVolume = !m.rawTrimToFirstVolume
-		m.useDefaultAdvanced = false
-	case optRawEventPrefixes:
-		m.startTextEdit(textFieldRawEventPrefixes)
-		m.useDefaultAdvanced = false
-	case optRawKeepAnnotations:
-		m.rawKeepAnnotations = !m.rawKeepAnnotations
-		m.useDefaultAdvanced = false
-	}
-}
-
-func (m *Model) toggleFmriRawToBidsAdvancedOption() {
-	options := m.getFmriRawToBidsOptions()
-	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
-		return
-	}
-
-	opt := options[m.advancedCursor]
-	switch opt {
-	case optUseDefaults:
-		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optFmriRawSession:
-		m.startTextEdit(textFieldFmriRawSession)
-		m.useDefaultAdvanced = false
-	case optFmriRawRestTask:
-		m.startTextEdit(textFieldFmriRawRestTask)
-		m.useDefaultAdvanced = false
-	case optFmriRawIncludeRest:
-		m.fmriRawIncludeRest = !m.fmriRawIncludeRest
-		m.useDefaultAdvanced = false
-	case optFmriRawIncludeFieldmaps:
-		m.fmriRawIncludeFieldmaps = !m.fmriRawIncludeFieldmaps
-		m.useDefaultAdvanced = false
-	case optFmriRawDicomMode:
-		m.fmriRawDicomModeIndex = (m.fmriRawDicomModeIndex + 1) % 3
-		m.useDefaultAdvanced = false
-	case optFmriRawOverwrite:
-		m.fmriRawOverwrite = !m.fmriRawOverwrite
-		m.useDefaultAdvanced = false
-	case optFmriRawCreateEvents:
-		m.fmriRawCreateEvents = !m.fmriRawCreateEvents
-		m.useDefaultAdvanced = false
-	case optFmriRawEventGranularity:
-		m.fmriRawEventGranularity = (m.fmriRawEventGranularity + 1) % 2
-		m.useDefaultAdvanced = false
-	case optFmriRawOnsetReference:
-		m.fmriRawOnsetRefIndex = (m.fmriRawOnsetRefIndex + 1) % 3
-		m.useDefaultAdvanced = false
-	case optFmriRawOnsetOffsetS:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optFmriRawDcm2niixPath:
-		m.startTextEdit(textFieldFmriRawDcm2niixPath)
-		m.useDefaultAdvanced = false
-	case optFmriRawDcm2niixArgs:
-		m.startTextEdit(textFieldFmriRawDcm2niixArgs)
-		m.useDefaultAdvanced = false
-	}
 }

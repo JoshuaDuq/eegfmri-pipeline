@@ -48,10 +48,6 @@ func (m Model) isCurrentlyEditing(opt optionType) bool {
 		options = m.getMLOptions()
 	case types.PipelinePreprocessing:
 		options = m.getPreprocessingOptions()
-	case types.PipelineRawToBIDS:
-		options = m.getRawToBidsOptions()
-	case types.PipelineFmriRawToBIDS:
-		options = m.getFmriRawToBidsOptions()
 	case types.PipelineFmri:
 		options = m.getFmriPreprocessingOptions()
 	case types.PipelineFmriAnalysis:

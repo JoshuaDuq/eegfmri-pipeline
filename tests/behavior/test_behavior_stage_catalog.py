@@ -45,7 +45,7 @@ class TestBehaviorStageCatalog(unittest.TestCase):
         cfg = SimpleNamespace(
             run_trial_table=False,
             run_lag_features=False,
-            run_pain_residual=False,
+            run_predictor_residual=False,
             run_temperature_models=False,
             run_regression=False,
             run_models=False,
@@ -62,7 +62,7 @@ class TestBehaviorStageCatalog(unittest.TestCase):
             run_mediation=False,
             run_moderation=False,
             run_mixed_effects=False,
-            compute_pain_sensitivity=False,
+            compute_predictor_sensitivity=False,
         )
         flags = {name: False for name in COMPUTATION_TO_PIPELINE_ATTR}
         flags["report"] = True
@@ -96,8 +96,8 @@ class TestBehaviorStageCatalog(unittest.TestCase):
             "behavior_analysis.regression.enabled",
         )
         self.assertEqual(
-            StageRegistry.get("pain_sensitivity").config_key,
-            "behavior_analysis.pain_sensitivity.enabled",
+            StageRegistry.get("predictor_sensitivity").config_key,
+            "behavior_analysis.predictor_sensitivity.enabled",
         )
 
     def test_stage_registry_matches_catalog_definitions(self):

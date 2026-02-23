@@ -16,7 +16,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		return false
 	}
 	needsInferenceSettings := hasSelectedComputation(
-		"correlations", "multilevel_correlations", "pain_sensitivity",
+		"correlations", "multilevel_correlations", "predictor_sensitivity", "predictor_residual",
 		"regression", "models", "stability", "influence",
 		"condition", "temporal", "cluster", "mediation", "moderation", "mixed_effects",
 	)
@@ -36,10 +36,12 @@ func (m Model) getBehaviorOptions() []optionType {
 	if needsInferenceSettings {
 		options = append(options, optBehaviorGroupStats)
 		if m.behaviorGroupStatsExpanded {
-			// Correlation method — only when correlations/stability/pain_sensitivity selected
-			if hasSelectedComputation("correlations", "stability", "pain_sensitivity") {
+			// Correlation method — only when correlations/stability/predictor_sensitivity selected
+			if hasSelectedComputation("correlations", "stability", "predictor_sensitivity") {
 				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
 			}
+			// Canonical behavior columns used across analyses
+			options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
 			// Bootstrap — correlations, stability
 			if hasSelectedComputation("correlations", "stability") {
 				options = append(options, optBootstrap)
@@ -63,7 +65,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optBehaviorExcludeNonTrialwiseFeatures,
 			)
 			// Shared covariate controls
-			if hasSelectedComputation("regression", "models", "influence", "correlations", "stability", "pain_sensitivity") {
+			if hasSelectedComputation("regression", "models", "influence", "correlations", "stability", "predictor_sensitivity") {
 				options = append(options, optBehaviorSubCovariates, optControlTemp, optControlOrder)
 			}
 			// Run adjustment
@@ -113,8 +115,8 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Pain Residual section - only show if pain_residual computation is selected
-	if m.isComputationSelected("pain_residual") {
+	// Pain Residual section - only show if predictor_residual computation is selected
+	if m.isComputationSelected("predictor_residual") {
 		options = append(options, optBehaviorGroupPainResidual)
 		if m.behaviorGroupPainResidualExpanded {
 			options = append(options,
@@ -262,7 +264,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// Pain sensitivity section
-	if m.isComputationSelected("pain_sensitivity") {
+	if m.isComputationSelected("predictor_sensitivity") {
 		options = append(options, optBehaviorGroupPainSens)
 		if m.behaviorGroupPainSensExpanded {
 			options = append(

@@ -48,7 +48,7 @@ func (m Model) SelectedComputations() []string {
 			key := m.computations[i].Key
 
 			switch key {
-			case "pain_residual":
+			case "predictor_residual":
 				result = append(result, key, "temperature_models")
 			case "validation":
 				result = append(result, "consistency", "influence")
@@ -82,7 +82,7 @@ func (m Model) SelectedComputations() []string {
 
 // isComputationSelected checks if a specific computation is currently selected.
 // Handles bundled computations: 'validation' includes 'consistency' and 'influence';
-// 'pain_residual' includes 'temperature_models'; 'regression' includes 'models' when multi-family enabled.
+// 'predictor_residual' includes 'temperature_models'; 'regression' includes 'models' when multi-family enabled.
 func (m Model) isComputationSelected(computation string) bool {
 	for i, sel := range m.computationSelected {
 		if sel && i < len(m.computations) {
@@ -93,7 +93,7 @@ func (m Model) isComputationSelected(computation string) bool {
 			if key == "validation" && (computation == "consistency" || computation == "influence") {
 				return true
 			}
-			if key == "pain_residual" && computation == "temperature_models" {
+			if key == "predictor_residual" && computation == "temperature_models" {
 				return true
 			}
 			if key == "regression" && computation == "models" {
@@ -572,15 +572,6 @@ func (m Model) BuildCommand() string {
 				parts[len(parts)-1] = "full"
 			}
 		}
-	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS || m.Pipeline == types.PipelineFmriRawToBIDS {
-		mode := "merge-psychopy"
-		switch m.Pipeline {
-		case types.PipelineRawToBIDS:
-			mode = "raw-to-bids"
-		case types.PipelineFmriRawToBIDS:
-			mode = "fmri-raw-to-bids"
-		}
-		parts = []string{"eeg-pipeline", "utilities", mode}
 	} else if m.Pipeline != types.PipelinePlotting {
 		cats := m.SelectedCategories()
 		if len(cats) > 0 && len(cats) < len(m.categories) {
@@ -631,18 +622,6 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--deriv-root", expandUserPath(m.derivRoot))
 		}
 	}
-	if m.Pipeline == types.PipelineRawToBIDS || m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineFmriRawToBIDS {
-		if m.sourceRoot != "" {
-			parts = append(parts, "--source-root", expandUserPath(m.sourceRoot))
-		}
-		if m.Pipeline == types.PipelineFmriRawToBIDS {
-			if m.bidsFmriRoot != "" {
-				parts = append(parts, "--bids-fmri-root", expandUserPath(m.bidsFmriRoot))
-			}
-		} else if m.bidsRoot != "" {
-			parts = append(parts, "--bids-root", expandUserPath(m.bidsRoot))
-		}
-	}
 
 	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		spatial := m.SelectedSpatialModes()
@@ -674,12 +653,6 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, m.buildFmriAdvancedArgs()...)
 		case types.PipelineFmriAnalysis:
 			parts = append(parts, m.buildFmriAnalysisAdvancedArgs()...)
-		case types.PipelineRawToBIDS:
-			parts = append(parts, m.buildRawToBidsAdvancedArgs()...)
-		case types.PipelineFmriRawToBIDS:
-			parts = append(parts, m.buildFmriRawToBidsAdvancedArgs()...)
-		case types.PipelineMergePsychoPyData:
-			parts = append(parts, m.buildMergePsychopyAdvancedArgs()...)
 		}
 	}
 

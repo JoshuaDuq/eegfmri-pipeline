@@ -13,12 +13,12 @@ Models:
 Usage:
     from eeg_pipeline.analysis.machine_learning.classification import (
         create_svm_pipeline,
-        decode_pain_binary,
+        decode_binary_outcome,
         nested_loso_classification,
     )
     
     # Quick classification
-    results = decode_pain_binary(X, y_binary, cv="loso", groups=subject_ids)
+    results = decode_binary_outcome(X, y_binary, cv="loso", groups=subject_ids)
     print(f"AUC: {results['auc']:.3f}, Balanced Acc: {results['balanced_acc']:.3f}")
 """
 
@@ -523,7 +523,7 @@ class ClassificationResult:
 ###################################################################
 
 
-def decode_pain_binary(
+def decode_binary_outcome(
     X: np.ndarray,
     y: np.ndarray,
     cv: Union[str, int] = "loso",

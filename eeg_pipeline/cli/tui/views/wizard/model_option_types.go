@@ -395,6 +395,8 @@ const (
 	// Behavior options - General extra
 	optRobustCorrelation
 	optBehaviorNJobs
+	optBehaviorOutcomeColumn
+	optBehaviorPredictorColumn
 	optComputeChangeScores
 	optComputeBayesFactors
 	optComputeLosoStability
@@ -636,30 +638,6 @@ const (
 	optPrepWriteCleanEvents
 	optPrepOverwriteCleanEvents
 	optPrepCleanEventsStrict
-	// Raw-to-BIDS options
-	optRawMontage
-	optRawLineFreq
-	optRawOverwrite
-	optRawTrimToFirstVolume
-	optRawEventPrefixes
-	optRawKeepAnnotations
-	// Merge-behavior options
-	optMergeEventPrefixes
-	optMergeEventTypes
-	optMergeQCColumns
-	// fMRI Raw-to-BIDS options
-	optFmriRawSession
-	optFmriRawRestTask
-	optFmriRawIncludeRest
-	optFmriRawIncludeFieldmaps
-	optFmriRawDicomMode
-	optFmriRawOverwrite
-	optFmriRawCreateEvents
-	optFmriRawEventGranularity
-	optFmriRawOnsetReference
-	optFmriRawOnsetOffsetS
-	optFmriRawDcm2niixPath
-	optFmriRawDcm2niixArgs
 	// Plotting advanced options (wizard-only)
 	optPlotGroupDefaults
 	optPlotGroupFonts

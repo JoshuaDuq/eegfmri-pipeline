@@ -20,7 +20,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 "machine_learning": {
                     "fmri_signature": {
                         "method": "lss",
-                        "contrast_name": "pain_vs_nonpain",
+                        "contrast_name": "contrast",
                         "signature_name": "NPS",
                         "metric": "dot",
                         "normalization": "none",
@@ -47,8 +47,8 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 / "sub-0001"
                 / "fmri"
                 / "lss"
-                / "task-thermalactive"
-                / "contrast-pain_vs_nonpain"
+                / "task-task"
+                / "contrast-contrast"
                 / "signatures"
             )
             sig_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
             y, y_label, _extra = _load_fmri_signature_target_for_subject(
                 subject_raw="0001",
-                task="thermalactive",
+                task="task",
                 deriv_root=root,
                 config=cfg,
                 events_df=events_df,
@@ -89,7 +89,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
             )
 
         arr = np.asarray(y, dtype=float)
-        self.assertEqual(y_label, "fmri_signature.lss.pain_vs_nonpain.NPS.dot")
+        self.assertEqual(y_label, "fmri_signature.lss.contrast.NPS.dot")
         self.assertTrue(np.all(np.isfinite(arr)))
         self.assertTrue(np.allclose(arr, np.array([1.25, 2.50], dtype=float)))
 
@@ -101,7 +101,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 "machine_learning": {
                     "fmri_signature": {
                         "method": "lss",
-                        "contrast_name": "pain_vs_nonpain",
+                        "contrast_name": "contrast",
                         "signature_name": "NPS",
                         "metric": "dot",
                         "normalization": "none",
@@ -127,8 +127,8 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 / "sub-0001"
                 / "fmri"
                 / "lss"
-                / "task-thermalactive"
-                / "contrast-pain_vs_nonpain"
+                / "task-task"
+                / "contrast-contrast"
                 / "signatures"
             )
             sig_dir.mkdir(parents=True, exist_ok=True)
@@ -166,7 +166,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
             y, _y_label, _extra = _load_fmri_signature_target_for_subject(
                 subject_raw="0001",
-                task="thermalactive",
+                task="task",
                 deriv_root=root,
                 config=cfg,
                 events_df=events_df,
@@ -185,7 +185,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 "machine_learning": {
                     "fmri_signature": {
                         "method": "lss",
-                        "contrast_name": "pain_vs_nonpain",
+                        "contrast_name": "contrast",
                         "signature_name": "NPS",
                         "metric": "dot",
                         "normalization": "none",
@@ -210,8 +210,8 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 / "sub-0001"
                 / "fmri"
                 / "lss"
-                / "task-thermalactive"
-                / "contrast-pain_vs_nonpain"
+                / "task-task"
+                / "contrast-contrast"
                 / "signatures"
             )
             sig_dir.mkdir(parents=True, exist_ok=True)
@@ -228,7 +228,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
             y, _y_label, _extra = _load_fmri_signature_target_for_subject(
                 subject_raw="0001",
-                task="thermalactive",
+                task="task",
                 deriv_root=root,
                 config=cfg,
                 events_df=events_df,

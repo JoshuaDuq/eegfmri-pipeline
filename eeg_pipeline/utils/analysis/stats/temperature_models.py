@@ -117,7 +117,7 @@ def _build_polynomial_terms(degree: int) -> str:
 
 def _get_polynomial_degrees(config: Any) -> List[int]:
     """Extract and validate polynomial degrees from config."""
-    degrees_raw = _get_config_value(config, "behavior_analysis.pain_residual.model_comparison.poly_degrees", [2, 3])
+    degrees_raw = _get_config_value(config, "behavior_analysis.temperature_models.model_comparison.poly_degrees", [2, 3])
     if not isinstance(degrees_raw, (list, tuple)) or not degrees_raw:
         return [2, 3]
     
@@ -127,7 +127,11 @@ def _get_polynomial_degrees(config: Any) -> List[int]:
 
 def _get_spline_df_candidates(config: Any) -> List[int]:
     """Extract and validate spline degrees of freedom from config."""
-    df_candidates_raw = _get_config_value(config, "behavior_analysis.pain_residual.spline_df_candidates", [3, 4, 5])
+    df_candidates_raw = _get_config_value(
+        config,
+        "behavior_analysis.temperature_models.model_comparison.spline_df_candidates",
+        [3, 4, 5],
+    )
     if not isinstance(df_candidates_raw, (list, tuple)) or not df_candidates_raw:
         return [3, 4, 5]
     
@@ -169,7 +173,7 @@ def compare_temperature_rating_models(
     config: Optional[Any] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Compare linear / polynomial / spline models for rating ~ f(temperature)."""
-    min_samples = int(_get_config_value(config, "behavior_analysis.pain_residual.model_comparison.min_samples", 10))
+    min_samples = int(_get_config_value(config, "behavior_analysis.temperature_models.model_comparison.min_samples", 10))
     data, meta = _validate_and_prepare_data(temperature, rating, min_samples)
     if data is None:
         return pd.DataFrame(), meta
@@ -215,8 +219,8 @@ def _fit_linear_baseline(sm: Any, temperatures: np.ndarray, ratings: np.ndarray)
 
 def _get_breakpoint_search_range(temperatures: np.ndarray, config: Any) -> Tuple[Optional[float], Optional[float], Dict[str, Any]]:
     """Determine valid temperature range for breakpoint search."""
-    quantile_low = float(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_low", 0.15))
-    quantile_high = float(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_high", 0.85))
+    quantile_low = float(_get_config_value(config, "behavior_analysis.temperature_models.breakpoint_test.quantile_low", 0.15))
+    quantile_high = float(_get_config_value(config, "behavior_analysis.temperature_models.breakpoint_test.quantile_high", 0.85))
     
     temperature_low = float(np.quantile(temperatures, quantile_low))
     temperature_high = float(np.quantile(temperatures, quantile_high))
@@ -232,7 +236,7 @@ def _get_breakpoint_search_range(temperatures: np.ndarray, config: Any) -> Tuple
 
 def _generate_breakpoint_candidates(temperature_low: float, temperature_high: float, config: Any) -> np.ndarray:
     """Generate candidate breakpoint values for search."""
-    n_candidates = max(int(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.n_candidates", 15)), 5)
+    n_candidates = max(int(_get_config_value(config, "behavior_analysis.temperature_models.breakpoint_test.n_candidates", 15)), 5)
     return np.linspace(temperature_low, temperature_high, num=n_candidates)
 
 
@@ -346,7 +350,7 @@ def fit_temperature_breakpoint_test(
 
     Model: rating ~ temp + max(0, temp - c)
     """
-    min_samples = int(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.min_samples", 12))
+    min_samples = int(_get_config_value(config, "behavior_analysis.temperature_models.breakpoint_test.min_samples", 12))
     data, meta = _validate_and_prepare_data(temperature, rating, min_samples)
     if data is None:
         return pd.DataFrame(), meta
@@ -404,4 +408,3 @@ def fit_temperature_breakpoint_test(
 
 
 __all__ = ["compare_temperature_rating_models", "fit_temperature_breakpoint_test"]
-

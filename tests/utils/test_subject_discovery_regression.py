@@ -30,7 +30,7 @@ def test_get_available_subjects_matches_numeric_config_to_zero_padded_bids(tmp_p
         config=config,
         deriv_root=deriv_root,
         bids_root=bids_root,
-        task="thermalactive",
+        task="task",
         discovery_sources=["bids"],
         subject_discovery_policy="intersection",
     )
@@ -66,7 +66,7 @@ def test_info_subjects_fmri_status_json_includes_new_bids_subjects(tmp_path: Pat
 
     out = io.StringIO()
     with redirect_stdout(out):
-        _handle_subjects_mode(args, deriv_root, "thermalactive", config, logging.getLogger("test"))
+        _handle_subjects_mode(args, deriv_root, "task", config, logging.getLogger("test"))
 
     payload = json.loads(out.getvalue())
     ids = [subj["id"] for subj in payload["subjects"]]

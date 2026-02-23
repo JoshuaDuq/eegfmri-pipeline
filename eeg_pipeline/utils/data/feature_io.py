@@ -58,6 +58,19 @@ def _extract_target_series(target_df: pd.DataFrame, target_path: Path) -> pd.Ser
     return pd.to_numeric(target_df[numeric_cols[0]], errors="coerce")
 
 
+def _preferred_target_columns(config: Optional[Any]) -> List[str]:
+    """Build ordered target column candidates (explicit outcome first, then rating aliases)."""
+    columns: List[str] = []
+    if config is not None and hasattr(config, "get"):
+        explicit_outcome = str(config.get("behavior_analysis.outcome_column", "") or "").strip()
+        if explicit_outcome:
+            columns.append(explicit_outcome)
+        for candidate in list(config.get("event_columns.rating", []) or []):
+            if candidate not in columns:
+                columns.append(candidate)
+    return columns
+
+
 def _validate_feature_lengths(
     subject: str,
     task: str,
@@ -69,19 +82,19 @@ def _validate_feature_lengths(
     """Validate that all feature dataframes have matching lengths."""
     if len(active_df) != target_length:
         raise ValueError(
-            f"Length mismatch: active features ({len(active_df)} rows) != target ratings "
+            f"Length mismatch: active features ({len(active_df)} rows) != target outcomes "
             f"({target_length} rows) for sub-{subject}, task-{task}"
         )
 
     if temporal_df is not None and len(temporal_df) != target_length:
         raise ValueError(
-            f"Length mismatch: temporal features ({len(temporal_df)} rows) != target ratings "
+            f"Length mismatch: temporal features ({len(temporal_df)} rows) != target outcomes "
             f"({target_length} rows) for sub-{subject}, task-{task}"
         )
 
     if conn_df is not None and len(conn_df) != target_length:
         raise ValueError(
-            f"Length mismatch: connectivity features ({len(conn_df)} rows) != target ratings "
+            f"Length mismatch: connectivity features ({len(conn_df)} rows) != target outcomes "
             f"({target_length} rows) for sub-{subject}, task-{task}"
         )
 
@@ -100,7 +113,8 @@ def _load_features_and_targets(
 ) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame], pd.Series, Any]:
     """Load features and targets for a subject, validating alignment.
     
-    Targets are extracted from aligned_events using the event_columns.rating config.
+    Targets are extracted from aligned_events using behavior_analysis.outcome_column
+    (if set), then event_columns.rating aliases.
     """
     from eeg_pipeline.utils.data.alignment import get_aligned_events
     
@@ -136,22 +150,20 @@ def _load_features_and_targets(
                 f"Could not locate clean epochs for sub-{subject}, task-{task}"
             )
     
-    # Load targets from aligned_events using event_columns.rating config
+    # Load targets from aligned_events using explicit outcome config first.
     aligned_events = get_aligned_events(
         epochs, subject, task, strict=True, logger=logger, config=config
     )
     if aligned_events is None:
         raise ValueError(f"Failed to load aligned events for sub-{subject}, task-{task}")
     
-    rating_columns = (
-        config.get("event_columns.rating", [])
-        if config is not None and hasattr(config, "get")
-        else []
+    target_col = pick_target_column(
+        aligned_events,
+        target_columns=_preferred_target_columns(config),
     )
-    target_col = pick_target_column(aligned_events, target_columns=rating_columns)
     if target_col is None:
         raise ValueError(
-            f"No rating column found in aligned_events for sub-{subject}, task-{task}. "
+            f"No target outcome column found in aligned_events for sub-{subject}, task-{task}. "
             f"Available columns: {list(aligned_events.columns)}"
         )
     target_series = pd.to_numeric(aligned_events[target_col], errors="coerce")
@@ -256,12 +268,10 @@ def _extract_targets_from_dataframe(
     if targets_df.shape[1] == 1:
         return pd.to_numeric(targets_df.iloc[:, 0], errors="coerce")
     
-    rating_columns = (
-        config.get("event_columns.rating", [])
-        if config is not None and hasattr(config, "get")
-        else []
+    target_col = pick_target_column(
+        targets_df,
+        target_columns=_preferred_target_columns(config),
     )
-    target_col = pick_target_column(targets_df, target_columns=rating_columns)
     
     if target_col is None:
         numeric_cols = targets_df.select_dtypes(include=[np.number]).columns
@@ -689,7 +699,6 @@ def save_all_features(
     pac_time_df: Optional[pd.DataFrame] = None,
     aper_qc: Optional[Dict[str, Any]] = None,
     active_df: Optional[pd.DataFrame] = None,
-    active_cols: Optional[List[str]] = None,
     y: Optional[pd.Series] = None,
     features_dir: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
@@ -718,8 +727,6 @@ def save_all_features(
     suffix: Optional[str] = None,
 ) -> pd.DataFrame:
     """Save all feature dataframes to disk with validation and deduplication."""
-    # Kept for backward compatibility with historical callers.
-    _ = active_cols
     if logger is None:
         logger = logging.getLogger(__name__)
     if features_dir is None:

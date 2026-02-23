@@ -229,7 +229,7 @@ def visualize_behavior_for_subjects(
 
     setup_matplotlib(config)
 
-    task = task or config.get("project.task", "thermalactive")
+    task = task or config.get("project.task", "task")
     deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
 
     if logger is None:

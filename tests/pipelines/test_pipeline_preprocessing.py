@@ -22,7 +22,7 @@ class TestPreprocessingHelpers(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         ev_dir = tmp / "sub-0001" / "eeg"
         ev_dir.mkdir(parents=True, exist_ok=True)
-        ev = ev_dir / "sub-0001_task-thermalactive_run-01_events.tsv"
+        ev = ev_dir / "sub-0001_task-task_run-01_events.tsv"
         ev.write_text(
             "trial_type\tonset\nTrig_thermHot\t0\nVolume\t1\nTrig_thermWarm\t2\n",
             encoding="utf-8",
@@ -101,8 +101,8 @@ class TestPreprocessingHelpers(unittest.TestCase):
                 "eeg_pipeline.preprocessing.pipeline.ica": mock_ica,
             },
         ):
-            p._run_bad_channel_detection(["0001"], "thermalactive", n_jobs=2)
-            p._run_ica_labeling(["0001"], "thermalactive")
+            p._run_bad_channel_detection(["0001"], "task", n_jobs=2)
+            p._run_ica_labeling(["0001"], "task")
 
         self.assertTrue(mock_preproc.run_bads_detection.called)
         self.assertTrue(mock_ica.run_ica_label.called)
@@ -127,7 +127,7 @@ class TestPreprocessingCompletion(unittest.TestCase):
 
         p = object.__new__(PreprocessingPipeline)
         p.name = "preprocessing"
-        p.config = DotConfig({"project": {"task": "thermalactive"}})
+        p.config = DotConfig({"project": {"task": "task"}})
         p.logger = Mock()
         p.bids_root = Path(tempfile.mkdtemp()) / "bids"
         p.deriv_root = Path(tempfile.mkdtemp())
@@ -135,7 +135,7 @@ class TestPreprocessingCompletion(unittest.TestCase):
         with patch.object(PreprocessingPipeline, "_execute_steps"):
             out = p.run_batch(
                 subjects=["0001"],
-                task="thermalactive",
+                task="task",
                 mode="epochs",
                 progress=_NoopProgress(),
             )
@@ -153,19 +153,19 @@ class TestPreprocessingCompletion(unittest.TestCase):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
         p = object.__new__(PreprocessingPipeline)
-        p.config = DotConfig({"project": {"task": "thermalactive"}})
+        p.config = DotConfig({"project": {"task": "task"}})
         p.logger = Mock()
 
         fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
         with patch.dict(sys.modules, {"eeg_pipeline.cli.common": fake_cli}):
             task, mode, use_icalabel, n_jobs, progress = p._extract_preprocessing_params(None, {})
-        self.assertEqual(task, "thermalactive")
+        self.assertEqual(task, "task")
         self.assertEqual(mode, "full")
         self.assertTrue(use_icalabel)
         self.assertEqual(n_jobs, 1)
         self.assertIsNotNone(progress)
 
-        with patch.object(PreprocessingPipeline, "_extract_preprocessing_params", return_value=("thermalactive", "full", True, 1, _NoopProgress())), patch.object(
+        with patch.object(PreprocessingPipeline, "_extract_preprocessing_params", return_value=("task", "full", True, 1, _NoopProgress())), patch.object(
             PreprocessingPipeline, "_get_steps_for_mode", return_value=["bad-channels"]
         ), patch.object(PreprocessingPipeline, "_execute_steps") as mock_exec:
             p.process_subject("0001", task=None)

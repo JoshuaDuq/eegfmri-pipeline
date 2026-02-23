@@ -83,33 +83,52 @@ def stage_temperature_models_impl(
     write_temperature_models_fn: Callable[[Any, Optional[TempModelComparisonResult], Optional[TempBreakpointResult]], Path],
 ) -> Dict[str, Any]:
     """Compare temperature→rating model fits and test for breakpoints."""
+    from eeg_pipeline.utils.data.columns import (
+        resolve_outcome_column,
+        resolve_predictor_column,
+    )
+
     df = load_trial_table_df_fn(ctx)
     if not is_dataframe_valid_fn(df):
         ctx.logger.warning("Temperature models: trial table missing; skipping.")
         return {"status": "skipped_missing_data"}
 
-    required_columns = {"temperature", "rating"}
+    predictor_column = resolve_predictor_column(df, ctx.config) or "temperature"
+    outcome_column = resolve_outcome_column(df, ctx.config) or "rating"
+    required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df.columns)
     if missing_columns:
         ctx.logger.warning(
-            "Temperature models: requires %s columns; missing: %s. Skipping.",
+            "Predictor-model stage requires predictor/outcome columns %s; missing: %s. Skipping.",
             required_columns,
             missing_columns,
         )
         return {"status": "skipped_missing_columns"}
 
-    meta: Dict[str, Any] = {"status": "init"}
+    meta: Dict[str, Any] = {
+        "status": "init",
+        "predictor_column": predictor_column,
+        "outcome_column": outcome_column,
+    }
     model_comparison = None
     breakpoint = None
 
     mc_enabled = get_config_bool(ctx.config, "behavior_analysis.temperature_models.model_comparison.enabled", True)
     if mc_enabled:
-        model_comparison = compute_temp_model_comparison_fn(df["temperature"], df["rating"], ctx.config)
+        model_comparison = compute_temp_model_comparison_fn(
+            df[predictor_column],
+            df[outcome_column],
+            ctx.config,
+        )
         meta["model_comparison"] = model_comparison.metadata
 
     bp_enabled = get_config_bool(ctx.config, "behavior_analysis.temperature_models.breakpoint_test.enabled", True)
     if bp_enabled:
-        breakpoint = compute_temp_breakpoints_fn(df["temperature"], df["rating"], ctx.config)
+        breakpoint = compute_temp_breakpoints_fn(
+            df[predictor_column],
+            df[outcome_column],
+            ctx.config,
+        )
         meta["breakpoint_test"] = breakpoint.metadata
 
     write_temperature_models_fn(ctx, model_comparison, breakpoint)
@@ -133,6 +152,10 @@ def stage_regression_impl(
 ) -> pd.DataFrame:
     """Trialwise regression stage with optional run-level aggregation."""
     from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
+    from eeg_pipeline.utils.data.columns import (
+        resolve_outcome_column,
+        resolve_predictor_column,
+    )
 
     suffix = feature_suffix_from_context_fn(ctx)
     method_label = getattr(config, "method_label", "")
@@ -175,7 +198,16 @@ def stage_regression_impl(
 
     if use_run_unit and run_col in df_trials.columns:
         ctx.logger.info("Regression: aggregating to run-level (primary_unit=%s)", primary_unit)
-        agg_cols = [c for c in (feature_cols + ["rating", "temperature"]) if c in df_trials.columns]
+        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+        predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
+        agg_cols = [
+            c
+            for c in (
+                feature_cols
+                + [outcome_column, predictor_column]
+            )
+            if c in df_trials.columns
+        ]
         df_trials = df_trials.groupby(run_col)[agg_cols].mean().reset_index()
         ctx.logger.info("  Run-level: %d observations", len(df_trials))
 
@@ -242,6 +274,10 @@ def stage_models_impl(
 ) -> pd.DataFrame:
     """Fit multiple model families per feature (OLS-HC3 / robust / quantile / logistic)."""
     from eeg_pipeline.utils.analysis.stats.feature_models import run_feature_model_families
+    from eeg_pipeline.utils.data.columns import (
+        resolve_outcome_column,
+        resolve_predictor_column,
+    )
 
     suffix = feature_suffix_from_context_fn(ctx)
     method_label = getattr(config, "method_label", "")
@@ -293,19 +329,21 @@ def stage_models_impl(
                 f"but run column '{run_col}' is missing from trial table."
             )
         ctx.logger.info("Models: aggregating to run-level (primary_unit=%s)", primary_unit)
-        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["rating", "pain_residual"])
+        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["rating", "predictor_residual"])
         if isinstance(outcomes_cfg, str):
             outcomes_cfg = [outcomes_cfg]
         elif not isinstance(outcomes_cfg, (list, tuple)):
-            outcomes_cfg = ["rating", "pain_residual"]
+            outcomes_cfg = ["rating", "predictor_residual"]
         binary_outcome = str(
-            get_config_value(ctx.config, "behavior_analysis.models.binary_outcome", "pain_binary") or "pain_binary"
+            get_config_value(ctx.config, "behavior_analysis.models.binary_outcome", "binary_outcome") or "binary_outcome"
         ).strip()
+        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+        predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
         extra_cols = [
-            "temperature",
-            "rating",
-            "pain_residual",
-            "pain_binary",
+            predictor_column,
+            outcome_column,
+            "predictor_residual",
+            "binary_outcome",
             "trial_index",
             "trial_index_within_group",
             "prev_temperature",

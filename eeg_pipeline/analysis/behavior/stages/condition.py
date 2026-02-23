@@ -11,13 +11,13 @@ from eeg_pipeline.utils.config.loader import get_config_bool, get_config_value
 
 def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
     """Resolve configured condition column, falling back to configured pain column."""
-    from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+    from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
 
     compare_col = str(get_config_value(config, "behavior_analysis.condition.compare_column", "") or "").strip()
     if compare_col and compare_col in df_trials.columns:
         return compare_col
 
-    fallback_col = get_pain_column_from_config(config, df_trials)
+    fallback_col = get_binary_outcome_column_from_config(config, df_trials)
     if fallback_col and fallback_col in df_trials.columns:
         return str(fallback_col)
 
@@ -114,7 +114,7 @@ def stage_condition_column_impl(
             msg = (
                 "Condition split produced zero trials; check "
                 "behavior_analysis.condition.compare_column / behavior_analysis.condition.compare_values "
-                "and/or config event_columns.pain_binary"
+                "and/or config event_columns.binary_outcome"
             )
             if fail_fast:
                 raise ValueError(msg)
