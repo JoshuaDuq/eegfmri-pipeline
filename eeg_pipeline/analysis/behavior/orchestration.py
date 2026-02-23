@@ -22,119 +22,29 @@ from eeg_pipeline.analysis.behavior.result_types import (
     TrialTableResult,
 )
 from eeg_pipeline.analysis.behavior.result_cache import BehaviorResultCache
-from eeg_pipeline.analysis.behavior.feature_filters import (
-    filter_feature_cols_by_band_impl as _filter_feature_cols_by_band_impl,
-    filter_feature_cols_by_provenance_impl as _filter_feature_cols_by_provenance_impl,
-    filter_feature_cols_for_computation_impl as _filter_feature_cols_for_computation_impl,
+from eeg_pipeline.analysis.behavior import (
+    change_scores as _change_scores,
+    common_helpers as _common_helpers,
+    feature_filters as _feature_filters,
+    feature_inference as _feature_inference,
+    group_level as _group_level,
+    stage_execution as _stage_execution,
+    stage_registry as _stage_registry,
+    stage_runners as _stage_runners,
 )
-from eeg_pipeline.analysis.behavior.feature_inference import (
-    infer_feature_band_impl as _infer_feature_band_impl,
-    infer_feature_type_impl as _infer_feature_type_impl,
-)
-from eeg_pipeline.analysis.behavior.common_helpers import (
-    attach_temperature_metadata_impl as _attach_temperature_metadata_impl,
-    check_early_exit_conditions_impl as _check_early_exit_conditions_impl,
-    is_dataframe_valid_impl as _is_dataframe_valid_impl,
-    write_metadata_file_impl as _write_metadata_file_impl,
-    write_stats_table_impl as _write_stats_table_impl,
-)
-from eeg_pipeline.analysis.behavior.change_scores import (
-    add_change_scores_impl as _add_change_scores_impl,
-    augment_dataframe_with_change_scores_impl as _augment_dataframe_with_change_scores_impl,
-    has_precomputed_change_scores_impl as _has_precomputed_change_scores_impl,
-)
-from eeg_pipeline.analysis.behavior.stage_runners import (
-    build_stage_runners_from_namespace_impl as _build_stage_runners_from_namespace_impl,
-)
-from eeg_pipeline.analysis.behavior.group_level import (
-    run_group_level_analysis_impl as _run_group_level_analysis_impl,
-    run_group_level_correlations_impl as _run_group_level_correlations_impl,
-    run_group_level_mixed_effects_impl as _run_group_level_mixed_effects_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.export import (
-    build_output_filename as _build_output_filename_impl,
-    stage_export_impl as _stage_export_impl,
-    write_outputs_manifest_impl as _write_outputs_manifest_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.diagnostics import (
-    stage_consistency_impl as _stage_consistency_impl,
-    stage_influence_impl as _stage_influence_impl,
-    stage_stability_impl as _stage_stability_impl,
-    stage_icc_impl as _stage_icc_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.models import (
-    compute_temp_breakpoints_impl as _compute_temp_breakpoints_impl,
-    compute_temp_model_comparison_impl as _compute_temp_model_comparison_impl,
-    stage_models_impl as _stage_models_impl,
-    stage_regression_impl as _stage_regression_impl,
-    stage_temperature_models_impl as _stage_temperature_models_impl,
-    write_temperature_models_impl as _write_temperature_models_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.metadata import (
-    build_behavior_qc_impl as _build_behavior_qc_impl,
-    compute_series_statistics as _compute_series_statistics_impl,
-    summarize_covariates_qc_impl as _summarize_covariates_qc_impl,
-    write_analysis_metadata_impl as _write_analysis_metadata_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.report import (
-    stage_report_impl as _stage_report_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.fdr import (
-    compute_unified_fdr_impl as _compute_unified_fdr_impl,
-    stage_hierarchical_fdr_summary_impl as _stage_hierarchical_fdr_summary_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.condition import (
-    resolve_condition_compare_column as _resolve_condition_compare_column_impl,
-    run_window_comparison_impl as _run_window_comparison_impl,
-    stage_condition_impl as _stage_condition_impl,
-    stage_condition_column_impl as _stage_condition_column_impl,
-    stage_condition_multigroup_impl as _stage_condition_multigroup_impl,
-    stage_condition_window_impl as _stage_condition_window_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.temporal import (
-    resolve_temporal_feature_selection_impl as _resolve_temporal_feature_selection_impl,
-    stage_cluster_impl as _stage_cluster_impl,
-    stage_temporal_stats_impl as _stage_temporal_stats_impl,
-    stage_temporal_tfr_impl as _stage_temporal_tfr_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.advanced import (
-    stage_mediation_impl as _stage_mediation_impl,
-    stage_mixed_effects_impl as _stage_mixed_effects_impl,
-    stage_moderation_impl as _stage_moderation_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.trial_table import (
-    compute_trial_table_impl as _compute_trial_table_impl,
-    stage_lag_features_impl as _stage_lag_features_impl,
-    stage_pain_residual_impl as _stage_pain_residual_impl,
-    stage_trial_table_impl as _stage_trial_table_impl,
-    try_reuse_cached_trial_table_impl as _try_reuse_cached_trial_table_impl,
-    write_trial_table_impl as _write_trial_table_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.correlate import (
-    CorrelateDesign as _CorrelateDesign,
-    _compute_single_effect_size as _compute_single_effect_size_impl,
-    stage_correlate_design_impl as _stage_correlate_design_impl,
-    stage_correlate_effect_sizes_impl as _stage_correlate_effect_sizes_impl,
-    stage_correlate_fdr_impl as _stage_correlate_fdr_impl,
-    stage_correlate_impl as _stage_correlate_impl,
-    stage_correlate_primary_selection_impl as _stage_correlate_primary_selection_impl,
-    stage_correlate_pvalues_impl as _stage_correlate_pvalues_impl,
-    stage_pain_sensitivity_impl as _stage_pain_sensitivity_impl,
-)
-from eeg_pipeline.analysis.behavior.stages.feature_qc import (
-    stage_feature_qc_screen_impl as _stage_feature_qc_screen_impl,
-)
-from eeg_pipeline.analysis.behavior.stage_execution import (
-    log_stage_outcome_impl as _log_stage_outcome_impl,
-    run_behavior_stages_impl as _run_behavior_stages_impl,
-    run_selected_stages_impl as _run_selected_stages_impl,
-    update_results_from_stage_impl as _update_results_from_stage_impl,
-)
-from eeg_pipeline.analysis.behavior.stage_registry import (
-    StageRegistry,
-    build_results_from_outputs as _build_results_from_outputs,
-    config_to_stage_names,
-    is_stage_enabled_by_config as _is_stage_enabled_by_config,
+from eeg_pipeline.analysis.behavior.stages import (
+    advanced as _stages_advanced,
+    condition as _stages_condition,
+    correlate as _stages_correlate,
+    diagnostics as _stages_diagnostics,
+    export as _stages_export,
+    fdr as _stages_fdr,
+    feature_qc as _stages_feature_qc,
+    metadata as _stages_metadata,
+    models as _stages_models,
+    report as _stages_report,
+    temporal as _stages_temporal,
+    trial_table as _stages_trial_table,
 )
 from eeg_pipeline.analysis.behavior.trial_table_helpers import (
     compute_trial_table_input_hash as _compute_trial_table_input_hash,
@@ -151,6 +61,10 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
 )
 from eeg_pipeline.utils.config.loader import get_config_int, get_config_bool
 from eeg_pipeline.infra.paths import ensure_dir
+
+
+StageRegistry = _stage_registry.StageRegistry
+config_to_stage_names = _stage_registry.config_to_stage_names
 
 
 UNIFIED_FDR_FAMILY_COLUMNS = ["feature_type", "band", "target", "analysis_kind"]
@@ -187,9 +101,9 @@ def _get_stage_runners() -> Dict[str, callable]:
     if STAGE_RUNNERS:
         return STAGE_RUNNERS
     STAGE_RUNNERS.update(
-        _build_stage_runners_from_namespace_impl(
+        _stage_runners.build_stage_runners_from_namespace_impl(
             globals(),
-            build_results_from_outputs_fn=_build_results_from_outputs,
+            build_results_from_outputs_fn=_stage_registry.build_results_from_outputs,
         )
     )
     return STAGE_RUNNERS
@@ -207,11 +121,11 @@ def stage_feature_qc_screen(
     ctx: BehaviorContext,
     config: Any,
 ) -> FeatureQCResult:
-    return _stage_feature_qc_screen_impl(
+    return _stages_feature_qc.stage_feature_qc_screen_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         feature_column_prefixes=FEATURE_COLUMN_PREFIXES,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
@@ -234,15 +148,15 @@ def run_selected_stages(
     progress: Optional[Any] = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    return _run_selected_stages_impl(
+    return _stage_execution.run_selected_stages_impl(
         ctx=ctx,
         config=config,
         selected_stages=selected_stages,
         stage_registry=StageRegistry,
         stage_runners=_get_stage_runners(),
-        is_stage_enabled_by_config_fn=_is_stage_enabled_by_config,
-        update_results_from_stage_fn=_update_results_from_stage_impl,
-        log_stage_outcome_fn=_log_stage_outcome_impl,
+        is_stage_enabled_by_config_fn=_stage_registry.is_stage_enabled_by_config,
+        update_results_from_stage_fn=_stage_execution.update_results_from_stage_impl,
+        log_stage_outcome_fn=_stage_execution.log_stage_outcome_impl,
         results=results,
         progress=progress,
         dry_run=dry_run,
@@ -255,7 +169,7 @@ def run_behavior_stages(
     results: Optional[Any] = None,
     progress: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    return _run_behavior_stages_impl(
+    return _stage_execution.run_behavior_stages_impl(
         ctx=ctx,
         pipeline_config=pipeline_config,
         config_to_stage_names_fn=config_to_stage_names,
@@ -305,12 +219,12 @@ def _check_early_exit_conditions(
     min_features: int = MIN_FEATURES_FOR_ANALYSIS,
     min_trials: int = MIN_TRIALS_FOR_ANALYSIS,
 ) -> Tuple[bool, Optional[str]]:
-    return _check_early_exit_conditions_impl(
+    return _common_helpers.check_early_exit_conditions_impl(
         df,
         feature_cols=feature_cols,
         min_features=min_features,
         min_trials=min_trials,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
     )
 
 
@@ -364,7 +278,7 @@ def _write_stats_table(
     path: Path,
     force_tsv: bool = False,
 ) -> Path:
-    return _write_stats_table_impl(ctx, df, path, force_tsv=force_tsv)
+    return _common_helpers.write_stats_table_impl(ctx, df, path, force_tsv=force_tsv)
 
 
 def _get_feature_columns(
@@ -394,23 +308,23 @@ def _attach_temperature_metadata(
     metadata_dict: Dict[str, Any],
     target_col: Optional[str] = None,
 ) -> pd.DataFrame:
-    return _attach_temperature_metadata_impl(df, metadata_dict, target_col=target_col)
+    return _common_helpers.attach_temperature_metadata_impl(df, metadata_dict, target_col=target_col)
 
 
 def _has_precomputed_change_scores(df: Optional[pd.DataFrame]) -> bool:
-    return _has_precomputed_change_scores_impl(df)
+    return _change_scores.has_precomputed_change_scores_impl(df)
 
 
 def _augment_dataframe_with_change_scores(df: Optional[pd.DataFrame], config: Any) -> Optional[pd.DataFrame]:
-    return _augment_dataframe_with_change_scores_impl(
+    return _change_scores.augment_dataframe_with_change_scores_impl(
         df,
         config,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
     )
 
 
 def add_change_scores(ctx: BehaviorContext) -> None:
-    _add_change_scores_impl(
+    _change_scores.add_change_scores_impl(
         ctx,
         augment_dataframe_with_change_scores_fn=_augment_dataframe_with_change_scores,
         has_precomputed_change_scores_fn=_has_precomputed_change_scores,
@@ -433,15 +347,15 @@ def stage_load(ctx: BehaviorContext) -> bool:
 ###################################################################
 
 
-CorrelateDesign = _CorrelateDesign
+CorrelateDesign = _stages_correlate.CorrelateDesign
 
 
 def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[CorrelateDesign]:
-    return _stage_correlate_design_impl(
+    return _stages_correlate.stage_correlate_design_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
     )
@@ -450,7 +364,7 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
 def _compute_single_effect_size(*args: Any, **kwargs: Any) -> Dict[str, Any]:
     kwargs.setdefault("feature_type_resolver_fn", _infer_feature_type)
     kwargs.setdefault("feature_band_resolver_fn", _infer_feature_band)
-    return _compute_single_effect_size_impl(*args, **kwargs)
+    return _stages_correlate._compute_single_effect_size(*args, **kwargs)
 
 
 
@@ -460,7 +374,7 @@ def stage_correlate_effect_sizes(
     config: Any,
     design: CorrelateDesign,
 ) -> List[Dict[str, Any]]:
-    return _stage_correlate_effect_sizes_impl(
+    return _stages_correlate.stage_correlate_effect_sizes_impl(
         ctx,
         config,
         design,
@@ -477,7 +391,7 @@ def stage_correlate_pvalues(
     design: CorrelateDesign,
     records: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    return _stage_correlate_pvalues_impl(ctx, config, design, records)
+    return _stages_correlate.stage_correlate_pvalues_impl(ctx, config, design, records)
 
 
 def stage_correlate_primary_selection(
@@ -486,7 +400,7 @@ def stage_correlate_primary_selection(
     design: CorrelateDesign,
     records: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    return _stage_correlate_primary_selection_impl(ctx, config, design, records)
+    return _stages_correlate.stage_correlate_primary_selection_impl(ctx, config, design, records)
 
 
 def _compute_unified_fdr(
@@ -497,7 +411,7 @@ def _compute_unified_fdr(
     family_cols: Optional[List[str]] = None,
     analysis_type: str = "correlations",
 ) -> pd.DataFrame:
-    return _compute_unified_fdr_impl(
+    return _stages_fdr.compute_unified_fdr_impl(
         ctx,
         config,
         df,
@@ -514,7 +428,7 @@ def stage_correlate_fdr(
     config: Any,
     records: List[Dict[str, Any]],
 ) -> pd.DataFrame:
-    return _stage_correlate_fdr_impl(
+    return _stages_correlate.stage_correlate_fdr_impl(
         ctx,
         config,
         records,
@@ -524,7 +438,7 @@ def stage_correlate_fdr(
 
 
 def stage_correlate(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    return _stage_correlate_impl(
+    return _stages_correlate.stage_correlate_impl(
         ctx,
         config,
         stage_correlate_design_fn=stage_correlate_design,
@@ -562,11 +476,11 @@ def _sanitize_permutation_groups(
 
 
 def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    return _stage_pain_sensitivity_impl(
+    return _stages_correlate.stage_pain_sensitivity_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
         compute_unified_fdr_fn=_compute_unified_fdr,
@@ -584,7 +498,7 @@ def _filter_feature_cols_by_band(
     feature_cols: List[str],
     ctx: BehaviorContext,
 ) -> List[str]:
-    return _filter_feature_cols_by_band_impl(
+    return _feature_filters.filter_feature_cols_by_band_impl(
         feature_cols,
         ctx,
         feature_column_prefixes=FEATURE_COLUMN_PREFIXES,
@@ -596,7 +510,7 @@ def _filter_feature_cols_for_computation(
     computation_name: str,
     ctx: BehaviorContext,
 ) -> List[str]:
-    return _filter_feature_cols_for_computation_impl(
+    return _feature_filters.filter_feature_cols_for_computation_impl(
         feature_cols,
         computation_name,
         ctx,
@@ -609,7 +523,7 @@ def _filter_feature_cols_by_provenance(
     ctx: BehaviorContext,
     computation_name: Optional[str] = None,
 ) -> List[str]:
-    return _filter_feature_cols_by_provenance_impl(
+    return _feature_filters.filter_feature_cols_by_provenance_impl(
         feature_cols,
         ctx,
         computation_name,
@@ -618,11 +532,11 @@ def _filter_feature_cols_by_provenance(
 
 
 def compute_trial_table(ctx: BehaviorContext, config: Any) -> Optional[TrialTableResult]:
-    return _compute_trial_table_impl(ctx, config)
+    return _stages_trial_table.compute_trial_table_impl(ctx, config)
 
 
 def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
-    out_path = _write_trial_table_impl(
+    out_path = _stages_trial_table.write_trial_table_impl(
         ctx,
         result,
         trial_table_suffix_from_context_fn=_trial_table_suffix_from_context,
@@ -639,7 +553,7 @@ def _try_reuse_cached_trial_table(
     *,
     input_hash: str,
 ) -> Optional[Path]:
-    reused = _try_reuse_cached_trial_table_impl(
+    reused = _stages_trial_table.try_reuse_cached_trial_table_impl(
         ctx,
         input_hash=input_hash,
         trial_table_suffix_from_context_fn=_trial_table_suffix_from_context,
@@ -656,7 +570,7 @@ def _try_reuse_cached_trial_table(
 
 
 def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
-    return _stage_trial_table_impl(
+    return _stages_trial_table.stage_trial_table_impl(
         ctx,
         config,
         compute_trial_table_input_hash_fn=_compute_trial_table_input_hash,
@@ -665,17 +579,17 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
             input_hash=input_hash,
         ),
         compute_trial_table_fn=compute_trial_table,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         write_trial_table_fn=write_trial_table,
     )
 
 
 def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
-    out_path = _stage_lag_features_impl(
+    out_path = _stages_trial_table.stage_lag_features_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
@@ -690,11 +604,11 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
 
 
 def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
-    out_path = _stage_pain_residual_impl(
+    out_path = _stages_trial_table.stage_pain_residual_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
@@ -714,7 +628,7 @@ def compute_temp_model_comparison(
     config: Any,
 ) -> TempModelComparisonResult:
     """Compare temperature→rating model fits (linear vs polynomial vs spline)."""
-    return _compute_temp_model_comparison_impl(temperature, rating, config)
+    return _stages_models.compute_temp_model_comparison_impl(temperature, rating, config)
 
 
 def compute_temp_breakpoints(
@@ -723,7 +637,7 @@ def compute_temp_breakpoints(
     config: Any,
 ) -> TempBreakpointResult:
     """Detect threshold temperatures where sensitivity changes."""
-    return _compute_temp_breakpoints_impl(temperature, rating, config)
+    return _stages_models.compute_temp_breakpoints_impl(temperature, rating, config)
 
 
 def write_temperature_models(
@@ -732,24 +646,24 @@ def write_temperature_models(
     breakpoint: Optional[TempBreakpointResult],
 ) -> Path:
     """Write temperature model results to disk."""
-    return _write_temperature_models_impl(
+    return _stages_models.write_temperature_models_impl(
         ctx,
         model_comparison,
         breakpoint,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
     )
 
 
 def stage_temperature_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
     """Compare temperature→rating model fits and test for breakpoints (composed)."""
-    return _stage_temperature_models_impl(
+    return _stages_models.stage_temperature_models_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         compute_temp_model_comparison_fn=compute_temp_model_comparison,
         compute_temp_breakpoints_fn=compute_temp_breakpoints,
         write_temperature_models_fn=write_temperature_models,
@@ -762,12 +676,12 @@ def _load_trial_table_df(ctx: BehaviorContext) -> Optional[pd.DataFrame]:
 
 
 def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    return _stage_regression_impl(
+    return _stages_models.stage_regression_impl(
         ctx,
         config,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
@@ -778,12 +692,12 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
 
 def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    return _stage_models_impl(
+    return _stages_models.stage_models_impl(
         ctx,
         config,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         attach_temperature_metadata_fn=_attach_temperature_metadata,
@@ -794,12 +708,12 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
 def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Assess within-subject run/block stability of feature→outcome associations (non-gating)."""
-    return _stage_stability_impl(
+    return _stages_diagnostics.stage_stability_impl(
         ctx,
         config,
         build_output_filename_fn=_build_output_filename,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         get_stats_subfolder_fn=_get_stats_subfolder,
@@ -809,12 +723,12 @@ def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
 def stage_icc(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Assess within-subject run-to-run reliability (ICC) of EEG features."""
-    return _stage_icc_impl(
+    return _stages_diagnostics.stage_icc_impl(
         ctx,
         config,
         build_output_filename_fn=_build_output_filename,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         get_stats_subfolder_fn=_get_stats_subfolder,
@@ -825,7 +739,7 @@ def stage_icc(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
 def stage_consistency(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataFrame:
     """Merge correlations/regression/models and flag effect-direction contradictions (non-gating)."""
-    return _stage_consistency_impl(
+    return _stages_diagnostics.stage_consistency_impl(
         ctx,
         config,
         results,
@@ -838,12 +752,12 @@ def stage_consistency(ctx: BehaviorContext, config: Any, results: Any) -> pd.Dat
 
 def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataFrame:
     """Compute leverage/Cook's summaries for top effects (non-gating)."""
-    return _stage_influence_impl(
+    return _stages_diagnostics.stage_influence_impl(
         ctx,
         config,
         results,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         attach_temperature_metadata_fn=_attach_temperature_metadata,
@@ -856,12 +770,12 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
 
 def _compute_series_statistics(series: pd.Series) -> Dict[str, Any]:
     """Compute basic statistics for a numeric series."""
-    return _compute_series_statistics_impl(series)
+    return _stages_metadata.compute_series_statistics(series)
 
 
 def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
     """Build behavior quality control summary."""
-    return _build_behavior_qc_impl(
+    return _stages_metadata.build_behavior_qc_impl(
         ctx,
         compute_series_statistics_fn=_compute_series_statistics,
         compute_correlation_fn=compute_correlation,
@@ -869,11 +783,15 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
 
 
 def _infer_feature_type(feature: str, config: Any) -> str:
-    return _infer_feature_type_impl(feature, config, feature_column_prefixes=FEATURE_COLUMN_PREFIXES)
+    return _feature_inference.infer_feature_type_impl(
+        feature,
+        config,
+        feature_column_prefixes=FEATURE_COLUMN_PREFIXES,
+    )
 
 
 def _infer_feature_band(feature: str, config: Any) -> str:
-    return _infer_feature_band_impl(feature, config)
+    return _feature_inference.infer_feature_band_impl(feature, config)
 
 
 def _build_result_cache() -> BehaviorResultCache:
@@ -898,7 +816,7 @@ _cache = _build_result_cache()
 
 
 def _summarize_covariates_qc(ctx: BehaviorContext) -> Dict[str, Any]:
-    return _summarize_covariates_qc_impl(ctx)
+    return _stages_metadata.summarize_covariates_qc_impl(ctx)
 
 
 def write_analysis_metadata(
@@ -908,7 +826,7 @@ def write_analysis_metadata(
     stage_metrics: Optional[Dict[str, Any]] = None,
     outputs_manifest: Optional[Path] = None,
 ) -> Path:
-    return _write_analysis_metadata_impl(
+    return _stages_metadata.write_analysis_metadata_impl(
         ctx,
         pipeline_config,
         results,
@@ -927,7 +845,7 @@ def write_analysis_metadata(
 
 def _resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
     """Resolve configured condition column, falling back to configured pain column."""
-    return _resolve_condition_compare_column_impl(df_trials, config)
+    return _stages_condition.resolve_condition_compare_column(df_trials, config)
 
 
 def stage_condition_column(
@@ -946,14 +864,14 @@ def stage_condition_column(
     
     If compare_values has 3+ values, delegates to multigroup comparison instead.
     """
-    return _stage_condition_column_impl(
+    return _stages_condition.stage_condition_column_impl(
         ctx,
         config,
         df_trials=df_trials,
         feature_cols=feature_cols,
         stage_condition_multigroup_fn=stage_condition_multigroup,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
@@ -1001,14 +919,14 @@ def stage_condition_window(
     Single responsibility: Window contrast comparison.
     """
 
-    return _stage_condition_window_impl(
+    return _stages_condition.stage_condition_window_impl(
         ctx,
         config,
         df_trials=df_trials,
         feature_cols=feature_cols,
         compare_windows=compare_windows,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
@@ -1028,11 +946,11 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     - stage_condition_window (paired window comparison)
     - stage_condition_multigroup (3+ group comparison)
     """
-    return _stage_condition_impl(
+    return _stages_condition.stage_condition_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_filtered_feature_cols_fn=lambda df, context: _cache.get_filtered_feature_cols(
             [c for c in df.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)],
             context,
@@ -1058,13 +976,13 @@ def stage_condition_multigroup(
     When overwrite=false, includes compare_column name in output filename to allow
     multiple comparisons without overwriting previous results.
     """
-    return _stage_condition_multigroup_impl(
+    return _stages_condition.stage_condition_multigroup_impl(
         ctx,
         config,
         df_trials=df_trials,
         feature_cols=feature_cols,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         resolve_condition_compare_column_fn=_resolve_condition_compare_column,
         compute_unified_fdr_fn=_compute_unified_fdr,
@@ -1085,7 +1003,7 @@ def _run_window_comparison(
     suffix: str,
 ) -> pd.DataFrame:
     """Run paired window comparison on feature columns."""
-    return _run_window_comparison_impl(
+    return _stages_condition.run_window_comparison_impl(
         ctx,
         df_trials,
         feature_cols,
@@ -1108,7 +1026,7 @@ def _run_window_comparison(
 
 def stage_temporal_tfr(ctx: BehaviorContext) -> Optional[Dict[str, Any]]:
     """Compute time-frequency representation correlations."""
-    return _stage_temporal_tfr_impl(ctx)
+    return _stages_temporal.stage_temporal_tfr_impl(ctx)
 
 
 def _resolve_temporal_feature_selection(
@@ -1116,7 +1034,7 @@ def _resolve_temporal_feature_selection(
     selected_features: Optional[List[str]] = None,
 ) -> List[str]:
     """Resolve effective temporal features from config toggles and user filters."""
-    return _resolve_temporal_feature_selection_impl(ctx, selected_features)
+    return _stages_temporal.resolve_temporal_feature_selection_impl(ctx, selected_features)
 
 
 def stage_temporal_stats(
@@ -1124,7 +1042,7 @@ def stage_temporal_stats(
     selected_features: Optional[List[str]] = None,
 ) -> Dict[str, Optional[Dict[str, Any]]]:
     """Compute temporal statistics (power, ITPC, ERDS correlations)."""
-    return _stage_temporal_stats_impl(
+    return _stages_temporal.stage_temporal_stats_impl(
         ctx,
         selected_features=selected_features,
         resolve_temporal_feature_selection_fn=_resolve_temporal_feature_selection,
@@ -1138,7 +1056,7 @@ def stage_temporal_stats(
 
 
 def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
-    return _stage_cluster_impl(ctx, config)
+    return _stages_temporal.stage_cluster_impl(ctx, config)
 
 
 ###################################################################
@@ -1148,11 +1066,11 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
 
 def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Run mediation analysis: test if neural features mediate the temperature→rating relationship."""
-    return _stage_mediation_impl(
+    return _stages_advanced.stage_mediation_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
@@ -1164,7 +1082,7 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
 def stage_mixed_effects(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Run mixed-effects analysis."""
-    return _stage_mixed_effects_impl(ctx, config)
+    return _stages_advanced.stage_mixed_effects_impl(ctx, config)
 
 
 ###################################################################
@@ -1182,7 +1100,7 @@ def run_group_level_mixed_effects(
     fdr_alpha: float = 0.05,
 ) -> MixedEffectsResult:
     """Run proper mixed-effects models across all subjects."""
-    return _run_group_level_mixed_effects_impl(
+    return _group_level.run_group_level_mixed_effects_impl(
         subjects=subjects,
         deriv_root=deriv_root,
         config=config,
@@ -1212,7 +1130,7 @@ def run_group_level_correlations(
     random_state: Optional[int] = None,
 ) -> pd.DataFrame:
     """Run multilevel correlations across subjects with block-aware permutations."""
-    return _run_group_level_correlations_impl(
+    return _group_level.run_group_level_correlations_impl(
         subjects=subjects,
         deriv_root=deriv_root,
         config=config,
@@ -1243,7 +1161,7 @@ def run_group_level_analysis(
     output_dir: Optional[Path] = None,
 ) -> GroupLevelResult:
     """Run all group-level analyses."""
-    return _run_group_level_analysis_impl(
+    return _group_level.run_group_level_analysis_impl(
         subjects=subjects,
         deriv_root=deriv_root,
         config=config,
@@ -1265,11 +1183,11 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     If b3 is significant, the feature moderates how temperature affects pain rating.
     """
-    return _stage_moderation_impl(
+    return _stages_advanced.stage_moderation_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_is_dataframe_valid_impl,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
@@ -1284,7 +1202,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
 def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Compute hierarchical FDR summary across analysis types from cached FDR results."""
-    return _stage_hierarchical_fdr_summary_impl(
+    return _stages_fdr.stage_hierarchical_fdr_summary_impl(
         ctx,
         config,
         get_cached_fdr_fn=_cache.get_fdr_results,
@@ -1297,7 +1215,7 @@ def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.Data
 
 def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Path:
     """Write a single-subject, self-diagnosing Markdown report (fail-fast)."""
-    return _stage_report_impl(
+    return _stages_report.stage_report_impl(
         ctx,
         pipeline_config,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
@@ -1316,16 +1234,16 @@ def _build_output_filename(
     """Build standardized output filename with feature and method suffixes."""
     feature_suffix = _feature_suffix_from_context(ctx)
     method_label = getattr(pipeline_config, "method_label", "")
-    return _build_output_filename_impl(feature_suffix, method_label, base_name)
+    return _stages_export.build_output_filename(feature_suffix, method_label, base_name)
 
 
 def _write_metadata_file(path: Path, metadata: Dict[str, Any]) -> None:
-    _write_metadata_file_impl(path, metadata)
+    _common_helpers.write_metadata_file_impl(path, metadata)
 
 
 def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> List[Path]:
     """Export all analysis results to disk with normalization."""
-    return _stage_export_impl(
+    return _stages_export.stage_export_impl(
         ctx,
         pipeline_config,
         results,
@@ -1342,7 +1260,7 @@ def write_outputs_manifest(
     stage_metrics: Optional[Dict[str, Any]] = None,
 ) -> Path:
     _ = results  # kept for backwards-compatible signature
-    return _write_outputs_manifest_impl(
+    return _stages_export.write_outputs_manifest_impl(
         ctx,
         pipeline_config,
         stage_metrics=stage_metrics,

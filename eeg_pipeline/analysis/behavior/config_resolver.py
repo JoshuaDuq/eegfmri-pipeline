@@ -36,7 +36,7 @@ def resolve_correlation_method(
     logger: Any = None,
     default: str = "spearman",
 ) -> str:
-    """Resolve correlation method from canonical key only."""
+    """Resolve correlation method, preferring canonical key with legacy fallback."""
     canonical_raw = get_config_value(
         config, "behavior_analysis.statistics.correlation_method", None
     )
@@ -49,6 +49,15 @@ def resolve_correlation_method(
 
     if canonical is not None:
         return canonical
+
+    legacy_raw = get_config_value(config, "behavior_analysis.correlation_method", None)
+    if legacy_raw is not None:
+        _warn(
+            logger,
+            "Deprecated config key 'behavior_analysis.correlation_method' detected; "
+            "use 'behavior_analysis.statistics.correlation_method' instead.",
+        )
+        return normalize_correlation_method(legacy_raw, default=default)
 
     return normalize_correlation_method(default, default=default)
 

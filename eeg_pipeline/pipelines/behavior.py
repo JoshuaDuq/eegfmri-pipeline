@@ -34,18 +34,21 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
 from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
+from eeg_pipeline.analysis.behavior.stage_catalog import (
+    COMPUTATION_TO_PIPELINE_ATTR,
+    apply_computation_flags_impl as _apply_computation_flags_impl,
+)
 from eeg_pipeline.analysis.behavior.orchestration import (
     run_behavior_stages,
     write_analysis_metadata as _write_analysis_metadata_impl,
     write_outputs_manifest,
     get_behavior_output_dir,
 )
-from eeg_pipeline.pipelines.constants import BEHAVIOR_COMPUTATIONS
 
 
 SIGNIFICANCE_THRESHOLD = 0.05
 
-BEHAVIOR_COMPUTATION_FLAGS = list(BEHAVIOR_COMPUTATIONS) + ["multilevel_correlations"]
+BEHAVIOR_COMPUTATION_FLAGS = list(COMPUTATION_TO_PIPELINE_ATTR)
 
 # Bundled computation aliases for cleaner TUI/CLI
 BEHAVIOR_COMPUTATION_BUNDLES = {
@@ -475,27 +478,7 @@ class BehaviorPipeline(PipelineBase):
                 self.logger.info("Auto-enabling `trial_table` (required by selected computations).")
                 comp_flags["trial_table"] = True
 
-            self.pipeline_config.run_trial_table = comp_flags["trial_table"]
-            self.pipeline_config.run_lag_features = comp_flags["lag_features"]
-            self.pipeline_config.run_pain_residual = comp_flags["pain_residual"]
-            self.pipeline_config.run_temperature_models = comp_flags["temperature_models"]
-            self.pipeline_config.run_regression = comp_flags["regression"]
-            self.pipeline_config.run_models = comp_flags["models"]
-            self.pipeline_config.run_stability = comp_flags["stability"]
-            # Preserve prior behavior where stability implies ICC, while allowing ICC-only selection.
-            self.pipeline_config.run_icc = comp_flags["icc"] or comp_flags["stability"]
-            self.pipeline_config.run_consistency = comp_flags["consistency"]
-            self.pipeline_config.run_influence = comp_flags["influence"]
-            self.pipeline_config.run_report = comp_flags["report"]
-            self.pipeline_config.run_correlations = comp_flags["correlations"]
-            self.pipeline_config.run_multilevel_correlations = comp_flags["multilevel_correlations"]
-            self.pipeline_config.run_condition_comparison = comp_flags["condition"]
-            self.pipeline_config.run_temporal_correlations = comp_flags["temporal"]
-            self.pipeline_config.run_cluster_tests = comp_flags["cluster"]
-            self.pipeline_config.run_mediation = comp_flags["mediation"]
-            self.pipeline_config.run_moderation = comp_flags["moderation"]
-            self.pipeline_config.run_mixed_effects = comp_flags["mixed_effects"]
-            self.pipeline_config.compute_pain_sensitivity = comp_flags["pain_sensitivity"]
+            _apply_computation_flags_impl(self.pipeline_config, comp_flags)
             
             selected_computations = [k for k, v in comp_flags.items() if v]
             selected_text = ", ".join(selected_computations) if selected_computations else "none"
