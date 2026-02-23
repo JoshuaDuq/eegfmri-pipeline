@@ -341,7 +341,7 @@ func (m Model) renderHeader() string {
 	logo := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
-		Render("PAIN_EEG_fMRI")
+		Render("eegfmri-pipeline")
 
 	versionBadge := lipgloss.NewStyle().
 		Foreground(styles.Muted).
