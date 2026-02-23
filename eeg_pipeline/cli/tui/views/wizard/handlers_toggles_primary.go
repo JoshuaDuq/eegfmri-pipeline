@@ -1640,11 +1640,11 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupStats:
 		m.behaviorGroupStatsExpanded = !m.behaviorGroupStatsExpanded
 		m.useDefaultAdvanced = false
-	case optBehaviorGroupGlobalValidation:
-		m.behaviorGroupGlobalValidationExpanded = !m.behaviorGroupGlobalValidationExpanded
+	case optBehaviorGroupAnalyses:
+		m.behaviorGroupAnalysesExpanded = !m.behaviorGroupAnalysesExpanded
 		m.useDefaultAdvanced = false
-	case optBehaviorGroupSystemIO:
-		m.behaviorGroupSystemIOExpanded = !m.behaviorGroupSystemIOExpanded
+	case optBehaviorGroupAdvanced:
+		m.behaviorGroupAdvancedExpanded = !m.behaviorGroupAdvancedExpanded
 		m.useDefaultAdvanced = false
 	case optCorrMethod:
 		if m.correlationMethod == "spearman" {

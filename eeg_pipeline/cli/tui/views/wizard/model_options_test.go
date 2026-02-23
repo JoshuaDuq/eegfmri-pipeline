@@ -196,7 +196,7 @@ func TestGetFeaturesOptions_ExecutionOptionsAreCategoryScoped(t *testing.T) {
 	}
 }
 
-func TestGetBehaviorOptions_HidesGlobalStatsAndIOForNonStatOnlySelections(t *testing.T) {
+func TestGetBehaviorOptions_HidesInferenceAndAdvancedForNonStatSelections(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {
 		m.computationSelected[i] = m.computations[i].Key == "report"
@@ -204,12 +204,12 @@ func TestGetBehaviorOptions_HidesGlobalStatsAndIOForNonStatOnlySelections(t *tes
 
 	opts := m.getBehaviorOptions()
 
-	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupGlobalValidation) || hasOption(opts, optBehaviorGroupSystemIO) {
-		t.Fatalf("did not expect stats/global/io group headers for report-only selection")
+	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupAdvanced) {
+		t.Fatalf("did not expect inference/advanced group headers for report-only selection")
 	}
 }
 
-func TestGetBehaviorOptions_ShowsGlobalStatsAndIOForStatSelections(t *testing.T) {
+func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForStatSelections(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {
 		m.computationSelected[i] = m.computations[i].Key == "correlations"
@@ -218,23 +218,19 @@ func TestGetBehaviorOptions_ShowsGlobalStatsAndIOForStatSelections(t *testing.T)
 	// Group headers should appear when collapsed
 	opts := m.getBehaviorOptions()
 	if !hasOption(opts, optBehaviorGroupStats) {
-		t.Fatalf("expected Stats group header for correlations selection")
+		t.Fatalf("expected Inference & Shared Settings group header for correlations selection")
 	}
-	if !hasOption(opts, optBehaviorGroupGlobalValidation) {
-		t.Fatalf("expected Global Validation group header for correlations selection")
-	}
-	if !hasOption(opts, optBehaviorGroupSystemIO) {
-		t.Fatalf("expected System/IO group header for correlations selection")
+	if !hasOption(opts, optBehaviorGroupAdvanced) {
+		t.Fatalf("expected Advanced group header for correlations selection")
 	}
 
 	// Child options should appear when groups are expanded
 	m.behaviorGroupStatsExpanded = true
-	m.behaviorGroupGlobalValidationExpanded = true
-	m.behaviorGroupSystemIOExpanded = true
+	m.behaviorGroupAdvancedExpanded = true
 	opts = m.getBehaviorOptions()
 
 	if !hasOption(opts, optBehaviorStatsTempControl) {
-		t.Fatalf("expected behavior stats options for correlations selection")
+		t.Fatalf("expected inference stats options for correlations selection")
 	}
 	if !hasOption(opts, optGlobalNBootstrap) {
 		t.Fatalf("expected global stats options for correlations selection")
@@ -247,7 +243,7 @@ func TestGetBehaviorOptions_ShowsGlobalStatsAndIOForStatSelections(t *testing.T)
 	}
 }
 
-func TestGetBehaviorOptions_HidesGlobalStatsAndIOForTrialTableOnly(t *testing.T) {
+func TestGetBehaviorOptions_HidesInferenceAndAdvancedForTrialTableOnly(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {
 		m.computationSelected[i] = m.computations[i].Key == "trial_table"
@@ -255,12 +251,12 @@ func TestGetBehaviorOptions_HidesGlobalStatsAndIOForTrialTableOnly(t *testing.T)
 
 	opts := m.getBehaviorOptions()
 
-	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupGlobalValidation) || hasOption(opts, optBehaviorGroupSystemIO) {
-		t.Fatalf("did not expect stats/global/io group headers for trial_table-only selection")
+	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupAdvanced) {
+		t.Fatalf("did not expect inference/advanced group headers for trial_table-only selection")
 	}
 }
 
-func TestGetBehaviorOptions_HidesGlobalStatsAndIOForPainResidualOnly(t *testing.T) {
+func TestGetBehaviorOptions_HidesInferenceAndAdvancedForPainResidualOnly(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {
 		m.computationSelected[i] = m.computations[i].Key == "pain_residual"
@@ -268,7 +264,7 @@ func TestGetBehaviorOptions_HidesGlobalStatsAndIOForPainResidualOnly(t *testing.
 
 	opts := m.getBehaviorOptions()
 
-	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupGlobalValidation) || hasOption(opts, optBehaviorGroupSystemIO) {
-		t.Fatalf("did not expect stats/global/io group headers for pain_residual-only selection")
+	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupAdvanced) {
+		t.Fatalf("did not expect inference/advanced group headers for pain_residual-only selection")
 	}
 }

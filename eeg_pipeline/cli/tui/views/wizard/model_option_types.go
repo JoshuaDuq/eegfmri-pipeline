@@ -48,8 +48,8 @@ const (
 	optBehaviorGroupMixedEffects
 	optBehaviorGroupOutput
 	optBehaviorGroupStats
-	optBehaviorGroupGlobalValidation
-	optBehaviorGroupSystemIO
+	optBehaviorGroupAnalyses
+	optBehaviorGroupAdvanced
 	// Behavior sub-section headers (non-collapsible, visual separators within expanded groups)
 	optBehaviorSubCorrelationSettings
 	optBehaviorSubCovariates

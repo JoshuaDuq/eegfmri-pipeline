@@ -1827,27 +1827,27 @@ type Model struct {
 	behaviorOverwrite bool // Overwrite existing output folders (if false, append timestamp)
 
 	// Behavior advanced config section expansion (collapsed by default for compact UI)
-	behaviorGroupGeneralExpanded          bool
-	behaviorGroupTrialTableExpanded       bool
-	behaviorGroupPainResidualExpanded     bool
-	behaviorGroupCorrelationsExpanded     bool
-	behaviorGroupPainSensExpanded         bool
-	behaviorGroupRegressionExpanded       bool
-	behaviorGroupModelsExpanded           bool
-	behaviorGroupStabilityExpanded        bool
-	behaviorGroupConsistencyExpanded      bool
-	behaviorGroupInfluenceExpanded        bool
-	behaviorGroupReportExpanded           bool
-	behaviorGroupConditionExpanded        bool
-	behaviorGroupTemporalExpanded         bool
-	behaviorGroupClusterExpanded          bool
-	behaviorGroupMediationExpanded        bool
-	behaviorGroupModerationExpanded       bool
-	behaviorGroupMixedEffectsExpanded     bool
-	behaviorGroupOutputExpanded           bool
-	behaviorGroupStatsExpanded            bool
-	behaviorGroupGlobalValidationExpanded bool
-	behaviorGroupSystemIOExpanded         bool
+	behaviorGroupGeneralExpanded      bool
+	behaviorGroupTrialTableExpanded   bool
+	behaviorGroupPainResidualExpanded bool
+	behaviorGroupCorrelationsExpanded bool
+	behaviorGroupPainSensExpanded     bool
+	behaviorGroupRegressionExpanded   bool
+	behaviorGroupModelsExpanded       bool
+	behaviorGroupStabilityExpanded    bool
+	behaviorGroupConsistencyExpanded  bool
+	behaviorGroupInfluenceExpanded    bool
+	behaviorGroupReportExpanded       bool
+	behaviorGroupConditionExpanded    bool
+	behaviorGroupTemporalExpanded     bool
+	behaviorGroupClusterExpanded      bool
+	behaviorGroupMediationExpanded    bool
+	behaviorGroupModerationExpanded   bool
+	behaviorGroupMixedEffectsExpanded bool
+	behaviorGroupOutputExpanded       bool
+	behaviorGroupStatsExpanded        bool
+	behaviorGroupAnalysesExpanded     bool
+	behaviorGroupAdvancedExpanded     bool
 
 	// Trial table / pain residual config (subject-level)
 	trialTableFormat         int // 0=parquet, 1=tsv

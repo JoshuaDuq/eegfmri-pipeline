@@ -6,7 +6,6 @@ func (m Model) getBehaviorOptions() []optionType {
 	var options []optionType
 	options = append(options, optUseDefaults)
 
-	// Check if any computation is selected
 	hasAnyComputation := len(m.SelectedComputations()) > 0
 	hasSelectedComputation := func(keys ...string) bool {
 		for _, key := range keys {
@@ -16,80 +15,59 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 		return false
 	}
-	needsBehaviorStatsAndGlobalOptions := hasSelectedComputation(
-		"correlations",
-		"multilevel_correlations",
-		"pain_sensitivity",
-		"regression",
-		"models",
-		"stability",
-		"influence",
-		"condition",
-		"temporal",
-		"cluster",
-		"mediation",
-		"moderation",
-		"mixed_effects",
+	needsInferenceSettings := hasSelectedComputation(
+		"correlations", "multilevel_correlations", "pain_sensitivity",
+		"regression", "models", "stability", "influence",
+		"condition", "temporal", "cluster", "mediation", "moderation", "mixed_effects",
 	)
 
-	// General section - only show if at least one computation is selected
+	// ── Execution ─────────────────────────────────────────────────────────────
+	// RNG, parallelism, global thresholds — always relevant when any computation is selected.
 	if hasAnyComputation {
 		options = append(options, optBehaviorGroupGeneral)
 		if m.behaviorGroupGeneralExpanded {
-			// RNG Seed and N Jobs are always relevant
 			options = append(options, optRNGSeed, optBehaviorNJobs, optBehaviorMinSamples, optBehaviorValidateOnly)
+		}
+	}
 
-			// Correlation method and robust correlation - only for correlations, stability, pain_sensitivity
-			needsCorrelationMethod := m.isComputationSelected("correlations") ||
-				m.isComputationSelected("stability") ||
-				m.isComputationSelected("pain_sensitivity")
-			if needsCorrelationMethod {
+	// ── Inference & Shared Settings ───────────────────────────────────────────
+	// Correlation method, FDR, permutations, covariates, run adjustment, feature QC.
+	// Centralised so users configure shared inference settings once, not per-analysis.
+	if needsInferenceSettings {
+		options = append(options, optBehaviorGroupStats)
+		if m.behaviorGroupStatsExpanded {
+			// Correlation method — only when correlations/stability/pain_sensitivity selected
+			if hasSelectedComputation("correlations", "stability", "pain_sensitivity") {
 				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
 			}
-
-			// Bootstrap - relevant for correlations, stability
-			needsBootstrap := m.isComputationSelected("correlations") ||
-				m.isComputationSelected("stability")
-			if needsBootstrap {
+			// Bootstrap — correlations, stability
+			if hasSelectedComputation("correlations", "stability") {
 				options = append(options, optBootstrap)
 			}
-
-			// FDR Alpha - relevant for correlations, condition, temporal, cluster, regression
-			needsFDR := m.isComputationSelected("correlations") ||
-				m.isComputationSelected("condition") ||
-				m.isComputationSelected("temporal") ||
-				m.isComputationSelected("cluster") ||
-				m.isComputationSelected("regression")
-			if needsFDR {
+			// FDR alpha — any analysis with multiple comparisons
+			if hasSelectedComputation("correlations", "condition", "temporal", "cluster", "regression") {
 				options = append(options, optFDRAlpha)
 			}
-
-			// N Permutations - relevant for cluster, temporal, regression, correlations, mediation, moderation
-			needsPermutations := m.isComputationSelected("cluster") ||
-				m.isComputationSelected("temporal") ||
-				m.isComputationSelected("regression") ||
-				m.isComputationSelected("correlations") ||
-				m.isComputationSelected("mediation") ||
-				m.isComputationSelected("moderation")
-			if needsPermutations {
+			// Global permutations
+			if hasSelectedComputation("cluster", "temporal", "regression", "correlations", "mediation", "moderation") {
 				options = append(options, optNPerm)
 			}
-
-			// Covariate controls - relevant for regression, models, influence, correlations, stability, pain_sensitivity
-			needsCovariates := m.isComputationSelected("regression") ||
-				m.isComputationSelected("models") ||
-				m.isComputationSelected("influence") ||
-				m.isComputationSelected("correlations") ||
-				m.isComputationSelected("stability") ||
-				m.isComputationSelected("pain_sensitivity")
-			if needsCovariates {
+			// Shared statistics settings
+			options = append(options,
+				optBehaviorStatsTempControl,
+				optBehaviorStatsAllowIIDTrials,
+				optBehaviorStatsHierarchicalFDR,
+				optBehaviorStatsComputeReliability,
+				optBehaviorPermScheme,
+				optBehaviorPermGroupColumnPreference,
+				optBehaviorExcludeNonTrialwiseFeatures,
+			)
+			// Shared covariate controls
+			if hasSelectedComputation("regression", "models", "influence", "correlations", "stability", "pain_sensitivity") {
 				options = append(options, optBehaviorSubCovariates, optControlTemp, optControlOrder)
 			}
-
-			// Run adjustment - relevant for trial_table, correlations
-			needsRunAdjustment := m.isComputationSelected("trial_table") ||
-				m.isComputationSelected("correlations")
-			if needsRunAdjustment {
+			// Run adjustment
+			if hasSelectedComputation("trial_table", "correlations") {
 				options = append(options, optBehaviorSubRunAdjustment, optRunAdjustmentEnabled)
 				if m.runAdjustmentEnabled {
 					options = append(options,
@@ -99,8 +77,7 @@ func (m Model) getBehaviorOptions() []optionType {
 					)
 				}
 			}
-
-			// Change scores, LOSO stability, Bayes factors - relevant for correlations
+			// Correlations extras (change scores, LOSO, Bayes)
 			if m.isComputationSelected("correlations") {
 				options = append(options,
 					optBehaviorSubCorrelationsExtra,
@@ -109,9 +86,8 @@ func (m Model) getBehaviorOptions() []optionType {
 					optComputeBayesFactors,
 				)
 			}
-
-			// Feature QC (optional gating) - relevant for correlations / multilevel correlations
-			if m.isComputationSelected("correlations") || m.isComputationSelected("multilevel_correlations") {
+			// Feature QC
+			if hasSelectedComputation("correlations", "multilevel_correlations") {
 				options = append(options, optBehaviorSubFeatureQC, optFeatureQCEnabled)
 				if m.featureQCEnabled {
 					options = append(options,
@@ -285,72 +261,6 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Stability section
-	if m.isComputationSelected("stability") {
-		options = append(options, optBehaviorGroupStability)
-		if m.behaviorGroupStabilityExpanded {
-			options = append(options,
-				optStabilityMethod,
-				optStabilityOutcome,
-				optStabilityGroupColumn,
-				optStabilityPartialTemp,
-				optStabilityMinGroupTrials,
-				optStabilityMaxFeatures,
-				optStabilityAlpha,
-			)
-		}
-	}
-
-	// Consistency section
-	if m.isComputationSelected("consistency") {
-		options = append(options, optBehaviorGroupConsistency)
-		if m.behaviorGroupConsistencyExpanded {
-			options = append(options, optConsistencyEnabled)
-		}
-	}
-
-	// Influence section
-	if m.isComputationSelected("influence") {
-		options = append(options, optBehaviorGroupInfluence)
-		if m.behaviorGroupInfluenceExpanded {
-			options = append(options,
-				optBehaviorSubOutcomes,
-				optInfluenceOutcomeRating,
-				optInfluenceOutcomePainResidual,
-				optInfluenceOutcomeTemperature,
-				optBehaviorSubCovariates,
-				optInfluenceIncludeTemperature,
-				optInfluenceTempControl,
-			)
-			if m.influenceTempControl == 2 {
-				options = append(options,
-					optInfluenceTempSplineKnots,
-					optInfluenceTempSplineQlow,
-					optInfluenceTempSplineQhigh,
-					optInfluenceTempSplineMinN,
-				)
-			}
-			options = append(options,
-				optInfluenceIncludeTrialOrder,
-				optInfluenceIncludeRunBlock,
-				optInfluenceIncludeInteraction,
-				optInfluenceStandardize,
-				optBehaviorSubDiagnostics,
-				optInfluenceMaxFeatures,
-				optInfluenceCooksThreshold,
-				optInfluenceLeverageThreshold,
-			)
-		}
-	}
-
-	// Report section
-	if m.isComputationSelected("report") {
-		options = append(options, optBehaviorGroupReport)
-		if m.behaviorGroupReportExpanded {
-			options = append(options, optReportTopN)
-		}
-	}
-
 	// Pain sensitivity section
 	if m.isComputationSelected("pain_sensitivity") {
 		options = append(options, optBehaviorGroupPainSens)
@@ -445,31 +355,112 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Mediation section
-	if m.isComputationSelected("mediation") {
-		options = append(options, optBehaviorGroupMediation)
-		if m.behaviorGroupMediationExpanded {
-			options = append(options, optMediationBootstrap, optMediationPermutations, optMediationPermutationPrimary, optMediationMinEffect, optMediationFeatures, optMediationMaxMediatorsEnabled, optMediationMaxMediators)
+	// ── Analyses (umbrella) ───────────────────────────────────────────────────
+	// Stability, Consistency, Influence, Report, Mediation, Moderation, Mixed Effects.
+	// Small analyses share one collapsible group to reduce visual noise.
+	hasAnalysesGroup := hasSelectedComputation(
+		"stability", "consistency", "influence", "report", "mediation", "moderation", "mixed_effects",
+	)
+	if hasAnalysesGroup {
+		options = append(options, optBehaviorGroupAnalyses)
+		if m.behaviorGroupAnalysesExpanded {
+			if m.isComputationSelected("stability") {
+				options = append(options,
+					optBehaviorGroupStability,
+				)
+				if m.behaviorGroupStabilityExpanded {
+					options = append(options,
+						optStabilityMethod,
+						optStabilityOutcome,
+						optStabilityGroupColumn,
+						optStabilityPartialTemp,
+						optStabilityMinGroupTrials,
+						optStabilityMaxFeatures,
+						optStabilityAlpha,
+					)
+				}
+			}
+			if m.isComputationSelected("consistency") {
+				options = append(options, optBehaviorGroupConsistency)
+				if m.behaviorGroupConsistencyExpanded {
+					options = append(options, optConsistencyEnabled)
+				}
+			}
+			if m.isComputationSelected("influence") {
+				options = append(options, optBehaviorGroupInfluence)
+				if m.behaviorGroupInfluenceExpanded {
+					options = append(options,
+						optBehaviorSubOutcomes,
+						optInfluenceOutcomeRating,
+						optInfluenceOutcomePainResidual,
+						optInfluenceOutcomeTemperature,
+						optBehaviorSubCovariates,
+						optInfluenceIncludeTemperature,
+						optInfluenceTempControl,
+					)
+					if m.influenceTempControl == 2 {
+						options = append(options,
+							optInfluenceTempSplineKnots,
+							optInfluenceTempSplineQlow,
+							optInfluenceTempSplineQhigh,
+							optInfluenceTempSplineMinN,
+						)
+					}
+					options = append(options,
+						optInfluenceIncludeTrialOrder,
+						optInfluenceIncludeRunBlock,
+						optInfluenceIncludeInteraction,
+						optInfluenceStandardize,
+						optBehaviorSubDiagnostics,
+						optInfluenceMaxFeatures,
+						optInfluenceCooksThreshold,
+						optInfluenceLeverageThreshold,
+					)
+				}
+			}
+			if m.isComputationSelected("report") {
+				options = append(options, optBehaviorGroupReport)
+				if m.behaviorGroupReportExpanded {
+					options = append(options, optReportTopN)
+				}
+			}
+			if m.isComputationSelected("mediation") {
+				options = append(options, optBehaviorGroupMediation)
+				if m.behaviorGroupMediationExpanded {
+					options = append(options,
+						optMediationBootstrap,
+						optMediationPermutations,
+						optMediationPermutationPrimary,
+						optMediationMinEffect,
+						optMediationFeatures,
+						optMediationMaxMediatorsEnabled,
+						optMediationMaxMediators,
+					)
+				}
+			}
+			if m.isComputationSelected("moderation") {
+				options = append(options, optBehaviorGroupModeration)
+				if m.behaviorGroupModerationExpanded {
+					options = append(options,
+						optModerationMaxFeaturesEnabled,
+						optModerationMaxFeatures,
+						optModerationMinSamples,
+						optModerationPermutations,
+						optModerationPermutationPrimary,
+						optModerationFeatures,
+					)
+				}
+			}
+			if m.isComputationSelected("mixed_effects") {
+				options = append(options, optBehaviorGroupMixedEffects)
+				if m.behaviorGroupMixedEffectsExpanded {
+					options = append(options, optMixedEffectsType, optMixedIncludeTemperature, optMixedMaxFeatures)
+				}
+			}
 		}
 	}
 
-	// Moderation section
-	if m.isComputationSelected("moderation") {
-		options = append(options, optBehaviorGroupModeration)
-		if m.behaviorGroupModerationExpanded {
-			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures, optModerationMinSamples, optModerationPermutations, optModerationPermutationPrimary, optModerationFeatures)
-		}
-	}
-
-	// Mixed effects section
-	if m.isComputationSelected("mixed_effects") {
-		options = append(options, optBehaviorGroupMixedEffects)
-		if m.behaviorGroupMixedEffectsExpanded {
-			options = append(options, optMixedEffectsType, optMixedIncludeTemperature, optMixedMaxFeatures)
-		}
-	}
-
-	// Output section - only show if at least one computation is selected
+	// ── Output ────────────────────────────────────────────────────────────────
 	if hasAnyComputation {
 		options = append(options, optBehaviorGroupOutput)
 		if m.behaviorGroupOutputExpanded {
@@ -477,26 +468,11 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Behavior Statistics
-	if needsBehaviorStatsAndGlobalOptions {
-		options = append(options, optBehaviorGroupStats)
-		if m.behaviorGroupStatsExpanded {
-			options = append(options,
-				optBehaviorStatsTempControl,
-				optBehaviorStatsAllowIIDTrials,
-				optBehaviorStatsHierarchicalFDR,
-				optBehaviorStatsComputeReliability,
-				optBehaviorPermScheme,
-				optBehaviorPermGroupColumnPreference,
-				optBehaviorExcludeNonTrialwiseFeatures,
-			)
-		}
-	}
-
-	// Global Statistics & Validation
-	if needsBehaviorStatsAndGlobalOptions {
-		options = append(options, optBehaviorGroupGlobalValidation)
-		if m.behaviorGroupGlobalValidationExpanded {
+	// ── Advanced (Global Validation + System IO) ───────────────────────────────
+	// Rarely-touched settings merged into one group to reduce clutter.
+	if needsInferenceSettings {
+		options = append(options, optBehaviorGroupAdvanced)
+		if m.behaviorGroupAdvancedExpanded {
 			options = append(options,
 				optGlobalNBootstrap,
 				optClusterCorrectionEnabled,
@@ -512,15 +488,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optValidationMinEpochs,
 				optValidationMinChannels,
 				optValidationMaxAmplitudeUv,
-			)
-		}
-	}
-
-	// System / IO
-	if needsBehaviorStatsAndGlobalOptions {
-		options = append(options, optBehaviorGroupSystemIO)
-		if m.behaviorGroupSystemIOExpanded {
-			options = append(options,
 				optIOTemperatureRange,
 				optIOMaxMissingChannelsFraction,
 			)

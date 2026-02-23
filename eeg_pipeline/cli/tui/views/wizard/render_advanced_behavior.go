@@ -46,125 +46,125 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"
 		// Behavior section headers
 		case optBehaviorGroupGeneral:
-			label := "▸ General"
+			label := "▸ Execution"
 			if m.behaviorGroupGeneralExpanded {
-				label = "▾ General"
+				label = "▾ Execution"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "RNG · jobs · thresholds"
 		case optBehaviorGroupTrialTable:
 			label := "▸ Trial Table"
 			if m.behaviorGroupTrialTableExpanded {
 				label = "▾ Trial Table"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "format · lag features · validation"
 		case optBehaviorGroupPainResidual:
 			label := "▸ Pain Residual"
 			if m.behaviorGroupPainResidualExpanded {
 				label = "▾ Pain Residual"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "fitting method · diagnostics · crossfit"
 		case optBehaviorGroupCorrelations:
 			label := "▸ Correlations"
 			if m.behaviorGroupCorrelationsExpanded {
 				label = "▾ Correlations"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "target · features · types · multilevel"
 		case optBehaviorGroupPainSens:
 			label := "▸ Pain Sensitivity"
 			if m.behaviorGroupPainSensExpanded {
 				label = "▾ Pain Sensitivity"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "min trials · features · permutations"
 		case optBehaviorGroupRegression:
 			label := "▸ Regression"
 			if m.behaviorGroupRegressionExpanded {
 				label = "▾ Regression"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "outcome · covariates · model families"
 		case optBehaviorGroupModels:
 			label := "▸ Models"
 			if m.behaviorGroupModelsExpanded {
 				label = "▾ Models"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "outcomes · covariates · families · inference"
 		case optBehaviorGroupStability:
 			label := "▸ Stability"
 			if m.behaviorGroupStabilityExpanded {
 				label = "▾ Stability"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "within-group correlation consistency"
 		case optBehaviorGroupConsistency:
 			label := "▸ Consistency"
 			if m.behaviorGroupConsistencyExpanded {
 				label = "▾ Consistency"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "sign-flip detection across subjects"
 		case optBehaviorGroupInfluence:
 			label := "▸ Influence"
 			if m.behaviorGroupInfluenceExpanded {
 				label = "▾ Influence"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "Cook's D · leverage · outlier detection"
 		case optBehaviorGroupReport:
 			label := "▸ Report"
 			if m.behaviorGroupReportExpanded {
 				label = "▾ Report"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "top-N features to summarise"
 		case optBehaviorGroupCondition:
 			label := "▸ Condition"
 			if m.behaviorGroupConditionExpanded {
 				label = "▾ Condition"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "compare column · windows · features"
 		case optBehaviorGroupTemporal:
 			label := "▸ Temporal"
 			if m.behaviorGroupTemporalExpanded {
 				label = "▾ Temporal"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "time window · resolution · ITPC · ERDS"
 		case optBehaviorGroupCluster:
 			label := "▸ Cluster"
 			if m.behaviorGroupClusterExpanded {
 				label = "▾ Cluster"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "threshold · min size · tail · features"
 		case optBehaviorGroupMediation:
 			label := "▸ Mediation"
 			if m.behaviorGroupMediationExpanded {
 				label = "▾ Mediation"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "bootstrap · permutations · mediator limit"
 		case optBehaviorGroupModeration:
 			label := "▸ Moderation"
 			if m.behaviorGroupModerationExpanded {
 				label = "▾ Moderation"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "feature limit · min samples · permutations"
 		case optBehaviorGroupMixedEffects:
 			label := "▸ Mixed Effects"
 			if m.behaviorGroupMixedEffectsExpanded {
 				label = "▾ Mixed Effects"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "random effects type · temperature · features"
 		case optBehaviorGroupStats:
-			label := "▸ Statistics"
+			label := "▸ Inference & Shared Settings"
 			if m.behaviorGroupStatsExpanded {
-				label = "▾ Statistics"
+				label = "▾ Inference & Shared Settings"
 			}
-			return label, "", "Space to toggle"
-		case optBehaviorGroupGlobalValidation:
-			label := "▸ Global Validation"
-			if m.behaviorGroupGlobalValidationExpanded {
-				label = "▾ Global Validation"
+			return label, "", "corr method · FDR · perms · covariates"
+		case optBehaviorGroupAnalyses:
+			label := "▸ Analyses"
+			if m.behaviorGroupAnalysesExpanded {
+				label = "▾ Analyses"
 			}
-			return label, "", "Space to toggle"
-		case optBehaviorGroupSystemIO:
-			label := "▸ System / IO"
-			if m.behaviorGroupSystemIOExpanded {
-				label = "▾ System / IO"
+			return label, "", "stability · influence · mediation · more"
+		case optBehaviorGroupAdvanced:
+			label := "▸ Advanced"
+			if m.behaviorGroupAdvancedExpanded {
+				label = "▾ Advanced"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "global validation · system IO"
 		// Behavior sub-section headers (non-collapsible visual separators)
 		case optBehaviorSubCorrelationSettings:
 			return "  ── Correlation Settings", "", ""
@@ -220,7 +220,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optNPerm) {
 				val = numberDisplay
 			}
-			return "Permutations", val, "cluster/global permutations"
+			return "Permutations", val, "0=disabled · shared across all analyses"
 		case optRNGSeed:
 			val := m.rngSeedDisplay()
 			if m.editingNumber && m.isCurrentlyEditing(optRNGSeed) {
@@ -282,7 +282,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optFDRAlpha) {
 				val = numberDisplay
 			}
-			return "FDR Alpha", val, "multiple comparison threshold"
+			return "FDR Alpha", val, "Benjamini-Hochberg q threshold"
 		case optComputeChangeScores:
 			return "Change Scores", m.boolToOnOff(m.behaviorComputeChangeScores), "Δ rating / Δ temperature"
 		case optComputeLosoStability:
@@ -335,6 +335,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Trial Order Max Missing", val, "disable control if missing > threshold"
+		case optFeatureSummariesEnabled:
+			return "Feature Summaries", m.boolToOnOff(m.featureSummariesEnabled), "per-feature descriptive stats in output"
 
 		// Pain residual
 		case optPainResidualEnabled:
@@ -682,7 +684,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optStabilityAlpha) {
 				val = numberDisplay
 			}
-			return "Alpha", val, "stability cutoff"
+			return "Alpha", val, "min |r| to flag as stable"
 
 		// Consistency
 		case optConsistencyEnabled:
@@ -1323,7 +1325,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.mixedEffectsType == 1 {
 				v = "intercept_slope"
 			}
-			return "Random Effects", v, "group-level only"
+			return "Random Effects", v, "intercept=random intercept · intercept_slope=full random"
 		case optMixedIncludeTemperature:
 			return "Include Temperature", m.boolToOnOff(m.mixedIncludeTemperature), "add temperature covariate"
 		case optMixedMaxFeatures:
@@ -1339,7 +1341,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.behaviorGroupOutputExpanded {
 				label = "▾ Output"
 			}
-			return label, "", "Space to toggle"
+			return label, "", "CSV export · overwrite policy"
 		case optAlsoSaveCsv:
 			return "Also Save CSV", m.boolToOnOff(m.alsoSaveCsv), "save tables as both TSV and CSV"
 		case optBehaviorOverwrite:
@@ -1348,16 +1350,16 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		// Behavior Statistics
 		case optBehaviorStatsTempControl:
 			controls := []string{"none", "linear", "spline"}
-			return "Stats Temp Control", controls[m.behaviorStatsTempControl%len(controls)], "temperature control method"
+			return "Stats Temp Control", controls[m.behaviorStatsTempControl%len(controls)], "global temp covariate for all analyses"
 		case optBehaviorStatsAllowIIDTrials:
-			return "Allow IID Trials", m.boolToOnOff(m.behaviorStatsAllowIIDTrials), "allow independent trials assumption"
+			return "Allow IID Trials", m.boolToOnOff(m.behaviorStatsAllowIIDTrials), "use asymptotic p-values when N_trials is large"
 		case optBehaviorStatsHierarchicalFDR:
-			return "Hierarchical FDR", m.boolToOnOff(m.behaviorStatsHierarchicalFDR), "hierarchical FDR correction"
+			return "Hierarchical FDR", m.boolToOnOff(m.behaviorStatsHierarchicalFDR), "family-wise correction across feature families"
 		case optBehaviorStatsComputeReliability:
-			return "Compute Reliability", m.boolToOnOff(m.behaviorStatsComputeReliability), "split-half reliability"
+			return "Compute Reliability", m.boolToOnOff(m.behaviorStatsComputeReliability), "split-half ICC for each feature"
 		case optBehaviorPermScheme:
 			schemes := []string{"shuffle", "circular_shift"}
-			return "Perm Scheme", schemes[m.behaviorPermScheme%len(schemes)], "permutation scheme"
+			return "Perm Scheme", schemes[m.behaviorPermScheme%len(schemes)], "shuffle=iid trials · circular_shift=time-series"
 		case optBehaviorPermGroupColumnPreference:
 			val := m.behaviorPermGroupColumnPreference
 			if strings.TrimSpace(val) == "" {
@@ -1368,7 +1370,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "Perm Group Column", val, "preferred grouping column"
 		case optBehaviorExcludeNonTrialwiseFeatures:
-			return "Exclude Non-Trialwise", m.boolToOnOff(m.behaviorExcludeNonTrialwiseFeatures), "exclude non-trialwise features"
+			return "Exclude Non-Trialwise", m.boolToOnOff(m.behaviorExcludeNonTrialwiseFeatures), "skip features without trial-level resolution"
 
 		// Global Statistics & Validation
 		case optGlobalNBootstrap:
@@ -1376,15 +1378,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optGlobalNBootstrap) {
 				val = m.numberBuffer + "█"
 			}
-			return "Global N Bootstrap", val, "bootstrap iterations"
+			return "Global N Bootstrap", val, "CI bootstrap iterations (0=disabled)"
 		case optClusterCorrectionEnabled:
-			return "Cluster Correction", m.boolToOnOff(m.clusterCorrectionEnabled), "global cluster correction"
+			return "Cluster Correction", m.boolToOnOff(m.clusterCorrectionEnabled), "spatial cluster correction across features"
 		case optClusterCorrectionAlpha:
 			val := fmt.Sprintf("%.4f", m.clusterCorrectionAlpha)
 			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionAlpha) {
 				val = m.numberBuffer + "█"
 			}
-			return "Cluster Corr Alpha", val, "cluster correction alpha"
+			return "Cluster Corr Alpha", val, "cluster-forming p-value threshold"
 		case optClusterCorrectionMinClusterSize:
 			val := fmt.Sprintf("%d", m.clusterCorrectionMinClusterSize)
 			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionMinClusterSize) {
@@ -1399,13 +1401,13 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optValidationMinEpochs) {
 				val = m.numberBuffer + "█"
 			}
-			return "Validation Min Epochs", val, "minimum epochs for validation"
+			return "Validation Min Epochs", val, "reject subjects with fewer epochs"
 		case optValidationMinChannels:
 			val := fmt.Sprintf("%d", m.validationMinChannels)
 			if m.editingNumber && m.isCurrentlyEditing(optValidationMinChannels) {
 				val = m.numberBuffer + "█"
 			}
-			return "Validation Min Channels", val, "minimum channels"
+			return "Validation Min Channels", val, "reject subjects with fewer channels"
 		case optValidationMaxAmplitudeUv:
 			val := fmt.Sprintf("%.1f", m.validationMaxAmplitudeUv)
 			if m.editingNumber && m.isCurrentlyEditing(optValidationMaxAmplitudeUv) {
@@ -1428,7 +1430,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optIOMaxMissingChannelsFraction) {
 				val = m.numberBuffer + "█"
 			}
-			return "Max Missing Channels Frac", val, "max fraction of missing channels"
+			return "Max Missing Channels Frac", val, "skip trial if more channels are NaN"
 
 		default:
 			return "", "", ""
@@ -1455,7 +1457,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		label, value, hint := getOptionDisplay(opt)
 
 		// Check if this is a collapsible group header or a non-collapsible sub-header
-		isGroupHeader := opt >= optBehaviorGroupGeneral && opt <= optBehaviorGroupSystemIO
+		isGroupHeader := opt >= optBehaviorGroupGeneral && opt <= optBehaviorGroupAdvanced
 		isSubHeader := opt >= optBehaviorSubCorrelationSettings && opt <= optBehaviorSubMultilevel
 		isSectionHeader := isGroupHeader || isSubHeader
 
