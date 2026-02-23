@@ -6,6 +6,7 @@ The pipeline layer (`eeg_pipeline.pipelines.behavior`) should remain a thin wrap
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -93,23 +94,39 @@ def _also_save_csv_from_config(config: Any) -> bool:
 ###################################################################
 
 
-# Global cache instance (initialized after helper definitions)
-_cache: BehaviorResultCache
+@dataclass
+class BehaviorOrchestrationRuntime:
+    """Run-scoped mutable orchestration state."""
+
+    cache: BehaviorResultCache
+    stage_runners: Dict[str, callable]
 
 
-def _get_stage_runners() -> Dict[str, callable]:
-    if STAGE_RUNNERS:
-        return STAGE_RUNNERS
-    STAGE_RUNNERS.update(
-        _stage_runners.build_stage_runners_from_namespace_impl(
-            globals(),
-            build_results_from_outputs_fn=_stage_registry.build_results_from_outputs,
-        )
+def _build_stage_runners() -> Dict[str, callable]:
+    return _stage_runners.build_stage_runners_from_namespace_impl(
+        globals(),
+        build_results_from_outputs_fn=_stage_registry.build_results_from_outputs,
     )
-    return STAGE_RUNNERS
 
 
-STAGE_RUNNERS: Dict[str, callable] = {}
+def create_behavior_runtime() -> BehaviorOrchestrationRuntime:
+    """Create an isolated runtime for one behavior pipeline execution."""
+    return BehaviorOrchestrationRuntime(
+        cache=_build_result_cache(),
+        stage_runners=_build_stage_runners(),
+    )
+
+
+def _get_runtime(ctx: Any) -> BehaviorOrchestrationRuntime:
+    runtime = getattr(ctx, "_behavior_runtime", None)
+    if runtime is None:
+        runtime = create_behavior_runtime()
+        setattr(ctx, "_behavior_runtime", runtime)
+    return runtime
+
+
+def _get_cache(ctx: Any) -> BehaviorResultCache:
+    return _get_runtime(ctx).cache
 
 
 ###################################################################
@@ -148,12 +165,13 @@ def run_selected_stages(
     progress: Optional[Any] = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
+    runtime = _get_runtime(ctx)
     return _stage_execution.run_selected_stages_impl(
         ctx=ctx,
         config=config,
         selected_stages=selected_stages,
         stage_registry=StageRegistry,
-        stage_runners=_get_stage_runners(),
+        stage_runners=runtime.stage_runners,
         is_stage_enabled_by_config_fn=_stage_registry.is_stage_enabled_by_config,
         update_results_from_stage_fn=_stage_execution.update_results_from_stage_impl,
         log_stage_outcome_fn=_stage_execution.log_stage_outcome_impl,
@@ -238,6 +256,7 @@ def _get_stats_subfolder(ctx: BehaviorContext, kind: str) -> Path:
 
 
 def _get_stats_subfolder_with_overwrite(
+    ctx: BehaviorContext,
     stats_dir: Path,
     kind: str,
     overwrite: bool,
@@ -249,12 +268,18 @@ def _get_stats_subfolder_with_overwrite(
     If overwrite is False, appends a timestamp to the folder name
     (e.g., 'trial_table_20260120_143022') to preserve previous outputs.
     """
-    return _cache.get_stats_subfolder(stats_dir, kind, overwrite, ensure=ensure)
+    return _get_cache(ctx).get_stats_subfolder(stats_dir, kind, overwrite, ensure=ensure)
 
 
 def _trial_table_output_dir(ctx: BehaviorContext, *, ensure: bool = True) -> Path:
     """Return output directory for trial-table artifacts."""
-    kind_dir = _get_stats_subfolder_with_overwrite(ctx.stats_dir, "trial_table", ctx.overwrite, ensure=ensure)
+    kind_dir = _get_stats_subfolder_with_overwrite(
+        ctx,
+        ctx.stats_dir,
+        "trial_table",
+        ctx.overwrite,
+        ensure=ensure,
+    )
     feature_dir = kind_dir / _trial_table_feature_folder_from_features(
         ctx.selected_feature_files or ctx.feature_categories or []
     )
@@ -265,7 +290,13 @@ def _trial_table_output_dir(ctx: BehaviorContext, *, ensure: bool = True) -> Pat
 
 def get_behavior_output_dir(ctx: BehaviorContext, kind: str, *, ensure: bool = True) -> Path:
     """Return `stats_dir/<kind>/<feature_folder>` (and optionally create it)."""
-    kind_dir = _get_stats_subfolder_with_overwrite(ctx.stats_dir, kind, ctx.overwrite, ensure=ensure)
+    kind_dir = _get_stats_subfolder_with_overwrite(
+        ctx,
+        ctx.stats_dir,
+        kind,
+        ctx.overwrite,
+        ensure=ensure,
+    )
     feature_dir = kind_dir / _feature_folder_from_context(ctx)
     if ensure:
         ensure_dir(feature_dir)
@@ -300,7 +331,7 @@ def _get_feature_columns(
         List of filtered feature column names
     """
     feature_cols = [c for c in df.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
-    return _cache.get_filtered_feature_cols(feature_cols, ctx, computation_name)
+    return _get_cache(ctx).get_filtered_feature_cols(feature_cols, ctx, computation_name)
 
 
 def _attach_temperature_metadata(
@@ -336,7 +367,7 @@ def stage_load(ctx: BehaviorContext) -> bool:
         ctx.logger.warning("Failed to load data")
         return False
 
-    _cache.load_manifest(ctx)
+    _get_cache(ctx).load_manifest(ctx)
 
     ctx.logger.info(f"Loaded {ctx.n_trials} trials")
     return True
@@ -374,12 +405,13 @@ def stage_correlate_effect_sizes(
     config: Any,
     design: CorrelateDesign,
 ) -> List[Dict[str, Any]]:
+    cache = _get_cache(ctx)
     return _stages_correlate.stage_correlate_effect_sizes_impl(
         ctx,
         config,
         design,
-        feature_type_resolver_fn=lambda feature_name, cfg: _cache.get_feature_type(str(feature_name), cfg),
-        feature_band_resolver_fn=lambda feature_name, cfg: _cache.get_feature_band(str(feature_name), cfg),
+        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(str(feature_name), cfg),
+        feature_band_resolver_fn=lambda feature_name, cfg: cache.get_feature_band(str(feature_name), cfg),
     )
 
 
@@ -411,6 +443,7 @@ def _compute_unified_fdr(
     family_cols: Optional[List[str]] = None,
     analysis_type: str = "correlations",
 ) -> pd.DataFrame:
+    cache = _get_cache(ctx)
     return _stages_fdr.compute_unified_fdr_impl(
         ctx,
         config,
@@ -418,8 +451,8 @@ def _compute_unified_fdr(
         p_col=p_col,
         family_cols=family_cols,
         analysis_type=analysis_type,
-        get_cached_fdr_fn=_cache.get_fdr_results,
-        set_cached_fdr_fn=_cache.set_fdr_results,
+        get_cached_fdr_fn=cache.get_fdr_results,
+        set_cached_fdr_fn=cache.set_fdr_results,
     )
 
 
@@ -543,8 +576,9 @@ def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
         trial_table_output_dir_fn=lambda context: _trial_table_output_dir(context, ensure=True),
         write_metadata_file_fn=_write_metadata_file,
     )
-    _cache._trial_table_df = result.df
-    _cache._trial_table_path = out_path
+    cache = _get_cache(ctx)
+    cache._trial_table_df = result.df
+    cache._trial_table_path = out_path
     return out_path
 
 
@@ -564,8 +598,9 @@ def _try_reuse_cached_trial_table(
     if reused is None:
         return None
     out_path, df_cached = reused
-    _cache._trial_table_df = df_cached
-    _cache._trial_table_path = out_path
+    cache = _get_cache(ctx)
+    cache._trial_table_df = df_cached
+    cache._trial_table_path = out_path
     return out_path
 
 
@@ -585,6 +620,7 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
 
 
 def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
+    cache = _get_cache(ctx)
     out_path = _stages_trial_table.stage_lag_features_impl(
         ctx,
         config,
@@ -594,16 +630,17 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
         write_metadata_file_fn=_write_metadata_file,
-        set_trial_table_cache_fn=lambda df: setattr(_cache, "_trial_table_df", df),
+        set_trial_table_cache_fn=lambda df: setattr(cache, "_trial_table_df", df),
     )
     if out_path is not None and out_path.exists():
         from eeg_pipeline.infra.tsv import read_table
 
-        _cache._trial_table_df = read_table(out_path)
+        cache._trial_table_df = read_table(out_path)
     return out_path
 
 
 def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
+    cache = _get_cache(ctx)
     out_path = _stages_trial_table.stage_pain_residual_impl(
         ctx,
         config,
@@ -613,12 +650,12 @@ def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
         write_metadata_file_fn=_write_metadata_file,
-        set_trial_table_cache_fn=lambda df: setattr(_cache, "_trial_table_df", df),
+        set_trial_table_cache_fn=lambda df: setattr(cache, "_trial_table_df", df),
     )
     if out_path is not None and out_path.exists():
         from eeg_pipeline.infra.tsv import read_table
 
-        _cache._trial_table_df = read_table(out_path)
+        cache._trial_table_df = read_table(out_path)
     return out_path
 
 
@@ -672,7 +709,7 @@ def stage_temperature_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any
 
 def _load_trial_table_df(ctx: BehaviorContext) -> Optional[pd.DataFrame]:
     """Load trial table with caching."""
-    return _cache.get_trial_table(ctx)
+    return _get_cache(ctx).get_trial_table(ctx)
 
 
 def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
@@ -812,9 +849,6 @@ def _build_result_cache() -> BehaviorResultCache:
     )
 
 
-_cache = _build_result_cache()
-
-
 def _summarize_covariates_qc(ctx: BehaviorContext) -> Dict[str, Any]:
     return _stages_metadata.summarize_covariates_qc_impl(ctx)
 
@@ -946,12 +980,13 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     - stage_condition_window (paired window comparison)
     - stage_condition_multigroup (3+ group comparison)
     """
+    cache = _get_cache(ctx)
     return _stages_condition.stage_condition_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
         is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_filtered_feature_cols_fn=lambda df, context: _cache.get_filtered_feature_cols(
+        get_filtered_feature_cols_fn=lambda df, context: cache.get_filtered_feature_cols(
             [c for c in df.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)],
             context,
             "condition",
@@ -1003,6 +1038,7 @@ def _run_window_comparison(
     suffix: str,
 ) -> pd.DataFrame:
     """Run paired window comparison on feature columns."""
+    cache = _get_cache(ctx)
     return _stages_condition.run_window_comparison_impl(
         ctx,
         df_trials,
@@ -1013,7 +1049,7 @@ def _run_window_comparison(
         suffix,
         feature_prefixes=FEATURE_COLUMN_PREFIXES,
         compute_pairwise_effect_sizes_fn=_compute_pairwise_effect_sizes,
-        feature_type_resolver_fn=lambda feature_name, cfg: _cache.get_feature_type(feature_name, cfg),
+        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(feature_name, cfg),
         compute_unified_fdr_fn=_compute_unified_fdr,
         unified_fdr_family_columns=UNIFIED_FDR_FAMILY_COLUMNS,
     )
@@ -1066,6 +1102,7 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
 
 def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Run mediation analysis: test if neural features mediate the temperature→rating relationship."""
+    cache = _get_cache(ctx)
     return _stages_advanced.stage_mediation_impl(
         ctx,
         config,
@@ -1074,7 +1111,7 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
-        feature_type_resolver_fn=lambda feature_name, cfg: _cache.get_feature_type(str(feature_name), cfg),
+        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(str(feature_name), cfg),
         compute_unified_fdr_fn=_compute_unified_fdr,
         unified_fdr_family_columns=UNIFIED_FDR_FAMILY_COLUMNS,
     )
@@ -1110,7 +1147,7 @@ def run_group_level_mixed_effects(
         fdr_alpha=fdr_alpha,
         find_trial_table_path_fn=_find_trial_table_path,
         feature_prefixes=FEATURE_COLUMN_PREFIXES,
-        feature_type_resolver=lambda feature_name, cfg: _cache.get_feature_type(str(feature_name), cfg),
+        feature_type_resolver=lambda feature_name, cfg: _infer_feature_type(str(feature_name), cfg),
     )
 
 
@@ -1146,7 +1183,7 @@ def run_group_level_correlations(
         random_state=random_state,
         find_trial_table_path_fn=_find_trial_table_path,
         feature_prefixes=FEATURE_COLUMN_PREFIXES,
-        feature_type_resolver=lambda feature_name, cfg: _cache.get_feature_type(str(feature_name), cfg),
+        feature_type_resolver=lambda feature_name, cfg: _infer_feature_type(str(feature_name), cfg),
         constant_variance_threshold=CONSTANT_VARIANCE_THRESHOLD,
     )
 
@@ -1183,6 +1220,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
     If b3 is significant, the feature moderates how temperature affects pain rating.
     """
+    cache = _get_cache(ctx)
     return _stages_advanced.stage_moderation_impl(
         ctx,
         config,
@@ -1191,7 +1229,7 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         get_feature_columns_fn=_get_feature_columns,
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
-        feature_type_resolver_fn=lambda feature_name, cfg: _cache.get_feature_type(str(feature_name), cfg),
+        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(str(feature_name), cfg),
         compute_unified_fdr_fn=_compute_unified_fdr,
         get_stats_subfolder_fn=_get_stats_subfolder,
         feature_suffix_from_context_fn=_feature_suffix_from_context,
@@ -1202,10 +1240,11 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
 
 def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Compute hierarchical FDR summary across analysis types from cached FDR results."""
+    cache = _get_cache(ctx)
     return _stages_fdr.stage_hierarchical_fdr_summary_impl(
         ctx,
         config,
-        get_cached_fdr_fn=_cache.get_fdr_results,
+        get_cached_fdr_fn=cache.get_fdr_results,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
     )

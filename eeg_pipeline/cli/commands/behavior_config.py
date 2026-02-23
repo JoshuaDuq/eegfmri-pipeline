@@ -4,7 +4,514 @@ from __future__ import annotations
 
 import argparse
 import warnings
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable, Sequence
+
+
+CastFn = Callable[[Any], Any]
+
+
+@dataclass(frozen=True)
+class ConfigOverrideRule:
+    """Declarative mapping from CLI arg attribute to nested config path."""
+
+    arg_attr: str
+    config_path: str
+    cast: CastFn
+
+
+def _to_bool(value: Any) -> bool:
+    return bool(value)
+
+
+def _to_int(value: Any) -> int:
+    return int(value)
+
+
+def _to_float(value: Any) -> float:
+    return float(value)
+
+
+def _to_stripped(value: Any) -> str:
+    return str(value).strip()
+
+
+def _to_lower_stripped(value: Any) -> str:
+    return str(value).strip().lower()
+
+
+def _to_list(value: Any) -> list[Any]:
+    return list(value)
+
+
+def _to_stripped_list(value: Any) -> list[str]:
+    return [str(v).strip() for v in (value or [])]
+
+
+def _to_lower_stripped_list(value: Any) -> list[str]:
+    return [str(v).strip().lower() for v in (value or [])]
+
+
+def _to_optional_int_max(value: Any) -> int | None:
+    parsed = int(value)
+    return None if parsed <= 0 else parsed
+
+
+def _to_optional_float_threshold(value: Any) -> float | None:
+    parsed = float(value)
+    return None if parsed <= 0 else parsed
+
+
+def _to_auto_blank_or_lower(value: Any) -> str:
+    parsed = _to_lower_stripped(value)
+    return "" if parsed == "auto" else parsed
+
+
+def _to_optional_robust_method(value: Any) -> str | None:
+    parsed = _to_lower_stripped(value)
+    return None if parsed in ("", "none") else parsed
+
+
+def _set_nested_config_value(config: Any, config_path: str, value: Any) -> None:
+    parts = config_path.split(".")
+    current = config
+    for part in parts[:-1]:
+        if part not in current or not isinstance(current[part], dict):
+            current[part] = {}
+        current = current[part]
+    current[parts[-1]] = value
+
+
+def _apply_override_rules(
+    args: argparse.Namespace,
+    config: Any,
+    rules: Sequence[ConfigOverrideRule],
+) -> None:
+    for rule in rules:
+        value = getattr(args, rule.arg_attr, None)
+        if value is None:
+            continue
+        _set_nested_config_value(config, rule.config_path, rule.cast(value))
+
+
+def _has_any_arg(args: argparse.Namespace, arg_names: Sequence[str]) -> bool:
+    return any(getattr(args, name, None) is not None for name in arg_names)
+
+
+_GENERAL_OVERRIDE_RULES = (
+    ConfigOverrideRule("correlation_method", "behavior_analysis.statistics.correlation_method", str),
+    ConfigOverrideRule("bootstrap", "behavior_analysis.bootstrap", _to_int),
+    ConfigOverrideRule("global_n_bootstrap", "behavior_analysis.statistics.default_n_bootstrap", _to_int),
+    ConfigOverrideRule("perm_scheme", "behavior_analysis.permutation.scheme", _to_lower_stripped),
+    ConfigOverrideRule("n_jobs", "behavior_analysis.n_jobs", _to_int),
+    ConfigOverrideRule("min_samples", "behavior_analysis.min_samples.default", _to_int),
+    ConfigOverrideRule("control_temperature", "behavior_analysis.control_temperature", _to_bool),
+    ConfigOverrideRule("control_trial_order", "behavior_analysis.control_trial_order", _to_bool),
+    ConfigOverrideRule("run_adjustment", "behavior_analysis.run_adjustment.enabled", _to_bool),
+    ConfigOverrideRule("run_adjustment_column", "behavior_analysis.run_adjustment.column", _to_stripped),
+    ConfigOverrideRule(
+        "run_adjustment_include_in_correlations",
+        "behavior_analysis.run_adjustment.include_in_correlations",
+        _to_bool,
+    ),
+    ConfigOverrideRule("run_adjustment_max_dummies", "behavior_analysis.run_adjustment.max_dummies", _to_int),
+    ConfigOverrideRule("fdr_alpha", "behavior_analysis.statistics.fdr_alpha", _to_float),
+    ConfigOverrideRule("stats_temp_control", "behavior_analysis.statistics.temperature_control", _to_lower_stripped),
+    ConfigOverrideRule("stats_allow_iid_trials", "behavior_analysis.statistics.allow_iid_trials", _to_bool),
+    ConfigOverrideRule("stats_hierarchical_fdr", "behavior_analysis.statistics.hierarchical_fdr", _to_bool),
+    ConfigOverrideRule("stats_compute_reliability", "behavior_analysis.statistics.compute_reliability", _to_bool),
+    ConfigOverrideRule(
+        "exclude_non_trialwise_features",
+        "behavior_analysis.features.exclude_non_trialwise_features",
+        _to_bool,
+    ),
+    ConfigOverrideRule("compute_change_scores", "behavior_analysis.correlations.compute_change_scores", _to_bool),
+    ConfigOverrideRule("loso_stability", "behavior_analysis.correlations.loso_stability", _to_bool),
+    ConfigOverrideRule("compute_bayes_factors", "behavior_analysis.correlations.compute_bayes_factors", _to_bool),
+    ConfigOverrideRule("consistency_enabled", "behavior_analysis.consistency.enabled", _to_bool),
+    ConfigOverrideRule("cluster_correction_enabled", "behavior_analysis.cluster_correction.enabled", _to_bool),
+    ConfigOverrideRule("cluster_correction_alpha", "behavior_analysis.cluster_correction.alpha", _to_float),
+    ConfigOverrideRule(
+        "cluster_correction_min_cluster_size",
+        "behavior_analysis.cluster_correction.min_cluster_size",
+        _to_int,
+    ),
+    ConfigOverrideRule("cluster_correction_tail", "behavior_analysis.cluster_correction.tail", _to_int),
+    ConfigOverrideRule("validation_min_epochs", "validation.min_epochs", _to_int),
+    ConfigOverrideRule("validation_min_channels", "validation.min_channels", _to_int),
+    ConfigOverrideRule("validation_max_amplitude_uv", "validation.max_amplitude_uv", _to_float),
+)
+
+_TRIAL_TABLE_OVERRIDE_RULES = (
+    ConfigOverrideRule("trial_table_format", "behavior_analysis.trial_table.format", _to_lower_stripped),
+    ConfigOverrideRule("trial_table_add_lag_features", "behavior_analysis.trial_table.add_lag_features", _to_bool),
+    ConfigOverrideRule(
+        "trial_order_max_missing_fraction",
+        "behavior_analysis.trial_order.max_missing_fraction",
+        _to_float,
+    ),
+    ConfigOverrideRule("feature_summaries_enabled", "behavior_analysis.feature_summaries.enabled", _to_bool),
+)
+
+_FEATURE_QC_OVERRIDE_RULES = (
+    ConfigOverrideRule("feature_qc_enabled", "behavior_analysis.feature_qc.enabled", _to_bool),
+    ConfigOverrideRule("feature_qc_max_missing_pct", "behavior_analysis.feature_qc.max_missing_pct", _to_float),
+    ConfigOverrideRule("feature_qc_min_variance", "behavior_analysis.feature_qc.min_variance", _to_float),
+    ConfigOverrideRule(
+        "feature_qc_check_within_run_variance",
+        "behavior_analysis.feature_qc.check_within_run_variance",
+        _to_bool,
+    ),
+)
+
+_PAIN_RESIDUAL_OVERRIDE_RULES = (
+    ConfigOverrideRule("pain_residual_enabled", "behavior_analysis.pain_residual.enabled", _to_bool),
+    ConfigOverrideRule("pain_residual_method", "behavior_analysis.pain_residual.method", _to_lower_stripped),
+    ConfigOverrideRule("pain_residual_min_samples", "behavior_analysis.pain_residual.min_samples", _to_int),
+    ConfigOverrideRule(
+        "pain_residual_spline_df_candidates",
+        "behavior_analysis.pain_residual.spline_df_candidates",
+        _to_list,
+    ),
+    ConfigOverrideRule("pain_residual_poly_degree", "behavior_analysis.pain_residual.poly_degree", _to_int),
+)
+
+_PAIN_RESIDUAL_CROSSFIT_OVERRIDE_RULES = (
+    ConfigOverrideRule("pain_residual_crossfit_enabled", "behavior_analysis.pain_residual.crossfit.enabled", _to_bool),
+    ConfigOverrideRule(
+        "pain_residual_crossfit_group_column",
+        "behavior_analysis.pain_residual.crossfit.group_column",
+        _to_stripped,
+    ),
+    ConfigOverrideRule(
+        "pain_residual_crossfit_n_splits",
+        "behavior_analysis.pain_residual.crossfit.n_splits",
+        _to_int,
+    ),
+    ConfigOverrideRule(
+        "pain_residual_crossfit_method",
+        "behavior_analysis.pain_residual.crossfit.method",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule(
+        "pain_residual_crossfit_spline_n_knots",
+        "behavior_analysis.pain_residual.crossfit.spline_n_knots",
+        _to_int,
+    ),
+)
+
+_REGRESSION_OVERRIDE_RULES = (
+    ConfigOverrideRule("regression_outcome", "behavior_analysis.regression.outcome", _to_lower_stripped),
+    ConfigOverrideRule("regression_include_temperature", "behavior_analysis.regression.include_temperature", _to_bool),
+    ConfigOverrideRule(
+        "regression_temperature_control",
+        "behavior_analysis.regression.temperature_control",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule("regression_include_trial_order", "behavior_analysis.regression.include_trial_order", _to_bool),
+    ConfigOverrideRule("regression_include_prev_terms", "behavior_analysis.regression.include_prev_terms", _to_bool),
+    ConfigOverrideRule("regression_include_run_block", "behavior_analysis.regression.include_run_block", _to_bool),
+    ConfigOverrideRule("regression_include_interaction", "behavior_analysis.regression.include_interaction", _to_bool),
+    ConfigOverrideRule("regression_standardize", "behavior_analysis.regression.standardize", _to_bool),
+    ConfigOverrideRule("regression_min_samples", "behavior_analysis.regression.min_samples", _to_int),
+    ConfigOverrideRule("regression_primary_unit", "behavior_analysis.regression.primary_unit", _to_lower_stripped),
+    ConfigOverrideRule("regression_permutations", "behavior_analysis.regression.n_permutations", _to_int),
+    ConfigOverrideRule("regression_max_features", "behavior_analysis.regression.max_features", _to_optional_int_max),
+)
+
+_REGRESSION_TEMP_SPLINE_OVERRIDE_RULES = (
+    ConfigOverrideRule(
+        "regression_temperature_spline_knots",
+        "behavior_analysis.regression.temperature_spline.n_knots",
+        _to_int,
+    ),
+    ConfigOverrideRule(
+        "regression_temperature_spline_quantile_low",
+        "behavior_analysis.regression.temperature_spline.quantile_low",
+        _to_float,
+    ),
+    ConfigOverrideRule(
+        "regression_temperature_spline_quantile_high",
+        "behavior_analysis.regression.temperature_spline.quantile_high",
+        _to_float,
+    ),
+    ConfigOverrideRule(
+        "regression_temperature_spline_min_samples",
+        "behavior_analysis.regression.temperature_spline.min_samples",
+        _to_int,
+    ),
+)
+
+_MODELS_OVERRIDE_RULES = (
+    ConfigOverrideRule("models_outcomes", "behavior_analysis.models.outcomes", _to_lower_stripped_list),
+    ConfigOverrideRule("models_families", "behavior_analysis.models.families", _to_lower_stripped_list),
+    ConfigOverrideRule("models_include_temperature", "behavior_analysis.models.include_temperature", _to_bool),
+    ConfigOverrideRule("models_temperature_control", "behavior_analysis.models.temperature_control", _to_lower_stripped),
+    ConfigOverrideRule("models_include_trial_order", "behavior_analysis.models.include_trial_order", _to_bool),
+    ConfigOverrideRule("models_include_prev_terms", "behavior_analysis.models.include_prev_terms", _to_bool),
+    ConfigOverrideRule("models_include_run_block", "behavior_analysis.models.include_run_block", _to_bool),
+    ConfigOverrideRule("models_include_interaction", "behavior_analysis.models.include_interaction", _to_bool),
+    ConfigOverrideRule("models_standardize", "behavior_analysis.models.standardize", _to_bool),
+    ConfigOverrideRule("models_min_samples", "behavior_analysis.models.min_samples", _to_int),
+    ConfigOverrideRule("models_max_features", "behavior_analysis.models.max_features", _to_optional_int_max),
+    ConfigOverrideRule("models_binary_outcome", "behavior_analysis.models.binary_outcome", _to_lower_stripped),
+    ConfigOverrideRule("models_primary_unit", "behavior_analysis.models.primary_unit", _to_lower_stripped),
+    ConfigOverrideRule(
+        "models_force_trial_iid_asymptotic",
+        "behavior_analysis.models.force_trial_iid_asymptotic",
+        _to_bool,
+    ),
+)
+
+_MODELS_TEMP_SPLINE_OVERRIDE_RULES = (
+    ConfigOverrideRule("models_temperature_spline_knots", "behavior_analysis.models.temperature_spline.n_knots", _to_int),
+    ConfigOverrideRule(
+        "models_temperature_spline_quantile_low",
+        "behavior_analysis.models.temperature_spline.quantile_low",
+        _to_float,
+    ),
+    ConfigOverrideRule(
+        "models_temperature_spline_quantile_high",
+        "behavior_analysis.models.temperature_spline.quantile_high",
+        _to_float,
+    ),
+    ConfigOverrideRule(
+        "models_temperature_spline_min_samples",
+        "behavior_analysis.models.temperature_spline.min_samples",
+        _to_int,
+    ),
+)
+
+_STABILITY_OVERRIDE_RULES = (
+    ConfigOverrideRule("stability_method", "behavior_analysis.stability.method", _to_lower_stripped),
+    ConfigOverrideRule("stability_outcome", "behavior_analysis.stability.outcome", _to_auto_blank_or_lower),
+    ConfigOverrideRule("stability_group_column", "behavior_analysis.stability.group_column", _to_auto_blank_or_lower),
+    ConfigOverrideRule("stability_partial_temperature", "behavior_analysis.stability.partial_temperature", _to_bool),
+    ConfigOverrideRule("stability_min_group_trials", "behavior_analysis.stability.min_group_trials", _to_int),
+    ConfigOverrideRule("stability_max_features", "behavior_analysis.stability.max_features", _to_optional_int_max),
+    ConfigOverrideRule("stability_alpha", "behavior_analysis.stability.alpha", _to_float),
+)
+
+_INFLUENCE_OVERRIDE_RULES = (
+    ConfigOverrideRule("influence_outcomes", "behavior_analysis.influence.outcomes", _to_lower_stripped_list),
+    ConfigOverrideRule("influence_max_features", "behavior_analysis.influence.max_features", _to_int),
+    ConfigOverrideRule("influence_include_temperature", "behavior_analysis.influence.include_temperature", _to_bool),
+    ConfigOverrideRule(
+        "influence_temperature_control",
+        "behavior_analysis.influence.temperature_control",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule("influence_include_trial_order", "behavior_analysis.influence.include_trial_order", _to_bool),
+    ConfigOverrideRule("influence_include_run_block", "behavior_analysis.influence.include_run_block", _to_bool),
+    ConfigOverrideRule("influence_include_interaction", "behavior_analysis.influence.include_interaction", _to_bool),
+    ConfigOverrideRule("influence_standardize", "behavior_analysis.influence.standardize", _to_bool),
+    ConfigOverrideRule(
+        "influence_cooks_threshold",
+        "behavior_analysis.influence.cooks_threshold",
+        _to_optional_float_threshold,
+    ),
+    ConfigOverrideRule(
+        "influence_leverage_threshold",
+        "behavior_analysis.influence.leverage_threshold",
+        _to_optional_float_threshold,
+    ),
+)
+
+_INFLUENCE_TEMP_SPLINE_OVERRIDE_RULES = (
+    ConfigOverrideRule(
+        "influence_temperature_spline_knots",
+        "behavior_analysis.influence.temperature_spline.n_knots",
+        _to_int,
+    ),
+    ConfigOverrideRule(
+        "influence_temperature_spline_quantile_low",
+        "behavior_analysis.influence.temperature_spline.quantile_low",
+        _to_float,
+    ),
+    ConfigOverrideRule(
+        "influence_temperature_spline_quantile_high",
+        "behavior_analysis.influence.temperature_spline.quantile_high",
+        _to_float,
+    ),
+    ConfigOverrideRule(
+        "influence_temperature_spline_min_samples",
+        "behavior_analysis.influence.temperature_spline.min_samples",
+        _to_int,
+    ),
+)
+
+_PAIN_SENSITIVITY_OVERRIDE_RULES = (
+    ConfigOverrideRule("pain_sensitivity_min_trials", "behavior_analysis.pain_sensitivity.min_trials", _to_int),
+    ConfigOverrideRule(
+        "pain_sensitivity_primary_unit",
+        "behavior_analysis.pain_sensitivity.primary_unit",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule(
+        "pain_sensitivity_permutations",
+        "behavior_analysis.pain_sensitivity.n_permutations",
+        _to_int,
+    ),
+)
+
+_CORRELATIONS_OVERRIDE_RULES = (
+    ConfigOverrideRule("correlations_types", "behavior_analysis.correlations.types", _to_list),
+    ConfigOverrideRule("correlations_primary_unit", "behavior_analysis.correlations.primary_unit", _to_lower_stripped),
+    ConfigOverrideRule("correlations_min_runs", "behavior_analysis.correlations.min_runs", _to_int),
+    ConfigOverrideRule(
+        "correlations_prefer_pain_residual",
+        "behavior_analysis.correlations.prefer_pain_residual",
+        _to_bool,
+    ),
+    ConfigOverrideRule(
+        "correlations_permutations",
+        "behavior_analysis.correlations.permutation.n_permutations",
+        _to_int,
+    ),
+    ConfigOverrideRule(
+        "correlations_use_crossfit_pain_residual",
+        "behavior_analysis.correlations.use_crossfit_pain_residual",
+        _to_bool,
+    ),
+    ConfigOverrideRule("correlations_target_column", "behavior_analysis.correlations.target_column", _to_stripped),
+)
+
+_GROUP_LEVEL_OVERRIDE_RULES = (
+    ConfigOverrideRule(
+        "group_level_target",
+        "behavior_analysis.group_level.multilevel_correlations.target",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule(
+        "group_level_control_temperature",
+        "behavior_analysis.group_level.multilevel_correlations.control_temperature",
+        _to_bool,
+    ),
+    ConfigOverrideRule(
+        "group_level_control_trial_order",
+        "behavior_analysis.group_level.multilevel_correlations.control_trial_order",
+        _to_bool,
+    ),
+    ConfigOverrideRule(
+        "group_level_control_run_effects",
+        "behavior_analysis.group_level.multilevel_correlations.control_run_effects",
+        _to_bool,
+    ),
+    ConfigOverrideRule(
+        "group_level_max_run_dummies",
+        "behavior_analysis.group_level.multilevel_correlations.max_run_dummies",
+        _to_int,
+    ),
+    ConfigOverrideRule(
+        "group_level_allow_parametric_fallback",
+        "behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback",
+        _to_bool,
+    ),
+)
+
+_REPORT_OVERRIDE_RULES = (
+    ConfigOverrideRule("report_top_n", "behavior_analysis.report.top_n", _to_int),
+)
+
+_CONDITION_OVERRIDE_RULES = (
+    ConfigOverrideRule("condition_fail_fast", "behavior_analysis.condition.fail_fast", _to_bool),
+    ConfigOverrideRule("condition_effect_threshold", "behavior_analysis.condition.effect_size_threshold", _to_float),
+    ConfigOverrideRule("condition_min_trials", "behavior_analysis.condition.min_trials_per_condition", _to_int),
+    ConfigOverrideRule("condition_compare_column", "behavior_analysis.condition.compare_column", _to_stripped),
+    ConfigOverrideRule("condition_compare_values", "behavior_analysis.condition.compare_values", _to_stripped_list),
+    ConfigOverrideRule("condition_compare_labels", "behavior_analysis.condition.compare_labels", _to_stripped_list),
+    ConfigOverrideRule("condition_overwrite", "behavior_analysis.condition.overwrite", _to_bool),
+    ConfigOverrideRule("condition_primary_unit", "behavior_analysis.condition.primary_unit", _to_lower_stripped),
+    ConfigOverrideRule("condition_compare_windows", "behavior_analysis.condition.compare_windows", _to_stripped_list),
+)
+
+_CONDITION_WINDOW_OVERRIDE_RULES = (
+    ConfigOverrideRule(
+        "condition_window_primary_unit",
+        "behavior_analysis.condition.window_comparison.primary_unit",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule(
+        "condition_window_min_samples",
+        "behavior_analysis.condition.window_comparison.min_samples",
+        _to_int,
+    ),
+)
+
+_TEMPORAL_OVERRIDE_RULES = (
+    ConfigOverrideRule("temporal_target_column", "behavior_analysis.temporal.target_column", _to_stripped),
+    ConfigOverrideRule(
+        "temporal_correction_method",
+        "behavior_analysis.temporal.correction_method",
+        _to_lower_stripped,
+    ),
+    ConfigOverrideRule("temporal_split_by_condition", "behavior_analysis.temporal.split_by_condition", _to_bool),
+    ConfigOverrideRule("temporal_condition_column", "behavior_analysis.temporal.condition_column", _to_stripped),
+    ConfigOverrideRule("temporal_condition_values", "behavior_analysis.temporal.condition_values", _to_stripped_list),
+    ConfigOverrideRule(
+        "temporal_include_roi_averages",
+        "behavior_analysis.temporal.include_roi_averages",
+        _to_bool,
+    ),
+    ConfigOverrideRule("temporal_include_tf_grid", "behavior_analysis.temporal.include_tf_grid", _to_bool),
+    ConfigOverrideRule("temporal_time_resolution_ms", "behavior_analysis.temporal.time_resolution_ms", _to_int),
+    ConfigOverrideRule("temporal_smooth_window_ms", "behavior_analysis.temporal.smooth_window_ms", _to_int),
+)
+
+_TEMPORAL_ITPC_OVERRIDE_RULES = (
+    ConfigOverrideRule(
+        "temporal_itpc_baseline_correction",
+        "behavior_analysis.temporal.itpc.baseline_correction",
+        _to_bool,
+    ),
+)
+
+_TEMPORAL_ERDS_OVERRIDE_RULES = (
+    ConfigOverrideRule("temporal_erds_method", "behavior_analysis.temporal.erds.method", _to_lower_stripped),
+)
+
+_TEMPORAL_FEATURES_OVERRIDE_RULES = (
+    ConfigOverrideRule("temporal_feature_power", "behavior_analysis.temporal.features.power", _to_bool),
+    ConfigOverrideRule("temporal_feature_itpc", "behavior_analysis.temporal.features.itpc", _to_bool),
+    ConfigOverrideRule("temporal_feature_erds", "behavior_analysis.temporal.features.erds", _to_bool),
+)
+
+_CLUSTER_OVERRIDE_RULES = (
+    ConfigOverrideRule("cluster_threshold", "behavior_analysis.cluster.forming_threshold", _to_float),
+    ConfigOverrideRule("cluster_min_size", "behavior_analysis.cluster.min_cluster_size", _to_int),
+    ConfigOverrideRule("cluster_tail", "behavior_analysis.cluster.tail", _to_int),
+    ConfigOverrideRule("cluster_condition_column", "behavior_analysis.cluster.condition_column", _to_stripped),
+    ConfigOverrideRule("cluster_condition_values", "behavior_analysis.cluster.condition_values", _to_stripped_list),
+)
+
+_MEDIATION_OVERRIDE_RULES = (
+    ConfigOverrideRule("mediation_bootstrap", "behavior_analysis.mediation.n_bootstrap", _to_int),
+    ConfigOverrideRule("mediation_permutations", "behavior_analysis.mediation.n_permutations", _to_int),
+    ConfigOverrideRule("mediation_min_effect_size", "behavior_analysis.mediation.min_effect_size", _to_float),
+    ConfigOverrideRule("mediation_max_mediators", "behavior_analysis.mediation.max_mediators", _to_int),
+)
+
+_MODERATION_OVERRIDE_RULES = (
+    ConfigOverrideRule("moderation_max_features", "behavior_analysis.moderation.max_features", _to_int),
+    ConfigOverrideRule("moderation_min_samples", "behavior_analysis.moderation.min_samples", _to_int),
+    ConfigOverrideRule("moderation_permutations", "behavior_analysis.moderation.n_permutations", _to_int),
+)
+
+_MIXED_EFFECTS_OVERRIDE_RULES = (
+    ConfigOverrideRule("mixed_random_effects", "behavior_analysis.mixed_effects.random_effects", _to_lower_stripped),
+    ConfigOverrideRule(
+        "mixed_include_temperature",
+        "behavior_analysis.mixed_effects.include_temperature",
+        _to_bool,
+    ),
+    ConfigOverrideRule("mixed_max_features", "behavior_analysis.mixed_effects.max_features", _to_int),
+)
+
+_OUTPUT_OVERRIDE_RULES = (
+    ConfigOverrideRule("also_save_csv", "behavior_analysis.output.also_save_csv", _to_bool),
+    ConfigOverrideRule("overwrite", "behavior_analysis.output.overwrite", _to_bool),
+)
+
 
 def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> None:
     """
@@ -14,514 +521,242 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     """
     ba = config.setdefault("behavior_analysis", {})
     stats_cfg = ba.setdefault("statistics", {})
-    corr_cfg = ba.setdefault("correlations", {})
-    run_adj_cfg = ba.setdefault("run_adjustment", {})
+    ba.setdefault("correlations", {})
+    ba.setdefault("run_adjustment", {})
 
-    rng_seed = args.rng_seed if args.rng_seed is not None else config.get("project.random_state")
+    rng_seed = args.rng_seed
+    if rng_seed is None:
+        rng_seed = config.get("project.random_state")
+    if rng_seed is None:
+        rng_seed = config.get("behavior_analysis.statistics.base_seed", 42)
     if rng_seed is not None:
         config.setdefault("project", {})["random_state"] = rng_seed
         # Behavior stages derive deterministic subject seeds from statistics.base_seed.
         stats_cfg["base_seed"] = int(rng_seed)
 
-    if args.correlation_method:
-        stats_cfg["correlation_method"] = args.correlation_method
+    _apply_override_rules(args, config, _GENERAL_OVERRIDE_RULES)
 
-    if getattr(args, "robust_correlation", None) is not None:
-        rc = str(args.robust_correlation).strip().lower()
-        ba["robust_correlation"] = None if rc in ("", "none") else rc
-
-    if args.bootstrap is not None:
-        ba["bootstrap"] = int(args.bootstrap)
-    if getattr(args, "global_n_bootstrap", None) is not None:
-        stats_cfg["default_n_bootstrap"] = int(args.global_n_bootstrap)
-
-    if args.n_perm is not None:
-        stats_cfg["n_permutations"] = int(args.n_perm)
-        ba.setdefault("cluster", {})["n_permutations"] = int(args.n_perm)
-    if getattr(args, "perm_scheme", None) is not None:
-        ba.setdefault("permutation", {})["scheme"] = str(args.perm_scheme).strip().lower()
-
-    if getattr(args, "n_jobs", None) is not None:
-        ba["n_jobs"] = int(args.n_jobs)
-
-    if getattr(args, "min_samples", None) is not None:
-        ba.setdefault("min_samples", {})["default"] = int(args.min_samples)
-
-    if getattr(args, "control_temperature", None) is not None:
-        ba["control_temperature"] = bool(args.control_temperature)
-
-    if getattr(args, "control_trial_order", None) is not None:
-        ba["control_trial_order"] = bool(args.control_trial_order)
-
-    # Run adjustment (optional; paradigms may have run_id or none)
-    if getattr(args, "run_adjustment", None) is not None:
-        run_adj_cfg["enabled"] = bool(args.run_adjustment)
-    if getattr(args, "run_adjustment_column", None) is not None:
-        run_adj_cfg["column"] = str(args.run_adjustment_column).strip()
-    if getattr(args, "run_adjustment_include_in_correlations", None) is not None:
-        run_adj_cfg["include_in_correlations"] = bool(args.run_adjustment_include_in_correlations)
-    if getattr(args, "run_adjustment_max_dummies", None) is not None:
-        run_adj_cfg["max_dummies"] = int(args.run_adjustment_max_dummies)
-
-    if getattr(args, "fdr_alpha", None) is not None:
-        stats_cfg["fdr_alpha"] = float(args.fdr_alpha)
-    if getattr(args, "stats_temp_control", None) is not None:
-        stats_cfg["temperature_control"] = str(args.stats_temp_control).strip().lower()
-    if getattr(args, "stats_allow_iid_trials", None) is not None:
-        stats_cfg["allow_iid_trials"] = bool(args.stats_allow_iid_trials)
-    if getattr(args, "stats_hierarchical_fdr", None) is not None:
-        stats_cfg["hierarchical_fdr"] = bool(args.stats_hierarchical_fdr)
-    if getattr(args, "stats_compute_reliability", None) is not None:
-        stats_cfg["compute_reliability"] = bool(args.stats_compute_reliability)
-    if getattr(args, "perm_group_column_preference", None):
-        parts = []
-        for token in args.perm_group_column_preference:
-            parts.extend(str(token).replace(",", " ").split())
-        if parts:
-            ba.setdefault("permutation", {})["group_column_preference"] = [p.strip() for p in parts if p.strip()]
-    if getattr(args, "exclude_non_trialwise_features", None) is not None:
-        ba.setdefault("features", {})["exclude_non_trialwise_features"] = bool(args.exclude_non_trialwise_features)
-    if getattr(args, "temperature_range", None) is not None:
-        config.setdefault("io", {}).setdefault("constants", {})["temperature_range"] = [float(args.temperature_range[0]), float(args.temperature_range[1])]
-    if getattr(args, "max_missing_channels_fraction", None) is not None:
-        config.setdefault("io", {}).setdefault("constants", {})["max_missing_channels_fraction"] = float(args.max_missing_channels_fraction)
-
-    if getattr(args, "compute_change_scores", None) is not None:
-        corr_cfg["compute_change_scores"] = bool(args.compute_change_scores)
-    if getattr(args, "loso_stability", None) is not None:
-        corr_cfg["loso_stability"] = bool(args.loso_stability)
-    if getattr(args, "compute_bayes_factors", None) is not None:
-        corr_cfg["compute_bayes_factors"] = bool(args.compute_bayes_factors)
-
-    if getattr(args, "consistency_enabled", None) is not None:
-        ba.setdefault("consistency", {})["enabled"] = bool(args.consistency_enabled)
-    ccfg = ba.setdefault("cluster_correction", {})
-    if getattr(args, "cluster_correction_enabled", None) is not None:
-        ccfg["enabled"] = bool(args.cluster_correction_enabled)
-    if getattr(args, "cluster_correction_alpha", None) is not None:
-        ccfg["alpha"] = float(args.cluster_correction_alpha)
-    if getattr(args, "cluster_correction_min_cluster_size", None) is not None:
-        ccfg["min_cluster_size"] = int(args.cluster_correction_min_cluster_size)
-    if getattr(args, "cluster_correction_tail", None) is not None:
-        ccfg["tail"] = int(args.cluster_correction_tail)
-    if getattr(args, "validation_min_epochs", None) is not None:
-        config.setdefault("validation", {})["min_epochs"] = int(args.validation_min_epochs)
-    if getattr(args, "validation_min_channels", None) is not None:
-        config.setdefault("validation", {})["min_channels"] = int(args.validation_min_channels)
-    if getattr(args, "validation_max_amplitude_uv", None) is not None:
-        config.setdefault("validation", {})["max_amplitude_uv"] = float(args.validation_max_amplitude_uv)
-
-    # Trial table
-    tt = ba.setdefault("trial_table", {})
-    if getattr(args, "trial_table_format", None) is not None:
-        tt["format"] = str(args.trial_table_format).strip().lower()
-    if getattr(args, "trial_table_add_lag_features", None) is not None:
-        tt["add_lag_features"] = bool(args.trial_table_add_lag_features)
-    if getattr(args, "trial_order_max_missing_fraction", None) is not None:
-        ba.setdefault("trial_order", {})["max_missing_fraction"] = float(
-            args.trial_order_max_missing_fraction
+    robust_correlation = getattr(args, "robust_correlation", None)
+    if robust_correlation is not None:
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.robust_correlation",
+            _to_optional_robust_method(robust_correlation),
         )
 
-    if getattr(args, "feature_summaries_enabled", None) is not None:
-        ba.setdefault("feature_summaries", {})["enabled"] = bool(args.feature_summaries_enabled)
+    if args.n_perm is not None:
+        n_perm = int(args.n_perm)
+        _set_nested_config_value(config, "behavior_analysis.statistics.n_permutations", n_perm)
+        _set_nested_config_value(config, "behavior_analysis.cluster.n_permutations", n_perm)
 
-    # Feature QC
-    fqc = ba.setdefault("feature_qc", {})
-    if getattr(args, "feature_qc_enabled", None) is not None:
-        fqc["enabled"] = bool(args.feature_qc_enabled)
-    if getattr(args, "feature_qc_max_missing_pct", None) is not None:
-        fqc["max_missing_pct"] = float(args.feature_qc_max_missing_pct)
-    if getattr(args, "feature_qc_min_variance", None) is not None:
-        fqc["min_variance"] = float(args.feature_qc_min_variance)
-    if getattr(args, "feature_qc_check_within_run_variance", None) is not None:
-        fqc["check_within_run_variance"] = bool(args.feature_qc_check_within_run_variance)
+    perm_group_column_preference = getattr(args, "perm_group_column_preference", None)
+    if perm_group_column_preference:
+        parts: list[str] = []
+        for token in perm_group_column_preference:
+            parts.extend(str(token).replace(",", " ").split())
+        if parts:
+            _set_nested_config_value(
+                config,
+                "behavior_analysis.permutation.group_column_preference",
+                [p.strip() for p in parts if p.strip()],
+            )
 
-    # Pain residual / temperature-model diagnostics
-    pr = ba.setdefault("pain_residual", {})
-    if getattr(args, "pain_residual_enabled", None) is not None:
-        pr["enabled"] = bool(args.pain_residual_enabled)
-    if getattr(args, "pain_residual_method", None) is not None:
-        pr["method"] = str(args.pain_residual_method).strip().lower()
-    if getattr(args, "pain_residual_min_samples", None) is not None:
-        pr["min_samples"] = int(args.pain_residual_min_samples)
-    if getattr(args, "pain_residual_spline_df_candidates", None) is not None:
-        pr["spline_df_candidates"] = list(args.pain_residual_spline_df_candidates)
-    if getattr(args, "pain_residual_poly_degree", None) is not None:
-        pr["poly_degree"] = int(args.pain_residual_poly_degree)
+    if getattr(args, "temperature_range", None) is not None:
+        _set_nested_config_value(
+            config,
+            "io.constants.temperature_range",
+            [float(args.temperature_range[0]), float(args.temperature_range[1])],
+        )
+    if getattr(args, "max_missing_channels_fraction", None) is not None:
+        _set_nested_config_value(
+            config,
+            "io.constants.max_missing_channels_fraction",
+            float(args.max_missing_channels_fraction),
+        )
+
+    _apply_override_rules(args, config, _TRIAL_TABLE_OVERRIDE_RULES)
+    _apply_override_rules(args, config, _FEATURE_QC_OVERRIDE_RULES)
+    _apply_override_rules(args, config, _PAIN_RESIDUAL_OVERRIDE_RULES)
 
     # Temperature-model diagnostics are consumed by behavior_analysis.temperature_models.*
     # Keep mirrored keys under pain_residual for backward compatibility.
-    tm = ba.setdefault("temperature_models", {})
-    mc = pr.setdefault("model_comparison", {})
-    tm_mc = tm.setdefault("model_comparison", {})
     if getattr(args, "pain_residual_model_compare_enabled", None) is not None:
         enabled = bool(args.pain_residual_model_compare_enabled)
-        mc["enabled"] = enabled
-        tm_mc["enabled"] = enabled
+        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.enabled", enabled)
+        _set_nested_config_value(config, "behavior_analysis.temperature_models.model_comparison.enabled", enabled)
     if getattr(args, "pain_residual_model_compare_min_samples", None) is not None:
         min_samples = int(args.pain_residual_model_compare_min_samples)
-        mc["min_samples"] = min_samples
-        tm_mc["min_samples"] = min_samples
+        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.min_samples", min_samples)
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.temperature_models.model_comparison.min_samples",
+            min_samples,
+        )
     if getattr(args, "pain_residual_model_compare_poly_degrees", None) is not None:
         poly_degrees = list(args.pain_residual_model_compare_poly_degrees)
-        mc["poly_degrees"] = poly_degrees
-        tm_mc["poly_degrees"] = poly_degrees
+        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.poly_degrees", poly_degrees)
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.temperature_models.model_comparison.poly_degrees",
+            poly_degrees,
+        )
 
-    bp = pr.setdefault("breakpoint_test", {})
-    tm_bp = tm.setdefault("breakpoint_test", {})
     if getattr(args, "pain_residual_breakpoint_enabled", None) is not None:
         enabled = bool(args.pain_residual_breakpoint_enabled)
-        bp["enabled"] = enabled
-        tm_bp["enabled"] = enabled
+        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.enabled", enabled)
+        _set_nested_config_value(config, "behavior_analysis.temperature_models.breakpoint_test.enabled", enabled)
     if getattr(args, "pain_residual_breakpoint_min_samples", None) is not None:
         min_samples = int(args.pain_residual_breakpoint_min_samples)
-        bp["min_samples"] = min_samples
-        tm_bp["min_samples"] = min_samples
+        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.min_samples", min_samples)
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.temperature_models.breakpoint_test.min_samples",
+            min_samples,
+        )
     if getattr(args, "pain_residual_breakpoint_candidates", None) is not None:
         candidates = int(args.pain_residual_breakpoint_candidates)
-        bp["n_candidates"] = candidates
-        tm_bp["n_candidates"] = candidates
+        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.n_candidates", candidates)
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.temperature_models.breakpoint_test.n_candidates",
+            candidates,
+        )
     if getattr(args, "pain_residual_breakpoint_quantile_low", None) is not None:
         q_low = float(args.pain_residual_breakpoint_quantile_low)
-        bp["quantile_low"] = q_low
-        tm_bp["quantile_low"] = q_low
+        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_low", q_low)
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.temperature_models.breakpoint_test.quantile_low",
+            q_low,
+        )
     if getattr(args, "pain_residual_breakpoint_quantile_high", None) is not None:
         q_high = float(args.pain_residual_breakpoint_quantile_high)
-        bp["quantile_high"] = q_high
-        tm_bp["quantile_high"] = q_high
-
-    crossfit = pr.setdefault("crossfit", {})
-    if getattr(args, "pain_residual_crossfit_enabled", None) is not None:
-        crossfit["enabled"] = bool(args.pain_residual_crossfit_enabled)
-    if getattr(args, "pain_residual_crossfit_group_column", None) is not None:
-        crossfit["group_column"] = str(args.pain_residual_crossfit_group_column).strip()
-    if getattr(args, "pain_residual_crossfit_n_splits", None) is not None:
-        crossfit["n_splits"] = int(args.pain_residual_crossfit_n_splits)
-    if getattr(args, "pain_residual_crossfit_method", None) is not None:
-        crossfit["method"] = str(args.pain_residual_crossfit_method).strip().lower()
-    if getattr(args, "pain_residual_crossfit_spline_n_knots", None) is not None:
-        crossfit["spline_n_knots"] = int(args.pain_residual_crossfit_spline_n_knots)
-
-    # Regression
-    reg = ba.setdefault("regression", {})
-    if getattr(args, "regression_outcome", None) is not None:
-        reg["outcome"] = str(args.regression_outcome).strip().lower()
-    if getattr(args, "regression_include_temperature", None) is not None:
-        reg["include_temperature"] = bool(args.regression_include_temperature)
-    if getattr(args, "regression_temperature_control", None) is not None:
-        reg["temperature_control"] = str(args.regression_temperature_control).strip().lower()
-    if (
-        getattr(args, "regression_temperature_spline_knots", None) is not None
-        or getattr(args, "regression_temperature_spline_quantile_low", None) is not None
-        or getattr(args, "regression_temperature_spline_quantile_high", None) is not None
-        or getattr(args, "regression_temperature_spline_min_samples", None) is not None
-    ):
-        ts = reg.setdefault("temperature_spline", {})
-        if getattr(args, "regression_temperature_spline_knots", None) is not None:
-            ts["n_knots"] = int(args.regression_temperature_spline_knots)
-        if getattr(args, "regression_temperature_spline_quantile_low", None) is not None:
-            ts["quantile_low"] = float(args.regression_temperature_spline_quantile_low)
-        if getattr(args, "regression_temperature_spline_quantile_high", None) is not None:
-            ts["quantile_high"] = float(args.regression_temperature_spline_quantile_high)
-        if getattr(args, "regression_temperature_spline_min_samples", None) is not None:
-            ts["min_samples"] = int(args.regression_temperature_spline_min_samples)
-    if getattr(args, "regression_include_trial_order", None) is not None:
-        reg["include_trial_order"] = bool(args.regression_include_trial_order)
-    if getattr(args, "regression_include_prev_terms", None) is not None:
-        reg["include_prev_terms"] = bool(args.regression_include_prev_terms)
-    if getattr(args, "regression_include_run_block", None) is not None:
-        reg["include_run_block"] = bool(args.regression_include_run_block)
-    if getattr(args, "regression_include_interaction", None) is not None:
-        reg["include_interaction"] = bool(args.regression_include_interaction)
-    if getattr(args, "regression_standardize", None) is not None:
-        reg["standardize"] = bool(args.regression_standardize)
-    if getattr(args, "regression_min_samples", None) is not None:
-        reg["min_samples"] = int(args.regression_min_samples)
-    if getattr(args, "regression_primary_unit", None) is not None:
-        reg["primary_unit"] = str(args.regression_primary_unit).strip().lower()
-    if getattr(args, "regression_permutations", None) is not None:
-        reg["n_permutations"] = int(args.regression_permutations)
-    if getattr(args, "regression_max_features", None) is not None:
-        max_f = int(args.regression_max_features)
-        reg["max_features"] = None if max_f <= 0 else max_f
-
-    # Models
-    mdl = ba.setdefault("models", {})
-    if getattr(args, "models_outcomes", None) is not None:
-        mdl["outcomes"] = [str(o).strip().lower() for o in (args.models_outcomes or [])]
-    if getattr(args, "models_families", None) is not None:
-        mdl["families"] = [str(f).strip().lower() for f in (args.models_families or [])]
-    if getattr(args, "models_include_temperature", None) is not None:
-        mdl["include_temperature"] = bool(args.models_include_temperature)
-    if getattr(args, "models_temperature_control", None) is not None:
-        mdl["temperature_control"] = str(args.models_temperature_control).strip().lower()
-    if (
-        getattr(args, "models_temperature_spline_knots", None) is not None
-        or getattr(args, "models_temperature_spline_quantile_low", None) is not None
-        or getattr(args, "models_temperature_spline_quantile_high", None) is not None
-        or getattr(args, "models_temperature_spline_min_samples", None) is not None
-    ):
-        ts = mdl.setdefault("temperature_spline", {})
-        if getattr(args, "models_temperature_spline_knots", None) is not None:
-            ts["n_knots"] = int(args.models_temperature_spline_knots)
-        if getattr(args, "models_temperature_spline_quantile_low", None) is not None:
-            ts["quantile_low"] = float(args.models_temperature_spline_quantile_low)
-        if getattr(args, "models_temperature_spline_quantile_high", None) is not None:
-            ts["quantile_high"] = float(args.models_temperature_spline_quantile_high)
-        if getattr(args, "models_temperature_spline_min_samples", None) is not None:
-            ts["min_samples"] = int(args.models_temperature_spline_min_samples)
-    if getattr(args, "models_include_trial_order", None) is not None:
-        mdl["include_trial_order"] = bool(args.models_include_trial_order)
-    if getattr(args, "models_include_prev_terms", None) is not None:
-        mdl["include_prev_terms"] = bool(args.models_include_prev_terms)
-    if getattr(args, "models_include_run_block", None) is not None:
-        mdl["include_run_block"] = bool(args.models_include_run_block)
-    if getattr(args, "models_include_interaction", None) is not None:
-        mdl["include_interaction"] = bool(args.models_include_interaction)
-    if getattr(args, "models_standardize", None) is not None:
-        mdl["standardize"] = bool(args.models_standardize)
-    if getattr(args, "models_min_samples", None) is not None:
-        mdl["min_samples"] = int(args.models_min_samples)
-    if getattr(args, "models_max_features", None) is not None:
-        max_f = int(args.models_max_features)
-        mdl["max_features"] = None if max_f <= 0 else max_f
-    if getattr(args, "models_binary_outcome", None) is not None:
-        mdl["binary_outcome"] = str(args.models_binary_outcome).strip().lower()
-    if getattr(args, "models_primary_unit", None) is not None:
-        mdl["primary_unit"] = str(args.models_primary_unit).strip().lower()
-    if getattr(args, "models_force_trial_iid_asymptotic", None) is not None:
-        mdl["force_trial_iid_asymptotic"] = bool(args.models_force_trial_iid_asymptotic)
-
-    # Stability
-    stab = ba.setdefault("stability", {})
-    if getattr(args, "stability_method", None) is not None:
-        stab["method"] = str(args.stability_method).strip().lower()
-    if getattr(args, "stability_outcome", None) is not None:
-        val = str(args.stability_outcome).strip().lower()
-        stab["outcome"] = "" if val == "auto" else val
-    if getattr(args, "stability_group_column", None) is not None:
-        val = str(args.stability_group_column).strip().lower()
-        stab["group_column"] = "" if val == "auto" else val
-    if getattr(args, "stability_partial_temperature", None) is not None:
-        stab["partial_temperature"] = bool(args.stability_partial_temperature)
-    if getattr(args, "stability_min_group_trials", None) is not None:
-        stab["min_group_trials"] = int(args.stability_min_group_trials)
-    if getattr(args, "stability_max_features", None) is not None:
-        max_f = int(args.stability_max_features)
-        stab["max_features"] = None if max_f <= 0 else max_f
-    if getattr(args, "stability_alpha", None) is not None:
-        stab["alpha"] = float(args.stability_alpha)
-
-    # Influence
-    infl = ba.setdefault("influence", {})
-    if getattr(args, "influence_outcomes", None) is not None:
-        infl["outcomes"] = [str(o).strip().lower() for o in (args.influence_outcomes or [])]
-    if getattr(args, "influence_max_features", None) is not None:
-        infl["max_features"] = int(args.influence_max_features)
-    if getattr(args, "influence_include_temperature", None) is not None:
-        infl["include_temperature"] = bool(args.influence_include_temperature)
-    if getattr(args, "influence_temperature_control", None) is not None:
-        infl["temperature_control"] = str(args.influence_temperature_control).strip().lower()
-    if (
-        getattr(args, "influence_temperature_spline_knots", None) is not None
-        or getattr(args, "influence_temperature_spline_quantile_low", None) is not None
-        or getattr(args, "influence_temperature_spline_quantile_high", None) is not None
-        or getattr(args, "influence_temperature_spline_min_samples", None) is not None
-    ):
-        ts = infl.setdefault("temperature_spline", {})
-        if getattr(args, "influence_temperature_spline_knots", None) is not None:
-            ts["n_knots"] = int(args.influence_temperature_spline_knots)
-        if getattr(args, "influence_temperature_spline_quantile_low", None) is not None:
-            ts["quantile_low"] = float(args.influence_temperature_spline_quantile_low)
-        if getattr(args, "influence_temperature_spline_quantile_high", None) is not None:
-            ts["quantile_high"] = float(args.influence_temperature_spline_quantile_high)
-        if getattr(args, "influence_temperature_spline_min_samples", None) is not None:
-            ts["min_samples"] = int(args.influence_temperature_spline_min_samples)
-    if getattr(args, "influence_include_trial_order", None) is not None:
-        infl["include_trial_order"] = bool(args.influence_include_trial_order)
-    if getattr(args, "influence_include_run_block", None) is not None:
-        infl["include_run_block"] = bool(args.influence_include_run_block)
-    if getattr(args, "influence_include_interaction", None) is not None:
-        infl["include_interaction"] = bool(args.influence_include_interaction)
-    if getattr(args, "influence_standardize", None) is not None:
-        infl["standardize"] = bool(args.influence_standardize)
-    if getattr(args, "influence_cooks_threshold", None) is not None:
-        infl["cooks_threshold"] = (
-            None if float(args.influence_cooks_threshold) <= 0 else float(args.influence_cooks_threshold)
-        )
-    if getattr(args, "influence_leverage_threshold", None) is not None:
-        infl["leverage_threshold"] = (
-            None if float(args.influence_leverage_threshold) <= 0 else float(args.influence_leverage_threshold)
+        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_high", q_high)
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.temperature_models.breakpoint_test.quantile_high",
+            q_high,
         )
 
-    # Pain sensitivity
-    psi_cfg = ba.setdefault("pain_sensitivity", {})
-    if getattr(args, "pain_sensitivity_min_trials", None) is not None:
-        psi_cfg["min_trials"] = int(args.pain_sensitivity_min_trials)
-    if getattr(args, "pain_sensitivity_primary_unit", None) is not None:
-        psi_cfg["primary_unit"] = str(args.pain_sensitivity_primary_unit).strip().lower()
-    if getattr(args, "pain_sensitivity_permutations", None) is not None:
-        psi_cfg["n_permutations"] = int(args.pain_sensitivity_permutations)
+    _apply_override_rules(args, config, _PAIN_RESIDUAL_CROSSFIT_OVERRIDE_RULES)
+
+    _apply_override_rules(args, config, _REGRESSION_OVERRIDE_RULES)
+    if _has_any_arg(
+        args,
+        (
+            "regression_temperature_spline_knots",
+            "regression_temperature_spline_quantile_low",
+            "regression_temperature_spline_quantile_high",
+            "regression_temperature_spline_min_samples",
+        ),
+    ):
+        _apply_override_rules(args, config, _REGRESSION_TEMP_SPLINE_OVERRIDE_RULES)
+
+    _apply_override_rules(args, config, _MODELS_OVERRIDE_RULES)
+    if _has_any_arg(
+        args,
+        (
+            "models_temperature_spline_knots",
+            "models_temperature_spline_quantile_low",
+            "models_temperature_spline_quantile_high",
+            "models_temperature_spline_min_samples",
+        ),
+    ):
+        _apply_override_rules(args, config, _MODELS_TEMP_SPLINE_OVERRIDE_RULES)
+
+    _apply_override_rules(args, config, _STABILITY_OVERRIDE_RULES)
+
+    _apply_override_rules(args, config, _INFLUENCE_OVERRIDE_RULES)
+    if _has_any_arg(
+        args,
+        (
+            "influence_temperature_spline_knots",
+            "influence_temperature_spline_quantile_low",
+            "influence_temperature_spline_quantile_high",
+            "influence_temperature_spline_min_samples",
+        ),
+    ):
+        _apply_override_rules(args, config, _INFLUENCE_TEMP_SPLINE_OVERRIDE_RULES)
+
+    _apply_override_rules(args, config, _PAIN_SENSITIVITY_OVERRIDE_RULES)
     if getattr(args, "pain_sensitivity_permutation_primary", None) is not None:
-        psi_cfg["p_primary_mode"] = (
-            "perm_if_available" if bool(args.pain_sensitivity_permutation_primary) else "asymptotic"
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.pain_sensitivity.p_primary_mode",
+            "perm_if_available" if bool(args.pain_sensitivity_permutation_primary) else "asymptotic",
         )
 
-    # Correlations (trial-table)
-    if getattr(args, "correlations_types", None) is not None:
-        corr_cfg["types"] = list(args.correlations_types)
-    if getattr(args, "correlations_primary_unit", None) is not None:
-        corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
-    if getattr(args, "correlations_min_runs", None) is not None:
-        corr_cfg["min_runs"] = int(args.correlations_min_runs)
-    if getattr(args, "correlations_prefer_pain_residual", None) is not None:
-        corr_cfg["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
-    if getattr(args, "correlations_permutations", None) is not None:
-        corr_cfg.setdefault("permutation", {})["n_permutations"] = int(args.correlations_permutations)
-    if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
-        corr_cfg["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
+    _apply_override_rules(args, config, _CORRELATIONS_OVERRIDE_RULES)
     if getattr(args, "correlations_permutation_primary", None) is not None:
         enabled = bool(args.correlations_permutation_primary)
-        corr_cfg["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
-        corr_cfg.setdefault("permutation", {})["enabled"] = enabled
-    if getattr(args, "correlations_target_column", None) is not None:
-        target_col = str(args.correlations_target_column).strip()
-        corr_cfg["target_column"] = target_col
-    gl_corr_cfg = ba.setdefault("group_level", {}).setdefault("multilevel_correlations", {})
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.correlations.p_primary_mode",
+            "perm_if_available" if enabled else "asymptotic",
+        )
+        _set_nested_config_value(config, "behavior_analysis.correlations.permutation.enabled", enabled)
+
+    _apply_override_rules(args, config, _GROUP_LEVEL_OVERRIDE_RULES)
     if getattr(args, "group_level_block_permutation", None) is not None:
         enabled = bool(args.group_level_block_permutation)
-        ba.setdefault("group_level", {})["block_permutation"] = enabled
-        gl_corr_cfg["block_permutation"] = enabled
-    if getattr(args, "group_level_target", None) is not None:
-        gl_corr_cfg["target"] = str(args.group_level_target).strip().lower()
-    if getattr(args, "group_level_control_temperature", None) is not None:
-        gl_corr_cfg["control_temperature"] = bool(args.group_level_control_temperature)
-    if getattr(args, "group_level_control_trial_order", None) is not None:
-        gl_corr_cfg["control_trial_order"] = bool(args.group_level_control_trial_order)
-    if getattr(args, "group_level_control_run_effects", None) is not None:
-        gl_corr_cfg["control_run_effects"] = bool(args.group_level_control_run_effects)
-    if getattr(args, "group_level_max_run_dummies", None) is not None:
-        gl_corr_cfg["max_run_dummies"] = int(args.group_level_max_run_dummies)
-    if getattr(args, "group_level_allow_parametric_fallback", None) is not None:
-        gl_corr_cfg["allow_parametric_fallback"] = bool(args.group_level_allow_parametric_fallback)
-
-    # Report
-    if getattr(args, "report_top_n", None) is not None:
-        ba.setdefault("report", {})["top_n"] = int(args.report_top_n)
-
-    # Condition
-    if getattr(args, "condition_fail_fast", None) is not None:
-        ba.setdefault("condition", {})["fail_fast"] = bool(args.condition_fail_fast)
-    if getattr(args, "condition_effect_threshold", None) is not None:
-        ba.setdefault("condition", {})["effect_size_threshold"] = float(args.condition_effect_threshold)
-    if getattr(args, "condition_min_trials", None) is not None:
-        ba.setdefault("condition", {})["min_trials_per_condition"] = int(args.condition_min_trials)
-    if getattr(args, "condition_compare_column", None) is not None:
-        ba.setdefault("condition", {})["compare_column"] = str(args.condition_compare_column).strip()
-    if getattr(args, "condition_compare_values", None) is not None:
-        values = [str(v).strip() for v in (args.condition_compare_values or [])]
-        ba.setdefault("condition", {})["compare_values"] = values
-    if getattr(args, "condition_compare_labels", None) is not None:
-        labels = [str(v).strip() for v in (args.condition_compare_labels or [])]
-        ba.setdefault("condition", {})["compare_labels"] = labels
-    if getattr(args, "condition_overwrite", None) is not None:
-        ba.setdefault("condition", {})["overwrite"] = bool(args.condition_overwrite)
-    if getattr(args, "condition_primary_unit", None) is not None:
-        ba.setdefault("condition", {})["primary_unit"] = str(args.condition_primary_unit).strip().lower()
-    if getattr(args, "condition_compare_windows", None) is not None:
-        windows = [str(w).strip() for w in (args.condition_compare_windows or [])]
-        ba.setdefault("condition", {})["compare_windows"] = windows
-    if getattr(args, "condition_window_primary_unit", None) is not None:
-        ba.setdefault("condition", {}).setdefault("window_comparison", {})["primary_unit"] = (
-            str(args.condition_window_primary_unit).strip().lower()
+        _set_nested_config_value(config, "behavior_analysis.group_level.block_permutation", enabled)
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.group_level.multilevel_correlations.block_permutation",
+            enabled,
         )
-    if getattr(args, "condition_window_min_samples", None) is not None:
-        ba.setdefault("condition", {}).setdefault("window_comparison", {})["min_samples"] = int(
-            args.condition_window_min_samples
-        )
+
+    _apply_override_rules(args, config, _REPORT_OVERRIDE_RULES)
+
+    _apply_override_rules(args, config, _CONDITION_OVERRIDE_RULES)
+    _apply_override_rules(args, config, _CONDITION_WINDOW_OVERRIDE_RULES)
     if getattr(args, "condition_permutation_primary", None) is not None:
         enabled = bool(args.condition_permutation_primary)
-        cond = ba.setdefault("condition", {})
-        cond["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
-        cond.setdefault("permutation", {})["enabled"] = enabled
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.condition.p_primary_mode",
+            "perm_if_available" if enabled else "asymptotic",
+        )
+        _set_nested_config_value(config, "behavior_analysis.condition.permutation.enabled", enabled)
 
-    # Temporal
-    temporal_cfg = ba.setdefault("temporal", {})
-    if getattr(args, "temporal_target_column", None) is not None:
-        temporal_cfg["target_column"] = str(args.temporal_target_column).strip()
-    if getattr(args, "temporal_correction_method", None) is not None:
-        temporal_cfg["correction_method"] = str(args.temporal_correction_method).strip().lower()
-    if getattr(args, "temporal_split_by_condition", None) is not None:
-        temporal_cfg["split_by_condition"] = bool(args.temporal_split_by_condition)
-    if getattr(args, "temporal_condition_column", None) is not None:
-        temporal_cfg["condition_column"] = str(args.temporal_condition_column).strip()
-    if getattr(args, "temporal_condition_values", None) is not None:
-        temporal_cfg["condition_values"] = [str(v).strip() for v in (args.temporal_condition_values or [])]
-    if getattr(args, "temporal_include_roi_averages", None) is not None:
-        temporal_cfg["include_roi_averages"] = bool(args.temporal_include_roi_averages)
-    if getattr(args, "temporal_include_tf_grid", None) is not None:
-        temporal_cfg["include_tf_grid"] = bool(args.temporal_include_tf_grid)
-    if getattr(args, "temporal_time_resolution_ms", None) is not None:
-        temporal_cfg["time_resolution_ms"] = int(args.temporal_time_resolution_ms)
-    if getattr(args, "temporal_smooth_window_ms", None) is not None:
-        temporal_cfg["smooth_window_ms"] = int(args.temporal_smooth_window_ms)
+    _apply_override_rules(args, config, _TEMPORAL_OVERRIDE_RULES)
+
     tmin = getattr(args, "temporal_time_min_ms", None)
     tmax = getattr(args, "temporal_time_max_ms", None)
     if tmin is not None or tmax is not None:
-        cur = temporal_cfg.get("time_range_ms", [-200, 1000])
-        lo = int(tmin) if tmin is not None else int(cur[0])
-        hi = int(tmax) if tmax is not None else int(cur[1])
-        temporal_cfg["time_range_ms"] = [lo, hi]
+        current_range = config.get("behavior_analysis.temporal.time_range_ms", [-200, 1000])
+        lo = int(tmin) if tmin is not None else int(current_range[0])
+        hi = int(tmax) if tmax is not None else int(current_range[1])
+        _set_nested_config_value(config, "behavior_analysis.temporal.time_range_ms", [lo, hi])
 
-    # ITPC-specific temporal options
-    itpc_cfg = temporal_cfg.setdefault("itpc", {})
-    if getattr(args, "temporal_itpc_baseline_min", None) is not None or getattr(
-        args,
-        "temporal_itpc_baseline_max",
-        None,
-    ) is not None:
-        baseline_window = list(itpc_cfg.get("baseline_window", [-0.5, -0.01]))
+    if _has_any_arg(args, ("temporal_itpc_baseline_min", "temporal_itpc_baseline_max")):
+        baseline_window = list(config.get("behavior_analysis.temporal.itpc.baseline_window", [-0.5, -0.01]))
         if getattr(args, "temporal_itpc_baseline_min", None) is not None:
             baseline_window[0] = float(args.temporal_itpc_baseline_min)
         if getattr(args, "temporal_itpc_baseline_max", None) is not None:
             baseline_window[1] = float(args.temporal_itpc_baseline_max)
-        itpc_cfg["baseline_window"] = baseline_window
-    if getattr(args, "temporal_itpc_baseline_correction", None) is not None:
-        itpc_cfg["baseline_correction"] = bool(args.temporal_itpc_baseline_correction)
+        _set_nested_config_value(config, "behavior_analysis.temporal.itpc.baseline_window", baseline_window)
+    _apply_override_rules(args, config, _TEMPORAL_ITPC_OVERRIDE_RULES)
 
-    # ERDS-specific temporal options
-    erds_cfg = temporal_cfg.setdefault("erds", {})
-    if getattr(args, "temporal_erds_baseline_min", None) is not None or getattr(
-        args,
-        "temporal_erds_baseline_max",
-        None,
-    ) is not None:
-        baseline_window = list(erds_cfg.get("baseline_window", [-0.5, -0.1]))
+    if _has_any_arg(args, ("temporal_erds_baseline_min", "temporal_erds_baseline_max")):
+        baseline_window = list(config.get("behavior_analysis.temporal.erds.baseline_window", [-0.5, -0.1]))
         if getattr(args, "temporal_erds_baseline_min", None) is not None:
             baseline_window[0] = float(args.temporal_erds_baseline_min)
         if getattr(args, "temporal_erds_baseline_max", None) is not None:
             baseline_window[1] = float(args.temporal_erds_baseline_max)
-        erds_cfg["baseline_window"] = baseline_window
-    if getattr(args, "temporal_erds_method", None) is not None:
-        erds_cfg["method"] = str(args.temporal_erds_method).lower()
+        _set_nested_config_value(config, "behavior_analysis.temporal.erds.baseline_window", baseline_window)
+    _apply_override_rules(args, config, _TEMPORAL_ERDS_OVERRIDE_RULES)
 
-    # Temporal feature selection
-    features_cfg = temporal_cfg.setdefault("features", {})
-    if getattr(args, "temporal_feature_power", None) is not None:
-        features_cfg["power"] = bool(args.temporal_feature_power)
-    if getattr(args, "temporal_feature_itpc", None) is not None:
-        features_cfg["itpc"] = bool(args.temporal_feature_itpc)
-    if getattr(args, "temporal_feature_erds", None) is not None:
-        features_cfg["erds"] = bool(args.temporal_feature_erds)
+    _apply_override_rules(args, config, _TEMPORAL_FEATURES_OVERRIDE_RULES)
 
     # Deprecated TF-heatmap aliases now map to canonical temporal settings.
-    tf_flag_used = any(
-        getattr(args, name, None) is not None
-        for name in (
+    tf_flag_used = _has_any_arg(
+        args,
+        (
             "tf_heatmap_enabled",
             "tf_heatmap_freqs",
             "tf_heatmap_time_resolution_ms",
-        )
+        ),
     )
     if tf_flag_used:
         warnings.warn(
@@ -531,65 +766,45 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
             stacklevel=2,
         )
         if getattr(args, "tf_heatmap_enabled", None) is not None:
-            temporal_cfg["include_tf_grid"] = bool(args.tf_heatmap_enabled)
+            _set_nested_config_value(
+                config,
+                "behavior_analysis.temporal.include_tf_grid",
+                bool(args.tf_heatmap_enabled),
+            )
         if getattr(args, "tf_heatmap_time_resolution_ms", None) is not None:
-            temporal_cfg["time_resolution_ms"] = int(args.tf_heatmap_time_resolution_ms)
+            _set_nested_config_value(
+                config,
+                "behavior_analysis.temporal.time_resolution_ms",
+                int(args.tf_heatmap_time_resolution_ms),
+            )
         if getattr(args, "tf_heatmap_freqs", None) is not None:
-            temporal_cfg["freqs_hz"] = [float(v) for v in (args.tf_heatmap_freqs or [])]
+            _set_nested_config_value(
+                config,
+                "behavior_analysis.temporal.freqs_hz",
+                [float(v) for v in (args.tf_heatmap_freqs or [])],
+            )
 
-    # Cluster
-    if getattr(args, "cluster_threshold", None) is not None:
-        ba.setdefault("cluster", {})["forming_threshold"] = float(args.cluster_threshold)
-    if getattr(args, "cluster_min_size", None) is not None:
-        ba.setdefault("cluster", {})["min_cluster_size"] = int(args.cluster_min_size)
-    if getattr(args, "cluster_tail", None) is not None:
-        ba.setdefault("cluster", {})["tail"] = int(args.cluster_tail)
-    if getattr(args, "cluster_condition_column", None) is not None:
-        ba.setdefault("cluster", {})["condition_column"] = str(args.cluster_condition_column).strip()
-    if getattr(args, "cluster_condition_values", None) is not None:
-        ba.setdefault("cluster", {})["condition_values"] = [
-            str(v).strip() for v in (args.cluster_condition_values or [])
-        ]
+    _apply_override_rules(args, config, _CLUSTER_OVERRIDE_RULES)
 
-    # Mediation / mixed effects
-    if getattr(args, "mediation_bootstrap", None) is not None:
-        ba.setdefault("mediation", {})["n_bootstrap"] = int(args.mediation_bootstrap)
-    if getattr(args, "mediation_permutations", None) is not None:
-        ba.setdefault("mediation", {})["n_permutations"] = int(args.mediation_permutations)
+    _apply_override_rules(args, config, _MEDIATION_OVERRIDE_RULES)
     if getattr(args, "mediation_permutation_primary", None) is not None:
-        ba.setdefault("mediation", {})["p_primary_mode"] = (
-            "perm_if_available" if bool(args.mediation_permutation_primary) else "asymptotic"
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.mediation.p_primary_mode",
+            "perm_if_available" if bool(args.mediation_permutation_primary) else "asymptotic",
         )
-    if getattr(args, "mediation_min_effect_size", None) is not None:
-        ba.setdefault("mediation", {})["min_effect_size"] = float(args.mediation_min_effect_size)
-    if getattr(args, "mediation_max_mediators", None) is not None:
-        ba.setdefault("mediation", {})["max_mediators"] = int(args.mediation_max_mediators)
 
-    # Moderation
-    if getattr(args, "moderation_max_features", None) is not None:
-        ba.setdefault("moderation", {})["max_features"] = int(args.moderation_max_features)
-    if getattr(args, "moderation_min_samples", None) is not None:
-        ba.setdefault("moderation", {})["min_samples"] = int(args.moderation_min_samples)
-    if getattr(args, "moderation_permutations", None) is not None:
-        ba.setdefault("moderation", {})["n_permutations"] = int(args.moderation_permutations)
+    _apply_override_rules(args, config, _MODERATION_OVERRIDE_RULES)
     if getattr(args, "moderation_permutation_primary", None) is not None:
-        ba.setdefault("moderation", {})["p_primary_mode"] = (
-            "perm_if_available" if bool(args.moderation_permutation_primary) else "asymptotic"
+        _set_nested_config_value(
+            config,
+            "behavior_analysis.moderation.p_primary_mode",
+            "perm_if_available" if bool(args.moderation_permutation_primary) else "asymptotic",
         )
 
-    if getattr(args, "mixed_random_effects", None) is not None:
-        ba.setdefault("mixed_effects", {})["random_effects"] = str(args.mixed_random_effects).strip().lower()
-    if getattr(args, "mixed_include_temperature", None) is not None:
-        ba.setdefault("mixed_effects", {})["include_temperature"] = bool(args.mixed_include_temperature)
-    if getattr(args, "mixed_max_features", None) is not None:
-        ba.setdefault("mixed_effects", {})["max_features"] = int(args.mixed_max_features)
+    _apply_override_rules(args, config, _MIXED_EFFECTS_OVERRIDE_RULES)
 
-    # Output options
-    out = ba.setdefault("output", {})
-    if getattr(args, "also_save_csv", None) is not None:
-        out["also_save_csv"] = bool(args.also_save_csv)
-    if getattr(args, "overwrite", None) is not None:
-        out["overwrite"] = bool(args.overwrite)
+    _apply_override_rules(args, config, _OUTPUT_OVERRIDE_RULES)
 
 
 def _build_computation_features(args: argparse.Namespace) -> dict[str, list[str]] | None:

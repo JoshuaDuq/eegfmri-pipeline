@@ -39,6 +39,7 @@ from eeg_pipeline.analysis.behavior.stage_catalog import (
     apply_computation_flags_impl as _apply_computation_flags_impl,
 )
 from eeg_pipeline.analysis.behavior.orchestration import (
+    create_behavior_runtime,
     run_behavior_stages,
     write_analysis_metadata as _write_analysis_metadata_impl,
     write_outputs_manifest,
@@ -499,11 +500,7 @@ class BehaviorPipeline(PipelineBase):
         """
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
         from eeg_pipeline.infra.logging import get_subject_logger
-        from eeg_pipeline.analysis.behavior.orchestration import _cache
         import time
-        
-        # Clear cache at pipeline entry point to prevent stale data
-        _cache.clear()
         
         task = task or self.config.get("project.task", "thermalactive")
         progress = ensure_progress_reporter(kwargs.get("progress"))
@@ -569,6 +566,8 @@ class BehaviorPipeline(PipelineBase):
             also_save_csv=also_save_csv,
             overwrite=overwrite,
         )
+        # Isolated runtime per subject prevents cross-subject cache leakage.
+        setattr(ctx, "_behavior_runtime", create_behavior_runtime())
         
         results = BehaviorPipelineResults(subject=subject)
         

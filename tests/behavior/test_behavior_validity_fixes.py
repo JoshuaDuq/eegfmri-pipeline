@@ -68,8 +68,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        orch._cache.clear()
-        orch._cache._trial_table_df = base_df
+        runtime = orch.create_behavior_runtime()
+        setattr(ctx, "_behavior_runtime", runtime)
+        runtime.cache._trial_table_df = base_df
 
         with patch(
             "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
@@ -1005,7 +1006,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(design.targets, ["pain_residual", "rating", "temperature"])
 
     def test_trial_table_stage_reuses_cached_output_when_input_hash_matches(self):
-        from eeg_pipeline.analysis.behavior.orchestration import _cache, stage_trial_table
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            create_behavior_runtime,
+            stage_trial_table,
+        )
         from eeg_pipeline.utils.data.trial_table import compute_trial_table_schema_hash
 
         cfg = DotConfig({"behavior_analysis": {"trial_table": {"format": "tsv"}}})
@@ -1023,7 +1027,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             encoding="utf-8",
         )
 
-        _cache.clear()
+        runtime = create_behavior_runtime()
+        setattr(ctx, "_behavior_runtime", runtime)
         with patch(
             "eeg_pipeline.analysis.behavior.orchestration._compute_trial_table_input_hash",
             return_value="abc",
@@ -1035,7 +1040,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(resolved, out_path)
 
     def test_trial_table_contract_validation_rejects_schema_mismatch(self):
-        from eeg_pipeline.analysis.behavior.orchestration import _cache
+        from eeg_pipeline.analysis.behavior.orchestration import create_behavior_runtime
 
         cfg = DotConfig({"behavior_analysis": {"trial_table": {"format": "tsv"}}})
         ctx = self._ctx(cfg)
@@ -1047,9 +1052,10 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             encoding="utf-8",
         )
 
-        _cache.clear()
+        runtime = create_behavior_runtime()
+        setattr(ctx, "_behavior_runtime", runtime)
         with self.assertRaises(ValueError):
-            _cache.get_trial_table(ctx)
+            runtime.cache.get_trial_table(ctx)
 
     def test_write_trial_table_uses_canonical_all_name_for_multi_feature_selection(self):
         from eeg_pipeline.analysis.behavior.orchestration import TrialTableResult, write_trial_table
