@@ -23,6 +23,7 @@ class TestCliInfoHelp(unittest.TestCase):
         args = parser.parse_args(["info", "subjects"])
         self.assertEqual(args.command, "info")
         self.assertEqual(args.mode, "subjects")
+        self.assertEqual(args.source, "all")
 
 
 if __name__ == "__main__":
