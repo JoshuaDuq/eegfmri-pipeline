@@ -66,21 +66,21 @@ var behaviorComputations = []Computation{
 	// Data Preparation
 	{"trial_table", "Trial Table", "Build canonical per-trial analysis table", "DataPrep"},
 	{"lag_features", "Lag Features", "Add temporal dynamics (prev_*, delta_*) for habituation", "DataPrep"},
-	{"pain_residual", "Pain Residual + Diagnostics", "Compute pain_residual and temperature model diagnostics", "DataPrep"},
+	{"pain_residual", "Residual + Diagnostics", "Compute residualized outcome and predictor model diagnostics", "DataPrep"},
 
 	// Core Analyses
-	{"correlations", "Correlations", "EEG-rating correlations with bootstrap CIs", "Core"},
+	{"correlations", "Correlations", "EEG-outcome correlations with bootstrap CIs", "Core"},
 	{"multilevel_correlations", "Group Multilevel Correlations", "Group-level correlations with block-restricted permutations", "Core"},
 	{"regression", "Regression", "Feature regression with optional permutation + model sensitivity", "Core"},
 	{"models", "Model Families", "Per-feature model families (OLS/robust/quantile/logit)", "Core"},
-	{"condition", "Condition Comparison", "Compare conditions (e.g., pain vs non-pain)", "Core"},
+	{"condition", "Condition Comparison", "Compare conditions (e.g., condition A vs condition B)", "Core"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis", "Core"},
-	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity (temperature→rating slope)", "Core"},
+	{"pain_sensitivity", "Predictor Sensitivity", "Individual sensitivity (predictor→outcome slope)", "Core"},
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests", "Core"},
 
 	// Advanced/Causal Analyses
-	{"mediation", "Mediation Analysis", "Path analysis: does EEG mediate temperature→rating?", "Advanced"},
-	{"moderation", "Moderation Analysis", "Does EEG moderate the temperature→rating effect?", "Advanced"},
+	{"mediation", "Mediation Analysis", "Path analysis: does EEG mediate predictor→outcome?", "Advanced"},
+	{"moderation", "Moderation Analysis", "Does EEG moderate the predictor→outcome effect?", "Advanced"},
 	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling (group-level)", "Advanced"},
 
 	// Quality & Validation
@@ -406,7 +406,7 @@ var computationApplicableFeatures = map[string][]string{
 	"correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Multilevel correlations uses the same features as correlations (group-level)
 	"multilevel_correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	// Pain sensitivity uses the same features as correlations
+	// Predictor sensitivity uses the same features as correlations
 	"pain_sensitivity": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Condition comparison uses trial-level features
 	"condition": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
@@ -621,6 +621,8 @@ const (
 	textFieldTemporalTargetColumn
 	textFieldTfHeatmapFreqs
 	textFieldRunAdjustmentColumn
+	textFieldBehaviorOutcomeColumn
+	textFieldBehaviorPredictorColumn
 	textFieldPainResidualCrossfitGroupColumn
 	textFieldClusterConditionColumn
 	textFieldClusterConditionValues
@@ -1700,7 +1702,7 @@ type Model struct {
 	sourceLocFmriCondAValue               string   // Condition A value (e.g., "temp49p3", "1")
 	sourceLocFmriCondBColumn              string   // Condition B column
 	sourceLocFmriCondBValue               string   // Condition B value
-	sourceLocFmriConditions               []string // Discovered conditions from fMRI events files (for backward compat)
+	sourceLocFmriConditions               []string // Discovered conditions from fMRI events files
 	sourceLocFmriCondIdx1                 int      // Index into discovered conditions for Condition A
 	sourceLocFmriCondIdx2                 int      // Index into discovered conditions for Condition B
 	sourceLocFmriContrastFormula          string   // Custom formula (e.g., "pain_high - pain_low")
@@ -1799,17 +1801,19 @@ type Model struct {
 	tfHeatmapTimeResMs int    // Time resolution in ms
 
 	// Behavior pipeline advanced config
-	correlationMethod     string  // "spearman" or "pearson"
-	robustCorrelation     int     // 0=none, 1=percentage_bend, 2=winsorized, 3=shepherd
-	bootstrapSamples      int     // 0 = disabled, 1000+ recommended
-	nPermutations         int     // For cluster tests
-	rngSeed               int     // 0 = use project default
-	controlTemperature    bool    // Include temperature as covariate
-	controlTrialOrder     bool    // Include trial order as covariate
-	behaviorMinSamples    int     // 0=unset; behavior_analysis.min_samples.default
-	fdrAlpha              float64 // FDR correction threshold
-	behaviorConfigSection int
-	behaviorNJobs         int // -1 = all
+	correlationMethod       string  // "spearman" or "pearson"
+	robustCorrelation       int     // 0=none, 1=percentage_bend, 2=winsorized, 3=shepherd
+	bootstrapSamples        int     // 0 = disabled, 1000+ recommended
+	nPermutations           int     // For cluster tests
+	rngSeed                 int     // 0 = use project default
+	controlTemperature      bool    // Include temperature as covariate
+	controlTrialOrder       bool    // Include trial order as covariate
+	behaviorOutcomeColumn   string  // Canonical outcome column (blank=auto)
+	behaviorPredictorColumn string  // Canonical predictor column (blank=auto)
+	behaviorMinSamples      int     // 0=unset; behavior_analysis.min_samples.default
+	fdrAlpha                float64 // FDR correction threshold
+	behaviorConfigSection   int
+	behaviorNJobs           int // -1 = all
 
 	behaviorComputeChangeScores  bool
 	behaviorComputeBayesFactors  bool
@@ -2803,17 +2807,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		qualityLineNoiseWidthHz:   1.0,
 		qualityLineNoiseHarmonics: 3,
 		// Behavior defaults
-		correlationMethod:     "spearman",
-		robustCorrelation:     0,
-		bootstrapSamples:      1000,
-		nPermutations:         1000,
-		rngSeed:               0,
-		controlTemperature:    true,
-		controlTrialOrder:     true,
-		behaviorMinSamples:    0,
-		fdrAlpha:              0.05,
-		behaviorConfigSection: 0,
-		behaviorNJobs:         -1,
+		correlationMethod:       "spearman",
+		robustCorrelation:       0,
+		bootstrapSamples:        1000,
+		nPermutations:           1000,
+		rngSeed:                 0,
+		controlTemperature:      true,
+		controlTrialOrder:       true,
+		behaviorOutcomeColumn:   "",
+		behaviorPredictorColumn: "",
+		behaviorMinSamples:      0,
+		fdrAlpha:                0.05,
+		behaviorConfigSection:   0,
+		behaviorNJobs:           -1,
 
 		behaviorComputeChangeScores:        true,
 		behaviorComputeBayesFactors:        false,
@@ -3632,12 +3638,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriTrialSigScopeTrialTypes = ""
 		m.fmriTrialSigScopeStimPhases = "" // no default scoping
 
-		// Backward-compat: older configs used modeIndex 2=lss.
-		// New mode options are 0=first-level, 1=trial-signatures, with method selected separately.
-		if m.modeIndex == 2 {
-			m.modeIndex = 1
-			m.fmriTrialSigMethodIndex = 1 // lss
-		}
 		if m.modeIndex < 0 || m.modeIndex >= len(m.modeOptions) {
 			m.modeIndex = 0
 		}

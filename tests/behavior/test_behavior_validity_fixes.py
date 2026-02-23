@@ -743,7 +743,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         parsed = BehaviorPipelineConfig.from_config(cfg)
         self.assertFalse(parsed.run_validation)
 
-    def test_behavior_pipeline_config_rejects_conflicting_correlation_method_keys(self):
+    def test_behavior_pipeline_config_uses_canonical_correlation_method_key(self):
         from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
 
         cfg = DotConfig(
@@ -754,8 +754,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 }
             }
         )
-        with self.assertRaises(ValueError):
-            BehaviorPipelineConfig.from_config(cfg)
+        parsed = BehaviorPipelineConfig.from_config(cfg)
+        self.assertEqual(parsed.method, "spearman")
 
     def test_behavior_pipeline_config_rejects_unknown_robust_method(self):
         from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
@@ -1452,6 +1452,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=pd.DataFrame({"trial_index": [0.0, 1.0]}),
             temperature_series=pd.Series([45.0, 46.0]),
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1498,6 +1499,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=None,
             temperature_series=None,
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1544,6 +1546,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=None,
             temperature_series=None,
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1589,6 +1592,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=None,
             temperature_series=None,
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1631,6 +1635,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             targets=["rating"],
             cov_df=pd.DataFrame({"trial_index": [0.0, 1.0, 0.0, 1.0]}),
             temperature_series=pd.Series([44.0, 44.5, 45.0, 45.5]),
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             groups_for_perm=None,
@@ -1665,6 +1670,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             df_trials=df_trials,
             cov_df=None,
             temperature_series=None,
+            predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
             method="spearman",

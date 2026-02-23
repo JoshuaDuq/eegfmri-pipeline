@@ -212,7 +212,7 @@ class TestBehaviorGapfill(unittest.TestCase):
 
             self.assertIsNone(_resolve_behavior_computation_flags(None))
 
-            cfg = DotConfig({"behavior_analysis": {"correlation_method": "pearson", "robust_correlation": " winsorized "}})
+            cfg = DotConfig({"behavior_analysis": {"statistics": {"correlation_method": "pearson"}, "robust_correlation": " winsorized "}})
             pcfg = BehaviorPipelineConfig.from_config(cfg)
             self.assertEqual(pcfg.method, "pearson")
             self.assertEqual(pcfg.robust_method, "winsorized")

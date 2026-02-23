@@ -57,6 +57,18 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--rng-seed", type=int, default=None)
     compute_group.add_argument("--n-jobs", type=int, default=None)
     compute_group.add_argument("--min-samples", type=int, default=None)
+    compute_group.add_argument(
+        "--predictor-column",
+        type=str,
+        default=None,
+        help="Canonical predictor column for behavior analyses (e.g., dose, intensity, temperature)",
+    )
+    compute_group.add_argument(
+        "--outcome-column",
+        type=str,
+        default=None,
+        help="Canonical outcome column for behavior analyses (e.g., rating, arousal, confidence)",
+    )
     compute_group.add_argument("--control-temperature", action="store_true", default=None)
     compute_group.add_argument("--no-control-temperature", action="store_false", dest="control_temperature")
     compute_group.add_argument("--control-trial-order", action="store_true", default=None)
@@ -322,7 +334,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     influence_group.add_argument("--influence-cooks-threshold", type=float, default=None)
     influence_group.add_argument("--influence-leverage-threshold", type=float, default=None)
 
-    pain_sensitivity_group = parser.add_argument_group("Pain sensitivity options")
+    pain_sensitivity_group = parser.add_argument_group("Predictor sensitivity options")
     pain_sensitivity_group.add_argument("--pain-sensitivity-min-trials", type=int, default=None)
     pain_sensitivity_group.add_argument("--pain-sensitivity-primary-unit", choices=["trial", "run_mean"], default=None)
     pain_sensitivity_group.add_argument("--pain-sensitivity-permutations", type=int, default=None)
@@ -476,6 +488,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     temporal_group.add_argument("--temporal-correction-method", choices=["fdr", "cluster"], default=None)
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
+    temporal_group.add_argument("--temporal-freqs-hz", nargs="+", type=float, default=None, help="Frequency bins for temporal TF analyses (Hz)")
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-max-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-smooth-window-ms", type=int, default=None)
@@ -503,14 +516,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     temporal_group.add_argument("--temporal-erds-baseline-min", type=float, default=None, help="ERDS baseline window start (seconds)")
     temporal_group.add_argument("--temporal-erds-baseline-max", type=float, default=None, help="ERDS baseline window end (seconds)")
     temporal_group.add_argument("--temporal-erds-method", choices=["percent", "zscore"], default=None, help="ERDS computation method")
-    
-    # Time-frequency heatmap options
-    tfheatmap_group = parser.add_argument_group("Time-frequency heatmap options")
-    tfheatmap_group.add_argument("--tf-heatmap-enabled", action="store_true", default=None, help="Enable TF heatmap computation")
-    tfheatmap_group.add_argument("--no-tf-heatmap-enabled", action="store_false", dest="tf_heatmap_enabled", help="Disable TF heatmap computation")
-    tfheatmap_group.add_argument("--tf-heatmap-freqs", nargs="+", type=float, default=None, help="Frequencies for TF heatmap")
-    tfheatmap_group.add_argument("--tf-heatmap-time-resolution-ms", type=int, default=None, help="Time resolution for TF heatmap (ms)")
-    
     
     # Cluster-specific options
     cluster_group = parser.add_argument_group("Cluster permutation options")

@@ -239,7 +239,14 @@ def stage_temporal_stats_impl(
         normalized_records = []
         method = "spearman" if ctx.use_spearman else "pearson"
         method_label = format_correlation_method_label_fn(method, None)
-        target_label = str(get_config_value(ctx.config, "behavior_analysis.temporal.target_column", "") or "").strip() or "rating"
+        target_label = str(
+            get_config_value(
+                ctx.config,
+                "behavior_analysis.temporal.target_column",
+                get_config_value(ctx.config, "behavior_analysis.outcome_column", "") or "rating",
+            )
+            or ""
+        ).strip() or "rating"
         for _, row in df_temporal.iterrows():
             normalized_records.append(
                 {

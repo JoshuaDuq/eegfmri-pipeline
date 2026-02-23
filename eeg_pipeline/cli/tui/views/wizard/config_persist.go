@@ -2,7 +2,6 @@ package wizard
 
 import (
 	"encoding/json"
-	"strings"
 )
 
 // ExportConfig exports all advanced configuration options to a map for persistence.
@@ -423,6 +422,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["temporalERDSMethod"] = m.temporalERDSMethod
 	cfg["controlTemperature"] = m.controlTemperature
 	cfg["controlTrialOrder"] = m.controlTrialOrder
+	cfg["behaviorOutcomeColumn"] = m.behaviorOutcomeColumn
+	cfg["behaviorPredictorColumn"] = m.behaviorPredictorColumn
 	cfg["behaviorMinSamples"] = m.behaviorMinSamples
 	cfg["behaviorComputeChangeScores"] = m.behaviorComputeChangeScores
 	cfg["behaviorComputeBayesFactors"] = m.behaviorComputeBayesFactors
@@ -1626,6 +1627,8 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.temporalERDSMethod = getInt("temporalERDSMethod", m.temporalERDSMethod)
 	m.controlTemperature = getBool("controlTemperature", m.controlTemperature)
 	m.controlTrialOrder = getBool("controlTrialOrder", m.controlTrialOrder)
+	m.behaviorOutcomeColumn = getString("behaviorOutcomeColumn", m.behaviorOutcomeColumn)
+	m.behaviorPredictorColumn = getString("behaviorPredictorColumn", m.behaviorPredictorColumn)
 	m.behaviorMinSamples = getInt("behaviorMinSamples", m.behaviorMinSamples)
 	m.behaviorComputeChangeScores = getBool("behaviorComputeChangeScores", m.behaviorComputeChangeScores)
 	m.behaviorComputeBayesFactors = getBool("behaviorComputeBayesFactors", m.behaviorComputeBayesFactors)
@@ -1641,12 +1644,6 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.featureQCMaxMissingPct = getFloat("featureQCMaxMissingPct", m.featureQCMaxMissingPct)
 	m.featureQCMinVariance = getFloat("featureQCMinVariance", m.featureQCMinVariance)
 	m.featureQCCheckWithinRunVariance = getBool("featureQCCheckWithinRunVariance", m.featureQCCheckWithinRunVariance)
-	// Backward-compat: we accept older persisted keys but ignore them.
-	_ = getBool("trialTableIncludeFeatures", true)
-	_ = getBool("trialTableIncludeCovars", true)
-	_ = getBool("trialTableIncludeEvents", true)
-	_ = getString("trialTableExtraEventCols", "")
-	_ = getFloat("trialTableHighMissingFrac", 0.5)
 
 	// Pain residual
 	m.painResidualEnabled = getBool("painResidualEnabled", m.painResidualEnabled)
@@ -1754,17 +1751,6 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.correlationsPermutationPrimary = getBool("correlationsPermutationPrimary", m.correlationsPermutationPrimary)
 	m.groupLevelBlockPermutation = getBool("groupLevelBlockPermutation", m.groupLevelBlockPermutation)
 	m.groupLevelTarget = getString("groupLevelTarget", m.groupLevelTarget)
-	// Backward compatibility for older saved configs using integer enum.
-	if strings.TrimSpace(m.groupLevelTarget) == "" {
-		switch getInt("groupLevelTarget", -1) {
-		case 0:
-			m.groupLevelTarget = "rating"
-		case 1:
-			m.groupLevelTarget = "pain_residual"
-		case 2:
-			m.groupLevelTarget = "temperature"
-		}
-	}
 	m.groupLevelControlTemperature = getBool("groupLevelControlTemperature", m.groupLevelControlTemperature)
 	m.groupLevelControlTrialOrder = getBool("groupLevelControlTrialOrder", m.groupLevelControlTrialOrder)
 	m.groupLevelControlRunEffects = getBool("groupLevelControlRunEffects", m.groupLevelControlRunEffects)

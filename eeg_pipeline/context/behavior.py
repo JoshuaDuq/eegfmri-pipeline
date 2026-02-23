@@ -22,7 +22,11 @@ import pandas as pd
 
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.utils.analysis.stats.correlation import CorrelationRecord
-from eeg_pipeline.utils.data.columns import pick_target_column
+from eeg_pipeline.utils.data.columns import (
+    pick_target_column,
+    resolve_outcome_column,
+    resolve_predictor_column,
+)
 
 
 ###################################################################
@@ -307,8 +311,6 @@ class BehaviorContext:
                 meta_dir = path.parent / "metadata"
                 candidates = [
                     meta_dir / f"{path.stem}.json",
-                    # Backward-compat: older runs wrote JSON manifests with a .parquet suffix by mistake.
-                    meta_dir / f"{path.stem}.parquet",
                 ]
                 for meta_path in candidates:
                     if not meta_path.exists():
@@ -457,6 +459,10 @@ class BehaviorContext:
         """Find rating column in aligned_events."""
         if self.aligned_events is None:
             return None
+
+        resolved = resolve_outcome_column(self.aligned_events, self.config)
+        if resolved is not None and resolved in self.aligned_events.columns:
+            return resolved
 
         rating_columns = (
             list(self.config.get("event_columns.rating", []) or [])
@@ -756,11 +762,19 @@ class BehaviorContext:
 
     def _extract_temperature(self) -> None:
         """Extract temperature data from aligned events."""
-        from eeg_pipeline.utils.data.covariates import extract_temperature_data
+        if self.aligned_events is None:
+            self.temperature, self.temperature_column = None, None
+            return
 
-        self.temperature, self.temperature_column = extract_temperature_data(
-            self.aligned_events, self.config
+        resolved = resolve_predictor_column(self.aligned_events, self.config)
+        if resolved is None or resolved not in self.aligned_events.columns:
+            self.temperature, self.temperature_column = None, None
+            return
+
+        self.temperature = pd.to_numeric(
+            self.aligned_events[resolved], errors="coerce"
         )
+        self.temperature_column = str(resolved)
 
     def _build_raw_covariate_matrix(self) -> Optional[pd.DataFrame]:
         """Build raw covariate matrix from aligned events."""

@@ -518,7 +518,9 @@ def split_by_condition(
     - config.behavior_analysis.condition.compare_column: explicit events column override (optional)
     - config.behavior_analysis.condition.compare_values: values to compare [val1, val2]
     
-    If compare_values is not specified, defaults to [1, 0] for backward compatibility.
+    If compare_values is not specified:
+    - Uses [1, 0] when a binary-coded condition column is detected.
+    - Otherwise auto-selects the first two observed condition values.
     Returns (group1_mask, group2_mask, n_group1, n_group2).
     """
     condition_column = _get_condition_column(events_df, config)
@@ -553,6 +555,33 @@ def split_by_condition(
         
         return mask1.to_numpy(), mask2.to_numpy(), n_group1, n_group2
     
+    condition_numeric = pd.to_numeric(condition_series, errors="coerce")
+    numeric_values = {
+        float(v)
+        for v in pd.Series(condition_numeric).dropna().unique().tolist()
+    }
+    if {0.0, 1.0}.issubset(numeric_values):
+        return _split_by_pain_binary(condition_series, condition_column, logger)
+
+    unique_values = [v for v in pd.Series(condition_series).dropna().unique().tolist()]
+    if len(unique_values) >= 2:
+        value1, value2 = unique_values[0], unique_values[1]
+        logger.info(
+            "Auto-selected condition values (no compare_values set): %s vs %s (column: %s)",
+            value1,
+            value2,
+            condition_column,
+        )
+        mask1, mask2 = _create_masks_from_compare_values(
+            condition_series,
+            value1,
+            value2,
+            logger,
+        )
+        n_group1 = int(mask1.sum())
+        n_group2 = int(mask2.sum())
+        return mask1.to_numpy(), mask2.to_numpy(), n_group1, n_group2
+
     return _split_by_pain_binary(condition_series, condition_column, logger)
 
 

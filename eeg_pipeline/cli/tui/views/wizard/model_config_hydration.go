@@ -250,6 +250,16 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.behaviorMinSamples = n
 			}
 		}},
+		{key: "behavior_analysis.outcome_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.behaviorOutcomeColumn = s
+			}
+		}},
+		{key: "behavior_analysis.predictor_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.behaviorPredictorColumn = s
+			}
+		}},
 		{key: "behavior_analysis.control_temperature", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.controlTemperature = b
@@ -992,7 +1002,7 @@ func (m Model) behaviorSections() []behaviorSection {
 		{Key: "general", Label: "General", Enabled: true},
 		{Key: "trial_table", Label: "Trial Table", Enabled: m.isComputationSelected("trial_table")},
 		{Key: "correlations", Label: "Correlations", Enabled: m.isComputationSelected("correlations")},
-		{Key: "pain_sensitivity", Label: "Pain Sensitivity", Enabled: m.isComputationSelected("pain_sensitivity")},
+		{Key: "pain_sensitivity", Label: "Predictor Sensitivity", Enabled: m.isComputationSelected("pain_sensitivity")},
 		{Key: "regression", Label: "Regression", Enabled: m.isComputationSelected("regression")},
 		{Key: "stability", Label: "Stability", Enabled: m.isComputationSelected("stability")},
 		{Key: "consistency", Label: "Consistency", Enabled: m.isComputationSelected("consistency")},

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
@@ -105,6 +104,8 @@ _GENERAL_OVERRIDE_RULES = (
     ConfigOverrideRule("perm_scheme", "behavior_analysis.permutation.scheme", _to_lower_stripped),
     ConfigOverrideRule("n_jobs", "behavior_analysis.n_jobs", _to_int),
     ConfigOverrideRule("min_samples", "behavior_analysis.min_samples.default", _to_int),
+    ConfigOverrideRule("predictor_column", "behavior_analysis.predictor_column", _to_stripped),
+    ConfigOverrideRule("outcome_column", "behavior_analysis.outcome_column", _to_stripped),
     ConfigOverrideRule("control_temperature", "behavior_analysis.control_temperature", _to_bool),
     ConfigOverrideRule("control_trial_order", "behavior_analysis.control_trial_order", _to_bool),
     ConfigOverrideRule("run_adjustment", "behavior_analysis.run_adjustment.enabled", _to_bool),
@@ -455,6 +456,7 @@ _TEMPORAL_OVERRIDE_RULES = (
     ),
     ConfigOverrideRule("temporal_include_tf_grid", "behavior_analysis.temporal.include_tf_grid", _to_bool),
     ConfigOverrideRule("temporal_time_resolution_ms", "behavior_analysis.temporal.time_resolution_ms", _to_int),
+    ConfigOverrideRule("temporal_freqs_hz", "behavior_analysis.temporal.freqs_hz", _to_list),
     ConfigOverrideRule("temporal_smooth_window_ms", "behavior_analysis.temporal.smooth_window_ms", _to_int),
 )
 
@@ -579,14 +581,11 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     _apply_override_rules(args, config, _PAIN_RESIDUAL_OVERRIDE_RULES)
 
     # Temperature-model diagnostics are consumed by behavior_analysis.temperature_models.*
-    # Keep mirrored keys under pain_residual for backward compatibility.
     if getattr(args, "pain_residual_model_compare_enabled", None) is not None:
         enabled = bool(args.pain_residual_model_compare_enabled)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.enabled", enabled)
         _set_nested_config_value(config, "behavior_analysis.temperature_models.model_comparison.enabled", enabled)
     if getattr(args, "pain_residual_model_compare_min_samples", None) is not None:
         min_samples = int(args.pain_residual_model_compare_min_samples)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.min_samples", min_samples)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.model_comparison.min_samples",
@@ -594,7 +593,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         )
     if getattr(args, "pain_residual_model_compare_poly_degrees", None) is not None:
         poly_degrees = list(args.pain_residual_model_compare_poly_degrees)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.model_comparison.poly_degrees", poly_degrees)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.model_comparison.poly_degrees",
@@ -603,11 +601,9 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     if getattr(args, "pain_residual_breakpoint_enabled", None) is not None:
         enabled = bool(args.pain_residual_breakpoint_enabled)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.enabled", enabled)
         _set_nested_config_value(config, "behavior_analysis.temperature_models.breakpoint_test.enabled", enabled)
     if getattr(args, "pain_residual_breakpoint_min_samples", None) is not None:
         min_samples = int(args.pain_residual_breakpoint_min_samples)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.min_samples", min_samples)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.breakpoint_test.min_samples",
@@ -615,7 +611,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         )
     if getattr(args, "pain_residual_breakpoint_candidates", None) is not None:
         candidates = int(args.pain_residual_breakpoint_candidates)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.n_candidates", candidates)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.breakpoint_test.n_candidates",
@@ -623,7 +618,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         )
     if getattr(args, "pain_residual_breakpoint_quantile_low", None) is not None:
         q_low = float(args.pain_residual_breakpoint_quantile_low)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_low", q_low)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.breakpoint_test.quantile_low",
@@ -631,7 +625,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         )
     if getattr(args, "pain_residual_breakpoint_quantile_high", None) is not None:
         q_high = float(args.pain_residual_breakpoint_quantile_high)
-        _set_nested_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_high", q_high)
         _set_nested_config_value(
             config,
             "behavior_analysis.temperature_models.breakpoint_test.quantile_high",
@@ -748,41 +741,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     _apply_override_rules(args, config, _TEMPORAL_ERDS_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _TEMPORAL_FEATURES_OVERRIDE_RULES)
-
-    # Deprecated TF-heatmap aliases now map to canonical temporal settings.
-    tf_flag_used = _has_any_arg(
-        args,
-        (
-            "tf_heatmap_enabled",
-            "tf_heatmap_freqs",
-            "tf_heatmap_time_resolution_ms",
-        ),
-    )
-    if tf_flag_used:
-        warnings.warn(
-            "TF-heatmap flags are deprecated. Use temporal options "
-            "(--temporal-include-tf-grid, --temporal-time-resolution-ms) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if getattr(args, "tf_heatmap_enabled", None) is not None:
-            _set_nested_config_value(
-                config,
-                "behavior_analysis.temporal.include_tf_grid",
-                bool(args.tf_heatmap_enabled),
-            )
-        if getattr(args, "tf_heatmap_time_resolution_ms", None) is not None:
-            _set_nested_config_value(
-                config,
-                "behavior_analysis.temporal.time_resolution_ms",
-                int(args.tf_heatmap_time_resolution_ms),
-            )
-        if getattr(args, "tf_heatmap_freqs", None) is not None:
-            _set_nested_config_value(
-                config,
-                "behavior_analysis.temporal.freqs_hz",
-                [float(v) for v in (args.tf_heatmap_freqs or [])],
-            )
 
     _apply_override_rules(args, config, _CLUSTER_OVERRIDE_RULES)
 

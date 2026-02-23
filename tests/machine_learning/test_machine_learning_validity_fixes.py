@@ -685,7 +685,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             self.assertIn("test_index", pred_df.columns)
             self.assertIn("in_interval", pred_df.columns)
 
-            with open(Path(td) / "uncertainty_metrics.json", "r", encoding="utf-8") as f:
+            with open(Path(td) / "metrics" / "uncertainty_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
             self.assertIn("subject_level", metrics)
             self.assertIn("mean_coverage", metrics["subject_level"])
@@ -805,7 +805,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                     classification_model="svm",
                 )
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
         self.assertAlmostEqual(float(metrics["brier_score"]), 0.01, places=6)
         self.assertAlmostEqual(float(metrics["expected_calibration_error"]), 0.1, places=6)
@@ -873,7 +873,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                     classification_model="svm",
                 )
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
         self.assertTrue(np.isnan(float(metrics["balanced_accuracy"])))
         self.assertTrue(np.isnan(float(metrics["subject_level"]["balanced_accuracy_mean"])))
@@ -934,7 +934,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                     classification_model="svm",
                 )
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
 
         self.assertAlmostEqual(float(metrics["precision"]), 0.5, places=6)
@@ -1000,7 +1000,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     classification_model="svm",
                 )
 
-            pred_df = pd.read_csv(out_dir / "loso_predictions.tsv", sep="\t")
+            pred_df = pd.read_csv(out_dir / "data" / "loso_predictions.tsv", sep="\t")
             self.assertIn("trial_id", pred_df.columns)
             self.assertIn("fold", pred_df.columns)
             self.assertIn("model", pred_df.columns)
@@ -1088,7 +1088,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     results_root=Path(td),
                     logger=Mock(),
                 )
-            with open(out_dir / "model_comparison_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "model_comparison_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
             self.assertIn("pairwise_inference", summary)
             self.assertTrue(summary["pairwise_inference"])
@@ -1125,7 +1125,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     results_root=Path(td),
                     logger=Mock(),
                 )
-            with open(out_dir / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
             self.assertIn("delta_r2_inference", summary)
             self.assertIn("p_value", summary["delta_r2_inference"])
@@ -1701,7 +1701,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                 )
 
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
             baseline_df = pd.read_csv(out_dir / "baseline_predictions.tsv", sep="\t")
 
@@ -1797,8 +1797,8 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 captured["n_test_features"] = int(X_in.shape[1])
                 return np.asarray(X_in[:, 0], dtype=float)
 
-        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode):
-            _ = (groups_train, harmonization_mode)
+        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode, n_covariates=0):
+            _ = (groups_train, harmonization_mode, n_covariates)
             captured["harmonize_calls"] += 1
             keep = np.array([False, True], dtype=bool)
             return X_train[:, keep], X_test[:, keep], keep
@@ -2136,9 +2136,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             }
         )
 
-        def _drop_baseline_columns(X_train, X_test, groups_train, harmonization_mode):
-            _ = (groups_train, harmonization_mode)
-            keep = np.array([False, True], dtype=bool)
+        def _drop_baseline_columns(X_train, X_test, groups_train, harmonization_mode, n_covariates=0):
+            _ = (groups_train, harmonization_mode, n_covariates)
+            keep = np.array([True, False], dtype=bool)
             return X_train[:, keep], X_test[:, keep], keep
 
         with tempfile.TemporaryDirectory() as td:
@@ -2384,7 +2384,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                 )
 
-            with open(out_dir / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
 
         self.assertAlmostEqual(float(summary["mean_fold_delta_r2"]), 0.4, places=8)
@@ -2526,7 +2526,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     classification_model="svm",
                 )
 
-            with open(out_dir / "pooled_metrics.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "pooled_metrics.json", "r", encoding="utf-8") as f:
                 metrics = json.load(f)
 
         subject_level = metrics.get("subject_level", {})
@@ -2601,7 +2601,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     baseline_predictors=["temperature"],
                 )
 
-            with open(out_dir / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
 
         self.assertEqual(summary["data"]["baseline_predictors"], ["intercept_only"])
@@ -2647,7 +2647,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     results_root=Path(td),
                     logger=Mock(),
                 )
-            with open(out_dir / "model_comparison_summary.json", "r", encoding="utf-8") as f:
+            with open(out_dir / "metrics" / "model_comparison_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
 
         pairwise = summary.get("pairwise_inference", {})
@@ -2716,7 +2716,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     classification_model="lr",
                 )
 
-            pred_df = pd.read_csv(out_dir / "cv_predictions.tsv", sep="\t")
+            pred_df = pd.read_csv(out_dir / "data" / "cv_predictions.tsv", sep="\t")
 
         self.assertIn("y_prob", pred_df.columns)
         self.assertTrue(np.all(np.isfinite(pred_df["y_prob"].to_numpy(dtype=float))))
@@ -2757,8 +2757,8 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
 
         calls = {"harmonize": 0}
 
-        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode):
-            _ = (groups_train, harmonization_mode)
+        def _fake_harmonize(X_train, X_test, groups_train, harmonization_mode, n_covariates=0):
+            _ = (groups_train, harmonization_mode, n_covariates)
             calls["harmonize"] += 1
             keep = np.array([False, True], dtype=bool)
             return X_train[:, keep], X_test[:, keep], keep

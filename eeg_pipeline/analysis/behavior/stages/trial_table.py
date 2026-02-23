@@ -195,23 +195,35 @@ def stage_pain_residual_impl(
     """Compute pain residual = rating - f(temperature)."""
     _ = config
     from eeg_pipeline.utils.data.trial_table import add_pain_residual
+    from eeg_pipeline.utils.data.columns import (
+        resolve_outcome_column,
+        resolve_predictor_column,
+    )
 
     df = load_trial_table_df_fn(ctx)
     if not is_dataframe_valid_fn(df):
         ctx.logger.warning("Pain residual: trial table missing; skipping.")
         return None
 
-    required_columns = {"temperature", "rating"}
+    predictor_column = resolve_predictor_column(df, ctx.config) or "temperature"
+    outcome_column = resolve_outcome_column(df, ctx.config) or "rating"
+
+    required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df.columns)
     if missing_columns:
         ctx.logger.warning(
-            "Pain residual: requires %s columns; missing: %s. Skipping.",
+            "Residual stage requires predictor/outcome columns %s; missing: %s. Skipping.",
             required_columns,
             missing_columns,
         )
         return None
 
-    df_augmented, resid_meta = add_pain_residual(df, ctx.config)
+    df_augmented, resid_meta = add_pain_residual(
+        df,
+        ctx.config,
+        temperature_col=predictor_column,
+        rating_col=outcome_column,
+    )
 
     suffix = feature_suffix_from_context_fn(ctx)
     out_dir = get_stats_subfolder_fn(ctx, "pain_residual")

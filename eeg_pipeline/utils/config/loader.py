@@ -119,11 +119,6 @@ def _get_overrides_path(config_path: Path) -> Path:
         return Path(env_path).expanduser().resolve()
     project_root = get_project_root()
     preferred = project_root / "data" / "derivatives" / ".tui_overrides.json"
-    legacy = project_root / "eeg_pipeline" / "data" / "derivatives" / ".tui_overrides.json"
-    if preferred.exists():
-        return preferred
-    if legacy.exists():
-        return legacy
     return preferred
 
 

@@ -395,6 +395,8 @@ const (
 	// Behavior options - General extra
 	optRobustCorrelation
 	optBehaviorNJobs
+	optBehaviorOutcomeColumn
+	optBehaviorPredictorColumn
 	optComputeChangeScores
 	optComputeBayesFactors
 	optComputeLosoStability

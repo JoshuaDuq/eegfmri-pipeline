@@ -98,6 +98,67 @@ def pick_target_column(df: pd.DataFrame, *, target_columns: List[str]) -> Option
     return None
 
 
+def _get_explicit_behavior_column(
+    config: Any,
+    *,
+    key: str,
+) -> Optional[str]:
+    """Resolve an explicit behavior-analysis column key from config."""
+    if config is None or not hasattr(config, "get"):
+        return None
+    raw = config.get(key)
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    return value if value else None
+
+
+def resolve_outcome_column(
+    events_df: pd.DataFrame,
+    config: Any,
+) -> Optional[str]:
+    """Resolve behavior outcome column from explicit config, then rating aliases."""
+    explicit = _get_explicit_behavior_column(
+        config,
+        key="behavior_analysis.outcome_column",
+    )
+    if explicit and explicit in events_df.columns:
+        return explicit
+
+    if "rating" in events_df.columns:
+        return "rating"
+
+    rating_candidates = []
+    if config is not None and hasattr(config, "get"):
+        rating_candidates = list(config.get("event_columns.rating", []) or [])
+    return pick_target_column(events_df, target_columns=rating_candidates)
+
+
+def resolve_predictor_column(
+    events_df: pd.DataFrame,
+    config: Any,
+) -> Optional[str]:
+    """Resolve behavior predictor column from explicit config, then temperature aliases."""
+    explicit = _get_explicit_behavior_column(
+        config,
+        key="behavior_analysis.predictor_column",
+    )
+    if explicit and explicit in events_df.columns:
+        return explicit
+
+    if "temperature" in events_df.columns:
+        return "temperature"
+
+    temperature_candidates: List[str] = []
+    if config is not None and hasattr(config, "get"):
+        temperature_candidates = list(config.get("event_columns.temperature", []) or [])
+
+    for candidate in temperature_candidates:
+        if candidate in events_df.columns:
+            return candidate
+    return None
+
+
 __all__ = [
     "find_column_in_events",
     "find_pain_column_in_events",
@@ -107,4 +168,6 @@ __all__ = [
     "get_temperature_column_from_config",
     "get_rating_column_from_config",
     "pick_target_column",
+    "resolve_outcome_column",
+    "resolve_predictor_column",
 ]

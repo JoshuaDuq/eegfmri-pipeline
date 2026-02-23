@@ -82,6 +82,10 @@ rois: &roi_definitions
 # 3. CORE PROCESSING PIPELINE
 ###################################################################
 event_columns:
+  # Optional: restrict strict event validation to these logical groups.
+  # Keep as ["rating"] for paradigm-agnostic use; add "temperature"/"pain_binary"
+  # when those analyses are required.
+  required: ["rating"]
   temperature: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
   rating: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
   pain_binary: ["pain_binary_coded", "pain_binary", "pain"]
@@ -618,6 +622,11 @@ feature_engineering:
 
 # 4.4 Behavioral Correlation
 behavior_analysis:
+  # Canonical behavior columns used across stages. If empty, auto-resolve from
+  # event_columns.* aliases and existing trial-table columns.
+  predictor_column: ""   # e.g., stimulus intensity / dose / temperature
+  outcome_column: ""     # e.g., rating / arousal / detection score
+
   # Optional robust estimator for correlations:
   # - null/"none": standard Spearman/Pearson
   # - "percentage_bend" | "winsorized" | "shepherd"
@@ -689,6 +698,7 @@ behavior_analysis:
       enabled: true
       min_samples: 10
       poly_degrees: [2, 3]
+      spline_df_candidates: [3, 4, 5]
     breakpoint_test:
       enabled: true
       min_samples: 12
@@ -834,7 +844,7 @@ behavior_analysis:
   # Pain sensitivity computation
   pain_sensitivity:
     enabled: true
-  
+
   # Condition comparison computation
   condition:
     enabled: true
@@ -881,9 +891,6 @@ behavior_analysis:
     erds:
       baseline_window: [-0.5, -0.1]    # Baseline window for ERDS (seconds)
       method: "percent"                # ERDS computation method: "percent" or "zscore"
-  
-  # Deprecated: time_frequency_heatmap.* has been folded into temporal.*.
-  # Keep legacy keys out of new configs; the loader still supports old runs.
   
   # Cluster permutation tests
   cluster:
@@ -1047,7 +1054,7 @@ machine_learning:
   evaluation:
     ci_method: "bootstrap"               # "fixed_effects" | "bootstrap"
     bootstrap_iterations: 1000
-    subject_weighting: "equal"           # "equal" (recommended inferential unit = subject) | "trial_count" (legacy)
+    subject_weighting: "equal"           # "equal" (recommended inferential unit = subject) | "trial_count"
 
   constants:
     variance_threshold: 0.0

@@ -315,25 +315,3 @@ def run_merge_psychopy(
 
     log.info("Done. Processed %d event file(s), merged successfully: %d.", len(ev_paths), n_ok)
     return n_ok
-
-
-def merge_behavior_to_events(
-    events_tsv: Path,
-    source_root: Path,
-    event_prefixes: Optional[List[str]] = None,
-    event_types: Optional[List[str]] = None,
-    dry_run: bool = False,
-    allow_misaligned_trim: bool = False,
-    *,
-    _logger: Optional[logging.Logger] = None,
-) -> bool:
-    """Backward-compatible alias for ``merge_psychopy_to_events``."""
-    return merge_psychopy_to_events(
-        events_tsv=events_tsv,
-        source_root=source_root,
-        event_prefixes=event_prefixes,
-        event_types=event_types,
-        dry_run=dry_run,
-        allow_misaligned_trim=allow_misaligned_trim,
-        _logger=_logger,
-    )

@@ -6,7 +6,7 @@ from eeg_pipeline.cli.commands.behavior_parser import setup_behavior
 from eeg_pipeline.utils.config.loader import ConfigDict
 
 
-class TestBehaviorCliDeprecations(unittest.TestCase):
+class TestBehaviorCliTemporalOptions(unittest.TestCase):
     def _parse_behavior_compute_args(self, extra_args):
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers(dest="command")
@@ -14,13 +14,13 @@ class TestBehaviorCliDeprecations(unittest.TestCase):
         argv = ["behavior", "compute", *extra_args]
         return parser.parse_args(argv)
 
-    def test_tf_heatmap_flags_map_to_temporal_config(self):
+    def test_temporal_flags_map_to_temporal_config(self):
         args = self._parse_behavior_compute_args(
             [
-                "--no-tf-heatmap-enabled",
-                "--tf-heatmap-time-resolution-ms",
+                "--no-temporal-include-tf-grid",
+                "--temporal-time-resolution-ms",
                 "80",
-                "--tf-heatmap-freqs",
+                "--temporal-freqs-hz",
                 "4",
                 "8",
                 "13",
@@ -33,7 +33,6 @@ class TestBehaviorCliDeprecations(unittest.TestCase):
         self.assertFalse(config.get("behavior_analysis.temporal.include_tf_grid", True))
         self.assertEqual(config.get("behavior_analysis.temporal.time_resolution_ms"), 80)
         self.assertEqual(config.get("behavior_analysis.temporal.freqs_hz"), [4.0, 8.0, 13.0])
-        self.assertIsNone(config.get("behavior_analysis.time_frequency_heatmap", None))
 
 
 if __name__ == "__main__":

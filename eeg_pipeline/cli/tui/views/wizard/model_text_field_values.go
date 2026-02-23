@@ -126,6 +126,10 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.tfHeatmapFreqsSpec
 	case textFieldRunAdjustmentColumn:
 		return m.runAdjustmentColumn
+	case textFieldBehaviorOutcomeColumn:
+		return m.behaviorOutcomeColumn
+	case textFieldBehaviorPredictorColumn:
+		return m.behaviorPredictorColumn
 	case textFieldPainResidualCrossfitGroupColumn:
 		return m.painResidualCrossfitGroupColumn
 	case textFieldPainResidualSplineDfCandidates:
@@ -517,6 +521,10 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.tfHeatmapFreqsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldRunAdjustmentColumn:
 		m.runAdjustmentColumn = strings.TrimSpace(value)
+	case textFieldBehaviorOutcomeColumn:
+		m.behaviorOutcomeColumn = strings.TrimSpace(value)
+	case textFieldBehaviorPredictorColumn:
+		m.behaviorPredictorColumn = strings.TrimSpace(value)
 	case textFieldPainResidualCrossfitGroupColumn:
 		m.painResidualCrossfitGroupColumn = strings.TrimSpace(value)
 	case textFieldPainResidualSplineDfCandidates:

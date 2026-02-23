@@ -53,6 +53,12 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	if m.behaviorMinSamples > 0 {
 		args = append(args, "--min-samples", fmt.Sprintf("%d", m.behaviorMinSamples))
 	}
+	if col := strings.TrimSpace(m.behaviorOutcomeColumn); col != "" {
+		args = append(args, "--outcome-column", col)
+	}
+	if col := strings.TrimSpace(m.behaviorPredictorColumn); col != "" {
+		args = append(args, "--predictor-column", col)
+	}
 
 	appendBoolPair(m.controlTemperature, "--control-temperature", "--no-control-temperature")
 	appendBoolPair(m.controlTrialOrder, "--control-trial-order", "--no-control-trial-order")

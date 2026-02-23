@@ -16,7 +16,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		return false
 	}
 	needsInferenceSettings := hasSelectedComputation(
-		"correlations", "multilevel_correlations", "pain_sensitivity",
+		"correlations", "multilevel_correlations", "pain_sensitivity", "pain_residual",
 		"regression", "models", "stability", "influence",
 		"condition", "temporal", "cluster", "mediation", "moderation", "mixed_effects",
 	)
@@ -40,6 +40,8 @@ func (m Model) getBehaviorOptions() []optionType {
 			if hasSelectedComputation("correlations", "stability", "pain_sensitivity") {
 				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
 			}
+			// Canonical behavior columns used across analyses
+			options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
 			// Bootstrap — correlations, stability
 			if hasSelectedComputation("correlations", "stability") {
 				options = append(options, optBootstrap)

@@ -23,16 +23,26 @@ def stage_mediation_impl(
 ) -> pd.DataFrame:
     """Run mediation analysis: test if neural features mediate temperature→rating."""
     from eeg_pipeline.analysis.behavior.api import run_mediation_analysis
+    from eeg_pipeline.utils.data.columns import (
+        resolve_outcome_column,
+        resolve_predictor_column,
+    )
 
     df_trials = load_trial_table_df_fn(ctx)
     if not is_dataframe_valid_fn(df_trials):
         ctx.logger.info("Mediation: trial table missing; skipping.")
         return pd.DataFrame()
 
-    required_columns = {"temperature", "rating"}
+    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
+    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+    required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df_trials.columns)
     if missing_columns:
-        ctx.logger.warning("Mediation: requires %s columns; missing: %s. Skipping.", required_columns, missing_columns)
+        ctx.logger.warning(
+            "Mediation requires predictor/outcome columns %s; missing: %s. Skipping.",
+            required_columns,
+            missing_columns,
+        )
         return pd.DataFrame()
 
     feature_cols = get_feature_columns_fn(df_trials, ctx, "mediation")
@@ -103,9 +113,9 @@ def stage_mediation_impl(
 
     result = run_mediation_analysis(
         df_trials,
-        "temperature",
+        predictor_column,
         mediators,
-        "rating",
+        outcome_column,
         n_bootstrap=n_bootstrap,
         n_permutations=n_permutations,
         groups=groups_for_resampling,
@@ -188,6 +198,10 @@ def stage_moderation_impl(
 ) -> pd.DataFrame:
     """Run moderation analysis: feature moderates temperature→rating relationship."""
     from eeg_pipeline.utils.analysis.stats.moderation import run_moderation_analysis
+    from eeg_pipeline.utils.data.columns import (
+        resolve_outcome_column,
+        resolve_predictor_column,
+    )
 
     suffix = feature_suffix_from_context_fn(ctx)
     method_label = getattr(config, "method_label", "")
@@ -198,10 +212,16 @@ def stage_moderation_impl(
         ctx.logger.warning("Moderation: trial table missing; skipping.")
         return pd.DataFrame()
 
-    required_columns = {"temperature", "rating"}
+    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
+    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+    required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df_trials.columns)
     if missing_columns:
-        ctx.logger.warning("Moderation: requires %s columns; missing: %s. Skipping.", required_columns, missing_columns)
+        ctx.logger.warning(
+            "Moderation requires predictor/outcome columns %s; missing: %s. Skipping.",
+            required_columns,
+            missing_columns,
+        )
         return pd.DataFrame()
 
     feature_cols = get_feature_columns_fn(df_trials, ctx, "moderation")
@@ -267,14 +287,14 @@ def stage_moderation_impl(
     else:
         ctx.logger.info("Moderation: testing all %d features (no limit)", len(feature_cols))
 
-    temperature = pd.to_numeric(df_trials["temperature"], errors="coerce").to_numpy()
-    rating = pd.to_numeric(df_trials["rating"], errors="coerce").to_numpy()
+    predictor = pd.to_numeric(df_trials[predictor_column], errors="coerce").to_numpy()
+    outcome = pd.to_numeric(df_trials[outcome_column], errors="coerce").to_numpy()
 
     records: List[Dict[str, Any]] = []
     for feat in feature_cols:
         feature_values = pd.to_numeric(df_trials[feat], errors="coerce").to_numpy()
 
-        valid_mask = np.isfinite(temperature) & np.isfinite(rating) & np.isfinite(feature_values)
+        valid_mask = np.isfinite(predictor) & np.isfinite(outcome) & np.isfinite(feature_values)
         n_valid = int(valid_mask.sum())
         if n_valid < min_samples:
             continue
@@ -286,13 +306,13 @@ def stage_moderation_impl(
             continue
 
         result = run_moderation_analysis(
-            X=temperature[valid_mask],
+            X=predictor[valid_mask],
             W=feature_values[valid_mask],
-            Y=rating[valid_mask],
+            Y=outcome[valid_mask],
             n_perm=n_permutations,
-            x_label="temperature",
+            x_label=predictor_column,
             w_label=str(feat),
-            y_label="rating",
+            y_label=outcome_column,
             center_predictors=True,
             rng=getattr(ctx, "rng", None),
             groups=groups_valid,
@@ -304,6 +324,7 @@ def stage_moderation_impl(
                 "feature": str(feat),
                 "feature_type": feature_type_resolver_fn(str(feat), ctx.config),
                 "n": result.n,
+                "b1_predictor": result.b1,
                 "b1_temperature": result.b1,
                 "b2_feature": result.b2,
                 "b3_interaction": result.b3,

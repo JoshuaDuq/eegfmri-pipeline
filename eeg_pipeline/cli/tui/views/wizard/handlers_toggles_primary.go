@@ -1685,6 +1685,22 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startTextEdit(textFieldRunAdjustmentColumn)
 		}
 		m.useDefaultAdvanced = false
+	case optBehaviorOutcomeColumn:
+		if len(m.GetAvailableColumns()) > 0 {
+			m.expandedOption = expandedBehaviorOutcomeColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldBehaviorOutcomeColumn)
+		}
+		m.useDefaultAdvanced = false
+	case optBehaviorPredictorColumn:
+		if len(m.GetAvailableColumns()) > 0 {
+			m.expandedOption = expandedBehaviorPredictorColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldBehaviorPredictorColumn)
+		}
+		m.useDefaultAdvanced = false
 	case optRunAdjustmentIncludeInCorrelations:
 		m.runAdjustmentIncludeInCorrelations = !m.runAdjustmentIncludeInCorrelations
 		m.useDefaultAdvanced = false

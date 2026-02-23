@@ -181,6 +181,10 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "compute",
                 "--global-n-bootstrap",
                 "2500",
+                "--predictor-column",
+                "stim_temp",
+                "--outcome-column",
+                "vas_custom",
                 "--perm-scheme",
                 "circular_shift",
                 "--stats-temp-control",
@@ -240,6 +244,8 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         _configure_behavior_compute_mode(args, config)
 
         self.assertEqual(config.get("behavior_analysis.statistics.default_n_bootstrap"), 2500)
+        self.assertEqual(config.get("behavior_analysis.predictor_column"), "stim_temp")
+        self.assertEqual(config.get("behavior_analysis.outcome_column"), "vas_custom")
         self.assertEqual(config.get("behavior_analysis.permutation.scheme"), "circular_shift")
         self.assertEqual(config.get("behavior_analysis.statistics.temperature_control"), "spline")
         self.assertEqual(config.get("behavior_analysis.statistics.base_seed"), 42)

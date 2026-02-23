@@ -50,9 +50,14 @@ def stage_stability_impl(
         ctx.logger.info("Stability: no run/block column available; skipping.")
         return pd.DataFrame()
 
+    from eeg_pipeline.utils.data.columns import resolve_outcome_column
+
     outcome = str(get_config_value(ctx.config, "behavior_analysis.stability.outcome", "")).strip().lower()
     if not outcome:
-        outcome = "pain_residual" if "pain_residual" in df_trials.columns else "rating"
+        if "pain_residual" in df_trials.columns:
+            outcome = "pain_residual"
+        else:
+            outcome = resolve_outcome_column(df_trials, ctx.config) or "rating"
 
     feature_cols = get_feature_columns_fn(df_trials, ctx)
 

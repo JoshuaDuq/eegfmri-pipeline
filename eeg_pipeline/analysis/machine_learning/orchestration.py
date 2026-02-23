@@ -10,7 +10,7 @@ Design
 - Targets/covariates come from clean events.tsv.
 - Outer CV is group-aware (typically LOSO).
 
-This module intentionally avoids maintaining multiple legacy CV implementations.
+This module intentionally uses a single canonical CV implementation.
 """
 
 from __future__ import annotations
@@ -65,18 +65,13 @@ from eeg_pipeline.analysis.machine_learning.time_generalization import time_gene
 logger = get_logger(__name__)
 
 
-def _write_json_with_legacy(payload: Dict[str, Any], primary_path: Path, legacy_path: Path) -> None:
-    with open(primary_path, "w") as f:
+def _write_json(payload: Dict[str, Any], output_path: Path) -> None:
+    with open(output_path, "w") as f:
         json.dump(payload, f, indent=2, default=str)
-    if legacy_path != primary_path:
-        with open(legacy_path, "w") as f:
-            json.dump(payload, f, indent=2, default=str)
 
 
-def _write_tsv_with_legacy(df: pd.DataFrame, primary_path: Path, legacy_path: Path) -> None:
-    write_tsv(df, primary_path)
-    if legacy_path != primary_path:
-        write_tsv(df, legacy_path)
+def _write_tsv(df: pd.DataFrame, output_path: Path) -> None:
+    write_tsv(df, output_path)
 
 
 def _copy_if_exists(src: Path, dst: Path) -> None:
@@ -406,7 +401,7 @@ def _resolve_param_grid_aliases(
     estimator: Pipeline,
     param_grid: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Normalize legacy RF grid keys to estimator-compatible parameter names."""
+    """Normalize parameter-grid keys to estimator-compatible parameter names."""
     grid = dict(param_grid or {})
     if not grid:
         return {}
@@ -424,7 +419,7 @@ def _resolve_param_grid_aliases(
     return resolved
 
 
-def _apply_fold_feature_harmonization_compat(
+def _apply_fold_feature_harmonization_foldwise(
     X_train: np.ndarray,
     X_test: np.ndarray,
     groups_train: np.ndarray,
@@ -432,37 +427,13 @@ def _apply_fold_feature_harmonization_compat(
     *,
     n_covariates: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Use legacy 4-arg call when covariates are absent for test/mocking compatibility."""
-    if int(n_covariates) > 0:
-        try:
-            return apply_fold_feature_harmonization(
-                X_train,
-                X_test,
-                groups_train,
-                harmonization_mode,
-                n_covariates=int(n_covariates),
-            )
-        except TypeError as exc:
-            # Some tests monkeypatch with legacy 4-argument callables.
-            if "n_covariates" not in str(exc):
-                raise
-            Xtr_legacy, Xte_legacy, keep_legacy = apply_fold_feature_harmonization(
-                X_train,
-                X_test,
-                groups_train,
-                harmonization_mode,
-            )
-            keep_arr = np.asarray(keep_legacy, dtype=bool).copy()
-            # Legacy harmonizers cannot explicitly protect covariates; mark them as
-            # dropped so downstream safeguards can fail closed.
-            if keep_arr.size >= int(n_covariates):
-                keep_arr[-int(n_covariates):] = False
-            return Xtr_legacy, Xte_legacy, keep_arr
+    """Apply fold-wise harmonization using canonical function signature."""
     return apply_fold_feature_harmonization(
         X_train,
         X_test,
         groups_train,
         harmonization_mode,
+        n_covariates=int(n_covariates),
     )
 
 
@@ -799,7 +770,7 @@ def run_regression_ml(
         meta.reset_index(drop=True),
         pred_path,
     )
-    _write_tsv_with_legacy(pred_df, pred_path, results_dir / "loso_predictions.tsv")
+    _write_tsv(pred_df, pred_path)
     export_indices(
         groups_ordered,
         test_indices,
@@ -924,7 +895,7 @@ def run_regression_ml(
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
 
     metrics_path = metrics_dir / "pooled_metrics.json"
-    _write_json_with_legacy(metrics, metrics_path, results_dir / "pooled_metrics.json")
+    _write_json(metrics, metrics_path)
 
     p_str = f", p={p_val:.4f}" if np.isfinite(p_val) else ""
     logger.info(
@@ -1088,7 +1059,7 @@ def run_within_subject_regression_ml(
         blocks_train = blocks_all[train_idx] if blocks_all is not None else None
         
         n_covs = len(covariates) if covariates else 0
-        X_train, X_test, _ = _apply_fold_feature_harmonization_compat(
+        X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
             X_train,
             X_test,
             groups_train,
@@ -1168,7 +1139,7 @@ def run_within_subject_regression_ml(
         meta.reset_index(drop=True),
         pred_path,
     )
-    _write_tsv_with_legacy(pred_df, pred_path, results_dir / "cv_predictions.tsv")
+    _write_tsv(pred_df, pred_path)
     export_indices(
         groups_ordered,
         test_indices,
@@ -1238,7 +1209,7 @@ def run_within_subject_regression_ml(
                 groups_train_p = groups[train_idx]
 
                 blocks_train_p = blocks_all[train_idx] if blocks_all is not None else None
-                X_train_p, X_test_p, _ = _apply_fold_feature_harmonization_compat(
+                X_train_p, X_test_p, _ = _apply_fold_feature_harmonization_foldwise(
                     X_train_p,
                     X_test_p,
                     groups_train_p,
@@ -1418,7 +1389,7 @@ def run_within_subject_regression_ml(
         }
     metrics.update(baseline_metrics)
     metrics_path = metrics_dir / "pooled_metrics.json"
-    _write_json_with_legacy(metrics, metrics_path, results_dir / "pooled_metrics.json")
+    _write_json(metrics, metrics_path)
 
     p_str = f", p={p_value:.4f}" if np.isfinite(p_value) else ""
     logger.info(
@@ -1692,7 +1663,7 @@ def run_classification_ml(
         pred_df["y_prob"] = np.asarray(result.y_prob, dtype=float)
     else:
         pred_df["y_prob"] = np.full(len(pred_df), np.nan, dtype=float)
-    _write_tsv_with_legacy(pred_df, pred_path, results_dir / "loso_predictions.tsv")
+    _write_tsv(pred_df, pred_path)
     write_parquet(pred_df, pred_path.with_suffix(".parquet"))
     export_indices(
         groups_for_predictions.tolist(),
@@ -1973,11 +1944,7 @@ def run_classification_ml(
     
     # Save calibration data separately
     if calibration_data:
-        _write_json_with_legacy(
-            calibration_data,
-            metrics_dir / "calibration_data.json",
-            results_dir / "calibration_data.json",
-        )
+        _write_json(calibration_data, metrics_dir / "calibration_data.json")
 
     # Add permutation p-value if available
     if n_perm > 0:
@@ -2012,7 +1979,7 @@ def run_classification_ml(
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
 
     metrics_path = metrics_dir / "pooled_metrics.json"
-    _write_json_with_legacy(metrics, metrics_path, results_dir / "pooled_metrics.json")
+    _write_json(metrics, metrics_path)
 
     p_info = ""
     if "p_value" in metrics:
@@ -2196,7 +2163,7 @@ def run_within_subject_classification_ml(
 
             if model_type != "cnn":
                 n_covs = len(covariates) if covariates else 0
-                X_train, X_test, _ = _apply_fold_feature_harmonization_compat(
+                X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
                     X_train,
                     X_test,
                     groups_train,
@@ -2361,7 +2328,7 @@ def run_within_subject_classification_ml(
         pred_df["y_prob"] = np.asarray(y_prob_all, dtype=float)
     else:
         pred_df["y_prob"] = np.full(len(pred_df), np.nan, dtype=float)
-    _write_tsv_with_legacy(pred_df, pred_path, results_dir / "cv_predictions.tsv")
+    _write_tsv(pred_df, pred_path)
     write_parquet(pred_df, pred_path.with_suffix(".parquet"))
     export_indices(
         groups_ordered,
@@ -2653,11 +2620,7 @@ def run_within_subject_classification_ml(
             )
 
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
-    _write_json_with_legacy(
-        metrics,
-        metrics_dir / "pooled_metrics.json",
-        results_dir / "pooled_metrics.json",
-    )
+    _write_json(metrics, metrics_dir / "pooled_metrics.json")
 
     p_info = ""
     if "p_value_auc" in metrics:
@@ -3039,7 +3002,7 @@ def run_model_comparison_ml(
             groups_train = groups[train_idx]
             
             n_covs = len(covariates) if covariates else 0
-            X_train, X_test, _ = _apply_fold_feature_harmonization_compat(
+            X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
                 X_train,
                 X_test,
                 groups_train,
@@ -3234,11 +3197,7 @@ def run_model_comparison_ml(
                     pairwise[pair_name][adj_key] = float(p_adj)
     summary["pairwise_inference"] = pairwise
     
-    _write_json_with_legacy(
-        summary,
-        metrics_dir / "model_comparison_summary.json",
-        results_dir / "model_comparison_summary.json",
-    )
+    _write_json(summary, metrics_dir / "model_comparison_summary.json")
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
     best_model = max(models.keys(), key=lambda m: summary[m]["mean_r2"])
@@ -3397,7 +3356,7 @@ def run_incremental_validity_ml(
         groups_train = groups[train_idx]
         X_full_train = X_full[train_idx]
         X_full_test = X_full[test_idx]
-        X_full_train, X_full_test, keep_mask = _apply_fold_feature_harmonization_compat(
+        X_full_train, X_full_test, keep_mask = _apply_fold_feature_harmonization_foldwise(
             X_full_train,
             X_full_test,
             groups_train,
@@ -3528,11 +3487,7 @@ def run_incremental_validity_ml(
         )
     summary["delta_r2_inference"] = delta_inference
     
-    _write_json_with_legacy(
-        summary,
-        metrics_dir / "incremental_validity_summary.json",
-        results_dir / "incremental_validity_summary.json",
-    )
+    _write_json(summary, metrics_dir / "incremental_validity_summary.json")
     
     write_reproducibility_info(results_dir, subjects, config, rng_seed)
     logger.info(
@@ -3590,7 +3545,7 @@ def _run_permutation_importance_stage(
         groups_train = groups[train_idx]
         
         n_covs = len(covariates) if covariates else 0
-        X_train, X_test, keep_mask = _apply_fold_feature_harmonization_compat(
+        X_train, X_test, keep_mask = _apply_fold_feature_harmonization_foldwise(
             X_train,
             X_test,
             groups_train,
@@ -3851,7 +3806,7 @@ def _run_uncertainty_stage(
         groups_train = groups[train_idx]
         
         n_covs = len(covariates) if covariates else 0
-        X_train, X_test, _ = _apply_fold_feature_harmonization_compat(
+        X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
             X_train,
             X_test,
             groups_train,
@@ -3979,11 +3934,7 @@ def _run_uncertainty_stage(
             "n_subjects": int(len(per_subject_df)),
         },
     }
-    _write_json_with_legacy(
-        metrics,
-        metrics_dir / "uncertainty_metrics.json",
-        results_dir / "uncertainty_metrics.json",
-    )
+    _write_json(metrics, metrics_dir / "uncertainty_metrics.json")
     
     logger.info(f"Uncertainty: coverage={coverage:.1%}, mean_width={mean_width:.3f}")
     _maybe_generate_mode_plots(mode="uncertainty", results_dir=results_dir, logger=logger, config=config)

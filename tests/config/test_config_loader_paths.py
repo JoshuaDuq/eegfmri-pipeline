@@ -34,7 +34,7 @@ def test_overrides_path_defaults_to_repo_data_derivatives(monkeypatch, tmp_path)
     assert overrides_path == tmp_path / "data" / "derivatives" / ".tui_overrides.json"
 
 
-def test_overrides_path_falls_back_to_legacy_location(monkeypatch, tmp_path) -> None:
+def test_overrides_path_ignores_legacy_location(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("EEG_PIPELINE_TUI_OVERRIDES", raising=False)
     monkeypatch.setattr(loader, "get_project_root", lambda: tmp_path)
     legacy = tmp_path / "eeg_pipeline" / "data" / "derivatives" / ".tui_overrides.json"
@@ -43,7 +43,7 @@ def test_overrides_path_falls_back_to_legacy_location(monkeypatch, tmp_path) -> 
 
     config_path = tmp_path / "eeg_pipeline" / "utils" / "config" / "eeg_config.yaml"
     overrides_path = loader._get_overrides_path(config_path)
-    assert overrides_path == legacy
+    assert overrides_path == tmp_path / "data" / "derivatives" / ".tui_overrides.json"
 
 
 def test_load_config_returns_isolated_nested_data(monkeypatch) -> None:

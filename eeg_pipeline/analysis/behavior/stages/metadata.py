@@ -59,44 +59,45 @@ def build_behavior_qc_impl(
         "subject": ctx.subject,
         "task": ctx.task,
         "n_trials": ctx.n_trials,
-        "has_temperature": ctx.has_temperature,
-        "temperature_column": ctx.temperature_column,
+        "has_predictor": ctx.has_temperature,
+        "predictor_column": ctx.temperature_column,
         "group_column": ctx.group_column,
     }
 
     if ctx.data_qc:
         qc["data_qc"] = ctx.data_qc
 
-    rating_series = None
-    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-    if rating_col is not None and ctx.aligned_events is not None:
-        rating_series = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+    outcome_series = None
+    outcome_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    qc["outcome_column"] = outcome_col
+    if outcome_col is not None and ctx.aligned_events is not None:
+        outcome_series = pd.to_numeric(ctx.aligned_events[outcome_col], errors="coerce")
 
-    if rating_series is not None:
-        qc["rating"] = compute_series_statistics_fn(rating_series)
+    if outcome_series is not None:
+        qc["outcome"] = compute_series_statistics_fn(outcome_series)
 
     if ctx.temperature is not None:
-        qc["temperature"] = compute_series_statistics_fn(ctx.temperature)
+        qc["predictor"] = compute_series_statistics_fn(ctx.temperature)
 
-    if rating_series is not None and ctx.temperature is not None:
-        s = pd.to_numeric(rating_series, errors="coerce")
+    if outcome_series is not None and ctx.temperature is not None:
+        s = pd.to_numeric(outcome_series, errors="coerce")
         t = pd.to_numeric(ctx.temperature, errors="coerce")
         valid = s.notna() & t.notna()
         if int(valid.sum()) >= 3:
             r, p = compute_correlation_fn(s[valid].values, t[valid].values, method="spearman")
-            qc["rating_temperature_sanity"] = {
+            qc["outcome_predictor_sanity"] = {
                 "method": "spearman",
                 "n": int(valid.sum()),
                 "r": float(r) if np.isfinite(r) else np.nan,
                 "p": float(p) if np.isfinite(p) else np.nan,
             }
 
-    if ctx.aligned_events is not None and rating_series is not None:
+    if ctx.aligned_events is not None and outcome_series is not None:
         from eeg_pipeline.analysis.behavior.api import split_by_condition
 
         pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(ctx.aligned_events, ctx.config, ctx.logger)
         if int(n_pain) > 0 or int(n_nonpain) > 0:
-            s = pd.to_numeric(rating_series, errors="coerce")
+            s = pd.to_numeric(outcome_series, errors="coerce")
             pain_ratings = s[pain_mask] if len(pain_mask) == len(s) else pd.Series(dtype=float)
             nonpain_ratings = s[nonpain_mask] if len(nonpain_mask) == len(s) else pd.Series(dtype=float)
             qc["pain_vs_nonpain"] = {
@@ -153,10 +154,10 @@ def write_analysis_metadata_impl(
         "method_label": method_label,
         "robust_method": robust_method,
         "min_samples": pipeline_config.min_samples,
-        "control_temperature": pipeline_config.control_temperature,
+        "control_predictor": pipeline_config.control_temperature,
         "control_trial_order": pipeline_config.control_trial_order,
         "compute_change_scores": pipeline_config.compute_change_scores,
-        "compute_pain_sensitivity": pipeline_config.compute_pain_sensitivity,
+        "compute_sensitivity": pipeline_config.compute_pain_sensitivity,
         "compute_reliability": pipeline_config.compute_reliability,
         "n_permutations": pipeline_config.n_permutations,
         "fdr_alpha": pipeline_config.fdr_alpha,
@@ -169,7 +170,7 @@ def write_analysis_metadata_impl(
             "bootstrap": pipeline_config.bootstrap,
             "n_permutations": pipeline_config.n_permutations,
             "fdr_alpha": pipeline_config.fdr_alpha,
-            "control_temperature": pipeline_config.control_temperature,
+            "control_predictor": pipeline_config.control_temperature,
             "control_trial_order": pipeline_config.control_trial_order,
             "compute_change_scores": pipeline_config.compute_change_scores,
             "compute_reliability": pipeline_config.compute_reliability,
@@ -186,7 +187,7 @@ def write_analysis_metadata_impl(
             if getattr(results, "models", None) is not None
             else False,
             "has_correlations": bool(getattr(results, "correlations", None) is not None and not results.correlations.empty),
-            "has_pain_sensitivity": bool(
+            "has_sensitivity": bool(
                 getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty
             ),
             "has_condition_effects": bool(
@@ -206,21 +207,21 @@ def write_analysis_metadata_impl(
         "qc": build_behavior_qc_fn(ctx),
     }
 
-    payload["temperature_status"] = {
+    payload["predictor_status"] = {
         "available": bool(ctx.temperature is not None and ctx.temperature.notna().any())
         if ctx.temperature is not None
         else False,
         "control_enabled": bool(ctx.control_temperature),
     }
-    if not payload["temperature_status"]["available"]:
-        payload["temperature_status"]["reason"] = "missing_temperature"
+    if not payload["predictor_status"]["available"]:
+        payload["predictor_status"]["reason"] = "missing_predictor"
 
     if not pipeline_config.compute_pain_sensitivity:
-        payload["pain_sensitivity_status"] = "disabled"
-    elif payload["temperature_status"]["available"]:
-        payload["pain_sensitivity_status"] = "computed" if payload["outputs"]["has_pain_sensitivity"] else "skipped"
+        payload["sensitivity_status"] = "disabled"
+    elif payload["predictor_status"]["available"]:
+        payload["sensitivity_status"] = "computed" if payload["outputs"]["has_sensitivity"] else "skipped"
     else:
-        payload["pain_sensitivity_status"] = "skipped_no_temperature"
+        payload["sensitivity_status"] = "skipped_no_predictor"
 
     payload["covariates_qc"] = summarize_covariates_qc_fn(ctx)
 

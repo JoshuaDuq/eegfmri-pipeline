@@ -101,8 +101,12 @@ def stage_report_impl(
     lines.append(f"- Features in trial table: `{n_features}`")
     lines.append(f"- Method: `{getattr(pipeline_config, 'method', '')}` (`{method_label}`)")
     lines.append(
-        f"- Controls: temperature=`{bool(getattr(pipeline_config, 'control_temperature', True))}`, trial_order=`{bool(getattr(pipeline_config, 'control_trial_order', True))}`"
+        f"- Controls: predictor=`{bool(getattr(pipeline_config, 'control_temperature', True))}`, trial_order=`{bool(getattr(pipeline_config, 'control_trial_order', True))}`"
     )
+    outcome_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    predictor_col = getattr(ctx, "temperature_column", None)
+    lines.append(f"- Outcome column: `{outcome_col or 'auto'}`")
+    lines.append(f"- Predictor column: `{predictor_col or 'auto'}`")
     lines.append(f"- Global FDR alpha: `{alpha}`")
 
     tsvs = [p for p in files if p.suffix == ".tsv"]

@@ -256,7 +256,7 @@ func TestGetBehaviorOptions_HidesInferenceAndAdvancedForTrialTableOnly(t *testin
 	}
 }
 
-func TestGetBehaviorOptions_HidesInferenceAndAdvancedForPainResidualOnly(t *testing.T) {
+func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForPainResidualOnly(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {
 		m.computationSelected[i] = m.computations[i].Key == "pain_residual"
@@ -264,7 +264,10 @@ func TestGetBehaviorOptions_HidesInferenceAndAdvancedForPainResidualOnly(t *test
 
 	opts := m.getBehaviorOptions()
 
-	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupAdvanced) {
-		t.Fatalf("did not expect inference/advanced group headers for pain_residual-only selection")
+	if !hasOption(opts, optBehaviorGroupStats) {
+		t.Fatalf("expected inference/shared settings group header for pain_residual-only selection")
+	}
+	if !hasOption(opts, optBehaviorGroupAdvanced) {
+		t.Fatalf("expected advanced group header for pain_residual-only selection")
 	}
 }

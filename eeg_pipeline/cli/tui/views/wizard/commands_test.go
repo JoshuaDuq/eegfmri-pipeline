@@ -103,6 +103,23 @@ func TestBuildBehaviorAdvancedArgs_EmitsEmptyCorrelationTargetColumn(t *testing.
 	}
 }
 
+func TestBuildBehaviorAdvancedArgs_EmitsCanonicalColumns(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.behaviorOutcomeColumn = "vas_custom"
+	m.behaviorPredictorColumn = "stimulus_intensity"
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	outcome, ok := argValue(args, "--outcome-column")
+	if !ok || outcome != "vas_custom" {
+		t.Fatalf("expected --outcome-column vas_custom, got args: %#v", args)
+	}
+	predictor, ok := argValue(args, "--predictor-column")
+	if !ok || predictor != "stimulus_intensity" {
+		t.Fatalf("expected --predictor-column stimulus_intensity, got args: %#v", args)
+	}
+}
+
 func TestBuildFmriAnalysisAdvancedArgs_DisabledCarpetAndTSNRAddsFlags(t *testing.T) {
 	m := Model{}
 	m.fmriAnalysisPlotsEnabled = true
