@@ -21,7 +21,7 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI research across parad
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/JoshuaDuq/Pain_fMRI_EEG.git && cd Pain_fMRI_EEG
+git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git && cd eegfmri-pipeline
 pip install -e .
 
 # 2. Place your data (see "Data Requirements" below)
@@ -208,7 +208,7 @@ paths:
 ## Project Structure
 
 ```
-PAIN_EEG_fMRI/
+eegfmri-pipeline/
 ├── eeg_pipeline/               # Core EEG pipeline package
 │   ├── analysis/               # Analysis modules
 │   │   ├── features/           # Feature extraction (16 categories)

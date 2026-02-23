@@ -52,7 +52,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/JoshuaDuq/PAIN_EEG_fMRI"
+Repository = "https://github.com/JoshuaDuq/eegfmri-pipeline"
 
 [project.optional-dependencies]
 dev = [

@@ -65,8 +65,8 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     parser.add_argument(
         "--source",
         choices=[SOURCE_BIDS, SOURCE_BIDS_FMRI, SOURCE_EPOCHS, SOURCE_FEATURES, SOURCE_SOURCE_DATA, SOURCE_ALL],
-        default=SOURCE_EPOCHS,
-        help="Discovery source for subjects (default: epochs)",
+        default=SOURCE_ALL,
+        help="Discovery source for subjects (default: all)",
     )
     parser.add_argument(
         "--json",
@@ -120,5 +120,4 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
 
     return parser
-
 
