@@ -2,7 +2,7 @@
 # 1. PROJECT & PATHS
 ###################################################################
 project:
-  task: "task"  # Task name used in BIDS paths and file naming
+  task: "thermalactive"  # Task name used in BIDS paths and file naming
   random_state: 42  # Primary random seed for reproducible analyses
   subject_list: null  # Optional list of subjects to process (null = all found)
 

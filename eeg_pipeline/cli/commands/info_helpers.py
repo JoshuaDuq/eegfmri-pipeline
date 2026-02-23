@@ -678,6 +678,16 @@ def _build_subject_status_json(
 
     # Process subjects in parallel (I/O bound operations)
     json_results = []
+    if not results:
+        return {
+            "subjects": [],
+            "count": 0,
+            "available_windows": available_windows,
+            "available_windows_by_feature": available_windows_by_feature,
+            "available_event_columns": available_columns,
+            "available_channels": [],
+            "unavailable_channels": [],
+        }
     with ThreadPoolExecutor(max_workers=min(8, len(results))) as executor:
         futures = []
         for result in results:
