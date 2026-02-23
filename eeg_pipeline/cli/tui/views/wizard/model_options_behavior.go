@@ -44,7 +44,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				m.isComputationSelected("stability") ||
 				m.isComputationSelected("pain_sensitivity")
 			if needsCorrelationMethod {
-				options = append(options, optCorrMethod, optRobustCorrelation)
+				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
 			}
 
 			// Bootstrap - relevant for correlations, stability
@@ -83,24 +83,27 @@ func (m Model) getBehaviorOptions() []optionType {
 				m.isComputationSelected("stability") ||
 				m.isComputationSelected("pain_sensitivity")
 			if needsCovariates {
-				options = append(options, optControlTemp, optControlOrder)
+				options = append(options, optBehaviorSubCovariates, optControlTemp, optControlOrder)
 			}
 
 			// Run adjustment - relevant for trial_table, correlations
 			needsRunAdjustment := m.isComputationSelected("trial_table") ||
 				m.isComputationSelected("correlations")
 			if needsRunAdjustment {
-				options = append(options,
-					optRunAdjustmentEnabled,
-					optRunAdjustmentColumn,
-					optRunAdjustmentIncludeInCorrelations,
-					optRunAdjustmentMaxDummies,
-				)
+				options = append(options, optBehaviorSubRunAdjustment, optRunAdjustmentEnabled)
+				if m.runAdjustmentEnabled {
+					options = append(options,
+						optRunAdjustmentColumn,
+						optRunAdjustmentIncludeInCorrelations,
+						optRunAdjustmentMaxDummies,
+					)
+				}
 			}
 
 			// Change scores, LOSO stability, Bayes factors - relevant for correlations
 			if m.isComputationSelected("correlations") {
 				options = append(options,
+					optBehaviorSubCorrelationsExtra,
 					optComputeChangeScores,
 					optComputeLosoStability,
 					optComputeBayesFactors,
@@ -109,12 +112,14 @@ func (m Model) getBehaviorOptions() []optionType {
 
 			// Feature QC (optional gating) - relevant for correlations / multilevel correlations
 			if m.isComputationSelected("correlations") || m.isComputationSelected("multilevel_correlations") {
-				options = append(options,
-					optFeatureQCEnabled,
-					optFeatureQCMaxMissingPct,
-					optFeatureQCMinVariance,
-					optFeatureQCCheckWithinRunVariance,
-				)
+				options = append(options, optBehaviorSubFeatureQC, optFeatureQCEnabled)
+				if m.featureQCEnabled {
+					options = append(options,
+						optFeatureQCMaxMissingPct,
+						optFeatureQCMinVariance,
+						optFeatureQCCheckWithinRunVariance,
+					)
+				}
 			}
 		}
 	}
@@ -137,11 +142,13 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupPainResidual)
 		if m.behaviorGroupPainResidualExpanded {
 			options = append(options,
+				optBehaviorSubFitting,
 				optPainResidualEnabled,
 				optPainResidualMethod,
 				optPainResidualPolyDegree,
 				optPainResidualSplineDfCandidates,
 				optPainResidualMinSamples,
+				optBehaviorSubDiagnostics,
 				optPainResidualModelCompare,
 				optPainResidualModelComparePolyDegrees,
 				optPainResidualModelCompareMinSamples,
@@ -150,12 +157,17 @@ func (m Model) getBehaviorOptions() []optionType {
 				optPainResidualBreakpointMinSamples,
 				optPainResidualBreakpointQlow,
 				optPainResidualBreakpointQhigh,
+				optBehaviorSubCrossfit,
 				optPainResidualCrossfitEnabled,
-				optPainResidualCrossfitGroupColumn,
-				optPainResidualCrossfitNSplits,
-				optPainResidualCrossfitMethod,
-				optPainResidualCrossfitSplineKnots,
 			)
+			if m.painResidualCrossfitEnabled {
+				options = append(options,
+					optPainResidualCrossfitGroupColumn,
+					optPainResidualCrossfitNSplits,
+					optPainResidualCrossfitMethod,
+					optPainResidualCrossfitSplineKnots,
+				)
+			}
 		}
 	}
 
@@ -176,7 +188,7 @@ func (m Model) getBehaviorOptions() []optionType {
 					optCorrelationsUseCrossfitPainResidual,
 				)
 			}
-			options = append(options, optCorrelationsMultilevel)
+			options = append(options, optBehaviorSubMultilevel, optCorrelationsMultilevel)
 			if m.isComputationSelected("multilevel_correlations") {
 				options = append(options,
 					optGroupLevelBlockPermutation,
@@ -196,6 +208,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupRegression)
 		if m.behaviorGroupRegressionExpanded {
 			options = append(options,
+				optBehaviorSubOutcome,
 				optRegressionOutcome,
 				optRegressionIncludeTemperature,
 				optRegressionTempControl,
@@ -209,18 +222,18 @@ func (m Model) getBehaviorOptions() []optionType {
 				)
 			}
 			options = append(options,
+				optBehaviorSubCovariates,
 				optRegressionIncludeTrialOrder,
 				optRegressionIncludePrev,
 				optRegressionIncludeRunBlock,
 				optRegressionIncludeInteraction,
 				optRegressionStandardize,
 				optRegressionMinSamples,
+				optBehaviorSubInference,
 				optRegressionPrimaryUnit,
 				optRegressionPermutations,
 				optRegressionMaxFeatures,
-			)
-			// Model sensitivity options (now part of regression)
-			options = append(options,
+				optBehaviorSubModelFamilies,
 				optModelsFamilyOLS,
 				optModelsFamilyRobust,
 				optModelsFamilyQuantile,
@@ -234,6 +247,12 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupModels)
 		if m.behaviorGroupModelsExpanded {
 			options = append(options,
+				optBehaviorSubOutcomes,
+				optModelsOutcomeRating,
+				optModelsOutcomePainResidual,
+				optModelsOutcomeTemperature,
+				optModelsOutcomePainBinary,
+				optBehaviorSubCovariates,
 				optModelsIncludeTemperature,
 				optModelsTempControl,
 			)
@@ -252,16 +271,14 @@ func (m Model) getBehaviorOptions() []optionType {
 				optModelsIncludeInteraction,
 				optModelsStandardize,
 				optModelsMinSamples,
-				optModelsMaxFeatures,
-				optModelsOutcomeRating,
-				optModelsOutcomePainResidual,
-				optModelsOutcomeTemperature,
-				optModelsOutcomePainBinary,
+				optBehaviorSubModelFamilies,
 				optModelsFamilyOLS,
 				optModelsFamilyRobust,
 				optModelsFamilyQuantile,
 				optModelsFamilyLogit,
 				optModelsBinaryOutcome,
+				optBehaviorSubInference,
+				optModelsMaxFeatures,
 				optModelsPrimaryUnit,
 				optModelsForceTrialIIDAsymptotic,
 			)
@@ -297,10 +314,11 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupInfluence)
 		if m.behaviorGroupInfluenceExpanded {
 			options = append(options,
+				optBehaviorSubOutcomes,
 				optInfluenceOutcomeRating,
 				optInfluenceOutcomePainResidual,
 				optInfluenceOutcomeTemperature,
-				optInfluenceMaxFeatures,
+				optBehaviorSubCovariates,
 				optInfluenceIncludeTemperature,
 				optInfluenceTempControl,
 			)
@@ -317,6 +335,8 @@ func (m Model) getBehaviorOptions() []optionType {
 				optInfluenceIncludeRunBlock,
 				optInfluenceIncludeInteraction,
 				optInfluenceStandardize,
+				optBehaviorSubDiagnostics,
+				optInfluenceMaxFeatures,
 				optInfluenceCooksThreshold,
 				optInfluenceLeverageThreshold,
 			)
@@ -373,12 +393,14 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupTemporal)
 		if m.behaviorGroupTemporalExpanded {
 			options = append(options,
+				optBehaviorSubTimeWindow,
 				optTemporalResolutionMs,
 				optTemporalCorrectionMethod,
 				optTemporalTimeMinMs,
 				optTemporalTimeMaxMs,
 				optTemporalSmoothMs,
 				optTemporalTargetColumn,
+				optBehaviorSubFeatures,
 				optTemporalFeatures,
 				optTemporalSplitByCondition,
 				optTemporalConditionColumn,
@@ -389,6 +411,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			// Show ITPC-specific options when 'itpc' is selected in step 3 (feature selection)
 			if m.featureFileSelected["itpc"] {
 				options = append(options,
+					optBehaviorSubITPC,
 					optTemporalITPCBaselineCorrection,
 					optTemporalITPCBaselineMin,
 					optTemporalITPCBaselineMax,
@@ -397,6 +420,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			// Show ERDS-specific options when 'erds' is selected in step 3 (feature selection)
 			if m.featureFileSelected["erds"] {
 				options = append(options,
+					optBehaviorSubERDS,
 					optTemporalERDSBaselineMin,
 					optTemporalERDSBaselineMax,
 					optTemporalERDSMethod,
@@ -455,43 +479,52 @@ func (m Model) getBehaviorOptions() []optionType {
 
 	// Behavior Statistics
 	if needsBehaviorStatsAndGlobalOptions {
-		options = append(options,
-			optBehaviorStatsTempControl,
-			optBehaviorStatsAllowIIDTrials,
-			optBehaviorStatsHierarchicalFDR,
-			optBehaviorStatsComputeReliability,
-			optBehaviorPermScheme,
-			optBehaviorPermGroupColumnPreference,
-			optBehaviorExcludeNonTrialwiseFeatures,
-		)
+		options = append(options, optBehaviorGroupStats)
+		if m.behaviorGroupStatsExpanded {
+			options = append(options,
+				optBehaviorStatsTempControl,
+				optBehaviorStatsAllowIIDTrials,
+				optBehaviorStatsHierarchicalFDR,
+				optBehaviorStatsComputeReliability,
+				optBehaviorPermScheme,
+				optBehaviorPermGroupColumnPreference,
+				optBehaviorExcludeNonTrialwiseFeatures,
+			)
+		}
 	}
 
 	// Global Statistics & Validation
 	if needsBehaviorStatsAndGlobalOptions {
-		options = append(options,
-			optGlobalNBootstrap,
-			optClusterCorrectionEnabled,
-		)
-		if m.clusterCorrectionEnabled {
+		options = append(options, optBehaviorGroupGlobalValidation)
+		if m.behaviorGroupGlobalValidationExpanded {
 			options = append(options,
-				optClusterCorrectionAlpha,
-				optClusterCorrectionMinClusterSize,
-				optClusterCorrectionTail,
+				optGlobalNBootstrap,
+				optClusterCorrectionEnabled,
+			)
+			if m.clusterCorrectionEnabled {
+				options = append(options,
+					optClusterCorrectionAlpha,
+					optClusterCorrectionMinClusterSize,
+					optClusterCorrectionTail,
+				)
+			}
+			options = append(options,
+				optValidationMinEpochs,
+				optValidationMinChannels,
+				optValidationMaxAmplitudeUv,
 			)
 		}
-		options = append(options,
-			optValidationMinEpochs,
-			optValidationMinChannels,
-			optValidationMaxAmplitudeUv,
-		)
 	}
 
 	// System / IO
 	if needsBehaviorStatsAndGlobalOptions {
-		options = append(options,
-			optIOTemperatureRange,
-			optIOMaxMissingChannelsFraction,
-		)
+		options = append(options, optBehaviorGroupSystemIO)
+		if m.behaviorGroupSystemIOExpanded {
+			options = append(options,
+				optIOTemperatureRange,
+				optIOMaxMissingChannelsFraction,
+			)
+		}
 	}
 
 	return options

@@ -147,6 +147,59 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				label = "▾ Mixed Effects"
 			}
 			return label, "", "Space to toggle"
+		case optBehaviorGroupStats:
+			label := "▸ Statistics"
+			if m.behaviorGroupStatsExpanded {
+				label = "▾ Statistics"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupGlobalValidation:
+			label := "▸ Global Validation"
+			if m.behaviorGroupGlobalValidationExpanded {
+				label = "▾ Global Validation"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupSystemIO:
+			label := "▸ System / IO"
+			if m.behaviorGroupSystemIOExpanded {
+				label = "▾ System / IO"
+			}
+			return label, "", "Space to toggle"
+		// Behavior sub-section headers (non-collapsible visual separators)
+		case optBehaviorSubCorrelationSettings:
+			return "  ── Correlation Settings", "", ""
+		case optBehaviorSubCovariates:
+			return "  ── Covariates", "", ""
+		case optBehaviorSubRunAdjustment:
+			return "  ── Run Adjustment", "", ""
+		case optBehaviorSubCorrelationsExtra:
+			return "  ── Correlations Extra", "", ""
+		case optBehaviorSubFeatureQC:
+			return "  ── Feature QC", "", ""
+		case optBehaviorSubOutcome:
+			return "  ── Outcome", "", ""
+		case optBehaviorSubOutcomes:
+			return "  ── Outcomes", "", ""
+		case optBehaviorSubModelFamilies:
+			return "  ── Model Families", "", ""
+		case optBehaviorSubInference:
+			return "  ── Inference", "", ""
+		case optBehaviorSubDiagnostics:
+			return "  ── Diagnostics", "", ""
+		case optBehaviorSubFitting:
+			return "  ── Fitting", "", ""
+		case optBehaviorSubCrossfit:
+			return "  ── Crossfit", "", ""
+		case optBehaviorSubTimeWindow:
+			return "  ── Time Window", "", ""
+		case optBehaviorSubFeatures:
+			return "  ── Features & Output", "", ""
+		case optBehaviorSubITPC:
+			return "  ── ITPC", "", ""
+		case optBehaviorSubERDS:
+			return "  ── ERDS", "", ""
+		case optBehaviorSubMultilevel:
+			return "  ── Group-Level", "", ""
 		case optCorrMethod:
 			return "Correlation Method", m.correlationMethod, "spearman / pearson"
 		case optRobustCorrelation:
@@ -1401,16 +1454,21 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		isFocused := i == m.advancedCursor
 		label, value, hint := getOptionDisplay(opt)
 
-		// Check if this is a section header option
-		isSectionHeader := opt >= optBehaviorGroupGeneral && opt <= optBehaviorGroupMixedEffects
+		// Check if this is a collapsible group header or a non-collapsible sub-header
+		isGroupHeader := opt >= optBehaviorGroupGeneral && opt <= optBehaviorGroupSystemIO
+		isSubHeader := opt >= optBehaviorSubCorrelationSettings && opt <= optBehaviorSubMultilevel
+		isSectionHeader := isGroupHeader || isSubHeader
 
 		var labelStyle, valueStyle lipgloss.Style
-		if isSectionHeader {
+		if isGroupHeader {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
+			valueStyle = lipgloss.NewStyle()
+		} else if isSubHeader {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
 			valueStyle = lipgloss.NewStyle()
 		} else if isFocused {
 			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)

@@ -1577,6 +1577,14 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	// Behavior sub-section headers are non-interactive visual separators
+	case optBehaviorSubCorrelationSettings, optBehaviorSubCovariates, optBehaviorSubRunAdjustment,
+		optBehaviorSubCorrelationsExtra, optBehaviorSubFeatureQC, optBehaviorSubOutcome,
+		optBehaviorSubOutcomes, optBehaviorSubModelFamilies, optBehaviorSubInference,
+		optBehaviorSubDiagnostics, optBehaviorSubFitting, optBehaviorSubCrossfit,
+		optBehaviorSubTimeWindow, optBehaviorSubFeatures, optBehaviorSubITPC,
+		optBehaviorSubERDS, optBehaviorSubMultilevel:
+		// no-op: sub-headers are visual separators only
 	// Behavior section header toggles
 	case optBehaviorGroupGeneral:
 		m.behaviorGroupGeneralExpanded = !m.behaviorGroupGeneralExpanded
@@ -1628,6 +1636,15 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optBehaviorGroupMixedEffects:
 		m.behaviorGroupMixedEffectsExpanded = !m.behaviorGroupMixedEffectsExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupStats:
+		m.behaviorGroupStatsExpanded = !m.behaviorGroupStatsExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupGlobalValidation:
+		m.behaviorGroupGlobalValidationExpanded = !m.behaviorGroupGlobalValidationExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupSystemIO:
+		m.behaviorGroupSystemIOExpanded = !m.behaviorGroupSystemIOExpanded
 		m.useDefaultAdvanced = false
 	case optCorrMethod:
 		if m.correlationMethod == "spearman" {

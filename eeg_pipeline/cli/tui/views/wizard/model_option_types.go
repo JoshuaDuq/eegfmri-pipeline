@@ -46,6 +46,28 @@ const (
 	optBehaviorGroupMediation
 	optBehaviorGroupModeration
 	optBehaviorGroupMixedEffects
+	optBehaviorGroupOutput
+	optBehaviorGroupStats
+	optBehaviorGroupGlobalValidation
+	optBehaviorGroupSystemIO
+	// Behavior sub-section headers (non-collapsible, visual separators within expanded groups)
+	optBehaviorSubCorrelationSettings
+	optBehaviorSubCovariates
+	optBehaviorSubRunAdjustment
+	optBehaviorSubCorrelationsExtra
+	optBehaviorSubFeatureQC
+	optBehaviorSubOutcome
+	optBehaviorSubModelFamilies
+	optBehaviorSubInference
+	optBehaviorSubOutcomes
+	optBehaviorSubDiagnostics
+	optBehaviorSubFitting
+	optBehaviorSubCrossfit
+	optBehaviorSubTimeWindow
+	optBehaviorSubFeatures
+	optBehaviorSubITPC
+	optBehaviorSubERDS
+	optBehaviorSubMultilevel
 	optConnectivity
 	optPACPhaseRange
 	optPACAmpRange
@@ -506,7 +528,6 @@ const (
 	optMediationFeatures
 	optModerationFeatures
 	// Behavior options - Output
-	optBehaviorGroupOutput
 	optAlsoSaveCsv
 	optBehaviorOverwrite
 	// Plotting options

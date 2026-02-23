@@ -204,17 +204,8 @@ func TestGetBehaviorOptions_HidesGlobalStatsAndIOForNonStatOnlySelections(t *tes
 
 	opts := m.getBehaviorOptions()
 
-	if hasOption(opts, optBehaviorStatsTempControl) {
-		t.Fatalf("did not expect behavior stats options for report-only selection")
-	}
-	if hasOption(opts, optGlobalNBootstrap) {
-		t.Fatalf("did not expect global stats options for report-only selection")
-	}
-	if hasOption(opts, optValidationMinEpochs) {
-		t.Fatalf("did not expect validation options for report-only selection")
-	}
-	if hasOption(opts, optIOTemperatureRange) {
-		t.Fatalf("did not expect system/io options for report-only selection")
+	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupGlobalValidation) || hasOption(opts, optBehaviorGroupSystemIO) {
+		t.Fatalf("did not expect stats/global/io group headers for report-only selection")
 	}
 }
 
@@ -224,7 +215,23 @@ func TestGetBehaviorOptions_ShowsGlobalStatsAndIOForStatSelections(t *testing.T)
 		m.computationSelected[i] = m.computations[i].Key == "correlations"
 	}
 
+	// Group headers should appear when collapsed
 	opts := m.getBehaviorOptions()
+	if !hasOption(opts, optBehaviorGroupStats) {
+		t.Fatalf("expected Stats group header for correlations selection")
+	}
+	if !hasOption(opts, optBehaviorGroupGlobalValidation) {
+		t.Fatalf("expected Global Validation group header for correlations selection")
+	}
+	if !hasOption(opts, optBehaviorGroupSystemIO) {
+		t.Fatalf("expected System/IO group header for correlations selection")
+	}
+
+	// Child options should appear when groups are expanded
+	m.behaviorGroupStatsExpanded = true
+	m.behaviorGroupGlobalValidationExpanded = true
+	m.behaviorGroupSystemIOExpanded = true
+	opts = m.getBehaviorOptions()
 
 	if !hasOption(opts, optBehaviorStatsTempControl) {
 		t.Fatalf("expected behavior stats options for correlations selection")
@@ -248,8 +255,8 @@ func TestGetBehaviorOptions_HidesGlobalStatsAndIOForTrialTableOnly(t *testing.T)
 
 	opts := m.getBehaviorOptions()
 
-	if hasOption(opts, optBehaviorStatsTempControl) || hasOption(opts, optGlobalNBootstrap) || hasOption(opts, optIOTemperatureRange) {
-		t.Fatalf("did not expect stats/global/io options for trial_table-only selection")
+	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupGlobalValidation) || hasOption(opts, optBehaviorGroupSystemIO) {
+		t.Fatalf("did not expect stats/global/io group headers for trial_table-only selection")
 	}
 }
 
@@ -261,7 +268,7 @@ func TestGetBehaviorOptions_HidesGlobalStatsAndIOForPainResidualOnly(t *testing.
 
 	opts := m.getBehaviorOptions()
 
-	if hasOption(opts, optBehaviorStatsTempControl) || hasOption(opts, optGlobalNBootstrap) || hasOption(opts, optIOTemperatureRange) {
-		t.Fatalf("did not expect stats/global/io options for pain_residual-only selection")
+	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupGlobalValidation) || hasOption(opts, optBehaviorGroupSystemIO) {
+		t.Fatalf("did not expect stats/global/io group headers for pain_residual-only selection")
 	}
 }
