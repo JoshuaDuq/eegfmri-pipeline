@@ -26,7 +26,7 @@ class TestBehaviorCliTemporalOptions(unittest.TestCase):
                 "13",
             ]
         )
-        config = ConfigDict({"project": {"task": "thermalactive"}})
+        config = ConfigDict({"project": {"task": "task"}})
 
         _configure_behavior_compute_mode(args, config)
 

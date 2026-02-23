@@ -150,12 +150,12 @@ class TestMachineLearningGapfill(unittest.TestCase):
             }
 
             with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
-                MLPipeline, "_validate_inputs", return_value="thermalactive"
+                MLPipeline, "_validate_inputs", return_value="task"
             ), patch.object(
                 MLPipeline, "_get_mode_dispatcher", return_value={"regression": (lambda **kwargs: None)}
             ):
                 with self.assertRaisesRegex(RuntimeError, "produced no output"):
-                    p.run_batch(["0001", "0002"], task="thermalactive", mode="regression")
+                    p.run_batch(["0001", "0002"], task="task", mode="regression")
             progress.complete.assert_called_once_with(success=False)
 
         def test_run_batch_writes_reproducibility_metadata(self):
@@ -179,13 +179,13 @@ class TestMachineLearningGapfill(unittest.TestCase):
             out_dir = Path(tempfile.mkdtemp())
 
             with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
-                MLPipeline, "_validate_inputs", return_value="thermalactive"
+                MLPipeline, "_validate_inputs", return_value="task"
             ), patch.object(
                 MLPipeline,
                 "_get_mode_dispatcher",
                 return_value={"regression": (lambda **kwargs: out_dir)},
             ):
-                out = p.run_batch(["0001"], task="thermalactive", mode="regression")
+                out = p.run_batch(["0001"], task="task", mode="regression")
 
             self.assertEqual(out[0]["status"], "success")
             metadata_dir = p.deriv_root / "logs" / "run_metadata" / "machine_learning"

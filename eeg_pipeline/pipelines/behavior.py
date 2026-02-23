@@ -8,7 +8,7 @@ with statistical routines consolidated in eeg_pipeline.analysis.behavior.api.
 
 Usage:
     pipeline = BehaviorPipeline(config=config)
-    pipeline.process_subject("0001", "thermalactive")
+    pipeline.process_subject("0001", "task")
     
     # Or batch processing
     pipeline.run_batch(["0001", "0002"])
@@ -107,7 +107,7 @@ class BehaviorPipelineConfig:
     control_temperature: bool = True
     control_trial_order: bool = True
     compute_change_scores: bool = True
-    compute_pain_sensitivity: bool = True
+    compute_predictor_sensitivity: bool = True
     compute_reliability: bool = False
     compute_bayes_factors: bool = False
     compute_loso_stability: bool = True
@@ -119,7 +119,7 @@ class BehaviorPipelineConfig:
     # Computation flags
     run_trial_table: bool = True
     run_lag_features: bool = True
-    run_pain_residual: bool = True
+    run_predictor_residual: bool = True
     run_temperature_models: bool = True
     run_feature_qc: bool = False
     run_regression: bool = False
@@ -184,7 +184,7 @@ class BehaviorPipelineConfig:
             control_temperature=bool(get_config_value(config, "behavior_analysis.control_temperature", True)),
             control_trial_order=bool(get_config_value(config, "behavior_analysis.control_trial_order", True)),
             compute_change_scores=bool(get_config_value(config, "behavior_analysis.correlations.compute_change_scores", True)),
-            compute_pain_sensitivity=bool(get_config_value(config, "behavior_analysis.pain_sensitivity.enabled", True)),
+            compute_predictor_sensitivity=bool(get_config_value(config, "behavior_analysis.predictor_sensitivity.enabled", True)),
             compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
             compute_bayes_factors=bool(get_config_value(config, "behavior_analysis.correlations.compute_bayes_factors", False)),
             compute_loso_stability=bool(get_config_value(config, "behavior_analysis.correlations.loso_stability", True)),
@@ -200,7 +200,7 @@ class BehaviorPipelineConfig:
             correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_temp"]),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
             run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
-            run_pain_residual=bool(get_config_value(config, "behavior_analysis.pain_residual.enabled", True)),
+            run_predictor_residual=bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)),
             run_temperature_models=bool(get_config_value(config, "behavior_analysis.temperature_models.enabled", True)),
             run_feature_qc=bool(get_config_value(config, "behavior_analysis.feature_qc.enabled", False)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
@@ -284,7 +284,7 @@ class BehaviorPipelineResults:
     consistency: Optional[pd.DataFrame] = None
     influence: Optional[pd.DataFrame] = None
     correlations: Optional[pd.DataFrame] = None
-    pain_sensitivity: Optional[pd.DataFrame] = None
+    predictor_sensitivity: Optional[pd.DataFrame] = None
     condition_effects: Optional[pd.DataFrame] = None
     mediation: Optional[pd.DataFrame] = None
     moderation: Optional[pd.DataFrame] = None
@@ -318,10 +318,10 @@ class BehaviorPipelineResults:
             n_sig_controlled += _count_significant(p_primary)
             n_sig_fdr += _count_significant(p_fdr)
         
-        if self.pain_sensitivity is not None and not self.pain_sensitivity.empty:
-            df = self.pain_sensitivity
+        if self.predictor_sensitivity is not None and not self.predictor_sensitivity.empty:
+            df = self.predictor_sensitivity
             n_total += len(df)
-            summary["n_pain_sensitivity_features"] = len(df)
+            summary["n_predictor_sensitivity_features"] = len(df)
             
             p_psi = _extract_p_value_column(df, ["p_psi"], ["p_value"])
             p_primary = _extract_p_value_column(df, ["p_primary"], [])
@@ -502,7 +502,7 @@ class BehaviorPipeline(PipelineBase):
         from eeg_pipeline.infra.logging import get_subject_logger
         import time
         
-        task = task or self.config.get("project.task", "thermalactive")
+        task = task or self.config.get("project.task", "task")
         progress = ensure_progress_reporter(kwargs.get("progress"))
         validate_only = bool(kwargs.get("validate_only", False))
         

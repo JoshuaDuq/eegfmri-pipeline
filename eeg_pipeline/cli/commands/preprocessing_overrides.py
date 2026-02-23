@@ -146,8 +146,8 @@ def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> Non
         event_cols["temperature"] = [str(v).strip() for v in args.event_col_temperature if str(v).strip()]
     if args.event_col_rating:
         event_cols["rating"] = [str(v).strip() for v in args.event_col_rating if str(v).strip()]
-    if args.event_col_pain_binary:
-        event_cols["pain_binary"] = [str(v).strip() for v in args.event_col_pain_binary if str(v).strip()]
+    if args.event_col_binary_outcome:
+        event_cols["binary_outcome"] = [str(v).strip() for v in args.event_col_binary_outcome if str(v).strip()]
 
 
 def _resolve_n_jobs(args: argparse.Namespace, config: Any) -> int:

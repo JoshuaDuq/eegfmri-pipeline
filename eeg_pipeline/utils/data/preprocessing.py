@@ -204,7 +204,7 @@ def get_sort_columns(combined_df: pd.DataFrame) -> List[str]:
 
 
 def combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
-    run_files = sorted(sub_eeg_dir.glob(f"*_task-{task}_run-*_events.tsv"))
+    run_files = sorted(p for p in sub_eeg_dir.glob(f"*_task-{task}_run-*_events.tsv") if not p.name.startswith("._"))
     if not run_files:
         return None
 

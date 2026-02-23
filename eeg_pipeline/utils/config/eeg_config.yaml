@@ -2,7 +2,7 @@
 # 1. PROJECT & PATHS
 ###################################################################
 project:
-  task: "thermalactive"  # Task name used in BIDS paths and file naming
+  task: "task"  # Task name used in BIDS paths and file naming
   random_state: 42  # Primary random seed for reproducible analyses
   subject_list: null  # Optional list of subjects to process (null = all found)
 
@@ -83,12 +83,12 @@ rois: &roi_definitions
 ###################################################################
 event_columns:
   # Optional: restrict strict event validation to these logical groups.
-  # Keep as ["rating"] for paradigm-agnostic use; add "temperature"/"pain_binary"
+  # Keep as ["rating"] for paradigm-agnostic use; add "temperature"/"binary_outcome"
   # when those analyses are required.
   required: ["rating"]
   temperature: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
   rating: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
-  pain_binary: ["pain_binary_coded", "pain_binary", "pain"]
+  binary_outcome: ["binary_outcome_coded", "binary_outcome", "pain"]
 
 alignment:
   allow_misaligned_trim: false
@@ -674,7 +674,7 @@ behavior_analysis:
     check_within_run_variance: true
 
   # Pain residual = rating - f(temperature) for "pain beyond stimulus intensity"
-  pain_residual:
+  predictor_residual:
     enabled: true
     method: "spline"          # "spline" (requires statsmodels) or "poly"
     min_samples: 10
@@ -711,7 +711,7 @@ behavior_analysis:
   regression:
     enabled: false
     primary_unit: "trial"            # "trial" | "run_mean"
-    outcome: "rating"              # "rating" | "pain_residual" | "temperature"
+    outcome: "rating"              # "rating" | "predictor_residual" | "temperature"
     include_temperature: true
     temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
     temperature_spline:
@@ -731,7 +731,7 @@ behavior_analysis:
   # Sensitivity model families per feature (robust/quantile/logistic)
   models:
     enabled: false
-    outcomes: ["rating", "pain_residual"]  # optionally add "temperature"
+    outcomes: ["rating", "predictor_residual"]  # optionally add "temperature"
     families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
     include_temperature: true
     temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
@@ -747,12 +747,12 @@ behavior_analysis:
     standardize: true
     min_samples: 20
     max_features: 100
-    binary_outcome: "pain_binary"     # or "rating_median"
+    binary_outcome: "binary_outcome"     # or "rating_median"
 
   # Within-subject stability across runs/blocks (non-gating diagnostics)
   stability:
     enabled: true
-    outcome: ""                     # "" -> auto (pain_residual if present, else rating)
+    outcome: ""                     # "" -> auto (predictor_residual if present, else rating)
     group_column: ""                # "" -> auto (run if present, else block)
     method: "spearman"
     partial_temperature: true
@@ -766,7 +766,7 @@ behavior_analysis:
   # Influence diagnostics (non-gating)
   influence:
     enabled: true
-    outcomes: ["rating", "pain_residual"]  # optionally add "temperature"
+    outcomes: ["rating", "predictor_residual"]  # optionally add "temperature"
     max_features: 20
     include_temperature: true
     temperature_control: "linear"  # "linear" | "rating_hat" | "spline"
@@ -828,12 +828,12 @@ behavior_analysis:
   correlations:
     enabled: true
     types: ["partial_cov_temp"]
-    targets: ["rating", "temperature", "pain_residual"]
+    targets: ["rating", "temperature", "predictor_residual"]
     compute_change_scores: true
     loso_stability: true
     compute_bayes_factors: false
-    prefer_pain_residual: true
-    use_crossfit_pain_residual: true
+    prefer_predictor_residual: true
+    use_crossfit_predictor_residual: true
     primary_unit: "trial"            # "trial" | "run_mean"
     min_runs: 5                      # Minimum run count when primary_unit="run_mean"
     p_primary_mode: "perm_if_available"  # "asymptotic" | "perm_if_available"
@@ -842,7 +842,7 @@ behavior_analysis:
       n_permutations: 1000
   
   # Pain sensitivity computation
-  pain_sensitivity:
+  predictor_sensitivity:
     enabled: true
 
   # Condition comparison computation
@@ -850,7 +850,7 @@ behavior_analysis:
     enabled: true
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
-    compare_column: ""          # Column to split by (empty = use event_columns.pain_binary)
+    compare_column: ""          # Column to split by (empty = use event_columns.binary_outcome)
     compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
     compare_windows: []          # Empty = compare all available windows
     compare_labels: null         # Optional labels for compare_values (same length)
@@ -873,7 +873,7 @@ behavior_analysis:
     correction_method: "cluster"      # "fdr" | "bonferroni" | "cluster"
     # Condition-based splitting (similar to condition comparison)
     split_by_condition: true           # If true, compute separate correlations per condition value
-    condition_column: ""               # Column to split by (empty = use event_columns.pain_binary)
+    condition_column: ""               # Column to split by (empty = use event_columns.binary_outcome)
     condition_values: []               # Specific values to compute for (empty = all unique values in column)
     # Output options for unified temporal correlations file
     include_roi_averages: true         # Include ROI-averaged rows (replaces power_topomap_correlations)
@@ -899,7 +899,7 @@ behavior_analysis:
     forming_threshold: 0.05
     min_cluster_size: 2
     tail: 0  # 0=two-tailed, 1=upper, -1=lower
-    condition_column: ""         # Column to split by (empty = use event_columns.pain_binary)
+    condition_column: ""         # Column to split by (empty = use event_columns.binary_outcome)
     condition_values: []         # Exactly 2 values to compare (default [0, 1] if empty)
   
   # Mediation analysis
@@ -1029,10 +1029,10 @@ machine_learning:
     require_trial_ml_safe: true          # If true, error unless feature_engineering.analysis_mode="trial_ml_safe"
     max_excluded_subject_fraction: 0.25  # Fail ML matrix build if excluded subjects exceed this fraction of requested subjects
 
-  # Targets can be logical names ('rating', 'temperature', 'pain_binary') or explicit events.tsv column names.
+  # Targets can be logical names ('rating', 'temperature', 'binary_outcome') or explicit events.tsv column names.
   targets:
     regression: "rating"
-    classification: "pain_binary"
+    classification: "binary_outcome"
     binary_threshold: null               # Required when classifying a continuous target (e.g., rating > 30)
     strict_regression_target_continuous: false  # If true, error when regression target is binary-like (prefer ml classify)
 

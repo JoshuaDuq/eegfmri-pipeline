@@ -8,22 +8,6 @@ import (
 
 // Numeric input commit handlers by pipeline.
 
-func (m *Model) commitFmriRawToBidsNumber(val float64) {
-	options := m.getFmriRawToBidsOptions()
-	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
-		return
-	}
-	opt := options[m.advancedCursor]
-	switch opt {
-	case optFmriRawOnsetOffsetS:
-		m.fmriRawOnsetOffsetS = val
-	}
-}
-
-///////////////////////////////////////////////////////////////////
-// Number Input Helpers
-///////////////////////////////////////////////////////////////////
-
 // commitNumberInput parses the number buffer and applies it to the current field
 func (m *Model) commitNumberInput() {
 	if m.numberBuffer == "" {
@@ -50,10 +34,6 @@ func (m *Model) commitNumberInput() {
 		m.commitFmriNumber(val)
 	case types.PipelineFmriAnalysis:
 		m.commitFmriAnalysisNumber(val)
-	case types.PipelineRawToBIDS:
-		m.commitRawToBidsNumber(val)
-	case types.PipelineFmriRawToBIDS:
-		m.commitFmriRawToBidsNumber(val)
 	}
 	m.useDefaultAdvanced = false
 }
@@ -1753,21 +1733,6 @@ func (m *Model) commitFmriAnalysisNumber(val float64) {
 	case optFmriTrialSigMaxTrialsPerRun:
 		if val >= 0 {
 			m.fmriTrialSigMaxTrialsPerRun = int(val)
-		}
-	}
-}
-
-func (m *Model) commitRawToBidsNumber(val float64) {
-	options := m.getRawToBidsOptions()
-	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
-		return
-	}
-
-	opt := options[m.advancedCursor]
-	switch opt {
-	case optRawLineFreq:
-		if val > 0 {
-			m.rawLineFreq = int(val)
 		}
 	}
 }

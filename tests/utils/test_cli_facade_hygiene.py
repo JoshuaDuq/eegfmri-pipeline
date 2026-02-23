@@ -14,7 +14,6 @@ CLI_FACADE_FILES = (
     "eeg_pipeline/cli/commands/behavior.py",
     "eeg_pipeline/cli/commands/machine_learning.py",
     "eeg_pipeline/cli/commands/preprocessing.py",
-    "eeg_pipeline/cli/commands/utilities.py",
     "eeg_pipeline/cli/commands/validate.py",
 )
 

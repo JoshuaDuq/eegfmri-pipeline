@@ -7,7 +7,7 @@ Single source of truth for feature extraction orchestration.
 Usage:
     # Single subject
     pipeline = FeaturePipeline(config=config)
-    pipeline.process_subject("0001", "thermalactive")
+    pipeline.process_subject("0001", "task")
 
     # Multiple subjects
     pipeline.run_batch(["0001", "0002"])

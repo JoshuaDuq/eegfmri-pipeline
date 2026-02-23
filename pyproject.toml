@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "eeg-pipeline"
 version = "1.0.0"
-description = "Modular EEG–fMRI analysis pipeline for thermal pain research"
+description = "Modular EEG–fMRI analysis pipeline for paradigm-agnostic research"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
     {name = "Joshua Duque"},
 ]
-keywords = ["eeg", "fmri", "bids", "mne", "pain", "neuroscience", "preprocessing", "machine-learning"]
+keywords = ["eeg", "fmri", "bids", "mne", "neuroscience", "preprocessing", "machine-learning"]
 dependencies = [
     "antropy>=0.1.9",
     "bctpy>=0.6.1",

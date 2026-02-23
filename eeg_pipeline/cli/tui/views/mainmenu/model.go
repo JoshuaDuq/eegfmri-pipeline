@@ -26,17 +26,17 @@ type pipelineItem struct {
 
 // Preprocessing pipelines (EEG and fMRI preprocessing)
 var preprocessingPipelines = []pipelineItem{
-	{"EEG Preprocessing", "Bad channels, ICA, epochs", 0},
-	{"fMRI Preprocessing", "Preprocess fMRI (fMRIPrep-style)", 5},
+	{"EEG Preprocessing", "Bad channels, ICA, epochs", int(types.PipelinePreprocessing)},
+	{"fMRI Preprocessing", "Preprocess fMRI (fMRIPrep-style)", int(types.PipelineFmri)},
 }
 
 // Analysis pipelines
 var analysisPipelines = []pipelineItem{
-	{"Features", "Extract EEG feature sets", 1},
-	{"Behavior", "EEG-behavior analysis", 2},
-	{"Machine Learning", "LOSO regression & classification", 3},
-	{"Plotting", "Curate and export visualization suites", 4},
-	{"fMRI Analysis", "First-level contrasts + trial-wise pain signatures", 9},
+	{"Features", "Extract EEG feature sets", int(types.PipelineFeatures)},
+	{"Behavior", "EEG-behavior analysis", int(types.PipelineBehavior)},
+	{"Machine Learning", "LOSO regression & classification", int(types.PipelineML)},
+	{"Plotting", "Curate and export visualization suites", int(types.PipelinePlotting)},
+	{"fMRI Analysis", "First-level contrasts + trial-wise pain signatures", int(types.PipelineFmriAnalysis)},
 }
 
 type utilityItem struct {
@@ -46,17 +46,11 @@ type utilityItem struct {
 
 const (
 	UtilityGlobalSetup = iota
-	UtilityMergePsychopy
-	UtilityRawToBids
-	UtilityFmriRawToBids
 	UtilityPipelineSmokeTest
 )
 
 var utilities = []utilityItem{
 	{"Global Setup", "Configure project paths and settings"},
-	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files"},
-	{"EEG Raw to BIDS", "Convert raw EEG data to BIDS format"},
-	{"fMRI Raw to BIDS", "Convert raw fMRI DICOM series to BIDS format"},
 	{"Pipeline Smoke Test", "Run quick parser/runtime checks across pipeline commands"},
 }
 
@@ -119,7 +113,7 @@ func New() Model {
 		utilityCursor:    0,
 		SelectedPipeline: -1,
 		SelectedUtility:  -1,
-		Task:             "thermalactive",
+		Task:             "task",
 		helpOverlay:      help,
 	}
 	m.animQueue.Push(animation.CursorBlinkLoop())
@@ -270,12 +264,6 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		case UtilityGlobalSetup:
 			m.SelectedUtility = UtilityGlobalSetup
 			return m, nil
-		case UtilityMergePsychopy:
-			m.SelectedPipeline = int(types.PipelineMergePsychoPyData)
-		case UtilityRawToBids:
-			m.SelectedPipeline = int(types.PipelineRawToBIDS)
-		case UtilityFmriRawToBids:
-			m.SelectedPipeline = int(types.PipelineFmriRawToBIDS)
 		case UtilityPipelineSmokeTest:
 			m.SelectedUtility = UtilityPipelineSmokeTest
 			return m, nil

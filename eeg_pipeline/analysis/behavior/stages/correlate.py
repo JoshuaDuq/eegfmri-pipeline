@@ -87,34 +87,34 @@ def stage_correlate_design_impl(
         )
         use_cv_resid = get_config_bool(
             ctx.config,
-            "behavior_analysis.correlations.use_crossfit_pain_residual",
+            "behavior_analysis.correlations.use_crossfit_predictor_residual",
             True,
         )
-        if (not explicit_target_column) and use_cv_resid and "pain_residual_cv" in df_trials.columns:
-            targets = ["pain_residual_cv", *[t for t in targets if t != "pain_residual_cv"]]
-        prefer_pain_residual = get_config_bool(
+        if (not explicit_target_column) and use_cv_resid and "predictor_residual_cv" in df_trials.columns:
+            targets = ["predictor_residual_cv", *[t for t in targets if t != "predictor_residual_cv"]]
+        prefer_predictor_residual = get_config_bool(
             ctx.config,
-            "behavior_analysis.correlations.prefer_pain_residual",
+            "behavior_analysis.correlations.prefer_predictor_residual",
             False,
         )
-        if prefer_pain_residual:
+        if prefer_predictor_residual:
             preferred_target: Optional[str] = None
-            if use_cv_resid and "pain_residual_cv" in df_trials.columns:
-                preferred_target = "pain_residual_cv"
-            elif "pain_residual" in df_trials.columns:
-                preferred_target = "pain_residual"
+            if use_cv_resid and "predictor_residual_cv" in df_trials.columns:
+                preferred_target = "predictor_residual_cv"
+            elif "predictor_residual" in df_trials.columns:
+                preferred_target = "predictor_residual"
             if preferred_target is not None:
                 updated_targets: List[str] = []
                 for target_name in targets:
-                    if target_name == "pain_residual" and preferred_target == "pain_residual_cv":
+                    if target_name == "predictor_residual" and preferred_target == "predictor_residual_cv":
                         if preferred_target not in updated_targets:
                             updated_targets.append(preferred_target)
                     elif target_name != preferred_target:
                         updated_targets.append(target_name)
                 if (
                     preferred_target in updated_targets
-                    or "pain_residual" in targets
-                    or "pain_residual_cv" in targets
+                    or "predictor_residual" in targets
+                    or "predictor_residual_cv" in targets
                 ):
                     targets = [preferred_target, *[t for t in updated_targets if t != preferred_target]]
     targets = [t for t in targets if t in df_trials.columns]
@@ -891,7 +891,7 @@ def stage_correlate_impl(
     return stage_correlate_fdr_fn(ctx, config, records)
 
 
-def stage_pain_sensitivity_impl(
+def stage_predictor_sensitivity_impl(
     ctx: Any,
     config: Any,
     *,
@@ -903,7 +903,7 @@ def stage_pain_sensitivity_impl(
     unified_fdr_family_columns: Sequence[str],
 ) -> pd.DataFrame:
     """Compute pain sensitivity correlations (independent stage)."""
-    from eeg_pipeline.analysis.behavior.api import run_pain_sensitivity_correlations
+    from eeg_pipeline.analysis.behavior.api import run_predictor_sensitivity_correlations
     from eeg_pipeline.utils.data.columns import (
         resolve_outcome_column,
         resolve_predictor_column,
@@ -929,17 +929,17 @@ def stage_pain_sensitivity_impl(
 
     method = getattr(config, "method", "spearman")
     primary_unit = str(
-        get_config_value(ctx.config, "behavior_analysis.pain_sensitivity.primary_unit", "trial") or "trial"
+        get_config_value(ctx.config, "behavior_analysis.predictor_sensitivity.primary_unit", "trial") or "trial"
     ).strip().lower()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
     n_perm = get_config_int(
         ctx.config,
-        "behavior_analysis.pain_sensitivity.n_permutations",
+        "behavior_analysis.predictor_sensitivity.n_permutations",
         get_config_int(ctx.config, "behavior_analysis.statistics.n_permutations", 0),
     )
     p_primary_mode = str(
-        get_config_value(ctx.config, "behavior_analysis.pain_sensitivity.p_primary_mode", "perm_if_available")
+        get_config_value(ctx.config, "behavior_analysis.predictor_sensitivity.p_primary_mode", "perm_if_available")
         or "perm_if_available"
     ).strip().lower()
     if primary_unit in {"trial", "trialwise"} and (not allow_iid_trials):
@@ -958,14 +958,14 @@ def stage_pain_sensitivity_impl(
     if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and n_perm <= 0:
         raise ValueError(
             "Trial-level pain sensitivity requires a valid non-i.i.d inference method. "
-            "Set behavior_analysis.pain_sensitivity.n_permutations > 0, "
-            "use run-level aggregation (behavior_analysis.pain_sensitivity.primary_unit=run_mean), "
+            "Set behavior_analysis.predictor_sensitivity.n_permutations > 0, "
+            "use run-level aggregation (behavior_analysis.predictor_sensitivity.primary_unit=run_mean), "
             "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
         )
 
     if use_run_unit:
         ctx.logger.info("Pain sensitivity: aggregating to run-level (primary_unit=%s)", primary_unit)
-        psi_feature_cols_run = get_feature_columns_fn(df_trials, ctx, "pain_sensitivity")
+        psi_feature_cols_run = get_feature_columns_fn(df_trials, ctx, "predictor_sensitivity")
         agg_cols = [
             c
             for c in (
@@ -986,7 +986,7 @@ def stage_pain_sensitivity_impl(
         strict=True,
     )
 
-    psi_feature_cols = get_feature_columns_fn(df_trials, ctx, "pain_sensitivity")
+    psi_feature_cols = get_feature_columns_fn(df_trials, ctx, "predictor_sensitivity")
 
     if not psi_feature_cols:
         ctx.logger.warning("Pain sensitivity: no feature columns found; skipping.")
@@ -1018,7 +1018,7 @@ def stage_pain_sensitivity_impl(
             "Provide behavior_analysis.run_adjustment.column in the trial table (or ctx.group_ids), "
             "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
         )
-    psi_df = run_pain_sensitivity_correlations(
+    psi_df = run_predictor_sensitivity_correlations(
         features_df=psi_features,
         ratings=pd.to_numeric(df_trials[outcome_column], errors="coerce"),
         temperatures=pd.to_numeric(df_trials[predictor_column], errors="coerce"),
@@ -1036,7 +1036,7 @@ def stage_pain_sensitivity_impl(
 
     if is_dataframe_valid_fn(psi_df):
         if "analysis_kind" not in psi_df.columns:
-            psi_df["analysis_kind"] = "pain_sensitivity"
+            psi_df["analysis_kind"] = "predictor_sensitivity"
 
         if "p_primary" in psi_df.columns:
             psi_df["p_primary"] = pd.to_numeric(psi_df["p_primary"], errors="coerce")
@@ -1057,7 +1057,7 @@ def stage_pain_sensitivity_impl(
                 psi_df,
                 p_col="p_primary",
                 family_cols=list(unified_fdr_family_columns),
-                analysis_type="pain_sensitivity",
+                analysis_type="predictor_sensitivity",
             )
 
     return psi_df if is_dataframe_valid_fn(psi_df) else pd.DataFrame()

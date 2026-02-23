@@ -89,8 +89,8 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             },
         ):
             cfg = ContrastCfg()
-            p.process_subject("0001", "thermalactive", contrast_cfg=cfg, plotting_cfg=PlotCfg(), dry_run=False)
-            p.process_subject("0001", "thermalactive", contrast_cfg=cfg, plotting_cfg=PlotCfg(), dry_run=False)
+            p.process_subject("0001", "task", contrast_cfg=cfg, plotting_cfg=PlotCfg(), dry_run=False)
+            p.process_subject("0001", "task", contrast_cfg=cfg, plotting_cfg=PlotCfg(), dry_run=False)
 
         self.assertEqual(cfg.fmriprep_space, "MNI152NLin2009cAsym")
         self.assertTrue(fake_builder.resample_to_freesurfer.called)
@@ -358,7 +358,7 @@ class TestFmriDeep(unittest.TestCase):
 
             @dataclass
             class Cfg:
-                name: str = "pain_vs_nonpain"
+                name: str = "contrast"
                 output_type: str = "z-score"
                 resample_to_freesurfer: bool = False
 
@@ -378,9 +378,9 @@ class TestFmriDeep(unittest.TestCase):
             fake_nib = types.SimpleNamespace(save=lambda img, path: Path(path).write_text("nii", encoding="utf-8"), load=lambda path: "img")
 
             with patch.dict(sys.modules, {"fmri_pipeline.analysis.contrast_builder": fake_builder, "nibabel": fake_nib}):
-                p.process_subject("0001", task="thermalactive", contrast_cfg=contrast_cfg, plotting_cfg=None, dry_run=False)
+                p.process_subject("0001", task="task", contrast_cfg=contrast_cfg, plotting_cfg=None, dry_run=False)
 
-            out_dir = p.deriv_root / "sub-0001" / "fmri" / "first_level" / "task-thermalactive" / "contrast-pain_vs_nonpain"
+            out_dir = p.deriv_root / "sub-0001" / "fmri" / "first_level" / "task-task" / "contrast-contrast"
             sidecars = list(out_dir.glob("*.json"))
             self.assertTrue(sidecars)
             payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
@@ -397,11 +397,11 @@ class TestFmriDeep(unittest.TestCase):
             anat_dir = tmp / "preprocessed" / "fmri" / "sub-0001" / "anat"
             func_dir.mkdir(parents=True, exist_ok=True)
             anat_dir.mkdir(parents=True, exist_ok=True)
-            (func_dir / "sub-0001_task-thermalactive_run-01_space-T1w_desc-brain_mask.nii.gz").write_text("x")
-            (func_dir / "sub-0001_task-thermalactive_run-01_space-T1w_boldref.nii.gz").write_text("x")
+            (func_dir / "sub-0001_task-task_run-01_space-T1w_desc-brain_mask.nii.gz").write_text("x")
+            (func_dir / "sub-0001_task-task_run-01_space-T1w_boldref.nii.gz").write_text("x")
             (anat_dir / "sub-0001_desc-preproc_T1w.nii.gz").write_text("x")
 
-            bg, mask = p._discover_plot_assets(sub_label="sub-0001", task="thermalactive", space="native")
+            bg, mask = p._discover_plot_assets(sub_label="sub-0001", task="task", space="native")
             self.assertIsNotNone(bg)
             self.assertIsNotNone(mask)
 
@@ -420,7 +420,7 @@ class TestFmriDeep(unittest.TestCase):
 
             @dataclass
             class Cfg:
-                name: str = "pain_vs_nonpain"
+                name: str = "contrast"
                 output_type: str = "z-score"
                 resample_to_freesurfer: bool = False
                 fmriprep_space: str = "T1w"
@@ -462,7 +462,7 @@ class TestFmriDeep(unittest.TestCase):
                     "fmri_pipeline.analysis.reporting": fake_report_mod,
                 },
             ):
-                p.process_subject("0001", task="thermalactive", contrast_cfg=contrast_cfg, plotting_cfg=plotting_cfg, dry_run=False)
+                p.process_subject("0001", task="task", contrast_cfg=contrast_cfg, plotting_cfg=plotting_cfg, dry_run=False)
 
         def test_fmri_analysis_plotting_exception_and_sidecar_exception(self):
             from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
@@ -567,7 +567,7 @@ class TestFmriDeep(unittest.TestCase):
             @dataclass
             class TrialSignatureExtractionConfig:
                 method: str = "lss"
-                task: str = "thermalactive"
+                task: str = "task"
 
             fake_mod = types.SimpleNamespace(
                 TrialSignatureExtractionConfig=TrialSignatureExtractionConfig,
@@ -576,7 +576,7 @@ class TestFmriDeep(unittest.TestCase):
             with patch.dict(sys.modules, {"fmri_pipeline.analysis.trial_signatures": fake_mod}):
                 p.process_subject(
                     "0001",
-                    task="thermalactive",
+                    task="task",
                     bids_fmri_root=tmp,
                     trial_cfg=TrialSignatureExtractionConfig(),
                     output_dir=tmp / "out",
@@ -801,7 +801,7 @@ class TestFmriCompletion(unittest.TestCase):
                             "me_output_echos": True,
                             "medial_surface_nan": True,
                             "no_msm": True,
-                            "task_id": "thermalactive",
+                            "task_id": "task",
                             "extra_args": "--dummy-opt 1",
                         },
                     },

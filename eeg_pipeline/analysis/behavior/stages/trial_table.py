@@ -180,7 +180,7 @@ def stage_lag_features_impl(
     return out_path
 
 
-def stage_pain_residual_impl(
+def stage_predictor_residual_impl(
     ctx: Any,
     config: Any,
     *,
@@ -194,7 +194,7 @@ def stage_pain_residual_impl(
 ) -> Optional[Path]:
     """Compute pain residual = rating - f(temperature)."""
     _ = config
-    from eeg_pipeline.utils.data.trial_table import add_pain_residual
+    from eeg_pipeline.utils.data.trial_table import add_predictor_residual
     from eeg_pipeline.utils.data.columns import (
         resolve_outcome_column,
         resolve_predictor_column,
@@ -218,7 +218,7 @@ def stage_pain_residual_impl(
         )
         return None
 
-    df_augmented, resid_meta = add_pain_residual(
+    df_augmented, resid_meta = add_predictor_residual(
         df,
         ctx.config,
         temperature_col=predictor_column,
@@ -226,13 +226,13 @@ def stage_pain_residual_impl(
     )
 
     suffix = feature_suffix_from_context_fn(ctx)
-    out_dir = get_stats_subfolder_fn(ctx, "pain_residual")
+    out_dir = get_stats_subfolder_fn(ctx, "predictor_residual")
     out_path = out_dir / f"trials_with_residual{suffix}.parquet"
     write_parquet_with_optional_csv_fn(df_augmented, out_path, also_save_csv=ctx.also_save_csv)
 
-    meta_path = out_dir / f"pain_residual{suffix}.metadata.json"
+    meta_path = out_dir / f"predictor_residual{suffix}.metadata.json"
     write_metadata_file_fn(meta_path, resid_meta)
-    ctx.data_qc["pain_residual"] = resid_meta
+    ctx.data_qc["predictor_residual"] = resid_meta
     if set_trial_table_cache_fn is not None:
         set_trial_table_cache_fn(df_augmented)
     ctx.logger.info("Pain residual saved: %s/%s", out_dir.name, out_path.name)

@@ -178,7 +178,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     computation_patterns = {
         "trial_table": ["trial_table*/*/trials_*.tsv", "trial_table*/*/trials_*.parquet"],
         "lag_features": ["lag_features*/*/trials_with_lags*.tsv", "lag_features*/*/*.metadata.json"],
-        "pain_residual": ["pain_residual*/*/trials_with_residual*.tsv", "pain_residual*/*/*.metadata.json"],
+        "predictor_residual": ["predictor_residual*/*/trials_with_residual*.tsv", "predictor_residual*/*/*.metadata.json"],
         "temperature_models": [
             "temperature_models*/*/model_comparison*.parquet",
             "temperature_models*/*/model_comparison*.tsv",
@@ -211,9 +211,9 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
             "correlations*/*/correlations*.tsv",
             "*_topomap_*_correlations_*.tsv",
         ],
-        "pain_sensitivity": [
-            "pain_sensitivity*/*/pain_sensitivity*.parquet",
-            "pain_sensitivity*/*/pain_sensitivity*.tsv",
+        "predictor_sensitivity": [
+            "predictor_sensitivity*/*/predictor_sensitivity*.parquet",
+            "predictor_sensitivity*/*/predictor_sensitivity*.tsv",
         ],
         "condition": [
             "condition_effects*/*/condition_effects*.parquet",

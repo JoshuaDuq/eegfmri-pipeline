@@ -347,8 +347,8 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
         aliases.add("rating")
     elif target_key in {"temperature", "temp"}:
         aliases.add("temperature")
-    elif target_key in {"pain", "pain_binary", "binary"}:
-        aliases.add("pain_binary")
+    elif target_key in {"pain", "binary_outcome", "binary"}:
+        aliases.add("binary_outcome")
     elif target_key in {"fmri_signature", "fmri-signature"}:
         aliases.add("fmri_signature")
 
@@ -358,7 +358,7 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
         event_alias_map = {
             "rating": get_config_value(config, "event_columns.rating", []),
             "temperature": get_config_value(config, "event_columns.temperature", []),
-            "pain_binary": get_config_value(config, "event_columns.pain_binary", []),
+            "binary_outcome": get_config_value(config, "event_columns.binary_outcome", []),
         }
         for canonical, aliases_raw in event_alias_map.items():
             if isinstance(aliases_raw, str):
@@ -1512,7 +1512,7 @@ def run_classification_ml(
     from eeg_pipeline.analysis.machine_learning.cnn import nested_loso_cnn_classification
     
     if target is None:
-        target = str(get_config_value(config, "machine_learning.targets.classification", "pain_binary"))
+        target = str(get_config_value(config, "machine_learning.targets.classification", "binary_outcome"))
     if binary_threshold is None:
         binary_threshold = get_config_value(config, "machine_learning.targets.binary_threshold", None)
 
@@ -2039,7 +2039,7 @@ def run_within_subject_classification_ml(
     from sklearn.model_selection import StratifiedGroupKFold
 
     if target is None:
-        target = str(get_config_value(config, "machine_learning.targets.classification", "pain_binary"))
+        target = str(get_config_value(config, "machine_learning.targets.classification", "binary_outcome"))
     if binary_threshold is None:
         binary_threshold = get_config_value(config, "machine_learning.targets.binary_threshold", None)
 

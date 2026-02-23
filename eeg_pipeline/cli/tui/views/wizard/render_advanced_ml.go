@@ -177,7 +177,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optUseDefaults:
 			label, value, hint = "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"
 		case optMLTarget:
-			hint = "e.g., rating / temperature / pain_binary"
+			hint = "e.g., rating / temperature / binary_outcome"
 			if len(availableColumns) > 0 {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
@@ -193,7 +193,7 @@ func (m Model) renderMLAdvancedConfig() string {
 			methods := []string{"beta-series", "lss"}
 			label, value, hint = "fMRI Sig Method", methods[m.mlFmriSigMethodIndex%len(methods)], "which fMRI target to load"
 		case optMLFmriSigContrastName:
-			label, value, hint = "fMRI Contrast Name", renderTextOrDefault(m.mlFmriSigContrastName, "(pain_vs_nonpain)"), "must match fmri/(beta_series|lss)/task-*/contrast-*"
+			label, value, hint = "fMRI Contrast Name", renderTextOrDefault(m.mlFmriSigContrastName, "(contrast)"), "must match fmri/(beta_series|lss)/task-*/contrast-*"
 		case optMLFmriSigSignature:
 			sigs := []string{"NPS", "SIIPS1"}
 			label, value, hint = "fMRI Signature", sigs[m.mlFmriSigSignatureIndex%len(sigs)], "signature used as target"

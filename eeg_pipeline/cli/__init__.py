@@ -14,9 +14,8 @@ Available commands:
 - info: Dataset information and validation
 - ml: Machine learning-based prediction
 - plotting: Curated visualization suites
-- preprocessing: Raw-to-BIDS and behavior merge
+- preprocessing: EEG preprocessing (bad channels, ICA, epochs)
 - stats: Statistical analysis
-- utilities: Raw-to-BIDS conversion and behavior merge
 - validate: BIDS validation
 """
 

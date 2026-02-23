@@ -5,7 +5,7 @@ Feature Models (Subject-Level)
 Per-feature model families that complement correlations/regressions for pain studies.
 
 This module is intended for single-subject analysis tables (one row per trial),
-and supports multiple outcomes (e.g., `rating`, `pain_residual`, and `pain_binary`).
+and supports multiple outcomes (e.g., `rating`, `predictor_residual`, and `binary_outcome`).
 """
 
 from __future__ import annotations
@@ -55,14 +55,14 @@ class FeatureModelsConfig:
     standardize: bool = True
     min_samples: int = 20
     max_features: Optional[int] = 100
-    binary_outcome: str = "pain_binary"  # or "rating_median"
+    binary_outcome: str = "binary_outcome"  # or "rating_median"
     n_jobs: int = 1
 
     @classmethod
     def from_config(cls, config: Any) -> "FeatureModelsConfig":
-        outcomes = _get(config, "behavior_analysis.models.outcomes", ["rating", "pain_residual"])
+        outcomes = _get(config, "behavior_analysis.models.outcomes", ["rating", "predictor_residual"])
         if not isinstance(outcomes, (list, tuple)) or not outcomes:
-            outcomes = ["rating", "pain_residual"]
+            outcomes = ["rating", "predictor_residual"]
         families = _get(config, "behavior_analysis.models.families", ["ols_hc3", "robust_rlm", "quantile_50", "logit"])
         if not isinstance(families, (list, tuple)) or not families:
             families = ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
@@ -79,7 +79,7 @@ class FeatureModelsConfig:
             standardize=bool(_get(config, "behavior_analysis.models.standardize", True)),
             min_samples=int(_get(config, "behavior_analysis.models.min_samples", 20)),
             max_features=_get(config, "behavior_analysis.models.max_features", 100),
-            binary_outcome=str(_get(config, "behavior_analysis.models.binary_outcome", "pain_binary")).strip().lower(),
+            binary_outcome=str(_get(config, "behavior_analysis.models.binary_outcome", "binary_outcome")).strip().lower(),
             n_jobs=int(_get(config, "behavior_analysis.n_jobs", 1)),
         )
 
@@ -348,8 +348,8 @@ def _fit_ols_hc3_model(
 
 def _derive_binary_outcome(df: pd.DataFrame, kind: str) -> Tuple[Optional[pd.Series], Dict[str, Any]]:
     meta: Dict[str, Any] = {"binary_outcome_kind": kind}
-    if kind == "pain_binary" and "pain_binary" in df.columns:
-        return pd.to_numeric(df["pain_binary"], errors="coerce"), meta
+    if kind == "binary_outcome" and "binary_outcome" in df.columns:
+        return pd.to_numeric(df["binary_outcome"], errors="coerce"), meta
     if kind in ("rating_median", "rating_median_split") and "rating" in df.columns:
         r = pd.to_numeric(df["rating"], errors="coerce")
         med = float(r.median(skipna=True)) if r.notna().any() else np.nan
@@ -547,8 +547,8 @@ def _prepare_outcome_data(
     outcome_name_str = str(outcome_name)
     meta: Dict[str, Any] = {}
     
-    if outcome_name_str == "pain_binary":
-        outcome_series, binary_meta = _derive_binary_outcome(trial_df, "pain_binary")
+    if outcome_name_str == "binary_outcome":
+        outcome_series, binary_meta = _derive_binary_outcome(trial_df, "binary_outcome")
         meta.update(binary_meta)
         if outcome_series is None:
             return None, False, outcome_name_str, meta
@@ -559,7 +559,7 @@ def _prepare_outcome_data(
         meta.update(binary_meta)
         if outcome_series is None:
             return None, False, outcome_name_str, meta
-        return outcome_series, True, "pain_binary_derived", meta
+        return outcome_series, True, "binary_outcome_derived", meta
     
     if outcome_name_str not in trial_df.columns:
         return None, False, outcome_name_str, meta

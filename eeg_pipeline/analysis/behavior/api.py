@@ -19,10 +19,10 @@ from eeg_pipeline.domain.features.registry import (
     get_feature_registry,
 )
 from eeg_pipeline.utils.analysis.stats.correlation import (
-    compute_pain_sensitivity_index,
+    compute_predictor_sensitivity_index,
     interpret_correlation,
     interpret_effect_size,
-    run_pain_sensitivity_correlations,
+    run_predictor_sensitivity_correlations,
 )
 from eeg_pipeline.types import CorrelationResult
 from eeg_pipeline.utils.analysis.stats.transforms import compute_change_features
@@ -80,13 +80,13 @@ def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
 
 __all__ = [
     # Correlation helpers
-    "compute_pain_sensitivity_index",
+    "compute_predictor_sensitivity_index",
     "compute_change_features",
     "compute_split_half_reliability",
     "interpret_effect_size",
     "interpret_correlation",
     "CorrelationResult",
-    "run_pain_sensitivity_correlations",
+    "run_predictor_sensitivity_correlations",
     # Feature correlator
     "FeatureBehaviorCorrelator",
     "CorrelationConfig",

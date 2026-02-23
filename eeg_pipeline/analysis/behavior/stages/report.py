@@ -70,7 +70,7 @@ def stage_report_impl(
 
     patterns = [
         "correlations*.parquet",
-        "pain_sensitivity*.parquet",
+        "predictor_sensitivity*.parquet",
         "regression_feature_effects*.parquet",
         "models_feature_effects*.parquet",
         "condition_effects*.parquet",

@@ -48,13 +48,6 @@ func (m Model) GetOutputPaths() []string {
 		paths = []string{filepath.Join(base, "sub-XX", "fmri", "first_level")}
 	case strings.Contains(cmd, "fmri") && strings.Contains(cmd, "preprocess"):
 		paths = []string{filepath.Join(base, "preprocessed", "fmri", "fmriprep")}
-	case strings.Contains(cmd, "fmri-raw-to-bids"):
-		// Extract bids-fmri-root from command or use default
-		bidsFmriRoot := m.extractBidsFmriRoot()
-		if bidsFmriRoot == "" {
-			bidsFmriRoot = filepath.Join(m.RepoRoot, "eeg_pipeline", "data", "bids_output", "fmri")
-		}
-		paths = []string{bidsFmriRoot}
 	case strings.Contains(cmd, " ml "):
 		paths = []string{filepath.Join(base, "machine_learning")}
 	case strings.Contains(cmd, "plot"):

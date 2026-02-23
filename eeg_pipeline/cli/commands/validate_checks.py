@@ -230,8 +230,8 @@ def _validate_behavior(
             ["r_primary", "r"],
         ),
         (
-            "pain_sensitivity",
-            ["pain_sensitivity*/*/pain_sensitivity*.tsv", "pain_sensitivity*/*/pain_sensitivity*.parquet"],
+            "predictor_sensitivity",
+            ["predictor_sensitivity*/*/predictor_sensitivity*.tsv", "predictor_sensitivity*/*/predictor_sensitivity*.parquet"],
             ["feature", "p_primary"],
             None,
         ),

@@ -656,7 +656,7 @@ All settings live under `machine_learning` in `eeg_config.yaml`:
 | `classification.model` | Default classifier | `svm` |
 | `classification.max_failed_fold_fraction` | Max allowed fold failures | `0.25` |
 | `classification.min_subjects_with_auc_for_inference` | Min subjects for AUC reporting | `2` |
-| `targets.classification` | Classification target column | `pain_binary` |
+| `targets.classification` | Classification target column | `binary_outcome` |
 | `targets.regression` | Regression target column | (configurable) |
 | `targets.binary_threshold` | Threshold for binarization | `None` |
 

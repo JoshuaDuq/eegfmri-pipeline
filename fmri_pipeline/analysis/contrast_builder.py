@@ -1297,7 +1297,7 @@ def build_fmri_contrast(
     freesurfer_subjects_dir: Path,
     subject: str,
     config: Any,
-    task: str = "pain",
+    task: str = "task",
     output_dir: Optional[Path] = None,
 ) -> Optional[Path]:
     """
@@ -1424,7 +1424,7 @@ def ensure_fmri_stats_map(
     bids_derivatives: Path,
     freesurfer_subjects_dir: Path,
     subject: str,
-    task: str = "pain",
+    task: str = "task",
 ) -> Optional[Path]:
     """
     Ensure fMRI stats map exists, building it if necessary.

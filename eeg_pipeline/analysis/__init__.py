@@ -7,7 +7,7 @@ Submodules:
 - behavior: Behavioral correlation analysis (EEG-pain correlations)
 - machine_learning: Machine learning pipeline (LOSO CV, time generalization)
 - features: Feature extraction (power, connectivity, ERDS, ERP, etc.)
-- utilities: BIDS conversion and event processing (raw-to-bids, merge-psychopy)
+- utilities: BIDS metadata helpers (participants.tsv, events sidecar)
 """
 
 from eeg_pipeline.analysis import behavior

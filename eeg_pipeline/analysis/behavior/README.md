@@ -8,10 +8,10 @@ The pipeline is orchestrated by a **stage registry** with explicit dependency re
 
 ```
 load → trial_table → lag_features
-                   → pain_residual
+                   → predictor_residual
                    → temperature_models
                    → correlate_design → correlate_effect_sizes → correlate_pvalues → correlate_primary_selection → correlate_fdr
-                   → pain_sensitivity
+                   → predictor_sensitivity
                    → regression
                    → models
                    → stability
@@ -72,7 +72,7 @@ Builds a canonical trial-level DataFrame merging all feature tables with behavio
 1. Load all feature DataFrames from the feature extraction pipeline (power, connectivity, aperiodic, ERP, etc.).
 2. Validate index alignment across all feature tables.
 3. Prefix each feature column with its category name (e.g., `power_`, `connectivity_`).
-4. Merge with `aligned_events` (from BIDS `events.tsv`) containing `rating`, `temperature`, `pain_binary`, `trial_index`, `run_id`.
+4. Merge with `aligned_events` (from BIDS `events.tsv`) containing `rating`, `temperature`, `binary_outcome`, `trial_index`, `run_id`.
 5. Optionally compute **change scores** (active − baseline) for features that have both segment variants.
 
 **Output:** `trials.parquet` — One row per trial, all features + behavioral variables.
@@ -101,17 +101,17 @@ Lag computation respects run boundaries — no carry-over across runs.
 
 ### 3. Pain Residual
 
-**Module:** `orchestration.py` → `stage_pain_residual`
+**Module:** `orchestration.py` → `stage_predictor_residual`
 
-Computes `pain_residual = rating − f(temperature)`, representing pain perception beyond what stimulus intensity predicts.
+Computes `predictor_residual = rating − f(temperature)`, representing pain perception beyond what stimulus intensity predicts.
 
 **Method:**
 
 1. Fit a flexible temperature→rating curve (natural cubic spline or polynomial, configurable).
 2. Optionally use **cross-validated (out-of-run) prediction** to avoid overfitting the temperature–rating relationship.
-3. Compute residuals: `pain_residual = rating − predicted_rating`.
+3. Compute residuals: `predictor_residual = rating − predicted_rating`.
 
-**Output:** `pain_residual` column added to the trial table. Used as the preferred correlation target when `prefer_pain_residual=true` (default).
+**Output:** `predictor_residual` column added to the trial table. Used as the preferred correlation target when `prefer_predictor_residual=true` (default).
 
 ---
 
@@ -140,7 +140,7 @@ The correlation pipeline is decomposed into five atomic stages:
 
 Assembles the design matrix: identifies target columns, builds covariate DataFrame (trial order, run dummies), resolves temperature series, and determines permutation groups.
 
-**Targets** (configurable, default order): `pain_residual`, `rating`, `temperature`.
+**Targets** (configurable, default order): `predictor_residual`, `rating`, `temperature`.
 
 **Covariates:**
 - `trial_index_within_group` — Controls for habituation/sensitization.
@@ -205,7 +205,7 @@ Applies Benjamini-Hochberg FDR correction to the primary p-values. Saves the fin
 
 ### 6. Pain Sensitivity
 
-**Module:** `orchestration.py` → `stage_pain_sensitivity`
+**Module:** `orchestration.py` → `stage_predictor_sensitivity`
 
 Correlates EEG features with a temperature-adjusted pain index derived from the temperature→rating relationship.
 
@@ -214,7 +214,7 @@ Correlates EEG features with a temperature-adjusted pain index derived from the 
 1. Fit a simple temperature→rating model and compute residuals (rating minus predicted-from-temperature).
 2. Correlate each EEG feature with this residual index.
 3. Optional permutation testing with within-group permutations (e.g., run/block-restricted).
-4. FDR correction within the pain_sensitivity analysis family.
+4. FDR correction within the predictor_sensitivity analysis family.
 
 **Unit of analysis:** Configurable as `trial` (with permutation requirement) or `run_mean` (aggregated per run).
 
@@ -255,9 +255,9 @@ Fits multiple model families per feature to assess robustness of effects across 
 | **OLS-HC3** | Ordinary least squares with heteroscedasticity-consistent (HC3) standard errors. |
 | **Robust** | M-estimator regression (Huber or bisquare weights). |
 | **Quantile** | Quantile regression at the median (robust to outliers and skewness). |
-| **Logistic** | Binary logistic regression predicting `pain_binary` from the feature. |
+| **Logistic** | Binary logistic regression predicting `binary_outcome` from the feature. |
 
-**Outcomes:** `rating`, `pain_residual`, and `pain_binary` (configurable).
+**Outcomes:** `rating`, `predictor_residual`, and `binary_outcome` (configurable).
 
 ---
 
@@ -317,7 +317,7 @@ Compares EEG features between experimental conditions.
 
 #### Column-based contrast
 
-Splits trials by a categorical column (e.g., `pain_binary`: pain vs. non-pain).
+Splits trials by a categorical column (e.g., `binary_outcome`: pain vs. non-pain).
 
 **Effect size metrics:**
 
@@ -501,7 +501,7 @@ Generates a self-diagnosing Markdown report summarizing all analysis results for
 **Module:** `orchestration.py` → `stage_export`
 
 Normalizes and exports all analysis results to disk. Produces:
-- Combined correlation tables (rating, temperature, pain_sensitivity).
+- Combined correlation tables (rating, temperature, predictor_sensitivity).
 - Condition effect tables.
 - Regression, mediation, moderation results.
 - Outputs manifest JSON for downstream consumption.
@@ -538,9 +538,9 @@ All behavior analysis settings live under `behavior_analysis` in `eeg_config.yam
 | `control_temperature` | Partial out temperature | `true` |
 | `control_trial_order` | Partial out trial order | `true` |
 | `correlations.types` | Which correlation types to compute | `["partial_cov_temp"]` |
-| `correlations.prefer_pain_residual` | Use pain_residual as primary target | `true` |
+| `correlations.prefer_predictor_residual` | Use predictor_residual as primary target | `true` |
 | `correlations.primary_unit` | `trial` or `run_mean` | `trial` |
-| `pain_sensitivity.primary_unit` | `trial` or `run_mean` | `trial` |
+| `predictor_sensitivity.primary_unit` | `trial` or `run_mean` | `trial` |
 | `regression.primary_unit` | `trial` or `run_mean` | `trial` |
 | `condition.compare_column` | Column for condition split | `pain` |
 | `condition.compare_values` | Values defining conditions | `[1, 0]` |

@@ -5,7 +5,7 @@
 [![BIDS](https://img.shields.io/badge/data-BIDS-orange.svg)](https://bids-specification.readthedocs.io/)
 [![MNE-Python](https://img.shields.io/badge/MNE--Python-1.9.0-informational.svg)](https://mne.tools)
 
-A modular, end-to-end pipeline for simultaneous EEG–fMRI thermal pain research.  Raw data conversion, preprocessing, feature extraction, behavioral analysis, machine learning, fMRI first-level analysis, and publication-ready visualization — all from a unified CLI.
+A modular, end-to-end pipeline for simultaneous EEG–fMRI research across paradigms. Raw data conversion, preprocessing, feature extraction, behavioral analysis, machine learning, fMRI first-level analysis, and publication-ready visualization from a unified CLI.
 
 **This pipeline ships with a dedicated interactive TUI** that provides guided wizards for every stage — no CLI flags to memorize. See [Interactive TUI](#interactive-tui).
 
@@ -64,12 +64,12 @@ The pipeline expects data organized under `data/` at the repository root. All pa
 |----------|-------------------------|
 | EEG preprocessing/features from BIDS | `data/bids_output/eeg/sub-XXXX/eeg/*_eeg.<format>` (plus matching sidecars expected by your BIDS converter) |
 | Behavioral analysis / ML using trial metadata | EEG `*_events.tsv` with at least `onset`, `duration`, `trial_type`; include pain/temperature/rating columns (see below) |
-| EEG raw to BIDS (`utilities raw-to-bids`) | `data/source_data/sub-XXXX/eeg/*.vhdr` (+ matching `.vmrk` and `.eeg`) |
-| Merge PsychoPy into EEG events (`utilities merge-psychopy`) | `data/source_data/sub-XXXX/PsychoPy_Data/*TrialSummary.csv` + existing BIDS EEG `*_events.tsv` |
-| fMRI raw to BIDS (`utilities fmri-raw-to-bids`) | `data/source_data/sub-XXXX/fmri/<dicom-series-dir>/` and (if writing events) `PsychoPy_Data/*TrialSummary.csv` |
+| EEG raw to BIDS (`paradigm-specific-scripts`) | `data/source_data/sub-XXXX/eeg/*.vhdr` (+ matching `.vmrk` and `.eeg`) |
+| Merge PsychoPy into EEG events (`paradigm-specific-scripts`) | `data/source_data/sub-XXXX/PsychoPy_Data/*TrialSummary.csv` + existing BIDS EEG `*_events.tsv` |
+| fMRI raw to BIDS (`paradigm-specific-scripts`) | `data/source_data/sub-XXXX/fmri/<dicom-series-dir>/` and (if writing events) `PsychoPy_Data/*TrialSummary.csv` |
 | fMRI first-level analysis (`fmri-analysis`) | `data/bids_output/fmri/sub-XXXX/func/*_bold.nii.gz` + matching `*_events.tsv` with `onset`, `duration`, `trial_type` |
 
-#### Option A: Start from raw recordings (use the built-in converter)
+#### Option A: Start from raw recordings (use paradigm-specific scripts)
 
 Place raw BrainVision EEG files under `source_data/` (subject directory must be `sub-XXXX`):
 
@@ -77,18 +77,22 @@ Place raw BrainVision EEG files under `source_data/` (subject directory must be 
 data/source_data/
 └── sub-XXXX/
     └── eeg/
-        ├── sub-XXXX_task-thermalactive_run-01_eeg.vhdr
-        ├── sub-XXXX_task-thermalactive_run-01_eeg.vmrk
-        └── sub-XXXX_task-thermalactive_run-01_eeg.eeg
+        ├── sub-XXXX_task-task_run-01_eeg.vhdr
+        ├── sub-XXXX_task-task_run-01_eeg.vmrk
+        └── sub-XXXX_task-task_run-01_eeg.eeg
 ```
 
 Then convert to BIDS:
 
 ```bash
-eeg-pipeline utilities raw-to-bids --subject XXXX
+python paradigm-specific-scripts/run_paradigm_specific.py eeg-raw-to-bids \
+  --source-root data/source_data \
+  --bids-root data/bids_output/eeg \
+  --task task \
+  --subject XXXX
 ```
 
-> **Note:** The built-in `raw-to-bids` converter is **paradigm-specific** — it is tailored for the simultaneous EEG–fMRI thermal pain paradigm (BrainVision format, EasyCap M1 montage, volume triggers for EEG–fMRI alignment). If your paradigm differs, you can either **adapt the converter** (`eeg_pipeline/analysis/utilities/eeg_raw_to_bids.py`) or use **Option B** below.
+> **Note:** Raw-to-BIDS and PsychoPy merge helpers are paradigm-specific and now live under `paradigm-specific-scripts/`. Adapt those scripts if your paradigm differs.
 
 If you want behavioral columns merged into EEG events, also provide PsychoPy trial summaries:
 
@@ -123,7 +127,7 @@ Skip the `raw-to-bids` step and proceed directly to preprocessing.
 #### For fMRI data (optional)
 
 ```
-data/source_data/sub-XXXX/fmri/    # Raw DICOMs (for fmri-raw-to-bids)
+data/source_data/sub-XXXX/fmri/    # Raw DICOMs (for paradigm-specific fMRI conversion)
 data/bids_output/fmri/              # BIDS-formatted fMRI (NIfTI + events)
 data/fMRI_data/sub-XXXX/anat/       # T1w anatomical (for FreeSurfer/source localization)
 ```
@@ -134,8 +138,8 @@ Minimal BIDS-fMRI run example for `fmri-analysis`:
 data/bids_output/fmri/
 └── sub-XXXX/
     └── func/
-        ├── sub-XXXX_task-thermalactive_run-01_bold.nii.gz
-        └── sub-XXXX_task-thermalactive_run-01_events.tsv
+        ├── sub-XXXX_task-task_run-01_bold.nii.gz
+        └── sub-XXXX_task-task_run-01_events.tsv
 ```
 
 #### For behavioral data
@@ -146,7 +150,7 @@ The pipeline reads behavioral variables from BIDS `*_events.tsv` files. The foll
 |----------|---------------------------|
 | **Temperature** | `stimulus_temp`, `stimulus_temperature`, `temp`, `temperature` |
 | **Pain rating** | `vas_final_coded_rating`, `vas_final_rating`, `vas_rating`, `pain_intensity`, `pain_rating`, `rating` |
-| **Pain binary** | `pain_binary_coded`, `pain_binary`, `pain` |
+| **Pain binary** | `binary_outcome_coded`, `binary_outcome`, `pain` |
 
 For fMRI first-level GLM, each run-level `*_events.tsv` must include:
 
@@ -154,7 +158,7 @@ For fMRI first-level GLM, each run-level `*_events.tsv` must include:
 - `duration`
 - `trial_type`
 
-For the default contrast setup, include `pain_binary_coded` (or override contrast columns in config/CLI).
+For the default contrast setup, include `binary_outcome_coded` (or override contrast columns in config/CLI).
 
 ### Default directory layout
 
@@ -256,7 +260,6 @@ eeg-pipeline <command> --help
 
 | Command | Description |
 |---------|-------------|
-| `utilities` | Data conversion (raw→BIDS), merge PsychoPy, clean disk |
 | `preprocessing` | Bad channels, ICA, epoching |
 | `features` | Extract or visualize 16 EEG feature categories |
 | `behavior` | Behavioral correlations, condition comparisons, mediation |
@@ -270,55 +273,7 @@ eeg-pipeline <command> --help
 
 ---
 
-### 1. Utilities — Data Conversion
-
-Convert raw recordings into BIDS format.
-
-| Mode | Description |
-|------|-------------|
-| `raw-to-bids` | Convert raw EEG (BrainVision .vhdr) to BIDS |
-| `fmri-raw-to-bids` | Convert fMRI DICOMs to BIDS NIfTI + events.tsv |
-| `merge-psychopy` | Merge PsychoPy behavioral logs into BIDS events.tsv |
-| `clean` | Clean up intermediate files to free disk space |
-
-```bash
-# EEG raw to BIDS
-eeg-pipeline utilities raw-to-bids --subject 0001 --montage easycap-M1
-
-# fMRI DICOM to BIDS (all subjects)
-eeg-pipeline utilities fmri-raw-to-bids --all-subjects --task thermalactive
-
-# Merge PsychoPy logs into events.tsv (with cross-modal QC)
-eeg-pipeline utilities merge-psychopy --subject 0001 --qc-column temperature
-
-# Preview disk cleanup (safe)
-eeg-pipeline utilities clean --target preview --subject 0001
-
-# Actually clean old plots
-eeg-pipeline utilities clean --target plots --older-than 30 --force
-```
-
-> **Paradigm note:** The `raw-to-bids` converter is designed for the simultaneous EEG–fMRI thermal pain paradigm (BrainVision format, EasyCap-M1 montage, volume triggers). For other paradigms, either adapt `eeg_pipeline/analysis/utilities/eeg_raw_to_bids.py` or place already BIDS-compliant data directly into `data/bids_output/eeg/`.
-
-**Key options:**
-
-| Option | Description |
-|--------|-------------|
-| `--montage` | EEG montage (default: `easycap-M1`) |
-| `--line-freq` | Line frequency in Hz (default: `60`) |
-| `--overwrite` | Overwrite existing BIDS files |
-| `--trim-to-first-volume` | Trim EEG to first fMRI volume trigger (for EEG–fMRI alignment) |
-| `--event-prefix` | Filter annotations by prefix (repeatable) |
-| `--session` | BIDS session label (fMRI) |
-| `--event-granularity` | `phases` (ramp/plateau/ramp_down) or `trial` (fMRI) |
-| `--dicom-mode` | `symlink`, `copy`, or `skip` (fMRI) |
-| `--dcm2niix-path` | Path to dcm2niix binary (fMRI) |
-
-See [docs/fmri/raw-to-bids.md](docs/fmri/raw-to-bids.md) for the full fMRI conversion guide.
-
----
-
-### 2. Preprocessing
+### 1. Preprocessing
 
 Automated EEG preprocessing: bad channel detection, ICA artifact removal, and epoching.
 
@@ -488,10 +443,10 @@ Correlate EEG features with pain ratings, temperature, and experimental conditio
 |-------|-------------|
 | `trial_table` | Build trial-level feature table (events + features merged) |
 | `lag_features` | Temporal dynamics (prev_*, delta_*) for habituation |
-| `pain_residual` | Rating − f(temperature): pain beyond stimulus intensity |
+| `predictor_residual` | Rating − f(temperature): pain beyond stimulus intensity |
 | `temperature_models` | Temperature→rating model comparison + breakpoint detection |
 | `correlations` | Feature–pain rating correlations (partial, permutation-tested) |
-| `pain_sensitivity` | Pain sensitivity profiling |
+| `predictor_sensitivity` | Pain sensitivity profiling |
 | `condition` | Condition comparison (high vs. low pain, effect sizes) |
 | `temporal` | Temporal dynamics across trial phases |
 | `regression` | Trialwise regression models |
@@ -601,7 +556,7 @@ eeg-pipeline ml --list-stages
 |--------|-------------|---------|
 | `--model` | `elasticnet`, `ridge`, `rf` | `elasticnet` |
 | `--cv-scope` | `group` (LOSO) or `subject` (within-subject) | `group` |
-| `--target` | `rating`, `temperature`, `pain_binary`, `fmri_signature` | `rating` |
+| `--target` | `rating`, `temperature`, `binary_outcome`, `fmri_signature` | `rating` |
 | `--classification-model` | `svm`, `lr`, `rf`, `cnn` | from config |
 | `--feature-families` | Feature families to load | all available |
 | `--feature-bands` | Restrict to specific frequency bands | all |
@@ -656,7 +611,7 @@ Subject-level GLM contrasts and trial-wise beta estimation.
 ```bash
 # First-level GLM
 eeg-pipeline fmri-analysis first-level --subject 0001 \
-  --contrast-name pain_vs_nonpain \
+  --contrast-name contrast \
   --cond-a-value stimulation --cond-b-value fixation_rest
 
 # With fMRIPrep preprocessed BOLD
@@ -825,7 +780,7 @@ All defaults live in `eeg_pipeline/utils/config/eeg_config.yaml`. CLI flags over
 
 | Section | Controls |
 |---------|----------|
-| `project` | Task name (`thermalactive`), random seed (`42`) |
+| `project` | Task name (`task`), random seed (`42`) |
 | `paths` | BIDS root, derivatives root, source data, FreeSurfer dirs |
 | `eeg` | Montage (`easycap-M1`), reference (`average`), EOG/ECG channels |
 | `preprocessing` | Filter settings, resampling, break detection, clean events |
@@ -851,7 +806,7 @@ All subject-aware commands accept these options:
 | `--subject XXXX` / `-s XXXX` | Single subject (repeatable) |
 | `--all-subjects` | Process all discovered subjects |
 | `--group all` or `--group A,B,C` | Process a named group or comma-separated list |
-| `--task` / `-t` | Override task label (default from config: `thermalactive`) |
+| `--task` / `-t` | Override task label (default from config: `task`) |
 | `--dry-run` | Preview what would run without executing |
 | `--json` | Output in JSON format (for TUI/scripting) |
 

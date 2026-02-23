@@ -320,15 +320,13 @@ func (m Model) handleQuickAction(action quickactions.ActionType) (tea.Model, tea
 			return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
 		}
 	case quickactions.ActionValidate:
-		// Run validation command
-		cmd := "eeg-pipeline utilities validate --all-subjects"
+		cmd := "eeg-pipeline validate --all-subjects"
 		if m.task != "" {
 			cmd += " --task " + m.task
 		}
 		return m.startExecution(cmd)
 	case quickactions.ActionExport:
-		// Run export command
-		cmd := "eeg-pipeline utilities export --all-subjects --format csv"
+		cmd := "eeg-pipeline info --all-subjects --format csv"
 		if m.task != "" {
 			cmd += " --task " + m.task
 		}

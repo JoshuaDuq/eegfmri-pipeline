@@ -159,9 +159,9 @@ def _detect_sign_flip(series_a: pd.Series, series_b: pd.Series) -> pd.Series:
 
 def _add_sign_flip_flags(out: pd.DataFrame) -> None:
     """Add sign flip detection columns."""
-    if "reg_rating_beta" in out.columns and "reg_pain_residual_beta" in out.columns:
-        out["flip_reg_rating_vs_pain_residual"] = _detect_sign_flip(
-            out["reg_rating_beta"], out["reg_pain_residual_beta"]
+    if "reg_rating_beta" in out.columns and "reg_predictor_residual_beta" in out.columns:
+        out["flip_reg_rating_vs_predictor_residual"] = _detect_sign_flip(
+            out["reg_rating_beta"], out["reg_predictor_residual_beta"]
         )
     
     if "corr_rating_r" in out.columns and "reg_rating_beta" in out.columns:
@@ -252,7 +252,7 @@ def _process_regressions(out: pd.DataFrame, regression_df: pd.DataFrame) -> None
 
     regression_targets = [
         ("rating", "reg_rating"),
-        ("pain_residual", "reg_pain_residual"),
+        ("predictor_residual", "reg_predictor_residual"),
         ("temperature", "reg_temperature"),
     ]
     for target, prefix in regression_targets:
@@ -277,7 +277,7 @@ def _process_models(out: pd.DataFrame, models_df: pd.DataFrame) -> None:
         models_processed["p_val"] = np.nan
 
     model_families = ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
-    model_targets = ["rating", "pain_residual"]
+    model_targets = ["rating", "predictor_residual"]
     
     for family in model_families:
         for target in model_targets:

@@ -26,7 +26,7 @@ source eeg_pipeline/.venv311/bin/activate
 ### 2. Verify cleaned epochs exist
 You must have cleaned epochs for your subject/task. Example location:
 ```
-eeg_pipeline/data/derivatives/preprocessed/sub-0000/eeg/sub-0000_task-thermalactive_proc-clean_epo.fif
+eeg_pipeline/data/derivatives/preprocessed/sub-0000/eeg/sub-0000_task-task_proc-clean_epo.fif
 ```
 
 ## Path 1: EEG-Only Source Localization (Template-Based)
@@ -263,7 +263,7 @@ from mne_bids import BIDSPath, read_raw_bids
 
 bids_root = "eeg_pipeline/data/bids_output"
 subject = "0000"
-task = "thermalactive"
+task = "task"
 
 bids_path = BIDSPath(
     subject=subject,

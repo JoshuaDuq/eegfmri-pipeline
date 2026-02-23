@@ -12,8 +12,8 @@ from .paths import ensure_dir
 
 
 def read_tsv(path: Path, **kwargs) -> pd.DataFrame:
-    """Read TSV file into DataFrame."""
-    defaults = {"sep": "\t", "low_memory": False}
+    """Read TSV file into DataFrame. Handles UTF-8 BOM (written by mne-bids)."""
+    defaults = {"sep": "\t", "low_memory": False, "encoding": "utf-8-sig"}
     defaults.update(kwargs)
     return pd.read_csv(path, **defaults)
 

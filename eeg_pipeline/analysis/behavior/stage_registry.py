@@ -195,7 +195,7 @@ class _ResultsFromOutputs:
 
     def __init__(self, outputs: Dict[str, Any]):
         self.correlations = outputs.get("correlate_fdr")
-        self.pain_sensitivity = outputs.get("pain_sensitivity")
+        self.predictor_sensitivity = outputs.get("predictor_sensitivity")
         self.condition_effects = outputs.get("condition_column")
         self.condition_effects_window = outputs.get("condition_window")
         self.mediation = outputs.get("mediation")

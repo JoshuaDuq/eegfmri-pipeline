@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
 from eeg_pipeline.utils.analysis.stats.base import get_config_value, get_epsilon_std
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
@@ -433,7 +433,7 @@ def _get_condition_column(
     if compare_col and compare_col in events_df.columns:
         return compare_col
     
-    return get_pain_column_from_config(config, events_df)
+    return get_binary_outcome_column_from_config(config, events_df)
 
 
 def _create_masks_from_compare_values(
@@ -470,7 +470,7 @@ def _create_masks_from_compare_values(
         return mask1, mask2
 
 
-def _split_by_pain_binary(
+def _split_by_binary_outcome(
     condition_series: pd.Series,
     column_name: str,
     logger: logging.Logger,
@@ -514,7 +514,7 @@ def split_by_condition(
     """Split trials into two conditions based on a column and values.
     
     Supports user-configurable condition column and values via:
-    - config.event_columns.pain_binary: column name (or list of candidates)
+    - config.event_columns.binary_outcome: column name (or list of candidates)
     - config.behavior_analysis.condition.compare_column: explicit events column override (optional)
     - config.behavior_analysis.condition.compare_values: values to compare [val1, val2]
     
@@ -561,7 +561,7 @@ def split_by_condition(
         for v in pd.Series(condition_numeric).dropna().unique().tolist()
     }
     if {0.0, 1.0}.issubset(numeric_values):
-        return _split_by_pain_binary(condition_series, condition_column, logger)
+        return _split_by_binary_outcome(condition_series, condition_column, logger)
 
     unique_values = [v for v in pd.Series(condition_series).dropna().unique().tolist()]
     if len(unique_values) >= 2:
@@ -582,7 +582,7 @@ def split_by_condition(
         n_group2 = int(mask2.sum())
         return mask1.to_numpy(), mask2.to_numpy(), n_group1, n_group2
 
-    return _split_by_pain_binary(condition_series, condition_column, logger)
+    return _split_by_binary_outcome(condition_series, condition_column, logger)
 
 
 def _compute_p_primary_columns(

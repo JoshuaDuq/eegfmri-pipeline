@@ -334,12 +334,12 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.correlationsTargetColumn = s
 			}
 		}},
-		{key: "behavior_analysis.correlations.use_crossfit_pain_residual", apply: func(v interface{}) {
+		{key: "behavior_analysis.correlations.use_crossfit_predictor_residual", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.correlationsUseCrossfitResidual = b
 			}
 		}},
-		{key: "behavior_analysis.correlations.prefer_pain_residual", apply: func(v interface{}) {
+		{key: "behavior_analysis.correlations.prefer_predictor_residual", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.correlationsPreferPainResidual = b
 			}
@@ -399,12 +399,12 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.groupLevelAllowParametricFallback = b
 			}
 		}},
-		{key: "behavior_analysis.pain_sensitivity.min_trials", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_sensitivity.min_trials", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.painSensitivityMinTrials = n
 			}
 		}},
-		{key: "behavior_analysis.pain_sensitivity.primary_unit", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_sensitivity.primary_unit", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				if strings.EqualFold(s, "run_mean") || strings.EqualFold(s, "run") {
 					m.painSensitivityPrimaryUnit = 1
@@ -413,12 +413,12 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
-		{key: "behavior_analysis.pain_sensitivity.n_permutations", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_sensitivity.n_permutations", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.painSensitivityPermutations = n
 			}
 		}},
-		{key: "behavior_analysis.pain_sensitivity.p_primary_mode", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_sensitivity.p_primary_mode", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				m.painSensitivityPermutationPrimary = !strings.EqualFold(strings.TrimSpace(s), "asymptotic")
 			}
@@ -578,12 +578,12 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.featureQCCheckWithinRunVariance = b
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.enabled", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.enabled", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.painResidualEnabled = b
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.method", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.method", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				if strings.EqualFold(s, "poly") {
 					m.painResidualMethod = 1
@@ -592,17 +592,17 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.min_samples", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.min_samples", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.painResidualMinSamples = n
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.spline_df_candidates", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.spline_df_candidates", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
 				m.painResidualSplineDfCandidates = strings.Join(splitLooseList(spec), ",")
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.poly_degree", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.poly_degree", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.painResidualPolyDegree = n
 			}
@@ -647,22 +647,22 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.painResidualBreakpointQhigh = f
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.crossfit.enabled", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.crossfit.enabled", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.painResidualCrossfitEnabled = b
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.crossfit.group_column", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.crossfit.group_column", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				m.painResidualCrossfitGroupColumn = s
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.crossfit.n_splits", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.crossfit.n_splits", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.painResidualCrossfitNSplits = n
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.crossfit.method", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.crossfit.method", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				if strings.EqualFold(s, "poly") {
 					m.painResidualCrossfitMethod = 1
@@ -671,7 +671,7 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
-		{key: "behavior_analysis.pain_residual.crossfit.spline_n_knots", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_residual.crossfit.spline_n_knots", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.painResidualCrossfitSplineKnots = n
 			}
@@ -1002,7 +1002,7 @@ func (m Model) behaviorSections() []behaviorSection {
 		{Key: "general", Label: "General", Enabled: true},
 		{Key: "trial_table", Label: "Trial Table", Enabled: m.isComputationSelected("trial_table")},
 		{Key: "correlations", Label: "Correlations", Enabled: m.isComputationSelected("correlations")},
-		{Key: "pain_sensitivity", Label: "Predictor Sensitivity", Enabled: m.isComputationSelected("pain_sensitivity")},
+		{Key: "predictor_sensitivity", Label: "Predictor Sensitivity", Enabled: m.isComputationSelected("predictor_sensitivity")},
 		{Key: "regression", Label: "Regression", Enabled: m.isComputationSelected("regression")},
 		{Key: "stability", Label: "Stability", Enabled: m.isComputationSelected("stability")},
 		{Key: "consistency", Label: "Consistency", Enabled: m.isComputationSelected("consistency")},

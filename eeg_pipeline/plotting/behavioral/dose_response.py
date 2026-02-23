@@ -473,12 +473,12 @@ def _resolve_dose_pain_columns(trials: pd.DataFrame, config: Any) -> tuple[str, 
         if pain_col not in trials.columns:
             raise ValueError(f"Pain column not found in table: {pain_col!r}.")
     else:
-        pain_candidates = list(get_config_value(config, "event_columns.pain_binary", []) or []) + ["pain_binary"]
+        pain_candidates = list(get_config_value(config, "event_columns.binary_outcome", []) or []) + ["binary_outcome"]
         resolved = find_column(trials, pain_candidates)
         if resolved is None:
             raise ValueError(
                 f"Could not resolve pain column from candidates={pain_candidates}. "
-                "Provide `dose_response_pain_column` or set `event_columns.pain_binary`."
+                "Provide `dose_response_pain_column` or set `event_columns.binary_outcome`."
             )
         pain_col = str(resolved)
 

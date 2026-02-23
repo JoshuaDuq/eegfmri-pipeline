@@ -203,7 +203,7 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 		args = append(args, splitCSVList(m.eventColRating)...)
 	}
 	if strings.TrimSpace(m.eventColPainBinary) != "" {
-		args = append(args, "--event-col-pain-binary")
+		args = append(args, "--event-col-binary-outcome")
 		args = append(args, splitCSVList(m.eventColPainBinary)...)
 	}
 

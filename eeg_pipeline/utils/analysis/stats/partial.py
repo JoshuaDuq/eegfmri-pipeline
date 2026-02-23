@@ -11,7 +11,7 @@ temperature and the outcome (e.g., pain rating). However, pain ratings vs temper
 are commonly NONLINEAR and SUBJECT-SPECIFIC (sigmoid, threshold effects, etc.).
 
 For more valid temperature control, consider:
-1. Using `pain_residual.fit_temperature_rating_curve()` to compute subject-specific
+1. Using `predictor_residual.fit_temperature_rating_curve()` to compute subject-specific
    dose-response residuals (spline-based, handles nonlinearity)
 2. Using spline terms for temperature in regression models
 3. Stratifying analysis by temperature level rather than linear adjustment

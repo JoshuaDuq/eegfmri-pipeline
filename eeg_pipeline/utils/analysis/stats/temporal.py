@@ -30,7 +30,7 @@ from eeg_pipeline.utils.analysis.tfr import (
 from eeg_pipeline.utils.analysis.windowing import build_time_windows_fixed_size_clamped
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.tfr_alignment import compute_aligned_data_length
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import write_tsv
 
@@ -577,7 +577,7 @@ def _determine_condition_values(
     requested_values = temporal_cfg.get("condition_values", []) or []
 
     if not condition_column:
-        condition_column = get_pain_column_from_config(config, events)
+        condition_column = get_binary_outcome_column_from_config(config, events)
 
     if split_by_condition and condition_column and condition_column in events.columns:
         condition_vec = events[condition_column].to_numpy()[:n_trials]

@@ -4,7 +4,7 @@ Pain Residual (Subject-Level)
 
 Defines a subject-level pain residual:
 
-    pain_residual = rating - f(temperature)
+    predictor_residual = rating - f(temperature)
 
 where f(·) is a flexible (but stable) dose-response curve. This targets
 "pain beyond stimulus intensity" for downstream feature associations.
@@ -54,7 +54,7 @@ def _fit_spline_model(
         return None
 
     degrees_of_freedom_candidates = _get_config_value(
-        config, "behavior_analysis.pain_residual.spline_df_candidates", [3, 4, 5]
+        config, "behavior_analysis.predictor_residual.spline_df_candidates", [3, 4, 5]
     )
 
     model_data = pd.DataFrame({
@@ -130,7 +130,7 @@ def _fit_polynomial_model(
     config: Optional[Any],
 ) -> Tuple[pd.Series, Dict[str, Any]]:
     """Fit polynomial model as fallback."""
-    degree = int(_get_config_value(config, "behavior_analysis.pain_residual.poly_degree", 2))
+    degree = int(_get_config_value(config, "behavior_analysis.predictor_residual.poly_degree", 2))
     degree = max(1, min(degree, 5))
 
     metadata = {
@@ -183,7 +183,7 @@ def fit_temperature_rating_curve(
     n_valid = int(valid_mask.sum())
     metadata["n_valid"] = n_valid
 
-    min_samples = int(_get_config_value(config, "behavior_analysis.pain_residual.min_samples", 10))
+    min_samples = int(_get_config_value(config, "behavior_analysis.predictor_residual.min_samples", 10))
     if n_valid < min_samples:
         metadata["status"] = "skipped_insufficient_samples"
         predicted = pd.Series(np.nan, index=common_index, dtype=float)
@@ -193,7 +193,7 @@ def fit_temperature_rating_curve(
     temperature_valid = temperature_aligned[valid_mask]
     rating_valid = rating_aligned[valid_mask]
 
-    method = str(_get_config_value(config, "behavior_analysis.pain_residual.method", "spline")).lower()
+    method = str(_get_config_value(config, "behavior_analysis.predictor_residual.method", "spline")).lower()
 
     predicted_full = pd.Series(np.nan, index=common_index, dtype=float)
     residual_full = pd.Series(np.nan, index=common_index, dtype=float)

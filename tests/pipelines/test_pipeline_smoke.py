@@ -42,7 +42,7 @@ class TestAllPipelines(unittest.TestCase):
         class DummyPipeline(PipelineBase):
             def __init__(self):
                 self.name = "dummy"
-                self.config = DotConfig({"project": {"task": "thermalactive"}})
+                self.config = DotConfig({"project": {"task": "task"}})
                 self.logger = Mock()
                 self.deriv_root = Path(tempfile.mkdtemp()) / "derivatives"
                 self.deriv_root.mkdir(parents=True, exist_ok=True)
@@ -73,7 +73,7 @@ class TestAllPipelines(unittest.TestCase):
         class DummyPipeline(PipelineBase):
             def __init__(self):
                 self.name = "dummy"
-                self.config = DotConfig({"project": {"task": "thermalactive"}})
+                self.config = DotConfig({"project": {"task": "task"}})
                 self.logger = Mock()
                 self.deriv_root = Path(tempfile.mkdtemp()) / "derivatives"
                 self.deriv_root.mkdir(parents=True, exist_ok=True)
@@ -98,7 +98,7 @@ class TestAllPipelines(unittest.TestCase):
         class DummyPipeline(PipelineBase):
             def __init__(self):
                 self.name = "dummy"
-                self.config = DotConfig({"project": {"task": "thermalactive"}})
+                self.config = DotConfig({"project": {"task": "task"}})
                 self.logger = Mock()
                 self.deriv_root = Path(tempfile.mkdtemp()) / "derivatives"
                 self.deriv_root.mkdir(parents=True, exist_ok=True)
@@ -113,7 +113,7 @@ class TestAllPipelines(unittest.TestCase):
         pipeline = DummyPipeline()
 
         with patch("eeg_pipeline.pipelines.base.BatchProgress", _NoopBatchProgress):
-            ledger = pipeline.run_batch(["0001", "0002"], task="thermalactive")
+            ledger = pipeline.run_batch(["0001", "0002"], task="task")
 
         self.assertEqual(len(ledger), 2)
         self.assertTrue(all(item["status"] == "success" for item in ledger))
@@ -128,7 +128,7 @@ class TestAllPipelines(unittest.TestCase):
         with patch.object(
             PreprocessingPipeline,
             "_extract_preprocessing_params",
-            return_value=("thermalactive", "ica", True, 2, progress),
+            return_value=("task", "ica", True, 2, progress),
         ), patch.object(
             PreprocessingPipeline,
             "_get_steps_for_mode",
@@ -236,7 +236,7 @@ class TestAllPipelines(unittest.TestCase):
         from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
         pipeline = object.__new__(MLPipeline)
-        pipeline.config = DotConfig({"project": {"task": "thermalactive"}})
+        pipeline.config = DotConfig({"project": {"task": "task"}})
         pipeline.logger = Mock()
 
         params = {
@@ -271,22 +271,22 @@ class TestAllPipelines(unittest.TestCase):
 
         pipeline = object.__new__(MLPipeline)
         pipeline.config = DotConfig(
-            {"project": {"task": "thermalactive"}, "analysis": {"min_subjects_for_group": 2}}
+            {"project": {"task": "task"}, "analysis": {"min_subjects_for_group": 2}}
         )
         with self.assertRaises(ValueError):
             pipeline._validate_inputs([], None, "group")
         with self.assertRaises(ValueError):
-            pipeline._validate_inputs(["0001"], "thermalactive", "bad")
+            pipeline._validate_inputs(["0001"], "task", "bad")
         with self.assertRaises(ValueError):
-            pipeline._validate_inputs(["0001"], "thermalactive", "group")
-        resolved = pipeline._validate_inputs(["0001"], "thermalactive", "subject")
-        self.assertEqual(resolved, "thermalactive")
+            pipeline._validate_inputs(["0001"], "task", "group")
+        resolved = pipeline._validate_inputs(["0001"], "task", "subject")
+        self.assertEqual(resolved, "task")
 
     def test_ml_pipeline_run_batch_dispatches_mode(self):
         from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
         pipeline = object.__new__(MLPipeline)
-        pipeline.config = DotConfig({"project": {"task": "thermalactive"}})
+        pipeline.config = DotConfig({"project": {"task": "task"}})
         pipeline.logger = Mock()
 
         progress = _DummyProgress()
@@ -315,123 +315,12 @@ class TestAllPipelines(unittest.TestCase):
 
         fake_executor = Mock(return_value=Path("/tmp/results"))
         with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
-            MLPipeline, "_validate_inputs", return_value="thermalactive"
+            MLPipeline, "_validate_inputs", return_value="task"
         ), patch.object(MLPipeline, "_get_mode_dispatcher", return_value={"regression": fake_executor}):
             out = pipeline.run_batch(["0001", "0002"], mode="regression")
         self.assertEqual(out[0]["status"], "success")
         self.assertIn("/tmp/results", out[0]["results_dir"])
         fake_executor.assert_called_once()
-
-    def test_utility_pipeline_run_batch(self):
-        from eeg_pipeline.pipelines.utilities import UtilityPipeline
-
-        pipeline = object.__new__(UtilityPipeline)
-        pipeline.config = DotConfig({"project": {"task": "thermalactive"}})
-        pipeline.logger = Mock()
-        pipeline.bids_root = Path(tempfile.mkdtemp()) / "bids"
-        pipeline.source_root = Path(tempfile.mkdtemp()) / "source"
-
-        with patch("eeg_pipeline.pipelines.utilities.run_raw_to_bids", return_value=2), patch(
-            "eeg_pipeline.pipelines.utilities.run_merge_psychopy", return_value=2
-        ):
-            out = pipeline.run_batch(["0001", "0002"], progress=_DummyProgress())
-
-        self.assertEqual(out[0]["status"], "success")
-        self.assertEqual(out[0]["n_converted"], 2)
-        self.assertEqual(out[0]["n_merged"], 2)
-
-    def test_utility_pipeline_extract_kwargs_and_resolve_task(self):
-        from eeg_pipeline.pipelines.utilities import UtilityPipeline
-
-        pipeline = object.__new__(UtilityPipeline)
-        pipeline.config = DotConfig(
-            {
-                "project": {"task": "thermalactive"},
-                "eeg": {"montage": "easycap-M1"},
-                "preprocessing": {"line_freq": 50.0},
-                "alignment": {"allow_misaligned_trim": True},
-            }
-        )
-
-        raw_kwargs = pipeline._extract_raw_to_bids_kwargs({})
-        self.assertEqual(raw_kwargs["montage"], "easycap-M1")
-        self.assertEqual(raw_kwargs["line_freq"], 50.0)
-
-        merge_kwargs = pipeline._extract_merge_psychopy_kwargs({})
-        self.assertTrue(merge_kwargs["allow_misaligned_trim"])
-        self.assertEqual(pipeline._resolve_task(None), "thermalactive")
-
-    def test_eeg_raw_to_bids_pipeline_run_batch(self):
-        from eeg_pipeline.pipelines.eeg_raw_to_bids import EEGRawToBidsPipeline
-
-        pipeline = object.__new__(EEGRawToBidsPipeline)
-        pipeline.config = DotConfig({"project": {"task": "thermalactive"}})
-        pipeline.logger = Mock()
-        pipeline.bids_root = Path(tempfile.mkdtemp()) / "bids"
-        pipeline.source_root = Path(tempfile.mkdtemp()) / "source"
-
-        with patch("eeg_pipeline.pipelines.eeg_raw_to_bids.run_raw_to_bids", return_value=1) as mock_run:
-            n = pipeline.run_batch(["0001"], task="thermalactive")
-
-        self.assertEqual(n, 1)
-        mock_run.assert_called_once()
-
-    def test_eeg_raw_to_bids_pipeline_process_subject_wires_types(self):
-        from eeg_pipeline.pipelines.eeg_raw_to_bids import EEGRawToBidsPipeline
-
-        pipeline = object.__new__(EEGRawToBidsPipeline)
-        pipeline.config = DotConfig({})
-        pipeline.logger = Mock()
-        pipeline.bids_root = Path(tempfile.mkdtemp()) / "bids"
-        pipeline.source_root = Path(tempfile.mkdtemp()) / "source"
-
-        with patch("eeg_pipeline.pipelines.eeg_raw_to_bids.run_raw_to_bids") as mock_run:
-            pipeline.process_subject(
-                "0001",
-                task="thermalactive",
-                line_freq="60.0",
-                overwrite=1,
-                do_trim_to_first_volume=1,
-                keep_all_annotations=0,
-            )
-        kwargs = mock_run.call_args.kwargs
-        self.assertEqual(kwargs["line_freq"], 60.0)
-        self.assertTrue(kwargs["overwrite"])
-        self.assertTrue(kwargs["do_trim_to_first_volume"])
-        self.assertFalse(kwargs["keep_all_annotations"])
-
-    def test_merge_psychopy_pipeline_process_subject_runs_qc_when_not_dry(self):
-        from eeg_pipeline.pipelines.merge_psychopy import MergePsychopyPipeline
-
-        pipeline = object.__new__(MergePsychopyPipeline)
-        pipeline.config = DotConfig({"alignment": {"allow_misaligned_trim": False}})
-        pipeline.logger = Mock()
-        pipeline.bids_root = Path(tempfile.mkdtemp()) / "bids"
-        pipeline.source_root = Path(tempfile.mkdtemp()) / "source"
-
-        with patch("eeg_pipeline.pipelines.merge_psychopy.run_merge_psychopy", return_value=1), patch.object(
-            MergePsychopyPipeline, "_validate_against_fmri_events"
-        ) as mock_validate:
-            pipeline.process_subject("0001", task="thermalactive", dry_run=False)
-
-        mock_validate.assert_called_once()
-
-    def test_merge_psychopy_pipeline_run_batch_skips_qc_when_dry(self):
-        from eeg_pipeline.pipelines.merge_psychopy import MergePsychopyPipeline
-
-        pipeline = object.__new__(MergePsychopyPipeline)
-        pipeline.config = DotConfig({"alignment": {"allow_misaligned_trim": False}})
-        pipeline.logger = Mock()
-        pipeline.bids_root = Path(tempfile.mkdtemp()) / "bids"
-        pipeline.source_root = Path(tempfile.mkdtemp()) / "source"
-
-        with patch("eeg_pipeline.pipelines.merge_psychopy.run_merge_psychopy", return_value=3), patch.object(
-            MergePsychopyPipeline, "_validate_against_fmri_events"
-        ) as mock_validate:
-            n = pipeline.run_batch(["0001", "0002"], task="thermalactive", dry_run=True)
-
-        self.assertEqual(n, 3)
-        mock_validate.assert_not_called()
 
     def test_fmri_preprocessing_pipeline_dry_run(self):
         from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline
@@ -488,15 +377,15 @@ class TestAllPipelines(unittest.TestCase):
         with patch.dict(sys.modules, {"nibabel": fake_nib}):
             pipeline.process_subject(
                 "0001",
-                task="thermalactive",
-                contrast_cfg=SimpleNamespace(name="pain_vs_nonpain", output_type="z-score"),
+                task="task",
+                contrast_cfg=SimpleNamespace(name="contrast", output_type="z-score"),
                 dry_run=True,
             )
 
     def test_fmri_analysis_helpers(self):
         from fmri_pipeline.pipelines.fmri_analysis import _safe_slug, _contrast_hash, FmriAnalysisPipeline
 
-        self.assertEqual(_safe_slug("pain vs nonpain"), "pain_vs_nonpain")
+        self.assertEqual(_safe_slug("condition a vs b"), "condition_a_vs_b")
         self.assertTrue(len(_contrast_hash(SimpleNamespace(a=1))) == 8)
 
         tmp = Path(tempfile.mkdtemp())
@@ -532,7 +421,7 @@ class TestAllPipelines(unittest.TestCase):
         with patch.dict(sys.modules, {"fmri_pipeline.analysis.trial_signatures": fake_module}):
             pipeline.process_subject(
                 "0001",
-                task="thermalactive",
+                task="task",
                 bids_fmri_root=tmp,
                 trial_cfg=TrialSignatureExtractionConfig(method="lss"),
                 dry_run=True,
@@ -561,7 +450,7 @@ class TestAllPipelines(unittest.TestCase):
             with self.assertRaises(TypeError):
                 pipeline.process_subject(
                     "0001",
-                    task="thermalactive",
+                    task="task",
                     bids_fmri_root=tmp,
                     trial_cfg=object(),
                     dry_run=False,

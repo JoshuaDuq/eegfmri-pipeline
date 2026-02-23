@@ -439,13 +439,13 @@ from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 pipeline = PreprocessingPipeline(config=config)
 
 # Full preprocessing for all subjects
-pipeline.run_batch(subjects=["001", "002", "003"], task="thermalactive", mode="full")
+pipeline.run_batch(subjects=["001", "002", "003"], task="task", mode="full")
 
 # Re-run only epoch creation after adjusting epoch parameters
-pipeline.run_batch(subjects=["001"], task="thermalactive", mode="epochs")
+pipeline.run_batch(subjects=["001"], task="task", mode="epochs")
 
 # Single subject
-pipeline.process_subject("001", task="thermalactive", mode="full")
+pipeline.process_subject("001", task="task", mode="full")
 ```
 
 ### Legacy Script Interface

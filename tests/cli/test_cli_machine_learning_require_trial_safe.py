@@ -11,7 +11,7 @@ class TestMachineLearningCliSafetyOverrides(unittest.TestCase):
         args = argparse.Namespace(
             list_stages=False,
             dry_run=False,
-            task="thermalactive",
+            task="task",
             bids_root=None,
             deriv_root=None,
             mode="regression",
@@ -55,7 +55,7 @@ class TestMachineLearningCliSafetyOverrides(unittest.TestCase):
         )
         config = ConfigDict(
             {
-                "project": {"task": "thermalactive", "random_state": 7},
+                "project": {"task": "task", "random_state": 7},
                 "feature_engineering": {"analysis_mode": "group_stats"},
                 "machine_learning": {"data": {"require_trial_ml_safe": False}},
             }
@@ -73,7 +73,7 @@ class TestMachineLearningCliSafetyOverrides(unittest.TestCase):
         args = argparse.Namespace(
             list_stages=False,
             dry_run=False,
-            task="thermalactive",
+            task="task",
             bids_root=None,
             deriv_root=None,
             mode="regression",
@@ -117,7 +117,7 @@ class TestMachineLearningCliSafetyOverrides(unittest.TestCase):
         )
         config = ConfigDict(
             {
-                "project": {"task": "thermalactive", "random_state": 7},
+                "project": {"task": "task", "random_state": 7},
                 "feature_engineering": {"analysis_mode": "group_stats"},
                 "machine_learning": {"data": {"require_trial_ml_safe": False}},
             }
@@ -135,7 +135,7 @@ class TestMachineLearningCliSafetyOverrides(unittest.TestCase):
         args = argparse.Namespace(
             list_stages=False,
             dry_run=False,
-            task="thermalactive",
+            task="task",
             bids_root=None,
             deriv_root=None,
             mode="shap",
@@ -179,7 +179,7 @@ class TestMachineLearningCliSafetyOverrides(unittest.TestCase):
         )
         config = ConfigDict(
             {
-                "project": {"task": "thermalactive", "random_state": 7},
+                "project": {"task": "task", "random_state": 7},
                 "feature_engineering": {"analysis_mode": "group_stats"},
                 "machine_learning": {"data": {"require_trial_ml_safe": False}},
             }

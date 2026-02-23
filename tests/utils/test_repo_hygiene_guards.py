@@ -14,6 +14,13 @@ FORBIDDEN_TRACKED_PREFIXES = (
 REMOVED_LEGACY_ENTRYPOINTS = (
     "scripts/eeg_raw_to_bids.py",
     "scripts/merge_psychopy.py",
+    "eeg_pipeline/pipelines/eeg_raw_to_bids.py",
+    "eeg_pipeline/pipelines/merge_psychopy.py",
+    "eeg_pipeline/pipelines/utilities.py",
+    "eeg_pipeline/analysis/utilities/eeg_raw_to_bids.py",
+    "eeg_pipeline/analysis/utilities/merge_psychopy.py",
+    "eeg_pipeline/cli/commands/utilities.py",
+    "fmri_pipeline/analysis/raw_to_bids.py",
 )
 
 
@@ -60,6 +67,6 @@ def test_removed_legacy_scripts_do_not_reappear() -> None:
     ]
     assert not reintroduced, (
         "Deprecated standalone utility scripts must not be reintroduced. "
-        "Use `eeg-pipeline utilities ...` subcommands instead.\n"
+        "Use `python paradigm-specific-scripts/run_paradigm_specific.py ...` instead.\n"
         f"Found: {reintroduced}"
     )

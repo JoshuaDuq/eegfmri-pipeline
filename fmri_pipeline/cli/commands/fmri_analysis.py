@@ -73,7 +73,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--contrast-name",
         type=str,
         default=None,
-        help="Contrast name used for output organization (default: pain_vs_nonpain)",
+        help="Contrast name used for output organization (default: contrast)",
     )
     contrast_group.add_argument(
         "--contrast-type",
@@ -556,7 +556,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         metavar="TT",
         help=(
             "Optional: restrict which events.tsv trial_type rows are eligible for trial selection. "
-            "This can prevent mixing phases when selecting by per-trial columns (e.g., pain_binary_coded). "
+            "This can prevent mixing phases when selecting by per-trial columns (e.g., binary_outcome_coded). "
             "Use 'all' to disable scoping."
         ),
     )
@@ -624,7 +624,7 @@ def _resolve_subjects(args: argparse.Namespace, bids_root: Path, config: Any) ->
 def _map_task_to_fmri(task: str) -> str:
     """Return task name for fMRI file matching (pass-through, no mapping)."""
     task = (task or "").strip()
-    return task if task else "thermalactive"
+    return task if task else "task"
 
 
 
@@ -679,7 +679,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
     else:
         smoothing_fwhm = normalize_smoothing_fwhm(args.smoothing_fwhm)
 
-    contrast_name = str(args.contrast_name or "pain_vs_nonpain").strip() or "contrast"
+    contrast_name = str(args.contrast_name or "contrast").strip() or "contrast"
     contrast_type = str(args.contrast_type or ("custom" if args.formula else "t-test")).strip()
 
     if contrast_type == "custom" and not (args.formula and str(args.formula).strip()):

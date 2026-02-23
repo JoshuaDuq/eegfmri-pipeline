@@ -24,7 +24,7 @@ func (m Model) buildMLAdvancedArgs() []string {
 		args = append(args, "--fmri-signature-method", methods[m.mlFmriSigMethodIndex%len(methods)])
 
 		contrast := strings.TrimSpace(m.mlFmriSigContrastName)
-		if contrast != "" && contrast != "pain_vs_nonpain" {
+		if contrast != "" && contrast != "contrast" {
 			args = append(args, "--fmri-signature-contrast-name", contrast)
 		}
 

@@ -422,7 +422,7 @@ def visualize_erp_for_subjects(
     from eeg_pipeline.infra.logging import get_logger
     
     setup_matplotlib(config)
-    task = task or config.get("project.task", "thermalactive")
+    task = task or config.get("project.task", "task")
     effective_deriv_root = resolve_deriv_root(
         deriv_root=deriv_root, config=config
     )

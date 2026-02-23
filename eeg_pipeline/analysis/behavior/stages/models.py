@@ -329,21 +329,21 @@ def stage_models_impl(
                 f"but run column '{run_col}' is missing from trial table."
             )
         ctx.logger.info("Models: aggregating to run-level (primary_unit=%s)", primary_unit)
-        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["rating", "pain_residual"])
+        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["rating", "predictor_residual"])
         if isinstance(outcomes_cfg, str):
             outcomes_cfg = [outcomes_cfg]
         elif not isinstance(outcomes_cfg, (list, tuple)):
-            outcomes_cfg = ["rating", "pain_residual"]
+            outcomes_cfg = ["rating", "predictor_residual"]
         binary_outcome = str(
-            get_config_value(ctx.config, "behavior_analysis.models.binary_outcome", "pain_binary") or "pain_binary"
+            get_config_value(ctx.config, "behavior_analysis.models.binary_outcome", "binary_outcome") or "binary_outcome"
         ).strip()
         outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
         predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
         extra_cols = [
             predictor_column,
             outcome_column,
-            "pain_residual",
-            "pain_binary",
+            "predictor_residual",
+            "binary_outcome",
             "trial_index",
             "trial_index_within_group",
             "prev_temperature",

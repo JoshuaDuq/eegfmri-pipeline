@@ -1,4 +1,4 @@
-"""Merge PsychoPy TrialSummary.csv into BIDS *_events.tsv (analysis-layer)."""
+"""Merge PsychoPy TrialSummary.csv into BIDS *_events.tsv (paradigm-specific)."""
 
 from __future__ import annotations
 
@@ -57,12 +57,7 @@ def _qc_compare_trial_intervals(
     log: logging.Logger,
     warn_threshold_s: float = 0.25,
 ) -> None:
-    """QC: compare inter-trial intervals between EEG triggers and PsychoPy times.
-
-    We cannot guarantee absolute onset alignment without an explicit shared sync signal,
-    but inter-trial intervals should match up to a constant offset if the trigger used
-    corresponds to the same trial marker.
-    """
+    """QC: compare inter-trial intervals between EEG triggers and PsychoPy times."""
     if "onset" not in target_events_df.columns:
         return
     if "stim_start_time" not in psychopy_df.columns:
@@ -215,14 +210,12 @@ def merge_psychopy_to_events(
             ev_df[column] = pd.NA
         ev_df.loc[event_rows_to_update, column] = psychopy_subset[column].values
 
-    # Populate run_id consistently for run-level events files.
     if run_num is not None:
         if "run_id" not in ev_df.columns:
             ev_df["run_id"] = int(run_num)
         else:
             ev_df["run_id"] = pd.to_numeric(ev_df["run_id"], errors="coerce").fillna(int(run_num))
 
-    # Keep output stable and chronological.
     if "onset" in ev_df.columns:
         sort_cols = ["onset"]
         if "sample" in ev_df.columns:
@@ -271,10 +264,10 @@ def run_merge_psychopy(
     log = _logger or logger
 
     pattern_run = f"sub-*/eeg/*_task-{task}_run-*_events.tsv"
-    ev_paths = sorted(bids_root.glob(pattern_run))
+    ev_paths = sorted(p for p in bids_root.glob(pattern_run) if not p.name.startswith("._"))
     if not ev_paths:
         pattern = f"sub-*/eeg/*_task-{task}_events.tsv"
-        ev_paths = sorted(bids_root.glob(pattern))
+        ev_paths = sorted(p for p in bids_root.glob(pattern) if not p.name.startswith("._"))
         if not ev_paths:
             log.info("No events found under %s for task '%s'", bids_root, task)
             return 0

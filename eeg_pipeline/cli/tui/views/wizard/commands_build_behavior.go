@@ -200,7 +200,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Regression
 	if m.isComputationSelected("regression") {
-		outcomes := []string{"rating", "pain_residual", "temperature"}
+		outcomes := []string{"rating", "predictor_residual", "temperature"}
 		if m.regressionOutcome >= 0 && m.regressionOutcome < len(outcomes) && m.regressionOutcome != 0 {
 			args = append(args, "--regression-outcome", outcomes[m.regressionOutcome])
 		}
@@ -315,15 +315,15 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			out = append(out, "rating")
 		}
 		if m.modelsOutcomePainResidual {
-			out = append(out, "pain_residual")
+			out = append(out, "predictor_residual")
 		}
 		if m.modelsOutcomeTemperature {
 			out = append(out, "temperature")
 		}
 		if m.modelsOutcomePainBinary {
-			out = append(out, "pain_binary")
+			out = append(out, "binary_outcome")
 		}
-		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "pain_residual") {
+		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "predictor_residual") {
 			args = append(args, "--models-outcomes")
 			args = append(args, out...)
 		}
@@ -344,7 +344,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--models-families")
 			args = append(args, fams...)
 		}
-		binOut := []string{"pain_binary", "rating_median"}
+		binOut := []string{"binary_outcome", "rating_median"}
 		if m.modelsBinaryOutcome >= 0 && m.modelsBinaryOutcome < len(binOut) && m.modelsBinaryOutcome != 0 {
 			args = append(args, "--models-binary-outcome", binOut[m.modelsBinaryOutcome])
 		}
@@ -363,7 +363,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.stabilityMethod == 1 {
 			args = append(args, "--stability-method", "pearson")
 		}
-		outcome := []string{"auto", "rating", "pain_residual"}
+		outcome := []string{"auto", "rating", "predictor_residual"}
 		if m.stabilityOutcome > 0 && m.stabilityOutcome < len(outcome) {
 			args = append(args, "--stability-outcome", outcome[m.stabilityOutcome])
 		}
@@ -399,12 +399,12 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			out = append(out, "rating")
 		}
 		if m.influenceOutcomePainResidual {
-			out = append(out, "pain_residual")
+			out = append(out, "predictor_residual")
 		}
 		if m.influenceOutcomeTemperature {
 			out = append(out, "temperature")
 		}
-		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "pain_residual") {
+		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "predictor_residual") {
 			args = append(args, "--influence-outcomes")
 			args = append(args, out...)
 		}
@@ -471,8 +471,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		appendBoolPair(
 			m.correlationsPreferPainResidual,
-			"--correlations-prefer-pain-residual",
-			"--no-correlations-prefer-pain-residual",
+			"--correlations-prefer-predictor-residual",
+			"--no-correlations-prefer-predictor-residual",
 		)
 		if m.correlationsPermutations > 0 {
 			args = append(args, "--correlations-permutations", fmt.Sprintf("%d", m.correlationsPermutations))
@@ -484,8 +484,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		)
 		appendBoolPair(
 			m.correlationsUseCrossfitResidual,
-			"--correlations-use-crossfit-pain-residual",
-			"--no-correlations-use-crossfit-pain-residual",
+			"--correlations-use-crossfit-predictor-residual",
+			"--no-correlations-use-crossfit-predictor-residual",
 		)
 		// Always pass explicit target selection (possibly empty) so the backend
 		// does not silently fall back to built-in defaults.
@@ -533,21 +533,21 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// Pain sensitivity
-	if m.isComputationSelected("pain_sensitivity") {
-		appendFeatureSpec("--pain-sensitivity-features", m.painSensitivityFeaturesSpec)
+	if m.isComputationSelected("predictor_sensitivity") {
+		appendFeatureSpec("--predictor-sensitivity-features", m.painSensitivityFeaturesSpec)
 		if m.painSensitivityMinTrials > 0 {
-			args = append(args, "--pain-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
+			args = append(args, "--predictor-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
 		}
 		if m.painSensitivityPrimaryUnit == 1 {
-			args = append(args, "--pain-sensitivity-primary-unit", "run_mean")
+			args = append(args, "--predictor-sensitivity-primary-unit", "run_mean")
 		}
 		if m.painSensitivityPermutations > 0 {
-			args = append(args, "--pain-sensitivity-permutations", fmt.Sprintf("%d", m.painSensitivityPermutations))
+			args = append(args, "--predictor-sensitivity-permutations", fmt.Sprintf("%d", m.painSensitivityPermutations))
 		}
 		appendBoolPair(
 			m.painSensitivityPermutationPrimary,
-			"--pain-sensitivity-permutation-primary",
-			"--no-pain-sensitivity-permutation-primary",
+			"--predictor-sensitivity-permutation-primary",
+			"--no-predictor-sensitivity-permutation-primary",
 		)
 	}
 

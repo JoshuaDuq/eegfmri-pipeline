@@ -258,7 +258,7 @@ def safe_correlation(
         return np.nan, np.nan, n_valid
 
 
-def compute_pain_sensitivity_index(
+def compute_predictor_sensitivity_index(
     ratings: pd.Series,
     temperatures: pd.Series,
 ) -> pd.Series:
@@ -321,7 +321,7 @@ def _align_psi_inputs(
     )
 
 
-def run_pain_sensitivity_correlations(
+def run_predictor_sensitivity_correlations(
     features_df: pd.DataFrame,
     ratings: pd.Series,
     temperatures: pd.Series,
@@ -352,7 +352,7 @@ def run_pain_sensitivity_correlations(
     if feat_aligned is None or ratings_aligned is None or temps_aligned is None:
         return pd.DataFrame()
 
-    psi = compute_pain_sensitivity_index(ratings_aligned, temps_aligned)
+    psi = compute_predictor_sensitivity_index(ratings_aligned, temps_aligned)
 
     if psi.isna().all():
         if logger:
@@ -456,7 +456,7 @@ def run_pain_sensitivity_correlations(
                 "method": method,
                 "robust_method": robust_method,
                 "method_label": method_label,
-                "target": "pain_sensitivity",
+                "target": "predictor_sensitivity",
             })
 
     if logger:

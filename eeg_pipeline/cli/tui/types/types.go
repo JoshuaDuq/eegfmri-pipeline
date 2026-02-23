@@ -10,9 +10,6 @@ const (
 	PipelineML
 	PipelinePlotting
 	PipelineFmri
-	PipelineMergePsychoPyData
-	PipelineRawToBIDS
-	PipelineFmriRawToBIDS
 	PipelineFmriAnalysis
 	pipelineCount // Sentinel for bounds checking
 )
@@ -32,9 +29,6 @@ var pipelineNames = [pipelineCount]string{
 	PipelineML:                "Machine Learning",
 	PipelinePlotting:          "Plotting",
 	PipelineFmri:              "fMRI",
-	PipelineMergePsychoPyData: "Merge PsychoPy Data",
-	PipelineRawToBIDS:         "EEG Raw to BIDS",
-	PipelineFmriRawToBIDS:     "fMRI Raw to BIDS",
 	PipelineFmriAnalysis:      "fMRI Analysis",
 }
 
@@ -46,9 +40,6 @@ var pipelineCommands = [pipelineCount]string{
 	PipelineML:                "ml",
 	PipelinePlotting:          "plotting",
 	PipelineFmri:              "fmri",
-	PipelineMergePsychoPyData: "utilities",
-	PipelineRawToBIDS:         "utilities",
-	PipelineFmriRawToBIDS:     "utilities",
 	PipelineFmriAnalysis:      "fmri-analysis",
 }
 
@@ -60,9 +51,6 @@ var pipelineDescriptions = [pipelineCount]string{
 	PipelineML:                "Machine learning: LOSO regression & time generalization",
 	PipelinePlotting:          "Generate curated visualization suites",
 	PipelineFmri:              "Preprocess fMRI (fMRIPrep-style)",
-	PipelineMergePsychoPyData: "Merge PsychoPy data into BIDS events files",
-	PipelineRawToBIDS:         "Convert raw BrainVision data to BIDS",
-	PipelineFmriRawToBIDS:     "Convert raw fMRI DICOM series to BIDS",
 	PipelineFmriAnalysis:      "First-level contrasts + trial-wise pain signatures",
 }
 
@@ -209,12 +197,8 @@ func (p Pipeline) ValidateSubject(s SubjectStatus) (valid bool, reason string) {
 // GetDataSource returns the appropriate data source for subject discovery
 func (p Pipeline) GetDataSource() string {
 	switch p {
-	case PipelinePreprocessing, PipelineMergePsychoPyData:
+	case PipelinePreprocessing:
 		return "bids"
-	case PipelineRawToBIDS:
-		return "source_data"
-	case PipelineFmriRawToBIDS:
-		return "source_data"
 	case PipelineFeatures, PipelineBehavior:
 		return "epochs"
 	case PipelineML:

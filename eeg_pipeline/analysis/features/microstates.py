@@ -405,11 +405,15 @@ def _compute_epoch_metrics(
             durations_ms[k] = float(np.mean(class_runs) * 1000.0 / sfreq)
             occurrence_hz[k] = float(len(class_runs) / max(epoch_sec, 1e-12))
 
+    # Transition probabilities are defined samplewise (t -> t+1),
+    # including self-transitions when a state persists across samples.
     counts = np.zeros((n_states, n_states), dtype=float)
-    for idx in range(len(runs) - 1):
-        src = int(runs[idx][0])
-        dst = int(runs[idx + 1][0])
-        counts[src, dst] += 1.0
+    if n_samples >= 2:
+        for idx in range(n_samples - 1):
+            src = int(states[idx])
+            dst = int(states[idx + 1])
+            if 0 <= src < n_states and 0 <= dst < n_states:
+                counts[src, dst] += 1.0
 
     transitions = np.full_like(counts, np.nan, dtype=float)
     row_sums = counts.sum(axis=1, keepdims=True)

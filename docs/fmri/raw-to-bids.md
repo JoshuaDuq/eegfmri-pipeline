@@ -1,4 +1,4 @@
-# fMRI Raw (DICOM) → BIDS Utility
+# fMRI Raw (DICOM) → BIDS Script
 
 This project includes a **fMRI raw-to-BIDS** converter for the simultaneous EEG–fMRI thermal pain study.
 
@@ -12,16 +12,19 @@ This project includes a **fMRI raw-to-BIDS** converter for the simultaneous EEG�
 
 Conversion requires the external binary `dcm2niix` available on `PATH`, or passed explicitly via `--dcm2niix-path`.
 
-## CLI usage
+## CLI usage (paradigm-specific)
 
 ```
-eeg-pipeline utilities fmri-raw-to-bids --all-subjects --task thermalactive
+python paradigm-specific-scripts/run_paradigm_specific.py fmri-raw-to-bids \
+  --source-root data/source_data \
+  --bids-fmri-root data/bids_output/fmri \
+  --task thermalactive
 ```
 
 Common options:
 
-- `--source-root <path>`: where `sub-*/fmri/` lives (default from config: `paths.source_data`)
-- `--bids-fmri-root <path>`: output BIDS fMRI root (default from config: `paths.bids_fmri_root`)
+- `--source-root <path>`: where `sub-*/fmri/` lives
+- `--bids-fmri-root <path>`: output BIDS fMRI root
 - `--session 01`: optional BIDS session label
 - `--rest-task rest`: task label to use for resting-state series
 - `--dicom-mode symlink|copy|skip`: how to store original DICOMs under `sourcedata/`
@@ -30,12 +33,7 @@ Common options:
 - `--event-granularity phases|trial`: stimulation modeling
 - `--onset-reference as_is|first_iti_start|first_stim_start` and `--onset-offset-s <sec>`
 
-## TUI usage
-
-In the TUI:
-
-- Main Menu → Utilities → `fMRI Raw to BIDS`
-- Configure advanced options (session/rest-task/events/dcm2niix), select subjects, then execute.
+This converter is intentionally not exposed via the TUI.
 
 ## Study paradigm → `events.tsv`
 
@@ -48,4 +46,3 @@ Events are generated per run from PsychoPy `TrialSummary.csv` timing columns. Th
 - `vas_rating`: VAS window (can end early on response)
 
 A dataset-level column dictionary is written to `task-<task>_events.json`.
-

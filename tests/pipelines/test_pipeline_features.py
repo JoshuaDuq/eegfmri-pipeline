@@ -43,7 +43,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         tmp = Path(tempfile.mkdtemp())
         p = object.__new__(FeaturePipeline)
-        p.config = DotConfig({"project": {"task": "thermalactive"}, "bids_root": str(tmp / "bids")})
+        p.config = DotConfig({"project": {"task": "task"}, "bids_root": str(tmp / "bids")})
         p.logger = Mock()
         p.deriv_root = tmp / "deriv"
         p.deriv_root.mkdir(parents=True, exist_ok=True)
@@ -56,7 +56,7 @@ class TestFeatureHelpers(unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(None, None)
         ):
-            p.process_subject("0001", task="thermalactive", progress=progress)
+            p.process_subject("0001", task="task", progress=progress)
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "f"
@@ -65,14 +65,14 @@ class TestFeatureHelpers(unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(SimpleNamespace(times=np.array([0.0]), info={"sfreq": 100.0}), None)
         ):
-            p.process_subject("0001", task="thermalactive", progress=progress)
+            p.process_subject("0001", task="task", progress=progress)
 
     def test_feature_pipeline_no_target_and_alignment_fail_branches(self):
         from eeg_pipeline.pipelines.features import FeaturePipeline
 
         tmp = Path(tempfile.mkdtemp())
         p = object.__new__(FeaturePipeline)
-        p.config = DotConfig({"project": {"task": "thermalactive"}, "bids_root": str(tmp / "bids"), "event_columns": {"rating": ["rating"]}})
+        p.config = DotConfig({"project": {"task": "task"}, "bids_root": str(tmp / "bids"), "event_columns": {"rating": ["rating"]}})
         p.logger = Mock()
         p.deriv_root = tmp / "deriv"
         p.deriv_root.mkdir(parents=True, exist_ok=True)
@@ -91,7 +91,7 @@ class TestFeatureHelpers(unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features.pick_target_column", return_value=None
         ):
-            p.process_subject("0001", task="thermalactive", progress=progress)
+            p.process_subject("0001", task="task", progress=progress)
 
         fake_features = SimpleNamespace(
             aper_qc=None, ratios_df=pd.DataFrame(), ratios_cols=[],
@@ -127,7 +127,7 @@ class TestFeatureHelpers(unittest.TestCase):
             "eeg_pipeline.pipelines.features.align_feature_dataframes",
             return_value=(pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.Series(dtype=float), None),
         ):
-            p.process_subject("0001", task="thermalactive", progress=progress)
+            p.process_subject("0001", task="task", progress=progress)
 
     def test_feature_pipeline_multi_range_merge_and_wrappers(self):
         from eeg_pipeline.pipelines import features as fmod
@@ -135,7 +135,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         tmp = Path(tempfile.mkdtemp())
         p = object.__new__(FeaturePipeline)
-        p.config = DotConfig({"project": {"task": "thermalactive"}, "bids_root": str(tmp / "bids"), "event_columns": {"rating": ["rating"]}})
+        p.config = DotConfig({"project": {"task": "task"}, "bids_root": str(tmp / "bids"), "event_columns": {"rating": ["rating"]}})
         p.logger = Mock()
         p.deriv_root = tmp / "deriv"
         p.deriv_root.mkdir(parents=True, exist_ok=True)
@@ -205,7 +205,7 @@ class TestFeatureHelpers(unittest.TestCase):
         ) as save_merged:
             p.process_subject(
                 "0001",
-                task="thermalactive",
+                task="task",
                 progress=progress,
                 feature_categories=["power"],
                 time_ranges=[{"name": "late", "tmin": 1.0, "tmax": 0.0}, {"name": "full", "tmin": 0.0, "tmax": 1.0}],
@@ -236,7 +236,7 @@ class TestFeatureHelpers(unittest.TestCase):
         pipeline = object.__new__(FeaturePipeline)
         pipeline.config = DotConfig(
             {
-                "project": {"task": "thermalactive"},
+                "project": {"task": "task"},
                 "event_columns": {"rating": ["rating"]},
                 "bids_root": str(tmp / "bids"),
             }
@@ -350,7 +350,7 @@ class TestFeatureHelpers(unittest.TestCase):
         ):
             pipeline.process_subject(
                 "0001",
-                task="thermalactive",
+                task="task",
                 progress=progress,
                 feature_categories=["power"],
                 train_mask=train_mask,
@@ -390,7 +390,7 @@ class TestFeatureHelpers(unittest.TestCase):
         pipeline = object.__new__(FeaturePipeline)
         pipeline.config = DotConfig(
             {
-                "project": {"task": "thermalactive"},
+                "project": {"task": "task"},
                 "event_columns": {"rating": ["rating"]},
                 "bids_root": str(tmp / "bids"),
             }
@@ -499,7 +499,7 @@ class TestFeatureHelpers(unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features._save_canonical_trial_table_artifact", create=True
         ) as save_trial_table_mock:
-            pipeline.process_subject("0001", task="thermalactive", progress=progress, feature_categories=["power"])
+            pipeline.process_subject("0001", task="task", progress=progress, feature_categories=["power"])
 
         self.assertEqual(save_trial_table_mock.call_count, 1)
 
@@ -682,7 +682,7 @@ class TestFeatureHelpers(unittest.TestCase):
         from eeg_pipeline.pipelines.features import _save_merged_features, _save_extraction_config
 
         tmp = Path(tempfile.mkdtemp())
-        features_dir = tmp / "derivatives" / "sub-0001" / "task-thermalactive" / "features"
+        features_dir = tmp / "derivatives" / "sub-0001" / "task-task" / "features"
         features_dir.mkdir(parents=True, exist_ok=True)
 
         acc = {
@@ -715,7 +715,7 @@ class TestFeatureHelpers(unittest.TestCase):
                 "eeg_pipeline.domain.features.naming": fake_naming,
             },
         ), patch("eeg_pipeline.pipelines.features.write_parquet") as mock_parquet:
-            _save_merged_features(acc, features_dir, DotConfig({"project": {"task": "thermalactive"}}), Mock())
+            _save_merged_features(acc, features_dir, DotConfig({"project": {"task": "task"}}), Mock())
         self.assertTrue(mock_parquet.called)
 
         with patch.dict(sys.modules, {"eeg_pipeline.utils.data.feature_io": fake_feature_io}):
@@ -826,7 +826,7 @@ class TestFeatureGapfill(unittest.TestCase):
         from eeg_pipeline.pipelines.features import FeaturePipeline, _save_merged_features
 
         tmp = Path(tempfile.mkdtemp())
-        features_dir = tmp / "derivatives" / "sub-0001" / "task-thermalactive" / "features"
+        features_dir = tmp / "derivatives" / "sub-0001" / "task-task" / "features"
         features_dir.mkdir(parents=True, exist_ok=True)
 
         acc = {
@@ -862,11 +862,11 @@ class TestFeatureGapfill(unittest.TestCase):
         ), patch("eeg_pipeline.pipelines.features.write_parquet") as write_parquet, patch(
             "eeg_pipeline.utils.config.loader.get_config_value", return_value=True
         ):
-            _save_merged_features(acc, features_dir, DotConfig({"project": {"task": "thermalactive"}}), Mock())
+            _save_merged_features(acc, features_dir, DotConfig({"project": {"task": "task"}}), Mock())
         self.assertTrue(write_parquet.called)
 
         p = object.__new__(FeaturePipeline)
-        p.config = DotConfig({"project": {"task": "thermalactive"}, "event_columns": {"rating": ["rating"]}, "bids_root": str(tmp / "bids")})
+        p.config = DotConfig({"project": {"task": "task"}, "event_columns": {"rating": ["rating"]}, "bids_root": str(tmp / "bids")})
         p.logger = Mock()
         p.deriv_root = tmp / "deriv"
         p.deriv_root.mkdir(parents=True, exist_ok=True)
@@ -937,6 +937,6 @@ class TestFeatureGapfill(unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features._save_extraction_config"
         ):
-            p.process_subject("0001", task="thermalactive", progress=progress, feature_categories=["power"])
+            p.process_subject("0001", task="task", progress=progress, feature_categories=["power"])
 
         self.assertIsNotNone(precomputed.condition_labels)

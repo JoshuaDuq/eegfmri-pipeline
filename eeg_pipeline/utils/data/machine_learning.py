@@ -14,7 +14,7 @@ from eeg_pipeline.infra.tsv import read_table, read_tsv
 from eeg_pipeline.infra.paths import _find_clean_events_path, deriv_features_path, load_events_df
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.columns import (
-    find_pain_column_in_events,
+    find_binary_outcome_column_in_events,
     find_temperature_column_in_events,
     pick_target_column,
 )
@@ -167,7 +167,7 @@ def _resolve_target_series(
     Resolve target vector from events.
 
     `target` can be:
-    - logical names: "rating", "temperature", "pain_binary"
+    - logical names: "rating", "temperature", "binary_outcome"
     - a literal column name in events_df
     """
     target_key = (target or "").strip()
@@ -196,12 +196,12 @@ def _resolve_target_series(
         series = pd.to_numeric(events_df[temp_col], errors="coerce")
         return series, str(temp_col)
 
-    if target_key.lower() in {"pain", "pain_binary", "binary"}:
-        pain_col = find_pain_column_in_events(events_df, config)
+    if target_key.lower() in {"pain", "binary_outcome", "binary"}:
+        pain_col = find_binary_outcome_column_in_events(events_df, config)
         if pain_col is None:
             raise ValueError(
                 "No pain-binary column found in events.tsv. "
-                f"Tried config event_columns.pain_binary={config.get('event_columns.pain_binary', [])}; available={list(events_df.columns)}"
+                f"Tried config event_columns.binary_outcome={config.get('event_columns.binary_outcome', [])}; available={list(events_df.columns)}"
             )
         series = pd.to_numeric(events_df[pain_col], errors="coerce")
         return series, str(pain_col)
@@ -232,8 +232,8 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
         aliases.add("rating")
     elif target_key in {"temperature", "temp"}:
         aliases.add("temperature")
-    elif target_key in {"pain", "pain_binary", "binary"}:
-        aliases.add("pain_binary")
+    elif target_key in {"pain", "binary_outcome", "binary"}:
+        aliases.add("binary_outcome")
     elif target_key in {"fmri_signature", "fmri-signature"}:
         aliases.add("fmri_signature")
 
@@ -243,7 +243,7 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
         event_alias_map = {
             "rating": _as_list(get_config_value(config, "event_columns.rating", [])) or [],
             "temperature": _as_list(get_config_value(config, "event_columns.temperature", [])) or [],
-            "pain_binary": _as_list(get_config_value(config, "event_columns.pain_binary", [])) or [],
+            "binary_outcome": _as_list(get_config_value(config, "event_columns.binary_outcome", [])) or [],
         }
         for canonical, column_aliases in event_alias_map.items():
             normalized = {str(c).strip().lower() for c in column_aliases if str(c).strip()}
@@ -258,7 +258,7 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
 def _fmri_signature_defaults(config: Any) -> dict:
     return {
         "method": str(get_config_value(config, "machine_learning.fmri_signature.method", "beta-series")).strip().lower(),
-        "contrast_name": str(get_config_value(config, "machine_learning.fmri_signature.contrast_name", "pain_vs_nonpain")).strip(),
+        "contrast_name": str(get_config_value(config, "machine_learning.fmri_signature.contrast_name", "contrast")).strip(),
         "signature_name": str(get_config_value(config, "machine_learning.fmri_signature.signature_name", "NPS")).strip(),
         "metric": str(get_config_value(config, "machine_learning.fmri_signature.metric", "dot")).strip().lower(),
         "normalization": str(get_config_value(config, "machine_learning.fmri_signature.normalization", "none")).strip().lower(),
@@ -743,9 +743,9 @@ def _standardize_meta_columns(
     if temp_col is not None:
         meta_cols["temperature"] = pd.to_numeric(events_df[temp_col], errors="coerce")
 
-    pain_col = find_pain_column_in_events(events_df, config)
+    pain_col = find_binary_outcome_column_in_events(events_df, config)
     if pain_col is not None:
-        meta_cols["pain_binary"] = pd.to_numeric(events_df[pain_col], errors="coerce")
+        meta_cols["binary_outcome"] = pd.to_numeric(events_df[pain_col], errors="coerce")
 
     rating_columns = config.get("event_columns.rating", [])
     rating_col = pick_target_column(events_df, target_columns=list(rating_columns) if rating_columns else [])

@@ -100,7 +100,7 @@ def build_behavior_qc_impl(
             s = pd.to_numeric(outcome_series, errors="coerce")
             pain_ratings = s[pain_mask] if len(pain_mask) == len(s) else pd.Series(dtype=float)
             nonpain_ratings = s[nonpain_mask] if len(nonpain_mask) == len(s) else pd.Series(dtype=float)
-            qc["pain_vs_nonpain"] = {
+            qc["contrast"] = {
                 "status": "ok",
                 "n_pain": int(n_pain),
                 "n_nonpain": int(n_nonpain),
@@ -157,7 +157,7 @@ def write_analysis_metadata_impl(
         "control_predictor": pipeline_config.control_temperature,
         "control_trial_order": pipeline_config.control_trial_order,
         "compute_change_scores": pipeline_config.compute_change_scores,
-        "compute_sensitivity": pipeline_config.compute_pain_sensitivity,
+        "compute_sensitivity": pipeline_config.compute_predictor_sensitivity,
         "compute_reliability": pipeline_config.compute_reliability,
         "n_permutations": pipeline_config.n_permutations,
         "fdr_alpha": pipeline_config.fdr_alpha,
@@ -188,7 +188,7 @@ def write_analysis_metadata_impl(
             else False,
             "has_correlations": bool(getattr(results, "correlations", None) is not None and not results.correlations.empty),
             "has_sensitivity": bool(
-                getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty
+                getattr(results, "predictor_sensitivity", None) is not None and not results.predictor_sensitivity.empty
             ),
             "has_condition_effects": bool(
                 getattr(results, "condition_effects", None) is not None and not results.condition_effects.empty
@@ -216,7 +216,7 @@ def write_analysis_metadata_impl(
     if not payload["predictor_status"]["available"]:
         payload["predictor_status"]["reason"] = "missing_predictor"
 
-    if not pipeline_config.compute_pain_sensitivity:
+    if not pipeline_config.compute_predictor_sensitivity:
         payload["sensitivity_status"] = "disabled"
     elif payload["predictor_status"]["available"]:
         payload["sensitivity_status"] = "computed" if payload["outputs"]["has_sensitivity"] else "skipped"

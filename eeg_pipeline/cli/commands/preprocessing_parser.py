@@ -185,7 +185,7 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     )
     prep_group.add_argument("--event-col-temperature", nargs="+", type=str, default=None, help="events.tsv candidate columns for temperature")
     prep_group.add_argument("--event-col-rating", nargs="+", type=str, default=None, help="events.tsv candidate columns for rating")
-    prep_group.add_argument("--event-col-pain-binary", nargs="+", type=str, default=None, help="events.tsv candidate columns for pain-binary split")
+    prep_group.add_argument("--event-col-binary-outcome", nargs="+", type=str, default=None, help="events.tsv candidate columns for pain-binary split")
 
     add_path_args(parser)
 

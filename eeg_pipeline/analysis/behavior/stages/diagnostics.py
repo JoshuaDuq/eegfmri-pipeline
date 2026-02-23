@@ -54,8 +54,8 @@ def stage_stability_impl(
 
     outcome = str(get_config_value(ctx.config, "behavior_analysis.stability.outcome", "")).strip().lower()
     if not outcome:
-        if "pain_residual" in df_trials.columns:
-            outcome = "pain_residual"
+        if "predictor_residual" in df_trials.columns:
+            outcome = "predictor_residual"
         else:
             outcome = resolve_outcome_column(df_trials, ctx.config) or "rating"
 

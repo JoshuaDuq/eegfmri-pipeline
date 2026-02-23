@@ -245,7 +245,7 @@ def _build_temperature_covariates(
     config: Optional[Any] = None,
     *,
     key_prefix: str = "behavior_analysis.regression.temperature_spline",
-    exclude_outcomes: Tuple[str, ...] = ("pain_residual",),
+    exclude_outcomes: Tuple[str, ...] = ("predictor_residual",),
 ) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
     """Build temperature-related covariates based on control strategy.
     
@@ -256,7 +256,7 @@ def _build_temperature_covariates(
     trial_df : pd.DataFrame
         Trial-level dataframe with temperature and rating columns
     outcome : str
-        Name of the outcome variable (e.g., "rating", "temperature", "pain_residual")
+        Name of the outcome variable (e.g., "rating", "temperature", "predictor_residual")
     temperature_control : str
         Control strategy: "linear", "spline"/"rcs"/"restricted_cubic", "rating_hat"/"nonlinear"
     include_temperature : bool
@@ -266,7 +266,7 @@ def _build_temperature_covariates(
     key_prefix : str
         Config key prefix for spline configuration (default: "behavior_analysis.regression.temperature_spline")
     exclude_outcomes : Tuple[str, ...]
-        Outcomes that should not use rating_hat fallback (default: ("pain_residual",))
+        Outcomes that should not use rating_hat fallback (default: ("predictor_residual",))
         
     Returns
     -------

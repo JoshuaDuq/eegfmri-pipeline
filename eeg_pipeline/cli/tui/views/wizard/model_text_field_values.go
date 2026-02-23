@@ -74,8 +74,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriTrialSigScopeTrialTypes
 	case textFieldFmriTrialSigScopeStimPhases:
 		return m.fmriTrialSigScopeStimPhases
-	case textFieldRawMontage:
-		return m.rawMontage
 	case textFieldPrepMontage:
 		return m.prepMontage
 	case textFieldPrepChTypes:
@@ -92,22 +90,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.prepRenameAnotDict
 	case textFieldPrepCustomBadDict:
 		return m.prepCustomBadDict
-	case textFieldRawEventPrefixes:
-		return m.rawEventPrefixes
-	case textFieldMergeEventPrefixes:
-		return m.mergeEventPrefixes
-	case textFieldMergeEventTypes:
-		return m.mergeEventTypes
-	case textFieldMergeQCColumns:
-		return m.mergeQCColumns
-	case textFieldFmriRawSession:
-		return m.fmriRawSession
-	case textFieldFmriRawRestTask:
-		return m.fmriRawRestTask
-	case textFieldFmriRawDcm2niixPath:
-		return m.fmriRawDcm2niixPath
-	case textFieldFmriRawDcm2niixArgs:
-		return m.fmriRawDcm2niixArgs
 	case textFieldConditionCompareColumn:
 		return m.conditionCompareColumn
 	case textFieldConditionCompareWindows:
@@ -469,8 +451,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriTrialSigScopeTrialTypes = strings.Join(strings.Fields(value), " ")
 	case textFieldFmriTrialSigScopeStimPhases:
 		m.fmriTrialSigScopeStimPhases = strings.TrimSpace(value)
-	case textFieldRawMontage:
-		m.rawMontage = value
 	case textFieldPrepMontage:
 		m.prepMontage = value
 	case textFieldPrepChTypes:
@@ -487,22 +467,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.prepRenameAnotDict = value
 	case textFieldPrepCustomBadDict:
 		m.prepCustomBadDict = value
-	case textFieldRawEventPrefixes:
-		m.rawEventPrefixes = value
-	case textFieldMergeEventPrefixes:
-		m.mergeEventPrefixes = value
-	case textFieldMergeEventTypes:
-		m.mergeEventTypes = value
-	case textFieldMergeQCColumns:
-		m.mergeQCColumns = value
-	case textFieldFmriRawSession:
-		m.fmriRawSession = value
-	case textFieldFmriRawRestTask:
-		m.fmriRawRestTask = value
-	case textFieldFmriRawDcm2niixPath:
-		m.fmriRawDcm2niixPath = value
-	case textFieldFmriRawDcm2niixArgs:
-		m.fmriRawDcm2niixArgs = value
 	case textFieldConditionCompareColumn:
 		m.conditionCompareColumn = strings.TrimSpace(value)
 	case textFieldConditionCompareWindows:

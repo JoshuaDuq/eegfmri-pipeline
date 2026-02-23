@@ -84,14 +84,14 @@ def test_resolve_single_path_keeps_docker_image_like_values() -> None:
 def test_resolve_paths_recursive_skips_non_path_scalar_keys(tmp_path) -> None:
     config = {
         "project": {
-            "task": "thermalactive",
+            "task": "task",
             "random_state": "42",
             "picks": "eeg",
             "project_root": "workspace-root",
         }
     }
     loader._resolve_paths_recursive(config, tmp_path / "config", tmp_path / "project")
-    assert config["project"]["task"] == "thermalactive"
+    assert config["project"]["task"] == "task"
     assert config["project"]["random_state"] == "42"
     assert config["project"]["picks"] == "eeg"
     assert config["project"]["project_root"] == "workspace-root"

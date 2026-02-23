@@ -36,7 +36,7 @@ FREQUENCY_BANDS: List[str] = [
 BEHAVIOR_COMPUTATIONS: List[str] = [
     "trial_table",
     "lag_features",
-    "pain_residual",
+    "predictor_residual",
     "temperature_models",
     "regression",
     "models",
@@ -46,7 +46,7 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "influence",
     "report",
     "correlations",
-    "pain_sensitivity",
+    "predictor_sensitivity",
     "condition",
     "temporal",
     "cluster",
