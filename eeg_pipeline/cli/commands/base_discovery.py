@@ -28,7 +28,7 @@ def discover_event_columns(
             "columns": ["onset", "duration", "trial_type", "condition", ...],
             "values": {
                 "condition": ["pain", "nonpain"],
-                "trial_type": ["stim", "rating"],
+                "trial_type": ["stim", "outcome"],
                 ...
             },
             "source": "events" | "metadata",

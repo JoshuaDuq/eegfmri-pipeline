@@ -748,7 +748,7 @@ const (
 
 	// Event Column Mapping text fields
 	textFieldEventColPredictor
-	textFieldEventColRating
+	textFieldEventColOutcome
 	textFieldEventColBinaryOutcome
 	textFieldConditionPreferredPrefixes
 
@@ -1915,7 +1915,7 @@ type Model struct {
 	modelsStandardize             bool
 	modelsMinSamples              int
 	modelsMaxFeatures             int
-	modelsOutcomeRating           bool
+	modelsOutcomeValue           bool
 	modelsOutcomePredictorResidual     bool
 	modelsOutcomePredictor      bool
 	modelsOutcomeBinaryOutcome       bool
@@ -1938,7 +1938,7 @@ type Model struct {
 
 	// Consistency & influence
 	consistencyEnabled           bool
-	influenceOutcomeRating       bool
+	influenceOutcomeValue       bool
 	influenceOutcomePredictorResidual bool
 	influenceOutcomePredictor  bool
 	influenceMaxFeatures         int
@@ -2230,7 +2230,7 @@ type Model struct {
 
 	// Event Column Mapping
 	eventColPredictor        string // Predictor column candidates (comma-separated)
-	eventColRating             string // Rating column candidates (comma-separated)
+	eventColOutcome             string // Rating column candidates (comma-separated)
 	eventColBinaryOutcome         string // Binary outcome column candidates (comma-separated)
 	conditionPreferredPrefixes string // Preferred trigger prefixes for auto condition detection (comma-separated)
 
@@ -2861,7 +2861,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		modelsStandardize:             true,
 		modelsMinSamples:              20,
 		modelsMaxFeatures:             100,
-		modelsOutcomeRating:           true,
+		modelsOutcomeValue:           true,
 		modelsOutcomePredictorResidual:     true,
 		modelsOutcomePredictor:      false,
 		modelsOutcomeBinaryOutcome:       false,
@@ -2882,7 +2882,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		stabilityAlpha:       0.05,
 
 		consistencyEnabled:           true,
-		influenceOutcomeRating:       true,
+		influenceOutcomeValue:       true,
 		influenceOutcomePredictorResidual: true,
 		influenceOutcomePredictor:  false,
 		influenceMaxFeatures:         20,
@@ -3112,7 +3112,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// Event Column Mapping defaults
 		eventColPredictor:        "predictor",
-		eventColRating:             "rating",
+		eventColOutcome:             "outcome",
 		eventColBinaryOutcome:         "binary_outcome,outcome_binary,label",
 		conditionPreferredPrefixes: "",
 

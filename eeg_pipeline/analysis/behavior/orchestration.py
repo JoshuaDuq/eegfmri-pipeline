@@ -1159,7 +1159,7 @@ def run_group_level_correlations(
     use_block_permutation: bool = True,
     n_perm: int = 1000,
     fdr_alpha: float = 0.05,
-    target_col: str = "rating",
+    target_col: str = "outcome",
     control_predictor: bool = False,
     control_trial_order: bool = False,
     control_run_effects: bool = False,

@@ -18,7 +18,7 @@ from eeg_pipeline.infra.logging import get_subject_logger
 def _load_and_validate_psychometric_data(
     events: pd.DataFrame,
     predictor_columns: list[str],
-    rating_columns: list[str],
+    outcome_columns: list[str],
     logger: logging.Logger,
 ) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
     """Load and validate predictor and rating data from events DataFrame."""
@@ -26,12 +26,12 @@ def _load_and_validate_psychometric_data(
     if predictor_column is None:
         return None, None
 
-    rating_column = _pick_first_column(events, rating_columns)
+    outcome_column = _pick_first_column(events, outcome_columns)
     predictor = pd.to_numeric(events[predictor_column], errors="coerce")
 
     valid_mask = predictor.notna()
-    if rating_column is not None:
-        rating = pd.to_numeric(events[rating_column], errors="coerce")
+    if outcome_column is not None:
+        rating = pd.to_numeric(events[outcome_column], errors="coerce")
         valid_mask = valid_mask & rating.notna()
     else:
         rating = None
@@ -91,12 +91,12 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
         return
 
     predictor_columns = config.get("event_columns.predictor", [])
-    rating_columns = config.get("event_columns.rating", [])
+    outcome_columns = config.get("event_columns.outcome", [])
 
     predictor_valid, rating_valid = _load_and_validate_psychometric_data(
         events,
         predictor_columns,
-        rating_columns,
+        outcome_columns,
         logger,
     )
 

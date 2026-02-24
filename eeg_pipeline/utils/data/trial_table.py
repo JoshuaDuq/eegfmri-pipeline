@@ -388,7 +388,7 @@ def build_subject_trial_table(ctx: Any) -> TrialTableBuildResult:
 def _compute_lag_and_delta_for_group(
     group: pd.DataFrame,
     predictor_col: str,
-    rating_col: str,
+    outcome_col: str,
     has_predictor: bool,
     has_rating: bool,
 ) -> pd.DataFrame:
@@ -399,9 +399,9 @@ def _compute_lag_and_delta_for_group(
         result["prev_predictor"] = predictor.shift(1)
         result["delta_predictor"] = predictor - predictor.shift(1)
     if has_rating:
-        rating = pd.to_numeric(result[rating_col], errors="coerce")
-        result["prev_rating"] = rating.shift(1)
-        result["delta_rating"] = rating - rating.shift(1)
+        outcome = pd.to_numeric(result[outcome_col], errors="coerce")
+        result["prev_outcome"] = rating.shift(1)
+        result["delta_outcome"] = rating - rating.shift(1)
     result["trial_index_within_group"] = np.arange(len(result), dtype=int)
     return result
 
@@ -410,7 +410,7 @@ def add_lag_and_delta_features(
     df: pd.DataFrame,
     *,
     predictor_col: str = "predictor",
-    rating_col: str = "rating",
+    outcome_col: str = "outcome",
     group_columns: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Add lagged and delta variables (prev_*, delta_*) within runs/blocks if available."""
@@ -427,14 +427,14 @@ def add_lag_and_delta_features(
         result_df = result_df.sort_values("epoch", kind="stable").reset_index(drop=True)
 
     has_predictor = predictor_col in result_df.columns
-    has_rating = rating_col in result_df.columns
+    has_outcome = outcome_col in result_df.columns
     if not has_predictor and not has_rating:
         meta["status"] = "skipped_no_columns"
         return result_df, meta
 
     def apply_to_group(group: pd.DataFrame) -> pd.DataFrame:
         return _compute_lag_and_delta_for_group(
-            group, predictor_col, rating_col, has_predictor, has_rating
+            group, predictor_col, outcome_col, has_predictor, has_outcome
         )
 
     if available_group_columns:
@@ -453,8 +453,8 @@ def add_predictor_residual(
     config: Any,
     *,
     predictor_col: str = "predictor",
-    rating_col: str = "rating",
-    out_pred_col: str = "rating_hat_from_predictor",
+    outcome_col: str = "outcome",
+    out_pred_col: str = "outcome_hat_from_predictor",
     out_resid_col: str = "predictor_residual",
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Add a flexible predictor→rating fit and define predictor_residual = rating - f(temp)."""
@@ -468,7 +468,7 @@ def add_predictor_residual(
         return df, meta
 
     has_required_columns = (
-        predictor_col in df.columns and rating_col in df.columns
+        predictor_col in df.columns and outcome_col in df.columns
     )
     if not has_required_columns:
         meta["status"] = "skipped_missing_columns"
@@ -477,7 +477,7 @@ def add_predictor_residual(
     from eeg_pipeline.utils.analysis.stats.predictor_residual import fit_predictor_rating_curve
 
     predictor = pd.to_numeric(df[predictor_col], errors="coerce")
-    rating = pd.to_numeric(df[rating_col], errors="coerce")
+    outcome = pd.to_numeric(df[outcome_col], errors="coerce")
     prediction, residual, model_meta = fit_predictor_rating_curve(
         predictor, rating, config=config
     )

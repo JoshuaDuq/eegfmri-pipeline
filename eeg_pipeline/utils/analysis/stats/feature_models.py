@@ -47,7 +47,7 @@ class FeatureModelsConfig:
     outcomes: Optional[List[str]] = None
     families: Optional[List[str]] = None
     include_predictor: bool = True
-    predictor_control: str = "linear"  # "linear" | "rating_hat" | "spline"
+    predictor_control: str = "linear"  # "linear" | "outcome_hat" | "spline"
     include_trial_order: bool = True
     include_prev_terms: bool = False
     include_run_block: bool = True
@@ -55,14 +55,14 @@ class FeatureModelsConfig:
     standardize: bool = True
     min_samples: int = 20
     max_features: Optional[int] = 100
-    binary_outcome: str = "binary_outcome"  # or "rating_median"
+    binary_outcome: str = "binary_outcome"  # or "outcome_median"
     n_jobs: int = 1
 
     @classmethod
     def from_config(cls, config: Any) -> "FeatureModelsConfig":
-        outcomes = _get(config, "behavior_analysis.models.outcomes", ["rating", "predictor_residual"])
+        outcomes = _get(config, "behavior_analysis.models.outcomes", ["outcome", "predictor_residual"])
         if not isinstance(outcomes, (list, tuple)) or not outcomes:
-            outcomes = ["rating", "predictor_residual"]
+            outcomes = ["outcome", "predictor_residual"]
         families = _get(config, "behavior_analysis.models.families", ["ols_hc3", "robust_rlm", "quantile_50", "logit"])
         if not isinstance(families, (list, tuple)) or not families:
             families = ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
@@ -350,10 +350,10 @@ def _derive_binary_outcome(df: pd.DataFrame, kind: str) -> Tuple[Optional[pd.Ser
     meta: Dict[str, Any] = {"binary_outcome_kind": kind}
     if kind == "binary_outcome" and "binary_outcome" in df.columns:
         return pd.to_numeric(df["binary_outcome"], errors="coerce"), meta
-    if kind in ("rating_median", "rating_median_split") and "rating" in df.columns:
-        r = pd.to_numeric(df["rating"], errors="coerce")
+    if kind in ("outcome_median", "outcome_median_split") and "outcome" in df.columns:
+        r = pd.to_numeric(df["outcome"], errors="coerce")
         med = float(r.median(skipna=True)) if r.notna().any() else np.nan
-        meta["rating_median"] = med
+        meta["outcome_median"] = med
         return (r > med).astype(float), meta
     return None, {"binary_outcome_kind": kind, "status": "missing"}
 
@@ -522,7 +522,7 @@ def _build_additional_covariates(
             covariates.append("trial_index")
     
     if cfg.include_prev_terms:
-        prev_term_candidates = ["prev_predictor", "prev_rating", "delta_predictor", "delta_rating"]
+        prev_term_candidates = ["prev_predictor", "prev_outcome", "delta_predictor", "delta_outcome"]
         for col in prev_term_candidates:
             if col in trial_df.columns:
                 covariates.append(col)
@@ -554,7 +554,7 @@ def _prepare_outcome_data(
             return None, False, outcome_name_str, meta
         return outcome_series, True, outcome_name_str, meta
     
-    if outcome_name_str in ("rating_median", "rating_median_split"):
+    if outcome_name_str in ("outcome_median", "outcome_median_split"):
         outcome_series, binary_meta = _derive_binary_outcome(trial_df, outcome_name_str)
         meta.update(binary_meta)
         if outcome_series is None:

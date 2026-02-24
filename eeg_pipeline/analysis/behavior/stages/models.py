@@ -94,7 +94,7 @@ def stage_predictor_models_impl(
         return {"status": "skipped_missing_data"}
 
     predictor_column = resolve_predictor_column(df, ctx.config) or "predictor"
-    outcome_column = resolve_outcome_column(df, ctx.config) or "rating"
+    outcome_column = resolve_outcome_column(df, ctx.config) or "outcome"
     required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df.columns)
     if missing_columns:
@@ -198,7 +198,7 @@ def stage_regression_impl(
 
     if use_run_unit and run_col in df_trials.columns:
         ctx.logger.info("Regression: aggregating to run-level (primary_unit=%s)", primary_unit)
-        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
         predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
         agg_cols = [
             c
@@ -329,15 +329,15 @@ def stage_models_impl(
                 f"but run column '{run_col}' is missing from trial table."
             )
         ctx.logger.info("Models: aggregating to run-level (primary_unit=%s)", primary_unit)
-        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["rating", "predictor_residual"])
+        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["outcome", "predictor_residual"])
         if isinstance(outcomes_cfg, str):
             outcomes_cfg = [outcomes_cfg]
         elif not isinstance(outcomes_cfg, (list, tuple)):
-            outcomes_cfg = ["rating", "predictor_residual"]
+            outcomes_cfg = ["outcome", "predictor_residual"]
         binary_outcome = str(
             get_config_value(ctx.config, "behavior_analysis.models.binary_outcome", "binary_outcome") or "binary_outcome"
         ).strip()
-        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
         predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
         extra_cols = [
             predictor_column,
@@ -347,9 +347,9 @@ def stage_models_impl(
             "trial_index",
             "trial_index_within_group",
             "prev_predictor",
-            "prev_rating",
+            "prev_outcome",
             "delta_predictor",
-            "delta_rating",
+            "delta_outcome",
         ]
         agg_cols = [c for c in set(feature_cols + list(outcomes_cfg) + [binary_outcome] + extra_cols) if c in df_trials.columns]
         agg_numeric = {c: "mean" for c in agg_cols if c != binary_outcome}

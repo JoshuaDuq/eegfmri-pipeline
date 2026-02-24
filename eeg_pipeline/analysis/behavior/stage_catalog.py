@@ -91,7 +91,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         name="load",
         description="Load behavioral data",
         requires=(),
-        produces=("rating", "predictor", "features"),
+        produces=("outcome", "predictor", "features"),
         group="data_prep",
     ),
     StageSpecDefinition(
@@ -113,7 +113,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     StageSpecDefinition(
         name="predictor_residual",
         description="Compute pain residual",
-        requires=("trial_table", "predictor", "rating"),
+        requires=("trial_table", "predictor", "outcome"),
         produces=("predictor_residual",),
         config_key="behavior_analysis.predictor_residual.enabled",
         group="data_prep",
@@ -121,7 +121,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     StageSpecDefinition(
         name="predictor_models",
         description="Compare predictor-outcome models",
-        requires=("trial_table", "predictor", "rating"),
+        requires=("trial_table", "predictor", "outcome"),
         produces=("predictor_models",),
         config_key="behavior_analysis.predictor_models.enabled",
         group="data_prep",
@@ -177,7 +177,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     StageSpecDefinition(
         name="predictor_sensitivity",
         description="Pain sensitivity correlations",
-        requires=("trial_table", "predictor", "rating"),
+        requires=("trial_table", "predictor", "outcome"),
         produces=("predictor_sensitivity",),
         config_key="behavior_analysis.predictor_sensitivity.enabled",
         group="correlations",
@@ -249,7 +249,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     StageSpecDefinition(
         name="temporal_tfr",
         description="Time-frequency correlations",
-        requires=("tfr", "rating"),
+        requires=("tfr", "outcome"),
         produces=("tfr_correlations",),
         config_key="behavior_analysis.temporal.enabled",
         group="temporal",
@@ -257,7 +257,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     StageSpecDefinition(
         name="temporal_stats",
         description="Temporal statistics (power/ITPC/ERDS)",
-        requires=("power_df", "rating"),
+        requires=("power_df", "outcome"),
         produces=("temporal_stats",),
         config_key="behavior_analysis.temporal.enabled",
         group="temporal",
@@ -273,7 +273,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     StageSpecDefinition(
         name="mediation",
         description="Mediation analysis",
-        requires=("trial_table", "predictor", "rating"),
+        requires=("trial_table", "predictor", "outcome"),
         produces=("mediation",),
         config_key="behavior_analysis.mediation.enabled",
         group="advanced",
@@ -281,7 +281,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     StageSpecDefinition(
         name="moderation",
         description="Moderation analysis",
-        requires=("trial_table", "predictor", "rating"),
+        requires=("trial_table", "predictor", "outcome"),
         produces=("moderation",),
         config_key="behavior_analysis.moderation.enabled",
         group="advanced",

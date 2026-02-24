@@ -206,7 +206,7 @@ def stage_predictor_residual_impl(
         return None
 
     predictor_column = resolve_predictor_column(df, ctx.config) or "predictor"
-    outcome_column = resolve_outcome_column(df, ctx.config) or "rating"
+    outcome_column = resolve_outcome_column(df, ctx.config) or "outcome"
 
     required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df.columns)
@@ -222,7 +222,7 @@ def stage_predictor_residual_impl(
         df,
         ctx.config,
         predictor_col=predictor_column,
-        rating_col=outcome_column,
+        outcome_col=outcome_column,
     )
 
     suffix = feature_suffix_from_context_fn(ctx)

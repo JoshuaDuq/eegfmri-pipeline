@@ -178,7 +178,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=None,
         help=(
-            "Target to predict. Can be a logical name ('rating', 'predictor', 'binary_outcome') "
+            "Target to predict. Can be a logical name ('outcome', 'predictor', 'binary_outcome') "
             "or an explicit events.tsv column name. Use --target=fmri_signature to predict trial-wise "
             "NPS/SIIPS1 expression from fMRI beta-series/LSS. Defaults depend on stage."
         ),
@@ -189,7 +189,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Fixed threshold for binarizing a continuous target when running classification "
-            "(e.g., --target=rating --binary-threshold=30). Median-split is intentionally disabled."
+            "(e.g., --target=outcome --binary-threshold=30). Median-split is intentionally disabled."
         ),
     )
     parser.add_argument(

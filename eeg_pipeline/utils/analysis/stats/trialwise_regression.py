@@ -65,7 +65,7 @@ def _build_previous_term_covariates(
     """Build previous trial term covariates."""
     covariates: List[str] = []
     if cfg.include_prev_terms:
-        prev_columns = ["prev_predictor", "prev_rating", "delta_predictor", "delta_rating"]
+        prev_columns = ["prev_predictor", "prev_outcome", "delta_predictor", "delta_outcome"]
         for col in prev_columns:
             if col in trial_df.columns:
                 covariates.append(col)
@@ -190,9 +190,9 @@ def _fit_reduced_model(
 
 @dataclass
 class TrialwiseRegressionConfig:
-    outcome: str = "rating"
+    outcome: str = "outcome"
     include_predictor: bool = True
-    predictor_control: str = "linear"  # "linear" | "rating_hat" | "spline"
+    predictor_control: str = "linear"  # "linear" | "outcome_hat" | "spline"
     include_trial_order: bool = True
     include_prev_terms: bool = False
     include_run_block: bool = True
@@ -207,7 +207,7 @@ class TrialwiseRegressionConfig:
     def from_config(cls, config: Any) -> "TrialwiseRegressionConfig":
         """Create config from configuration object."""
         base_path = "behavior_analysis.regression"
-        outcome = str(_get(config, f"{base_path}.outcome", "rating"))
+        outcome = str(_get(config, f"{base_path}.outcome", "outcome"))
         include_predictor = bool(_get(config, f"{base_path}.include_predictor", True))
         predictor_control_raw = str(_get(config, f"{base_path}.predictor_control", "linear"))
         predictor_control = predictor_control_raw.strip().lower()

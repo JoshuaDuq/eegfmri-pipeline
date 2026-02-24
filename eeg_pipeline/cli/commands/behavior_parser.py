@@ -67,7 +67,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         "--outcome-column",
         type=str,
         default=None,
-        help="Canonical outcome column for behavior analyses (e.g., rating, arousal, confidence)",
+        help="Canonical outcome column for behavior analyses (e.g., vas_rating, arousal, confidence)",
     )
     compute_group.add_argument("--predictor-control", action="store_true", default=None, dest="predictor_control")
     compute_group.add_argument("--no-predictor-control", action="store_false", dest="predictor_control")
@@ -245,10 +245,10 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     residual_group.add_argument("--predictor-residual-crossfit-spline-n-knots", type=int, default=None, dest="pain_residual_crossfit_spline_n_knots")
 
     regression_group = parser.add_argument_group("Trialwise regression options")
-    regression_group.add_argument("--regression-outcome", choices=["rating", "predictor_residual", "predictor"], default=None)
+    regression_group.add_argument("--regression-outcome", choices=["outcome", "predictor_residual", "predictor"], default=None)
     regression_group.add_argument("--regression-include-predictor", action="store_true", default=None, dest="regression_include_predictor")
     regression_group.add_argument("--no-regression-include-predictor", action="store_false", dest="regression_include_predictor")
-    regression_group.add_argument("--regression-predictor-control", choices=["linear", "rating_hat", "spline"], default=None, dest="regression_predictor_control")
+    regression_group.add_argument("--regression-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="regression_predictor_control")
     regression_group.add_argument("--regression-predictor-spline-knots", type=int, default=None, dest="regression_predictor_spline_knots")
     regression_group.add_argument("--regression-predictor-spline-quantile-low", type=float, default=None, dest="regression_predictor_spline_quantile_low")
     regression_group.add_argument("--regression-predictor-spline-quantile-high", type=float, default=None, dest="regression_predictor_spline_quantile_high")
@@ -269,11 +269,11 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     regression_group.add_argument("--regression-max-features", type=int, default=None)
 
     models_group = parser.add_argument_group("Model families options")
-    models_group.add_argument("--models-outcomes", nargs="+", choices=["rating", "predictor_residual", "predictor", "binary_outcome"], default=None)
+    models_group.add_argument("--models-outcomes", nargs="+", choices=["outcome", "predictor_residual", "predictor", "binary_outcome"], default=None)
     models_group.add_argument("--models-families", nargs="+", choices=["ols_hc3", "robust_rlm", "quantile_50", "logit"], default=None)
     models_group.add_argument("--models-include-predictor", action="store_true", default=None, dest="models_include_predictor")
     models_group.add_argument("--no-models-include-predictor", action="store_false", dest="models_include_predictor")
-    models_group.add_argument("--models-predictor-control", choices=["linear", "rating_hat", "spline"], default=None, dest="models_predictor_control")
+    models_group.add_argument("--models-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="models_predictor_control")
     models_group.add_argument("--models-predictor-spline-knots", type=int, default=None, dest="models_predictor_spline_knots")
     models_group.add_argument("--models-predictor-spline-quantile-low", type=float, default=None, dest="models_predictor_spline_quantile_low")
     models_group.add_argument("--models-predictor-spline-quantile-high", type=float, default=None, dest="models_predictor_spline_quantile_high")
@@ -290,7 +290,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     models_group.add_argument("--no-models-standardize", action="store_false", dest="models_standardize")
     models_group.add_argument("--models-min-samples", type=int, default=None)
     models_group.add_argument("--models-max-features", type=int, default=None)
-    models_group.add_argument("--models-binary-outcome", choices=["binary_outcome", "rating_median"], default=None)
+    models_group.add_argument("--models-binary-outcome", choices=["binary_outcome", "outcome_median"], default=None)
     models_group.add_argument("--models-primary-unit", choices=["trial", "run_mean"], default=None)
     models_group.add_argument(
         "--models-force-trial-iid-asymptotic",
@@ -307,7 +307,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     stability_group = parser.add_argument_group("Stability options")
     stability_group.add_argument("--stability-method", choices=["spearman", "pearson"], default=None)
-    stability_group.add_argument("--stability-outcome", choices=["auto", "rating", "predictor_residual"], default=None)
+    stability_group.add_argument("--stability-outcome", choices=["auto", "outcome", "predictor_residual"], default=None)
     stability_group.add_argument("--stability-group-column", choices=["auto", "run", "block"], default=None)
     stability_group.add_argument("--stability-partial-predictor", action="store_true", default=None, dest="stability_partial_predictor")
     stability_group.add_argument("--no-stability-partial-predictor", action="store_false", dest="stability_partial_predictor")
@@ -316,11 +316,11 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     stability_group.add_argument("--stability-alpha", type=float, default=None)
 
     influence_group = parser.add_argument_group("Influence diagnostics options")
-    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["rating", "predictor_residual", "predictor"], default=None)
+    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["outcome", "predictor_residual", "predictor"], default=None)
     influence_group.add_argument("--influence-max-features", type=int, default=None)
     influence_group.add_argument("--influence-include-predictor", action="store_true", default=None, dest="influence_include_predictor")
     influence_group.add_argument("--no-influence-include-predictor", action="store_false", dest="influence_include_predictor")
-    influence_group.add_argument("--influence-predictor-control", choices=["linear", "rating_hat", "spline"], default=None, dest="influence_predictor_control")
+    influence_group.add_argument("--influence-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="influence_predictor_control")
     influence_group.add_argument("--influence-predictor-spline-knots", type=int, default=None, dest="influence_predictor_spline_knots")
     influence_group.add_argument("--influence-predictor-spline-quantile-low", type=float, default=None, dest="influence_predictor_spline_quantile_low")
     influence_group.add_argument("--influence-predictor-spline-quantile-high", type=float, default=None, dest="influence_predictor_spline_quantile_high")
@@ -486,7 +486,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         "--temporal-target-column",
         type=str,
         default=None,
-        help="events.tsv column to correlate against for temporal analyses (default: rating from event_columns.rating)",
+        help="events.tsv column to correlate against for temporal analyses (default: outcome from event_columns.outcome)",
     )
     temporal_group.add_argument("--temporal-correction-method", choices=["fdr", "cluster"], default=None)
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)

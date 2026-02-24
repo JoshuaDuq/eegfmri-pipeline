@@ -343,8 +343,8 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     target_key = target_raw.lower()
     aliases: set[str] = set()
 
-    if target_key in {"", "rating"}:
-        aliases.add("rating")
+    if target_key in {"", "outcome"}:
+        aliases.add("outcome")
     elif target_key in {"predictor"}:
         aliases.add("predictor")
     elif target_key in {"binary_outcome", "binary"}:
@@ -356,7 +356,7 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     # aliases so baseline-predictor leakage guards remain effective.
     if config is not None:
         event_alias_map = {
-            "rating": get_config_value(config, "event_columns.rating", []),
+            "outcome": get_config_value(config, "event_columns.outcome", []),
             "predictor": get_config_value(config, "event_columns.predictor", []),
             "binary_outcome": get_config_value(config, "event_columns.binary_outcome", []),
         }

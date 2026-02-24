@@ -243,10 +243,10 @@ def stage_temporal_stats_impl(
             get_config_value(
                 ctx.config,
                 "behavior_analysis.temporal.target_column",
-                get_config_value(ctx.config, "behavior_analysis.outcome_column", "") or "rating",
+                get_config_value(ctx.config, "behavior_analysis.outcome_column", "") or "outcome",
             )
             or ""
-        ).strip() or "rating"
+        ).strip() or "outcome"
         for _, row in df_temporal.iterrows():
             normalized_records.append(
                 {

@@ -167,21 +167,21 @@ def _resolve_target_series(
     Resolve target vector from events.
 
     `target` can be:
-    - logical names: "rating", "predictor", "binary_outcome"
+    - logical names: "outcome", "predictor", "binary_outcome"
     - a literal column name in events_df
     """
     target_key = (target or "").strip()
 
     if not target_key:
-        target_key = "rating"
+        target_key = "outcome"
 
-    if target_key.lower() in {"rating"}:
-        rating_columns = config.get("event_columns.rating", [])
-        tgt_col = pick_target_column(events_df, target_columns=list(rating_columns) if rating_columns else [])
+    if target_key.lower() in {"outcome"}:
+        outcome_columns = config.get("event_columns.outcome", [])
+        tgt_col = pick_target_column(events_df, target_columns=list(outcome_columns) if outcome_columns else [])
         if tgt_col is None:
             raise ValueError(
                 "No rating column found in events.tsv. "
-                f"Tried config event_columns.rating={rating_columns}; available={list(events_df.columns)}"
+                f"Tried config event_columns.outcome={outcome_columns}; available={list(events_df.columns)}"
             )
         series = pd.to_numeric(events_df[tgt_col], errors="coerce")
         return series, str(tgt_col)
@@ -228,8 +228,8 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     target_key = target_raw.lower()
     aliases: set[str] = set()
 
-    if target_key in {"", "rating"}:
-        aliases.add("rating")
+    if target_key in {"", "outcome"}:
+        aliases.add("outcome")
     elif target_key in {"predictor"}:
         aliases.add("predictor")
     elif target_key in {"binary_outcome", "binary"}:
@@ -241,7 +241,7 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     # aliases so leakage checks still block semantically identical predictors.
     if config is not None:
         event_alias_map = {
-            "rating": _as_list(get_config_value(config, "event_columns.rating", [])) or [],
+            "outcome": _as_list(get_config_value(config, "event_columns.outcome", [])) or [],
             "predictor": _as_list(get_config_value(config, "event_columns.predictor", [])) or [],
             "binary_outcome": _as_list(get_config_value(config, "event_columns.binary_outcome", [])) or [],
         }
@@ -747,10 +747,10 @@ def _standardize_meta_columns(
     if pain_col is not None:
         meta_cols["binary_outcome"] = pd.to_numeric(events_df[pain_col], errors="coerce")
 
-    rating_columns = config.get("event_columns.rating", [])
-    rating_col = pick_target_column(events_df, target_columns=list(rating_columns) if rating_columns else [])
-    if rating_col is not None:
-        meta_cols["rating"] = pd.to_numeric(events_df[rating_col], errors="coerce")
+    outcome_columns = config.get("event_columns.outcome", [])
+    outcome_col = pick_target_column(events_df, target_columns=list(outcome_columns) if outcome_columns else [])
+    if outcome_col is not None:
+        meta_cols["outcome"] = pd.to_numeric(events_df[outcome_col], errors="coerce")
 
     if "trial_index" in events_df.columns:
         meta_cols["trial_index"] = pd.to_numeric(events_df["trial_index"], errors="coerce")
@@ -1268,7 +1268,7 @@ def load_active_matrix(
         tuple(X.shape),
         len(np.unique(groups_arr)),
         ",".join(resolved_families),
-        str(target or "rating"),
+        str(target or "outcome"),
     )
 
     return X, y_all, groups_arr, feature_names, meta

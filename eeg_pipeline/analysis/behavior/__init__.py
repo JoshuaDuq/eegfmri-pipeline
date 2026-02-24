@@ -2,7 +2,7 @@
 Behavior Analysis Module
 ========================
 
-Correlate EEG features with behavioral measures (behavioral ratings, predictor).
+Correlate EEG features with behavioral measures (behavioral outcomes, predictor).
 Statistical entry points are consolidated in eeg_pipeline.analysis.behavior.api.
 """
 

@@ -259,7 +259,7 @@ def _build_predictor_covariates(
     outcome : str
         Name of the outcome variable column.
     predictor_control : str
-        Control strategy: "linear", "spline"/"rcs"/"restricted_cubic", "rating_hat"/"nonlinear".
+        Control strategy: "linear", "spline"/"rcs"/"restricted_cubic", "outcome_hat"/"nonlinear".
     include_predictor : bool
         Whether to include predictor control.
     config : Optional[Any]
@@ -269,7 +269,7 @@ def _build_predictor_covariates(
     key_prefix : str
         Config key prefix for spline configuration.
     exclude_outcomes : Tuple[str, ...]
-        Outcomes that should not use rating_hat fallback.
+        Outcomes that should not use outcome_hat fallback.
 
     Returns
     -------
@@ -286,10 +286,10 @@ def _build_predictor_covariates(
     ctrl = str(predictor_control or "linear").strip().lower()
 
     # Rating hat / nonlinear control
-    if ctrl in ("rating_hat", "rating_hat_from_temp", "nonlinear"):
-        if outcome not in exclude_outcomes and "rating_hat_from_temp" in trial_df.columns:
-            covariates.append("rating_hat_from_temp")
-            meta.update({"predictor_control_used": "rating_hat", "predictor_control_column": "rating_hat_from_temp"})
+    if ctrl in ("outcome_hat", "outcome_hat_from_predictor", "nonlinear"):
+        if outcome not in exclude_outcomes and "outcome_hat_from_predictor" in trial_df.columns:
+            covariates.append("outcome_hat_from_predictor")
+            meta.update({"predictor_control_used": "outcome_hat", "predictor_control_column": "outcome_hat_from_predictor"})
         elif predictor_col in trial_df.columns:
             covariates.append(predictor_col)
             meta.update({"predictor_control_used": "linear", "predictor_control_fallback": predictor_col})
@@ -315,9 +315,9 @@ def _build_predictor_covariates(
                 "predictor_control_column": predictor_col,
                 "predictor_spline": spline_meta,
             })
-        elif outcome not in exclude_outcomes and "rating_hat_from_temp" in trial_df.columns:
-            covariates.append("rating_hat_from_temp")
-            meta.update({"predictor_control_used": "rating_hat_fallback", "predictor_control_column": "rating_hat_from_temp"})
+        elif outcome not in exclude_outcomes and "outcome_hat_from_predictor" in trial_df.columns:
+            covariates.append("outcome_hat_from_predictor")
+            meta.update({"predictor_control_used": "outcome_hat_fallback", "predictor_control_column": "outcome_hat_from_predictor"})
 
     # Linear control (default)
     elif predictor_col in trial_df.columns:

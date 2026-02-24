@@ -408,7 +408,7 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.startTextEdit(textFieldEventColPredictor)
 		m.useDefaultAdvanced = false
 	case optEventColRating:
-		m.startTextEdit(textFieldEventColRating)
+		m.startTextEdit(textFieldEventColOutcome)
 		m.useDefaultAdvanced = false
 	case optEventColBinaryOutcome:
 		m.startTextEdit(textFieldEventColBinaryOutcome)

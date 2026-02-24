@@ -68,7 +68,7 @@ def build_behavior_qc_impl(
         qc["data_qc"] = ctx.data_qc
 
     outcome_series = None
-    outcome_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
     qc["outcome_column"] = outcome_col
     if outcome_col is not None and ctx.aligned_events is not None:
         outcome_series = pd.to_numeric(ctx.aligned_events[outcome_col], errors="coerce")
@@ -98,17 +98,17 @@ def build_behavior_qc_impl(
         cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(ctx.aligned_events, ctx.config, ctx.logger)
         if int(n_condition_a) > 0 or int(n_condition_b) > 0:
             s = pd.to_numeric(outcome_series, errors="coerce")
-            cond_a_ratings = s[cond_a_mask] if len(cond_a_mask) == len(s) else pd.Series(dtype=float)
-            cond_b_ratings = s[cond_b_mask] if len(cond_b_mask) == len(s) else pd.Series(dtype=float)
+            cond_a_outcomes = s[cond_a_mask] if len(cond_a_mask) == len(s) else pd.Series(dtype=float)
+            cond_b_outcomes = s[cond_b_mask] if len(cond_b_mask) == len(s) else pd.Series(dtype=float)
             qc["contrast"] = {
                 "status": "ok",
                 "n_condition_a": int(n_condition_a),
                 "n_condition_b": int(n_condition_b),
-                "mean_outcome_condition_a": float(cond_a_ratings.mean()) if cond_a_ratings.notna().any() else np.nan,
-                "mean_outcome_condition_b": float(cond_b_ratings.mean()) if cond_b_ratings.notna().any() else np.nan,
+                "mean_outcome_condition_a": float(cond_a_outcomes.mean()) if cond_a_outcomes.notna().any() else np.nan,
+                "mean_outcome_condition_b": float(cond_b_outcomes.mean()) if cond_b_outcomes.notna().any() else np.nan,
                 "mean_outcome_difference_a_minus_b": (
-                    float(cond_a_ratings.mean() - cond_b_ratings.mean())
-                    if cond_a_ratings.notna().any() and cond_b_ratings.notna().any()
+                    float(cond_a_outcomes.mean() - cond_b_outcomes.mean())
+                    if cond_a_outcomes.notna().any() and cond_b_outcomes.notna().any()
                     else np.nan
                 ),
             }

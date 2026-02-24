@@ -89,7 +89,7 @@ class InfluenceConfig:
     include_trial_order: bool = True
     include_run_block: bool = True
     include_predictor: bool = True
-    predictor_control: str = "linear"  # "linear" | "rating_hat" | "spline"
+    predictor_control: str = "linear"  # "linear" | "outcome_hat" | "spline"
     include_interaction: bool = False
     standardize: bool = True
     n_jobs: int = -1
@@ -97,7 +97,7 @@ class InfluenceConfig:
     @classmethod
     def from_config(cls, config: Any) -> "InfluenceConfig":
         """Create config from configuration object."""
-        default_outcomes = ["rating", "predictor_residual"]
+        default_outcomes = ["outcome", "predictor_residual"]
         outcomes = _get_config_value(config, "behavior_analysis.influence.outcomes", default_outcomes)
         if not isinstance(outcomes, (list, tuple)) or not outcomes:
             outcomes = default_outcomes
@@ -146,7 +146,7 @@ def _extract_p_values_from_dataframe(df: pd.DataFrame, p_column: str) -> List[Tu
 def _filter_rating_target(df: pd.DataFrame) -> pd.DataFrame:
     """Filter dataframe to rating target rows."""
     if "target" in df.columns:
-        return df[df["target"].astype(str) == "rating"]
+        return df[df["target"].astype(str) == "outcome"]
     return df
 
 

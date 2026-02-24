@@ -1855,26 +1855,26 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optModelsOutcomeRating:
-		m.modelsOutcomeRating = !m.modelsOutcomeRating
-		if !m.modelsOutcomeRating && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
-			m.modelsOutcomeRating = true
+		m.modelsOutcomeValue = !m.modelsOutcomeValue
+		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
+			m.modelsOutcomeValue = true
 		}
 		m.useDefaultAdvanced = false
 	case optModelsOutcomePredictorResidual:
 		m.modelsOutcomePredictorResidual = !m.modelsOutcomePredictorResidual
-		if !m.modelsOutcomeRating && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
+		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
 			m.modelsOutcomePredictorResidual = true
 		}
 		m.useDefaultAdvanced = false
 	case optModelsOutcomePredictor:
 		m.modelsOutcomePredictor = !m.modelsOutcomePredictor
-		if !m.modelsOutcomeRating && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
+		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
 			m.modelsOutcomePredictor = true
 		}
 		m.useDefaultAdvanced = false
 	case optModelsOutcomeBinaryOutcome:
 		m.modelsOutcomeBinaryOutcome = !m.modelsOutcomeBinaryOutcome
-		if !m.modelsOutcomeRating && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
+		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
 			m.modelsOutcomeBinaryOutcome = true
 		}
 		m.useDefaultAdvanced = false
@@ -1937,20 +1937,20 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 
 	// Influence
 	case optInfluenceOutcomeRating:
-		m.influenceOutcomeRating = !m.influenceOutcomeRating
-		if !m.influenceOutcomeRating && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
-			m.influenceOutcomeRating = true
+		m.influenceOutcomeValue = !m.influenceOutcomeValue
+		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
+			m.influenceOutcomeValue = true
 		}
 		m.useDefaultAdvanced = false
 	case optInfluenceOutcomePredictorResidual:
 		m.influenceOutcomePredictorResidual = !m.influenceOutcomePredictorResidual
-		if !m.influenceOutcomeRating && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
+		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
 			m.influenceOutcomePredictorResidual = true
 		}
 		m.useDefaultAdvanced = false
 	case optInfluenceOutcomePredictor:
 		m.influenceOutcomePredictor = !m.influenceOutcomePredictor
-		if !m.influenceOutcomeRating && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
+		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
 			m.influenceOutcomePredictor = true
 		}
 		m.useDefaultAdvanced = false

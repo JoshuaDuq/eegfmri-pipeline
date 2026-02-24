@@ -182,7 +182,7 @@ def write_outputs_manifest_impl(
         "feature_categories": ctx.feature_categories or [],
         "feature_files": ctx.selected_feature_files or [],
         "targets": {
-            "rating": bool(ctx._find_rating_column() is not None) if hasattr(ctx, "_find_rating_column") else False,
+            "outcome": bool(ctx._find_outcome_column() is not None) if hasattr(ctx, "_find_outcome_column") else False,
             "predictor": bool(ctx.predictor_series is not None and ctx.predictor_series.notna().any()) if ctx.predictor_series is not None else False,
         },
         "covariates_qc": ctx.data_qc.get("covariates_qc", {}),

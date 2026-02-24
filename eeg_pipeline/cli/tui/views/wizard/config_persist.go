@@ -492,7 +492,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["modelsStandardize"] = m.modelsStandardize
 	cfg["modelsMinSamples"] = m.modelsMinSamples
 	cfg["modelsMaxFeatures"] = m.modelsMaxFeatures
-	cfg["modelsOutcomeRating"] = m.modelsOutcomeRating
+	cfg["modelsOutcomeValue"] = m.modelsOutcomeValue
 	cfg["modelsOutcomePredictorResidual"] = m.modelsOutcomePredictorResidual
 	cfg["modelsOutcomePredictor"] = m.modelsOutcomePredictor
 	cfg["modelsOutcomeBinaryOutcome"] = m.modelsOutcomeBinaryOutcome
@@ -515,7 +515,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 
 	// Consistency & influence
 	cfg["consistencyEnabled"] = m.consistencyEnabled
-	cfg["influenceOutcomeRating"] = m.influenceOutcomeRating
+	cfg["influenceOutcomeValue"] = m.influenceOutcomeValue
 	cfg["influenceOutcomePredictorResidual"] = m.influenceOutcomePredictorResidual
 	cfg["influenceOutcomePredictor"] = m.influenceOutcomePredictor
 	cfg["influenceMaxFeatures"] = m.influenceMaxFeatures
@@ -1053,7 +1053,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 
 	// Event Column Mapping
 	cfg["eventColPredictor"] = m.eventColPredictor
-	cfg["eventColRating"] = m.eventColRating
+	cfg["eventColOutcome"] = m.eventColOutcome
 	cfg["eventColBinaryOutcome"] = m.eventColBinaryOutcome
 	cfg["conditionPreferredPrefixes"] = m.conditionPreferredPrefixes
 
@@ -1699,7 +1699,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.modelsStandardize = getBool("modelsStandardize", m.modelsStandardize)
 	m.modelsMinSamples = getInt("modelsMinSamples", m.modelsMinSamples)
 	m.modelsMaxFeatures = getInt("modelsMaxFeatures", m.modelsMaxFeatures)
-	m.modelsOutcomeRating = getBool("modelsOutcomeRating", m.modelsOutcomeRating)
+	m.modelsOutcomeValue = getBool("modelsOutcomeValue", m.modelsOutcomeValue)
 	m.modelsOutcomePredictorResidual = getBool("modelsOutcomePredictorResidual", m.modelsOutcomePredictorResidual)
 	m.modelsOutcomePredictor = getBool("modelsOutcomePredictor", m.modelsOutcomePredictor)
 	m.modelsOutcomeBinaryOutcome = getBool("modelsOutcomeBinaryOutcome", m.modelsOutcomeBinaryOutcome)
@@ -1725,7 +1725,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 
 	// Consistency & influence
 	m.consistencyEnabled = getBool("consistencyEnabled", m.consistencyEnabled)
-	m.influenceOutcomeRating = getBool("influenceOutcomeRating", m.influenceOutcomeRating)
+	m.influenceOutcomeValue = getBool("influenceOutcomeValue", m.influenceOutcomeValue)
 	m.influenceOutcomePredictorResidual = getBool("influenceOutcomePredictorResidual", m.influenceOutcomePredictorResidual)
 	m.influenceOutcomePredictor = getBool("influenceOutcomePredictor", m.influenceOutcomePredictor)
 	m.influenceMaxFeatures = getInt("influenceMaxFeatures", m.influenceMaxFeatures)
@@ -2271,7 +2271,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 
 	// Event Column Mapping
 	m.eventColPredictor = getString("eventColPredictor", m.eventColPredictor)
-	m.eventColRating = getString("eventColRating", m.eventColRating)
+	m.eventColOutcome = getString("eventColOutcome", m.eventColOutcome)
 	m.eventColBinaryOutcome = getString("eventColBinaryOutcome", m.eventColBinaryOutcome)
 	m.conditionPreferredPrefixes = getString("conditionPreferredPrefixes", m.conditionPreferredPrefixes)
 

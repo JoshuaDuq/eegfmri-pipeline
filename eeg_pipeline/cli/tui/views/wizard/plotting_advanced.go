@@ -809,7 +809,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		}
 		return lines
 	case plotItemConfigFieldBehaviorScatterColumns:
-		value := m.getPlotFieldTextValue(cfg.BehaviorScatterColumnsSpec, "rating", row, plotItemConfigFieldBehaviorScatterColumns)
+		value := m.getPlotFieldTextValue(cfg.BehaviorScatterColumnsSpec, "outcome", row, plotItemConfigFieldBehaviorScatterColumns)
 		hint := "Space to select behavioral columns"
 		plotCols := m.GetPlottingComparisonColumns()
 		if len(plotCols) > 0 {

@@ -59,7 +59,7 @@ def _fit_spline_model(
 
     model_data = pd.DataFrame({
         "pred": predictor_values.to_numpy(dtype=float),
-        "rating": rating_values.to_numpy(dtype=float),
+        "outcome": rating_values.to_numpy(dtype=float),
     })
 
     best_model = None

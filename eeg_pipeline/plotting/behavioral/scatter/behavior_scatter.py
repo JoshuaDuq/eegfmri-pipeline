@@ -658,7 +658,7 @@ def plot_behavior_scatter(
         If None, uses config default or all available.
     columns : list of str, optional
         Behavioral columns to correlate with (from events.tsv).
-        If None, uses config default (e.g., ["rating", "predictor"]).
+        If None, uses config default (e.g., ["outcome", "predictor"]).
     aggregation_modes : list of str, optional
         Aggregation modes: "roi", "global", "channel".
         If None, defaults to ["roi", "global"].
@@ -703,7 +703,7 @@ def plot_behavior_scatter(
     if features is None:
         features = scatter_config.get("features", ["power"])
     if columns is None:
-        columns = scatter_config.get("columns", ["rating"])
+        columns = scatter_config.get("columns", ["outcome"])
     if aggregation_modes is None:
         agg_str = scatter_config.get("aggregation_modes", ["roi", "global"])
         aggregation_modes = agg_str if isinstance(agg_str, list) else [agg_str]

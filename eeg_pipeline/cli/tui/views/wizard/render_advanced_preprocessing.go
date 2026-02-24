@@ -570,11 +570,11 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			hint = "comma-separated column names"
 		case optEventColRating:
 			label = "Rating Columns"
-			val := m.eventColRating
+			val := m.eventColOutcome
 			if strings.TrimSpace(val) == "" {
 				val = "(default)"
 			}
-			if m.editingText && m.editingTextField == textFieldEventColRating {
+			if m.editingText && m.editingTextField == textFieldEventColOutcome {
 				val = m.textBuffer + "█"
 			}
 			value = val

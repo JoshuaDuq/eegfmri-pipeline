@@ -240,7 +240,7 @@ def _process_correlations(out: pd.DataFrame, corr_df: pd.DataFrame) -> None:
     corr_processed["r_val"] = _extract_column(corr_processed, "r_primary", "r")
     corr_processed["p_val"] = _extract_column(corr_processed, "p_primary", "p")
 
-    _add_correlation_columns(out, corr_processed, "rating", "corr_rating")
+    _add_correlation_columns(out, corr_processed, "outcome", "corr_rating")
     _add_correlation_columns(out, corr_processed, "predictor", "corr_predictor")
 
 
@@ -251,7 +251,7 @@ def _process_regressions(out: pd.DataFrame, regression_df: pd.DataFrame) -> None
     reg_processed["beta"] = _extract_column(reg_processed, "beta_feature", "beta")
 
     regression_targets = [
-        ("rating", "reg_rating"),
+        ("outcome", "reg_rating"),
         ("predictor_residual", "reg_predictor_residual"),
         ("predictor", "reg_predictor"),
     ]
@@ -277,7 +277,7 @@ def _process_models(out: pd.DataFrame, models_df: pd.DataFrame) -> None:
         models_processed["p_val"] = np.nan
 
     model_families = ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
-    model_targets = ["rating", "predictor_residual"]
+    model_targets = ["outcome", "predictor_residual"]
     
     for family in model_families:
         for target in model_targets:

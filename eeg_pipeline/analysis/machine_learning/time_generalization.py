@@ -328,7 +328,7 @@ def time_generalization_regression(
     seed
         Seed for the permutation random number generator.
     target
-        Optional target selector from events.tsv (e.g., ``"rating"``,
+        Optional target selector from events.tsv (e.g., ``"outcome"``,
         ``"predictor"``, or explicit column name). Defaults to rating when
         omitted.
 

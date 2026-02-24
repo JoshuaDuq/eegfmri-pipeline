@@ -35,7 +35,7 @@ class StageRegistry:
     RESOURCE_TFR = "tfr"
     RESOURCE_POWER_DF = "power_df"
     RESOURCE_PREDICTOR = "predictor"
-    RESOURCE_RATING = "rating"
+    RESOURCE_OUTCOME = "outcome"
     RESOURCE_FEATURES = "features"
     RESOURCE_DESIGN = "correlate_design"
     RESOURCE_EFFECT_SIZES = "effect_sizes"
@@ -141,9 +141,9 @@ class StageRegistry:
         if ctx.predictor_series is not None:
             available_resources.add(cls.RESOURCE_PREDICTOR)
         if ctx.aligned_events is not None:
-            rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-            if rating_col is not None:
-                available_resources.add(cls.RESOURCE_RATING)
+            outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
+            if outcome_col is not None:
+                available_resources.add(cls.RESOURCE_OUTCOME)
         if ctx.epochs_info is not None:
             available_resources.add(cls.RESOURCE_EPOCHS)
 

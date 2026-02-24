@@ -145,8 +145,8 @@ def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> Non
 
     if args.event_col_predictor:
         event_cols["predictor"] = [str(v).strip() for v in args.event_col_predictor if str(v).strip()]
-    if args.event_col_rating:
-        event_cols["rating"] = [str(v).strip() for v in args.event_col_rating if str(v).strip()]
+    if args.event_col_outcome:
+        event_cols["outcome"] = [str(v).strip() for v in args.event_col_outcome if str(v).strip()]
     if args.event_col_binary_outcome:
         event_cols["binary_outcome"] = [str(v).strip() for v in args.event_col_binary_outcome if str(v).strip()]
     if args.condition_preferred_prefixes:

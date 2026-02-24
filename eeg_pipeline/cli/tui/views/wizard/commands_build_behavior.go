@@ -200,7 +200,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Regression
 	if m.isComputationSelected("regression") {
-		outcomes := []string{"rating", "predictor_residual", "predictor"}
+		outcomes := []string{"outcome", "predictor_residual", "predictor"}
 		if m.regressionOutcome >= 0 && m.regressionOutcome < len(outcomes) && m.regressionOutcome != 0 {
 			args = append(args, "--regression-outcome", outcomes[m.regressionOutcome])
 		}
@@ -209,7 +209,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			"--regression-include-predictor",
 			"--no-regression-include-predictor",
 		)
-		tempCtrl := []string{"linear", "rating_hat", "spline"}
+		tempCtrl := []string{"linear", "outcome_hat", "spline"}
 		if m.regressionTempControl >= 0 && m.regressionTempControl < len(tempCtrl) && m.regressionTempControl != 0 {
 			args = append(args, "--regression-predictor-control", tempCtrl[m.regressionTempControl])
 		}
@@ -267,7 +267,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			"--models-include-predictor",
 			"--no-models-include-predictor",
 		)
-		tempCtrl := []string{"linear", "rating_hat", "spline"}
+		tempCtrl := []string{"linear", "outcome_hat", "spline"}
 		if m.modelsTempControl >= 0 && m.modelsTempControl < len(tempCtrl) && m.modelsTempControl != 0 {
 			args = append(args, "--models-predictor-control", tempCtrl[m.modelsTempControl])
 		}
@@ -311,8 +311,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--models-max-features", fmt.Sprintf("%d", m.modelsMaxFeatures))
 		}
 		out := []string{}
-		if m.modelsOutcomeRating {
-			out = append(out, "rating")
+		if m.modelsOutcomeValue {
+			out = append(out, "outcome")
 		}
 		if m.modelsOutcomePredictorResidual {
 			out = append(out, "predictor_residual")
@@ -323,7 +323,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.modelsOutcomeBinaryOutcome {
 			out = append(out, "binary_outcome")
 		}
-		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "predictor_residual") {
+		if len(out) > 0 && !(len(out) == 2 && out[0] == "outcome" && out[1] == "predictor_residual") {
 			args = append(args, "--models-outcomes")
 			args = append(args, out...)
 		}
@@ -344,7 +344,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--models-families")
 			args = append(args, fams...)
 		}
-		binOut := []string{"binary_outcome", "rating_median"}
+		binOut := []string{"binary_outcome", "outcome_median"}
 		if m.modelsBinaryOutcome >= 0 && m.modelsBinaryOutcome < len(binOut) && m.modelsBinaryOutcome != 0 {
 			args = append(args, "--models-binary-outcome", binOut[m.modelsBinaryOutcome])
 		}
@@ -363,7 +363,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.stabilityMethod == 1 {
 			args = append(args, "--stability-method", "pearson")
 		}
-		outcome := []string{"auto", "rating", "predictor_residual"}
+		outcome := []string{"auto", "outcome", "predictor_residual"}
 		if m.stabilityOutcome > 0 && m.stabilityOutcome < len(outcome) {
 			args = append(args, "--stability-outcome", outcome[m.stabilityOutcome])
 		}
@@ -395,8 +395,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	// Influence
 	if m.isComputationSelected("influence") {
 		out := []string{}
-		if m.influenceOutcomeRating {
-			out = append(out, "rating")
+		if m.influenceOutcomeValue {
+			out = append(out, "outcome")
 		}
 		if m.influenceOutcomePredictorResidual {
 			out = append(out, "predictor_residual")
@@ -404,7 +404,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.influenceOutcomePredictor {
 			out = append(out, "predictor")
 		}
-		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "predictor_residual") {
+		if len(out) > 0 && !(len(out) == 2 && out[0] == "outcome" && out[1] == "predictor_residual") {
 			args = append(args, "--influence-outcomes")
 			args = append(args, out...)
 		}
@@ -416,7 +416,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			"--influence-include-predictor",
 			"--no-influence-include-predictor",
 		)
-		tempCtrl := []string{"linear", "rating_hat", "spline"}
+		tempCtrl := []string{"linear", "outcome_hat", "spline"}
 		if m.influenceTempControl >= 0 && m.influenceTempControl < len(tempCtrl) && m.influenceTempControl != 0 {
 			args = append(args, "--influence-predictor-control", tempCtrl[m.influenceTempControl])
 		}

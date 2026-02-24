@@ -64,7 +64,7 @@ def run_group_level_mixed_effects_impl(
     combined = pd.concat(all_trials, ignore_index=True)
     logger.info("Mixed-effects: %d subjects, %d total trials", len(all_trials), len(combined))
 
-    outcome_column = resolve_outcome_column(combined, config) or "rating"
+    outcome_column = resolve_outcome_column(combined, config) or "outcome"
     predictor_column = resolve_predictor_column(combined, config) or "predictor"
     if outcome_column not in combined.columns:
         raise KeyError(
@@ -228,7 +228,7 @@ def run_group_level_correlations_impl(
     use_block_permutation: bool = True,
     n_perm: int = 1000,
     fdr_alpha: float = 0.05,
-    target_col: str = "rating",
+    target_col: str = "outcome",
     control_predictor: bool = False,
     control_trial_order: bool = False,
     control_run_effects: bool = False,
@@ -278,7 +278,7 @@ def run_group_level_correlations_impl(
     combined = pd.concat(all_trials, ignore_index=True)
     correlation_method = resolve_correlation_method(config, logger=logger, default="spearman")
 
-    resolved_target = resolve_outcome_column(combined, config) or "rating"
+    resolved_target = resolve_outcome_column(combined, config) or "outcome"
     target_column = str(target_col or resolved_target).strip() or resolved_target
     if target_column not in combined.columns:
         logger.warning("Multilevel correlations: target column '%s' not found.", target_column)
@@ -292,7 +292,7 @@ def run_group_level_correlations_impl(
             break
 
     feature_cols = [c for c in combined.columns if str(c).startswith(tuple(feature_prefixes))]
-    rating = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
+    outcome = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
     subject_all = combined["subject_id"].astype(str).to_numpy(dtype=object)
     block_all = combined[block_col].to_numpy() if block_col is not None else None
 
@@ -331,7 +331,7 @@ def run_group_level_correlations_impl(
         family_id = f"corr_{feat_type}"
 
         feature_vals = pd.to_numeric(combined[feat], errors="coerce").to_numpy(dtype=float)
-        if int((np.isfinite(feature_vals) & np.isfinite(rating)).sum()) < 10:
+        if int((np.isfinite(feature_vals) & np.isfinite(outcome)).sum()) < 10:
             continue
 
         subject_payloads: List[Dict[str, Any]] = []
@@ -654,7 +654,7 @@ def run_group_level_analysis_impl(
         if not isinstance(gl_corr_cfg, dict):
             gl_corr_cfg = {}
 
-        default_target = str(get_config_value(config, "behavior_analysis.outcome_column", "") or "rating").strip() or "rating"
+        default_target = str(get_config_value(config, "behavior_analysis.outcome_column", "") or "outcome").strip() or "outcome"
         target_col = str(gl_corr_cfg.get("target", default_target) or default_target).strip()
         control_predictor = bool(
             gl_corr_cfg.get("control_predictor", get_config_bool(config, "behavior_analysis.predictor_control_enabled", True))

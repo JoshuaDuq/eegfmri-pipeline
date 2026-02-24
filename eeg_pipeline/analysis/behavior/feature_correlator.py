@@ -778,7 +778,7 @@ class FeatureBehaviorCorrelator:
     def correlate_all(
         self,
         targets: pd.Series,
-        target_name: str = "rating",
+        target_name: str = "outcome",
         corr_config: Optional[CorrelationConfig] = None,
         n_jobs: int = -1,
     ) -> Dict[str, FeatureCorrelationResult]:
@@ -864,7 +864,7 @@ class FeatureBehaviorCorrelator:
         targets: pd.Series,
         config: CorrelationConfig,
         feature_type: str,
-        target_name: str = "rating",
+        target_name: str = "outcome",
         subject_ids: Optional[np.ndarray] = None,
     ) -> FeatureCorrelationResult:
         """Correlate a single feature dataframe using core function."""
@@ -1007,7 +1007,7 @@ class FeatureBehaviorCorrelator:
     def save_results(
         self,
         results: Dict[str, FeatureCorrelationResult],
-        target_name: str = "rating",
+        target_name: str = "outcome",
         apply_fdr: bool = True,
         method_label: Optional[str] = None,
     ) -> List[Path]:
@@ -1293,7 +1293,7 @@ class FeatureBehaviorCorrelator:
 
         if effective_config.apply_fdr:
             _apply_fdr_to_dataframe(df, effective_config, self.config)
-        target_suffix = "rating" if "rating" in target_name.lower() else "temp"
+        target_suffix = "outcome" if "outcome" in target_name.lower() else "temp"
         method_suffix = f"_{method_label}" if method_label else ""
         from eeg_pipeline.infra.paths import ensure_dir
         corr_dir = self.stats_dir / "correlations"
@@ -1305,7 +1305,7 @@ class FeatureBehaviorCorrelator:
 
     def run_complete_analysis(
         self,
-        rating_series: pd.Series,
+        outcome_series: pd.Series,
         predictor_series: Optional[pd.Series] = None,
         corr_config: Optional[CorrelationConfig] = None,
     ) -> ComputationResult:
@@ -1322,25 +1322,25 @@ class FeatureBehaviorCorrelator:
         if corr_config is None:
             corr_config = self.default_corr_config
 
-        rating_records: List[Dict[str, Any]] = []
+        outcome_records: List[Dict[str, Any]] = []
         predictor_records: List[Dict[str, Any]] = []
         metadata = {"n_feature_types": len(self._feature_dfs)}
         method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
 
-        if rating_series is not None and len(rating_series) > 0:
-            rating_results = self.correlate_all(rating_series, "rating", corr_config)
-            self.save_results(rating_results, "rating", method_label=method_label)
+        if outcome_series is not None and len(outcome_series) > 0:
+            outcome_results = self.correlate_all(outcome_series, "outcome", corr_config)
+            self.save_results(outcome_results, "outcome", method_label=method_label)
 
-            for name, result in rating_results.items():
+            for name, result in outcome_results.items():
                 metadata[f"{name}_n_features"] = result.n_features
                 metadata[f"{name}_n_total"] = result.n_total or result.n_features
                 metadata[f"{name}_n_dropped"] = result.n_dropped
                 metadata[f"{name}_n_significant"] = result.n_significant
-                rating_records.extend(result.records)
+                outcome_records.extend(result.records)
             
             if "power" in self._feature_dfs:
                 self.compute_roi_correlations(
-                    self._feature_dfs["power"], rating_series, "rating", corr_config
+                    self._feature_dfs["power"], outcome_series, "outcome", corr_config
                 )
 
         min_samples_default = get_min_samples(self.config, "default")
@@ -1366,11 +1366,11 @@ class FeatureBehaviorCorrelator:
 
         overwrite = get_config_bool(self.config, "behavior_analysis.output.overwrite", True)
         corr_dir = _get_stats_subfolder_with_overwrite(self.stats_dir, "correlations", overwrite)
-        combined_rating_df = pd.DataFrame(rating_records) if rating_records else pd.DataFrame()
-        if not combined_rating_df.empty:
-            _apply_fdr_to_dataframe(combined_rating_df, corr_config, self.config)
-            combined_path = corr_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"
-            save_correlation_results(combined_rating_df, combined_path)
+        combined_outcome_df = pd.DataFrame(outcome_records) if outcome_records else pd.DataFrame()
+        if not combined_outcome_df.empty:
+            _apply_fdr_to_dataframe(combined_outcome_df, corr_config, self.config)
+            combined_path = corr_dir / f"corr_stats_all_features_vs_outcome{method_suffix}.tsv"
+            save_correlation_results(combined_outcome_df, combined_path)
 
         combined_predictor_df = pd.DataFrame(predictor_records) if predictor_records else pd.DataFrame()
         if not combined_predictor_df.empty:
@@ -1379,12 +1379,12 @@ class FeatureBehaviorCorrelator:
             save_correlation_results(combined_predictor_df, combined_path)
 
         significance_alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
-        n_significant_rating = sum(
-            1 for record in rating_records
+        n_significant_outcome = sum(
+            1 for record in outcome_records
             if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
         )
         self.logger.info(
-            f"Complete (rating): {len(rating_records)} correlations, {n_significant_rating} significant "
+            f"Complete (outcome): {len(outcome_records)} correlations, {n_significant_outcome} significant "
             f"(alpha={significance_alpha})"
         )
 
@@ -1398,7 +1398,7 @@ class FeatureBehaviorCorrelator:
                 f"(alpha={significance_alpha})"
             )
 
-        combined_df = pd.DataFrame([*rating_records, *predictor_records]) if (rating_records or predictor_records) else pd.DataFrame()
+        combined_df = pd.DataFrame([*outcome_records, *predictor_records]) if (outcome_records or predictor_records) else pd.DataFrame()
 
         return ComputationResult(
             name="feature_correlator",
@@ -1432,14 +1432,14 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True
     
-    # Get rating from aligned_events using event_columns.rating config
-    rating_series = None
-    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-    if rating_col is not None and ctx.aligned_events is not None:
-        rating_series = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+    # Get rating from aligned_events using event_columns.outcome config
+    outcome_series = None
+    outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
+    if outcome_col is not None and ctx.aligned_events is not None:
+        outcome_series = pd.to_numeric(ctx.aligned_events[outcome_col], errors="coerce")
     
     return correlator.run_complete_analysis(
-        rating_series=rating_series,
+        outcome_series=outcome_series,
         predictor_series=ctx.predictor_series,
         corr_config=CorrelationConfig.from_context(ctx),
     )

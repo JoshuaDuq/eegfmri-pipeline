@@ -351,8 +351,8 @@ func (m Model) getTextFieldValue(field textField) string {
 	// Event Column Mapping text fields
 	case textFieldEventColPredictor:
 		return m.eventColPredictor
-	case textFieldEventColRating:
-		return m.eventColRating
+	case textFieldEventColOutcome:
+		return m.eventColOutcome
 	case textFieldEventColBinaryOutcome:
 		return m.eventColBinaryOutcome
 	case textFieldConditionPreferredPrefixes:
@@ -743,8 +743,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 	// Event Column Mapping text fields
 	case textFieldEventColPredictor:
 		m.eventColPredictor = strings.Join(splitLooseList(value), ",")
-	case textFieldEventColRating:
-		m.eventColRating = strings.Join(splitLooseList(value), ",")
+	case textFieldEventColOutcome:
+		m.eventColOutcome = strings.Join(splitLooseList(value), ",")
 	case textFieldEventColBinaryOutcome:
 		m.eventColBinaryOutcome = strings.Join(splitLooseList(value), ",")
 	case textFieldConditionPreferredPrefixes:

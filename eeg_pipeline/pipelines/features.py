@@ -752,7 +752,7 @@ class FeaturePipeline(PipelineBase):
                     100 * int(n_trials) / len(original_events),
                 )
 
-        target_columns = list(self.config.get("event_columns.rating", []) or [])
+        target_columns = list(self.config.get("event_columns.outcome", []) or [])
         explicit_outcome = str(
             self.config.get("behavior_analysis.outcome_column", "") or ""
         ).strip()

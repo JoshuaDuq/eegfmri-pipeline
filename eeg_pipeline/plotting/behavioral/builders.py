@@ -190,7 +190,7 @@ def _extract_band_info(title_prefix: str) -> str:
 
 def _extract_target_info(title_prefix: str) -> str:
     title_lower = title_prefix.lower()
-    if "rating" in title_lower:
+    if "outcome" in title_lower:
         return " vs rating"
     if "predictor" in title_lower or "temp" in title_lower:
         return " vs predictor"

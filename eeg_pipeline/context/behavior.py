@@ -455,7 +455,7 @@ class BehaviorContext:
 
         return self._align_feature_tables()
 
-    def _find_rating_column(self) -> Optional[str]:
+    def _find_outcome_column(self) -> Optional[str]:
         """Find rating column in aligned_events."""
         if self.aligned_events is None:
             return None
@@ -464,14 +464,14 @@ class BehaviorContext:
         if resolved is not None and resolved in self.aligned_events.columns:
             return resolved
 
-        rating_columns = (
-            list(self.config.get("event_columns.rating", []) or [])
+        outcome_columns = (
+            list(self.config.get("event_columns.outcome", []) or [])
             if self.config is not None
             else []
         )
         try:
             return pick_target_column(
-                self.aligned_events, target_columns=rating_columns
+                self.aligned_events, target_columns=outcome_columns
             )
         except (KeyError, AttributeError):
             return None

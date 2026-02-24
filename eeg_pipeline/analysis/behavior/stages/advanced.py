@@ -34,7 +34,7 @@ def stage_mediation_impl(
         return pd.DataFrame()
 
     predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
-    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
     required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df_trials.columns)
     if missing_columns:
@@ -213,7 +213,7 @@ def stage_moderation_impl(
         return pd.DataFrame()
 
     predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
-    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
     required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df_trials.columns)
     if missing_columns:

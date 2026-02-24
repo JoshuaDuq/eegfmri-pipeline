@@ -84,9 +84,9 @@ rois: &roi_definitions
 event_columns:
   # Generic column aliases for logical event groups.
   # Add paradigm-specific column names in your overrides file.
-  required: ["rating"]
+  required: ["outcome"]
   predictor: []
-  rating: ["rating"]
+  outcome: ["outcome", "rating"]
   binary_outcome: ["binary_outcome", "outcome_binary", "label"]
 
 alignment:
@@ -713,9 +713,9 @@ behavior_analysis:
   regression:
     enabled: false
     primary_unit: "trial"            # "trial" | "run_mean"
-    outcome: "rating"              # "rating" | "predictor_residual" | "predictor"
+    outcome: "outcome"              # "outcome" | "predictor_residual" | "predictor"
     include_predictor: true
-    predictor_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on predictor)
+    predictor_control: "linear"    # "linear" | "outcome_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on predictor)
     predictor_spline:
       n_knots: 4
       quantile_low: 0.05
@@ -733,10 +733,10 @@ behavior_analysis:
   # Sensitivity model families per feature (robust/quantile/logistic)
   models:
     enabled: false
-    outcomes: ["rating", "predictor_residual"]  # optionally add "predictor"
+    outcomes: ["outcome", "predictor_residual"]  # optionally add "predictor"
     families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
     include_predictor: true
-    predictor_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on predictor)
+    predictor_control: "linear"    # "linear" | "outcome_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on predictor)
     predictor_spline:
       n_knots: 4
       quantile_low: 0.05
@@ -749,7 +749,7 @@ behavior_analysis:
     standardize: true
     min_samples: 20
     max_features: 100
-    binary_outcome: "binary_outcome"     # or "rating_median"
+    binary_outcome: "binary_outcome"     # or "outcome_median"
 
   # Within-subject stability across runs/blocks (non-gating diagnostics)
   stability:
@@ -768,10 +768,10 @@ behavior_analysis:
   # Influence diagnostics (non-gating)
   influence:
     enabled: true
-    outcomes: ["rating", "predictor_residual"]  # optionally add "predictor"
+    outcomes: ["outcome", "predictor_residual"]  # optionally add "predictor"
     max_features: 20
     include_predictor: true
-    predictor_control: "linear"  # "linear" | "rating_hat" | "spline"
+    predictor_control: "linear"  # "linear" | "outcome_hat" | "spline"
     predictor_spline:
       n_knots: 4
       quantile_low: 0.05
@@ -830,7 +830,7 @@ behavior_analysis:
   correlations:
     enabled: true
     types: ["partial_cov_temp"]
-    targets: ["rating", "predictor", "predictor_residual"]
+    targets: ["outcome", "predictor", "predictor_residual"]
     compute_change_scores: true
     loso_stability: true
     compute_bayes_factors: false
@@ -868,7 +868,7 @@ behavior_analysis:
   # Temporal correlations computation  
   temporal:
     enabled: true
-    target_column: ""                 # Empty = use event_columns.rating
+    target_column: ""                 # Empty = use event_columns.outcome
     time_resolution_ms: 50
     time_range_ms: [-200, 1000]
     smooth_window_ms: 100
@@ -1033,7 +1033,7 @@ machine_learning:
 
   # Targets can be logical names ('rating', 'predictor', 'binary_outcome') or explicit events.tsv column names.
   targets:
-    regression: "rating"
+    regression: "outcome"
     classification: "binary_outcome"
     binary_threshold: null               # Required when classifying a continuous target (e.g., rating > 30)
     strict_regression_target_continuous: false  # If true, error when regression target is binary-like (prefer ml classify)

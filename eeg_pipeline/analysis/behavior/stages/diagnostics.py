@@ -57,7 +57,7 @@ def stage_stability_impl(
         if "predictor_residual" in df_trials.columns:
             outcome = "predictor_residual"
         else:
-            outcome = resolve_outcome_column(df_trials, ctx.config) or "rating"
+            outcome = resolve_outcome_column(df_trials, ctx.config) or "outcome"
 
     feature_cols = get_feature_columns_fn(df_trials, ctx)
 

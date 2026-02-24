@@ -103,7 +103,7 @@ def stage_report_impl(
     lines.append(
         f"- Controls: predictor=`{bool(getattr(pipeline_config, 'control_predictor', True))}`, trial_order=`{bool(getattr(pipeline_config, 'control_trial_order', True))}`"
     )
-    outcome_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
+    outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
     predictor_col = getattr(ctx, "predictor_column", None)
     lines.append(f"- Outcome column: `{outcome_col or 'auto'}`")
     lines.append(f"- Predictor column: `{predictor_col or 'auto'}`")

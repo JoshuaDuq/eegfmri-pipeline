@@ -63,7 +63,7 @@ def _find_missing_event_columns(
         if required_set is not None and str(logical_name) not in required_set:
             continue
         explicit_key = None
-        if logical_name == "rating":
+        if logical_name == "outcome":
             explicit_key = "behavior_analysis.outcome_column"
         elif logical_name == "predictor":
             explicit_key = "behavior_analysis.predictor_column"

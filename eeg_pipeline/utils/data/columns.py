@@ -7,7 +7,7 @@ from typing import Any, List, Optional
 import pandas as pd
 
 VAS_KEYWORD = "vas"
-RATING_KEYWORD = "rating"
+RATING_KEYWORD = "outcome"
 
 
 def find_column_in_events(events_df: pd.DataFrame, column_names: List[str]) -> Optional[str]:
@@ -74,12 +74,12 @@ def get_predictor_column_from_config(
     return get_column_from_config(config, "event_columns.predictor", events_df)
 
 
-def get_rating_column_from_config(
+def get_outcome_column_from_config(
     config: Any,
     events_df: Optional[pd.DataFrame] = None,
 ) -> Optional[str]:
     """Get rating column name from config, optionally matching against events dataframe."""
-    return get_column_from_config(config, "event_columns.rating", events_df)
+    return get_column_from_config(config, "event_columns.outcome", events_df)
 
 
 def pick_target_column(df: pd.DataFrame, *, target_columns: List[str]) -> Optional[str]:
@@ -125,12 +125,12 @@ def resolve_outcome_column(
     if explicit and explicit in events_df.columns:
         return explicit
 
-    if "rating" in events_df.columns:
-        return "rating"
+    if "outcome" in events_df.columns:
+        return "outcome"
 
     rating_candidates = []
     if config is not None and hasattr(config, "get"):
-        rating_candidates = list(config.get("event_columns.rating", []) or [])
+        rating_candidates = list(config.get("event_columns.outcome", []) or [])
     return pick_target_column(events_df, target_columns=rating_candidates)
 
 
@@ -163,7 +163,7 @@ __all__ = [
     "get_column_from_config",
     "get_binary_outcome_column_from_config",
     "get_predictor_column_from_config",
-    "get_rating_column_from_config",
+    "get_outcome_column_from_config",
     "pick_target_column",
     "resolve_outcome_column",
     "resolve_predictor_column",

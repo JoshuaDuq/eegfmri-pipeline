@@ -20,7 +20,7 @@ from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path
 from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-from eeg_pipeline.utils.data.columns import get_rating_column_from_config
+from eeg_pipeline.utils.data.columns import get_outcome_column_from_config
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
@@ -747,15 +747,15 @@ def plot_aperiodic_topomaps(
     )
 
 
-def _find_rating_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
+def _find_outcome_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
     """Find rating column from config (no heuristics)."""
-    rating_col = get_rating_column_from_config(config, events_df)
-    if rating_col is None:
+    outcome_col = get_outcome_column_from_config(config, events_df)
+    if outcome_col is None:
         raise ValueError(
-            "event_columns.rating is missing/empty or did not match any column in events.tsv. "
+            "event_columns.outcome is missing/empty or did not match any column in events.tsv. "
             f"Available columns: {list(events_df.columns)[:30]}"
         )
-    return rating_col
+    return outcome_col
 
 
 def _find_common_slope_columns(

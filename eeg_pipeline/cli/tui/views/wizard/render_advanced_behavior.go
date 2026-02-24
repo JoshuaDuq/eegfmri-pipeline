@@ -493,7 +493,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		// Regression
 		case optRegressionOutcome:
-			v := "rating"
+			v := "outcome"
 			switch m.regressionOutcome {
 			case 1:
 				v = "residual"
@@ -507,11 +507,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			v := "linear"
 			switch m.regressionTempControl {
 			case 1:
-				v = "rating_hat"
+				v = "outcome_hat"
 			case 2:
 				v = "spline"
 			}
-			return "Predictor Control", v, "linear | rating_hat | spline"
+			return "Predictor Control", v, "linear | outcome_hat | spline"
 		case optRegressionTempSplineKnots:
 			val := fmt.Sprintf("%d", m.regressionTempSplineKnots)
 			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineKnots) {
@@ -578,11 +578,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			v := "linear"
 			switch m.modelsTempControl {
 			case 1:
-				v = "rating_hat"
+				v = "outcome_hat"
 			case 2:
 				v = "spline"
 			}
-			return "Predictor Control", v, "linear | rating_hat | spline"
+			return "Predictor Control", v, "linear | outcome_hat | spline"
 		case optModelsTempSplineKnots:
 			val := fmt.Sprintf("%d", m.modelsTempSplineKnots)
 			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineKnots) {
@@ -630,7 +630,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "Max Features", val, "0=no limit"
 		case optModelsOutcomeRating:
-			return "Outcome: rating", m.boolToOnOff(m.modelsOutcomeRating), "include rating"
+			return "Outcome: raw", m.boolToOnOff(m.modelsOutcomeValue), "include raw outcome"
 		case optModelsOutcomePredictorResidual:
 			return "Outcome: residual", m.boolToOnOff(m.modelsOutcomePredictorResidual), "include residualized outcome"
 		case optModelsOutcomePredictor:
@@ -648,7 +648,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optModelsBinaryOutcome:
 			v := "binary"
 			if m.modelsBinaryOutcome == 1 {
-				v = "rating_median"
+				v = "outcome_median"
 			}
 			return "Binary Outcome", v, "for logit models"
 		case optModelsPrimaryUnit:
@@ -674,7 +674,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			v := "auto"
 			switch m.stabilityOutcome {
 			case 1:
-				v = "rating"
+				v = "outcome"
 			case 2:
 				v = "residual"
 			}
@@ -718,7 +718,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		// Influence
 		case optInfluenceOutcomeRating:
-			return "Outcome: rating", m.boolToOnOff(m.influenceOutcomeRating), "include rating"
+			return "Outcome: raw", m.boolToOnOff(m.influenceOutcomeValue), "include raw outcome"
 		case optInfluenceOutcomePredictorResidual:
 			return "Outcome: residual", m.boolToOnOff(m.influenceOutcomePredictorResidual), "include residual"
 		case optInfluenceOutcomePredictor:
@@ -735,11 +735,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			v := "linear"
 			switch m.influenceTempControl {
 			case 1:
-				v = "rating_hat"
+				v = "outcome_hat"
 			case 2:
 				v = "spline"
 			}
-			return "Predictor Control", v, "linear | rating_hat | spline"
+			return "Predictor Control", v, "linear | outcome_hat | spline"
 		case optInfluenceTempSplineKnots:
 			val := fmt.Sprintf("%d", m.influenceTempSplineKnots)
 			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineKnots) {

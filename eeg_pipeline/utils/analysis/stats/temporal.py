@@ -75,21 +75,21 @@ def _get_temporal_targets_from_events(
         logger.info("%s: using temporal target column '%s'", analysis_name, target_col)
         return pd.to_numeric(events[target_col], errors="coerce")
 
-    rating_columns = (
-        list(config.get("event_columns.rating", []) or [])
+    outcome_columns = (
+        list(config.get("event_columns.outcome", []) or [])
         if config is not None and hasattr(config, "get")
         else []
     )
     from eeg_pipeline.utils.data.columns import pick_target_column
 
-    rating_col = pick_target_column(events, target_columns=rating_columns)
-    if rating_col is None:
+    outcome_col = pick_target_column(events, target_columns=outcome_columns)
+    if outcome_col is None:
         raise ValueError(
-            f"{analysis_name}: no rating column found. Configure event_columns.rating or set "
+            f"{analysis_name}: no rating column found. Configure event_columns.outcome or set "
             f"behavior_analysis.temporal.target_column. Available columns: {list(events.columns)}"
         )
-    logger.info("%s: using rating column '%s'", analysis_name, rating_col)
-    return pd.to_numeric(events[rating_col], errors="coerce")
+    logger.info("%s: using outcome column '%s'", analysis_name, outcome_col)
+    return pd.to_numeric(events[outcome_col], errors="coerce")
 
 
 def _to_numpy_array(y: Any) -> np.ndarray:

@@ -198,9 +198,9 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 		args = append(args, "--event-col-predictor")
 		args = append(args, splitCSVList(m.eventColPredictor)...)
 	}
-	if strings.TrimSpace(m.eventColRating) != "" {
-		args = append(args, "--event-col-rating")
-		args = append(args, splitCSVList(m.eventColRating)...)
+	if strings.TrimSpace(m.eventColOutcome) != "" {
+		args = append(args, "--event-col-outcome")
+		args = append(args, splitCSVList(m.eventColOutcome)...)
 	}
 	if strings.TrimSpace(m.eventColBinaryOutcome) != "" {
 		args = append(args, "--event-col-binary-outcome")
