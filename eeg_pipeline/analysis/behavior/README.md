@@ -171,7 +171,7 @@ Breakpoint (hinge) model:
 
 $$
 
-y = \beta_0 + \beta_1 T + \beta_2 \max(0,\, T - c) + \varepsilon
+y = \beta_0 + \beta_1 T + \beta_2 \max(0, T - c) + \varepsilon
 
 $$
 
@@ -206,13 +206,13 @@ Defines targets, covariates, and permutation groups.
 Raw correlations:
 
 - Pearson: $r = \mathrm{corr}(x, y)$
-- Spearman: $r = \mathrm{corr}(\mathrm{rank}(x),\, \mathrm{rank}(y))$
+- Spearman: $r = \mathrm{corr}(\mathrm{rank}(x), \mathrm{rank}(y))$
 
 Partial correlation (covariate control): residualize $x$ and $y$ on $Z$ and correlate residuals. Test statistic:
 
 $$
 
-t = r\sqrt{\frac{n-k-2}{1-r^2}}, \qquad p = 2\,P\!\left(|T_{n-k-2}| \geq |t|\right)
+t = r\sqrt{\frac{n-k-2}{1-r^2}}, \qquad p = 2P\left(|T_{n-k-2}| \geq |t|\right)
 
 $$
 
@@ -241,7 +241,7 @@ BH adjustment core:
 
 $$
 
-q_{(i)} = \min_{j \geq i} \frac{m}{j}\,p_{(j)}
+q_{(i)} = \min_{j \geq i} \frac{m}{j}p_{(j)}
 
 $$
 
@@ -284,7 +284,7 @@ $$
 
 $$
 
-\widehat{\text{Cov}}_\text{HC3} = (X^\top X)^{-1} X^\top \mathrm{diag}(w)\, X\, (X^\top X)^{-1}
+\widehat{\text{Cov}}_\text{HC3} = (X^\top X)^{-1} X^\top \mathrm{diag}(w) X (X^\top X)^{-1}
 
 $$
 
@@ -335,7 +335,7 @@ Subject stage uses ICC(3,1):
 
 $$
 
-\text{ICC}(3,1) = \frac{MS_\text{rows} - MS_\text{error}}{MS_\text{rows} + (k-1)\,MS_\text{error}}
+\text{ICC}(3,1) = \frac{MS_\text{rows} - MS_\text{error}}{MS_\text{rows} + (k-1)MS_\text{error}}
 
 $$
 
@@ -360,7 +360,7 @@ $$
 
 $$
 
-d = \frac{\bar{x}_1 - \bar{x}_2}{s_\text{pooled}}, \qquad g = d\!\left(1 - \frac{3}{4\,df - 1}\right), \qquad d_z = \frac{\bar{d}}{s_d} \text{ (paired)}
+d = \frac{\bar{x}_1 - \bar{x}_2}{s_\text{pooled}}, \qquad g = d\left(1 - \frac{3}{4df - 1}\right), \qquad d_z = \frac{\bar{d}}{s_d} \text{ (paired)}
 
 $$
 
@@ -379,7 +379,7 @@ Paired window comparison uses Wilcoxon and difference-score effects:
 
 $$
 
-d_z = \bar{d}/s_d, \qquad g_z = d_z\!\left(1 - \frac{3}{4n-1}\right), \quad \text{where } d_i = v_{2i} - v_{1i}
+d_z = \bar{d}/s_d, \qquad g_z = d_z\left(1 - \frac{3}{4n-1}\right), \quad \text{where } d_i = v_{2i} - v_{1i}
 
 $$
 
@@ -411,7 +411,7 @@ ITPC trial metric:
 
 $$
 
-\text{ITPC}_\text{trial} = \mathrm{mean}\!\left(\cos(\phi_\text{trial} - \bar{\phi})\right)
+\text{ITPC}_\text{trial} = \mathrm{mean}\left(\cos(\phi_\text{trial} - \bar{\phi})\right)
 
 $$
 
@@ -455,7 +455,7 @@ Derived quantities:
 
 $$
 
-\text{indirect} = ab, \qquad \text{SE}_{ab} = \sqrt{a^2\,\text{SE}_b^2 + b^2\,\text{SE}_a^2}, \qquad z = ab/\text{SE}_{ab}, \qquad \text{prop.\ mediated} = ab/c
+\text{indirect} = ab, \qquad \text{SE}_{ab} = \sqrt{a^2\text{SE}_b^2 + b^2\text{SE}_a^2}, \qquad z = ab/\text{SE}_{ab}, \qquad \text{prop.\ mediated} = ab/c
 
 $$
 
@@ -487,7 +487,7 @@ Simple slope at moderator level $W$:
 
 $$
 
-\text{slope}(W) = \beta_1 + \beta_3 W, \qquad \text{Var}[\text{slope}(W)] = \text{Var}(\beta_1) + W^2\text{Var}(\beta_3) + 2W\,\text{Cov}(\beta_1,\beta_3)
+\text{slope}(W) = \beta_1 + \beta_3 W, \qquad \text{Var}[\text{slope}(W)] = \text{Var}(\beta_1) + W^2\text{Var}(\beta_3) + 2W\text{Cov}(\beta_1,\beta_3)
 
 $$
 
@@ -566,7 +566,7 @@ Per-subject associations are aggregated with Fisher averaging:
 
 $$
 
-r_\text{group} = \tanh\!\left(\mathrm{mean}_s\left[\mathrm{atanh}(r_s)\right]\right)
+r_\text{group} = \tanh\left(\mathrm{mean}_s\left[\mathrm{atanh}(r_s)\right]\right)
 
 $$
 
@@ -582,7 +582,7 @@ BH q-values:
 
 $$
 
-q_{(i)} = \min_{j \geq i} \frac{m}{j}\,p_{(j)}
+q_{(i)} = \min_{j \geq i} \frac{m}{j}p_{(j)}
 
 $$
 
@@ -590,7 +590,7 @@ Hierarchical FDR family gate (Simes):
 
 $$
 
-p_\text{Simes} = \min_i \frac{m_f}{i}\,p_{(i,\text{family})}
+p_\text{Simes} = \min_i \frac{m_f}{i}p_{(i,\text{family})}
 
 $$
 

@@ -110,7 +110,7 @@ For any window with mask $M_\text{seg}(t) \in \{0,1\}$, we define:
 
 $$
 
-\bar{x}_{e,c}^{(\text{seg})} = \frac{\sum_t M_\text{seg}(t)\,x_{e,c}(t)}{\sum_t M_\text{seg}(t)}.
+\bar{x}_{e,c}^{(\text{seg})} = \frac{\sum_t M_\text{seg}(t)x_{e,c}(t)}{\sum_t M_\text{seg}(t)}.
 
 $$
 
@@ -309,7 +309,7 @@ Starting from TFR power $P_{e,c}(f,t)$:
 $$
 
 \bar{P}_{e,c}^{B,\text{seg}}(f) =
-\frac{\sum_t M_\text{seg}(t)\,P_{e,c}(f,t)}{\sum_t M_\text{seg}(t)}.
+\frac{\sum_t M_\text{seg}(t)P_{e,c}(f,t)}{\sum_t M_\text{seg}(t)}.
 
 $$
 
@@ -318,7 +318,7 @@ $$
 $$
 
 P_{e,c}^{B,\text{seg}} =
-\frac{\sum_{f \in B} \bar{P}_{e,c}^{B,\text{seg}}(f)\,\Delta f}
+\frac{\sum_{f \in B} \bar{P}_{e,c}^{B,\text{seg}}(f)\Delta f}
      {\sum_{f \in B} \Delta f}.
 
 $$
@@ -328,7 +328,7 @@ $$
 $$
 
 \text{logratio}_{e,c}^{B} =
-\log_{10}\!\left(
+\log_{10}\left(
   \frac{\max(P_{e,c}^{B,\text{active}}, \varepsilon)}
        {\max(P_{e,c}^{B,\text{baseline}}, \varepsilon)}
 \right),
@@ -367,8 +367,8 @@ For each trial and channel, a PSD is computed either by multitaper or Welch. Wit
 $$
 
 f_\text{cog} =
-\frac{\sum_{f \in B} f\,\mathrm{PSD}(f)\,\Delta f}
-     {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}.
+\frac{\sum_{f \in B} f\mathrm{PSD}(f)\Delta f}
+     {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}.
 
 $$
 
@@ -378,8 +378,8 @@ $$
 
 \sigma_B =
 \sqrt{
-  \frac{\sum_{f \in B} (f - f_\text{cog})^2\,\mathrm{PSD}(f)\,\Delta f}
-       {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}
+  \frac{\sum_{f \in B} (f - f_\text{cog})^2\mathrm{PSD}(f)\Delta f}
+       {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}
 }.
 
 $$
@@ -390,8 +390,8 @@ Let
 
 $$
 
-p(f) = \frac{\mathrm{PSD}(f)\,\Delta f}
-            {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}.
+p(f) = \frac{\mathrm{PSD}(f)\Delta f}
+            {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}.
 
 $$
 
@@ -399,7 +399,7 @@ Then
 
 $$
 
-H_B = -\frac{\sum_{f \in B} p(f)\,\ln p(f)}{\ln N_B},
+H_B = -\frac{\sum_{f \in B} p(f)\ln p(f)}{\ln N_B},
 
 $$
 
@@ -417,8 +417,8 @@ where $N_B$ is the number of frequency bins in $B$.
 
 $$
 
-\frac{\sum_{f' \le f} \mathrm{PSD}(f')\,\Delta f'}
-     {\sum_{f'} \mathrm{PSD}(f')\,\Delta f'} \ge 0.95.
+\frac{\sum_{f' \le f} \mathrm{PSD}(f')\Delta f'}
+     {\sum_{f'} \mathrm{PSD}(f')\Delta f'} \ge 0.95.
 
 $$
 
@@ -462,7 +462,7 @@ $$
 
 $$
 
-y(f) = \text{offset} - \log_{10}\!\bigl(\text{knee} + f^{\text{exponent}}\bigr).
+y(f) = \text{offset} - \log_{10}\bigl(\text{knee} + f^{\text{exponent}}\bigr).
 
 $$
 
@@ -474,7 +474,7 @@ $$
 
 $$
 
-\text{powcorr}_B = \sum_{f \in B} 10^{r(f)}\,\Delta f,
+\text{powcorr}_B = \sum_{f \in B} 10^{r(f)}\Delta f,
 
 $$
 
@@ -542,7 +542,7 @@ $$
 
 $$
 
-\text{auc}_{e,c}^{\text{comp}} = \int_{t \in T_\text{comp}} \tilde{x}_{e,c}(t)\,dt,
+\text{auc}_{e,c}^{\text{comp}} = \int_{t \in T_\text{comp}} \tilde{x}_{e,c}(t)dt,
 
 $$
 
@@ -607,7 +607,7 @@ From PSD‑integrated band powers $P^B_{e,c}$:
 
 $$
 
-P^B_{e,c} = \sum_{f \in B} \mathrm{PSD}_{e,c}(f)\,\Delta f.
+P^B_{e,c} = \sum_{f \in B} \mathrm{PSD}_{e,c}(f)\Delta f.
 
 $$
 
@@ -618,8 +618,8 @@ $$
 \text{power\_ratio}_e =
 \frac{P^{B_\text{num}}_e}{P^{B_\text{den}}_e},\quad
 \text{log\_ratio}_e =
-\ln\!\bigl(P^{B_\text{num}}_e + \varepsilon\bigr)
- - \ln\!\bigl(P^{B_\text{den}}_e + \varepsilon\bigr).
+\ln\bigl(P^{B_\text{num}}_e + \varepsilon\bigr)
+ - \ln\bigl(P^{B_\text{den}}_e + \varepsilon\bigr).
 
 $$
 
@@ -644,7 +644,7 @@ Optionally, an **activation convention** alpha asymmetry:
 
 $$
 
-\text{logdiff\_activation} = -\,\text{logdiff},
+\text{logdiff\_activation} = -\text{logdiff},
 
 $$
 
@@ -683,7 +683,7 @@ $$
 $$
 
 \text{imCoh}_{ij} =
-\mathrm{Im}\!\left(
+\mathrm{Im}\left(
   \frac{S_{ij}}{\sqrt{S_{ii} S_{jj}}}
 \right).
 
@@ -741,8 +741,8 @@ Then
 $$
 
 \text{PSI}_{ij} =
-\mathrm{Im}\!\left(
-  \sum_f C_{ij}^\ast(f)\,C_{ij}(f + \Delta f)
+\mathrm{Im}\left(
+  \sum_f C_{ij}^\ast(f)C_{ij}(f + \Delta f)
 \right).
 
 $$
@@ -821,13 +821,13 @@ For a phase band $B_\phi$ and amplitude band $B_A$:
 
 $$
 
-u(t) = \mathbb{E}_{f_\phi \in B_\phi}\!\left[e^{i\phi(f_\phi,t)}\right],\quad
-A(t) = \mathbb{E}_{f_A \in B_A}\!\left[\text{amp}(f_A,t)\right],
+u(t) = \mathbb{E}_{f_\phi \in B_\phi}\left[e^{i\phi(f_\phi,t)}\right],\quad
+A(t) = \mathbb{E}_{f_A \in B_A}\left[\text{amp}(f_A,t)\right],
 
 $$
 
 $$
-\text{MVL} = \frac{\left|\sum_t A(t)\,u(t)\right|}{\sum_t A(t)}.
+\text{MVL} = \frac{\left|\sum_t A(t)u(t)\right|}{\sum_t A(t)}.
 
 $$
 
@@ -871,7 +871,7 @@ Features include:
 $$
 
 \text{src\_power}^{B,\text{seg}}_\text{ROI} =
-\frac{\sum_{f \in B} \mathrm{PSD}_\text{ROI}(f)\,\Delta f}
+\frac{\sum_{f \in B} \mathrm{PSD}_\text{ROI}(f)\Delta f}
      {\sum_{f \in B} \Delta f},
 
 $$
@@ -913,7 +913,7 @@ $$
 $$
 
   \text{PE} =
-  -\frac{\sum_{\pi} p(\pi)\,\log_2 p(\pi)}{\log_2(m!)}.
+  -\frac{\sum_{\pi} p(\pi)\log_2 p(\pi)}{\log_2(m!)}.
 
 $$
 
@@ -1113,7 +1113,7 @@ $$
 
 z^{\text{robust}}_i =
 \frac{x_i - m^\text{ref}}
-     {\max\!\bigl(\mathrm{MAD}(x^\text{ref})_\text{normal}, \varepsilon\bigr)},
+     {\max\bigl(\mathrm{MAD}(x^\text{ref})_\text{normal}, \varepsilon\bigr)},
 \quad
 m^\text{ref} = \mathrm{median}(x^\text{ref}),
 
@@ -1125,9 +1125,9 @@ where $\mathrm{MAD}(\cdot)_\text{normal}$ is the normal‑consistent MAD (scaled
 
 $$
 
-x'_i = a + (b-a)\,
+x'_i = a + (b-a)
 \frac{x_i - x_\text{min}^\text{ref}}
-     {\max\!\bigl(x_\text{max}^\text{ref} - x_\text{min}^\text{ref}, \varepsilon\bigr)},
+     {\max\bigl(x_\text{max}^\text{ref} - x_\text{min}^\text{ref}, \varepsilon\bigr)},
 
 $$
 

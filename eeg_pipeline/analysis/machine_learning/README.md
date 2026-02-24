@@ -143,7 +143,7 @@ Combined L1 + L2 penalized linear regression. Encourages both sparsity (L1) and 
 
 $$
 
-\hat{\beta} = \underset{\beta}{\arg\min} \;\frac{1}{2n}\bigl\|y - X\beta\bigr\|_2^2 + \alpha\!\left[\rho\|\beta\|_1 + \frac{1-\rho}{2}\|\beta\|_2^2\right]
+\hat{\beta} = \underset{\beta}{\arg\min} \;\frac{1}{2n}\bigl\|y - X\beta\bigr\|_2^2 + \alpha\left[\rho\|\beta\|_1 + \frac{1-\rho}{2}\|\beta\|_2^2\right]
 
 $$
 
@@ -311,7 +311,7 @@ Combines SVM, Logistic Regression, and Random Forest via probability averaging:
 
 $$
 
-\hat{p}_\text{ens}(y=1\mid x) = \frac{1}{3}\!\left[\hat{p}_\text{SVM}(x) + \hat{p}_\text{LR}(x) + \hat{p}_\text{RF}(x)\right]
+\hat{p}_\text{ens}(y=1\mid x) = \frac{1}{3}\left[\hat{p}_\text{SVM}(x) + \hat{p}_\text{LR}(x) + \hat{p}_\text{RF}(x)\right]
 
 $$
 
@@ -434,9 +434,9 @@ $$
 
 Aggregate across $S$ subjects using the Fisher z-transformation to handle the bounded support of $r$:
 
-1. **Clip** to prevent arctanh explosion near $\pm 1$: $r_i^* = \text{clip}(r_i,\, r_\text{min},\, r_\text{max})$
+1. **Clip** to prevent arctanh explosion near $\pm 1$: $r_i^* = \text{clip}(r_i, r_\text{min}, r_\text{max})$
 2. **Transform:** $z_i = \mathrm{arctanh}(r_i^*)$
-3. **Weighted average:** $\bar{z} = \sum_i w_i z_i \,/\, \sum_i w_i$
+3. **Weighted average:** $\bar{z} = \sum_i w_i z_i / \sum_i w_i$
 4. **Back-transform:** $\bar{r} = \tanh(\bar{z})$
 
 Weighting modes (configurable via `evaluation.subject_weighting`):
@@ -444,7 +444,7 @@ Weighting modes (configurable via `evaluation.subject_weighting`):
 | Mode | Weight `w_i` | Notes |
 |------|----------------|-------|
 | `equal` (default) | `1` | Treats each subject as independent; robust to variable trial counts |
-| `trial_count` | $\max(n_i - 3,\, 1)$ | Fisher information weighting; standard meta-analytic fixed-effects scheme |
+| `trial_count` | $\max(n_i - 3, 1)$ | Fisher information weighting; standard meta-analytic fixed-effects scheme |
 
 **Secondary metric — Subject-level mean R²:**
 
@@ -461,7 +461,7 @@ Both $\bar{r}$ and $\overline{R^2}$ receive permutation p-values when `n_perm > 
 | Method | Computation |
 |--------|-------------|
 | `bootstrap` (default) | Resample subjects $B$ times with replacement; recompute weighted $\bar{z}$; $\text{CI} = [\mathrm{perc}_{2.5}, \mathrm{perc}_{97.5}]$ of $\tanh(\bar{z}^{(b)})$ |
-| `fixed_effects` | $\mathrm{SE} = 1/\sqrt{\sum_i w_i}$; $\text{CI} = \tanh\bigl(\bar{z} \pm 1.96\,\mathrm{SE}\bigr)$ |
+| `fixed_effects` | $\mathrm{SE} = 1/\sqrt{\sum_i w_i}$; $\text{CI} = \tanh\bigl(\bar{z} \pm 1.96\mathrm{SE}\bigr)$ |
 
 **Subject-level error metrics:**
 
@@ -487,7 +487,7 @@ with optional bootstrap CIs (subjects resampled). Pooled trial-level Pearson r, 
 | Balanced accuracy | $(\text{sensitivity} + \text{specificity})/2$ |
 | AUC (ROC) | Area under the receiver operating characteristic curve |
 | Average precision | Area under the precision–recall curve |
-| F1 | $2\,\text{precision}\cdot\text{recall}/(\text{precision}+\text{recall})$ |
+| F1 | $2\text{precision}\cdot\text{recall}/(\text{precision}+\text{recall})$ |
 | Sensitivity (recall) | $\text{TP}/(\text{TP}+\text{FN})$ |
 | Specificity | $\text{TN}/(\text{TN}+\text{FP})$ |
 | Brier score | $\frac{1}{N}\sum_i(\hat{p}_i - y_i)^2$ — probability calibration |
@@ -556,7 +556,7 @@ Trains a decoding model in each time window and evaluates it in all other window
 
 $$
 
-x_{w,\text{trial},c} = \frac{1}{|W_w|}\sum_{t \in W_w} \text{data}[\text{trial},\, c,\, t]
+x_{w,\text{trial},c} = \frac{1}{|W_w|}\sum_{t \in W_w} \text{data}[\text{trial}, c, t]
 
 $$
 
@@ -572,7 +572,7 @@ Optionally tune $\alpha$ via inner `GroupKFold` (`use_ridgecv: true`). For each 
 
 $$
 
-r_{ij}^\text{agg} = \tanh\!\left(\frac{1}{S_{ij}}\sum_{s=1}^{S_{ij}} \mathrm{arctanh}\!\bigl(\text{clip}(r_{ij}^{(s)})\bigr)\right)
+r_{ij}^\text{agg} = \tanh\left(\frac{1}{S_{ij}}\sum_{s=1}^{S_{ij}} \mathrm{arctanh}\bigl(\text{clip}(r_{ij}^{(s)})\bigr)\right)
 
 $$
 
@@ -641,7 +641,7 @@ For each LOSO fold: fit model on training data (with inner CV tuning), compute S
 
 $$
 
-\bar{\phi}_k = \frac{1}{K}\sum_{f=1}^{K} \phi_k^{(f)}, \qquad \sigma_k = \mathrm{std}_f\!\left(\phi_k^{(f)}\right)
+\bar{\phi}_k = \frac{1}{K}\sum_{f=1}^{K} \phi_k^{(f)}, \qquad \sigma_k = \mathrm{std}_f\left(\phi_k^{(f)}\right)
 
 $$
 
@@ -669,7 +669,7 @@ Model-agnostic importance via column permutation (Breiman 2001). For each featur
 
 $$
 
-\text{imp}_k = \mathrm{score}(y, \hat{y}) - \mathbb{E}_\pi\!\left[\mathrm{score}\!\left(y, \hat{y}^{(\pi_k)}\right)\right]
+\text{imp}_k = \mathrm{score}(y, \hat{y}) - \mathbb{E}_\pi\left[\mathrm{score}\left(y, \hat{y}^{(\pi_k)}\right)\right]
 
 $$
 
@@ -687,7 +687,7 @@ Distribution-free prediction intervals via conformal prediction. For exchangeabl
 
 $$
 
-\mathbb{P}\!\left(y \in \hat{C}(x)\right) \geq 1 - \alpha
+\mathbb{P}\left(y \in \hat{C}(x)\right) \geq 1 - \alpha
 
 $$
 
@@ -703,7 +703,7 @@ The stage runs within LOSO: models are tuned via inner CV, then conformal interv
 
 $$
 
-\hat{q} = \mathrm{Quantile}\!\left(\{s_i\},\; \frac{\lceil(|\mathcal{D}_\text{cal}|+1)(1-\alpha)\rceil}{|\mathcal{D}_\text{cal}|}\right)
+\hat{q} = \mathrm{Quantile}\left(\{s_i\},\; \frac{\lceil(|\mathcal{D}_\text{cal}|+1)(1-\alpha)\rceil}{|\mathcal{D}_\text{cal}|}\right)
 
 $$
 
@@ -718,11 +718,11 @@ More data-efficient than split conformal; uses cross-validation residuals:
 1. $k$-fold CV on training data (group-aware). For each fold $f$ and test point $x$:
    - Train on folds $\neq f$; compute residuals $\{s_i^{(f)}\}_{i \in \text{fold}_f}$.
    - Predict $\hat{y}_f(x)$.
-2. Prediction interval at $x$ using conservative order-statistic quantiles over the full ensemble of $\{(\hat{y}_f(x),\, s^{(f)})\}$:
+2. Prediction interval at $x$ using conservative order-statistic quantiles over the full ensemble of $\{(\hat{y}_f(x), s^{(f)})\}$:
 
 $$
 
-\hat{C}(x) = \left[\hat{q}_\alpha\!\left(\{\hat{y}_f(x) - s_j^{(f)}\}_{f,j}\right),\; \hat{q}_{1-\alpha}\!\left(\{\hat{y}_f(x) + s_j^{(f)}\}_{f,j}\right)\right]
+\hat{C}(x) = \left[\hat{q}_\alpha\left(\{\hat{y}_f(x) - s_j^{(f)}\}_{f,j}\right),\; \hat{q}_{1-\alpha}\left(\{\hat{y}_f(x) + s_j^{(f)}\}_{f,j}\right)\right]
 
 $$
 
@@ -735,7 +735,7 @@ A full model trained on all training data provides the point prediction.
 Adaptive intervals for heteroscedastic data — interval width adapts to local uncertainty.
 
 1. CV to collect out-of-fold quantile predictions at levels $\alpha/2$ and $1-\alpha/2$ via `GradientBoostingRegressor(loss="quantile")`.
-2. Conformity scores: $E_i = \max\!\bigl(\hat{q}_{\alpha/2}(x_i) - y_i,\; y_i - \hat{q}_{1-\alpha/2}(x_i)\bigr)$.
+2. Conformity scores: $E_i = \max\bigl(\hat{q}_{\alpha/2}(x_i) - y_i,\; y_i - \hat{q}_{1-\alpha/2}(x_i)\bigr)$.
 3. Conformal quantile $\hat{Q}$ from $\{E_i\}$.
 4. Prediction interval: $\hat{C}(x) = \bigl[\hat{q}_{\alpha/2}(x) - \hat{Q},\; \hat{q}_{1-\alpha/2}(x) + \hat{Q}\bigr]$.
 
@@ -822,7 +822,7 @@ Quantifies the out-of-fold gain in R² when adding EEG features over a baseline 
 3. For each LOSO fold:
    - Fit tuned ElasticNet on $X_\text{base,train}$ → predict $\hat{y}_\text{base}$
    - Fit tuned ElasticNet on $X_\text{full,train}$ → predict $\hat{y}_\text{full}$
-   - Compute: $\Delta R^2_\text{fold} = R^2\!\left(y_\text{test},\hat{y}_\text{full}\right) - R^2\!\left(y_\text{test},\hat{y}_\text{base}\right)$
+   - Compute: $\Delta R^2_\text{fold} = R^2\left(y_\text{test},\hat{y}_\text{full}\right) - R^2\left(y_\text{test},\hat{y}_\text{base}\right)$
 
 4. **Primary estimate:**
 
