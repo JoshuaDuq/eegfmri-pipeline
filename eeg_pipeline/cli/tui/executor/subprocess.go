@@ -377,17 +377,16 @@ func DiscoverROIs(repoRoot string, task string) tea.Cmd {
 	}
 }
 
-// LoadSubjects runs eeg-pipeline info subjects --json and returns subjects
+// LoadSubjects runs eeg-pipeline info subjects --json and returns subjects.
+// Uses --source all so the TUI always shows every discovered subject (BIDS, epochs, features, source_data);
+// pipeline validation still determines which subjects are runnable for the chosen stage.
 func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{"-m", "eeg_pipeline", "info", "subjects", "--status", "--json", "--cache"}
 		if task != "" {
 			args = append(args, "--task", task)
 		}
-
-		// Use the pipeline's GetDataSource method for proper source determination
-		source := pipeline.GetDataSource()
-		args = append(args, "--source", source)
+		args = append(args, "--source", "all")
 
 		output, err := runPythonJSONCommand(repoRoot, args)
 		if err != nil {
@@ -431,8 +430,7 @@ func LoadSubjectsRefresh(repoRoot string, task string, pipeline types.Pipeline) 
 		if task != "" {
 			args = append(args, "--task", task)
 		}
-		source := pipeline.GetDataSource()
-		args = append(args, "--source", source)
+		args = append(args, "--source", "all")
 
 		output, err := runPythonJSONCommand(repoRoot, args)
 		if err != nil {

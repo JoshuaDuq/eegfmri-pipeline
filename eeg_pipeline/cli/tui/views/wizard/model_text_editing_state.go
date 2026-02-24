@@ -1,11 +1,15 @@
 package wizard
 
-import "github.com/eeg-pipeline/tui/messages"
+import (
+	"strings"
+
+	"github.com/eeg-pipeline/tui/messages"
+)
 
 // Wizard text-editing state transitions and summary injection.
 
 func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
-	if m.task == "" && summary.Task != "" {
+	if (m.task == "" || m.task == "task") && summary.Task != "" {
 		m.task = summary.Task
 	}
 	if m.bidsRoot == "" && summary.BidsRoot != "" {
@@ -23,6 +27,14 @@ func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 	if summary.PreprocessingNJobs > 0 {
 		m.prepNJobs = summary.PreprocessingNJobs
 	}
+}
+
+func (m *Model) SetTask(task string) {
+	task = strings.TrimSpace(task)
+	if task == "" {
+		return
+	}
+	m.task = task
 }
 
 func (m *Model) SetRepoRoot(repoRoot string) {

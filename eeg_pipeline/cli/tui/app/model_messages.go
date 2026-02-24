@@ -258,6 +258,7 @@ func (m *Model) updateTask(newTask string) {
 	m.task = newTask
 	m.mainMenu.Task = m.task
 	m.pipelineSmoke.SetTask(m.task)
+	m.wizard.SetTask(m.task)
 }
 
 func (m *Model) handleConfigKeysLoaded(msg messages.ConfigKeysLoadedMsg) {

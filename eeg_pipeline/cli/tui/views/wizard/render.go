@@ -64,8 +64,9 @@ func (m Model) View() string {
 
 	mainH := max(containerH-containerPadV*2-containerBorder-headerH-footerH, minMainContentHeight)
 	mainContent := m.renderMainContent(h < shortHeightThreshold)
+	mainContent = normalizeContentFrame(mainContent, innerW, mainH)
 
-	mainStyled := lipgloss.NewStyle().Width(innerW).Height(mainH).Render(mainContent)
+	mainStyled := lipgloss.NewStyle().Width(innerW).Render(mainContent)
 	innerView := header + "\n" + mainStyled + "\n" + footer
 
 	container := lipgloss.NewStyle().
@@ -77,6 +78,22 @@ func (m Model) View() string {
 		Render(innerView)
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, container)
+}
+
+func normalizeContentFrame(content string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	framed := make([]string, 0, height)
+	for i := 0; i < len(lines) && len(framed) < height; i++ {
+		line := styles.TruncateLine(lines[i], width)
+		framed = append(framed, styles.PadRight(line, width))
+	}
+	for len(framed) < height {
+		framed = append(framed, strings.Repeat(" ", width))
+	}
+	return strings.Join(framed, "\n")
 }
 
 func (m Model) effectiveDimensions() (int, int) {

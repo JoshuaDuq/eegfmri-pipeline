@@ -113,7 +113,7 @@ func DefaultConfigKeys() []string {
 }
 
 func New(repoRoot string) Model {
-	overridesPath := filepath.Join(repoRoot, "eeg_pipeline", "data", "derivatives", ".tui_overrides.json")
+	overridesPath := filepath.Join(repoRoot, "data", "derivatives", ".tui_overrides.json")
 	m := Model{
 		repoRoot:      repoRoot,
 		overridesPath: overridesPath,

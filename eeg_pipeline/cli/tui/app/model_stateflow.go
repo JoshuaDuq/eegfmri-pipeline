@@ -74,6 +74,7 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	m.saveState()
 
 	m.wizard = wizard.New(m.selectedPipeline, m.repoRoot)
+	m.wizard.SetTask(m.task)
 	m.wizard.SetTimeRanges(m.persistentState.TimeRanges)
 	m.restoreWizardConfig()
 	m.wizard.SetSubjectsLoading()
