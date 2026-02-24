@@ -1,490 +1,508 @@
-## Feature Extraction Pipeline
+# Feature Extraction Pipeline
 
-This document describes the **trial-level EEG feature extraction pipeline** implemented in `eeg_pipeline.analysis.features`.  
-Each trial (epoch) produces one row in the feature matrix. The design targets pain research paradigms but is applicable to any event‑related EEG study with well‑defined time windows.
+**Module:** `eeg_pipeline.analysis.features`
 
-The README is organized like a methods section:
-
-- **Overview and notation**
-- **Configuration, time windows, frequency bands (including IAF)**
-- **Precomputed intermediates and spatial transforms**
-- **Per‑category feature definitions with formulas**
-- **Change scores and normalization**
-- **Cross‑validation hygiene and analysis modes**
-- **Result containers and naming**
-
-All formulas are given in LaTeX; random‑effects modeling and inferential statistics are intentionally left to downstream analysis.
+This document is the methods reference for the trial-level EEG feature extraction pipeline.
+Each trial (epoch) produces one row in a feature matrix.
+The pipeline targets event-related paradigms with well-defined time windows (e.g. pain research),
+but is applicable to any EEG study with the same structure.
 
 ---
 
-### Global Notation
+## Table of Contents
 
-Let:
-
-- $e \in \{1,\dots, N_{\text{trials}}\}$ index epochs (trials),
-- $c \in \{1,\dots, N_{\text{ch}}\}$ index channels,
-- $r$ index regions of interest (ROIs),
-- $f$ denote frequency in Hz,  
-- $t$ denote time in seconds,
-- $x_{e,c}(t)$ denote the time‑domain EEG signal,
-- $P_{e,c}(f,t)$ denote time–frequency power (Morlet TFR),
-- $\mathrm{PSD}_{e,c}(f)$ denote power spectral density (µV$^2$/Hz),
-- $\mathcal{H}(\cdot)$ denote the Hilbert transform.
-
-We use:
-
-- $B$ for a frequency band with range $[f_{\text{min}}, f_{\text{max}}]$,
-- $T_{\text{seg}}$ for a time window segment (baseline, active, etc.),
-- $\varepsilon$ as a small positive constant to avoid division by zero.
+1. [Notation](#1-notation)
+2. [Module Structure](#2-module-structure)
+3. [Configuration, Categories, and Naming](#3-configuration-categories-and-naming)
+4. [Time Windows](#4-time-windows)
+5. [Frequency Bands and Individual Alpha Frequency](#5-frequency-bands-and-individual-alpha-frequency)
+6. [Precomputed Intermediates and Spatial Transforms](#6-precomputed-intermediates-and-spatial-transforms)
+7. [Extraction Pipelines](#7-extraction-pipelines)
+8. [Feature Definitions](#8-feature-definitions)
+9. [Change Scores](#9-change-scores)
+10. [Normalization](#10-normalization)
+11. [Cross-Validation Hygiene](#11-cross-validation-hygiene)
+12. [Result Containers](#12-result-containers)
+13. [Dependencies](#13-dependencies)
 
 ---
 
-## 1. Configuration, Categories, and Naming
+## 1. Notation
 
-### 1.1 Feature Categories
+| Symbol | Meaning |
+|--------|---------|
+| $e \in \{1,\dots,N_\text{trials}\}$ | Trial (epoch) index |
+| $c \in \{1,\dots,N_\text{ch}\}$ | Channel index |
+| $r$ | Region-of-interest (ROI) index |
+| $f$ | Frequency (Hz) |
+| $t$ | Time (s) |
+| $x_{e,c}(t)$ | Time-domain EEG signal |
+| $P_{e,c}(f,t)$ | Time–frequency power (Morlet TFR) |
+| $\mathrm{PSD}_{e,c}(f)$ | Power spectral density (µV²/Hz) |
+| $\mathcal{H}(\cdot)$ | Hilbert transform |
+| $B = [f_\text{min}^B, f_\text{max}^B]$ | Frequency band with bounds |
+| $T_\text{seg}$ | Time-window segment (baseline, active, …) |
+| $M_\text{seg}(t) \in \{0,1\}$ | Boolean mask for segment $T_\text{seg}$ |
+| $\Delta f$ | Frequency bin width |
+| $\varepsilon$ | Small positive constant to prevent division by zero |
 
-Feature categories are resolved by `resolve_feature_categories` in `selection.py`:
+---
 
-- User‑requested categories (CLI or API) take precedence.
-- Otherwise `feature_engineering.feature_categories` from the config is used.
-- If neither is given, all entries in `FEATURE_CATEGORIES` are enabled.
+## 2. Module Structure
 
-Categories currently include:
-
-```math
-\{\text{power}, \text{spectral}, \text{aperiodic}, \text{erp}, \text{erds},
-\text{ratios}, \text{asymmetry}, \text{connectivity}, \text{directedconnectivity},
-\text{itpc}/\text{phase}, \text{pac}, \text{complexity}, \text{bursts},
-\text{microstates}, \text{quality}, \text{sourcelocalization}\}.
 ```
-### 1.2 Column Naming Schema
+features/
+├── api.py                  # Entry points: extract_all_features, extract_precomputed_features
+├── selection.py            # Feature category resolution and spatial-mode filtering
+├── preparation.py          # Epoch validation, TFR computation, baseline metrics
+├── cv_hygiene.py           # Cross-validation guards: fold-specific IAF, train-mask enforcement
+├── normalization.py        # Train/test-separated normalization schemes
+├── results.py              # FeatureExtractionResult, ExtractionResult dataclasses
+├── spectral.py             # Power (TFR-based), spectral descriptors
+├── aperiodic.py            # 1/f aperiodic component decomposition
+├── erp.py                  # ERP components (peak, mean, AUC, latency)
+├── connectivity.py         # Undirected and directed connectivity
+├── phase.py                # ITPC, PLV, PAC, phase-amplitude coupling
+├── complexity.py           # LZC, permutation entropy, sample entropy, MSE
+├── bursts.py               # Transient oscillation detection
+├── microstates.py          # EEG microstate segmentation and statistics
+├── quality.py              # Trial- and channel-level QC metrics
+├── source_localization.py  # LCMV / eLORETA source-space features
+└── precomputed/
+    ├── __init__.py         # precompute_data: band filtering, PSD, GFP, evoked subtraction
+    ├── erds.py             # ERDS extraction from precomputed band envelopes
+    └── extras.py           # Band-power ratios, hemispheric asymmetry
+```
 
-Most features follow:
+---
 
-```text
+## 3. Configuration, Categories, and Naming
+
+### 3.1 Feature Categories
+
+Feature categories are resolved by `resolve_feature_categories` in `selection.py`, in priority order:
+
+1. Explicitly requested categories (CLI or API call).
+2. `feature_engineering.feature_categories` from configuration.
+3. All entries in `FEATURE_CATEGORIES` if neither of the above is set.
+
+Available categories:
+
+```
+power, spectral, aperiodic, erp, erds, ratios, asymmetry,
+connectivity, directedconnectivity, itpc, phase, pac,
+complexity, bursts, microstates, quality, sourcelocalization
+```
+
+### 3.2 Column Naming Schema
+
+Most feature columns follow the pattern:
+
+```
 {domain}_{segment}_{band}_{scope}_{statistic}
 ```
 
-- **`domain`** – feature family (e.g. `power`, `erp`, `itpc`, `erds`, `conn`, `comp`).
-- **`segment`** – time window label (e.g. `baseline`, `active`, task‑specific names).
-- **`band`** – frequency band name (e.g. `alpha`, `theta`, `broadband`).
-- **`scope`** – spatial aggregation:  
-  - `ch`  = channel,  
-  - `roi` = region of interest,  
-  - `global` = all channels,  
-  - `chpair` = channel pair.
-- **`statistic`** – scalar statistic (e.g. `logratio`, `mean`, `peak_freq`).
+| Component | Values |
+|-----------|--------|
+| `domain` | `power`, `erp`, `itpc`, `erds`, `conn`, `comp`, … |
+| `segment` | `baseline`, `active`, task-specific window names |
+| `band` | `alpha`, `theta`, `beta`, `broadband`, … |
+| `scope` | `ch` (channel), `roi`, `global`, `chpair` |
+| `statistic` | `logratio`, `mean`, `peak_freq`, `db`, … |
 
-**Exceptions**
+**Exceptions:**
+- Source-space features use `src_*` prefix for fMRI pipeline compatibility.
+- Connectivity and microstate metrics encode method or state names in the suffix.
 
-- Source‑space features use explicit `src_*` names for compatibility with fMRI pipelines.
-- Some connectivity and microstate metrics encode method/state names in the suffix.
+### 3.3 Spatial Aggregation Modes
 
-### 1.3 Spatial Aggregation Modes
-
-Spatial modes are controlled by `feature_engineering.spatial_modes` and enforced by
+Controlled by `feature_engineering.spatial_modes` and enforced by
 `filter_features_by_spatial_modes` in `api.py`:
 
-- `channels` – keep per‑channel and channel‑pair features (`*_ch_*`, `*_chpair_*`),
-- `roi` – keep ROI‑aggregated features (`*_roi_*` or names matching ROI labels),
-- `global` – keep global features (`*_global_*` or columns ending with `_global`).
+| Mode | Retained columns |
+|------|-----------------|
+| `channels` | `*_ch_*`, `*_chpair_*` |
+| `roi` | `*_roi_*`, names matching ROI labels |
+| `global` | `*_global_*`, columns ending with `_global` |
 
-Non‑spatial features (e.g. global scalar summary metrics) are always retained.
-
----
-
-## 2. Time Windows and Segments
-
-Time windows are represented by `TimeWindows` (`baseline_range`, `active_range`, `masks`, `ranges`, `times`).
-
-- Windows are built from configuration via `TimeWindowSpec` and `time_windows_from_spec`.
-- In the TFR‑based pipeline, when epochs are cropped to $[t_{\text{min}}, t_{\text{max}}]$,
-  new masks are constructed on the cropped time axis to avoid shape mismatches.
-- Baseline and active ranges are kept in physical time, so baseline‑dependent computations
-  can still reference the original windows.
-
-For any window with mask $M_{\text{seg}}(t) \in \{0,1\}$, we define:
-
-```math
-\bar{x}_{e,c}^{(\text{seg})} = \frac{\sum_t M_{\text{seg}}(t)x_{e,c}(t)}{\sum_t M_{\text{seg}}(t)}.
-```
-Segments with fewer than the required number of samples or cycles (per‑feature criteria)
-are skipped for that feature.
+Non-spatial features (global scalar summaries) are always retained.
 
 ---
 
-## 3. Frequency Bands and Individual Alpha Frequency (IAF)
+## 4. Time Windows
 
-### 3.1 Base Frequency Bands
+Time windows are represented by `TimeWindows` (fields: `baseline_range`, `active_range`,
+`masks`, `ranges`, `times`) and constructed from `TimeWindowSpec` objects via
+`time_windows_from_spec`.
 
-Base frequency bands are read from the config via `get_frequency_bands(config)` and typically include:
-
-```math
-\text{delta},\ \text{theta},\ \text{alpha},\ \text{beta},\ \text{gamma}.
-```
-Each band $B$ has bounds $[f_{\text{min}}^B, f_{\text{max}}^B]$.
-
-### 3.2 IAF‑Adjusted Bands (Global Precomputation)
-
-The precomputation module (`precomputed/__init__.py`) can adapt bands to an **Individual Alpha Frequency** (IAF) when `feature_engineering.bands.use_iaf = true`.
-
-Workflow:
-
-1. Extract baseline data (if available) using the baseline mask; otherwise optionally fall back to the full segment if explicitly allowed.
-2. Compute PSD in a broad range (default $\approx 1$–$40$ Hz) using `mne.time_frequency.psd_array_multitaper`.
-3. Remove a 1/f trend:
+For a segment with mask $M_\text{seg}(t)$, the masked mean is:
 
 ```math
-\log_{10} P_{\text{resid}}(f) = \log_{10} P(f) - \left(\beta_0 + \beta_1 \log_{10} f\right),
+\bar{x}_{e,c}^{(\text{seg})} =
+\frac{\sum_t M_\text{seg}(t)\, x_{e,c}(t)}{\sum_t M_\text{seg}(t)}.
 ```
-estimated by robust or ordinary linear regression in log–log space.
 
-4. Estimate IAF, $\hat{f}_\alpha$, either as the most prominent residual peak in a search range (e.g. 7–13 Hz) or, if no peak passes prominence criteria, as a residual‑power‑weighted average in that range.
-5. Adjust bands (schematic):
+When epochs are cropped to $[t_\text{min}, t_\text{max}]$ in the TFR pipeline,
+masks are rebuilt on the cropped time axis to avoid shape mismatches.
+Baseline and active ranges are kept in physical time so baseline-dependent
+computations remain unaffected.
+
+Segments failing per-feature duration or cycle-count requirements are skipped
+for that feature.
+
+---
+
+## 5. Frequency Bands and Individual Alpha Frequency
+
+### 5.1 Base Frequency Bands
+
+Read from configuration via `get_frequency_bands(config)`. Standard bands:
+
+```
+delta, theta, alpha, beta, gamma
+```
+
+Each band $B$ has bounds $[f_\text{min}^B, f_\text{max}^B]$.
+
+### 5.2 IAF Estimation
+
+When `feature_engineering.bands.use_iaf = true`, the Individual Alpha Frequency (IAF)
+is estimated at the subject level by `precompute_data`:
+
+1. Extract baseline data using the baseline mask (required; no fallback to full segment).
+2. Compute PSD in a broad range (default ≈ 1–40 Hz) using `mne.time_frequency.psd_array_multitaper`.
+3. Remove the aperiodic 1/f trend by fitting a log–log linear regression:
+
+```math
+\log_{10} P_\text{resid}(f) =
+\log_{10} P(f) - \bigl(\beta_0 + \beta_1 \log_{10} f\bigr).
+```
+
+4. Estimate $\hat{f}_\alpha$ as either:
+   - the most prominent residual peak in the search range (default 7–13 Hz), or
+   - a residual-power-weighted frequency centroid if no peak passes the prominence threshold.
+
+5. Adjust bands:
 
 ```math
 \begin{aligned}
-\text{alpha} &= [\hat{f}_\alpha - w_\alpha,\ \hat{f}_\alpha + w_\alpha],\\
-\text{theta} &= [\max(3,\ \hat{f}_\alpha - 6),\ \max(4,\ f_{\min}^{\alpha})],\\
-\text{beta}  &= [\max(13,\ f_{\max}^{\alpha}),\ f_{\max}^{\beta}].
+\text{alpha} &= [\hat{f}_\alpha - w_\alpha,\; \hat{f}_\alpha + w_\alpha],\\
+\text{theta} &= [\max(3,\; \hat{f}_\alpha - 6),\; \max(4,\; f_\text{min}^\alpha)],\\
+\text{beta}  &= [\max(13,\; f_\text{max}^\alpha),\; f_\text{max}^\beta].
 \end{aligned}
 ```
-All IAF‑dependent logic includes explicit **duration and cycle‑count checks** to avoid
-ill‑posed estimates.
 
-### 3.3 Fold‑Specific IAF in Cross‑Validation
+All IAF-dependent steps include explicit duration and cycle-count checks.
 
-`cv_hygiene.py` implements **fold‑specific IAF** for cross‑validation:
+### 5.3 Fold-Specific IAF in Cross-Validation
 
-- Given a boolean `train_mask` on epochs, only training trials are used to estimate IAF.
-- The same residual‑based method as above is used, but restricted to training data.
-- This yields:
+`cv_hygiene.compute_iaf_for_fold` restricts IAF estimation to training trials:
 
-  - $\text{IAF}_{\text{fold}}$ in Hz,
-  - an IAF‑adjusted frequency‑band dictionary $\mathcal{B}_{\text{fold}}$.
+- Input: boolean `train_mask` over epochs.
+- Output: $\text{IAF}_\text{fold}$ (Hz) and IAF-adjusted band dictionary $\mathcal{B}_\text{fold}$.
+- If the training set is too small, IAF estimation is skipped and an error is raised.
 
-This guards against **data leakage** from test trials into band definitions.
+This prevents spectral band definitions from leaking test-trial information.
 
 ---
 
-## 4. Precomputed Intermediates and Spatial Transforms
+## 6. Precomputed Intermediates and Spatial Transforms
 
-### 4.1 Spatial Transform Selection
+### 6.1 Spatial Transform Selection
 
-Many feature families (connectivity, PAC, ERDS, complexity, etc.) can be computed after a spatial transform such as surface Laplacian / CSD. `precompute_data` applies:
+Applied by `precompute_data` before band filtering. Configured globally via
+`feature_engineering.spatial_transform ∈ {none, csd, laplacian}`, with optional
+per-family overrides in `feature_engineering.spatial_transform_per_family`.
 
-- A global setting `feature_engineering.spatial_transform` in $\{\text{"none"}, \text{"csd"}, \text{"laplacian"}\}$, or
-- A per‑family override `feature_engineering.spatial_transform_per_family[family]`.
-
-Spatial transforms are **never silently skipped**. If a requested transform fails
-(e.g. due to montage problems), a `RuntimeError` is raised.
-
-The standard transform is CSD via:
+The standard transform is Current Source Density (CSD):
 
 ```math
-x^{\text{CSD}}(t) = \text{compute\_current\_source\_density}(x(t);\ \lambda^2,\ \text{stiffness}),
-```
-where $\lambda^2$ and stiffness are configured parameters with sensible defaults.
-
-### 4.2 Precomputed Data Container
-
-`PrecomputedData` (in `eeg_pipeline.types`) stores:
-
-- Band‑filtered analytic signals (envelope, phase, band‑specific GFP),
-- PSD estimates,
-- Time windows (`TimeWindows`),
-- GFP of broadband data,
-- Frequency band definitions (possibly IAF‑adjusted),
-- Quality‑control metadata.
-
-The main precomputation function is:
-
-```python
-precompute_data(epochs, bands, config, logger, ...)
+x^\text{CSD}(t) =
+\text{compute\_current\_source\_density}\!\bigl(x(t);\; \lambda^2,\; \text{stiffness}\bigr),
 ```
 
-which:
+where $\lambda^2$ and stiffness are configured parameters.
+A failed transform raises a `RuntimeError`; it is never silently skipped.
 
-1. Picks EEG channels and applies the configured spatial transform.
-2. Builds windows on the actual time axis (rebuilding if necessary to match the data length).
-3. Computes:
+### 6.2 Precomputed Data Container
 
-   - **Band data** $x_{e,c}^B(t)$ for requested bands $B$,
-   - **Band GFP** per band: $\mathrm{GFP}^B_e(t)$,
-   - **PSD data** (possibly baseline‑restricted),
-   - Global GFP.
+`PrecomputedData` stores shared intermediates used by multiple feature families:
 
-4. Stores QC measures (finite fractions, medians, frequency ranges, window sample counts).
+- Band-filtered analytic signals (envelope, phase, band-specific GFP)
+- PSD estimates (full or baseline-restricted)
+- `TimeWindows` object
+- Broadband GFP
+- Frequency band definitions (IAF-adjusted if applicable)
+- Quality-control metadata (finite fractions, medians, frequency ranges, window counts)
 
-Precomputed objects are keyed per **feature family** and can be shared between
-families as long as their spatial transform requirements are compatible.
+The main function is `precompute_data(epochs, bands, config, logger, ...)`, which:
 
-### 4.3 Evoked‑Subtracted Data (Induced Power)
+1. Selects EEG channels and applies the configured spatial transform.
+2. Rebuilds `TimeWindows` on the actual time axis if needed.
+3. Computes band-filtered data $x_{e,c}^B(t)$, per-band GFP $\mathrm{GFP}^B_e(t)$,
+   PSD data, and global GFP.
+4. Stores QC measures.
 
-For pain paradigms, induced power can be computed by subtracting condition‑wise evoked responses:
+Precomputed objects are keyed per feature family and shared across families with
+compatible spatial transform requirements.
 
-1. Let $x_{e,c}(t)$ be the trial waveform and $\bar{x}_{k,c}(t)$ the average over trials in condition $k$.
-2. The **induced** signal is:
+### 6.3 Evoked-Subtracted Data (Induced Power)
+
+When `feature_engineering.power.subtract_evoked = true`, the evoked (phase-locked)
+response is removed per condition before band filtering:
 
 ```math
-x^{\text{induced}}_{e,c}(t) = x_{e,c}(t) - \bar{x}_{k(e),c}(t).
+x^\text{induced}_{e,c}(t) = x_{e,c}(t) - \bar{x}_{k(e),c}(t),
 ```
-3. This is implemented by `subtract_evoked` and is used:
 
-   - In precomputation (`precompute_data`) when `feature_engineering.precomputed.subtract_evoked` or `feature_engineering.power.subtract_evoked` is enabled.
-   - In TFR computation for power when `feature_engineering.power.subtract_evoked = true`.
+where $\bar{x}_{k(e),c}(t)$ is the condition-$k$ trial average.
 
-In `trial_ml_safe` mode, a **train_mask is mandatory** for evoked subtraction; otherwise the code raises a `ValueError`, since cross‑trial averages would otherwise leak test information.
-
----
-
-## 5. TFR‑Based Extraction vs Precomputed‑Based Extraction
-
-### 5.1 TFR‑Based Pipeline (`extract_all_features`)
-
-`extract_all_features(ctx)` (in `api.py`) is the main TFR‑based entry point:
-
-1. Prepare working epochs, possibly cropped to $[t_{\text{min}}, t_{\text{max}}]$.
-2. Rebuild `TimeWindows` on the cropped time axis.
-3. Optionally precompute band data (`precompute_data`) when requested feature categories depend on it (e.g. ERDS, aperiodic, spectral, complexity, bursts, ratios, asymmetry, connectivity).
-4. Validate epochs (montage, sampling rate, duration, etc.).
-5. Compute TFR and baseline metrics once if any of the TFR‑dependent categories (`power`, `itpc`, `pac`) are requested.
-6. Sequentially call the per‑category extractors using `_extract_feature_with_error_handling`, which enforces:
-
-   - Strict trial‑count matching,
-   - Timing and logging for each category,
-   - Immediate surfacing of any mismatch or unexpected return type.
-
-7. Apply spatial‑mode filtering to each feature DataFrame.
-8. Compute **change scores** (Section 7) and append them as additional columns.
-
-Outputs are stored in a `FeatureExtractionResult` dataclass with one DataFrame per domain (power, ERP, connectivity, etc.).
-
-### 5.2 Precomputed‑Only Pipeline (`extract_precomputed_features`)
-
-`extract_precomputed_features` provides a lighter‑weight API when precomputed intermediates are already available or when TFR‑based features are not needed:
-
-- Takes `epochs`, `bands`, `config`, `logger`, and optional `events_df` and `precomputed`.
-- If `precomputed` is `None`, it calls `precompute_data`.
-- Extracts a subset of feature **groups** (e.g. `["erds", "spectral", "aperiodic", "connectivity", ...]`).
-- Stores results in an `ExtractionResult` object with a `features` dict and optional `condition` labels.
-
-This is the preferred path for large‑scale precomputation and for use in other modalities (e.g. shared PAC / connectivity features across models).
+In `trial_ml_safe` mode, a valid `train_mask` is required for evoked subtraction.
+Without it, a `ValueError` is raised, since condition averages computed over all
+trials would leak test-trial information.
 
 ---
 
-## 6. Per‑Category Feature Definitions
+## 7. Extraction Pipelines
 
-Below, we summarize each feature family with the principal formulas. Details such as QC thresholds and configuration keys are documented inline in the code and reflected in this description.
+### 7.1 TFR-Based Pipeline (`extract_all_features`)
 
-### 6.1 Power (Oscillatory Power)
+Entry point in `api.py`. Performs the following steps in order:
+
+1. Optionally crop epochs to $[t_\text{min}, t_\text{max}]$ and rebuild `TimeWindows`.
+2. Precompute band data when any of the following categories are requested:
+   `erds`, `aperiodic`, `spectral`, `complexity`, `bursts`, `ratios`, `asymmetry`, `connectivity`.
+3. Validate epochs (montage, sampling rate, duration).
+4. Compute TFR and baseline metrics once for categories `power`, `itpc`, `pac`.
+5. Call per-category extractors via `_extract_feature_with_error_handling`, which enforces:
+   - Strict trial-count matching between output and input.
+   - Timing and logging per category.
+   - Immediate surfacing of shape mismatches or unexpected return types.
+6. Apply spatial-mode filtering to each feature DataFrame.
+7. Append change scores (see §9).
+
+Output: `FeatureExtractionResult` dataclass with one DataFrame per domain.
+
+### 7.2 Precomputed-Only Pipeline (`extract_precomputed_features`)
+
+A lighter-weight entry point for cases where TFR features are not needed or
+precomputed intermediates already exist:
+
+- Accepts `epochs`, `bands`, `config`, `logger`, and optional `events_df` and `precomputed`.
+- Calls `precompute_data` if `precomputed` is `None`.
+- Extracts a specified subset of feature groups.
+- Returns an `ExtractionResult` with a `features` dict and optional condition labels.
+
+This is the preferred path for large-scale batch processing and cross-modality sharing
+of features (e.g. PAC and connectivity features shared across models).
+
+---
+
+## 8. Feature Definitions
+
+### 8.1 Power (Oscillatory Power)
 
 **Module:** `spectral.py` → `extract_power_features`
 
 Starting from TFR power $P_{e,c}(f,t)$:
 
-1. **Segment average per frequency**:
+**Step 1 — Segment average per frequency:**
 
 ```math
 \bar{P}_{e,c}^{B,\text{seg}}(f) =
-\frac{\sum_t M_{\text{seg}}(t)P_{e,c}(f,t)}{\sum_t M_{\text{seg}}(t)}.
+\frac{\sum_t M_\text{seg}(t)\, P_{e,c}(f,t)}{\sum_t M_\text{seg}(t)}.
 ```
-2. **Frequency‑weighted band power** over band $B$ with bin widths $\Delta f$:
+
+**Step 2 — Band-integrated power:**
 
 ```math
 P_{e,c}^{B,\text{seg}} =
-\frac{\sum_{f \in B} \bar{P}_{e,c}^{B,\text{seg}}(f)\Delta f}
-     {\sum_{f \in B} \Delta f}.
+\frac{\sum_{f \in B} \bar{P}_{e,c}^{B,\text{seg}}(f)\,\Delta f}{\sum_{f \in B} \Delta f}.
 ```
-3. **Baseline‑normalized log‑ratio** (when baseline is available and TFR is not already baselined):
+
+**Step 3 — Baseline-normalized log-ratio** (when baseline is available and TFR is not pre-baselined):
 
 ```math
-\text{logratio}_{e,c}^{B} =
-\log_{10}\left(
-  \frac{\max(P_{e,c}^{B,\text{active}}, \varepsilon)}
-       {\max(P_{e,c}^{B,\text{baseline}}, \varepsilon)}
-\right),
-\quad \varepsilon = 10^{-20}.
+\text{logratio}_{e,c}^B =
+\log_{10}\!\left(
+  \frac{\max(P_{e,c}^{B,\text{active}},\, \varepsilon)}
+       {\max(P_{e,c}^{B,\text{baseline}},\, \varepsilon)}
+\right), \quad \varepsilon = 10^{-20}.
 ```
-4. **dB scaling**:
+
+**Step 4 — dB scaling:**
 
 ```math
-\text{dB}_{e,c}^{B} = 10 \cdot \text{logratio}_{e,c}^{B}.
+\mathrm{dB}_{e,c}^B = 10 \cdot \text{logratio}_{e,c}^B.
 ```
-If the TFR was already baselined (e.g. `logratio` or `percent` mode during TFR computation), the baselined power values are used directly, and baseline self‑normalization is avoided.
 
-**Outputs (per band × segment × scope)**
+If the TFR was pre-baselined (e.g. `logratio` or `percent` mode), the baselined
+values are used directly.
+Line-noise harmonics within a configurable exclusion window around mains-frequency
+multiples are removed before band integration.
 
-- `power_{segment}_{band}_{scope}_logratio`,
-- optional `..._db` if `emit_db = true`,
-- optional raw log‑power `log10raw` when no baseline is available and `require_baseline = false`.
-
-Line‑noise harmonics inside a configurable exclusion window around multiples of the mains frequency are removed prior to averaging.
+**Outputs:** `power_{segment}_{band}_{scope}_logratio`;
+optionally `..._db` (`emit_db = true`) and `..._log10raw` (no baseline, `require_baseline = false`).
 
 ---
 
-### 6.2 Spectral Descriptors
+### 8.2 Spectral Descriptors
 
 **Module:** `spectral.py` → `extract_spectral_features`
 
-For each trial and channel, a PSD is computed either by multitaper or Welch. Within a band $B$:
+PSD estimated per trial and channel (multitaper or Welch). Within band $B$:
 
-1. **Center frequency (spectral CoG)**:
+**Center frequency (spectral CoG):**
 
 ```math
-f_{\text{cog}} =
-\frac{\sum_{f \in B} f\mathrm{PSD}(f)\Delta f}
-     {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}.
+f_\text{cog} =
+\frac{\sum_{f \in B} f\,\mathrm{PSD}(f)\,\Delta f}
+     {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}.
 ```
-2. **Bandwidth (power‑weighted standard deviation)**:
+
+**Bandwidth (power-weighted standard deviation):**
 
 ```math
 \sigma_B =
 \sqrt{
-  \frac{\sum_{f \in B} (f - f_{\text{cog}})^2\mathrm{PSD}(f)\Delta f}
-       {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}
+  \frac{\sum_{f \in B} (f - f_\text{cog})^2\,\mathrm{PSD}(f)\,\Delta f}
+       {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}
 }.
 ```
-3. **Normalized spectral entropy**:
 
-Let
-```math
-p(f) = \frac{\mathrm{PSD}(f)\Delta f}
-            {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}.
-```
-Then
+**Normalized spectral entropy** (with $p(f) = \mathrm{PSD}(f)\,\Delta f \,/\, \sum_{f \in B} \mathrm{PSD}(f)\,\Delta f$):
+
 ```math
 H_B = -\frac{\sum_{f \in B} p(f)\ln p(f)}{\ln N_B},
 ```
+
 where $N_B$ is the number of frequency bins in $B$.
 
-4. **Peak features** use a robust aperiodic fit (shared with the aperiodic module):
+**Peak features** (via shared aperiodic residuals):
 
-- Residuals: $r(f) = \log_{10}\mathrm{PSD}(f) - \widehat{\log_{10} \mathrm{PSD}}_{\text{aperiodic}}(f)$.
-- Peak frequency: $f^* = \arg\max_{f \in B} r(f)$ (with CoG fallback for low‑prominence peaks).
-- Peak power, peak ratio, and peak residual are derived at $f^*$.
+- Residual: $r(f) = \log_{10}\mathrm{PSD}(f) - \widehat{\log_{10}\mathrm{PSD}}_\text{aperiodic}(f)$.
+- Peak frequency: $f^* = \arg\max_{f \in B} r(f)$; CoG is used when peak prominence is insufficient.
+- Peak power, ratio, and residual derived at $f^*$.
 
-5. **Broadband spectral edge**:
+**Broadband spectral edge:**
 
-`edge_freq_95` is the smallest $f$ such that:
+$f_\text{edge,95}$ is the smallest $f$ satisfying:
 
 ```math
-\frac{\sum_{f' \le f} \mathrm{PSD}(f')\Delta f'}
-     {\sum_{f'} \mathrm{PSD}(f')\Delta f'} \ge 0.95.
+\frac{\sum_{f' \le f} \mathrm{PSD}(f')\,\Delta f'}
+     {\sum_{f'} \mathrm{PSD}(f')\,\Delta f'} \ge 0.95.
 ```
-Segments shorter than a configured `min_segment_sec` or with fewer than `min_cycles_at_fmin` cycles are skipped.
+
+Segments shorter than `min_segment_sec` or with fewer than `min_cycles_at_fmin` cycles are skipped.
 
 ---
 
-### 6.3 Aperiodic (1/f) Components
+### 8.3 Aperiodic (1/f) Components
 
 **Module:** `aperiodic.py` → `extract_aperiodic_features`
 
-The aperiodic component is modeled in log–log space:
-
-1. Compute PSD and transform:
+**Step 1 — Log–log transform:**
 
 ```math
-x(f) = \log_{10} f,\quad
-y(f) = \log_{10} \mathrm{PSD}(f).
+x(f) = \log_{10} f, \qquad y(f) = \log_{10}\mathrm{PSD}(f).
 ```
-2. Iteratively fit the aperiodic trend:
 
-- Fit an initial model in $[f_{\text{min}}, f_{\text{max}}]$ (e.g. 2–40 Hz).
-- Compute residuals $r(f) = y(f) - \hat{y}(f)$.
-- Remove bins with large positive residuals (putative oscillatory peaks) exceeding a threshold in MAD units.
-- Refit up to a fixed number of iterations.
+**Step 2 — Iterative aperiodic fit** in $[f_\text{min}, f_\text{max}]$ (e.g. 2–40 Hz):
 
-3. Models:
+- Fit model; compute residuals $r(f) = y(f) - \hat{y}(f)$.
+- Remove bins with large positive residuals (putative oscillatory peaks, threshold in MAD units).
+- Repeat for a fixed maximum number of iterations.
 
-- **Fixed‑slope (linear)**
+**Step 3 — Model options:**
+
+*Fixed-slope (linear):*
 ```math
 y(f) = \text{offset} + \text{slope} \cdot x(f).
 ```
-- **Knee model**
-```math
-y(f) = \text{offset} - \log_{10}\bigl(\text{knee} + f^{\text{exponent}}\bigr).
-```
-4. Features per segment:
 
-- `slope`, `offset`, `exponent`, `knee`,
-- Goodness‑of‑fit metrics (`r2`, `rms`),
-- Aperiodic‑corrected band powers:
+*Knee model:*
+```math
+y(f) = \text{offset} - \log_{10}\!\bigl(\text{knee} + f^\text{exponent}\bigr).
+```
+
+**Outputs per segment:** `slope`, `offset`, `exponent`, `knee`, `r2`, `rms`;
+aperiodic-corrected band powers:
 
 ```math
-\text{powcorr}_B = \sum_{f \in B} 10^{r(f)}\Delta f,
+\text{powcorr}_B = \sum_{f \in B} 10^{r(f)}\,\Delta f;
 ```
-- Aperiodic‑corrected theta/beta ratio:
+
+aperiodic-corrected theta/beta ratio:
 
 ```math
 \text{tbr} =
 \frac{\mathrm{mean}_{f \in \theta} 10^{r(f)}}
-     {\mathrm{mean}_{f \in \beta}  10^{r(f)}},
-\quad
+     {\mathrm{mean}_{f \in \beta}  10^{r(f)}}, \qquad
 \text{tbr\_raw} =
 \frac{\mathrm{mean}_{f \in \theta} \mathrm{PSD}(f)}
      {\mathrm{mean}_{f \in \beta}  \mathrm{PSD}(f)}.
 ```
-Residual peaks are further summarized by center frequency, bandwidth, and height (FOOOF‑like).
+
+Residual spectral peaks are summarized by center frequency, bandwidth, and height.
 
 ---
 
-### 6.4 ERP (Evoked Potentials)
+### 8.4 ERP (Evoked Potentials)
 
 **Module:** `erp.py` → `extract_erp_features`
 
-For each ERP component window $T_{\text{comp}}$ (e.g. N2, P2) and each channel or ROI:
+For each ERP component window $T_\text{comp}$ (e.g. N2, P2) and channel or ROI:
 
-1. Baseline‑corrected signal:
+**Baseline correction:**
 
 ```math
 \tilde{x}_{e,c}(t) = x_{e,c}(t) - \bar{x}_{e,c}^{(\text{baseline})}.
 ```
-2. Component mean:
+
+**Component mean:**
 
 ```math
-\text{mean}_{e,c}^{\text{comp}} =
-\frac{1}{|T_{\text{comp}}|} \sum_{t \in T_{\text{comp}}} \tilde{x}_{e,c}(t).
+\text{mean}_{e,c}^\text{comp} =
+\frac{1}{|T_\text{comp}|} \sum_{t \in T_\text{comp}} \tilde{x}_{e,c}(t).
 ```
-3. Peak amplitude and latency:
 
-- Depending on polarity (`neg`, `pos`, or `abs`), find:
+**Peak amplitude and latency** (polarity $s \in \{\text{identity}, -1, |\cdot|\}$):
 
 ```math
-t^* = \arg\max_{t \in T_{\text{comp}}} s(\tilde{x}_{e,c}(t)),
+t^* = \arg\max_{t \in T_\text{comp}} s\bigl(\tilde{x}_{e,c}(t)\bigr), \qquad
+\text{peak}_{e,c}^\text{comp} = \tilde{x}_{e,c}(t^*), \qquad
+\text{latency}_{e,c}^\text{comp} = t^*.
 ```
-where $s$ is identity, minus, or absolute value. Then:
+
+**Area under the curve:**
 
 ```math
-\text{peak}_{e,c}^{\text{comp}} = \tilde{x}_{e,c}(t^*),\quad
-\text{latency}_{e,c}^{\text{comp}} = t^*.
+\text{auc}_{e,c}^\text{comp} =
+\int_{t \in T_\text{comp}} \tilde{x}_{e,c}(t)\, dt,
 ```
-4. Area under the curve (AUC):
 
-```math
-\text{auc}_{e,c}^{\text{comp}} = \int_{t \in T_{\text{comp}}} \tilde{x}_{e,c}(t)dt,
-```
-computed as a sum of trapezoids over contiguous valid segments.
+computed as a trapezoidal sum over contiguous valid intervals.
 
-Paired components (e.g. N2–P2) yield peak‑to‑peak amplitude and latency differences.
+Paired components (e.g. N2–P2) yield peak-to-peak amplitude and latency differences.
 
 ---
 
-### 6.5 ERDS (Event‑Related Desynchronization/Synchronization)
+### 8.5 ERDS (Event-Related Desynchronization / Synchronization)
 
 **Module:** `precomputed/erds.py` → `extract_erds_from_precomputed`
 
 Using precomputed band envelopes $|\mathcal{H}(x_{e,c}^B(t))|$:
 
-1. Baseline and active power:
+**Baseline and active power:**
 
 ```math
-P^{B,\text{baseline}}_{e,c} = \mathrm{mean}_{t \in T_{\text{baseline}}}
-   |\mathcal{H}(x_{e,c}^B(t))|^2,\quad
-P^{B,\text{active}}_{e,c}   = \mathrm{mean}_{t \in T_{\text{active}}}
-   |\mathcal{H}(x_{e,c}^B(t))|^2.
+P^{B,\text{baseline}}_{e,c} =
+\mathrm{mean}_{t \in T_\text{baseline}} |\mathcal{H}(x_{e,c}^B(t))|^2, \qquad
+P^{B,\text{active}}_{e,c} =
+\mathrm{mean}_{t \in T_\text{active}} |\mathcal{H}(x_{e,c}^B(t))|^2.
 ```
-2. ERDS percentage:
+
+**ERDS percentage:**
 
 ```math
 \text{ERDS\%}_{e,c}^B =
@@ -492,566 +510,539 @@ P^{B,\text{active}}_{e,c}   = \mathrm{mean}_{t \in T_{\text{active}}}
 \frac{P^{B,\text{active}}_{e,c} - P^{B,\text{baseline}}_{e,c}}
      {P^{B,\text{baseline}}_{e,c}}.
 ```
-3. dB form:
+
+**ERDS in dB:**
 
 ```math
-\text{ERDS}_{\text{dB}} =
-10 \log_{10}
-\left(
-  \frac{P^{B,\text{active}}_{e,c}}
-       {P^{B,\text{baseline}}_{e,c}}
-\right).
+\text{ERDS}_\text{dB} =
+10 \log_{10}\!\left(\frac{P^{B,\text{active}}_{e,c}}{P^{B,\text{baseline}}_{e,c}}\right).
 ```
-Very low baseline power is treated as invalid rather than artificially clamped.
 
-Outputs include per‑channel ERDS, ROI/global aggregates, slopes, onset and peak latencies, and pain‑specific markers (contralateral somatosensory ERD, rebound magnitude, etc.).
+Very low baseline power is treated as invalid; no clamping is applied.
+
+Additional outputs include per-channel ERDS, ROI/global aggregates, slopes, onset and peak
+latencies, and pain-specific markers (contralateral somatosensory ERD, rebound magnitude).
 
 ---
 
-### 6.6 Ratios (Band Power Ratios)
+### 8.6 Ratios (Band Power Ratios)
 
 **Module:** `precomputed/extras.py` → `extract_band_ratios_from_precomputed`
 
-From PSD‑integrated band powers $P^B_{e,c}$:
+PSD-integrated band power:
 
 ```math
-P^B_{e,c} = \sum_{f \in B} \mathrm{PSD}_{e,c}(f)\Delta f.
+P^B_{e,c} = \sum_{f \in B} \mathrm{PSD}_{e,c}(f)\,\Delta f.
 ```
-For a ratio pair $(B_{\text{num}}, B_{\text{den}})$:
+
+For a numerator band $B_\text{num}$ and denominator band $B_\text{den}$:
 
 ```math
 \text{power\_ratio}_e =
-\frac{P^{B_{\text{num}}}_e}{P^{B_{\text{den}}}_e},\quad
+\frac{P^{B_\text{num}}_e}{P^{B_\text{den}}_e}, \qquad
 \text{log\_ratio}_e =
-\ln\bigl(P^{B_{\text{num}}}_e + \varepsilon\bigr)
- - \ln\bigl(P^{B_{\text{den}}}_e + \varepsilon\bigr).
+\ln\!\bigl(P^{B_\text{num}}_e + \varepsilon\bigr) -
+\ln\!\bigl(P^{B_\text{den}}_e + \varepsilon\bigr).
 ```
-ROI/global ratios use **averaged PSDs** across channels rather than averages of per‑channel ratios.
+
+ROI and global ratios are computed from PSDs averaged across channels, not from averages
+of per-channel ratios.
 
 ---
 
-### 6.7 Asymmetry (Hemispheric Indices)
+### 8.7 Asymmetry (Hemispheric Indices)
 
 **Module:** `precomputed/extras.py` → `extract_asymmetry_from_precomputed`
 
-For a left–right pair $(L,R)$ and band $B$, with integrated powers $P^B_L, P^B_R$:
+For a left–right electrode pair $(L, R)$ and band $B$:
 
 ```math
-\text{index} = \frac{P^B_R - P^B_L}{P^B_R + P^B_L},\quad
+\text{index} =
+\frac{P^B_R - P^B_L}{P^B_R + P^B_L}, \qquad
 \text{logdiff} = \ln P^B_R - \ln P^B_L.
 ```
-Optionally, an **activation convention** alpha asymmetry:
+
+Optional activation-convention alpha asymmetry (higher value → greater right-hemisphere activation):
 
 ```math
-\text{logdiff\_activation} = -\text{logdiff},
+\text{logdiff\_activation} = -\text{logdiff}.
 ```
-so that higher values correspond to greater cortical activation on the right side under the usual alpha‑suppression interpretation.
 
 ---
 
-### 6.8 Connectivity (Undirected)
+### 8.8 Connectivity (Undirected)
 
 **Module:** `connectivity.py` → `extract_connectivity_features`
 
-Connectivity is computed in the frequency domain (wPLI, PLI, imaginary coherence, PLV) and in the amplitude domain (AEC). Let $X_i(f,t)$ and $X_j(f,t)$ be complex Fourier coefficients or analytic signals for channels $i,j$.
+Let $X_i(f,t)$ and $X_j(f,t)$ be complex Fourier coefficients or analytic signals for
+channels $i, j$, with cross-spectrum $S_{ij}(f)$ and auto-spectra $S_{ii}(f)$, $S_{jj}(f)$.
 
-1. Cross‑spectrum $S_{ij}(f)$ and auto‑spectra $S_{ii}(f), S_{jj}(f)$.
-2. wPLI:
+**Weighted PLI (wPLI):**
 
 ```math
 \text{wPLI}_{ij} =
-\frac{\left|\mathbb{E}\bigl[\mathrm{Im}(X_i X_j^\ast)\bigr]\right|}
-     {\mathbb{E}\bigl[\left|\mathrm{Im}(X_i X_j^\ast)\right|\bigr]}.
+\frac{\bigl|\mathbb{E}[\mathrm{Im}(X_i X_j^*)]\bigr|}
+     {\mathbb{E}[|\mathrm{Im}(X_i X_j^*)|]}.
 ```
-3. PLI:
+
+**Phase Lag Index (PLI):**
 
 ```math
 \text{PLI}_{ij} =
-\left|\mathbb{E}\bigl[\mathrm{sign}(\mathrm{Im}(X_i X_j^\ast))\bigr]\right|.
+\bigl|\mathbb{E}[\mathrm{sign}(\mathrm{Im}(X_i X_j^*))]\bigr|.
 ```
-4. Imaginary coherence:
+
+**Imaginary Coherence:**
 
 ```math
 \text{imCoh}_{ij} =
-\mathrm{Im}\left(
-  \frac{S_{ij}}{\sqrt{S_{ii} S_{jj}}}
-\right).
+\mathrm{Im}\!\left(\frac{S_{ij}}{\sqrt{S_{ii}\, S_{jj}}}\right).
 ```
-5. PLV:
+
+**Phase Locking Value (PLV):**
 
 ```math
 \text{PLV}_{ij} =
-\left|\mathbb{E}\bigl[e^{\mathrm{i}\Delta\varphi_{ij}}\bigr]\right|.
+\bigl|\mathbb{E}[e^{i\Delta\varphi_{ij}}]\bigr|.
 ```
-6. AEC (envelope correlation):
+
+**Amplitude Envelope Correlation (AEC):**
 
 ```math
-r_{ij} = \mathrm{corr}(A_i, A_j),
-\quad
-z_{ij} = \mathrm{atanh}(\mathrm{clip}(r_{ij}, -0.9999, 0.9999)).
+r_{ij} = \mathrm{corr}(A_i, A_j), \qquad
+z_{ij} = \mathrm{atanh}\!\bigl(\mathrm{clip}(r_{ij}, -0.9999, 0.9999)\bigr).
 ```
-Connectivity can be:
 
-- Trial‑wise,
-- Condition‑wise (across trials of a condition),
-- Subject‑wise (all trials).
-
-Optional graph metrics (clustering coefficient, global efficiency, small‑world index) are computed from thresholded or weighted connectivity matrices.
-
-Volume‑conduction guards emit warnings when phase‑based measures are computed without a CSD/Laplacian transform.
+Connectivity can be estimated trial-wise, condition-wise, or subject-wise.
+Optional graph metrics (clustering coefficient, global efficiency, small-world index) are
+derived from thresholded or weighted connectivity matrices.
+Phase-based measures computed without a spatial transform (CSD/Laplacian) emit a
+volume-conduction warning.
 
 ---
 
-### 6.9 Directed Connectivity
+### 8.9 Directed Connectivity
 
 **Module:** `connectivity.py` → `extract_directed_connectivity_features`
 
-Directed connectivity is based on either spectral phase‑slope (PSI) or MVAR models (DTF, PDC):
+**Phase Slope Index (PSI):**
 
-1. **PSI**:
-
-Let
 ```math
-C_{ij}(f) = \frac{S_{ij}(f)}{\sqrt{S_{ii}(f) S_{jj}(f)}}.
-```
-Then
-```math
+C_{ij}(f) = \frac{S_{ij}(f)}{\sqrt{S_{ii}(f)\,S_{jj}(f)}}, \qquad
 \text{PSI}_{ij} =
-\mathrm{Im}\left(
-  \sum_f C_{ij}^\ast(f)C_{ij}(f + \Delta f)
-\right).
+\mathrm{Im}\!\left(\sum_f C_{ij}^*(f)\, C_{ij}(f + \Delta f)\right).
 ```
-2. **DTF**:
 
-From an MVAR model with frequency‑domain transfer matrix $H(f)$,
+**Directed Transfer Function (DTF)** from MVAR transfer matrix $H(f)$:
+
 ```math
 \text{DTF}_{i \leftarrow j}(f) =
-\frac{|H_{ij}(f)|}
-     {\sqrt{\sum_k |H_{ik}(f)|^2}}.
+\frac{|H_{ij}(f)|}{\sqrt{\sum_k |H_{ik}(f)|^2}}.
 ```
-3. **PDC**:
 
-From the MVAR coefficient matrix $A(f)$,
+**Partial Directed Coherence (PDC)** from MVAR coefficient matrix $A(f)$:
+
 ```math
 \text{PDC}_{i \leftarrow j}(f) =
-\frac{|A_{ij}(f)|}
-     {\sqrt{\sum_k |A_{kj}(f)|^2}}.
+\frac{|A_{ij}(f)|}{\sqrt{\sum_k |A_{kj}(f)|^2}}.
 ```
-Outputs include forward/backward directed influence and asymmetry summaries at the trial and global level. MVAR order is automatically reduced when the data do not support the requested model order.
+
+Outputs include forward/backward directed influence and asymmetry summaries at trial and global
+levels. MVAR model order is automatically reduced when data do not support the requested order.
 
 ---
 
-### 6.10 ITPC and Phase Metrics
+### 8.10 ITPC and Phase Metrics
 
 **Module:** `phase.py` → `extract_phase_features`, `extract_itpc_from_precomputed`
 
-Given complex time–frequency data $Z_e(f,t)$, define unit vectors
+Unit phasor from complex time–frequency data $Z_e(f,t)$:
+
 ```math
 u_e(f,t) = \frac{Z_e(f,t)}{|Z_e(f,t)| + \varepsilon}.
 ```
-ITPC over a set of trials $\mathcal{T}$ is:
+
+**ITPC** over trial set $\mathcal{T}$:
 
 ```math
-\text{ITPC}(f,t) = \left|\frac{1}{|\mathcal{T}|}\sum_{e \in \mathcal{T}} u_e(f,t)\right|.
+\text{ITPC}(f,t) =
+\left|\frac{1}{|\mathcal{T}|}\sum_{e \in \mathcal{T}} u_e(f,t)\right|.
 ```
-The pipeline supports:
 
-- Global (all trials),
-- Fold‑global (training trials only; default, CV‑safe),
-- Leave‑one‑out (LOO),
-- Condition‑wise ITPC.
+Supported averaging modes:
 
-ITPC is then band‑ and segment‑averaged to yield scalar features in $[0,1]$.
+| Mode | Description |
+|------|-------------|
+| `global` | All trials |
+| `fold_global` | Training trials only (default; CV-safe) |
+| `loo` | Leave-one-out |
+| `condition` | Per condition |
+
+ITPC is band- and segment-averaged to yield scalar features in $[0, 1]$.
 
 ---
 
-### 6.11 PAC (Phase–Amplitude Coupling)
+### 8.11 PAC (Phase–Amplitude Coupling)
 
 **Module:** `phase.py` → `extract_pac_from_precomputed`, `compute_pac_comodulograms`
 
-For a phase band $B_\phi$ and amplitude band $B_A$:
+For phase band $B_\phi$ and amplitude band $B_A$:
 
-1. Extract phase $\phi(t)$ and amplitude $A(t)$ from either:
-
-- Hilbert‑based precomputed analytic signals, or
-- Complex TFR data (TFR‑based PAC).
-
-2. Mean vector length (MVL):
+**Mean vector length (MVL):**
 
 ```math
-u(t) = \mathbb{E}_{f_\phi \in B_\phi}\left[e^{i\phi(f_\phi,t)}\right],\quad
-A(t) = \mathbb{E}_{f_A \in B_A}\left[\text{amp}(f_A,t)\right],
+u(t) = \mathbb{E}_{f_\phi \in B_\phi}\!\left[e^{i\phi(f_\phi,t)}\right], \qquad
+A(t) = \mathbb{E}_{f_A \in B_A}\!\left[\mathrm{amp}(f_A,t)\right],
 ```
-```math
-\text{MVL} = \frac{\left|\sum_t A(t)u(t)\right|}{\sum_t A(t)}.
-```
-3. Optional surrogate‑based $z$‑scoring:
 
 ```math
-z = \frac{\text{MVL}_{\text{obs}} - \mu_{\text{surr}}}{\sigma_{\text{surr}}},
+\text{MVL} = \frac{\left|\sum_t A(t)\,u(t)\right|}{\sum_t A(t)}.
 ```
-where $\mu_{\text{surr}}$ and $\sigma_{\text{surr}}$ are estimated from PAC values computed on surrogate data (trial‑shuffled and/or circularly shifted).
 
-PAC can be exported as:
+**Surrogate-based $z$-score** (optional):
 
-- Trial‑wise scalar features (per band pair × segment),
-- Full comodulograms with phase and amplitude frequency axes,
-- Optional time‑resolved PAC traces.
+```math
+z = \frac{\text{MVL}_\text{obs} - \mu_\text{surr}}{\sigma_\text{surr}},
+```
 
-Harmonic overlap guards skip scientifically dubious band combinations.
+where $\mu_\text{surr}$ and $\sigma_\text{surr}$ are estimated from surrogate PAC values
+(trial-shuffled and/or circularly time-shifted).
+
+**Output formats:**
+- Trial-wise scalar features per band pair and segment.
+- Full comodulograms with phase and amplitude frequency axes.
+- Time-resolved PAC traces (optional).
+
+Harmonic overlap guards reject scientifically invalid band combinations.
 
 ---
 
-### 6.12 Source Localization
+### 8.12 Source Localization
 
 **Module:** `source_localization.py` → `extract_source_localization_features`
 
-Using a forward model and inverse solution (LCMV or eLORETA), source‑space signals
-$x_v(t)$ are mapped to ROI time courses:
+Using a forward model and LCMV or eLORETA inverse solution, source signals $x_v(t)$ are
+projected to ROI time courses:
 
 ```math
-x_{\text{ROI}}(t) = \frac{1}{|V_{\text{ROI}}|}\sum_{v \in V_{\text{ROI}}} x_v(t).
+x_\text{ROI}(t) = \frac{1}{|V_\text{ROI}|}\sum_{v \in V_\text{ROI}} x_v(t).
 ```
-Features include:
 
-- Source‑space band power:
+**Source-space band power:**
 
 ```math
-\text{src\_power}^{B,\text{seg}}_{\text{ROI}} =
-\frac{\sum_{f \in B} \mathrm{PSD}_{\text{ROI}}(f)\Delta f}
-     {\sum_{f \in B} \Delta f},
+\text{src\_power}^{B,\text{seg}}_\text{ROI} =
+\frac{\sum_{f \in B} \mathrm{PSD}_\text{ROI}(f)\,\Delta f}{\sum_{f \in B} \Delta f}.
 ```
-- Source‑space Hilbert envelopes averaged over segments,  
-- Global averages across ROIs.
 
-Optional fMRI constraints restrict the source space to suprathreshold fMRI clusters.
+Additional outputs include source-space Hilbert envelopes averaged over segments
+and global averages across ROIs.
+When fMRI constraints are enabled, the source space is restricted to suprathreshold
+fMRI activation clusters.
 
 ---
 
-### 6.13 Complexity
+### 8.13 Complexity
 
 **Module:** `complexity.py` → `extract_complexity_from_precomputed`
 
-Complexity metrics (LZC, permutation entropy, sample entropy, multiscale entropy) are computed on either band‑filtered time series or envelopes.
+Computed on band-filtered time series or envelopes.
 
-Key definitions:
+**Lempel–Ziv Complexity (LZC):**
 
-- **Lempel–Ziv Complexity (LZC)**:
-
-  - Binary sequence $b_t = \mathbf{1}[x_t > \mathrm{median}(x)]$,
-  - Complexity count $c$ from the LZ76 parsing algorithm,
-  - Normalized:
+Binarize: $b_t = \mathbf{1}[x_t > \mathrm{median}(x)]$.
+Let $c$ be the LZ76 parsing complexity count; normalize by the random-sequence expectation:
 
 ```math
-  \text{LZC} = \frac{c}{n / \log_2 n},
+\text{LZC} = \frac{c}{n / \log_2 n}, \quad n = \text{sequence length}.
 ```
-  where $n$ is sequence length.
 
-- **Permutation Entropy (PE)**:
+**Permutation Entropy (PE):**
 
-  - For embedding dimension $m$ and delay $\tau$, compute ordinal patterns $\pi$ and their probabilities $p(\pi)$,
-  - Then
+For embedding dimension $m$ and delay $\tau$, compute ordinal pattern probabilities $p(\pi)$:
+
 ```math
-  \text{PE} =
-  -\frac{\sum_{\pi} p(\pi)\log_2 p(\pi)}{\log_2(m!)}.
+\text{PE} = -\frac{\sum_\pi p(\pi)\log_2 p(\pi)}{\log_2(m!)}.
 ```
-- **Sample Entropy (SampEn)**:
 
-  - With pattern length $m$, tolerance $r\sigma_x$,
-  - Let $B$ be the count of template matches at length $m$,
-  - Let $A$ be the count at length $m+1$,
-  - Then
+**Sample Entropy (SampEn):**
+
+With pattern length $m$ and tolerance $r\sigma_x$, let $B$ be the number of template matches
+at length $m$ and $A$ at length $m+1$:
+
 ```math
-  \text{SampEn}(m,r) = -\log \frac{A}{B}.
+\text{SampEn}(m, r) = -\log\frac{A}{B}.
 ```
-- **Multiscale Entropy (MSE)**:
 
-  - For each scale $s$, coarse‑grain $x(t)$ by averaging non‑overlapping blocks of length $s$,
-  - Compute $\text{SampEn}$ of the coarse‑grained series to obtain $\text{MSE}(s)$.
+**Multiscale Entropy (MSE):**
 
-Per‑band, per‑segment metrics are exported for each spatial scope.
+For scale $s$, coarse-grain $x(t)$ by averaging non-overlapping blocks of length $s$,
+then compute $\text{SampEn}$ of the coarse-grained series to yield $\text{MSE}(s)$.
 
 ---
 
-### 6.14 Bursts (Transient Oscillations)
+### 8.14 Bursts (Transient Oscillations)
 
 **Module:** `bursts.py` → `extract_burst_features`
 
 From band envelopes $E_{e,c}^B(t) = |\mathcal{H}(x_{e,c}^B(t))|$:
 
-1. Estimate a baseline envelope distribution (per trial, subject, or condition).
-2. Define a threshold $\theta$ via one of:
+**Threshold estimation** (configured method):
 
-- Percentile:
+| Method | Formula |
+|--------|---------|
+| Percentile | $\theta = \mathrm{percentile}(E_\text{baseline},\, q)$ |
+| z-score | $\theta = \mu + z\sigma$ |
+| MAD | $\theta = \mathrm{median}(E_\text{baseline}) + z \cdot 1.4826 \cdot \mathrm{MAD}(E_\text{baseline})$ |
 
-```math
-  \theta = \mathrm{percentile}(E_{\text{baseline}}, q),
-```
-- z‑score:
+**Burst detection:**
 
-```math
-  \theta = \mu + z\sigma,
-```
-- MAD:
+Identify contiguous intervals where $E_{e,c}^B(t) > \theta$ with minimum duration:
 
 ```math
-  \theta = \mathrm{median}(E_{\text{baseline}})
-          + z \cdot 1.4826 \cdot \mathrm{MAD}(E_{\text{baseline}}).
+T_\text{burst} \ge \max\!\left(T_\text{min},\; \frac{\text{min\_cycles}}{f_\text{center}}\right).
 ```
-3. Identify contiguous intervals where $E_{e,c}^B(t) > \theta$.
-4. Enforce a minimum duration:
 
-```math
-T_{\text{burst}} \ge \max\left(T_{\text{min}}, \frac{\text{min\_cycles}}{f_{\text{center}}}\right).
-```
-Per segment and band, the pipeline outputs burst counts, rates, mean durations, mean amplitudes, and occupancy fractions.
+**Outputs per segment and band:** burst count, rate (Hz), mean duration (ms),
+mean amplitude, and occupancy fraction.
 
 ---
 
-### 6.15 Microstates
+### 8.15 Microstates
 
 **Module:** `microstates.py` → `extract_microstate_features`
 
-Global Field Power (GFP) is:
+**Global Field Power:**
 
 ```math
 \text{GFP}_e(t) =
-\sqrt{\frac{1}{N_{\text{ch}}}\sum_c \left(x_{e,c}(t) - \bar{x}_e(t)\right)^2}.
+\sqrt{\frac{1}{N_\text{ch}} \sum_c \bigl(x_{e,c}(t) - \bar{x}_e(t)\bigr)^2}.
 ```
-GFP peaks are detected; scalp maps at these peaks are normalized (zero‑mean, unit‑norm, sign‑standardized) and clustered into microstates (fixed templates or K‑means). Labels are backfitted to the full time series with minimum‑duration smoothing.
 
-Per state $k$, features include:
+GFP peaks are detected; scalp maps at these peaks are normalized (zero-mean, unit-norm,
+sign-standardized) and clustered into $K$ microstate templates via K-means or provided fixed
+templates. Labels are backfitted to the full time series with minimum-duration smoothing.
 
-- Coverage:
+**Per-state statistics** for state $k$:
 
 ```math
-\text{coverage}_k =
-\frac{\#\{t: s(t) = k\}}{N_t},
+\text{coverage}_k = \frac{\#\{t : s(t) = k\}}{N_t}, \qquad
+\text{mean duration (ms)}, \qquad
+\text{occurrence rate (Hz)}.
 ```
-- Mean duration (ms),
-- Occurrence rate (Hz),
-- Transition probabilities between states.
 
-In `trial_ml_safe` mode, clustering is restricted to training trials.
+Transition probabilities between states are also computed.
+In `trial_ml_safe` mode, template clustering is restricted to training trials.
 
 ---
 
-### 6.16 Quality Metrics
+### 8.16 Quality Metrics
 
 **Module:** `quality.py` → `extract_quality_features`, `compute_trial_quality_metrics`
 
 Per segment and channel:
 
-- Variance:
+| Metric | Formula |
+|--------|---------|
+| Variance | $\mathrm{Var}(x) = \frac{1}{N_t-1}\sum_t (x(t)-\bar{x})^2$ |
+| Peak-to-peak | $\mathrm{ptp} = \max_t x(t) - \min_t x(t)$ |
+| Finite fraction | $\mathrm{finite} = \#\{t : x(t)\ \text{finite}\} \,/\, N_t$ |
+| SNR (dB) | $10\log_{10}(d_\text{signal} / d_\text{noise})$, where $d$ is band-limited power density |
+| Muscle artifact index | Fraction of PSD power in high-frequency band (e.g. 30–80 Hz) |
 
-```math
-\mathrm{Var}_t(x) = \frac{1}{N_t - 1}\sum_t (x(t) - \bar{x})^2.
-```
-- Peak‑to‑peak:
-
-```math
-\text{ptp} = \max_t x(t) - \min_t x(t).
-```
-- Fraction of finite samples:
-
-```math
-\text{finite} = \frac{\#\{t: x(t)\ \text{finite}\}}{N_t}.
-```
-- SNR (using band‑limited PSDs):
-
-```math
-\text{SNR}_{\text{dB}} = 10\log_{10}
-\left(
-  \frac{d_{\text{signal}}}{d_{\text{noise}}}
-\right),
-```
-where $d$ is a band‑limited integrated power density.
-
-- Muscle artifact index: fraction of PSD power in a high‑frequency band (e.g. 30–80 Hz).
-
-These metrics serve both as QC features and as filters for downstream processing.
+These metrics serve both as QC features and as gatekeepers for downstream processing.
 
 ---
 
-## 7. Change Scores (Active – Baseline)
+## 9. Change Scores
 
-After primary features are computed, `_add_change_scores_to_results` adds **change‑score features** for multiple families (power, connectivity, aperiodic, phase, PAC, ERDS, spectral, ratios, asymmetry, microstates, etc.), when `feature_engineering.compute_change_scores = true`.
+After primary feature extraction, `_add_change_scores_to_results` appends change-score
+columns when `feature_engineering.compute_change_scores = true`.
 
-Conceptually, for a feature column $X$ with baseline and active variants:
+For a feature column $X$ with baseline and active variants:
 
 ```math
-X_\Delta = X^{\text{active}} - X^{\text{baseline}}.
+X_\Delta = X^\text{active} - X^\text{baseline}.
 ```
-More complicated window structures (e.g. multiple active segments) are handled by `compute_change_features`, which inspects column names and produces consistent `_delta`‑style columns without recomputing the original feature.
 
-Change scores are stored alongside original features to avoid repeated derivation downstream.
+`compute_change_features` inspects column names to identify paired segments and produces
+consistent `_delta`-suffixed columns without recomputing the underlying features.
+Change scores are stored alongside original features to avoid redundant derivation downstream.
+
+Supported families: power, connectivity, aperiodic, phase, PAC, ERDS, spectral,
+ratios, asymmetry, microstates.
 
 ---
 
-## 8. Normalization
+## 10. Normalization
 
-Normalization is intentionally separated from feature extraction and implemented in `normalization.py`.
-All schemes avoid data leakage by allowing **train/test‑separated** estimation of parameters.
+**Module:** `normalization.py`
 
-### 8.1 Per‑column normalization methods
+Normalization is intentionally separated from feature extraction.
+All schemes estimate parameters from a reference set $x^\text{ref}$, which must be
+the training subset in cross-validation contexts.
 
-Given a feature column $x \in \mathbb{R}^N$ and a reference vector $x^{\text{ref}}$ (typically the
-training subset), the following methods are available:
+### 10.1 Normalization Methods
 
-- **Z‑score**:
-
-```math
-z_i = \frac{x_i - \mu^{\text{ref}}}{\max(\sigma^{\text{ref}}, \varepsilon)},\quad
-\mu^{\text{ref}} = \mathrm{mean}(x^{\text{ref}}),\quad
-\sigma^{\text{ref}} = \mathrm{sd}(x^{\text{ref}}).
-```
-- **Robust (median/MAD)**:
+**Z-score:**
 
 ```math
-z^{\text{robust}}_i =
-\frac{x_i - m^{\text{ref}}}
-     {\max\bigl(\mathrm{MAD}(x^{\text{ref}})_{\text{normal}}, \varepsilon\bigr)},
-\quad
-m^{\text{ref}} = \mathrm{median}(x^{\text{ref}}),
+z_i =
+\frac{x_i - \mu^\text{ref}}{\max(\sigma^\text{ref},\, \varepsilon)}, \qquad
+\mu^\text{ref} = \mathrm{mean}(x^\text{ref}), \quad
+\sigma^\text{ref} = \mathrm{sd}(x^\text{ref}).
 ```
-where $\mathrm{MAD}(\cdot)_{\text{normal}}$ is the normal‑consistent MAD (scaled by 1.4826).
 
-- **Min–max** to range $[a,b]$:
+**Robust (median / MAD):**
+
+```math
+z_i^\text{robust} =
+\frac{x_i - m^\text{ref}}
+     {\max\!\bigl(\mathrm{MAD}(x^\text{ref})_\text{normal},\, \varepsilon\bigr)}, \qquad
+m^\text{ref} = \mathrm{median}(x^\text{ref}),
+```
+
+where $\mathrm{MAD}(\cdot)_\text{normal}$ is the normal-consistent MAD (scaled by 1.4826).
+
+**Min–max** to $[a, b]$:
 
 ```math
 x'_i = a + (b-a)
-\frac{x_i - x_{\text{min}}^{\text{ref}}}
-     {\max\bigl(x_{\text{max}}^{\text{ref}} - x_{\text{min}}^{\text{ref}}, \varepsilon\bigr)},
+\frac{x_i - x_\text{min}^\text{ref}}
+     {\max\!\bigl(x_\text{max}^\text{ref} - x_\text{min}^\text{ref},\, \varepsilon\bigr)}.
 ```
-with $x_{\text{min}}^{\text{ref}} = \min(x^{\text{ref}})$ and
-$x_{\text{max}}^{\text{ref}} = \max(x^{\text{ref}})$.
 
-- **Rank‑based** (0–1 ranks on finite values):
+**Rank-based** (0–1 normalized ranks on finite values):
 
 ```math
 r_i =
-\frac{\mathrm{rank}(x_i) - 1}{n_{\text{finite}} - 1},
+\frac{\mathrm{rank}(x_i) - 1}{n_\text{finite} - 1},
 ```
-where ties are handled by a configurable ranking method (default: average rank) and
-$n_{\text{finite}}$ is the number of finite entries.
 
-- **Log**:
+where ties are handled by a configurable ranking method (default: average) and
+$n_\text{finite}$ is the count of finite entries.
+
+**Log:**
 
 ```math
-\log_b(x_i) = \frac{\ln(x_i + \varepsilon)}{\ln b},
+\log_b(x_i) = \frac{\ln(x_i + \varepsilon)}{\ln b}, \quad b \in \{e, 10\}.
 ```
-with $b \in \{e, 10\}$ or any positive base and $\varepsilon > 0$ drawn from configuration
-(default $10^{-12}$).
 
-Columns with fewer than two finite values are left as `NaN` rather than artificially
-normalized.
+Columns with fewer than two finite values are left as `NaN`.
 
-### 8.2 Condition‑wise and run‑wise references
+### 10.2 Reference Modes
 
-`normalize_features` supports **reference modes** that compute normalization parameters
-within groups:
+`normalize_features` computes normalization parameters within groups:
 
-- `reference="all"` – use all rows (default),
-- `reference="condition"` – normalize **within each condition**,
-- `reference="run"` – normalize **within each run** (useful for scanner or session drift).
+| Mode | Reference set |
+|------|--------------|
+| `all` | All rows (default) |
+| `condition` | Within each condition |
+| `run` | Within each run (useful for scanner drift correction) |
 
-For a grouping variable $g_i \in \mathcal{G}$ (e.g. condition or run), z‑score
-normalization within groups is:
+For a grouping variable $g_i \in \mathcal{G}$:
 
 ```math
 z_i^{(g)} =
-\frac{x_i - \mu_{g_i}}{\max(\sigma_{g_i}, \varepsilon)},\quad
-\mu_{g} = \mathrm{mean}\{x_j : g_j = g\},\quad
-\sigma_{g} = \mathrm{sd}\{x_j : g_j = g\}.
+\frac{x_i - \mu_{g_i}}{\max(\sigma_{g_i},\, \varepsilon)}, \qquad
+\mu_g = \mathrm{mean}\{x_j : g_j = g\}, \quad
+\sigma_g = \mathrm{sd}\{x_j : g_j = g\}.
 ```
-Analogous formulas apply for robust and min–max normalization with group‑specific
-medians/MADs or minima/maxima.
 
-When a grouping column is requested but missing, the implementation falls back to
-`reference="all"` rather than guessing group structure.
+If the requested grouping column is absent, a `KeyError` is raised.
 
-### 8.3 Train/test‑separated and fitted normalizers
+### 10.3 Train/Test-Separated Normalization
 
-To avoid cross‑validation leakage:
+- `normalize_train_test(train_df, test_df, method)` — normalizes both DataFrames using
+  parameters estimated on `train_df` only.
+- `FeatureNormalizer(method)` — a stateful normalizer: `.fit(train_df)` stores per-column
+  parameters; `.transform(df)` applies them to any DataFrame.
 
-- `normalize_train_test(train_df, test_df, method)` normalizes both DataFrames
-  using parameters estimated on `train_df` only. For each numeric feature column
-$x$, `train_df` plays the role of $x^{\text{ref}}$.
-- `FeatureNormalizer(method)` can be:
-
-  - **fit** on a training DataFrame to store per‑column parameters
-    (mean/std, median/MAD, or min/max), and
-  - **applied** to new DataFrames via `.transform(df)` using those stored
-    parameters.
-
-Both utilities respect an exclusion list (by default including `condition`, `subject`,
-`trial`, `run`, `run_id`, etc.), so that non‑feature metadata columns are never
-transformed.
+Both utilities exclude non-feature metadata columns (`condition`, `subject`, `trial`,
+`run`, `run_id`, …) from transformation.
 
 ---
 
-## 9. Cross‑Validation Hygiene and Analysis Modes
+## 11. Cross-Validation Hygiene
 
-Several modules collaborate to prevent data leakage:
+**Module:** `cv_hygiene.py`
 
-- **Analysis modes** (see also the earlier Cross‑Validation section):
+Several pipeline components can introduce data leakage if not properly constrained to
+training trials. The following table summarizes the safeguards:
 
-  - `trial_ml_safe`: All cross‑trial computations that could leak test information require `train_mask` and are restricted to training trials (e.g. IAF estimation, PAC surrogates, microstate templates, certain connectivity modes).
-  - `group_stats`: Aggregations may use all available trials (appropriate for group‑level descriptive statistics).
+| Component | Leakage risk | Safeguard |
+|-----------|-------------|-----------|
+| IAF estimation | Test-trial spectra influence band definitions | `compute_iaf_for_fold` uses `train_mask` only |
+| Evoked subtraction | Condition averages include test trials | `ValueError` raised unless `train_mask` is provided |
+| ITPC | Trial-average phase involves test trials | `fold_global` mode restricts to training trials |
+| PAC surrogates | Surrogate distribution estimated on all trials | Surrogates computed from training trials only |
+| Microstate templates | Clustering sees test-trial scalp maps | K-means restricted to training trials |
+| Connectivity (condition-wise) | Condition average includes test trials | Training-only aggregation enforced |
 
-- **IAF in CV**: `cv_hygiene.compute_iaf_for_fold` computes fold‑specific IAF and band definitions from training trials only; if the `train_mask` is too small, IAF is skipped rather than guessed.
+**Analysis modes:**
 
-- **Evoked subtraction in CV**: Both precomputation and power TFR require a valid `train_mask` when `subtract_evoked = true` and `analysis_mode = "trial_ml_safe"`. Otherwise, a `ValueError` is raised.
+- `trial_ml_safe` — all cross-trial computations that could leak test information require a
+  valid `train_mask`. Any violation raises an error.
+- `group_stats` — aggregations over all available trials; appropriate for group-level
+  descriptive statistics only.
 
-- **ITPC / PAC / Connectivity**: Methods that aggregate across trials default to **fold‑safe options** when possible (e.g. `fold_global` for ITPC, training‑only surrogates for PAC).
-
-Any configuration that would silently mix train and test information is rejected rather than “helpfully” altered.
-
----
-
-## 10. Result Containers and Manifests
-
-### 10.1 `FeatureExtractionResult` (TFR‑Based)
-
-`FeatureExtractionResult` (in `results.py`) is a flat dataclass used by the TFR‑based pipeline. It stores:
-
-- `pow_df`, `aper_df`, `erp_df`, `conn_df`, `dconn_df`, `phase_df`, `pac_trials_df`, `pac_time_df`, `erds_df`, `spectral_df`, `ratios_df`, `asymmetry_df`, `comp_df`, `bursts_df`, `microstates_df`, `quality_df`, `source_df`,
-- plus associated column lists and baseline/TFR metadata.
-
-### 10.2 `ExtractionResult` (Precomputed‑Based)
-
-`ExtractionResult` collects feature groups in a dict:
-
-- `features[group_name] = FeatureSet(df, cols, name)`,
-- optional `condition` vector if events are provided,
-- QC metadata per group.
-
-It provides:
-
-- `get_combined_df(include_condition=True)` – concatenates all groups into a single design matrix,
-- `get_feature_group_df(group)` – returns a single group’s DataFrame,
-- `get_qc_summary()` – summarized QC across groups.
-
-### 10.3 Manifests and Organized Saving
-
-Using `generate_manifest` and `save_features_organized` from `eeg_pipeline.domain.features.naming`, features can be saved with:
-
-- A machine‑readable feature manifest (names, domains, bands, scopes, QC flags),
-- A standardized directory structure per subject and task,
-- Optional condition labels.
-
-This ensures that downstream analyses (e.g. fMRI integration, ML models) can reconstruct exactly which features were used and under what preprocessing choices.
+Any configuration that would silently mix training and test information is rejected.
 
 ---
 
-## 11. Dependencies
+## 12. Result Containers
 
-- **MNE‑Python** – TFR, PSD, forward/inverse solutions, CSD.
-- **mne‑connectivity** – Phase‑based and amplitude‑based connectivity.
-- **NumPy / SciPy** – Numerical computing, signal processing, optimization.
-- **scikit‑learn** – Clustering (microstates, dynamic connectivity states).
-- **NetworkX** – Graph‑theoretic connectivity metrics.
-- **NiBabel** – NIfTI reading for fMRI‑constrained source localization.
-- **joblib** – Parallelization for band precomputation, aperiodic fitting, ITPC, and asymmetry.
+### 12.1 `FeatureExtractionResult` (TFR-Based)
 
-All computations are designed to be **transparent, scientifically interpretable, and reproducible**, with explicit guards against silent fallbacks and cross‑validation leakage.
+Flat dataclass in `results.py`. One DataFrame per feature domain:
+
+```
+pow_df, aper_df, erp_df, conn_df, dconn_df, phase_df,
+pac_trials_df, pac_time_df, erds_df, spectral_df,
+ratios_df, asymmetry_df, comp_df, bursts_df,
+microstates_df, quality_df, source_df
+```
+
+Also stores associated column lists and baseline/TFR metadata.
+
+### 12.2 `ExtractionResult` (Precomputed-Based)
+
+Stores feature groups as:
+
+```python
+features[group_name] = FeatureSet(df, cols, name)
+```
+
+Key methods:
+
+| Method | Returns |
+|--------|---------|
+| `get_combined_df(include_condition)` | Single design matrix from all groups |
+| `get_feature_group_df(group)` | DataFrame for one group |
+| `get_qc_summary()` | Aggregated QC across groups |
+
+### 12.3 Feature Manifests
+
+`generate_manifest` and `save_features_organized` (in `eeg_pipeline.domain.features.naming`)
+produce:
+
+- A machine-readable manifest: feature names, domains, bands, scopes, QC flags.
+- A standardized directory structure per subject and task.
+- Optional condition labels alongside features.
+
+This ensures downstream analyses (fMRI integration, ML models) can reconstruct exactly
+which features were extracted and under what preprocessing choices.
+
+---
+
+## 13. Dependencies
+
+| Library | Role |
+|---------|------|
+| **MNE-Python** | TFR, PSD, forward/inverse solutions, CSD |
+| **mne-connectivity** | Phase- and amplitude-based connectivity |
+| **NumPy / SciPy** | Numerical computing, signal processing, optimization |
+| **scikit-learn** | Clustering (microstates, dynamic connectivity states) |
+| **NetworkX** | Graph-theoretic connectivity metrics |
+| **NiBabel** | NIfTI reading for fMRI-constrained source localization |
+| **joblib** | Parallelization for band precomputation, aperiodic fitting, ITPC, asymmetry |
