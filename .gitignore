@@ -83,6 +83,9 @@ data/**
 eeg_pipeline/data/**
 !eeg_pipeline/data/**/.gitkeep
 
+# Ignore paradigm-specific helper scripts (local to each project)
+paradigm-specific-scripts/
+
 # Allow specific metadata files in bids_output
 !data/bids_output/
 data/bids_output/**
