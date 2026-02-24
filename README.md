@@ -13,18 +13,14 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI research. Covers raw 
 
 ## Documentation
 
-Each pipeline has a dedicated README with full methods, formulas, configuration references, and output schemas. Start here for orientation, then follow the link relevant to your workflow.
+Each pipeline has a dedicated README with full methods, formulas, configuration references, and output schemas. Start here for orientation, then follow the link relevant to your workflow:
 
-| Module | README | What it covers |
-|--------|--------|----------------|
-| EEG Preprocessing | [eeg_pipeline/preprocessing/README.md](eeg_pipeline/preprocessing/README.md) | Bad channel detection, ICA, epoching, artifact rejection steps, all config options |
-| Feature Extraction | [eeg_pipeline/analysis/features/README.md](eeg_pipeline/analysis/features/README.md) | All 16 feature families with formulas, naming schema, spatial transforms, CV-safety, output structure |
-| Behavioral Analysis | [eeg_pipeline/analysis/behavior/README.md](eeg_pipeline/analysis/behavior/README.md) | Stage DAG, statistical safeguards, all 19 stage definitions, FDR reference |
-| Machine Learning | [eeg_pipeline/analysis/machine_learning/README.md](eeg_pipeline/analysis/machine_learning/README.md) | CV schemes, models, preprocessing, evaluation metrics, SHAP, uncertainty quantification |
-| fMRI Analysis | [fmri_pipeline/README.md](fmri_pipeline/README.md) | Raw-to-BIDS, fMRIPrep, GLM, beta-series, pain signatures (NPS/SIIPS1), BEM generation |
-| Interactive TUI | [eeg_pipeline/cli/tui/README.md](eeg_pipeline/cli/tui/README.md) | Architecture, build instructions, wizard flow, configuration persistence |
-
----
+- **EEG Preprocessing** – `eeg_pipeline/preprocessing/README.md`
+- **Feature Extraction** – `eeg_pipeline/analysis/features/README.md`
+- **Behavioral Analysis** – `eeg_pipeline/analysis/behavior/README.md`
+- **Machine Learning** – `eeg_pipeline/analysis/machine_learning/README.md`
+- **fMRI Analysis** – `fmri_pipeline/README.md`
+- **Interactive TUI** – `eeg_pipeline/cli/tui/README.md`
 
 An **interactive TUI** provides guided wizards for every stage with no CLI flags to memorize. See [Interactive TUI](#interactive-tui).
 
