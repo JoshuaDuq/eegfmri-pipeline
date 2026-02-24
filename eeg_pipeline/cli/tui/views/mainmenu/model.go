@@ -35,7 +35,6 @@ var analysisPipelines = []pipelineItem{
 	{"Features", "Extract EEG feature sets", int(types.PipelineFeatures)},
 	{"Behavior", "EEG-behavior analysis", int(types.PipelineBehavior)},
 	{"Machine Learning", "LOSO regression & classification", int(types.PipelineML)},
-	{"Plotting", "Curate and export visualization suites", int(types.PipelinePlotting)},
 	{"fMRI Analysis", "First-level contrasts + trial-wise signatures", int(types.PipelineFmriAnalysis)},
 }
 
@@ -46,11 +45,13 @@ type utilityItem struct {
 
 const (
 	UtilityGlobalSetup = iota
+	UtilityPlotting
 	UtilityPipelineSmokeTest
 )
 
 var utilities = []utilityItem{
 	{"Global Setup", "Configure project paths and settings"},
+	{"Plotting", "Curate and export visualization suites"},
 	{"Pipeline Smoke Test", "Run quick parser/runtime checks across pipeline commands"},
 }
 
@@ -136,6 +137,11 @@ func (m *Model) SetCursor(idx int) {
 			m.analysisCursor = i
 			return
 		}
+	}
+	if idx == int(types.PipelinePlotting) {
+		m.currentSection = SectionUtilities
+		m.utilityCursor = UtilityPlotting
+		return
 	}
 }
 
@@ -263,6 +269,9 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		switch m.utilityCursor {
 		case UtilityGlobalSetup:
 			m.SelectedUtility = UtilityGlobalSetup
+			return m, nil
+		case UtilityPlotting:
+			m.SelectedPipeline = int(types.PipelinePlotting)
 			return m, nil
 		case UtilityPipelineSmokeTest:
 			m.SelectedUtility = UtilityPipelineSmokeTest

@@ -1,692 +1,1071 @@
-# Machine Learning Pipeline (under development due to lack of source data)
+# Machine Learning Pipeline
 
-Trial-level predictive modeling for pain research, supporting both continuous regression (pain intensity) and binary classification (pain vs. no-pain). All evaluation uses strict cross-validation with subject as the statistical unit.
-
-## Architecture
-
-The pipeline is organized into modular layers:
-
-```
-orchestration.py          ← High-level runners (entry points)
-├── cv.py                 ← Cross-validation fold creation, metrics, permutation tests
-├── pipelines.py          ← Regression pipeline factories (ElasticNet, Ridge, RF)
-├── classification.py     ← Classification pipeline factories (SVM, LR, RF, Ensemble)
-├── cnn.py                ← EEGNet-style CNN classifier (PyTorch)
-├── preprocessing.py      ← CV-safe transformers (variance, NaN, inf handling)
-├── config.py             ← Unified configuration loader with defaults
-├── shap_importance.py    ← SHAP feature importance (per-fold aggregated)
-├── uncertainty.py        ← Conformal prediction intervals
-├── time_generalization.py← Temporal generalization analysis
-└── feature_metadata.py   ← Feature name parsing and grouped importance
-```
-
-**Data flow:** Per-trial feature tables (from the feature extraction pipeline) are loaded via `load_active_matrix`, merged with behavioral targets from `events.tsv`, and passed through nested CV.
+Trial-level predictive modeling from EEG features. Supports continuous regression (pain intensity) and binary classification (pain vs. no-pain). The **subject is the statistical unit** throughout: all primary metrics are subject-level aggregates computed under leave-one-subject-out (LOSO) cross-validation.
 
 ---
 
-## Preprocessing
+## Table of Contents
 
-**Module:** `preprocessing.py`, `pipelines.py`
+1. [Architecture](#1-architecture)
+2. [Preprocessing](#2-preprocessing)
+3. [Regression Models](#3-regression-models)
+4. [Classification Models](#4-classification-models)
+5. [Cross-Validation Schemes](#5-cross-validation-schemes)
+6. [Evaluation Metrics](#6-evaluation-metrics)
+7. [Permutation Testing](#7-permutation-testing)
+8. [Time Generalization Analysis](#8-time-generalization-analysis)
+9. [SHAP Feature Importance](#9-shap-feature-importance)
+10. [Permutation Feature Importance](#10-permutation-feature-importance)
+11. [Uncertainty Quantification](#11-uncertainty-quantification)
+12. [Pipeline Runners](#12-pipeline-runners)
+13. [Output Structure](#13-output-structure)
+14. [Reproducibility](#14-reproducibility)
+15. [Configuration Reference](#15-configuration-reference)
+16. [Dependencies](#16-dependencies)
 
-All pipelines share a common preprocessing chain that is fitted on the training fold only (CV-safe):
+---
 
-| Step | Transformer | Method |
-|------|-------------|--------|
-| 1. **Inf → NaN** | `ReplaceInfWithNaN` | Replaces `±inf` with `NaN` so downstream imputers can handle them. |
-| 2. **Drop all-NaN columns** | `DropAllNaNColumns` | Removes columns where every value is `NaN`/`inf` in the training fold. Requires at least `min_finite=1` finite value per column. |
-| 3. **Imputation** | `SimpleImputer` | Fills remaining `NaN` values using the training-fold statistic. Default strategy: `median`. |
-| 4. **Variance filter** | `VarianceThreshold` | Removes features with variance below threshold (default `0.0`). Threshold is tuned via grid search (`variance_threshold_grid: [0.0, 0.01, 0.1]`). Raises an actionable error when all features are removed. |
-| 5. **Scaling** | `StandardScaler` | Zero-mean, unit-variance standardization. Applied for linear models (ElasticNet, Ridge, SVM, LR); skipped for Random Forest. |
-| 6. **PCA** (optional) | `PCA` | Dimensionality reduction retaining `n_components` fraction of variance (default 95%). Disabled by default (`pca.enabled: false`). |
+## 1. Architecture
 
-### Feature Harmonization
+```
+orchestration.py           ← High-level pipeline runners (entry points)
+├── cv.py                  ← CV fold creation, aggregation, permutation tests
+├── pipelines.py           ← Regression pipeline factories (ElasticNet, Ridge, RF)
+├── classification.py      ← Classification pipeline factories (SVM, LR, RF, Ensemble)
+├── cnn.py                 ← EEGNet-style CNN classifier (PyTorch)
+├── preprocessing.py       ← CV-safe transformers (inf/NaN, variance, deconfound)
+├── config.py              ← Unified configuration loader with defaults
+├── shap_importance.py     ← SHAP feature importance (per-fold aggregated)
+├── uncertainty.py         ← Conformal prediction intervals
+├── time_generalization.py ← Temporal generalization regression
+├── feature_metadata.py    ← Feature name parsing and grouped importance
+└── plotting.py            ← Auto-generated publication-style figures
+```
 
-When subjects have different feature sets (e.g., different channel counts), fold-level harmonization ensures consistent dimensionality:
+**Data flow:**  Per-trial feature tables (written by the feature extraction pipeline to `derivatives/*/eeg/features/`) are assembled into a design matrix $ X \in \mathbb{R}^{N \times P} $ via `load_active_matrix`, merged with behavioral targets from `events.tsv`, and passed through nested CV. All preprocessing parameters are estimated exclusively on the training fold of each split.
+
+---
+
+## 2. Preprocessing
+
+**Modules:** `preprocessing.py`, `pipelines.py`
+
+### 2.1 Standard Preprocessing Steps
+
+All model pipelines share a common chain. Every transformer is **CV-safe**: fitted on the training fold only, applied to train and test.
+
+| Step | Transformer | Behavior |
+|------|-------------|----------|
+| 1 | `ReplaceInfWithNaN` | Replaces `\pm\infty` with `NaN` so downstream imputers can operate. |
+| 2 | `DropAllNaNColumns` | Removes columns with no finite value in the training fold. Raises if all columns are removed. |
+| 3 | `SpatialFeatureSelector` | Retains only features whose inferred ROI appears in `spatial_regions_allowed`. Skipped when list is empty; passes all features if names are unavailable. |
+| 4 | `SimpleImputer` | Replaces remaining `NaN` with the training-fold statistic (default: `median`). |
+| 5 | `VarianceThreshold` | Drops features with variance ` \sigma^2 < \theta `. Default `\theta = 0.0`. Jointly tuned via grid search. Raises a descriptive error if all features are removed. |
+| 6 | `SelectPercentile` *(optional)* | Retains the top-`k\%` features ranked by univariate score (`f_regression` for regression, `f_classif` for classification). Activated only when `feature_selection_percentile < 100`. |
+| 7 | `StandardScaler` | Zero-mean, unit-variance standardization. Applied for all linear models (ElasticNet, Ridge, SVM, LR) and whenever PCA is enabled. Skipped for Random Forest. |
+| 8 | `PCA` *(optional)* | Dimensionality reduction. `n_components` is either a float (fraction of explained variance, default 0.95) or an integer count. Disabled by default. |
+
+### 2.2 Covariate Handling
+
+When `covariates` are provided, they are appended as the last $C$ columns of $X$ and the pipeline splits into two parallel branches via `ColumnTransformer`:
+
+```
+ColumnTransformer
+├── "eeg" branch : columns [0 … P−C−1]  → full feature pipeline (steps 1–8)
+└── "cov" branch : columns [P−C … P−1]  → ReplaceInfWithNaN → SimpleImputer(most_frequent) → [StandardScaler]
+```
+
+Covariate columns are never dropped by variance filtering, spatial selection, or feature harmonization.
+
+### 2.3 Deconfounding
+
+**Transformer:** `Deconfounder` — applied after `ColumnTransformer` when `preprocessing.deconfound: true`.
+
+Given the design matrix partitioned as $X = [X_\text{EEG} \mid Z]$ where $Z \in \mathbb{R}^{N \times C}$ are covariates, the transformer fits a linear model on the training fold:
+
+$$
+
+\hat{B} = (Z_\text{train}^\top Z_\text{train})^{-1} Z_\text{train}^\top X_{\text{EEG,train}}
+
+$$
+
+and returns residuals for both train and test:
+
+$$
+
+\tilde{X}_\text{EEG} = X_\text{EEG} - Z\hat{B}
+
+$$
+
+The output matrix contains only the deconfounded EEG features — covariate columns are discarded.
+
+### 2.4 Feature Harmonization
+
+Fold-level harmonization ensures consistent dimensionality across subjects with heterogeneous feature coverage:
 
 | Mode | Behavior |
 |------|----------|
-| `intersection` | Keep only features present (finite) in every training subject. Default for LOSO. |
-| `union_impute` | Keep all features; missing values are imputed. |
+| `intersection` | Retain only features for which **every** training subject has at least one finite value. Falls back to any-finite-in-train if strict intersection is empty. **Default.** |
+| `union_impute` | Retain all features; missing values handled by imputation downstream. |
+
+Covariate columns are always protected and excluded from harmonization logic.
 
 ---
 
-## Regression Models
+## 3. Regression Models
 
-### ElasticNet
+**Module:** `pipelines.py`
 
-**Module:** `pipelines.py` → `create_elasticnet_pipeline`
+All regression pipelines wrap the estimator in `TransformedTargetRegressor`, applying a Yeo-Johnson power transform to the target $y$ before fitting and back-transforming predictions to the original scale. This normalizes skewed pain-rating distributions.
 
-Linear regression with combined L1 + L2 regularization and Yeo-Johnson target transformation.
+**Target transformation:** The Yeo-Johnson transform $\psi_\lambda(y)$ is defined piecewise for $\lambda \neq 0, 2$:
 
-**Pipeline:**
+$$
 
-```
-Preprocessing → StandardScaler → [PCA] → TransformedTargetRegressor(
-    regressor = ElasticNet(α, l1_ratio),
-    transformer = PowerTransformer(method="yeo-johnson", standardize=True)
-)
-```
+\psi_\lambda(y) = \begin{cases}
+\tfrac{(y+1)^\lambda - 1}{\lambda} & y \geq 0,\; \lambda \neq 0 \\
+\ln(y+1) & y \geq 0,\; \lambda = 0 \\
+-\tfrac{(1-y)^{2-\lambda}-1}{2-\lambda} & y < 0,\; \lambda \neq 2 \\
+-\ln(1-y) & y < 0,\; \lambda = 2
+\end{cases}
 
-**Target transformation:** The Yeo-Johnson power transform normalizes the target distribution before fitting, improving performance on skewed pain ratings. Predictions are back-transformed to the original scale.
+$$
 
-**Hyperparameter grid:**
+$\lambda$ is estimated by maximum likelihood on the **training fold only**.
 
-| Parameter | Search space |
-|-----------|-------------|
-| `alpha` | `[0.01, 0.1, 1.0, 10.0]` |
-| `l1_ratio` | `[0.1, 0.5, 0.9]` |
-| `variance_threshold` | `[0.0, 0.01, 0.1]` |
+---
 
-### Ridge
+### 3.1 ElasticNet
 
-**Module:** `pipelines.py` → `create_ridge_pipeline`
+**Factory:** `create_elasticnet_pipeline`
 
-L2-regularized linear regression with Yeo-Johnson target transformation. Same pipeline structure as ElasticNet but without L1 sparsity.
+Combined L1 + L2 penalized linear regression. Encourages both sparsity (L1) and stability for correlated features (L2):
 
-**Hyperparameter grid:**
+$$
 
-| Parameter | Search space |
-|-----------|-------------|
-| `alpha` | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
+\hat{\beta} = \underset{\beta}{\arg\min} \;\frac{1}{2n}\bigl\|y - X\beta\bigr\|_2^2 + \alpha\!\left[\rho\|\beta\|_1 + \frac{1-\rho}{2}\|\beta\|_2^2\right]
 
-### Random Forest Regressor
+$$
 
-**Module:** `pipelines.py` → `create_rf_pipeline`
-
-Ensemble of decision trees. No scaling or target transformation (tree-based models are invariant to monotonic transforms).
+where $\alpha > 0$ controls regularization strength and $\rho \in [0,1]$ is the L1 mixing ratio.
 
 **Pipeline:**
-
 ```
-Preprocessing (no scaling) → RandomForestRegressor(n_estimators, bootstrap=True)
+Preprocessing → StandardScaler → [SelectPercentile] → [PCA]
+  → TransformedTargetRegressor(ElasticNet(α, ρ), PowerTransformer("yeo-johnson"))
+```
+
+**Hyperparameter grid (inner CV):**
+
+| Parameter | Default search space |
+|-----------|----------------------|
+| `\alpha` | `[0.01, 0.1, 1.0, 10.0]` |
+| `\rho` (`l1_ratio`) | `[0.1, 0.5, 0.9]` |
+| `\theta` (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
+
+---
+
+### 3.2 Ridge
+
+**Factory:** `create_ridge_pipeline`
+
+L2-regularized linear regression (Tikhonov regularization). Numerically stable for correlated feature sets:
+
+$$
+
+\hat{\beta} = \underset{\beta}{\arg\min} \;\bigl\|y - X\beta\bigr\|_2^2 + \alpha\|\beta\|_2^2
+
+$$
+
+**Pipeline:** Identical to ElasticNet; the L1 term is absent.
+
+**Hyperparameter grid:**
+
+| Parameter | Default search space |
+|-----------|----------------------|
+| `\alpha` | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
+| `\theta` (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
+
+---
+
+### 3.3 Random Forest Regressor
+
+**Factory:** `create_rf_pipeline`
+
+Bagged ensemble of decision trees. Invariant to monotonic feature transforms; no scaling is applied to features.
+
+$$
+
+\hat{f}(x) = \frac{1}{B}\sum_{b=1}^{B} T_b(x), \quad T_b \text{ trained on bootstrap resample } \mathcal{D}_b
+
+$$
+
+**Pipeline:**
+```
+Preprocessing (no scaling)
+  → TransformedTargetRegressor(RandomForestRegressor(B, bootstrap=True), PowerTransformer("yeo-johnson"))
 ```
 
 **Hyperparameter grid:**
 
-| Parameter | Search space |
-|-----------|-------------|
+| Parameter | Default search space |
+|-----------|----------------------|
 | `max_depth` | `[5, 10, 20, None]` |
 | `min_samples_split` | `[2, 5, 10]` |
 | `min_samples_leaf` | `[1, 2, 4]` |
+| `\theta` (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
 
 ---
 
-## Classification Models
+## 4. Classification Models
 
 **Module:** `classification.py`
 
-Binary classification for pain vs. no-pain prediction. All classifiers use `class_weight="balanced"` to handle class imbalance.
+Binary classification (pain vs. no-pain). All classifiers use `class_weight="balanced"` and are wrapped in `imblearn.pipeline.Pipeline` to support optional class resampling.
 
-### SVM
+### 4.1 Class Imbalance Handling
+
+Configured via `classification.resampler`:
+
+| Value | Strategy |
+|-------|---------|
+| `none` | No resampling (default). |
+| `undersample` | `RandomUnderSampler`: randomly remove majority-class samples to balance class counts. |
+| `smote` | `SMOTE`: synthetically generate minority-class samples via k-NN interpolation. |
+
+---
+
+### 4.2 Support Vector Machine (SVM)
+
+**Factory:** `create_svm_pipeline`
+
+SVM with RBF kernel. Soft-margin formulation:
+
+$$
+
+\min_{w,b,\xi}\;\frac{1}{2}\|w\|^2 + C\sum_i \xi_i
+\quad\text{s.t.}\quad y_i(w^\top\phi(x_i)+b)\geq 1-\xi_i,\;\xi_i\geq 0
+
+$$
+
+with $K(x,x') = \exp(-\gamma\|x-x'\|^2)$. Probability calibration via Platt scaling (`probability=True`).
 
 **Pipeline:**
-
 ```
-Preprocessing → StandardScaler → [PCA] → SVC(kernel="rbf", probability=True, class_weight="balanced")
+Preprocessing → StandardScaler → [PCA] → [Resampler] → SVC(RBF, probability=True, class_weight="balanced")
 ```
 
 **Hyperparameter grid:**
 
-| Parameter | Search space |
-|-----------|-------------|
+| Parameter | Default search space |
+|-----------|----------------------|
 | `C` | `[0.1, 1.0, 10.0]` |
-| `gamma` | `["scale", "auto"]` |
-| `variance_threshold` | `[0.0, 0.01, 0.1]` |
+| `\gamma` | `["scale", "auto"]` |
+| `\theta` | `[0.0, 0.01, 0.1]` |
 
-### Logistic Regression
+---
 
-**Pipeline:**
+### 4.3 Logistic Regression
 
-```
-Preprocessing → StandardScaler → [PCA] → LogisticRegression(penalty, solver, class_weight="balanced")
-```
+**Factory:** `create_logistic_pipeline`
 
-Solver is automatically selected: `saga` for L1/ElasticNet penalties, `lbfgs` for L2.
+Regularized logistic regression with sigmoid output:
 
-**Hyperparameter grid:**
+$$
 
-| Parameter | Search space |
-|-----------|-------------|
-| `C` | `[0.01, 0.1, 1.0, 10.0]` |
-| `variance_threshold` | `[0.0, 0.01, 0.1]` |
+\hat{p}(y=1 \mid x) = \sigma(x^\top\beta + b) = \frac{1}{1+e^{-x^\top\beta - b}}
 
-### Random Forest Classifier
+$$
 
-**Pipeline:**
-
-```
-Preprocessing (no scaling) → RandomForestClassifier(n_estimators=100, class_weight="balanced")
-```
+Supports L2 (default), L1, and ElasticNet penalties. Solver is auto-selected: `saga` for L1/ElasticNet, `lbfgs` for L2 (with scikit-learn ≥ 1.8.0 compatibility).
 
 **Hyperparameter grid:**
 
-| Parameter | Search space |
-|-----------|-------------|
-| `max_depth` | `[5, 10, 20, None]` |
-| `min_samples_leaf` | `[1, 3, 5]` |
-| `variance_threshold` | `[0.0, 0.01, 0.1]` |
+| Parameter | Default search space |
+|-----------|----------------------|
+| `C = 1/\alpha` | `[0.01, 0.1, 1.0, 10.0]` |
+| `l1_ratio` (ElasticNet only) | `[0.1, 0.5, 0.9]` |
+| `\theta` | `[0.0, 0.01, 0.1]` |
 
-### Soft Voting Ensemble
+---
 
-**Module:** `classification.py` → `create_ensemble_pipeline`
+### 4.4 Random Forest Classifier
 
-Combines SVM, Logistic Regression, and Random Forest via `VotingClassifier(voting="soft")`. Each base classifier produces class probabilities; the ensemble averages them for the final prediction.
+**Factory:** `create_rf_classification_pipeline`
 
-### EEGNet CNN
+Bagged ensemble of decision trees for binary classification. No feature scaling applied.
 
-**Module:** `cnn.py` → `fit_predict_cnn_binary_classifier`
+```
+Preprocessing (no scaling) → [Resampler] → RandomForestClassifier(B=100, class_weight="balanced")
+```
 
-EEGNet-style convolutional neural network operating on raw epoch tensors `(n_trials, n_channels, n_timepoints)` rather than extracted features.
+**Hyperparameter grid:** Same structure as the regressor (max_depth, min_samples_split, min_samples_leaf, variance_threshold).
+
+---
+
+### 4.5 Soft Voting Ensemble
+
+**Factory:** `create_ensemble_pipeline`
+
+Combines SVM, Logistic Regression, and Random Forest via probability averaging:
+
+$$
+
+\hat{p}_\text{ens}(y=1\mid x) = \frac{1}{3}\!\left[\hat{p}_\text{SVM}(x) + \hat{p}_\text{LR}(x) + \hat{p}_\text{RF}(x)\right]
+
+$$
+
+When `classification.calibrate_ensemble: true`, SVM and RF are individually wrapped in `CalibratedClassifierCV(method="sigmoid", cv=2)` before voting to correct probability calibration independently.
+
+---
+
+### 4.6 EEGNet CNN
+
+**Module:** `cnn.py`
+
+EEGNet-style convolutional neural network operating on raw epoch tensors $(N, C, T)$ — not extracted features. Loaded via `load_epoch_tensor_matrix` (distinct from `load_active_matrix`).
 
 **Architecture:**
 
 ```
-Block 1:
-  Conv2d(1, F₁, kernel=(1, K₁))          ← Temporal convolution (K₁=64)
-  BatchNorm2d(F₁)
-  Conv2d(F₁, F₁·D, kernel=(C, 1), groups=F₁)  ← Depthwise spatial convolution
-  BatchNorm2d(F₁·D)
-  ELU → AvgPool2d(1, 4) → Dropout(p)
+Input: (N, 1, C, T)
 
-Block 2:
-  Conv2d(F₁·D, F₁·D, kernel=(1, K₂), groups=F₁·D)  ← Separable temporal (K₂=16)
-  Conv2d(F₁·D, F₂, kernel=(1, 1))                     ← Pointwise
-  BatchNorm2d(F₂)
-  ELU → AvgPool2d(1, 8) → Dropout(p)
+Block 1 — Temporal + Depthwise Spatial:
+  Conv2d(1, F₁, (1, K₁), pad=(0, K₁//2))      ← temporal filters
+  BatchNorm2d(F₁)
+  Conv2d(F₁, F₁·D, (C, 1), groups=F₁)          ← depthwise spatial
+  BatchNorm2d(F₁·D) → ELU → AvgPool2d(1,4) → Dropout(p)
+
+Block 2 — Separable Temporal:
+  Conv2d(F₁·D, F₁·D, (1, K₂), groups=F₁·D)    ← depthwise temporal
+  Conv2d(F₁·D, F₂, (1,1))                        ← pointwise
+  BatchNorm2d(F₂) → ELU → AvgPool2d(1,8) → Dropout(p)
 
 Head:
-  AdaptiveAvgPool2d(1, 1) → Linear(F₂, 1)
+  AdaptiveAvgPool2d(1,1) → Flatten → Linear(F₂, 1) → σ(·) → probability
 ```
 
-| Parameter | Default |
-|-----------|---------|
-| `F₁` (temporal filters) | 8 |
-| `D` (depth multiplier) | 2 |
-| `F₂` (pointwise filters) | 16 |
-| `K₁` (temporal kernel) | 64 (forced odd) |
-| `K₂` (separable kernel) | 16 (forced odd) |
-| `dropout` | 0.5 |
+**Default parameters:**
+
+| Symbol | Config key | Default |
+|--------|-----------|---------|
+| `F_1` | `temporal_filters` | 8 |
+| `D` | `depth_multiplier` | 2 |
+| `F_2` | `pointwise_filters` | 16 |
+| `K_1` | `kernel_length` | 64 (forced odd) |
+| `K_2` | `separable_kernel_length` | 16 (forced odd) |
+| `p` | `dropout` | 0.5 |
 
 **Training:**
 
-- **Optimizer:** AdamW (lr=1e-3, weight_decay=1e-3)
-- **Loss:** BCEWithLogitsLoss with automatic positive-class weighting (`pos_weight = n_neg / n_pos`)
-- **Early stopping:** Patience of 10 epochs on validation loss
+- **Loss:** `BCEWithLogitsLoss` with `pos_weight = n_\text{neg} / n_\text{pos}` for automatic class balancing
+- **Optimizer:** AdamW (lr = 10⁻³, weight_decay = 10⁻³)
+- **Early stopping:** Patience 10 epochs on held-out validation loss
 - **Gradient clipping:** Max norm 1.0
-- **Channelwise standardization:** Per-channel zero-mean, unit-variance computed on training data only
-- **Validation split:** 20% of training data, group-aware (`GroupShuffleSplit`) when multiple subjects are present
+- **Normalization:** Channelwise standardization — mean and std computed on the training partition only
+- **Validation split:** 20% of training data; group-aware (`GroupShuffleSplit`) when multiple subjects present, preserving independence during early stopping
+- **LOSO:** Inner loop provides early stopping only — no hyperparameter grid search
 
 ---
 
-## Cross-Validation Schemes
+## 5. Cross-Validation Schemes
 
 **Module:** `cv.py`
 
-### Leave-One-Subject-Out (LOSO)
+### 5.1 Nested LOSO (Primary)
 
-The primary evaluation scheme. Each subject is held out once as the test set; all remaining subjects form the training set.
-
-**Nested CV structure:**
+Leave-one-subject-out outer loop with group-aware inner CV for hyperparameter selection. Guarantees unbiased generalization estimates across subjects.
 
 ```
-Outer loop: LOSO (one subject held out per fold)
-  Inner loop: GroupKFold on training subjects (hyperparameter tuning)
-    Scoring: Pearson r (primary, refit metric) + neg_MSE (secondary)
+Outer loop: LeaveOneGroupOut
+  └─ Per fold: feature harmonization on training set only
+     Inner loop: GroupKFold (k ≤ n_train_subjects)
+       Scoring: Pearson r (logged) + neg_MSE
+       Refit criterion: neg_MSE (regression) | average_precision (classification, configurable)
 ```
 
-- Inner CV splits are capped at the number of unique training subjects.
-- If fewer than 2 training subjects remain, the model is fitted without hyperparameter tuning.
+**Inner CV fallback:** When fewer than 2 training subjects remain, the model is fitted directly without hyperparameter search.
 
-### Within-Subject CV
+---
 
-Block-aware cross-validation within each subject. Uses `GroupKFold` with run/block labels as groups to prevent temporal leakage.
+### 5.2 Within-Subject CV (Block-Aware)
 
-**Structure:**
+Block-aware CV within each subject. Run/block labels serve as groups to prevent temporal leakage across sessions.
 
 ```
 For each subject:
-  Outer loop: GroupKFold on blocks/runs
-    Inner loop: Block-aware GroupKFold (hyperparameter tuning)
+  Outer loop: GroupKFold on block labels (k = min(n_blocks, outer_cv_splits))
+    Inner loop: GroupKFold on remaining blocks (refit: neg_MSE for regression; roc_auc for classification)
 ```
 
-- Requires `block`/`run_id` labels in `events.tsv`.
-- Trials with missing block labels are dropped.
+**Ordered block mode** (`cv.within_subject_ordered_blocks: true`): Folds respect temporal ordering — all preceding blocks form the training set, the next block is the test set. Appropriate when temporal autocorrelation is present.
 
-### CV Hygiene
+Block labels are read from `block`, `run_id`, `run`, `session`, or `run_num` columns of `events.tsv`. Subjects with missing or constant block labels are skipped.
 
-**Module:** `cv.py` → `apply_fold_specific_hygiene`
+---
+
+### 5.3 CV Hygiene
+
+**Function:** `apply_fold_specific_hygiene`
 
 Prevents data leakage from test trials into fold-specific computations:
 
-- **IAF (Individual Alpha Frequency):** Band definitions computed on training trials only.
-- **Global/broadcast features:** ITPC and similar cross-trial features use `train_mask` to exclude test trials.
-- **Feature scaling:** All parameters learned on training fold only.
+- **Individual Alpha Frequency (IAF):** Band boundary estimation computed on training trials only.
+- **Global features (e.g., ITPC):** Cross-trial computations use `train_mask` to exclude test data.
+- **All preprocessing statistics:** Imputation, variance thresholds, scaling, PCA — all estimated on training fold only.
 
 Controlled by `machine_learning.cv.hygiene_enabled` (default `true`).
 
 ---
 
-## Evaluation Metrics
+## 6. Evaluation Metrics
 
-### Regression
+### 6.1 Regression
 
-**Primary metric:** Subject-level Fisher-z–averaged Pearson correlation.
+**Primary metric — Subject-level Fisher-z–aggregated Pearson correlation**
 
-**Method:**
+For each held-out subject $i$ with $n_i$ test trials, compute the Pearson correlation between predicted and true ratings:
 
-1. Compute per-subject Pearson r between predicted and true values.
-2. Clip r values to `[clip_min, clip_max]` (configurable, prevents arctanh explosion).
-3. Fisher z-transform: `z = arctanh(r)`.
-4. Weighted average: `z̄ = Σ(wᵢ × zᵢ) / Σ(wᵢ)`, where `wᵢ = max(nᵢ − 3, 1)`.
-5. Back-transform: `r̄ = tanh(z̄)`.
+$$
 
-**Confidence intervals** (configurable via `machine_learning.evaluation.ci_method`):
+r_i = \frac{\sum_t (\hat{y}_{it} - \bar{\hat{y}}_i)(y_{it} - \bar{y}_i)}{\sqrt{\sum_t (\hat{y}_{it} - \bar{\hat{y}}_i)^2 \cdot \sum_t (y_{it} - \bar{y}_i)^2}}
+
+$$
+
+Aggregate across $S$ subjects using the Fisher z-transformation to handle the bounded support of $r$:
+
+1. **Clip** to prevent arctanh explosion near $\pm 1$: $r_i^* = \text{clip}(r_i,\, r_\text{min},\, r_\text{max})$
+2. **Transform:** $z_i = \operatorname{arctanh}(r_i^*)$
+3. **Weighted average:** $\bar{z} = \sum_i w_i z_i \,/\, \sum_i w_i$
+4. **Back-transform:** $\bar{r} = \tanh(\bar{z})$
+
+Weighting modes (configurable via `evaluation.subject_weighting`):
+
+| Mode | Weight `w_i` | Notes |
+|------|----------------|-------|
+| `equal` (default) | `1` | Treats each subject as independent; robust to variable trial counts |
+| `trial_count` | `\max(n_i - 3,\, 1)` | Fisher information weighting; standard meta-analytic fixed-effects scheme |
+
+**Secondary metric — Subject-level mean R²:**
+
+$$
+
+\overline{R^2} = \frac{1}{S}\sum_{i=1}^{S} R^2_i, \quad R^2_i = 1 - \frac{\sum_t(y_{it}-\hat{y}_{it})^2}{\sum_t(y_{it}-\bar{y}_i)^2}
+
+$$
+
+Both $\bar{r}$ and $\overline{R^2}$ receive permutation p-values when `n_perm > 0`.
+
+**Confidence intervals** for $\bar{r}$ (`evaluation.ci_method`):
 
 | Method | Computation |
 |--------|-------------|
-| `fixed_effects` | SE = `√(1 / Σwᵢ)`, CI = `tanh(z̄ ± 1.96 × SE)`. Standard meta-analytic fixed-effects variance. |
-| `bootstrap` | Subject-level bootstrap (1000 iterations). Resample subjects with replacement, recompute weighted z̄, take 2.5th/97.5th percentiles. |
+| `bootstrap` (default) | Resample subjects `B` times with replacement; recompute weighted `\bar{z}`; `\text{CI} = [\operatorname{perc}_{2.5}, \operatorname{perc}_{97.5}]` of `\tanh(\bar{z}^{(b)})` |
+| `fixed_effects` | `\operatorname{SE} = 1/\sqrt{\sum_i w_i}`; `\text{CI} = \tanh\bigl(\bar{z} \pm 1.96\,\operatorname{SE}\bigr)` |
 
-**Subject-level error metrics:** Unweighted mean MAE and RMSE across subjects, with optional bootstrap CI.
+**Subject-level error metrics:**
 
-**Pooled (secondary):** Trial-level Pearson r, R², MAE, RMSE reported for reference but not used as the primary inferential statistic.
+$$
 
-### Classification
+\overline{\text{MAE}} = \frac{1}{S}\sum_i\operatorname{MAE}_i, \qquad \overline{\text{RMSE}} = \frac{1}{S}\sum_i\operatorname{RMSE}_i
 
-**Primary metric:** Subject-level mean AUC (averaged across per-subject AUC values from LOSO).
+$$
 
-| Metric | Computation |
-|--------|-------------|
-| `accuracy` | `correct / total` |
-| `balanced_accuracy` | Mean of per-class recall: `(sensitivity + specificity) / 2` |
-| `auc` | Area under ROC curve (requires probability predictions) |
-| `average_precision` | Area under precision-recall curve |
-| `f1` | `2 × (precision × recall) / (precision + recall)` |
-| `sensitivity` (recall) | `TP / (TP + FN)` |
-| `specificity` | `TN / (TN + FP)` |
-| `brier_score` | `mean((y_prob − y_true)²)` — calibration quality |
-| `ECE` | Expected Calibration Error: weighted mean of `|fraction_positive − mean_predicted|` across 10 uniform probability bins |
-
-**AUC inference gating:** Subject-level AUC is only reported when at least `min_subjects_with_auc_for_inference` (default 2) subjects have evaluable AUC (requires both classes present per subject).
+with optional bootstrap CIs (subjects resampled). Pooled trial-level Pearson r, MAE, and RMSE are logged as **secondary diagnostics only** (subject is the inferential unit for LOSO).
 
 ---
 
-## Permutation Testing
+### 6.2 Classification
 
-**Module:** `cv.py` → `run_permutation_test`, `orchestration.py`
+**Primary metric:** Subject-level mean AUC — the unweighted mean of per-subject ROC-AUC values. Reported as valid only when at least `min_subjects_with_auc_for_inference` (default 2) subjects have both classes present.
 
-Constructs a null distribution by repeating the full nested CV with permuted labels.
+**Bootstrap CIs** (subject-level bootstrap, $B = 1000$ by default) are computed for all metrics listed below.
 
-**Method:**
+| Metric | Formula |
+|--------|---------|
+| Accuracy | `(\text{TP}+\text{TN})/N` |
+| Balanced accuracy | `(\text{sensitivity} + \text{specificity})/2` |
+| AUC (ROC) | Area under the receiver operating characteristic curve |
+| Average precision | Area under the precision–recall curve |
+| F1 | `2\,\text{precision}\cdot\text{recall}/(\text{precision}+\text{recall})` |
+| Sensitivity (recall) | `\text{TP}/(\text{TP}+\text{FN})` |
+| Specificity | `\text{TN}/(\text{TN}+\text{FP})` |
+| Brier score | `\frac{1}{N}\sum_i(\hat{p}_i - y_i)^2` — probability calibration |
+| ECE | `\sum_{k=1}^{10}\frac{|B_k|}{N}\bigl|\bar{p}_k - \bar{y}_k\bigr|` — Expected Calibration Error over 10 uniform probability bins |
 
-1. Permute target labels within the dependence structure (preserving subject × block grouping).
-2. Re-run the complete nested LOSO pipeline (including inner CV hyperparameter tuning) on permuted labels.
-3. Compute the subject-level metric (Fisher-z r for regression, subject-mean AUC for classification) for each permutation.
-4. Two-tailed p-value: `p = (n_extreme + 1) / (n_perm + 1)`, where `n_extreme = |{null_metric : |null| ≥ |observed|}|`.
+Pooled trial-level metrics are reported alongside subject-level metrics for diagnostics. Subject-level means with bootstrap CIs are the primary inferential statistics.
 
-**Permutation schemes** (configurable via `machine_learning.cv.permutation_scheme`):
+---
+
+## 7. Permutation Testing
+
+**Functions:** `cv.py → run_permutation_test`; `orchestration.py → _run_classification_permutations`
+
+Constructs an empirical null distribution by re-running the full nested CV pipeline with permuted labels. All hyperparameter tuning is repeated on each permuted dataset.
+
+### 7.1 Permutation Schemes
 
 | Scheme | Behavior |
 |--------|----------|
-| `within_subject_within_block` | Permute labels within each subject × block combination. **Default.** Preserves both subject-level and block-level dependence. |
-| `within_subject` | Permute labels within each subject (ignoring block structure). Fallback when block labels are unavailable. |
+| `within_subject_within_block` | Permute labels within each subject × block combination. Preserves both subject-level and block-level dependence structure. **Default.** |
+| `within_subject` | Permute labels within each subject. Automatic fallback when block labels are unavailable or when block-level permutation is ineffective. |
 
-**Completion threshold:** At least 50% of permutations must produce finite metrics; otherwise a `RuntimeError` is raised.
+A permutation is **effective** only if it changes at least `min_label_shuffle_fraction` (default 1%) of labels. When the primary scheme fails, a fallback to `within_subject` is attempted per permutation before discarding.
+
+### 7.2 P-value Computation
+
+**Regression** (two-tailed):
+
+$$
+
+p = \frac{\#\bigl\{|s(y^\pi_j)| \geq |s(y)|\bigr\} + 1}{n_\text{perm,valid} + 1}
+
+$$
+
+where $s(\cdot)$ denotes the subject-level Fisher-z–aggregated Pearson r. Computed independently for both $\bar{r}$ and $\overline{R^2}$.
+
+**Classification** (one-tailed; AUC $\geq$ observed):
+
+$$
+
+p = \frac{\#\bigl\{\text{AUC}(y^\pi_j) \geq \text{AUC}(y)\bigr\} + 1}{n_\text{perm,valid} + 1}
+
+$$
+
+### 7.3 Quality Gate
+
+At least `min_valid_permutation_fraction` (default 50%) of permutations must produce finite metrics; a `RuntimeError` is raised otherwise.
+
+> **Recommendation:** Use ≥ 1 000 permutations for a single test. For multiple comparisons across frequency bands or feature groups, use ≥ 5 000–10 000.
 
 ---
 
-## Time Generalization Analysis
+## 8. Time Generalization Analysis
 
-**Module:** `time_generalization.py` → `time_generalization_regression`
+**Module:** `time_generalization.py → time_generalization_regression`
 
-Trains a model in one time window and tests in all other windows, producing a time × time generalization matrix of prediction performance.
+Trains a decoding model in each time window and evaluates it in all other windows. The resulting $W \times W$ matrix of prediction performance reveals whether the neural representation is **temporally stable** (broad off-diagonal generalization) or **dynamic** (diagonal-only).
 
-**Method:**
+### 8.1 Method
 
-1. Load epoch tensors and behavioral targets across subjects.
-2. Define sliding time windows within the active period (configurable `window_len`, `step`, `active_window`).
-3. For each window, compute mean channel activity as features: `X[trial, window, channel] = mean(data[trial, channel, t_start:t_end])`.
-4. LOSO outer loop:
-   - For each training window `i`, fit a Ridge regression model (`StandardScaler → Ridge`).
-   - Optionally tune Ridge α via `GridSearchCV` with inner `GroupKFold` (`use_ridgecv=true`).
-   - For each test window `j`, predict on held-out subject's data and compute Pearson r and R².
-5. Aggregate across folds using Fisher-z averaging (same method as regression metrics).
+1. **Epoch loading:** Load raw epoch tensors across subjects; align to the common channel set within each LOSO fold.
 
-**Significance testing** (when `n_perm > 0`):
+2. **Sliding windows:** Partition the active period $[t_\text{min}, t_\text{max}]$ (configurable) into overlapping windows of length $\Delta t$ with step $\delta t$. Window centers form both axes of the generalization matrix.
 
-Three correction methods are applied simultaneously:
+3. **Window feature extraction:** For window $w$, compute mean channel activity per trial:
+
+$$
+
+x_{w,\text{trial},c} = \frac{1}{|W_w|}\sum_{t \in W_w} \text{data}[\text{trial},\, c,\, t]
+
+$$
+
+yielding an $N_\text{trials} \times C$ feature matrix per window.
+
+4. **LOSO outer loop:** For each training window $i$, fit a Ridge regression model:
+```
+SimpleImputer → StandardScaler → TransformedTargetRegressor(Ridge(α), PowerTransformer)
+```
+Optionally tune $\alpha$ via inner `GroupKFold` (`use_ridgecv: true`). For each test window $j$, predict on the held-out subject and record Pearson r and R².
+
+5. **Aggregation:** Stack per-fold matrices; for cell $(i,j)$, aggregate over $S_{ij}$ valid subjects using Fisher-z averaging (equal subject weights):
+
+$$
+
+r_{ij}^\text{agg} = \tanh\!\left(\frac{1}{S_{ij}}\sum_{s=1}^{S_{ij}} \operatorname{arctanh}\!\bigl(\text{clip}(r_{ij}^{(s)})\bigr)\right)
+
+$$
+
+Cells with $S_{ij} < $  `min_subjects_per_cell` or total trial count $ < $  `min_count_per_cell` are excluded (set to `NaN`).
+
+### 8.2 Significance Testing (`n_perm > 0`)
+
+Three corrections are applied simultaneously to all tested cells:
 
 | Method | Description |
 |--------|-------------|
-| **FDR** | Benjamini-Hochberg correction across all tested cells. |
-| **Max-stat (FWER)** | 95th percentile of the maximum absolute null r across all cells per permutation. |
-| **Cluster (FWER)** | Cluster-based permutation test: contiguous cells exceeding a forming threshold are grouped; cluster sizes are compared to the null distribution of maximum cluster sizes. |
+| **FDR-BH** | Benjamini-Hochberg procedure applied across all finite cells. Controls false discovery rate. |
+| **Max-stat (FWER)** | Threshold at the 95th percentile of the permutation null distribution of `\max_{(i,j)} |r_{ij}^\pi|`. Controls familywise error rate. |
+| **Cluster-FWER** | Contiguous cells exceeding a forming threshold are grouped; cluster sizes compared to the null distribution of maximum cluster sizes. Controls FWER at cluster level. |
 
-**Cell-level p-value:** `p = (|{null_r : |null| ≥ |observed|}| + 1) / (n_perm_valid + 1)`.
+**Cell-level p-value:**
+
+$$
+
+p_{ij} = \frac{\#\bigl\{|r_{ij}^\pi| \geq |r_{ij}^\text{obs}|\bigr\} + 1}{n_\text{perm,valid} + 1}
+
+$$
 
 **Quality gates:**
 
-| Gate | Default |
-|------|---------|
-| `min_subjects_per_cell` | 2 |
-| `min_count_per_cell` | 15 |
-| `min_samples_per_window` | 15 |
-| `min_samples_for_corr` | 10 |
-| `min_valid_permutation_fraction` | 0.8 |
+| Gate | Config key | Default |
+|------|-----------|---------|
+| Min subjects per cell | `min_subjects_per_cell` | 2 |
+| Min trials per cell | `min_count_per_cell` | 15 |
+| Min samples per window | `min_samples_per_window` | 15 |
+| Min samples for correlation | `min_samples_for_corr` | 10 |
+| Min valid fold fraction | `min_valid_fold_fraction` | 0.8 |
+| Min valid permutation fraction | `min_valid_permutation_fraction` | 0.8 |
 
 ---
 
-## SHAP Feature Importance
+## 9. SHAP Feature Importance
 
 **Module:** `shap_importance.py`
 
-Computes SHAP (SHapley Additive exPlanations) values for model interpretation, aggregated across CV folds.
+SHAP (SHapley Additive exPlanations) values decompose each prediction into per-feature additive contributions satisfying efficiency, symmetry, and the dummy axioms. Per-feature importance is the mean absolute SHAP value:
 
-**Method:**
+$$
 
-1. For each LOSO fold, fit the model on training data (with inner CV hyperparameter tuning).
-2. Select the appropriate SHAP explainer based on model type:
+\phi_k = \frac{1}{N}\sum_{i=1}^{N} |\phi_k(x_i)|
 
-| Model type | Explainer | Detection |
-|------------|-----------|-----------|
+$$
+
+### 9.1 Explainer Selection
+
+Automatically determined from the fitted estimator type (after pipeline preprocessing steps have been applied):
+
+| Model type | Explainer | Detection criterion |
+|------------|-----------|---------------------|
 | Tree-based (RF) | `shap.TreeExplainer` | `hasattr(estimator, "feature_importances_")` |
 | Linear (ElasticNet, Ridge, LR) | `shap.LinearExplainer` | `hasattr(estimator, "coef_")` |
-| Other | `shap.KernelExplainer` | Fallback; uses 100 background samples |
+| Other (SVM, ensemble) | `shap.KernelExplainer` | Fallback; 100 background samples |
 
-3. Compute SHAP values on the test fold.
-4. Per-feature importance: `mean(|SHAP_values|)` across test samples.
-5. Aggregate across folds: mean and std of per-fold importance.
+### 9.2 Pipeline Awareness
 
-**Pipeline awareness:** For sklearn `Pipeline` objects, preprocessing steps are applied to transform X before SHAP computation. Feature names are tracked through selectors (`get_support`) and transformers (`get_feature_names_out`). PCA components are labeled `PC1`, `PC2`, etc.
+Pipeline preprocessing is applied to transform $X$ before SHAP computation. Feature names are propagated through selectors (`get_support`) and transformers (`get_feature_names_out`). After PCA, components are relabeled `PC1`, `PC2`, ….
 
-**Grouped summaries** (when `machine_learning.interpretability.grouped_outputs=true`):
+### 9.3 Cross-Fold Aggregation
 
-Feature names are parsed via `NamingSchema` into structured metadata (group, band, ROI, scope, stat). Importance is aggregated by:
-- Group × band
-- Group × band × ROI
+For each LOSO fold: fit model on training data (with inner CV tuning), compute SHAP values on the test fold. Aggregate by feature name across folds, reporting mean and inter-fold standard deviation:
 
-Each group's `importance_share = sum / total` provides a normalized contribution fraction.
+$$
 
----
+\bar{\phi}_k = \frac{1}{K}\sum_{f=1}^{K} \phi_k^{(f)}, \qquad \sigma_k = \operatorname{std}_f\!\left(\phi_k^{(f)}\right)
 
-## Permutation Importance
+$$
 
-**Module:** `orchestration.py` → `_run_permutation_importance_stage`
+**Completion gate:** At least `analysis.shap.min_valid_fold_fraction` (default 0.8) of folds must succeed.
 
-Sklearn's `permutation_importance` applied per LOSO fold and averaged.
+### 9.4 Grouped Summaries
 
-**Method:**
+When `interpretability.grouped_outputs: true`, feature names are parsed via `NamingSchema` into structured metadata (group, frequency band, ROI, scope, statistic). Importance is aggregated at two levels:
 
-1. For each fold, fit the tuned model on training data.
-2. Compute `permutation_importance(model, X_test, y_test, n_repeats, scoring="r2")`.
-3. Map fold-level importances back to the full feature set (features excluded by harmonization receive `NaN`).
-4. Average across folds: `mean` and `std` of per-fold importance.
+$$
 
-Same grouped summary outputs as SHAP (by group × band, group × band × ROI).
+\phi_\mathcal{G} = \sum_{k \in \mathcal{G}} \phi_k, \qquad \text{share}_\mathcal{G} = \frac{\phi_\mathcal{G}}{\sum_k \phi_k}
+
+$$
+
+Outputs: `shap_importance_by_group_band.tsv`, `shap_importance_by_group_band_roi.tsv`.
 
 ---
 
-## Uncertainty Quantification
+## 10. Permutation Feature Importance
 
-**Module:** `uncertainty.py`
+**Function:** `orchestration.py → _run_permutation_importance_stage`
 
-Distribution-free prediction intervals via conformal prediction.
+Model-agnostic importance via column permutation (Breiman 2001). For each feature $k$:
 
-### Split Conformal
+$$
 
-**Method:**
+\text{imp}_k = \operatorname{score}(y, \hat{y}) - \mathbb{E}_\pi\!\left[\operatorname{score}\!\left(y, \hat{y}^{(\pi_k)}\right)\right]
 
-1. Split training data into proper training (80%) and calibration (20%, min 2 calibration samples; requires at least 5 total training samples).
-2. Fit model on proper training set.
-3. Compute calibration residuals: `rᵢ = |yᵢ − ŷᵢ|` on calibration set.
-4. Conformal quantile: `q̂ = quantile(residuals, ⌈(n+1)(1−α)⌉/n)`.
-5. Prediction intervals: `[ŷ − q̂, ŷ + q̂]`.
+$$
 
-### CV+ (Jackknife+)
+where $\hat{y}^{(\pi_k)}$ is the prediction after randomly permuting column $k$ in the test set. Scoring metric: $R^2$ (`n_repeats` permutations per feature, default 5).
 
-**Method:**
-
-1. Cross-validation on training data (group-aware via `GroupKFold` or `LeaveOneGroupOut`).
-2. Collect out-of-fold residuals: `rᵢ = |yᵢ − ŷᵢ|` for each training sample.
-3. Fit full model on all training data.
-4. Conformal quantile from LOO residuals.
-5. Prediction intervals: `[ŷ − q̂, ŷ + q̂]`.
-
-### Conformalized Quantile Regression (CQR)
-
-Adaptive intervals for heteroscedastic data where prediction uncertainty varies across the feature space.
-
-**Method:**
-
-1. Cross-validation on training data to collect out-of-fold quantile predictions.
-2. For each fold, fit two `GradientBoostingRegressor` models:
-   - Lower quantile: `α/2`
-   - Upper quantile: `1 − α/2`
-3. Compute conformity scores: `E = max(q̂_low − y, y − q̂_high)`.
-4. Conformal quantile `Q̂` from conformity scores.
-5. Fit full quantile models on all training data.
-6. Prediction intervals: `[q̂_low(x) − Q̂, q̂_high(x) + Q̂]`.
-
-**Coverage guarantee:** For exchangeable data, empirical coverage ≥ `1 − α` (default α=0.1 → 90% intervals).
+**Aggregation:** Features excluded by fold harmonization receive `NaN`. Mean and std are reported across folds. Same grouped summaries as SHAP (by group × band and group × band × ROI).
 
 ---
 
-## Pipeline Runners
+## 11. Uncertainty Quantification
+
+**Module:** `uncertainty.py` — integrated into pipeline runners via `_run_uncertainty_stage`
+
+Distribution-free prediction intervals via conformal prediction. For exchangeable data:
+
+$$
+
+\mathbb{P}\!\left(y \in \hat{C}(x)\right) \geq 1 - \alpha
+
+$$
+
+The stage runs within LOSO: models are tuned via inner CV, then conformal intervals are computed on held-out subjects using the **CV+ method** by default. Empirical coverage and mean interval width are reported per subject.
+
+---
+
+### 11.1 Split Conformal
+
+1. Split training set into proper training ($\approx 80\%$) and calibration ($\approx 20\%$, ≥ 2 samples). Group-aware via `GroupShuffleSplit` when subject labels are available.
+2. Fit model; compute calibration residuals $s_i = |y_i - \hat{y}_i|$, $i \in \mathcal{D}_\text{cal}$.
+3. Conformal quantile:
+
+$$
+
+\hat{q} = \operatorname{Quantile}\!\left(\{s_i\},\; \frac{\lceil(|\mathcal{D}_\text{cal}|+1)(1-\alpha)\rceil}{|\mathcal{D}_\text{cal}|}\right)
+
+$$
+
+4. Prediction interval: $\hat{C}(x) = [\hat{y}(x) - \hat{q},\; \hat{y}(x) + \hat{q}]$.
+
+---
+
+### 11.2 CV+ (Jackknife+) — Default in Orchestration Stage
+
+More data-efficient than split conformal; uses cross-validation residuals:
+
+1. $k$-fold CV on training data (group-aware). For each fold $f$ and test point $x$:
+   - Train on folds $\neq f$; compute residuals $\{s_i^{(f)}\}_{i \in \text{fold}_f}$.
+   - Predict $\hat{y}_f(x)$.
+2. Prediction interval at $x$ using conservative order-statistic quantiles over the full ensemble of $\{(\hat{y}_f(x),\, s^{(f)})\}$:
+
+$$
+
+\hat{C}(x) = \left[\hat{q}_\alpha\!\left(\{\hat{y}_f(x) - s_j^{(f)}\}_{f,j}\right),\; \hat{q}_{1-\alpha}\!\left(\{\hat{y}_f(x) + s_j^{(f)}\}_{f,j}\right)\right]
+
+$$
+
+A full model trained on all training data provides the point prediction.
+
+---
+
+### 11.3 Conformalized Quantile Regression (CQR)
+
+Adaptive intervals for heteroscedastic data — interval width adapts to local uncertainty.
+
+1. CV to collect out-of-fold quantile predictions at levels $\alpha/2$ and $1-\alpha/2$ via `GradientBoostingRegressor(loss="quantile")`.
+2. Conformity scores: $E_i = \max\!\bigl(\hat{q}_{\alpha/2}(x_i) - y_i,\; y_i - \hat{q}_{1-\alpha/2}(x_i)\bigr)$.
+3. Conformal quantile $\hat{Q}$ from $\{E_i\}$.
+4. Prediction interval: $\hat{C}(x) = \bigl[\hat{q}_{\alpha/2}(x) - \hat{Q},\; \hat{q}_{1-\alpha/2}(x) + \hat{Q}\bigr]$.
+
+---
+
+## 12. Pipeline Runners
 
 **Module:** `orchestration.py`
 
-### `run_regression_ml`
+All runners accept feature subsetting arguments (`feature_families`, `feature_bands`, `feature_segments`, `feature_scopes`, `feature_stats`) and write structured output directories (see §13).
 
-LOSO regression on per-trial feature tables.
+---
 
-**Steps:**
+### 12.1 `run_regression_ml` — LOSO Regression
 
-1. Load feature matrix via `load_active_matrix` (handles multi-subject assembly, feature filtering, target extraction).
-2. Validate target is continuous (warns if binary-like; blocks if `strict_regression_target_continuous=true`).
+1. Assemble design matrix via `load_active_matrix` (multi-subject, optional covariate appending, target validation).
+2. Warn (or raise if `strict_regression_target_continuous: true`) when target appears binary-like.
 3. Build model pipeline and hyperparameter grid (ElasticNet, Ridge, or RF).
-4. Run `nested_loso_predictions_matrix` (nested LOSO with inner GroupKFold tuning).
-5. Export predictions, per-subject correlations, per-subject errors.
-6. Compute subject-level Fisher-z r with CI.
-7. Optionally run permutation test for p-value.
-8. Compute and export baseline (mean predictor) for sanity check.
-9. Write `pooled_metrics.json` with subject-level (primary) and pooled-trial (secondary) metrics.
+4. Run `nested_loso_predictions_matrix`: outer LOSO with inner `GroupKFold`; refit criterion `neg_MSE`.
+5. Compute subject-level $\bar{r}$ (primary) and $\overline{R^2}$ (secondary), both with bootstrap CI.
+6. Optionally run permutation test → two-tailed p-values for $\bar{r}$ and $\overline{R^2}$.
+7. Compute and export LOSO mean-predictor baseline.
+8. Run SHAP and permutation importance stages when enabled.
+9. Generate diagnostic plots.
 
-### `run_within_subject_regression_ml`
+---
 
-Block-aware within-subject regression.
+### 12.2 `run_within_subject_regression_ml` — Within-Subject Regression
 
-**Steps:**
+Block-aware regression within each subject. Requires block/run labels in `events.tsv`.
 
-1. Load feature matrix; require block/run labels.
-2. Create within-subject folds via `create_within_subject_folds` (GroupKFold on blocks within each subject).
-3. For each fold, fit with block-aware inner CV hyperparameter tuning.
-4. Aggregate predictions; compute subject-level Fisher-z r.
-5. Optionally run block-aware permutation test (permute within subject × block).
+1. Load and validate design matrix; drop trials with missing block labels.
+2. Create within-subject folds via `create_within_subject_folds` (GroupKFold or temporal ordering per subject).
+3. For each fold, fit with block-aware inner CV (refit: `neg_MSE`).
+4. Aggregate; compute subject-level $\bar{r}$ with CI.
+5. Block-aware permutation test (within-subject × block shuffle).
+6. Baseline: per-fold training-set mean prediction (within-subject mean predictor).
 
-### `run_classification_ml`
+---
 
-LOSO classification for pain vs. no-pain.
+### 12.3 `run_classification_ml` — LOSO Classification
 
-**Steps:**
+1. Load feature matrix via `load_active_matrix` (standard models) or epoch tensor via `load_epoch_tensor_matrix` (CNN). Binary target; optional `binary_threshold` to binarize a continuous column.
+2. Run `nested_loso_classification` (SVM/LR/RF/Ensemble) or `nested_loso_cnn_classification` (CNN). Inner loop: `StratifiedGroupKFold` with configurable scoring (default `average_precision`).
+3. Compute per-subject metrics (AUC, balanced accuracy, F1, etc.) with bootstrap CIs.
+4. Compute calibration metrics (Brier score, ECE, calibration curve from 10 uniform bins).
+5. Validate fold failure fraction against `max_failed_fold_fraction` (default 0.25).
+6. Optionally run permutation test → one-tailed AUC p-value.
 
-1. Load feature matrix (or epoch tensor for CNN) with binary target.
-2. Run `nested_loso_classification` (outer LOSO, inner `StratifiedGroupKFold` tuned on `roc_auc`).
-3. Compute per-subject metrics (AUC, balanced accuracy, accuracy).
-4. Compute calibration metrics (Brier score, ECE, calibration curve).
-5. Optionally run permutation test (subject-mean AUC null distribution).
-6. Validate fold failure fraction against `max_failed_fold_fraction` (default 0.25).
+---
 
-### `run_within_subject_classification_ml`
+### 12.4 `run_within_subject_classification_ml` — Within-Subject Classification
 
-Block-aware within-subject classification.
+Same structure as LOSO classification but uses `GroupKFold` on block labels within each subject. Inner loop: `StratifiedGroupKFold` with `scoring="roc_auc"`. Same block-aware permutation test.
 
-Same structure as LOSO classification but with `GroupKFold` on blocks within each subject. Inner CV uses `StratifiedGroupKFold` on block labels.
+---
 
-### `run_model_comparison_ml`
+### 12.5 `run_model_comparison_ml` — Model Comparison
 
-Compares ElasticNet, Ridge, and Random Forest on identical outer folds.
-
-**Method:**
+Compares ElasticNet, Ridge, and Random Forest on **identical outer LOSO folds**.
 
 1. Create shared LOSO outer folds.
-2. For each model, run nested CV with inner `GroupKFold` tuning (scoring: R²).
-3. Record per-fold R² and MAE for each model.
-4. Export `model_comparison.tsv` (per-fold) and `model_comparison_summary.json` (aggregated mean ± std).
+2. For each model, run nested CV with inner `GroupKFold` (refit: Pearson r). Record per-fold R² and MAE.
+3. Compute summary statistics (mean ± std and bootstrap CI per model).
+4. **Pairwise inference:** Paired sign-flip permutation test on per-fold $\Delta R^2$ and $\Delta\text{MAE}$:
 
-### `run_incremental_validity_ml`
+$$
 
-Quantifies ΔR² when adding EEG features over baseline predictors.
+p\bigl(\Delta R^2_{AB}\bigr) = \frac{\#\bigl\{\bigl|\overline{s \cdot \Delta R^2_{AB}}\bigr| \geq \bigl|\overline{\Delta R^2_{AB}}\bigr|\bigr\} + 1}{n_\text{perm} + 1}, \quad s_j \in \{-1,+1\}
 
-**Method:**
+$$
 
-1. Define baseline predictor matrix (default: `temperature` from `events.tsv`).
-2. Define full predictor matrix: `[baseline_predictors | EEG_features]`.
+5. Holm–Bonferroni multiple-comparison correction across all pairwise $\Delta R^2$ and $\Delta\text{MAE}$ tests.
+6. Export `model_comparison.tsv` (per fold) and `model_comparison_summary.json` (aggregated with pairwise inference).
+
+---
+
+### 12.6 `run_incremental_validity_ml` — Incremental Validity
+
+Quantifies the out-of-fold gain in R² when adding EEG features over a baseline predictor (e.g., stimulus temperature). Uses **identical model family** (ElasticNet with covariate protection) for both conditions to isolate information gain rather than algorithmic differences.
+
+1. Define baseline predictor matrix $X_\text{base}$ from `events.tsv` (default: `temperature`). Guard against target-variable leakage.
+2. Full matrix: $X_\text{full} = [X_\text{EEG} \mid X_\text{base}]$ — baseline columns appended as protected covariates.
 3. For each LOSO fold:
-   - Fit baseline model (Ridge with tuned α) on baseline predictors only.
-   - Fit full model (ElasticNet) on all predictors.
-   - Compute per-fold `Δ R² = R²_full − R²_baseline`.
-4. Export per-fold results and summary statistics.
+   - Fit tuned ElasticNet on $X_\text{base,train}$ → predict $\hat{y}_\text{base}$
+   - Fit tuned ElasticNet on $X_\text{full,train}$ → predict $\hat{y}_\text{full}$
+   - Compute: $\Delta R^2_\text{fold} = R^2\!\left(y_\text{test},\hat{y}_\text{full}\right) - R^2\!\left(y_\text{test},\hat{y}_\text{base}\right)$
 
-### `run_time_generalization`
+4. **Primary estimate:**
 
-Delegates to `time_generalization_regression` (see Time Generalization Analysis above).
+$$
 
----
+\overline{\Delta R^2} = \frac{1}{K}\sum_{k=1}^{K} \Delta R^2_k
 
-## Baseline Model
+$$
 
-**Module:** `orchestration.py` → `compute_baseline_predictions`
-
-A null (intercept-only) model for sanity checking.
-
-| Task | Baseline |
-|------|----------|
-| Regression | LOSO mean predictor: predict the training-set mean for each held-out subject. |
-| Classification | LOSO majority class: predict the most frequent class in the training set. |
-
-Baseline predictions and metrics (`baseline_r2`, `baseline_mae` or `baseline_accuracy`, `baseline_balanced_accuracy`) are exported alongside model results.
+5. Bootstrap CI on $\overline{\Delta R^2}$ (resample folds). Paired sign-flip permutation p-value when `n_perm > 0`.
 
 ---
 
-## Reproducibility
+### 12.7 `run_time_generalization` — Time Generalization
 
-**Module:** `orchestration.py` → `write_reproducibility_info`
-
-Each ML run writes `reproducibility_info.json` containing:
-
-- `sklearn`, `numpy`, `pandas` versions
-- RNG seed
-- Subject list and data signature (SHA-256 hash)
-- Configuration snapshot (`machine_learning` section)
+Delegates to `time_generalization_regression` (see §8). Saves outputs to `results_root/time_generalization/`.
 
 ---
 
-## Configuration
+## 13. Output Structure
 
-All settings live under `machine_learning` in `eeg_config.yaml`:
+Each runner creates a self-contained results directory:
 
-### Constants and Preprocessing
+```
+results_root/{mode}/
+├── data/
+│   ├── loso_predictions.tsv      ← y_true, y_pred, subject_id, fold_id
+│   ├── loso_predictions.parquet
+│   ├── loso_indices.tsv
+│   └── baseline_predictions.tsv
+├── metrics/
+│   ├── pooled_metrics.json       ← subject-level (primary) + pooled-trial (secondary)
+│   ├── per_subject_correlations.tsv
+│   ├── per_subject_errors.tsv
+│   └── per_subject_metrics.tsv  (classification)
+├── models/
+│   └── best_params_{model}.jsonl
+├── null/
+│   └── loso_null_{model}.npz    ← null_r, null_r2, n_completed
+├── importance/
+│   ├── shap_importance.tsv
+│   ├── shap_importance_by_group_band.tsv
+│   ├── shap_importance_by_group_band_roi.tsv
+│   ├── permutation_importance.tsv
+│   └── permutation_importance_by_group_band.tsv
+├── plots/
+│   └── *.{png,pdf,svg}           ← publication-style diagnostic figures
+└── reports/
+    ├── reproducibility_info.json
+    ├── included_subjects.tsv
+    └── excluded_subjects.tsv
+```
+
+---
+
+## 14. Reproducibility
+
+**Function:** `write_reproducibility_info`
+
+Each run writes `reports/reproducibility_info.json` containing:
+
+- `sklearn`, `numpy`, `pandas` library versions
+- RNG seed used throughout
+- Subject list and SHA-256 data signature (hash of sorted subject IDs)
+- Full `machine_learning` configuration snapshot
+
+---
+
+## 15. Configuration Reference
+
+All settings reside under `machine_learning` in `eeg_config.yaml`.
+
+### 15.1 Preprocessing
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `constants.variance_threshold` | Base variance threshold | `0.0` |
-| `preprocessing.imputer_strategy` | Imputation method | `median` |
-| `preprocessing.power_transformer_method` | Target transform | `yeo-johnson` |
+| `constants.variance_threshold` | Base variance filter threshold `\theta` | `0.0` |
+| `preprocessing.imputer_strategy` | Imputation statistic (`median`, `mean`) | `"median"` |
+| `preprocessing.power_transformer_method` | Target power transform | `"yeo-johnson"` |
 | `preprocessing.power_transformer_standardize` | Standardize after transform | `true` |
-| `preprocessing.variance_threshold_grid` | Grid search values | `[0.0, 0.01, 0.1]` |
+| `preprocessing.variance_threshold_grid` | Grid search values for `\theta` | `[0.0, 0.01, 0.1]` |
+| `preprocessing.feature_selection_percentile` | Univariate top-`k\%` selection (100 = disabled) | `100.0` |
+| `preprocessing.deconfound` | Regress out covariates from EEG features | `false` |
+| `preprocessing.spatial_regions_allowed` | ROI whitelist for `SpatialFeatureSelector` | `[]` |
 | `preprocessing.pca.enabled` | Enable PCA | `false` |
-| `preprocessing.pca.n_components` | Variance fraction to retain | `0.95` |
-| `preprocessing.pca.whiten` | Whiten components | `false` |
+| `preprocessing.pca.n_components` | Variance fraction or integer component count | `0.95` |
+| `preprocessing.pca.whiten` | Whiten principal components | `false` |
+| `preprocessing.pca.svd_solver` | SVD solver (`auto`, `full`, `randomized`) | `"auto"` |
 
-### Models
-
-| Key | Description | Default |
-|-----|-------------|---------|
-| `models.elasticnet.alpha_grid` | ElasticNet α search | `[0.01, 0.1, 1.0, 10.0]` |
-| `models.elasticnet.l1_ratio_grid` | L1/L2 mixing search | `[0.1, 0.5, 0.9]` |
-| `models.elasticnet.max_iter` | Max solver iterations | `10000` |
-| `models.ridge.alpha_grid` | Ridge α search | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
-| `models.random_forest.n_estimators` | Number of trees | `100` |
-| `models.random_forest.max_depth_grid` | Depth search | `[5, 10, 20, None]` |
-| `models.svm.kernel` | SVM kernel | `rbf` |
-| `models.svm.C_grid` | Regularization search | `[0.1, 1.0, 10.0]` |
-| `models.svm.gamma_grid` | Kernel coefficient search | `["scale", "auto"]` |
-| `models.logistic_regression.penalty` | Regularization type | `l2` |
-| `models.logistic_regression.C_grid` | Regularization search | `[0.01, 0.1, 1.0, 10.0]` |
-
-### CNN
+### 15.2 Regression Models
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `models.cnn.temporal_filters` | F₁ | `8` |
-| `models.cnn.depth_multiplier` | D | `2` |
-| `models.cnn.pointwise_filters` | F₂ | `16` |
-| `models.cnn.kernel_length` | K₁ | `64` |
-| `models.cnn.separable_kernel_length` | K₂ | `16` |
-| `models.cnn.dropout` | Dropout rate | `0.5` |
-| `models.cnn.batch_size` | Training batch size | `64` |
+| `models.elasticnet.alpha_grid` | ElasticNet `\alpha` search | `[0.01, 0.1, 1.0, 10.0]` |
+| `models.elasticnet.l1_ratio_grid` | ElasticNet `\rho` search | `[0.1, 0.5, 0.9]` |
+| `models.elasticnet.max_iter` | Solver max iterations | `10000` |
+| `models.elasticnet.tol` | Solver convergence tolerance | `1e-4` |
+| `models.ridge.alpha_grid` | Ridge `\alpha` search | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
+| `models.random_forest.n_estimators` | Number of trees `B` | `100` |
+| `models.random_forest.bootstrap` | Bootstrap resampling | `true` |
+| `models.random_forest.max_depth_grid` | Depth search | `[5, 10, 20, null]` |
+| `models.random_forest.min_samples_split_grid` | Split threshold search | `[2, 5, 10]` |
+| `models.random_forest.min_samples_leaf_grid` | Leaf size search | `[1, 2, 4]` |
+
+### 15.3 Classification Models
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `models.svm.kernel` | SVM kernel type | `"rbf"` |
+| `models.svm.C_grid` | SVM regularization `C` search | `[0.1, 1.0, 10.0]` |
+| `models.svm.gamma_grid` | RBF kernel `\gamma` search | `["scale", "auto"]` |
+| `models.svm.class_weight` | Class weighting | `"balanced"` |
+| `models.logistic_regression.penalty` | Regularization type | `"l2"` |
+| `models.logistic_regression.C_grid` | Inverse regularization `C` search | `[0.01, 0.1, 1.0, 10.0]` |
+| `models.logistic_regression.l1_ratio_grid` | ElasticNet mixing search | `[0.1, 0.5, 0.9]` |
+| `models.logistic_regression.class_weight` | Class weighting | `"balanced"` |
+| `classification.resampler` | Class imbalance strategy (`none`, `undersample`, `smote`) | `"none"` |
+| `classification.calibrate_ensemble` | Calibrate SVM/RF in ensemble via Platt scaling | `false` |
+| `classification.scoring` | Inner CV scoring metric | `"average_precision"` |
+| `classification.model` | Default classifier | `"svm"` |
+| `classification.max_failed_fold_fraction` | Maximum allowed fold failure rate | `0.25` |
+| `classification.min_subjects_with_auc_for_inference` | Minimum subjects for AUC inference | `2` |
+
+### 15.4 CNN
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `models.cnn.temporal_filters` | `F_1` | `8` |
+| `models.cnn.depth_multiplier` | `D` | `2` |
+| `models.cnn.pointwise_filters` | `F_2` | `16` |
+| `models.cnn.kernel_length` | `K_1` | `64` |
+| `models.cnn.separable_kernel_length` | `K_2` | `16` |
+| `models.cnn.dropout` | Dropout rate `p` | `0.5` |
+| `models.cnn.batch_size` | Mini-batch size | `64` |
 | `models.cnn.max_epochs` | Maximum training epochs | `75` |
-| `models.cnn.patience` | Early stopping patience | `10` |
-| `models.cnn.learning_rate` | AdamW learning rate | `1e-3` |
+| `models.cnn.patience` | Early stopping patience (epochs) | `10` |
+| `models.cnn.learning_rate` | AdamW lr | `1e-3` |
 | `models.cnn.weight_decay` | AdamW weight decay | `1e-3` |
 | `models.cnn.gradient_clip_norm` | Max gradient norm | `1.0` |
-| `models.cnn.val_fraction` | Validation split fraction | `0.2` |
+| `models.cnn.val_fraction` | Validation fraction for early stopping | `0.2` |
 | `models.cnn.use_cuda` | Enable GPU | `false` |
 
-### Cross-Validation
+### 15.5 Cross-Validation
 
 | Key | Description | Default |
 |-----|-------------|---------|
 | `cv.default_n_splits` | Default inner CV splits | `5` |
-| `cv.hygiene_enabled` | Enable CV hygiene | `true` |
-| `cv.permutation_scheme` | Permutation structure | `within_subject_within_block` |
-| `cv.min_valid_permutation_fraction` | Min valid permutation rate | `0.5` |
+| `cv.inner_splits` | Inner CV splits (used by importance/SHAP stages) | `5` |
+| `cv.outer_splits` | Outer CV splits for within-subject mode | `5` |
+| `cv.hygiene_enabled` | Enable fold-specific CV hygiene | `true` |
+| `cv.within_subject_ordered_blocks` | Temporal block ordering within subjects | `false` |
+| `cv.permutation_scheme` | Label permutation structure | `"within_subject_within_block"` |
+| `cv.min_label_shuffle_fraction` | Min fraction of labels changed per permutation | `0.01` |
+| `cv.min_valid_permutation_fraction` | Min fraction of permutations yielding finite metrics | `0.5` |
+| `cv.min_valid_permutation_fold_fraction` | Min fold completion rate per permutation (within-subject) | `1.0` |
 
-### Evaluation
+### 15.6 Evaluation
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `evaluation.ci_method` | CI computation method | `bootstrap` |
+| `evaluation.ci_method` | CI method for regression r (`bootstrap`, `fixed_effects`) | `"bootstrap"` |
 | `evaluation.bootstrap_iterations` | Bootstrap resamples | `1000` |
+| `evaluation.subject_weighting` | Fisher-z weighting (`equal`, `trial_count`) | `"equal"` |
 
-### Classification
-
-| Key | Description | Default |
-|-----|-------------|---------|
-| `classification.model` | Default classifier | `svm` |
-| `classification.max_failed_fold_fraction` | Max allowed fold failures | `0.25` |
-| `classification.min_subjects_with_auc_for_inference` | Min subjects for AUC reporting | `2` |
-| `targets.classification` | Classification target column | `binary_outcome` |
-| `targets.regression` | Regression target column | (configurable) |
-| `targets.binary_threshold` | Threshold for binarization | `None` |
-
-### Time Generalization
+### 15.7 Targets
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `analysis.time_generalization.active_window` | Time range (seconds) | `[3.0, 10.5]` |
+| `targets.regression` | Continuous target column in `events.tsv` | *(configurable)* |
+| `targets.classification` | Binary target column | `"binary_outcome"` |
+| `targets.binary_threshold` | Threshold to binarize a continuous target | `null` |
+| `targets.strict_regression_target_continuous` | Raise error for binary-like regression targets | `false` |
+
+### 15.8 Time Generalization
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `analysis.time_generalization.active_window` | Time range `[t_min, t_max]` (seconds) | `[3.0, 10.5]` |
 | `analysis.time_generalization.window_len` | Window duration (seconds) | `0.75` |
 | `analysis.time_generalization.step` | Window step (seconds) | `0.25` |
-| `analysis.time_generalization.default_alpha` | Ridge α (no tuning) | `1.0` |
-| `analysis.time_generalization.use_ridgecv` | Enable inner CV for Ridge α | `false` |
-| `analysis.time_generalization.cluster_threshold` | Cluster forming threshold | `0.05` |
+| `analysis.time_generalization.default_alpha` | Ridge `\alpha` when not tuning | `1.0` |
+| `analysis.time_generalization.use_ridgecv` | Tune Ridge `\alpha` via inner GroupKFold | `false` |
+| `analysis.time_generalization.alpha_grid` | `\alpha` grid for inner CV | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
+| `analysis.time_generalization.cluster_threshold` | Cluster-forming threshold `\alpha_\text{cluster}` | `0.05` |
+| `analysis.time_generalization.min_subjects_per_cell` | Min subjects for a valid cell | `2` |
+| `analysis.time_generalization.min_count_per_cell` | Min trials for a valid cell | `15` |
+| `analysis.time_generalization.min_valid_fold_fraction` | Min fold completion rate | `0.8` |
+| `analysis.time_generalization.min_valid_permutation_fraction` | Min permutation completion rate | `0.8` |
 
-### Data
+### 15.9 Feature Importance
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `data.feature_harmonization` | Harmonization mode | `intersection` |
-| `data.max_excluded_subject_fraction` | Max subject exclusion rate | `1.0` |
+| `analysis.shap.enabled` | Run SHAP importance | `true` |
+| `analysis.shap.min_valid_fold_fraction` | Min fold completion for SHAP | `0.8` |
+| `analysis.permutation_importance.enabled` | Run permutation importance | `false` |
+| `analysis.permutation_importance.n_repeats` | Shuffles per feature per fold | `5` |
+| `analysis.permutation_importance.min_valid_fold_fraction` | Min fold completion | `0.8` |
+| `interpretability.grouped_outputs` | Export importance grouped by band/ROI | `true` |
+
+### 15.10 Incremental Validity
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `incremental_validity.baseline_predictors` | Baseline predictor columns from `events.tsv` | `["temperature"]` |
+| `incremental_validity.require_baseline_predictors` | Raise if baseline columns are missing | `true` |
+
+### 15.11 Uncertainty Quantification
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `analysis.uncertainty.min_valid_fold_fraction` | Min fold completion for conformal intervals | `0.8` |
+
+### 15.12 Data
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `data.feature_harmonization` | Default harmonization mode | `"intersection"` |
+| `data.max_excluded_subject_fraction` | Max fraction of requested subjects that may be excluded | `1.0` |
+
+### 15.13 Plotting
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `plotting.enabled` | Auto-generate diagnostic figures | `true` |
+| `plotting.formats` | Output formats (`["png"]`, `["png","svg"]`, …) | `["png"]` |
+| `plotting.dpi` | Figure resolution | `300` |
+| `plotting.top_n_features` | Top N features in importance figures | `20` |
+| `plotting.include_diagnostics` | Include prediction scatter / calibration plots | `true` |
 
 ---
 
-## Dependencies
+## 16. Dependencies
 
-- **scikit-learn** — Pipelines, CV, GridSearchCV, metrics, imputation, scaling, PCA, Ridge, ElasticNet, RF, SVM, LR
-- **NumPy / SciPy** — Numerical computation, Pearson correlation, Fisher z-transform
-- **pandas** — Feature table I/O, metadata handling
-- **statsmodels** — Multiple testing correction (FDR)
-- **joblib** — Parallel fold execution
-- **SHAP** — Feature importance (optional)
-- **PyTorch** — CNN classifier (optional)
-- **MNE-Python** — Epoch loading for time generalization
+| Library | Role |
+|---------|------|
+| **scikit-learn** | Pipelines, CV, `GridSearchCV`, metrics, imputation, scaling, PCA, Ridge, ElasticNet, RF, SVM, LR |
+| **imbalanced-learn** | `ImbPipeline`, `SMOTE`, `RandomUnderSampler` |
+| **NumPy / SciPy** | Numerical computation, Pearson correlation, Fisher z-transform |
+| **pandas** | Feature table I/O, metadata handling |
+| **statsmodels** | FDR (Benjamini-Hochberg), Holm correction |
+| **joblib** | Parallel outer-fold execution |
+| **SHAP** | Feature importance *(optional — `pip install shap`)* |
+| **PyTorch** | EEGNet CNN classifier *(optional — `pip install torch`)* |
+| **MNE-Python** | Epoch loading for time generalization |
+| **matplotlib** | Diagnostic figures |

@@ -205,6 +205,7 @@ type ConnectivityMeasure struct {
 
 var connectivityMeasures = []ConnectivityMeasure{
 	{"wpli", "wPLI", "Weighted phase lag index"},
+	{"imcoh", "imCoh", "Imaginary coherence"},
 	{"aec", "AEC", "Amplitude envelope correlation"},
 	{"plv", "PLV", "Phase locking value"},
 	{"pli", "PLI", "Phase lag index"},

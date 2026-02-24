@@ -1,9 +1,9 @@
 # TUI (Text User Interface)
 
-A terminal-based interactive interface for the EEG/fMRI pipeline, built with
+Terminal-based interactive interface for the EEG/fMRI pipeline, built with
 Go 1.21 and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
-It wraps the Python CLI (`eeg-pipeline`) with guided wizards, live execution
-monitoring, and persistent configuration — all inside an alternate-screen
+Wraps the Python CLI (`eeg-pipeline`) with guided wizards, live execution
+monitoring, and persistent configuration — all in an alternate-screen
 terminal application with mouse support.
 
 ![Main menu](../../../docs/screenshots/tui_main_menu.png)
@@ -55,9 +55,9 @@ styles/                  Colors, constants, layout helpers
 types/                   Pipeline and WizardStep enums
 ```
 
-The application is a single Bubble Tea program using an alternate screen with
-mouse cell-motion. A navigation stack (`navStack`) tracks view history so
-`Esc` always returns to the previous screen.
+Single Bubble Tea program using an alternate screen with mouse cell-motion.
+A navigation stack (`navStack`) tracks view history; `Esc` always returns to
+the previous screen.
 
 ---
 

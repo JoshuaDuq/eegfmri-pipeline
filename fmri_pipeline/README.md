@@ -1,10 +1,8 @@
 # fMRI Analysis Pipeline
 
-Subject-level fMRI analysis pipeline for thermal pain experiments. Converts raw DICOM data to BIDS, runs fMRIPrep preprocessing, fits first-level GLMs, computes statistical contrasts, extracts trial-wise beta maps, and quantifies multivariate pain signature expression (NPS, SIIPS1).
+Subject-level fMRI analysis for thermal pain experiments: DICOM-to-BIDS conversion, fMRIPrep preprocessing, first-level GLM contrasts, trial-wise beta estimation, and multivariate pain signature readout (NPS, SIIPS1).
 
-Designed for integration with EEG source localization: the resulting fMRI statistical maps constrain EEG inverse solutions.
-
-For repository-wide documentation entry points, see `docs/index.md`.
+Designed for integration with EEG source localization — the resulting fMRI statistical maps constrain EEG inverse solutions.
 
 ---
 
@@ -132,7 +130,7 @@ fmri_pipeline/
 
 **Module:** `analysis/raw_to_bids.py`
 
-Converts per-series DICOM directories into a BIDS-compliant fMRI dataset.
+Converts per-series DICOM directories into a BIDS-compliant fMRI dataset via `dcm2niix`.
 
 ### Method
 
@@ -212,7 +210,7 @@ Runs [fMRIPrep](https://fmriprep.org/) in a Docker or Apptainer container for ea
 
 **Module:** `pipelines/fmri_analysis.py` → `analysis/contrast_builder.py`
 
-Computes subject-level (first-level) statistical contrasts between experimental conditions using nilearn's `FirstLevelModel`.
+Subject-level statistical contrasts between experimental conditions via nilearn's `FirstLevelModel`.
 
 ### 3.1 BIDS Discovery
 
@@ -287,7 +285,7 @@ The first-level model is configured as follows:
 
 ### 3.5 Multi-Run GLM Fitting
 
-Runs are combined using nilearn's native multi-run `FirstLevelModel` support (fixed-effects across runs). This is the statistically valid approach — averaging per-run z/t maps is explicitly avoided.
+Runs are combined using nilearn's native multi-run `FirstLevelModel` (fixed-effects across runs). Averaging per-run z/t maps is explicitly avoided.
 
 **Run exclusion logic:**
 - Runs where condition A or B values are absent are excluded with a warning
@@ -337,7 +335,7 @@ When `resample_to_freesurfer=true`, the contrast map is resampled to the FreeSur
 
 **Module:** `pipelines/fmri_trial_signatures.py` → `analysis/trial_signatures.py`
 
-Computes per-trial beta maps and quantifies multivariate pain signature expression for each trial.
+Per-trial beta maps and multivariate pain signature expression for each trial.
 
 ### 4.1 Methods
 
@@ -416,7 +414,7 @@ For each trial beta map and each condition-averaged map, multivariate pain signa
 
 **Module:** `analysis/reporting.py`
 
-Generates a self-contained HTML report with statistical visualizations and QC diagnostics.
+Self-contained HTML report with statistical visualizations and QC diagnostics.
 
 ### 5.1 Statistical Visualizations
 
@@ -484,7 +482,7 @@ The report is a self-contained HTML file with:
 
 **Module:** `analysis/bem_generation.py`
 
-Generates boundary element model (BEM) surfaces, solutions, and EEG↔MRI coregistration transforms using Docker with FreeSurfer and MNE-Python.
+BEM surfaces, solutions, and EEG↔MRI coregistration transforms via Docker with FreeSurfer and MNE-Python.
 
 ### BEM Model
 
@@ -512,7 +510,7 @@ Default image: `freesurfer-mne:7.4.1` (custom image with FreeSurfer 7.4.1 + MNE-
 
 **Module:** `analysis/pain_signatures.py`
 
-Computes expression of established multivariate pain biomarkers on statistical or beta maps.
+Expression of established multivariate pain biomarkers computed on statistical or beta maps.
 
 ### Supported Signatures
 
@@ -545,8 +543,7 @@ For each signature weight map $\mathbf{w}$ and input image $\mathbf{x}$ (after r
 
 ## Configuration Reference
 
-Runtime settings are loaded from `eeg_pipeline/utils/config/eeg_config.yaml` (including `fmri_preprocessing`, `fmri_contrast`, and `fmri_constraint`).  
-`fmri_pipeline/utils/config/fmri_config.yaml` is kept as a reference/template for fMRI-only workflows.
+Runtime settings are loaded from `eeg_pipeline/utils/config/eeg_config.yaml` (sections `fmri_preprocessing`, `fmri_contrast`, `fmri_constraint`). A standalone reference template is kept at `fmri_pipeline/utils/config/fmri_config.yaml`.
 
 ### Paths
 

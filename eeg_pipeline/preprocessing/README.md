@@ -1,6 +1,6 @@
-# EEG Preprocessing Pipeline (forked from the coll_lab_eeg_pipeline)
+# EEG Preprocessing Pipeline
 
-Automated, reproducible EEG preprocessing built on [MNE-Python](https://mne.tools/), [MNE-BIDS-Pipeline](https://mne.tools/mne-bids-pipeline/), [PyPREP](https://pyprep.readthedocs.io/), and [MNE-ICAlabel](https://mne.tools/mne-icalabel/). The pipeline operates on BIDS-formatted EEG data and produces clean, epoched datasets ready for feature extraction and statistical analysis.
+Automated, reproducible EEG preprocessing built on [MNE-Python](https://mne.tools/), [MNE-BIDS-Pipeline](https://mne.tools/mne-bids-pipeline/), [PyPREP](https://pyprep.readthedocs.io/), and [MNE-ICAlabel](https://mne.tools/mne-icalabel/). Operates on BIDS-formatted EEG data and produces clean, epoched datasets ready for feature extraction and statistical analysis.
 
 ---
 
@@ -147,7 +147,7 @@ bids_root/
 
 **Module**: `preprocessing/pipeline/preprocess.py` → `run_bads_detection()`
 
-Automated detection of noisy channels using [PyPREP's `NoisyChannels`](https://pyprep.readthedocs.io/) class. This step operates on continuous (raw) data before any ICA or epoching.
+Automated detection of noisy channels using [PyPREP's `NoisyChannels`](https://pyprep.readthedocs.io/) class, operating on continuous (raw) data before ICA or epoching.
 
 #### Method
 
@@ -194,7 +194,7 @@ Bad channel detection supports parallel execution across files via `n_jobs` (use
 
 **Module**: `preprocessing/pipeline/preprocess.py` → `synchronize_bad_channels_across_runs()`
 
-For multi-run paradigms, bad channels detected in **any** run are propagated to **all** runs of the same subject. This ensures consistent channel sets across runs before ICA fitting.
+For multi-run paradigms, bad channels detected in **any** run are propagated to **all** runs of the same subject, ensuring consistent channel sets before ICA fitting.
 
 #### Method
 
@@ -202,7 +202,7 @@ For multi-run paradigms, bad channels detected in **any** run are propagated to 
 2. Collect the **union** of all channels marked `status == "bad"` across runs.
 3. Write the unified bad channel set back to every run's `channels.tsv`.
 
-This step is critical because MNE-BIDS-Pipeline reads `channels.tsv` to determine which channels to exclude from ICA fitting and interpolation. Inconsistent bads across runs would produce incompatible ICA decompositions.
+MNE-BIDS-Pipeline reads `channels.tsv` to determine which channels to exclude from ICA fitting and interpolation. Inconsistent bads across runs would produce incompatible ICA decompositions.
 
 ---
 
@@ -210,7 +210,7 @@ This step is critical because MNE-BIDS-Pipeline reads `channels.tsv` to determin
 
 **Module**: `pipelines/preprocessing.py` → `_run_ica_fitting()`
 
-ICA fitting is delegated to [MNE-BIDS-Pipeline](https://mne.tools/mne-bids-pipeline/) via a subprocess call. A temporary Python config file is generated from the YAML configuration and passed to the pipeline.
+ICA fitting is delegated to [MNE-BIDS-Pipeline](https://mne.tools/mne-bids-pipeline/) via subprocess. A temporary Python config file is generated from the YAML configuration and passed to the pipeline.
 
 #### MNE-BIDS-Pipeline Steps Executed
 
@@ -243,7 +243,7 @@ ICA fitting is delegated to [MNE-BIDS-Pipeline](https://mne.tools/mne-bids-pipel
 
 #### Why Extended Infomax?
 
-The default algorithm is `extended_infomax` because it is the recommended algorithm for [MNE-ICAlabel](https://mne.tools/mne-icalabel/), which uses the ICLabel classifier trained on extended infomax decompositions. Using a different ICA algorithm may degrade ICLabel classification accuracy.
+`extended_infomax` is the default because [ICLabel](https://mne.tools/mne-icalabel/) was trained on extended infomax decompositions. Using a different ICA algorithm may degrade classification accuracy.
 
 ---
 
@@ -342,7 +342,7 @@ Set `preprocessing.task_is_rest: true` in the configuration. MNE-BIDS-Pipeline w
 
 **Module**: `utils/data/preprocessing.py` → `write_clean_events_tsv_for_epochs()`
 
-After epoch rejection, a **clean events table** is written to derivatives. This table contains only the events corresponding to **kept** (non-rejected) epochs, enabling downstream analyses to align behavioral data with the surviving trials.
+After epoch rejection, a **clean events table** is written to derivatives containing only events for **kept** (non-rejected) epochs, enabling downstream analyses to align behavioral data with surviving trials.
 
 #### Method
 
@@ -392,7 +392,7 @@ Collects summary statistics across all processed subjects for quality control.
 
 **Module**: `preprocessing/pipeline/tfr.py` → `custom_tfr()`
 
-Computes Morlet wavelet time-frequency decompositions on clean epochs. This step is optional and typically configured separately from the core preprocessing.
+Optional Morlet wavelet time-frequency decomposition on clean epochs, typically configured separately from core preprocessing.
 
 #### Method
 
@@ -559,4 +559,4 @@ derivatives/preprocessed/eeg/
 
 ### `pipelines/preprocessing.py`
 
-The `PreprocessingPipeline` class orchestrates all steps, generates temporary MNE-BIDS-Pipeline configs, and manages subprocess execution. It inherits from `PipelineBase` which provides batch processing, logging, error handling, and ledger tracking.
+The `PreprocessingPipeline` class orchestrates all steps, generates temporary MNE-BIDS-Pipeline configs, and manages subprocess execution. Inherits from `PipelineBase` (batch processing, logging, error handling, ledger tracking).

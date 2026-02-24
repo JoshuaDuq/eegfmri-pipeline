@@ -1,561 +1,597 @@
-# Behavior Computation Pipeline (THIS IS STILL UNDER DEVELOPMENT AND IS SUBJECT TO CHANGES)
+# Behavior Computation Pipeline
 
-DAG-based statistical analysis pipeline correlating EEG features with behavioral measures (pain ratings, temperature, experimental conditions). Executes as a dependency-resolved sequence of stages, each with single responsibility.
+This document describes the behavioral statistics pipeline. Stages run as a dependency-resolved DAG over EEG/behavior data (pain ratings, temperature, experimental conditions), with explicit non-i.i.d. safeguards and per-stage outputs.
 
-## Architecture
+**Scope:** trial-level associations between behavioral variables (ratings, temperature, conditions, covariates) and EEG-derived features, plus group-level aggregation and validation.
 
-The pipeline is orchestrated by a **stage registry** with explicit dependency resolution. Each stage declares its required inputs and produced outputs. The DAG executor resolves prerequisites automatically, so requesting `correlations` will auto-enable `load → trial_table → correlate_design → ...`.
+The README is organized like a methods section:
 
+- **1. Overview and notation**
+- **2. Architecture (stage DAG)**
+- **3. Statistical safeguards**
+- **4. Stage definitions (trial-wise, temporal, advanced, diagnostics)**
+- **5. Group-level utilities**
+- **6. FDR reference**
+
+## 1. Overview and Notation
+
+We work at the **trial level**. Let:
+
+- $i \in \{1,\dots, N_\text{trials}\}$ index trials within a subject,
+- $g$ index grouping units (runs/blocks) used for non-i.i.d. safeguards,
+- $s$ index subjects (for group-level aggregation),
+- $f \in \{1,\dots, F\}$ index EEG-derived features.
+
+For each trial $i$ we define:
+
+- Behavioral **outcome** (e.g. pain rating) $y_i$,
+- Thermal **predictor** (e.g. temperature) $T_i$,
+- Feature vector $x_i \in \mathbb{R}^{F}$ with components $x_{i,f}$,
+- Optional covariate vector $z_i$ (age, sex, questionnaire scores, etc.),
+- Group label $G_i \in \{1,\dots, N_\text{groups}\}$ (run/block/cluster).
+
+The **trial table** stores one row per trial $i$ with columns:
+
+- trial metadata (subject, run/block, condition, indices),
+- behavioral variables ($y_i$, $T_i$, covariates),
+- EEG feature columns ($x_{i,f}$) joined from feature tables.
+
+Trials are **not i.i.d.**: they are clustered within runs/blocks and subjects. All permutation-based inference respects this structure via grouped labels, and group-level analyses aggregate subject-level statistics rather than pooling trials.
+
+## 2. Architecture
+
+The pipeline runs as dependency-resolved stages:
+
+```text
+load
+ → trial_table
+ → lag_features
+ → predictor_residual
+ → temperature_models
+ → feature_qc
+ → correlate_design
+ → correlate_effect_sizes
+ → correlate_pvalues
+ → correlate_primary_selection
+ → correlate_fdr
+ → predictor_sensitivity
+ → regression
+ → models
+ → stability
+ → icc
+ → condition_column
+ → condition_window
+ → temporal_tfr
+ → temporal_stats
+ → cluster
+ → mediation
+ → moderation
+ → mixed_effects (subject-level stage skips)
+ → consistency
+ → influence
+ → hierarchical_fdr_summary
+ → report
+ → export
 ```
-load → trial_table → lag_features
-                   → predictor_residual
-                   → temperature_models
-                   → correlate_design → correlate_effect_sizes → correlate_pvalues → correlate_primary_selection → correlate_fdr
-                   → predictor_sensitivity
-                   → regression
-                   → models
-                   → stability
-                   → condition_column / condition_window
-                   → temporal_tfr / temporal_stats
-                   → cluster
-                   → mediation
-                   → moderation
-                   → mixed_effects (group-level only)
-                   → consistency (requires correlations)
-                   → influence (requires correlations)
-                   → hierarchical_fdr_summary
-                   → report → export
-```
+
+Group-level computations run outside the subject DAG via `BehaviorPipeline.run_group_level(...)`.
 
 ## Statistical Safeguards
 
-### Non-i.i.d. Inference
+**Non-i.i.d. trial data:**
 
-Trial-level analyses (correlations, regression, condition comparisons) enforce valid inference for non-independent observations:
+- Correlations, predictor sensitivity, regression, condition column, mediation, and moderation enforce grouped permutation in trial mode unless `allow_iid_trials=true`.
+- Models, condition window, and condition multigroup require an explicit i.i.d. override for trial-level inference.
+- Temporal trial-level inference requires cluster correction with valid grouped labels when `allow_iid_trials=false`.
 
-- **Default:** Permutation testing with block/run-restricted permutations is required.
-- **Alternative:** Run-level aggregation (`primary_unit=run_mean`) averages features per run before testing, eliminating pseudo-replication.
-- **Override:** `allow_iid_trials=true` bypasses the check (not recommended).
+**Temperature control:**
 
-### Temperature Control
+- Partial/control and residualization paths are implemented. Temperature control is skipped when the target is temperature itself.
 
-Pain ratings covary with stimulus temperature. The pipeline separates temperature-driven from neural-driven effects:
+**Multiple-comparison correction:**
 
-1. **Partial correlations** — Regress out temperature (and trial order) before computing feature–rating correlations.
-2. **Pain residual** — `rating − f(temperature)` removes the stimulus-intensity component, leaving "pain beyond what temperature predicts."
-3. **Temperature spline** — Flexible nonlinear temperature→rating curve (natural cubic spline with configurable knots).
-
-When the target *is* temperature, temperature control is automatically disabled to avoid circular partialling.
-
-### Multiple Comparison Correction
-
-All stages use a unified FDR framework:
-
-1. **Within-family FDR** — Benjamini-Hochberg correction within each feature type (power, connectivity, etc.).
-2. **Hierarchical FDR** — Two-level correction: family-level significance gates, then within-family q-values.
-3. **Global FDR** — Cross-family correction for the final combined results table.
-
-P-value priority: `permutation > partial_cov_temp > partial_temp > partial_cov > raw`.
+- Unified hierarchical/global FDR is applied in wrapped stages.
+- Regression and model-family helpers compute local BH (`p_fdr`).
+- Temporal correction mode is configurable: `cluster`, `fdr`, `bonferroni`, or `none`.
 
 ---
 
-## Stages
+## Stage Categories
+
+### 0. Load and Metadata
+
+**Modules:** `stages/metadata.py`, `utils/data/behavior.py`
+
+- **Load stage (`load`)**: reads aligned behavioral events, thermal predictor series, covariates, and trial-wise EEG feature tables into the `BehaviorContext`. It produces the core behavioral series (`rating`, `temperature`) and a mapping of named feature tables used downstream.
+- **Metadata/QC stage (`metadata`)**: builds a JSON summary of behavioral data quality (trial counts, missingness, basic rating/temperature distributions, pain vs. non-pain contrasts, covariate coverage, feature counts) and records key analysis configuration fields (method labels, permutation counts, FDR level). Outputs live alongside stats files and support reproducibility/diagnostics.
+
+---
 
 ### 1. Trial Table
 
-**Module:** `orchestration.py` → `stage_trial_table`
+**Module:** `stages/trial_table.py` → `utils/data/trial_table.py`
 
-Builds a canonical trial-level DataFrame merging all feature tables with behavioral event metadata.
-
-**Method:**
-
-1. Load all feature DataFrames from the feature extraction pipeline (power, connectivity, aperiodic, ERP, etc.).
-2. Validate index alignment across all feature tables.
-3. Prefix each feature column with its category name (e.g., `power_`, `connectivity_`).
-4. Merge with `aligned_events` (from BIDS `events.tsv`) containing `rating`, `temperature`, `binary_outcome`, `trial_index`, `run_id`.
-5. Optionally compute **change scores** (active − baseline) for features that have both segment variants.
-
-**Output:** `trials.parquet` — One row per trial, all features + behavioral variables.
+Builds the canonical trial-level table by joining aligned events and all feature tables.
 
 ---
 
 ### 2. Lag Features
 
-**Module:** `orchestration.py` → `stage_lag_features`
+**Module:** `stages/trial_table.py` → `utils/data/trial_table.py::add_lag_and_delta_features`
 
-Adds temporal dynamics variables for habituation and sensitization analysis.
+Computed within run/block grouping:
 
-**Computed variables:**
+$$
 
-| Variable | Computation |
-|----------|-------------|
-| `prev_temperature` | Temperature of the preceding trial (within run). |
-| `delta_temperature` | `temperature − prev_temperature` |
-| `prev_rating` | Rating of the preceding trial (within run). |
-| `delta_rating` | `rating − prev_rating` |
-| `trial_index_within_group` | 0-indexed trial position within each run/block. |
+\text{prev\_temperature}_i = T_{i-1}, \quad \Delta\text{temperature}_i = T_i - T_{i-1}
 
-Lag computation respects run boundaries — no carry-over across runs.
+$$
+
+$$
+
+\text{prev\_rating}_i = y_{i-1}, \quad \Delta\text{rating}_i = y_i - y_{i-1}, \quad \text{trial\_index}_i = i
+
+$$
 
 ---
 
-### 3. Pain Residual
+### 3. Predictor Residual
 
-**Module:** `orchestration.py` → `stage_predictor_residual`
+**Module:** `stages/trial_table.py` → `utils/analysis/stats/predictor_residual.py`
 
-Computes `predictor_residual = rating − f(temperature)`, representing pain perception beyond what stimulus intensity predicts.
+Core quantity: $\text{residual}_i = y_i - \hat{y}_i$, where $\hat{y}_i = f(T_i)$.
 
-**Method:**
+Model path:
 
-1. Fit a flexible temperature→rating curve (natural cubic spline or polynomial, configurable).
-2. Optionally use **cross-validated (out-of-run) prediction** to avoid overfitting the temperature–rating relationship.
-3. Compute residuals: `predictor_residual = rating − predicted_rating`.
-
-**Output:** `predictor_residual` column added to the trial table. Used as the preferred correlation target when `prefer_predictor_residual=true` (default).
+- Spline OLS candidates: `rating ~ bs(temp, df=d, degree=3)` (pick lowest AIC)
+- Fallback polynomial: $\hat{y} = \sum_j a_j T^j$
+- Optional cross-fit residual (`predictor_residual_cv`) via GroupKFold.
 
 ---
 
 ### 4. Temperature Models
 
-**Module:** `orchestration.py` → `stage_temperature_models`
+**Module:** `stages/models.py` → `utils/analysis/stats/temperature_models.py`
 
-Characterizes the temperature→rating psychophysical function.
+Model comparison:
 
-**Sub-computations:**
+- Linear: $y = \beta_0 + \beta_1 T + \varepsilon$
+- Polynomial: $y = \beta_0 + \beta_1 T + \cdots + \beta_d T^d + \varepsilon$
+- Spline: $y = \beta_0 + \sum_j \beta_j B_j(T) + \varepsilon$
 
-- **Model comparison** — Fits linear, polynomial (degree 2–4), and natural spline models to temperature→rating. Compares via AIC/BIC to select the best-fitting curve shape.
-- **Breakpoint detection** — Tests for threshold temperatures where pain sensitivity changes (piecewise regression with breakpoint search).
+Metrics:
 
-**Output:** Model comparison table + breakpoint candidates with test statistics.
+$$
 
----
+\text{RMSE} = \sqrt{\operatorname{mean}((y - \hat{y})^2)}, \qquad \Delta\text{AIC} = \text{AIC}_\text{model} - \text{AIC}_\text{best}
 
-### 5. Correlations (5-stage sub-pipeline)
+$$
 
-The correlation pipeline is decomposed into five atomic stages:
+Breakpoint (hinge) model:
 
-#### 5a. Correlate Design
+$$
 
-**Module:** `orchestration.py` → `stage_correlate_design`
+y = \beta_0 + \beta_1 T + \beta_2 \max(0,\, T - c) + \varepsilon
 
-Assembles the design matrix: identifies target columns, builds covariate DataFrame (trial order, run dummies), resolves temperature series, and determines permutation groups.
+$$
 
-**Targets** (configurable, default order): `predictor_residual`, `rating`, `temperature`.
+Linear-vs-hinge F-test:
 
-**Covariates:**
-- `trial_index_within_group` — Controls for habituation/sensitization.
-- Run dummy variables — Controls for between-run variance (when `run_adjustment.enabled=true`).
+$$
 
-#### 5b. Correlate Effect Sizes
+F = \frac{(RSS_\text{lin} - RSS_\text{hinge})/df_\text{num}}{RSS_\text{hinge}/df_\text{den}}
 
-**Module:** `orchestration.py` → `stage_correlate_effect_sizes`
-
-Computes correlation coefficients for every feature × target pair. Parallelized via `joblib` for large feature sets (≥100 pairs).
-
-**Correlation types** (configurable, computed selectively):
-
-| Type | Method |
-|------|--------|
-| `raw` | Bivariate Spearman/Pearson correlation. |
-| `partial_cov` | Partial correlation controlling for trial order (+ run dummies). |
-| `partial_temp` | Partial correlation controlling for temperature. |
-| `partial_cov_temp` | Partial correlation controlling for both covariates and temperature. **Default.** |
-| `run_mean` | Run-level aggregated correlation (mean feature/target per run). |
-
-**Robust methods** (optional): `percentage_bend`, `winsorized`, `shepherd` — when enabled, partial correlations are disabled (robust methods don't support partialling).
-
-#### 5c. Correlate P-values
-
-**Module:** `orchestration.py` → `stage_correlate_pvalues`
-
-Adds permutation-based p-values to each effect size record.
-
-**Method:**
-1. For each feature × target pair, permute the target within blocks/runs (`permute_within_groups`).
-2. Recompute the correlation on each permuted dataset.
-3. Two-tailed p-value: `p = (n_extreme + 1) / (n_perm + 1)`.
-4. Permutation p-values are computed for all correlation types (raw, partial_cov, partial_temp, partial_cov_temp).
-
-**Permutation schemes:** `shuffle` (within-group exchangeability), `circular_shift` (within-group circular shift; preserves within-run autocorrelation).
-
-#### 5d. Correlate Primary Selection
-
-**Module:** `orchestration.py` → `stage_correlate_primary_selection`
-
-Selects the primary p-value and effect size for each record based on the control settings:
-
-| Control Settings | Primary Selected |
-|-----------------|------------------|
-| `control_temperature + control_trial_order` | `r_partial_cov_temp`, `p_partial_cov_temp` |
-| `control_temperature` only | `r_partial_temp`, `p_partial_temp` |
-| `control_trial_order` only | `r_partial_cov`, `p_partial_cov` |
-| Neither | `r_raw`, `p_raw` |
-
-If permutation p-values are available, the corresponding permutation p-value replaces the asymptotic one.
-
-#### 5e. Correlate FDR
-
-**Module:** `orchestration.py` → `stage_correlate_fdr`
-
-Applies Benjamini-Hochberg FDR correction to the primary p-values. Saves the final correlation results table.
-
-**Output columns:** `r_raw`, `p_raw`, `r_partial_cov_temp`, `p_partial_cov_temp`, `p_perm_*`, `p_primary`, `p_fdr`, `q_within_family`, `q_global`.
+$$
 
 ---
 
-### 6. Pain Sensitivity
+### 5. Feature QC
 
-**Module:** `orchestration.py` → `stage_predictor_sensitivity`
+**Module:** `stages/feature_qc.py`
 
-Correlates EEG features with a temperature-adjusted pain index derived from the temperature→rating relationship.
-
-**Method:**
-
-1. Fit a simple temperature→rating model and compute residuals (rating minus predicted-from-temperature).
-2. Correlate each EEG feature with this residual index.
-3. Optional permutation testing with within-group permutations (e.g., run/block-restricted).
-4. FDR correction within the predictor_sensitivity analysis family.
-
-**Unit of analysis:** Configurable as `trial` (with permutation requirement) or `run_mean` (aggregated per run).
+Applies feature-quality screening and emits QC metadata.
 
 ---
 
-### 7. Regression
+### 6. Correlations Sub-Pipeline
 
-**Module:** `orchestration.py` → `stage_regression`
+**Modules:** `stages/correlate.py`, `stats/correlation.py`, `stats/partial.py`, `stats/permutation.py`
 
-Trialwise multiple regression for each feature:
+#### 6.1 Correlate Design
 
-```
-rating ~ temperature + trial_order + feature (+ temperature × feature interaction)
-```
+Defines targets, covariates, and permutation groups.
 
-**Method:**
+#### 6.2 Correlate Effect Sizes
 
-1. For each feature, fit an OLS model with HC3 robust standard errors.
-2. Extract the feature coefficient (`b_feature`), its p-value, and the interaction term.
-3. Optional permutation testing for the feature coefficient.
+Raw correlations:
 
-**Unit of analysis:** `trial` (with permutation) or `run_mean` (aggregated per run to avoid pseudo-replication).
+- Pearson: $r = \operatorname{corr}(x, y)$
+- Spearman: $r = \operatorname{corr}(\operatorname{rank}(x),\, \operatorname{rank}(y))$
 
-**Output:** Per-feature regression coefficients, standard errors, p-values, and interaction effects.
+Partial correlation (covariate control): residualize $x$ and $y$ on $Z$ and correlate residuals. Test statistic:
 
----
+$$
 
-### 8. Models
+t = r\sqrt{\frac{n-k-2}{1-r^2}}, \qquad p = 2\,P\!\left(|T_{n-k-2}| \geq |t|\right)
 
-**Module:** `orchestration.py` → `stage_models`
+$$
 
-Fits multiple model families per feature to assess robustness of effects across estimation methods.
+Run-mean mode computes correlations on run-aggregated means.
 
-**Model families:**
+#### 6.3 Correlate P-values
 
-| Family | Method |
-|--------|--------|
-| **OLS-HC3** | Ordinary least squares with heteroscedasticity-consistent (HC3) standard errors. |
-| **Robust** | M-estimator regression (Huber or bisquare weights). |
-| **Quantile** | Quantile regression at the median (robust to outliers and skewness). |
-| **Logistic** | Binary logistic regression predicting `binary_outcome` from the feature. |
+Permutation p-value:
 
-**Outcomes:** `rating`, `predictor_residual`, and `binary_outcome` (configurable).
+$$
 
----
+p_\text{perm} = \frac{\#\text{extreme} + 1}{n_\text{perm} + 1}
 
-### 9. Stability
+$$
 
-**Module:** `orchestration.py` → `stage_stability`
+Grouped schemes: shuffle or circular-shift (`permute_within_groups`).
+Partial permutation uses Freedman-Lane residual permutation.
 
-Assesses within-subject cross-run stability of feature→outcome associations.
+#### 6.4 Primary Selection
 
-**Method:**
+Selects primary effect/p-value according to control path, unit (trial vs run), and strict non-i.i.d mode.
 
-1. For each feature, compute the feature–outcome correlation separately within each run/block.
-2. Summarize: mean correlation across runs, standard deviation, and a stability index.
-3. Features with inconsistent effects across runs are flagged (non-gating — does not exclude features).
+#### 6.5 FDR
 
-**Output:** Per-feature stability metrics (`r_mean`, `r_std`, `stability_index`).
+BH adjustment core:
 
----
+$$
 
-### 10. Consistency
+q_{(i)} = \min_{j \geq i} \frac{m}{j}\,p_{(j)}
 
-**Module:** `orchestration.py` → `stage_consistency`
+$$
 
-Merges results from correlations, regression, and models stages to flag **effect-direction contradictions**.
-
-**Method:**
-
-1. For each feature, extract the sign of the effect from each analysis method (correlation r, regression β, model coefficients).
-2. Flag features where the effect direction disagrees across methods.
-3. Non-gating: flags are informational, not exclusionary.
+Wrapped stages use unified hierarchical/global FDR helpers.
 
 ---
 
-### 11. Influence
+### 7. Predictor Sensitivity
 
-**Module:** `orchestration.py` → `stage_influence`
+**Module:** `stages/correlate.py` → `stats/correlation.py::run_predictor_sensitivity_correlations`
 
-Detects influential observations that disproportionately drive statistical results.
+Pain sensitivity index: fit $y = \beta_0 + \beta_1 T + \varepsilon$, compute residual $\psi = y - (\beta_0 + \beta_1 T)$, then correlate each feature with $\psi$.
 
-**Diagnostics:**
-
-| Metric | Description |
-|--------|-------------|
-| **Cook's D** | Influence of each trial on the regression fit. Trials with `D > 4/n` are flagged. |
-| **Leverage** | Hat-matrix diagonal values. High-leverage points have unusual predictor values. |
-| **DFFITS** | Standardized difference in fitted values when each observation is removed. |
-
-Computed for top-ranked features from the correlation/regression results.
+Permutation p-values: $(\#\text{extreme} + 1)/(n_\text{perm} + 1)$.
 
 ---
 
-### 12. Condition Comparison
+### 8. Regression
 
-**Module:** `orchestration.py` → `stage_condition_column`, `stage_condition_window`
+**Module:** `stages/models.py` → `stats/trialwise_regression.py`
 
-Compares EEG features between experimental conditions.
+Per-feature model:
 
-#### Column-based contrast
+$$
 
-Splits trials by a categorical column (e.g., `binary_outcome`: pain vs. non-pain).
+y = Z\gamma + \beta_f x_f + \beta_\text{int}(x_f \cdot T) + \varepsilon \quad \text{(full)}, \qquad y = Z\gamma + \varepsilon \quad \text{(reduced)}
 
-**Effect size metrics:**
+$$
 
-| Metric | Computation |
-|--------|-------------|
-| `cohens_d` | `(mean_group2 − mean_group1) / SD_pooled` (paired: Cohen's dz from difference scores). |
-| `hedges_g` | Bias-corrected Cohen's d: `d × (1 − 3/(4n−1))`. |
-| `mean_diff` | Raw mean difference between conditions. |
+Outputs include:
 
-**Inference:** Permutation-tested (block-restricted) or run-level aggregated. FDR-corrected.
+- $\Delta R^2 = R^2_\text{full} - R^2_\text{reduced}$
+- HC3 heteroskedasticity-consistent standard errors:
 
-**Multigroup:** When `compare_values` has 3+ levels, delegates to Kruskal-Wallis / one-way ANOVA with post-hoc pairwise comparisons.
+$$
 
-#### Window-based contrast
+h_i = x_i^\top (X^\top X)^{-1} x_i, \qquad w_i = \frac{e_i^2}{(1-h_i)^2}
 
-Compares features across time windows (e.g., baseline vs. active) using paired effect sizes (Cohen's dz).
+$$
 
----
+$$
 
-### 13. Temporal Analysis
+\widehat{\text{Cov}}_\text{HC3} = (X^\top X)^{-1} X^\top \operatorname{diag}(w)\, X\, (X^\top X)^{-1}
 
-**Module:** `orchestration.py` → `stage_temporal_tfr`, `stage_temporal_stats`
+$$
 
-Time-resolved feature–behavior correlations.
+- $t = \hat{\beta} / \text{SE}$, two-sided t p-values
 
-#### Time-Frequency Correlations (`temporal_tfr`)
-
-Correlates TFR power at each (time, frequency) bin with pain ratings. Produces a time-frequency correlation map.
-
-#### Temporal Statistics (`temporal_stats`)
-
-Computes time-resolved correlations for power, ITPC, and ERDS features across trial phases.
-
-**Multiple comparison correction** (configurable):
-
-| Method | Description |
-|--------|-------------|
-| `fdr` | Benjamini-Hochberg across all time × frequency cells. **Default.** |
-| `cluster` | Cluster-based permutation test (preferred for dense grids). |
-| `bonferroni` | Conservative Bonferroni correction. |
-| `none` | No correction (use with caution). |
+Permutation feature-term inference uses reduced-model residual permutation (Freedman-Lane style).
 
 ---
 
-### 14. Cluster Permutation Tests
+### 9. Model Families
 
-**Module:** `orchestration.py` → `stage_cluster`
+**Module:** `stages/models.py` → `stats/feature_models.py`
 
-Non-parametric cluster-based permutation tests on epoch data (MNE `spatio_temporal_cluster_test`).
+Families:
 
-**Method:**
+- `ols_hc3`
+- `robust_rlm` (Huber M-estimation)
+- `quantile_50` (median regression)
+- `logit`
 
-1. For each frequency band, form clusters of contiguous time × channel points exceeding a forming threshold.
-2. Compute cluster-level statistics (sum of t-values within each cluster).
-3. Build a null distribution by permuting condition labels and recomputing cluster statistics.
-4. Cluster p-value: proportion of permutation cluster statistics exceeding the observed one.
+Logistic form:
+
+$$
+
+\operatorname{logit}(P(Y=1)) = X\beta, \qquad \text{OR} = \exp(\beta_\text{feature})
+
+$$
+
+Additional diagnostics include McFadden pseudo-$R^2$ and AUC/delta-AUC.
+
+---
+
+### 10. Stability
+
+**Module:** `stages/diagnostics.py` → `stats/stability.py`
+
+Per run/block group $g$: $r_g = \operatorname{corr}(x_g, y_g)$ (optionally partial on temperature).
+
+Summary metrics: $\bar{r}_g$, $s_{r_g}$, $\min(r_g)$, $\max(r_g)$; sign consistency against overall effect; fraction with $p_g < \alpha$.
+
+---
+
+### 11. ICC Reliability
+
+**Module:** `stages/diagnostics.py` → `stats/reliability.py`
+
+Subject stage uses ICC(3,1):
+
+$$
+
+\text{ICC}(3,1) = \frac{MS_\text{rows} - MS_\text{error}}{MS_\text{rows} + (k-1)\,MS_\text{error}}
+
+$$
+
+---
+
+### 12. Condition Comparisons
+
+**Modules:** `stages/condition.py`, `stats/effect_size.py`, `utils/parallel.py`
+
+#### 12.1 Condition Column (two-group)
+
+- Unpaired default: Welch t-test
+
+$$
+
+t = \frac{\bar{x}_1 - \bar{x}_2}{\sqrt{s_1^2/n_1 + s_2^2/n_2}}
+
+$$
+
+- Paired path (run-level): paired tests/effects
+- Effect sizes:
+
+$$
+
+d = \frac{\bar{x}_1 - \bar{x}_2}{s_\text{pooled}}, \qquad g = d\!\left(1 - \frac{3}{4\,df - 1}\right), \qquad d_z = \frac{\bar{d}}{s_d} \text{ (paired)}
+
+$$
+
+Permutation p-values (unpaired mean-difference and paired sign-flip): $(\#\text{extreme} + 1)/(n_\text{perm} + 1)$.
+
+#### 12.2 Condition Multigroup
+
+Pairwise tests only (no stage-level omnibus):
+
+- unpaired: Mann-Whitney U
+- paired run-level: Wilcoxon signed-rank
+
+#### 12.3 Condition Window
+
+Paired window comparison uses Wilcoxon and difference-score effects:
+
+$$
+
+d_z = \bar{d}/s_d, \qquad g_z = d_z\!\left(1 - \frac{3}{4n-1}\right), \quad \text{where } d_i = v_{2i} - v_{1i}
+
+$$
+
+---
+
+### 13. Temporal Statistics
+
+**Modules:** `stages/temporal.py`, `stats/temporal.py`
+
+Power-bin statistic:
+
+$$
+
+b_{i,f,w} = \operatorname{mean}_{t \in w} P_{i,f,t}
+
+$$
+
+Correlate $b$ with behavior (simple or partial). Correlation-to-$t$ transform for cluster forming:
+
+$$
+
+t = r\sqrt{\frac{\text{dof}}{1-r^2}}
+
+$$
+
+Temporal correction modes: `fdr` (BH), `bonferroni`, `cluster`, `none`.
+
+ITPC trial metric:
+
+$$
+
+\text{ITPC}_\text{trial} = \operatorname{mean}\!\left(\cos(\phi_\text{trial} - \bar{\phi})\right)
+
+$$
+
+ERDS trial metrics:
+
+$$
+
+\text{ERDS\%} = 100 \cdot \frac{P_\text{active} - P_\text{base}}{P_\text{base}}, \qquad \text{ERDS}_z = \frac{P_\text{active} - P_\text{base}}{\sigma_\text{base}}
+
+$$
+
+---
+
+### 14. Cluster Tests
+
+**Modules:** `stages/temporal.py::stage_cluster_impl`, `stats/cluster.py`
+
+Key formulas:
+
+$$
+
+d = \frac{\mu_A - \mu_B}{s_\text{pooled}}, \qquad M_c = \sum_{i \in c} |t_i|, \qquad p_c = \frac{\#\{M_\text{max}^\text{perm} \geq M_c\} + 1}{n_\text{perm} + 1}
+
+$$
 
 ---
 
 ### 15. Mediation
 
-**Module:** `orchestration.py` → `stage_mediation`
+**Module:** `stages/advanced.py` → `stats/mediation.py`
 
-Tests whether EEG features mediate the temperature→rating causal pathway.
+Path models:
 
-**Model:**
+$$
 
-```
-Path a: temperature → feature (mediator)
-Path b: feature → rating (controlling for temperature)
-Path c': temperature → rating (direct, controlling for feature)
-Indirect effect: ab = a × b
-```
+M = \alpha_0 + aX + \varepsilon_M, \qquad Y = c_0 + cX + \varepsilon_Y, \qquad Y = c_0' + c'X + bM + \varepsilon_Y'
 
-**Inference:**
+$$
 
-| Method | Description |
-|--------|-------------|
-| **Sobel test** | Asymptotic test of `ab ≠ 0`. |
-| **Bootstrap CI** | Percentile bootstrap confidence interval for `ab` (default 1000 resamples). |
-| **Permutation** | Block-restricted permutation p-value for the indirect effect. |
+Derived quantities:
 
-**Feature selection:** Optionally limited to top `max_mediators` features by variance.
+$$
+
+\text{indirect} = ab, \qquad \text{SE}_{ab} = \sqrt{a^2\,\text{SE}_b^2 + b^2\,\text{SE}_a^2}, \qquad z = ab/\text{SE}_{ab}, \qquad \text{prop.\ mediated} = ab/c
+
+$$
+
+Bootstrap CI is percentile-based. Optional permutation p-values: $(\#\text{extreme}+1)/(n_\text{perm}+1)$.
 
 ---
 
 ### 16. Moderation
 
-**Module:** `orchestration.py` → `stage_moderation`
+**Module:** `stages/advanced.py` → `stats/moderation.py`
 
-Tests whether EEG features moderate the temperature→rating relationship (interaction effects).
+Model:
 
-**Model:**
+$$
 
-```
-rating = b0 + b1 × temperature + b2 × feature + b3 × (temperature × feature) + ε
-```
+Y = \beta_0 + \beta_1 X + \beta_2 W + \beta_3 (X \cdot W) + \varepsilon
 
-If `b3` is significant, the feature moderates how temperature affects pain perception.
+$$
 
-**Output per feature:**
+Key computations:
 
-| Field | Description |
-|-------|-------------|
-| `b3_interaction` | Interaction coefficient. |
-| `p_interaction` | Asymptotic p-value for the interaction. |
-| `p_interaction_perm` | Permutation p-value (block-restricted). |
-| `slope_low_w` / `slope_high_w` | Simple slopes at ±1 SD of the feature (Johnson-Neyman probing). |
-| `jn_low` / `jn_high` | Johnson-Neyman significance transition points. |
-| `r_squared_change` | ΔR² from adding the interaction term. |
+$$
 
----
+\Delta R^2 = R^2_\text{full} - R^2_\text{reduced}, \qquad F = \frac{(R^2_\text{full} - R^2_\text{reduced})/1}{(1 - R^2_\text{full})/(n-4)}
 
-### 17. Mixed Effects (Group-Level)
+$$
 
-**Module:** `orchestration.py` → `run_group_level_mixed_effects`
+Simple slope at moderator level $W$:
 
-Multi-subject mixed-effects models with subject as random effect. **Only runs at group level** (≥2 subjects).
+$$
 
-**Model:**
+\text{slope}(W) = \beta_1 + \beta_3 W, \qquad \text{Var}[\text{slope}(W)] = \text{Var}(\beta_1) + W^2\text{Var}(\beta_3) + 2W\,\text{Cov}(\beta_1,\beta_3)
 
-```
-rating ~ feature_value + (1 | subject_id)          # random intercept (default)
-rating ~ feature_value + (feature_value | subject_id)  # random slope
-```
+$$
 
-**Method:**
-
-1. Concatenate trial tables across subjects.
-2. For each feature, fit `statsmodels.MixedLM` with REML estimation.
-3. Extract fixed-effect coefficient, z-statistic, and p-value.
-4. Apply hierarchical FDR correction by feature family.
-
-**Output:** Fixed-effect coefficients, AIC/BIC, convergence status, hierarchical q-values.
+Johnson-Neyman interval solved from the t-critical boundary equation.
+Optional permutation test: permute $Y$ and evaluate $|\hat{\beta}_3^\text{perm}| \geq |\hat{\beta}_3^\text{obs}|$.
 
 ---
 
-### 18. Multilevel Correlations (Group-Level)
+### 17. Mixed Effects
 
-**Module:** `orchestration.py` → `run_group_level_correlations`
+**Module:** `stages/advanced.py::stage_mixed_effects_impl`
 
-Cross-subject correlations with block-aware permutation testing.
-
-**Method:**
-
-1. Concatenate trial tables across subjects.
-2. Compute feature–rating correlations on the combined data.
-3. Permute within blocks (subject × run) to preserve the dependence structure.
-4. Hierarchical FDR correction by feature family.
+The subject-level stage is a no-op by design. Mixed-effects models require multiple subjects and are provided at the group level (see [Group-Level Utilities](#group-level-utilities)).
 
 ---
 
-### 19. Feature QC Screen
+### 18. Consistency
 
-**Module:** `orchestration.py` → `stage_feature_qc_screen`
+**Module:** `stages/diagnostics.py` → `stats/consistency.py`
 
-Pre-inference quality control filtering.
+Computes sign-consistency/sign-flip diagnostics:
 
-**Filters:**
+$$
 
-| Criterion | Threshold |
-|-----------|-----------|
-| **High missingness** | `> max_missing_pct` (default 50%) of values are NaN. |
-| **Near-zero variance** | Variance `< min_variance` (default 1e-10). |
-| **Constant within run** | No variation within any run (all run-level variances ≈ 0). |
+\text{flip} = \mathbf{1}[\operatorname{sign}(a) \cdot \operatorname{sign}(b) < 0] \quad \text{(finite/nonzero values only)}
 
-Features failing QC are excluded from downstream inference. Non-gating: the QC table is saved for inspection.
+$$
 
 ---
 
-### 20. Report
+### 19. Influence
 
-**Module:** `orchestration.py` → `stage_report`
+**Module:** `stages/diagnostics.py` → `stats/influence.py`
 
-Generates a self-diagnosing Markdown report summarizing all analysis results for a single subject.
+Linear-model influence metrics:
 
----
+$$
 
-### 21. Export
+h_i = x_i^\top (X^\top X)^{-1} x_i, \qquad D_i = \frac{e_i^2}{p \cdot \text{MSE}} \cdot \frac{h_i}{(1-h_i)^2}
 
-**Module:** `orchestration.py` → `stage_export`
+$$
 
-Normalizes and exports all analysis results to disk. Produces:
-- Combined correlation tables (rating, temperature, predictor_sensitivity).
-- Condition effect tables.
-- Regression, mediation, moderation results.
-- Outputs manifest JSON for downstream consumption.
+Default thresholds: $D_i > 4/n$ and $h_i > 2p/n$.
 
 ---
 
-## Feature-Behavior Correlator
+### 20. Hierarchical FDR Summary
 
-**Module:** `feature_correlator.py` → `FeatureBehaviorCorrelator`
+**Module:** `stages/fdr.py`
 
-An alternative entry point that loads all feature files from the registry and runs a complete correlation analysis in a single call. Used by `run_unified_feature_correlations` from the `BehaviorContext`.
-
-**Capabilities:**
-- Loads all feature types from the feature registry.
-- Computes raw, partial, and permutation-tested correlations.
-- Bootstrap confidence intervals.
-- Bayes factors (optional).
-- LOSO (leave-one-session-out) stability.
-- Split-half reliability.
-- ROI-level correlations for power features.
+Aggregates cached unified-FDR metadata from prior stages.
 
 ---
 
-## Configuration
+### 21. Report and Export
 
-All behavior analysis settings live under `behavior_analysis` in `eeg_config.yaml`:
+**Modules:** `stages/report.py`, `stages/export.py`
 
-| Key | Description | Default |
-|-----|-------------|---------|
-| `statistics.correlation_method` | `spearman` or `pearson` | `spearman` |
-| `statistics.fdr_alpha` | FDR correction threshold | `0.05` |
-| `statistics.n_permutations` | Permutation iterations | `1000` |
-| `statistics.allow_iid_trials` | Bypass non-i.i.d. check | `false` |
-| `control_temperature` | Partial out temperature | `true` |
-| `control_trial_order` | Partial out trial order | `true` |
-| `correlations.types` | Which correlation types to compute | `["partial_cov_temp"]` |
-| `correlations.prefer_predictor_residual` | Use predictor_residual as primary target | `true` |
-| `correlations.primary_unit` | `trial` or `run_mean` | `trial` |
-| `predictor_sensitivity.primary_unit` | `trial` or `run_mean` | `trial` |
-| `regression.primary_unit` | `trial` or `run_mean` | `trial` |
-| `condition.compare_column` | Column for condition split | `pain` |
-| `condition.compare_values` | Values defining conditions | `[1, 0]` |
-| `mediation.n_bootstrap` | Bootstrap resamples for mediation | `1000` |
-| `mediation.max_mediators` | Max features to test as mediators | `20` |
-| `moderation.max_features` | Max features for moderation | `50` |
-| `robust_correlation` | Robust method (`percentage_bend`, `winsorized`, `shepherd`) | `none` |
-| `run_adjustment.enabled` | Include run dummies as covariates | `false` |
-| `permutation.scheme` | `shuffle` or `circular_shift` | `circular_shift` |
+Serializes and normalizes outputs for downstream use.
 
-## Dependencies
+---
 
-- **statsmodels** — Mixed-effects models, robust regression, quantile regression
-- **scipy.stats** — Spearman/Pearson correlations, permutation testing
-- **joblib** — Parallel computation for large feature sets
-- **pandas** — Trial table construction, data alignment
-- **NumPy** — Numerical computation
-- **MNE-Python** — Cluster permutation tests, epoch handling
+## Group-Level Utilities
+
+### 1. Group-Level Mixed Effects
+
+**Module:** `analysis/behavior/group_level.py::run_group_level_mixed_effects_impl`
+
+Fits feature-wise mixed models across subjects (`MixedLM`), then applies hierarchical FDR.
+
+### 2. Group-Level Multilevel Correlations
+
+**Module:** `analysis/behavior/group_level.py::run_group_level_correlations_impl`
+
+Per-subject associations are aggregated with Fisher averaging:
+
+$$
+
+r_\text{group} = \tanh\!\left(\operatorname{mean}_s\left[\operatorname{atanh}(r_s)\right]\right)
+
+$$
+
+Permutation primary p-value: $p_\text{perm} = (\#\text{extreme} + 1)/(n_\text{perm} + 1)$.
+
+Optional fallback (config): one-sample t-test of subject Fisher-z values vs 0.
+
+---
+
+## FDR Formula Reference
+
+BH q-values:
+
+$$
+
+q_{(i)} = \min_{j \geq i} \frac{m}{j}\,p_{(j)}
+
+$$
+
+Hierarchical FDR family gate (Simes):
+
+$$
+
+p_\text{Simes} = \min_i \frac{m_f}{i}\,p_{(i,\text{family})}
+
+$$
+
+Within-family rejections are retained only when the family gate rejects.

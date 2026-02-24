@@ -24,6 +24,24 @@ class TestCliFeaturesHelp(unittest.TestCase):
         self.assertEqual(args.command, "features")
         self.assertEqual(args.mode, "compute")
 
+    def test_features_connectivity_measures_accept_imcoh(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_features(subparsers)
+
+        args = parser.parse_args(
+            [
+                "features",
+                "compute",
+                "--subject",
+                "0001",
+                "--connectivity-measures",
+                "imcoh",
+                "wpli",
+            ]
+        )
+        self.assertEqual(args.connectivity_measures, ["imcoh", "wpli"])
+
 
 if __name__ == "__main__":
     unittest.main()

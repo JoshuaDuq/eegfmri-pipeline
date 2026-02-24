@@ -1,17 +1,11 @@
-## FreeSurfer License Handling
+# FreeSurfer License Handling
 
-Do not commit real FreeSurfer license files to this repository.
+**Do not commit real FreeSurfer license files to this repository.**
 
-Preferred setup:
+Provide the license path via one of these methods (checked in order):
 
-1. Export `EEG_PIPELINE_FREESURFER_LICENSE` to an absolute path on your machine.
-2. Or set `paths.freesurfer_license` in your local config/overrides.
-3. Or pass `--fs-license-file` on CLI calls that need it.
-
-Example:
-
-```bash
-export EEG_PIPELINE_FREESURFER_LICENSE="$HOME/.freesurfer/license.txt"
-```
+1. Environment variable: `export EEG_PIPELINE_FREESURFER_LICENSE="$HOME/.freesurfer/license.txt"`
+2. Config key: `paths.freesurfer_license` in your local config/overrides.
+3. CLI flag: `--fs-license-file /path/to/license.txt`
 
 The file `license_freesurfer.txt.example` is a placeholder template only.

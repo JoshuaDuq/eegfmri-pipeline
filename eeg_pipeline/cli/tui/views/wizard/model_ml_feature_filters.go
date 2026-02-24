@@ -12,6 +12,7 @@ var mlFeatureStats = []string{
 	"max",
 	"min",
 	"wpli",
+	"imcoh",
 	"aec",
 	"plv",
 	"pli",

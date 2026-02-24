@@ -1,6 +1,6 @@
 # Paradigm-Specific Scripts (CLI Only)
 
-This folder contains scripts specific to the simultaneous EEG-fMRI pain paradigm. They are **not integrated into the TUI or `eeg-pipeline` CLI** and must be run manually before any downstream analysis.
+Scripts specific to the simultaneous EEG–fMRI pain paradigm. **Not integrated into the TUI or `eeg-pipeline` CLI** — must be run manually before any downstream analysis.
 
 ## Required Workflow Order
 

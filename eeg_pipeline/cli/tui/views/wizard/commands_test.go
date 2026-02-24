@@ -729,6 +729,30 @@ func TestBuildFeaturesAdvancedArgs_IncludesConnectivityAdvancedFlags(t *testing.
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_ConnectivityMeasuresIncludeImcoh(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "connectivity" {
+			m.selected[i] = true
+			break
+		}
+	}
+
+	for i := range m.connectivityMeasures {
+		m.connectivityMeasures[i] = false
+	}
+	for i, measure := range connectivityMeasures {
+		if measure.Key == "imcoh" {
+			m.connectivityMeasures[i] = true
+		}
+	}
+
+	args := m.buildFeaturesAdvancedArgs()
+	if !containsSubsequence(args, []string{"--connectivity-measures", "imcoh"}) {
+		t.Fatalf("expected --connectivity-measures imcoh in args, got: %#v", args)
+	}
+}
+
 func TestBuildFeaturesAdvancedArgs_IncludesSourceSubjectsDirFlag(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, cat := range m.categories {
