@@ -21,8 +21,8 @@ All formulas are given in LaTeX; random‑effects modeling and inferential stati
 
 Let:
 
-- $e \in \{1,\dots, N_\text{trials}\}$ index epochs (trials),
-- $c \in \{1,\dots, N_\text{ch}\}$ index channels,
+- $e \in \{1,\dots, N_{\text{trials}}\}$ index epochs (trials),
+- $c \in \{1,\dots, N_{\text{ch}}\}$ index channels,
 - $r$ index regions of interest (ROIs),
 - $f$ denote frequency in Hz,  
 - $t$ denote time in seconds,
@@ -33,8 +33,8 @@ Let:
 
 We use:
 
-- $B$ for a frequency band with range $[f_\text{min}, f_\text{max}]$,
-- $T_\text{seg}$ for a time window segment (baseline, active, etc.),
+- $B$ for a frequency band with range $[f_{\text{min}}, f_{\text{max}}]$,
+- $T_{\text{seg}}$ for a time window segment (baseline, active, etc.),
 - $\varepsilon$ as a small positive constant to avoid division by zero.
 
 ---
@@ -101,16 +101,16 @@ Non‑spatial features (e.g. global scalar summary metrics) are always retained.
 Time windows are represented by `TimeWindows` (`baseline_range`, `active_range`, `masks`, `ranges`, `times`).
 
 - Windows are built from configuration via `TimeWindowSpec` and `time_windows_from_spec`.
-- In the TFR‑based pipeline, when epochs are cropped to $[t_\text{min}, t_\text{max}]$,
+- In the TFR‑based pipeline, when epochs are cropped to $[t_{\text{min}}, t_{\text{max}}]$,
   new masks are constructed on the cropped time axis to avoid shape mismatches.
 - Baseline and active ranges are kept in physical time, so baseline‑dependent computations
   can still reference the original windows.
 
-For any window with mask $M_\text{seg}(t) \in \{0,1\}$, we define:
+For any window with mask $M_{\text{seg}}(t) \in \{0,1\}$, we define:
 
 $$
 
-\bar{x}_{e,c}^{(\text{seg})} = \frac{\sum_t M_\text{seg}(t)x_{e,c}(t)}{\sum_t M_\text{seg}(t)}.
+\bar{x}_{e,c}^{(\text{seg})} = \frac{\sum_t M_{\text{seg}}(t)x_{e,c}(t)}{\sum_t M_{\text{seg}}(t)}.
 
 $$
 
@@ -131,7 +131,7 @@ $$
 
 $$
 
-Each band $B$ has bounds $[f_\text{min}^B, f_\text{max}^B]$.
+Each band $B$ has bounds $[f_{\text{min}}^B, f_{\text{max}}^B]$.
 
 ### 3.2 IAF‑Adjusted Bands (Global Precomputation)
 
@@ -145,7 +145,7 @@ Workflow:
 
 $$
 
-\log_{10} P_\text{resid}(f) = \log_{10} P(f) - \left(\beta_0 + \beta_1 \log_{10} f\right),
+\log_{10} P_{\text{resid}}(f) = \log_{10} P(f) - \left(\beta_0 + \beta_1 \log_{10} f\right),
 
 $$
 
@@ -158,8 +158,8 @@ $$
 
 \begin{aligned}
 \text{alpha} &= [\hat{f}_\alpha - w_\alpha,\ \hat{f}_\alpha + w_\alpha],\\
-\text{theta} &= [\max(3,\ \hat{f}_\alpha - 6),\ \max(4,\ f^\text{alpha}_\text{min})],\\
-\text{beta}  &= [\max(13,\ f^\text{alpha}_\text{max}),\ f^\text{beta}_\text{max}].
+\text{theta} &= [\max(3,\ \hat{f}_\alpha - 6),\ \max(4,\ f^\text{alpha}_{\text{min}})],\\
+\text{beta}  &= [\max(13,\ f^\text{alpha}_{\text{max}}),\ f^\text{beta}_{\text{max}}].
 \end{aligned}
 
 $$
@@ -175,8 +175,8 @@ ill‑posed estimates.
 - The same residual‑based method as above is used, but restricted to training data.
 - This yields:
 
-  - $\text{IAF}_\text{fold}$ in Hz,
-  - an IAF‑adjusted frequency‑band dictionary $\mathcal{B}_\text{fold}$.
+  - $\text{IAF}_{\text{fold}}$ in Hz,
+  - an IAF‑adjusted frequency‑band dictionary $\mathcal{B}_{\text{fold}}$.
 
 This guards against **data leakage** from test trials into band definitions.
 
@@ -265,7 +265,7 @@ In `trial_ml_safe` mode, a **train_mask is mandatory** for evoked subtraction; o
 
 `extract_all_features(ctx)` (in `api.py`) is the main TFR‑based entry point:
 
-1. Prepare working epochs, possibly cropped to $[t_\text{min}, t_\text{max}]$.
+1. Prepare working epochs, possibly cropped to $[t_{\text{min}}, t_{\text{max}}]$.
 2. Rebuild `TimeWindows` on the cropped time axis.
 3. Optionally precompute band data (`precompute_data`) when requested feature categories depend on it (e.g. ERDS, aperiodic, spectral, complexity, bursts, ratios, asymmetry, connectivity).
 4. Validate epochs (montage, sampling rate, duration, etc.).
@@ -309,7 +309,7 @@ Starting from TFR power $P_{e,c}(f,t)$:
 $$
 
 \bar{P}_{e,c}^{B,\text{seg}}(f) =
-\frac{\sum_t M_\text{seg}(t)P_{e,c}(f,t)}{\sum_t M_\text{seg}(t)}.
+\frac{\sum_t M_{\text{seg}}(t)P_{e,c}(f,t)}{\sum_t M_{\text{seg}}(t)}.
 
 $$
 
@@ -366,7 +366,7 @@ For each trial and channel, a PSD is computed either by multitaper or Welch. Wit
 
 $$
 
-f_\text{cog} =
+f_{\text{cog}} =
 \frac{\sum_{f \in B} f\mathrm{PSD}(f)\Delta f}
      {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}.
 
@@ -378,7 +378,7 @@ $$
 
 \sigma_B =
 \sqrt{
-  \frac{\sum_{f \in B} (f - f_\text{cog})^2\mathrm{PSD}(f)\Delta f}
+  \frac{\sum_{f \in B} (f - f_{\text{cog}})^2\mathrm{PSD}(f)\Delta f}
        {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}
 }.
 
@@ -407,7 +407,7 @@ where $N_B$ is the number of frequency bins in $B$.
 
 4. **Peak features** use a robust aperiodic fit (shared with the aperiodic module):
 
-- Residuals: $r(f) = \log_{10}\mathrm{PSD}(f) - \widehat{\log_{10} \mathrm{PSD}}_\text{aperiodic}(f)$.
+- Residuals: $r(f) = \log_{10}\mathrm{PSD}(f) - \widehat{\log_{10} \mathrm{PSD}}_{\text{aperiodic}}(f)$.
 - Peak frequency: $f^* = \arg\max_{f \in B} r(f)$ (with CoG fallback for low‑prominence peaks).
 - Peak power, peak ratio, and peak residual are derived at $f^*$.
 
@@ -443,7 +443,7 @@ $$
 
 2. Iteratively fit the aperiodic trend:
 
-- Fit an initial model in $[f_\text{min}, f_\text{max}]$ (e.g. 2–40 Hz).
+- Fit an initial model in $[f_{\text{min}}, f_{\text{max}}]$ (e.g. 2–40 Hz).
 - Compute residuals $r(f) = y(f) - \hat{y}(f)$.
 - Remove bins with large positive residuals (putative oscillatory peaks) exceeding a threshold in MAD units.
 - Refit up to a fixed number of iterations.
@@ -500,7 +500,7 @@ Residual peaks are further summarized by center frequency, bandwidth, and height
 
 **Module:** `erp.py` → `extract_erp_features`
 
-For each ERP component window $T_\text{comp}$ (e.g. N2, P2) and each channel or ROI:
+For each ERP component window $T_{\text{comp}}$ (e.g. N2, P2) and each channel or ROI:
 
 1. Baseline‑corrected signal:
 
@@ -515,7 +515,7 @@ $$
 $$
 
 \text{mean}_{e,c}^{\text{comp}} =
-\frac{1}{|T_\text{comp}|} \sum_{t \in T_\text{comp}} \tilde{x}_{e,c}(t).
+\frac{1}{|T_{\text{comp}}|} \sum_{t \in T_{\text{comp}}} \tilde{x}_{e,c}(t).
 
 $$
 
@@ -525,7 +525,7 @@ $$
 
 $$
 
-t^* = \arg\max_{t \in T_\text{comp}} s(\tilde{x}_{e,c}(t)),
+t^* = \arg\max_{t \in T_{\text{comp}}} s(\tilde{x}_{e,c}(t)),
 
 $$
 
@@ -542,7 +542,7 @@ $$
 
 $$
 
-\text{auc}_{e,c}^{\text{comp}} = \int_{t \in T_\text{comp}} \tilde{x}_{e,c}(t)dt,
+\text{auc}_{e,c}^{\text{comp}} = \int_{t \in T_{\text{comp}}} \tilde{x}_{e,c}(t)dt,
 
 $$
 
@@ -562,9 +562,9 @@ Using precomputed band envelopes $|\mathcal{H}(x_{e,c}^B(t))|$:
 
 $$
 
-P^{B,\text{baseline}}_{e,c} = \mathrm{mean}_{t \in T_\text{baseline}}
+P^{B,\text{baseline}}_{e,c} = \mathrm{mean}_{t \in T_{\text{baseline}}}
    |\mathcal{H}(x_{e,c}^B(t))|^2,\quad
-P^{B,\text{active}}_{e,c}   = \mathrm{mean}_{t \in T_\text{active}}
+P^{B,\text{active}}_{e,c}   = \mathrm{mean}_{t \in T_{\text{active}}}
    |\mathcal{H}(x_{e,c}^B(t))|^2.
 
 $$
@@ -584,7 +584,7 @@ $$
 
 $$
 
-\text{ERDS}_\text{dB} =
+\text{ERDS}_{\text{dB}} =
 10 \log_{10}
 \left(
   \frac{P^{B,\text{active}}_{e,c}}
@@ -611,15 +611,15 @@ P^B_{e,c} = \sum_{f \in B} \mathrm{PSD}_{e,c}(f)\Delta f.
 
 $$
 
-For a ratio pair $(B_\text{num}, B_\text{den})$:
+For a ratio pair $(B_{\text{num}}, B_{\text{den}})$:
 
 $$
 
 \text{power\_ratio}_e =
-\frac{P^{B_\text{num}}_e}{P^{B_\text{den}}_e},\quad
+\frac{P^{B_{\text{num}}}_e}{P^{B_{\text{den}}}_e},\quad
 \text{log\_ratio}_e =
-\ln\bigl(P^{B_\text{num}}_e + \varepsilon\bigr)
- - \ln\bigl(P^{B_\text{den}}_e + \varepsilon\bigr).
+\ln\bigl(P^{B_{\text{num}}}_e + \varepsilon\bigr)
+ - \ln\bigl(P^{B_{\text{den}}}_e + \varepsilon\bigr).
 
 $$
 
@@ -835,11 +835,11 @@ $$
 
 $$
 
-z = \frac{\text{MVL}_\text{obs} - \mu_\text{surr}}{\sigma_\text{surr}},
+z = \frac{\text{MVL}_{\text{obs}} - \mu_{\text{surr}}}{\sigma_{\text{surr}}},
 
 $$
 
-where $\mu_\text{surr}$ and $\sigma_\text{surr}$ are estimated from PAC values computed on surrogate data (trial‑shuffled and/or circularly shifted).
+where $\mu_{\text{surr}}$ and $\sigma_{\text{surr}}$ are estimated from PAC values computed on surrogate data (trial‑shuffled and/or circularly shifted).
 
 PAC can be exported as:
 
@@ -860,7 +860,7 @@ $x_v(t)$ are mapped to ROI time courses:
 
 $$
 
-x_\text{ROI}(t) = \frac{1}{|V_\text{ROI}|}\sum_{v \in V_\text{ROI}} x_v(t).
+x_{\text{ROI}}(t) = \frac{1}{|V_{\text{ROI}}|}\sum_{v \in V_{\text{ROI}}} x_v(t).
 
 $$
 
@@ -870,8 +870,8 @@ Features include:
 
 $$
 
-\text{src\_power}^{B,\text{seg}}_\text{ROI} =
-\frac{\sum_{f \in B} \mathrm{PSD}_\text{ROI}(f)\Delta f}
+\text{src\_power}^{B,\text{seg}}_{\text{ROI}} =
+\frac{\sum_{f \in B} \mathrm{PSD}_{\text{ROI}}(f)\Delta f}
      {\sum_{f \in B} \Delta f},
 
 $$
@@ -952,7 +952,7 @@ From band envelopes $E_{e,c}^B(t) = |\mathcal{H}(x_{e,c}^B(t))|$:
 
 $$
 
-  \theta = \mathrm{percentile}(E_\text{baseline}, q),
+  \theta = \mathrm{percentile}(E_{\text{baseline}}, q),
 
 $$
 
@@ -968,8 +968,8 @@ $$
 
 $$
 
-  \theta = \mathrm{median}(E_\text{baseline})
-          + z \cdot 1.4826 \cdot \mathrm{MAD}(E_\text{baseline}).
+  \theta = \mathrm{median}(E_{\text{baseline}})
+          + z \cdot 1.4826 \cdot \mathrm{MAD}(E_{\text{baseline}}).
 
 $$
 
@@ -978,7 +978,7 @@ $$
 
 $$
 
-T_\text{burst} \ge \max\left(T_\text{min}, \frac{\text{min\_cycles}}{f_\text{center}}\right).
+T_{\text{burst}} \ge \max\left(T_{\text{min}}, \frac{\text{min\_cycles}}{f_{\text{center}}}\right).
 
 $$
 
@@ -995,7 +995,7 @@ Global Field Power (GFP) is:
 $$
 
 \text{GFP}_e(t) =
-\sqrt{\frac{1}{N_\text{ch}}\sum_c \left(x_{e,c}(t) - \bar{x}_e(t)\right)^2}.
+\sqrt{\frac{1}{N_{\text{ch}}}\sum_c \left(x_{e,c}(t) - \bar{x}_e(t)\right)^2}.
 
 $$
 
@@ -1054,9 +1054,9 @@ $$
 
 $$
 
-\text{SNR}_\text{dB} = 10\log_{10}
+\text{SNR}_{\text{dB}} = 10\log_{10}
 \left(
-  \frac{d_\text{signal}}{d_\text{noise}}
+  \frac{d_{\text{signal}}}{d_{\text{noise}}}
 \right),
 
 $$
@@ -1113,38 +1113,38 @@ $$
 
 z^{\text{robust}}_i =
 \frac{x_i - m^\text{ref}}
-     {\max\bigl(\mathrm{MAD}(x^\text{ref})_\text{normal}, \varepsilon\bigr)},
+     {\max\bigl(\mathrm{MAD}(x^\text{ref})_{\text{normal}}, \varepsilon\bigr)},
 \quad
 m^\text{ref} = \mathrm{median}(x^\text{ref}),
 
 $$
 
-where $\mathrm{MAD}(\cdot)_\text{normal}$ is the normal‑consistent MAD (scaled by 1.4826).
+where $\mathrm{MAD}(\cdot)_{\text{normal}}$ is the normal‑consistent MAD (scaled by 1.4826).
 
 - **Min–max** to range $[a,b]$:
 
 $$
 
 x'_i = a + (b-a)
-\frac{x_i - x_\text{min}^\text{ref}}
-     {\max\bigl(x_\text{max}^\text{ref} - x_\text{min}^\text{ref}, \varepsilon\bigr)},
+\frac{x_i - x_{\text{min}}^\text{ref}}
+     {\max\bigl(x_{\text{max}}^\text{ref} - x_{\text{min}}^\text{ref}, \varepsilon\bigr)},
 
 $$
 
-with $x_\text{min}^\text{ref} = \min(x^\text{ref})$ and
-$x_\text{max}^\text{ref} = \max(x^\text{ref})$.
+with $x_{\text{min}}^\text{ref} = \min(x^\text{ref})$ and
+$x_{\text{max}}^\text{ref} = \max(x^\text{ref})$.
 
 - **Rank‑based** (0–1 ranks on finite values):
 
 $$
 
 r_i =
-\frac{\mathrm{rank}(x_i) - 1}{n_\text{finite} - 1},
+\frac{\mathrm{rank}(x_i) - 1}{n_{\text{finite}} - 1},
 
 $$
 
 where ties are handled by a configurable ranking method (default: average rank) and
-$n_\text{finite}$ is the number of finite entries.
+$n_{\text{finite}}$ is the number of finite entries.
 
 - **Log**:
 

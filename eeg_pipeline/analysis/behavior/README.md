@@ -17,7 +17,7 @@ The README is organized like a methods section:
 
 We work at the **trial level**. Let:
 
-- $i \in \{1,\dots, N_\text{trials}\}$ index trials within a subject,
+- $i \in \{1,\dots, N_{\text{trials}}\}$ index trials within a subject,
 - $g$ index grouping units (runs/blocks) used for non-i.i.d. safeguards,
 - $s$ index subjects (for group-level aggregation),
 - $f \in \{1,\dots, F\}$ index EEG-derived features.
@@ -28,7 +28,7 @@ For each trial $i$ we define:
 - Thermal **predictor** (e.g. temperature) $T_i$,
 - Feature vector $x_i \in \mathbb{R}^{F}$ with components $x_{i,f}$,
 - Optional covariate vector $z_i$ (age, sex, questionnaire scores, etc.),
-- Group label $G_i \in \{1,\dots, N_\text{groups}\}$ (run/block/cluster).
+- Group label $G_i \in \{1,\dots, N_{\text{groups}}\}$ (run/block/cluster).
 
 The **trial table** stores one row per trial $i$ with columns:
 
@@ -163,7 +163,7 @@ Metrics:
 
 $$
 
-\text{RMSE} = \sqrt{\mathrm{mean}((y - \hat{y})^2)}, \qquad \Delta\text{AIC} = \text{AIC}_\text{model} - \text{AIC}_\text{best}
+\text{RMSE} = \sqrt{\mathrm{mean}((y - \hat{y})^2)}, \qquad \Delta\text{AIC} = \text{AIC}_{\text{model}} - \text{AIC}_{\text{best}}
 
 $$
 
@@ -179,7 +179,7 @@ Linear-vs-hinge F-test:
 
 $$
 
-F = \frac{(RSS_\text{lin} - RSS_\text{hinge})/df_\text{num}}{RSS_\text{hinge}/df_\text{den}}
+F = \frac{(RSS_{\text{lin}} - RSS_{\text{hinge}})/df_{\text{num}}}{RSS_{\text{hinge}}/df_{\text{den}}}
 
 $$
 
@@ -224,7 +224,7 @@ Permutation p-value:
 
 $$
 
-p_\text{perm} = \frac{\#\text{extreme} + 1}{n_\text{perm} + 1}
+p_{\text{perm}} = \frac{\#\text{extreme} + 1}{n_{\text{perm}} + 1}
 
 $$
 
@@ -255,7 +255,7 @@ Wrapped stages use unified hierarchical/global FDR helpers.
 
 Pain sensitivity index: fit $y = \beta_0 + \beta_1 T + \varepsilon$, compute residual $\psi = y - (\beta_0 + \beta_1 T)$, then correlate each feature with $\psi$.
 
-Permutation p-values: $(\#\text{extreme} + 1)/(n_\text{perm} + 1)$.
+Permutation p-values: $(\#\text{extreme} + 1)/(n_{\text{perm}} + 1)$.
 
 ---
 
@@ -267,13 +267,13 @@ Per-feature model:
 
 $$
 
-y = Z\gamma + \beta_f x_f + \beta_\text{int}(x_f \cdot T) + \varepsilon \quad \text{(full)}, \qquad y = Z\gamma + \varepsilon \quad \text{(reduced)}
+y = Z\gamma + \beta_f x_f + \beta_{\text{int}}(x_f \cdot T) + \varepsilon \quad \text{(full)}, \qquad y = Z\gamma + \varepsilon \quad \text{(reduced)}
 
 $$
 
 Outputs include:
 
-- $\Delta R^2 = R^2_\text{full} - R^2_\text{reduced}$
+- $\Delta R^2 = R^2_{\text{full}} - R^2_{\text{reduced}}$
 - HC3 heteroskedasticity-consistent standard errors:
 
 $$
@@ -284,7 +284,7 @@ $$
 
 $$
 
-\widehat{\text{Cov}}_\text{HC3} = (X^\top X)^{-1} X^\top \mathrm{diag}(w) X (X^\top X)^{-1}
+\widehat{\text{Cov}}_{\text{HC3}} = (X^\top X)^{-1} X^\top \mathrm{diag}(w) X (X^\top X)^{-1}
 
 $$
 
@@ -309,7 +309,7 @@ Logistic form:
 
 $$
 
-\mathrm{logit}(P(Y=1)) = X\beta, \qquad \text{OR} = \exp(\beta_\text{feature})
+\mathrm{logit}(P(Y=1)) = X\beta, \qquad \text{OR} = \exp(\beta_{\text{feature}})
 
 $$
 
@@ -335,7 +335,7 @@ Subject stage uses ICC(3,1):
 
 $$
 
-\text{ICC}(3,1) = \frac{MS_\text{rows} - MS_\text{error}}{MS_\text{rows} + (k-1)MS_\text{error}}
+\text{ICC}(3,1) = \frac{MS_{\text{rows}} - MS_{\text{error}}}{MS_{\text{rows}} + (k-1)MS_{\text{error}}}
 
 $$
 
@@ -360,11 +360,11 @@ $$
 
 $$
 
-d = \frac{\bar{x}_1 - \bar{x}_2}{s_\text{pooled}}, \qquad g = d\left(1 - \frac{3}{4df - 1}\right), \qquad d_z = \frac{\bar{d}}{s_d} \text{ (paired)}
+d = \frac{\bar{x}_1 - \bar{x}_2}{s_{\text{pooled}}}, \qquad g = d\left(1 - \frac{3}{4df - 1}\right), \qquad d_z = \frac{\bar{d}}{s_d} \text{ (paired)}
 
 $$
 
-Permutation p-values (unpaired mean-difference and paired sign-flip): $(\#\text{extreme} + 1)/(n_\text{perm} + 1)$.
+Permutation p-values (unpaired mean-difference and paired sign-flip): $(\#\text{extreme} + 1)/(n_{\text{perm}} + 1)$.
 
 #### 12.2 Condition Multigroup
 
@@ -411,7 +411,7 @@ ITPC trial metric:
 
 $$
 
-\text{ITPC}_\text{trial} = \mathrm{mean}\left(\cos(\phi_\text{trial} - \bar{\phi})\right)
+\text{ITPC}_{\text{trial}} = \mathrm{mean}\left(\cos(\phi_{\text{trial}} - \bar{\phi})\right)
 
 $$
 
@@ -419,7 +419,7 @@ ERDS trial metrics:
 
 $$
 
-\text{ERDS\%} = 100 \cdot \frac{P_\text{active} - P_\text{base}}{P_\text{base}}, \qquad \text{ERDS}_z = \frac{P_\text{active} - P_\text{base}}{\sigma_\text{base}}
+\text{ERDS\%} = 100 \cdot \frac{P_{\text{active}} - P_{\text{base}}}{P_{\text{base}}}, \qquad \text{ERDS}_z = \frac{P_{\text{active}} - P_{\text{base}}}{\sigma_{\text{base}}}
 
 $$
 
@@ -433,7 +433,7 @@ Key formulas:
 
 $$
 
-d = \frac{\mu_A - \mu_B}{s_\text{pooled}}, \qquad M_c = \sum_{i \in c} |t_i|, \qquad p_c = \frac{\#\{M_\text{max}^\text{perm} \geq M_c\} + 1}{n_\text{perm} + 1}
+d = \frac{\mu_A - \mu_B}{s_{\text{pooled}}}, \qquad M_c = \sum_{i \in c} |t_i|, \qquad p_c = \frac{\#\{M_{\text{max}}^\text{perm} \geq M_c\} + 1}{n_{\text{perm}} + 1}
 
 $$
 
@@ -459,7 +459,7 @@ $$
 
 $$
 
-Bootstrap CI is percentile-based. Optional permutation p-values: $(\#\text{extreme}+1)/(n_\text{perm}+1)$.
+Bootstrap CI is percentile-based. Optional permutation p-values: $(\#\text{extreme}+1)/(n_{\text{perm}}+1)$.
 
 ---
 
@@ -479,7 +479,7 @@ Key computations:
 
 $$
 
-\Delta R^2 = R^2_\text{full} - R^2_\text{reduced}, \qquad F = \frac{(R^2_\text{full} - R^2_\text{reduced})/1}{(1 - R^2_\text{full})/(n-4)}
+\Delta R^2 = R^2_{\text{full}} - R^2_{\text{reduced}}, \qquad F = \frac{(R^2_{\text{full}} - R^2_{\text{reduced}})/1}{(1 - R^2_{\text{full}})/(n-4)}
 
 $$
 
@@ -566,11 +566,11 @@ Per-subject associations are aggregated with Fisher averaging:
 
 $$
 
-r_\text{group} = \tanh\left(\mathrm{mean}_s\left[\mathrm{atanh}(r_s)\right]\right)
+r_{\text{group}} = \tanh\left(\mathrm{mean}_s\left[\mathrm{atanh}(r_s)\right]\right)
 
 $$
 
-Permutation primary p-value: $p_\text{perm} = (\#\text{extreme} + 1)/(n_\text{perm} + 1)$.
+Permutation primary p-value: $p_{\text{perm}} = (\#\text{extreme} + 1)/(n_{\text{perm}} + 1)$.
 
 Optional fallback (config): one-sample t-test of subject Fisher-z values vs 0.
 
@@ -590,7 +590,7 @@ Hierarchical FDR family gate (Simes):
 
 $$
 
-p_\text{Simes} = \min_i \frac{m_f}{i}p_{(i,\text{family})}
+p_{\text{Simes}} = \min_i \frac{m_f}{i}p_{(i,\text{family})}
 
 $$
 

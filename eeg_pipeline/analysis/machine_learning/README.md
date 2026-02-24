@@ -81,11 +81,11 @@ Covariate columns are never dropped by variance filtering, spatial selection, or
 
 **Transformer:** `Deconfounder` — applied after `ColumnTransformer` when `preprocessing.deconfound: true`.
 
-Given the design matrix partitioned as $X = [X_\text{EEG} \mid Z]$ where $Z \in \mathbb{R}^{N \times C}$ are covariates, the transformer fits a linear model on the training fold:
+Given the design matrix partitioned as $X = [X_{\text{EEG}} \mid Z]$ where $Z \in \mathbb{R}^{N \times C}$ are covariates, the transformer fits a linear model on the training fold:
 
 $$
 
-\hat{B} = (Z_\text{train}^\top Z_\text{train})^{-1} Z_\text{train}^\top X_{\text{EEG,train}}
+\hat{B} = (Z_{\text{train}}^\top Z_{\text{train}})^{-1} Z_{\text{train}}^\top X_{\text{EEG,train}}
 
 $$
 
@@ -93,7 +93,7 @@ and returns residuals for both train and test:
 
 $$
 
-\tilde{X}_\text{EEG} = X_\text{EEG} - Z\hat{B}
+\tilde{X}_{\text{EEG}} = X_{\text{EEG}} - Z\hat{B}
 
 $$
 
@@ -311,7 +311,7 @@ Combines SVM, Logistic Regression, and Random Forest via probability averaging:
 
 $$
 
-\hat{p}_\text{ens}(y=1\mid x) = \frac{1}{3}\left[\hat{p}_\text{SVM}(x) + \hat{p}_\text{LR}(x) + \hat{p}_\text{RF}(x)\right]
+\hat{p}_{\text{ens}}(y=1\mid x) = \frac{1}{3}\left[\hat{p}_{\text{SVM}}(x) + \hat{p}_{\text{LR}}(x) + \hat{p}_{\text{RF}}(x)\right]
 
 $$
 
@@ -434,7 +434,7 @@ $$
 
 Aggregate across $S$ subjects using the Fisher z-transformation to handle the bounded support of $r$:
 
-1. **Clip** to prevent arctanh explosion near $\pm 1$: $r_i^* = \text{clip}(r_i, r_\text{min}, r_\text{max})$
+1. **Clip** to prevent arctanh explosion near $\pm 1$: $r_i^* = \text{clip}(r_i, r_{\text{min}}, r_{\text{max}})$
 2. **Transform:** $z_i = \mathrm{arctanh}(r_i^*)$
 3. **Weighted average:** $\bar{z} = \sum_i w_i z_i / \sum_i w_i$
 4. **Back-transform:** $\bar{r} = \tanh(\bar{z})$
@@ -518,7 +518,7 @@ A permutation is **effective** only if it changes at least `min_label_shuffle_fr
 
 $$
 
-p = \frac{\#\bigl\{|s(y^\pi_j)| \geq |s(y)|\bigr\} + 1}{n_\text{perm,valid} + 1}
+p = \frac{\#\bigl\{|s(y^\pi_j)| \geq |s(y)|\bigr\} + 1}{n_{\text{perm,valid}} + 1}
 
 $$
 
@@ -528,7 +528,7 @@ where $s(\cdot)$ denotes the subject-level Fisher-z–aggregated Pearson r. Comp
 
 $$
 
-p = \frac{\#\bigl\{\text{AUC}(y^\pi_j) \geq \text{AUC}(y)\bigr\} + 1}{n_\text{perm,valid} + 1}
+p = \frac{\#\bigl\{\text{AUC}(y^\pi_j) \geq \text{AUC}(y)\bigr\} + 1}{n_{\text{perm,valid}} + 1}
 
 $$
 
@@ -550,7 +550,7 @@ Trains a decoding model in each time window and evaluates it in all other window
 
 1. **Epoch loading:** Load raw epoch tensors across subjects; align to the common channel set within each LOSO fold.
 
-2. **Sliding windows:** Partition the active period $[t_\text{min}, t_\text{max}]$ (configurable) into overlapping windows of length $\Delta t$ with step $\delta t$. Window centers form both axes of the generalization matrix.
+2. **Sliding windows:** Partition the active period $[t_{\text{min}}, t_{\text{max}}]$ (configurable) into overlapping windows of length $\Delta t$ with step $\delta t$. Window centers form both axes of the generalization matrix.
 
 3. **Window feature extraction:** For window $w$, compute mean channel activity per trial:
 
@@ -560,7 +560,7 @@ x_{w,\text{trial},c} = \frac{1}{|W_w|}\sum_{t \in W_w} \text{data}[\text{trial},
 
 $$
 
-yielding an $N_\text{trials} \times C$ feature matrix per window.
+yielding an $N_{\text{trials}} \times C$ feature matrix per window.
 
 4. **LOSO outer loop:** For each training window $i$, fit a Ridge regression model:
 ```
@@ -592,7 +592,7 @@ Three corrections are applied simultaneously to all tested cells:
 
 $$
 
-p_{ij} = \frac{\#\bigl\{|r_{ij}^\pi| \geq |r_{ij}^\text{obs}|\bigr\} + 1}{n_\text{perm,valid} + 1}
+p_{ij} = \frac{\#\bigl\{|r_{ij}^\pi| \geq |r_{ij}^\text{obs}|\bigr\} + 1}{n_{\text{perm,valid}} + 1}
 
 $$
 
@@ -698,12 +698,12 @@ The stage runs within LOSO: models are tuned via inner CV, then conformal interv
 ### 11.1 Split Conformal
 
 1. Split training set into proper training ($\approx 80\%$) and calibration ($\approx 20\%$, ≥ 2 samples). Group-aware via `GroupShuffleSplit` when subject labels are available.
-2. Fit model; compute calibration residuals $s_i = |y_i - \hat{y}_i|$, $i \in \mathcal{D}_\text{cal}$.
+2. Fit model; compute calibration residuals $s_i = |y_i - \hat{y}_i|$, $i \in \mathcal{D}_{\text{cal}}$.
 3. Conformal quantile:
 
 $$
 
-\hat{q} = \mathrm{Quantile}\left(\{s_i\},\; \frac{\lceil(|\mathcal{D}_\text{cal}|+1)(1-\alpha)\rceil}{|\mathcal{D}_\text{cal}|}\right)
+\hat{q} = \mathrm{Quantile}\left(\{s_i\},\; \frac{\lceil(|\mathcal{D}_{\text{cal}}|+1)(1-\alpha)\rceil}{|\mathcal{D}_{\text{cal}}|}\right)
 
 $$
 
@@ -804,7 +804,7 @@ Compares ElasticNet, Ridge, and Random Forest on **identical outer LOSO folds**.
 
 $$
 
-p\bigl(\Delta R^2_{AB}\bigr) = \frac{\#\bigl\{\bigl|\overline{s \cdot \Delta R^2_{AB}}\bigr| \geq \bigl|\overline{\Delta R^2_{AB}}\bigr|\bigr\} + 1}{n_\text{perm} + 1}, \quad s_j \in \{-1,+1\}
+p\bigl(\Delta R^2_{AB}\bigr) = \frac{\#\bigl\{\bigl|\overline{s \cdot \Delta R^2_{AB}}\bigr| \geq \bigl|\overline{\Delta R^2_{AB}}\bigr|\bigr\} + 1}{n_{\text{perm}} + 1}, \quad s_j \in \{-1,+1\}
 
 $$
 
@@ -817,12 +817,12 @@ $$
 
 Quantifies the out-of-fold gain in R² when adding EEG features over a baseline predictor (e.g., stimulus temperature). Uses **identical model family** (ElasticNet with covariate protection) for both conditions to isolate information gain rather than algorithmic differences.
 
-1. Define baseline predictor matrix $X_\text{base}$ from `events.tsv` (default: `temperature`). Guard against target-variable leakage.
-2. Full matrix: $X_\text{full} = [X_\text{EEG} \mid X_\text{base}]$ — baseline columns appended as protected covariates.
+1. Define baseline predictor matrix $X_{\text{base}}$ from `events.tsv` (default: `temperature`). Guard against target-variable leakage.
+2. Full matrix: $X_{\text{full}} = [X_{\text{EEG}} \mid X_{\text{base}}]$ — baseline columns appended as protected covariates.
 3. For each LOSO fold:
-   - Fit tuned ElasticNet on $X_\text{base,train}$ → predict $\hat{y}_\text{base}$
-   - Fit tuned ElasticNet on $X_\text{full,train}$ → predict $\hat{y}_\text{full}$
-   - Compute: $\Delta R^2_\text{fold} = R^2\left(y_\text{test},\hat{y}_\text{full}\right) - R^2\left(y_\text{test},\hat{y}_\text{base}\right)$
+   - Fit tuned ElasticNet on $X_{\text{base,train}}$ → predict $\hat{y}_{\text{base}}$
+   - Fit tuned ElasticNet on $X_{\text{full,train}}$ → predict $\hat{y}_{\text{full}}$
+   - Compute: $\Delta R^2_{\text{fold}} = R^2\left(y_{\text{test}},\hat{y}_{\text{full}}\right) - R^2\left(y_{\text{test}},\hat{y}_{\text{base}}\right)$
 
 4. **Primary estimate:**
 
@@ -1006,7 +1006,7 @@ All settings reside under `machine_learning` in `eeg_config.yaml`.
 | `analysis.time_generalization.default_alpha` | Ridge $\alpha$ when not tuning | `1.0` |
 | `analysis.time_generalization.use_ridgecv` | Tune Ridge $\alpha$ via inner GroupKFold | `false` |
 | `analysis.time_generalization.alpha_grid` | $\alpha$ grid for inner CV | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
-| `analysis.time_generalization.cluster_threshold` | Cluster-forming threshold $\alpha_\text{cluster}$ | `0.05` |
+| `analysis.time_generalization.cluster_threshold` | Cluster-forming threshold $\alpha_{\text{cluster}}$ | `0.05` |
 | `analysis.time_generalization.min_subjects_per_cell` | Min subjects for a valid cell | `2` |
 | `analysis.time_generalization.min_count_per_cell` | Min trials for a valid cell | `15` |
 | `analysis.time_generalization.min_valid_fold_fraction` | Min fold completion rate | `0.8` |
