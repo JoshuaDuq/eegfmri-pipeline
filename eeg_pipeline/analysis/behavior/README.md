@@ -163,7 +163,7 @@ Metrics:
 
 $$
 
-\text{RMSE} = \sqrt{\operatorname{mean}((y - \hat{y})^2)}, \qquad \Delta\text{AIC} = \text{AIC}_\text{model} - \text{AIC}_\text{best}
+\text{RMSE} = \sqrt{\mathrm{mean}((y - \hat{y})^2)}, \qquad \Delta\text{AIC} = \text{AIC}_\text{model} - \text{AIC}_\text{best}
 
 $$
 
@@ -205,8 +205,8 @@ Defines targets, covariates, and permutation groups.
 
 Raw correlations:
 
-- Pearson: $r = \operatorname{corr}(x, y)$
-- Spearman: $r = \operatorname{corr}(\operatorname{rank}(x),\, \operatorname{rank}(y))$
+- Pearson: $r = \mathrm{corr}(x, y)$
+- Spearman: $r = \mathrm{corr}(\mathrm{rank}(x),\, \mathrm{rank}(y))$
 
 Partial correlation (covariate control): residualize $x$ and $y$ on $Z$ and correlate residuals. Test statistic:
 
@@ -284,7 +284,7 @@ $$
 
 $$
 
-\widehat{\text{Cov}}_\text{HC3} = (X^\top X)^{-1} X^\top \operatorname{diag}(w)\, X\, (X^\top X)^{-1}
+\widehat{\text{Cov}}_\text{HC3} = (X^\top X)^{-1} X^\top \mathrm{diag}(w)\, X\, (X^\top X)^{-1}
 
 $$
 
@@ -309,7 +309,7 @@ Logistic form:
 
 $$
 
-\operatorname{logit}(P(Y=1)) = X\beta, \qquad \text{OR} = \exp(\beta_\text{feature})
+\mathrm{logit}(P(Y=1)) = X\beta, \qquad \text{OR} = \exp(\beta_\text{feature})
 
 $$
 
@@ -321,7 +321,7 @@ Additional diagnostics include McFadden pseudo-$R^2$ and AUC/delta-AUC.
 
 **Module:** `stages/diagnostics.py` → `stats/stability.py`
 
-Per run/block group $g$: $r_g = \operatorname{corr}(x_g, y_g)$ (optionally partial on temperature).
+Per run/block group $g$: $r_g = \mathrm{corr}(x_g, y_g)$ (optionally partial on temperature).
 
 Summary metrics: $\bar{r}_g$, $s_{r_g}$, $\min(r_g)$, $\max(r_g)$; sign consistency against overall effect; fraction with $p_g < \alpha$.
 
@@ -393,7 +393,7 @@ Power-bin statistic:
 
 $$
 
-b_{i,f,w} = \operatorname{mean}_{t \in w} P_{i,f,t}
+b_{i,f,w} = \mathrm{mean}_{t \in w} P_{i,f,t}
 
 $$
 
@@ -411,7 +411,7 @@ ITPC trial metric:
 
 $$
 
-\text{ITPC}_\text{trial} = \operatorname{mean}\!\left(\cos(\phi_\text{trial} - \bar{\phi})\right)
+\text{ITPC}_\text{trial} = \mathrm{mean}\!\left(\cos(\phi_\text{trial} - \bar{\phi})\right)
 
 $$
 
@@ -512,7 +512,7 @@ Computes sign-consistency/sign-flip diagnostics:
 
 $$
 
-\text{flip} = \mathbf{1}[\operatorname{sign}(a) \cdot \operatorname{sign}(b) < 0] \quad \text{(finite/nonzero values only)}
+\text{flip} = \mathbf{1}[\mathrm{sign}(a) \cdot \mathrm{sign}(b) < 0] \quad \text{(finite/nonzero values only)}
 
 $$
 
@@ -566,7 +566,7 @@ Per-subject associations are aggregated with Fisher averaging:
 
 $$
 
-r_\text{group} = \tanh\!\left(\operatorname{mean}_s\left[\operatorname{atanh}(r_s)\right]\right)
+r_\text{group} = \tanh\!\left(\mathrm{mean}_s\left[\mathrm{atanh}(r_s)\right]\right)
 
 $$
 

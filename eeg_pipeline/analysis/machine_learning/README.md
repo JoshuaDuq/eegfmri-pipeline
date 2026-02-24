@@ -56,12 +56,12 @@ All model pipelines share a common chain. Every transformer is **CV-safe**: fitt
 
 | Step | Transformer | Behavior |
 |------|-------------|----------|
-| 1 | `ReplaceInfWithNaN` | Replaces `\pm\infty` with `NaN` so downstream imputers can operate. |
+| 1 | `ReplaceInfWithNaN` | Replaces $\pm\infty$ with `NaN` so downstream imputers can operate. |
 | 2 | `DropAllNaNColumns` | Removes columns with no finite value in the training fold. Raises if all columns are removed. |
 | 3 | `SpatialFeatureSelector` | Retains only features whose inferred ROI appears in `spatial_regions_allowed`. Skipped when list is empty; passes all features if names are unavailable. |
 | 4 | `SimpleImputer` | Replaces remaining `NaN` with the training-fold statistic (default: `median`). |
-| 5 | `VarianceThreshold` | Drops features with variance ` \sigma^2 < \theta `. Default `\theta = 0.0`. Jointly tuned via grid search. Raises a descriptive error if all features are removed. |
-| 6 | `SelectPercentile` *(optional)* | Retains the top-`k\%` features ranked by univariate score (`f_regression` for regression, `f_classif` for classification). Activated only when `feature_selection_percentile < 100`. |
+| 5 | `VarianceThreshold` | Drops features with variance $\sigma^2 < \theta$. Default $\theta = 0.0$. Jointly tuned via grid search. Raises a descriptive error if all features are removed. |
+| 6 | `SelectPercentile` *(optional)* | Retains the top-$k\%$ features ranked by univariate score (`f_regression` for regression, `f_classif` for classification). Activated only when `feature_selection_percentile < 100`. |
 | 7 | `StandardScaler` | Zero-mean, unit-variance standardization. Applied for all linear models (ElasticNet, Ridge, SVM, LR) and whenever PCA is enabled. Skipped for Random Forest. |
 | 8 | `PCA` *(optional)* | Dimensionality reduction. `n_components` is either a float (fraction of explained variance, default 0.95) or an integer count. Disabled by default. |
 
@@ -159,9 +159,9 @@ Preprocessing → StandardScaler → [SelectPercentile] → [PCA]
 
 | Parameter | Default search space |
 |-----------|----------------------|
-| `\alpha` | `[0.01, 0.1, 1.0, 10.0]` |
-| `\rho` (`l1_ratio`) | `[0.1, 0.5, 0.9]` |
-| `\theta` (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
+| $\alpha$ | `[0.01, 0.1, 1.0, 10.0]` |
+| $\rho$ (`l1_ratio`) | `[0.1, 0.5, 0.9]` |
+| $\theta$ (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
 
 ---
 
@@ -183,8 +183,8 @@ $$
 
 | Parameter | Default search space |
 |-----------|----------------------|
-| `\alpha` | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
-| `\theta` (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
+| $\alpha$ | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
+| $\theta$ (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
 
 ---
 
@@ -213,7 +213,7 @@ Preprocessing (no scaling)
 | `max_depth` | `[5, 10, 20, None]` |
 | `min_samples_split` | `[2, 5, 10]` |
 | `min_samples_leaf` | `[1, 2, 4]` |
-| `\theta` (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
+| $\theta$ (`variance_threshold`) | `[0.0, 0.01, 0.1]` |
 
 ---
 
@@ -260,8 +260,8 @@ Preprocessing → StandardScaler → [PCA] → [Resampler] → SVC(RBF, probabil
 | Parameter | Default search space |
 |-----------|----------------------|
 | `C` | `[0.1, 1.0, 10.0]` |
-| `\gamma` | `["scale", "auto"]` |
-| `\theta` | `[0.0, 0.01, 0.1]` |
+| $\gamma$ | `["scale", "auto"]` |
+| $\theta$ | `[0.0, 0.01, 0.1]` |
 
 ---
 
@@ -283,9 +283,9 @@ Supports L2 (default), L1, and ElasticNet penalties. Solver is auto-selected: `s
 
 | Parameter | Default search space |
 |-----------|----------------------|
-| `C = 1/\alpha` | `[0.01, 0.1, 1.0, 10.0]` |
+| $C = 1/\alpha$ | `[0.01, 0.1, 1.0, 10.0]` |
 | `l1_ratio` (ElasticNet only) | `[0.1, 0.5, 0.9]` |
-| `\theta` | `[0.0, 0.01, 0.1]` |
+| $\theta$ | `[0.0, 0.01, 0.1]` |
 
 ---
 
@@ -358,7 +358,7 @@ Head:
 
 **Training:**
 
-- **Loss:** `BCEWithLogitsLoss` with `pos_weight = n_\text{neg} / n_\text{pos}` for automatic class balancing
+- **Loss:** `BCEWithLogitsLoss` with $\mathrm{pos\_weight} = n_{\text{neg}} / n_{\text{pos}}$ for automatic class balancing
 - **Optimizer:** AdamW (lr = 10⁻³, weight_decay = 10⁻³)
 - **Early stopping:** Patience 10 epochs on held-out validation loss
 - **Gradient clipping:** Max norm 1.0
@@ -435,7 +435,7 @@ $$
 Aggregate across $S$ subjects using the Fisher z-transformation to handle the bounded support of $r$:
 
 1. **Clip** to prevent arctanh explosion near $\pm 1$: $r_i^* = \text{clip}(r_i,\, r_\text{min},\, r_\text{max})$
-2. **Transform:** $z_i = \operatorname{arctanh}(r_i^*)$
+2. **Transform:** $z_i = \mathrm{arctanh}(r_i^*)$
 3. **Weighted average:** $\bar{z} = \sum_i w_i z_i \,/\, \sum_i w_i$
 4. **Back-transform:** $\bar{r} = \tanh(\bar{z})$
 
@@ -444,7 +444,7 @@ Weighting modes (configurable via `evaluation.subject_weighting`):
 | Mode | Weight `w_i` | Notes |
 |------|----------------|-------|
 | `equal` (default) | `1` | Treats each subject as independent; robust to variable trial counts |
-| `trial_count` | `\max(n_i - 3,\, 1)` | Fisher information weighting; standard meta-analytic fixed-effects scheme |
+| `trial_count` | $\max(n_i - 3,\, 1)$ | Fisher information weighting; standard meta-analytic fixed-effects scheme |
 
 **Secondary metric — Subject-level mean R²:**
 
@@ -460,14 +460,14 @@ Both $\bar{r}$ and $\overline{R^2}$ receive permutation p-values when `n_perm > 
 
 | Method | Computation |
 |--------|-------------|
-| `bootstrap` (default) | Resample subjects `B` times with replacement; recompute weighted `\bar{z}`; `\text{CI} = [\operatorname{perc}_{2.5}, \operatorname{perc}_{97.5}]` of `\tanh(\bar{z}^{(b)})` |
-| `fixed_effects` | `\operatorname{SE} = 1/\sqrt{\sum_i w_i}`; `\text{CI} = \tanh\bigl(\bar{z} \pm 1.96\,\operatorname{SE}\bigr)` |
+| `bootstrap` (default) | Resample subjects $B$ times with replacement; recompute weighted $\bar{z}$; $\text{CI} = [\mathrm{perc}_{2.5}, \mathrm{perc}_{97.5}]$ of $\tanh(\bar{z}^{(b)})$ |
+| `fixed_effects` | $\mathrm{SE} = 1/\sqrt{\sum_i w_i}$; $\text{CI} = \tanh\bigl(\bar{z} \pm 1.96\,\mathrm{SE}\bigr)$ |
 
 **Subject-level error metrics:**
 
 $$
 
-\overline{\text{MAE}} = \frac{1}{S}\sum_i\operatorname{MAE}_i, \qquad \overline{\text{RMSE}} = \frac{1}{S}\sum_i\operatorname{RMSE}_i
+\overline{\text{MAE}} = \frac{1}{S}\sum_i\mathrm{MAE}_i, \qquad \overline{\text{RMSE}} = \frac{1}{S}\sum_i\mathrm{RMSE}_i
 
 $$
 
@@ -483,15 +483,15 @@ with optional bootstrap CIs (subjects resampled). Pooled trial-level Pearson r, 
 
 | Metric | Formula |
 |--------|---------|
-| Accuracy | `(\text{TP}+\text{TN})/N` |
-| Balanced accuracy | `(\text{sensitivity} + \text{specificity})/2` |
+| Accuracy | $(\text{TP}+\text{TN})/N$ |
+| Balanced accuracy | $(\text{sensitivity} + \text{specificity})/2$ |
 | AUC (ROC) | Area under the receiver operating characteristic curve |
 | Average precision | Area under the precision–recall curve |
-| F1 | `2\,\text{precision}\cdot\text{recall}/(\text{precision}+\text{recall})` |
-| Sensitivity (recall) | `\text{TP}/(\text{TP}+\text{FN})` |
-| Specificity | `\text{TN}/(\text{TN}+\text{FP})` |
-| Brier score | `\frac{1}{N}\sum_i(\hat{p}_i - y_i)^2` — probability calibration |
-| ECE | `\sum_{k=1}^{10}\frac{|B_k|}{N}\bigl|\bar{p}_k - \bar{y}_k\bigr|` — Expected Calibration Error over 10 uniform probability bins |
+| F1 | $2\,\text{precision}\cdot\text{recall}/(\text{precision}+\text{recall})$ |
+| Sensitivity (recall) | $\text{TP}/(\text{TP}+\text{FN})$ |
+| Specificity | $\text{TN}/(\text{TN}+\text{FP})$ |
+| Brier score | $\frac{1}{N}\sum_i(\hat{p}_i - y_i)^2$ — probability calibration |
+| ECE | $\sum_{k=1}^{10}\frac{|B_k|}{N}\bigl|\bar{p}_k - \bar{y}_k\bigr|$ — Expected Calibration Error over 10 uniform probability bins |
 
 Pooled trial-level metrics are reported alongside subject-level metrics for diagnostics. Subject-level means with bootstrap CIs are the primary inferential statistics.
 
@@ -572,7 +572,7 @@ Optionally tune $\alpha$ via inner `GroupKFold` (`use_ridgecv: true`). For each 
 
 $$
 
-r_{ij}^\text{agg} = \tanh\!\left(\frac{1}{S_{ij}}\sum_{s=1}^{S_{ij}} \operatorname{arctanh}\!\bigl(\text{clip}(r_{ij}^{(s)})\bigr)\right)
+r_{ij}^\text{agg} = \tanh\!\left(\frac{1}{S_{ij}}\sum_{s=1}^{S_{ij}} \mathrm{arctanh}\!\bigl(\text{clip}(r_{ij}^{(s)})\bigr)\right)
 
 $$
 
@@ -585,7 +585,7 @@ Three corrections are applied simultaneously to all tested cells:
 | Method | Description |
 |--------|-------------|
 | **FDR-BH** | Benjamini-Hochberg procedure applied across all finite cells. Controls false discovery rate. |
-| **Max-stat (FWER)** | Threshold at the 95th percentile of the permutation null distribution of `\max_{(i,j)} |r_{ij}^\pi|`. Controls familywise error rate. |
+| **Max-stat (FWER)** | Threshold at the 95th percentile of the permutation null distribution of $\max_{(i,j)} |r_{ij}^\pi|$. Controls familywise error rate. |
 | **Cluster-FWER** | Contiguous cells exceeding a forming threshold are grouped; cluster sizes compared to the null distribution of maximum cluster sizes. Controls FWER at cluster level. |
 
 **Cell-level p-value:**
@@ -641,7 +641,7 @@ For each LOSO fold: fit model on training data (with inner CV tuning), compute S
 
 $$
 
-\bar{\phi}_k = \frac{1}{K}\sum_{f=1}^{K} \phi_k^{(f)}, \qquad \sigma_k = \operatorname{std}_f\!\left(\phi_k^{(f)}\right)
+\bar{\phi}_k = \frac{1}{K}\sum_{f=1}^{K} \phi_k^{(f)}, \qquad \sigma_k = \mathrm{std}_f\!\left(\phi_k^{(f)}\right)
 
 $$
 
@@ -669,7 +669,7 @@ Model-agnostic importance via column permutation (Breiman 2001). For each featur
 
 $$
 
-\text{imp}_k = \operatorname{score}(y, \hat{y}) - \mathbb{E}_\pi\!\left[\operatorname{score}\!\left(y, \hat{y}^{(\pi_k)}\right)\right]
+\text{imp}_k = \mathrm{score}(y, \hat{y}) - \mathbb{E}_\pi\!\left[\mathrm{score}\!\left(y, \hat{y}^{(\pi_k)}\right)\right]
 
 $$
 
@@ -703,7 +703,7 @@ The stage runs within LOSO: models are tuned via inner CV, then conformal interv
 
 $$
 
-\hat{q} = \operatorname{Quantile}\!\left(\{s_i\},\; \frac{\lceil(|\mathcal{D}_\text{cal}|+1)(1-\alpha)\rceil}{|\mathcal{D}_\text{cal}|}\right)
+\hat{q} = \mathrm{Quantile}\!\left(\{s_i\},\; \frac{\lceil(|\mathcal{D}_\text{cal}|+1)(1-\alpha)\rceil}{|\mathcal{D}_\text{cal}|}\right)
 
 $$
 
@@ -899,12 +899,12 @@ All settings reside under `machine_learning` in `eeg_config.yaml`.
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `constants.variance_threshold` | Base variance filter threshold `\theta` | `0.0` |
+| `constants.variance_threshold` | Base variance filter threshold $\theta$ | `0.0` |
 | `preprocessing.imputer_strategy` | Imputation statistic (`median`, `mean`) | `"median"` |
 | `preprocessing.power_transformer_method` | Target power transform | `"yeo-johnson"` |
 | `preprocessing.power_transformer_standardize` | Standardize after transform | `true` |
-| `preprocessing.variance_threshold_grid` | Grid search values for `\theta` | `[0.0, 0.01, 0.1]` |
-| `preprocessing.feature_selection_percentile` | Univariate top-`k\%` selection (100 = disabled) | `100.0` |
+| `preprocessing.variance_threshold_grid` | Grid search values for $\theta$ | `[0.0, 0.01, 0.1]` |
+| `preprocessing.feature_selection_percentile` | Univariate top-$k\%$ selection (100 = disabled) | `100.0` |
 | `preprocessing.deconfound` | Regress out covariates from EEG features | `false` |
 | `preprocessing.spatial_regions_allowed` | ROI whitelist for `SpatialFeatureSelector` | `[]` |
 | `preprocessing.pca.enabled` | Enable PCA | `false` |
@@ -916,11 +916,11 @@ All settings reside under `machine_learning` in `eeg_config.yaml`.
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `models.elasticnet.alpha_grid` | ElasticNet `\alpha` search | `[0.01, 0.1, 1.0, 10.0]` |
-| `models.elasticnet.l1_ratio_grid` | ElasticNet `\rho` search | `[0.1, 0.5, 0.9]` |
+| `models.elasticnet.alpha_grid` | ElasticNet $\alpha$ search | `[0.01, 0.1, 1.0, 10.0]` |
+| `models.elasticnet.l1_ratio_grid` | ElasticNet $\rho$ search | `[0.1, 0.5, 0.9]` |
 | `models.elasticnet.max_iter` | Solver max iterations | `10000` |
 | `models.elasticnet.tol` | Solver convergence tolerance | `1e-4` |
-| `models.ridge.alpha_grid` | Ridge `\alpha` search | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
+| `models.ridge.alpha_grid` | Ridge $\alpha$ search | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
 | `models.random_forest.n_estimators` | Number of trees `B` | `100` |
 | `models.random_forest.bootstrap` | Bootstrap resampling | `true` |
 | `models.random_forest.max_depth_grid` | Depth search | `[5, 10, 20, null]` |
@@ -933,7 +933,7 @@ All settings reside under `machine_learning` in `eeg_config.yaml`.
 |-----|-------------|---------|
 | `models.svm.kernel` | SVM kernel type | `"rbf"` |
 | `models.svm.C_grid` | SVM regularization `C` search | `[0.1, 1.0, 10.0]` |
-| `models.svm.gamma_grid` | RBF kernel `\gamma` search | `["scale", "auto"]` |
+| `models.svm.gamma_grid` | RBF kernel $\gamma$ search | `["scale", "auto"]` |
 | `models.svm.class_weight` | Class weighting | `"balanced"` |
 | `models.logistic_regression.penalty` | Regularization type | `"l2"` |
 | `models.logistic_regression.C_grid` | Inverse regularization `C` search | `[0.01, 0.1, 1.0, 10.0]` |
@@ -1003,10 +1003,10 @@ All settings reside under `machine_learning` in `eeg_config.yaml`.
 | `analysis.time_generalization.active_window` | Time range `[t_min, t_max]` (seconds) | `[3.0, 10.5]` |
 | `analysis.time_generalization.window_len` | Window duration (seconds) | `0.75` |
 | `analysis.time_generalization.step` | Window step (seconds) | `0.25` |
-| `analysis.time_generalization.default_alpha` | Ridge `\alpha` when not tuning | `1.0` |
-| `analysis.time_generalization.use_ridgecv` | Tune Ridge `\alpha` via inner GroupKFold | `false` |
-| `analysis.time_generalization.alpha_grid` | `\alpha` grid for inner CV | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
-| `analysis.time_generalization.cluster_threshold` | Cluster-forming threshold `\alpha_\text{cluster}` | `0.05` |
+| `analysis.time_generalization.default_alpha` | Ridge $\alpha$ when not tuning | `1.0` |
+| `analysis.time_generalization.use_ridgecv` | Tune Ridge $\alpha$ via inner GroupKFold | `false` |
+| `analysis.time_generalization.alpha_grid` | $\alpha$ grid for inner CV | `[0.01, 0.1, 1.0, 10.0, 100.0]` |
+| `analysis.time_generalization.cluster_threshold` | Cluster-forming threshold $\alpha_\text{cluster}$ | `0.05` |
 | `analysis.time_generalization.min_subjects_per_cell` | Min subjects for a valid cell | `2` |
 | `analysis.time_generalization.min_count_per_cell` | Min trials for a valid cell | `15` |
 | `analysis.time_generalization.min_valid_fold_fraction` | Min fold completion rate | `0.8` |

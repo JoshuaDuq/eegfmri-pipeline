@@ -28,7 +28,7 @@ Let:
 - $t$ denote time in seconds,
 - $x_{e,c}(t)$ denote the time‑domain EEG signal,
 - $P_{e,c}(f,t)$ denote time–frequency power (Morlet TFR),
-- $\operatorname{PSD}_{e,c}(f)$ denote power spectral density (µV$^2$/Hz),
+- $\mathrm{PSD}_{e,c}(f)$ denote power spectral density (µV$^2$/Hz),
 - $\mathcal{H}(\cdot)$ denote the Hilbert transform.
 
 We use:
@@ -228,7 +228,7 @@ which:
 3. Computes:
 
    - **Band data** $x_{e,c}^B(t)$ for requested bands $B$,
-   - **Band GFP** per band: $\operatorname{GFP}^B_e(t)$,
+   - **Band GFP** per band: $\mathrm{GFP}^B_e(t)$,
    - **PSD data** (possibly baseline‑restricted),
    - Global GFP.
 
@@ -367,8 +367,8 @@ For each trial and channel, a PSD is computed either by multitaper or Welch. Wit
 $$
 
 f_\text{cog} =
-\frac{\sum_{f \in B} f\,\operatorname{PSD}(f)\,\Delta f}
-     {\sum_{f \in B} \operatorname{PSD}(f)\,\Delta f}.
+\frac{\sum_{f \in B} f\,\mathrm{PSD}(f)\,\Delta f}
+     {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}.
 
 $$
 
@@ -378,8 +378,8 @@ $$
 
 \sigma_B =
 \sqrt{
-  \frac{\sum_{f \in B} (f - f_\text{cog})^2\,\operatorname{PSD}(f)\,\Delta f}
-       {\sum_{f \in B} \operatorname{PSD}(f)\,\Delta f}
+  \frac{\sum_{f \in B} (f - f_\text{cog})^2\,\mathrm{PSD}(f)\,\Delta f}
+       {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}
 }.
 
 $$
@@ -390,8 +390,8 @@ Let
 
 $$
 
-p(f) = \frac{\operatorname{PSD}(f)\,\Delta f}
-            {\sum_{f \in B} \operatorname{PSD}(f)\,\Delta f}.
+p(f) = \frac{\mathrm{PSD}(f)\,\Delta f}
+            {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}.
 
 $$
 
@@ -407,7 +407,7 @@ where $N_B$ is the number of frequency bins in $B$.
 
 4. **Peak features** use a robust aperiodic fit (shared with the aperiodic module):
 
-- Residuals: $r(f) = \log_{10}\operatorname{PSD}(f) - \widehat{\log_{10} \operatorname{PSD}}_\text{aperiodic}(f)$.
+- Residuals: $r(f) = \log_{10}\mathrm{PSD}(f) - \widehat{\log_{10} \mathrm{PSD}}_\text{aperiodic}(f)$.
 - Peak frequency: $f^* = \arg\max_{f \in B} r(f)$ (with CoG fallback for low‑prominence peaks).
 - Peak power, peak ratio, and peak residual are derived at $f^*$.
 
@@ -417,8 +417,8 @@ where $N_B$ is the number of frequency bins in $B$.
 
 $$
 
-\frac{\sum_{f' \le f} \operatorname{PSD}(f')\,\Delta f'}
-     {\sum_{f'} \operatorname{PSD}(f')\,\Delta f'} \ge 0.95.
+\frac{\sum_{f' \le f} \mathrm{PSD}(f')\,\Delta f'}
+     {\sum_{f'} \mathrm{PSD}(f')\,\Delta f'} \ge 0.95.
 
 $$
 
@@ -437,7 +437,7 @@ The aperiodic component is modeled in log–log space:
 $$
 
 x(f) = \log_{10} f,\quad
-y(f) = \log_{10} \operatorname{PSD}(f).
+y(f) = \log_{10} \mathrm{PSD}(f).
 
 $$
 
@@ -483,12 +483,12 @@ $$
 $$
 
 \text{tbr} =
-\frac{\operatorname{mean}_{f \in \theta} 10^{r(f)}}
-     {\operatorname{mean}_{f \in \beta}  10^{r(f)}},
+\frac{\mathrm{mean}_{f \in \theta} 10^{r(f)}}
+     {\mathrm{mean}_{f \in \beta}  10^{r(f)}},
 \quad
 \text{tbr\_raw} =
-\frac{\operatorname{mean}_{f \in \theta} \operatorname{PSD}(f)}
-     {\operatorname{mean}_{f \in \beta}  \operatorname{PSD}(f)}.
+\frac{\mathrm{mean}_{f \in \theta} \mathrm{PSD}(f)}
+     {\mathrm{mean}_{f \in \beta}  \mathrm{PSD}(f)}.
 
 $$
 
@@ -562,9 +562,9 @@ Using precomputed band envelopes $|\mathcal{H}(x_{e,c}^B(t))|$:
 
 $$
 
-P^{B,\text{baseline}}_{e,c} = \operatorname{mean}_{t \in T_\text{baseline}}
+P^{B,\text{baseline}}_{e,c} = \mathrm{mean}_{t \in T_\text{baseline}}
    |\mathcal{H}(x_{e,c}^B(t))|^2,\quad
-P^{B,\text{active}}_{e,c}   = \operatorname{mean}_{t \in T_\text{active}}
+P^{B,\text{active}}_{e,c}   = \mathrm{mean}_{t \in T_\text{active}}
    |\mathcal{H}(x_{e,c}^B(t))|^2.
 
 $$
@@ -607,7 +607,7 @@ From PSD‑integrated band powers $P^B_{e,c}$:
 
 $$
 
-P^B_{e,c} = \sum_{f \in B} \operatorname{PSD}_{e,c}(f)\,\Delta f.
+P^B_{e,c} = \sum_{f \in B} \mathrm{PSD}_{e,c}(f)\,\Delta f.
 
 $$
 
@@ -664,8 +664,8 @@ Connectivity is computed in the frequency domain (wPLI, PLI, imaginary coherence
 $$
 
 \text{wPLI}_{ij} =
-\frac{\left|\mathbb{E}\bigl[\operatorname{Im}(X_i X_j^\ast)\bigr]\right|}
-     {\mathbb{E}\bigl[\left|\operatorname{Im}(X_i X_j^\ast)\right|\bigr]}.
+\frac{\left|\mathbb{E}\bigl[\mathrm{Im}(X_i X_j^\ast)\bigr]\right|}
+     {\mathbb{E}\bigl[\left|\mathrm{Im}(X_i X_j^\ast)\right|\bigr]}.
 
 $$
 
@@ -674,7 +674,7 @@ $$
 $$
 
 \text{PLI}_{ij} =
-\left|\mathbb{E}\bigl[\operatorname{sign}(\operatorname{Im}(X_i X_j^\ast))\bigr]\right|.
+\left|\mathbb{E}\bigl[\mathrm{sign}(\mathrm{Im}(X_i X_j^\ast))\bigr]\right|.
 
 $$
 
@@ -683,7 +683,7 @@ $$
 $$
 
 \text{imCoh}_{ij} =
-\operatorname{Im}\!\left(
+\mathrm{Im}\!\left(
   \frac{S_{ij}}{\sqrt{S_{ii} S_{jj}}}
 \right).
 
@@ -702,9 +702,9 @@ $$
 
 $$
 
-r_{ij} = \operatorname{corr}(A_i, A_j),
+r_{ij} = \mathrm{corr}(A_i, A_j),
 \quad
-z_{ij} = \operatorname{atanh}(\operatorname{clip}(r_{ij}, -0.9999, 0.9999)).
+z_{ij} = \mathrm{atanh}(\mathrm{clip}(r_{ij}, -0.9999, 0.9999)).
 
 $$
 
@@ -741,7 +741,7 @@ Then
 $$
 
 \text{PSI}_{ij} =
-\operatorname{Im}\!\left(
+\mathrm{Im}\!\left(
   \sum_f C_{ij}^\ast(f)\,C_{ij}(f + \Delta f)
 \right).
 
@@ -871,7 +871,7 @@ Features include:
 $$
 
 \text{src\_power}^{B,\text{seg}}_\text{ROI} =
-\frac{\sum_{f \in B} \operatorname{PSD}_\text{ROI}(f)\,\Delta f}
+\frac{\sum_{f \in B} \mathrm{PSD}_\text{ROI}(f)\,\Delta f}
      {\sum_{f \in B} \Delta f},
 
 $$
@@ -893,7 +893,7 @@ Key definitions:
 
 - **Lempel–Ziv Complexity (LZC)**:
 
-  - Binary sequence $b_t = \mathbf{1}[x_t > \operatorname{median}(x)]$,
+  - Binary sequence $b_t = \mathbf{1}[x_t > \mathrm{median}(x)]$,
   - Complexity count $c$ from the LZ76 parsing algorithm,
   - Normalized:
 
@@ -952,7 +952,7 @@ From band envelopes $E_{e,c}^B(t) = |\mathcal{H}(x_{e,c}^B(t))|$:
 
 $$
 
-  \theta = \operatorname{percentile}(E_\text{baseline}, q),
+  \theta = \mathrm{percentile}(E_\text{baseline}, q),
 
 $$
 
@@ -968,8 +968,8 @@ $$
 
 $$
 
-  \theta = \operatorname{median}(E_\text{baseline})
-          + z \cdot 1.4826 \cdot \operatorname{MAD}(E_\text{baseline}).
+  \theta = \mathrm{median}(E_\text{baseline})
+          + z \cdot 1.4826 \cdot \mathrm{MAD}(E_\text{baseline}).
 
 $$
 
@@ -1030,7 +1030,7 @@ Per segment and channel:
 
 $$
 
-\operatorname{Var}_t(x) = \frac{1}{N_t - 1}\sum_t (x(t) - \bar{x})^2.
+\mathrm{Var}_t(x) = \frac{1}{N_t - 1}\sum_t (x(t) - \bar{x})^2.
 
 $$
 
@@ -1102,8 +1102,8 @@ training subset), the following methods are available:
 $$
 
 z_i = \frac{x_i - \mu^\text{ref}}{\max(\sigma^\text{ref}, \varepsilon)},\quad
-\mu^\text{ref} = \operatorname{mean}(x^\text{ref}),\quad
-\sigma^\text{ref} = \operatorname{sd}(x^\text{ref}).
+\mu^\text{ref} = \mathrm{mean}(x^\text{ref}),\quad
+\sigma^\text{ref} = \mathrm{sd}(x^\text{ref}).
 
 $$
 
@@ -1113,13 +1113,13 @@ $$
 
 z^{\text{robust}}_i =
 \frac{x_i - m^\text{ref}}
-     {\max\!\bigl(\operatorname{MAD}(x^\text{ref})_\text{normal}, \varepsilon\bigr)},
+     {\max\!\bigl(\mathrm{MAD}(x^\text{ref})_\text{normal}, \varepsilon\bigr)},
 \quad
-m^\text{ref} = \operatorname{median}(x^\text{ref}),
+m^\text{ref} = \mathrm{median}(x^\text{ref}),
 
 $$
 
-where $\operatorname{MAD}(\cdot)_\text{normal}$ is the normal‑consistent MAD (scaled by 1.4826).
+where $\mathrm{MAD}(\cdot)_\text{normal}$ is the normal‑consistent MAD (scaled by 1.4826).
 
 - **Min–max** to range $[a,b]$:
 
@@ -1139,7 +1139,7 @@ $x_\text{max}^\text{ref} = \max(x^\text{ref})$.
 $$
 
 r_i =
-\frac{\operatorname{rank}(x_i) - 1}{n_\text{finite} - 1},
+\frac{\mathrm{rank}(x_i) - 1}{n_\text{finite} - 1},
 
 $$
 
@@ -1176,8 +1176,8 @@ $$
 
 z_i^{(g)} =
 \frac{x_i - \mu_{g_i}}{\max(\sigma_{g_i}, \varepsilon)},\quad
-\mu_{g} = \operatorname{mean}\{x_j : g_j = g\},\quad
-\sigma_{g} = \operatorname{sd}\{x_j : g_j = g\}.
+\mu_{g} = \mathrm{mean}\{x_j : g_j = g\},\quad
+\sigma_{g} = \mathrm{sd}\{x_j : g_j = g\}.
 
 $$
 
