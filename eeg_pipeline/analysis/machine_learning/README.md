@@ -510,7 +510,7 @@ Optionally tune $\alpha$ via inner `GroupKFold` (`use_ridgecv: true`). For each 
 
 5. **Aggregation:** Stack per-fold matrices; for cell $(i,j)$, aggregate over $S_{ij}$ valid subjects using Fisher-z averaging (equal subject weights):
 $$
-r_{ij}^\text{agg} = \tanh\left(\frac{1}{S_{ij}}\sum_{s=1}^{S_{ij}} \mathrm{arctanh}\bigl(\text{clip}(r_{ij}^{(s)})\bigr)\right)
+r_{ij}^{\text{agg}} = \tanh\left(\frac{1}{S_{ij}}\sum_{s=1}^{S_{ij}} \mathrm{arctanh}\bigl(\text{clip}(r_{ij}^{(s)})\bigr)\right)
 $$
 Cells with $S_{ij} < $  `min_subjects_per_cell` or total trial count $ < $  `min_count_per_cell` are excluded (set to `NaN`).
 
@@ -526,7 +526,7 @@ Three corrections are applied simultaneously to all tested cells:
 
 **Cell-level p-value:**
 $$
-p_{ij} = \frac{\#\bigl\{|r_{ij}^\pi| \geq |r_{ij}^\text{obs}|\bigr\} + 1}{n_{\text{perm,valid}} + 1}
+p_{ij} = \frac{\#\bigl\{|r_{ij}^\pi| \geq |r_{ij}^{\text{obs}}|\bigr\} + 1}{n_{\text{perm,valid}} + 1}
 $$
 **Quality gates:**
 

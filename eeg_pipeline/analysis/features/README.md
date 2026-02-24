@@ -140,8 +140,8 @@ estimated by robust or ordinary linear regression in log–log space.
 $$
 \begin{aligned}
 \text{alpha} &= [\hat{f}_\alpha - w_\alpha,\ \hat{f}_\alpha + w_\alpha],\\
-\text{theta} &= [\max(3,\ \hat{f}_\alpha - 6),\ \max(4,\ f^\text{alpha}_{\text{min}})],\\
-\text{beta}  &= [\max(13,\ f^\text{alpha}_{\text{max}}),\ f^\text{beta}_{\text{max}}].
+\text{theta} &= [\max(3,\ \hat{f}_\alpha - 6),\ \max(4,\ f_{\min}^{\alpha})],\\
+\text{beta}  &= [\max(13,\ f_{\max}^{\alpha}),\ f_{\max}^{\beta}].
 \end{aligned}
 $$
 All IAF‑dependent logic includes explicit **duration and cycle‑count checks** to avoid
@@ -176,7 +176,7 @@ Spatial transforms are **never silently skipped**. If a requested transform fail
 
 The standard transform is CSD via:
 $$
-x^\text{CSD}(t) = \text{compute\_current\_source\_density}(x(t);\ \lambda^2,\ \text{stiffness}),
+x^{\text{CSD}}(t) = \text{compute\_current\_source\_density}(x(t);\ \lambda^2,\ \text{stiffness}),
 $$
 where $\lambda^2$ and stiffness are configured parameters with sensible defaults.
 
@@ -829,7 +829,7 @@ After primary features are computed, `_add_change_scores_to_results` adds **chan
 
 Conceptually, for a feature column $X$ with baseline and active variants:
 $$
-X_\Delta = X^\text{active} - X^\text{baseline}.
+X_\Delta = X^{\text{active}} - X^{\text{baseline}}.
 $$
 More complicated window structures (e.g. multiple active segments) are handled by `compute_change_features`, which inspects column names and produces consistent `_delta`‑style columns without recomputing the original feature.
 
@@ -844,33 +844,33 @@ All schemes avoid data leakage by allowing **train/test‑separated** estimation
 
 ### 8.1 Per‑column normalization methods
 
-Given a feature column $x \in \mathbb{R}^N$ and a reference vector $x^\text{ref}$ (typically the
+Given a feature column $x \in \mathbb{R}^N$ and a reference vector $x^{\text{ref}}$ (typically the
 training subset), the following methods are available:
 
 - **Z‑score**:
 $$
-z_i = \frac{x_i - \mu^\text{ref}}{\max(\sigma^\text{ref}, \varepsilon)},\quad
-\mu^\text{ref} = \mathrm{mean}(x^\text{ref}),\quad
-\sigma^\text{ref} = \mathrm{sd}(x^\text{ref}).
+z_i = \frac{x_i - \mu^{\text{ref}}}{\max(\sigma^{\text{ref}}, \varepsilon)},\quad
+\mu^{\text{ref}} = \mathrm{mean}(x^{\text{ref}}),\quad
+\sigma^{\text{ref}} = \mathrm{sd}(x^{\text{ref}}).
 $$
 - **Robust (median/MAD)**:
 $$
 z^{\text{robust}}_i =
-\frac{x_i - m^\text{ref}}
-     {\max\bigl(\mathrm{MAD}(x^\text{ref})_{\text{normal}}, \varepsilon\bigr)},
+\frac{x_i - m^{\text{ref}}}
+     {\max\bigl(\mathrm{MAD}(x^{\text{ref}})_{\text{normal}}, \varepsilon\bigr)},
 \quad
-m^\text{ref} = \mathrm{median}(x^\text{ref}),
+m^{\text{ref}} = \mathrm{median}(x^{\text{ref}}),
 $$
 where $\mathrm{MAD}(\cdot)_{\text{normal}}$ is the normal‑consistent MAD (scaled by 1.4826).
 
 - **Min–max** to range $[a,b]$:
 $$
 x'_i = a + (b-a)
-\frac{x_i - x_{\text{min}}^\text{ref}}
-     {\max\bigl(x_{\text{max}}^\text{ref} - x_{\text{min}}^\text{ref}, \varepsilon\bigr)},
+\frac{x_i - x_{\text{min}}^{\text{ref}}}
+     {\max\bigl(x_{\text{max}}^{\text{ref}} - x_{\text{min}}^{\text{ref}}, \varepsilon\bigr)},
 $$
-with $x_{\text{min}}^\text{ref} = \min(x^\text{ref})$ and
-$x_{\text{max}}^\text{ref} = \max(x^\text{ref})$.
+with $x_{\text{min}}^{\text{ref}} = \min(x^{\text{ref}})$ and
+$x_{\text{max}}^{\text{ref}} = \max(x^{\text{ref}})$.
 
 - **Rank‑based** (0–1 ranks on finite values):
 $$
@@ -919,7 +919,7 @@ To avoid cross‑validation leakage:
 
 - `normalize_train_test(train_df, test_df, method)` normalizes both DataFrames
   using parameters estimated on `train_df` only. For each numeric feature column
-$x$, `train_df` plays the role of $x^\text{ref}$.
+$x$, `train_df` plays the role of $x^{\text{ref}}$.
 - `FeatureNormalizer(method)` can be:
 
   - **fit** on a training DataFrame to store per‑column parameters

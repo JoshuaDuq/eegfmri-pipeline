@@ -353,7 +353,7 @@ $$
 
 Key formulas:
 $$
-d = \frac{\mu_A - \mu_B}{s_{\text{pooled}}}, \qquad M_c = \sum_{i \in c} |t_i|, \qquad p_c = \frac{\#\{M_{\text{max}}^\text{perm} \geq M_c\} + 1}{n_{\text{perm}} + 1}
+d = \frac{\mu_A - \mu_B}{s_{\text{pooled}}}, \qquad M_c = \sum_{i \in c} |t_i|, \qquad p_c = \frac{\#\{M_{\text{max}}^{\text{perm}} \geq M_c\} + 1}{n_{\text{perm}} + 1}
 $$
 ---
 
@@ -390,7 +390,7 @@ $$
 \text{slope}(W) = \beta_1 + \beta_3 W, \qquad \text{Var}[\text{slope}(W)] = \text{Var}(\beta_1) + W^2\text{Var}(\beta_3) + 2W\text{Cov}(\beta_1,\beta_3)
 $$
 Johnson-Neyman interval solved from the t-critical boundary equation.
-Optional permutation test: permute $Y$ and evaluate $|\hat{\beta}_3^\text{perm}| \geq |\hat{\beta}_3^\text{obs}|$.
+Optional permutation test: permute $Y$ and evaluate $|\hat{\beta}_3^{\text{perm}}| \geq |\hat{\beta}_3^{\text{obs}}|$.
 
 ---
 
