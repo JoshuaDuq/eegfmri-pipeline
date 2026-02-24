@@ -52,7 +52,7 @@ def load_behavior_stats_files(
     logger: logging.Logger,
     method_label: Optional[str] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    """Load rating and temperature correlation stats files with fallback patterns."""
+    """Load rating and predictor correlation stats files with fallback patterns."""
     rating_patterns = _build_stats_file_patterns("rating", method_label)
     temp_patterns = _build_stats_file_patterns("temp", method_label)
     

@@ -169,7 +169,7 @@ def compute_mediation_paths(
     Parameters
     ----------
     X : np.ndarray
-        Independent variable (temperature)
+        Independent variable (predictor)
     M : np.ndarray
         Mediator (neural feature)
     Y : np.ndarray
@@ -575,7 +575,7 @@ def run_full_mediation_analysis(
     Parameters
     ----------
     X : np.ndarray
-        Independent variable (temperature)
+        Independent variable (predictor)
     M : np.ndarray
         Mediator (neural feature)  
     Y : np.ndarray

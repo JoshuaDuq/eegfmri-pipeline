@@ -695,8 +695,8 @@ def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
         erds_cfg["rebound_min_latency_ms"] = args.erds_rebound_min_latency_ms
     if getattr(args, "erds_infer_contralateral", None) is not None:
         erds_cfg["infer_contralateral_when_missing"] = args.erds_infer_contralateral
-    if getattr(args, "erds_pain_marker_bands", None) is not None:
-        erds_cfg["pain_marker_bands"] = list(args.erds_pain_marker_bands)
+    if getattr(args, "erds_condition_marker_bands", None) is not None:
+        erds_cfg["condition_marker_bands"] = list(args.erds_condition_marker_bands)
     if getattr(args, "erds_laterality_columns", None) is not None:
         erds_cfg["laterality_columns"] = list(args.erds_laterality_columns)
     if getattr(args, "erds_somatosensory_left_channels", None) is not None:

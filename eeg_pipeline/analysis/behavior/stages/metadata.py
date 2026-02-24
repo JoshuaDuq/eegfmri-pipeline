@@ -59,8 +59,8 @@ def build_behavior_qc_impl(
         "subject": ctx.subject,
         "task": ctx.task,
         "n_trials": ctx.n_trials,
-        "has_predictor": ctx.has_temperature,
-        "predictor_column": ctx.temperature_column,
+        "has_predictor": ctx.has_predictor,
+        "predictor_column": ctx.predictor_column,
         "group_column": ctx.group_column,
     }
 
@@ -76,12 +76,12 @@ def build_behavior_qc_impl(
     if outcome_series is not None:
         qc["outcome"] = compute_series_statistics_fn(outcome_series)
 
-    if ctx.temperature is not None:
-        qc["predictor"] = compute_series_statistics_fn(ctx.temperature)
+    if ctx.predictor_series is not None:
+        qc["predictor"] = compute_series_statistics_fn(ctx.predictor_series)
 
-    if outcome_series is not None and ctx.temperature is not None:
+    if outcome_series is not None and ctx.predictor_series is not None:
         s = pd.to_numeric(outcome_series, errors="coerce")
-        t = pd.to_numeric(ctx.temperature, errors="coerce")
+        t = pd.to_numeric(ctx.predictor_series, errors="coerce")
         valid = s.notna() & t.notna()
         if int(valid.sum()) >= 3:
             r, p = compute_correlation_fn(s[valid].values, t[valid].values, method="spearman")
@@ -95,20 +95,20 @@ def build_behavior_qc_impl(
     if ctx.aligned_events is not None and outcome_series is not None:
         from eeg_pipeline.analysis.behavior.api import split_by_condition
 
-        pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(ctx.aligned_events, ctx.config, ctx.logger)
-        if int(n_pain) > 0 or int(n_nonpain) > 0:
+        cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(ctx.aligned_events, ctx.config, ctx.logger)
+        if int(n_condition_a) > 0 or int(n_condition_b) > 0:
             s = pd.to_numeric(outcome_series, errors="coerce")
-            pain_ratings = s[pain_mask] if len(pain_mask) == len(s) else pd.Series(dtype=float)
-            nonpain_ratings = s[nonpain_mask] if len(nonpain_mask) == len(s) else pd.Series(dtype=float)
+            cond_a_ratings = s[cond_a_mask] if len(cond_a_mask) == len(s) else pd.Series(dtype=float)
+            cond_b_ratings = s[cond_b_mask] if len(cond_b_mask) == len(s) else pd.Series(dtype=float)
             qc["contrast"] = {
                 "status": "ok",
-                "n_pain": int(n_pain),
-                "n_nonpain": int(n_nonpain),
-                "mean_rating_pain": float(pain_ratings.mean()) if pain_ratings.notna().any() else np.nan,
-                "mean_rating_nonpain": float(nonpain_ratings.mean()) if nonpain_ratings.notna().any() else np.nan,
-                "mean_rating_difference_pain_minus_nonpain": (
-                    float(pain_ratings.mean() - nonpain_ratings.mean())
-                    if pain_ratings.notna().any() and nonpain_ratings.notna().any()
+                "n_condition_a": int(n_condition_a),
+                "n_condition_b": int(n_condition_b),
+                "mean_outcome_condition_a": float(cond_a_ratings.mean()) if cond_a_ratings.notna().any() else np.nan,
+                "mean_outcome_condition_b": float(cond_b_ratings.mean()) if cond_b_ratings.notna().any() else np.nan,
+                "mean_outcome_difference_a_minus_b": (
+                    float(cond_a_ratings.mean() - cond_b_ratings.mean())
+                    if cond_a_ratings.notna().any() and cond_b_ratings.notna().any()
                     else np.nan
                 ),
             }
@@ -154,7 +154,7 @@ def write_analysis_metadata_impl(
         "method_label": method_label,
         "robust_method": robust_method,
         "min_samples": pipeline_config.min_samples,
-        "control_predictor": pipeline_config.control_temperature,
+        "control_predictor": pipeline_config.control_predictor,
         "control_trial_order": pipeline_config.control_trial_order,
         "compute_change_scores": pipeline_config.compute_change_scores,
         "compute_sensitivity": pipeline_config.compute_predictor_sensitivity,
@@ -170,7 +170,7 @@ def write_analysis_metadata_impl(
             "bootstrap": pipeline_config.bootstrap,
             "n_permutations": pipeline_config.n_permutations,
             "fdr_alpha": pipeline_config.fdr_alpha,
-            "control_predictor": pipeline_config.control_temperature,
+            "control_predictor": pipeline_config.control_predictor,
             "control_trial_order": pipeline_config.control_trial_order,
             "compute_change_scores": pipeline_config.compute_change_scores,
             "compute_reliability": pipeline_config.compute_reliability,
@@ -208,10 +208,10 @@ def write_analysis_metadata_impl(
     }
 
     payload["predictor_status"] = {
-        "available": bool(ctx.temperature is not None and ctx.temperature.notna().any())
-        if ctx.temperature is not None
+        "available": bool(ctx.predictor_series is not None and ctx.predictor_series.notna().any())
+        if ctx.predictor_series is not None
         else False,
-        "control_enabled": bool(ctx.control_temperature),
+        "control_enabled": bool(ctx.control_predictor),
     }
     if not payload["predictor_status"]["available"]:
         payload["predictor_status"]["reason"] = "missing_predictor"

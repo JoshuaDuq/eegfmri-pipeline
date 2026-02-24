@@ -39,15 +39,15 @@ def _compute_group_correlation(
 def _compute_partial_correlation_for_group(
     feature_values: pd.Series,
     outcome_values: pd.Series,
-    temperature_values: pd.Series,
+    predictor_values: pd.Series,
     method: str,
 ) -> Tuple[float, float]:
-    """Compute partial correlation controlling for temperature."""
+    """Compute partial correlation controlling for predictor."""
     try:
         r_partial, p_partial, _ = compute_partial_corr(
             feature_values,
             outcome_values,
-            pd.DataFrame({"temperature": temperature_values}),
+            pd.DataFrame({"predictor": predictor_values}),
             method=method,
         )
         r_float = float(r_partial) if np.isfinite(r_partial) else np.nan
@@ -147,17 +147,17 @@ def _process_single_stability_feature(
         group_sample_sizes.append(sample_size)
 
         if use_partial:
-            temperature_values = pd.to_numeric(
-                trial_df.loc[group_mask, "temperature"],
+            predictor_values = pd.to_numeric(
+                trial_df.loc[group_mask, "predictor"],
                 errors="coerce"
             )
-            valid_temp_mask = temperature_values.notna()
+            valid_pred_mask = predictor_values.notna()
             
-            if int(valid_temp_mask.sum()) >= _MIN_TRIALS_FOR_ANALYSIS:
-                valid_temp_array = valid_temp_mask.values
-                partial_feature = pd.Series(group_feature[valid_temp_array])
-                partial_outcome = pd.Series(group_outcome[valid_temp_array])
-                partial_temp = temperature_values[valid_temp_mask]
+            if int(valid_pred_mask.sum()) >= _MIN_TRIALS_FOR_ANALYSIS:
+                valid_pred_array = valid_pred_mask.values
+                partial_feature = pd.Series(group_feature[valid_pred_array])
+                partial_outcome = pd.Series(group_outcome[valid_pred_array])
+                partial_pred = predictor_values[valid_pred_mask]
                 
                 r_partial, p_partial = _compute_partial_correlation_for_group(
                     partial_feature,
@@ -200,8 +200,8 @@ def _process_single_stability_feature(
             valid_partial_corr = partial_corr_array[valid_partial_mask]
             valid_partial_p = partial_p_array[valid_partial_mask]
             
-            record["r_partial_temp_group_mean"] = float(np.nanmean(valid_partial_corr))
-            record["r_partial_temp_group_std"] = (
+            record["r_partial_pred_group_mean"] = float(np.nanmean(valid_partial_corr))
+            record["r_partial_pred_group_std"] = (
                 float(np.nanstd(valid_partial_corr, ddof=1))
                 if len(valid_partial_corr) > 1
                 else np.nan
@@ -228,7 +228,7 @@ def _extract_configuration(
     )
     use_partial_temp = bool(
         _get_config_value(
-            config, "behavior_analysis.stability.partial_temperature", True
+            config, "behavior_analysis.stability.partial_predictor", True
         )
     )
     n_jobs = int(_get_config_value(config, "behavior_analysis.n_jobs", -1))
@@ -324,7 +324,7 @@ def compute_groupwise_stability(
         "method": method,
         "max_features": max_features,
         "alpha": alpha,
-        "partial_temperature": use_partial_temp,
+        "partial_predictor": use_partial_temp,
         "outcome": outcome,
         "group_col": group_col,
     }
@@ -349,7 +349,7 @@ def compute_groupwise_stability(
     meta["n_features_considered"] = n_candidates
     meta["n_features_selected"] = len(selected_features)
     meta["has_partial_corr"] = True
-    has_temp = "temperature" in trial_df.columns
+    has_temp = "predictor" in trial_df.columns
 
     groups = group_series.dropna().unique().tolist()
     meta["n_groups_total"] = len(groups)

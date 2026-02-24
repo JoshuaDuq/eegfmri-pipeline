@@ -658,8 +658,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertTrue(bool(out["paired_test"]))
         self.assertEqual(int(out["n_pairs"]), 2)
-        self.assertEqual(int(out["n_pain"]), 2)
-        self.assertEqual(int(out["n_nonpain"]), 2)
+        self.assertEqual(int(out["n_condition_a"]), 2)
+        self.assertEqual(int(out["n_condition_b"]), 2)
 
     def test_condition_primary_mode_perm_marks_missing_when_permutation_unavailable(self):
         from eeg_pipeline.utils.analysis.stats.effect_size import compute_condition_effects

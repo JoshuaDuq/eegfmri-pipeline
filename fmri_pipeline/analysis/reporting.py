@@ -11,7 +11,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
-from fmri_pipeline.analysis.pain_signatures import discover_pain_signature_files, compute_pain_signature_expression, PainSignatureResult
+from fmri_pipeline.analysis.multivariate_signatures import (
+    SignatureResult,
+    compute_signature_expression,
+    discover_signature_files,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -398,34 +402,39 @@ def generate_tsnr_qc_images(
         return []
 
 
-def generate_pain_signature_tables(
+def generate_signature_tables(
     *,
     contrast_dir: Path,
     cfg: FmriPlottingConfig,
     mni_effect_img: Optional[Any],
     mni_mask_img: Optional[Any],
     signature_root: Optional[Path],
+    signature_specs: Optional[List[Any]] = None,
 ) -> List[ReportTable]:
     """
-    Compute NPS/SIIPS1 expression on the unthresholded MNI effect-size map and return report tables (best-effort).
+    Compute multivariate signature expression on the unthresholded MNI effect-size map.
+
+    Returns report tables (best-effort; returns empty list on any failure).
+    Signatures are read from ``signature_specs`` (config-driven list of {name, path} dicts).
     """
     cfg = cfg.normalized()
     if not cfg.enabled or not bool(getattr(cfg, "include_signatures", True)):
         return []
     if mni_effect_img is None:
         return []
-    if signature_root is None:
+    if signature_root is None or not signature_specs:
         return []
 
-    sig_files = discover_pain_signature_files(signature_root)
+    sig_files = discover_signature_files(signature_root, signature_specs)
     if not sig_files:
         return []
 
-    results: List[PainSignatureResult] = []
+    results: List[SignatureResult] = []
     try:
-        results = compute_pain_signature_expression(
+        results = compute_signature_expression(
             stat_or_effect_img=mni_effect_img,
             signature_root=signature_root,
+            signature_specs=signature_specs,
             mask_img=mni_mask_img,
             signatures=sorted(sig_files.keys()),
         )
@@ -438,7 +447,7 @@ def generate_pain_signature_tables(
 
     qc_dir = contrast_dir / "plots" / "qc"
     qc_dir.mkdir(parents=True, exist_ok=True)
-    tsv_path = qc_dir / "pain_signature_expression.tsv"
+    tsv_path = qc_dir / "signature_expression.tsv"
     try:
         header = ["signature", "dot", "cosine", "pearson_r", "n_voxels", "weight_path"]
         lines = ["\t".join(header)]
@@ -486,7 +495,7 @@ def generate_pain_signature_tables(
 
     return [
         ReportTable(
-            title="Multivariate Pain Signature Expression (MNI effect-size map)",
+            title="Multivariate Signature Expression (MNI effect-size map)",
             tsv_path=tsv_path,
             html_table=html_table,
             caption=(
@@ -1160,6 +1169,7 @@ def run_fmri_plotting_and_report(
     native_mask_img: Optional[Any] = None,
     mni_mask_img: Optional[Any] = None,
     signature_root: Optional[Path] = None,
+    signature_specs: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """
     Best-effort plotting + report for a contrast directory.
@@ -1410,12 +1420,13 @@ def run_fmri_plotting_and_report(
 
     # Signatures section (computed on the MNI effect-size map)
     try:
-        sig_tables = generate_pain_signature_tables(
+        sig_tables = generate_signature_tables(
             contrast_dir=contrast_dir,
             cfg=cfg,
             mni_effect_img=mni_effect_img,
             mni_mask_img=mni_mask_img,
             signature_root=signature_root,
+            signature_specs=signature_specs,
         )
         if sig_tables:
             sections.append(ReportSpaceSection(space="Signatures", images=(), tables=tuple(sig_tables), summary=None))

@@ -357,11 +357,11 @@ def _get_all_channels_from_roi_map(roi_map: Dict[str, List[str]]) -> List[str]:
     return sorted(all_channels)
 
 
-def _is_temperature_target(target_col: str, config: Any) -> bool:
+def _is_predictor_target(target_col: str, config: Any) -> bool:
     target = str(target_col).strip().lower()
-    temperature_cols = get_config_value(config, "event_columns.temperature", []) or []
-    temperature_cols = {str(col).strip().lower() for col in temperature_cols}
-    return target in temperature_cols or target == "temp" or "temperature" in target
+    predictor_cols = get_config_value(config, "event_columns.predictor", []) or []
+    predictor_cols = {str(col).strip().lower() for col in predictor_cols}
+    return target in predictor_cols or target == "predictor" or "predictor" in target
 
 
 def _build_scatter_covariates(
@@ -370,14 +370,14 @@ def _build_scatter_covariates(
     config: Any,
 ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """Build a covariate matrix so scatter plots reflect analysis controls."""
-    control_temperature = bool(get_config_value(config, "behavior_analysis.control_temperature", True))
+    control_predictor = bool(get_config_value(config, "behavior_analysis.predictor_control_enabled", True))
     control_trial_order = bool(get_config_value(config, "behavior_analysis.control_trial_order", True))
 
     cov_df = build_covariate_matrix(events_df, requested_covariates=None, config=config)
     if cov_df is None or cov_df.empty:
         return None, None
 
-    include_temperature = control_temperature and not _is_temperature_target(target_col, config)
+    include_predictor = control_predictor and not _is_predictor_target(target_col, config)
     include_trial = control_trial_order
 
     parts: List[pd.DataFrame] = []
@@ -387,35 +387,35 @@ def _build_scatter_covariates(
         parts.append(cov_df[["trial"]])
         controls.append("trial")
 
-    if include_temperature and "temperature" in cov_df.columns:
-        from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
+    from eeg_pipeline.utils.data.columns import resolve_predictor_column
+
+    predictor_col = resolve_predictor_column(events_df, config)
+    if include_predictor and predictor_col and predictor_col in cov_df.columns:
+        from eeg_pipeline.utils.analysis.stats.splines import build_predictor_rcs_design
 
         mode = str(
             get_config_value(
                 config,
-                "behavior_analysis.statistics.temperature_control",
-                get_config_value(config, "behavior_analysis.regression.temperature_control", "spline"),
+                "behavior_analysis.statistics.predictor_control",
+                get_config_value(config, "behavior_analysis.regression.predictor_control", "spline"),
             )
         ).strip().lower() or "spline"
 
-        temp_series = cov_df["temperature"]
+        predictor_series = cov_df[predictor_col]
         if mode == "linear":
-            parts.append(pd.DataFrame({"temp": pd.to_numeric(temp_series, errors="coerce")}, index=cov_df.index))
-            controls.append("temp")
-        else:
-            temp_design, cov_names, _meta = build_temperature_rcs_design(
-                temp_series,
-                config=config,
-                key_prefix="behavior_analysis.regression.temperature_spline",
-                name_prefix="temperature_rcs",
+            parts.append(
+                pd.DataFrame({"predictor": pd.to_numeric(predictor_series, errors="coerce")}, index=cov_df.index)
             )
-            rename_map = {"temperature": "temp"}
-            for name in cov_names:
-                if name.startswith("temperature_rcs_"):
-                    rename_map[name] = name.replace("temperature_", "temp_", 1)
-            temp_design = temp_design.rename(columns=rename_map)
-            parts.append(temp_design)
-            controls.append("temp(spline)" if len(temp_design.columns) > 1 else "temp")
+            controls.append("predictor")
+        else:
+            pred_design, cov_names, _meta = build_predictor_rcs_design(
+                predictor_series,
+                config=config,
+                key_prefix="behavior_analysis.regression.predictor_spline",
+                name_prefix="predictor_rcs",
+            )
+            parts.append(pred_design)
+            controls.append("predictor(spline)" if len(pred_design.columns) > 1 else "predictor")
 
     if not parts:
         return None, None
@@ -658,7 +658,7 @@ def plot_behavior_scatter(
         If None, uses config default or all available.
     columns : list of str, optional
         Behavioral columns to correlate with (from events.tsv).
-        If None, uses config default (e.g., ["rating", "temperature"]).
+        If None, uses config default (e.g., ["rating", "predictor"]).
     aggregation_modes : list of str, optional
         Aggregation modes: "roi", "global", "channel".
         If None, defaults to ["roi", "global"].

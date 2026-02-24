@@ -260,19 +260,19 @@ def safe_correlation(
 
 def compute_predictor_sensitivity_index(
     ratings: pd.Series,
-    temperatures: pd.Series,
+    predictors: pd.Series,
 ) -> pd.Series:
-    """Compute pain sensitivity as residual from temperature-rating regression."""
-    valid = ratings.notna() & temperatures.notna()
+    """Compute predictor sensitivity as residual from predictor-rating regression."""
+    valid = ratings.notna() & predictors.notna()
     psi = pd.Series(np.nan, index=ratings.index)
 
     if valid.sum() < _MIN_SAMPLES_PSI:
         return psi
 
     ratings_valid = ratings[valid].values
-    temps_valid = temperatures[valid].values
+    preds_valid = predictors[valid].values
 
-    design_matrix = np.column_stack([np.ones(len(temps_valid)), temps_valid])
+    design_matrix = np.column_stack([np.ones(len(preds_valid)), preds_valid])
     try:
         beta = np.linalg.lstsq(design_matrix, ratings_valid, rcond=None)[0]
         predicted = design_matrix @ beta
@@ -286,26 +286,26 @@ def compute_predictor_sensitivity_index(
 def _align_psi_inputs(
     features_df: pd.DataFrame,
     ratings: pd.Series,
-    temperatures: pd.Series,
+    predictors: pd.Series,
     min_samples: int,
     logger: Optional[logging.Logger],
 ) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[pd.Series]]:
-    """Align features, ratings, and temperatures for PSI computation."""
-    if features_df is None or features_df.empty or ratings is None or temperatures is None:
+    """Align features, ratings, and predictors for PSI computation."""
+    if features_df is None or features_df.empty or ratings is None or predictors is None:
         return None, None, None
 
-    common_index = features_df.index.intersection(ratings.index).intersection(temperatures.index)
+    common_index = features_df.index.intersection(ratings.index).intersection(predictors.index)
 
     if common_index.empty:
         if logger:
-            logger.error("No overlapping samples across features, ratings, and temperatures for PSI")
+            logger.error("No overlapping samples across features, ratings, and predictors for PSI")
         return None, None, None
 
     features_aligned = features_df.loc[common_index]
     ratings_aligned = ratings.loc[common_index]
-    temps_aligned = temperatures.loc[common_index]
+    preds_aligned = predictors.loc[common_index]
 
-    valid_mask = ratings_aligned.notna() & temps_aligned.notna()
+    valid_mask = ratings_aligned.notna() & preds_aligned.notna()
     if valid_mask.sum() < min_samples:
         if logger:
             logger.warning(
@@ -317,14 +317,14 @@ def _align_psi_inputs(
     return (
         features_aligned.loc[valid_mask],
         ratings_aligned.loc[valid_mask],
-        temps_aligned.loc[valid_mask],
+        preds_aligned.loc[valid_mask],
     )
 
 
 def run_predictor_sensitivity_correlations(
     features_df: pd.DataFrame,
     ratings: pd.Series,
-    temperatures: pd.Series,
+    predictors: pd.Series,
     method: str = "spearman",
     robust_method: Optional[str] = None,
     min_samples: int = 10,
@@ -346,13 +346,13 @@ def run_predictor_sensitivity_correlations(
         seed = int(get_config_value(config, "project.random_state", 42)) if config is not None else 42
         rng = np.random.default_rng(seed)
     
-    feat_aligned, ratings_aligned, temps_aligned = _align_psi_inputs(
-        features_df, ratings, temperatures, min_samples, logger
+    feat_aligned, ratings_aligned, preds_aligned = _align_psi_inputs(
+        features_df, ratings, predictors, min_samples, logger
     )
-    if feat_aligned is None or ratings_aligned is None or temps_aligned is None:
+    if feat_aligned is None or ratings_aligned is None or preds_aligned is None:
         return pd.DataFrame()
 
-    psi = compute_predictor_sensitivity_index(ratings_aligned, temps_aligned)
+    psi = compute_predictor_sensitivity_index(ratings_aligned, preds_aligned)
 
     if psi.isna().all():
         if logger:

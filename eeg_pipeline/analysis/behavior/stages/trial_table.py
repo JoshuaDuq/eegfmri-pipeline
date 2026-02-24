@@ -192,7 +192,7 @@ def stage_predictor_residual_impl(
     write_metadata_file_fn: Callable[[Path, Dict[str, Any]], None],
     set_trial_table_cache_fn: Optional[Callable[[pd.DataFrame], None]] = None,
 ) -> Optional[Path]:
-    """Compute pain residual = rating - f(temperature)."""
+    """Compute predictor residual = rating - f(predictor)."""
     _ = config
     from eeg_pipeline.utils.data.trial_table import add_predictor_residual
     from eeg_pipeline.utils.data.columns import (
@@ -205,7 +205,7 @@ def stage_predictor_residual_impl(
         ctx.logger.warning("Pain residual: trial table missing; skipping.")
         return None
 
-    predictor_column = resolve_predictor_column(df, ctx.config) or "temperature"
+    predictor_column = resolve_predictor_column(df, ctx.config) or "predictor"
     outcome_column = resolve_outcome_column(df, ctx.config) or "rating"
 
     required_columns = {predictor_column, outcome_column}
@@ -221,7 +221,7 @@ def stage_predictor_residual_impl(
     df_augmented, resid_meta = add_predictor_residual(
         df,
         ctx.config,
-        temperature_col=predictor_column,
+        predictor_col=predictor_column,
         rating_col=outcome_column,
     )
 

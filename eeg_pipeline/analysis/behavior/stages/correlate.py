@@ -19,7 +19,7 @@ class CorrelateDesign:
     feature_cols: List[str]
     targets: List[str]
     cov_df: Optional[pd.DataFrame]
-    temperature_series: Optional[pd.Series]
+    predictor_series: Optional[pd.Series]
     predictor_column: str
     run_col: str
     run_adjust_in_correlations: bool
@@ -158,10 +158,10 @@ def stage_correlate_design_impl(
             )
     cov_df = pd.concat(cov_parts, axis=1) if cov_parts else None
 
-    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
-    temperature_series = None
-    if bool(getattr(config, "control_temperature", True)) and predictor_column in df_trials.columns:
-        temperature_series = pd.to_numeric(df_trials[predictor_column], errors="coerce")
+    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
+    predictor_series = None
+    if bool(getattr(config, "control_predictor", True)) and predictor_column in df_trials.columns:
+        predictor_series = pd.to_numeric(df_trials[predictor_column], errors="coerce")
 
     groups_for_perm = None
     if getattr(ctx, "group_ids", None) is not None:
@@ -198,7 +198,7 @@ def stage_correlate_design_impl(
         len(feature_cols),
         len(targets),
         cov_df.shape[1] if cov_df is not None else 0,
-        temperature_series is not None,
+        predictor_series is not None,
     )
 
     return CorrelateDesign(
@@ -206,7 +206,7 @@ def stage_correlate_design_impl(
         feature_cols=feature_cols,
         targets=targets,
         cov_df=cov_df,
-        temperature_series=temperature_series,
+        predictor_series=predictor_series,
         predictor_column=predictor_column,
         run_col=run_col,
         run_adjust_in_correlations=run_adjust_in_correlations,
@@ -219,7 +219,7 @@ def _compute_single_effect_size(
     target: str,
     df_trials: pd.DataFrame,
     cov_df: Optional[pd.DataFrame],
-    temperature_series: Optional[pd.Series],
+    predictor_series: Optional[pd.Series],
     predictor_column: str,
     run_col: str,
     run_adjust_in_correlations: bool,
@@ -280,8 +280,8 @@ def _compute_single_effect_size(
     }
 
     temp_for_partial = (
-        temperature_series
-        if (temperature_series is not None and target != predictor_column)
+        predictor_series
+        if (predictor_series is not None and target != predictor_column)
         else None
     )
 
@@ -290,7 +290,7 @@ def _compute_single_effect_size(
             roi_values=x,
             target_values=y,
             covariates_df=cov_df,
-            temperature_series=temp_for_partial,
+            predictor_series=temp_for_partial,
             method=method,
             context="trial_table",
             logger=None,
@@ -392,15 +392,15 @@ def stage_correlate_effect_sizes_impl(
     )
 
     has_covariate_controls = design.cov_df is not None and not design.cov_df.empty
-    has_temperature_control = bool(
-        design.temperature_series is not None
+    has_predictor_control = bool(
+        design.predictor_series is not None
         and any(str(t) != design.predictor_column for t in design.targets)
     )
 
     if robust_method not in (None, "", False):
-        if has_covariate_controls or has_temperature_control:
+        if has_covariate_controls or has_predictor_control:
             raise ValueError(
-                "Correlations: robust correlation with covariate/temperature controls is not supported. "
+                "Correlations: robust correlation with covariate/predictor controls is not supported. "
                 "Disable robust correlation or run without partial controls to avoid confounded primary effects."
             )
         if want_partial_cov or want_partial_temp or want_partial_cov_temp:
@@ -434,7 +434,7 @@ def stage_correlate_effect_sizes_impl(
                 target=target,
                 df_trials=design.df_trials,
                 cov_df=design.cov_df,
-                temperature_series=design.temperature_series,
+                predictor_series=design.predictor_series,
                 predictor_column=design.predictor_column,
                 run_col=design.run_col,
                 run_adjust_in_correlations=design.run_adjust_in_correlations,
@@ -461,7 +461,7 @@ def stage_correlate_effect_sizes_impl(
                 target=target,
                 df_trials=design.df_trials,
                 cov_df=design.cov_df,
-                temperature_series=design.temperature_series,
+                predictor_series=design.predictor_series,
                 predictor_column=design.predictor_column,
                 run_col=design.run_col,
                 run_adjust_in_correlations=design.run_adjust_in_correlations,
@@ -491,7 +491,7 @@ def _compute_single_pvalue(
     df_trials: pd.DataFrame,
     df_index: pd.Index,
     cov_df: Optional[pd.DataFrame],
-    temperature_series: Optional[pd.Series],
+    predictor_series: Optional[pd.Series],
     predictor_column: str,
     groups_for_perm: Optional[pd.Series],
     method: str,
@@ -578,15 +578,15 @@ def _compute_single_pvalue(
         )
     else:
         temp_for_partial = (
-            temperature_series
-            if (temperature_series is not None and target != predictor_column)
+            predictor_series
+            if (predictor_series is not None and target != predictor_column)
             else None
         )
         p_perm, p_perm_cov, p_perm_temp, p_perm_cov_temp = compute_permutation_pvalues_with_cov_temp(
             x_aligned=pd.Series(x.to_numpy(dtype=float), index=df_index),
             y_aligned=pd.Series(y.to_numpy(dtype=float), index=df_index),
             covariates_df=cov_df,
-            temp_series=temp_for_partial,
+            predictor_series=temp_for_partial,
             method=method.strip().lower(),
             n_perm=n_perm,
             n_eff=int(n),
@@ -676,7 +676,7 @@ def stage_correlate_pvalues_impl(
                 df_trials=design.df_trials,
                 df_index=design.df_trials.index,
                 cov_df=design.cov_df,
-                temperature_series=design.temperature_series,
+                predictor_series=design.predictor_series,
                 predictor_column=design.predictor_column,
                 groups_for_perm=design.groups_for_perm,
                 method=method,
@@ -696,7 +696,7 @@ def stage_correlate_pvalues_impl(
                 df_trials=design.df_trials,
                 df_index=design.df_trials.index,
                 cov_df=design.cov_df,
-                temperature_series=design.temperature_series,
+                predictor_series=design.predictor_series,
                 predictor_column=design.predictor_column,
                 groups_for_perm=design.groups_for_perm,
                 method=method,
@@ -774,9 +774,9 @@ def stage_correlate_primary_selection_impl(
         else:
             want_partial_cov = design.cov_df is not None and not design.cov_df.empty
             want_partial_temp = (
-                bool(getattr(config, "control_temperature", True))
+                bool(getattr(config, "control_predictor", True))
                 and target != design.predictor_column
-                and design.temperature_series is not None
+                and design.predictor_series is not None
             )
 
             if want_partial_temp and want_partial_cov:
@@ -914,7 +914,7 @@ def stage_predictor_sensitivity_impl(
         ctx.logger.warning("Pain sensitivity: trial table missing; skipping.")
         return pd.DataFrame()
 
-    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
+    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
     outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
 
     required_columns = {predictor_column, outcome_column}
@@ -1021,7 +1021,7 @@ def stage_predictor_sensitivity_impl(
     psi_df = run_predictor_sensitivity_correlations(
         features_df=psi_features,
         ratings=pd.to_numeric(df_trials[outcome_column], errors="coerce"),
-        temperatures=pd.to_numeric(df_trials[predictor_column], errors="coerce"),
+        predictors=pd.to_numeric(df_trials[predictor_column], errors="coerce"),
         method=method,
         robust_method=robust_method_cfg,
         min_samples=int(getattr(config, "min_samples", 10)),

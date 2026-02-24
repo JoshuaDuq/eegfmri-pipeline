@@ -66,8 +66,8 @@ def _should_use_parallel(n_jobs: int, num_items: int, min_items: int = 1) -> boo
 def parallel_condition_effects(
     feature_columns: List[str],
     features_df: pd.DataFrame,
-    pain_mask: np.ndarray,
-    nonpain_mask: np.ndarray,
+    cond_a_mask: np.ndarray,
+    cond_b_mask: np.ndarray,
     min_samples: int,
     n_jobs: int = -1,
     *,
@@ -80,24 +80,25 @@ def parallel_condition_effects(
     logger: Optional[logging.Logger] = None,
 ) -> List[Dict[str, Any]]:
     """Compute condition effects for multiple features.
-    
+
     Uses vectorized batch computation for speed when possible.
     Falls back to per-feature parallel computation for small feature sets.
+    ``cond_a_mask``/``cond_b_mask`` define condition A and condition B respectively.
     """
     from eeg_pipeline.utils.analysis.stats.effect_size import compute_batch_condition_effects
-    
+
     if not feature_columns:
         return []
-    
+
     n_features = len(feature_columns)
-    
+
     # Use vectorized batch computation for large feature sets (much faster)
     if n_features >= _MIN_FEATURES_FOR_BATCH_CONDITION and not paired:
         return compute_batch_condition_effects(
             feature_columns=feature_columns,
             features_df=features_df,
-            pain_mask=pain_mask,
-            nonpain_mask=nonpain_mask,
+            cond_a_mask=cond_a_mask,
+            cond_b_mask=cond_b_mask,
             min_samples=min_samples,
             n_perm=n_perm,
             base_seed=base_seed,
@@ -119,8 +120,8 @@ def parallel_condition_effects(
             result = _compute_single_condition_effect(
                 col,
                 features_df,
-                pain_mask,
-                nonpain_mask,
+                cond_a_mask,
+                cond_b_mask,
                 min_samples,
                 paired=paired,
                 pair_ids=pair_ids,
@@ -138,8 +139,8 @@ def parallel_condition_effects(
         delayed(_compute_single_condition_effect)(
             col,
             features_df,
-            pain_mask,
-            nonpain_mask,
+            cond_a_mask,
+            cond_b_mask,
             min_samples,
             paired=paired,
             pair_ids=pair_ids,
@@ -155,23 +156,14 @@ def parallel_condition_effects(
 
 
 def _compute_ttest_statistics(
-    pain_values: np.ndarray,
-    nonpain_values: np.ndarray,
+    cond_a_values: np.ndarray,
+    cond_b_values: np.ndarray,
     paired: bool = False,
 ) -> Tuple[float, float]:
-    """Compute t-test statistics for two groups.
-    
-    Args:
-        pain_values: Values for pain condition
-        nonpain_values: Values for non-pain condition
-        paired: If True, use paired t-test (for within-subject designs).
-                If False, use independent samples Welch t-test.
-    
-    Note:
-        For within-subject thermal pain paradigms, paired=True is scientifically
-        correct because pain/non-pain conditions are within the same subject.
-        Using unpaired tests inflates Type I error by ignoring subject-level
-        correlation structure.
+    """Compute t-test statistics for two conditions.
+
+    Uses paired t-test for within-subject designs, Welch's t-test otherwise.
+    Requires equal-length arrays when paired=True; falls back to unpaired if lengths differ.
     """
     from scipy import stats
 
@@ -179,15 +171,12 @@ def _compute_ttest_statistics(
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
             if paired:
-                # Paired t-test for within-subject designs
-                # Requires equal-length arrays (matched pairs)
-                if len(pain_values) != len(nonpain_values):
-                    # Fall back to unpaired if lengths don't match
-                    t_stat, p_val = stats.ttest_ind(pain_values, nonpain_values, equal_var=False)
+                if len(cond_a_values) != len(cond_b_values):
+                    t_stat, p_val = stats.ttest_ind(cond_a_values, cond_b_values, equal_var=False)
                 else:
-                    t_stat, p_val = stats.ttest_rel(pain_values, nonpain_values)
+                    t_stat, p_val = stats.ttest_rel(cond_a_values, cond_b_values)
             else:
-                t_stat, p_val = stats.ttest_ind(pain_values, nonpain_values, equal_var=False)
+                t_stat, p_val = stats.ttest_ind(cond_a_values, cond_b_values, equal_var=False)
             return float(t_stat), float(p_val)
     except RuntimeWarning:
         return np.nan, np.nan
@@ -223,11 +212,11 @@ def _extract_valid_groups(
 
 def _extract_paired_condition_values(
     values: np.ndarray,
-    pain_mask: np.ndarray,
-    nonpain_mask: np.ndarray,
+    cond_a_mask: np.ndarray,
+    cond_b_mask: np.ndarray,
     pair_ids: Optional[np.ndarray],
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Return matched (pain, non-pain) values per pair id."""
+    """Return matched (condition A, condition B) values per pair id."""
     if pair_ids is None:
         return np.array([], dtype=float), np.array([], dtype=float)
 
@@ -235,18 +224,18 @@ def _extract_paired_condition_values(
     if pair_array.shape[0] != values.shape[0]:
         return np.array([], dtype=float), np.array([], dtype=float)
 
-    valid_rows = np.isfinite(values) & (pain_mask | nonpain_mask)
+    valid_rows = np.isfinite(values) & (cond_a_mask | cond_b_mask)
     if not np.any(valid_rows):
         return np.array([], dtype=float), np.array([], dtype=float)
 
     frame = pd.DataFrame(
         {
             "pair_id": pair_array[valid_rows],
-            "is_pain": pain_mask[valid_rows].astype(bool),
+            "is_cond_a": cond_a_mask[valid_rows].astype(bool),
             "value": values[valid_rows].astype(float, copy=False),
         }
     )
-    pivot = frame.groupby(["pair_id", "is_pain"], dropna=True)["value"].mean().unstack()
+    pivot = frame.groupby(["pair_id", "is_cond_a"], dropna=True)["value"].mean().unstack()
     if True not in pivot.columns or False not in pivot.columns:
         return np.array([], dtype=float), np.array([], dtype=float)
 
@@ -254,20 +243,20 @@ def _extract_paired_condition_values(
     if paired.empty:
         return np.array([], dtype=float), np.array([], dtype=float)
 
-    pain_values = paired.iloc[:, 0].to_numpy(dtype=float)
-    nonpain_values = paired.iloc[:, 1].to_numpy(dtype=float)
-    return pain_values, nonpain_values
+    cond_a_values = paired.iloc[:, 0].to_numpy(dtype=float)
+    cond_b_values = paired.iloc[:, 1].to_numpy(dtype=float)
+    return cond_a_values, cond_b_values
 
 
 def _compute_paired_hedges_g(
-    pain_values: np.ndarray,
-    nonpain_values: np.ndarray,
+    cond_a_values: np.ndarray,
+    cond_b_values: np.ndarray,
 ) -> float:
     """Bias-corrected paired standardized mean difference (g_z)."""
-    if pain_values.size != nonpain_values.size or pain_values.size < 2:
+    if cond_a_values.size != cond_b_values.size or cond_a_values.size < 2:
         return np.nan
 
-    diffs = np.asarray(pain_values, dtype=float) - np.asarray(nonpain_values, dtype=float)
+    diffs = np.asarray(cond_a_values, dtype=float) - np.asarray(cond_b_values, dtype=float)
     mean_diff = float(np.mean(diffs))
     std_diff = float(np.std(diffs, ddof=1))
     if std_diff < _NUMERIC_TOLERANCE:
@@ -283,8 +272,8 @@ def _compute_paired_hedges_g(
 
 
 def _perm_pval_paired_mean_difference(
-    pain_values: np.ndarray,
-    nonpain_values: np.ndarray,
+    cond_a_values: np.ndarray,
+    cond_b_values: np.ndarray,
     *,
     n_perm: int,
     rng: np.random.Generator,
@@ -292,12 +281,12 @@ def _perm_pval_paired_mean_difference(
     """Permutation p-value for paired mean difference using random sign-flips."""
     if n_perm <= 0:
         return np.nan
-    pain_arr = np.asarray(pain_values, dtype=float).ravel()
-    nonpain_arr = np.asarray(nonpain_values, dtype=float).ravel()
-    if pain_arr.size != nonpain_arr.size or pain_arr.size < 2:
+    cond_a_arr = np.asarray(cond_a_values, dtype=float).ravel()
+    cond_b_arr = np.asarray(cond_b_values, dtype=float).ravel()
+    if cond_a_arr.size != cond_b_arr.size or cond_a_arr.size < 2:
         return np.nan
 
-    diffs = pain_arr - nonpain_arr
+    diffs = cond_a_arr - cond_b_arr
     valid = np.isfinite(diffs)
     diffs = diffs[valid]
     if diffs.size < 2:
@@ -320,8 +309,8 @@ def _perm_pval_paired_mean_difference(
 def _compute_single_condition_effect(
     col: str,
     features_df: pd.DataFrame,
-    pain_mask: np.ndarray,
-    nonpain_mask: np.ndarray,
+    cond_a_mask: np.ndarray,
+    cond_b_mask: np.ndarray,
     min_samples: int,
     *,
     paired: bool = False,
@@ -341,34 +330,34 @@ def _compute_single_condition_effect(
         
         values = pd.to_numeric(features_df[col], errors="coerce").values
 
-        pain_values = values[pain_mask]
-        nonpain_values = values[nonpain_mask]
+        cond_a_values = values[cond_a_mask]
+        cond_b_values = values[cond_b_mask]
 
-        pain_valid = pain_values[np.isfinite(pain_values)]
-        nonpain_valid = nonpain_values[np.isfinite(nonpain_values)]
+        cond_a_valid = cond_a_values[np.isfinite(cond_a_values)]
+        cond_b_valid = cond_b_values[np.isfinite(cond_b_values)]
         min_required = max(int(min_samples), 2)
         n_pairs = np.nan
         p_permutation = np.nan
 
         if paired:
-            pain_matched, nonpain_matched = _extract_paired_condition_values(
+            cond_a_matched, cond_b_matched = _extract_paired_condition_values(
                 values,
-                pain_mask,
-                nonpain_mask,
+                cond_a_mask,
+                cond_b_mask,
                 pair_ids,
             )
-            if pain_matched.size < min_required or nonpain_matched.size < min_required:
+            if cond_a_matched.size < min_required or cond_b_matched.size < min_required:
                 return None
 
-            n_pairs = int(min(pain_matched.size, nonpain_matched.size))
-            mean_pain = float(np.mean(pain_matched))
-            mean_nonpain = float(np.mean(nonpain_matched))
-            std_pain = float(np.std(pain_matched, ddof=1))
-            std_nonpain = float(np.std(nonpain_matched, ddof=1))
+            n_pairs = int(min(cond_a_matched.size, cond_b_matched.size))
+            mean_condition_a = float(np.mean(cond_a_matched))
+            mean_condition_b = float(np.mean(cond_b_matched))
+            std_condition_a = float(np.std(cond_a_matched, ddof=1))
+            std_condition_b = float(np.std(cond_b_matched, ddof=1))
 
-            hedges_g_value = _compute_paired_hedges_g(pain_matched, nonpain_matched)
+            hedges_g_value = _compute_paired_hedges_g(cond_a_matched, cond_b_matched)
 
-            diff_values = pain_matched - nonpain_matched
+            diff_values = cond_a_matched - cond_b_matched
             has_zero_diff_variance = float(np.std(diff_values, ddof=1)) < _NUMERIC_TOLERANCE
             has_zero_mean_difference = abs(float(np.mean(diff_values))) < _NUMERIC_TOLERANCE
 
@@ -378,8 +367,8 @@ def _compute_single_condition_effect(
                 hedges_g_value = 0.0
             else:
                 t_statistic, p_value = _compute_ttest_statistics(
-                    pain_matched,
-                    nonpain_matched,
+                    cond_a_matched,
+                    cond_b_matched,
                     paired=True,
                 )
 
@@ -387,40 +376,40 @@ def _compute_single_condition_effect(
                 rng_seed = _generate_column_seed(col, base_seed)
                 rng = np.random.default_rng(rng_seed)
                 p_permutation = _perm_pval_paired_mean_difference(
-                    pain_matched,
-                    nonpain_matched,
+                    cond_a_matched,
+                    cond_b_matched,
                     n_perm=int(n_perm),
                     rng=rng,
                 )
-            n_pain_out = int(n_pairs)
-            n_nonpain_out = int(n_pairs)
+            n_condition_a_out = int(n_pairs)
+            n_condition_b_out = int(n_pairs)
         else:
-            if pain_valid.size < min_required or nonpain_valid.size < min_required:
+            if cond_a_valid.size < min_required or cond_b_valid.size < min_required:
                 return None
 
-            mean_pain = float(np.mean(pain_valid))
-            mean_nonpain = float(np.mean(nonpain_valid))
-            std_pain = float(np.std(pain_valid, ddof=1))
-            std_nonpain = float(np.std(nonpain_valid, ddof=1))
+            mean_condition_a = float(np.mean(cond_a_valid))
+            mean_condition_b = float(np.mean(cond_b_valid))
+            std_condition_a = float(np.std(cond_a_valid, ddof=1))
+            std_condition_b = float(np.std(cond_b_valid, ddof=1))
 
-            hedges_g_value = hedges_g(pain_valid, nonpain_valid)
+            hedges_g_value = hedges_g(cond_a_valid, cond_b_valid)
 
-            has_zero_variance = std_pain < _NUMERIC_TOLERANCE and std_nonpain < _NUMERIC_TOLERANCE
-            has_zero_mean_difference = abs(mean_pain - mean_nonpain) < _NUMERIC_TOLERANCE
+            has_zero_variance = std_condition_a < _NUMERIC_TOLERANCE and std_condition_b < _NUMERIC_TOLERANCE
+            has_zero_mean_difference = abs(mean_condition_a - mean_condition_b) < _NUMERIC_TOLERANCE
 
             if has_zero_variance and has_zero_mean_difference:
                 t_statistic = 0.0
                 p_value = 1.0
                 hedges_g_value = 0.0
             else:
-                t_statistic, p_value = _compute_ttest_statistics(pain_valid, nonpain_valid)
-            n_pain_out = len(pain_valid)
-            n_nonpain_out = len(nonpain_valid)
+                t_statistic, p_value = _compute_ttest_statistics(cond_a_valid, cond_b_valid)
+            n_condition_a_out = len(cond_a_valid)
+            n_condition_b_out = len(cond_b_valid)
 
         if n_perm > 0 and not paired:
-            finite_mask = np.isfinite(values) & (pain_mask | nonpain_mask)
+            finite_mask = np.isfinite(values) & (cond_a_mask | cond_b_mask)
             finite_values = values[finite_mask].astype(float, copy=False)
-            finite_labels = pain_mask[finite_mask].astype(bool, copy=False)
+            finite_labels = cond_a_mask[finite_mask].astype(bool, copy=False)
 
             has_sufficient_data = finite_values.size >= 4
             has_both_conditions = finite_labels.any() and (~finite_labels).any()
@@ -445,10 +434,10 @@ def _compute_single_condition_effect(
 
     return {
         "feature": col,
-        "mean_pain": mean_pain,
-        "mean_nonpain": mean_nonpain,
-        "std_pain": std_pain,
-        "std_nonpain": std_nonpain,
+        "mean_condition_a": mean_condition_a,
+        "mean_condition_b": mean_condition_b,
+        "std_condition_a": std_condition_a,
+        "std_condition_b": std_condition_b,
         "hedges_g": float(hedges_g_value),
         "effect_interpretation": effect_interpretation,
         "t_statistic": float(t_statistic),
@@ -456,8 +445,8 @@ def _compute_single_condition_effect(
         "p_raw": float(p_value),
         "p_perm": float(p_permutation) if np.isfinite(p_permutation) else np.nan,
         "n_permutations": n_perm if n_perm > 0 else 0,
-        "n_pain": int(n_pain_out),
-        "n_nonpain": int(n_nonpain_out),
+        "n_condition_a": int(n_condition_a_out),
+        "n_condition_b": int(n_condition_b_out),
         "n_pairs": int(n_pairs) if np.isfinite(n_pairs) else np.nan,
         "paired_test": bool(paired),
     }

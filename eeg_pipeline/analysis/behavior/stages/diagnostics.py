@@ -133,7 +133,7 @@ def stage_influence_impl(
     is_dataframe_valid_fn: Callable[[Optional[pd.DataFrame]], bool],
     get_feature_columns_fn: Callable[[pd.DataFrame, Any], List[str]],
     check_early_exit_conditions_fn: Callable[..., Tuple[bool, Optional[str]]],
-    attach_temperature_metadata_fn: Callable[[pd.DataFrame, Dict[str, Any], Optional[str]], pd.DataFrame],
+    attach_predictor_metadata_fn: Callable[[pd.DataFrame, Dict[str, Any], Optional[str]], pd.DataFrame],
     get_stats_subfolder_fn: Callable[[Any, str], Path],
     build_output_filename_fn: Callable[[Any, Any, str], str],
     write_stats_table_fn: Callable[[Any, pd.DataFrame, Path], Path],
@@ -171,8 +171,8 @@ def stage_influence_impl(
         return pd.DataFrame()
 
     influence_meta = meta if isinstance(meta, dict) else {}
-    influence_meta["temperature_control"] = get_config_value(ctx.config, "behavior_analysis.influence.temperature_control", None)
-    out_df = attach_temperature_metadata_fn(out_df, influence_meta, target_col="outcome")
+    influence_meta["predictor_control"] = get_config_value(ctx.config, "behavior_analysis.influence.predictor_control", None)
+    out_df = attach_predictor_metadata_fn(out_df, influence_meta, target_col="outcome")
 
     out_dir = get_stats_subfolder_fn(ctx, "influence_diagnostics")
     filename = build_output_filename_fn(ctx, config, "influence_diagnostics")

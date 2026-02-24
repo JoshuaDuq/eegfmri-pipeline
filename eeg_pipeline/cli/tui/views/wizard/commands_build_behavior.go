@@ -60,7 +60,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--predictor-column", col)
 	}
 
-	appendBoolPair(m.controlTemperature, "--control-temperature", "--no-control-temperature")
+	appendBoolPair(m.controlPredictor, "--predictor-control", "--no-predictor-control")
 	appendBoolPair(m.controlTrialOrder, "--control-trial-order", "--no-control-trial-order")
 
 	// Run adjustment (subject-level; optional)
@@ -96,7 +96,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--no-overwrite")
 	}
 
-	// Trial table / pain residual / diagnostics
+	// Trial table / predictor residual / diagnostics
 	if m.isComputationSelected("trial_table") {
 		formats := []string{"parquet", "tsv"}
 		if m.trialTableFormat >= 0 && m.trialTableFormat < len(formats) && m.trialTableFormat != 0 {
@@ -109,71 +109,71 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 		appendBoolPair(m.featureSummariesEnabled, "--feature-summaries", "--no-feature-summaries")
 
-		appendBoolPair(m.painResidualEnabled, "--pain-residual", "--no-pain-residual")
-		if m.painResidualEnabled {
+		appendBoolPair(m.predictorResidualEnabled, "--predictor-residual", "--no-predictor-residual")
+		if m.predictorResidualEnabled {
 			methods := []string{"spline", "poly"}
-			if m.painResidualMethod >= 0 && m.painResidualMethod < len(methods) && m.painResidualMethod != 0 {
-				args = append(args, "--pain-residual-method", methods[m.painResidualMethod])
+			if m.predictorResidualMethod >= 0 && m.predictorResidualMethod < len(methods) && m.predictorResidualMethod != 0 {
+				args = append(args, "--predictor-residual-method", methods[m.predictorResidualMethod])
 			}
-			if m.painResidualMinSamples != 10 {
-				args = append(args, "--pain-residual-min-samples", fmt.Sprintf("%d", m.painResidualMinSamples))
+			if m.predictorResidualMinSamples != 10 {
+				args = append(args, "--predictor-residual-min-samples", fmt.Sprintf("%d", m.predictorResidualMinSamples))
 			}
-			if m.painResidualPolyDegree != 2 {
-				args = append(args, "--pain-residual-poly-degree", fmt.Sprintf("%d", m.painResidualPolyDegree))
+			if m.predictorResidualPolyDegree != 2 {
+				args = append(args, "--predictor-residual-poly-degree", fmt.Sprintf("%d", m.predictorResidualPolyDegree))
 			}
-			if strings.TrimSpace(m.painResidualSplineDfCandidates) != "" && m.painResidualSplineDfCandidates != "3,4,5" {
-				args = append(args, "--pain-residual-spline-df-candidates")
-				args = append(args, splitCSVList(m.painResidualSplineDfCandidates)...)
+			if strings.TrimSpace(m.predictorResidualSplineDfCandidates) != "" && m.predictorResidualSplineDfCandidates != "3,4,5" {
+				args = append(args, "--predictor-residual-spline-df-candidates")
+				args = append(args, splitCSVList(m.predictorResidualSplineDfCandidates)...)
 			}
 		}
 
 		appendBoolPair(
-			m.painResidualModelCompareEnabled,
-			"--pain-residual-model-compare",
-			"--no-pain-residual-model-compare",
+			m.predictorResidualModelCompareEnabled,
+			"--predictor-residual-model-compare",
+			"--no-predictor-residual-model-compare",
 		)
-		if m.painResidualModelCompareMinSamples != 10 {
-			args = append(args, "--pain-residual-model-compare-min-samples", fmt.Sprintf("%d", m.painResidualModelCompareMinSamples))
+		if m.predictorResidualModelCompareMinSamples != 10 {
+			args = append(args, "--predictor-residual-model-compare-min-samples", fmt.Sprintf("%d", m.predictorResidualModelCompareMinSamples))
 		}
-		if strings.TrimSpace(m.painResidualModelComparePolyDegrees) != "" && m.painResidualModelComparePolyDegrees != "2,3" {
-			args = append(args, "--pain-residual-model-compare-poly-degrees")
-			args = append(args, splitCSVList(m.painResidualModelComparePolyDegrees)...)
+		if strings.TrimSpace(m.predictorResidualModelComparePolyDegrees) != "" && m.predictorResidualModelComparePolyDegrees != "2,3" {
+			args = append(args, "--predictor-residual-model-compare-poly-degrees")
+			args = append(args, splitCSVList(m.predictorResidualModelComparePolyDegrees)...)
 		}
 		appendBoolPair(
-			m.painResidualBreakpointEnabled,
-			"--pain-residual-breakpoint-test",
-			"--no-pain-residual-breakpoint-test",
+			m.predictorResidualBreakpointEnabled,
+			"--predictor-residual-breakpoint-test",
+			"--no-predictor-residual-breakpoint-test",
 		)
-		if m.painResidualBreakpointMinSamples != 12 {
-			args = append(args, "--pain-residual-breakpoint-min-samples", fmt.Sprintf("%d", m.painResidualBreakpointMinSamples))
+		if m.predictorResidualBreakpointMinSamples != 12 {
+			args = append(args, "--predictor-residual-breakpoint-min-samples", fmt.Sprintf("%d", m.predictorResidualBreakpointMinSamples))
 		}
-		if m.painResidualBreakpointCandidates != 15 {
-			args = append(args, "--pain-residual-breakpoint-candidates", fmt.Sprintf("%d", m.painResidualBreakpointCandidates))
+		if m.predictorResidualBreakpointCandidates != 15 {
+			args = append(args, "--predictor-residual-breakpoint-candidates", fmt.Sprintf("%d", m.predictorResidualBreakpointCandidates))
 		}
-		if m.painResidualBreakpointQlow != 0.15 {
-			args = append(args, "--pain-residual-breakpoint-quantile-low", fmt.Sprintf("%.3f", m.painResidualBreakpointQlow))
+		if m.predictorResidualBreakpointQlow != 0.15 {
+			args = append(args, "--predictor-residual-breakpoint-quantile-low", fmt.Sprintf("%.3f", m.predictorResidualBreakpointQlow))
 		}
-		if m.painResidualBreakpointQhigh != 0.85 {
-			args = append(args, "--pain-residual-breakpoint-quantile-high", fmt.Sprintf("%.3f", m.painResidualBreakpointQhigh))
+		if m.predictorResidualBreakpointQhigh != 0.85 {
+			args = append(args, "--predictor-residual-breakpoint-quantile-high", fmt.Sprintf("%.3f", m.predictorResidualBreakpointQhigh))
 		}
 
-		if m.painResidualEnabled {
-			appendBoolPair(m.painResidualCrossfitEnabled, "--pain-residual-crossfit", "--no-pain-residual-crossfit")
+		if m.predictorResidualEnabled {
+			appendBoolPair(m.predictorResidualCrossfitEnabled, "--predictor-residual-crossfit", "--no-predictor-residual-crossfit")
 		}
-		if m.painResidualEnabled && m.painResidualCrossfitEnabled {
-			args = append(args, "--pain-residual-crossfit")
-			if strings.TrimSpace(m.painResidualCrossfitGroupColumn) != "" {
-				args = append(args, "--pain-residual-crossfit-group-column", strings.TrimSpace(m.painResidualCrossfitGroupColumn))
+		if m.predictorResidualEnabled && m.predictorResidualCrossfitEnabled {
+			args = append(args, "--predictor-residual-crossfit")
+			if strings.TrimSpace(m.predictorResidualCrossfitGroupColumn) != "" {
+				args = append(args, "--predictor-residual-crossfit-group-column", strings.TrimSpace(m.predictorResidualCrossfitGroupColumn))
 			}
-			if m.painResidualCrossfitNSplits != 5 {
-				args = append(args, "--pain-residual-crossfit-n-splits", fmt.Sprintf("%d", m.painResidualCrossfitNSplits))
+			if m.predictorResidualCrossfitNSplits != 5 {
+				args = append(args, "--predictor-residual-crossfit-n-splits", fmt.Sprintf("%d", m.predictorResidualCrossfitNSplits))
 			}
 			cfMethods := []string{"spline", "poly"}
-			if m.painResidualCrossfitMethod >= 0 && m.painResidualCrossfitMethod < len(cfMethods) && m.painResidualCrossfitMethod != 0 {
-				args = append(args, "--pain-residual-crossfit-method", cfMethods[m.painResidualCrossfitMethod])
+			if m.predictorResidualCrossfitMethod >= 0 && m.predictorResidualCrossfitMethod < len(cfMethods) && m.predictorResidualCrossfitMethod != 0 {
+				args = append(args, "--predictor-residual-crossfit-method", cfMethods[m.predictorResidualCrossfitMethod])
 			}
-			if m.painResidualCrossfitMethod == 0 && m.painResidualCrossfitSplineKnots != 5 {
-				args = append(args, "--pain-residual-crossfit-spline-n-knots", fmt.Sprintf("%d", m.painResidualCrossfitSplineKnots))
+			if m.predictorResidualCrossfitMethod == 0 && m.predictorResidualCrossfitSplineKnots != 5 {
+				args = append(args, "--predictor-residual-crossfit-spline-n-knots", fmt.Sprintf("%d", m.predictorResidualCrossfitSplineKnots))
 			}
 		}
 	}
@@ -200,25 +200,25 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Regression
 	if m.isComputationSelected("regression") {
-		outcomes := []string{"rating", "predictor_residual", "temperature"}
+		outcomes := []string{"rating", "predictor_residual", "predictor"}
 		if m.regressionOutcome >= 0 && m.regressionOutcome < len(outcomes) && m.regressionOutcome != 0 {
 			args = append(args, "--regression-outcome", outcomes[m.regressionOutcome])
 		}
 		appendBoolPair(
-			m.regressionIncludeTemperature,
-			"--regression-include-temperature",
-			"--no-regression-include-temperature",
+			m.regressionIncludePredictor,
+			"--regression-include-predictor",
+			"--no-regression-include-predictor",
 		)
 		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.regressionTempControl >= 0 && m.regressionTempControl < len(tempCtrl) && m.regressionTempControl != 0 {
-			args = append(args, "--regression-temperature-control", tempCtrl[m.regressionTempControl])
+			args = append(args, "--regression-predictor-control", tempCtrl[m.regressionTempControl])
 		}
 		if m.regressionTempControl == 2 {
-			args = append(args, "--regression-temperature-spline-knots", fmt.Sprintf("%d", m.regressionTempSplineKnots))
-			args = append(args, "--regression-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.regressionTempSplineQlow))
-			args = append(args, "--regression-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.regressionTempSplineQhigh))
+			args = append(args, "--regression-predictor-spline-knots", fmt.Sprintf("%d", m.regressionTempSplineKnots))
+			args = append(args, "--regression-predictor-spline-quantile-low", fmt.Sprintf("%.3f", m.regressionTempSplineQlow))
+			args = append(args, "--regression-predictor-spline-quantile-high", fmt.Sprintf("%.3f", m.regressionTempSplineQhigh))
 			if m.regressionTempSplineMinN != 12 {
-				args = append(args, "--regression-temperature-spline-min-samples", fmt.Sprintf("%d", m.regressionTempSplineMinN))
+				args = append(args, "--regression-predictor-spline-min-samples", fmt.Sprintf("%d", m.regressionTempSplineMinN))
 			}
 		}
 		appendBoolPair(
@@ -263,20 +263,20 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	// Models
 	if m.isComputationSelected("models") {
 		appendBoolPair(
-			m.modelsIncludeTemperature,
-			"--models-include-temperature",
-			"--no-models-include-temperature",
+			m.modelsIncludePredictor,
+			"--models-include-predictor",
+			"--no-models-include-predictor",
 		)
 		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.modelsTempControl >= 0 && m.modelsTempControl < len(tempCtrl) && m.modelsTempControl != 0 {
-			args = append(args, "--models-temperature-control", tempCtrl[m.modelsTempControl])
+			args = append(args, "--models-predictor-control", tempCtrl[m.modelsTempControl])
 		}
 		if m.modelsTempControl == 2 {
-			args = append(args, "--models-temperature-spline-knots", fmt.Sprintf("%d", m.modelsTempSplineKnots))
-			args = append(args, "--models-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.modelsTempSplineQlow))
-			args = append(args, "--models-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.modelsTempSplineQhigh))
+			args = append(args, "--models-predictor-spline-knots", fmt.Sprintf("%d", m.modelsTempSplineKnots))
+			args = append(args, "--models-predictor-spline-quantile-low", fmt.Sprintf("%.3f", m.modelsTempSplineQlow))
+			args = append(args, "--models-predictor-spline-quantile-high", fmt.Sprintf("%.3f", m.modelsTempSplineQhigh))
 			if m.modelsTempSplineMinN != 12 {
-				args = append(args, "--models-temperature-spline-min-samples", fmt.Sprintf("%d", m.modelsTempSplineMinN))
+				args = append(args, "--models-predictor-spline-min-samples", fmt.Sprintf("%d", m.modelsTempSplineMinN))
 			}
 		}
 		appendBoolPair(
@@ -314,13 +314,13 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.modelsOutcomeRating {
 			out = append(out, "rating")
 		}
-		if m.modelsOutcomePainResidual {
+		if m.modelsOutcomePredictorResidual {
 			out = append(out, "predictor_residual")
 		}
-		if m.modelsOutcomeTemperature {
-			out = append(out, "temperature")
+		if m.modelsOutcomePredictor {
+			out = append(out, "predictor")
 		}
-		if m.modelsOutcomePainBinary {
+		if m.modelsOutcomeBinaryOutcome {
 			out = append(out, "binary_outcome")
 		}
 		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "predictor_residual") {
@@ -373,8 +373,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		appendBoolPair(
 			m.stabilityPartialTemp,
-			"--stability-partial-temperature",
-			"--no-stability-partial-temperature",
+			"--stability-partial-predictor",
+			"--no-stability-partial-predictor",
 		)
 		if m.stabilityMaxFeatures != 50 {
 			args = append(args, "--stability-max-features", fmt.Sprintf("%d", m.stabilityMaxFeatures))
@@ -398,11 +398,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.influenceOutcomeRating {
 			out = append(out, "rating")
 		}
-		if m.influenceOutcomePainResidual {
+		if m.influenceOutcomePredictorResidual {
 			out = append(out, "predictor_residual")
 		}
-		if m.influenceOutcomeTemperature {
-			out = append(out, "temperature")
+		if m.influenceOutcomePredictor {
+			out = append(out, "predictor")
 		}
 		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "predictor_residual") {
 			args = append(args, "--influence-outcomes")
@@ -412,20 +412,20 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--influence-max-features", fmt.Sprintf("%d", m.influenceMaxFeatures))
 		}
 		appendBoolPair(
-			m.influenceIncludeTemperature,
-			"--influence-include-temperature",
-			"--no-influence-include-temperature",
+			m.influenceIncludePredictor,
+			"--influence-include-predictor",
+			"--no-influence-include-predictor",
 		)
 		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.influenceTempControl >= 0 && m.influenceTempControl < len(tempCtrl) && m.influenceTempControl != 0 {
-			args = append(args, "--influence-temperature-control", tempCtrl[m.influenceTempControl])
+			args = append(args, "--influence-predictor-control", tempCtrl[m.influenceTempControl])
 		}
 		if m.influenceTempControl == 2 {
-			args = append(args, "--influence-temperature-spline-knots", fmt.Sprintf("%d", m.influenceTempSplineKnots))
-			args = append(args, "--influence-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.influenceTempSplineQlow))
-			args = append(args, "--influence-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.influenceTempSplineQhigh))
+			args = append(args, "--influence-predictor-spline-knots", fmt.Sprintf("%d", m.influenceTempSplineKnots))
+			args = append(args, "--influence-predictor-spline-quantile-low", fmt.Sprintf("%.3f", m.influenceTempSplineQlow))
+			args = append(args, "--influence-predictor-spline-quantile-high", fmt.Sprintf("%.3f", m.influenceTempSplineQhigh))
 			if m.influenceTempSplineMinN != 12 {
-				args = append(args, "--influence-temperature-spline-min-samples", fmt.Sprintf("%d", m.influenceTempSplineMinN))
+				args = append(args, "--influence-predictor-spline-min-samples", fmt.Sprintf("%d", m.influenceTempSplineMinN))
 			}
 		}
 		appendBoolPair(
@@ -470,7 +470,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--correlations-min-runs", fmt.Sprintf("%d", m.correlationsMinRuns))
 		}
 		appendBoolPair(
-			m.correlationsPreferPainResidual,
+			m.correlationsPreferPredictorResidual,
 			"--correlations-prefer-predictor-residual",
 			"--no-correlations-prefer-predictor-residual",
 		)
@@ -503,9 +503,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--group-level-target", col)
 		}
 		appendBoolPair(
-			m.groupLevelControlTemperature,
-			"--group-level-control-temperature",
-			"--no-group-level-control-temperature",
+			m.groupLevelControlPredictor,
+			"--group-level-control-predictor",
+			"--no-group-level-control-predictor",
 		)
 		appendBoolPair(
 			m.groupLevelControlTrialOrder,
@@ -532,20 +532,20 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--report-top-n", fmt.Sprintf("%d", m.reportTopN))
 	}
 
-	// Pain sensitivity
+	// Predictor sensitivity
 	if m.isComputationSelected("predictor_sensitivity") {
-		appendFeatureSpec("--predictor-sensitivity-features", m.painSensitivityFeaturesSpec)
-		if m.painSensitivityMinTrials > 0 {
-			args = append(args, "--predictor-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
+		appendFeatureSpec("--predictor-sensitivity-features", m.predictorSensitivityFeaturesSpec)
+		if m.predictorSensitivityMinTrials > 0 {
+			args = append(args, "--predictor-sensitivity-min-trials", fmt.Sprintf("%d", m.predictorSensitivityMinTrials))
 		}
-		if m.painSensitivityPrimaryUnit == 1 {
+		if m.predictorSensitivityPrimaryUnit == 1 {
 			args = append(args, "--predictor-sensitivity-primary-unit", "run_mean")
 		}
-		if m.painSensitivityPermutations > 0 {
-			args = append(args, "--predictor-sensitivity-permutations", fmt.Sprintf("%d", m.painSensitivityPermutations))
+		if m.predictorSensitivityPermutations > 0 {
+			args = append(args, "--predictor-sensitivity-permutations", fmt.Sprintf("%d", m.predictorSensitivityPermutations))
 		}
 		appendBoolPair(
-			m.painSensitivityPermutationPrimary,
+			m.predictorSensitivityPermutationPrimary,
 			"--predictor-sensitivity-permutation-primary",
 			"--no-predictor-sensitivity-permutation-primary",
 		)
@@ -759,9 +759,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--mixed-random-effects", "intercept_slope")
 		}
 		appendBoolPair(
-			m.mixedIncludeTemperature,
-			"--mixed-include-temperature",
-			"--no-mixed-include-temperature",
+			m.mixedIncludePredictor,
+			"--mixed-include-predictor",
+			"--no-mixed-include-predictor",
 		)
 		if m.mixedMaxFeatures != 50 {
 			args = append(args, "--mixed-max-features", fmt.Sprintf("%d", m.mixedMaxFeatures))
@@ -834,9 +834,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// System / IO
-	if strings.TrimSpace(m.ioTemperatureRange) != "" {
-		args = append(args, "--temperature-range")
-		args = append(args, splitCSVList(m.ioTemperatureRange)...)
+	if strings.TrimSpace(m.ioPredictorRange) != "" {
+		args = append(args, "--predictor-range")
+		args = append(args, splitCSVList(m.ioPredictorRange)...)
 	}
 	if m.ioMaxMissingChannelsFraction != 0.1 {
 		args = append(args, "--max-missing-channels-fraction", fmt.Sprintf("%.3f", m.ioMaxMissingChannelsFraction))

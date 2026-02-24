@@ -404,14 +404,14 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.alignFmriOnsetReference = (m.alignFmriOnsetReference + 1) % 3
 		m.useDefaultAdvanced = false
 	// Event Column Mapping
-	case optEventColTemperature:
-		m.startTextEdit(textFieldEventColTemperature)
+	case optEventColPredictor:
+		m.startTextEdit(textFieldEventColPredictor)
 		m.useDefaultAdvanced = false
 	case optEventColRating:
 		m.startTextEdit(textFieldEventColRating)
 		m.useDefaultAdvanced = false
-	case optEventColPainBinary:
-		m.startTextEdit(textFieldEventColPainBinary)
+	case optEventColBinaryOutcome:
+		m.startTextEdit(textFieldEventColBinaryOutcome)
 		m.useDefaultAdvanced = false
 	case optConditionPreferredPrefixes:
 		m.startTextEdit(textFieldConditionPreferredPrefixes)
@@ -825,6 +825,8 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optFmriAnalysisSignatureDir:
 		m.startTextEdit(textFieldFmriAnalysisSignatureDir)
+	case optFmriAnalysisSignatureMaps:
+		m.startTextEdit(textFieldFmriAnalysisSignatureMaps)
 	case optFmriTrialSigScopeStimPhases:
 		m.expandedOption = expandedFmriTrialSigStimPhases
 		m.subCursor = 0

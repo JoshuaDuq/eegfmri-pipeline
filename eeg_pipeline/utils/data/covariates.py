@@ -2,7 +2,7 @@
 Covariate Extraction Utilities
 ==============================
 
-Functions for extracting and managing alignment covariates (e.g., temperature, trials).
+Functions for extracting and managing alignment covariates (e.g., predictor, trials).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ TRIAL_COLUMN_CANDIDATES = ["trial_index", "trial_number", "trial"]
 # These are NOT valid trial order covariates - they are categorical grouping variables
 RUN_BLOCK_COLUMNS = ["run", "block", "run_number", "block_number"]
 
-TEMPERATURE_ALIASES = {"temp", "temperature"}
+PREDICTOR_ALIASES = {"temp", "temperature", "predictor"}
 
 # Only true within-run trial indices should be used as order covariates
 TRIAL_ALIASES = {"trial", "trial_number", "trial_index"}
@@ -67,7 +67,7 @@ def _pick_first_column(df: Optional[pd.DataFrame], candidates: List[str]) -> Opt
 
 
 def _canonical_covariate_name(name: Optional[str], config: Optional[Any] = None) -> Optional[str]:
-    """Resolve covariate name to canonical form (temperature, trial, etc.)."""
+    """Resolve covariate name to canonical form (predictor, trial, etc.)."""
     if name is None:
         return None
     
@@ -76,15 +76,15 @@ def _canonical_covariate_name(name: Optional[str], config: Optional[Any] = None)
     if config is None:
         config = _load_config_safely()
     
-    temperature_aliases = TEMPERATURE_ALIASES.copy()
+    predictor_aliases = PREDICTOR_ALIASES.copy()
     trial_aliases = TRIAL_ALIASES.copy()
     
     if config is not None and hasattr(config, "get"):
-        config_temp_cols = config.get("event_columns.temperature", [])
-        temperature_aliases.update(str(col).lower() for col in config_temp_cols)
+        config_pred_cols = config.get("event_columns.predictor", [])
+        predictor_aliases.update(str(col).lower() for col in config_pred_cols)
     
-    if normalized_name in temperature_aliases:
-        return "temperature"
+    if normalized_name in predictor_aliases:
+        return "predictor"
     if normalized_name in trial_aliases:
         return "trial"
     
@@ -96,24 +96,24 @@ def _canonical_covariate_name(name: Optional[str], config: Optional[Any] = None)
 ###################################################################
 
 
-def extract_temperature_data(
+def extract_predictor_data(
     aligned_events: Optional[pd.DataFrame],
     config: Any,
 ) -> Tuple[Optional[pd.Series], Optional[str]]:
-    """Extract temperature series and column name from aligned events."""
+    """Extract predictor series and column name from aligned events."""
     if aligned_events is None:
         return None, None
 
     from eeg_pipeline.utils.data.columns import resolve_predictor_column
 
-    temperature_column = resolve_predictor_column(aligned_events, config)
-    if temperature_column is None or temperature_column not in aligned_events.columns:
+    predictor_column = resolve_predictor_column(aligned_events, config)
+    if predictor_column is None or predictor_column not in aligned_events.columns:
         return None, None
 
-    temperature_series = pd.to_numeric(
-        aligned_events[temperature_column], errors="coerce"
+    predictor_series = pd.to_numeric(
+        aligned_events[predictor_column], errors="coerce"
     )
-    return temperature_series, temperature_column
+    return predictor_series, predictor_column
 
 
 ###################################################################
@@ -125,7 +125,7 @@ def _resolve_requested_covariate(
     covariate_name: str,
     events_df: pd.DataFrame,
     config: Any,
-    temperature_candidates: List[str],
+    predictor_candidates: List[str],
     covariate_columns: List[str],
     column_name_map: Dict[str, str],
 ) -> None:
@@ -139,25 +139,25 @@ def _resolve_requested_covariate(
         return
     
     canonical_name = _canonical_covariate_name(covariate_name, config=config)
-    if canonical_name == "temperature":
-        temperature_column = _pick_first_column(events_df, temperature_candidates)
-        if temperature_column:
-            covariate_columns.append(temperature_column)
-            column_name_map[temperature_column] = canonical_name
+    if canonical_name == "predictor":
+        predictor_column = _pick_first_column(events_df, predictor_candidates)
+        if predictor_column:
+            covariate_columns.append(predictor_column)
+            column_name_map[predictor_column] = canonical_name
 
 
 def _resolve_default_covariates(
     events_df: pd.DataFrame,
     config: Any,
-    temperature_candidates: List[str],
+    predictor_candidates: List[str],
     covariate_columns: List[str],
     column_name_map: Dict[str, str],
 ) -> None:
-    """Resolve default covariates (temperature and trial)."""
-    temperature_column = _pick_first_column(events_df, temperature_candidates)
-    if temperature_column:
-        covariate_columns.append(temperature_column)
-        column_name_map[temperature_column] = "temperature"
+    """Resolve default covariates (predictor and trial)."""
+    predictor_column = _pick_first_column(events_df, predictor_candidates)
+    if predictor_column:
+        covariate_columns.append(predictor_column)
+        column_name_map[predictor_column] = "predictor"
     
     trial_column = _pick_first_column(events_df, TRIAL_COLUMN_CANDIDATES)
     if trial_column:
@@ -190,7 +190,7 @@ def _resolve_covariate_columns(
     
     covariate_columns: List[str] = []
     column_name_map: Dict[str, str] = {}
-    temperature_candidates = config.get("event_columns.temperature")
+    predictor_candidates = config.get("event_columns.predictor")
 
     if requested_covariates:
         for covariate_name in requested_covariates:
@@ -198,7 +198,7 @@ def _resolve_covariate_columns(
                 covariate_name,
                 events_df,
                 config,
-                temperature_candidates,
+                predictor_candidates,
                 covariate_columns,
                 column_name_map,
             )
@@ -206,7 +206,7 @@ def _resolve_covariate_columns(
         _resolve_default_covariates(
             events_df,
             config,
-            temperature_candidates,
+            predictor_candidates,
             covariate_columns,
             column_name_map,
         )
@@ -231,19 +231,19 @@ def _build_covariate_dataframe(
     return None if covariates_df.empty else covariates_df
 
 
-def _remove_temperature_column(
+def _remove_predictor_column(
     covariates_df: pd.DataFrame,
-    temperature_column: Optional[str],
+    predictor_column: Optional[str],
     config: Optional[Any],
 ) -> Optional[pd.DataFrame]:
-    """Remove temperature column from covariates DataFrame."""
-    if temperature_column is None:
+    """Remove predictor column from covariates DataFrame."""
+    if predictor_column is None:
         return covariates_df.copy()
     
-    columns_to_drop = {temperature_column}
-    temperature_canonical = _canonical_covariate_name(temperature_column, config=config)
-    if temperature_canonical and temperature_canonical != temperature_column:
-        columns_to_drop.add(temperature_canonical)
+    columns_to_drop = {predictor_column}
+    predictor_canonical = _canonical_covariate_name(predictor_column, config=config)
+    if predictor_canonical and predictor_canonical != predictor_column:
+        columns_to_drop.add(predictor_canonical)
     
     columns_to_drop = [col for col in columns_to_drop if col in covariates_df.columns]
     if not columns_to_drop:
@@ -256,7 +256,7 @@ def _remove_temperature_column(
 def _build_covariate_matrices(
     events_df: Optional[pd.DataFrame],
     requested_covariates: Optional[List[str]],
-    temperature_column: Optional[str],
+    predictor_column: Optional[str],
     config: Optional[Any] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Build covariate matrices for analysis."""
@@ -282,8 +282,8 @@ def _build_covariate_matrices(
     if covariates_df is None:
         return None, None
 
-    covariates_without_temp = _remove_temperature_column(
-        covariates_df, temperature_column, config
+    covariates_without_predictor = _remove_predictor_column(
+        covariates_df, predictor_column, config
     )
 
     return covariates_df, covariates_without_temp
@@ -301,7 +301,7 @@ def build_covariate_matrix(
     aligned_events : DataFrame or None
         Events DataFrame with aligned data
     requested_covariates : list of str or None
-        Covariate names to include. If None, uses defaults (temperature, trial).
+        Covariate names to include. If None, uses defaults (predictor, trial).
     config : Any, optional
         Configuration object. If None, attempts to load from file.
         
@@ -313,42 +313,42 @@ def build_covariate_matrix(
     if aligned_events is None:
         return None
     
-    _, temperature_column = extract_temperature_data(aligned_events, config)
+    _, predictor_column = extract_predictor_data(aligned_events, config)
     covariates_df, _ = _build_covariate_matrices(
-        aligned_events, requested_covariates, temperature_column, config
+        aligned_events, requested_covariates, predictor_column, config
     )
     return covariates_df
 
 
-def build_covariates_without_temp(
+def build_covariates_without_predictor(
     covariates_df: Optional[pd.DataFrame],
-    temperature_column: Optional[str],
+    predictor_column: Optional[str],
     config: Optional[Any] = None,
 ) -> Optional[pd.DataFrame]:
-    """Build covariate matrix excluding temperature column.
+    """Build covariate matrix excluding predictor column.
     
     Parameters
     ----------
     covariates_df : DataFrame or None
         Full covariate matrix
-    temperature_column : str or None
-        Name of temperature column to exclude
+    predictor_column : str or None
+        Name of predictor column to exclude
     config : Any, optional
         Configuration object for canonical name resolution
         
     Returns
     -------
     DataFrame or None
-        Covariates without temperature, or None if empty
+        Covariates without predictor, or None if empty
     """
     if covariates_df is None or covariates_df.empty:
         return None
     
-    return _remove_temperature_column(covariates_df, temperature_column, config)
+    return _remove_predictor_column(covariates_df, predictor_column, config)
 
 
 __all__ = [
-    "extract_temperature_data",
+    "extract_predictor_data",
     "build_covariate_matrix",
-    "build_covariates_without_temp",
+    "build_covariates_without_predictor",
 ]

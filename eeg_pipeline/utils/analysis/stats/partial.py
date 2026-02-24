@@ -4,20 +4,15 @@ Partial Correlation
 
 Partial correlation and covariate-adjusted analysis.
 
-WARNING: Temperature Control Limitations
-----------------------------------------
-Linear partial correlation with temperature assumes a linear relationship between
-temperature and the outcome (e.g., pain rating). However, pain ratings vs temperature
-are commonly NONLINEAR and SUBJECT-SPECIFIC (sigmoid, threshold effects, etc.).
+WARNING: Predictor Control Limitations
+---------------------------------------
+Linear partial correlation assumes a linear relationship between predictor and outcome.
+Many experimental paradigms produce nonlinear dose-response curves (e.g., sigmoid,
+threshold effects). For more valid predictor control, consider:
 
-For more valid temperature control, consider:
-1. Using `predictor_residual.fit_temperature_rating_curve()` to compute subject-specific
-   dose-response residuals (spline-based, handles nonlinearity)
-2. Using spline terms for temperature in regression models
-3. Stratifying analysis by temperature level rather than linear adjustment
-
-The linear partial correlation here is a first-pass approximation that may be
-inadequate for studies where temperature-pain nonlinearity is scientifically relevant.
+1. Using ``predictor_residual`` to compute subject-specific residuals (spline-based).
+2. Using spline terms for the predictor in regression models.
+3. Stratifying analysis by predictor level rather than linear adjustment.
 """
 
 from __future__ import annotations
@@ -32,7 +27,7 @@ from scipy.linalg import lstsq
 
 from .base import get_statistics_constants, get_config_value
 from .correlation import compute_correlation
-from .splines import build_temperature_rcs_design
+from .splines import build_predictor_rcs_design
 
 
 # Constants
@@ -41,13 +36,13 @@ _DEFAULT_COLLINEARITY_THRESHOLD = 0.9
 _MIN_SAMPLES_CORRELATION = 3
 
 
-def _get_temperature_control_mode(config: Optional[Any]) -> str:
-    """Resolve temperature control mode for correlation statistics."""
+def _get_predictor_control_mode(config: Optional[Any]) -> str:
+    """Resolve predictor control mode for correlation statistics."""
     mode = str(
         get_config_value(
             config,
-            "behavior_analysis.statistics.temperature_control",
-            get_config_value(config, "behavior_analysis.regression.temperature_control", "spline"),
+            "behavior_analysis.statistics.predictor_control",
+            get_config_value(config, "behavior_analysis.regression.predictor_control", "spline"),
         )
     ).strip().lower()
     if mode in {"spline", "linear"}:
@@ -55,28 +50,29 @@ def _get_temperature_control_mode(config: Optional[Any]) -> str:
     return "spline"
 
 
-def _build_temperature_covariates(
-    temperature_series: pd.Series,
+def _build_predictor_covariates(
+    predictor_series: pd.Series,
     *,
     config: Optional[Any],
 ) -> pd.DataFrame:
-    """Build temperature covariates (linear or restricted cubic spline) for control."""
-    mode = _get_temperature_control_mode(config)
+    """Build predictor covariates (linear or restricted cubic spline) for control."""
+    mode = _get_predictor_control_mode(config)
     if mode == "linear":
-        return pd.DataFrame({"temp": temperature_series})
+        return pd.DataFrame({"predictor": predictor_series})
 
-    df_cols, covariate_names, _meta = build_temperature_rcs_design(
-        temperature_series,
+    from .splines import build_predictor_rcs_design
+
+    df_cols, covariate_names, _meta = build_predictor_rcs_design(
+        predictor_series,
         config=config,
-        key_prefix="behavior_analysis.regression.temperature_spline",
-        name_prefix="temperature_rcs",
+        key_prefix="behavior_analysis.regression.predictor_spline",
+        name_prefix="predictor_rcs",
     )
 
-    # Standardize names used elsewhere in the stats stack.
-    rename_map = {"temperature": "temp"}
+    rename_map = {"predictor": "predictor"}
     for name in covariate_names:
-        if name.startswith("temperature_rcs_"):
-            rename_map[name] = name.replace("temperature_", "temp_", 1)
+        if name.startswith("predictor_rcs_"):
+            rename_map[name] = name
     return df_cols.rename(columns=rename_map)
 
 
@@ -381,30 +377,30 @@ def compute_partial_correlations(
     roi_values: pd.Series,
     target_values: pd.Series,
     covariates_df: Optional[pd.DataFrame],
-    temperature_series: Optional[pd.Series],
+    predictor_series: Optional[pd.Series],
     method: str,
     context: str,
     logger: Optional[logging.Logger] = None,
     min_samples: Optional[int] = None,
     config: Optional[Any] = None,
 ) -> Tuple[float, float, int, float, float, int]:
-    """Compute partial correlations with covariates and temperature."""
+    """Compute partial correlations with covariates and predictor control."""
     r_partial = p_partial = np.nan
     n_partial = 0
     r_temp = p_temp = np.nan
     n_temp = 0
-    
+
     if covariates_df is not None and not covariates_df.empty:
         r_partial, p_partial, n_partial = compute_partial_correlation_with_covariates(
             roi_values, target_values, covariates_df, method, f"{context} partial", logger, min_samples, config
         )
-    
-    if temperature_series is not None and not temperature_series.empty:
-        temp_cov = _build_temperature_covariates(temperature_series, config=config)
+
+    if predictor_series is not None and not predictor_series.empty:
+        predictor_cov = _build_predictor_covariates(predictor_series, config=config)
         r_temp, p_temp, n_temp = compute_partial_correlation_with_covariates(
-            roi_values, target_values, temp_cov, method, f"{context} rating|temp", logger, min_samples, config
+            roi_values, target_values, predictor_cov, method, f"{context} rating|predictor", logger, min_samples, config
         )
-    
+
     return r_partial, p_partial, n_partial, r_temp, p_temp, n_temp
 
 
@@ -412,19 +408,19 @@ def compute_partial_correlations_with_cov_temp(
     roi_values: pd.Series,
     target_values: pd.Series,
     covariates_df: Optional[pd.DataFrame],
-    temperature_series: Optional[pd.Series],
+    predictor_series: Optional[pd.Series],
     method: str,
     context: str,
     logger: Optional[logging.Logger] = None,
     min_samples: Optional[int] = None,
     config: Optional[Any] = None,
 ) -> Tuple[float, float, int, float, float, int, float, float, int]:
-    """Compute partial correlations for covariates-only, temp-only, and covariates+temp."""
+    """Compute partial correlations for covariates-only, predictor-only, and covariates+predictor."""
     r_cov, p_cov, n_cov, r_temp, p_temp, n_temp = compute_partial_correlations(
         roi_values=roi_values,
         target_values=target_values,
         covariates_df=covariates_df,
-        temperature_series=temperature_series,
+        predictor_series=predictor_series,
         method=method,
         context=context,
         logger=logger,
@@ -436,15 +432,15 @@ def compute_partial_correlations_with_cov_temp(
     n_cov_temp = 0
 
     has_covariates = covariates_df is not None and not covariates_df.empty
-    has_temperature = temperature_series is not None and not temperature_series.empty
-    
-    if has_covariates and has_temperature:
-        covariates_with_temp = covariates_df.copy()
-        temp_cov = _build_temperature_covariates(temperature_series, config=config)
-        overlap = [c for c in temp_cov.columns if c in covariates_with_temp.columns]
+    has_predictor = predictor_series is not None and not predictor_series.empty
+
+    if has_covariates and has_predictor:
+        covariates_with_predictor = covariates_df.copy()
+        predictor_cov = _build_predictor_covariates(predictor_series, config=config)
+        overlap = [c for c in predictor_cov.columns if c in covariates_with_predictor.columns]
         if overlap:
-            covariates_with_temp = covariates_with_temp.drop(columns=overlap, errors="ignore")
-        covariates_with_temp = pd.concat([covariates_with_temp, temp_cov], axis=1)
+            covariates_with_predictor = covariates_with_predictor.drop(columns=overlap, errors="ignore")
+        covariates_with_temp = pd.concat([covariates_with_predictor, predictor_cov], axis=1)
         try:
             r_cov_temp, p_cov_temp, n_cov_temp = compute_partial_correlation_with_covariates(
                 roi_values,

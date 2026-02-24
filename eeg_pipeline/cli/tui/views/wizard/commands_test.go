@@ -462,12 +462,12 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"behavior_analysis.robust_correlation":                                            "winsorized",
 		"behavior_analysis.bootstrap":                                                     1500.0,
 		"behavior_analysis.statistics.default_n_bootstrap":                                2500.0,
-		"behavior_analysis.statistics.temperature_control":                                "linear",
+		"behavior_analysis.statistics.predictor_control":                                "linear",
 		"behavior_analysis.permutation.scheme":                                            "circular_shift",
 		"behavior_analysis.permutation.group_column_preference":                           []interface{}{"run_id", "block"},
 		"behavior_analysis.features.exclude_non_trialwise_features":                       false,
-		"behavior_analysis.temperature_models.model_comparison.enabled":                   false,
-		"behavior_analysis.temperature_models.breakpoint_test.enabled":                    false,
+		"behavior_analysis.predictor_models.model_comparison.enabled":                   false,
+		"behavior_analysis.predictor_models.breakpoint_test.enabled":                    false,
 		"behavior_analysis.correlations.min_runs":                                         6.0,
 		"behavior_analysis.correlations.target_column":                                    "custom_rating",
 		"behavior_analysis.correlations.prefer_predictor_residual":                             true,
@@ -479,7 +479,7 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"behavior_analysis.condition.primary_unit":                                        "run_mean",
 		"behavior_analysis.condition.compare_labels":                                      []interface{}{"low", "high"},
 		"behavior_analysis.condition.window_comparison.min_samples":                       12.0,
-		"behavior_analysis.mixed_effects.include_temperature":                             false,
+		"behavior_analysis.mixed_effects.include_predictor":                             false,
 		"behavior_analysis.mediation.p_primary_mode":                                      "asymptotic",
 		"behavior_analysis.moderation.p_primary_mode":                                     "asymptotic",
 		"behavior_analysis.regression.primary_unit":                                       "run_mean",
@@ -491,7 +491,7 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"validation.min_epochs":                                                           30.0,
 		"validation.min_channels":                                                         16.0,
 		"validation.max_amplitude_uv":                                                     400.0,
-		"io.constants.temperature_range":                                                  []interface{}{35.0, 55.0},
+		"io.constants.predictor_range":                                                  []interface{}{35.0, 55.0},
 		"io.constants.max_missing_channels_fraction":                                      0.2,
 	})
 
@@ -519,17 +519,17 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	if m.behaviorExcludeNonTrialwiseFeatures {
 		t.Fatalf("expected behaviorExcludeNonTrialwiseFeatures=false")
 	}
-	if m.painResidualModelCompareEnabled {
-		t.Fatalf("expected painResidualModelCompareEnabled=false")
+	if m.predictorResidualModelCompareEnabled {
+		t.Fatalf("expected predictorResidualModelCompareEnabled=false")
 	}
-	if m.painResidualBreakpointEnabled {
-		t.Fatalf("expected painResidualBreakpointEnabled=false")
+	if m.predictorResidualBreakpointEnabled {
+		t.Fatalf("expected predictorResidualBreakpointEnabled=false")
 	}
 	if m.correlationsMinRuns != 6 {
 		t.Fatalf("expected correlationsMinRuns=6, got %d", m.correlationsMinRuns)
 	}
-	if !m.correlationsPreferPainResidual {
-		t.Fatalf("expected correlationsPreferPainResidual=true")
+	if !m.correlationsPreferPredictorResidual {
+		t.Fatalf("expected correlationsPreferPredictorResidual=true")
 	}
 	if m.correlationsPermutations != 77 {
 		t.Fatalf("expected correlationsPermutations=77, got %d", m.correlationsPermutations)
@@ -537,14 +537,14 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	if m.correlationsTargetColumn != "custom_rating" {
 		t.Fatalf("unexpected correlationsTargetColumn: %q", m.correlationsTargetColumn)
 	}
-	if m.painSensitivityPrimaryUnit != 1 {
-		t.Fatalf("expected painSensitivityPrimaryUnit=1 (run_mean), got %d", m.painSensitivityPrimaryUnit)
+	if m.predictorSensitivityPrimaryUnit != 1 {
+		t.Fatalf("expected predictorSensitivityPrimaryUnit=1 (run_mean), got %d", m.predictorSensitivityPrimaryUnit)
 	}
-	if m.painSensitivityPermutations != 300 {
-		t.Fatalf("expected painSensitivityPermutations=300, got %d", m.painSensitivityPermutations)
+	if m.predictorSensitivityPermutations != 300 {
+		t.Fatalf("expected predictorSensitivityPermutations=300, got %d", m.predictorSensitivityPermutations)
 	}
-	if m.painSensitivityPermutationPrimary {
-		t.Fatalf("expected painSensitivityPermutationPrimary=false")
+	if m.predictorSensitivityPermutationPrimary {
+		t.Fatalf("expected predictorSensitivityPermutationPrimary=false")
 	}
 	if !m.groupLevelAllowParametricFallback {
 		t.Fatalf("expected groupLevelAllowParametricFallback=true")
@@ -558,8 +558,8 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	if m.conditionWindowMinSamples != 12 {
 		t.Fatalf("expected conditionWindowMinSamples=12, got %d", m.conditionWindowMinSamples)
 	}
-	if m.mixedIncludeTemperature {
-		t.Fatalf("expected mixedIncludeTemperature=false")
+	if m.mixedIncludePredictor {
+		t.Fatalf("expected mixedIncludePredictor=false")
 	}
 	if m.mediationPermutationPrimary {
 		t.Fatalf("expected mediationPermutationPrimary=false")
@@ -594,8 +594,8 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	if m.validationMaxAmplitudeUv != 400.0 {
 		t.Fatalf("expected validationMaxAmplitudeUv=400.0, got %v", m.validationMaxAmplitudeUv)
 	}
-	if m.ioTemperatureRange != "35,55" {
-		t.Fatalf("unexpected ioTemperatureRange: %q", m.ioTemperatureRange)
+	if m.ioPredictorRange != "35,55" {
+		t.Fatalf("unexpected ioPredictorRange: %q", m.ioPredictorRange)
 	}
 	if m.ioMaxMissingChannelsFraction != 0.2 {
 		t.Fatalf("expected ioMaxMissingChannelsFraction=0.2, got %v", m.ioMaxMissingChannelsFraction)
@@ -824,9 +824,9 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 		}
 	}
 
-	m.painResidualMinSamples = 14
-	m.painResidualModelCompareMinSamples = 11
-	m.painResidualBreakpointMinSamples = 16
+	m.predictorResidualMinSamples = 14
+	m.predictorResidualModelCompareMinSamples = 11
+	m.predictorResidualBreakpointMinSamples = 16
 
 	m.regressionTempControl = 2
 	m.regressionTempSplineMinN = 18
@@ -841,7 +841,7 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 
 	m.behaviorMinSamples = 7
 	m.stabilityMinGroupN = 4
-	m.painSensitivityMinTrials = 9
+	m.predictorSensitivityMinTrials = 9
 	m.conditionMinTrials = 6
 	m.moderationMinSamples = 21
 
@@ -849,29 +849,29 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	if !containsSubsequence(args, []string{"--min-samples", "7"}) {
 		t.Fatalf("expected --min-samples 7 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--pain-residual-min-samples", "14"}) {
-		t.Fatalf("expected --pain-residual-min-samples 14 in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--predictor-residual-min-samples", "14"}) {
+		t.Fatalf("expected --predictor-residual-min-samples 14 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--pain-residual-model-compare-min-samples", "11"}) {
-		t.Fatalf("expected --pain-residual-model-compare-min-samples 11 in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--predictor-residual-model-compare-min-samples", "11"}) {
+		t.Fatalf("expected --predictor-residual-model-compare-min-samples 11 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--pain-residual-breakpoint-min-samples", "16"}) {
-		t.Fatalf("expected --pain-residual-breakpoint-min-samples 16 in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--predictor-residual-breakpoint-min-samples", "16"}) {
+		t.Fatalf("expected --predictor-residual-breakpoint-min-samples 16 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--regression-temperature-spline-min-samples", "18"}) {
-		t.Fatalf("expected --regression-temperature-spline-min-samples 18 in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--regression-predictor-spline-min-samples", "18"}) {
+		t.Fatalf("expected --regression-predictor-spline-min-samples 18 in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--regression-min-samples", "22"}) {
 		t.Fatalf("expected --regression-min-samples 22 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--models-temperature-spline-min-samples", "17"}) {
-		t.Fatalf("expected --models-temperature-spline-min-samples 17 in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--models-predictor-spline-min-samples", "17"}) {
+		t.Fatalf("expected --models-predictor-spline-min-samples 17 in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--models-min-samples", "25"}) {
 		t.Fatalf("expected --models-min-samples 25 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--influence-temperature-spline-min-samples", "19"}) {
-		t.Fatalf("expected --influence-temperature-spline-min-samples 19 in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--influence-predictor-spline-min-samples", "19"}) {
+		t.Fatalf("expected --influence-predictor-spline-min-samples 19 in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--stability-min-group-trials", "4"}) {
 		t.Fatalf("expected --stability-min-group-trials 4 in args, got: %#v", args)
@@ -898,7 +898,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 
 	m.groupLevelBlockPermutation = false
 	m.groupLevelTarget = "predictor_residual"
-	m.groupLevelControlTemperature = false
+	m.groupLevelControlPredictor = false
 	m.groupLevelControlTrialOrder = false
 	m.groupLevelControlRunEffects = false
 	m.groupLevelMaxRunDummies = 12
@@ -911,8 +911,8 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 	if !containsSubsequence(args, []string{"--group-level-target", "predictor_residual"}) {
 		t.Fatalf("expected --group-level-target predictor_residual in args, got: %#v", args)
 	}
-	if !containsString(args, "--no-group-level-control-temperature") {
-		t.Fatalf("expected --no-group-level-control-temperature in args, got: %#v", args)
+	if !containsString(args, "--no-group-level-control-predictor") {
+		t.Fatalf("expected --no-group-level-control-predictor in args, got: %#v", args)
 	}
 	if !containsString(args, "--no-group-level-control-trial-order") {
 		t.Fatalf("expected --no-group-level-control-trial-order in args, got: %#v", args)
@@ -944,16 +944,16 @@ func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testi
 	}
 
 	m.correlationsMinRuns = 5
-	m.painSensitivityPrimaryUnit = 1
-	m.painSensitivityPermutations = 250
-	m.painSensitivityPermutationPrimary = false
+	m.predictorSensitivityPrimaryUnit = 1
+	m.predictorSensitivityPermutations = 250
+	m.predictorSensitivityPermutationPrimary = false
 	m.conditionPrimaryUnit = 1
 	m.conditionWindowMinSamples = 14
 	m.conditionCompareLabels = "low,high"
-	m.mixedIncludeTemperature = false
+	m.mixedIncludePredictor = false
 	m.mediationPermutationPrimary = false
 	m.moderationPermutationPrimary = false
-	m.correlationsPreferPainResidual = true
+	m.correlationsPreferPredictorResidual = true
 	m.correlationsPermutations = 111
 	m.regressionPrimaryUnit = 1
 	m.temporalCorrectionMethod = 1
@@ -993,8 +993,8 @@ func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testi
 	if !containsSubsequence(args, []string{"--condition-compare-labels", "low", "high"}) {
 		t.Fatalf("expected --condition-compare-labels low high in args, got: %#v", args)
 	}
-	if !containsString(args, "--no-mixed-include-temperature") {
-		t.Fatalf("expected --no-mixed-include-temperature in args, got: %#v", args)
+	if !containsString(args, "--no-mixed-include-predictor") {
+		t.Fatalf("expected --no-mixed-include-predictor in args, got: %#v", args)
 	}
 	if !containsString(args, "--no-mediation-permutation-primary") {
 		t.Fatalf("expected --no-mediation-permutation-primary in args, got: %#v", args)
@@ -1014,8 +1014,8 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 	}
 
 	m.runAdjustmentEnabled = false
-	m.painResidualEnabled = true
-	m.painResidualCrossfitEnabled = false
+	m.predictorResidualEnabled = true
+	m.predictorResidualCrossfitEnabled = false
 	m.regressionIncludePrev = false
 	m.modelsIncludePrev = false
 	m.modelsForceTrialIIDAsymptotic = false
@@ -1033,7 +1033,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 
 	expectedFlags := []string{
 		"--no-run-adjustment",
-		"--no-pain-residual-crossfit",
+		"--no-predictor-residual-crossfit",
 		"--no-regression-include-prev-terms",
 		"--no-models-include-prev-terms",
 		"--no-models-force-trial-iid-asymptotic",
@@ -1086,7 +1086,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing
 
 	m.behaviorValidateOnly = true
 	m.correlationsFeaturesSpec = "power,connectivity"
-	m.painSensitivityFeaturesSpec = "erp,itpc"
+	m.predictorSensitivityFeaturesSpec = "erp,itpc"
 	m.conditionFeaturesSpec = "spectral"
 	m.temporalFeaturesSpec = "power,erds"
 	m.clusterFeaturesSpec = "connectivity"

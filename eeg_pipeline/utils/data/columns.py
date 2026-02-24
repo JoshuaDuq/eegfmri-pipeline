@@ -26,13 +26,13 @@ def find_binary_outcome_column_in_events(events_df: pd.DataFrame, config: Any) -
     return find_column_in_events(events_df, column_names)
 
 
-def find_temperature_column_in_events(events_df: pd.DataFrame, config: Any) -> Optional[str]:
-    """Find temperature column in events dataframe using config."""
+def find_predictor_column_in_events(events_df: pd.DataFrame, config: Any) -> Optional[str]:
+    """Find predictor column in events dataframe using config."""
     if config is None:
         raise ValueError("config is required")
-    
+
     event_columns = config.get("event_columns", {})
-    column_names = event_columns.get("temperature", [])
+    column_names = event_columns.get("predictor", [])
     return find_column_in_events(events_df, column_names)
 
 
@@ -66,12 +66,12 @@ def get_binary_outcome_column_from_config(
     return get_column_from_config(config, "event_columns.binary_outcome", events_df)
 
 
-def get_temperature_column_from_config(
+def get_predictor_column_from_config(
     config: Any,
     events_df: Optional[pd.DataFrame] = None,
 ) -> Optional[str]:
-    """Get temperature column name from config, optionally matching against events dataframe."""
-    return get_column_from_config(config, "event_columns.temperature", events_df)
+    """Get predictor column name from config, optionally matching against events dataframe."""
+    return get_column_from_config(config, "event_columns.predictor", events_df)
 
 
 def get_rating_column_from_config(
@@ -138,7 +138,7 @@ def resolve_predictor_column(
     events_df: pd.DataFrame,
     config: Any,
 ) -> Optional[str]:
-    """Resolve behavior predictor column from explicit config, then temperature aliases."""
+    """Resolve behavior predictor column from explicit config, then predictor aliases."""
     explicit = _get_explicit_behavior_column(
         config,
         key="behavior_analysis.predictor_column",
@@ -146,14 +146,11 @@ def resolve_predictor_column(
     if explicit and explicit in events_df.columns:
         return explicit
 
-    if "temperature" in events_df.columns:
-        return "temperature"
-
-    temperature_candidates: List[str] = []
+    predictor_candidates: List[str] = []
     if config is not None and hasattr(config, "get"):
-        temperature_candidates = list(config.get("event_columns.temperature", []) or [])
+        predictor_candidates = list(config.get("event_columns.predictor", []) or [])
 
-    for candidate in temperature_candidates:
+    for candidate in predictor_candidates:
         if candidate in events_df.columns:
             return candidate
     return None
@@ -162,10 +159,10 @@ def resolve_predictor_column(
 __all__ = [
     "find_column_in_events",
     "find_binary_outcome_column_in_events",
-    "find_temperature_column_in_events",
+    "find_predictor_column_in_events",
     "get_column_from_config",
     "get_binary_outcome_column_from_config",
-    "get_temperature_column_from_config",
+    "get_predictor_column_from_config",
     "get_rating_column_from_config",
     "pick_target_column",
     "resolve_outcome_column",

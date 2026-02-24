@@ -291,8 +291,12 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
 			ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
 		}
+		if strings.TrimSpace(m.fmriAnalysisSignatureMaps) != "" {
+			ab.args = append(ab.args, "--signature-maps")
+			ab.args = append(ab.args, strings.Fields(strings.TrimSpace(m.fmriAnalysisSignatureMaps))...)
+		}
 
-		// Signature grouping (e.g., temperature levels)
+		// Signature grouping
 		groupCol := strings.TrimSpace(m.fmriTrialSigGroupColumn)
 		groupVals := splitSpaceList(strings.TrimSpace(m.fmriTrialSigGroupValuesSpec))
 		if groupCol != "" && len(groupVals) > 0 {
@@ -360,11 +364,17 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		if !m.fmriAnalysisPlotEmbedImages {
 			ab.args = append(ab.args, "--plot-no-embed-images")
 		}
-		if !m.fmriAnalysisPlotSignatures {
-			ab.args = append(ab.args, "--plot-no-signatures")
-		} else if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
+	if !m.fmriAnalysisPlotSignatures {
+		ab.args = append(ab.args, "--plot-no-signatures")
+	} else {
+		if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
 			ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
 		}
+		if strings.TrimSpace(m.fmriAnalysisSignatureMaps) != "" {
+			ab.args = append(ab.args, "--signature-maps")
+			ab.args = append(ab.args, strings.Fields(strings.TrimSpace(m.fmriAnalysisSignatureMaps))...)
+		}
+	}
 
 		// Formats: require at least one
 		var formats []string

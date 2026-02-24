@@ -4,7 +4,7 @@ Influence Diagnostics (Subject-Level, Non-Gating)
 
 Computes leverage and Cook's distance for per-feature subject-level models:
 
-  outcome ~ (temperature control) + trial order + run/block dummies + feature (+ optional interaction)
+  outcome ~ (predictor control) + trial order + run/block dummies + feature (+ optional interaction)
 
 Used to detect when single trials dominate an effect.
 """
@@ -21,7 +21,7 @@ from eeg_pipeline.utils.parallel import get_n_jobs, parallel_influence_features
 from eeg_pipeline.utils.analysis.stats._regression_utils import (
     _ols_fit as _fit_ols,
     _build_covariate_design,
-    _build_temperature_covariates as _build_temp_cov_shared,
+    _build_predictor_covariates as _build_temp_cov_shared,
 )
 from eeg_pipeline.utils.analysis.stats.transforms import zscore_array as _standardize
 
@@ -88,8 +88,8 @@ class InfluenceConfig:
     max_features: int = 20
     include_trial_order: bool = True
     include_run_block: bool = True
-    include_temperature: bool = True
-    temperature_control: str = "linear"  # "linear" | "rating_hat" | "spline"
+    include_predictor: bool = True
+    predictor_control: str = "linear"  # "linear" | "rating_hat" | "spline"
     include_interaction: bool = False
     standardize: bool = True
     n_jobs: int = -1
@@ -102,11 +102,11 @@ class InfluenceConfig:
         if not isinstance(outcomes, (list, tuple)) or not outcomes:
             outcomes = default_outcomes
         
-        temperature_control_raw = _get_config_value(
-            config, "behavior_analysis.influence.temperature_control", "linear"
+        predictor_control_raw = _get_config_value(
+            config, "behavior_analysis.influence.predictor_control", "linear"
         )
-        temperature_control = str(temperature_control_raw).strip().lower()
-        
+        predictor_control = str(predictor_control_raw).strip().lower()
+
         return cls(
             enabled=bool(_get_config_value(config, "behavior_analysis.influence.enabled", True)),
             outcomes=[str(x) for x in outcomes],
@@ -117,10 +117,10 @@ class InfluenceConfig:
             include_run_block=bool(
                 _get_config_value(config, "behavior_analysis.influence.include_run_block", True)
             ),
-            include_temperature=bool(
-                _get_config_value(config, "behavior_analysis.influence.include_temperature", True)
+            include_predictor=bool(
+                _get_config_value(config, "behavior_analysis.influence.include_predictor", True)
             ),
-            temperature_control=temperature_control,
+            predictor_control=predictor_control,
             include_interaction=bool(
                 _get_config_value(config, "behavior_analysis.influence.include_interaction", False)
             ),
@@ -254,16 +254,16 @@ def _build_feature_design_matrix(
     design_parts = [base_design_matrix[valid_mask], feature_values[:, None]]
     design_names = [*base_design_names, "feature"]
 
-    if config.include_interaction and "temperature" in trial_df.columns:
-        temperature_raw = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)
-        temperature_valid = temperature_raw[valid_mask]
-        temperature_standardized = (
-            _standardize(temperature_valid) if config.standardize else temperature_valid
+    if config.include_interaction and "predictor" in trial_df.columns:
+        predictor_raw = pd.to_numeric(trial_df["predictor"], errors="coerce").to_numpy(dtype=float)
+        predictor_valid = predictor_raw[valid_mask]
+        predictor_standardized = (
+            _standardize(predictor_valid) if config.standardize else predictor_valid
         )
-        if np.isfinite(temperature_standardized).any():
-            interaction = (feature_values * temperature_standardized)[:, None]
+        if np.isfinite(predictor_standardized).any():
+            interaction = (feature_values * predictor_standardized)[:, None]
             design_parts.append(interaction)
-            design_names.append("feature_x_temperature")
+            design_names.append("feature_x_predictor")
 
     design_matrix = np.column_stack(design_parts)
     return design_matrix, design_names
@@ -390,7 +390,7 @@ def _process_single_influence_feature(
         "target": str(outcome),
         "n": int(len(outcome_valid)),
         "p": n_parameters,
-        "temperature_control": cfg.temperature_control,
+        "predictor_control": cfg.predictor_control,
         "cooks_threshold": cooks_threshold,
         "leverage_threshold": leverage_threshold,
         "max_cooks": float(np.nanmax(cooks_distance)) if np.isfinite(cooks_distance).any() else np.nan,
@@ -435,16 +435,16 @@ def _add_run_block_covariate(trial_df: pd.DataFrame, config: Optional[Any]) -> O
 def _build_base_covariate_dataframe(
     trial_df: pd.DataFrame,
     covariates: List[str],
-    temperature_design_df: Optional[pd.DataFrame],
+    predictor_design_df: Optional[pd.DataFrame],
 ) -> pd.DataFrame:
     """Build base dataframe with covariate columns."""
     present_covariates = [col for col in covariates if col in trial_df.columns]
     base_df = trial_df[present_covariates].copy() if present_covariates else pd.DataFrame(index=trial_df.index)
     
-    if temperature_design_df is not None:
+    if predictor_design_df is not None:
         for col in covariates:
-            if col not in base_df.columns and col in temperature_design_df.columns:
-                base_df[col] = temperature_design_df[col]
+            if col not in base_df.columns and col in predictor_design_df.columns:
+                base_df[col] = predictor_design_df[col]
     
     return base_df
 
@@ -464,21 +464,25 @@ def _process_outcome_influence(
     outcome_values = pd.to_numeric(trial_df[outcome], errors="coerce").to_numpy(dtype=float)
     
     covariates: List[str] = []
-    temperature_control_type = str(config.temperature_control or "linear").strip().lower()
-    
-    if config.include_temperature:
+    predictor_control_type = str(config.predictor_control or "linear").strip().lower()
+
+    if config.include_predictor:
+        from eeg_pipeline.utils.data.columns import resolve_predictor_column
+
+        predictor_col = resolve_predictor_column(trial_df, global_config) or "predictor"
         temp_covariates, temp_design_df, temp_metadata = _build_temp_cov_shared(
             trial_df=trial_df,
             outcome=outcome,
-            temperature_control=temperature_control_type,
-            include_temperature=True,
+            predictor_control=predictor_control_type,
+            include_predictor=True,
             config=global_config,
-            key_prefix="behavior_analysis.influence.temperature_spline",
+            predictor_col=predictor_col,
+            key_prefix="behavior_analysis.influence.predictor_spline",
         )
         covariates.extend(temp_covariates)
     else:
         temp_design_df = None
-        temp_metadata = {"temperature_control_requested": temperature_control_type}
+        temp_metadata = {"predictor_control_requested": predictor_control_type}
     
     if config.include_trial_order:
         trial_order_col = _add_trial_order_covariate(trial_df)
@@ -537,19 +541,19 @@ def compute_influence_diagnostics(
     metadata["selected_features"] = selected_features
 
     all_records: List[Dict[str, Any]] = []
-    temperature_control_by_outcome: Dict[str, Dict[str, Any]] = {}
+    predictor_control_by_outcome: Dict[str, Dict[str, Any]] = {}
 
     for outcome in cfg.outcomes:
         outcome_records, temp_metadata = _process_outcome_influence(
             outcome, trial_df, selected_features, cfg, config, n_jobs_actual
         )
         all_records.extend(outcome_records)
-        temperature_control_by_outcome[str(outcome)] = temp_metadata
+        predictor_control_by_outcome[str(outcome)] = temp_metadata
 
     if not all_records:
         return pd.DataFrame(), {**metadata, "status": "empty_after_fit"}
 
-    metadata["temperature_control_by_outcome"] = temperature_control_by_outcome
+    metadata["predictor_control_by_outcome"] = predictor_control_by_outcome
     result_df = pd.DataFrame(all_records)
     return result_df, {**metadata, "status": "ok", "n_rows": int(len(result_df))}
 

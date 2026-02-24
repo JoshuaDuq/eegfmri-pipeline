@@ -58,8 +58,8 @@ var plotDefaults = struct {
 	figureSizeTopomap  string
 
 	// Colors
-	colorPain           string
-	colorNonpain        string
+	colorCondB          string
+	colorCondA          string
 	colorSignificant    string
 	colorNonsignificant string
 	colorGray           string
@@ -237,8 +237,8 @@ var plotDefaults = struct {
 	figureSizeTopomap:  "7.0 7.0",
 
 	// Colors
-	colorPain:           "crimson",
-	colorNonpain:        "navy",
+	colorCondB:          "crimson",
+	colorCondA:          "navy",
 	colorSignificant:    "#C42847",
 	colorNonsignificant: "#666666",
 	colorGray:           "#555555",
@@ -900,18 +900,18 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 			lines = append(lines, expandedLines...)
 		}
 		return lines
-	case plotItemConfigFieldDoseResponsePainColumn:
-		value := m.getPlotFieldTextValue(cfg.DoseResponsePainColumn, "(auto)", row, plotItemConfigFieldDoseResponsePainColumn)
+	case plotItemConfigFieldDoseResponsePredictorColumn:
+		value := m.getPlotFieldTextValue(cfg.DoseResponsePredictorColumn, "(auto)", row, plotItemConfigFieldDoseResponsePredictorColumn)
 		plotCols := m.GetPlottingComparisonColumns()
 		hint := "Space to select (events.tsv) · or type manually"
 		if len(plotCols) > 0 {
 			hint = fmt.Sprintf("Space to select · %d columns", len(plotCols))
 		}
-		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponsePainColumn
-		lines := []renderLine{m.renderPlotValueLine("pain_column", value, hint, focused || isEditing, labelWidth)}
+		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponsePredictorColumn
+		lines := []renderLine{m.renderPlotValueLine("predictor_column", value, hint, focused || isEditing, labelWidth)}
 		if isEditing && len(plotCols) > 0 {
 			expandedLines := m.renderExpandedListItems(plotCols, func(col string) bool {
-				return cfg.DoseResponsePainColumn == col
+				return cfg.DoseResponsePredictorColumn == col
 			})
 			lines = append(lines, expandedLines...)
 		}
@@ -1175,11 +1175,11 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 		value := m.formatTextFieldWithBuffer(textFieldPlotFigureSizeTopomap, m.plotFigureSizeTopomapSpec, plotDefaults.figureSizeTopomap)
 		return []renderLine{m.renderValueLine(opt, "figsize_topomap", value, "W H", focused, labelWidth)}
 
-	case optPlotColorPain:
-		value := m.formatTextFieldWithBuffer(textFieldPlotColorPain, m.plotColorPain, plotDefaults.colorPain)
+	case optPlotColorCondB:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorCondB, m.plotColorCondB, plotDefaults.colorCondB)
 		return []renderLine{m.renderValueLine(opt, "color_condition_2", value, "hex or named color", focused, labelWidth)}
-	case optPlotColorNonpain:
-		value := m.formatTextFieldWithBuffer(textFieldPlotColorNonpain, m.plotColorNonpain, plotDefaults.colorNonpain)
+	case optPlotColorCondA:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorCondA, m.plotColorCondA, plotDefaults.colorCondA)
 		return []renderLine{m.renderValueLine(opt, "color_condition_1", value, "hex or named color", focused, labelWidth)}
 	case optPlotColorSignificant:
 		value := m.formatTextFieldWithBuffer(textFieldPlotColorSignificant, m.plotColorSignificant, plotDefaults.colorSignificant)

@@ -28,7 +28,7 @@ from eeg_pipeline.utils.analysis.stats._regression_utils import (
     _hc3_se,
     _r2,
     _build_covariate_design,
-    _build_temperature_covariates as _build_temp_cov_shared,
+    _build_predictor_covariates as _build_temp_cov_shared,
 )
 
 # Constants
@@ -46,8 +46,8 @@ class FeatureModelsConfig:
     enabled: bool = False
     outcomes: Optional[List[str]] = None
     families: Optional[List[str]] = None
-    include_temperature: bool = True
-    temperature_control: str = "linear"  # "linear" | "rating_hat" | "spline"
+    include_predictor: bool = True
+    predictor_control: str = "linear"  # "linear" | "rating_hat" | "spline"
     include_trial_order: bool = True
     include_prev_terms: bool = False
     include_run_block: bool = True
@@ -70,8 +70,8 @@ class FeatureModelsConfig:
             enabled=bool(_get(config, "behavior_analysis.models.enabled", False)),
             outcomes=[str(x) for x in outcomes],
             families=[str(x).strip().lower() for x in families],
-            include_temperature=bool(_get(config, "behavior_analysis.models.include_temperature", True)),
-            temperature_control=str(_get(config, "behavior_analysis.models.temperature_control", "linear")).strip().lower(),
+            include_predictor=bool(_get(config, "behavior_analysis.models.include_predictor", True)),
+            predictor_control=str(_get(config, "behavior_analysis.models.predictor_control", "linear")).strip().lower(),
             include_trial_order=bool(_get(config, "behavior_analysis.models.include_trial_order", True)),
             include_prev_terms=bool(_get(config, "behavior_analysis.models.include_prev_terms", False)),
             include_run_block=bool(_get(config, "behavior_analysis.models.include_run_block", True)),
@@ -91,10 +91,10 @@ def _extract_interaction_terms(
     model_pvalues: Optional[Any] = None,
 ) -> Tuple[float, float]:
     """Extract interaction term beta and p-value if present."""
-    if "feature_x_temperature" not in names:
+    if "feature_x_predictor" not in names:
         return np.nan, np.nan
-    
-    interaction_idx = names.index("feature_x_temperature")
+
+    interaction_idx = names.index("feature_x_predictor")
     beta_interaction = float(model_params[interaction_idx])
     
     if model_pvalues is not None and hasattr(model_pvalues, "__getitem__"):
@@ -372,10 +372,10 @@ def _prepare_feature_data(
     if cfg.standardize:
         feature_values = _zscore(feature_values)
 
-    temperature_values = None
-    if cfg.include_interaction and "temperature" in trial_df.columns:
-        temperature_raw = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)
-        temperature_values = _zscore(temperature_raw) if cfg.standardize else temperature_raw
+    predictor_values = None
+    if cfg.include_interaction and "predictor" in trial_df.columns:
+        predictor_raw = pd.to_numeric(trial_df["predictor"], errors="coerce").to_numpy(dtype=float)
+        predictor_values = _zscore(predictor_raw) if cfg.standardize else predictor_raw
 
     outcome_values = pd.to_numeric(y_all, errors="coerce").to_numpy(dtype=float)
     is_valid = (
@@ -383,8 +383,8 @@ def _prepare_feature_data(
         np.isfinite(feature_values) &
         np.all(np.isfinite(X_base), axis=1)
     )
-    if temperature_values is not None:
-        is_valid = is_valid & np.isfinite(temperature_values)
+    if predictor_values is not None:
+        is_valid = is_valid & np.isfinite(predictor_values)
     
     n_valid = int(is_valid.sum())
     if n_valid < cfg.min_samples:
@@ -397,11 +397,11 @@ def _prepare_feature_data(
     design_parts = [X_base_valid, feature_valid[:, None]]
     design_names = [*X_base_names, "feature"]
     
-    if temperature_values is not None:
-        temperature_valid = temperature_values[is_valid]
-        interaction_term = (feature_valid * temperature_valid)[:, None]
+    if predictor_values is not None:
+        predictor_valid = predictor_values[is_valid]
+        interaction_term = (feature_valid * predictor_valid)[:, None]
         design_parts.append(interaction_term)
-        design_names.append("feature_x_temperature")
+        design_names.append("feature_x_predictor")
     
     X_full = np.column_stack(design_parts)
     return outcome_valid, feature_valid, X_base_valid, X_full, design_names, n_valid
@@ -522,7 +522,7 @@ def _build_additional_covariates(
             covariates.append("trial_index")
     
     if cfg.include_prev_terms:
-        prev_term_candidates = ["prev_temperature", "prev_rating", "delta_temperature", "delta_rating"]
+        prev_term_candidates = ["prev_predictor", "prev_rating", "delta_predictor", "delta_rating"]
         for col in prev_term_candidates:
             if col in trial_df.columns:
                 covariates.append(col)
@@ -582,7 +582,7 @@ def run_feature_model_families(
         "enabled": cfg.enabled,
         "families": cfg.families,
         "outcomes": cfg.outcomes,
-        "temperature_control": cfg.temperature_control,
+        "predictor_control": cfg.predictor_control,
     }
     if not cfg.enabled:
         return pd.DataFrame(), {**meta, "status": "disabled"}
@@ -606,13 +606,17 @@ def run_feature_model_families(
         
         meta.setdefault("binary_outcome", {}).update(outcome_meta)
 
+        from eeg_pipeline.utils.data.columns import resolve_predictor_column
+
+        predictor_col = resolve_predictor_column(trial_df, config) or "predictor"
         temp_covariates, temp_design_df, temp_meta = _build_temp_cov_shared(
             trial_df=trial_df,
             outcome=outcome_name,
-            temperature_control=cfg.temperature_control,
-            include_temperature=cfg.include_temperature,
+            predictor_control=cfg.predictor_control,
+            include_predictor=cfg.include_predictor,
             config=config,
-            key_prefix="behavior_analysis.models.temperature_spline",
+            predictor_col=predictor_col,
+            key_prefix="behavior_analysis.models.predictor_spline",
         )
         additional_covariates = _build_additional_covariates(trial_df, cfg, config)
         
@@ -626,7 +630,7 @@ def run_feature_model_families(
                     base_df[col] = temp_design_df[col]
 
         X_base, X_base_names = _build_covariate_design(base_df, all_covariates, add_intercept=True)
-        meta.setdefault("temperature_control_by_outcome", {})[outcome_name] = temp_meta
+        meta.setdefault("predictor_control_by_outcome", {})[outcome_name] = temp_meta
         meta.setdefault("covariates_by_outcome", {})[outcome_name] = list(all_covariates)
 
         feature_args = [

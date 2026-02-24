@@ -115,35 +115,35 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Pain Residual section - only show if predictor_residual computation is selected
+	// Predictor Residual section - only show if predictor_residual computation is selected
 	if m.isComputationSelected("predictor_residual") {
-		options = append(options, optBehaviorGroupPainResidual)
-		if m.behaviorGroupPainResidualExpanded {
+		options = append(options, optBehaviorGroupPredictorResidual)
+		if m.behaviorGroupPredictorResidualExpanded {
 			options = append(options,
 				optBehaviorSubFitting,
-				optPainResidualEnabled,
-				optPainResidualMethod,
-				optPainResidualPolyDegree,
-				optPainResidualSplineDfCandidates,
-				optPainResidualMinSamples,
+				optPredictorResidualEnabled,
+				optPredictorResidualMethod,
+				optPredictorResidualPolyDegree,
+				optPredictorResidualSplineDfCandidates,
+				optPredictorResidualMinSamples,
 				optBehaviorSubDiagnostics,
-				optPainResidualModelCompare,
-				optPainResidualModelComparePolyDegrees,
-				optPainResidualModelCompareMinSamples,
-				optPainResidualBreakpoint,
-				optPainResidualBreakpointCandidates,
-				optPainResidualBreakpointMinSamples,
-				optPainResidualBreakpointQlow,
-				optPainResidualBreakpointQhigh,
+				optPredictorResidualModelCompare,
+				optPredictorResidualModelComparePolyDegrees,
+				optPredictorResidualModelCompareMinSamples,
+				optPredictorResidualBreakpoint,
+				optPredictorResidualBreakpointCandidates,
+				optPredictorResidualBreakpointMinSamples,
+				optPredictorResidualBreakpointQlow,
+				optPredictorResidualBreakpointQhigh,
 				optBehaviorSubCrossfit,
-				optPainResidualCrossfitEnabled,
+				optPredictorResidualCrossfitEnabled,
 			)
-			if m.painResidualCrossfitEnabled {
+			if m.predictorResidualCrossfitEnabled {
 				options = append(options,
-					optPainResidualCrossfitGroupColumn,
-					optPainResidualCrossfitNSplits,
-					optPainResidualCrossfitMethod,
-					optPainResidualCrossfitSplineKnots,
+					optPredictorResidualCrossfitGroupColumn,
+					optPredictorResidualCrossfitNSplits,
+					optPredictorResidualCrossfitMethod,
+					optPredictorResidualCrossfitSplineKnots,
 				)
 			}
 		}
@@ -160,10 +160,10 @@ func (m Model) getBehaviorOptions() []optionType {
 					optCorrelationsTypes,
 					optCorrelationsPrimaryUnit,
 					optCorrelationsMinRuns,
-					optCorrelationsPreferPainResidual,
+					optCorrelationsPreferPredictorResidual,
 					optCorrelationsPermutations,
 					optCorrelationsPermutationPrimary,
-					optCorrelationsUseCrossfitPainResidual,
+					optCorrelationsUseCrossfitPredictorResidual,
 				)
 			}
 			options = append(options, optBehaviorSubMultilevel, optCorrelationsMultilevel)
@@ -171,7 +171,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				options = append(options,
 					optGroupLevelBlockPermutation,
 					optGroupLevelTarget,
-					optGroupLevelControlTemperature,
+					optGroupLevelControlPredictor,
 					optGroupLevelControlTrialOrder,
 					optGroupLevelControlRunEffects,
 					optGroupLevelMaxRunDummies,
@@ -188,7 +188,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			options = append(options,
 				optBehaviorSubOutcome,
 				optRegressionOutcome,
-				optRegressionIncludeTemperature,
+				optRegressionIncludePredictor,
 				optRegressionTempControl,
 			)
 			if m.regressionTempControl == 2 {
@@ -227,11 +227,11 @@ func (m Model) getBehaviorOptions() []optionType {
 			options = append(options,
 				optBehaviorSubOutcomes,
 				optModelsOutcomeRating,
-				optModelsOutcomePainResidual,
-				optModelsOutcomeTemperature,
-				optModelsOutcomePainBinary,
+				optModelsOutcomePredictorResidual,
+				optModelsOutcomePredictor,
+				optModelsOutcomeBinaryOutcome,
 				optBehaviorSubCovariates,
-				optModelsIncludeTemperature,
+				optModelsIncludePredictor,
 				optModelsTempControl,
 			)
 			if m.modelsTempControl == 2 {
@@ -263,17 +263,17 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Pain sensitivity section
+	// Predictor sensitivity section
 	if m.isComputationSelected("predictor_sensitivity") {
-		options = append(options, optBehaviorGroupPainSens)
-		if m.behaviorGroupPainSensExpanded {
+		options = append(options, optBehaviorGroupPredictorSens)
+		if m.behaviorGroupPredictorSensExpanded {
 			options = append(
 				options,
-				optPainSensitivityMinTrials,
-				optPainSensitivityPrimaryUnit,
-				optPainSensitivityPermutations,
-				optPainSensitivityPermutationPrimary,
-				optPainSensitivityFeatures,
+				optPredictorSensitivityMinTrials,
+				optPredictorSensitivityPrimaryUnit,
+				optPredictorSensitivityPermutations,
+				optPredictorSensitivityPermutationPrimary,
+				optPredictorSensitivityFeatures,
 			)
 		}
 	}
@@ -394,10 +394,10 @@ func (m Model) getBehaviorOptions() []optionType {
 					options = append(options,
 						optBehaviorSubOutcomes,
 						optInfluenceOutcomeRating,
-						optInfluenceOutcomePainResidual,
-						optInfluenceOutcomeTemperature,
+						optInfluenceOutcomePredictorResidual,
+						optInfluenceOutcomePredictor,
 						optBehaviorSubCovariates,
-						optInfluenceIncludeTemperature,
+						optInfluenceIncludePredictor,
 						optInfluenceTempControl,
 					)
 					if m.influenceTempControl == 2 {
@@ -456,7 +456,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			if m.isComputationSelected("mixed_effects") {
 				options = append(options, optBehaviorGroupMixedEffects)
 				if m.behaviorGroupMixedEffectsExpanded {
-					options = append(options, optMixedEffectsType, optMixedIncludeTemperature, optMixedMaxFeatures)
+					options = append(options, optMixedEffectsType, optMixedIncludePredictor, optMixedMaxFeatures)
 				}
 			}
 		}
@@ -490,7 +490,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optValidationMinEpochs,
 				optValidationMinChannels,
 				optValidationMaxAmplitudeUv,
-				optIOTemperatureRange,
+				optIOPredictorRange,
 				optIOMaxMissingChannelsFraction,
 			)
 		}

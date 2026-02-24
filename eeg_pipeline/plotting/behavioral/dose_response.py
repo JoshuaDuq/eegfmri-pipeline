@@ -5,7 +5,7 @@ Dose-response visualization (visualize.py-style)
 This module intentionally replaces the prior dose-response implementation with
 the plotting approach from the repository-root `visualize` script:
 
-- Mean ± SEM curves by dose level (typically temperature)
+- Mean ± SEM curves by dose level (typically predictor)
 - ROI × band panels
 - Optional rating (response) vs dose and pain-probability vs dose
 
@@ -419,8 +419,8 @@ def _resolve_dose_response_columns(
 
     dose_col = resolve(
         override_key="plotting.plots.behavior.dose_response.dose_column",
-        candidate_key="event_columns.temperature",
-        defaults=["temperature"],
+        candidate_key="event_columns.predictor",
+        defaults=["predictor"],
         required=True,
     )
     raw_response = get_config_value(config, "plotting.plots.behavior.dose_response.response_column", None)
@@ -460,7 +460,7 @@ def _resolve_dose_pain_columns(trials: pd.DataFrame, config: Any) -> tuple[str, 
         if dose_col not in trials.columns:
             raise ValueError(f"Dose column not found in table: {dose_col!r}.")
     else:
-        dose_candidates = list(get_config_value(config, "event_columns.temperature", []) or []) + ["temperature"]
+        dose_candidates = list(get_config_value(config, "event_columns.predictor", []) or [])
         resolved = find_column(trials, dose_candidates)
         if resolved is None:
             raise ValueError(f"Could not resolve dose column from candidates={dose_candidates}.")
@@ -1063,7 +1063,7 @@ def _plot_roi_bands_vs_dose_single_subject(
             ax.set_xticks(unique_x)
             ax.set_xticklabels([f"{v:.1f}" for v in unique_x])
 
-            # Effect sizes computed on temperature means (avoid trials-as-independent)
+            # Effect sizes computed on predictor means (avoid trials-as-independent)
             try:
                 rho, p, n = _spearman_xy(summ["x"].to_numpy(float), summ["mean"].to_numpy(float))
                 slope = _linear_slope(summ["x"].to_numpy(float), summ["mean"].to_numpy(float))
@@ -1144,7 +1144,7 @@ def _plot_xy_mean_sem(
         _save_fig_scientific(fig, out_path, plot_cfg=plot_cfg, config=config, has_suptitle=False)
 
 
-def _plot_pain_probability_vs_dose(
+def _plot_binary_outcome_probability_vs_predictor(
     df: pd.DataFrame,
     *,
     subject: str,
@@ -1424,7 +1424,7 @@ def visualize_dose_response(
     return saved
 
 
-def visualize_pain_probability(
+def visualize_binary_outcome_probability(
     subject: str,
     deriv_root: Path,
     task: str,
@@ -1442,7 +1442,7 @@ def visualize_pain_probability(
     plot_cfg = get_plot_config(config)
     plot_subdir = plot_cfg.get_behavioral_config().get("plot_subdir", "behavior")
     plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
-    out_dir = plots_dir / "pain_probability"
+    out_dir = plots_dir / "binary_outcome_probability"
     ensure_dir(out_dir)
 
     epochs, _ = load_epochs_for_analysis(
@@ -1474,8 +1474,8 @@ def visualize_pain_probability(
     table[dose_col] = pd.to_numeric(_require_column(table, dose_col), errors="coerce")
     table[pain_col] = pd.to_numeric(_require_column(table, pain_col), errors="coerce")
 
-    out_path = out_dir / f"sub-{subject}_pain_probability_vs_{dose_col}"
-    _plot_pain_probability_vs_dose(
+    out_path = out_dir / f"sub-{subject}_binary_outcome_probability_vs_{dose_col}"
+    _plot_binary_outcome_probability_vs_predictor(
         table,
         subject=subject,
         dose_col=dose_col,
@@ -1485,7 +1485,7 @@ def visualize_pain_probability(
     )
 
     logger.info("Created pain probability plot under %s", out_dir)
-    return {f"pain_probability_vs_{dose_col}": out_path}
+    return {f"binary_outcome_probability_vs_{dose_col}": out_path}
 
 
-__all__ = ["visualize_dose_response", "visualize_pain_probability"]
+__all__ = ["visualize_dose_response", "visualize_binary_outcome_probability"]

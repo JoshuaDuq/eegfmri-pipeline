@@ -10,7 +10,15 @@ from eeg_pipeline.utils.config.loader import get_config_bool, get_config_value
 
 
 def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
-    """Resolve configured condition column, falling back to configured pain column."""
+    """
+    Resolve the condition column from config.
+
+    Resolution order:
+    1. ``behavior_analysis.condition.compare_column`` (explicit override)
+    2. ``event_columns.binary_outcome`` (discovered from column aliases)
+
+    Raises ``ValueError`` if neither resolves to a column present in the trial table.
+    """
     from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
 
     compare_col = str(get_config_value(config, "behavior_analysis.condition.compare_column", "") or "").strip()
@@ -21,7 +29,12 @@ def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> st
     if fallback_col and fallback_col in df_trials.columns:
         return str(fallback_col)
 
-    return compare_col or "pain"
+    raise ValueError(
+        "Could not resolve a condition comparison column. "
+        "Set 'behavior_analysis.condition.compare_column' or configure "
+        "'event_columns.binary_outcome' to match a column in the trial table. "
+        f"Available columns: {sorted(df_trials.columns.tolist())}"
+    )
 
 
 def stage_condition_column_impl(
@@ -43,7 +56,7 @@ def stage_condition_column_impl(
     resolve_condition_compare_column_fn: Callable[[pd.DataFrame, Any], str],
     unified_fdr_family_columns: Sequence[str],
 ) -> pd.DataFrame:
-    """Run column-based condition comparison (e.g., pain vs non-pain)."""
+    """Run column-based condition comparison."""
     from eeg_pipeline.analysis.behavior.api import compute_condition_effects, split_by_condition
 
     compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
@@ -108,9 +121,9 @@ def stage_condition_column_impl(
     out_dir = get_stats_subfolder_fn(ctx, "condition_effects")
 
     try:
-        pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(df_trials, ctx.config, ctx.logger)
+        cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(df_trials, ctx.config, ctx.logger)
 
-        if n_pain == 0 and n_nonpain == 0:
+        if n_condition_a == 0 and n_condition_b == 0:
             msg = (
                 "Condition split produced zero trials; check "
                 "behavior_analysis.condition.compare_column / behavior_analysis.condition.compare_values "
@@ -166,8 +179,8 @@ def stage_condition_column_impl(
 
         column_df = compute_condition_effects(
             features,
-            pain_mask,
-            nonpain_mask,
+            cond_a_mask,
+            cond_b_mask,
             min_samples=max(int(getattr(config, "min_samples", 10)), 2),
             fdr_alpha=config.fdr_alpha,
             logger=ctx.logger,

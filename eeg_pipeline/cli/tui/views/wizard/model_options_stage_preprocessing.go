@@ -121,9 +121,9 @@ func (m Model) getPreprocessingOptions() []optionType {
 
 	// Event Column Mapping
 	options = append(options,
-		optEventColTemperature,
+		optEventColPredictor,
 		optEventColRating,
-		optEventColPainBinary,
+		optEventColBinaryOutcome,
 		optConditionPreferredPrefixes,
 	)
 

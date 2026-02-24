@@ -60,8 +60,8 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.DoseResponseDoseColumn
 	case plotItemConfigFieldDoseResponseResponseColumn:
 		return cfg.DoseResponseResponseColumn
-	case plotItemConfigFieldDoseResponsePainColumn:
-		return cfg.DoseResponsePainColumn
+	case plotItemConfigFieldDoseResponsePredictorColumn:
+		return cfg.DoseResponsePredictorColumn
 	case plotItemConfigFieldDoseResponseSegment:
 		return cfg.DoseResponseSegment
 	case plotItemConfigFieldDoseResponseBands:
@@ -184,10 +184,10 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 				m.ShowToast("Unknown feature category: "+unknown[0], "warning")
 			}
 		}
-	case plotItemConfigFieldDoseResponsePainColumn:
-		cfg.DoseResponsePainColumn = strings.TrimSpace(value)
-		if cfg.DoseResponsePainColumn != "" && len(m.availableColumns) > 0 {
-			unknown := unknownFromList([]string{cfg.DoseResponsePainColumn}, m.availableColumns)
+	case plotItemConfigFieldDoseResponsePredictorColumn:
+		cfg.DoseResponsePredictorColumn = strings.TrimSpace(value)
+		if cfg.DoseResponsePredictorColumn != "" && len(m.availableColumns) > 0 {
+			unknown := unknownFromList([]string{cfg.DoseResponsePredictorColumn}, m.availableColumns)
 			if len(unknown) > 0 {
 				m.ShowToast("Unknown events.tsv column: "+unknown[0], "warning")
 			}

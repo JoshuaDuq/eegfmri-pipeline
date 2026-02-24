@@ -4,7 +4,7 @@ Pain Residual (Subject-Level)
 
 Defines a subject-level pain residual:
 
-    predictor_residual = rating - f(temperature)
+    predictor_residual = rating - f(predictor)
 
 where f(·) is a flexible (but stable) dose-response curve. This targets
 "pain beyond stimulus intensity" for downstream feature associations.
@@ -22,16 +22,16 @@ from .base import get_config_value as _get_config_value
 
 
 def _prepare_data(
-    temperature: pd.Series,
+    predictor: pd.Series,
     rating: pd.Series,
 ) -> Tuple[pd.Series, pd.Series, pd.Index]:
-    """Align and validate temperature and rating series."""
-    temperature_values = pd.to_numeric(temperature, errors="coerce")
+    """Align and validate predictor and rating series."""
+    predictor_values = pd.to_numeric(predictor, errors="coerce")
     rating_values = pd.to_numeric(rating, errors="coerce")
-    common_index = temperature_values.index.intersection(rating_values.index)
-    temperature_aligned = temperature_values.loc[common_index]
+    common_index = predictor_values.index.intersection(rating_values.index)
+    predictor_aligned = predictor_values.loc[common_index]
     rating_aligned = rating_values.loc[common_index]
-    return temperature_aligned, rating_aligned, common_index
+    return predictor_aligned, rating_aligned, common_index
 
 
 def _compute_residuals(
@@ -43,7 +43,7 @@ def _compute_residuals(
 
 
 def _fit_spline_model(
-    temperature_values: pd.Series,
+    predictor_values: pd.Series,
     rating_values: pd.Series,
     config: Optional[Any],
 ) -> Optional[Tuple[pd.Series, Dict[str, Any]]]:
@@ -58,7 +58,7 @@ def _fit_spline_model(
     )
 
     model_data = pd.DataFrame({
-        "temp": temperature_values.to_numpy(dtype=float),
+        "pred": predictor_values.to_numpy(dtype=float),
         "rating": rating_values.to_numpy(dtype=float),
     })
 
@@ -99,12 +99,12 @@ def _fit_spline_model(
 
     try:
         prediction_data = pd.DataFrame({
-            "temp": temperature_values.to_numpy(dtype=float),
+            "pred": predictor_values.to_numpy(dtype=float),
         })
         predicted_values = best_model.predict(prediction_data)
         predicted_series = pd.Series(
             np.asarray(predicted_values, dtype=float),
-            index=temperature_values.index,
+            index=predictor_values.index,
             dtype=float,
         )
     except (ValueError, AttributeError, TypeError):
@@ -125,7 +125,7 @@ def _fit_spline_model(
 
 
 def _fit_polynomial_model(
-    temperature_values: pd.Series,
+    predictor_values: pd.Series,
     rating_values: pd.Series,
     config: Optional[Any],
 ) -> Tuple[pd.Series, Dict[str, Any]]:
@@ -140,15 +140,15 @@ def _fit_polynomial_model(
 
     try:
         coefficients = np.polyfit(
-            temperature_values.to_numpy(dtype=float),
+            predictor_values.to_numpy(dtype=float),
             rating_values.to_numpy(dtype=float),
             deg=degree,
         )
         polynomial = np.poly1d(coefficients)
-        predicted_values = polynomial(temperature_values.to_numpy(dtype=float))
+        predicted_values = polynomial(predictor_values.to_numpy(dtype=float))
         predicted_series = pd.Series(
             predicted_values,
-            index=temperature_values.index,
+            index=predictor_values.index,
             dtype=float,
         )
         metadata["status"] = "ok"
@@ -159,19 +159,19 @@ def _fit_polynomial_model(
     return predicted_series, metadata
 
 
-def fit_temperature_rating_curve(
-    temperature: pd.Series,
+def fit_predictor_rating_curve(
+    predictor: pd.Series,
     rating: pd.Series,
     *,
     config: Optional[Any] = None,
 ) -> Tuple[pd.Series, pd.Series, Dict[str, Any]]:
     """
-    Fit rating ~ f(temperature) and return (predicted, residual, metadata).
+    Fit rating ~ f(predictor) and return (predicted, residual, metadata).
 
     Uses a spline model when statsmodels is available; otherwise falls back
     to a low-order polynomial.
     """
-    temperature_aligned, rating_aligned, common_index = _prepare_data(temperature, rating)
+    predictor_aligned, rating_aligned, common_index = _prepare_data(predictor, rating)
 
     metadata: Dict[str, Any] = {
         "model": None,
@@ -179,7 +179,7 @@ def fit_temperature_rating_curve(
         "n_total": int(len(common_index)),
     }
 
-    valid_mask = temperature_aligned.notna() & rating_aligned.notna()
+    valid_mask = predictor_aligned.notna() & rating_aligned.notna()
     n_valid = int(valid_mask.sum())
     metadata["n_valid"] = n_valid
 
@@ -190,7 +190,7 @@ def fit_temperature_rating_curve(
         residual = pd.Series(np.nan, index=common_index, dtype=float)
         return predicted, residual, metadata
 
-    temperature_valid = temperature_aligned[valid_mask]
+    predictor_valid = predictor_aligned[valid_mask]
     rating_valid = rating_aligned[valid_mask]
 
     method = str(_get_config_value(config, "behavior_analysis.predictor_residual.method", "spline")).lower()
@@ -199,19 +199,19 @@ def fit_temperature_rating_curve(
     residual_full = pd.Series(np.nan, index=common_index, dtype=float)
 
     if method == "spline":
-        spline_result = _fit_spline_model(temperature_valid, rating_valid, config)
+        spline_result = _fit_spline_model(predictor_valid, rating_valid, config)
         if spline_result is not None:
             predicted_valid, spline_metadata = spline_result
-            predicted_full.loc[temperature_valid.index] = predicted_valid
+            predicted_full.loc[predictor_valid.index] = predicted_valid
             residual_valid = _compute_residuals(rating_valid, predicted_valid)
             residual_full.loc[rating_valid.index] = residual_valid
             metadata.update(spline_metadata)
             return predicted_full, residual_full, metadata
 
     predicted_valid, polynomial_metadata = _fit_polynomial_model(
-        temperature_valid, rating_valid, config
+        predictor_valid, rating_valid, config
     )
-    predicted_full.loc[temperature_valid.index] = predicted_valid
+    predicted_full.loc[predictor_valid.index] = predicted_valid
     residual_valid = _compute_residuals(rating_valid, predicted_valid)
     residual_full.loc[rating_valid.index] = residual_valid
     metadata.update(polynomial_metadata)
@@ -219,5 +219,5 @@ def fit_temperature_rating_curve(
     return predicted_full, residual_full, metadata
 
 
-__all__ = ["fit_temperature_rating_curve"]
+__all__ = ["fit_predictor_rating_curve"]
 

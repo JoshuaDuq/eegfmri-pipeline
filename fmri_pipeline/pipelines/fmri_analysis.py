@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
-from fmri_pipeline.utils.signature_paths import discover_signature_root
+from fmri_pipeline.utils.signature_paths import discover_signature_root_and_specs
 from fmri_pipeline.utils.text import safe_slug
 
 
@@ -40,15 +40,16 @@ class FmriAnalysisPipeline(PipelineBase):
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="fmri_analysis", config=config)
 
-    def _discover_signature_root(self) -> Optional[Path]:
+    def _discover_signature_root_and_specs(self) -> tuple[Optional[Path], list]:
         """
-        Best-effort path discovery for multivariate signature weight maps.
+        Resolve signature weight-map root directory and spec list from config.
 
-        Preference:
+        Preference for root:
         1) config: paths.signature_dir (explicit override)
         2) sibling directory of derivatives: <deriv_root>/../external
+        Specs are read from config: paths.signature_maps (list of {name, path} dicts).
         """
-        return discover_signature_root(self.config, self.deriv_root)
+        return discover_signature_root_and_specs(self.config, self.deriv_root)
 
     def _discover_plot_assets(
         self,
@@ -303,6 +304,7 @@ class FmriAnalysisPipeline(PipelineBase):
 
                 native_bg, native_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="native")
                 mni_bg, mni_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="mni")
+                sig_root, sig_specs = self._discover_signature_root_and_specs()
 
                 native_effect = None
                 native_variance = None
@@ -335,7 +337,8 @@ class FmriAnalysisPipeline(PipelineBase):
                     mni_bg_img_path=mni_bg,
                     native_mask_img_path=native_mask,
                     mni_mask_img_path=mni_mask,
-                    signature_root=self._discover_signature_root(),
+                    signature_root=sig_root,
+                    signature_specs=sig_specs,
                 )
         except Exception as exc:
             # Best-effort: plotting/reporting should never fail the fMRI analysis step.

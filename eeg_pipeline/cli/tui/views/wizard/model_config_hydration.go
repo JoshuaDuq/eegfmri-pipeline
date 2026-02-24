@@ -187,9 +187,9 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.behaviorPredictorColumn = s
 			}
 		}},
-		{key: "behavior_analysis.control_temperature", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_control_enabled", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
-				m.controlTemperature = b
+				m.controlPredictor = b
 			}
 		}},
 		{key: "behavior_analysis.control_trial_order", apply: func(v interface{}) {
@@ -268,7 +268,7 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		}},
 		{key: "behavior_analysis.correlations.prefer_predictor_residual", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
-				m.correlationsPreferPainResidual = b
+				m.correlationsPreferPredictorResidual = b
 			}
 		}},
 		{key: "behavior_analysis.correlations.p_primary_mode", apply: func(v interface{}) {
@@ -301,9 +301,9 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.groupLevelTarget = strings.TrimSpace(s)
 			}
 		}},
-		{key: "behavior_analysis.group_level.multilevel_correlations.control_temperature", apply: func(v interface{}) {
+		{key: "behavior_analysis.group_level.multilevel_correlations.control_predictor", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
-				m.groupLevelControlTemperature = b
+				m.groupLevelControlPredictor = b
 			}
 		}},
 		{key: "behavior_analysis.group_level.multilevel_correlations.control_trial_order", apply: func(v interface{}) {
@@ -328,26 +328,26 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		}},
 		{key: "behavior_analysis.predictor_sensitivity.min_trials", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painSensitivityMinTrials = n
+				m.predictorSensitivityMinTrials = n
 			}
 		}},
 		{key: "behavior_analysis.predictor_sensitivity.primary_unit", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				if strings.EqualFold(s, "run_mean") || strings.EqualFold(s, "run") {
-					m.painSensitivityPrimaryUnit = 1
+					m.predictorSensitivityPrimaryUnit = 1
 				} else {
-					m.painSensitivityPrimaryUnit = 0
+					m.predictorSensitivityPrimaryUnit = 0
 				}
 			}
 		}},
 		{key: "behavior_analysis.predictor_sensitivity.n_permutations", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painSensitivityPermutations = n
+				m.predictorSensitivityPermutations = n
 			}
 		}},
 		{key: "behavior_analysis.predictor_sensitivity.p_primary_mode", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
-				m.painSensitivityPermutationPrimary = !strings.EqualFold(strings.TrimSpace(s), "asymptotic")
+				m.predictorSensitivityPermutationPrimary = !strings.EqualFold(strings.TrimSpace(s), "asymptotic")
 			}
 		}},
 		{key: "behavior_analysis.condition.compare_values", apply: func(v interface{}) {
@@ -413,9 +413,9 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.conditionWindowMinSamples = n
 			}
 		}},
-		{key: "behavior_analysis.mixed_effects.include_temperature", apply: func(v interface{}) {
+		{key: "behavior_analysis.mixed_effects.include_predictor", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
-				m.mixedIncludeTemperature = b
+				m.mixedIncludePredictor = b
 			}
 		}},
 		{key: "behavior_analysis.mediation.p_primary_mode", apply: func(v interface{}) {
@@ -507,103 +507,103 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		}},
 		{key: "behavior_analysis.predictor_residual.enabled", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
-				m.painResidualEnabled = b
+				m.predictorResidualEnabled = b
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.method", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				if strings.EqualFold(s, "poly") {
-					m.painResidualMethod = 1
+					m.predictorResidualMethod = 1
 				} else {
-					m.painResidualMethod = 0
+					m.predictorResidualMethod = 0
 				}
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.min_samples", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painResidualMinSamples = n
+				m.predictorResidualMinSamples = n
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.spline_df_candidates", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
-				m.painResidualSplineDfCandidates = strings.Join(splitLooseList(spec), ",")
+				m.predictorResidualSplineDfCandidates = strings.Join(splitLooseList(spec), ",")
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.poly_degree", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painResidualPolyDegree = n
+				m.predictorResidualPolyDegree = n
 			}
 		}},
-		{key: "behavior_analysis.temperature_models.model_comparison.enabled", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_models.model_comparison.enabled", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
-				m.painResidualModelCompareEnabled = b
+				m.predictorResidualModelCompareEnabled = b
 			}
 		}},
-		{key: "behavior_analysis.temperature_models.model_comparison.min_samples", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_models.model_comparison.min_samples", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painResidualModelCompareMinSamples = n
+				m.predictorResidualModelCompareMinSamples = n
 			}
 		}},
-		{key: "behavior_analysis.temperature_models.model_comparison.poly_degrees", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_models.model_comparison.poly_degrees", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
-				m.painResidualModelComparePolyDegrees = strings.Join(splitLooseList(spec), ",")
+				m.predictorResidualModelComparePolyDegrees = strings.Join(splitLooseList(spec), ",")
 			}
 		}},
-		{key: "behavior_analysis.temperature_models.breakpoint_test.enabled", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_models.breakpoint_test.enabled", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
-				m.painResidualBreakpointEnabled = b
+				m.predictorResidualBreakpointEnabled = b
 			}
 		}},
-		{key: "behavior_analysis.temperature_models.breakpoint_test.min_samples", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_models.breakpoint_test.min_samples", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painResidualBreakpointMinSamples = n
+				m.predictorResidualBreakpointMinSamples = n
 			}
 		}},
-		{key: "behavior_analysis.temperature_models.breakpoint_test.n_candidates", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_models.breakpoint_test.n_candidates", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painResidualBreakpointCandidates = n
+				m.predictorResidualBreakpointCandidates = n
 			}
 		}},
-		{key: "behavior_analysis.temperature_models.breakpoint_test.quantile_low", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_models.breakpoint_test.quantile_low", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
-				m.painResidualBreakpointQlow = f
+				m.predictorResidualBreakpointQlow = f
 			}
 		}},
-		{key: "behavior_analysis.temperature_models.breakpoint_test.quantile_high", apply: func(v interface{}) {
+		{key: "behavior_analysis.predictor_models.breakpoint_test.quantile_high", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
-				m.painResidualBreakpointQhigh = f
+				m.predictorResidualBreakpointQhigh = f
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.crossfit.enabled", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
-				m.painResidualCrossfitEnabled = b
+				m.predictorResidualCrossfitEnabled = b
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.crossfit.group_column", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
-				m.painResidualCrossfitGroupColumn = s
+				m.predictorResidualCrossfitGroupColumn = s
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.crossfit.n_splits", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painResidualCrossfitNSplits = n
+				m.predictorResidualCrossfitNSplits = n
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.crossfit.method", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				if strings.EqualFold(s, "poly") {
-					m.painResidualCrossfitMethod = 1
+					m.predictorResidualCrossfitMethod = 1
 				} else {
-					m.painResidualCrossfitMethod = 0
+					m.predictorResidualCrossfitMethod = 0
 				}
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.crossfit.spline_n_knots", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.painResidualCrossfitSplineKnots = n
+				m.predictorResidualCrossfitSplineKnots = n
 			}
 		}},
-		{key: "behavior_analysis.statistics.temperature_control", apply: func(v interface{}) {
+		{key: "behavior_analysis.statistics.predictor_control", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(s) {
 				case "linear":
@@ -696,9 +696,9 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.validationMaxAmplitudeUv = f
 			}
 		}},
-		{key: "io.constants.temperature_range", apply: func(v interface{}) {
+		{key: "io.constants.predictor_range", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
-				m.ioTemperatureRange = strings.Join(splitLooseList(spec), ",")
+				m.ioPredictorRange = strings.Join(splitLooseList(spec), ",")
 			}
 		}},
 		{key: "io.constants.max_missing_channels_fraction", apply: func(v interface{}) {

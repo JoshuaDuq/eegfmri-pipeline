@@ -46,9 +46,9 @@ var preComparisonFieldsByPlotID = map[string][]plotItemConfigField{
 		plotItemConfigFieldDoseResponseScopes,
 		plotItemConfigFieldDoseResponseStat,
 	},
-	"behavior_pain_probability": {
+	"behavior_binary_outcome_probability": {
 		plotItemConfigFieldDoseResponseDoseColumn,
-		plotItemConfigFieldDoseResponsePainColumn,
+		plotItemConfigFieldDoseResponsePredictorColumn,
 	},
 	"band_power_topomaps": {
 		plotItemConfigFieldTopomapWindow,

@@ -15,7 +15,7 @@ from eeg_pipeline.infra.paths import _find_clean_events_path, deriv_features_pat
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.columns import (
     find_binary_outcome_column_in_events,
-    find_temperature_column_in_events,
+    find_predictor_column_in_events,
     pick_target_column,
 )
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
@@ -167,7 +167,7 @@ def _resolve_target_series(
     Resolve target vector from events.
 
     `target` can be:
-    - logical names: "rating", "temperature", "binary_outcome"
+    - logical names: "rating", "predictor", "binary_outcome"
     - a literal column name in events_df
     """
     target_key = (target or "").strip()
@@ -186,15 +186,15 @@ def _resolve_target_series(
         series = pd.to_numeric(events_df[tgt_col], errors="coerce")
         return series, str(tgt_col)
 
-    if target_key.lower() in {"temperature", "temp"}:
-        temp_col = find_temperature_column_in_events(events_df, config)
-        if temp_col is None:
+    if target_key.lower() in {"predictor"}:
+        pred_col = find_predictor_column_in_events(events_df, config)
+        if pred_col is None:
             raise ValueError(
-                "No temperature column found in events.tsv. "
-                f"Tried config event_columns.temperature={config.get('event_columns.temperature', [])}; available={list(events_df.columns)}"
+                "No predictor column found in events.tsv. "
+                f"Tried config event_columns.predictor={config.get('event_columns.predictor', [])}; available={list(events_df.columns)}"
             )
-        series = pd.to_numeric(events_df[temp_col], errors="coerce")
-        return series, str(temp_col)
+        series = pd.to_numeric(events_df[pred_col], errors="coerce")
+        return series, str(pred_col)
 
     if target_key.lower() in {"binary_outcome", "binary"}:
         pain_col = find_binary_outcome_column_in_events(events_df, config)
@@ -230,8 +230,8 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
 
     if target_key in {"", "rating"}:
         aliases.add("rating")
-    elif target_key in {"temperature", "temp"}:
-        aliases.add("temperature")
+    elif target_key in {"predictor"}:
+        aliases.add("predictor")
     elif target_key in {"binary_outcome", "binary"}:
         aliases.add("binary_outcome")
     elif target_key in {"fmri_signature", "fmri-signature"}:
@@ -242,7 +242,7 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     if config is not None:
         event_alias_map = {
             "rating": _as_list(get_config_value(config, "event_columns.rating", [])) or [],
-            "temperature": _as_list(get_config_value(config, "event_columns.temperature", [])) or [],
+            "predictor": _as_list(get_config_value(config, "event_columns.predictor", [])) or [],
             "binary_outcome": _as_list(get_config_value(config, "event_columns.binary_outcome", [])) or [],
         }
         for canonical, column_aliases in event_alias_map.items():
@@ -739,9 +739,9 @@ def _standardize_meta_columns(
     if block_col is not None:
         meta_cols["block"] = block_col
 
-    temp_col = find_temperature_column_in_events(events_df, config)
-    if temp_col is not None:
-        meta_cols["temperature"] = pd.to_numeric(events_df[temp_col], errors="coerce")
+    pred_col = find_predictor_column_in_events(events_df, config)
+    if pred_col is not None:
+        meta_cols["predictor"] = pd.to_numeric(events_df[pred_col], errors="coerce")
 
     pain_col = find_binary_outcome_column_in_events(events_df, config)
     if pain_col is not None:

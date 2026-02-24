@@ -190,6 +190,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 				optFmriAnalysisPlotEmbedImages,
 				optFmriAnalysisPlotSignatures,
 				optFmriAnalysisSignatureDir,
+				optFmriAnalysisSignatureMaps,
 			)
 		}
 	} else {
@@ -210,6 +211,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 				optFmriTrialSigSignatureNPS,
 				optFmriTrialSigSignatureSIIPS1,
 				optFmriAnalysisSignatureDir,
+				optFmriAnalysisSignatureMaps,
 				optFmriTrialSigScopeTrialTypes,
 				optFmriTrialSigScopeStimPhases,
 				optFmriTrialSigGroupColumn,

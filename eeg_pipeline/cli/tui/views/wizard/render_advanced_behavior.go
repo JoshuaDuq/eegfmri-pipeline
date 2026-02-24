@@ -57,9 +57,9 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				label = "▾ Trial Table"
 			}
 			return label, "", "format · lag features · validation"
-		case optBehaviorGroupPainResidual:
+		case optBehaviorGroupPredictorResidual:
 			label := "▸ Residual Modeling"
-			if m.behaviorGroupPainResidualExpanded {
+			if m.behaviorGroupPredictorResidualExpanded {
 				label = "▾ Residual Modeling"
 			}
 			return label, "", "fitting method · diagnostics · crossfit"
@@ -69,9 +69,9 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				label = "▾ Correlations"
 			}
 			return label, "", "target · features · types · multilevel"
-		case optBehaviorGroupPainSens:
+		case optBehaviorGroupPredictorSens:
 			label := "▸ Predictor Sensitivity"
-			if m.behaviorGroupPainSensExpanded {
+			if m.behaviorGroupPredictorSensExpanded {
 				label = "▾ Predictor Sensitivity"
 			}
 			return label, "", "min trials · features · permutations"
@@ -260,7 +260,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "Predictor Column", val, hint
 		case optControlTemp:
-			return "Control Predictor", m.boolToOnOff(m.controlTemperature), "partial-correlation covariate"
+			return "Control Predictor", m.boolToOnOff(m.controlPredictor), "partial-correlation covariate"
 		case optControlOrder:
 			return "Control Trial Order", m.boolToOnOff(m.controlTrialOrder), "partial-correlation covariate"
 		case optRunAdjustmentEnabled:
@@ -364,93 +364,93 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optFeatureSummariesEnabled:
 			return "Feature Summaries", m.boolToOnOff(m.featureSummariesEnabled), "per-feature descriptive stats in output"
 
-		// Pain residual
-		case optPainResidualEnabled:
-			return "Residual", m.boolToOnOff(m.painResidualEnabled), "outcome - f(predictor)"
-		case optPainResidualMethod:
+		// Predictor residual
+		case optPredictorResidualEnabled:
+			return "Residual", m.boolToOnOff(m.predictorResidualEnabled), "outcome - f(predictor)"
+		case optPredictorResidualMethod:
 			v := "spline"
-			if m.painResidualMethod == 1 {
+			if m.predictorResidualMethod == 1 {
 				v = "poly"
 			}
 			return "Residual Method", v, "spline preferred"
-		case optPainResidualPolyDegree:
-			val := fmt.Sprintf("%d", m.painResidualPolyDegree)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualPolyDegree) {
+		case optPredictorResidualPolyDegree:
+			val := fmt.Sprintf("%d", m.predictorResidualPolyDegree)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualPolyDegree) {
 				val = numberDisplay
 			}
 			return "Poly Degree", val, "poly fallback degree"
-		case optPainResidualSplineDfCandidates:
-			val := m.painResidualSplineDfCandidates
+		case optPredictorResidualSplineDfCandidates:
+			val := m.predictorResidualSplineDfCandidates
 			if val == "" {
 				val = "(none)"
 			}
-			if m.editingText && m.editingTextField == textFieldPainResidualSplineDfCandidates {
+			if m.editingText && m.editingTextField == textFieldPredictorResidualSplineDfCandidates {
 				val = textDisplay
 			}
 			return "Spline DF Candidates", val, "comma-separated (e.g., 3,4,5)"
-		case optPainResidualMinSamples:
-			val := fmt.Sprintf("%d", m.painResidualMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualMinSamples) {
+		case optPredictorResidualMinSamples:
+			val := fmt.Sprintf("%d", m.predictorResidualMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualMinSamples) {
 				val = numberDisplay
 			}
 			return "Residual Min Samples", val, "minimum rows for fit"
-		case optPainResidualModelCompare:
-			return "Predictor Model Compare", m.boolToOnOff(m.painResidualModelCompareEnabled), "non-gating diagnostics"
-		case optPainResidualModelComparePolyDegrees:
-			val := m.painResidualModelComparePolyDegrees
+		case optPredictorResidualModelCompare:
+			return "Predictor Model Compare", m.boolToOnOff(m.predictorResidualModelCompareEnabled), "non-gating diagnostics"
+		case optPredictorResidualModelComparePolyDegrees:
+			val := m.predictorResidualModelComparePolyDegrees
 			if val == "" {
 				val = "(none)"
 			}
-			if m.editingText && m.editingTextField == textFieldPainResidualModelComparePolyDegrees {
+			if m.editingText && m.editingTextField == textFieldPredictorResidualModelComparePolyDegrees {
 				val = textDisplay
 			}
 			return "Model Compare Poly Deg", val, "comma-separated (e.g., 2,3)"
-		case optPainResidualModelCompareMinSamples:
-			val := fmt.Sprintf("%d", m.painResidualModelCompareMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualModelCompareMinSamples) {
+		case optPredictorResidualModelCompareMinSamples:
+			val := fmt.Sprintf("%d", m.predictorResidualModelCompareMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualModelCompareMinSamples) {
 				val = numberDisplay
 			}
 			return "Model Compare Min N", val, "minimum rows for comparison"
-		case optPainResidualBreakpoint:
-			return "Breakpoint Test", m.boolToOnOff(m.painResidualBreakpointEnabled), "single-hinge model"
-		case optPainResidualBreakpointCandidates:
-			val := fmt.Sprintf("%d", m.painResidualBreakpointCandidates)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointCandidates) {
+		case optPredictorResidualBreakpoint:
+			return "Breakpoint Test", m.boolToOnOff(m.predictorResidualBreakpointEnabled), "single-hinge model"
+		case optPredictorResidualBreakpointCandidates:
+			val := fmt.Sprintf("%d", m.predictorResidualBreakpointCandidates)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualBreakpointCandidates) {
 				val = numberDisplay
 			}
 			return "Breakpoint Candidates", val, "grid size"
-		case optPainResidualBreakpointMinSamples:
-			val := fmt.Sprintf("%d", m.painResidualBreakpointMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointMinSamples) {
+		case optPredictorResidualBreakpointMinSamples:
+			val := fmt.Sprintf("%d", m.predictorResidualBreakpointMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualBreakpointMinSamples) {
 				val = numberDisplay
 			}
 			return "Breakpoint Min N", val, "minimum rows for hinge test"
-		case optPainResidualBreakpointQlow:
-			val := fmt.Sprintf("%.2f", m.painResidualBreakpointQlow)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointQlow) {
+		case optPredictorResidualBreakpointQlow:
+			val := fmt.Sprintf("%.2f", m.predictorResidualBreakpointQlow)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualBreakpointQlow) {
 				val = numberDisplay
 			}
 			return "Breakpoint Q Low", val, "quantile bound"
-		case optPainResidualBreakpointQhigh:
-			val := fmt.Sprintf("%.2f", m.painResidualBreakpointQhigh)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointQhigh) {
+		case optPredictorResidualBreakpointQhigh:
+			val := fmt.Sprintf("%.2f", m.predictorResidualBreakpointQhigh)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualBreakpointQhigh) {
 				val = numberDisplay
 			}
 			return "Breakpoint Q High", val, "quantile bound"
-		case optPainResidualCrossfitEnabled:
-			if !m.painResidualEnabled {
+		case optPredictorResidualCrossfitEnabled:
+			if !m.predictorResidualEnabled {
 				return "Residual Crossfit", "N/A", "enable Residual"
 			}
-			return "Residual Crossfit", m.boolToOnOff(m.painResidualCrossfitEnabled), "out-of-run predictor→outcome"
-		case optPainResidualCrossfitGroupColumn:
-			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
+			return "Residual Crossfit", m.boolToOnOff(m.predictorResidualCrossfitEnabled), "out-of-run predictor→outcome"
+		case optPredictorResidualCrossfitGroupColumn:
+			if !m.predictorResidualEnabled || !m.predictorResidualCrossfitEnabled {
 				return "Crossfit Group Col", "N/A", "enable Residual Crossfit"
 			}
-			val := m.painResidualCrossfitGroupColumn
+			val := m.predictorResidualCrossfitGroupColumn
 			if strings.TrimSpace(val) == "" {
 				val = "(default: run column)"
 			}
-			if m.editingText && m.editingTextField == textFieldPainResidualCrossfitGroupColumn {
+			if m.editingText && m.editingTextField == textFieldPredictorResidualCrossfitGroupColumn {
 				val = textDisplay
 			}
 			hint := "Space to select"
@@ -460,33 +460,33 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = "Space to edit (blank=run column)"
 			}
 			return "Crossfit Group Col", val, hint
-		case optPainResidualCrossfitNSplits:
-			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
+		case optPredictorResidualCrossfitNSplits:
+			if !m.predictorResidualEnabled || !m.predictorResidualCrossfitEnabled {
 				return "Crossfit Splits", "N/A", "enable Residual Crossfit"
 			}
-			val := fmt.Sprintf("%d", m.painResidualCrossfitNSplits)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualCrossfitNSplits) {
+			val := fmt.Sprintf("%d", m.predictorResidualCrossfitNSplits)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualCrossfitNSplits) {
 				val = numberDisplay
 			}
 			return "Crossfit Splits", val, "n_splits (>=2)"
-		case optPainResidualCrossfitMethod:
-			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
+		case optPredictorResidualCrossfitMethod:
+			if !m.predictorResidualEnabled || !m.predictorResidualCrossfitEnabled {
 				return "Crossfit Method", "N/A", "enable Residual Crossfit"
 			}
 			v := "spline"
-			if m.painResidualCrossfitMethod == 1 {
+			if m.predictorResidualCrossfitMethod == 1 {
 				v = "poly"
 			}
 			return "Crossfit Method", v, "spline | poly"
-		case optPainResidualCrossfitSplineKnots:
-			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
+		case optPredictorResidualCrossfitSplineKnots:
+			if !m.predictorResidualEnabled || !m.predictorResidualCrossfitEnabled {
 				return "Crossfit Knots", "N/A", "enable Residual Crossfit"
 			}
-			if m.painResidualCrossfitMethod == 1 {
+			if m.predictorResidualCrossfitMethod == 1 {
 				return "Crossfit Knots", "N/A", "poly method"
 			}
-			val := fmt.Sprintf("%d", m.painResidualCrossfitSplineKnots)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualCrossfitSplineKnots) {
+			val := fmt.Sprintf("%d", m.predictorResidualCrossfitSplineKnots)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualCrossfitSplineKnots) {
 				val = numberDisplay
 			}
 			return "Crossfit Knots", val, "spline knots (>=3)"
@@ -501,8 +501,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "predictor"
 			}
 			return "Outcome", v, "dependent variable"
-		case optRegressionIncludeTemperature:
-			return "Include Predictor", m.boolToOnOff(m.regressionIncludeTemperature), "add predictor covariate"
+		case optRegressionIncludePredictor:
+			return "Include Predictor", m.boolToOnOff(m.regressionIncludePredictor), "add predictor covariate"
 		case optRegressionTempControl:
 			v := "linear"
 			switch m.regressionTempControl {
@@ -572,8 +572,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Max Features", val, "0=no limit"
 
 		// Models
-		case optModelsIncludeTemperature:
-			return "Include Predictor", m.boolToOnOff(m.modelsIncludeTemperature), "add predictor covariate"
+		case optModelsIncludePredictor:
+			return "Include Predictor", m.boolToOnOff(m.modelsIncludePredictor), "add predictor covariate"
 		case optModelsTempControl:
 			v := "linear"
 			switch m.modelsTempControl {
@@ -631,12 +631,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Max Features", val, "0=no limit"
 		case optModelsOutcomeRating:
 			return "Outcome: rating", m.boolToOnOff(m.modelsOutcomeRating), "include rating"
-		case optModelsOutcomePainResidual:
-			return "Outcome: residual", m.boolToOnOff(m.modelsOutcomePainResidual), "include residualized outcome"
-		case optModelsOutcomeTemperature:
-			return "Outcome: predictor", m.boolToOnOff(m.modelsOutcomeTemperature), "include predictor"
-		case optModelsOutcomePainBinary:
-			return "Outcome: binary", m.boolToOnOff(m.modelsOutcomePainBinary), "include binary outcome"
+		case optModelsOutcomePredictorResidual:
+			return "Outcome: residual", m.boolToOnOff(m.modelsOutcomePredictorResidual), "include residualized outcome"
+		case optModelsOutcomePredictor:
+			return "Outcome: predictor", m.boolToOnOff(m.modelsOutcomePredictor), "include predictor"
+		case optModelsOutcomeBinaryOutcome:
+			return "Outcome: binary", m.boolToOnOff(m.modelsOutcomeBinaryOutcome), "include binary outcome"
 		case optModelsFamilyOLS:
 			return "Family: OLS-HC3", m.boolToOnOff(m.modelsFamilyOLS), "ols_hc3"
 		case optModelsFamilyRobust:
@@ -719,18 +719,18 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		// Influence
 		case optInfluenceOutcomeRating:
 			return "Outcome: rating", m.boolToOnOff(m.influenceOutcomeRating), "include rating"
-		case optInfluenceOutcomePainResidual:
-			return "Outcome: residual", m.boolToOnOff(m.influenceOutcomePainResidual), "include residual"
-		case optInfluenceOutcomeTemperature:
-			return "Outcome: predictor", m.boolToOnOff(m.influenceOutcomeTemperature), "include predictor"
+		case optInfluenceOutcomePredictorResidual:
+			return "Outcome: residual", m.boolToOnOff(m.influenceOutcomePredictorResidual), "include residual"
+		case optInfluenceOutcomePredictor:
+			return "Outcome: predictor", m.boolToOnOff(m.influenceOutcomePredictor), "include predictor"
 		case optInfluenceMaxFeatures:
 			val := fmt.Sprintf("%d", m.influenceMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optInfluenceMaxFeatures) {
 				val = numberDisplay
 			}
 			return "Max Features", val, "top effects to inspect"
-		case optInfluenceIncludeTemperature:
-			return "Include Predictor", m.boolToOnOff(m.influenceIncludeTemperature), "add covariate"
+		case optInfluenceIncludePredictor:
+			return "Include Predictor", m.boolToOnOff(m.influenceIncludePredictor), "add covariate"
 		case optInfluenceTempControl:
 			v := "linear"
 			switch m.influenceTempControl {
@@ -893,35 +893,35 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Effect Threshold", val, "Cohen's d cutoff"
 
 		// Temporal
-		case optPainSensitivityMinTrials:
+		case optPredictorSensitivityMinTrials:
 			val := "unset"
-			if m.painSensitivityMinTrials > 0 {
-				val = fmt.Sprintf("%d", m.painSensitivityMinTrials)
+			if m.predictorSensitivityMinTrials > 0 {
+				val = fmt.Sprintf("%d", m.predictorSensitivityMinTrials)
 			}
-			if m.editingNumber && m.isCurrentlyEditing(optPainSensitivityMinTrials) {
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorSensitivityMinTrials) {
 				val = numberDisplay
 			}
 			return "Min Trials", val, "0=unset"
-		case optPainSensitivityPrimaryUnit:
+		case optPredictorSensitivityPrimaryUnit:
 			v := "trial"
-			if m.painSensitivityPrimaryUnit == 1 {
+			if m.predictorSensitivityPrimaryUnit == 1 {
 				v = "run_mean"
 			}
 			return "Primary Unit", v, "trial | run_mean"
-		case optPainSensitivityPermutations:
-			val := fmt.Sprintf("%d", m.painSensitivityPermutations)
-			if m.editingNumber && m.isCurrentlyEditing(optPainSensitivityPermutations) {
+		case optPredictorSensitivityPermutations:
+			val := fmt.Sprintf("%d", m.predictorSensitivityPermutations)
+			if m.editingNumber && m.isCurrentlyEditing(optPredictorSensitivityPermutations) {
 				val = numberDisplay
 			}
 			return "Permutations", val, "0=use global"
-		case optPainSensitivityPermutationPrimary:
-			return "Permutation p-primary", m.boolToOnOff(m.painSensitivityPermutationPrimary), "perm_if_available | asymptotic"
-		case optPainSensitivityFeatures:
-			val := m.painSensitivityFeaturesSpec
+		case optPredictorSensitivityPermutationPrimary:
+			return "Permutation p-primary", m.boolToOnOff(m.predictorSensitivityPermutationPrimary), "perm_if_available | asymptotic"
+		case optPredictorSensitivityFeatures:
+			val := m.predictorSensitivityFeaturesSpec
 			if strings.TrimSpace(val) == "" {
 				val = "(all)"
 			}
-			if m.editingText && m.editingTextField == textFieldPainSensitivityFeatures {
+			if m.editingText && m.editingTextField == textFieldPredictorSensitivityFeatures {
 				val = textDisplay
 			}
 			return "Feature Filters", val, "comma-separated feature families"
@@ -1106,7 +1106,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			return "Correlation Types", val, "comma-separated: raw,partial_cov,partial_temp,partial_cov_temp,run_mean"
-		case optCorrelationsUseCrossfitPainResidual:
+		case optCorrelationsUseCrossfitPredictorResidual:
 			return "Use residual_cv", m.boolToOnOff(m.correlationsUseCrossfitResidual), "requires residual crossfit"
 		case optCorrelationsPrimaryUnit:
 			v := "trial"
@@ -1120,8 +1120,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Min Runs", val, "minimum runs for run-mean stats"
-		case optCorrelationsPreferPainResidual:
-			return "Prefer Residual Target", m.boolToOnOff(m.correlationsPreferPainResidual), "prefer residual target ordering"
+		case optCorrelationsPreferPredictorResidual:
+			return "Prefer Residual Target", m.boolToOnOff(m.correlationsPreferPredictorResidual), "prefer residual target ordering"
 		case optCorrelationsPermutations:
 			val := fmt.Sprintf("%d", m.correlationsPermutations)
 			if m.editingNumber && m.isCurrentlyEditing(optCorrelationsPermutations) {
@@ -1180,11 +1180,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = "type column name (no discovered targets)"
 			}
 			return "Group Target", v, hint
-		case optGroupLevelControlTemperature:
+		case optGroupLevelControlPredictor:
 			if !m.isComputationSelected("multilevel_correlations") {
 				return "Ctrl Predictor", "N/A", "enable Group Multilevel Correlations"
 			}
-			return "Ctrl Predictor", m.boolToOnOff(m.groupLevelControlTemperature), "partial Spearman covariate"
+			return "Ctrl Predictor", m.boolToOnOff(m.groupLevelControlPredictor), "partial Spearman covariate"
 		case optGroupLevelControlTrialOrder:
 			if !m.isComputationSelected("multilevel_correlations") {
 				return "Ctrl Trial Order", "N/A", "enable Group Multilevel Correlations"
@@ -1356,8 +1356,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "intercept_slope"
 			}
 			return "Random Effects", v, "intercept=random intercept · intercept_slope=full random"
-		case optMixedIncludeTemperature:
-			return "Include Predictor", m.boolToOnOff(m.mixedIncludeTemperature), "add predictor covariate"
+		case optMixedIncludePredictor:
+			return "Include Predictor", m.boolToOnOff(m.mixedIncludePredictor), "add predictor covariate"
 		case optMixedMaxFeatures:
 			val := fmt.Sprintf("%d", m.mixedMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optMixedMaxFeatures) {
@@ -1446,15 +1446,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Max Amplitude (µV)", val, "amplitude rejection threshold"
 
 		// System / IO
-		case optIOTemperatureRange:
-			val := m.ioTemperatureRange
+		case optIOPredictorRange:
+			val := m.ioPredictorRange
 			if strings.TrimSpace(val) == "" {
 				val = "(default)"
 			}
-			if m.editingText && m.editingTextField == textFieldIOTemperatureRange {
+			if m.editingText && m.editingTextField == textFieldIOPredictorRange {
 				val = textDisplay
 			}
-			return "Temperature Range", val, "e.g. 32.0,50.0"
+			return "Predictor Range", val, "e.g. 32.0,50.0"
 		case optIOMaxMissingChannelsFraction:
 			val := fmt.Sprintf("%.2f", m.ioMaxMissingChannelsFraction)
 			if m.editingNumber && m.isCurrentlyEditing(optIOMaxMissingChannelsFraction) {

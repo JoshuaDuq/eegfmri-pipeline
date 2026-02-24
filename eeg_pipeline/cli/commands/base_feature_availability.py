@@ -179,11 +179,11 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         "trial_table": ["trial_table*/*/trials_*.tsv", "trial_table*/*/trials_*.parquet"],
         "lag_features": ["lag_features*/*/trials_with_lags*.tsv", "lag_features*/*/*.metadata.json"],
         "predictor_residual": ["predictor_residual*/*/trials_with_residual*.tsv", "predictor_residual*/*/*.metadata.json"],
-        "temperature_models": [
-            "temperature_models*/*/model_comparison*.parquet",
-            "temperature_models*/*/model_comparison*.tsv",
-            "temperature_models*/*/breakpoint_candidates*.parquet",
-            "temperature_models*/*/breakpoint_candidates*.tsv",
+        "predictor_models": [
+            "predictor_models*/*/model_comparison*.parquet",
+            "predictor_models*/*/model_comparison*.tsv",
+            "predictor_models*/*/breakpoint_candidates*.parquet",
+            "predictor_models*/*/breakpoint_candidates*.tsv",
         ],
         "regression": [
             "trialwise_regression*/*/regression_feature_effects*.parquet",

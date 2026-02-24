@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from fmri_pipeline.analysis.pain_signatures import compute_pain_signature_expression
+from fmri_pipeline.analysis.multivariate_signatures import compute_signature_expression
 from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
 from fmri_pipeline.utils.bold_discovery import (
     build_first_level_model as _build_first_level_model,
@@ -614,6 +614,7 @@ def run_trial_signature_extraction_for_subject(
     subject: str,
     cfg: TrialSignatureExtractionConfig,
     signature_root: Optional[Path],
+    signature_specs: Optional[List[Any]] = None,
     output_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
@@ -630,13 +631,14 @@ def run_trial_signature_extraction_for_subject(
         """
     cfg = cfg.normalized()
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
-    if signature_root is not None:
-        # Scientific validity guardrail: the bundled NPS/SIIPS1 weights are in MNI space.
-        # Resampling them into subject-native/T1w grids is not a valid comparison.
+    if signature_root is not None and signature_specs:
+        # Signature weight maps must be in the same space as the beta images.
+        # Most multivariate signatures (e.g. NPS, SIIPS1) are defined in MNI space.
         space = str(cfg.fmriprep_space or "").strip().lower()
         if "mni" not in space:
             raise ValueError(
-                "Trial-wise signature extraction requires MNI-space images for NPS/SIIPS1. "
+                "Trial-wise signature extraction requires images in the same space as the "
+                "signature weight maps (typically MNI space). "
                 "Re-run with --input-source fmriprep --fmriprep-space MNI152NLin2009cAsym "
                 "(or provide MNI-space inputs)."
             )
@@ -766,10 +768,11 @@ def run_trial_signature_extraction_for_subject(
                     p.parent.mkdir(parents=True, exist_ok=True)
                     nib.save(var_img, str(p))
 
-                if signature_root is not None:
-                    sigs = compute_pain_signature_expression(
+                if signature_root is not None and signature_specs:
+                    sigs = compute_signature_expression(
                         stat_or_effect_img=beta_img,
                         signature_root=signature_root,
+                        signature_specs=signature_specs,
                         mask_img=mask_img,
                         signatures=cfg.signatures,
                     )
@@ -848,10 +851,11 @@ def run_trial_signature_extraction_for_subject(
                     p.parent.mkdir(parents=True, exist_ok=True)
                     nib.save(var_img, str(p))
 
-                if signature_root is not None:
-                    sigs = compute_pain_signature_expression(
+                if signature_root is not None and signature_specs:
+                    sigs = compute_signature_expression(
                         stat_or_effect_img=beta_img,
                         signature_root=signature_root,
+                        signature_specs=signature_specs,
                         mask_img=mask_img,
                         signatures=cfg.signatures,
                     )
@@ -929,8 +933,8 @@ def run_trial_signature_extraction_for_subject(
                 if cfg.write_condition_betas:
                     nib.save(diff_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_minus_b_beta.nii.gz"))
 
-            if signature_root is not None:
-                for label, img in [
+if signature_root is not None and signature_specs:
+            for label, img in [
                     ("cond_a", a_img),
                     ("cond_b", b_img),
                     ("cond_a_minus_b", diff_img),
@@ -943,9 +947,10 @@ def run_trial_signature_extraction_for_subject(
                             brain_union = _union_masks_to_target(run_brain_masks, img)
                         except Exception:
                             brain_union = None
-                    sigs = compute_pain_signature_expression(
+                    sigs = compute_signature_expression(
                         stat_or_effect_img=img,
                         signature_root=signature_root,
+                        signature_specs=signature_specs,
                         mask_img=brain_union,
                         signatures=cfg.signatures,
                     )
@@ -1027,9 +1032,10 @@ def run_trial_signature_extraction_for_subject(
                             brain_union = _union_masks_to_target(run_brain_masks, img)
                         except Exception:
                             brain_union = None
-                    sigs = compute_pain_signature_expression(
+                    sigs = compute_signature_expression(
                         stat_or_effect_img=img,
                         signature_root=signature_root,
+                        signature_specs=signature_specs,
                         mask_img=brain_union,
                         signatures=cfg.signatures,
                     )

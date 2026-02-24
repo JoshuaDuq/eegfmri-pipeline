@@ -1,8 +1,8 @@
 """
 TFR contrast plotting functions.
 
-Functions for creating pain and temperature contrast visualizations,
-including max-min temperature contrasts and combined pain/temperature plots.
+Functions for creating condition and predictor contrast visualizations,
+including max-min predictor contrasts and combined condition/predictor plots.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from eeg_pipeline.plotting.io.figures import (
     plot_topomap_on_ax,
 )
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
+from eeg_pipeline.utils.data.columns import get_predictor_column_from_config
 from eeg_pipeline.utils.config.loader import require_config_value
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.analysis.tfr import (
@@ -38,9 +38,9 @@ from ...utils.analysis.stats import (
 )
 from ...utils.data.tfr_alignment import (
     compute_aligned_data_length,
-    extract_temperature_series,
-    get_temperature_range,
-    create_temperature_masks_from_range,
+    extract_predictor_series,
+    get_predictor_range,
+    create_predictor_masks_from_range,
 )
 from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
@@ -390,20 +390,20 @@ def _compute_band_diff_data(
     tmin: float,
     tmax: float,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """Compute band difference data for condition and temperature contrasts.
+    """Compute band difference data for condition and predictor contrasts.
     
     Args:
         tfr_condition_2: TFR for condition 2
         tfr_condition_1: TFR for condition 1
-        tfr_max_temp: TFR for maximum temperature
-        tfr_min_temp: TFR for minimum temperature
+        tfr_max_pred: TFR for maximum predictor
+        tfr_min_pred: TFR for minimum predictor
         fmin: Minimum frequency
         fmax_effective: Effective maximum frequency
         tmin: Minimum time
         tmax: Maximum time
         
     Returns:
-        Tuple of (condition_diff_data, temperature_diff_data) or (None, None) on failure
+        Tuple of (condition_diff_data, predictor_diff_data) or (None, None) on failure
     """
     condition_2_data = average_tfr_band(tfr_condition_2, fmin=fmin, fmax=fmax_effective, tmin=tmin, tmax=tmax)
     condition_1_data = average_tfr_band(tfr_condition_1, fmin=fmin, fmax=fmax_effective, tmin=tmin, tmax=tmax)
@@ -414,8 +414,8 @@ def _compute_band_diff_data(
         return None, None
     
     condition_diff_data = condition_2_data - condition_1_data
-    temperature_diff_data = max_temp_data - min_temp_data
-    return condition_diff_data, temperature_diff_data
+    predictor_diff_data = max_temp_data - min_temp_data
+    return condition_diff_data, predictor_diff_data
 
 
 def _trim_mask_to_length(mask, target_length: int):
@@ -544,7 +544,7 @@ def _save_fig(
 ###################################################################
 
 
-def contrast_maxmin_temperature(
+def contrast_maxmin_predictor(
     tfr: "mne.time_frequency.EpochsTFR | mne.time_frequency.AverageTFR",
     events_df: Optional[pd.DataFrame],
     out_dir: Path,
@@ -553,14 +553,14 @@ def contrast_maxmin_temperature(
     active_window: Optional[Tuple[float, float]] = None,
     logger: Optional[logging.Logger] = None,
 ) -> None:
-    """Plot max vs min temperature contrast topomaps.
+    """Plot max vs min predictor contrast topomaps.
     
-    Creates topomap grid showing max temperature, min temperature, and their difference
+    Creates topomap grid showing max predictor, min predictor, and their difference
     across frequency bands.
     
     Args:
         tfr: MNE TFR object (EpochsTFR or AverageTFR)
-        events_df: Optional events DataFrame with temperature column
+        events_df: Optional events DataFrame with predictor column
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
@@ -576,31 +576,31 @@ def contrast_maxmin_temperature(
                 f"(got {active_raw!r})"
             )
         active_window = (float(active_raw[0]), float(active_raw[1]))
-    if not require_epochs_tfr(tfr, "Max-vs-min temperature contrast", logger):
+    if not require_epochs_tfr(tfr, "Max-vs-min predictor contrast", logger):
         return
     if events_df is None:
-        log("Max-vs-min temperature contrast requires events_df; skipping.", logger)
+        log("Max-vs-min predictor contrast requires events_df; skipping.", logger)
         return
-    temp_col = get_temperature_column_from_config(config, events_df)
+    temp_col = get_predictor_column_from_config(config, events_df)
     if temp_col is None:
-        log("Max-vs-min temperature contrast: no temperature column found; skipping.", logger)
+        log("Max-vs-min predictor contrast: no predictor column found; skipping.", logger)
         return
 
     n = compute_aligned_data_length(tfr, events_df)
     
-    temp_series = extract_temperature_series(tfr, events_df, temp_col, n)
+    pred_series = extract_predictor_series(tfr, events_df, temp_col, n)
     if temp_series is None:
-        log("Max-vs-min temperature contrast: no temperature column found; skipping.", logger)
+        log("Max-vs-min predictor contrast: no predictor column found; skipping.", logger)
         return
 
-    t_min, t_max = get_temperature_range(temp_series)
+    t_min, t_max = get_predictor_range(temp_series)
     if t_min is None or t_max is None:
-        log("Max-vs-min temperature contrast: need at least 2 temperature levels; skipping.", logger)
+        log("Max-vs-min predictor contrast: need at least 2 predictor levels; skipping.", logger)
         return
 
-    mask_min, mask_max = create_temperature_masks_from_range(temp_series, t_min, t_max)
+    mask_min, mask_max = create_predictor_masks_from_range(temp_series, t_min, t_max)
     if mask_min.sum() == 0 or mask_max.sum() == 0:
-        log(f"Max-vs-min temperature contrast: zero trials in one group (min n={int(mask_min.sum())}, max n={int(mask_max.sum())}); skipping.", logger)
+        log(f"Max-vs-min predictor contrast: zero trials in one group (min n={int(mask_min.sum())}, max n={int(mask_max.sum())}); skipping.", logger)
         return
 
     tfr_sub = create_tfr_subset(tfr, n)

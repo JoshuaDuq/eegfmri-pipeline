@@ -67,42 +67,42 @@ def write_stats_table_impl(
     return actual_path
 
 
-def attach_temperature_metadata_impl(
+def attach_predictor_metadata_impl(
     df: pd.DataFrame,
     metadata_dict: Dict[str, Any],
     *,
     target_col: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Attach temperature control metadata to result DataFrame."""
+    """Attach predictor control metadata to result DataFrame."""
     if df is None or df.empty:
         return df
 
-    if "temperature_control" not in df.columns:
+    if "predictor_control" not in df.columns:
         df = df.copy()
-        df["temperature_control"] = metadata_dict.get("temperature_control", None)
-        df["temperature_control_used"] = metadata_dict.get("temperature_control_used", None)
+        df["predictor_control"] = metadata_dict.get("predictor_control", None)
+        df["predictor_control_used"] = metadata_dict.get("predictor_control_used", None)
 
-        spline_meta = metadata_dict.get("temperature_spline", None)
+        spline_meta = metadata_dict.get("predictor_spline", None)
         if isinstance(spline_meta, dict):
-            df["temperature_spline_status"] = spline_meta.get("status", None)
-            df["temperature_spline_n_knots"] = spline_meta.get("n_knots", None)
-            df["temperature_spline_quantile_low"] = spline_meta.get("quantile_low", None)
-            df["temperature_spline_quantile_high"] = spline_meta.get("quantile_high", None)
+            df["predictor_spline_status"] = spline_meta.get("status", None)
+            df["predictor_spline_n_knots"] = spline_meta.get("n_knots", None)
+            df["predictor_spline_quantile_low"] = spline_meta.get("quantile_low", None)
+            df["predictor_spline_quantile_high"] = spline_meta.get("quantile_high", None)
 
     if target_col and target_col in df.columns:
-        ctrl_by_out = metadata_dict.get("temperature_control_by_outcome", None)
+        ctrl_by_out = metadata_dict.get("predictor_control_by_outcome", None)
         if isinstance(ctrl_by_out, dict):
-            used_map = {str(k): (v or {}).get("temperature_control_used", None) for k, v in ctrl_by_out.items()}
+            used_map = {str(k): (v or {}).get("predictor_control_used", None) for k, v in ctrl_by_out.items()}
             status_map = {}
             nknots_map = {}
             for k, v in ctrl_by_out.items():
-                s = (v or {}).get("temperature_spline", None)
+                s = (v or {}).get("predictor_spline", None)
                 if isinstance(s, dict):
                     status_map[str(k)] = s.get("status", None)
                     nknots_map[str(k)] = s.get("n_knots", None)
-            df["temperature_control_used"] = df[target_col].astype(str).map(used_map)
-            df["temperature_spline_status"] = df[target_col].astype(str).map(status_map)
-            df["temperature_spline_n_knots"] = df[target_col].astype(str).map(nknots_map)
+            df["predictor_control_used"] = df[target_col].astype(str).map(used_map)
+            df["predictor_spline_status"] = df[target_col].astype(str).map(status_map)
+            df["predictor_spline_n_knots"] = df[target_col].astype(str).map(nknots_map)
 
     return df
 

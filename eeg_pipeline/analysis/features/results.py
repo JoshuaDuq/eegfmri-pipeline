@@ -50,11 +50,11 @@ class FeatureSet:
 class ExtractionResult:
     """
     Container for all extracted feature groups, epoch-aligned with condition labels.
-    
+
     Each feature group produces a DataFrame with one row per epoch.
-    If events_df is provided, a 'condition' column is added indicating
-    'pain' or 'nonpain' for each trial.
-    
+    If events_df is provided, a 'condition' column is added with per-trial labels
+    derived from the configured binary outcome column.
+
     Attributes
     ----------
     features : Dict[str, FeatureSet]
@@ -62,7 +62,7 @@ class ExtractionResult:
     precomputed : PrecomputedData
         The precomputed intermediates (can be reused)
     condition : Optional[np.ndarray]
-        Array of condition labels ('pain' or 'nonpain') per epoch
+        Array of condition labels per epoch (values depend on the paradigm)
     """
     features: Dict[str, FeatureSet] = field(default_factory=dict)
     precomputed: Optional[PrecomputedData] = None
@@ -157,31 +157,25 @@ class ExtractionResult:
         first_feature_set = next(iter(self.features.values()))
         return len(first_feature_set.df)
     
-    @property
-    def n_pain(self) -> int:
-        """Number of pain condition trials."""
+    def condition_counts(self) -> Dict[str, int]:
+        """Return a mapping from each condition label to its trial count."""
         if self.condition is None:
-            return 0
-        return int(np.sum(self.condition == "pain"))
-    
-    @property
-    def n_nonpain(self) -> int:
-        """Number of non-pain condition trials."""
-        if self.condition is None:
-            return 0
-        return int(np.sum(self.condition == "nonpain"))
-    
+            return {}
+        unique, counts = np.unique(self.condition, return_counts=True)
+        return {str(label): int(count) for label, count in zip(unique, counts)}
+
     def __repr__(self) -> str:
         total_features = sum(
-            len(feature_set.columns) 
+            len(feature_set.columns)
             for feature_set in self.features.values()
         )
         group_names = list(self.features.keys())
-        
+
         condition_info = ""
         if self.condition is not None:
-            condition_info = f" (pain={self.n_pain}, nonpain={self.n_nonpain})"
-        
+            counts = self.condition_counts()
+            condition_info = " (" + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + ")"
+
         return (
             f"ExtractionResult({self.n_epochs} epochs, "
             f"{total_features} features from {group_names}{condition_info})"
@@ -240,8 +234,7 @@ class ExtractionResult:
     def _add_condition_summary_to_summary(self, summary: Dict[str, Any]) -> None:
         """Add condition label summary if available."""
         if self.condition is not None:
-            summary["n_pain"] = self.n_pain
-            summary["n_nonpain"] = self.n_nonpain
+            summary["condition_counts"] = self.condition_counts()
 
     def build_manifest(
         self, 

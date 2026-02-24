@@ -513,8 +513,8 @@ class ClassificationResult:
             f"  F1: {self.f1:.3f}\n"
             f"  Sensitivity: {self.recall:.3f}\n"
             f"  Specificity: {self.specificity:.3f}\n"
-            f"  N samples: {len(self.y_true)} ({int(self.y_true.sum())} pain, "
-            f"{int(len(self.y_true) - self.y_true.sum())} no-pain)"
+            f"  N samples: {len(self.y_true)} ({int(self.y_true.sum())} positive, "
+            f"{int(len(self.y_true) - self.y_true.sum())} negative)"
         )
 
 

@@ -22,15 +22,15 @@ _DESIGN_MATRIX_RANK_TOLERANCE = 1e-10
 _RESIDUAL_VARIANCE_TOLERANCE_FACTOR = 1e-12
 
 
-def _get_temperature_control_mode(config: Optional[Any]) -> str:
+def _get_predictor_control_mode(config: Optional[Any]) -> str:
     if config is None:
         return "spline"
     try:
         mode = str(
             get_config_value(
                 config,
-                "behavior_analysis.statistics.temperature_control",
-                get_config_value(config, "behavior_analysis.regression.temperature_control", "spline"),
+                "behavior_analysis.statistics.predictor_control",
+                get_config_value(config, "behavior_analysis.regression.predictor_control", "spline"),
             )
         ).strip().lower()
     except Exception:
@@ -40,29 +40,25 @@ def _get_temperature_control_mode(config: Optional[Any]) -> str:
     return "spline"
 
 
-def _build_temperature_covariates(
-    temp_series: pd.Series,
+def _build_predictor_covariates(
+    predictor_series: pd.Series,
     *,
     config: Optional[Any],
 ) -> pd.DataFrame:
-    """Build temperature covariates (linear or restricted cubic spline) for control."""
-    mode = _get_temperature_control_mode(config)
+    """Build predictor covariates (linear or restricted cubic spline) for control."""
+    mode = _get_predictor_control_mode(config)
     if mode == "linear":
-        return pd.DataFrame({"temp": temp_series})
+        return pd.DataFrame({"predictor": predictor_series})
 
-    from .splines import build_temperature_rcs_design
+    from .splines import build_predictor_rcs_design
 
-    df_cols, covariate_names, _meta = build_temperature_rcs_design(
-        temp_series,
+    df_cols, covariate_names, _meta = build_predictor_rcs_design(
+        predictor_series,
         config=config,
-        key_prefix="behavior_analysis.regression.temperature_spline",
-        name_prefix="temperature_rcs",
+        key_prefix="behavior_analysis.regression.predictor_spline",
+        name_prefix="predictor_rcs",
     )
-    rename_map = {"temperature": "temp"}
-    for name in covariate_names:
-        if name.startswith("temperature_rcs_"):
-            rename_map[name] = name.replace("temperature_", "temp_", 1)
-    return df_cols.rename(columns=rename_map)
+    return df_cols.rename(columns={})  # column names already use predictor prefix
 
 
 def _get_permutation_scheme(config: Optional[Any]) -> str:
@@ -408,7 +404,7 @@ def compute_permutation_pvalues(
     x_aligned: pd.Series,
     y_aligned: pd.Series,
     covariates_df: Optional[pd.DataFrame],
-    temp_series: Optional[pd.Series],
+    predictor_series: Optional[pd.Series],
     method: str,
     n_perm: Optional[int],
     n_eff: int,
@@ -418,7 +414,6 @@ def compute_permutation_pvalues(
     groups: Optional[np.ndarray] = None,
 ) -> Tuple[float, float, float]:
     """Compute all permutation p-values for ROI analysis."""
-    
     p_perm = p_partial_perm = p_temp_perm = np.nan
     
     if min_samples is None:
@@ -453,12 +448,12 @@ def compute_permutation_pvalues(
             scheme=scheme,
         )
 
-    if temp_series is not None and not temp_series.empty:
-        temperature_covariates = _build_temperature_covariates(temp_series, config=config)
+    if predictor_series is not None and not predictor_series.empty:
+        predictor_covariates = _build_predictor_covariates(predictor_series, config=config)
         p_temp_perm = perm_pval_partial_freedman_lane(
             x_aligned,
             y_aligned,
-            temperature_covariates,
+            predictor_covariates,
             method,
             n_perm,
             rng,
@@ -470,11 +465,11 @@ def compute_permutation_pvalues(
     return p_perm, p_partial_perm, p_temp_perm
 
 
-def _compute_combined_covariates_temp_pvalue(
+def _compute_combined_covariates_predictor_pvalue(
     x_aligned: pd.Series,
     y_aligned: pd.Series,
     covariates_df: Optional[pd.DataFrame],
-    temp_series: Optional[pd.Series],
+    predictor_series: Optional[pd.Series],
     method: str,
     n_perm: Optional[int],
     n_eff: int,
@@ -483,27 +478,27 @@ def _compute_combined_covariates_temp_pvalue(
     config: Optional[Any],
     groups: Optional[np.ndarray],
 ) -> float:
-    """Compute permutation p-value for combined covariates and temperature."""
+    """Compute permutation p-value for combined covariates and predictor control."""
     has_valid_permutations = n_perm is not None and n_perm > 0
     has_covariates = covariates_df is not None and not covariates_df.empty
-    has_temperature = temp_series is not None and not temp_series.empty
-    
-    if not has_valid_permutations or not has_covariates or not has_temperature:
+    has_predictor = predictor_series is not None and not predictor_series.empty
+
+    if not has_valid_permutations or not has_covariates or not has_predictor:
         return np.nan
-    
+
     if min_samples is None:
         constants = get_statistics_constants(config)
         min_samples = constants.get("min_samples_for_correlation", 5)
-    
+
     if n_eff < min_samples:
         return np.nan
-    
+
     combined_covariates = covariates_df.copy()
-    temp_cov = _build_temperature_covariates(temp_series, config=config)
-    overlap = [c for c in temp_cov.columns if c in combined_covariates.columns]
+    predictor_cov = _build_predictor_covariates(predictor_series, config=config)
+    overlap = [c for c in predictor_cov.columns if c in combined_covariates.columns]
     if overlap:
         combined_covariates = combined_covariates.drop(columns=overlap, errors="ignore")
-    combined_covariates = pd.concat([combined_covariates, temp_cov], axis=1)
+    combined_covariates = pd.concat([combined_covariates, predictor_cov], axis=1)
     combined_covariates = combined_covariates.dropna()
     
     if combined_covariates.empty:
@@ -587,7 +582,7 @@ def compute_permutation_pvalues_with_cov_temp(
     x_aligned: pd.Series,
     y_aligned: pd.Series,
     covariates_df: Optional[pd.DataFrame],
-    temp_series: Optional[pd.Series],
+    predictor_series: Optional[pd.Series],
     method: str,
     n_perm: Optional[int],
     n_eff: int,
@@ -597,12 +592,12 @@ def compute_permutation_pvalues_with_cov_temp(
     config: Optional[Any] = None,
     groups: Optional[np.ndarray] = None,
 ) -> Tuple[float, float, float, float]:
-    """Compute permutation p-values including combined covariates+temp."""
+    """Compute permutation p-values including combined covariates+predictor."""
     p_perm, p_partial_cov, p_partial_temp = compute_permutation_pvalues(
         x_aligned=x_aligned,
         y_aligned=y_aligned,
         covariates_df=covariates_df,
-        temp_series=temp_series,
+        predictor_series=predictor_series,
         method=method,
         n_perm=n_perm,
         n_eff=n_eff,
@@ -612,11 +607,11 @@ def compute_permutation_pvalues_with_cov_temp(
         groups=groups,
     )
 
-    p_partial_cov_temp = _compute_combined_covariates_temp_pvalue(
+    p_partial_cov_temp = _compute_combined_covariates_predictor_pvalue(
         x_aligned,
         y_aligned,
         covariates_df,
-        temp_series,
+        predictor_series,
         method,
         n_perm,
         n_eff,

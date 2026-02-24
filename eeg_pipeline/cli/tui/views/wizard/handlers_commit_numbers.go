@@ -1054,7 +1054,7 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 1 {
 			m.directedConnMinSamplesPerMvarParam = int(val)
 		}
-	// ERDS pain markers
+	// ERDS condition markers
 	case optERDSOnsetMinThresholdPercent:
 		if val >= 0 {
 			m.erdsOnsetMinThresholdPercent = val
@@ -1129,42 +1129,42 @@ func (m *Model) commitBehaviorNumber(val float64) {
 			m.featureQCMinVariance = val
 		}
 
-	// Pain residual + diagnostics
-	case optPainResidualPolyDegree:
+	// Predictor residual + diagnostics
+	case optPredictorResidualPolyDegree:
 		if val >= 1 {
-			m.painResidualPolyDegree = int(val)
+			m.predictorResidualPolyDegree = int(val)
 		}
-	case optPainResidualBreakpointCandidates:
+	case optPredictorResidualBreakpointCandidates:
 		if val >= 5 {
-			m.painResidualBreakpointCandidates = int(val)
+			m.predictorResidualBreakpointCandidates = int(val)
 		}
-	case optPainResidualBreakpointQlow:
+	case optPredictorResidualBreakpointQlow:
 		if val > 0 && val < 1 {
-			m.painResidualBreakpointQlow = val
+			m.predictorResidualBreakpointQlow = val
 		}
-	case optPainResidualBreakpointQhigh:
+	case optPredictorResidualBreakpointQhigh:
 		if val > 0 && val < 1 {
-			m.painResidualBreakpointQhigh = val
+			m.predictorResidualBreakpointQhigh = val
 		}
-	case optPainResidualCrossfitNSplits:
+	case optPredictorResidualCrossfitNSplits:
 		if val >= 2 {
-			m.painResidualCrossfitNSplits = int(val)
+			m.predictorResidualCrossfitNSplits = int(val)
 		}
-	case optPainResidualCrossfitSplineKnots:
+	case optPredictorResidualCrossfitSplineKnots:
 		if val >= 3 {
-			m.painResidualCrossfitSplineKnots = int(val)
+			m.predictorResidualCrossfitSplineKnots = int(val)
 		}
-	case optPainResidualMinSamples:
+	case optPredictorResidualMinSamples:
 		if val >= 1 {
-			m.painResidualMinSamples = int(val)
+			m.predictorResidualMinSamples = int(val)
 		}
-	case optPainResidualModelCompareMinSamples:
+	case optPredictorResidualModelCompareMinSamples:
 		if val >= 1 {
-			m.painResidualModelCompareMinSamples = int(val)
+			m.predictorResidualModelCompareMinSamples = int(val)
 		}
-	case optPainResidualBreakpointMinSamples:
+	case optPredictorResidualBreakpointMinSamples:
 		if val >= 1 {
-			m.painResidualBreakpointMinSamples = int(val)
+			m.predictorResidualBreakpointMinSamples = int(val)
 		}
 
 	// Regression
@@ -1267,7 +1267,7 @@ func (m *Model) commitBehaviorNumber(val float64) {
 			m.influenceLeverageThreshold = val
 		}
 
-	// Pain sensitivity / temporal
+	// Predictor sensitivity / temporal
 	case optReportTopN:
 		if val >= 1 {
 			m.reportTopN = int(val)
@@ -1299,13 +1299,13 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 1 {
 			m.tfHeatmapTimeResMs = int(val)
 		}
-	case optPainSensitivityMinTrials:
+	case optPredictorSensitivityMinTrials:
 		if val >= 0 {
-			m.painSensitivityMinTrials = int(val)
+			m.predictorSensitivityMinTrials = int(val)
 		}
-	case optPainSensitivityPermutations:
+	case optPredictorSensitivityPermutations:
 		if val >= 0 {
-			m.painSensitivityPermutations = int(val)
+			m.predictorSensitivityPermutations = int(val)
 		}
 	case optConditionMinTrials:
 		if val >= 0 {

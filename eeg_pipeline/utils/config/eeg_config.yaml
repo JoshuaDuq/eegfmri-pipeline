@@ -85,7 +85,7 @@ event_columns:
   # Generic column aliases for logical event groups.
   # Add paradigm-specific column names in your overrides file.
   required: ["rating"]
-  temperature: ["temp", "temperature"]
+  predictor: []
   rating: ["rating"]
   binary_outcome: ["binary_outcome", "outcome_binary", "label"]
 
@@ -587,8 +587,8 @@ feature_engineering:
     min_segment_sec: 0.5             # Minimum segment duration in seconds
     bands: ["alpha", "beta"]         # Bands for ERDS computation (subset of frequency_bands)
     # Optional laterality-aware ERDS markers (disabled by default for paradigm-agnostic behavior).
-    enable_pain_markers: false
-    pain_marker_bands: ["alpha"]     # Bands where contralateral pain markers are extracted
+    enable_condition_markers: false
+    condition_marker_bands: ["alpha"]     # Bands where contralateral condition markers are extracted
     laterality_columns: ["stim_side", "stimulated_side", "pain_side", "side", "stimulus_side", "hand"]
     infer_contralateral_when_missing: true
     somatosensory_left_channels: ["C1", "C3", "C5", "CP1", "CP3", "CP5", "FC1", "FC3", "FC5"]
@@ -626,7 +626,7 @@ feature_engineering:
 behavior_analysis:
   # Canonical behavior columns used across stages. If empty, auto-resolve from
   # event_columns.* aliases and existing trial-table columns.
-  predictor_column: ""   # e.g., stimulus intensity / dose / temperature
+  predictor_column: ""   # e.g., stimulus intensity / dose / any continuous IV
   outcome_column: ""     # e.g., rating / arousal / detection score
 
   # Optional robust estimator for correlations:
@@ -634,7 +634,7 @@ behavior_analysis:
   # - "percentage_bend" | "winsorized" | "shepherd"
   robust_correlation: null
   pooling_strategy: "within_subject_centered"
-  control_temperature: true
+  predictor_control_enabled: true
   control_trial_order: true
   bootstrap: 1000
   n_jobs: -1
@@ -675,7 +675,7 @@ behavior_analysis:
     min_variance: 1.0e-10
     check_within_run_variance: true
 
-  # Pain residual = rating - f(temperature) for "pain beyond stimulus intensity"
+  # Predictor residual = outcome - f(predictor) for "response beyond stimulus intensity"
   predictor_residual:
     enabled: true
     method: "spline"          # "spline" (requires statsmodels) or "poly"
@@ -693,8 +693,8 @@ behavior_analysis:
       method: "spline"        # "spline" | "poly" (crossfit uses sklearn splines/poly + ridge)
       spline_n_knots: 5
 
-  # Temperature→rating model diagnostics (model comparison + breakpoint detection)
-  temperature_models:
+  # Predictor→outcome model diagnostics (model comparison + breakpoint detection)
+  predictor_models:
     enabled: true
     model_comparison:
       enabled: true
@@ -708,15 +708,15 @@ behavior_analysis:
       quantile_high: 0.85
       n_candidates: 15
 
-  
+
   # Trialwise regression/moderation (complements correlations)
   regression:
     enabled: false
     primary_unit: "trial"            # "trial" | "run_mean"
-    outcome: "rating"              # "rating" | "predictor_residual" | "temperature"
-    include_temperature: true
-    temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
-    temperature_spline:
+    outcome: "rating"              # "rating" | "predictor_residual" | "predictor"
+    include_predictor: true
+    predictor_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on predictor)
+    predictor_spline:
       n_knots: 4
       quantile_low: 0.05
       quantile_high: 0.95
@@ -724,7 +724,7 @@ behavior_analysis:
     include_trial_order: true
     include_prev_terms: false      # uses prev_/delta_ columns from trial table
     include_run_block: true
-    include_interaction: true      # feature × temperature
+    include_interaction: true      # feature × predictor
     standardize: true
     min_samples: 15
     n_permutations: 0
@@ -733,11 +733,11 @@ behavior_analysis:
   # Sensitivity model families per feature (robust/quantile/logistic)
   models:
     enabled: false
-    outcomes: ["rating", "predictor_residual"]  # optionally add "temperature"
+    outcomes: ["rating", "predictor_residual"]  # optionally add "predictor"
     families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
-    include_temperature: true
-    temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
-    temperature_spline:
+    include_predictor: true
+    predictor_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on predictor)
+    predictor_spline:
       n_knots: 4
       quantile_low: 0.05
       quantile_high: 0.95
@@ -757,7 +757,7 @@ behavior_analysis:
     outcome: ""                     # "" -> auto (predictor_residual if present, else rating)
     group_column: ""                # "" -> auto (run if present, else block)
     method: "spearman"
-    partial_temperature: true
+    partial_predictor: true
     max_features: 50
     alpha: 0.05
 
@@ -768,11 +768,11 @@ behavior_analysis:
   # Influence diagnostics (non-gating)
   influence:
     enabled: true
-    outcomes: ["rating", "predictor_residual"]  # optionally add "temperature"
+    outcomes: ["rating", "predictor_residual"]  # optionally add "predictor"
     max_features: 20
-    include_temperature: true
-    temperature_control: "linear"  # "linear" | "rating_hat" | "spline"
-    temperature_spline:
+    include_predictor: true
+    predictor_control: "linear"  # "linear" | "rating_hat" | "spline"
+    predictor_spline:
       n_knots: 4
       quantile_low: 0.05
       quantile_high: 0.95
@@ -815,9 +815,9 @@ behavior_analysis:
     default_n_bootstrap: 1000
     base_seed: 42
     hierarchical_fdr: true
-    # Temperature control used in partial correlations / permutation tests for correlations.
+    # Predictor control used in partial correlations / permutation tests for correlations.
     # "spline" uses a restricted cubic spline basis (linear regression on nonlinear terms).
-    temperature_control: "spline"  # "linear" | "spline"
+    predictor_control: "spline"  # "linear" | "spline"
     # If false, trial-level tests require permutation or aggregation.
     # Set true only if you explicitly accept i.i.d. trial assumptions.
     allow_iid_trials: false
@@ -830,7 +830,7 @@ behavior_analysis:
   correlations:
     enabled: true
     types: ["partial_cov_temp"]
-    targets: ["rating", "temperature", "predictor_residual"]
+    targets: ["rating", "predictor", "predictor_residual"]
     compute_change_scores: true
     loso_stability: true
     compute_bayes_factors: false
@@ -1026,12 +1026,12 @@ machine_learning:
     feature_stats: null                  # Optional restriction (NamingSchema stat), e.g. ["wpli", "aec"] for connectivity
     feature_harmonization: "intersection"  # "intersection" | "union_impute"
     feature_files: {}                    # Optional overrides per family: { power: "features_power.parquet", ... }
-    covariates: []                       # Optional extra predictors appended to X (meta names: temperature, trial_index, block, ...)
+    covariates: []                       # Optional extra predictors appended to X (meta names: predictor, trial_index, block, ...)
     covariates_strict: false             # If true, error when requested covariates are missing
     require_trial_ml_safe: true          # If true, error unless feature_engineering.analysis_mode="trial_ml_safe"
     max_excluded_subject_fraction: 0.25  # Fail ML matrix build if excluded subjects exceed this fraction of requested subjects
 
-  # Targets can be logical names ('rating', 'temperature', 'binary_outcome') or explicit events.tsv column names.
+  # Targets can be logical names ('rating', 'predictor', 'binary_outcome') or explicit events.tsv column names.
   targets:
     regression: "rating"
     classification: "binary_outcome"
@@ -1039,7 +1039,7 @@ machine_learning:
     strict_regression_target_continuous: false  # If true, error when regression target is binary-like (prefer ml classify)
 
   incremental_validity:
-    baseline_predictors: ["temperature"] # Standardized meta names: temperature, trial_index, block
+    baseline_predictors: ["predictor"]  # Standardized meta names: predictor, trial_index, block
     require_baseline_predictors: true    # If true, missing baseline predictors raise an error instead of intercept-only fallback
     baseline_alpha: 1.0
 
@@ -1318,5 +1318,5 @@ system:
 
 io:
   constants:
-    temperature_range: [35.0, 55.0]
+    predictor_range: []
     max_missing_channels_fraction: 0.5

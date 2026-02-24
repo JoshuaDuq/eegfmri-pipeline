@@ -183,7 +183,7 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         default=None,
         help="Reference event for fMRI onset alignment",
     )
-    prep_group.add_argument("--event-col-temperature", nargs="+", type=str, default=None, help="events.tsv candidate columns for temperature")
+    prep_group.add_argument("--event-col-predictor", nargs="+", type=str, default=None, help="events.tsv candidate columns for predictor")
     prep_group.add_argument("--event-col-rating", nargs="+", type=str, default=None, help="events.tsv candidate columns for rating")
     prep_group.add_argument("--event-col-binary-outcome", nargs="+", type=str, default=None, help="events.tsv candidate columns for binary-outcome split")
     prep_group.add_argument(

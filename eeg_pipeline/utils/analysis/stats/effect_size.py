@@ -160,8 +160,8 @@ _NUMERIC_TOLERANCE = 1e-12
 def compute_batch_condition_effects(
     feature_columns: List[str],
     features_df: pd.DataFrame,
-    pain_mask: np.ndarray,
-    nonpain_mask: np.ndarray,
+    cond_a_mask: np.ndarray,
+    cond_b_mask: np.ndarray,
     min_samples: int = 5,
     n_perm: int = 0,
     base_seed: int = 42,
@@ -170,63 +170,55 @@ def compute_batch_condition_effects(
     logger: Optional[logging.Logger] = None,
 ) -> List[Dict[str, Any]]:
     """Vectorized batch computation of condition effects.
-    
+
     Computes t-tests and effect sizes for all features using numpy broadcasting.
     Much faster than per-feature loops for large feature sets.
     """
     from eeg_pipeline.utils.analysis.stats.correlation import interpret_effect_size
-    
+
     n_features = len(feature_columns)
     if n_features == 0:
         return []
-    
+
     if logger:
         logger.info(f"Condition effects: testing {n_features} features (vectorized batch mode)")
-    
-    # Extract data matrix
+
     data_matrix = features_df[feature_columns].to_numpy(dtype=np.float64, na_value=np.nan)
-    
-    # Compute group statistics vectorized
-    pain_data = data_matrix[pain_mask, :]  # shape: (n_pain, n_features)
-    nonpain_data = data_matrix[nonpain_mask, :]  # shape: (n_nonpain, n_features)
-    
+
+    cond_a_data = data_matrix[cond_a_mask, :]
+    cond_b_data = data_matrix[cond_b_mask, :]
+
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
-        
-        # Compute means (ignoring NaN)
-        mean_pain = np.nanmean(pain_data, axis=0)
-        mean_nonpain = np.nanmean(nonpain_data, axis=0)
-        
-        # Compute stds (ignoring NaN, ddof=1)
-        std_pain = np.nanstd(pain_data, axis=0, ddof=1)
-        std_nonpain = np.nanstd(nonpain_data, axis=0, ddof=1)
-        
-        # Count valid samples per feature
-        n_pain_per_feature = np.sum(np.isfinite(pain_data), axis=0)
-        n_nonpain_per_feature = np.sum(np.isfinite(nonpain_data), axis=0)
-    
-    # Compute Hedges' g vectorized
+
+        mean_condition_a = np.nanmean(cond_a_data, axis=0)
+        mean_condition_b = np.nanmean(cond_b_data, axis=0)
+
+        std_condition_a = np.nanstd(cond_a_data, axis=0, ddof=1)
+        std_condition_b = np.nanstd(cond_b_data, axis=0, ddof=1)
+
+        n_cond_a_per_feature = np.sum(np.isfinite(cond_a_data), axis=0)
+        n_cond_b_per_feature = np.sum(np.isfinite(cond_b_data), axis=0)
+
     hedges_g_values = _compute_batch_hedges_g(
-        mean_pain, mean_nonpain, std_pain, std_nonpain,
-        n_pain_per_feature, n_nonpain_per_feature
+        mean_condition_a, mean_condition_b, std_condition_a, std_condition_b,
+        n_cond_a_per_feature, n_cond_b_per_feature,
     )
-    
-    # Compute t-tests vectorized (Welch's t-test)
+
     t_stats, p_values = _compute_batch_welch_ttest(
-        mean_pain, mean_nonpain, std_pain, std_nonpain,
-        n_pain_per_feature, n_nonpain_per_feature
+        mean_condition_a, mean_condition_b, std_condition_a, std_condition_b,
+        n_cond_a_per_feature, n_cond_b_per_feature,
     )
-    
-    # Compute permutation p-values if requested
+
     p_perm_values = np.full(n_features, np.nan)
     if n_perm > 0:
         if logger:
             logger.info(f"Computing {n_perm} permutations for {n_features} features...")
         p_perm_values = _compute_batch_permutation_pvalues(
             data_matrix,
-            pain_mask,
-            nonpain_mask,
+            cond_a_mask,
+            cond_b_mask,
             n_perm,
             base_seed,
             groups,
@@ -234,22 +226,21 @@ def compute_batch_condition_effects(
             logger=logger,
         )
     
-    # Build result records
     results: List[Dict[str, Any]] = []
     min_required = max(int(min_samples), 2)
-    
+
     for i, col in enumerate(feature_columns):
-        if int(n_pain_per_feature[i]) < min_required or int(n_nonpain_per_feature[i]) < min_required:
+        if int(n_cond_a_per_feature[i]) < min_required or int(n_cond_b_per_feature[i]) < min_required:
             continue
         hg = hedges_g_values[i]
         effect_interp = interpret_effect_size(hg) if np.isfinite(hg) else "unknown"
-        
+
         results.append({
             "feature": col,
-            "mean_pain": float(mean_pain[i]),
-            "mean_nonpain": float(mean_nonpain[i]),
-            "std_pain": float(std_pain[i]),
-            "std_nonpain": float(std_nonpain[i]),
+            "mean_condition_a": float(mean_condition_a[i]),
+            "mean_condition_b": float(mean_condition_b[i]),
+            "std_condition_a": float(std_condition_a[i]),
+            "std_condition_b": float(std_condition_b[i]),
             "hedges_g": float(hg),
             "effect_interpretation": effect_interp,
             "t_statistic": float(t_stats[i]),
@@ -257,13 +248,13 @@ def compute_batch_condition_effects(
             "p_raw": float(p_values[i]),
             "p_perm": float(p_perm_values[i]) if np.isfinite(p_perm_values[i]) else np.nan,
             "n_permutations": n_perm if n_perm > 0 else 0,
-            "n_pain": int(n_pain_per_feature[i]),
-            "n_nonpain": int(n_nonpain_per_feature[i]),
+            "n_condition_a": int(n_cond_a_per_feature[i]),
+            "n_condition_b": int(n_cond_b_per_feature[i]),
         })
-    
+
     if logger:
         logger.info(f"Condition effects batch computation complete: {len(results)} features")
-    
+
     return results
 
 
@@ -336,8 +327,8 @@ def _compute_batch_welch_ttest(
 
 def _compute_batch_permutation_pvalues(
     data_matrix: np.ndarray,
-    pain_mask: np.ndarray,
-    nonpain_mask: np.ndarray,
+    cond_a_mask: np.ndarray,
+    cond_b_mask: np.ndarray,
     n_perm: int,
     base_seed: int,
     groups: Optional[np.ndarray],
@@ -346,45 +337,40 @@ def _compute_batch_permutation_pvalues(
     logger: Optional[logging.Logger],
 ) -> np.ndarray:
     """Compute permutation p-values for all features using vectorized operations.
-    
+
     Uses matrix operations to compute all permutations for all features at once,
     which is much faster than per-feature permutation loops.
     """
     import warnings
-    
+
     n_samples, n_features = data_matrix.shape
-    combined_mask = pain_mask | nonpain_mask
-    
-    # Work with combined mask indices
+    combined_mask = cond_a_mask | cond_b_mask
+
     valid_indices = np.where(combined_mask)[0]
     n_valid = len(valid_indices)
-    
+
     if n_valid < 4:
         return np.full(n_features, np.nan)
-    
-    # Extract valid data
-    valid_data = data_matrix[valid_indices, :]  # (n_valid, n_features)
-    valid_labels = pain_mask[valid_indices]  # True = pain
-    
-    # Observed statistic: |mean_pain - mean_nonpain| for each feature
+
+    valid_data = data_matrix[valid_indices, :]
+    valid_labels = cond_a_mask[valid_indices]  # True = condition A
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
-        
-        pain_means_obs = np.nanmean(valid_data[valid_labels, :], axis=0)
-        nonpain_means_obs = np.nanmean(valid_data[~valid_labels, :], axis=0)
-        observed_diff = np.abs(pain_means_obs - nonpain_means_obs)
-    
-    # Count how many permutations exceed observed
+        cond_a_means_obs = np.nanmean(valid_data[valid_labels, :], axis=0)
+        cond_b_means_obs = np.nanmean(valid_data[~valid_labels, :], axis=0)
+        observed_diff = np.abs(cond_a_means_obs - cond_b_means_obs)
+
     n_exceeded = np.ones(n_features)  # Start at 1 for observed
-    
+
     rng = np.random.default_rng(base_seed)
     log_interval = max(1, n_perm // 10)
     scheme = str(scheme or "shuffle").strip().lower()
-    
+
     for perm_i in range(n_perm):
         if logger and perm_i > 0 and perm_i % log_interval == 0:
             logger.debug(f"  Permutation {perm_i}/{n_perm}")
-        
+
         from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
 
         valid_groups = groups[valid_indices] if groups is not None else None
@@ -403,22 +389,16 @@ def _compute_batch_permutation_pvalues(
                 )
             return np.full(n_features, np.nan)
         perm_labels = valid_labels[perm_indices]
-        
-        # Compute permuted statistic
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
-            
-            perm_pain_means = np.nanmean(valid_data[perm_labels, :], axis=0)
-            perm_nonpain_means = np.nanmean(valid_data[~perm_labels, :], axis=0)
-            perm_diff = np.abs(perm_pain_means - perm_nonpain_means)
-        
-        # Count exceedances (vectorized across all features)
+            perm_cond_a_means = np.nanmean(valid_data[perm_labels, :], axis=0)
+            perm_cond_b_means = np.nanmean(valid_data[~perm_labels, :], axis=0)
+            perm_diff = np.abs(perm_cond_a_means - perm_cond_b_means)
+
         n_exceeded += (perm_diff >= observed_diff - _NUMERIC_TOLERANCE).astype(float)
-    
-    # p-value = (n_exceeded) / (n_perm + 1)
-    p_values = n_exceeded / (n_perm + 1)
-    
-    return p_values
+
+    return n_exceeded / (n_perm + 1)
 
 
 def _get_condition_column(
@@ -475,34 +455,27 @@ def _split_by_binary_outcome(
     column_name: str,
     logger: logging.Logger,
 ) -> Tuple[np.ndarray, np.ndarray, int, int]:
-    """Split by standard pain binary coding (1=pain, 0=nonpain).
+    """Split by binary coding (1=condition A, 0=condition B).
 
-    This performs numeric coercion but intentionally does not validate that
-    values are strictly binary. Non-{0,1} and NaN values are treated as neither
-    condition (i.e., excluded from both masks).
+    Performs numeric coercion; non-{0,1} and NaN values are excluded from both masks.
     """
     if condition_series.dtype == object:
-        condition_normalized = (
-            condition_series.astype(str)
-            .str.strip()
-            .str.lower()
-        )
-        condition_series = condition_normalized
+        condition_series = condition_series.astype(str).str.strip().str.lower()
 
-    pain_values = pd.to_numeric(condition_series, errors="coerce").to_numpy()
-    pain_mask = pain_values == 1
-    nonpain_mask = pain_values == 0
+    numeric_values = pd.to_numeric(condition_series, errors="coerce").to_numpy()
+    cond_a_mask = numeric_values == 1
+    cond_b_mask = numeric_values == 0
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int(nonpain_mask.sum())
+    n_condition_a = int(cond_a_mask.sum())
+    n_condition_b = int(cond_b_mask.sum())
 
-    logger.info(f"Condition split: {n_pain} pain, {n_nonpain} non-pain trials")
+    logger.info(f"Condition split: {n_condition_a} condition A, {n_condition_b} condition B trials")
 
     return (
-        np.asarray(pain_mask, dtype=bool),
-        np.asarray(nonpain_mask, dtype=bool),
-        n_pain,
-        n_nonpain,
+        np.asarray(cond_a_mask, dtype=bool),
+        np.asarray(cond_b_mask, dtype=bool),
+        n_condition_a,
+        n_condition_b,
     )
 
 
@@ -620,8 +593,8 @@ def _compute_p_primary_columns(
 
 def compute_condition_effects(
     features_df: pd.DataFrame,
-    pain_mask: np.ndarray,
-    nonpain_mask: np.ndarray,
+    cond_a_mask: np.ndarray,
+    cond_b_mask: np.ndarray,
     min_samples: int = 5,
     fdr_alpha: float = 0.05,
     logger: Optional[logging.Logger] = None,
@@ -632,8 +605,8 @@ def compute_condition_effects(
     pair_ids: Optional[np.ndarray] = None,
     p_primary_mode: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Compute effect sizes for condition comparison (e.g., pain vs non-pain).
-    
+    """Compute effect sizes for condition A vs condition B across all features.
+
     Uses vectorized batch computation for large feature sets, which is
     significantly faster than per-feature computation. Constant features
     (std ≤ 1e-12) are automatically filtered and assigned zero effect.
@@ -686,8 +659,8 @@ def compute_condition_effects(
         records = parallel_condition_effects(
             feature_columns=feature_columns,
             features_df=features_df,
-            pain_mask=pain_mask,
-            nonpain_mask=nonpain_mask,
+            cond_a_mask=cond_a_mask,
+            cond_b_mask=cond_b_mask,
             min_samples=min_samples,
             n_jobs=n_jobs_actual,
             paired=paired,

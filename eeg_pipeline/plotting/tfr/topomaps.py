@@ -2,7 +2,7 @@
 TFR-specific topomap plotting functions.
 
 Functions for creating topomap visualizations for time-frequency representations,
-including temperature grids and temporal topomaps.
+including predictor grids and temporal topomaps.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from eeg_pipeline.plotting.io.figures import (
     get_viz_params,
     plot_topomap_on_ax,
 )
-from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
+from eeg_pipeline.utils.data.columns import get_predictor_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
@@ -35,8 +35,8 @@ from ...utils.analysis.windowing import (
     build_time_windows_fixed_size_clamped,
 )
 from ...utils.data.tfr_alignment import (
-    extract_temperature_series,
-    create_temperature_masks,
+    extract_predictor_series,
+    create_predictor_masks,
 )
 from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
@@ -59,9 +59,9 @@ PERCENT_CAP = 100.0
 DEFAULT_VLIM_FALLBACK = 1e-6
 
 
-class TemperatureData(NamedTuple):
-    """Container for temperature-related TFR data and masks."""
-    has_temperature: bool
+class PredictorData(NamedTuple):
+    """Container for predictor-related TFR data and masks."""
+    has_predictor: bool
     tfr_max: Optional[mne.time_frequency.AverageTFR]
     tfr_min: Optional[mne.time_frequency.AverageTFR]
     mask_max: Optional[np.ndarray]
@@ -70,7 +70,7 @@ class TemperatureData(NamedTuple):
     t_max: Optional[float]
 
 
-def _prepare_temperature_data(
+def _prepare_predictor_data(
     tfr_sub: mne.time_frequency.EpochsTFR,
     tfr: mne.time_frequency.EpochsTFR,
     events_df: Optional[pd.DataFrame],
@@ -78,8 +78,8 @@ def _prepare_temperature_data(
     baseline_used: Tuple[float, float],
     config,
     logger: Optional[logging.Logger] = None,
-) -> TemperatureData:
-    """Extract and prepare temperature-related TFR data.
+) -> PredictorData:
+    """Extract and prepare predictor-related TFR data.
     
     Args:
         tfr_sub: Subset TFR for statistics
@@ -91,23 +91,23 @@ def _prepare_temperature_data(
         logger: Optional logger instance
         
     Returns:
-        TemperatureData named tuple with all temperature-related data
+        PredictorData named tuple with all predictor-related data
     """
     aligned_events = _get_aligned_events_df_for_tfr(tfr, events_df, n_trials)
-    temp_col = get_temperature_column_from_config(config, aligned_events) if aligned_events is not None else None
-    temp_series = extract_temperature_series(tfr, aligned_events, temp_col, n_trials) if temp_col else None
+    temp_col = get_predictor_column_from_config(config, aligned_events) if aligned_events is not None else None
+    pred_series = extract_predictor_series(tfr, aligned_events, temp_col, n_trials) if temp_col else None
     
     if temp_series is None:
-        return TemperatureData(False, None, None, None, None, None, None)
+        return PredictorData(False, None, None, None, None, None, None)
     
-    temp_result = create_temperature_masks(temp_series)
+    pred_result = create_predictor_masks(temp_series)
     if temp_result[0] is None:
-        return TemperatureData(False, None, None, None, None, None, None)
+        return PredictorData(False, None, None, None, None, None, None)
     
     t_min, t_max, mask_min, mask_max = temp_result
     
     if mask_min.sum() == 0 or mask_max.sum() == 0:
-        return TemperatureData(False, None, None, None, None, None, None)
+        return PredictorData(False, None, None, None, None, None, None)
     
     try:
         ensure_aligned_lengths(
@@ -121,16 +121,16 @@ def _prepare_temperature_data(
         tfr_max = tfr_sub[mask_max].average()
         
         log(f"Temperature contrast: max temp={int(mask_max.sum())}, min temp={int(mask_min.sum())} trials.", logger)
-        return TemperatureData(True, tfr_max, tfr_min, mask_max, mask_min, t_min, t_max)
+        return PredictorData(True, tfr_max, tfr_min, mask_max, mask_min, t_min, t_max)
     except ValueError as e:
-        log(f"{e}. Skipping temperature contrast.", logger, "warning")
-        return TemperatureData(False, None, None, None, None, None, None)
+        log(f"{e}. Skipping predictor contrast.", logger, "warning")
+        return PredictorData(False, None, None, None, None, None, None)
 
 
 def _compute_band_diff_data_windows(
     tfr_condition_2: mne.time_frequency.AverageTFR,
     tfr_condition_1: mne.time_frequency.AverageTFR,
-    temp_data: TemperatureData,
+    temp_data: PredictorData,
     fmin: float,
     fmax_eff: float,
     window_starts: np.ndarray,
@@ -139,10 +139,10 @@ def _compute_band_diff_data_windows(
     """Compute band difference data for multiple time windows.
     
     Returns:
-        Tuple of (condition_diff_windows, temperature_diff_windows)
+        Tuple of (condition_diff_windows, predictor_diff_windows)
     """
     condition_diff_windows = []
-    temperature_diff_windows = []
+    predictor_diff_windows = []
     
     for tmin_win, tmax_win in zip(window_starts, window_ends):
         condition_2_data = average_tfr_band(
@@ -157,7 +157,7 @@ def _compute_band_diff_data_windows(
         else:
             condition_diff_windows.append(None)
         
-        if temp_data.has_temperature and temp_data.tfr_max is not None and temp_data.tfr_min is not None:
+        if temp_data.has_predictor and temp_data.tfr_max is not None and temp_data.tfr_min is not None:
             max_data = average_tfr_band(
                 temp_data.tfr_max, fmin=fmin, fmax=fmax_eff, tmin=tmin_win, tmax=tmax_win
             )
@@ -166,13 +166,13 @@ def _compute_band_diff_data_windows(
             )
             
             if max_data is not None and min_data is not None:
-                temperature_diff_windows.append(max_data - min_data)
+                predictor_diff_windows.append(max_data - min_data)
             else:
-                temperature_diff_windows.append(None)
+                predictor_diff_windows.append(None)
         else:
-            temperature_diff_windows.append(None)
+            predictor_diff_windows.append(None)
     
-    return condition_diff_windows, temperature_diff_windows
+    return condition_diff_windows, predictor_diff_windows
 
 
 def _compute_statistical_mask(
@@ -304,7 +304,7 @@ def _plot_single_topomap_window(
 def _collect_valid_bands(
     tfr_condition_2: mne.time_frequency.AverageTFR,
     tfr_condition_1: mne.time_frequency.AverageTFR,
-    temp_data: TemperatureData,
+    temp_data: PredictorData,
     window_starts: np.ndarray,
     window_ends: np.ndarray,
     config,
@@ -345,7 +345,7 @@ def _collect_valid_bands(
         valid_bands[band_name] = (fmin, fmax_eff, condition_diff_windows, temp_diff_windows)
         all_diff_data.extend(condition_diff_valid)
         
-        if temp_data.has_temperature and temp_diff_windows is not None:
+        if temp_data.has_predictor and temp_diff_windows is not None:
             temp_diff_valid = [d for d in temp_diff_windows if d is not None]
             all_diff_data.extend(temp_diff_valid)
 
@@ -357,7 +357,7 @@ def _build_figure_title(
     condition_label_1: str,
     band_name: str,
     window_label: str,
-    temp_data: TemperatureData,
+    temp_data: PredictorData,
     vabs_diff: float,
     baseline_used: Tuple[float, float],
     condition_mask_2: np.ndarray,
@@ -396,7 +396,7 @@ def _plot_temporal_topomaps_for_bands(
     tfr_condition_2: mne.time_frequency.AverageTFR,
     tfr_condition_1: mne.time_frequency.AverageTFR,
     tfr_sub: mne.time_frequency.EpochsTFR,
-    temp_data: TemperatureData,
+    temp_data: PredictorData,
     condition_mask_2: np.ndarray,
     condition_mask_1: np.ndarray,
     window_starts: np.ndarray,
@@ -550,7 +550,7 @@ def _prepare_temporal_topomap_data(
     tfr_condition_2 = tfr_sub_stats[mask2].average()
     tfr_condition_1 = tfr_sub_stats[mask1].average()
 
-    temp_data = _prepare_temperature_data(
+    temp_data = _prepare_predictor_data(
         tfr_sub_stats, tfr, events_df, int(n), baseline_used, config, logger
     )
 

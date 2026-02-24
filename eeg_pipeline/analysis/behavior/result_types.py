@@ -33,8 +33,8 @@ class ConditionResults:
 
     df: pd.DataFrame
     comparison_type: str = "column"
-    n_pain: int = 0
-    n_nonpain: int = 0
+    n_condition_a: int = 0
+    n_condition_b: int = 0
     n_significant: int = 0
     metadata: Optional[Dict[str, Any]] = None
 
@@ -126,16 +126,16 @@ class TrialTableResult:
 
 
 @dataclass
-class TempModelComparisonResult:
-    """Result from compute_temp_model_comparison."""
+class PredictorModelComparisonResult:
+    """Result from compute_predictor_model_comparison."""
 
     df: Optional[pd.DataFrame]
     metadata: Dict[str, Any]
 
 
 @dataclass
-class TempBreakpointResult:
-    """Result from compute_temp_breakpoints."""
+class PredictorBreakpointResult:
+    """Result from compute_predictor_breakpoints."""
 
     df: Optional[pd.DataFrame]
     metadata: Dict[str, Any]

@@ -37,7 +37,7 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "trial_table",
     "lag_features",
     "predictor_residual",
-    "temperature_models",
+    "predictor_models",
     "regression",
     "models",
     "stability",
@@ -74,7 +74,7 @@ FEATURE_VISUALIZE_CATEGORIES: List[str] = [
 
 BEHAVIOR_VISUALIZE_CATEGORIES: List[str] = [
     "psychometrics",
-    "temperature_models",
+    "predictor_models",
     "stability",
     "power",
     "aperiodic",

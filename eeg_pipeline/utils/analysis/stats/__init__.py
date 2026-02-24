@@ -29,7 +29,7 @@ Modules:
     - consistency: Consistency checks
     - influence: Influence diagnostics
     - splines: Spline fitting
-    - temperature_models: Temperature-rating models
+    - predictor_models: Predictor-outcome models
     - predictor_residual: Pain residual computation
     - mixed_effects: Mixed effects models
 """

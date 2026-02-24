@@ -3,7 +3,7 @@ Effect Direction Consistency (Subject-Level)
 ===========================================
 
 Builds a per-feature summary that compares effect direction across:
-- correlations (feature vs rating/temperature)
+- correlations (feature vs rating/predictor)
 - trialwise regression (beta_feature)
 - model families (beta_feature by family)
 
@@ -241,7 +241,7 @@ def _process_correlations(out: pd.DataFrame, corr_df: pd.DataFrame) -> None:
     corr_processed["p_val"] = _extract_column(corr_processed, "p_primary", "p")
 
     _add_correlation_columns(out, corr_processed, "rating", "corr_rating")
-    _add_correlation_columns(out, corr_processed, "temperature", "corr_temperature")
+    _add_correlation_columns(out, corr_processed, "predictor", "corr_predictor")
 
 
 def _process_regressions(out: pd.DataFrame, regression_df: pd.DataFrame) -> None:
@@ -253,7 +253,7 @@ def _process_regressions(out: pd.DataFrame, regression_df: pd.DataFrame) -> None
     regression_targets = [
         ("rating", "reg_rating"),
         ("predictor_residual", "reg_predictor_residual"),
-        ("temperature", "reg_temperature"),
+        ("predictor", "reg_predictor"),
     ]
     for target, prefix in regression_targets:
         _add_regression_columns(out, reg_processed, target, prefix)

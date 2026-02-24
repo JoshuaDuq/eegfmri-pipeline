@@ -167,9 +167,20 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         type=str,
         default=None,
         help=(
-            "Optional comma-separated allow-list of stimulation sub-phases to include when events.tsv has a stim_phase column. "
+            "Optional comma-separated allow-list of event sub-phases to include when events.tsv has a stim_phase column. "
             "If unset, no stim_phase scoping is applied. "
             "Use 'all' to disable phase scoping."
+        ),
+    )
+    glm_group.add_argument(
+        "--phase-scope-trial-type",
+        type=str,
+        default=None,
+        dest="phase_scope_trial_type",
+        help=(
+            "Optional trial_type value to restrict stim_phase scoping to. "
+            "If unset, phase scoping applies to all rows. "
+            "Example: --phase-scope-trial-type stimulation"
         ),
     )
 
@@ -429,19 +440,31 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         dest="plot_signatures",
         action="store_false",
         default=None,
-        help="Disable multivariate signature readouts (NPS, SIIPS1)",
+        help="Disable multivariate signature readouts",
     )
     plot_group.add_argument(
         "--plot-signatures",
         dest="plot_signatures",
         action="store_true",
-        help="Enable multivariate signature readouts (NPS, SIIPS1)",
+        help="Enable multivariate signature readouts",
     )
     plot_group.add_argument(
         "--signature-dir",
         type=str,
         default=None,
-        help="Path to signature weights root (expects NPS/ and SIIPS1/ subfolders)",
+        dest="signature_dir",
+        help="Root directory for signature weight maps (paths.signature_dir)",
+    )
+    plot_group.add_argument(
+        "--signature-maps",
+        nargs="+",
+        default=None,
+        dest="signature_maps",
+        metavar="NAME:REL_PATH",
+        help=(
+            "Signature weight maps as NAME:RELATIVE_PATH pairs (relative to --signature-dir). "
+            "Example: --signature-maps NPS:NPS/weights.nii.gz SIIPS1:SIIPS1/weights.nii.gz"
+        ),
     )
 
     trial_group = parser.add_argument_group("Trial-wise betas / signatures (beta-series, lss)")
@@ -647,6 +670,17 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         config.setdefault("paths", {})["freesurfer_dir"] = args.freesurfer_dir
     if getattr(args, "signature_dir", None):
         config.setdefault("paths", {})["signature_dir"] = args.signature_dir
+    if getattr(args, "signature_maps", None):
+        parsed_specs = []
+        for token in args.signature_maps:
+            if ":" in token:
+                name, _, rel_path = token.partition(":")
+                name = name.strip()
+                rel_path = rel_path.strip()
+                if name and rel_path:
+                    parsed_specs.append({"name": name, "path": rel_path})
+        if parsed_specs:
+            config.setdefault("paths", {})["signature_maps"] = parsed_specs
 
     bids_fmri_root = config.get("paths.bids_fmri_root")
     if not bids_fmri_root:
@@ -736,6 +770,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             smoothing_fwhm=smoothing_fwhm,
             events_to_model=events_to_model,
             stim_phases_to_model=stim_phases_to_model,
+            phase_scope_trial_type=str(args.phase_scope_trial_type).strip() if getattr(args, "phase_scope_trial_type", None) else None,
         )
     else:
         include_other_events = True if args.include_other_events is None else bool(args.include_other_events)

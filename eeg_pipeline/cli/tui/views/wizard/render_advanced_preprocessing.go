@@ -557,13 +557,13 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			value = refs[m.alignFmriOnsetReference%len(refs)]
 			hint = "alignment reference point"
 		// Event Column Mapping
-		case optEventColTemperature:
-			label = "Temperature Columns"
-			val := m.eventColTemperature
+		case optEventColPredictor:
+			label = "Predictor Columns"
+			val := m.eventColPredictor
 			if strings.TrimSpace(val) == "" {
 				val = "(default)"
 			}
-			if m.editingText && m.editingTextField == textFieldEventColTemperature {
+			if m.editingText && m.editingTextField == textFieldEventColPredictor {
 				val = m.textBuffer + "█"
 			}
 			value = val
@@ -579,13 +579,13 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			value = val
 			hint = "comma-separated column names"
-		case optEventColPainBinary:
+		case optEventColBinaryOutcome:
 			label = "Binary Outcome Columns"
-			val := m.eventColPainBinary
+			val := m.eventColBinaryOutcome
 			if strings.TrimSpace(val) == "" {
 				val = "(default)"
 			}
-			if m.editingText && m.editingTextField == textFieldEventColPainBinary {
+			if m.editingText && m.editingTextField == textFieldEventColBinaryOutcome {
 				val = m.textBuffer + "█"
 			}
 			value = val
