@@ -353,6 +353,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.eventColRating
 	case textFieldEventColPainBinary:
 		return m.eventColPainBinary
+	case textFieldConditionPreferredPrefixes:
+		return m.conditionPreferredPrefixes
 	// Change Scores text fields
 	case textFieldChangeScoresWindowPairs:
 		return m.changeScoresWindowPairs
@@ -741,6 +743,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.eventColRating = strings.Join(splitLooseList(value), ",")
 	case textFieldEventColPainBinary:
 		m.eventColPainBinary = strings.Join(splitLooseList(value), ",")
+	case textFieldConditionPreferredPrefixes:
+		m.conditionPreferredPrefixes = strings.Join(splitLooseList(value), ",")
 	// Change Scores text fields
 	case textFieldChangeScoresWindowPairs:
 		m.changeScoresWindowPairs = strings.TrimSpace(value)

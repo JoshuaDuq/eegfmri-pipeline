@@ -159,7 +159,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         default=None,
         help=(
             "Optional comma-separated allow-list of events.tsv trial_type values to include in the GLM. "
-            "Example (recommended for your task): stimulation,pain_question,vas_rating"
+            "Example: condition_a,condition_b,rating"
         ),
     )
     glm_group.add_argument(
@@ -429,19 +429,19 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         dest="plot_signatures",
         action="store_false",
         default=None,
-        help="Disable multivariate pain signature readouts (NPS, SIIPS1)",
+        help="Disable multivariate signature readouts (NPS, SIIPS1)",
     )
     plot_group.add_argument(
         "--plot-signatures",
         dest="plot_signatures",
         action="store_true",
-        help="Enable multivariate pain signature readouts (NPS, SIIPS1)",
+        help="Enable multivariate signature readouts (NPS, SIIPS1)",
     )
     plot_group.add_argument(
         "--signature-dir",
         type=str,
         default=None,
-        help="Path to pain signature weights root (expects NPS/ and SIIPS1/ subfolders)",
+        help="Path to signature weights root (expects NPS/ and SIIPS1/ subfolders)",
     )
 
     trial_group = parser.add_argument_group("Trial-wise betas / signatures (beta-series, lss)")
@@ -689,7 +689,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         raise ValueError("Missing required --cond-a-value (or use --contrast-type custom --formula ...)")
     if mode in {"beta-series", "lss"}:
         if not (args.cond_b_value and str(args.cond_b_value).strip()):
-            raise ValueError("Trial-wise modes require --cond-b-value (e.g., pain vs nonpain).")
+            raise ValueError("Trial-wise modes require --cond-b-value (e.g., condition_a vs condition_b).")
 
     confounds_strategy = str(args.confounds_strategy or "auto").strip().lower()
     if not confounds_strategy:

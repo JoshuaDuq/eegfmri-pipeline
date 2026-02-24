@@ -246,7 +246,7 @@ A command-palette overlay activated with `Ctrl+K` from the main menu or wizard:
 | Behavior | `behavior` | `epochs` | Trial tables, correlations, regression, condition comparison, mediation, mixed effects |
 | Machine Learning | `ml` | `features` | LOSO regression (ElasticNet/Ridge/RF), classification (SVM/LR/RF/CNN), time generalization |
 | Plotting | `plotting` | `all` | 40+ plot types across power, connectivity, TFR, ERP, behavior, and more |
-| fMRI Analysis | `fmri-analysis` | `bids_fmri` | First-level contrasts, trial-wise pain signatures |
+| fMRI Analysis | `fmri-analysis` | `bids_fmri` | First-level contrasts, trial-wise signatures |
 | Pipeline Smoke Test | `scripts/tui_pipeline_smoke.py` | — | Quick CLI parser and runtime checks across all pipeline commands (excludes paradigm-specific scripts) |
 
 ---

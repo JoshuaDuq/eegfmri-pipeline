@@ -2,7 +2,7 @@
 # 1. PROJECT & PATHS
 ###################################################################
 project:
-  task: "thermalactive"  # Task name used in BIDS paths and file naming
+  task: "task"  # Task name used in BIDS paths and file naming
   random_state: 42  # Primary random seed for reproducible analyses
   subject_list: null  # Optional list of subjects to process (null = all found)
 
@@ -50,7 +50,7 @@ frequency_bands: &frequency_bands
 
 # 2.2 Time Windows
 time_windows:
-  active: &active_window [3.0, 10.5]  # Active/task period [s]
+  active: &active_window [3.0, 10.5]  # Primary analysis period [s]
   baseline_tfr: &baseline_window_tfr [-5.0, -0.01]  # TFR baseline window [s]
   baseline_erp: [-0.2, 0.0]  # ERP baseline window [s]
 
@@ -93,9 +93,9 @@ event_columns:
 alignment:
   allow_misaligned_trim: false
   min_alignment_samples: 5
-  # EEG↔fMRI: recommended for simultaneous acquisition
+  # EEG↔fMRI alignment defaults; paradigm-specific scripts may override.
   trim_to_first_volume: true         # EEG raw_to_bids: trim to first volume marker
-  fmri_onset_reference: "first_iti_start"  # fMRI raw_to_bids: event onsets relative to first ITI
+  fmri_onset_reference: "as_is"  # fMRI raw_to_bids onset reference (as_is | first_iti_start | first_stim_start)
 
 eeg:
   montage: "easycap-M1"
@@ -115,6 +115,9 @@ preprocessing:
   write_clean_events: true           # Write post-rejection (kept-epochs) *_proc-clean_events.tsv in derivatives
   clean_events_overwrite: true       # Overwrite existing clean events.tsv
   clean_events_strict: true          # Fail preprocessing if clean events.tsv cannot be written/aligned
+  # Optional preferred task-trigger prefixes for auto-detecting epoch conditions.
+  # Keep this generic; define paradigm-specific trigger prefixes in overrides.
+  condition_preferred_prefixes: ["Trig_"]
 
 pyprep:
   ransac: true
@@ -483,7 +486,7 @@ feature_engineering:
       max_total_voxels: 20000
       random_seed: 0
       time_windows:
-        window_a: {name: "plateau", tmin: 5.0, tmax: 10.0}
+        window_a: {name: "window_a", tmin: 5.0, tmax: 10.0}
         window_b: {name: "baseline", tmin: -2.0, tmax: 0.0}
       contrast:
         enabled: false
@@ -491,15 +494,14 @@ feature_engineering:
         cond_a: {column: "trial_type", value: ""}
         cond_b: {column: "trial_type", value: ""}
         formula: ""
-        name: "pain_vs_baseline"
+        name: "contrast"
         runs: []                   # explicit runs (empty = auto-detect)
         hrf_model: "spm"           # "spm" | "flobs" | "fir"
         drift_model: "cosine"      # "none" | "cosine" | "polynomial"
         high_pass_hz: 0.008
         low_pass_hz: null          # Optional; avoid unless you know you need it
         # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
-        # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
-        #   ["stimulation", "pain_question", "vas_rating"]
+        # If null, all event rows are modeled (default).
         events_to_model: null
         # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
         # If null, no stim_phase scoping is applied.
@@ -585,7 +587,8 @@ feature_engineering:
     min_active_power: 1.0e-12        # Clamp active power for log computation
     min_segment_sec: 0.5             # Minimum segment duration in seconds
     bands: ["alpha", "beta"]         # Bands for ERDS computation (subset of frequency_bands)
-    # Pain-focused alpha markers (trial-level contralateral somatosensory kinetics)
+    # Optional laterality-aware ERDS markers (disabled by default for paradigm-agnostic behavior).
+    enable_pain_markers: false
     pain_marker_bands: ["alpha"]     # Bands where contralateral pain markers are extracted
     laterality_columns: ["stim_side", "stimulated_side", "pain_side", "side", "stimulus_side", "hand"]
     infer_contralateral_when_missing: true

@@ -182,13 +182,13 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.alignAllowMisalignedTrim {
 		args = append(args, "--allow-misaligned-trim")
 	}
-	if m.alignMinAlignmentSamples != 100 {
+	if m.alignMinAlignmentSamples != 5 {
 		args = append(args, "--min-alignment-samples", fmt.Sprintf("%d", m.alignMinAlignmentSamples))
 	}
 	if m.alignTrimToFirstVolume {
 		args = append(args, "--trim-to-first-volume")
 	}
-	refs := []string{"first_volume", "scanner_trigger"}
+	refs := []string{"as_is", "first_volume", "scanner_trigger"}
 	if m.alignFmriOnsetReference != 0 {
 		args = append(args, "--fmri-onset-reference", refs[m.alignFmriOnsetReference%len(refs)])
 	}
@@ -205,6 +205,10 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if strings.TrimSpace(m.eventColPainBinary) != "" {
 		args = append(args, "--event-col-binary-outcome")
 		args = append(args, splitCSVList(m.eventColPainBinary)...)
+	}
+	if strings.TrimSpace(m.conditionPreferredPrefixes) != "" {
+		args = append(args, "--condition-preferred-prefixes")
+		args = append(args, splitCSVList(m.conditionPreferredPrefixes)...)
 	}
 
 	return args

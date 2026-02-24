@@ -51,7 +51,7 @@ var pipelineDescriptions = [pipelineCount]string{
 	PipelineML:                "Machine learning: LOSO regression & time generalization",
 	PipelinePlotting:          "Generate curated visualization suites",
 	PipelineFmri:              "Preprocess fMRI (fMRIPrep-style)",
-	PipelineFmriAnalysis:      "First-level contrasts + trial-wise pain signatures",
+	PipelineFmriAnalysis:      "First-level contrasts + trial-wise signatures",
 }
 
 // String returns the display name for the pipeline

@@ -247,3 +247,10 @@ These scripts encode conventions specific to this pain paradigm:
 - **Behavior**: PsychoPy `TrialSummary.csv` with `run_id`, `stim_start_time`, `stimulus_temp`, `condition` columns.
 
 To adapt for a different paradigm, modify the scripts in this folder. **Do not modify** `eeg_pipeline/` or `fmri_pipeline/` core code.
+
+Paradigm-specific configuration templates are also isolated here:
+
+- `paradigm-specific-scripts/config/thermal_pain_eeg_overrides.yaml`
+- `paradigm-specific-scripts/config/thermal_pain_fmri_overrides.yaml`
+
+Use these as optional overrides when running the thermal pain paradigm, while keeping core pipeline defaults paradigm-agnostic.

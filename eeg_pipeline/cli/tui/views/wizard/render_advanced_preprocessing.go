@@ -552,7 +552,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			value = m.boolToOnOff(m.alignTrimToFirstVolume)
 			hint = "trim EEG to first fMRI volume"
 		case optAlignFmriOnsetReference:
-			refs := []string{"first_volume", "scanner_trigger"}
+			refs := []string{"as_is", "first_volume", "scanner_trigger"}
 			label = "fMRI Onset Reference"
 			value = refs[m.alignFmriOnsetReference%len(refs)]
 			hint = "alignment reference point"
@@ -580,7 +580,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			value = val
 			hint = "comma-separated column names"
 		case optEventColPainBinary:
-			label = "Pain Binary Columns"
+			label = "Binary Outcome Columns"
 			val := m.eventColPainBinary
 			if strings.TrimSpace(val) == "" {
 				val = "(default)"
@@ -590,6 +590,17 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			value = val
 			hint = "comma-separated column names"
+		case optConditionPreferredPrefixes:
+			label = "Condition Trigger Prefixes"
+			val := m.conditionPreferredPrefixes
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldConditionPreferredPrefixes {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "comma-separated trigger prefixes"
 		}
 
 		styledHint := ""

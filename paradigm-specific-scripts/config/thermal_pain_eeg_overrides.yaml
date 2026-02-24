@@ -1,0 +1,24 @@
+# Thermal pain paradigm override template for eeg_pipeline/utils/config/eeg_config.yaml
+# Apply these values via TUI Global Setup overrides or by copying into your project config.
+
+project:
+  task: "thermalactive"
+
+alignment:
+  fmri_onset_reference: "first_iti_start"
+
+preprocessing:
+  condition_preferred_prefixes: ["Trig_therm", "Trig_"]
+
+feature_engineering:
+  sourcelocalization:
+    fmri:
+      time_windows:
+        window_a: {name: "plateau", tmin: 5.0, tmax: 10.0}
+        window_b: {name: "baseline", tmin: -2.0, tmax: 0.0}
+      contrast:
+        name: "pain_vs_baseline"
+  erds:
+    enable_pain_markers: true
+    pain_marker_bands: ["alpha"]
+    laterality_columns: ["stim_side", "stimulated_side", "pain_side", "side", "stimulus_side", "hand"]

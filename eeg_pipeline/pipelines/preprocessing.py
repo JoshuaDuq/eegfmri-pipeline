@@ -693,9 +693,26 @@ class PreprocessingPipeline(PipelineBase):
                     return None
 
                 # Heuristic filtering:
-                # - Prefer task triggers (Trig_therm*) for thermal pain EEG-fMRI runs.
+                # - Prefer task-like triggers using configurable prefixes.
                 # - Avoid scanner/housekeeping markers (Volume, Pulse Artifact, SyncStatus, etc.)
-                preferred_prefixes = ("Trig_therm", "Trig_")
+                cfg_obj = getattr(self, "config", None)
+                configured_prefixes = None
+                if cfg_obj is not None and hasattr(cfg_obj, "get"):
+                    configured_prefixes = cfg_obj.get("preprocessing.condition_preferred_prefixes", None)
+                if isinstance(configured_prefixes, (list, tuple)):
+                    preferred_prefixes = tuple(
+                        str(p).strip()
+                        for p in configured_prefixes
+                        if str(p).strip()
+                    ) or ("Trig_",)
+                elif isinstance(configured_prefixes, str) and configured_prefixes.strip():
+                    preferred_prefixes = tuple(
+                        part.strip()
+                        for part in configured_prefixes.split(",")
+                        if part.strip()
+                    ) or ("Trig_",)
+                else:
+                    preferred_prefixes = ("Trig_",)
                 excluded_prefixes = (
                     "Volume",
                     "Pulse",

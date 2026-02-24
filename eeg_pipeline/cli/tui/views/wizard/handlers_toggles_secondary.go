@@ -401,7 +401,7 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.alignTrimToFirstVolume = !m.alignTrimToFirstVolume
 		m.useDefaultAdvanced = false
 	case optAlignFmriOnsetReference:
-		m.alignFmriOnsetReference = (m.alignFmriOnsetReference + 1) % 2
+		m.alignFmriOnsetReference = (m.alignFmriOnsetReference + 1) % 3
 		m.useDefaultAdvanced = false
 	// Event Column Mapping
 	case optEventColTemperature:
@@ -412,6 +412,9 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optEventColPainBinary:
 		m.startTextEdit(textFieldEventColPainBinary)
+		m.useDefaultAdvanced = false
+	case optConditionPreferredPrefixes:
+		m.startTextEdit(textFieldConditionPreferredPrefixes)
 		m.useDefaultAdvanced = false
 	}
 

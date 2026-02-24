@@ -42,7 +42,7 @@ class FmriAnalysisPipeline(PipelineBase):
 
     def _discover_signature_root(self) -> Optional[Path]:
         """
-        Best-effort path discovery for multivariate pain signature weight maps.
+        Best-effort path discovery for multivariate signature weight maps.
 
         Preference:
         1) config: paths.signature_dir (explicit override)

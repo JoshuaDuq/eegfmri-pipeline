@@ -132,23 +132,21 @@ fmri_contrast:
   
   # Condition A: column and value to select trials
   condition_a:
-    column: "binary_outcome_coded" # Column name in events.tsv
-    value: 1                    # Value to filter for (e.g., "temp49p3", "1")
+    column: "trial_type"        # Column name in events.tsv
+    value: null                 # Value to filter for (set explicitly for your paradigm)
   
   # Condition B: column and value for comparison (optional)
   condition_b:
-    column: "binary_outcome_coded"
-    value: 0
+    column: "trial_type"
+    value: null
 
   # Optional: restrict condition-based trial selection to specific event phases.
-  # Best practice for designs where per-trial columns (e.g., binary_outcome_coded) repeat across phases.
+  # Best practice for designs where per-trial columns repeat across phases.
   # If null, no trial_type scoping is applied.
   condition_scope_trial_types: null  # e.g., ["stimulation"]
 
   # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
-  # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
-  #   ["stimulation", "pain_question", "vas_rating"]
-  # This focuses the model on the stimulation response while controlling for rating/question overlap.
+  # If null, all event rows are modeled (default).
   events_to_model: null
 
   # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
@@ -211,10 +209,10 @@ fmri_constraint:
   # When enabled, source localization uses these windows instead of main pipeline windows
   time_windows:
     window_a:
-      name: "plateau"
+      name: "window_a"
       tmin: 3.0
       tmax: 10.45
     window_b:
-      name: "plateau"
+      name: "window_b"
       tmin: 3.0
       tmax: 10.45

@@ -330,7 +330,7 @@ Epoch segmentation and final artifact rejection are delegated to MNE-BIDS-Pipeli
 
 #### Condition Auto-Detection
 
-When `epochs.conditions` is not set, the pipeline reads the first available BIDS `events.tsv` and extracts unique `trial_type` values. Heuristic filtering excludes scanner/housekeeping markers (`Volume`, `Pulse`, `SyncStatus`, `New Segment`, `Bad`, `EDGE`, `Response`) and prefers task-relevant triggers (e.g., `Trig_therm*` prefixes for thermal pain paradigms).
+When `epochs.conditions` is not set, the pipeline reads the first available BIDS `events.tsv` and extracts unique `trial_type` values. Heuristic filtering excludes scanner/housekeeping markers (`Volume`, `Pulse`, `SyncStatus`, `New Segment`, `Bad`, `EDGE`, `Response`) and prefers task-relevant trigger prefixes configured in `preprocessing.condition_preferred_prefixes` (default: `Trig_`).
 
 #### Resting-State Data
 

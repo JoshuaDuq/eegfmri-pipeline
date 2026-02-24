@@ -339,7 +339,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 							args = append(args, "--source-fmri-cond-b-value", strings.TrimSpace(m.sourceLocFmriCondBValue))
 						}
 					}
-					if strings.TrimSpace(m.sourceLocFmriContrastName) != "" && m.sourceLocFmriContrastName != "pain_vs_baseline" {
+					if strings.TrimSpace(m.sourceLocFmriContrastName) != "" && m.sourceLocFmriContrastName != "contrast" {
 						args = append(args, "--source-fmri-contrast-name", strings.TrimSpace(m.sourceLocFmriContrastName))
 					}
 					if !m.sourceLocFmriAutoDetectRuns && strings.TrimSpace(m.sourceLocFmriRunsToInclude) != "" {

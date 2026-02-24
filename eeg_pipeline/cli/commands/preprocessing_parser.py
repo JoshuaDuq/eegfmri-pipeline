@@ -179,13 +179,20 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--trim-to-first-volume", action="store_true", default=False, help="Trim EEG events to first fMRI volume start when aligning")
     prep_group.add_argument(
         "--fmri-onset-reference",
-        choices=["first_volume", "scanner_trigger"],
+        choices=["as_is", "first_volume", "scanner_trigger"],
         default=None,
         help="Reference event for fMRI onset alignment",
     )
     prep_group.add_argument("--event-col-temperature", nargs="+", type=str, default=None, help="events.tsv candidate columns for temperature")
     prep_group.add_argument("--event-col-rating", nargs="+", type=str, default=None, help="events.tsv candidate columns for rating")
-    prep_group.add_argument("--event-col-binary-outcome", nargs="+", type=str, default=None, help="events.tsv candidate columns for pain-binary split")
+    prep_group.add_argument("--event-col-binary-outcome", nargs="+", type=str, default=None, help="events.tsv candidate columns for binary-outcome split")
+    prep_group.add_argument(
+        "--condition-preferred-prefixes",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Preferred trigger prefixes for auto-detecting epoch conditions from events.tsv",
+    )
 
     add_path_args(parser)
 

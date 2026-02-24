@@ -126,6 +126,7 @@ def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> Non
     """Update config with alignment + event-column overrides."""
     alignment_cfg = config.setdefault("alignment", {})
     event_cols = config.setdefault("event_columns", {})
+    preprocessing_cfg = config.setdefault("preprocessing", {})
     if args.allow_misaligned_trim:
         alignment_cfg["allow_misaligned_trim"] = True
     if args.min_alignment_samples is not None:
@@ -148,6 +149,10 @@ def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> Non
         event_cols["rating"] = [str(v).strip() for v in args.event_col_rating if str(v).strip()]
     if args.event_col_binary_outcome:
         event_cols["binary_outcome"] = [str(v).strip() for v in args.event_col_binary_outcome if str(v).strip()]
+    if args.condition_preferred_prefixes:
+        preprocessing_cfg["condition_preferred_prefixes"] = [
+            str(v).strip() for v in args.condition_preferred_prefixes if str(v).strip()
+        ]
 
 
 def _resolve_n_jobs(args: argparse.Namespace, config: Any) -> int:

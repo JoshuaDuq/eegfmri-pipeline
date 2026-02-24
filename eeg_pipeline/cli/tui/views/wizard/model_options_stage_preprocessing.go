@@ -124,6 +124,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 		optEventColTemperature,
 		optEventColRating,
 		optEventColPainBinary,
+		optConditionPreferredPrefixes,
 	)
 
 	return options

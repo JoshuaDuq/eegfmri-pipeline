@@ -1003,6 +1003,7 @@ const (
 	optEventColTemperature
 	optEventColRating
 	optEventColPainBinary
+	optConditionPreferredPrefixes
 
 	// Per-Family Spatial Transforms
 	optSpatialTransformPerFamilyConnectivity

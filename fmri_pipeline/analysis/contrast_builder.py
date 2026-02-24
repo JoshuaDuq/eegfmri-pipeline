@@ -74,7 +74,7 @@ class ContrastBuilderConfig:
     smoothing_fwhm: Optional[float] = None
     # Optional: restrict which trial_type rows are passed to nilearn for GLM.
     # If None, all rows are modeled (default/current behavior).
-    # Recommended for multi-phase tasks: ["stimulation", "pain_question", "vas_rating"].
+    # Useful for multi-phase tasks to limit modeled rows.
     events_to_model: Optional[List[str]] = None
     # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
     # If None, no stim_phase scoping is applied. Use ["all"] to disable phase scoping.

@@ -44,6 +44,7 @@ htmlcov/
 
 ### Go (TUI) ###
 .gocache/
+.gocache_local/
 eeg_pipeline/cli/tui/tui
 eeg_pipeline/cli/tui/eeg-tui
 eeg_pipeline/cli/tui/eeg-pipeline-tui

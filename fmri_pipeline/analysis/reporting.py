@@ -430,7 +430,7 @@ def generate_pain_signature_tables(
             signatures=sorted(sig_files.keys()),
         )
     except Exception as exc:
-        logger.warning("Failed to compute pain signatures (%s)", exc)
+        logger.warning("Failed to compute signatures (%s)", exc)
         return []
 
     if not results:

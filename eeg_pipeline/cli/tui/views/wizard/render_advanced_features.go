@@ -1207,7 +1207,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		case optSourceLocFmriContrastFormula:
 			label = "Formula"
 			if strings.TrimSpace(m.sourceLocFmriContrastFormula) == "" {
-				value = "(e.g., pain_high - pain_low)"
+				value = "(e.g., cond_a - cond_b)"
 			} else {
 				value = m.sourceLocFmriContrastFormula
 			}
@@ -1218,7 +1218,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		case optSourceLocFmriContrastName:
 			label = "Contrast Name"
 			if strings.TrimSpace(m.sourceLocFmriContrastName) == "" {
-				value = "pain_vs_baseline"
+				value = "contrast"
 			} else {
 				value = m.sourceLocFmriContrastName
 			}
@@ -1360,7 +1360,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldSourceLocFmriWindowAName {
 				value = m.textBuffer + "█"
 			}
-			hint = "e.g., plateau"
+			hint = "e.g., window_a"
 		case optSourceLocFmriWindowATmin:
 			label = "Window A Tmin"
 			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowATmin)
@@ -1385,7 +1385,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldSourceLocFmriWindowBName {
 				value = m.textBuffer + "█"
 			}
-			hint = "e.g., baseline (optional)"
+			hint = "e.g., window_b (optional)"
 		case optSourceLocFmriWindowBTmin:
 			label = "Window B Tmin"
 			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowBTmin)

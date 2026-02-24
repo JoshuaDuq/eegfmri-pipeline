@@ -52,6 +52,9 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
                 "rating",
                 "--event-col-binary-outcome",
                 "binary_outcome",
+                "--condition-preferred-prefixes",
+                "Trig_",
+                "Stim_",
                 "--rename-anot-dict",
                 "{\"BAD boundary\":\"BAD_boundary\"}",
                 "--custom-bad-dict",
@@ -74,6 +77,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("event_columns.temperature"), ["temperature", "stim_temp"])
         self.assertEqual(config.get("event_columns.rating"), ["rating"])
         self.assertEqual(config.get("event_columns.binary_outcome"), ["binary_outcome"])
+        self.assertEqual(config.get("preprocessing.condition_preferred_prefixes"), ["Trig_", "Stim_"])
         self.assertEqual(config["pyprep"]["rename_anot_dict"]["BAD boundary"], "BAD_boundary")
         self.assertEqual(config["pyprep"]["custom_bad_dict"]["task"]["0001"], ["TP8"])
 

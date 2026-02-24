@@ -311,7 +311,7 @@ def filter_annotations(
     if event_prefixes is None:
         # Default: keep both task triggers and fMRI volume triggers for
         # simultaneous EEG-fMRI alignment/QC.
-        normalized_prefixes = ["Trig_therm", "Volume"]
+        normalized_prefixes = ["Trig_", "Volume"]
     else:
         normalized_prefixes = [normalize_string(p) for p in event_prefixes if str(p).strip() != ""]
     

@@ -1054,6 +1054,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["eventColTemperature"] = m.eventColTemperature
 	cfg["eventColRating"] = m.eventColRating
 	cfg["eventColPainBinary"] = m.eventColPainBinary
+	cfg["conditionPreferredPrefixes"] = m.conditionPreferredPrefixes
 
 	// Per-Family Spatial Transforms
 	cfg["spatialTransformPerFamilyConnectivity"] = m.spatialTransformPerFamilyConnectivity
@@ -2270,6 +2271,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.eventColTemperature = getString("eventColTemperature", m.eventColTemperature)
 	m.eventColRating = getString("eventColRating", m.eventColRating)
 	m.eventColPainBinary = getString("eventColPainBinary", m.eventColPainBinary)
+	m.conditionPreferredPrefixes = getString("conditionPreferredPrefixes", m.conditionPreferredPrefixes)
 
 	// Per-Family Spatial Transforms
 	m.spatialTransformPerFamilyConnectivity = getInt("spatialTransformPerFamilyConnectivity", m.spatialTransformPerFamilyConnectivity)

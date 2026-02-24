@@ -748,6 +748,7 @@ const (
 	textFieldEventColTemperature
 	textFieldEventColRating
 	textFieldEventColPainBinary
+	textFieldConditionPreferredPrefixes
 
 	// Change Scores text fields
 	textFieldChangeScoresWindowPairs
@@ -1695,8 +1696,8 @@ type Model struct {
 	sourceLocFmriConditions               []string // Discovered conditions from fMRI events files
 	sourceLocFmriCondIdx1                 int      // Index into discovered conditions for Condition A
 	sourceLocFmriCondIdx2                 int      // Index into discovered conditions for Condition B
-	sourceLocFmriContrastFormula          string   // Custom formula (e.g., "pain_high - pain_low")
-	sourceLocFmriContrastName             string   // Contrast name (e.g., "pain_vs_baseline")
+	sourceLocFmriContrastFormula          string   // Custom formula (e.g., "cond_a - cond_b")
+	sourceLocFmriContrastName             string   // Contrast name (e.g., "contrast")
 	sourceLocFmriRunsToInclude            string   // Comma-separated runs (e.g., "1,2,3")
 	sourceLocFmriAutoDetectRuns           bool     // Auto-detect available BOLD runs
 	sourceLocFmriHrfModel                 int      // 0: SPM, 1: FLOBS, 2: FIR
@@ -1713,7 +1714,7 @@ type Model struct {
 	sourceLocFmriRequireFmriprep          bool     // Require fMRIPrep for contrast building
 
 	// fMRI-specific time windows (independent of EEG feature extraction windows)
-	sourceLocFmriWindowAName string  // Name for window A (e.g., "plateau")
+	sourceLocFmriWindowAName string  // Name for window A (e.g., "window_a")
 	sourceLocFmriWindowATmin float64 // Start time for window A (seconds)
 	sourceLocFmriWindowATmax float64 // End time for window A (seconds)
 	sourceLocFmriWindowBName string  // Name for window B (e.g., "baseline")
@@ -2222,12 +2223,13 @@ type Model struct {
 	alignAllowMisalignedTrim bool // Allow misaligned trim
 	alignMinAlignmentSamples int  // Minimum alignment samples
 	alignTrimToFirstVolume   bool // Trim EEG to first volume marker
-	alignFmriOnsetReference  int  // 0: first_iti_start, 1: first_stim_start, 2: as_is
+	alignFmriOnsetReference  int  // 0: as_is, 1: first_volume, 2: scanner_trigger
 
 	// Event Column Mapping
-	eventColTemperature string // Temperature column candidates (comma-separated)
-	eventColRating      string // Rating column candidates (comma-separated)
-	eventColPainBinary  string // Pain binary column candidates (comma-separated)
+	eventColTemperature        string // Temperature column candidates (comma-separated)
+	eventColRating             string // Rating column candidates (comma-separated)
+	eventColPainBinary         string // Binary outcome column candidates (comma-separated)
+	conditionPreferredPrefixes string // Preferred trigger prefixes for auto condition detection (comma-separated)
 
 	// Per-Family Spatial Transforms (0: none, 1: csd, 2: laplacian)
 	spatialTransformPerFamilyConnectivity int
@@ -2645,7 +2647,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriCondBColumn:              "trial_type",
 		sourceLocFmriCondBValue:               "",
 		sourceLocFmriContrastFormula:          "",
-		sourceLocFmriContrastName:             "pain_vs_baseline",
+		sourceLocFmriContrastName:             "contrast",
 		sourceLocFmriRunsToInclude:            "",
 		sourceLocFmriAutoDetectRuns:           true,
 		sourceLocFmriHrfModel:                 0,     // 0: SPM
@@ -2660,10 +2662,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriResampleToFS:             true,
 		sourceLocFmriInputSource:              0, // 0: fmriprep
 		sourceLocFmriRequireFmriprep:          true,
-		sourceLocFmriWindowAName:              "plateau",
+		sourceLocFmriWindowAName:              "window_a",
 		sourceLocFmriWindowATmin:              5.0,
 		sourceLocFmriWindowATmax:              10.0,
-		sourceLocFmriWindowBName:              "baseline",
+		sourceLocFmriWindowBName:              "window_b",
 		sourceLocFmriWindowBTmin:              -2.0,
 		sourceLocFmriWindowBTmax:              0.0,
 
@@ -3103,12 +3105,13 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		alignAllowMisalignedTrim: false,
 		alignMinAlignmentSamples: 5,
 		alignTrimToFirstVolume:   true,
-		alignFmriOnsetReference:  0, // 0: first_iti_start
+		alignFmriOnsetReference:  0, // 0: as_is
 
 		// Event Column Mapping defaults
-		eventColTemperature: "stimulus_temp,stimulus_temperature,temp,temperature",
-		eventColRating:      "vas_final_coded_rating,vas_final_rating,vas_rating,pain_intensity,pain_rating,rating",
-		eventColPainBinary:  "binary_outcome_coded,binary_outcome,pain",
+		eventColTemperature:        "stimulus_temp,stimulus_temperature,temp,temperature",
+		eventColRating:             "vas_final_coded_rating,vas_final_rating,vas_rating,pain_intensity,pain_rating,rating",
+		eventColPainBinary:         "binary_outcome,binary_outcome_coded,outcome_binary,label,pain",
+		conditionPreferredPrefixes: "Trig_",
 
 		// Per-Family Spatial Transforms defaults (all 0 = none / inherit global)
 		spatialTransformPerFamilyConnectivity: 0,
