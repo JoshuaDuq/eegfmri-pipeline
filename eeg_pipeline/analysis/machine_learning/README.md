@@ -491,7 +491,7 @@ with optional bootstrap CIs (subjects resampled). Pooled trial-level Pearson r, 
 | Sensitivity (recall) | $\text{TP}/(\text{TP}+\text{FN})$ |
 | Specificity | $\text{TN}/(\text{TN}+\text{FP})$ |
 | Brier score | $\frac{1}{N}\sum_i(\hat{p}_i - y_i)^2$ — probability calibration |
-| ECE | $\sum_{k=1}^{10}\frac{|B_k|}{N}\bigl|\bar{p}_k - \bar{y}_k\bigr|$ — Expected Calibration Error over 10 uniform probability bins |
+| ECE | $\sum_{k=1}^{10}\frac{\lvert B_k \rvert}{N}\bigl\lvert \bar{p}_k - \bar{y}_k \bigr\rvert$ — Expected Calibration Error over 10 uniform probability bins |
 
 Pooled trial-level metrics are reported alongside subject-level metrics for diagnostics. Subject-level means with bootstrap CIs are the primary inferential statistics.
 
@@ -585,7 +585,7 @@ Three corrections are applied simultaneously to all tested cells:
 | Method | Description |
 |--------|-------------|
 | **FDR-BH** | Benjamini-Hochberg procedure applied across all finite cells. Controls false discovery rate. |
-| **Max-stat (FWER)** | Threshold at the 95th percentile of the permutation null distribution of $\max_{(i,j)} |r_{ij}^\pi|$. Controls familywise error rate. |
+| **Max-stat (FWER)** | Threshold at the 95th percentile of the permutation null distribution of $\max_{(i,j)} \lvert r_{ij}^\pi \rvert$. Controls familywise error rate. |
 | **Cluster-FWER** | Contiguous cells exceeding a forming threshold are grouped; cluster sizes compared to the null distribution of maximum cluster sizes. Controls FWER at cluster level. |
 
 **Cell-level p-value:**
