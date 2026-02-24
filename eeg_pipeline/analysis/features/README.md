@@ -50,16 +50,12 @@ Feature categories are resolved by `resolve_feature_categories` in `selection.py
 - If neither is given, all entries in `FEATURE_CATEGORIES` are enabled.
 
 Categories currently include:
-
 $$
-
 \{\text{power}, \text{spectral}, \text{aperiodic}, \text{erp}, \text{erds},
 \text{ratios}, \text{asymmetry}, \text{connectivity}, \text{directedconnectivity},
 \text{itpc}/\text{phase}, \text{pac}, \text{complexity}, \text{bursts},
 \text{microstates}, \text{quality}, \text{sourcelocalization}\}.
-
 $$
-
 ### 1.2 Column Naming Schema
 
 Most features follow:
@@ -107,13 +103,9 @@ Time windows are represented by `TimeWindows` (`baseline_range`, `active_range`,
   can still reference the original windows.
 
 For any window with mask $M_{\text{seg}}(t) \in \{0,1\}$, we define:
-
 $$
-
 \bar{x}_{e,c}^{(\text{seg})} = \frac{\sum_t M_{\text{seg}}(t)x_{e,c}(t)}{\sum_t M_{\text{seg}}(t)}.
-
 $$
-
 Segments with fewer than the required number of samples or cycles (per‑feature criteria)
 are skipped for that feature.
 
@@ -124,13 +116,9 @@ are skipped for that feature.
 ### 3.1 Base Frequency Bands
 
 Base frequency bands are read from the config via `get_frequency_bands(config)` and typically include:
-
 $$
-
 \text{delta},\ \text{theta},\ \text{alpha},\ \text{beta},\ \text{gamma}.
-
 $$
-
 Each band $B$ has bounds $[f_{\text{min}}^B, f_{\text{max}}^B]$.
 
 ### 3.2 IAF‑Adjusted Bands (Global Precomputation)
@@ -142,28 +130,20 @@ Workflow:
 1. Extract baseline data (if available) using the baseline mask; otherwise optionally fall back to the full segment if explicitly allowed.
 2. Compute PSD in a broad range (default $\approx 1$–$40$ Hz) using `mne.time_frequency.psd_array_multitaper`.
 3. Remove a 1/f trend:
-
 $$
-
 \log_{10} P_{\text{resid}}(f) = \log_{10} P(f) - \left(\beta_0 + \beta_1 \log_{10} f\right),
-
 $$
-
 estimated by robust or ordinary linear regression in log–log space.
 
 4. Estimate IAF, $\hat{f}_\alpha$, either as the most prominent residual peak in a search range (e.g. 7–13 Hz) or, if no peak passes prominence criteria, as a residual‑power‑weighted average in that range.
 5. Adjust bands (schematic):
-
 $$
-
 \begin{aligned}
 \text{alpha} &= [\hat{f}_\alpha - w_\alpha,\ \hat{f}_\alpha + w_\alpha],\\
 \text{theta} &= [\max(3,\ \hat{f}_\alpha - 6),\ \max(4,\ f^\text{alpha}_{\text{min}})],\\
 \text{beta}  &= [\max(13,\ f^\text{alpha}_{\text{max}}),\ f^\text{beta}_{\text{max}}].
 \end{aligned}
-
 $$
-
 All IAF‑dependent logic includes explicit **duration and cycle‑count checks** to avoid
 ill‑posed estimates.
 
@@ -195,13 +175,9 @@ Spatial transforms are **never silently skipped**. If a requested transform fail
 (e.g. due to montage problems), a `RuntimeError` is raised.
 
 The standard transform is CSD via:
-
 $$
-
 x^\text{CSD}(t) = \text{compute\_current\_source\_density}(x(t);\ \lambda^2,\ \text{stiffness}),
-
 $$
-
 where $\lambda^2$ and stiffness are configured parameters with sensible defaults.
 
 ### 4.2 Precomputed Data Container
@@ -243,13 +219,9 @@ For pain paradigms, induced power can be computed by subtracting condition‑wis
 
 1. Let $x_{e,c}(t)$ be the trial waveform and $\bar{x}_{k,c}(t)$ the average over trials in condition $k$.
 2. The **induced** signal is:
-
 $$
-
 x^{\text{induced}}_{e,c}(t) = x_{e,c}(t) - \bar{x}_{k(e),c}(t).
-
 $$
-
 3. This is implemented by `subtract_evoked` and is used:
 
    - In precomputation (`precompute_data`) when `feature_engineering.precomputed.subtract_evoked` or `feature_engineering.power.subtract_evoked` is enabled.
@@ -305,45 +277,29 @@ Below, we summarize each feature family with the principal formulas. Details suc
 Starting from TFR power $P_{e,c}(f,t)$:
 
 1. **Segment average per frequency**:
-
 $$
-
 \bar{P}_{e,c}^{B,\text{seg}}(f) =
 \frac{\sum_t M_{\text{seg}}(t)P_{e,c}(f,t)}{\sum_t M_{\text{seg}}(t)}.
-
 $$
-
 2. **Frequency‑weighted band power** over band $B$ with bin widths $\Delta f$:
-
 $$
-
 P_{e,c}^{B,\text{seg}} =
 \frac{\sum_{f \in B} \bar{P}_{e,c}^{B,\text{seg}}(f)\Delta f}
      {\sum_{f \in B} \Delta f}.
-
 $$
-
 3. **Baseline‑normalized log‑ratio** (when baseline is available and TFR is not already baselined):
-
 $$
-
 \text{logratio}_{e,c}^{B} =
 \log_{10}\left(
   \frac{\max(P_{e,c}^{B,\text{active}}, \varepsilon)}
        {\max(P_{e,c}^{B,\text{baseline}}, \varepsilon)}
 \right),
 \quad \varepsilon = 10^{-20}.
-
 $$
-
 4. **dB scaling**:
-
 $$
-
 \text{dB}_{e,c}^{B} = 10 \cdot \text{logratio}_{e,c}^{B}.
-
 $$
-
 If the TFR was already baselined (e.g. `logratio` or `percent` mode during TFR computation), the baselined power values are used directly, and baseline self‑normalization is avoided.
 
 **Outputs (per band × segment × scope)**
@@ -363,46 +319,30 @@ Line‑noise harmonics inside a configurable exclusion window around multiples o
 For each trial and channel, a PSD is computed either by multitaper or Welch. Within a band $B$:
 
 1. **Center frequency (spectral CoG)**:
-
 $$
-
 f_{\text{cog}} =
 \frac{\sum_{f \in B} f\mathrm{PSD}(f)\Delta f}
      {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}.
-
 $$
-
 2. **Bandwidth (power‑weighted standard deviation)**:
-
 $$
-
 \sigma_B =
 \sqrt{
   \frac{\sum_{f \in B} (f - f_{\text{cog}})^2\mathrm{PSD}(f)\Delta f}
        {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}
 }.
-
 $$
-
 3. **Normalized spectral entropy**:
 
 Let
-
 $$
-
 p(f) = \frac{\mathrm{PSD}(f)\Delta f}
             {\sum_{f \in B} \mathrm{PSD}(f)\Delta f}.
-
 $$
-
 Then
-
 $$
-
 H_B = -\frac{\sum_{f \in B} p(f)\ln p(f)}{\ln N_B},
-
 $$
-
 where $N_B$ is the number of frequency bins in $B$.
 
 4. **Peak features** use a robust aperiodic fit (shared with the aperiodic module):
@@ -414,14 +354,10 @@ where $N_B$ is the number of frequency bins in $B$.
 5. **Broadband spectral edge**:
 
 `edge_freq_95` is the smallest $f$ such that:
-
 $$
-
 \frac{\sum_{f' \le f} \mathrm{PSD}(f')\Delta f'}
      {\sum_{f'} \mathrm{PSD}(f')\Delta f'} \ge 0.95.
-
 $$
-
 Segments shorter than a configured `min_segment_sec` or with fewer than `min_cycles_at_fmin` cycles are skipped.
 
 ---
@@ -433,14 +369,10 @@ Segments shorter than a configured `min_segment_sec` or with fewer than `min_cyc
 The aperiodic component is modeled in log–log space:
 
 1. Compute PSD and transform:
-
 $$
-
 x(f) = \log_{10} f,\quad
 y(f) = \log_{10} \mathrm{PSD}(f).
-
 $$
-
 2. Iteratively fit the aperiodic trend:
 
 - Fit an initial model in $[f_{\text{min}}, f_{\text{max}}]$ (e.g. 2–40 Hz).
@@ -451,37 +383,23 @@ $$
 3. Models:
 
 - **Fixed‑slope (linear)**
-
 $$
-
 y(f) = \text{offset} + \text{slope} \cdot x(f).
-
 $$
-
 - **Knee model**
-
 $$
-
 y(f) = \text{offset} - \log_{10}\bigl(\text{knee} + f^{\text{exponent}}\bigr).
-
 $$
-
 4. Features per segment:
 
 - `slope`, `offset`, `exponent`, `knee`,
 - Goodness‑of‑fit metrics (`r2`, `rms`),
 - Aperiodic‑corrected band powers:
-
 $$
-
 \text{powcorr}_B = \sum_{f \in B} 10^{r(f)}\Delta f,
-
 $$
-
 - Aperiodic‑corrected theta/beta ratio:
-
 $$
-
 \text{tbr} =
 \frac{\mathrm{mean}_{f \in \theta} 10^{r(f)}}
      {\mathrm{mean}_{f \in \beta}  10^{r(f)}},
@@ -489,9 +407,7 @@ $$
 \text{tbr\_raw} =
 \frac{\mathrm{mean}_{f \in \theta} \mathrm{PSD}(f)}
      {\mathrm{mean}_{f \in \beta}  \mathrm{PSD}(f)}.
-
 $$
-
 Residual peaks are further summarized by center frequency, bandwidth, and height (FOOOF‑like).
 
 ---
@@ -503,49 +419,29 @@ Residual peaks are further summarized by center frequency, bandwidth, and height
 For each ERP component window $T_{\text{comp}}$ (e.g. N2, P2) and each channel or ROI:
 
 1. Baseline‑corrected signal:
-
 $$
-
 \tilde{x}_{e,c}(t) = x_{e,c}(t) - \bar{x}_{e,c}^{(\text{baseline})}.
-
 $$
-
 2. Component mean:
-
 $$
-
 \text{mean}_{e,c}^{\text{comp}} =
 \frac{1}{|T_{\text{comp}}|} \sum_{t \in T_{\text{comp}}} \tilde{x}_{e,c}(t).
-
 $$
-
 3. Peak amplitude and latency:
 
 - Depending on polarity (`neg`, `pos`, or `abs`), find:
-
 $$
-
 t^* = \arg\max_{t \in T_{\text{comp}}} s(\tilde{x}_{e,c}(t)),
-
 $$
-
 where $s$ is identity, minus, or absolute value. Then:
-
 $$
-
 \text{peak}_{e,c}^{\text{comp}} = \tilde{x}_{e,c}(t^*),\quad
 \text{latency}_{e,c}^{\text{comp}} = t^*.
-
 $$
-
 4. Area under the curve (AUC):
-
 $$
-
 \text{auc}_{e,c}^{\text{comp}} = \int_{t \in T_{\text{comp}}} \tilde{x}_{e,c}(t)dt,
-
 $$
-
 computed as a sum of trapezoids over contiguous valid segments.
 
 Paired components (e.g. N2–P2) yield peak‑to‑peak amplitude and latency differences.
@@ -559,40 +455,28 @@ Paired components (e.g. N2–P2) yield peak‑to‑peak amplitude and latency di
 Using precomputed band envelopes $|\mathcal{H}(x_{e,c}^B(t))|$:
 
 1. Baseline and active power:
-
 $$
-
 P^{B,\text{baseline}}_{e,c} = \mathrm{mean}_{t \in T_{\text{baseline}}}
    |\mathcal{H}(x_{e,c}^B(t))|^2,\quad
 P^{B,\text{active}}_{e,c}   = \mathrm{mean}_{t \in T_{\text{active}}}
    |\mathcal{H}(x_{e,c}^B(t))|^2.
-
 $$
-
 2. ERDS percentage:
-
 $$
-
 \text{ERDS\%}_{e,c}^B =
 100 \cdot
 \frac{P^{B,\text{active}}_{e,c} - P^{B,\text{baseline}}_{e,c}}
      {P^{B,\text{baseline}}_{e,c}}.
-
 $$
-
 3. dB form:
-
 $$
-
 \text{ERDS}_{\text{dB}} =
 10 \log_{10}
 \left(
   \frac{P^{B,\text{active}}_{e,c}}
        {P^{B,\text{baseline}}_{e,c}}
 \right).
-
 $$
-
 Very low baseline power is treated as invalid rather than artificially clamped.
 
 Outputs include per‑channel ERDS, ROI/global aggregates, slopes, onset and peak latencies, and pain‑specific markers (contralateral somatosensory ERD, rebound magnitude, etc.).
@@ -604,25 +488,17 @@ Outputs include per‑channel ERDS, ROI/global aggregates, slopes, onset and pea
 **Module:** `precomputed/extras.py` → `extract_band_ratios_from_precomputed`
 
 From PSD‑integrated band powers $P^B_{e,c}$:
-
 $$
-
 P^B_{e,c} = \sum_{f \in B} \mathrm{PSD}_{e,c}(f)\Delta f.
-
 $$
-
 For a ratio pair $(B_{\text{num}}, B_{\text{den}})$:
-
 $$
-
 \text{power\_ratio}_e =
 \frac{P^{B_{\text{num}}}_e}{P^{B_{\text{den}}}_e},\quad
 \text{log\_ratio}_e =
 \ln\bigl(P^{B_{\text{num}}}_e + \varepsilon\bigr)
  - \ln\bigl(P^{B_{\text{den}}}_e + \varepsilon\bigr).
-
 $$
-
 ROI/global ratios use **averaged PSDs** across channels rather than averages of per‑channel ratios.
 
 ---
@@ -632,22 +508,14 @@ ROI/global ratios use **averaged PSDs** across channels rather than averages of 
 **Module:** `precomputed/extras.py` → `extract_asymmetry_from_precomputed`
 
 For a left–right pair $(L,R)$ and band $B$, with integrated powers $P^B_L, P^B_R$:
-
 $$
-
 \text{index} = \frac{P^B_R - P^B_L}{P^B_R + P^B_L},\quad
 \text{logdiff} = \ln P^B_R - \ln P^B_L.
-
 $$
-
 Optionally, an **activation convention** alpha asymmetry:
-
 $$
-
 \text{logdiff\_activation} = -\text{logdiff},
-
 $$
-
 so that higher values correspond to greater cortical activation on the right side under the usual alpha‑suppression interpretation.
 
 ---
@@ -660,54 +528,34 @@ Connectivity is computed in the frequency domain (wPLI, PLI, imaginary coherence
 
 1. Cross‑spectrum $S_{ij}(f)$ and auto‑spectra $S_{ii}(f), S_{jj}(f)$.
 2. wPLI:
-
 $$
-
 \text{wPLI}_{ij} =
 \frac{\left|\mathbb{E}\bigl[\mathrm{Im}(X_i X_j^\ast)\bigr]\right|}
      {\mathbb{E}\bigl[\left|\mathrm{Im}(X_i X_j^\ast)\right|\bigr]}.
-
 $$
-
 3. PLI:
-
 $$
-
 \text{PLI}_{ij} =
 \left|\mathbb{E}\bigl[\mathrm{sign}(\mathrm{Im}(X_i X_j^\ast))\bigr]\right|.
-
 $$
-
 4. Imaginary coherence:
-
 $$
-
 \text{imCoh}_{ij} =
 \mathrm{Im}\left(
   \frac{S_{ij}}{\sqrt{S_{ii} S_{jj}}}
 \right).
-
 $$
-
 5. PLV:
-
 $$
-
 \text{PLV}_{ij} =
 \left|\mathbb{E}\bigl[e^{\mathrm{i}\Delta\varphi_{ij}}\bigr]\right|.
-
 $$
-
 6. AEC (envelope correlation):
-
 $$
-
 r_{ij} = \mathrm{corr}(A_i, A_j),
 \quad
 z_{ij} = \mathrm{atanh}(\mathrm{clip}(r_{ij}, -0.9999, 0.9999)).
-
 $$
-
 Connectivity can be:
 
 - Trial‑wise,
@@ -729,48 +577,32 @@ Directed connectivity is based on either spectral phase‑slope (PSI) or MVAR mo
 1. **PSI**:
 
 Let
-
 $$
-
 C_{ij}(f) = \frac{S_{ij}(f)}{\sqrt{S_{ii}(f) S_{jj}(f)}}.
-
 $$
-
 Then
-
 $$
-
 \text{PSI}_{ij} =
 \mathrm{Im}\left(
   \sum_f C_{ij}^\ast(f)C_{ij}(f + \Delta f)
 \right).
-
 $$
-
 2. **DTF**:
 
 From an MVAR model with frequency‑domain transfer matrix $H(f)$,
-
 $$
-
 \text{DTF}_{i \leftarrow j}(f) =
 \frac{|H_{ij}(f)|}
      {\sqrt{\sum_k |H_{ik}(f)|^2}}.
-
 $$
-
 3. **PDC**:
 
 From the MVAR coefficient matrix $A(f)$,
-
 $$
-
 \text{PDC}_{i \leftarrow j}(f) =
 \frac{|A_{ij}(f)|}
      {\sqrt{\sum_k |A_{kj}(f)|^2}}.
-
 $$
-
 Outputs include forward/backward directed influence and asymmetry summaries at the trial and global level. MVAR order is automatically reduced when the data do not support the requested model order.
 
 ---
@@ -780,21 +612,13 @@ Outputs include forward/backward directed influence and asymmetry summaries at t
 **Module:** `phase.py` → `extract_phase_features`, `extract_itpc_from_precomputed`
 
 Given complex time–frequency data $Z_e(f,t)$, define unit vectors
-
 $$
-
 u_e(f,t) = \frac{Z_e(f,t)}{|Z_e(f,t)| + \varepsilon}.
-
 $$
-
 ITPC over a set of trials $\mathcal{T}$ is:
-
 $$
-
 \text{ITPC}(f,t) = \left|\frac{1}{|\mathcal{T}|}\sum_{e \in \mathcal{T}} u_e(f,t)\right|.
-
 $$
-
 The pipeline supports:
 
 - Global (all trials),
@@ -818,27 +642,17 @@ For a phase band $B_\phi$ and amplitude band $B_A$:
 - Complex TFR data (TFR‑based PAC).
 
 2. Mean vector length (MVL):
-
 $$
-
 u(t) = \mathbb{E}_{f_\phi \in B_\phi}\left[e^{i\phi(f_\phi,t)}\right],\quad
 A(t) = \mathbb{E}_{f_A \in B_A}\left[\text{amp}(f_A,t)\right],
-
 $$
-
 $$
 \text{MVL} = \frac{\left|\sum_t A(t)u(t)\right|}{\sum_t A(t)}.
-
 $$
-
 3. Optional surrogate‑based $z$‑scoring:
-
 $$
-
 z = \frac{\text{MVL}_{\text{obs}} - \mu_{\text{surr}}}{\sigma_{\text{surr}}},
-
 $$
-
 where $\mu_{\text{surr}}$ and $\sigma_{\text{surr}}$ are estimated from PAC values computed on surrogate data (trial‑shuffled and/or circularly shifted).
 
 PAC can be exported as:
@@ -857,25 +671,17 @@ Harmonic overlap guards skip scientifically dubious band combinations.
 
 Using a forward model and inverse solution (LCMV or eLORETA), source‑space signals
 $x_v(t)$ are mapped to ROI time courses:
-
 $$
-
 x_{\text{ROI}}(t) = \frac{1}{|V_{\text{ROI}}|}\sum_{v \in V_{\text{ROI}}} x_v(t).
-
 $$
-
 Features include:
 
 - Source‑space band power:
-
 $$
-
 \text{src\_power}^{B,\text{seg}}_{\text{ROI}} =
 \frac{\sum_{f \in B} \mathrm{PSD}_{\text{ROI}}(f)\Delta f}
      {\sum_{f \in B} \Delta f},
-
 $$
-
 - Source‑space Hilbert envelopes averaged over segments,  
 - Global averages across ROIs.
 
@@ -896,40 +702,28 @@ Key definitions:
   - Binary sequence $b_t = \mathbf{1}[x_t > \mathrm{median}(x)]$,
   - Complexity count $c$ from the LZ76 parsing algorithm,
   - Normalized:
-
 $$
-
   \text{LZC} = \frac{c}{n / \log_2 n},
-
 $$
-
   where $n$ is sequence length.
 
 - **Permutation Entropy (PE)**:
 
   - For embedding dimension $m$ and delay $\tau$, compute ordinal patterns $\pi$ and their probabilities $p(\pi)$,
   - Then
-
 $$
-
   \text{PE} =
   -\frac{\sum_{\pi} p(\pi)\log_2 p(\pi)}{\log_2(m!)}.
-
 $$
-
 - **Sample Entropy (SampEn)**:
 
   - With pattern length $m$, tolerance $r\sigma_x$,
   - Let $B$ be the count of template matches at length $m$,
   - Let $A$ be the count at length $m+1$,
   - Then
-
 $$
-
   \text{SampEn}(m,r) = -\log \frac{A}{B}.
-
 $$
-
 - **Multiscale Entropy (MSE)**:
 
   - For each scale $s$, coarse‑grain $x(t)$ by averaging non‑overlapping blocks of length $s$,
@@ -949,39 +743,23 @@ From band envelopes $E_{e,c}^B(t) = |\mathcal{H}(x_{e,c}^B(t))|$:
 2. Define a threshold $\theta$ via one of:
 
 - Percentile:
-
 $$
-
   \theta = \mathrm{percentile}(E_{\text{baseline}}, q),
-
 $$
-
 - z‑score:
-
 $$
-
   \theta = \mu + z\sigma,
-
 $$
-
 - MAD:
-
 $$
-
   \theta = \mathrm{median}(E_{\text{baseline}})
           + z \cdot 1.4826 \cdot \mathrm{MAD}(E_{\text{baseline}}).
-
 $$
-
 3. Identify contiguous intervals where $E_{e,c}^B(t) > \theta$.
 4. Enforce a minimum duration:
-
 $$
-
 T_{\text{burst}} \ge \max\left(T_{\text{min}}, \frac{\text{min\_cycles}}{f_{\text{center}}}\right).
-
 $$
-
 Per segment and band, the pipeline outputs burst counts, rates, mean durations, mean amplitudes, and occupancy fractions.
 
 ---
@@ -991,27 +769,19 @@ Per segment and band, the pipeline outputs burst counts, rates, mean durations, 
 **Module:** `microstates.py` → `extract_microstate_features`
 
 Global Field Power (GFP) is:
-
 $$
-
 \text{GFP}_e(t) =
 \sqrt{\frac{1}{N_{\text{ch}}}\sum_c \left(x_{e,c}(t) - \bar{x}_e(t)\right)^2}.
-
 $$
-
 GFP peaks are detected; scalp maps at these peaks are normalized (zero‑mean, unit‑norm, sign‑standardized) and clustered into microstates (fixed templates or K‑means). Labels are backfitted to the full time series with minimum‑duration smoothing.
 
 Per state $k$, features include:
 
 - Coverage:
-
 $$
-
 \text{coverage}_k =
 \frac{\#\{t: s(t) = k\}}{N_t},
-
 $$
-
 - Mean duration (ms),
 - Occurrence rate (Hz),
 - Transition probabilities between states.
@@ -1027,40 +797,24 @@ In `trial_ml_safe` mode, clustering is restricted to training trials.
 Per segment and channel:
 
 - Variance:
-
 $$
-
 \mathrm{Var}_t(x) = \frac{1}{N_t - 1}\sum_t (x(t) - \bar{x})^2.
-
 $$
-
 - Peak‑to‑peak:
-
 $$
-
 \text{ptp} = \max_t x(t) - \min_t x(t).
-
 $$
-
 - Fraction of finite samples:
-
 $$
-
 \text{finite} = \frac{\#\{t: x(t)\ \text{finite}\}}{N_t}.
-
 $$
-
 - SNR (using band‑limited PSDs):
-
 $$
-
 \text{SNR}_{\text{dB}} = 10\log_{10}
 \left(
   \frac{d_{\text{signal}}}{d_{\text{noise}}}
 \right),
-
 $$
-
 where $d$ is a band‑limited integrated power density.
 
 - Muscle artifact index: fraction of PSD power in a high‑frequency band (e.g. 30–80 Hz).
@@ -1074,13 +828,9 @@ These metrics serve both as QC features and as filters for downstream processing
 After primary features are computed, `_add_change_scores_to_results` adds **change‑score features** for multiple families (power, connectivity, aperiodic, phase, PAC, ERDS, spectral, ratios, asymmetry, microstates, etc.), when `feature_engineering.compute_change_scores = true`.
 
 Conceptually, for a feature column $X$ with baseline and active variants:
-
 $$
-
 X_\Delta = X^\text{active} - X^\text{baseline}.
-
 $$
-
 More complicated window structures (e.g. multiple active segments) are handled by `compute_change_features`, which inspects column names and produces consistent `_delta`‑style columns without recomputing the original feature.
 
 Change scores are stored alongside original features to avoid repeated derivation downstream.
@@ -1098,62 +848,42 @@ Given a feature column $x \in \mathbb{R}^N$ and a reference vector $x^\text{ref}
 training subset), the following methods are available:
 
 - **Z‑score**:
-
 $$
-
 z_i = \frac{x_i - \mu^\text{ref}}{\max(\sigma^\text{ref}, \varepsilon)},\quad
 \mu^\text{ref} = \mathrm{mean}(x^\text{ref}),\quad
 \sigma^\text{ref} = \mathrm{sd}(x^\text{ref}).
-
 $$
-
 - **Robust (median/MAD)**:
-
 $$
-
 z^{\text{robust}}_i =
 \frac{x_i - m^\text{ref}}
      {\max\bigl(\mathrm{MAD}(x^\text{ref})_{\text{normal}}, \varepsilon\bigr)},
 \quad
 m^\text{ref} = \mathrm{median}(x^\text{ref}),
-
 $$
-
 where $\mathrm{MAD}(\cdot)_{\text{normal}}$ is the normal‑consistent MAD (scaled by 1.4826).
 
 - **Min–max** to range $[a,b]$:
-
 $$
-
 x'_i = a + (b-a)
 \frac{x_i - x_{\text{min}}^\text{ref}}
      {\max\bigl(x_{\text{max}}^\text{ref} - x_{\text{min}}^\text{ref}, \varepsilon\bigr)},
-
 $$
-
 with $x_{\text{min}}^\text{ref} = \min(x^\text{ref})$ and
 $x_{\text{max}}^\text{ref} = \max(x^\text{ref})$.
 
 - **Rank‑based** (0–1 ranks on finite values):
-
 $$
-
 r_i =
 \frac{\mathrm{rank}(x_i) - 1}{n_{\text{finite}} - 1},
-
 $$
-
 where ties are handled by a configurable ranking method (default: average rank) and
 $n_{\text{finite}}$ is the number of finite entries.
 
 - **Log**:
-
 $$
-
 \log_b(x_i) = \frac{\ln(x_i + \varepsilon)}{\ln b},
-
 $$
-
 with $b \in \{e, 10\}$ or any positive base and $\varepsilon > 0$ drawn from configuration
 (default $10^{-12}$).
 
@@ -1171,16 +901,12 @@ within groups:
 
 For a grouping variable $g_i \in \mathcal{G}$ (e.g. condition or run), z‑score
 normalization within groups is:
-
 $$
-
 z_i^{(g)} =
 \frac{x_i - \mu_{g_i}}{\max(\sigma_{g_i}, \varepsilon)},\quad
 \mu_{g} = \mathrm{mean}\{x_j : g_j = g\},\quad
 \sigma_{g} = \mathrm{sd}\{x_j : g_j = g\}.
-
 $$
-
 Analogous formulas apply for robust and min–max normalization with group‑specific
 medians/MADs or minima/maxima.
 
