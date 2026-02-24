@@ -82,13 +82,12 @@ rois: &roi_definitions
 # 3. CORE PROCESSING PIPELINE
 ###################################################################
 event_columns:
-  # Optional: restrict strict event validation to these logical groups.
-  # Keep as ["rating"] for paradigm-agnostic use; add "temperature"/"binary_outcome"
-  # when those analyses are required.
+  # Generic column aliases for logical event groups.
+  # Add paradigm-specific column names in your overrides file.
   required: ["rating"]
-  temperature: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
-  rating: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
-  binary_outcome: ["binary_outcome_coded", "binary_outcome", "pain"]
+  temperature: ["temp", "temperature"]
+  rating: ["rating"]
+  binary_outcome: ["binary_outcome", "outcome_binary", "label"]
 
 alignment:
   allow_misaligned_trim: false
@@ -116,8 +115,8 @@ preprocessing:
   clean_events_overwrite: true       # Overwrite existing clean events.tsv
   clean_events_strict: true          # Fail preprocessing if clean events.tsv cannot be written/aligned
   # Optional preferred task-trigger prefixes for auto-detecting epoch conditions.
-  # Keep this generic; define paradigm-specific trigger prefixes in overrides.
-  condition_preferred_prefixes: ["Trig_"]
+  # Leave empty for generic use; define paradigm-specific prefixes in your overrides file.
+  condition_preferred_prefixes: []
 
 pyprep:
   ransac: true

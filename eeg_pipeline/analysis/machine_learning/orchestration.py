@@ -343,11 +343,11 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     target_key = target_raw.lower()
     aliases: set[str] = set()
 
-    if target_key in {"", "rating", "pain_rating", "vas"}:
+    if target_key in {"", "rating"}:
         aliases.add("rating")
     elif target_key in {"temperature", "temp"}:
         aliases.add("temperature")
-    elif target_key in {"pain", "binary_outcome", "binary"}:
+    elif target_key in {"binary_outcome", "binary"}:
         aliases.add("binary_outcome")
     elif target_key in {"fmri_signature", "fmri-signature"}:
         aliases.add("fmri_signature")

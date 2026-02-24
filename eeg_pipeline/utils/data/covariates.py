@@ -27,7 +27,7 @@ TRIAL_COLUMN_CANDIDATES = ["trial_index", "trial_number", "trial"]
 # These are NOT valid trial order covariates - they are categorical grouping variables
 RUN_BLOCK_COLUMNS = ["run", "block", "run_number", "block_number"]
 
-TEMPERATURE_ALIASES = {"stimulus_temp", "stimulus_temperature", "temp", "temperature"}
+TEMPERATURE_ALIASES = {"temp", "temperature"}
 
 # Only true within-run trial indices should be used as order covariates
 TRIAL_ALIASES = {"trial", "trial_number", "trial_index"}

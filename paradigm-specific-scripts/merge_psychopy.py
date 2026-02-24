@@ -119,7 +119,12 @@ def merge_psychopy_to_events(
     sub_label = m.group(1)
 
     run_num = extract_run_number(events_tsv)
-    beh_csv = find_behavior_csv_for_run(source_root / f"sub-{sub_label}", run=run_num)
+    beh_csv = find_behavior_csv_for_run(
+        source_root / f"sub-{sub_label}",
+        run=run_num,
+        behavior_dir_name="PsychoPy_Data",
+        glob_pattern="*TrialSummary.csv",
+    )
 
     if not beh_csv or not beh_csv.exists():
         if run_num is None:

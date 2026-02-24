@@ -271,6 +271,7 @@ func (m *Model) restoreWizardConfig() {
 			m.wizard.ImportConfig(cfg)
 		}
 	}
+
 }
 
 // saveWizardConfig copies bands, ROIs, spatial selection, and pipeline config to persistent state

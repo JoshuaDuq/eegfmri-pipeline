@@ -3108,10 +3108,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		alignFmriOnsetReference:  0, // 0: as_is
 
 		// Event Column Mapping defaults
-		eventColTemperature:        "stimulus_temp,stimulus_temperature,temp,temperature",
-		eventColRating:             "vas_final_coded_rating,vas_final_rating,vas_rating,pain_intensity,pain_rating,rating",
-		eventColPainBinary:         "binary_outcome,binary_outcome_coded,outcome_binary,label,pain",
-		conditionPreferredPrefixes: "Trig_",
+		eventColTemperature:        "temp,temperature",
+		eventColRating:             "rating",
+		eventColPainBinary:         "binary_outcome,outcome_binary,label",
+		conditionPreferredPrefixes: "",
 
 		// Per-Family Spatial Transforms defaults (all 0 = none / inherit global)
 		spatialTransformPerFamilyConnectivity: 0,

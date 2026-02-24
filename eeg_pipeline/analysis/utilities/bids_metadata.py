@@ -7,25 +7,6 @@ from pathlib import Path
 from typing import Any
 
 
-THERMAL_EVENTS_SCHEMA: dict[str, dict[str, Any]] = {
-    "run_id": {"Description": "Run index (1-based; matches PsychoPy run_id)."},
-    "trial_number": {"Description": "Within-run trial index (1-based)."},
-    "stimulus_temp": {"Description": "Thermode target temperature.", "Units": "C"},
-    "selected_surface": {"Description": "Stimulus surface index (experiment-defined)."},
-    "binary_outcome_coded": {"Description": "Pain yes/no response (1=yes, 0=no)."},
-    "vas_final_coded_rating": {
-        "Description": "Final VAS-coded rating (non-pain: 0–99 heat; pain: 100–200 pain)."
-    },
-    "iti_start_time": {"Description": "Trial ITI start time (experiment clock).", "Units": "s"},
-    "iti_end_time": {"Description": "Trial ITI end time (experiment clock).", "Units": "s"},
-    "stim_start_time": {"Description": "Stimulation start time (experiment clock).", "Units": "s"},
-    "stim_end_time": {"Description": "Stimulation end time (experiment clock).", "Units": "s"},
-    "pain_q_start_time": {"Description": "Pain question start time (experiment clock).", "Units": "s"},
-    "pain_q_end_time": {"Description": "Pain question end time (experiment clock).", "Units": "s"},
-    "vas_start_time": {"Description": "VAS start time (experiment clock).", "Units": "s"},
-    "vas_end_time": {"Description": "VAS end time (experiment clock).", "Units": "s"},
-}
-
 
 def _load_json(path: Path) -> dict[str, Any]:
     try:
@@ -81,9 +62,6 @@ def ensure_events_sidecar(events_tsv: Path, columns: list[str]) -> None:
             continue
         if col in data:
             continue
-        if col in THERMAL_EVENTS_SCHEMA:
-            data[col] = THERMAL_EVENTS_SCHEMA[col]
-            continue
         if col.endswith("_time"):
             data[col] = {"Description": f"{col} (experiment clock).", "Units": "s"}
         else:
@@ -103,7 +81,6 @@ def ensure_task_events_json(bids_root: Path, task: str) -> None:
         "value": {"Description": "Event code (trigger ID)."},
         "sample": {"Description": "Event onset sample index (first sample is 0)."},
     }
-    schema.update(THERMAL_EVENTS_SCHEMA)
     _write_json(out, schema)
 
 

@@ -651,7 +651,12 @@ def run_fmri_raw_to_bids(
 
                 # Events for pain runs: use PsychoPy TrialSummary for matching run.
                 if create_events and s.kind == "bold" and s.run is not None:
-                    beh = find_behavior_csv_for_run(subj_dir, run=s.run)
+                    beh = find_behavior_csv_for_run(
+                        subj_dir,
+                        run=s.run,
+                        behavior_dir_name="PsychoPy_Data",
+                        glob_pattern="*TrialSummary.csv",
+                    )
                     if beh and beh.exists():
                         ev_tsv = dest_dir / f"{dest_stem}_events.tsv"
                         _write_events_tsv_for_run(

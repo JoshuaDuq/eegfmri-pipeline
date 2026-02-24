@@ -94,12 +94,15 @@ def normalize_event_filters(filters: Optional[List[str]]) -> Optional[List[str]]
 def find_behavior_csv_for_run(
     source_sub_dir: Path,
     run: Optional[int] = None,
+    *,
+    behavior_dir_name: str = "behavior",
+    glob_pattern: str = "*.csv",
 ) -> Optional[Path]:
-    psychopy_dir = source_sub_dir / "PsychoPy_Data"
-    if not psychopy_dir.exists():
+    behavior_dir = source_sub_dir / behavior_dir_name
+    if not behavior_dir.exists():
         return None
 
-    csvs: List[Path] = sorted(psychopy_dir.glob("*TrialSummary.csv"))
+    csvs: List[Path] = sorted(behavior_dir.glob(glob_pattern))
     if not csvs:
         return None
     if run is None:
@@ -113,7 +116,7 @@ def find_behavior_csv_for_run(
 
     if not candidates:
         return None
-    
+
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
 

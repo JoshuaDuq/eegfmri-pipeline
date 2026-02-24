@@ -175,7 +175,7 @@ def _resolve_target_series(
     if not target_key:
         target_key = "rating"
 
-    if target_key.lower() in {"rating", "pain_rating", "vas"}:
+    if target_key.lower() in {"rating"}:
         rating_columns = config.get("event_columns.rating", [])
         tgt_col = pick_target_column(events_df, target_columns=list(rating_columns) if rating_columns else [])
         if tgt_col is None:
@@ -196,11 +196,11 @@ def _resolve_target_series(
         series = pd.to_numeric(events_df[temp_col], errors="coerce")
         return series, str(temp_col)
 
-    if target_key.lower() in {"pain", "binary_outcome", "binary"}:
+    if target_key.lower() in {"binary_outcome", "binary"}:
         pain_col = find_binary_outcome_column_in_events(events_df, config)
         if pain_col is None:
             raise ValueError(
-                "No pain-binary column found in events.tsv. "
+                "No binary_outcome column found in events.tsv. "
                 f"Tried config event_columns.binary_outcome={config.get('event_columns.binary_outcome', [])}; available={list(events_df.columns)}"
             )
         series = pd.to_numeric(events_df[pain_col], errors="coerce")
@@ -228,11 +228,11 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     target_key = target_raw.lower()
     aliases: set[str] = set()
 
-    if target_key in {"", "rating", "pain_rating", "vas"}:
+    if target_key in {"", "rating"}:
         aliases.add("rating")
     elif target_key in {"temperature", "temp"}:
         aliases.add("temperature")
-    elif target_key in {"pain", "binary_outcome", "binary"}:
+    elif target_key in {"binary_outcome", "binary"}:
         aliases.add("binary_outcome")
     elif target_key in {"fmri_signature", "fmri-signature"}:
         aliases.add("fmri_signature")

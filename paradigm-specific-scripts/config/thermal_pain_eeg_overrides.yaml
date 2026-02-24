@@ -7,6 +7,11 @@ project:
 alignment:
   fmri_onset_reference: "first_iti_start"
 
+event_columns:
+  temperature: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
+  rating: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
+  binary_outcome: ["binary_outcome_coded", "binary_outcome", "pain", "outcome_binary", "label"]
+
 preprocessing:
   condition_preferred_prefixes: ["Trig_therm", "Trig_"]
 

@@ -7,79 +7,6 @@ import (
 )
 
 func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
-	asString := func(v interface{}) (string, bool) {
-		s, ok := v.(string)
-		if !ok {
-			return "", false
-		}
-		return strings.TrimSpace(s), true
-	}
-	asBool := func(v interface{}) (bool, bool) {
-		b, ok := v.(bool)
-		return b, ok
-	}
-	asInt := func(v interface{}) (int, bool) {
-		switch n := v.(type) {
-		case float64:
-			return int(n), true
-		case int:
-			return n, true
-		default:
-			return 0, false
-		}
-	}
-	asFloat := func(v interface{}) (float64, bool) {
-		switch n := v.(type) {
-		case float64:
-			return n, true
-		case int:
-			return float64(n), true
-		default:
-			return 0, false
-		}
-	}
-	asStringList := func(v interface{}) ([]string, bool) {
-		raw, ok := v.([]interface{})
-		if !ok {
-			return nil, false
-		}
-		var out []string
-		for _, item := range raw {
-			s, ok := item.(string)
-			if !ok {
-				continue
-			}
-			s = strings.TrimSpace(s)
-			if s != "" {
-				out = append(out, s)
-			}
-		}
-		return out, true
-	}
-	asListSpec := func(v interface{}) (string, bool) {
-		switch vals := v.(type) {
-		case []interface{}:
-			out := make([]string, 0, len(vals))
-			for _, item := range vals {
-				s := strings.TrimSpace(fmt.Sprintf("%v", item))
-				if s != "" && s != "<nil>" {
-					out = append(out, s)
-				}
-			}
-			return strings.Join(out, " "), true
-		case []string:
-			out := make([]string, 0, len(vals))
-			for _, item := range vals {
-				s := strings.TrimSpace(item)
-				if s != "" {
-					out = append(out, s)
-				}
-			}
-			return strings.Join(out, " "), true
-		default:
-			return "", false
-		}
-	}
 
 	if rawBands, ok := values["time_frequency_analysis.bands"]; ok {
 		bands := parseConfigBands(rawBands)
@@ -933,11 +860,99 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		}},
 	}
 
-	for _, binding := range binders {
-		if v, ok := values[binding.key]; ok {
-			binding.apply(v)
+	for _, b := range binders {
+		if v, ok := values[b.key]; ok {
+			b.apply(v)
 		}
 	}
+}
+
+func asString(v interface{}) (string, bool) {
+	s, ok := v.(string)
+	return strings.TrimSpace(s), ok
+}
+
+func asBool(v interface{}) (bool, bool) {
+	b, ok := v.(bool)
+	return b, ok
+}
+
+func asInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	}
+	return 0, false
+}
+
+func asFloat(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	}
+	return 0, false
+}
+
+// asStringList extracts []string from a []interface{} (string items only).
+func asStringList(v interface{}) ([]string, bool) {
+	raw, ok := v.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	var out []string
+	for _, item := range raw {
+		if s, ok := item.(string); ok {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out, true
+}
+
+// asListSpec joins a []interface{} or []string into a space-separated spec string.
+func asListSpec(v interface{}) (string, bool) {
+	switch vals := v.(type) {
+	case []interface{}:
+		out := make([]string, 0, len(vals))
+		for _, item := range vals {
+			s := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if s != "" && s != "<nil>" {
+				out = append(out, s)
+			}
+		}
+		return strings.Join(out, " "), true
+	case []string:
+		out := make([]string, 0, len(vals))
+		for _, item := range vals {
+			if s := strings.TrimSpace(item); s != "" {
+				out = append(out, s)
+			}
+		}
+		return strings.Join(out, " "), true
+	}
+	return "", false
+}
+
+// sliceFromAny extracts []string from []interface{} or a comma-separated string.
+func sliceFromAny(v interface{}) ([]string, bool) {
+	switch val := v.(type) {
+	case []interface{}:
+		return asStringList(val)
+	case string:
+		var out []string
+		for _, p := range strings.Split(val, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		return out, len(out) > 0
+	}
+	return nil, false
 }
 
 func parseConfigBands(value interface{}) []FrequencyBand {
