@@ -15,12 +15,12 @@ A modular, end-to-end pipeline for simultaneous EEG–fMRI research. Covers raw 
 
 Each pipeline has a dedicated README with full methods, formulas, configuration references, and output schemas. Start here for orientation, then follow the link relevant to your workflow:
 
-- **EEG Preprocessing** – `eeg_pipeline/preprocessing/README.md`
-- **Feature Extraction** – `eeg_pipeline/analysis/features/README.md`
-- **Behavioral Analysis** – `eeg_pipeline/analysis/behavior/README.md`
-- **Machine Learning** – `eeg_pipeline/analysis/machine_learning/README.md`
-- **fMRI Analysis** – `fmri_pipeline/README.md`
-- **Interactive TUI** – `eeg_pipeline/cli/tui/README.md`
+- **EEG Preprocessing** – [eeg_pipeline/preprocessing/README.md](eeg_pipeline/preprocessing/README.md)
+- **Feature Extraction** – [eeg_pipeline/analysis/features/README.md](eeg_pipeline/analysis/features/README.md)
+- **Behavioral Analysis** – [eeg_pipeline/analysis/behavior/README.md](eeg_pipeline/analysis/behavior/README.md)
+- **Machine Learning** – [eeg_pipeline/analysis/machine_learning/README.md](eeg_pipeline/analysis/machine_learning/README.md)
+- **fMRI Analysis** – [fmri_pipeline/README.md](fmri_pipeline/README.md)
+- **Interactive TUI** – [eeg_pipeline/cli/tui/README.md](eeg_pipeline/cli/tui/README.md)
 
 An **interactive TUI** provides guided wizards for every stage with no CLI flags to memorize. See [Interactive TUI](#interactive-tui).
 
