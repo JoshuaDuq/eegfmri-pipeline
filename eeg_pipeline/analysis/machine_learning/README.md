@@ -82,13 +82,15 @@ Covariate columns are never dropped by variance filtering, spatial selection, or
 **Transformer:** `Deconfounder` — applied after `ColumnTransformer` when `preprocessing.deconfound: true`.
 
 Given the design matrix partitioned as $X = [X_{\text{EEG}} \mid Z]$ where $Z \in \mathbb{R}^{N \times C}$ are covariates, the transformer fits a linear model on the training fold:
-$$
+
+```math
 \hat{B} = (Z_{\text{train}}^\top Z_{\text{train}})^{-1} Z_{\text{train}}^\top X_{\text{EEG,train}}
-$$
+```
 and returns residuals for both train and test:
-$$
+
+```math
 \tilde{X}_{\text{EEG}} = X_{\text{EEG}} - Z\hat{B}
-$$
+```
 The output matrix contains only the deconfounded EEG features — covariate columns are discarded.
 
 ### 2.4 Feature Harmonization
@@ -111,14 +113,15 @@ Covariate columns are always protected and excluded from harmonization logic.
 All regression pipelines wrap the estimator in `TransformedTargetRegressor`, applying a Yeo-Johnson power transform to the target $y$ before fitting and back-transforming predictions to the original scale. This normalizes skewed pain-rating distributions.
 
 **Target transformation:** The Yeo-Johnson transform $\psi_\lambda(y)$ is defined piecewise for $\lambda \neq 0, 2$:
-$$
+
+```math
 \psi_\lambda(y) = \begin{cases}
 \tfrac{(y+1)^\lambda - 1}{\lambda} & y \geq 0,\; \lambda \neq 0 \\
 \ln(y+1) & y \geq 0,\; \lambda = 0 \\
 -\tfrac{(1-y)^{2-\lambda}-1}{2-\lambda} & y < 0,\; \lambda \neq 2 \\
 -\ln(1-y) & y < 0,\; \lambda = 2
 \end{cases}
-$$
+```
 $\lambda$ is estimated by maximum likelihood on the **training fold only**.
 
 ---
@@ -128,9 +131,10 @@ $\lambda$ is estimated by maximum likelihood on the **training fold only**.
 **Factory:** `create_elasticnet_pipeline`
 
 Combined L1 + L2 penalized linear regression. Encourages both sparsity (L1) and stability for correlated features (L2):
-$$
+
+```math
 \hat{\beta} = \underset{\beta}{\arg\min} \;\frac{1}{2n}\bigl\|y - X\beta\bigr\|_2^2 + \alpha\left[\rho\|\beta\|_1 + \frac{1-\rho}{2}\|\beta\|_2^2\right]
-$$
+```
 where $\alpha > 0$ controls regularization strength and $\rho \in [0,1]$ is the L1 mixing ratio.
 
 **Pipeline:**
@@ -154,9 +158,10 @@ Preprocessing → StandardScaler → [SelectPercentile] → [PCA]
 **Factory:** `create_ridge_pipeline`
 
 L2-regularized linear regression (Tikhonov regularization). Numerically stable for correlated feature sets:
-$$
+
+```math
 \hat{\beta} = \underset{\beta}{\arg\min} \;\bigl\|y - X\beta\bigr\|_2^2 + \alpha\|\beta\|_2^2
-$$
+```
 **Pipeline:** Identical to ElasticNet; the L1 term is absent.
 
 **Hyperparameter grid:**
@@ -173,9 +178,9 @@ $$
 **Factory:** `create_rf_pipeline`
 
 Bagged ensemble of decision trees. Invariant to monotonic feature transforms; no scaling is applied to features.
-$$
+```math
 \hat{f}(x) = \frac{1}{B}\sum_{b=1}^{B} T_b(x), \quad T_b \text{ trained on bootstrap resample } \mathcal{D}_b
-$$
+```
 **Pipeline:**
 ```
 Preprocessing (no scaling)
@@ -216,10 +221,11 @@ Configured via `classification.resampler`:
 **Factory:** `create_svm_pipeline`
 
 SVM with RBF kernel. Soft-margin formulation:
-$$
+
+```math
 \min_{w,b,\xi}\;\frac{1}{2}\|w\|^2 + C\sum_i \xi_i
 \quad\text{s.t.}\quad y_i(w^\top\phi(x_i)+b)\geq 1-\xi_i,\;\xi_i\geq 0
-$$
+```
 with $K(x,x') = \exp(-\gamma\|x-x'\|^2)$. Probability calibration via Platt scaling (`probability=True`).
 
 **Pipeline:**
@@ -242,9 +248,10 @@ Preprocessing → StandardScaler → [PCA] → [Resampler] → SVC(RBF, probabil
 **Factory:** `create_logistic_pipeline`
 
 Regularized logistic regression with sigmoid output:
-$$
+
+```math
 \hat{p}(y=1 \mid x) = \sigma(x^\top\beta + b) = \frac{1}{1+e^{-x^\top\beta - b}}
-$$
+```
 Supports L2 (default), L1, and ElasticNet penalties. Solver is auto-selected: `saga` for L1/ElasticNet, `lbfgs` for L2 (with scikit-learn ≥ 1.8.0 compatibility).
 
 **Hyperparameter grid:**
@@ -276,9 +283,10 @@ Preprocessing (no scaling) → [Resampler] → RandomForestClassifier(B=100, cla
 **Factory:** `create_ensemble_pipeline`
 
 Combines SVM, Logistic Regression, and Random Forest via probability averaging:
-$$
+
+```math
 \hat{p}_{\text{ens}}(y=1\mid x) = \frac{1}{3}\left[\hat{p}_{\text{SVM}}(x) + \hat{p}_{\text{LR}}(x) + \hat{p}_{\text{RF}}(x)\right]
-$$
+```
 When `classification.calibrate_ensemble: true`, SVM and RF are individually wrapped in `CalibratedClassifierCV(method="sigmoid", cv=2)` before voting to correct probability calibration independently.
 
 ---
@@ -389,9 +397,10 @@ Controlled by `machine_learning.cv.hygiene_enabled` (default `true`).
 **Primary metric — Subject-level Fisher-z–aggregated Pearson correlation**
 
 For each held-out subject $i$ with $n_i$ test trials, compute the Pearson correlation between predicted and true ratings:
-$$
+
+```math
 r_i = \frac{\sum_t (\hat{y}_{it} - \bar{\hat{y}}_i)(y_{it} - \bar{y}_i)}{\sqrt{\sum_t (\hat{y}_{it} - \bar{\hat{y}}_i)^2 \cdot \sum_t (y_{it} - \bar{y}_i)^2}}
-$$
+```
 Aggregate across $S$ subjects using the Fisher z-transformation to handle the bounded support of $r$:
 
 1. **Clip** to prevent arctanh explosion near $\pm 1$: $r_i^* = \text{clip}(r_i, r_{\text{min}}, r_{\text{max}})$
@@ -407,9 +416,9 @@ Weighting modes (configurable via `evaluation.subject_weighting`):
 | `trial_count` | $\max(n_i - 3, 1)$ | Fisher information weighting; standard meta-analytic fixed-effects scheme |
 
 **Secondary metric — Subject-level mean R²:**
-$$
+```math
 \overline{R^2} = \frac{1}{S}\sum_{i=1}^{S} R^2_i, \quad R^2_i = 1 - \frac{\sum_t(y_{it}-\hat{y}_{it})^2}{\sum_t(y_{it}-\bar{y}_i)^2}
-$$
+```
 Both $\bar{r}$ and $\overline{R^2}$ receive permutation p-values when `n_perm > 0`.
 
 **Confidence intervals** for $\bar{r}$ (`evaluation.ci_method`):
@@ -420,9 +429,9 @@ Both $\bar{r}$ and $\overline{R^2}$ receive permutation p-values when `n_perm > 
 | `fixed_effects` | $\mathrm{SE} = 1/\sqrt{\sum_i w_i}$; $\text{CI} = \tanh\bigl(\bar{z} \pm 1.96\mathrm{SE}\bigr)$ |
 
 **Subject-level error metrics:**
-$$
+```math
 \overline{\text{MAE}} = \frac{1}{S}\sum_i\mathrm{MAE}_i, \qquad \overline{\text{RMSE}} = \frac{1}{S}\sum_i\mathrm{RMSE}_i
-$$
+```
 with optional bootstrap CIs (subjects resampled). Pooled trial-level Pearson r, MAE, and RMSE are logged as **secondary diagnostics only** (subject is the inferential unit for LOSO).
 
 ---
@@ -467,15 +476,17 @@ A permutation is **effective** only if it changes at least `min_label_shuffle_fr
 ### 7.2 P-value Computation
 
 **Regression** (two-tailed):
-$$
+
+```math
 p = \frac{\#\bigl\{|s(y^\pi_j)| \geq |s(y)|\bigr\} + 1}{n_{\text{perm,valid}} + 1}
-$$
+```
 where $s(\cdot)$ denotes the subject-level Fisher-z–aggregated Pearson r. Computed independently for both $\bar{r}$ and $\overline{R^2}$.
 
 **Classification** (one-tailed; AUC $\geq$ observed):
-$$
+
+```math
 p = \frac{\#\bigl\{\text{AUC}(y^\pi_j) \geq \text{AUC}(y)\bigr\} + 1}{n_{\text{perm,valid}} + 1}
-$$
+```
 ### 7.3 Quality Gate
 
 At least `min_valid_permutation_fraction` (default 50%) of permutations must produce finite metrics; a `RuntimeError` is raised otherwise.
@@ -497,9 +508,10 @@ Trains a decoding model in each time window and evaluates it in all other window
 2. **Sliding windows:** Partition the active period $[t_{\text{min}}, t_{\text{max}}]$ (configurable) into overlapping windows of length $\Delta t$ with step $\delta t$. Window centers form both axes of the generalization matrix.
 
 3. **Window feature extraction:** For window $w$, compute mean channel activity per trial:
-$$
+
+```math
 x_{w,\text{trial},c} = \frac{1}{|W_w|}\sum_{t \in W_w} \text{data}[\text{trial}, c, t]
-$$
+```
 yielding an $N_{\text{trials}} \times C$ feature matrix per window.
 
 4. **LOSO outer loop:** For each training window $i$, fit a Ridge regression model:
@@ -509,9 +521,10 @@ SimpleImputer → StandardScaler → TransformedTargetRegressor(Ridge(α), Power
 Optionally tune $\alpha$ via inner `GroupKFold` (`use_ridgecv: true`). For each test window $j$, predict on the held-out subject and record Pearson r and R².
 
 5. **Aggregation:** Stack per-fold matrices; for cell $(i,j)$, aggregate over $S_{ij}$ valid subjects using Fisher-z averaging (equal subject weights):
-$$
+
+```math
 r_{ij}^{\text{agg}} = \tanh\left(\frac{1}{S_{ij}}\sum_{s=1}^{S_{ij}} \mathrm{arctanh}\bigl(\text{clip}(r_{ij}^{(s)})\bigr)\right)
-$$
+```
 Cells with $S_{ij} < $  `min_subjects_per_cell` or total trial count $ < $  `min_count_per_cell` are excluded (set to `NaN`).
 
 ### 8.2 Significance Testing (`n_perm > 0`)
@@ -525,9 +538,9 @@ Three corrections are applied simultaneously to all tested cells:
 | **Cluster-FWER** | Contiguous cells exceeding a forming threshold are grouped; cluster sizes compared to the null distribution of maximum cluster sizes. Controls FWER at cluster level. |
 
 **Cell-level p-value:**
-$$
+```math
 p_{ij} = \frac{\#\bigl\{|r_{ij}^\pi| \geq |r_{ij}^{\text{obs}}|\bigr\} + 1}{n_{\text{perm,valid}} + 1}
-$$
+```
 **Quality gates:**
 
 | Gate | Config key | Default |
@@ -546,9 +559,10 @@ $$
 **Module:** `shap_importance.py`
 
 SHAP (SHapley Additive exPlanations) values decompose each prediction into per-feature additive contributions satisfying efficiency, symmetry, and the dummy axioms. Per-feature importance is the mean absolute SHAP value:
-$$
+
+```math
 \phi_k = \frac{1}{N}\sum_{i=1}^{N} |\phi_k(x_i)|
-$$
+```
 ### 9.1 Explainer Selection
 
 Automatically determined from the fitted estimator type (after pipeline preprocessing steps have been applied):
@@ -566,17 +580,19 @@ Pipeline preprocessing is applied to transform $X$ before SHAP computation. Feat
 ### 9.3 Cross-Fold Aggregation
 
 For each LOSO fold: fit model on training data (with inner CV tuning), compute SHAP values on the test fold. Aggregate by feature name across folds, reporting mean and inter-fold standard deviation:
-$$
+
+```math
 \bar{\phi}_k = \frac{1}{K}\sum_{f=1}^{K} \phi_k^{(f)}, \qquad \sigma_k = \mathrm{std}_f\left(\phi_k^{(f)}\right)
-$$
+```
 **Completion gate:** At least `analysis.shap.min_valid_fold_fraction` (default 0.8) of folds must succeed.
 
 ### 9.4 Grouped Summaries
 
 When `interpretability.grouped_outputs: true`, feature names are parsed via `NamingSchema` into structured metadata (group, frequency band, ROI, scope, statistic). Importance is aggregated at two levels:
-$$
+
+```math
 \phi_\mathcal{G} = \sum_{k \in \mathcal{G}} \phi_k, \qquad \text{share}_\mathcal{G} = \frac{\phi_\mathcal{G}}{\sum_k \phi_k}
-$$
+```
 Outputs: `shap_importance_by_group_band.tsv`, `shap_importance_by_group_band_roi.tsv`.
 
 ---
@@ -586,9 +602,10 @@ Outputs: `shap_importance_by_group_band.tsv`, `shap_importance_by_group_band_roi
 **Function:** `orchestration.py → _run_permutation_importance_stage`
 
 Model-agnostic importance via column permutation (Breiman 2001). For each feature $k$:
-$$
+
+```math
 \text{imp}_k = \mathrm{score}(y, \hat{y}) - \mathbb{E}_\pi\left[\mathrm{score}\left(y, \hat{y}^{(\pi_k)}\right)\right]
-$$
+```
 where $\hat{y}^{(\pi_k)}$ is the prediction after randomly permuting column $k$ in the test set. Scoring metric: $R^2$ (`n_repeats` permutations per feature, default 5).
 
 **Aggregation:** Features excluded by fold harmonization receive `NaN`. Mean and std are reported across folds. Same grouped summaries as SHAP (by group × band and group × band × ROI).
@@ -600,9 +617,10 @@ where $\hat{y}^{(\pi_k)}$ is the prediction after randomly permuting column $k$ 
 **Module:** `uncertainty.py` — integrated into pipeline runners via `_run_uncertainty_stage`
 
 Distribution-free prediction intervals via conformal prediction. For exchangeable data:
-$$
+
+```math
 \mathbb{P}\left(y \in \hat{C}(x)\right) \geq 1 - \alpha
-$$
+```
 The stage runs within LOSO: models are tuned via inner CV, then conformal intervals are computed on held-out subjects using the **CV+ method** by default. Empirical coverage and mean interval width are reported per subject.
 
 ---
@@ -612,9 +630,10 @@ The stage runs within LOSO: models are tuned via inner CV, then conformal interv
 1. Split training set into proper training ($\approx 80\%$) and calibration ($\approx 20\%$, ≥ 2 samples). Group-aware via `GroupShuffleSplit` when subject labels are available.
 2. Fit model; compute calibration residuals $s_i = |y_i - \hat{y}_i|$, $i \in \mathcal{D}_{\text{cal}}$.
 3. Conformal quantile:
-$$
+
+```math
 \hat{q} = \mathrm{Quantile}\left(\{s_i\},\; \frac{\lceil(|\mathcal{D}_{\text{cal}}|+1)(1-\alpha)\rceil}{|\mathcal{D}_{\text{cal}}|}\right)
-$$
+```
 4. Prediction interval: $\hat{C}(x) = [\hat{y}(x) - \hat{q},\; \hat{y}(x) + \hat{q}]$.
 
 ---
@@ -627,9 +646,10 @@ More data-efficient than split conformal; uses cross-validation residuals:
    - Train on folds $\neq f$; compute residuals $\{s_i^{(f)}\}_{i \in \text{fold}_f}$.
    - Predict $\hat{y}_f(x)$.
 2. Prediction interval at $x$ using conservative order-statistic quantiles over the full ensemble of $\{(\hat{y}_f(x), s^{(f)})\}$:
-$$
+
+```math
 \hat{C}(x) = \left[\hat{q}_\alpha\left(\{\hat{y}_f(x) - s_j^{(f)}\}_{f,j}\right),\; \hat{q}_{1-\alpha}\left(\{\hat{y}_f(x) + s_j^{(f)}\}_{f,j}\right)\right]
-$$
+```
 A full model trained on all training data provides the point prediction.
 
 ---
@@ -705,9 +725,10 @@ Compares ElasticNet, Ridge, and Random Forest on **identical outer LOSO folds**.
 2. For each model, run nested CV with inner `GroupKFold` (refit: Pearson r). Record per-fold R² and MAE.
 3. Compute summary statistics (mean ± std and bootstrap CI per model).
 4. **Pairwise inference:** Paired sign-flip permutation test on per-fold $\Delta R^2$ and $\Delta\text{MAE}$:
-$$
+
+```math
 p\bigl(\Delta R^2_{AB}\bigr) = \frac{\#\bigl\{\bigl|\overline{s \cdot \Delta R^2_{AB}}\bigr| \geq \bigl|\overline{\Delta R^2_{AB}}\bigr|\bigr\} + 1}{n_{\text{perm}} + 1}, \quad s_j \in \{-1,+1\}
-$$
+```
 5. Holm–Bonferroni multiple-comparison correction across all pairwise $\Delta R^2$ and $\Delta\text{MAE}$ tests.
 6. Export `model_comparison.tsv` (per fold) and `model_comparison_summary.json` (aggregated with pairwise inference).
 
@@ -725,9 +746,9 @@ Quantifies the out-of-fold gain in R² when adding EEG features over a baseline 
    - Compute: $\Delta R^2_{\text{fold}} = R^2\left(y_{\text{test}},\hat{y}_{\text{full}}\right) - R^2\left(y_{\text{test}},\hat{y}_{\text{base}}\right)$
 
 4. **Primary estimate:**
-$$
+```math
 \overline{\Delta R^2} = \frac{1}{K}\sum_{k=1}^{K} \Delta R^2_k
-$$
+```
 5. Bootstrap CI on $\overline{\Delta R^2}$ (resample folds). Paired sign-flip permutation p-value when `n_perm > 0`.
 
 ---
