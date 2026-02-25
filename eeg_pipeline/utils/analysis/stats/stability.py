@@ -3,7 +3,7 @@ Block/Run Stability (Subject-Level)
 ===================================
 
 Non-gating stability diagnostics for feature→outcome associations across repeated
-blocks/runs within a subject (common in pain paradigms).
+blocks/runs within a subject.
 """
 
 from __future__ import annotations
@@ -110,8 +110,8 @@ def _process_single_stability_feature(
     group_col: str,
     method: str,
     alpha: float,
-    use_partial_temp: bool,
-    has_temp: bool,
+    use_partial_predictor: bool,
+    has_predictor: bool,
 ) -> Optional[Dict[str, Any]]:
     """Process stability for a single feature across groups."""
     feature_values = pd.to_numeric(trial_df[feature_name], errors="coerce")
@@ -127,7 +127,7 @@ def _process_single_stability_feature(
     overall_r = float(overall_r) if np.isfinite(overall_r) else np.nan
     overall_p = float(overall_p) if np.isfinite(overall_p) else np.nan
 
-    use_partial = use_partial_temp and has_temp
+    use_partial = use_partial_predictor and has_predictor
 
     group_correlations = []
     group_p_values = []
@@ -162,7 +162,7 @@ def _process_single_stability_feature(
                 r_partial, p_partial = _compute_partial_correlation_for_group(
                     partial_feature,
                     partial_outcome,
-                    partial_temp,
+                    partial_pred,
                     method,
                 )
                 partial_correlations.append(r_partial)
@@ -226,7 +226,7 @@ def _extract_configuration(
     alpha = float(
         _get_config_value(config, "behavior_analysis.stability.alpha", 0.05)
     )
-    use_partial_temp = bool(
+    use_partial_predictor = bool(
         _get_config_value(
             config, "behavior_analysis.stability.partial_predictor", True
         )
@@ -237,7 +237,7 @@ def _extract_configuration(
         "method": method,
         "max_features": max_features,
         "alpha": alpha,
-        "use_partial_temp": use_partial_temp,
+        "use_partial_predictor": use_partial_predictor,
         "n_jobs": n_jobs,
     }
 
@@ -317,14 +317,14 @@ def compute_groupwise_stability(
     method = cfg["method"]
     max_features = cfg["max_features"]
     alpha = cfg["alpha"]
-    use_partial_temp = cfg["use_partial_temp"]
+    use_partial_predictor = cfg["use_partial_predictor"]
     n_jobs_actual = get_n_jobs(config, cfg["n_jobs"])
 
     meta: Dict[str, Any] = {
         "method": method,
         "max_features": max_features,
         "alpha": alpha,
-        "partial_predictor": use_partial_temp,
+        "partial_predictor": use_partial_predictor,
         "outcome": outcome,
         "group_col": group_col,
     }
@@ -349,7 +349,7 @@ def compute_groupwise_stability(
     meta["n_features_considered"] = n_candidates
     meta["n_features_selected"] = len(selected_features)
     meta["has_partial_corr"] = True
-    has_temp = "predictor" in trial_df.columns
+    has_predictor = "predictor" in trial_df.columns
 
     groups = group_series.dropna().unique().tolist()
     meta["n_groups_total"] = len(groups)
@@ -365,8 +365,8 @@ def compute_groupwise_stability(
             group_col,
             method,
             alpha,
-            use_partial_temp,
-            has_temp,
+            use_partial_predictor,
+            has_predictor,
         )
         for feat in selected_features
     ]
@@ -383,4 +383,3 @@ def compute_groupwise_stability(
 
 
 __all__ = ["compute_groupwise_stability"]
-

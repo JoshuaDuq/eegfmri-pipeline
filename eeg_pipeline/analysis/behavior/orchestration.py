@@ -878,7 +878,7 @@ def write_analysis_metadata(
 
 
 def _resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
-    """Resolve configured condition column, falling back to configured pain column."""
+    """Resolve configured condition column, falling back to configured binary-outcome column."""
     return _stages_condition.resolve_condition_compare_column(df_trials, config)
 
 
@@ -888,7 +888,7 @@ def stage_condition_column(
     df_trials: Optional[pd.DataFrame] = None,
     feature_cols: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    """Run column-based condition comparison (e.g., pain vs non-pain).
+    """Run column-based condition comparison.
     
     Single responsibility: Column contrast comparison.
     Supports primary_unit=trial|run to control unit of analysis.
@@ -1101,7 +1101,7 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
 
 
 def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Run mediation analysis: test if neural features mediate the predictor→rating relationship."""
+    """Run mediation analysis: test if neural features mediate the predictor→outcome relationship."""
     cache = _get_cache(ctx)
     return _stages_advanced.stage_mediation_impl(
         ctx,
@@ -1214,11 +1214,11 @@ def run_group_level_analysis(
 
 
 def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Run moderation analysis: test if neural features moderate the predictor→rating relationship.
+    """Run moderation analysis: test if neural features moderate the predictor→outcome relationship.
 
-    Model: rating = b0 + b1*predictor + b2*feature + b3*(predictor*feature) + error
+    Model: outcome = b0 + b1*predictor + b2*feature + b3*(predictor*feature) + error
 
-    If b3 is significant, the feature moderates how predictor affects pain rating.
+    If b3 is significant, the feature moderates how predictor affects the outcome.
     """
     cache = _get_cache(ctx)
     return _stages_advanced.stage_moderation_impl(

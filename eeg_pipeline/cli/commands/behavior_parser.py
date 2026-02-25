@@ -148,7 +148,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     compute_group.add_argument(
         "--predictor-sensitivity-features", nargs="+", choices=feature_choices, default=None,
-        help="Feature categories for pain sensitivity analysis"
+        help="Feature categories for predictor sensitivity analysis"
     )
     compute_group.add_argument(
         "--condition-features", nargs="+", choices=feature_choices, default=None,
@@ -368,7 +368,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     correlations_group.add_argument(
         "--correlations-types",
         nargs="+",
-        choices=["raw", "partial_cov", "partial_temp", "partial_cov_temp", "run_mean"],
+        choices=["raw", "partial_cov", "partial_predictor", "partial_cov_predictor", "run_mean"],
         default=None,
         help="Correlation types to compute (default from config)",
     )

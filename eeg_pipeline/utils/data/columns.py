@@ -7,7 +7,7 @@ from typing import Any, List, Optional
 import pandas as pd
 
 VAS_KEYWORD = "vas"
-RATING_KEYWORD = "outcome"
+OUTCOME_KEYWORD = "outcome"
 
 
 def find_column_in_events(events_df: pd.DataFrame, column_names: List[str]) -> Optional[str]:
@@ -17,7 +17,7 @@ def find_column_in_events(events_df: pd.DataFrame, column_names: List[str]) -> O
 
 
 def find_binary_outcome_column_in_events(events_df: pd.DataFrame, config: Any) -> Optional[str]:
-    """Find pain column in events dataframe using config."""
+    """Find binary outcome column in events dataframe using config."""
     if config is None:
         raise ValueError("config is required")
     
@@ -62,7 +62,7 @@ def get_binary_outcome_column_from_config(
     config: Any,
     events_df: Optional[pd.DataFrame] = None,
 ) -> Optional[str]:
-    """Get pain column name from config, optionally matching against events dataframe."""
+    """Get binary outcome column from config, optionally matching against events dataframe."""
     return get_column_from_config(config, "event_columns.binary_outcome", events_df)
 
 
@@ -78,21 +78,21 @@ def get_outcome_column_from_config(
     config: Any,
     events_df: Optional[pd.DataFrame] = None,
 ) -> Optional[str]:
-    """Get rating column name from config, optionally matching against events dataframe."""
+    """Get outcome column from config, optionally matching against events dataframe."""
     return get_column_from_config(config, "event_columns.outcome", events_df)
 
 
 def pick_target_column(df: pd.DataFrame, *, target_columns: List[str]) -> Optional[str]:
-    """Pick target column from dataframe, matching target list or VAS/rating patterns."""
+    """Pick target column from dataframe, matching target list or VAS/outcome patterns."""
     for col in target_columns:
         if col in df.columns:
             return col
 
     for col in df.columns:
         col_lower = str(col).lower()
-        has_vas_or_rating = VAS_KEYWORD in col_lower or RATING_KEYWORD in col_lower
+        has_vas_or_outcome = VAS_KEYWORD in col_lower or OUTCOME_KEYWORD in col_lower
         is_numeric = pd.api.types.is_numeric_dtype(df[col])
-        if has_vas_or_rating and is_numeric:
+        if has_vas_or_outcome and is_numeric:
             return col
 
     return None
@@ -117,7 +117,7 @@ def resolve_outcome_column(
     events_df: pd.DataFrame,
     config: Any,
 ) -> Optional[str]:
-    """Resolve behavior outcome column from explicit config, then rating aliases."""
+    """Resolve behavior outcome column from explicit config, then outcome aliases."""
     explicit = _get_explicit_behavior_column(
         config,
         key="behavior_analysis.outcome_column",
@@ -128,10 +128,10 @@ def resolve_outcome_column(
     if "outcome" in events_df.columns:
         return "outcome"
 
-    rating_candidates = []
+    outcome_candidates = []
     if config is not None and hasattr(config, "get"):
-        rating_candidates = list(config.get("event_columns.outcome", []) or [])
-    return pick_target_column(events_df, target_columns=rating_candidates)
+        outcome_candidates = list(config.get("event_columns.outcome", []) or [])
+    return pick_target_column(events_df, target_columns=outcome_candidates)
 
 
 def resolve_predictor_column(

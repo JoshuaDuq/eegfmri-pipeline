@@ -1265,7 +1265,7 @@ def _permute_indices_2d(
     groups_array = np.asarray(groups) if groups is not None else None
 
     # IMPORTANT scientific validity:
-    # In pain paradigms, trial order often carries autocorrelation (habituation/drift).
+    # In repeated-trial paradigms, trial order often carries autocorrelation (habituation/drift).
     # Support circular-shift permutations (optionally within groups) to preserve
     # serial dependence when requested.
     from .permutation import permute_within_groups

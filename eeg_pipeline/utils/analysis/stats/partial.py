@@ -398,13 +398,13 @@ def compute_partial_correlations(
     if predictor_series is not None and not predictor_series.empty:
         predictor_cov = _build_predictor_covariates(predictor_series, config=config)
         r_temp, p_temp, n_temp = compute_partial_correlation_with_covariates(
-            roi_values, target_values, predictor_cov, method, f"{context} rating|predictor", logger, min_samples, config
+            roi_values, target_values, predictor_cov, method, f"{context} outcome|predictor", logger, min_samples, config
         )
 
     return r_partial, p_partial, n_partial, r_temp, p_temp, n_temp
 
 
-def compute_partial_correlations_with_cov_temp(
+def compute_partial_correlations_with_cov_predictor(
     roi_values: pd.Series,
     target_values: pd.Series,
     covariates_df: Optional[pd.DataFrame],
@@ -428,8 +428,8 @@ def compute_partial_correlations_with_cov_temp(
         config=config,
     )
 
-    r_cov_temp = p_cov_temp = np.nan
-    n_cov_temp = 0
+    r_cov_predictor = p_cov_predictor = np.nan
+    n_cov_predictor = 0
 
     has_covariates = covariates_df is not None and not covariates_df.empty
     has_predictor = predictor_series is not None and not predictor_series.empty
@@ -440,20 +440,20 @@ def compute_partial_correlations_with_cov_temp(
         overlap = [c for c in predictor_cov.columns if c in covariates_with_predictor.columns]
         if overlap:
             covariates_with_predictor = covariates_with_predictor.drop(columns=overlap, errors="ignore")
-        covariates_with_temp = pd.concat([covariates_with_predictor, predictor_cov], axis=1)
+        covariates_with_predictor_control = pd.concat([covariates_with_predictor, predictor_cov], axis=1)
         try:
-            r_cov_temp, p_cov_temp, n_cov_temp = compute_partial_correlation_with_covariates(
+            r_cov_predictor, p_cov_predictor, n_cov_predictor = compute_partial_correlation_with_covariates(
                 roi_values,
                 target_values,
-                covariates_with_temp,
+                covariates_with_predictor_control,
                 method,
-                f"{context} rating|cov+temp",
+                f"{context} outcome|cov+predictor",
                 logger,
                 min_samples,
                 config,
             )
         except (ValueError, np.linalg.LinAlgError, KeyError):
-            r_cov_temp, p_cov_temp, n_cov_temp = np.nan, np.nan, 0
+            r_cov_predictor, p_cov_predictor, n_cov_predictor = np.nan, np.nan, 0
 
     return (
         r_cov,
@@ -462,11 +462,10 @@ def compute_partial_correlations_with_cov_temp(
         r_temp,
         p_temp,
         n_temp,
-        r_cov_temp,
-        p_cov_temp,
-        n_cov_temp,
+        r_cov_predictor,
+        p_cov_predictor,
+        n_cov_predictor,
     )
-
 
 
 

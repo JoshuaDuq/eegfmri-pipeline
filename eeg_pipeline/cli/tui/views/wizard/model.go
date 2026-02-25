@@ -1957,7 +1957,7 @@ type Model struct {
 	influenceLeverageThreshold   float64 // 0 = default
 
 	// Correlations (trial-table)
-	correlationsTypesSpec             string // Comma-separated list (e.g., "partial_cov_temp,raw")
+	correlationsTypesSpec             string // Comma-separated list (e.g., "partial_cov_predictor,raw")
 	correlationsUseCrossfitResidual   bool
 	correlationsPrimaryUnit           int // 0=trial, 1=run_mean
 	correlationsMinRuns               int // minimum runs for run-mean correlations
@@ -2901,7 +2901,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		influenceCooksThreshold:      0.0,
 		influenceLeverageThreshold:   0.0,
 
-		correlationsTypesSpec:             "partial_cov_temp",
+		correlationsTypesSpec:             "partial_cov_predictor",
 		correlationsUseCrossfitResidual:   false,
 		correlationsPrimaryUnit:           0,
 		correlationsMinRuns:               3,

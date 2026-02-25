@@ -85,7 +85,7 @@ def _get_temporal_targets_from_events(
     outcome_col = pick_target_column(events, target_columns=outcome_columns)
     if outcome_col is None:
         raise ValueError(
-            f"{analysis_name}: no rating column found. Configure event_columns.outcome or set "
+            f"{analysis_name}: no outcome column found. Configure event_columns.outcome or set "
             f"behavior_analysis.temporal.target_column. Available columns: {list(events.columns)}"
         )
     logger.info("%s: using outcome column '%s'", analysis_name, outcome_col)

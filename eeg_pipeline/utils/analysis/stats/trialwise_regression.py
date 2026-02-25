@@ -5,7 +5,7 @@ Trialwise Regression (Subject-Level)
 Per-subject regression analyses that complement correlations:
 
 Primary model (default):
-    rating ~ predictor + trial_order (+ run/block dummies) + feature
+    outcome ~ predictor + trial_order (+ run/block dummies) + feature
 
 Optional moderation:
     + feature*predictor

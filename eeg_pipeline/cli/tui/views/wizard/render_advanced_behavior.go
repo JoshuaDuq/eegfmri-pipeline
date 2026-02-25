@@ -1125,12 +1125,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optCorrelationsTypes:
 			val := m.correlationsTypesSpec
 			if strings.TrimSpace(val) == "" {
-				val = "(default: partial_cov_temp)"
+				val = "(default: partial_cov_predictor)"
 			}
 			if m.editingText && m.editingTextField == textFieldCorrelationsTypes {
 				val = textDisplay
 			}
-			return "Correlation Types", val, "comma-separated: raw,partial_cov,partial_temp,partial_cov_temp,run_mean"
+			return "Correlation Types", val, "comma-separated: raw,partial_cov,partial_predictor,partial_cov_predictor,run_mean"
 		case optCorrelationsUseCrossfitPredictorResidual:
 			return "Use residual_cv", m.boolToOnOff(m.correlationsUseCrossfitResidual), "requires residual crossfit"
 		case optCorrelationsPrimaryUnit:

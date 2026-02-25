@@ -192,7 +192,7 @@ def stage_predictor_residual_impl(
     write_metadata_file_fn: Callable[[Path, Dict[str, Any]], None],
     set_trial_table_cache_fn: Optional[Callable[[pd.DataFrame], None]] = None,
 ) -> Optional[Path]:
-    """Compute predictor residual = rating - f(predictor)."""
+    """Compute predictor residual = outcome - f(predictor)."""
     _ = config
     from eeg_pipeline.utils.data.trial_table import add_predictor_residual
     from eeg_pipeline.utils.data.columns import (
@@ -202,7 +202,7 @@ def stage_predictor_residual_impl(
 
     df = load_trial_table_df_fn(ctx)
     if not is_dataframe_valid_fn(df):
-        ctx.logger.warning("Pain residual: trial table missing; skipping.")
+        ctx.logger.warning("Predictor residual: trial table missing; skipping.")
         return None
 
     predictor_column = resolve_predictor_column(df, ctx.config) or "predictor"
@@ -218,12 +218,23 @@ def stage_predictor_residual_impl(
         )
         return None
 
-    df_augmented, resid_meta = add_predictor_residual(
-        df,
-        ctx.config,
-        predictor_col=predictor_column,
-        outcome_col=outcome_column,
-    )
+    try:
+        df_augmented, resid_meta = add_predictor_residual(
+            df,
+            ctx.config,
+            predictor_col=predictor_column,
+            outcome_col=outcome_column,
+        )
+    except ValueError as exc:
+        resid_meta = {
+            "status": "skipped_incompatible_predictor",
+            "error": str(exc),
+            "predictor_column": predictor_column,
+            "outcome_column": outcome_column,
+        }
+        ctx.data_qc["predictor_residual"] = resid_meta
+        ctx.logger.warning("Predictor residual skipped: %s", exc)
+        return None
 
     suffix = feature_suffix_from_context_fn(ctx)
     out_dir = get_stats_subfolder_fn(ctx, "predictor_residual")
@@ -235,6 +246,6 @@ def stage_predictor_residual_impl(
     ctx.data_qc["predictor_residual"] = resid_meta
     if set_trial_table_cache_fn is not None:
         set_trial_table_cache_fn(df_augmented)
-    ctx.logger.info("Pain residual saved: %s/%s", out_dir.name, out_path.name)
+    ctx.logger.info("Predictor residual saved: %s/%s", out_dir.name, out_path.name)
 
     return out_path

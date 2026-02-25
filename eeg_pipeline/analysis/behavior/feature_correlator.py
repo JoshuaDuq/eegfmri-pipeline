@@ -23,8 +23,8 @@ from eeg_pipeline.domain.features.registry import get_feature_registry
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv
 from eeg_pipeline.utils.analysis.stats import (
-    compute_partial_correlations_with_cov_temp,
-    compute_permutation_pvalues_with_cov_temp,
+    compute_partial_correlations_with_cov_predictor,
+    compute_permutation_pvalues_with_cov_predictor,
     fdr_bh,
 )
 from eeg_pipeline.utils.analysis.stats.correlation import (
@@ -358,8 +358,8 @@ def _add_partial_correlations(
     (
         r_pc, p_pc, n_pc,
         r_temp, p_temp, n_temp,
-        r_cov_temp, p_cov_temp, n_cov_temp,
-    ) = compute_partial_correlations_with_cov_temp(
+        r_cov_predictor, p_cov_predictor, n_cov_predictor,
+    ) = compute_partial_correlations_with_cov_predictor(
         roi_values=feature_series,
         target_values=target_series,
         covariates_df=cov_aligned,
@@ -373,12 +373,12 @@ def _add_partial_correlations(
     record["r_partial_cov"] = r_pc
     record["p_partial_cov"] = p_pc
     record["n_partial_cov"] = n_pc
-    record["r_partial_temp"] = r_temp
-    record["p_partial_temp"] = p_temp
-    record["n_partial_temp"] = n_temp
-    record["r_partial_cov_temp"] = r_cov_temp
-    record["p_partial_cov_temp"] = p_cov_temp
-    record["n_partial_cov_temp"] = n_cov_temp
+    record["r_partial_predictor"] = r_temp
+    record["p_partial_predictor"] = p_temp
+    record["n_partial_predictor"] = n_temp
+    record["r_partial_cov_predictor"] = r_cov_predictor
+    record["p_partial_cov_predictor"] = p_cov_predictor
+    record["n_partial_cov_predictor"] = n_cov_predictor
 
 
 def _add_permutation_pvalues(
@@ -398,9 +398,9 @@ def _add_permutation_pvalues(
     (
         p_perm_raw,
         p_perm_partial_cov,
-        p_perm_partial_temp,
-        p_perm_partial_cov_temp,
-    ) = compute_permutation_pvalues_with_cov_temp(
+        p_perm_partial_predictor,
+        p_perm_partial_cov_predictor,
+    ) = compute_permutation_pvalues_with_cov_predictor(
         x_aligned=feature_series,
         y_aligned=target_series,
         covariates_df=cov_aligned,
@@ -414,8 +414,8 @@ def _add_permutation_pvalues(
     )
     record["p_perm_raw"] = p_perm_raw
     record["p_perm_partial_cov"] = p_perm_partial_cov
-    record["p_perm_partial_temp"] = p_perm_partial_temp
-    record["p_perm_partial_cov_temp"] = p_perm_partial_cov_temp
+    record["p_perm_partial_predictor"] = p_perm_partial_predictor
+    record["p_perm_partial_cov_predictor"] = p_perm_partial_cov_predictor
     record["p_perm"] = p_perm_raw
 
 
@@ -424,35 +424,43 @@ def _select_primary_correlation(
     control_predictor: bool,
     control_trial_order: bool,
 ) -> None:
-    """Select primary correlation based on control settings."""
+    """Select primary correlation based on control settings (no fallback downgrades)."""
+    def _set_missing(kind: str, source: str) -> None:
+        record["p_kind_primary"] = kind
+        record["p_primary"] = np.nan
+        record["r_primary"] = np.nan
+        record["p_primary_source"] = source
+
     if control_predictor and control_trial_order:
-        if pd.notna(record.get("p_partial_cov_temp", np.nan)):
-            record["p_kind_primary"] = "p_partial_cov_temp"
-            record["p_primary"] = record.get("p_partial_cov_temp", np.nan)
-            record["r_primary"] = record.get("r_partial_cov_temp", np.nan)
-            record["p_primary_source"] = "partial_cov_temp"
-        elif pd.notna(record.get("p_partial_temp", np.nan)):
-            record["p_kind_primary"] = "p_partial_temp"
-            record["p_primary"] = record.get("p_partial_temp", np.nan)
-            record["r_primary"] = record.get("r_partial_temp", np.nan)
-            record["p_primary_source"] = "partial_temp_fallback"
-        elif pd.notna(record.get("p_partial_cov", np.nan)):
-            record["p_kind_primary"] = "p_partial_cov"
-            record["p_primary"] = record.get("p_partial_cov", np.nan)
-            record["r_primary"] = record.get("r_partial_cov", np.nan)
-            record["p_primary_source"] = "partial_cov_fallback"
+        p_val = record.get("p_partial_cov_predictor", np.nan)
+        r_val = record.get("r_partial_cov_predictor", np.nan)
+        if pd.notna(p_val):
+            record["p_kind_primary"] = "p_partial_cov_predictor"
+            record["p_primary"] = p_val
+            record["r_primary"] = r_val
+            record["p_primary_source"] = "partial_cov_predictor"
+        else:
+            _set_missing("missing_required", "partial_cov_predictor_missing")
     elif control_predictor:
-        if pd.notna(record.get("p_partial_temp", np.nan)):
-            record["p_kind_primary"] = "p_partial_temp"
-            record["p_primary"] = record.get("p_partial_temp", np.nan)
-            record["r_primary"] = record.get("r_partial_temp", np.nan)
-            record["p_primary_source"] = "partial_temp"
+        p_val = record.get("p_partial_predictor", np.nan)
+        r_val = record.get("r_partial_predictor", np.nan)
+        if pd.notna(p_val):
+            record["p_kind_primary"] = "p_partial_predictor"
+            record["p_primary"] = p_val
+            record["r_primary"] = r_val
+            record["p_primary_source"] = "partial_predictor"
+        else:
+            _set_missing("missing_required", "partial_predictor_missing")
     elif control_trial_order:
-        if pd.notna(record.get("p_partial_cov", np.nan)):
+        p_val = record.get("p_partial_cov", np.nan)
+        r_val = record.get("r_partial_cov", np.nan)
+        if pd.notna(p_val):
             record["p_kind_primary"] = "p_partial_cov"
-            record["p_primary"] = record.get("p_partial_cov", np.nan)
-            record["r_primary"] = record.get("r_partial_cov", np.nan)
+            record["p_primary"] = p_val
+            record["r_primary"] = r_val
             record["p_primary_source"] = "partial_cov"
+        else:
+            _set_missing("missing_required", "partial_cov_missing")
 
 
 def _update_primary_perm_pvalue(record: Dict[str, Any]) -> None:
@@ -460,8 +468,8 @@ def _update_primary_perm_pvalue(record: Dict[str, Any]) -> None:
     primary_to_permutation_column = {
         "p_raw": "p_perm_raw",
         "p_partial_cov": "p_perm_partial_cov",
-        "p_partial_temp": "p_perm_partial_temp",
-        "p_partial_cov_temp": "p_perm_partial_cov_temp",
+        "p_partial_predictor": "p_perm_partial_predictor",
+        "p_partial_cov_predictor": "p_perm_partial_cov_predictor",
     }
     primary_kind = record.get("p_kind_primary")
     permutation_column = primary_to_permutation_column.get(primary_kind)
@@ -1293,7 +1301,9 @@ class FeatureBehaviorCorrelator:
 
         if effective_config.apply_fdr:
             _apply_fdr_to_dataframe(df, effective_config, self.config)
-        target_suffix = "outcome" if "outcome" in target_name.lower() else "temp"
+        target_suffix = re.sub(r"[^a-z0-9_]+", "_", str(target_name).strip().lower()).strip("_")
+        if not target_suffix:
+            target_suffix = "target"
         method_suffix = f"_{method_label}" if method_label else ""
         from eeg_pipeline.infra.paths import ensure_dir
         corr_dir = self.stats_dir / "correlations"
@@ -1432,7 +1442,7 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True
     
-    # Get rating from aligned_events using event_columns.outcome config
+    # Resolve outcome from aligned_events using event_columns.outcome config.
     outcome_series = None
     outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
     if outcome_col is not None and ctx.aligned_events is not None:

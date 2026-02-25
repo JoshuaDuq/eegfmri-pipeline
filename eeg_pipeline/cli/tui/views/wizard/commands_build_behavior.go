@@ -464,7 +464,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	// Correlations (trial-table)
 	if m.isComputationSelected("correlations") {
 		appendFeatureSpec("--correlations-features", m.correlationsFeaturesSpec)
-		if strings.TrimSpace(m.correlationsTypesSpec) != "" && m.correlationsTypesSpec != "partial_cov_temp" {
+		if strings.TrimSpace(m.correlationsTypesSpec) != "" && m.correlationsTypesSpec != "partial_cov_predictor" {
 			args = append(args, "--correlations-types")
 			args = append(args, splitCSVList(m.correlationsTypesSpec)...)
 		}

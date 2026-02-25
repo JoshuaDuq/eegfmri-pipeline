@@ -578,7 +578,7 @@ def perm_pval_mean_difference(
     return float(exceed / (int(n_perm) + 1))
 
 
-def compute_permutation_pvalues_with_cov_temp(
+def compute_permutation_pvalues_with_cov_predictor(
     x_aligned: pd.Series,
     y_aligned: pd.Series,
     covariates_df: Optional[pd.DataFrame],
@@ -593,7 +593,7 @@ def compute_permutation_pvalues_with_cov_temp(
     groups: Optional[np.ndarray] = None,
 ) -> Tuple[float, float, float, float]:
     """Compute permutation p-values including combined covariates+predictor."""
-    p_perm, p_partial_cov, p_partial_temp = compute_permutation_pvalues(
+    p_perm, p_partial_cov, p_partial_predictor = compute_permutation_pvalues(
         x_aligned=x_aligned,
         y_aligned=y_aligned,
         covariates_df=covariates_df,
@@ -607,7 +607,7 @@ def compute_permutation_pvalues_with_cov_temp(
         groups=groups,
     )
 
-    p_partial_cov_temp = _compute_combined_covariates_predictor_pvalue(
+    p_partial_cov_predictor = _compute_combined_covariates_predictor_pvalue(
         x_aligned,
         y_aligned,
         covariates_df,
@@ -621,4 +621,4 @@ def compute_permutation_pvalues_with_cov_temp(
         groups,
     )
 
-    return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
+    return p_perm, p_partial_cov, p_partial_predictor, p_partial_cov_predictor

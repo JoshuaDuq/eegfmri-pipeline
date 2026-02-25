@@ -390,7 +390,7 @@ def _compute_lag_and_delta_for_group(
     predictor_col: str,
     outcome_col: str,
     has_predictor: bool,
-    has_rating: bool,
+    has_outcome: bool,
 ) -> pd.DataFrame:
     """Compute lagged and delta features for a single group."""
     result = group.copy()
@@ -398,10 +398,10 @@ def _compute_lag_and_delta_for_group(
         predictor = pd.to_numeric(result[predictor_col], errors="coerce")
         result["prev_predictor"] = predictor.shift(1)
         result["delta_predictor"] = predictor - predictor.shift(1)
-    if has_rating:
+    if has_outcome:
         outcome = pd.to_numeric(result[outcome_col], errors="coerce")
-        result["prev_outcome"] = rating.shift(1)
-        result["delta_outcome"] = rating - rating.shift(1)
+        result["prev_outcome"] = outcome.shift(1)
+        result["delta_outcome"] = outcome - outcome.shift(1)
     result["trial_index_within_group"] = np.arange(len(result), dtype=int)
     return result
 
@@ -428,7 +428,7 @@ def add_lag_and_delta_features(
 
     has_predictor = predictor_col in result_df.columns
     has_outcome = outcome_col in result_df.columns
-    if not has_predictor and not has_rating:
+    if not has_predictor and not has_outcome:
         meta["status"] = "skipped_no_columns"
         return result_df, meta
 
@@ -457,7 +457,7 @@ def add_predictor_residual(
     out_pred_col: str = "outcome_hat_from_predictor",
     out_resid_col: str = "predictor_residual",
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Add a flexible predictor→rating fit and define predictor_residual = rating - f(temp)."""
+    """Add a flexible predictor→outcome fit and define predictor_residual = outcome - f(predictor)."""
     from eeg_pipeline.utils.config.loader import get_config_value
 
     enabled = bool(
@@ -474,12 +474,12 @@ def add_predictor_residual(
         meta["status"] = "skipped_missing_columns"
         return df, meta
 
-    from eeg_pipeline.utils.analysis.stats.predictor_residual import fit_predictor_rating_curve
+    from eeg_pipeline.utils.analysis.stats.predictor_residual import fit_predictor_outcome_curve
 
     predictor = pd.to_numeric(df[predictor_col], errors="coerce")
     outcome = pd.to_numeric(df[outcome_col], errors="coerce")
-    prediction, residual, model_meta = fit_predictor_rating_curve(
-        predictor, rating, config=config
+    prediction, residual, model_meta = fit_predictor_outcome_curve(
+        predictor, outcome, config=config
     )
     meta.update(model_meta)
 
@@ -521,7 +521,7 @@ def add_predictor_residual(
         groups = (
             result[group_col] if group_col and group_col in result.columns else None
         )
-        valid_mask = predictor.notna() & rating.notna()
+        valid_mask = predictor.notna() & outcome.notna()
         if groups is not None:
             groups_series = pd.Series(groups, index=result.index)
             valid_mask = valid_mask & groups_series.notna()
@@ -541,7 +541,7 @@ def add_predictor_residual(
             else:
                 valid_indices = result.index[valid_mask]
                 X = predictor.loc[valid_indices].to_numpy(dtype=float)[:, None]
-                y = rating.loc[valid_indices].to_numpy(dtype=float)
+                y = outcome.loc[valid_indices].to_numpy(dtype=float)
 
                 if groups is None:
                     meta["crossfit"]["status"] = "skipped_missing_groups"

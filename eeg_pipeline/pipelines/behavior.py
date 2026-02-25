@@ -114,7 +114,7 @@ class BehaviorPipelineConfig:
     bootstrap: int = 0
     robust_method: Optional[str] = None
     method_label: str = "spearman"
-    correlation_types: List[str] = field(default_factory=lambda: ["partial_cov_temp"])
+    correlation_types: List[str] = field(default_factory=lambda: ["partial_cov_predictor"])
     
     # Computation flags
     run_trial_table: bool = True
@@ -197,7 +197,7 @@ class BehaviorPipelineConfig:
             ),
             robust_method=robust_method,
             method_label=method_label,
-            correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_temp"]),
+            correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_predictor"]),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
             run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
             run_predictor_residual=bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)),

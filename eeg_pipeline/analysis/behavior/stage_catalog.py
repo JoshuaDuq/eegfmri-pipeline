@@ -112,7 +112,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     ),
     StageSpecDefinition(
         name="predictor_residual",
-        description="Compute pain residual",
+        description="Compute predictor residual",
         requires=("trial_table", "predictor", "outcome"),
         produces=("predictor_residual",),
         config_key="behavior_analysis.predictor_residual.enabled",

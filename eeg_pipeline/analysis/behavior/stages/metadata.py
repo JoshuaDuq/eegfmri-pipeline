@@ -239,8 +239,8 @@ def write_analysis_metadata_impl(
         df = corr_df
         partial_cols = [
             ("p_partial_cov", "partial_cov"),
-            ("p_partial_temp", "partial_temp"),
-            ("p_partial_cov_temp", "partial_cov_temp"),
+            ("p_partial_predictor", "partial_predictor"),
+            ("p_partial_cov_predictor", "partial_cov_predictor"),
         ]
         partial_ok: Dict[str, Any] = {}
         for col, label in partial_cols:

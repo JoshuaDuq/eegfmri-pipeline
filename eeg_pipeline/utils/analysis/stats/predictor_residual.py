@@ -24,28 +24,28 @@ from .validation import assert_continuous_predictor
 
 def _prepare_data(
     predictor: pd.Series,
-    rating: pd.Series,
+    outcome: pd.Series,
 ) -> Tuple[pd.Series, pd.Series, pd.Index]:
-    """Align and validate predictor and rating series."""
+    """Align and validate predictor and outcome series."""
     predictor_values = pd.to_numeric(predictor, errors="coerce")
-    rating_values = pd.to_numeric(rating, errors="coerce")
-    common_index = predictor_values.index.intersection(rating_values.index)
+    outcome_values = pd.to_numeric(outcome, errors="coerce")
+    common_index = predictor_values.index.intersection(outcome_values.index)
     predictor_aligned = predictor_values.loc[common_index]
-    rating_aligned = rating_values.loc[common_index]
-    return predictor_aligned, rating_aligned, common_index
+    outcome_aligned = outcome_values.loc[common_index]
+    return predictor_aligned, outcome_aligned, common_index
 
 
 def _compute_residuals(
-    rating_values: pd.Series,
+    outcome_values: pd.Series,
     predicted_values: pd.Series,
 ) -> pd.Series:
-    """Compute residuals as rating - predicted."""
-    return rating_values - predicted_values
+    """Compute residuals as outcome - predicted."""
+    return outcome_values - predicted_values
 
 
 def _fit_spline_model(
     predictor_values: pd.Series,
-    rating_values: pd.Series,
+    outcome_values: pd.Series,
     config: Optional[Any],
 ) -> Optional[Tuple[pd.Series, Dict[str, Any]]]:
     """Fit spline model using statsmodels if available."""
@@ -60,7 +60,7 @@ def _fit_spline_model(
 
     model_data = pd.DataFrame({
         "pred": predictor_values.to_numpy(dtype=float),
-        "outcome": rating_values.to_numpy(dtype=float),
+        "outcome": outcome_values.to_numpy(dtype=float),
     })
 
     best_model = None
@@ -76,7 +76,7 @@ def _fit_spline_model(
         if degrees_of_freedom < 3:
             continue
 
-        formula = f"rating ~ bs(temp, df={degrees_of_freedom}, degree=3)"
+        formula = f"outcome ~ bs(pred, df={degrees_of_freedom}, degree=3)"
         try:
             model = smf.ols(formula, data=model_data).fit()
         except (ValueError, TypeError, AttributeError):
@@ -127,7 +127,7 @@ def _fit_spline_model(
 
 def _fit_polynomial_model(
     predictor_values: pd.Series,
-    rating_values: pd.Series,
+    outcome_values: pd.Series,
     config: Optional[Any],
 ) -> Tuple[pd.Series, Dict[str, Any]]:
     """Fit polynomial model as fallback."""
@@ -142,7 +142,7 @@ def _fit_polynomial_model(
     try:
         coefficients = np.polyfit(
             predictor_values.to_numpy(dtype=float),
-            rating_values.to_numpy(dtype=float),
+            outcome_values.to_numpy(dtype=float),
             deg=degree,
         )
         polynomial = np.poly1d(coefficients)
@@ -160,9 +160,9 @@ def _fit_polynomial_model(
     return predicted_series, metadata
 
 
-def fit_predictor_rating_curve(
+def fit_predictor_outcome_curve(
     predictor: pd.Series,
-    rating: pd.Series,
+    outcome: pd.Series,
     *,
     config: Optional[Any] = None,
 ) -> Tuple[pd.Series, pd.Series, Dict[str, Any]]:
@@ -178,7 +178,7 @@ def fit_predictor_rating_curve(
         If predictor_type is not 'continuous' or has < 5 unique values.
     """
     assert_continuous_predictor(predictor, config, context="predictor_residual")
-    predictor_aligned, rating_aligned, common_index = _prepare_data(predictor, rating)
+    predictor_aligned, outcome_aligned, common_index = _prepare_data(predictor, outcome)
 
     metadata: Dict[str, Any] = {
         "model": None,
@@ -186,7 +186,7 @@ def fit_predictor_rating_curve(
         "n_total": int(len(common_index)),
     }
 
-    valid_mask = predictor_aligned.notna() & rating_aligned.notna()
+    valid_mask = predictor_aligned.notna() & outcome_aligned.notna()
     n_valid = int(valid_mask.sum())
     metadata["n_valid"] = n_valid
 
@@ -198,7 +198,7 @@ def fit_predictor_rating_curve(
         return predicted, residual, metadata
 
     predictor_valid = predictor_aligned[valid_mask]
-    rating_valid = rating_aligned[valid_mask]
+    outcome_valid = outcome_aligned[valid_mask]
 
     method = str(_get_config_value(config, "behavior_analysis.predictor_residual.method", "spline")).lower()
 
@@ -206,25 +206,24 @@ def fit_predictor_rating_curve(
     residual_full = pd.Series(np.nan, index=common_index, dtype=float)
 
     if method == "spline":
-        spline_result = _fit_spline_model(predictor_valid, rating_valid, config)
+        spline_result = _fit_spline_model(predictor_valid, outcome_valid, config)
         if spline_result is not None:
             predicted_valid, spline_metadata = spline_result
             predicted_full.loc[predictor_valid.index] = predicted_valid
-            residual_valid = _compute_residuals(rating_valid, predicted_valid)
-            residual_full.loc[rating_valid.index] = residual_valid
+            residual_valid = _compute_residuals(outcome_valid, predicted_valid)
+            residual_full.loc[outcome_valid.index] = residual_valid
             metadata.update(spline_metadata)
             return predicted_full, residual_full, metadata
 
     predicted_valid, polynomial_metadata = _fit_polynomial_model(
-        predictor_valid, rating_valid, config
+        predictor_valid, outcome_valid, config
     )
     predicted_full.loc[predictor_valid.index] = predicted_valid
-    residual_valid = _compute_residuals(rating_valid, predicted_valid)
-    residual_full.loc[rating_valid.index] = residual_valid
+    residual_valid = _compute_residuals(outcome_valid, predicted_valid)
+    residual_full.loc[outcome_valid.index] = residual_valid
     metadata.update(polynomial_metadata)
 
     return predicted_full, residual_full, metadata
 
 
-__all__ = ["fit_predictor_rating_curve"]
-
+__all__ = ["fit_predictor_outcome_curve"]

@@ -30,7 +30,7 @@ Modules:
     - influence: Influence diagnostics
     - splines: Spline fitting
     - predictor_models: Predictor-outcome models
-    - predictor_residual: Pain residual computation
+    - predictor_residual: Predictor residual computation
     - mixed_effects: Mixed effects models
 """
 
@@ -118,7 +118,7 @@ from .permutation import (
     permute_within_groups,
     perm_pval_simple,
     compute_permutation_pvalues,
-    compute_permutation_pvalues_with_cov_temp,
+    compute_permutation_pvalues_with_cov_predictor,
 )
 
 from .partial import (
@@ -127,7 +127,7 @@ from .partial import (
     compute_partial_residuals,
     compute_partial_corr,
     compute_partial_correlation_with_covariates,
-    compute_partial_correlations_with_cov_temp,
+    compute_partial_correlations_with_cov_predictor,
 )
 
 
@@ -227,13 +227,13 @@ __all__ = [
     "permute_within_groups",
     "perm_pval_simple",
     "compute_permutation_pvalues",
-    "compute_permutation_pvalues_with_cov_temp",
+    "compute_permutation_pvalues_with_cov_predictor",
     # Partial
     "partial_corr_xy_given_Z",
     "partial_residuals_xy_given_Z",
     "compute_partial_residuals",
     "compute_partial_correlation_with_covariates",
-    "compute_partial_correlations_with_cov_temp",
+    "compute_partial_correlations_with_cov_predictor",
     # Reliability and validity
     "compute_icc",
     # Paired Comparisons

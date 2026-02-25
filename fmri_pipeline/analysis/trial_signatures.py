@@ -933,8 +933,8 @@ def run_trial_signature_extraction_for_subject(
                 if cfg.write_condition_betas:
                     nib.save(diff_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_minus_b_beta.nii.gz"))
 
-if signature_root is not None and signature_specs:
-            for label, img in [
+            if signature_root is not None and signature_specs:
+                for label, img in [
                     ("cond_a", a_img),
                     ("cond_b", b_img),
                     ("cond_a_minus_b", diff_img),
@@ -969,7 +969,7 @@ if signature_root is not None and signature_specs:
                                 "weights": str(s.weight_path),
                             }
                         )
-            _write_tsv(out_dir / "signatures" / "condition_signature_expression.tsv", cond_rows)
+                _write_tsv(out_dir / "signatures" / "condition_signature_expression.tsv", cond_rows)
 
         else:
             def _count_trials_for_group(run_label: Optional[str], group: str) -> int:
@@ -1025,7 +1025,7 @@ if signature_root is not None and signature_specs:
 
                 n_trials = _count_trials_for_group(run_label or None, group)
 
-                if signature_root is not None:
+                if signature_root is not None and signature_specs:
                     brain_union = None
                     if run_brain_masks:
                         try:

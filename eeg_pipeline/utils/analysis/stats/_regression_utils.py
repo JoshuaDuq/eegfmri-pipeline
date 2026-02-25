@@ -269,7 +269,7 @@ def _build_predictor_covariates(
     key_prefix : str
         Config key prefix for spline configuration.
     exclude_outcomes : Tuple[str, ...]
-        Outcomes that should not use outcome_hat fallback.
+        Outcomes that should not use outcome_hat controls.
 
     Returns
     -------
@@ -285,14 +285,13 @@ def _build_predictor_covariates(
 
     ctrl = str(predictor_control or "linear").strip().lower()
 
-    # Rating hat / nonlinear control
+    # Outcome-hat / nonlinear control
     if ctrl in ("outcome_hat", "outcome_hat_from_predictor", "nonlinear"):
         if outcome not in exclude_outcomes and "outcome_hat_from_predictor" in trial_df.columns:
             covariates.append("outcome_hat_from_predictor")
             meta.update({"predictor_control_used": "outcome_hat", "predictor_control_column": "outcome_hat_from_predictor"})
-        elif predictor_col in trial_df.columns:
-            covariates.append(predictor_col)
-            meta.update({"predictor_control_used": "linear", "predictor_control_fallback": predictor_col})
+        else:
+            meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_outcome_hat"})
 
     # Spline / RCS control
     elif ctrl in ("spline", "rcs", "restricted_cubic"):
@@ -315,13 +314,14 @@ def _build_predictor_covariates(
                 "predictor_control_column": predictor_col,
                 "predictor_spline": spline_meta,
             })
-        elif outcome not in exclude_outcomes and "outcome_hat_from_predictor" in trial_df.columns:
-            covariates.append("outcome_hat_from_predictor")
-            meta.update({"predictor_control_used": "outcome_hat_fallback", "predictor_control_column": "outcome_hat_from_predictor"})
+        else:
+            meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_predictor"})
 
     # Linear control (default)
     elif predictor_col in trial_df.columns:
         covariates.append(predictor_col)
         meta.update({"predictor_control_used": "linear", "predictor_control_column": predictor_col})
+    else:
+        meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_predictor"})
 
     return covariates, design_df, meta

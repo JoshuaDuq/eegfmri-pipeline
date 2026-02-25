@@ -115,23 +115,38 @@ def stage_predictor_models_impl(
 
     mc_enabled = get_config_bool(ctx.config, "behavior_analysis.predictor_models.model_comparison.enabled", True)
     if mc_enabled:
-        model_comparison = compute_predictor_model_comparison_fn(
-            df[predictor_column],
-            df[outcome_column],
-            ctx.config,
-        )
-        meta["model_comparison"] = model_comparison.metadata
+        try:
+            model_comparison = compute_predictor_model_comparison_fn(
+                df[predictor_column],
+                df[outcome_column],
+                ctx.config,
+            )
+            meta["model_comparison"] = model_comparison.metadata
+        except ValueError as exc:
+            meta["status"] = "skipped_incompatible_predictor"
+            meta["error"] = str(exc)
+            ctx.data_qc["predictor_models"] = meta
+            ctx.logger.warning("Predictor model comparison skipped: %s", exc)
+            return meta
 
     bp_enabled = get_config_bool(ctx.config, "behavior_analysis.predictor_models.breakpoint_test.enabled", True)
     if bp_enabled:
-        breakpoint = compute_predictor_breakpoints_fn(
-            df[predictor_column],
-            df[outcome_column],
-            ctx.config,
-        )
-        meta["breakpoint_test"] = breakpoint.metadata
+        try:
+            breakpoint = compute_predictor_breakpoints_fn(
+                df[predictor_column],
+                df[outcome_column],
+                ctx.config,
+            )
+            meta["breakpoint_test"] = breakpoint.metadata
+        except ValueError as exc:
+            meta["status"] = "skipped_incompatible_predictor"
+            meta["error"] = str(exc)
+            ctx.data_qc["predictor_models"] = meta
+            ctx.logger.warning("Predictor breakpoint test skipped: %s", exc)
+            return meta
 
     write_predictor_models_fn(ctx, model_comparison, breakpoint)
+    ctx.data_qc["predictor_models"] = meta
     meta["status"] = "ok"
     return meta
 

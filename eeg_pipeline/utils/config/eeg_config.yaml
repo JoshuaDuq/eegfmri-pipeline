@@ -728,7 +728,7 @@ behavior_analysis:
     primary_unit: "trial"            # "trial" | "run_mean"
     outcome: "outcome"              # "outcome" | "predictor_residual" | "predictor"
     include_predictor: true
-    predictor_control: "linear"    # "linear" | "outcome_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on predictor)
+    predictor_control: "linear"    # "linear" | "outcome_hat" (uses outcome_hat_from_predictor) | "spline" (restricted cubic spline on predictor)
     predictor_spline:
       n_knots: 4
       quantile_low: 0.05
@@ -749,7 +749,7 @@ behavior_analysis:
     outcomes: ["outcome", "predictor_residual"]  # optionally add "predictor"
     families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
     include_predictor: true
-    predictor_control: "linear"    # "linear" | "outcome_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on predictor)
+    predictor_control: "linear"    # "linear" | "outcome_hat" (uses outcome_hat_from_predictor) | "spline" (restricted cubic spline on predictor)
     predictor_spline:
       n_knots: 4
       quantile_low: 0.05
@@ -842,7 +842,7 @@ behavior_analysis:
   # Correlations computation
   correlations:
     enabled: true
-    types: ["partial_cov_temp"]
+    types: ["partial_cov_predictor"]
     targets: ["outcome", "predictor", "predictor_residual"]
     compute_change_scores: true
     loso_stability: true

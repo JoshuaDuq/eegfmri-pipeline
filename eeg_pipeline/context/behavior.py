@@ -456,7 +456,7 @@ class BehaviorContext:
         return self._align_feature_tables()
 
     def _find_outcome_column(self) -> Optional[str]:
-        """Find rating column in aligned_events."""
+        """Find outcome column in aligned_events."""
         if self.aligned_events is None:
             return None
 

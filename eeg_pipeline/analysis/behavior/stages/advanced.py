@@ -21,7 +21,7 @@ def stage_mediation_impl(
     compute_unified_fdr_fn: Callable[..., pd.DataFrame],
     unified_fdr_family_columns: List[str],
 ) -> pd.DataFrame:
-    """Run mediation analysis: test if neural features mediate predictor→rating."""
+    """Run mediation analysis: test if neural features mediate predictor→outcome."""
     from eeg_pipeline.analysis.behavior.api import run_mediation_analysis
     from eeg_pipeline.utils.data.columns import (
         resolve_outcome_column,
@@ -196,7 +196,7 @@ def stage_moderation_impl(
     write_parquet_with_optional_csv_fn: Callable[[pd.DataFrame, Any, bool], None],
     unified_fdr_family_columns: List[str],
 ) -> pd.DataFrame:
-    """Run moderation analysis: feature moderates predictor→rating relationship."""
+    """Run moderation analysis: feature moderates predictor→outcome relationship."""
     from eeg_pipeline.utils.analysis.stats.moderation import run_moderation_analysis
     from eeg_pipeline.utils.data.columns import (
         resolve_outcome_column,
