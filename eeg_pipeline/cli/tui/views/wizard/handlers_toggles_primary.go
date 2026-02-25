@@ -1802,7 +1802,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.regressionIncludePredictor = !m.regressionIncludePredictor
 		m.useDefaultAdvanced = false
 	case optRegressionTempControl:
-		m.regressionTempControl = (m.regressionTempControl + 1) % 3
+		if m.predictorType == 0 {
+			m.regressionTempControl = (m.regressionTempControl + 1) % 3
+		}
 		m.useDefaultAdvanced = false
 	case optRegressionTempSplineKnots, optRegressionTempSplineQlow, optRegressionTempSplineQhigh, optRegressionTempSplineMinN:
 		m.startNumberEdit()
@@ -1834,7 +1836,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.modelsIncludePredictor = !m.modelsIncludePredictor
 		m.useDefaultAdvanced = false
 	case optModelsTempControl:
-		m.modelsTempControl = (m.modelsTempControl + 1) % 3
+		if m.predictorType == 0 {
+			m.modelsTempControl = (m.modelsTempControl + 1) % 3
+		}
 		m.useDefaultAdvanced = false
 	case optModelsTempSplineKnots, optModelsTempSplineQlow, optModelsTempSplineQhigh, optModelsTempSplineMinN:
 		m.startNumberEdit()
@@ -1964,7 +1968,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.influenceIncludePredictor = !m.influenceIncludePredictor
 		m.useDefaultAdvanced = false
 	case optInfluenceTempControl:
-		m.influenceTempControl = (m.influenceTempControl + 1) % 3
+		if m.predictorType == 0 {
+			m.influenceTempControl = (m.influenceTempControl + 1) % 3
+		}
 		m.useDefaultAdvanced = false
 	case optInfluenceTempSplineKnots, optInfluenceTempSplineQlow, optInfluenceTempSplineQhigh, optInfluenceTempSplineMinN:
 		m.startNumberEdit()

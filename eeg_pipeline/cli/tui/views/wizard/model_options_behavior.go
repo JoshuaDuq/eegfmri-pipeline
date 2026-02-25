@@ -117,8 +117,9 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Predictor Residual section - only show if predictor_residual computation is selected
-	if m.isComputationSelected("predictor_residual") {
+	// Predictor Residual — only valid for continuous predictors.
+	// predictor_residual = outcome - f(predictor) requires a dose-response curve fit.
+	if m.isComputationSelected("predictor_residual") && m.predictorType == 0 {
 		options = append(options, optBehaviorGroupPredictorResidual)
 		if m.behaviorGroupPredictorResidualExpanded {
 			options = append(options,
@@ -162,11 +163,16 @@ func (m Model) getBehaviorOptions() []optionType {
 					optCorrelationsTypes,
 					optCorrelationsPrimaryUnit,
 					optCorrelationsMinRuns,
-					optCorrelationsPreferPredictorResidual,
 					optCorrelationsPermutations,
 					optCorrelationsPermutationPrimary,
-					optCorrelationsUseCrossfitPredictorResidual,
 				)
+				// Predictor-residual preference only meaningful for continuous predictors.
+				if m.predictorType == 0 {
+					options = append(options,
+						optCorrelationsPreferPredictorResidual,
+						optCorrelationsUseCrossfitPredictorResidual,
+					)
+				}
 			}
 			options = append(options, optBehaviorSubMultilevel, optCorrelationsMultilevel)
 			if m.isComputationSelected("multilevel_correlations") {
@@ -193,7 +199,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optRegressionIncludePredictor,
 				optRegressionTempControl,
 			)
-			if m.regressionTempControl == 2 {
+			if m.predictorType == 0 && m.regressionTempControl == 2 {
 				options = append(options,
 					optRegressionTempSplineKnots,
 					optRegressionTempSplineQlow,
@@ -229,14 +235,20 @@ func (m Model) getBehaviorOptions() []optionType {
 			options = append(options,
 				optBehaviorSubOutcomes,
 				optModelsOutcomeRating,
-				optModelsOutcomePredictorResidual,
 				optModelsOutcomePredictor,
 				optModelsOutcomeBinaryOutcome,
+			)
+			// predictor_residual outcome only exists for continuous predictors.
+			if m.predictorType == 0 {
+				options = append(options, optModelsOutcomePredictorResidual)
+			}
+			options = append(options,
 				optBehaviorSubCovariates,
 				optModelsIncludePredictor,
 				optModelsTempControl,
 			)
-			if m.modelsTempControl == 2 {
+			// Spline sub-options only relevant for continuous predictors.
+			if m.predictorType == 0 && m.modelsTempControl == 2 {
 				options = append(options,
 					optModelsTempSplineKnots,
 					optModelsTempSplineQlow,
@@ -396,13 +408,16 @@ func (m Model) getBehaviorOptions() []optionType {
 					options = append(options,
 						optBehaviorSubOutcomes,
 						optInfluenceOutcomeRating,
-						optInfluenceOutcomePredictorResidual,
 						optInfluenceOutcomePredictor,
 						optBehaviorSubCovariates,
 						optInfluenceIncludePredictor,
 						optInfluenceTempControl,
 					)
-					if m.influenceTempControl == 2 {
+					// predictor_residual outcome and spline control: continuous only.
+					if m.predictorType == 0 {
+						options = append(options, optInfluenceOutcomePredictorResidual)
+					}
+					if m.predictorType == 0 && m.influenceTempControl == 2 {
 						options = append(options,
 							optInfluenceTempSplineKnots,
 							optInfluenceTempSplineQlow,

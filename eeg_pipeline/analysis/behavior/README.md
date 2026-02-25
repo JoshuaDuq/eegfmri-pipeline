@@ -4,9 +4,13 @@
 
 This document is the methods reference for the behavioral statistics pipeline.
 Analyses run as a dependency-resolved DAG over aligned EEG and behavioral data
-(pain ratings, thermal predictor, experimental conditions).
+(outcome variable, predictor, experimental conditions).
 The pipeline targets trial-level associations between behavioral variables and
 EEG-derived features, with explicit non-i.i.d. safeguards and per-stage outputs.
+
+The pipeline is **paradigm-agnostic**: it supports any combination of continuous,
+binary, or categorical predictors and any scalar outcome measure. See §4 for how
+`predictor_type` gates analyses that require a continuous predictor.
 
 ---
 
@@ -21,7 +25,7 @@ EEG-derived features, with explicit non-i.i.d. safeguards and per-stage outputs.
    - 5.2 [Trial Table](#52-trial-table)
    - 5.3 [Lag Features](#53-lag-features)
    - 5.4 [Predictor Residual](#54-predictor-residual)
-   - 5.5 [Temperature Models](#55-temperature-models)
+   - 5.5 [Predictor Models](#55-predictor-models)
    - 5.6 [Feature QC](#56-feature-qc)
    - 5.7 [Correlations](#57-correlations)
    - 5.8 [Predictor Sensitivity](#58-predictor-sensitivity)
@@ -52,8 +56,8 @@ EEG-derived features, with explicit non-i.i.d. safeguards and per-stage outputs.
 | $g$ | Grouping unit (run / block) for non-i.i.d. safeguards |
 | $s$ | Subject index (group-level aggregation) |
 | $f \in \{1,\dots,F\}$ | EEG-derived feature index |
-| $y_i$ | Behavioral outcome (e.g. pain rating) for trial $i$ |
-| $T_i$ | Thermal predictor (e.g. stimulus temperature) for trial $i$ |
+| $y_i$ | Behavioral outcome for trial $i$ (e.g. subjective rating, detection score) |
+| $P_i$ | Predictor value for trial $i$ (e.g. stimulus intensity, dose, condition label) |
 | $x_{i,f}$ | EEG feature $f$ for trial $i$ |
 | $z_i$ | Covariate vector (age, sex, questionnaire scores, …) |
 | $G_i \in \{1,\dots,N_\text{groups}\}$ | Group label (run / block / cluster) |
@@ -61,7 +65,7 @@ EEG-derived features, with explicit non-i.i.d. safeguards and per-stage outputs.
 | $\varepsilon$ | Model residual |
 
 The **trial table** stores one row per trial $i$ with columns for trial metadata
-(subject, run/block, condition), behavioral variables ($y_i$, $T_i$, covariates),
+(subject, run/block, condition), behavioral variables ($y_i$, $P_i$, covariates),
 and EEG feature columns ($x_{i,f}$) joined from feature tables.
 
 Trials are **not i.i.d.**: they are clustered within runs/blocks and subjects.
@@ -93,7 +97,7 @@ behavior/
 └── stages/
     ├── metadata.py          # load, metadata stages
     ├── trial_table.py       # trial_table, lag_features, predictor_residual
-    ├── models.py            # temperature_models, regression, model families
+    ├── models.py            # predictor_models, regression, model families
     ├── feature_qc.py        # feature_qc stage
     ├── correlate.py         # correlate_* stages, predictor_sensitivity
     ├── condition.py         # condition_column, condition_window, multigroup
@@ -115,8 +119,8 @@ Stages run in dependency order. Arrows denote data dependencies.
 load
 └── trial_table
     ├── lag_features
-    ├── predictor_residual
-    │   └── temperature_models
+    ├── predictor_residual          [continuous predictor only]
+    │   └── predictor_models        [continuous predictor only]
     ├── feature_qc
     │   ├── correlate_design
     │   │   ├── correlate_effect_sizes
@@ -165,13 +169,32 @@ The following stages require an explicit i.i.d. override for trial-level inferen
 Temporal trial-level inference (`temporal_stats`) requires cluster correction with
 valid group labels when `allow_iid_trials = false`.
 
-### 4.2 Temperature Control
+### 4.2 Predictor Control
 
 Partial correlation and residualization paths are both available for controlling the
-effect of the thermal predictor. Temperature control is skipped when the analysis
-target is the thermal predictor itself.
+effect of the predictor. The available control strategies depend on `predictor_type`:
 
-### 4.3 Multiple Comparison Correction
+| Strategy | Description | Requires |
+|----------|-------------|----------|
+| `linear` | Add predictor as a linear covariate | Any predictor type |
+| `outcome_hat` | Use $\hat{y} = f(P)$ (fitted outcome) as covariate | `continuous` only |
+| `spline` | Restricted cubic spline of predictor as covariate | `continuous` only |
+
+Predictor control is skipped when the analysis target is the predictor itself.
+
+### 4.3 Predictor Type Validation
+
+The `behavior_analysis.predictor_type` key declares the nature of the predictor:
+
+- **`continuous`** — ordered numeric scale with ≥ 5 distinct levels (e.g. stimulus intensity, dose). Enables predictor_residual, predictor_models, psychometrics, and spline/outcome_hat control.
+- **`binary`** — two-level factor (0/1 or condition A/B). Disables all curve-fitting analyses.
+- **`categorical`** — unordered multi-level factor (≥ 3 levels). Same restrictions as binary.
+
+Attempting to run a curve-fitting analysis (`predictor_residual`, `predictor_models`,
+`psychometrics`) when `predictor_type ≠ continuous` raises a `ValueError` at the
+analysis entry point via `assert_continuous_predictor()` / `assert_predictor_type_continuous()`.
+
+### 4.4 Multiple Comparison Correction
 
 - **Unified hierarchical FDR** is applied across wrapped stages (see §7).
 - **Local BH correction** (`p_fdr`) is computed within regression and model-family stages.
@@ -186,15 +209,15 @@ target is the thermal predictor itself.
 
 **Modules:** `stages/metadata.py`, `api.py`
 
-**`load`** — Reads aligned behavioral events, thermal predictor series, covariates,
+**`load`** — Reads aligned behavioral events, predictor series, covariates,
 and trial-wise EEG feature tables into `BehaviorContext`.
-Produces the core behavioral series (`rating`, `temperature`) and a named mapping
+Produces the core behavioral series ($y_i$, $P_i$) and a named mapping
 of feature tables used by all downstream stages.
 
 **`metadata`** — Builds a JSON QC summary:
 
-- Trial counts, missingness fractions, rating and temperature distributions.
-- Pain vs. non-pain contrasts, covariate coverage, feature counts.
+- Trial counts, missingness fractions, outcome and predictor distributions.
+- Condition contrasts, covariate coverage, feature counts.
 - Analysis configuration fields (method labels, permutation counts, FDR level).
 
 ---
@@ -216,13 +239,13 @@ One row per trial; one column per behavioral or EEG-feature variable.
 Computed within each run/block group $g$:
 
 ```math
-\text{prev\_temperature}_i = T_{i-1}, \qquad
-\Delta\text{temperature}_i = T_i - T_{i-1},
+\text{prev\_predictor}_i = P_{i-1}, \qquad
+\Delta\text{predictor}_i = P_i - P_{i-1},
 ```
 
 ```math
-\text{prev\_rating}_i = y_{i-1}, \qquad
-\Delta\text{rating}_i = y_i - y_{i-1}, \qquad
+\text{prev\_outcome}_i = y_{i-1}, \qquad
+\Delta\text{outcome}_i = y_i - y_{i-1}, \qquad
 \text{trial\_index}_i = i.
 ```
 
@@ -232,32 +255,39 @@ Computed within each run/block group $g$:
 
 **Module:** `stages/trial_table.py`
 
-Residualizes the outcome on the thermal predictor to remove temperature-driven variance:
+**Requires:** `predictor_type = continuous` (≥ 5 unique predictor values).
+
+Residualizes the outcome on the predictor to isolate variance not explained
+by stimulus intensity:
 
 ```math
-\text{residual}_i = y_i - \hat{y}_i, \qquad \hat{y}_i = f(T_i).
+\text{predictor\_residual}_i = y_i - \hat{y}_i, \qquad \hat{y}_i = f(P_i).
 ```
 
 Model selection procedure:
 
-1. Fit spline OLS candidates `rating ~ bs(temp, df=d, degree=3)` for increasing $d$; retain the model with lowest AIC.
-2. If no spline model converges, fit a polynomial: $\hat{y} = \sum_j a_j T^j$.
+1. Fit spline OLS candidates `outcome ~ bs(predictor, df=d, degree=3)` for increasing $d$; retain the model with lowest AIC.
+2. If no spline model converges, fit a polynomial: $\hat{y} = \sum_j a_j P^j$.
 3. Optionally compute cross-fit residuals (`predictor_residual_cv`) via `GroupKFold` to avoid in-sample bias.
 
 ---
 
-### 5.5 Temperature Models
+### 5.5 Predictor Models
 
 **Module:** `stages/models.py`
 
-Fits and compares stimulus–response models for the thermal predictor:
+**Requires:** `predictor_type = continuous` (≥ 5 unique predictor values).
+
+Fits and compares stimulus–response model families for `outcome ~ f(predictor)`.
+Useful for characterising the functional form of the dose-response relationship
+before downstream analyses.
 
 | Model | Equation |
 |-------|---------|
-| Linear | $y = \beta_0 + \beta_1 T + \varepsilon$ |
-| Polynomial (degree $d$) | $y = \beta_0 + \beta_1 T + \cdots + \beta_d T^d + \varepsilon$ |
-| Spline | $y = \beta_0 + \sum_j \beta_j B_j(T) + \varepsilon$ |
-| Breakpoint (hinge) | $y = \beta_0 + \beta_1 T + \beta_2 \max(0, T - c) + \varepsilon$ |
+| Linear | $y = \beta_0 + \beta_1 P + \varepsilon$ |
+| Polynomial (degree $d$) | $y = \beta_0 + \beta_1 P + \cdots + \beta_d P^d + \varepsilon$ |
+| Spline | $y = \beta_0 + \sum_j \beta_j B_j(P) + \varepsilon$ |
+| Breakpoint (hinge) | $y = \beta_0 + \beta_1 P + \beta_2 \max(0, P - c) + \varepsilon$ |
 
 **Model comparison metrics:**
 
@@ -272,6 +302,11 @@ Fits and compares stimulus–response models for the thermal predictor:
 F = \frac{(RSS_\text{lin} - RSS_\text{hinge}) / df_\text{num}}
          {RSS_\text{hinge} / df_\text{den}}.
 ```
+
+> **Scientific note:** These analyses are only valid when the predictor is a
+> continuous variable with a plausible dose–response relationship to the outcome.
+> Setting `predictor_type = binary` or `categorical` disables this stage and
+> raises a `ValueError` at the entry point.
 
 ---
 
@@ -334,11 +369,11 @@ Benjamini–Hochberg q-values applied across features (see §7).
 
 **Module:** `stages/correlate.py` → `feature_correlator.py`
 
-Quantifies each feature's association with pain sensitivity (temperature-independent
-rating variability):
+Quantifies each feature's association with the outcome variance not explained
+by the predictor (i.e. individual variability in response beyond stimulus drive):
 
-1. Fit $y = \beta_0 + \beta_1 T + \varepsilon$; compute sensitivity residual
-   $\psi_i = y_i - (\hat\beta_0 + \hat\beta_1 T_i)$.
+1. Fit $y = \beta_0 + \beta_1 P + \varepsilon$; compute sensitivity residual
+   $\psi_i = y_i - (\hat\beta_0 + \hat\beta_1 P_i)$.
 2. Correlate each feature $x_f$ with $\psi$.
 3. Permutation p-values: $(\#\text{extreme} + 1) / (n_\text{perm} + 1)$.
 
@@ -348,10 +383,10 @@ rating variability):
 
 **Module:** `stages/models.py`
 
-Per-feature OLS model with optional temperature interaction:
+Per-feature OLS model with optional predictor interaction:
 
 ```math
-y = Z\gamma + \beta_f x_f + \beta_\text{int}(x_f \cdot T) + \varepsilon \quad \text{(full)}, \qquad
+y = Z\gamma + \beta_f x_f + \beta_\text{int}(x_f \cdot P) + \varepsilon \quad \text{(full)}, \qquad
 y = Z\gamma + \varepsilon \quad \text{(reduced)}.
 ```
 
@@ -408,7 +443,7 @@ Assesses whether the feature–outcome association is consistent across runs/blo
 For each group $g$:
 
 ```math
-r_g = \mathrm{corr}(x_g, y_g) \quad \text{(optionally partial on temperature)}.
+r_g = \mathrm{corr}(x_g, y_g) \quad \text{(optionally partial on predictor)}.
 ```
 
 **Summary metrics:** $\bar{r}_g$, $s_{r_g}$, $\min(r_g)$, $\max(r_g)$;

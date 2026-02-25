@@ -512,13 +512,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Include Predictor", m.boolToOnOff(m.regressionIncludePredictor), "add predictor covariate"
 		case optRegressionTempControl:
 			v := "linear"
-			switch m.regressionTempControl {
-			case 1:
-				v = "outcome_hat"
-			case 2:
-				v = "spline"
+			if m.predictorType == 0 {
+				switch m.regressionTempControl {
+				case 1:
+					v = "outcome_hat"
+				case 2:
+					v = "spline"
+				}
 			}
-			return "Predictor Control", v, "linear | outcome_hat | spline"
+			hint := "linear | outcome_hat | spline"
+			if m.predictorType != 0 {
+				hint = "linear (continuous predictor required for outcome_hat/spline)"
+			}
+			return "Predictor Control", v, hint
 		case optRegressionTempSplineKnots:
 			val := fmt.Sprintf("%d", m.regressionTempSplineKnots)
 			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineKnots) {
@@ -583,13 +589,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Include Predictor", m.boolToOnOff(m.modelsIncludePredictor), "add predictor covariate"
 		case optModelsTempControl:
 			v := "linear"
-			switch m.modelsTempControl {
-			case 1:
-				v = "outcome_hat"
-			case 2:
-				v = "spline"
+			if m.predictorType == 0 {
+				switch m.modelsTempControl {
+				case 1:
+					v = "outcome_hat"
+				case 2:
+					v = "spline"
+				}
 			}
-			return "Predictor Control", v, "linear | outcome_hat | spline"
+			hint := "linear | outcome_hat | spline"
+			if m.predictorType != 0 {
+				hint = "linear (continuous predictor required for outcome_hat/spline)"
+			}
+			return "Predictor Control", v, hint
 		case optModelsTempSplineKnots:
 			val := fmt.Sprintf("%d", m.modelsTempSplineKnots)
 			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineKnots) {
@@ -740,13 +752,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Include Predictor", m.boolToOnOff(m.influenceIncludePredictor), "add covariate"
 		case optInfluenceTempControl:
 			v := "linear"
-			switch m.influenceTempControl {
-			case 1:
-				v = "outcome_hat"
-			case 2:
-				v = "spline"
+			if m.predictorType == 0 {
+				switch m.influenceTempControl {
+				case 1:
+					v = "outcome_hat"
+				case 2:
+					v = "spline"
+				}
 			}
-			return "Predictor Control", v, "linear | outcome_hat | spline"
+			hint := "linear | outcome_hat | spline"
+			if m.predictorType != 0 {
+				hint = "linear (continuous predictor required for outcome_hat/spline)"
+			}
+			return "Predictor Control", v, hint
 		case optInfluenceTempSplineKnots:
 			val := fmt.Sprintf("%d", m.influenceTempSplineKnots)
 			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineKnots) {
