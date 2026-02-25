@@ -81,53 +81,23 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	m.pushState(StatePipelineWizard)
 	m.mainMenu.SelectedPipeline = -1
 
-	configKeys := []string{"time_frequency_analysis.bands"}
-	if m.selectedPipeline == types.PipelineML {
-		configKeys = append(configKeys,
-			"machine_learning.targets.regression",
-			"machine_learning.targets.classification",
-			"machine_learning.targets.binary_threshold",
-			"machine_learning.data.feature_families",
-			"machine_learning.data.feature_bands",
-			"machine_learning.data.feature_segments",
-			"machine_learning.data.feature_scopes",
-			"machine_learning.data.feature_stats",
-			"machine_learning.data.feature_harmonization",
-			"machine_learning.data.covariates",
-			"machine_learning.data.require_trial_ml_safe",
-			"machine_learning.classification.model",
-			"machine_learning.cv.inner_splits",
-			"machine_learning.models.elasticnet.alpha_grid",
-			"machine_learning.models.elasticnet.l1_ratio_grid",
-			"machine_learning.models.ridge.alpha_grid",
-			"machine_learning.models.random_forest.n_estimators",
-			"machine_learning.models.random_forest.max_depth_grid",
-			"machine_learning.preprocessing.variance_threshold_grid",
-		)
-	}
-	if m.selectedPipeline == types.PipelineFmri || m.selectedPipeline == types.PipelineFmriAnalysis {
-		configKeys = append(configKeys,
-			"fmri_preprocessing.engine",
-			"fmri_preprocessing.fmriprep.image",
-			"fmri_preprocessing.fmriprep.output_dir",
-			"fmri_preprocessing.fmriprep.work_dir",
-			"fmri_preprocessing.fmriprep.fs_license_file",
-			"fmri_preprocessing.fmriprep.fs_subjects_dir",
-			"fmri_preprocessing.fmriprep.output_spaces",
-			"fmri_preprocessing.fmriprep.ignore",
-			"fmri_preprocessing.fmriprep.bids_filter_file",
-			"fmri_preprocessing.fmriprep.use_aroma",
-			"fmri_preprocessing.fmriprep.skip_bids_validation",
-			"fmri_preprocessing.fmriprep.stop_on_first_crash",
-			"fmri_preprocessing.fmriprep.clean_workdir",
-			"fmri_preprocessing.fmriprep.fs_no_reconall",
-			"fmri_preprocessing.fmriprep.nthreads",
-			"fmri_preprocessing.fmriprep.omp_nthreads",
-			"fmri_preprocessing.fmriprep.mem_mb",
-			"fmri_preprocessing.fmriprep.extra_args",
-			"paths.freesurfer_license",
-			"paths.bids_fmri_root",
-		)
+	// Request top-level sections and flatten on the Go side so all wizard
+	// hydration binders receive their corresponding config values.
+	configKeys := []string{
+		"time_frequency_analysis",
+		"project",
+		"paths",
+		"eeg",
+		"epochs",
+		"alignment",
+		"event_columns",
+		"preprocessing",
+		"behavior_analysis",
+		"feature_engineering",
+		"machine_learning",
+		"validation",
+		"io",
+		"fmri_preprocessing",
 	}
 
 	cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())

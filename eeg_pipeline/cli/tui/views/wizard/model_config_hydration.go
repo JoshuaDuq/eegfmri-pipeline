@@ -1285,12 +1285,624 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.rfMaxDepthGrid = strings.Join(splitLooseList(spec), ",")
 			}
 		}},
-		{key: "machine_learning.preprocessing.variance_threshold_grid", apply: func(v interface{}) {
-			if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
-				m.varianceThresholdGrid = strings.Join(splitLooseList(spec), ",")
-			}
-		}},
-	}
+			{key: "machine_learning.preprocessing.variance_threshold_grid", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
+					m.varianceThresholdGrid = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			// Additional ML hydration (YAML -> TUI)
+			{key: "machine_learning.preprocessing.imputer_strategy", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "mean":
+						m.mlImputer = 1
+					case "most_frequent":
+						m.mlImputer = 2
+					default:
+						m.mlImputer = 0
+					}
+				}
+			}},
+			{key: "machine_learning.preprocessing.power_transformer_method", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "box-cox":
+						m.mlPowerTransformerMethod = 1
+					default:
+						m.mlPowerTransformerMethod = 0
+					}
+				}
+			}},
+			{key: "machine_learning.preprocessing.power_transformer_standardize", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlPowerTransformerStandardize = b
+				}
+			}},
+			{key: "machine_learning.preprocessing.pca.enabled", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlPCAEnabled = b
+				}
+			}},
+			{key: "machine_learning.preprocessing.pca.n_components", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok && f > 0 {
+					m.mlPCANComponents = f
+				}
+			}},
+			{key: "machine_learning.preprocessing.pca.whiten", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlPCAWhiten = b
+				}
+			}},
+			{key: "machine_learning.preprocessing.pca.svd_solver", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "full":
+						m.mlPCASvdSolver = 1
+					case "randomized":
+						m.mlPCASvdSolver = 2
+					default:
+						m.mlPCASvdSolver = 0
+					}
+				}
+			}},
+			{key: "machine_learning.preprocessing.pca.random_state", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlPCARngSeed = n
+				}
+			}},
+			{key: "machine_learning.preprocessing.deconfound", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlDeconfound = b
+				}
+			}},
+			{key: "machine_learning.preprocessing.feature_selection_percentile", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlFeatureSelectionPercentile = f
+				}
+			}},
+			{key: "machine_learning.preprocessing.spatial_regions_allowed", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.mlSpatialRegionsAllowed = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "machine_learning.classification.calibrate_ensemble", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlEnsembleCalibrate = b
+				}
+			}},
+			{key: "machine_learning.classification.resampler", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "undersample":
+						m.mlClassificationResampler = 1
+					case "smote":
+						m.mlClassificationResampler = 2
+					default:
+						m.mlClassificationResampler = 0
+					}
+				}
+			}},
+			{key: "machine_learning.classification.resampler_seed", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlClassificationResamplerSeed = n
+				}
+			}},
+			{key: "machine_learning.models.svm.kernel", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "linear":
+						m.mlSvmKernel = 1
+					case "poly":
+						m.mlSvmKernel = 2
+					default:
+						m.mlSvmKernel = 0
+					}
+				}
+			}},
+			{key: "machine_learning.models.svm.C_grid", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.mlSvmCGrid = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "machine_learning.models.svm.gamma_grid", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.mlSvmGammaGrid = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "machine_learning.models.svm.class_weight", apply: func(v interface{}) {
+				if v == nil {
+					m.mlSvmClassWeight = 1
+					return
+				}
+				if s, ok := asString(v); ok {
+					if strings.EqualFold(s, "none") {
+						m.mlSvmClassWeight = 1
+					} else {
+						m.mlSvmClassWeight = 0
+					}
+				}
+			}},
+			{key: "machine_learning.models.logistic_regression.penalty", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "l1":
+						m.mlLrPenalty = 1
+					case "elasticnet":
+						m.mlLrPenalty = 2
+					default:
+						m.mlLrPenalty = 0
+					}
+				}
+			}},
+			{key: "machine_learning.models.logistic_regression.C_grid", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.mlLrCGrid = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "machine_learning.models.logistic_regression.l1_ratio_grid", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.mlLrL1RatioGrid = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "machine_learning.models.logistic_regression.max_iter", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlLrMaxIter = n
+				}
+			}},
+			{key: "machine_learning.models.logistic_regression.class_weight", apply: func(v interface{}) {
+				if v == nil {
+					m.mlLrClassWeight = 1
+					return
+				}
+				if s, ok := asString(v); ok {
+					if strings.EqualFold(s, "none") {
+						m.mlLrClassWeight = 1
+					} else {
+						m.mlLrClassWeight = 0
+					}
+				}
+			}},
+			{key: "machine_learning.models.random_forest.min_samples_split_grid", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.mlRfMinSamplesSplitGrid = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "machine_learning.models.random_forest.min_samples_leaf_grid", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.mlRfMinSamplesLeafGrid = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "machine_learning.models.random_forest.bootstrap", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlRfBootstrap = b
+				}
+			}},
+			{key: "machine_learning.models.random_forest.class_weight", apply: func(v interface{}) {
+				if v == nil {
+					m.mlRfClassWeight = 2
+					return
+				}
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "balanced_subsample":
+						m.mlRfClassWeight = 1
+					case "none":
+						m.mlRfClassWeight = 2
+					default:
+						m.mlRfClassWeight = 0
+					}
+				}
+			}},
+			{key: "machine_learning.models.cnn.temporal_filters", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnFilters1 = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.pointwise_filters", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnFilters2 = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.kernel_length", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnKernelSize1 = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.separable_kernel_length", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnKernelSize2 = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.pool_size", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnPoolSize = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.dense_units", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnDenseUnits = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.dropout_conv", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlCnnDropoutConv = f
+				}
+			}},
+			{key: "machine_learning.models.cnn.dropout", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlCnnDropoutDense = f
+				}
+			}},
+			{key: "machine_learning.models.cnn.batch_size", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnBatchSize = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.max_epochs", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnEpochs = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.learning_rate", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlCnnLearningRate = f
+				}
+			}},
+			{key: "machine_learning.models.cnn.patience", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnPatience = n
+				}
+			}},
+			{key: "machine_learning.models.cnn.min_delta", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlCnnMinDelta = f
+				}
+			}},
+			{key: "machine_learning.models.cnn.weight_decay", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlCnnL2Lambda = f
+				}
+			}},
+			{key: "machine_learning.cv.hygiene_enabled", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlCvHygieneEnabled = b
+				}
+			}},
+			{key: "machine_learning.cv.permutation_scheme", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					if strings.EqualFold(s, "within_subject_within_block") {
+						m.mlCvPermutationScheme = 1
+					} else {
+						m.mlCvPermutationScheme = 0
+					}
+				}
+			}},
+			{key: "machine_learning.cv.min_valid_permutation_fraction", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlCvMinValidPermFraction = f
+				}
+			}},
+			{key: "machine_learning.cv.default_n_bins", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCvDefaultNBins = n
+				}
+			}},
+			{key: "machine_learning.evaluation.ci_method", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					if strings.EqualFold(s, "fixed_effects") {
+						m.mlEvalCIMethod = 1
+					} else {
+						m.mlEvalCIMethod = 0
+					}
+				}
+			}},
+			{key: "machine_learning.evaluation.bootstrap_iterations", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlEvalBootstrapIterations = n
+				}
+			}},
+			{key: "machine_learning.data.covariates_strict", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlDataCovariatesStrict = b
+				}
+			}},
+			{key: "machine_learning.data.max_excluded_subject_fraction", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlDataMaxExcludedSubjectFraction = f
+				}
+			}},
+			{key: "machine_learning.incremental_validity.baseline_alpha", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlIncrementalBaselineAlpha = f
+				}
+			}},
+			{key: "machine_learning.interpretability.grouped_outputs", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlInterpretabilityGroupedOutputs = b
+				}
+			}},
+			{key: "machine_learning.analysis.time_generalization.min_subjects_per_cell", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlTimeGenMinSubjects = n
+				}
+			}},
+			{key: "machine_learning.analysis.time_generalization.min_valid_permutation_fraction", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlTimeGenMinValidPermFraction = f
+				}
+			}},
+			{key: "machine_learning.classification.min_subjects_with_auc_for_inference", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlClassMinSubjectsForAUC = n
+				}
+			}},
+			{key: "machine_learning.classification.max_failed_fold_fraction", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.mlClassMaxFailedFoldFraction = f
+				}
+			}},
+			{key: "machine_learning.targets.strict_regression_target_continuous", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.mlTargetsStrictRegressionCont = b
+				}
+			}},
+			{key: "project.random_state", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.mlCnnRandomSeed = n
+				}
+			}},
+			// Additional preprocessing/alignment hydration
+			{key: "eeg.ecg_channels", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.prepEcgChannels = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "epochs.autoreject_n_interpolate", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.prepAutorejectNInterpolate = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "alignment.allow_misaligned_trim", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.alignAllowMisalignedTrim = b
+				}
+			}},
+			{key: "alignment.min_alignment_samples", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.alignMinAlignmentSamples = n
+				}
+			}},
+			{key: "alignment.trim_to_first_volume", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.alignTrimToFirstVolume = b
+				}
+			}},
+			{key: "alignment.fmri_onset_reference", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "first_volume", "first_iti_start":
+						m.alignFmriOnsetReference = 1
+					case "scanner_trigger", "first_stim_start":
+						m.alignFmriOnsetReference = 2
+					default:
+						m.alignFmriOnsetReference = 0
+					}
+				}
+			}},
+			// Additional feature-engineering hydration
+			{key: "feature_engineering.spatial_transform_per_family.connectivity", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyConnectivity = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.itpc", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyItpc = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.pac", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyPac = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.power", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyPower = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.aperiodic", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyAperiodic = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.bursts", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyBursts = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.erds", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyErds = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.complexity", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyComplexity = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.ratios", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyRatios = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.asymmetry", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyAsymmetry = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.spectral", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilySpectral = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.erp", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyErp = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.quality", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyQuality = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.spatial_transform_per_family.microstates", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.spatialTransformPerFamilyMicrostates = spatialTransformOverrideIndex(s)
+				}
+			}},
+			{key: "feature_engineering.change_scores.transform", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "ratio":
+						m.changeScoresTransform = 1
+					case "log_ratio":
+						m.changeScoresTransform = 2
+					default:
+						m.changeScoresTransform = 0
+					}
+				}
+			}},
+			{key: "feature_engineering.change_scores.window_pairs", apply: func(v interface{}) {
+				if spec, ok := asWindowPairSpec(v); ok {
+					m.changeScoresWindowPairs = spec
+				}
+			}},
+			{key: "feature_engineering.itpc.min_segment_sec", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.itpcMinSegmentSec = f
+				}
+			}},
+			{key: "feature_engineering.itpc.min_cycles_at_fmin", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.itpcMinCyclesAtFmin = f
+				}
+			}},
+			{key: "feature_engineering.pac.min_segment_sec", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.pacMinSegmentSec = f
+				}
+			}},
+			{key: "feature_engineering.pac.min_cycles_at_fmin", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.pacMinCyclesAtFmin = f
+				}
+			}},
+			{key: "feature_engineering.pac.surrogate_method", apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					switch strings.ToLower(strings.TrimSpace(s)) {
+					case "circular_shift":
+						m.pacSurrogateMethod = 1
+					case "swap_phase_amp":
+						m.pacSurrogateMethod = 2
+					case "time_shift":
+						m.pacSurrogateMethod = 3
+					default:
+						m.pacSurrogateMethod = 0
+					}
+				}
+			}},
+			{key: "feature_engineering.aperiodic.max_freq_resolution_hz", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.aperiodicMaxFreqResolutionHz = f
+				}
+			}},
+			{key: "feature_engineering.aperiodic.multitaper_adaptive", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.aperiodicMultitaperAdaptive = b
+				}
+			}},
+			{key: "feature_engineering.directedconnectivity.min_samples_per_mvar_parameter", apply: func(v interface{}) {
+				if n, ok := asInt(v); ok {
+					m.directedConnMinSamplesPerMvarParam = n
+				}
+			}},
+			{key: "feature_engineering.erds.condition_marker_bands", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.erdsConditionMarkerBands = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "feature_engineering.erds.laterality_columns", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.erdsLateralityColumns = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "feature_engineering.erds.somatosensory_left_channels", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.erdsSomatosensoryLeftChannels = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "feature_engineering.erds.somatosensory_right_channels", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					m.erdsSomatosensoryRightChannels = strings.Join(splitLooseList(spec), ",")
+				}
+			}},
+			{key: "feature_engineering.erds.onset_min_threshold_percent", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.erdsOnsetMinThresholdPercent = f
+				}
+			}},
+			{key: "feature_engineering.erds.rebound_threshold_sigma", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.erdsReboundThresholdSigma = f
+				}
+			}},
+			{key: "feature_engineering.erds.rebound_min_threshold_percent", apply: func(v interface{}) {
+				if f, ok := asFloat(v); ok {
+					m.erdsReboundMinThresholdPercent = f
+				}
+			}},
+			{key: "feature_engineering.microstates.assign_from_gfp_peaks", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.microstatesAssignFromGfpPeaks = b
+				}
+			}},
+			// Supplemental behavior hydration for configurable fields.
+			{key: "behavior_analysis.validate_only", apply: func(v interface{}) {
+				if b, ok := asBool(v); ok {
+					m.behaviorValidateOnly = b
+				}
+			}},
+			{key: "behavior_analysis.feature_categories", apply: func(v interface{}) {
+				if spec, ok := asListSpec(v); ok {
+					joined := strings.Join(splitLooseList(spec), ",")
+					if strings.TrimSpace(joined) != "" {
+						m.correlationsFeaturesSpec = joined
+						m.predictorSensitivityFeaturesSpec = joined
+						m.conditionFeaturesSpec = joined
+						m.clusterFeaturesSpec = joined
+						m.mediationFeaturesSpec = joined
+						m.moderationFeaturesSpec = joined
+					}
+				}
+			}},
+			{key: "behavior_analysis.temporal.features", apply: func(v interface{}) {
+				raw, ok := v.(map[string]interface{})
+				if !ok {
+					return
+				}
+				selected := make([]string, 0, 3)
+				for _, name := range []string{"power", "itpc", "erds"} {
+					if val, ok := raw[name]; ok {
+						if b, ok := asBool(val); ok && b {
+							selected = append(selected, name)
+						}
+					}
+				}
+				if len(selected) > 0 {
+					m.temporalFeaturesSpec = strings.Join(selected, ",")
+				}
+			}},
+		}
 
 	for _, b := range binders {
 		if v, ok := values[b.key]; ok {
@@ -1366,6 +1978,73 @@ func asListSpec(v interface{}) (string, bool) {
 			}
 		}
 		return strings.Join(out, " "), true
+	}
+	return "", false
+}
+
+func spatialTransformOverrideIndex(value string) int {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "none":
+		return 1
+	case "csd":
+		return 2
+	case "laplacian":
+		return 3
+	default:
+		return 0
+	}
+}
+
+// asWindowPairSpec normalizes change-score window pairs to "a:b,c:d" format.
+func asWindowPairSpec(v interface{}) (string, bool) {
+	switch pairs := v.(type) {
+	case []interface{}:
+		out := make([]string, 0, len(pairs))
+		for _, item := range pairs {
+			switch pair := item.(type) {
+			case []interface{}:
+				if len(pair) < 2 {
+					continue
+				}
+				left := strings.TrimSpace(fmt.Sprintf("%v", pair[0]))
+				right := strings.TrimSpace(fmt.Sprintf("%v", pair[1]))
+				if left != "" && left != "<nil>" && right != "" && right != "<nil>" {
+					out = append(out, left+":"+right)
+				}
+			case []string:
+				if len(pair) < 2 {
+					continue
+				}
+				left := strings.TrimSpace(pair[0])
+				right := strings.TrimSpace(pair[1])
+				if left != "" && right != "" {
+					out = append(out, left+":"+right)
+				}
+			case string:
+				if s := strings.TrimSpace(pair); s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+		if len(out) == 0 {
+			return "", false
+		}
+		return strings.Join(out, ","), true
+	case []string:
+		out := make([]string, 0, len(pairs))
+		for _, pair := range pairs {
+			if s := strings.TrimSpace(pair); s != "" {
+				out = append(out, s)
+			}
+		}
+		if len(out) == 0 {
+			return "", false
+		}
+		return strings.Join(out, ","), true
+	case string:
+		if s := strings.TrimSpace(pairs); s != "" {
+			return strings.Join(splitLooseList(s), ","), true
+		}
 	}
 	return "", false
 }

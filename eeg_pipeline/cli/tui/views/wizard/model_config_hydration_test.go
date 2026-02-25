@@ -74,3 +74,125 @@ func TestApplyConfigKeys_HydratesFmriThreadConfig(t *testing.T) {
 		t.Fatalf("expected fmriOmpNThreads=6, got %d", m.fmriOmpNThreads)
 	}
 }
+
+func TestApplyConfigKeys_HydratesExtendedMLConfig(t *testing.T) {
+	m := New(types.PipelineML, ".")
+	values := map[string]interface{}{
+		"machine_learning.preprocessing.imputer_strategy":                      "most_frequent",
+		"machine_learning.preprocessing.pca.enabled":                           true,
+		"machine_learning.preprocessing.pca.svd_solver":                        "randomized",
+		"machine_learning.preprocessing.pca.n_components":                      0.9,
+		"machine_learning.classification.resampler":                            "smote",
+		"machine_learning.models.svm.kernel":                                   "poly",
+		"machine_learning.models.svm.C_grid":                                   []interface{}{0.1, 1.0, 10.0},
+		"machine_learning.models.random_forest.class_weight":                   "none",
+		"machine_learning.analysis.time_generalization.min_subjects_per_cell":  float64(7),
+		"machine_learning.targets.strict_regression_target_continuous":         true,
+		"machine_learning.interpretability.grouped_outputs":                    false,
+		"machine_learning.classification.max_failed_fold_fraction":             0.33,
+		"machine_learning.evaluation.bootstrap_iterations":                     float64(2500),
+	}
+
+	m.ApplyConfigKeys(values)
+
+	if m.mlImputer != 2 {
+		t.Fatalf("expected mlImputer=2 (most_frequent), got %d", m.mlImputer)
+	}
+	if !m.mlPCAEnabled {
+		t.Fatalf("expected mlPCAEnabled=true")
+	}
+	if m.mlPCASvdSolver != 2 {
+		t.Fatalf("expected mlPCASvdSolver=2 (randomized), got %d", m.mlPCASvdSolver)
+	}
+	if m.mlPCANComponents != 0.9 {
+		t.Fatalf("expected mlPCANComponents=0.9, got %v", m.mlPCANComponents)
+	}
+	if m.mlClassificationResampler != 2 {
+		t.Fatalf("expected mlClassificationResampler=2 (smote), got %d", m.mlClassificationResampler)
+	}
+	if m.mlSvmKernel != 2 {
+		t.Fatalf("expected mlSvmKernel=2 (poly), got %d", m.mlSvmKernel)
+	}
+	if m.mlSvmCGrid != "0.1,1,10" {
+		t.Fatalf("expected mlSvmCGrid='0.1,1,10', got %q", m.mlSvmCGrid)
+	}
+	if m.mlRfClassWeight != 2 {
+		t.Fatalf("expected mlRfClassWeight=2 (none), got %d", m.mlRfClassWeight)
+	}
+	if m.mlTimeGenMinSubjects != 7 {
+		t.Fatalf("expected mlTimeGenMinSubjects=7, got %d", m.mlTimeGenMinSubjects)
+	}
+	if !m.mlTargetsStrictRegressionCont {
+		t.Fatalf("expected mlTargetsStrictRegressionCont=true")
+	}
+	if m.mlInterpretabilityGroupedOutputs {
+		t.Fatalf("expected mlInterpretabilityGroupedOutputs=false")
+	}
+	if m.mlClassMaxFailedFoldFraction != 0.33 {
+		t.Fatalf("expected mlClassMaxFailedFoldFraction=0.33, got %v", m.mlClassMaxFailedFoldFraction)
+	}
+	if m.mlEvalBootstrapIterations != 2500 {
+		t.Fatalf("expected mlEvalBootstrapIterations=2500, got %d", m.mlEvalBootstrapIterations)
+	}
+}
+
+func TestApplyConfigKeys_HydratesAdditionalFeatureAndPreprocessingConfig(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	values := map[string]interface{}{
+		"alignment.allow_misaligned_trim":                                  true,
+		"alignment.min_alignment_samples":                                  float64(11),
+		"alignment.fmri_onset_reference":                                   "first_iti_start",
+		"eeg.ecg_channels":                                                 []interface{}{"ECG", "EKG"},
+		"epochs.autoreject_n_interpolate":                                  []interface{}{4, 8, 16},
+		"feature_engineering.spatial_transform_per_family.connectivity":    "laplacian",
+		"feature_engineering.change_scores.transform":                      "log_ratio",
+		"feature_engineering.change_scores.window_pairs":                   []interface{}{[]interface{}{"baseline", "active"}},
+		"feature_engineering.pac.surrogate_method":                         "time_shift",
+		"feature_engineering.aperiodic.max_freq_resolution_hz":             0.5,
+		"feature_engineering.directedconnectivity.min_samples_per_mvar_parameter": float64(25),
+		"feature_engineering.erds.laterality_columns":                      []interface{}{"stim_side", "hand"},
+		"feature_engineering.microstates.assign_from_gfp_peaks":            false,
+	}
+
+	m.ApplyConfigKeys(values)
+
+	if !m.alignAllowMisalignedTrim {
+		t.Fatalf("expected alignAllowMisalignedTrim=true")
+	}
+	if m.alignMinAlignmentSamples != 11 {
+		t.Fatalf("expected alignMinAlignmentSamples=11, got %d", m.alignMinAlignmentSamples)
+	}
+	if m.alignFmriOnsetReference != 1 {
+		t.Fatalf("expected alignFmriOnsetReference=1 (first_volume/first_iti_start), got %d", m.alignFmriOnsetReference)
+	}
+	if m.prepEcgChannels != "ECG,EKG" {
+		t.Fatalf("expected prepEcgChannels='ECG,EKG', got %q", m.prepEcgChannels)
+	}
+	if m.prepAutorejectNInterpolate != "4,8,16" {
+		t.Fatalf("expected prepAutorejectNInterpolate='4,8,16', got %q", m.prepAutorejectNInterpolate)
+	}
+	if m.spatialTransformPerFamilyConnectivity != 3 {
+		t.Fatalf("expected spatialTransformPerFamilyConnectivity=3 (laplacian), got %d", m.spatialTransformPerFamilyConnectivity)
+	}
+	if m.changeScoresTransform != 2 {
+		t.Fatalf("expected changeScoresTransform=2 (log_ratio), got %d", m.changeScoresTransform)
+	}
+	if m.changeScoresWindowPairs != "baseline:active" {
+		t.Fatalf("expected changeScoresWindowPairs='baseline:active', got %q", m.changeScoresWindowPairs)
+	}
+	if m.pacSurrogateMethod != 3 {
+		t.Fatalf("expected pacSurrogateMethod=3 (time_shift), got %d", m.pacSurrogateMethod)
+	}
+	if m.aperiodicMaxFreqResolutionHz != 0.5 {
+		t.Fatalf("expected aperiodicMaxFreqResolutionHz=0.5, got %v", m.aperiodicMaxFreqResolutionHz)
+	}
+	if m.directedConnMinSamplesPerMvarParam != 25 {
+		t.Fatalf("expected directedConnMinSamplesPerMvarParam=25, got %d", m.directedConnMinSamplesPerMvarParam)
+	}
+	if m.erdsLateralityColumns != "stim_side,hand" {
+		t.Fatalf("expected erdsLateralityColumns='stim_side,hand', got %q", m.erdsLateralityColumns)
+	}
+	if m.microstatesAssignFromGfpPeaks {
+		t.Fatalf("expected microstatesAssignFromGfpPeaks=false")
+	}
+}

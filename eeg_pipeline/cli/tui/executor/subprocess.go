@@ -533,12 +533,46 @@ func LoadConfigKeys(repoRoot string, keys []string) tea.Cmd {
 				Error: err,
 			}
 		}
+		values = flattenConfigValues(values)
 
 		return messages.ConfigKeysLoadedMsg{
 			Values: values,
 			Error:  nil,
 		}
 	}
+}
+
+// flattenConfigValues expands nested config objects into dotted keys so
+// hydration can bind values regardless of whether config was queried by
+// leaf key or section root.
+func flattenConfigValues(values map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{})
+	var walk func(prefix string, value interface{})
+	walk = func(prefix string, value interface{}) {
+		if prefix == "" {
+			return
+		}
+		out[prefix] = value
+		switch nested := value.(type) {
+		case map[string]interface{}:
+			for key, child := range nested {
+				next := key
+				if prefix != "" {
+					next = prefix + "." + key
+				}
+				walk(next, child)
+			}
+		}
+	}
+
+	for key, value := range values {
+		if strings.Contains(key, ".") {
+			out[key] = value
+			continue
+		}
+		walk(key, value)
+	}
+	return out
 }
 
 type ProgressStreamer struct {
