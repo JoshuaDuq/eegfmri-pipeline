@@ -13,6 +13,10 @@ from tests.pipelines_test_utils import DotConfig
 
 class TestBehaviorValidityFixes(unittest.TestCase):
     def _ctx(self, config: DotConfig) -> SimpleNamespace:
+        event_columns = config.setdefault("event_columns", {})
+        event_columns.setdefault("predictor", ["predictor", "temperature"])
+        event_columns.setdefault("outcome", ["outcome", "rating"])
+        event_columns.setdefault("binary_outcome", ["binary_outcome"])
         return SimpleNamespace(
             subject="0001",
             task="task",
@@ -52,7 +56,11 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 {
                     "behavior_analysis": {
                         "run_adjustment": {"column": "run_id"},
-                        "predictor_residual": {"enabled": True, "crossfit": {"enabled": False}},
+                        "predictor_residual": {
+                            "enabled": True,
+                            "min_samples": 3,
+                            "crossfit": {"enabled": False},
+                        },
                     }
                 }
             )
@@ -60,11 +68,13 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         base_df = pd.DataFrame(
             {
-                "epoch": [0, 1, 2, 3],
-                "run_id": [1, 1, 2, 2],
-                "temperature": [46.0, 46.0, 48.0, 48.0],
-                "rating": [10.0, 20.0, 30.0, 40.0],
-                "power_alpha": [0.1, 0.2, 0.3, 0.4],
+                "epoch": list(range(8)),
+                "run_id": [1, 1, 1, 1, 2, 2, 2, 2],
+                "temperature": [44.0, 44.5, 45.0, 45.5, 46.0, 46.5, 47.0, 47.5],
+                "rating": [10.0, 14.0, 18.0, 23.0, 30.0, 38.0, 47.0, 57.0],
+                "predictor": [44.0, 44.5, 45.0, 45.5, 46.0, 46.5, 47.0, 47.5],
+                "outcome": [10.0, 14.0, 18.0, 23.0, 30.0, 38.0, 47.0, 57.0],
+                "power_alpha": [0.1, 0.15, 0.2, 0.24, 0.3, 0.36, 0.43, 0.5],
             }
         )
 
@@ -410,6 +420,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 logger=logger,
                 use_block_permutation=False,
                 n_perm=2,
+                target_col="rating",
             )
 
         self.assertFalse(out.empty)
@@ -454,6 +465,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=40,
+                target_col="rating",
             )
 
         self.assertFalse(out.empty)
@@ -511,7 +523,14 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             result = run_group_level_mixed_effects(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({}),
+                config=DotConfig(
+                    {
+                        "event_columns": {
+                            "outcome": ["rating"],
+                            "predictor": ["temperature"],
+                        }
+                    }
+                ),
                 logger=Mock(),
                 max_features=1,
                 fdr_alpha=0.05,
@@ -629,8 +648,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         batch = compute_batch_condition_effects(
             feature_columns=["power_alpha"],
             features_df=features,
-            pain_mask=pain_mask,
-            nonpain_mask=nonpain_mask,
+            cond_a_mask=pain_mask,
+            cond_b_mask=nonpain_mask,
             min_samples=3,
             n_perm=0,
         )
@@ -680,8 +699,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         out = compute_condition_effects(
             features_df=features,
-            pain_mask=pain_mask,
-            nonpain_mask=nonpain_mask,
+            cond_a_mask=pain_mask,
+            cond_b_mask=nonpain_mask,
             min_samples=2,
             fdr_alpha=0.05,
             n_jobs=1,
@@ -805,7 +824,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             design = stage_correlate_design(
                 ctx,
-                SimpleNamespace(control_temperature=True, control_trial_order=True),
+                SimpleNamespace(control_predictor=True, control_trial_order=True),
             )
         self.assertIsNotNone(design)
         self.assertEqual(design.targets, ["rating", "temperature"])
@@ -842,7 +861,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             design = stage_correlate_design(
                 ctx,
-                SimpleNamespace(control_temperature=True, control_trial_order=True),
+                SimpleNamespace(control_predictor=True, control_trial_order=True),
             )
         self.assertIsNone(design)
 
@@ -879,7 +898,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             with self.assertRaises(ValueError):
                 stage_correlate_design(
                     ctx,
-                    SimpleNamespace(control_temperature=True, control_trial_order=True),
+                    SimpleNamespace(control_predictor=True, control_trial_order=True),
                 )
 
     def test_correlate_design_uses_only_explicit_target_column(self):
@@ -917,7 +936,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             design = stage_correlate_design(
                 ctx,
-                SimpleNamespace(control_temperature=True, control_trial_order=True),
+                SimpleNamespace(control_predictor=True, control_trial_order=True),
             )
         self.assertIsNotNone(design)
         self.assertEqual(design.targets, ["vas_custom"])
@@ -959,7 +978,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             design = stage_correlate_design(
                 ctx,
-                SimpleNamespace(control_temperature=True, control_trial_order=True),
+                SimpleNamespace(control_predictor=True, control_trial_order=True),
             )
         self.assertIsNotNone(design)
         self.assertEqual(design.targets, ["predictor_residual_cv", "rating", "temperature"])
@@ -1000,7 +1019,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             design = stage_correlate_design(
                 ctx,
-                SimpleNamespace(control_temperature=True, control_trial_order=True),
+                SimpleNamespace(control_predictor=True, control_trial_order=True),
             )
         self.assertIsNotNone(design)
         self.assertEqual(design.targets, ["predictor_residual", "rating", "temperature"])
@@ -1451,7 +1470,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             feature_cols=["power_alpha"],
             targets=["rating"],
             cov_df=pd.DataFrame({"trial_index": [0.0, 1.0]}),
-            temperature_series=pd.Series([45.0, 46.0]),
+            predictor_series=pd.Series([45.0, 46.0]),
             predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
@@ -1472,7 +1491,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         out = stage_correlate_primary_selection(
             ctx,
-            SimpleNamespace(control_temperature=True, control_trial_order=True),
+            SimpleNamespace(control_predictor=True, control_trial_order=True),
             design,
             records,
         )
@@ -1498,7 +1517,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             feature_cols=["power_alpha"],
             targets=["rating"],
             cov_df=None,
-            temperature_series=None,
+            predictor_series=None,
             predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
@@ -1517,7 +1536,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         out = stage_correlate_primary_selection(
             ctx,
-            SimpleNamespace(control_temperature=True, control_trial_order=True),
+            SimpleNamespace(control_predictor=True, control_trial_order=True),
             design,
             records,
         )
@@ -1545,7 +1564,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             feature_cols=["power_alpha"],
             targets=["rating"],
             cov_df=None,
-            temperature_series=None,
+            predictor_series=None,
             predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
@@ -1565,7 +1584,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         out = stage_correlate_primary_selection(
             ctx,
-            SimpleNamespace(control_temperature=True, control_trial_order=True),
+            SimpleNamespace(control_predictor=True, control_trial_order=True),
             design,
             records,
         )
@@ -1591,7 +1610,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             feature_cols=["power_alpha"],
             targets=["rating"],
             cov_df=None,
-            temperature_series=None,
+            predictor_series=None,
             predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
@@ -1610,7 +1629,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         out = stage_correlate_primary_selection(
             ctx,
-            SimpleNamespace(control_temperature=False, control_trial_order=False),
+            SimpleNamespace(control_predictor=False, control_trial_order=False),
             design,
             records,
         )
@@ -1634,7 +1653,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             feature_cols=["power_alpha"],
             targets=["rating"],
             cov_df=pd.DataFrame({"trial_index": [0.0, 1.0, 0.0, 1.0]}),
-            temperature_series=pd.Series([44.0, 44.5, 45.0, 45.5]),
+            predictor_series=pd.Series([44.0, 44.5, 45.0, 45.5]),
             predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
@@ -1669,7 +1688,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             target="rating",
             df_trials=df_trials,
             cov_df=None,
-            temperature_series=None,
+            predictor_series=None,
             predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
@@ -1729,6 +1748,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=0,
+                target_col="rating",
             )
 
         self.assertFalse(out.empty)
@@ -1777,12 +1797,12 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({}),
+                config=DotConfig({"behavior_analysis": {"predictor_column": "temperature"}}),
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=0,
                 target_col="rating",
-                control_temperature=True,
+                control_predictor=True,
                 control_trial_order=False,
                 control_run_effects=False,
             )
@@ -1831,6 +1851,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=15,
+                target_col="rating",
             )
 
         self.assertFalse(out.empty)
@@ -1866,7 +1887,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
             side_effect=lambda df, **_kwargs: df,
         ), patch(
-            "eeg_pipeline.analysis.behavior.orchestration.np.random.default_rng",
+            "eeg_pipeline.analysis.behavior.group_level.np.random.default_rng",
             wraps=np.random.default_rng,
         ) as rng_factory:
             run_group_level_correlations(
@@ -1876,6 +1897,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=2,
+                target_col="rating",
             )
 
         self.assertTrue(rng_factory.called)
@@ -1913,6 +1935,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=0,
+                target_col="rating",
             )
 
         self.assertFalse(out.empty)
@@ -2212,6 +2235,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "power_baseline_alpha_ch_Fp1_mean": [1.0, 2.0, 3.0, 2.0, 1.0, 4.0, 5.0, 3.0, 2.0, 1.0],
                 "power_active_alpha_ch_Fp1_mean": [1.5, 2.5, 3.5, 2.5, 1.5, 4.5, 5.5, 3.5, 2.5, 1.5],
+                "binary_outcome": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
             }
         )
         captured = {}
@@ -2454,6 +2478,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 logger=Mock(),
                 use_block_permutation=True,
                 n_perm=20,
+                target_col="rating",
             )
 
         self.assertFalse(out.empty)
@@ -2728,7 +2753,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             design = stage_correlate_design(
                 ctx,
-                SimpleNamespace(control_temperature=True, control_trial_order=True),
+                SimpleNamespace(control_predictor=True, control_trial_order=True),
             )
 
         self.assertIsNotNone(design)

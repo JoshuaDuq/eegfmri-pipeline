@@ -15,7 +15,7 @@ def _get_config_value(config: Any, key: str) -> Any:
             if value is not None:
                 return value
         except Exception:
-            pass
+            return None
     if isinstance(config, dict):
         parts = key.split(".")
         current = config

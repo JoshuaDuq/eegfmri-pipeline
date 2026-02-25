@@ -45,10 +45,10 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
                 "--trim-to-first-volume",
                 "--fmri-onset-reference",
                 "scanner_trigger",
-                "--event-col-temperature",
+                "--event-col-predictor",
                 "temperature",
                 "stim_temp",
-                "--event-col-rating",
+                "--event-col-outcome",
                 "rating",
                 "--event-col-binary-outcome",
                 "binary_outcome",
@@ -74,8 +74,8 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("alignment.min_alignment_samples"), 7)
         self.assertTrue(config.get("alignment.trim_to_first_volume", False))
         self.assertEqual(config.get("alignment.fmri_onset_reference"), "first_stim_start")
-        self.assertEqual(config.get("event_columns.temperature"), ["temperature", "stim_temp"])
-        self.assertEqual(config.get("event_columns.rating"), ["rating"])
+        self.assertEqual(config.get("event_columns.predictor"), ["temperature", "stim_temp"])
+        self.assertEqual(config.get("event_columns.outcome"), ["rating"])
         self.assertEqual(config.get("event_columns.binary_outcome"), ["binary_outcome"])
         self.assertEqual(config.get("preprocessing.condition_preferred_prefixes"), ["Trig_", "Stim_"])
         self.assertEqual(config["pyprep"]["rename_anot_dict"]["BAD boundary"], "BAD_boundary")
@@ -127,7 +127,7 @@ class TestFeaturesTUIWiring(unittest.TestCase):
             erds_onset_min_duration_ms=None,
             erds_rebound_min_latency_ms=None,
             erds_infer_contralateral=None,
-            erds_pain_marker_bands=["alpha"],
+            erds_condition_marker_bands=["alpha"],
             erds_laterality_columns=["stim_side"],
             erds_somatosensory_left_channels=["C3"],
             erds_somatosensory_right_channels=["C4"],
@@ -166,7 +166,7 @@ class TestFeaturesTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("feature_engineering.itpc.min_segment_sec"), 1.25)
         self.assertEqual(config.get("feature_engineering.itpc.min_cycles_at_fmin"), 3.5)
         self.assertFalse(config.get("feature_engineering.microstates.assign_from_gfp_peaks", True))
-        self.assertEqual(config.get("feature_engineering.erds.pain_marker_bands"), ["alpha"])
+        self.assertEqual(config.get("feature_engineering.erds.condition_marker_bands"), ["alpha"])
         self.assertEqual(config.get("feature_engineering.erds.laterality_columns"), ["stim_side"])
         self.assertEqual(config.get("feature_engineering.erds.onset_min_threshold_percent"), 12.5)
         self.assertEqual(config.get("feature_engineering.spatial_transform_per_family.connectivity"), "csd")
@@ -191,12 +191,12 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "vas_custom",
                 "--perm-scheme",
                 "circular_shift",
-                "--stats-temp-control",
+                "--stats-predictor-control",
                 "spline",
                 "--stats-allow-iid-trials",
                 "--group-level-target",
                 "predictor_residual",
-                "--group-level-control-temperature",
+                "--group-level-control-predictor",
                 "--no-group-level-control-trial-order",
                 "--no-group-level-control-run-effects",
                 "--group-level-max-run-dummies",
@@ -228,7 +228,7 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "cluster",
                 "--no-mediation-permutation-primary",
                 "--no-moderation-permutation-primary",
-                "--no-mixed-include-temperature",
+                "--no-mixed-include-predictor",
                 "--cluster-correction-enabled",
                 "--cluster-correction-alpha",
                 "0.01",
@@ -251,7 +251,7 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("behavior_analysis.predictor_column"), "stim_temp")
         self.assertEqual(config.get("behavior_analysis.outcome_column"), "vas_custom")
         self.assertEqual(config.get("behavior_analysis.permutation.scheme"), "circular_shift")
-        self.assertEqual(config.get("behavior_analysis.statistics.temperature_control"), "spline")
+        self.assertEqual(config.get("behavior_analysis.statistics.predictor_control"), "spline")
         self.assertEqual(config.get("behavior_analysis.statistics.base_seed"), 42)
         self.assertTrue(config.get("behavior_analysis.statistics.allow_iid_trials", False))
         self.assertEqual(
@@ -259,7 +259,7 @@ class TestBehaviorTUIWiring(unittest.TestCase):
             "predictor_residual",
         )
         self.assertTrue(
-            config.get("behavior_analysis.group_level.multilevel_correlations.control_temperature", False)
+            config.get("behavior_analysis.group_level.multilevel_correlations.control_predictor", False)
         )
         self.assertFalse(
             config.get("behavior_analysis.group_level.multilevel_correlations.control_trial_order", True)
@@ -289,7 +289,7 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("behavior_analysis.temporal.correction_method"), "cluster")
         self.assertEqual(config.get("behavior_analysis.mediation.p_primary_mode"), "asymptotic")
         self.assertEqual(config.get("behavior_analysis.moderation.p_primary_mode"), "asymptotic")
-        self.assertFalse(config.get("behavior_analysis.mixed_effects.include_temperature", True))
+        self.assertFalse(config.get("behavior_analysis.mixed_effects.include_predictor", True))
         self.assertTrue(config.get("behavior_analysis.cluster_correction.enabled", False))
         self.assertEqual(config.get("behavior_analysis.cluster_correction.alpha"), 0.01)
         self.assertEqual(config.get("behavior_analysis.cluster_correction.min_cluster_size"), 4)

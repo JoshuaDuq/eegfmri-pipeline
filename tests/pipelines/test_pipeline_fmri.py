@@ -593,20 +593,21 @@ class TestFmriCompletion(unittest.TestCase):
                 p = FmriTrialSignaturePipeline(config=cfg)
             ext = p.deriv_root.parent / "external"
             ext.mkdir(parents=True, exist_ok=True)
-            self.assertEqual(p._discover_signature_root().resolve(), ext.resolve())  # type: ignore[union-attr]
+            sig_root, _sig_specs = p._discover_signature_root_and_specs()
+            self.assertEqual(sig_root.resolve(), ext.resolve())  # type: ignore[union-attr]
             self.assertIsNone(p.run_group_level(["0001"], task="t"))
 
             p.config = DotConfig({"paths": {"signature_dir": "/path/does/not/exist"}})
-            self.assertIsNone(p._discover_signature_root())
+            self.assertIsNone(p._discover_signature_root_and_specs()[0])
 
             class BadCfg:
                 def get(self, *_a, **_k):
                     raise RuntimeError("bad")
 
             p.config = BadCfg()
-            self.assertIsNotNone(p._discover_signature_root())
+            self.assertIsNotNone(p._discover_signature_root_and_specs()[0])
             p.deriv_root = object()
-            self.assertIsNone(p._discover_signature_root())
+            self.assertIsNone(p._discover_signature_root_and_specs()[0])
 
         def test_fmri_analysis_init_and_error_paths(self):
             from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
@@ -618,8 +619,9 @@ class TestFmriCompletion(unittest.TestCase):
             # discover signature fallback
             ext = p.deriv_root.parent / "external"
             ext.mkdir(parents=True, exist_ok=True)
+            sig_root, _sig_specs = p._discover_signature_root_and_specs()
             self.assertEqual(
-                p._discover_signature_root().resolve(), ext.resolve()  # type: ignore[union-attr]
+                sig_root.resolve(), ext.resolve()  # type: ignore[union-attr]
             )
 
             @dataclass
@@ -637,7 +639,7 @@ class TestFmriCompletion(unittest.TestCase):
 
             p.config = BadCfg()
             p.deriv_root = object()  # force fallback path failure branch
-            self.assertIsNone(p._discover_signature_root())
+            self.assertIsNone(p._discover_signature_root_and_specs()[0])
 
         def test_fmri_analysis_resample_error_paths(self):
             from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline

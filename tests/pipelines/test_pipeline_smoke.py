@@ -396,7 +396,8 @@ class TestAllPipelines(unittest.TestCase):
         pipeline.config = DotConfig({"paths": {"signature_dir": str(explicit)}})
         pipeline.deriv_root = tmp / "derivatives"
         pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
-        self.assertEqual(pipeline._discover_signature_root(), explicit)
+        sig_root, _sig_specs = pipeline._discover_signature_root_and_specs()
+        self.assertEqual(sig_root, explicit)
 
     def test_fmri_trial_signature_pipeline_dry_run(self):
         from fmri_pipeline.pipelines.fmri_trial_signatures import FmriTrialSignaturePipeline

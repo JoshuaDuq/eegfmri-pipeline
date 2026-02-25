@@ -300,6 +300,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": ["sub-0001", "sub-0001"],
                 "rating": [10.0, 20.0],
+                "vas_final_rating": [10.0, 20.0],
                 "temperature": [44.0, 45.0],
                 "trial_index": [0, 1],
             }
@@ -326,7 +327,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         config = DotConfig(
             {
                 "feature_engineering": {"analysis_mode": "trial_ml_safe"},
-                "event_columns": {"rating": ["vas_final_rating", "rating"]},
+                "event_columns": {"outcome": ["vas_final_rating", "rating"]},
             }
         )
 
@@ -352,7 +353,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     config=config,
                     feature_families=["power"],
                     target="vas_final_rating",
-                    covariates=["rating"],
+                    covariates=["vas_final_rating"],
                 )
 
     def test_incremental_validity_blocks_target_baseline_predictor(self):
@@ -367,6 +368,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 "subject_id": groups,
                 "trial_id": [0, 1, 2, 3],
                 "rating": y,
+                "vas_final_rating": y,
                 "temperature": [44.0, 45.0, 46.0, 47.0],
             }
         )
@@ -393,7 +395,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
     def test_incremental_validity_blocks_target_baseline_predictor_for_explicit_target_column(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
-        config = DotConfig({"event_columns": {"rating": ["vas_final_rating", "rating"]}})
+        config = DotConfig({"event_columns": {"outcome": ["vas_final_rating", "rating"]}})
         X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
         y = np.array([10.0, 20.0, 30.0, 40.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
@@ -422,7 +424,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                         results_root=Path(td),
                         logger=Mock(),
                         target="vas_final_rating",
-                        baseline_predictors=["rating"],
+                        baseline_predictors=["vas_final_rating"],
                     )
 
     def test_time_generalization_raises_on_stage_error(self):
@@ -1109,6 +1111,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                         {
                             "subject_id": np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object),
                             "trial_id": [0, 1, 2, 3],
+                            "predictor": [44.0, 45.0, 46.0, 47.0],
                             "temperature": [44.0, 45.0, 46.0, 47.0],
                         }
                     ),
@@ -2274,6 +2277,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": np.arange(len(groups), dtype=int),
+                "predictor": np.linspace(44.0, 46.5, len(groups)),
                 "temperature": np.linspace(44.0, 46.5, len(groups)),
             }
         )
@@ -2341,6 +2345,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": np.arange(len(groups), dtype=int),
+                "predictor": np.linspace(44.0, 46.5, len(groups)),
                 "temperature": np.linspace(44.0, 46.5, len(groups)),
             }
         )

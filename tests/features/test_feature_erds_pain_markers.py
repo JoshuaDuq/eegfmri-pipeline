@@ -101,7 +101,8 @@ class TestERDSPainMarkers(unittest.TestCase):
                     },
                     "erds": {
                         "bands": ["alpha"],
-                        "pain_marker_bands": ["alpha"],
+                        "enable_laterality_markers": True,
+                        "laterality_marker_bands": ["alpha"],
                         "laterality_columns": ["stimulated_side"],
                         "infer_contralateral_when_missing": True,
                         "onset_threshold_sigma": 0.5,
