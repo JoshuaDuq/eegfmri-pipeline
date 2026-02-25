@@ -65,7 +65,7 @@ def _load_aligned_events_and_covariates(
 ):
     """Load aligned events and build covariate matrices."""
     from .alignment import get_aligned_events
-    from .covariates import extract_temperature_data
+    from .covariates import extract_predictor_data
     
     aligned_events = get_aligned_events(
         epochs,
@@ -76,12 +76,12 @@ def _load_aligned_events_and_covariates(
         config=config,
     )
     
-    temp_series, temp_col = extract_temperature_data(aligned_events, config)
-    Z_df_full, Z_df_temp = _build_covariate_matrices(
-        aligned_events, partial_covars, temp_col, config
+    pred_series, pred_col = extract_predictor_data(aligned_events, config)
+    Z_df_full, Z_df_predictor = _build_covariate_matrices(
+        aligned_events, partial_covars, pred_col, config
     )
     
-    return aligned_events, temp_series, Z_df_full, Z_df_temp
+    return aligned_events, pred_series, Z_df_full, Z_df_predictor
 
 
 def load_subject_scatter_data(
@@ -96,9 +96,9 @@ def load_subject_scatter_data(
     Optional[pd.DataFrame],  # active_df (power)
     Optional[pd.DataFrame],  # y (target)
     Optional[Any],           # info
-    Optional[pd.Series],     # temp_series
+    Optional[pd.Series],     # pred_series
     Optional[pd.DataFrame],  # Z_df_full
-    Optional[pd.DataFrame],  # Z_df_temp
+    Optional[pd.DataFrame],  # Z_df_predictor
     Optional[Dict],          # roi_map
     Optional[pd.DataFrame],  # conn_df (connectivity)
 ]:
@@ -123,7 +123,7 @@ def load_subject_scatter_data(
     Returns
     -------
     Tuple of 9 optional values:
-        temporal_df, active_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
+        temporal_df, active_df, y, info, pred_series, Z_df_full, Z_df_predictor, roi_map, conn_df
         Returns tuple of None values if loading fails
     """
     try:
@@ -133,7 +133,7 @@ def load_subject_scatter_data(
             subject, task, deriv_root, config, epochs
         )
         
-        _, temp_series, Z_df_full, Z_df_temp = _load_aligned_events_and_covariates(
+        _, pred_series, Z_df_full, Z_df_predictor = _load_aligned_events_and_covariates(
             epochs, subject, task, config, logger, partial_covars
         )
         
@@ -146,9 +146,9 @@ def load_subject_scatter_data(
             active_df,
             y,
             info,
-            temp_series,
+            pred_series,
             Z_df_full,
-            Z_df_temp,
+            Z_df_predictor,
             roi_map,
             conn_df,
         )

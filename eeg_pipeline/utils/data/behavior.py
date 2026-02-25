@@ -52,14 +52,14 @@ def load_behavior_stats_files(
     logger: logging.Logger,
     method_label: Optional[str] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    """Load rating and temperature correlation stats files with fallback patterns."""
-    rating_patterns = _build_stats_file_patterns("rating", method_label)
-    temp_patterns = _build_stats_file_patterns("temp", method_label)
-    
-    rating_stats = load_stats_file_with_fallbacks(stats_dir, rating_patterns)
-    temp_stats = load_stats_file_with_fallbacks(stats_dir, temp_patterns)
-    
-    return rating_stats, temp_stats
+    """Load outcome and predictor correlation stats files with fallback patterns."""
+    outcome_patterns = _build_stats_file_patterns("outcome", method_label)
+    predictor_patterns = _build_stats_file_patterns("predictor", method_label)
+
+    outcome_stats = load_stats_file_with_fallbacks(stats_dir, outcome_patterns)
+    predictor_stats = load_stats_file_with_fallbacks(stats_dir, predictor_patterns)
+
+    return outcome_stats, predictor_stats
 
 
 __all__ = [

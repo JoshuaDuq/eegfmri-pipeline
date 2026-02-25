@@ -237,100 +237,91 @@ def _build_covariate_design(
     return X, names
 
 
-def _build_temperature_covariates(
+def _build_predictor_covariates(
     trial_df: pd.DataFrame,
     outcome: str,
-    temperature_control: str,
-    include_temperature: bool,
+    predictor_control: str,
+    include_predictor: bool,
     config: Optional[Any] = None,
     *,
-    key_prefix: str = "behavior_analysis.regression.temperature_spline",
+    predictor_col: str = "predictor",
+    key_prefix: str = "behavior_analysis.regression.predictor_spline",
     exclude_outcomes: Tuple[str, ...] = ("predictor_residual",),
 ) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
-    """Build temperature-related covariates based on control strategy.
-    
-    Consolidated implementation used by trialwise_regression, feature_models, and influence modules.
-    
+    """Build predictor-related covariates based on control strategy.
+
+    Used by trialwise_regression, feature_models, and influence modules.
+
     Parameters
     ----------
     trial_df : pd.DataFrame
-        Trial-level dataframe with temperature and rating columns
+        Trial-level dataframe with predictor and outcome columns.
     outcome : str
-        Name of the outcome variable (e.g., "rating", "temperature", "predictor_residual")
-    temperature_control : str
-        Control strategy: "linear", "spline"/"rcs"/"restricted_cubic", "rating_hat"/"nonlinear"
-    include_temperature : bool
-        Whether to include temperature control
+        Name of the outcome variable column.
+    predictor_control : str
+        Control strategy: "linear", "spline"/"rcs"/"restricted_cubic", "outcome_hat"/"nonlinear".
+    include_predictor : bool
+        Whether to include predictor control.
     config : Optional[Any]
-        Configuration object for spline parameters
+        Configuration object for spline parameters.
+    predictor_col : str
+        Name of the predictor column in trial_df.
     key_prefix : str
-        Config key prefix for spline configuration (default: "behavior_analysis.regression.temperature_spline")
+        Config key prefix for spline configuration.
     exclude_outcomes : Tuple[str, ...]
-        Outcomes that should not use rating_hat fallback (default: ("predictor_residual",))
-        
+        Outcomes that should not use outcome_hat controls.
+
     Returns
     -------
     Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]
-        Covariate column names, optional spline design DataFrame, metadata dictionary
+        Covariate column names, optional spline design DataFrame, metadata dictionary.
     """
     covariates: List[str] = []
-    temp_design_df: Optional[pd.DataFrame] = None
-    meta: Dict[str, Any] = {"temperature_control_requested": temperature_control}
-    
-    if not include_temperature or outcome == "temperature":
-        return covariates, temp_design_df, meta
-    
-    temp_ctrl = str(temperature_control or "linear").strip().lower()
-    
-    # Rating hat / nonlinear control
-    if temp_ctrl in ("rating_hat", "rating_hat_from_temp", "nonlinear"):
-        if outcome not in exclude_outcomes and "rating_hat_from_temp" in trial_df.columns:
-            covariates.append("rating_hat_from_temp")
-            meta.update({
-                "temperature_control_used": "rating_hat",
-                "temperature_control_column": "rating_hat_from_temp"
-            })
-        elif "temperature" in trial_df.columns:
-            covariates.append("temperature")
-            meta.update({
-                "temperature_control_used": "linear",
-                "temperature_control_fallback": "temperature"
-            })
-    
+    design_df: Optional[pd.DataFrame] = None
+    meta: Dict[str, Any] = {"predictor_control_requested": predictor_control}
+
+    if not include_predictor or outcome == predictor_col:
+        return covariates, design_df, meta
+
+    ctrl = str(predictor_control or "linear").strip().lower()
+
+    # Outcome-hat / nonlinear control
+    if ctrl in ("outcome_hat", "outcome_hat_from_predictor", "nonlinear"):
+        if outcome not in exclude_outcomes and "outcome_hat_from_predictor" in trial_df.columns:
+            covariates.append("outcome_hat_from_predictor")
+            meta.update({"predictor_control_used": "outcome_hat", "predictor_control_column": "outcome_hat_from_predictor"})
+        else:
+            meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_outcome_hat"})
+
     # Spline / RCS control
-    elif temp_ctrl in ("spline", "rcs", "restricted_cubic"):
-        if "temperature" in trial_df.columns:
-            from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
-            
-            temp_design_df, spline_cols, spline_meta = build_temperature_rcs_design(
-                trial_df["temperature"],
+    elif ctrl in ("spline", "rcs", "restricted_cubic"):
+        if predictor_col in trial_df.columns:
+            from eeg_pipeline.utils.analysis.stats.splines import build_predictor_rcs_design
+
+            design_df, spline_cols, spline_meta = build_predictor_rcs_design(
+                trial_df[predictor_col],
                 config=config,
                 key_prefix=key_prefix,
-                name_prefix="temperature_rcs",
+                name_prefix="predictor_rcs",
             )
             for col in spline_cols:
                 if col not in covariates:
                     covariates.append(col)
             meta.update({
-                "temperature_control_used": (
+                "predictor_control_used": (
                     "spline" if spline_meta.get("status") in ("ok", "ok_linear_only") else "linear"
                 ),
-                "temperature_control_column": "temperature",
-                "temperature_spline": spline_meta
+                "predictor_control_column": predictor_col,
+                "predictor_spline": spline_meta,
             })
-        elif outcome not in exclude_outcomes and "rating_hat_from_temp" in trial_df.columns:
-            covariates.append("rating_hat_from_temp")
-            meta.update({
-                "temperature_control_used": "rating_hat_fallback",
-                "temperature_control_column": "rating_hat_from_temp"
-            })
-    
+        else:
+            meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_predictor"})
+
     # Linear control (default)
-    elif "temperature" in trial_df.columns:
-        covariates.append("temperature")
-        meta.update({
-            "temperature_control_used": "linear",
-            "temperature_control_column": "temperature"
-        })
-    
-    return covariates, temp_design_df, meta
+    elif predictor_col in trial_df.columns:
+        covariates.append(predictor_col)
+        meta.update({"predictor_control_used": "linear", "predictor_control_column": predictor_col})
+    else:
+        meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_predictor"})
+
+    return covariates, design_df, meta

@@ -343,10 +343,10 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     target_key = target_raw.lower()
     aliases: set[str] = set()
 
-    if target_key in {"", "rating"}:
-        aliases.add("rating")
-    elif target_key in {"temperature", "temp"}:
-        aliases.add("temperature")
+    if target_key in {"", "outcome"}:
+        aliases.add("outcome")
+    elif target_key in {"predictor"}:
+        aliases.add("predictor")
     elif target_key in {"binary_outcome", "binary"}:
         aliases.add("binary_outcome")
     elif target_key in {"fmri_signature", "fmri-signature"}:
@@ -356,8 +356,8 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
     # aliases so baseline-predictor leakage guards remain effective.
     if config is not None:
         event_alias_map = {
-            "rating": get_config_value(config, "event_columns.rating", []),
-            "temperature": get_config_value(config, "event_columns.temperature", []),
+            "outcome": get_config_value(config, "event_columns.outcome", []),
+            "predictor": get_config_value(config, "event_columns.predictor", []),
             "binary_outcome": get_config_value(config, "event_columns.binary_outcome", []),
         }
         for canonical, aliases_raw in event_alias_map.items():
@@ -3237,11 +3237,11 @@ def run_incremental_validity_ml(
     feature_stats: Optional[List[str]] = None,
 ) -> Path:
     """Quantify Δperformance when adding EEG features over baseline predictors.
-    
+
     Compares:
-    - Baseline: temperature-only predictor
-    - Full: temperature + EEG features
-    
+    - Baseline: predictor-only model
+    - Full: predictor + EEG features
+
     All evaluations strictly out-of-fold to avoid leakage.
     
     Outputs:
@@ -3290,13 +3290,13 @@ def run_incremental_validity_ml(
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
     
     if baseline_predictors is None:
-        raw_preds = get_config_value(config, "machine_learning.incremental_validity.baseline_predictors", ["temperature"])
+        raw_preds = get_config_value(config, "machine_learning.incremental_validity.baseline_predictors", ["predictor"])
         if isinstance(raw_preds, (list, tuple)):
             baseline_predictors = [str(v) for v in raw_preds if str(v).strip() != ""]
         elif isinstance(raw_preds, str) and raw_preds.strip():
             baseline_predictors = [raw_preds.strip()]
         else:
-            baseline_predictors = ["temperature"]
+            baseline_predictors = ["predictor"]
 
     # Guard against target leakage through baseline predictors.
     forbidden_predictors = {v.lower() for v in _target_covariate_aliases(target, config=config)}
@@ -3311,7 +3311,7 @@ def run_incremental_validity_ml(
         get_config_value(config, "machine_learning.incremental_validity.require_baseline_predictors", True)
     )
 
-    # Extract baseline predictors from meta (meta uses standardized names: temperature, trial_index, block, etc.)
+    # Extract baseline predictors from meta (meta uses standardized names: predictor, trial_index, block, etc.)
     missing = [c for c in baseline_predictors if c not in meta.columns]
     if missing:
         msg = (

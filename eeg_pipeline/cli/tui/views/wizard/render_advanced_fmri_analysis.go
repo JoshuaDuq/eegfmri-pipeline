@@ -583,7 +583,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			value = m.boolToOnOff(m.fmriAnalysisPlotEmbedImages)
 			hint = "Space to toggle"
 		case optFmriAnalysisPlotSignatures:
-			label = "Pain Signatures (NPS/SIIPS1)"
+			label = "Signatures"
 			value = m.boolToOnOff(m.fmriAnalysisPlotSignatures)
 			hint = "Space to toggle"
 		case optFmriAnalysisSignatureDir:
@@ -596,6 +596,16 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 				value = "(auto: <deriv_root>/../external)"
 			}
 			hint = "Space to edit"
+		case optFmriAnalysisSignatureMaps:
+			label = "Signature Maps"
+			value = strings.TrimSpace(m.fmriAnalysisSignatureMaps)
+			if m.editingText && m.editingTextField == textFieldFmriAnalysisSignatureMaps {
+				value = m.textBuffer + "█"
+			}
+			if value == "" {
+				value = "(empty — use paths.signature_maps from config)"
+			}
+			hint = "NAME:path pairs, space-separated"
 		case optFmriTrialSigScopeStimPhases:
 			label = "Stim Phase Scope"
 			val := strings.TrimSpace(m.fmriTrialSigScopeStimPhases)

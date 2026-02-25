@@ -79,6 +79,10 @@ class ContrastBuilderConfig:
     # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
     # If None, no stim_phase scoping is applied. Use ["all"] to disable phase scoping.
     stim_phases_to_model: Optional[List[str]] = None
+    # Optional: trial_type value that the stim_phase scoping should be restricted to.
+    # If None, phase scoping applies to all rows regardless of trial_type.
+    # Set to the relevant event type for your paradigm (e.g. "stimulation" for thermal pain).
+    phase_scope_trial_type: Optional[str] = None
 
 
 def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
@@ -213,20 +217,24 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     )
 
 
-def _apply_stimulation_phase_scoping(
+def _apply_trial_phase_scoping(
     events_df: pd.DataFrame,
     *,
-    allowed_stim_phases: Optional[List[str]],
+    allowed_phases: Optional[List[str]],
+    phase_scope_trial_type: Optional[str] = None,
 ) -> pd.DataFrame:
     """
-    Restrict stimulation events to specific stim_phase values without dropping non-stimulation rows.
+    Restrict events to specific stim_phase values, optionally scoped to one trial_type.
 
-    Scoping is only applied when allowed_stim_phases is explicitly provided.
+    Scoping is only applied when ``allowed_phases`` is explicitly provided.
+    When ``phase_scope_trial_type`` is set, phase filtering only applies to rows
+    where ``trial_type`` matches that value; all other rows are kept as-is.
+    When ``phase_scope_trial_type`` is None, phase filtering applies to all rows.
     """
-    if "trial_type" not in events_df.columns or "stim_phase" not in events_df.columns:
+    if "stim_phase" not in events_df.columns:
         return events_df
 
-    raw = allowed_stim_phases
+    raw = allowed_phases
     if raw is None:
         return events_df
     allow_norm = [str(v).strip().lower() for v in raw if str(v).strip()]
@@ -236,9 +244,15 @@ def _apply_stimulation_phase_scoping(
         return events_df
     allow = set(allow_norm)
 
-    stim_mask = events_df["trial_type"].astype(str).str.strip().str.lower().eq("stimulation")
     phase_norm = events_df["stim_phase"].fillna("").astype(str).str.strip().str.lower()
-    keep = (~stim_mask) | phase_norm.isin(list(allow))
+    if phase_scope_trial_type is not None and "trial_type" in events_df.columns:
+        scope_match = events_df["trial_type"].astype(str).str.strip().str.lower().eq(
+            phase_scope_trial_type.strip().lower()
+        )
+        keep = (~scope_match) | phase_norm.isin(list(allow))
+    else:
+        keep = phase_norm.isin(list(allow))
+
     if bool(keep.all()):
         return events_df
     return events_df.loc[keep].copy()
@@ -696,9 +710,10 @@ def fit_first_level_glm(
                     f"After applying events_to_model={sorted(allow)}, no events remained in {events_path}."
                 )
 
-    events_df = _apply_stimulation_phase_scoping(
+    events_df = _apply_trial_phase_scoping(
         events_df,
-        allowed_stim_phases=getattr(cfg, "stim_phases_to_model", None),
+        allowed_phases=getattr(cfg, "stim_phases_to_model", None),
+        phase_scope_trial_type=getattr(cfg, "phase_scope_trial_type", None),
     )
 
     # Use strict=True for single-run: cannot skip the only run
@@ -811,9 +826,10 @@ def fit_first_level_glm_multi_run(
                     )
                     continue
 
-        events_df = _apply_stimulation_phase_scoping(
+        events_df = _apply_trial_phase_scoping(
             events_df,
-            allowed_stim_phases=getattr(cfg, "stim_phases_to_model", None),
+            allowed_phases=getattr(cfg, "stim_phases_to_model", None),
+            phase_scope_trial_type=getattr(cfg, "phase_scope_trial_type", None),
         )
 
         # Remap conditions, allowing missing values (strict=False)

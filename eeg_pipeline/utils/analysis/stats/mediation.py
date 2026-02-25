@@ -2,7 +2,7 @@
 Mediation Analysis
 ==================
 
-Statistical mediation analysis for the Temperature → Neural Feature → Pain pathway.
+Statistical mediation analysis for the Predictor → Neural Feature → Outcome pathway.
 
 Implements Baron & Kenny (1986) approach with modern extensions:
 - Bootstrap confidence intervals for indirect effect
@@ -10,9 +10,9 @@ Implements Baron & Kenny (1986) approach with modern extensions:
 - Proportion mediated
 
 Theoretical Framework:
-    X = Temperature (stimulus intensity)
+    X = Predictor (stimulus intensity)
     M = Neural feature (e.g., alpha power)
-    Y = Pain rating (subjective report)
+    Y = Outcome (subjective response)
 
 Path Model:
     X → M (path a)
@@ -169,11 +169,11 @@ def compute_mediation_paths(
     Parameters
     ----------
     X : np.ndarray
-        Independent variable (temperature)
+        Independent variable (predictor)
     M : np.ndarray
         Mediator (neural feature)
     Y : np.ndarray
-        Dependent variable (pain rating)
+        Dependent variable (outcome)
         
     Returns
     -------
@@ -562,9 +562,9 @@ def run_full_mediation_analysis(
     Y: np.ndarray,
     n_boot: int = 5000,
     n_perm: int = 0,
-    x_label: str = "Temperature",
+    x_label: str = "Predictor",
     m_label: str = "Power",
-    y_label: str = "Pain Rating",
+    y_label: str = "Outcome",
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
     groups: Optional[np.ndarray] = None,
@@ -575,11 +575,11 @@ def run_full_mediation_analysis(
     Parameters
     ----------
     X : np.ndarray
-        Independent variable (temperature)
+        Independent variable (predictor)
     M : np.ndarray
         Mediator (neural feature)  
     Y : np.ndarray
-        Dependent variable (pain rating)
+        Dependent variable (outcome)
     n_boot : int
         Number of bootstrap iterations for confidence intervals
     n_perm : int
@@ -700,8 +700,8 @@ def analyze_mediation_for_features(
     Y: np.ndarray,
     n_boot: int = 2000,
     n_perm: int = 0,
-    x_label: str = "Temperature",
-    y_label: str = "Pain Rating",
+    x_label: str = "Predictor",
+    y_label: str = "Outcome",
     logger: Optional[logging.Logger] = None,
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,

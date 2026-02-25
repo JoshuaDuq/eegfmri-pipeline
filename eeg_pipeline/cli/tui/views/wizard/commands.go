@@ -48,8 +48,8 @@ func (m Model) SelectedComputations() []string {
 			key := m.computations[i].Key
 
 			switch key {
-			case "predictor_residual":
-				result = append(result, key, "temperature_models")
+		case "predictor_residual":
+			result = append(result, key, "predictor_models")
 			case "validation":
 				result = append(result, "consistency", "influence")
 			case "regression":
@@ -82,7 +82,7 @@ func (m Model) SelectedComputations() []string {
 
 // isComputationSelected checks if a specific computation is currently selected.
 // Handles bundled computations: 'validation' includes 'consistency' and 'influence';
-// 'predictor_residual' includes 'temperature_models'; 'regression' includes 'models' when multi-family enabled.
+// 'predictor_residual' includes 'predictor_models'; 'regression' includes 'models' when multi-family enabled.
 func (m Model) isComputationSelected(computation string) bool {
 	for i, sel := range m.computationSelected {
 		if sel && i < len(m.computations) {
@@ -93,7 +93,7 @@ func (m Model) isComputationSelected(computation string) bool {
 			if key == "validation" && (computation == "consistency" || computation == "influence") {
 				return true
 			}
-			if key == "predictor_residual" && computation == "temperature_models" {
+			if key == "predictor_residual" && computation == "predictor_models" {
 				return true
 			}
 			if key == "regression" && computation == "models" {
@@ -719,8 +719,8 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	ab.addSpaceListFlagWithLengthCheck("--figure-size-topomap", m.plotFigureSizeTopomapSpec, 2)
 
 	// Colors
-	ab.addIfNonEmpty("--color-condition-2", m.plotColorPain)
-	ab.addIfNonEmpty("--color-condition-1", m.plotColorNonpain)
+	ab.addIfNonEmpty("--color-condition-2", m.plotColorCondB)
+	ab.addIfNonEmpty("--color-condition-1", m.plotColorCondA)
 	ab.addIfNonEmpty("--color-significant", m.plotColorSignificant)
 	ab.addIfNonEmpty("--color-nonsignificant", m.plotColorNonsignificant)
 	ab.addIfNonEmpty("--color-gray", m.plotColorGray)
@@ -1013,8 +1013,8 @@ func (m Model) buildPlotItemConfigArgs() []string {
 			args = append(args, "--plot-item-config", plotID, "dose_response_response_column")
 			args = append(args, splitSpaceList(strings.TrimSpace(cfg.DoseResponseResponseColumn))...)
 		}
-		if strings.TrimSpace(cfg.DoseResponsePainColumn) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_pain_column", strings.TrimSpace(cfg.DoseResponsePainColumn))
+		if strings.TrimSpace(cfg.DoseResponsePredictorColumn) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_predictor_column", strings.TrimSpace(cfg.DoseResponsePredictorColumn))
 		}
 		if strings.TrimSpace(cfg.DoseResponseSegment) != "" {
 			args = append(args, "--plot-item-config", plotID, "dose_response_segment", strings.TrimSpace(cfg.DoseResponseSegment))

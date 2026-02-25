@@ -4,7 +4,7 @@ from typing import Any
 
 from eeg_pipeline.plotting.behavioral.dose_response import (
     visualize_dose_response,
-    visualize_pain_probability,
+    visualize_binary_outcome_probability,
 )
 from eeg_pipeline.plotting.behavioral.registry import BehaviorPlotContext, BehaviorPlotRegistry
 from eeg_pipeline.plotting.behavioral.scatter.behavior_scatter import plot_behavior_scatter
@@ -71,9 +71,9 @@ def run_dose_response(ctx: BehaviorPlotContext, saved_plots: dict[str, Any]) -> 
     saved_plots.update(result)
 
 
-@BehaviorPlotRegistry.register("dose_response", name="pain_probability")
-def run_pain_probability(ctx: BehaviorPlotContext, saved_plots: dict[str, Any]) -> None:
-    result = visualize_pain_probability(
+@BehaviorPlotRegistry.register("dose_response", name="binary_outcome_probability")
+def run_binary_outcome_probability(ctx: BehaviorPlotContext, saved_plots: dict[str, Any]) -> None:
+    result = visualize_binary_outcome_probability(
         subject=ctx.subject,
         deriv_root=ctx.deriv_root,
         task=ctx.task,

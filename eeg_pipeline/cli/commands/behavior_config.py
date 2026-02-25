@@ -106,7 +106,8 @@ _GENERAL_OVERRIDE_RULES = (
     ConfigOverrideRule("min_samples", "behavior_analysis.min_samples.default", _to_int),
     ConfigOverrideRule("predictor_column", "behavior_analysis.predictor_column", _to_stripped),
     ConfigOverrideRule("outcome_column", "behavior_analysis.outcome_column", _to_stripped),
-    ConfigOverrideRule("control_temperature", "behavior_analysis.control_temperature", _to_bool),
+    ConfigOverrideRule("predictor_type", "behavior_analysis.predictor_type", _to_lower_stripped),
+    ConfigOverrideRule("predictor_control", "behavior_analysis.predictor_control_enabled", _to_bool),
     ConfigOverrideRule("control_trial_order", "behavior_analysis.control_trial_order", _to_bool),
     ConfigOverrideRule("run_adjustment", "behavior_analysis.run_adjustment.enabled", _to_bool),
     ConfigOverrideRule("run_adjustment_column", "behavior_analysis.run_adjustment.column", _to_stripped),
@@ -117,7 +118,7 @@ _GENERAL_OVERRIDE_RULES = (
     ),
     ConfigOverrideRule("run_adjustment_max_dummies", "behavior_analysis.run_adjustment.max_dummies", _to_int),
     ConfigOverrideRule("fdr_alpha", "behavior_analysis.statistics.fdr_alpha", _to_float),
-    ConfigOverrideRule("stats_temp_control", "behavior_analysis.statistics.temperature_control", _to_lower_stripped),
+    ConfigOverrideRule("stats_predictor_control", "behavior_analysis.statistics.predictor_control", _to_lower_stripped),
     ConfigOverrideRule("stats_allow_iid_trials", "behavior_analysis.statistics.allow_iid_trials", _to_bool),
     ConfigOverrideRule("stats_hierarchical_fdr", "behavior_analysis.statistics.hierarchical_fdr", _to_bool),
     ConfigOverrideRule("stats_compute_reliability", "behavior_analysis.statistics.compute_reliability", _to_bool),
@@ -203,10 +204,10 @@ _PAIN_RESIDUAL_CROSSFIT_OVERRIDE_RULES = (
 
 _REGRESSION_OVERRIDE_RULES = (
     ConfigOverrideRule("regression_outcome", "behavior_analysis.regression.outcome", _to_lower_stripped),
-    ConfigOverrideRule("regression_include_temperature", "behavior_analysis.regression.include_temperature", _to_bool),
+    ConfigOverrideRule("regression_include_predictor", "behavior_analysis.regression.include_predictor", _to_bool),
     ConfigOverrideRule(
-        "regression_temperature_control",
-        "behavior_analysis.regression.temperature_control",
+        "regression_predictor_control",
+        "behavior_analysis.regression.predictor_control",
         _to_lower_stripped,
     ),
     ConfigOverrideRule("regression_include_trial_order", "behavior_analysis.regression.include_trial_order", _to_bool),
@@ -220,25 +221,25 @@ _REGRESSION_OVERRIDE_RULES = (
     ConfigOverrideRule("regression_max_features", "behavior_analysis.regression.max_features", _to_optional_int_max),
 )
 
-_REGRESSION_TEMP_SPLINE_OVERRIDE_RULES = (
+_REGRESSION_PREDICTOR_SPLINE_OVERRIDE_RULES = (
     ConfigOverrideRule(
-        "regression_temperature_spline_knots",
-        "behavior_analysis.regression.temperature_spline.n_knots",
+        "regression_predictor_spline_knots",
+        "behavior_analysis.regression.predictor_spline.n_knots",
         _to_int,
     ),
     ConfigOverrideRule(
-        "regression_temperature_spline_quantile_low",
-        "behavior_analysis.regression.temperature_spline.quantile_low",
+        "regression_predictor_spline_quantile_low",
+        "behavior_analysis.regression.predictor_spline.quantile_low",
         _to_float,
     ),
     ConfigOverrideRule(
-        "regression_temperature_spline_quantile_high",
-        "behavior_analysis.regression.temperature_spline.quantile_high",
+        "regression_predictor_spline_quantile_high",
+        "behavior_analysis.regression.predictor_spline.quantile_high",
         _to_float,
     ),
     ConfigOverrideRule(
-        "regression_temperature_spline_min_samples",
-        "behavior_analysis.regression.temperature_spline.min_samples",
+        "regression_predictor_spline_min_samples",
+        "behavior_analysis.regression.predictor_spline.min_samples",
         _to_int,
     ),
 )
@@ -246,8 +247,8 @@ _REGRESSION_TEMP_SPLINE_OVERRIDE_RULES = (
 _MODELS_OVERRIDE_RULES = (
     ConfigOverrideRule("models_outcomes", "behavior_analysis.models.outcomes", _to_lower_stripped_list),
     ConfigOverrideRule("models_families", "behavior_analysis.models.families", _to_lower_stripped_list),
-    ConfigOverrideRule("models_include_temperature", "behavior_analysis.models.include_temperature", _to_bool),
-    ConfigOverrideRule("models_temperature_control", "behavior_analysis.models.temperature_control", _to_lower_stripped),
+    ConfigOverrideRule("models_include_predictor", "behavior_analysis.models.include_predictor", _to_bool),
+    ConfigOverrideRule("models_predictor_control", "behavior_analysis.models.predictor_control", _to_lower_stripped),
     ConfigOverrideRule("models_include_trial_order", "behavior_analysis.models.include_trial_order", _to_bool),
     ConfigOverrideRule("models_include_prev_terms", "behavior_analysis.models.include_prev_terms", _to_bool),
     ConfigOverrideRule("models_include_run_block", "behavior_analysis.models.include_run_block", _to_bool),
@@ -264,21 +265,21 @@ _MODELS_OVERRIDE_RULES = (
     ),
 )
 
-_MODELS_TEMP_SPLINE_OVERRIDE_RULES = (
-    ConfigOverrideRule("models_temperature_spline_knots", "behavior_analysis.models.temperature_spline.n_knots", _to_int),
+_MODELS_PREDICTOR_SPLINE_OVERRIDE_RULES = (
+    ConfigOverrideRule("models_predictor_spline_knots", "behavior_analysis.models.predictor_spline.n_knots", _to_int),
     ConfigOverrideRule(
-        "models_temperature_spline_quantile_low",
-        "behavior_analysis.models.temperature_spline.quantile_low",
+        "models_predictor_spline_quantile_low",
+        "behavior_analysis.models.predictor_spline.quantile_low",
         _to_float,
     ),
     ConfigOverrideRule(
-        "models_temperature_spline_quantile_high",
-        "behavior_analysis.models.temperature_spline.quantile_high",
+        "models_predictor_spline_quantile_high",
+        "behavior_analysis.models.predictor_spline.quantile_high",
         _to_float,
     ),
     ConfigOverrideRule(
-        "models_temperature_spline_min_samples",
-        "behavior_analysis.models.temperature_spline.min_samples",
+        "models_predictor_spline_min_samples",
+        "behavior_analysis.models.predictor_spline.min_samples",
         _to_int,
     ),
 )
@@ -287,7 +288,7 @@ _STABILITY_OVERRIDE_RULES = (
     ConfigOverrideRule("stability_method", "behavior_analysis.stability.method", _to_lower_stripped),
     ConfigOverrideRule("stability_outcome", "behavior_analysis.stability.outcome", _to_auto_blank_or_lower),
     ConfigOverrideRule("stability_group_column", "behavior_analysis.stability.group_column", _to_auto_blank_or_lower),
-    ConfigOverrideRule("stability_partial_temperature", "behavior_analysis.stability.partial_temperature", _to_bool),
+    ConfigOverrideRule("stability_partial_predictor", "behavior_analysis.stability.partial_predictor", _to_bool),
     ConfigOverrideRule("stability_min_group_trials", "behavior_analysis.stability.min_group_trials", _to_int),
     ConfigOverrideRule("stability_max_features", "behavior_analysis.stability.max_features", _to_optional_int_max),
     ConfigOverrideRule("stability_alpha", "behavior_analysis.stability.alpha", _to_float),
@@ -296,10 +297,10 @@ _STABILITY_OVERRIDE_RULES = (
 _INFLUENCE_OVERRIDE_RULES = (
     ConfigOverrideRule("influence_outcomes", "behavior_analysis.influence.outcomes", _to_lower_stripped_list),
     ConfigOverrideRule("influence_max_features", "behavior_analysis.influence.max_features", _to_int),
-    ConfigOverrideRule("influence_include_temperature", "behavior_analysis.influence.include_temperature", _to_bool),
+    ConfigOverrideRule("influence_include_predictor", "behavior_analysis.influence.include_predictor", _to_bool),
     ConfigOverrideRule(
-        "influence_temperature_control",
-        "behavior_analysis.influence.temperature_control",
+        "influence_predictor_control",
+        "behavior_analysis.influence.predictor_control",
         _to_lower_stripped,
     ),
     ConfigOverrideRule("influence_include_trial_order", "behavior_analysis.influence.include_trial_order", _to_bool),
@@ -318,25 +319,25 @@ _INFLUENCE_OVERRIDE_RULES = (
     ),
 )
 
-_INFLUENCE_TEMP_SPLINE_OVERRIDE_RULES = (
+_INFLUENCE_PREDICTOR_SPLINE_OVERRIDE_RULES = (
     ConfigOverrideRule(
-        "influence_temperature_spline_knots",
-        "behavior_analysis.influence.temperature_spline.n_knots",
+        "influence_predictor_spline_knots",
+        "behavior_analysis.influence.predictor_spline.n_knots",
         _to_int,
     ),
     ConfigOverrideRule(
-        "influence_temperature_spline_quantile_low",
-        "behavior_analysis.influence.temperature_spline.quantile_low",
+        "influence_predictor_spline_quantile_low",
+        "behavior_analysis.influence.predictor_spline.quantile_low",
         _to_float,
     ),
     ConfigOverrideRule(
-        "influence_temperature_spline_quantile_high",
-        "behavior_analysis.influence.temperature_spline.quantile_high",
+        "influence_predictor_spline_quantile_high",
+        "behavior_analysis.influence.predictor_spline.quantile_high",
         _to_float,
     ),
     ConfigOverrideRule(
-        "influence_temperature_spline_min_samples",
-        "behavior_analysis.influence.temperature_spline.min_samples",
+        "influence_predictor_spline_min_samples",
+        "behavior_analysis.influence.predictor_spline.min_samples",
         _to_int,
     ),
 )
@@ -384,8 +385,8 @@ _GROUP_LEVEL_OVERRIDE_RULES = (
         _to_lower_stripped,
     ),
     ConfigOverrideRule(
-        "group_level_control_temperature",
-        "behavior_analysis.group_level.multilevel_correlations.control_temperature",
+        "group_level_control_predictor",
+        "behavior_analysis.group_level.multilevel_correlations.control_predictor",
         _to_bool,
     ),
     ConfigOverrideRule(
@@ -502,8 +503,8 @@ _MODERATION_OVERRIDE_RULES = (
 _MIXED_EFFECTS_OVERRIDE_RULES = (
     ConfigOverrideRule("mixed_random_effects", "behavior_analysis.mixed_effects.random_effects", _to_lower_stripped),
     ConfigOverrideRule(
-        "mixed_include_temperature",
-        "behavior_analysis.mixed_effects.include_temperature",
+        "mixed_include_predictor",
+        "behavior_analysis.mixed_effects.include_predictor",
         _to_bool,
     ),
     ConfigOverrideRule("mixed_max_features", "behavior_analysis.mixed_effects.max_features", _to_int),
@@ -563,11 +564,11 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
                 [p.strip() for p in parts if p.strip()],
             )
 
-    if getattr(args, "temperature_range", None) is not None:
+    if getattr(args, "predictor_range", None) is not None:
         _set_nested_config_value(
             config,
-            "io.constants.temperature_range",
-            [float(args.temperature_range[0]), float(args.temperature_range[1])],
+            "io.constants.predictor_range",
+            [float(args.predictor_range[0]), float(args.predictor_range[1])],
         )
     if getattr(args, "max_missing_channels_fraction", None) is not None:
         _set_nested_config_value(
@@ -580,54 +581,54 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     _apply_override_rules(args, config, _FEATURE_QC_OVERRIDE_RULES)
     _apply_override_rules(args, config, _PAIN_RESIDUAL_OVERRIDE_RULES)
 
-    # Temperature-model diagnostics are consumed by behavior_analysis.temperature_models.*
+    # Predictor-model diagnostics are consumed by behavior_analysis.predictor_models.*
     if getattr(args, "predictor_residual_model_compare_enabled", None) is not None:
         enabled = bool(args.predictor_residual_model_compare_enabled)
-        _set_nested_config_value(config, "behavior_analysis.temperature_models.model_comparison.enabled", enabled)
+        _set_nested_config_value(config, "behavior_analysis.predictor_models.model_comparison.enabled", enabled)
     if getattr(args, "predictor_residual_model_compare_min_samples", None) is not None:
         min_samples = int(args.predictor_residual_model_compare_min_samples)
         _set_nested_config_value(
             config,
-            "behavior_analysis.temperature_models.model_comparison.min_samples",
+            "behavior_analysis.predictor_models.model_comparison.min_samples",
             min_samples,
         )
     if getattr(args, "predictor_residual_model_compare_poly_degrees", None) is not None:
         poly_degrees = list(args.predictor_residual_model_compare_poly_degrees)
         _set_nested_config_value(
             config,
-            "behavior_analysis.temperature_models.model_comparison.poly_degrees",
+            "behavior_analysis.predictor_models.model_comparison.poly_degrees",
             poly_degrees,
         )
 
     if getattr(args, "predictor_residual_breakpoint_enabled", None) is not None:
         enabled = bool(args.predictor_residual_breakpoint_enabled)
-        _set_nested_config_value(config, "behavior_analysis.temperature_models.breakpoint_test.enabled", enabled)
+        _set_nested_config_value(config, "behavior_analysis.predictor_models.breakpoint_test.enabled", enabled)
     if getattr(args, "predictor_residual_breakpoint_min_samples", None) is not None:
         min_samples = int(args.predictor_residual_breakpoint_min_samples)
         _set_nested_config_value(
             config,
-            "behavior_analysis.temperature_models.breakpoint_test.min_samples",
+            "behavior_analysis.predictor_models.breakpoint_test.min_samples",
             min_samples,
         )
     if getattr(args, "predictor_residual_breakpoint_candidates", None) is not None:
         candidates = int(args.predictor_residual_breakpoint_candidates)
         _set_nested_config_value(
             config,
-            "behavior_analysis.temperature_models.breakpoint_test.n_candidates",
+            "behavior_analysis.predictor_models.breakpoint_test.n_candidates",
             candidates,
         )
     if getattr(args, "predictor_residual_breakpoint_quantile_low", None) is not None:
         q_low = float(args.predictor_residual_breakpoint_quantile_low)
         _set_nested_config_value(
             config,
-            "behavior_analysis.temperature_models.breakpoint_test.quantile_low",
+            "behavior_analysis.predictor_models.breakpoint_test.quantile_low",
             q_low,
         )
     if getattr(args, "predictor_residual_breakpoint_quantile_high", None) is not None:
         q_high = float(args.predictor_residual_breakpoint_quantile_high)
         _set_nested_config_value(
             config,
-            "behavior_analysis.temperature_models.breakpoint_test.quantile_high",
+            "behavior_analysis.predictor_models.breakpoint_test.quantile_high",
             q_high,
         )
 
@@ -637,25 +638,25 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if _has_any_arg(
         args,
         (
-            "regression_temperature_spline_knots",
-            "regression_temperature_spline_quantile_low",
-            "regression_temperature_spline_quantile_high",
-            "regression_temperature_spline_min_samples",
+            "regression_predictor_spline_knots",
+            "regression_predictor_spline_quantile_low",
+            "regression_predictor_spline_quantile_high",
+            "regression_predictor_spline_min_samples",
         ),
     ):
-        _apply_override_rules(args, config, _REGRESSION_TEMP_SPLINE_OVERRIDE_RULES)
+        _apply_override_rules(args, config, _REGRESSION_PREDICTOR_SPLINE_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _MODELS_OVERRIDE_RULES)
     if _has_any_arg(
         args,
         (
-            "models_temperature_spline_knots",
-            "models_temperature_spline_quantile_low",
-            "models_temperature_spline_quantile_high",
-            "models_temperature_spline_min_samples",
+            "models_predictor_spline_knots",
+            "models_predictor_spline_quantile_low",
+            "models_predictor_spline_quantile_high",
+            "models_predictor_spline_min_samples",
         ),
     ):
-        _apply_override_rules(args, config, _MODELS_TEMP_SPLINE_OVERRIDE_RULES)
+        _apply_override_rules(args, config, _MODELS_PREDICTOR_SPLINE_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _STABILITY_OVERRIDE_RULES)
 
@@ -663,13 +664,13 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if _has_any_arg(
         args,
         (
-            "influence_temperature_spline_knots",
-            "influence_temperature_spline_quantile_low",
-            "influence_temperature_spline_quantile_high",
-            "influence_temperature_spline_min_samples",
+            "influence_predictor_spline_knots",
+            "influence_predictor_spline_quantile_low",
+            "influence_predictor_spline_quantile_high",
+            "influence_predictor_spline_min_samples",
         ),
     ):
-        _apply_override_rules(args, config, _INFLUENCE_TEMP_SPLINE_OVERRIDE_RULES)
+        _apply_override_rules(args, config, _INFLUENCE_PREDICTOR_SPLINE_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _PAIN_SENSITIVITY_OVERRIDE_RULES)
     if getattr(args, "predictor_sensitivity_permutation_primary", None) is not None:

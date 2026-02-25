@@ -76,8 +76,8 @@ def stage_report_impl(
         "condition_effects*.parquet",
         "consistency_summary*.parquet",
         "influence_diagnostics*.parquet",
-        "temperature_model_comparison*.parquet",
-        "temperature_breakpoint_candidates*.parquet",
+        "predictor_model_comparison*.parquet",
+        "predictor_breakpoint_candidates*.parquet",
         "hierarchical_fdr_summary.parquet",
         "normalized_results*.parquet",
         "summary.json",
@@ -101,10 +101,10 @@ def stage_report_impl(
     lines.append(f"- Features in trial table: `{n_features}`")
     lines.append(f"- Method: `{getattr(pipeline_config, 'method', '')}` (`{method_label}`)")
     lines.append(
-        f"- Controls: predictor=`{bool(getattr(pipeline_config, 'control_temperature', True))}`, trial_order=`{bool(getattr(pipeline_config, 'control_trial_order', True))}`"
+        f"- Controls: predictor=`{bool(getattr(pipeline_config, 'control_predictor', True))}`, trial_order=`{bool(getattr(pipeline_config, 'control_trial_order', True))}`"
     )
-    outcome_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-    predictor_col = getattr(ctx, "temperature_column", None)
+    outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
+    predictor_col = getattr(ctx, "predictor_column", None)
     lines.append(f"- Outcome column: `{outcome_col or 'auto'}`")
     lines.append(f"- Predictor column: `{predictor_col or 'auto'}`")
     lines.append(f"- Global FDR alpha: `{alpha}`")

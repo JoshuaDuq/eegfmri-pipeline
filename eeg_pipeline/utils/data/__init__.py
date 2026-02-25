@@ -5,7 +5,7 @@ from .behavior import (
 )
 from .covariates import (
     _pick_first_column,
-    extract_temperature_data,
+    extract_predictor_data,
 )
 from .epochs import load_epochs_for_analysis
 from .feature_io import (
@@ -36,7 +36,7 @@ __all__ = [
     "compute_aligned_data_length",
     "ensure_dataset_description",
     "extract_run_number",
-    "extract_temperature_data",
+    "extract_predictor_data",
     "find_brainvision_vhdrs",
     "find_column",
     "get_aligned_events",

@@ -105,8 +105,8 @@ func (m Model) getGlobalStylingOptions() []optionType {
 	options = append(options, optPlotGroupColors)
 	if m.plotGroupColorsExpanded {
 		options = append(options,
-			optPlotColorPain,
-			optPlotColorNonpain,
+			optPlotColorCondB,
+			optPlotColorCondA,
 			optPlotColorSignificant,
 			optPlotColorNonsignificant,
 			optPlotColorGray,

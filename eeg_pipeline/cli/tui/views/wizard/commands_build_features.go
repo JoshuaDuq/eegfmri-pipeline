@@ -982,10 +982,10 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		} else {
 			args = append(args, "--no-erds-infer-contralateral")
 		}
-		// ERDS pain markers
-		if strings.TrimSpace(m.erdsPainMarkerBands) != "" {
-			args = append(args, "--erds-pain-marker-bands")
-			args = append(args, splitCSVList(m.erdsPainMarkerBands)...)
+		// ERDS condition markers
+		if strings.TrimSpace(m.erdsConditionMarkerBands) != "" {
+			args = append(args, "--erds-condition-marker-bands")
+			args = append(args, splitCSVList(m.erdsConditionMarkerBands)...)
 		}
 		if strings.TrimSpace(m.erdsLateralityColumns) != "" {
 			args = append(args, "--erds-laterality-columns")

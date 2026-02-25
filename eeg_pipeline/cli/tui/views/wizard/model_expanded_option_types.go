@@ -45,7 +45,7 @@ const (
 	expandedFmriTrialSigGroupColumn         = 37
 	expandedFmriTrialSigGroupValues         = 38
 	expandedSourceLocFmriStimPhases         = 39
-	expandedPainResidualCrossfitGroupColumn = 40
+	expandedPredictorResidualCrossfitGroupColumn = 40
 	expandedStabilityGroupColumn            = 41
 	expandedGroupLevelTarget                = 42
 	expandedFmriTrialSigStimPhases          = 43

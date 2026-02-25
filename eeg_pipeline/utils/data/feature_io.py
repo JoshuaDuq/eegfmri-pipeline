@@ -65,7 +65,7 @@ def _preferred_target_columns(config: Optional[Any]) -> List[str]:
         explicit_outcome = str(config.get("behavior_analysis.outcome_column", "") or "").strip()
         if explicit_outcome:
             columns.append(explicit_outcome)
-        for candidate in list(config.get("event_columns.rating", []) or []):
+        for candidate in list(config.get("event_columns.outcome", []) or []):
             if candidate not in columns:
                 columns.append(candidate)
     return columns
@@ -114,7 +114,7 @@ def _load_features_and_targets(
     """Load features and targets for a subject, validating alignment.
     
     Targets are extracted from aligned_events using behavior_analysis.outcome_column
-    (if set), then event_columns.rating aliases.
+    (if set), then event_columns.outcome aliases.
     """
     from eeg_pipeline.utils.data.alignment import get_aligned_events
     

@@ -23,8 +23,8 @@ from eeg_pipeline.domain.features.registry import get_feature_registry
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv
 from eeg_pipeline.utils.analysis.stats import (
-    compute_partial_correlations_with_cov_temp,
-    compute_permutation_pvalues_with_cov_temp,
+    compute_partial_correlations_with_cov_predictor,
+    compute_permutation_pvalues_with_cov_predictor,
     fdr_bh,
 )
 from eeg_pipeline.utils.analysis.stats.correlation import (
@@ -43,27 +43,27 @@ from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_m
 
 def _build_stats_config_snapshot(config: Any) -> Dict[str, Any]:
     """Build a small, pickle-friendly config subset for parallel stats workers."""
-    temperature_control = str(
-        get_config_value(config, "behavior_analysis.statistics.temperature_control", "spline")
+    predictor_control = str(
+        get_config_value(config, "behavior_analysis.statistics.predictor_control", "spline")
     ).strip().lower() or "spline"
     perm_scheme = str(
         get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")
     ).strip().lower() or "shuffle"
-    spline_cfg = get_config_value(config, "behavior_analysis.regression.temperature_spline", {}) or {}
+    spline_cfg = get_config_value(config, "behavior_analysis.regression.predictor_spline", {}) or {}
     spline_cfg = dict(spline_cfg) if isinstance(spline_cfg, dict) else {}
 
     return {
         "behavior_analysis": {
-            "statistics": {"temperature_control": temperature_control},
+            "statistics": {"predictor_control": predictor_control},
             "permutation": {"scheme": perm_scheme},
-            "regression": {"temperature_spline": spline_cfg},
+            "regression": {"predictor_spline": spline_cfg},
         }
     }
 
 
-def _is_temperature_target_name(target_name: str) -> bool:
+def _is_predictor_target_name(target_name: str) -> bool:
     name = str(target_name or "").strip().lower()
-    return name in {"temp", "temperature"} or "temperature" in name
+    return name in {"predictor"} or "predictor" in name
 
 
 @dataclass
@@ -83,10 +83,10 @@ class CorrelationConfig:
     compute_loso_stability: bool = False
     compute_reliability: bool = False
     covariates_df: Optional[pd.DataFrame] = None
-    covariates_without_temp_df: Optional[pd.DataFrame] = None
-    temperature_series: Optional[pd.Series] = None
+    covariates_without_predictor_df: Optional[pd.DataFrame] = None
+    predictor_series: Optional[pd.Series] = None
     groups: Optional[np.ndarray] = None
-    control_temperature: bool = True
+    control_predictor: bool = True
     control_trial_order: bool = True
     n_jobs: int = -1
 
@@ -148,10 +148,10 @@ class CorrelationConfig:
             compute_loso_stability=compute_loso_stability,
             compute_reliability=compute_reliability,
             covariates_df=ctx.covariates_df if ctx else None,
-            covariates_without_temp_df=ctx.covariates_without_temp_df if ctx else None,
-            temperature_series=ctx.temperature if ctx and ctx.control_temperature else None,
+            covariates_without_predictor_df=ctx.covariates_without_predictor_df if ctx else None,
+            predictor_series=ctx.predictor_series if ctx and ctx.control_predictor else None,
             groups=ctx.group_ids if ctx else None,
-            control_temperature=ctx.control_temperature if ctx else True,
+            control_predictor=ctx.control_predictor if ctx else True,
             control_trial_order=ctx.control_trial_order if ctx else True,
             n_jobs=n_jobs,
         )
@@ -176,10 +176,10 @@ class CorrelationConfig:
                 compute_loso_stability=bool(getattr(stats_cfg, "compute_loso_stability", True)),
                 compute_reliability=ctx.compute_reliability,
                 covariates_df=ctx.covariates_df,
-                covariates_without_temp_df=ctx.covariates_without_temp_df,
-                temperature_series=ctx.temperature if ctx.control_temperature else None,
+                covariates_without_predictor_df=ctx.covariates_without_predictor_df,
+                predictor_series=ctx.predictor_series if ctx.control_predictor else None,
                 groups=ctx.group_ids,
-                control_temperature=ctx.control_temperature,
+                control_predictor=ctx.control_predictor,
                 control_trial_order=ctx.control_trial_order,
                 n_jobs=int(getattr(stats_cfg, "n_jobs", -1)),
             )
@@ -216,7 +216,7 @@ class ColumnProcessingParams:
     missing_fraction: float
     variance: float
     covariates_aligned: Optional[pd.DataFrame]
-    temperature_aligned: Optional[pd.Series]
+    predictor_aligned: Optional[pd.Series]
     loso_groups: Optional[np.ndarray]
     permutation_groups: Optional[np.ndarray]
     correlation_method: str
@@ -226,7 +226,7 @@ class ColumnProcessingParams:
     n_permutations: int
     n_bootstrap: int
     random_seed: int
-    control_temperature: bool
+    control_predictor: bool
     control_trial_order: bool
     compute_bayes_factor: bool
     compute_loso_stability: bool
@@ -348,7 +348,7 @@ def _add_partial_correlations(
     feature_series: pd.Series,
     target_series: pd.Series,
     cov_aligned: Optional[pd.DataFrame],
-    temp_aligned: Optional[pd.Series],
+    pred_aligned: Optional[pd.Series],
     method: str,
     feature_type: str,
     min_samples: int,
@@ -358,12 +358,12 @@ def _add_partial_correlations(
     (
         r_pc, p_pc, n_pc,
         r_temp, p_temp, n_temp,
-        r_cov_temp, p_cov_temp, n_cov_temp,
-    ) = compute_partial_correlations_with_cov_temp(
+        r_cov_predictor, p_cov_predictor, n_cov_predictor,
+    ) = compute_partial_correlations_with_cov_predictor(
         roi_values=feature_series,
         target_values=target_series,
         covariates_df=cov_aligned,
-        temperature_series=temp_aligned,
+        predictor_series=pred_aligned,
         method=method,
         context=feature_type,
         logger=None,
@@ -373,12 +373,12 @@ def _add_partial_correlations(
     record["r_partial_cov"] = r_pc
     record["p_partial_cov"] = p_pc
     record["n_partial_cov"] = n_pc
-    record["r_partial_temp"] = r_temp
-    record["p_partial_temp"] = p_temp
-    record["n_partial_temp"] = n_temp
-    record["r_partial_cov_temp"] = r_cov_temp
-    record["p_partial_cov_temp"] = p_cov_temp
-    record["n_partial_cov_temp"] = n_cov_temp
+    record["r_partial_predictor"] = r_temp
+    record["p_partial_predictor"] = p_temp
+    record["n_partial_predictor"] = n_temp
+    record["r_partial_cov_predictor"] = r_cov_predictor
+    record["p_partial_cov_predictor"] = p_cov_predictor
+    record["n_partial_cov_predictor"] = n_cov_predictor
 
 
 def _add_permutation_pvalues(
@@ -386,7 +386,7 @@ def _add_permutation_pvalues(
     feature_series: pd.Series,
     target_series: pd.Series,
     cov_aligned: Optional[pd.DataFrame],
-    temp_aligned: Optional[pd.Series],
+    pred_aligned: Optional[pd.Series],
     method: str,
     n_permutations: int,
     rng: np.random.Generator,
@@ -398,13 +398,13 @@ def _add_permutation_pvalues(
     (
         p_perm_raw,
         p_perm_partial_cov,
-        p_perm_partial_temp,
-        p_perm_partial_cov_temp,
-    ) = compute_permutation_pvalues_with_cov_temp(
+        p_perm_partial_predictor,
+        p_perm_partial_cov_predictor,
+    ) = compute_permutation_pvalues_with_cov_predictor(
         x_aligned=feature_series,
         y_aligned=target_series,
         covariates_df=cov_aligned,
-        temp_series=temp_aligned,
+        predictor_series=pred_aligned,
         method=method,
         n_perm=n_permutations,
         n_eff=n_eff,
@@ -414,45 +414,53 @@ def _add_permutation_pvalues(
     )
     record["p_perm_raw"] = p_perm_raw
     record["p_perm_partial_cov"] = p_perm_partial_cov
-    record["p_perm_partial_temp"] = p_perm_partial_temp
-    record["p_perm_partial_cov_temp"] = p_perm_partial_cov_temp
+    record["p_perm_partial_predictor"] = p_perm_partial_predictor
+    record["p_perm_partial_cov_predictor"] = p_perm_partial_cov_predictor
     record["p_perm"] = p_perm_raw
 
 
 def _select_primary_correlation(
     record: Dict[str, Any],
-    control_temperature: bool,
+    control_predictor: bool,
     control_trial_order: bool,
 ) -> None:
-    """Select primary correlation based on control settings."""
-    if control_temperature and control_trial_order:
-        if pd.notna(record.get("p_partial_cov_temp", np.nan)):
-            record["p_kind_primary"] = "p_partial_cov_temp"
-            record["p_primary"] = record.get("p_partial_cov_temp", np.nan)
-            record["r_primary"] = record.get("r_partial_cov_temp", np.nan)
-            record["p_primary_source"] = "partial_cov_temp"
-        elif pd.notna(record.get("p_partial_temp", np.nan)):
-            record["p_kind_primary"] = "p_partial_temp"
-            record["p_primary"] = record.get("p_partial_temp", np.nan)
-            record["r_primary"] = record.get("r_partial_temp", np.nan)
-            record["p_primary_source"] = "partial_temp_fallback"
-        elif pd.notna(record.get("p_partial_cov", np.nan)):
-            record["p_kind_primary"] = "p_partial_cov"
-            record["p_primary"] = record.get("p_partial_cov", np.nan)
-            record["r_primary"] = record.get("r_partial_cov", np.nan)
-            record["p_primary_source"] = "partial_cov_fallback"
-    elif control_temperature:
-        if pd.notna(record.get("p_partial_temp", np.nan)):
-            record["p_kind_primary"] = "p_partial_temp"
-            record["p_primary"] = record.get("p_partial_temp", np.nan)
-            record["r_primary"] = record.get("r_partial_temp", np.nan)
-            record["p_primary_source"] = "partial_temp"
+    """Select primary correlation based on control settings (no fallback downgrades)."""
+    def _set_missing(kind: str, source: str) -> None:
+        record["p_kind_primary"] = kind
+        record["p_primary"] = np.nan
+        record["r_primary"] = np.nan
+        record["p_primary_source"] = source
+
+    if control_predictor and control_trial_order:
+        p_val = record.get("p_partial_cov_predictor", np.nan)
+        r_val = record.get("r_partial_cov_predictor", np.nan)
+        if pd.notna(p_val):
+            record["p_kind_primary"] = "p_partial_cov_predictor"
+            record["p_primary"] = p_val
+            record["r_primary"] = r_val
+            record["p_primary_source"] = "partial_cov_predictor"
+        else:
+            _set_missing("missing_required", "partial_cov_predictor_missing")
+    elif control_predictor:
+        p_val = record.get("p_partial_predictor", np.nan)
+        r_val = record.get("r_partial_predictor", np.nan)
+        if pd.notna(p_val):
+            record["p_kind_primary"] = "p_partial_predictor"
+            record["p_primary"] = p_val
+            record["r_primary"] = r_val
+            record["p_primary_source"] = "partial_predictor"
+        else:
+            _set_missing("missing_required", "partial_predictor_missing")
     elif control_trial_order:
-        if pd.notna(record.get("p_partial_cov", np.nan)):
+        p_val = record.get("p_partial_cov", np.nan)
+        r_val = record.get("r_partial_cov", np.nan)
+        if pd.notna(p_val):
             record["p_kind_primary"] = "p_partial_cov"
-            record["p_primary"] = record.get("p_partial_cov", np.nan)
-            record["r_primary"] = record.get("r_partial_cov", np.nan)
+            record["p_primary"] = p_val
+            record["r_primary"] = r_val
             record["p_primary_source"] = "partial_cov"
+        else:
+            _set_missing("missing_required", "partial_cov_missing")
 
 
 def _update_primary_perm_pvalue(record: Dict[str, Any]) -> None:
@@ -460,8 +468,8 @@ def _update_primary_perm_pvalue(record: Dict[str, Any]) -> None:
     primary_to_permutation_column = {
         "p_raw": "p_perm_raw",
         "p_partial_cov": "p_perm_partial_cov",
-        "p_partial_temp": "p_perm_partial_temp",
-        "p_partial_cov_temp": "p_perm_partial_cov_temp",
+        "p_partial_predictor": "p_perm_partial_predictor",
+        "p_partial_cov_predictor": "p_perm_partial_cov_predictor",
     }
     primary_kind = record.get("p_kind_primary")
     permutation_column = primary_to_permutation_column.get(primary_kind)
@@ -640,15 +648,15 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
             ) from exc
 
     has_covariates = params.covariates_aligned is not None
-    has_temperature = params.temperature_aligned is not None
-    if has_covariates or has_temperature:
+    has_predictor = params.predictor_aligned is not None
+    if has_covariates or has_predictor:
         try:
             _add_partial_correlations(
                 record,
                 feature_series,
                 target_series,
                 params.covariates_aligned,
-                params.temperature_aligned,
+                params.predictor_aligned,
                 params.correlation_method,
                 params.feature_type,
                 params.column_min_samples,
@@ -667,7 +675,7 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 feature_series,
                 target_series,
                 params.covariates_aligned,
-                params.temperature_aligned,
+                params.predictor_aligned,
                 params.correlation_method,
                 params.n_permutations,
                 random_generator,
@@ -680,7 +688,7 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
                 f"(type={params.feature_type}, target={params.target_name})"
             ) from exc
 
-    _select_primary_correlation(record, params.control_temperature, params.control_trial_order)
+    _select_primary_correlation(record, params.control_predictor, params.control_trial_order)
 
     if params.n_permutations > 0:
         _update_primary_perm_pvalue(record)
@@ -778,7 +786,7 @@ class FeatureBehaviorCorrelator:
     def correlate_all(
         self,
         targets: pd.Series,
-        target_name: str = "rating",
+        target_name: str = "outcome",
         corr_config: Optional[CorrelationConfig] = None,
         n_jobs: int = -1,
     ) -> Dict[str, FeatureCorrelationResult]:
@@ -833,17 +841,17 @@ class FeatureBehaviorCorrelator:
         config: CorrelationConfig,
         subject_ids: Optional[np.ndarray],
     ) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[np.ndarray], Optional[np.ndarray]]:
-        """Align covariates, temperature, and groups for correlation analysis."""
+        """Align covariates, predictor, and groups for correlation analysis."""
         covariates_aligned = None
-        if config.control_temperature:
-            if config.covariates_without_temp_df is not None:
-                covariates_aligned = config.covariates_without_temp_df.reindex(df_aligned.index)
+        if config.control_predictor:
+            if config.covariates_without_predictor_df is not None:
+                covariates_aligned = config.covariates_without_predictor_df.reindex(df_aligned.index)
         elif config.covariates_df is not None:
             covariates_aligned = config.covariates_df.reindex(df_aligned.index)
-        
-        temperature_aligned = None
-        if config.control_temperature and config.temperature_series is not None:
-            temperature_aligned = config.temperature_series.reindex(df_aligned.index)
+
+        predictor_aligned = None
+        if config.control_predictor and config.predictor_series is not None:
+            predictor_aligned = config.predictor_series.reindex(df_aligned.index)
         
         loso_groups = None
         permutation_groups = None
@@ -856,7 +864,7 @@ class FeatureBehaviorCorrelator:
             if loso_groups is None:
                 loso_groups = permutation_groups
         
-        return covariates_aligned, temperature_aligned, loso_groups, permutation_groups
+        return covariates_aligned, predictor_aligned, loso_groups, permutation_groups
 
     def _correlate_df(
         self,
@@ -864,7 +872,7 @@ class FeatureBehaviorCorrelator:
         targets: pd.Series,
         config: CorrelationConfig,
         feature_type: str,
-        target_name: str = "rating",
+        target_name: str = "outcome",
         subject_ids: Optional[np.ndarray] = None,
     ) -> FeatureCorrelationResult:
         """Correlate a single feature dataframe using core function."""
@@ -872,13 +880,13 @@ class FeatureBehaviorCorrelator:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
         effective_config = config
-        if config.control_temperature and _is_temperature_target_name(target_name):
-            # Scientific validity: never "control for temperature" when temperature is the target.
+        if config.control_predictor and _is_predictor_target_name(target_name):
+            # Scientific validity: never "control for predictor" when predictor is the target.
             effective_config = replace(
                 config,
-                control_temperature=False,
-                temperature_series=None,
-                covariates_df=config.covariates_without_temp_df,
+                control_predictor=False,
+                predictor_series=None,
+                covariates_df=config.covariates_without_predictor_df,
             )
 
         min_samples_align = get_min_samples(self.config, "default")
@@ -888,7 +896,7 @@ class FeatureBehaviorCorrelator:
         if df_aligned is None or targets_aligned is None:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
-        cov_aligned, temp_aligned, loso_groups, perm_groups = self._align_data_for_correlation(
+        cov_aligned, pred_aligned, loso_groups, perm_groups = self._align_data_for_correlation(
             df_aligned, targets_aligned, effective_config, subject_ids
         )
         
@@ -950,7 +958,7 @@ class FeatureBehaviorCorrelator:
                 missing_fraction=missing_fraction,
                 variance=variance,
                 covariates_aligned=cov_aligned,
-                temperature_aligned=temp_aligned,
+                predictor_aligned=pred_aligned,
                 loso_groups=loso_groups_arr,
                 permutation_groups=perm_groups_arr,
                 correlation_method=effective_config.method,
@@ -960,7 +968,7 @@ class FeatureBehaviorCorrelator:
                 n_permutations=effective_config.n_permutations,
                 n_bootstrap=effective_config.n_bootstrap,
                 random_seed=base_seed + column_index,
-                control_temperature=effective_config.control_temperature,
+                control_predictor=effective_config.control_predictor,
                 control_trial_order=effective_config.control_trial_order,
                 compute_bayes_factor=effective_config.compute_bayes_factor,
                 compute_loso_stability=effective_config.compute_loso_stability,
@@ -1007,7 +1015,7 @@ class FeatureBehaviorCorrelator:
     def save_results(
         self,
         results: Dict[str, FeatureCorrelationResult],
-        target_name: str = "rating",
+        target_name: str = "outcome",
         apply_fdr: bool = True,
         method_label: Optional[str] = None,
     ) -> List[Path]:
@@ -1075,12 +1083,12 @@ class FeatureBehaviorCorrelator:
                 column_to_channel[str(column)] = str(identifier)
         
         effective_config = corr_config
-        if corr_config.control_temperature and _is_temperature_target_name(target_name):
+        if corr_config.control_predictor and _is_predictor_target_name(target_name):
             effective_config = replace(
                 corr_config,
-                control_temperature=False,
-                temperature_series=None,
-                covariates_df=corr_config.covariates_without_temp_df,
+                control_predictor=False,
+                predictor_series=None,
+                covariates_df=corr_config.covariates_without_predictor_df,
             )
 
         method_label = format_correlation_method_label(effective_config.method, effective_config.robust_method)
@@ -1122,16 +1130,16 @@ class FeatureBehaviorCorrelator:
 
                 cov_aligned = None
                 if effective_config.control_trial_order:
-                    if effective_config.control_temperature:
-                        if effective_config.covariates_without_temp_df is not None:
-                            cov_aligned = effective_config.covariates_without_temp_df.reindex(df_pair.index)
+                    if effective_config.control_predictor:
+                        if effective_config.covariates_without_predictor_df is not None:
+                            cov_aligned = effective_config.covariates_without_predictor_df.reindex(df_pair.index)
                     elif effective_config.covariates_df is not None:
                         cov_aligned = effective_config.covariates_df.reindex(df_pair.index)
 
-                temp_aligned = None
-                if effective_config.control_temperature and effective_config.temperature_series is not None:
-                    temp_aligned = effective_config.temperature_series.reindex(df_pair.index)
-                
+                pred_aligned = None
+                if effective_config.control_predictor and effective_config.predictor_series is not None:
+                    pred_aligned = effective_config.predictor_series.reindex(df_pair.index)
+
                 correlation_coefficient, p_value, n_valid = safe_correlation(
                     df_pair["x"].values,
                     df_pair["y"].values,
@@ -1162,13 +1170,13 @@ class FeatureBehaviorCorrelator:
                     "p_primary_is_permutation": False,
                 }
 
-                if cov_aligned is not None or temp_aligned is not None:
+                if cov_aligned is not None or pred_aligned is not None:
                     _add_partial_correlations(
                         record,
                         df_pair["x"],
                         df_pair["y"],
                         cov_aligned,
-                        temp_aligned,
+                        pred_aligned,
                         effective_config.method,
                         feature_type="power_roi",
                         min_samples=effective_config.min_samples,
@@ -1176,7 +1184,7 @@ class FeatureBehaviorCorrelator:
                     )
                     _select_primary_correlation(
                         record,
-                        effective_config.control_temperature,
+                        effective_config.control_predictor,
                         effective_config.control_trial_order,
                     )
 
@@ -1190,7 +1198,7 @@ class FeatureBehaviorCorrelator:
                         df_pair["x"],
                         df_pair["y"],
                         cov_aligned,
-                        temp_aligned,
+                        pred_aligned,
                         effective_config.method,
                         effective_config.n_permutations,
                         rng,
@@ -1200,21 +1208,21 @@ class FeatureBehaviorCorrelator:
                     _update_primary_perm_pvalue(record)
 
                 records.append(record)
-            
+
             overall_values = band_matrix.mean(axis=1)
             df_pair = pd.concat([overall_values.rename("x"), targets.rename("y")], axis=1).dropna()
             if not df_pair.empty:
                 cov_aligned = None
                 if effective_config.control_trial_order:
-                    if effective_config.control_temperature:
-                        if effective_config.covariates_without_temp_df is not None:
-                            cov_aligned = effective_config.covariates_without_temp_df.reindex(df_pair.index)
+                    if effective_config.control_predictor:
+                        if effective_config.covariates_without_predictor_df is not None:
+                            cov_aligned = effective_config.covariates_without_predictor_df.reindex(df_pair.index)
                     elif effective_config.covariates_df is not None:
                         cov_aligned = effective_config.covariates_df.reindex(df_pair.index)
 
-                temp_aligned = None
-                if effective_config.control_temperature and effective_config.temperature_series is not None:
-                    temp_aligned = effective_config.temperature_series.reindex(df_pair.index)
+                pred_aligned = None
+                if effective_config.control_predictor and effective_config.predictor_series is not None:
+                    pred_aligned = effective_config.predictor_series.reindex(df_pair.index)
 
                 correlation_coefficient, p_value, n_valid = safe_correlation(
                     df_pair["x"].values,
@@ -1246,13 +1254,13 @@ class FeatureBehaviorCorrelator:
                     "p_primary_is_permutation": False,
                 }
 
-                if cov_aligned is not None or temp_aligned is not None:
+                if cov_aligned is not None or pred_aligned is not None:
                     _add_partial_correlations(
                         record,
                         df_pair["x"],
                         df_pair["y"],
                         cov_aligned,
-                        temp_aligned,
+                        pred_aligned,
                         effective_config.method,
                         feature_type="power_roi",
                         min_samples=effective_config.min_samples,
@@ -1260,7 +1268,7 @@ class FeatureBehaviorCorrelator:
                     )
                     _select_primary_correlation(
                         record,
-                        effective_config.control_temperature,
+                        effective_config.control_predictor,
                         effective_config.control_trial_order,
                     )
 
@@ -1274,7 +1282,7 @@ class FeatureBehaviorCorrelator:
                         df_pair["x"],
                         df_pair["y"],
                         cov_aligned,
-                        temp_aligned,
+                        pred_aligned,
                         effective_config.method,
                         effective_config.n_permutations,
                         rng,
@@ -1293,7 +1301,9 @@ class FeatureBehaviorCorrelator:
 
         if effective_config.apply_fdr:
             _apply_fdr_to_dataframe(df, effective_config, self.config)
-        target_suffix = "rating" if "rating" in target_name.lower() else "temp"
+        target_suffix = re.sub(r"[^a-z0-9_]+", "_", str(target_name).strip().lower()).strip("_")
+        if not target_suffix:
+            target_suffix = "target"
         method_suffix = f"_{method_label}" if method_label else ""
         from eeg_pipeline.infra.paths import ensure_dir
         corr_dir = self.stats_dir / "correlations"
@@ -1305,8 +1315,8 @@ class FeatureBehaviorCorrelator:
 
     def run_complete_analysis(
         self,
-        rating_series: pd.Series,
-        temperature_series: Optional[pd.Series] = None,
+        outcome_series: pd.Series,
+        predictor_series: Optional[pd.Series] = None,
         corr_config: Optional[CorrelationConfig] = None,
     ) -> ComputationResult:
         """Run complete feature-behavior correlation analysis."""
@@ -1322,83 +1332,83 @@ class FeatureBehaviorCorrelator:
         if corr_config is None:
             corr_config = self.default_corr_config
 
-        rating_records: List[Dict[str, Any]] = []
-        temperature_records: List[Dict[str, Any]] = []
+        outcome_records: List[Dict[str, Any]] = []
+        predictor_records: List[Dict[str, Any]] = []
         metadata = {"n_feature_types": len(self._feature_dfs)}
         method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
 
-        if rating_series is not None and len(rating_series) > 0:
-            rating_results = self.correlate_all(rating_series, "rating", corr_config)
-            self.save_results(rating_results, "rating", method_label=method_label)
+        if outcome_series is not None and len(outcome_series) > 0:
+            outcome_results = self.correlate_all(outcome_series, "outcome", corr_config)
+            self.save_results(outcome_results, "outcome", method_label=method_label)
 
-            for name, result in rating_results.items():
+            for name, result in outcome_results.items():
                 metadata[f"{name}_n_features"] = result.n_features
                 metadata[f"{name}_n_total"] = result.n_total or result.n_features
                 metadata[f"{name}_n_dropped"] = result.n_dropped
                 metadata[f"{name}_n_significant"] = result.n_significant
-                rating_records.extend(result.records)
+                outcome_records.extend(result.records)
             
             if "power" in self._feature_dfs:
                 self.compute_roi_correlations(
-                    self._feature_dfs["power"], rating_series, "rating", corr_config
+                    self._feature_dfs["power"], outcome_series, "outcome", corr_config
                 )
 
         min_samples_default = get_min_samples(self.config, "default")
-        if temperature_series is not None and len(temperature_series.dropna()) > min_samples_default:
-            temp_results = self.correlate_all(temperature_series, "temperature", corr_config)
-            self.save_results(temp_results, "temperature", method_label=method_label)
+        if predictor_series is not None and len(predictor_series.dropna()) > min_samples_default:
+            pred_results = self.correlate_all(predictor_series, "predictor", corr_config)
+            self.save_results(pred_results, "predictor", method_label=method_label)
 
-            for name, result in temp_results.items():
-                metadata[f"{name}_n_features_temperature"] = result.n_features
-                metadata[f"{name}_n_total_temperature"] = result.n_total or result.n_features
-                metadata[f"{name}_n_dropped_temperature"] = result.n_dropped
-                metadata[f"{name}_n_significant_temperature"] = result.n_significant
-                temperature_records.extend(result.records)
-            
+            for name, result in pred_results.items():
+                metadata[f"{name}_n_features_predictor"] = result.n_features
+                metadata[f"{name}_n_total_predictor"] = result.n_total or result.n_features
+                metadata[f"{name}_n_dropped_predictor"] = result.n_dropped
+                metadata[f"{name}_n_significant_predictor"] = result.n_significant
+                predictor_records.extend(result.records)
+
             if "power" in self._feature_dfs:
                 self.compute_roi_correlations(
-                    self._feature_dfs["power"], temperature_series, "temp", corr_config
+                    self._feature_dfs["power"], predictor_series, "predictor", corr_config
                 )
 
         method_suffix = f"_{method_label}" if method_label else ""
         from eeg_pipeline.analysis.behavior.orchestration import _get_stats_subfolder_with_overwrite
         from eeg_pipeline.utils.config.loader import get_config_bool
-        
+
         overwrite = get_config_bool(self.config, "behavior_analysis.output.overwrite", True)
         corr_dir = _get_stats_subfolder_with_overwrite(self.stats_dir, "correlations", overwrite)
-        combined_rating_df = pd.DataFrame(rating_records) if rating_records else pd.DataFrame()
-        if not combined_rating_df.empty:
-            _apply_fdr_to_dataframe(combined_rating_df, corr_config, self.config)
-            combined_path = corr_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"
-            save_correlation_results(combined_rating_df, combined_path)
+        combined_outcome_df = pd.DataFrame(outcome_records) if outcome_records else pd.DataFrame()
+        if not combined_outcome_df.empty:
+            _apply_fdr_to_dataframe(combined_outcome_df, corr_config, self.config)
+            combined_path = corr_dir / f"corr_stats_all_features_vs_outcome{method_suffix}.tsv"
+            save_correlation_results(combined_outcome_df, combined_path)
 
-        combined_temperature_df = pd.DataFrame(temperature_records) if temperature_records else pd.DataFrame()
-        if not combined_temperature_df.empty:
-            _apply_fdr_to_dataframe(combined_temperature_df, corr_config, self.config)
-            combined_path = corr_dir / f"corr_stats_all_features_vs_temperature{method_suffix}.tsv"
-            save_correlation_results(combined_temperature_df, combined_path)
+        combined_predictor_df = pd.DataFrame(predictor_records) if predictor_records else pd.DataFrame()
+        if not combined_predictor_df.empty:
+            _apply_fdr_to_dataframe(combined_predictor_df, corr_config, self.config)
+            combined_path = corr_dir / f"corr_stats_all_features_vs_predictor{method_suffix}.tsv"
+            save_correlation_results(combined_predictor_df, combined_path)
 
         significance_alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
-        n_significant_rating = sum(
-            1 for record in rating_records
+        n_significant_outcome = sum(
+            1 for record in outcome_records
             if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
         )
         self.logger.info(
-            f"Complete (rating): {len(rating_records)} correlations, {n_significant_rating} significant "
+            f"Complete (outcome): {len(outcome_records)} correlations, {n_significant_outcome} significant "
             f"(alpha={significance_alpha})"
         )
 
-        if temperature_records:
-            n_significant_temperature = sum(
-                1 for record in temperature_records
+        if predictor_records:
+            n_significant_predictor = sum(
+                1 for record in predictor_records
                 if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
             )
             self.logger.info(
-                f"Complete (temperature): {len(temperature_records)} correlations, {n_significant_temperature} significant "
+                f"Complete (predictor): {len(predictor_records)} correlations, {n_significant_predictor} significant "
                 f"(alpha={significance_alpha})"
             )
 
-        combined_df = pd.DataFrame([*rating_records, *temperature_records]) if (rating_records or temperature_records) else pd.DataFrame()
+        combined_df = pd.DataFrame([*outcome_records, *predictor_records]) if (outcome_records or predictor_records) else pd.DataFrame()
 
         return ComputationResult(
             name="feature_correlator",
@@ -1432,14 +1442,14 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True
     
-    # Get rating from aligned_events using event_columns.rating config
-    rating_series = None
-    rating_col = ctx._find_rating_column() if hasattr(ctx, "_find_rating_column") else None
-    if rating_col is not None and ctx.aligned_events is not None:
-        rating_series = pd.to_numeric(ctx.aligned_events[rating_col], errors="coerce")
+    # Resolve outcome from aligned_events using event_columns.outcome config.
+    outcome_series = None
+    outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
+    if outcome_col is not None and ctx.aligned_events is not None:
+        outcome_series = pd.to_numeric(ctx.aligned_events[outcome_col], errors="coerce")
     
     return correlator.run_complete_analysis(
-        rating_series=rating_series,
-        temperature_series=ctx.temperature,
+        outcome_series=outcome_series,
+        predictor_series=ctx.predictor_series,
         corr_config=CorrelationConfig.from_context(ctx),
     )

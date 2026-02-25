@@ -658,8 +658,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertTrue(bool(out["paired_test"]))
         self.assertEqual(int(out["n_pairs"]), 2)
-        self.assertEqual(int(out["n_pain"]), 2)
-        self.assertEqual(int(out["n_nonpain"]), 2)
+        self.assertEqual(int(out["n_condition_a"]), 2)
+        self.assertEqual(int(out["n_condition_b"]), 2)
 
     def test_condition_primary_mode_perm_marks_missing_when_permutation_unavailable(self):
         from eeg_pipeline.utils.analysis.stats.effect_size import compute_condition_effects
@@ -723,8 +723,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         out = run_predictor_sensitivity_correlations(
             features_df=pd.DataFrame({"power_alpha": [0.1, 0.2, 0.3, 0.4, 0.6, 0.7]}),
-            ratings=pd.Series([10, 20, 30, 40, 50, 60], dtype=float),
-            temperatures=pd.Series([44.1, 44.3, 44.6, 45.0, 45.3, 45.6], dtype=float),
+            outcomes=pd.Series([10, 20, 30, 40, 50, 60], dtype=float),
+            predictors=pd.Series([44.1, 44.3, 44.6, 45.0, 45.3, 45.6], dtype=float),
             method="spearman",
             min_samples=5,
             n_perm=0,
@@ -1463,9 +1463,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 "target": "rating",
                 "r_raw": 0.5,
                 "p_raw": 0.01,
-                "r_partial_cov_temp": np.nan,
-                "p_partial_cov_temp": np.nan,
-                "p_perm_partial_cov_temp": np.nan,
+                "r_partial_cov_predictor": np.nan,
+                "p_partial_cov_predictor": np.nan,
+                "p_perm_partial_cov_predictor": np.nan,
                 "robust_method": None,
             }
         ]
@@ -1680,8 +1680,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             run_min_samples=5,
             want_raw=True,
             want_partial_cov=False,
-            want_partial_temp=False,
-            want_partial_cov_temp=False,
+            want_partial_predictor=False,
+            want_partial_cov_predictor=False,
             want_run_mean=True,
             config=DotConfig({}),
         )

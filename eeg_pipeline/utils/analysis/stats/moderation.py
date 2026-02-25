@@ -139,7 +139,7 @@ def compute_moderation_effect(
     W : np.ndarray
         Moderator variable (e.g., connectivity strength)
     Y : np.ndarray
-        Outcome variable (e.g., pain rating)
+        Outcome variable (e.g., response intensity)
     center_predictors : bool
         Whether to mean-center X and W (recommended for interpretation)
         

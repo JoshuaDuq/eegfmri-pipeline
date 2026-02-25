@@ -21,7 +21,7 @@ from eeg_pipeline.utils.analysis.stats import (
 class SubjectScatterData:
     temporal_df: pd.DataFrame
     features_df: pd.DataFrame
-    rating_series: pd.Series
+    outcome_series: pd.Series
     info: mne.Info
     temp_series: Optional[pd.Series]
     covariate_df_full: Optional[pd.DataFrame]
@@ -84,7 +84,7 @@ def _get_scatter_plot_config_from_config(config: Any) -> ScatterPlotConfig:
         significance_threshold=float(
             behavioral_config.get("significance_threshold", 0.05)
         ),
-        target_rating=behavioral_config.get("target_rating", "rating"),
+        target_rating=behavioral_config.get("target_rating", "outcome"),
     )
 
 

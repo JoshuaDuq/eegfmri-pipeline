@@ -32,7 +32,7 @@ __all__ = [
     "plot_scalpmean_all_trials",
     "contrast_scalpmean_pain_nonpain",
     # Contrast plotting
-    "contrast_maxmin_temperature",
+    "contrast_maxmin_predictor",
     "contrast_pain_nonpain",
     # ROI TFR plotting
     "compute_roi_tfrs",
@@ -63,7 +63,7 @@ def __getattr__(name: str):
         "plot_scalpmean_all_trials": "scalpmean",
         "contrast_scalpmean_pain_nonpain": "scalpmean",
         # Contrast plotting
-        "contrast_maxmin_temperature": "contrasts",
+        "contrast_maxmin_predictor": "contrasts",
         "contrast_pain_nonpain": "contrasts",
         # ROI TFR plotting
         "compute_roi_tfrs": "rois",

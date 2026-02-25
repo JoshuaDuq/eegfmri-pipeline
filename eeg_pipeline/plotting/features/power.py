@@ -20,7 +20,7 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
 from eeg_pipeline.plotting.io.figures import get_viz_params
 from eeg_pipeline.utils.data.columns import (
-    find_temperature_column_in_events,
+    find_predictor_column_in_events,
 )
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.roi import (
@@ -756,7 +756,7 @@ def _crop_tfr_to_active(tfr: Any, active_window: List[float], logger: logging.Lo
     return tfr.copy().crop(tmin, tmax)
 
 
-def _validate_temperature_data(
+def _validate_predictor_data(
     tfr: Any,
     events_df: Optional[pd.DataFrame],
     *,
@@ -764,7 +764,7 @@ def _validate_temperature_data(
     subject: str,
     logger: logging.Logger,
 ) -> Optional[pd.Series]:
-    """Validate and extract temperature data from events DataFrame.
+    """Validate and extract predictor data from events DataFrame.
     
     Args:
         tfr: TFR object
@@ -773,19 +773,19 @@ def _validate_temperature_data(
         logger: Logger instance
     
     Returns:
-        Series of temperature values or None if validation fails
+        Series of predictor values or None if validation fails
     """
     if config is None:
-        logger.warning("Config is required for temperature plotting; skipping.")
+        logger.warning("Config is required for predictor plotting; skipping.")
         return None
 
     if events_df is None or events_df.empty:
-        logger.warning("No events DataFrame provided for temperature analysis")
+        logger.warning("No events DataFrame provided for predictor analysis")
         return None
         
-    temp_col = find_temperature_column_in_events(events_df, config)
+    temp_col = find_predictor_column_in_events(events_df, config)
     if temp_col is None:
-        logger.warning("No temperature column found in events")
+        logger.warning("No predictor column found in events")
         return None
         
     temps = pd.to_numeric(events_df[temp_col], errors="coerce")
@@ -1028,7 +1028,7 @@ def _plot_psd_by_conditions(
     return True
 
 
-def _plot_psd_by_temperature(
+def _plot_psd_by_predictor(
     tfr_epochs: Any,
     temps: pd.Series,
     subject: str,
@@ -1036,7 +1036,7 @@ def _plot_psd_by_temperature(
     logger: logging.Logger,
     config: Any
 ) -> bool:
-    """Plot PSD by temperature condition with uncertainty visualization and frequency band annotations.
+    """Plot PSD by predictor condition with uncertainty visualization and frequency band annotations.
     
     Computes PSD per trial, then averages across channels and time windows.
     Shows mean ± SEM with shaded confidence intervals for scientific rigor.
@@ -1044,7 +1044,7 @@ def _plot_psd_by_temperature(
     
     Args:
         tfr_epochs: EpochsTFR object
-        temps: Series of temperature values
+        preds: Series of predictor values
         subject: Subject identifier
         save_dir: Directory to save plots
         logger: Logger instance
@@ -1199,11 +1199,11 @@ def _plot_psd_by_temperature(
     )
     
     plt.tight_layout(rect=[0, 0.03, 1, 1])
-    output_path = save_dir / f'sub-{subject}_power_spectral_density_by_temperature'
+    output_path = save_dir / f'sub-{subject}_power_spectral_density_by_predictor'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
-    logger.info("Saved PSD by temperature (Induced) with uncertainty visualization")
+    logger.info("Saved PSD by predictor (Induced) with uncertainty visualization")
     return True
 
 

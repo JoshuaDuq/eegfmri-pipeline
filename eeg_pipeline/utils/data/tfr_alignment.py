@@ -42,81 +42,81 @@ def extract_aligned_column_vector(
     return None
 
 
-def extract_temperature_series(
+def extract_predictor_series(
     tfr,
     events_df: Optional[pd.DataFrame],
     temp_col: Optional[str],
     n_samples: int,
 ) -> Optional[pd.Series]:
-    """Extract temperature series from TFR or events DataFrame.
+    """Extract predictor series from TFR or events DataFrame.
     
     Args:
         tfr: TFR object that may have metadata attribute
         events_df: Optional events DataFrame
-        temp_col: Name of temperature column, or None
+        temp_col: Name of predictor column, or None
         n_samples: Number of samples to extract
         
     Returns:
-        Series with numeric temperature values, or None if column not found
+        Series with numeric predictor values, or None if column not found
     """
     if temp_col is None:
         return None
     return extract_aligned_column_vector(tfr, events_df, temp_col, n_samples)
 
 
-def _extract_unique_temperatures(
+def _extract_unique_predictors(
     temp_series: pd.Series,
-    temperature_rounding_decimals: int,
+    predictor_rounding_decimals: int,
 ) -> list[float]:
-    """Extract sorted unique temperature values from series.
+    """Extract sorted unique predictor values from series.
     
     Args:
-        temp_series: Series with temperature values
-        temperature_rounding_decimals: Decimal places for rounding
+        temp_series: Series with predictor values
+        predictor_rounding_decimals: Decimal places for rounding
         
     Returns:
-        Sorted list of unique temperature values
+        Sorted list of unique predictor values
     """
     rounded_series = pd.to_numeric(temp_series, errors="coerce").round(
-        temperature_rounding_decimals
+        predictor_rounding_decimals
     )
     unique_temps = rounded_series.dropna().unique()
     return sorted(map(float, unique_temps))
 
 
-def _create_temperature_mask(
+def _create_predictor_mask(
     temp_series: pd.Series,
-    target_temp: float,
-    temperature_rounding_decimals: int,
+    target_pred: float,
+    predictor_rounding_decimals: int,
 ) -> np.ndarray:
-    """Create boolean mask for samples matching target temperature.
+    """Create boolean mask for samples matching target predictor.
     
     Args:
-        temp_series: Series with temperature values
-        target_temp: Target temperature to match
-        temperature_rounding_decimals: Decimal places for rounding
+        temp_series: Series with predictor values
+        target_pred: Target predictor value to match
+        predictor_rounding_decimals: Decimal places for rounding
         
     Returns:
         Boolean array indicating matching samples
     """
     rounded_series = pd.to_numeric(temp_series, errors="coerce").round(
-        temperature_rounding_decimals
+        predictor_rounding_decimals
     )
-    target_rounded = round(target_temp, temperature_rounding_decimals)
+    target_rounded = round(target_pred, predictor_rounding_decimals)
     return np.asarray(rounded_series == target_rounded, dtype=bool)
 
 
-def get_temperature_range(
+def get_predictor_range(
     temp_series: pd.Series,
-    temperature_rounding_decimals: int = 1,
-    min_temperatures_required: int = 2,
+    predictor_rounding_decimals: int = 1,
+    min_predictors_required: int = 2,
 ) -> tuple[Optional[float], Optional[float]]:
-    """Extract minimum and maximum temperature values from series.
+    """Extract minimum and maximum predictor values from series.
     
     Args:
-        temp_series: Series with temperature values, or None
-        temperature_rounding_decimals: Decimal places for rounding
-        min_temperatures_required: Minimum unique temperatures needed
+        temp_series: Series with predictor values, or None
+        predictor_rounding_decimals: Decimal places for rounding
+        min_predictors_required: Minimum unique predictor levels needed
         
     Returns:
         Tuple of (min_temp, max_temp), or (None, None) if insufficient data
@@ -124,24 +124,24 @@ def get_temperature_range(
     if temp_series is None:
         return None, None
 
-    unique_temps = _extract_unique_temperatures(temp_series, temperature_rounding_decimals)
-    if len(unique_temps) < min_temperatures_required:
+    unique_preds = _extract_unique_predictors(temp_series, predictor_rounding_decimals)
+    if len(unique_temps) < min_predictors_required:
         return None, None
 
     return float(min(unique_temps)), float(max(unique_temps))
 
 
-def create_temperature_masks(
+def create_predictor_masks(
     temp_series: pd.Series,
-    temperature_rounding_decimals: int = 1,
-    min_temperatures_required: int = 2,
+    predictor_rounding_decimals: int = 1,
+    min_predictors_required: int = 2,
 ) -> tuple[Optional[float], Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
-    """Create masks for minimum and maximum temperature conditions.
+    """Create masks for minimum and maximum predictor conditions.
     
     Args:
-        temp_series: Series with temperature values, or None
-        temperature_rounding_decimals: Decimal places for rounding
-        min_temperatures_required: Minimum unique temperatures needed
+        temp_series: Series with predictor values, or None
+        predictor_rounding_decimals: Decimal places for rounding
+        min_predictors_required: Minimum unique predictor levels needed
         
     Returns:
         Tuple of (t_min, t_max, mask_min, mask_max), with None values if insufficient data
@@ -149,30 +149,30 @@ def create_temperature_masks(
     if temp_series is None:
         return None, None, None, None
 
-    unique_temps = _extract_unique_temperatures(temp_series, temperature_rounding_decimals)
-    if len(unique_temps) < min_temperatures_required:
+    unique_preds = _extract_unique_predictors(temp_series, predictor_rounding_decimals)
+    if len(unique_temps) < min_predictors_required:
         return None, None, None, None
 
     t_min = float(min(unique_temps))
     t_max = float(max(unique_temps))
-    mask_min = _create_temperature_mask(temp_series, t_min, temperature_rounding_decimals)
-    mask_max = _create_temperature_mask(temp_series, t_max, temperature_rounding_decimals)
+    mask_min = _create_predictor_mask(temp_series, t_min, predictor_rounding_decimals)
+    mask_max = _create_predictor_mask(temp_series, t_max, predictor_rounding_decimals)
     return t_min, t_max, mask_min, mask_max
 
 
-def create_temperature_masks_from_range(
+def create_predictor_masks_from_range(
     temp_series: pd.Series,
     t_min: float,
     t_max: float,
-    temperature_rounding_decimals: int = 1,
+    predictor_rounding_decimals: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Create masks for specified minimum and maximum temperatures.
+    """Create masks for specified minimum and maximum predictor values.
     
     Args:
-        temp_series: Series with temperature values, or None
-        t_min: Minimum temperature value
-        t_max: Maximum temperature value
-        temperature_rounding_decimals: Decimal places for rounding
+        temp_series: Series with predictor values, or None
+        t_min: Minimum predictor value
+        t_max: Maximum predictor value
+        predictor_rounding_decimals: Decimal places for rounding
         
     Returns:
         Tuple of (mask_min, mask_max) boolean arrays, or empty arrays if invalid input
@@ -180,16 +180,16 @@ def create_temperature_masks_from_range(
     if temp_series is None or t_min is None or t_max is None:
         return np.array([], dtype=bool), np.array([], dtype=bool)
 
-    mask_min = _create_temperature_mask(temp_series, t_min, temperature_rounding_decimals)
-    mask_max = _create_temperature_mask(temp_series, t_max, temperature_rounding_decimals)
+    mask_min = _create_predictor_mask(temp_series, t_min, predictor_rounding_decimals)
+    mask_max = _create_predictor_mask(temp_series, t_max, predictor_rounding_decimals)
     return mask_min, mask_max
 
 
 __all__ = [
     "compute_aligned_data_length",
     "extract_aligned_column_vector",
-    "extract_temperature_series",
-    "create_temperature_masks",
-    "get_temperature_range",
-    "create_temperature_masks_from_range",
+    "extract_predictor_series",
+    "create_predictor_masks",
+    "get_predictor_range",
+    "create_predictor_masks_from_range",
 ]

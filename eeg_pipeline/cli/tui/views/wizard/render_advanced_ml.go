@@ -177,7 +177,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optUseDefaults:
 			label, value, hint = "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"
 		case optMLTarget:
-			hint = "e.g., rating / temperature / binary_outcome"
+			hint = "e.g., outcome / predictor / binary_outcome"
 			if len(availableColumns) > 0 {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}

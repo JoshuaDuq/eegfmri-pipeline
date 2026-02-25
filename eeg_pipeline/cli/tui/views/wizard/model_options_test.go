@@ -238,7 +238,7 @@ func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForStatSelections(t *testin
 	if !hasOption(opts, optValidationMinEpochs) {
 		t.Fatalf("expected validation options for correlations selection")
 	}
-	if !hasOption(opts, optIOTemperatureRange) {
+	if !hasOption(opts, optIOPredictorRange) {
 		t.Fatalf("expected system/io options for correlations selection")
 	}
 }

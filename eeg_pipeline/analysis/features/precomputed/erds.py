@@ -17,7 +17,7 @@ from eeg_pipeline.utils.config.loader import get_feature_constant
 from .extras import validate_window_masks
 
 
-_PAIN_MARKER_IDENTIFIER = "Somatosensory_Contralateral"
+_DEFAULT_LATERALITY_MARKER = "Somatosensory_Contralateral"
 _DEFAULT_LEFT_SOMATOSENSORY_CHANNELS = (
     "C1",
     "C3",
@@ -175,7 +175,7 @@ def _aggregate_trace(
         return np.nanmean(stacked, axis=0), len(traces)
 
 
-def _resolve_somatosensory_indices(
+def _resolve_laterality_roi_indices(
     ch_names: Sequence[str],
     erds_cfg: Mapping[str, Any],
     roi_map: Mapping[str, Sequence[int]],
@@ -230,7 +230,7 @@ def _resolve_somatosensory_indices(
     return left_idx, right_idx
 
 
-def _compute_pain_metrics(
+def _compute_laterality_metrics(
     trace: np.ndarray,
     active_times: np.ndarray,
     sfreq: float,
@@ -351,11 +351,11 @@ def extract_erds_from_precomputed(
     min_active_power = float(erds_cfg.get("min_active_power", epsilon))
     use_log_ratio = bool(erds_cfg.get("use_log_ratio", False))
 
-    pain_metrics_enabled = _bool_or_default(erds_cfg.get("enable_pain_markers"), True)
-    pain_marker_identifier = str(erds_cfg.get("pain_marker_identifier", _PAIN_MARKER_IDENTIFIER))
-    pain_marker_bands = {
+    laterality_metrics_enabled = _bool_or_default(erds_cfg.get("enable_laterality_markers"), False)
+    laterality_marker_identifier = str(erds_cfg.get("laterality_marker_identifier", _DEFAULT_LATERALITY_MARKER))
+    laterality_marker_bands = {
         str(token).strip().lower()
-        for token in _coerce_str_list(erds_cfg.get("pain_marker_bands"), ["alpha"])
+        for token in _coerce_str_list(erds_cfg.get("laterality_marker_bands"), ["alpha"])
     }
     laterality_columns = _coerce_str_list(
         erds_cfg.get("laterality_columns"),
@@ -405,7 +405,7 @@ def extract_erds_from_precomputed(
         if roi_defs:
             roi_map = build_roi_map(precomputed.ch_names, roi_defs)
 
-    left_somato_idx, right_somato_idx = _resolve_somatosensory_indices(
+    left_somato_idx, right_somato_idx = _resolve_laterality_roi_indices(
         precomputed.ch_names,
         erds_cfg,
         roi_map,
@@ -569,10 +569,10 @@ def extract_erds_from_precomputed(
                             ] = ers_duration
 
                 if (
-                    pain_metrics_enabled
-                    and band.lower() in pain_marker_bands
+                    laterality_metrics_enabled
+                    and band.lower() in laterality_marker_bands
                     and len(active_times) > 1
-                    and pain_marker_identifier
+                    and laterality_marker_identifier
                 ):
                     stim_side = _trial_stim_side(
                         getattr(precomputed, "metadata", None),
@@ -623,7 +623,7 @@ def extract_erds_from_precomputed(
                     if selected_indices.size > 0 and np.any(np.isfinite(selected_trace)):
                         noise_vals = baseline_noise_pct_by_channel[selected_indices]
                         baseline_noise_pct = float(np.nanmedian(noise_vals)) if np.any(np.isfinite(noise_vals)) else np.nan
-                        pain_metrics = _compute_pain_metrics(
+                        laterality_metrics = _compute_laterality_metrics(
                             selected_trace,
                             active_times,
                             precomputed.sfreq,
@@ -635,7 +635,7 @@ def extract_erds_from_precomputed(
                             rebound_min_threshold_percent=rebound_min_threshold_percent,
                             rebound_min_latency_ms=rebound_min_latency_ms,
                         )
-                        for stat, value in pain_metrics.items():
+                        for stat, value in laterality_metrics.items():
                             record[
                                 NamingSchema.build(
                                     "erds",
@@ -643,7 +643,7 @@ def extract_erds_from_precomputed(
                                     band,
                                     "roi",
                                     stat,
-                                    channel=pain_marker_identifier,
+                                    channel=laterality_marker_identifier,
                                 )
                             ] = float(value)
 

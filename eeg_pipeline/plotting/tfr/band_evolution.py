@@ -313,7 +313,7 @@ def _create_condition_masks(
     """Create masks for different conditions based on user-specified comparison.
     
     Only creates masks for what the user explicitly specifies in the comparison configuration.
-    No automatic temperature detection - only uses the comparison_column, comparison_values, 
+    No automatic predictor detection - only uses the comparison_column, comparison_values, 
     and comparison_labels from the config.
     
     Args:
@@ -373,7 +373,7 @@ def plot_band_power_evolution_all_conditions(
     
     Args:
         tfr: EpochsTFR object
-        events_df: Events DataFrame with condition/temperature columns
+        events_df: Events DataFrame with condition/predictor columns
         save_dir: Directory to save plots
         config: Configuration object
         baseline: Baseline window for correction

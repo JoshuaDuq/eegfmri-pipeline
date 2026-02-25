@@ -194,17 +194,17 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 
 	// Event Column Mapping
-	if strings.TrimSpace(m.eventColTemperature) != "" {
-		args = append(args, "--event-col-temperature")
-		args = append(args, splitCSVList(m.eventColTemperature)...)
+	if strings.TrimSpace(m.eventColPredictor) != "" {
+		args = append(args, "--event-col-predictor")
+		args = append(args, splitCSVList(m.eventColPredictor)...)
 	}
-	if strings.TrimSpace(m.eventColRating) != "" {
-		args = append(args, "--event-col-rating")
-		args = append(args, splitCSVList(m.eventColRating)...)
+	if strings.TrimSpace(m.eventColOutcome) != "" {
+		args = append(args, "--event-col-outcome")
+		args = append(args, splitCSVList(m.eventColOutcome)...)
 	}
-	if strings.TrimSpace(m.eventColPainBinary) != "" {
+	if strings.TrimSpace(m.eventColBinaryOutcome) != "" {
 		args = append(args, "--event-col-binary-outcome")
-		args = append(args, splitCSVList(m.eventColPainBinary)...)
+		args = append(args, splitCSVList(m.eventColBinaryOutcome)...)
 	}
 	if strings.TrimSpace(m.conditionPreferredPrefixes) != "" {
 		args = append(args, "--condition-preferred-prefixes")

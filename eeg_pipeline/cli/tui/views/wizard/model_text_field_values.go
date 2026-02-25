@@ -66,6 +66,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisFreesurferDir
 	case textFieldFmriAnalysisSignatureDir:
 		return m.fmriAnalysisSignatureDir
+	case textFieldFmriAnalysisSignatureMaps:
+		return m.fmriAnalysisSignatureMaps
 	case textFieldFmriTrialSigGroupColumn:
 		return m.fmriTrialSigGroupColumn
 	case textFieldFmriTrialSigGroupValues:
@@ -112,12 +114,12 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.behaviorOutcomeColumn
 	case textFieldBehaviorPredictorColumn:
 		return m.behaviorPredictorColumn
-	case textFieldPainResidualCrossfitGroupColumn:
-		return m.painResidualCrossfitGroupColumn
-	case textFieldPainResidualSplineDfCandidates:
-		return m.painResidualSplineDfCandidates
-	case textFieldPainResidualModelComparePolyDegrees:
-		return m.painResidualModelComparePolyDegrees
+	case textFieldPredictorResidualCrossfitGroupColumn:
+		return m.predictorResidualCrossfitGroupColumn
+	case textFieldPredictorResidualSplineDfCandidates:
+		return m.predictorResidualSplineDfCandidates
+	case textFieldPredictorResidualModelComparePolyDegrees:
+		return m.predictorResidualModelComparePolyDegrees
 	case textFieldClusterConditionColumn:
 		return m.clusterConditionColumn
 	case textFieldClusterConditionValues:
@@ -130,8 +132,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.correlationsTypesSpec
 	case textFieldCorrelationsFeatures:
 		return m.correlationsFeaturesSpec
-	case textFieldPainSensitivityFeatures:
-		return m.painSensitivityFeaturesSpec
+	case textFieldPredictorSensitivityFeatures:
+		return m.predictorSensitivityFeaturesSpec
 	case textFieldConditionFeatures:
 		return m.conditionFeaturesSpec
 	case textFieldTemporalFeatures:
@@ -230,10 +232,10 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.plotFigureSizeTFRSpec
 	case textFieldPlotFigureSizeTopomap:
 		return m.plotFigureSizeTopomapSpec
-	case textFieldPlotColorPain:
-		return m.plotColorPain
-	case textFieldPlotColorNonpain:
-		return m.plotColorNonpain
+	case textFieldPlotColorCondB:
+		return m.plotColorCondB
+	case textFieldPlotColorCondA:
+		return m.plotColorCondA
 	case textFieldPlotColorSignificant:
 		return m.plotColorSignificant
 	case textFieldPlotColorNonsignificant:
@@ -347,20 +349,20 @@ func (m Model) getTextFieldValue(field textField) string {
 	case textFieldPrepAutorejectNInterpolate:
 		return m.prepAutorejectNInterpolate
 	// Event Column Mapping text fields
-	case textFieldEventColTemperature:
-		return m.eventColTemperature
-	case textFieldEventColRating:
-		return m.eventColRating
-	case textFieldEventColPainBinary:
-		return m.eventColPainBinary
+	case textFieldEventColPredictor:
+		return m.eventColPredictor
+	case textFieldEventColOutcome:
+		return m.eventColOutcome
+	case textFieldEventColBinaryOutcome:
+		return m.eventColBinaryOutcome
 	case textFieldConditionPreferredPrefixes:
 		return m.conditionPreferredPrefixes
 	// Change Scores text fields
 	case textFieldChangeScoresWindowPairs:
 		return m.changeScoresWindowPairs
-	// ERDS Pain Markers text fields
-	case textFieldERDSPainMarkerBands:
-		return m.erdsPainMarkerBands
+	// ERDS Condition Markers text fields
+	case textFieldERDSConditionMarkerBands:
+		return m.erdsConditionMarkerBands
 	case textFieldERDSLateralityColumns:
 		return m.erdsLateralityColumns
 	case textFieldERDSSomatosensoryLeftChannels:
@@ -371,8 +373,8 @@ func (m Model) getTextFieldValue(field textField) string {
 	case textFieldBehaviorPermGroupColumnPreference:
 		return m.behaviorPermGroupColumnPreference
 	// System / IO text fields
-	case textFieldIOTemperatureRange:
-		return m.ioTemperatureRange
+	case textFieldIOPredictorRange:
+		return m.ioPredictorRange
 	// Preprocessing text fields
 	case textFieldIcaLabelsToKeep:
 		return m.icaLabelsToKeep
@@ -444,6 +446,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisFreesurferDir = strings.TrimSpace(value)
 	case textFieldFmriAnalysisSignatureDir:
 		m.fmriAnalysisSignatureDir = strings.TrimSpace(value)
+	case textFieldFmriAnalysisSignatureMaps:
+		m.fmriAnalysisSignatureMaps = strings.TrimSpace(value)
 	case textFieldFmriTrialSigGroupColumn:
 		m.fmriTrialSigGroupColumn = strings.TrimSpace(value)
 		m.fmriTrialSigGroupValuesSpec = "" // Reset values when column changes
@@ -491,12 +495,12 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.behaviorOutcomeColumn = strings.TrimSpace(value)
 	case textFieldBehaviorPredictorColumn:
 		m.behaviorPredictorColumn = strings.TrimSpace(value)
-	case textFieldPainResidualCrossfitGroupColumn:
-		m.painResidualCrossfitGroupColumn = strings.TrimSpace(value)
-	case textFieldPainResidualSplineDfCandidates:
-		m.painResidualSplineDfCandidates = strings.Join(strings.Fields(value), "")
-	case textFieldPainResidualModelComparePolyDegrees:
-		m.painResidualModelComparePolyDegrees = strings.Join(strings.Fields(value), "")
+	case textFieldPredictorResidualCrossfitGroupColumn:
+		m.predictorResidualCrossfitGroupColumn = strings.TrimSpace(value)
+	case textFieldPredictorResidualSplineDfCandidates:
+		m.predictorResidualSplineDfCandidates = strings.Join(strings.Fields(value), "")
+	case textFieldPredictorResidualModelComparePolyDegrees:
+		m.predictorResidualModelComparePolyDegrees = strings.Join(strings.Fields(value), "")
 	case textFieldClusterConditionColumn:
 		m.clusterConditionColumn = strings.TrimSpace(value)
 	case textFieldClusterConditionValues:
@@ -509,8 +513,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.correlationsTypesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldCorrelationsFeatures:
 		m.correlationsFeaturesSpec = strings.Join(strings.Fields(value), "")
-	case textFieldPainSensitivityFeatures:
-		m.painSensitivityFeaturesSpec = strings.Join(strings.Fields(value), "")
+	case textFieldPredictorSensitivityFeatures:
+		m.predictorSensitivityFeaturesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldConditionFeatures:
 		m.conditionFeaturesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldTemporalFeatures:
@@ -609,10 +613,10 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.plotFigureSizeTFRSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotFigureSizeTopomap:
 		m.plotFigureSizeTopomapSpec = strings.Join(strings.Fields(value), " ")
-	case textFieldPlotColorPain:
-		m.plotColorPain = value
-	case textFieldPlotColorNonpain:
-		m.plotColorNonpain = value
+	case textFieldPlotColorCondB:
+		m.plotColorCondB = value
+	case textFieldPlotColorCondA:
+		m.plotColorCondA = value
 	case textFieldPlotColorSignificant:
 		m.plotColorSignificant = value
 	case textFieldPlotColorNonsignificant:
@@ -737,20 +741,20 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 	case textFieldPrepAutorejectNInterpolate:
 		m.prepAutorejectNInterpolate = strings.Join(splitLooseList(value), ",")
 	// Event Column Mapping text fields
-	case textFieldEventColTemperature:
-		m.eventColTemperature = strings.Join(splitLooseList(value), ",")
-	case textFieldEventColRating:
-		m.eventColRating = strings.Join(splitLooseList(value), ",")
-	case textFieldEventColPainBinary:
-		m.eventColPainBinary = strings.Join(splitLooseList(value), ",")
+	case textFieldEventColPredictor:
+		m.eventColPredictor = strings.Join(splitLooseList(value), ",")
+	case textFieldEventColOutcome:
+		m.eventColOutcome = strings.Join(splitLooseList(value), ",")
+	case textFieldEventColBinaryOutcome:
+		m.eventColBinaryOutcome = strings.Join(splitLooseList(value), ",")
 	case textFieldConditionPreferredPrefixes:
 		m.conditionPreferredPrefixes = strings.Join(splitLooseList(value), ",")
 	// Change Scores text fields
 	case textFieldChangeScoresWindowPairs:
 		m.changeScoresWindowPairs = strings.TrimSpace(value)
-	// ERDS Pain Markers text fields
-	case textFieldERDSPainMarkerBands:
-		m.erdsPainMarkerBands = strings.Join(splitLooseList(value), ",")
+	// ERDS Condition Markers text fields
+	case textFieldERDSConditionMarkerBands:
+		m.erdsConditionMarkerBands = strings.Join(splitLooseList(value), ",")
 	case textFieldERDSLateralityColumns:
 		m.erdsLateralityColumns = strings.Join(splitLooseList(value), ",")
 	case textFieldERDSSomatosensoryLeftChannels:
@@ -761,8 +765,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 	case textFieldBehaviorPermGroupColumnPreference:
 		m.behaviorPermGroupColumnPreference = strings.Join(splitLooseList(value), ",")
 	// System / IO text fields
-	case textFieldIOTemperatureRange:
-		m.ioTemperatureRange = strings.Join(splitLooseList(value), ",")
+	case textFieldIOPredictorRange:
+		m.ioPredictorRange = strings.Join(splitLooseList(value), ",")
 	// Preprocessing text fields
 	case textFieldIcaLabelsToKeep:
 		m.icaLabelsToKeep = strings.Join(strings.Fields(value), "")

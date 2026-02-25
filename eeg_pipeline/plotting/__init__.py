@@ -59,7 +59,7 @@ def __getattr__(name: str):
         "plot_channels_all_trials": "tfr",
         "plot_scalpmean_all_trials": "tfr",
         "contrast_scalpmean_pain_nonpain": "tfr",
-        "contrast_maxmin_temperature": "tfr",
+        "contrast_maxmin_predictor": "tfr",
         "compute_roi_tfrs": "tfr",
         "plot_rois_all_trials": "tfr",
         "plot_pain_nonpain_temporal_topomaps_diff_allbands": "tfr",

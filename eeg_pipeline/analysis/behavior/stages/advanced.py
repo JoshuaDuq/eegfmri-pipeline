@@ -21,7 +21,7 @@ def stage_mediation_impl(
     compute_unified_fdr_fn: Callable[..., pd.DataFrame],
     unified_fdr_family_columns: List[str],
 ) -> pd.DataFrame:
-    """Run mediation analysis: test if neural features mediate temperature→rating."""
+    """Run mediation analysis: test if neural features mediate predictor→outcome."""
     from eeg_pipeline.analysis.behavior.api import run_mediation_analysis
     from eeg_pipeline.utils.data.columns import (
         resolve_outcome_column,
@@ -33,8 +33,8 @@ def stage_mediation_impl(
         ctx.logger.info("Mediation: trial table missing; skipping.")
         return pd.DataFrame()
 
-    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
-    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
+    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
     required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df_trials.columns)
     if missing_columns:
@@ -196,7 +196,7 @@ def stage_moderation_impl(
     write_parquet_with_optional_csv_fn: Callable[[pd.DataFrame, Any, bool], None],
     unified_fdr_family_columns: List[str],
 ) -> pd.DataFrame:
-    """Run moderation analysis: feature moderates temperature→rating relationship."""
+    """Run moderation analysis: feature moderates predictor→outcome relationship."""
     from eeg_pipeline.utils.analysis.stats.moderation import run_moderation_analysis
     from eeg_pipeline.utils.data.columns import (
         resolve_outcome_column,
@@ -212,8 +212,8 @@ def stage_moderation_impl(
         ctx.logger.warning("Moderation: trial table missing; skipping.")
         return pd.DataFrame()
 
-    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
-    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
+    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
+    outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
     required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df_trials.columns)
     if missing_columns:
@@ -325,7 +325,6 @@ def stage_moderation_impl(
                 "feature_type": feature_type_resolver_fn(str(feat), ctx.config),
                 "n": result.n,
                 "b1_predictor": result.b1,
-                "b1_temperature": result.b1,
                 "b2_feature": result.b2,
                 "b3_interaction": result.b3,
                 "se_b3": result.se_b3,

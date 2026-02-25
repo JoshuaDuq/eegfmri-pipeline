@@ -881,9 +881,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optDirectedConnMinSamplesPerMvarParam:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	// ERDS pain markers
-	case optERDSPainMarkerBands:
-		m.startTextEdit(textFieldERDSPainMarkerBands)
+	// ERDS condition markers
+	case optERDSConditionMarkerBands:
+		m.startTextEdit(textFieldERDSConditionMarkerBands)
 		m.useDefaultAdvanced = false
 	case optERDSLateralityColumns:
 		m.startTextEdit(textFieldERDSLateralityColumns)
@@ -1020,8 +1020,8 @@ func (m *Model) togglePlottingAdvancedOption() {
 		case plotItemConfigFieldConnectivityCircleTopFraction, plotItemConfigFieldConnectivityCircleMinLines, plotItemConfigFieldConnectivityNetworkTopFraction:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
-		case plotItemConfigFieldDoseResponseDoseColumn, plotItemConfigFieldDoseResponsePainColumn:
-			// Dose/pain columns come from aligned events / trial metadata.
+		case plotItemConfigFieldDoseResponseDoseColumn, plotItemConfigFieldDoseResponsePredictorColumn:
+			// Dose/predictor columns come from aligned events / trial metadata.
 			plotCols := m.GetPlottingComparisonColumns()
 			if len(plotCols) > 0 {
 				m.expandedOption = expandedPlotComparisonColumn
@@ -1270,11 +1270,11 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.startTextEdit(textFieldPlotFigureSizeTopomap)
 		m.useDefaultAdvanced = false
 
-	case optPlotColorPain:
-		m.startTextEdit(textFieldPlotColorPain)
+	case optPlotColorCondB:
+		m.startTextEdit(textFieldPlotColorCondB)
 		m.useDefaultAdvanced = false
-	case optPlotColorNonpain:
-		m.startTextEdit(textFieldPlotColorNonpain)
+	case optPlotColorCondA:
+		m.startTextEdit(textFieldPlotColorCondA)
 		m.useDefaultAdvanced = false
 	case optPlotColorSignificant:
 		m.startTextEdit(textFieldPlotColorSignificant)
@@ -1586,14 +1586,14 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupTrialTable:
 		m.behaviorGroupTrialTableExpanded = !m.behaviorGroupTrialTableExpanded
 		m.useDefaultAdvanced = false
-	case optBehaviorGroupPainResidual:
-		m.behaviorGroupPainResidualExpanded = !m.behaviorGroupPainResidualExpanded
+	case optBehaviorGroupPredictorResidual:
+		m.behaviorGroupPredictorResidualExpanded = !m.behaviorGroupPredictorResidualExpanded
 		m.useDefaultAdvanced = false
 	case optBehaviorGroupCorrelations:
 		m.behaviorGroupCorrelationsExpanded = !m.behaviorGroupCorrelationsExpanded
 		m.useDefaultAdvanced = false
-	case optBehaviorGroupPainSens:
-		m.behaviorGroupPainSensExpanded = !m.behaviorGroupPainSensExpanded
+	case optBehaviorGroupPredictorSens:
+		m.behaviorGroupPredictorSensExpanded = !m.behaviorGroupPredictorSensExpanded
 		m.useDefaultAdvanced = false
 	case optBehaviorGroupRegression:
 		m.behaviorGroupRegressionExpanded = !m.behaviorGroupRegressionExpanded
@@ -1647,6 +1647,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.correlationMethod = "spearman"
 		}
 		m.useDefaultAdvanced = false
+	case optPredictorType:
+		m.predictorType = (m.predictorType + 1) % 3
+		m.useDefaultAdvanced = false
 	case optRobustCorrelation:
 		m.robustCorrelation = (m.robustCorrelation + 1) % 4
 		m.useDefaultAdvanced = false
@@ -1663,7 +1666,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optControlTemp:
-		m.controlTemperature = !m.controlTemperature
+		m.controlPredictor = !m.controlPredictor
 		m.useDefaultAdvanced = false
 	case optControlOrder:
 		m.controlTrialOrder = !m.controlTrialOrder
@@ -1743,51 +1746,51 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optFeatureQCCheckWithinRunVariance:
 		m.featureQCCheckWithinRunVariance = !m.featureQCCheckWithinRunVariance
 		m.useDefaultAdvanced = false
-	case optPainResidualEnabled:
-		m.painResidualEnabled = !m.painResidualEnabled
+	case optPredictorResidualEnabled:
+		m.predictorResidualEnabled = !m.predictorResidualEnabled
 		m.useDefaultAdvanced = false
-	case optPainResidualMethod:
-		m.painResidualMethod = (m.painResidualMethod + 1) % 2
+	case optPredictorResidualMethod:
+		m.predictorResidualMethod = (m.predictorResidualMethod + 1) % 2
 		m.useDefaultAdvanced = false
-	case optPainResidualPolyDegree:
+	case optPredictorResidualPolyDegree:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPainResidualSplineDfCandidates:
-		m.startTextEdit(textFieldPainResidualSplineDfCandidates)
+	case optPredictorResidualSplineDfCandidates:
+		m.startTextEdit(textFieldPredictorResidualSplineDfCandidates)
 		m.useDefaultAdvanced = false
-	case optPainResidualModelCompare:
-		m.painResidualModelCompareEnabled = !m.painResidualModelCompareEnabled
+	case optPredictorResidualModelCompare:
+		m.predictorResidualModelCompareEnabled = !m.predictorResidualModelCompareEnabled
 		m.useDefaultAdvanced = false
-	case optPainResidualModelComparePolyDegrees:
-		m.startTextEdit(textFieldPainResidualModelComparePolyDegrees)
+	case optPredictorResidualModelComparePolyDegrees:
+		m.startTextEdit(textFieldPredictorResidualModelComparePolyDegrees)
 		m.useDefaultAdvanced = false
-	case optPainResidualMinSamples, optPainResidualModelCompareMinSamples:
+	case optPredictorResidualMinSamples, optPredictorResidualModelCompareMinSamples:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPainResidualBreakpoint:
-		m.painResidualBreakpointEnabled = !m.painResidualBreakpointEnabled
+	case optPredictorResidualBreakpoint:
+		m.predictorResidualBreakpointEnabled = !m.predictorResidualBreakpointEnabled
 		m.useDefaultAdvanced = false
-	case optPainResidualBreakpointCandidates, optPainResidualBreakpointMinSamples, optPainResidualBreakpointQlow, optPainResidualBreakpointQhigh:
+	case optPredictorResidualBreakpointCandidates, optPredictorResidualBreakpointMinSamples, optPredictorResidualBreakpointQlow, optPredictorResidualBreakpointQhigh:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPainResidualCrossfitEnabled:
-		m.painResidualCrossfitEnabled = !m.painResidualCrossfitEnabled
+	case optPredictorResidualCrossfitEnabled:
+		m.predictorResidualCrossfitEnabled = !m.predictorResidualCrossfitEnabled
 		m.useDefaultAdvanced = false
-	case optPainResidualCrossfitGroupColumn:
+	case optPredictorResidualCrossfitGroupColumn:
 		if len(m.GetAvailableColumns()) > 0 {
-			m.expandedOption = expandedPainResidualCrossfitGroupColumn
+			m.expandedOption = expandedPredictorResidualCrossfitGroupColumn
 			m.subCursor = 0
 		} else {
-			m.startTextEdit(textFieldPainResidualCrossfitGroupColumn)
+			m.startTextEdit(textFieldPredictorResidualCrossfitGroupColumn)
 		}
 		m.useDefaultAdvanced = false
-	case optPainResidualCrossfitNSplits:
+	case optPredictorResidualCrossfitNSplits:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPainResidualCrossfitMethod:
-		m.painResidualCrossfitMethod = (m.painResidualCrossfitMethod + 1) % 2
+	case optPredictorResidualCrossfitMethod:
+		m.predictorResidualCrossfitMethod = (m.predictorResidualCrossfitMethod + 1) % 2
 		m.useDefaultAdvanced = false
-	case optPainResidualCrossfitSplineKnots:
+	case optPredictorResidualCrossfitSplineKnots:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -1795,11 +1798,13 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRegressionOutcome:
 		m.regressionOutcome = (m.regressionOutcome + 1) % 3
 		m.useDefaultAdvanced = false
-	case optRegressionIncludeTemperature:
-		m.regressionIncludeTemperature = !m.regressionIncludeTemperature
+	case optRegressionIncludePredictor:
+		m.regressionIncludePredictor = !m.regressionIncludePredictor
 		m.useDefaultAdvanced = false
 	case optRegressionTempControl:
-		m.regressionTempControl = (m.regressionTempControl + 1) % 3
+		if m.predictorType == 0 {
+			m.regressionTempControl = (m.regressionTempControl + 1) % 3
+		}
 		m.useDefaultAdvanced = false
 	case optRegressionTempSplineKnots, optRegressionTempSplineQlow, optRegressionTempSplineQhigh, optRegressionTempSplineMinN:
 		m.startNumberEdit()
@@ -1827,11 +1832,13 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Models
-	case optModelsIncludeTemperature:
-		m.modelsIncludeTemperature = !m.modelsIncludeTemperature
+	case optModelsIncludePredictor:
+		m.modelsIncludePredictor = !m.modelsIncludePredictor
 		m.useDefaultAdvanced = false
 	case optModelsTempControl:
-		m.modelsTempControl = (m.modelsTempControl + 1) % 3
+		if m.predictorType == 0 {
+			m.modelsTempControl = (m.modelsTempControl + 1) % 3
+		}
 		m.useDefaultAdvanced = false
 	case optModelsTempSplineKnots, optModelsTempSplineQlow, optModelsTempSplineQhigh, optModelsTempSplineMinN:
 		m.startNumberEdit()
@@ -1855,27 +1862,27 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optModelsOutcomeRating:
-		m.modelsOutcomeRating = !m.modelsOutcomeRating
-		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomeTemperature && !m.modelsOutcomePainBinary {
-			m.modelsOutcomeRating = true
+		m.modelsOutcomeValue = !m.modelsOutcomeValue
+		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
+			m.modelsOutcomeValue = true
 		}
 		m.useDefaultAdvanced = false
-	case optModelsOutcomePainResidual:
-		m.modelsOutcomePainResidual = !m.modelsOutcomePainResidual
-		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomeTemperature && !m.modelsOutcomePainBinary {
-			m.modelsOutcomePainResidual = true
+	case optModelsOutcomePredictorResidual:
+		m.modelsOutcomePredictorResidual = !m.modelsOutcomePredictorResidual
+		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
+			m.modelsOutcomePredictorResidual = true
 		}
 		m.useDefaultAdvanced = false
-	case optModelsOutcomeTemperature:
-		m.modelsOutcomeTemperature = !m.modelsOutcomeTemperature
-		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomeTemperature && !m.modelsOutcomePainBinary {
-			m.modelsOutcomeTemperature = true
+	case optModelsOutcomePredictor:
+		m.modelsOutcomePredictor = !m.modelsOutcomePredictor
+		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
+			m.modelsOutcomePredictor = true
 		}
 		m.useDefaultAdvanced = false
-	case optModelsOutcomePainBinary:
-		m.modelsOutcomePainBinary = !m.modelsOutcomePainBinary
-		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomeTemperature && !m.modelsOutcomePainBinary {
-			m.modelsOutcomePainBinary = true
+	case optModelsOutcomeBinaryOutcome:
+		m.modelsOutcomeBinaryOutcome = !m.modelsOutcomeBinaryOutcome
+		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
+			m.modelsOutcomeBinaryOutcome = true
 		}
 		m.useDefaultAdvanced = false
 	case optModelsFamilyOLS:
@@ -1937,31 +1944,33 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 
 	// Influence
 	case optInfluenceOutcomeRating:
-		m.influenceOutcomeRating = !m.influenceOutcomeRating
-		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual && !m.influenceOutcomeTemperature {
-			m.influenceOutcomeRating = true
+		m.influenceOutcomeValue = !m.influenceOutcomeValue
+		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
+			m.influenceOutcomeValue = true
 		}
 		m.useDefaultAdvanced = false
-	case optInfluenceOutcomePainResidual:
-		m.influenceOutcomePainResidual = !m.influenceOutcomePainResidual
-		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual && !m.influenceOutcomeTemperature {
-			m.influenceOutcomePainResidual = true
+	case optInfluenceOutcomePredictorResidual:
+		m.influenceOutcomePredictorResidual = !m.influenceOutcomePredictorResidual
+		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
+			m.influenceOutcomePredictorResidual = true
 		}
 		m.useDefaultAdvanced = false
-	case optInfluenceOutcomeTemperature:
-		m.influenceOutcomeTemperature = !m.influenceOutcomeTemperature
-		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual && !m.influenceOutcomeTemperature {
-			m.influenceOutcomeTemperature = true
+	case optInfluenceOutcomePredictor:
+		m.influenceOutcomePredictor = !m.influenceOutcomePredictor
+		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
+			m.influenceOutcomePredictor = true
 		}
 		m.useDefaultAdvanced = false
 	case optInfluenceMaxFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optInfluenceIncludeTemperature:
-		m.influenceIncludeTemperature = !m.influenceIncludeTemperature
+	case optInfluenceIncludePredictor:
+		m.influenceIncludePredictor = !m.influenceIncludePredictor
 		m.useDefaultAdvanced = false
 	case optInfluenceTempControl:
-		m.influenceTempControl = (m.influenceTempControl + 1) % 3
+		if m.predictorType == 0 {
+			m.influenceTempControl = (m.influenceTempControl + 1) % 3
+		}
 		m.useDefaultAdvanced = false
 	case optInfluenceTempSplineKnots, optInfluenceTempSplineQlow, optInfluenceTempSplineQhigh, optInfluenceTempSplineMinN:
 		m.startNumberEdit()
@@ -1988,7 +1997,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Correlations
-	case optCorrelationsUseCrossfitPainResidual:
+	case optCorrelationsUseCrossfitPredictorResidual:
 		m.correlationsUseCrossfitResidual = !m.correlationsUseCrossfitResidual
 		m.useDefaultAdvanced = false
 	case optCorrelationsPrimaryUnit:
@@ -1997,8 +2006,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optCorrelationsMinRuns:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optCorrelationsPreferPainResidual:
-		m.correlationsPreferPainResidual = !m.correlationsPreferPainResidual
+	case optCorrelationsPreferPredictorResidual:
+		m.correlationsPreferPredictorResidual = !m.correlationsPreferPredictorResidual
 		m.useDefaultAdvanced = false
 	case optCorrelationsPermutations:
 		m.startNumberEdit()
@@ -2040,8 +2049,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startTextEdit(textFieldGroupLevelTarget)
 		}
 		m.useDefaultAdvanced = false
-	case optGroupLevelControlTemperature:
-		m.groupLevelControlTemperature = !m.groupLevelControlTemperature
+	case optGroupLevelControlPredictor:
+		m.groupLevelControlPredictor = !m.groupLevelControlPredictor
 		m.useDefaultAdvanced = false
 	case optGroupLevelControlTrialOrder:
 		m.groupLevelControlTrialOrder = !m.groupLevelControlTrialOrder
@@ -2228,8 +2237,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optMixedMaxFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optMixedIncludeTemperature:
-		m.mixedIncludeTemperature = !m.mixedIncludeTemperature
+	case optMixedIncludePredictor:
+		m.mixedIncludePredictor = !m.mixedIncludePredictor
 		m.useDefaultAdvanced = false
 	case optMixedEffectsType:
 		m.mixedEffectsType = (m.mixedEffectsType + 1) % 2
@@ -2272,20 +2281,20 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optConditionMinTrials:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPainSensitivityMinTrials:
+	case optPredictorSensitivityMinTrials:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPainSensitivityPrimaryUnit:
-		m.painSensitivityPrimaryUnit = (m.painSensitivityPrimaryUnit + 1) % 2
+	case optPredictorSensitivityPrimaryUnit:
+		m.predictorSensitivityPrimaryUnit = (m.predictorSensitivityPrimaryUnit + 1) % 2
 		m.useDefaultAdvanced = false
-	case optPainSensitivityPermutations:
+	case optPredictorSensitivityPermutations:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPainSensitivityPermutationPrimary:
-		m.painSensitivityPermutationPrimary = !m.painSensitivityPermutationPrimary
+	case optPredictorSensitivityPermutationPrimary:
+		m.predictorSensitivityPermutationPrimary = !m.predictorSensitivityPermutationPrimary
 		m.useDefaultAdvanced = false
-	case optPainSensitivityFeatures:
-		m.startTextEdit(textFieldPainSensitivityFeatures)
+	case optPredictorSensitivityFeatures:
+		m.startTextEdit(textFieldPredictorSensitivityFeatures)
 		m.useDefaultAdvanced = false
 	case optConditionPrimaryUnit:
 		m.conditionPrimaryUnit = (m.conditionPrimaryUnit + 1) % 2
@@ -2359,8 +2368,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// System / IO
-	case optIOTemperatureRange:
-		m.startTextEdit(textFieldIOTemperatureRange)
+	case optIOPredictorRange:
+		m.startTextEdit(textFieldIOPredictorRange)
 		m.useDefaultAdvanced = false
 	case optIOMaxMissingChannelsFraction:
 		m.startNumberEdit()

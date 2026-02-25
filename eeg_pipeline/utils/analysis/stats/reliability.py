@@ -192,7 +192,7 @@ def compute_correlation_split_half_reliability(
     x : np.ndarray
         First variable
     y : np.ndarray
-        Second variable (e.g., ratings)
+        Second variable (e.g., outcomes)
     method : str
         Correlation method ('spearman' or 'pearson')
     n_splits : int

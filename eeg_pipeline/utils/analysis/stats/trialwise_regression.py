@@ -5,10 +5,10 @@ Trialwise Regression (Subject-Level)
 Per-subject regression analyses that complement correlations:
 
 Primary model (default):
-    rating ~ temperature + trial_order (+ run/block dummies) + feature
+    outcome ~ predictor + trial_order (+ run/block dummies) + feature
 
 Optional moderation:
-    + feature*temperature
+    + feature*predictor
 
 Outputs robust (HC3) standard errors and optional Freedman–Lane permutation p-values.
 """
@@ -32,7 +32,7 @@ from eeg_pipeline.utils.analysis.stats._regression_utils import (
     _hc3_se,
     _r2,
     _build_covariate_design,
-    _build_temperature_covariates as _build_temp_cov_shared,
+    _build_predictor_covariates as _build_temp_cov_shared,
 )
 
 
@@ -65,7 +65,7 @@ def _build_previous_term_covariates(
     """Build previous trial term covariates."""
     covariates: List[str] = []
     if cfg.include_prev_terms:
-        prev_columns = ["prev_temperature", "prev_rating", "delta_temperature", "delta_rating"]
+        prev_columns = ["prev_predictor", "prev_outcome", "delta_predictor", "delta_outcome"]
         for col in prev_columns:
             if col in trial_df.columns:
                 covariates.append(col)
@@ -190,9 +190,9 @@ def _fit_reduced_model(
 
 @dataclass
 class TrialwiseRegressionConfig:
-    outcome: str = "rating"
-    include_temperature: bool = True
-    temperature_control: str = "linear"  # "linear" | "rating_hat" | "spline"
+    outcome: str = "outcome"
+    include_predictor: bool = True
+    predictor_control: str = "linear"  # "linear" | "outcome_hat" | "spline"
     include_trial_order: bool = True
     include_prev_terms: bool = False
     include_run_block: bool = True
@@ -207,10 +207,10 @@ class TrialwiseRegressionConfig:
     def from_config(cls, config: Any) -> "TrialwiseRegressionConfig":
         """Create config from configuration object."""
         base_path = "behavior_analysis.regression"
-        outcome = str(_get(config, f"{base_path}.outcome", "rating"))
-        include_temperature = bool(_get(config, f"{base_path}.include_temperature", True))
-        temperature_control_raw = str(_get(config, f"{base_path}.temperature_control", "linear"))
-        temperature_control = temperature_control_raw.strip().lower()
+        outcome = str(_get(config, f"{base_path}.outcome", "outcome"))
+        include_predictor = bool(_get(config, f"{base_path}.include_predictor", True))
+        predictor_control_raw = str(_get(config, f"{base_path}.predictor_control", "linear"))
+        predictor_control = predictor_control_raw.strip().lower()
         include_trial_order = bool(_get(config, f"{base_path}.include_trial_order", True))
         include_prev_terms = bool(_get(config, f"{base_path}.include_prev_terms", False))
         include_run_block = bool(_get(config, f"{base_path}.include_run_block", True))
@@ -223,8 +223,8 @@ class TrialwiseRegressionConfig:
         
         return cls(
             outcome=outcome,
-            include_temperature=include_temperature,
-            temperature_control=temperature_control,
+            include_predictor=include_predictor,
+            predictor_control=predictor_control,
             include_trial_order=include_trial_order,
             include_prev_terms=include_prev_terms,
             include_run_block=include_run_block,
@@ -276,7 +276,7 @@ def _compute_permutation_pvalues(
     exceed_feature = 1
     exceed_int = 1
     denom = n_permutations + 1
-    has_interaction = "feature_x_temperature" in names
+    has_interaction = "feature_x_predictor" in names
 
     for _ in range(n_permutations):
         try:
@@ -297,7 +297,7 @@ def _compute_permutation_pvalues(
             exceed_feature += 1
 
         if has_interaction:
-            idx_int = names.index("feature_x_temperature")
+            idx_int = names.index("feature_x_predictor")
             beta_perm_int = float(beta_p[idx_int])
             if np.abs(beta_perm_int) >= np.abs(beta_int):
                 exceed_int += 1
@@ -324,10 +324,10 @@ def _prepare_feature_and_interaction(
     x = _zscore(x_raw) if cfg.standardize else x_raw
     
     x_int = None
-    if cfg.include_interaction and "temperature" in trial_df.columns and np.isfinite(x).any():
-        temperature = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)[valid_mask]
-        temperature_standardized = _zscore(temperature) if cfg.standardize else temperature
-        x_int = x * temperature_standardized
+    if cfg.include_interaction and "predictor" in trial_df.columns and np.isfinite(x).any():
+        predictor = pd.to_numeric(trial_df["predictor"], errors="coerce").to_numpy(dtype=float)[valid_mask]
+        predictor_standardized = _zscore(predictor) if cfg.standardize else predictor
+        x_int = x * predictor_standardized
     
     valid_feat = np.isfinite(x)
     if x_int is not None:
@@ -348,7 +348,7 @@ def _build_full_design_matrix(
     
     if x_int is not None:
         X_parts.append(x_int[:, None])
-        names.append("feature_x_temperature")
+        names.append("feature_x_predictor")
     
     X = np.column_stack(X_parts)
     return X, names
@@ -375,8 +375,8 @@ def _extract_coefficient_results(
     
     beta_int = np.nan
     p_int = np.nan
-    if "feature_x_temperature" in names:
-        idx_int = names.index("feature_x_temperature")
+    if "feature_x_predictor" in names:
+        idx_int = names.index("feature_x_predictor")
         beta_int = float(beta[idx_int])
         p_int = float(p_vals[idx_int]) if np.isfinite(p_vals[idx_int]) else np.nan
     
@@ -490,7 +490,7 @@ def run_trialwise_feature_regressions(
     """Run per-feature regression on a subject's trial table."""
     cfg = TrialwiseRegressionConfig.from_config(config)
     out_col = cfg.outcome
-    meta: Dict[str, Any] = {"outcome": out_col, "temperature_control": cfg.temperature_control}
+    meta: Dict[str, Any] = {"outcome": out_col, "predictor_control": cfg.predictor_control}
 
     if out_col not in trial_df.columns:
         return pd.DataFrame(), {"status": "missing_outcome", **meta}
@@ -499,13 +499,17 @@ def run_trialwise_feature_regressions(
     if y_all.notna().sum() < cfg.min_samples:
         return pd.DataFrame(), {"status": "insufficient_samples", "n_valid": int(y_all.notna().sum()), **meta}
 
+    from eeg_pipeline.utils.data.columns import resolve_predictor_column
+
+    predictor_col = resolve_predictor_column(trial_df, config) or "predictor"
     temp_covariates, temp_design_df, temp_meta = _build_temp_cov_shared(
         trial_df=trial_df,
         outcome=out_col,
-        temperature_control=cfg.temperature_control or "linear",
-        include_temperature=cfg.include_temperature,
+        predictor_control=cfg.predictor_control or "linear",
+        include_predictor=cfg.include_predictor,
         config=config,
-        key_prefix="behavior_analysis.regression.temperature_spline",
+        predictor_col=predictor_col,
+        key_prefix="behavior_analysis.regression.predictor_spline",
     )
     meta.update(temp_meta)
     

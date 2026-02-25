@@ -104,7 +104,7 @@ def _get_optional_int(config: Any, key: str, default: Optional[int]) -> Optional
 class BehaviorPipelineConfig:
     method: str = "spearman"
     min_samples: int = 10
-    control_temperature: bool = True
+    control_predictor: bool = True
     control_trial_order: bool = True
     compute_change_scores: bool = True
     compute_predictor_sensitivity: bool = True
@@ -114,13 +114,13 @@ class BehaviorPipelineConfig:
     bootstrap: int = 0
     robust_method: Optional[str] = None
     method_label: str = "spearman"
-    correlation_types: List[str] = field(default_factory=lambda: ["partial_cov_temp"])
+    correlation_types: List[str] = field(default_factory=lambda: ["partial_cov_predictor"])
     
     # Computation flags
     run_trial_table: bool = True
     run_lag_features: bool = True
     run_predictor_residual: bool = True
-    run_temperature_models: bool = True
+    run_predictor_models: bool = True
     run_feature_qc: bool = False
     run_regression: bool = False
     run_models: bool = False
@@ -181,7 +181,7 @@ class BehaviorPipelineConfig:
         return cls(
             method=method,
             min_samples=int(get_config_value(config, "behavior_analysis.min_samples.default", 10)),
-            control_temperature=bool(get_config_value(config, "behavior_analysis.control_temperature", True)),
+            control_predictor=bool(get_config_value(config, "behavior_analysis.predictor_control_enabled", True)),
             control_trial_order=bool(get_config_value(config, "behavior_analysis.control_trial_order", True)),
             compute_change_scores=bool(get_config_value(config, "behavior_analysis.correlations.compute_change_scores", True)),
             compute_predictor_sensitivity=bool(get_config_value(config, "behavior_analysis.predictor_sensitivity.enabled", True)),
@@ -197,11 +197,11 @@ class BehaviorPipelineConfig:
             ),
             robust_method=robust_method,
             method_label=method_label,
-            correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_temp"]),
+            correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_predictor"]),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
             run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
             run_predictor_residual=bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)),
-            run_temperature_models=bool(get_config_value(config, "behavior_analysis.temperature_models.enabled", True)),
+            run_predictor_models=bool(get_config_value(config, "behavior_analysis.predictor_models.enabled", True)),
             run_feature_qc=bool(get_config_value(config, "behavior_analysis.feature_qc.enabled", False)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
             run_models=bool(get_config_value(config, "behavior_analysis.models.enabled", False)),
@@ -517,8 +517,8 @@ class BehaviorPipeline(PipelineBase):
             or getattr(self.pipeline_config, "method", "spearman")
         )
         controls = []
-        if self.pipeline_config.control_temperature:
-            controls.append("temperature")
+        if self.pipeline_config.control_predictor:
+            controls.append("predictor")
         if self.pipeline_config.control_trial_order:
             controls.append("trial_order")
         logger.info(
@@ -554,7 +554,7 @@ class BehaviorPipeline(PipelineBase):
             n_perm=int(self.pipeline_config.n_permutations),
             rng=rng,
             partial_covars=partial_covars,
-            control_temperature=self.pipeline_config.control_temperature,
+            control_predictor=self.pipeline_config.control_predictor,
             control_trial_order=self.pipeline_config.control_trial_order,
             compute_change_scores=self.pipeline_config.compute_change_scores,
             compute_reliability=self.pipeline_config.compute_reliability,

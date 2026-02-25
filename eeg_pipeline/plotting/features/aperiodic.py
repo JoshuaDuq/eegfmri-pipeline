@@ -20,7 +20,7 @@ from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path
 from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-from eeg_pipeline.utils.data.columns import get_rating_column_from_config
+from eeg_pipeline.utils.data.columns import get_outcome_column_from_config
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
@@ -288,7 +288,7 @@ def _extract_condition_masks(
     """Extract condition masks from events DataFrame.
     
     Returns:
-        Tuple of (nonpain_mask, pain_mask, label1, label2) or (None, None, None, None)
+        Tuple of (cond_a_mask, cond_b_mask, label1, label2) or (None, None, None, None)
     """
     if events_df is None or len(features_df) != len(events_df):
         if events_df is not None:
@@ -298,24 +298,24 @@ def _extract_condition_masks(
                 "Events/features length mismatch; using overall mean."
             )
         return None, None, None, None
-    
+
     comp = extract_comparison_mask(events_df, config, require_enabled=False)
     if comp is None:
         return None, None, None, None
-    
-    nonpain_mask, pain_mask, label1, label2 = comp
-    nonpain_mask = np.asarray(nonpain_mask, dtype=bool)
-    pain_mask = np.asarray(pain_mask, dtype=bool)
-    
-    if nonpain_mask.sum() == 0 or pain_mask.sum() == 0:
+
+    cond_a_mask, cond_b_mask, label1, label2 = comp
+    cond_a_mask = np.asarray(cond_a_mask, dtype=bool)
+    cond_b_mask = np.asarray(cond_b_mask, dtype=bool)
+
+    if cond_a_mask.sum() == 0 or cond_b_mask.sum() == 0:
         log_if_present(
             logger,
             "warning",
             "Condition topomaps skipped (missing one condition)"
         )
         return None, None, None, None
-    
-    return nonpain_mask, pain_mask, label1, label2
+
+    return cond_a_mask, cond_b_mask, label1, label2
 
 
 def _find_run_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
@@ -389,26 +389,14 @@ def _compute_channel_pvalues(
     common_channels: List[str],
     metric: str,
     band: str,
-    pain_mask: np.ndarray,
-    nonpain_mask: np.ndarray,
+    cond_a_mask: np.ndarray,
+    cond_b_mask: np.ndarray,
     run_col: Optional[str],
     config: Any,
     segment: Optional[str] = None,
 ) -> List[float]:
-    """Compute p-values for each channel comparing pain vs nonpain.
-    
-    Args:
-        features_df: Features DataFrame
-        events_df: Events DataFrame
-        common_channels: List of channel names
-        metric: Metric stat name
-        band: Band name used by NamingSchema.
-        pain_mask: Boolean mask for pain condition
-        nonpain_mask: Boolean mask for nonpain condition
-        run_col: Optional run column name
-        config: Configuration object
-        segment: Optional segment name. If None, searches across all segments.
-    
+    """Compute Mann-Whitney p-values per channel for condition A vs condition B.
+
     Returns:
         List of p-values (may contain NaN)
     """
@@ -418,35 +406,33 @@ def _compute_channel_pvalues(
         )
     )
     p_values = []
-    
+
     for channel in common_channels:
         col = _get_aperiodic_column_name(channel, metric, features_df, segment=segment, band=band)
         if col is None:
             p_values.append(np.nan)
             continue
-        
+
         series = pd.to_numeric(features_df[col], errors="coerce")
-        
+
         if run_col:
             runs = events_df[run_col]
-            vals_pain = series[pain_mask].groupby(runs[pain_mask]).mean().dropna()
-            vals_nonpain = series[nonpain_mask].groupby(runs[nonpain_mask]).mean().dropna()
+            vals_a = series[cond_a_mask].groupby(runs[cond_a_mask]).mean().dropna()
+            vals_b = series[cond_b_mask].groupby(runs[cond_b_mask]).mean().dropna()
         else:
-            vals_pain = series[pain_mask].dropna()
-            vals_nonpain = series[nonpain_mask].dropna()
-        
-        if len(vals_pain) < min_samples or len(vals_nonpain) < min_samples:
+            vals_a = series[cond_a_mask].dropna()
+            vals_b = series[cond_b_mask].dropna()
+
+        if len(vals_a) < min_samples or len(vals_b) < min_samples:
             p_values.append(np.nan)
             continue
-        
+
         try:
-            _, pval = stats.mannwhitneyu(
-                vals_pain, vals_nonpain, alternative="two-sided"
-            )
+            _, pval = stats.mannwhitneyu(vals_a, vals_b, alternative="two-sided")
         except ValueError:
             pval = np.nan
         p_values.append(pval)
-    
+
     return p_values
 
 
@@ -455,35 +441,26 @@ def _extract_pair_data(
     common_channels: List[str],
     metric: str,
     band: str,
-    pain_mask: np.ndarray,
-    nonpain_mask: np.ndarray,
+    cond_a_mask: np.ndarray,
+    cond_b_mask: np.ndarray,
     segment: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Extract mean values for pain and nonpain conditions.
-    
-    Args:
-        features_df: Features DataFrame
-        common_channels: List of channel names
-        metric: Metric stat name
-        band: Band name used by NamingSchema.
-        pain_mask: Boolean mask for pain condition
-        nonpain_mask: Boolean mask for nonpain condition
-        segment: Optional segment name. If None, searches across all segments.
-    
+    """Extract per-channel mean values for condition A and condition B.
+
     Returns:
-        Tuple of (data_nonpain, data_pain) arrays
+        Tuple of (data_cond_a, data_cond_b) arrays
     """
-    data_nonpain = []
-    data_pain = []
-    
+    data_cond_a = []
+    data_cond_b = []
+
     for channel in common_channels:
         col = _get_aperiodic_column_name(channel, metric, features_df, segment=segment, band=band)
         if col is None:
             continue
-        data_nonpain.append(features_df.loc[nonpain_mask, col].mean())
-        data_pain.append(features_df.loc[pain_mask, col].mean())
-    
-    return np.array(data_nonpain), np.array(data_pain)
+        data_cond_a.append(features_df.loc[cond_a_mask, col].mean())
+        data_cond_b.append(features_df.loc[cond_b_mask, col].mean())
+
+    return np.array(data_cond_a), np.array(data_cond_b)
 
 
 def plot_aperiodic_topomaps(
@@ -495,7 +472,7 @@ def plot_aperiodic_topomaps(
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """Plot topomaps for available aperiodic metrics, split by pain condition.
+    """Plot topomaps for available aperiodic metrics, split by condition.
     
     Includes core aperiodic parameters (slope/offset) and periodic peak metrics
     exported by the aperiodic module (e.g., center frequency, bandwidth, peak height).
@@ -527,7 +504,7 @@ def plot_aperiodic_topomaps(
         if logger:
             logger.info(f"Using segment '{segment}' for aperiodic topomaps")
     
-    nonpain_mask, pain_mask, label1, label2 = _extract_condition_masks(
+    cond_a_mask, cond_b_mask, label1, label2 = _extract_condition_masks(
         features_df, events_df, config, logger
     )
 
@@ -580,25 +557,25 @@ def plot_aperiodic_topomaps(
             "pair_data": None,
         }
 
-        if pain_mask is not None and nonpain_mask is not None:
-            data_nonpain, ch_nonpain = _extract_aperiodic_data(
-                features_df, metric, band, info, mask=nonpain_mask, segment=segment
+        if cond_a_mask is not None and cond_b_mask is not None:
+            data_cond_a, ch_cond_a = _extract_aperiodic_data(
+                features_df, metric, band, info, mask=cond_a_mask, segment=segment
             )
-            data_pain, ch_pain = _extract_aperiodic_data(
-                features_df, metric, band, info, mask=pain_mask, segment=segment
+            data_cond_b, ch_cond_b = _extract_aperiodic_data(
+                features_df, metric, band, info, mask=cond_b_mask, segment=segment
             )
             common_chs = [
                 ch for ch in found_chs_overall
-                if ch in ch_nonpain and ch in ch_pain
+                if ch in ch_cond_a and ch in ch_cond_b
             ]
-            
+
             if common_chs and events_df is not None:
                 run_col = _find_run_column(events_df, config)
                 if run_col is None:
                     log_if_present(
                         logger,
                         "warning",
-                        "No run/block column found; skipping pain vs non-pain "
+                        "No run/block column found; skipping condition comparison "
                         "channel tests to avoid non-independent trials."
                     )
                 else:
@@ -608,30 +585,30 @@ def plot_aperiodic_topomaps(
                         common_chs,
                         metric,
                         band,
-                        pain_mask,
-                        nonpain_mask,
+                        cond_a_mask,
+                        cond_b_mask,
                         run_col,
                         config,
                         segment=segment,
                     )
-                    
+
                     per_metric_pvals[metric_key] = p_vals
                     all_pvals.extend([p for p in p_vals if np.isfinite(p)])
-                    
-                    data_nonpain_arr, data_pain_arr = _extract_pair_data(
+
+                    data_cond_a_arr, data_cond_b_arr = _extract_pair_data(
                         features_df,
                         common_chs,
                         metric,
                         band,
-                        pain_mask,
-                        nonpain_mask,
+                        cond_a_mask,
+                        cond_b_mask,
                         segment=segment,
                     )
-                    
+
                     per_metric_common[metric_key]["pair_data"] = {
                         "common_chs": common_chs,
-                        "data_nonpain": data_nonpain_arr,
-                        "data_pain": data_pain_arr,
+                        "data_cond_a": data_cond_a_arr,
+                        "data_cond_b": data_cond_b_arr,
                     }
 
     per_metric_qvals: Dict[str, np.ndarray] = {}
@@ -655,10 +632,10 @@ def plot_aperiodic_topomaps(
         log_if_present(logger, "warning", f"No aperiodic metrics available for topomap grid (tried segments: {available_segments}, found data for: {list(per_metric_common.keys())})")
         return
     
-    has_pain_data = any(
+    has_condition_data = any(
         meta.get("pair_data") is not None for meta in per_metric_common.values()
     )
-    n_cols = 4 if has_pain_data else 1
+    n_cols = 4 if has_condition_data else 1
     n_rows = len(metric_keys)
     
     aperiodic_config = plot_cfg.plot_type_configs.get("aperiodic", {})
@@ -683,7 +660,7 @@ def plot_aperiodic_topomaps(
         )
         ax.set_title(f"{metric_label.title()} - Overall")
         
-        if not has_pain_data or n_cols == 1:
+        if not has_condition_data or n_cols == 1:
             for col_idx in range(1, n_cols):
                 axes[row_idx, col_idx].axis("off")
             continue
@@ -691,11 +668,11 @@ def plot_aperiodic_topomaps(
         pair_data = meta.get("pair_data")
         if pair_data is not None:
             common_chs = pair_data["common_chs"]
-            data_nonpain = pair_data["data_nonpain"]
-            data_pain = pair_data["data_pain"]
+            data_cond_a = pair_data["data_cond_a"]
+            data_cond_b = pair_data["data_cond_b"]
             picks_common = mne.pick_channels(info.ch_names, common_chs)
             info_common = mne.pick_info(info, picks_common)
-            diff = data_pain - data_nonpain
+            diff = data_cond_b - data_cond_a
             q_vals = per_metric_qvals.get(metric_key, np.full(len(common_chs), np.nan))
             sig_mask = np.isfinite(q_vals) & (q_vals < alpha)
             
@@ -704,14 +681,14 @@ def plot_aperiodic_topomaps(
             
             ax = axes[row_idx, 1]
             mne.viz.plot_topomap(
-                data_nonpain, info_common, axes=ax, show=False, cmap=cmap,
+                data_cond_a, info_common, axes=ax, show=False, cmap=cmap,
                 contours=TOPO_CONTOURS
             )
             ax.set_title(f"{metric_label.title()} - {cond1_label}")
-            
+
             ax = axes[row_idx, 2]
             mne.viz.plot_topomap(
-                data_pain, info_common, axes=ax, show=False, cmap=cmap,
+                data_cond_b, info_common, axes=ax, show=False, cmap=cmap,
                 contours=TOPO_CONTOURS
             )
             ax.set_title(f"{metric_label.title()} - {cond2_label}")
@@ -770,15 +747,15 @@ def plot_aperiodic_topomaps(
     )
 
 
-def _find_rating_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
+def _find_outcome_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
     """Find rating column from config (no heuristics)."""
-    rating_col = get_rating_column_from_config(config, events_df)
-    if rating_col is None:
+    outcome_col = get_outcome_column_from_config(config, events_df)
+    if outcome_col is None:
         raise ValueError(
-            "event_columns.rating is missing/empty or did not match any column in events.tsv. "
+            "event_columns.outcome is missing/empty or did not match any column in events.tsv. "
             f"Available columns: {list(events_df.columns)[:30]}"
         )
-    return rating_col
+    return outcome_col
 
 
 def _find_common_slope_columns(

@@ -229,7 +229,7 @@ func (m Model) getFeaturesOptions() []optionType {
 				optERDSOnsetMinDurationMs,
 				optERDSReboundMinLatencyMs,
 				optERDSInferContralateral,
-				optERDSPainMarkerBands,
+				optERDSConditionMarkerBands,
 				optERDSLateralityColumns,
 				optERDSSomatosensoryLeftChannels,
 				optERDSSomatosensoryRightChannels,

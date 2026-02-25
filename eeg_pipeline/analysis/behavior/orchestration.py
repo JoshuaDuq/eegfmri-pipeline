@@ -18,8 +18,8 @@ from eeg_pipeline.analysis.behavior.result_types import (
     FeatureQCResult,
     GroupLevelResult,
     MixedEffectsResult,
-    TempBreakpointResult,
-    TempModelComparisonResult,
+    PredictorBreakpointResult,
+    PredictorModelComparisonResult,
     TrialTableResult,
 )
 from eeg_pipeline.analysis.behavior.result_cache import BehaviorResultCache
@@ -334,12 +334,12 @@ def _get_feature_columns(
     return _get_cache(ctx).get_filtered_feature_cols(feature_cols, ctx, computation_name)
 
 
-def _attach_temperature_metadata(
+def _attach_predictor_metadata(
     df: pd.DataFrame,
     metadata_dict: Dict[str, Any],
     target_col: Optional[str] = None,
 ) -> pd.DataFrame:
-    return _common_helpers.attach_temperature_metadata_impl(df, metadata_dict, target_col=target_col)
+    return _common_helpers.attach_predictor_metadata_impl(df, metadata_dict, target_col=target_col)
 
 
 def _has_precomputed_change_scores(df: Optional[pd.DataFrame]) -> bool:
@@ -659,31 +659,31 @@ def stage_predictor_residual(ctx: BehaviorContext, config: Any) -> Optional[Path
     return out_path
 
 
-def compute_temp_model_comparison(
-    temperature: pd.Series,
-    rating: pd.Series,
+def compute_predictor_model_comparison(
+    predictor: pd.Series,
+    outcome: pd.Series,
     config: Any,
-) -> TempModelComparisonResult:
-    """Compare temperature→rating model fits (linear vs polynomial vs spline)."""
-    return _stages_models.compute_temp_model_comparison_impl(temperature, rating, config)
+) -> PredictorModelComparisonResult:
+    """Compare predictor→outcome model fits (linear vs polynomial vs spline)."""
+    return _stages_models.compute_predictor_model_comparison_impl(predictor, outcome, config)
 
 
-def compute_temp_breakpoints(
-    temperature: pd.Series,
-    rating: pd.Series,
+def compute_predictor_breakpoints(
+    predictor: pd.Series,
+    outcome: pd.Series,
     config: Any,
-) -> TempBreakpointResult:
-    """Detect threshold temperatures where sensitivity changes."""
-    return _stages_models.compute_temp_breakpoints_impl(temperature, rating, config)
+) -> PredictorBreakpointResult:
+    """Detect threshold predictor values where sensitivity changes."""
+    return _stages_models.compute_predictor_breakpoints_impl(predictor, outcome, config)
 
 
-def write_temperature_models(
+def write_predictor_models(
     ctx: BehaviorContext,
-    model_comparison: Optional[TempModelComparisonResult],
-    breakpoint: Optional[TempBreakpointResult],
+    model_comparison: Optional[PredictorModelComparisonResult],
+    breakpoint: Optional[PredictorBreakpointResult],
 ) -> Path:
-    """Write temperature model results to disk."""
-    return _stages_models.write_temperature_models_impl(
+    """Write predictor model results to disk."""
+    return _stages_models.write_predictor_models_impl(
         ctx,
         model_comparison,
         breakpoint,
@@ -694,16 +694,16 @@ def write_temperature_models(
     )
 
 
-def stage_temperature_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
-    """Compare temperature→rating model fits and test for breakpoints (composed)."""
-    return _stages_models.stage_temperature_models_impl(
+def stage_predictor_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
+    """Compare predictor→outcome model fits and test for breakpoints (composed)."""
+    return _stages_models.stage_predictor_models_impl(
         ctx,
         config,
         load_trial_table_df_fn=_load_trial_table_df,
         is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        compute_temp_model_comparison_fn=compute_temp_model_comparison,
-        compute_temp_breakpoints_fn=compute_temp_breakpoints,
-        write_temperature_models_fn=write_temperature_models,
+        compute_predictor_model_comparison_fn=compute_predictor_model_comparison,
+        compute_predictor_breakpoints_fn=compute_predictor_breakpoints,
+        write_predictor_models_fn=write_predictor_models,
     )
 
 
@@ -722,7 +722,7 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
         sanitize_permutation_groups_fn=_sanitize_permutation_groups,
-        attach_temperature_metadata_fn=_attach_temperature_metadata,
+        attach_predictor_metadata_fn=_attach_predictor_metadata,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_stats_table_fn=_write_stats_table,
     )
@@ -737,7 +737,7 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
-        attach_temperature_metadata_fn=_attach_temperature_metadata,
+        attach_predictor_metadata_fn=_attach_predictor_metadata,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_stats_table_fn=_write_stats_table,
     )
@@ -797,7 +797,7 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
         is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
         get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
         check_early_exit_conditions_fn=_check_early_exit_conditions,
-        attach_temperature_metadata_fn=_attach_temperature_metadata,
+        attach_predictor_metadata_fn=_attach_predictor_metadata,
         get_stats_subfolder_fn=_get_stats_subfolder,
         build_output_filename_fn=_build_output_filename,
         write_stats_table_fn=_write_stats_table,
@@ -878,7 +878,7 @@ def write_analysis_metadata(
 
 
 def _resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
-    """Resolve configured condition column, falling back to configured pain column."""
+    """Resolve configured condition column, falling back to configured binary-outcome column."""
     return _stages_condition.resolve_condition_compare_column(df_trials, config)
 
 
@@ -888,7 +888,7 @@ def stage_condition_column(
     df_trials: Optional[pd.DataFrame] = None,
     feature_cols: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    """Run column-based condition comparison (e.g., pain vs non-pain).
+    """Run column-based condition comparison.
     
     Single responsibility: Column contrast comparison.
     Supports primary_unit=trial|run to control unit of analysis.
@@ -1101,7 +1101,7 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
 
 
 def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Run mediation analysis: test if neural features mediate the temperature→rating relationship."""
+    """Run mediation analysis: test if neural features mediate the predictor→outcome relationship."""
     cache = _get_cache(ctx)
     return _stages_advanced.stage_mediation_impl(
         ctx,
@@ -1159,8 +1159,8 @@ def run_group_level_correlations(
     use_block_permutation: bool = True,
     n_perm: int = 1000,
     fdr_alpha: float = 0.05,
-    target_col: str = "rating",
-    control_temperature: bool = False,
+    target_col: str = "outcome",
+    control_predictor: bool = False,
     control_trial_order: bool = False,
     control_run_effects: bool = False,
     max_run_dummies: int = 20,
@@ -1176,7 +1176,7 @@ def run_group_level_correlations(
         n_perm=n_perm,
         fdr_alpha=fdr_alpha,
         target_col=target_col,
-        control_temperature=control_temperature,
+        control_predictor=control_predictor,
         control_trial_order=control_trial_order,
         control_run_effects=control_run_effects,
         max_run_dummies=max_run_dummies,
@@ -1214,11 +1214,11 @@ def run_group_level_analysis(
 
 
 def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Run moderation analysis: test if neural features moderate the temperature→rating relationship.
+    """Run moderation analysis: test if neural features moderate the predictor→outcome relationship.
 
-    Model: rating = b0 + b1*temperature + b2*feature + b3*(temperature*feature) + error
+    Model: outcome = b0 + b1*predictor + b2*feature + b3*(predictor*feature) + error
 
-    If b3 is significant, the feature moderates how temperature affects pain rating.
+    If b3 is significant, the feature moderates how predictor affects the outcome.
     """
     cache = _get_cache(ctx)
     return _stages_advanced.stage_moderation_impl(

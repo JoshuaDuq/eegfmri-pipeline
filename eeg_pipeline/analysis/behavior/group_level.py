@@ -64,8 +64,8 @@ def run_group_level_mixed_effects_impl(
     combined = pd.concat(all_trials, ignore_index=True)
     logger.info("Mixed-effects: %d subjects, %d total trials", len(all_trials), len(combined))
 
-    outcome_column = resolve_outcome_column(combined, config) or "rating"
-    predictor_column = resolve_predictor_column(combined, config) or "temperature"
+    outcome_column = resolve_outcome_column(combined, config) or "outcome"
+    predictor_column = resolve_predictor_column(combined, config) or "predictor"
     if outcome_column not in combined.columns:
         raise KeyError(
             f"Mixed-effects requires outcome column '{outcome_column}' in the combined trial table."
@@ -90,7 +90,7 @@ def run_group_level_mixed_effects_impl(
     run_col_candidates = [run_col_cfg, "run_id", "run", "block"]
     run_col = next((c for c in run_col_candidates if c and c in combined.columns), None)
     trial_order_col = next((c for c in ("trial_index_within_group", "trial_index") if c in combined.columns), None)
-    include_predictor = bool(get_config_value(config, "behavior_analysis.mixed_effects.include_temperature", True))
+    include_predictor = bool(get_config_value(config, "behavior_analysis.mixed_effects.include_predictor", True))
     max_run_dummies = int(get_config_value(config, "behavior_analysis.run_adjustment.max_dummies", 20))
 
     records: List[Dict[str, Any]] = []
@@ -228,8 +228,8 @@ def run_group_level_correlations_impl(
     use_block_permutation: bool = True,
     n_perm: int = 1000,
     fdr_alpha: float = 0.05,
-    target_col: str = "rating",
-    control_temperature: bool = False,
+    target_col: str = "outcome",
+    control_predictor: bool = False,
     control_trial_order: bool = False,
     control_run_effects: bool = False,
     max_run_dummies: int = 20,
@@ -278,12 +278,12 @@ def run_group_level_correlations_impl(
     combined = pd.concat(all_trials, ignore_index=True)
     correlation_method = resolve_correlation_method(config, logger=logger, default="spearman")
 
-    resolved_target = resolve_outcome_column(combined, config) or "rating"
+    resolved_target = resolve_outcome_column(combined, config) or "outcome"
     target_column = str(target_col or resolved_target).strip() or resolved_target
     if target_column not in combined.columns:
         logger.warning("Multilevel correlations: target column '%s' not found.", target_column)
         return pd.DataFrame()
-    predictor_column = resolve_predictor_column(combined, config) or "temperature"
+    predictor_column = resolve_predictor_column(combined, config) or "predictor"
 
     block_col = None
     for cand in ("block", "run_id", "run", "session"):
@@ -292,7 +292,7 @@ def run_group_level_correlations_impl(
             break
 
     feature_cols = [c for c in combined.columns if str(c).startswith(tuple(feature_prefixes))]
-    rating = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
+    outcome = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
     subject_all = combined["subject_id"].astype(str).to_numpy(dtype=object)
     block_all = combined[block_col].to_numpy() if block_col is not None else None
 
@@ -331,7 +331,7 @@ def run_group_level_correlations_impl(
         family_id = f"corr_{feat_type}"
 
         feature_vals = pd.to_numeric(combined[feat], errors="coerce").to_numpy(dtype=float)
-        if int((np.isfinite(feature_vals) & np.isfinite(rating)).sum()) < 10:
+        if int((np.isfinite(feature_vals) & np.isfinite(outcome)).sum()) < 10:
             continue
 
         subject_payloads: List[Dict[str, Any]] = []
@@ -351,7 +351,7 @@ def run_group_level_correlations_impl(
 
             cov_df = pd.DataFrame(index=x_valid.index)
             if (
-                control_temperature
+                control_predictor
                 and predictor_column in subj_df.columns
                 and target_column != predictor_column
             ):
@@ -654,10 +654,10 @@ def run_group_level_analysis_impl(
         if not isinstance(gl_corr_cfg, dict):
             gl_corr_cfg = {}
 
-        default_target = str(get_config_value(config, "behavior_analysis.outcome_column", "") or "rating").strip() or "rating"
+        default_target = str(get_config_value(config, "behavior_analysis.outcome_column", "") or "outcome").strip() or "outcome"
         target_col = str(gl_corr_cfg.get("target", default_target) or default_target).strip()
-        control_temperature = bool(
-            gl_corr_cfg.get("control_temperature", get_config_bool(config, "behavior_analysis.control_temperature", True))
+        control_predictor = bool(
+            gl_corr_cfg.get("control_predictor", get_config_bool(config, "behavior_analysis.predictor_control_enabled", True))
         )
         control_trial_order = bool(
             gl_corr_cfg.get("control_trial_order", get_config_bool(config, "behavior_analysis.control_trial_order", True))
@@ -687,7 +687,7 @@ def run_group_level_analysis_impl(
             n_perm=get_config_int(config, "behavior_analysis.statistics.n_permutations", 1000),
             fdr_alpha=get_config_float(config, "behavior_analysis.statistics.fdr_alpha", 0.05),
             target_col=target_col,
-            control_temperature=control_temperature,
+            control_predictor=control_predictor,
             control_trial_order=control_trial_order,
             control_run_effects=control_run_effects,
             max_run_dummies=max_run_dummies,

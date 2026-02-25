@@ -16,15 +16,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
-from fmri_pipeline.utils.signature_paths import discover_signature_root
+from fmri_pipeline.utils.signature_paths import discover_signature_root_and_specs
 
 
 class FmriTrialSignaturePipeline(PipelineBase):
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="fmri_trial_signatures", config=config)
 
-    def _discover_signature_root(self) -> Optional[Path]:
-        return discover_signature_root(self.config, self.deriv_root)
+    def _discover_signature_root_and_specs(self) -> tuple[Optional[Path], list]:
+        return discover_signature_root_and_specs(self.config, self.deriv_root)
 
     def process_subject(
         self,
@@ -35,6 +35,7 @@ class FmriTrialSignaturePipeline(PipelineBase):
         trial_cfg: Any,
         output_dir: Optional[Path] = None,
         signature_root: Optional[Path] = None,
+        signature_specs: Optional[list] = None,
         progress: Any = None,
         dry_run: bool = False,
         **_kwargs: Any,
@@ -48,9 +49,12 @@ class FmriTrialSignaturePipeline(PipelineBase):
         if cfg is None:
             raise TypeError("trial_cfg must be a TrialSignatureExtractionConfig")
 
-        sig_root = signature_root or self._discover_signature_root()
-        if sig_root is None:
-            self.logger.warning("No signature_root found; signature readouts will be skipped.")
+        discovered_root, discovered_specs = self._discover_signature_root_and_specs()
+        sig_root = signature_root or discovered_root
+        sig_specs = signature_specs if signature_specs is not None else discovered_specs
+
+        if sig_root is None or not sig_specs:
+            self.logger.warning("No signature_root or signature_specs configured; signature readouts will be skipped.")
 
         if dry_run:
             self.logger.info(
@@ -83,6 +87,7 @@ class FmriTrialSignaturePipeline(PipelineBase):
             subject=subject,
             cfg=TrialSignatureExtractionConfig(**{**asdict(cfg), "task": task}),
             signature_root=sig_root,
+            signature_specs=sig_specs,
             output_dir=output_dir,
         )
         elapsed = _time.perf_counter() - t0
@@ -96,5 +101,4 @@ class FmriTrialSignaturePipeline(PipelineBase):
         )
 
     def run_group_level(self, subjects, task=None, **kwargs):  # type: ignore[override]
-        # No group-level inference here; downstream EEG ML can aggregate subject TSVs.
         return

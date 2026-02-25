@@ -387,21 +387,21 @@ def build_subject_trial_table(ctx: Any) -> TrialTableBuildResult:
 
 def _compute_lag_and_delta_for_group(
     group: pd.DataFrame,
-    temperature_col: str,
-    rating_col: str,
-    has_temperature: bool,
-    has_rating: bool,
+    predictor_col: str,
+    outcome_col: str,
+    has_predictor: bool,
+    has_outcome: bool,
 ) -> pd.DataFrame:
     """Compute lagged and delta features for a single group."""
     result = group.copy()
-    if has_temperature:
-        temperature = pd.to_numeric(result[temperature_col], errors="coerce")
-        result["prev_temperature"] = temperature.shift(1)
-        result["delta_temperature"] = temperature - temperature.shift(1)
-    if has_rating:
-        rating = pd.to_numeric(result[rating_col], errors="coerce")
-        result["prev_rating"] = rating.shift(1)
-        result["delta_rating"] = rating - rating.shift(1)
+    if has_predictor:
+        predictor = pd.to_numeric(result[predictor_col], errors="coerce")
+        result["prev_predictor"] = predictor.shift(1)
+        result["delta_predictor"] = predictor - predictor.shift(1)
+    if has_outcome:
+        outcome = pd.to_numeric(result[outcome_col], errors="coerce")
+        result["prev_outcome"] = outcome.shift(1)
+        result["delta_outcome"] = outcome - outcome.shift(1)
     result["trial_index_within_group"] = np.arange(len(result), dtype=int)
     return result
 
@@ -409,8 +409,8 @@ def _compute_lag_and_delta_for_group(
 def add_lag_and_delta_features(
     df: pd.DataFrame,
     *,
-    temperature_col: str = "temperature",
-    rating_col: str = "rating",
+    predictor_col: str = "predictor",
+    outcome_col: str = "outcome",
     group_columns: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Add lagged and delta variables (prev_*, delta_*) within runs/blocks if available."""
@@ -426,15 +426,15 @@ def add_lag_and_delta_features(
     if "epoch" in result_df.columns:
         result_df = result_df.sort_values("epoch", kind="stable").reset_index(drop=True)
 
-    has_temperature = temperature_col in result_df.columns
-    has_rating = rating_col in result_df.columns
-    if not has_temperature and not has_rating:
+    has_predictor = predictor_col in result_df.columns
+    has_outcome = outcome_col in result_df.columns
+    if not has_predictor and not has_outcome:
         meta["status"] = "skipped_no_columns"
         return result_df, meta
 
     def apply_to_group(group: pd.DataFrame) -> pd.DataFrame:
         return _compute_lag_and_delta_for_group(
-            group, temperature_col, rating_col, has_temperature, has_rating
+            group, predictor_col, outcome_col, has_predictor, has_outcome
         )
 
     if available_group_columns:
@@ -452,12 +452,12 @@ def add_predictor_residual(
     df: pd.DataFrame,
     config: Any,
     *,
-    temperature_col: str = "temperature",
-    rating_col: str = "rating",
-    out_pred_col: str = "rating_hat_from_temp",
+    predictor_col: str = "predictor",
+    outcome_col: str = "outcome",
+    out_pred_col: str = "outcome_hat_from_predictor",
     out_resid_col: str = "predictor_residual",
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Add a flexible temperature→rating fit and define predictor_residual = rating - f(temp)."""
+    """Add a flexible predictor→outcome fit and define predictor_residual = outcome - f(predictor)."""
     from eeg_pipeline.utils.config.loader import get_config_value
 
     enabled = bool(
@@ -468,18 +468,18 @@ def add_predictor_residual(
         return df, meta
 
     has_required_columns = (
-        temperature_col in df.columns and rating_col in df.columns
+        predictor_col in df.columns and outcome_col in df.columns
     )
     if not has_required_columns:
         meta["status"] = "skipped_missing_columns"
         return df, meta
 
-    from eeg_pipeline.utils.analysis.stats.predictor_residual import fit_temperature_rating_curve
+    from eeg_pipeline.utils.analysis.stats.predictor_residual import fit_predictor_outcome_curve
 
-    temperature = pd.to_numeric(df[temperature_col], errors="coerce")
-    rating = pd.to_numeric(df[rating_col], errors="coerce")
-    prediction, residual, model_meta = fit_temperature_rating_curve(
-        temperature, rating, config=config
+    predictor = pd.to_numeric(df[predictor_col], errors="coerce")
+    outcome = pd.to_numeric(df[outcome_col], errors="coerce")
+    prediction, residual, model_meta = fit_predictor_outcome_curve(
+        predictor, outcome, config=config
     )
     meta.update(model_meta)
 
@@ -521,7 +521,7 @@ def add_predictor_residual(
         groups = (
             result[group_col] if group_col and group_col in result.columns else None
         )
-        valid_mask = temperature.notna() & rating.notna()
+        valid_mask = predictor.notna() & outcome.notna()
         if groups is not None:
             groups_series = pd.Series(groups, index=result.index)
             valid_mask = valid_mask & groups_series.notna()
@@ -540,8 +540,8 @@ def add_predictor_residual(
                 meta["crossfit"]["error"] = str(exc)
             else:
                 valid_indices = result.index[valid_mask]
-                X = temperature.loc[valid_indices].to_numpy(dtype=float)[:, None]
-                y = rating.loc[valid_indices].to_numpy(dtype=float)
+                X = predictor.loc[valid_indices].to_numpy(dtype=float)[:, None]
+                y = outcome.loc[valid_indices].to_numpy(dtype=float)
 
                 if groups is None:
                     meta["crossfit"]["status"] = "skipped_missing_groups"

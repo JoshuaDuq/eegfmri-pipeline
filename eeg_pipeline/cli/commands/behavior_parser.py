@@ -48,6 +48,17 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     
     compute_group = parser.add_argument_group("Compute mode options")
+    compute_group.add_argument(
+        "--predictor-type",
+        choices=["continuous", "binary", "categorical"],
+        default=None,
+        help=(
+            "Nature of the predictor variable. "
+            "'continuous' enables curve-fitting analyses (predictor_residual, "
+            "predictor_models, psychometrics, spline/outcome_hat control). "
+            "'binary' or 'categorical' disables these analyses."
+        ),
+    )
     compute_group.add_argument("--correlation-method", choices=["spearman", "pearson"], default=None)
     compute_group.add_argument("--robust-correlation", choices=["none", "percentage_bend", "winsorized", "shepherd"], default=None)
     compute_group.add_argument("--bootstrap", type=int, default=None)
@@ -61,16 +72,16 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         "--predictor-column",
         type=str,
         default=None,
-        help="Canonical predictor column for behavior analyses (e.g., dose, intensity, temperature)",
+        help="Canonical predictor column for behavior analyses (e.g., dose, intensity, predictor)",
     )
     compute_group.add_argument(
         "--outcome-column",
         type=str,
         default=None,
-        help="Canonical outcome column for behavior analyses (e.g., rating, arousal, confidence)",
+        help="Canonical outcome column for behavior analyses (e.g., vas_rating, arousal, confidence)",
     )
-    compute_group.add_argument("--control-temperature", action="store_true", default=None)
-    compute_group.add_argument("--no-control-temperature", action="store_false", dest="control_temperature")
+    compute_group.add_argument("--predictor-control", action="store_true", default=None, dest="predictor_control")
+    compute_group.add_argument("--no-predictor-control", action="store_false", dest="predictor_control")
     compute_group.add_argument("--control-trial-order", action="store_true", default=None)
     compute_group.add_argument("--no-control-trial-order", action="store_false", dest="control_trial_order")
     # Run adjustment (subject-level; optional)
@@ -91,7 +102,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     compute_group.add_argument("--run-adjustment-max-dummies", type=int, default=None)
     compute_group.add_argument("--fdr-alpha", type=float, default=None)
-    compute_group.add_argument("--stats-temp-control", choices=["linear", "spline"], default=None)
+    compute_group.add_argument("--stats-predictor-control", choices=["linear", "spline"], default=None, dest="stats_predictor_control")
     compute_group.add_argument("--stats-allow-iid-trials", action="store_true", default=None)
     compute_group.add_argument("--no-stats-allow-iid-trials", action="store_false", dest="stats_allow_iid_trials")
     compute_group.add_argument("--compute-change-scores", action="store_true", default=None)
@@ -107,7 +118,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--perm-group-column-preference", nargs="+", default=None, metavar="COL", dest="perm_group_column_preference", help="Preferred columns for permutation grouping (e.g. run_id block)")
     compute_group.add_argument("--exclude-non-trialwise-features", action="store_true", default=None, dest="exclude_non_trialwise_features")
     compute_group.add_argument("--no-exclude-non-trialwise-features", action="store_false", dest="exclude_non_trialwise_features")
-    compute_group.add_argument("--temperature-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), dest="temperature_range", help="Valid temperature range (e.g. 35.0 55.0)")
+    compute_group.add_argument("--predictor-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), dest="predictor_range", help="Valid predictor range (e.g. 0.0 1.0)")
     compute_group.add_argument("--max-missing-channels-fraction", type=float, default=None, help="Max fraction of missing channels allowed")
     compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
     compute_group.add_argument(
@@ -137,7 +148,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     compute_group.add_argument(
         "--predictor-sensitivity-features", nargs="+", choices=feature_choices, default=None,
-        help="Feature categories for pain sensitivity analysis"
+        help="Feature categories for predictor sensitivity analysis"
     )
     compute_group.add_argument(
         "--condition-features", nargs="+", choices=feature_choices, default=None,
@@ -205,52 +216,54 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="feature_qc_check_within_run_variance",
     )
 
-    residual_group = parser.add_argument_group("Pain residual / temperature-model diagnostics")
-    residual_group.add_argument("--pain-residual", action="store_true", default=None, dest="predictor_residual_enabled")
-    residual_group.add_argument("--no-pain-residual", action="store_false", dest="predictor_residual_enabled")
-    residual_group.add_argument("--pain-residual-method", choices=["spline", "poly"], default=None)
-    residual_group.add_argument("--pain-residual-min-samples", type=int, default=None)
+    residual_group = parser.add_argument_group("Predictor residual / predictor-model diagnostics")
+    residual_group.add_argument("--predictor-residual", action="store_true", default=None, dest="predictor_residual_enabled")
+    residual_group.add_argument("--no-predictor-residual", action="store_false", dest="predictor_residual_enabled")
+    residual_group.add_argument("--predictor-residual-method", choices=["spline", "poly"], default=None, dest="pain_residual_method")
+    residual_group.add_argument("--predictor-residual-min-samples", type=int, default=None, dest="pain_residual_min_samples")
     residual_group.add_argument(
-        "--pain-residual-spline-df-candidates",
+        "--predictor-residual-spline-df-candidates",
         nargs="+",
         type=int,
         default=None,
-        help="Candidate spline degrees of freedom for temperature→rating residual model (e.g., 3 4 5)",
+        dest="pain_residual_spline_df_candidates",
+        help="Candidate spline degrees of freedom for predictor→outcome residual model (e.g., 3 4 5)",
     )
-    residual_group.add_argument("--pain-residual-poly-degree", type=int, default=None)
-    residual_group.add_argument("--pain-residual-model-compare", action="store_true", default=None, dest="predictor_residual_model_compare_enabled")
-    residual_group.add_argument("--no-pain-residual-model-compare", action="store_false", dest="predictor_residual_model_compare_enabled")
-    residual_group.add_argument("--pain-residual-model-compare-min-samples", type=int, default=None)
+    residual_group.add_argument("--predictor-residual-poly-degree", type=int, default=None, dest="pain_residual_poly_degree")
+    residual_group.add_argument("--predictor-residual-model-compare", action="store_true", default=None, dest="predictor_residual_model_compare_enabled")
+    residual_group.add_argument("--no-predictor-residual-model-compare", action="store_false", dest="predictor_residual_model_compare_enabled")
+    residual_group.add_argument("--predictor-residual-model-compare-min-samples", type=int, default=None, dest="predictor_residual_model_compare_min_samples")
     residual_group.add_argument(
-        "--pain-residual-model-compare-poly-degrees",
+        "--predictor-residual-model-compare-poly-degrees",
         nargs="+",
         type=int,
         default=None,
-        help="Polynomial degrees to compare in pain-residual model comparison (e.g., 2 3)",
+        dest="predictor_residual_model_compare_poly_degrees",
+        help="Polynomial degrees to compare in predictor-residual model comparison (e.g., 2 3)",
     )
-    residual_group.add_argument("--pain-residual-breakpoint-test", action="store_true", default=None, dest="predictor_residual_breakpoint_enabled")
-    residual_group.add_argument("--no-pain-residual-breakpoint-test", action="store_false", dest="predictor_residual_breakpoint_enabled")
-    residual_group.add_argument("--pain-residual-breakpoint-min-samples", type=int, default=None)
-    residual_group.add_argument("--pain-residual-breakpoint-candidates", type=int, default=None)
-    residual_group.add_argument("--pain-residual-breakpoint-quantile-low", type=float, default=None)
-    residual_group.add_argument("--pain-residual-breakpoint-quantile-high", type=float, default=None)
+    residual_group.add_argument("--predictor-residual-breakpoint-test", action="store_true", default=None, dest="predictor_residual_breakpoint_enabled")
+    residual_group.add_argument("--no-predictor-residual-breakpoint-test", action="store_false", dest="predictor_residual_breakpoint_enabled")
+    residual_group.add_argument("--predictor-residual-breakpoint-min-samples", type=int, default=None, dest="predictor_residual_breakpoint_min_samples")
+    residual_group.add_argument("--predictor-residual-breakpoint-candidates", type=int, default=None, dest="predictor_residual_breakpoint_candidates")
+    residual_group.add_argument("--predictor-residual-breakpoint-quantile-low", type=float, default=None, dest="predictor_residual_breakpoint_quantile_low")
+    residual_group.add_argument("--predictor-residual-breakpoint-quantile-high", type=float, default=None, dest="predictor_residual_breakpoint_quantile_high")
     # Optional cross-fit residualization (out-of-run prediction)
-    residual_group.add_argument("--pain-residual-crossfit", action="store_true", default=None, dest="predictor_residual_crossfit_enabled")
-    residual_group.add_argument("--no-pain-residual-crossfit", action="store_false", dest="predictor_residual_crossfit_enabled")
-    residual_group.add_argument("--pain-residual-crossfit-group-column", type=str, default=None)
-    residual_group.add_argument("--pain-residual-crossfit-n-splits", type=int, default=None)
-    residual_group.add_argument("--pain-residual-crossfit-method", choices=["spline", "poly"], default=None)
-    residual_group.add_argument("--pain-residual-crossfit-spline-n-knots", type=int, default=None)
+    residual_group.add_argument("--predictor-residual-crossfit", action="store_true", default=None, dest="predictor_residual_crossfit_enabled")
+    residual_group.add_argument("--no-predictor-residual-crossfit", action="store_false", dest="predictor_residual_crossfit_enabled")
+    residual_group.add_argument("--predictor-residual-crossfit-group-column", type=str, default=None, dest="pain_residual_crossfit_group_column")
+    residual_group.add_argument("--predictor-residual-crossfit-n-splits", type=int, default=None, dest="pain_residual_crossfit_n_splits")
+    residual_group.add_argument("--predictor-residual-crossfit-method", choices=["spline", "poly"], default=None, dest="pain_residual_crossfit_method")
+    residual_group.add_argument("--predictor-residual-crossfit-spline-n-knots", type=int, default=None, dest="pain_residual_crossfit_spline_n_knots")
 
     regression_group = parser.add_argument_group("Trialwise regression options")
-    regression_group.add_argument("--regression-outcome", choices=["rating", "predictor_residual", "temperature"], default=None)
-    regression_group.add_argument("--regression-include-temperature", action="store_true", default=None)
-    regression_group.add_argument("--no-regression-include-temperature", action="store_false", dest="regression_include_temperature")
-    regression_group.add_argument("--regression-temperature-control", choices=["linear", "rating_hat", "spline"], default=None)
-    regression_group.add_argument("--regression-temperature-spline-knots", type=int, default=None)
-    regression_group.add_argument("--regression-temperature-spline-quantile-low", type=float, default=None)
-    regression_group.add_argument("--regression-temperature-spline-quantile-high", type=float, default=None)
-    regression_group.add_argument("--regression-temperature-spline-min-samples", type=int, default=None)
+    regression_group.add_argument("--regression-outcome", choices=["outcome", "predictor_residual", "predictor"], default=None)
+    regression_group.add_argument("--regression-include-predictor", action="store_true", default=None, dest="regression_include_predictor")
+    regression_group.add_argument("--no-regression-include-predictor", action="store_false", dest="regression_include_predictor")
+    regression_group.add_argument("--regression-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="regression_predictor_control")
+    regression_group.add_argument("--regression-predictor-spline-knots", type=int, default=None, dest="regression_predictor_spline_knots")
+    regression_group.add_argument("--regression-predictor-spline-quantile-low", type=float, default=None, dest="regression_predictor_spline_quantile_low")
+    regression_group.add_argument("--regression-predictor-spline-quantile-high", type=float, default=None, dest="regression_predictor_spline_quantile_high")
+    regression_group.add_argument("--regression-predictor-spline-min-samples", type=int, default=None, dest="regression_predictor_spline_min_samples")
     regression_group.add_argument("--regression-include-trial-order", action="store_true", default=None)
     regression_group.add_argument("--no-regression-include-trial-order", action="store_false", dest="regression_include_trial_order")
     regression_group.add_argument("--regression-include-prev-terms", action="store_true", default=None)
@@ -267,15 +280,15 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     regression_group.add_argument("--regression-max-features", type=int, default=None)
 
     models_group = parser.add_argument_group("Model families options")
-    models_group.add_argument("--models-outcomes", nargs="+", choices=["rating", "predictor_residual", "temperature", "binary_outcome"], default=None)
+    models_group.add_argument("--models-outcomes", nargs="+", choices=["outcome", "predictor_residual", "predictor", "binary_outcome"], default=None)
     models_group.add_argument("--models-families", nargs="+", choices=["ols_hc3", "robust_rlm", "quantile_50", "logit"], default=None)
-    models_group.add_argument("--models-include-temperature", action="store_true", default=None)
-    models_group.add_argument("--no-models-include-temperature", action="store_false", dest="models_include_temperature")
-    models_group.add_argument("--models-temperature-control", choices=["linear", "rating_hat", "spline"], default=None)
-    models_group.add_argument("--models-temperature-spline-knots", type=int, default=None)
-    models_group.add_argument("--models-temperature-spline-quantile-low", type=float, default=None)
-    models_group.add_argument("--models-temperature-spline-quantile-high", type=float, default=None)
-    models_group.add_argument("--models-temperature-spline-min-samples", type=int, default=None)
+    models_group.add_argument("--models-include-predictor", action="store_true", default=None, dest="models_include_predictor")
+    models_group.add_argument("--no-models-include-predictor", action="store_false", dest="models_include_predictor")
+    models_group.add_argument("--models-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="models_predictor_control")
+    models_group.add_argument("--models-predictor-spline-knots", type=int, default=None, dest="models_predictor_spline_knots")
+    models_group.add_argument("--models-predictor-spline-quantile-low", type=float, default=None, dest="models_predictor_spline_quantile_low")
+    models_group.add_argument("--models-predictor-spline-quantile-high", type=float, default=None, dest="models_predictor_spline_quantile_high")
+    models_group.add_argument("--models-predictor-spline-min-samples", type=int, default=None, dest="models_predictor_spline_min_samples")
     models_group.add_argument("--models-include-trial-order", action="store_true", default=None)
     models_group.add_argument("--no-models-include-trial-order", action="store_false", dest="models_include_trial_order")
     models_group.add_argument("--models-include-prev-terms", action="store_true", default=None)
@@ -288,7 +301,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     models_group.add_argument("--no-models-standardize", action="store_false", dest="models_standardize")
     models_group.add_argument("--models-min-samples", type=int, default=None)
     models_group.add_argument("--models-max-features", type=int, default=None)
-    models_group.add_argument("--models-binary-outcome", choices=["binary_outcome", "rating_median"], default=None)
+    models_group.add_argument("--models-binary-outcome", choices=["binary_outcome", "outcome_median"], default=None)
     models_group.add_argument("--models-primary-unit", choices=["trial", "run_mean"], default=None)
     models_group.add_argument(
         "--models-force-trial-iid-asymptotic",
@@ -305,24 +318,24 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     stability_group = parser.add_argument_group("Stability options")
     stability_group.add_argument("--stability-method", choices=["spearman", "pearson"], default=None)
-    stability_group.add_argument("--stability-outcome", choices=["auto", "rating", "predictor_residual"], default=None)
+    stability_group.add_argument("--stability-outcome", choices=["auto", "outcome", "predictor_residual"], default=None)
     stability_group.add_argument("--stability-group-column", choices=["auto", "run", "block"], default=None)
-    stability_group.add_argument("--stability-partial-temperature", action="store_true", default=None)
-    stability_group.add_argument("--no-stability-partial-temperature", action="store_false", dest="stability_partial_temperature")
+    stability_group.add_argument("--stability-partial-predictor", action="store_true", default=None, dest="stability_partial_predictor")
+    stability_group.add_argument("--no-stability-partial-predictor", action="store_false", dest="stability_partial_predictor")
     stability_group.add_argument("--stability-min-group-trials", type=int, default=None)
     stability_group.add_argument("--stability-max-features", type=int, default=None)
     stability_group.add_argument("--stability-alpha", type=float, default=None)
 
     influence_group = parser.add_argument_group("Influence diagnostics options")
-    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["rating", "predictor_residual", "temperature"], default=None)
+    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["outcome", "predictor_residual", "predictor"], default=None)
     influence_group.add_argument("--influence-max-features", type=int, default=None)
-    influence_group.add_argument("--influence-include-temperature", action="store_true", default=None)
-    influence_group.add_argument("--no-influence-include-temperature", action="store_false", dest="influence_include_temperature")
-    influence_group.add_argument("--influence-temperature-control", choices=["linear", "rating_hat", "spline"], default=None)
-    influence_group.add_argument("--influence-temperature-spline-knots", type=int, default=None)
-    influence_group.add_argument("--influence-temperature-spline-quantile-low", type=float, default=None)
-    influence_group.add_argument("--influence-temperature-spline-quantile-high", type=float, default=None)
-    influence_group.add_argument("--influence-temperature-spline-min-samples", type=int, default=None)
+    influence_group.add_argument("--influence-include-predictor", action="store_true", default=None, dest="influence_include_predictor")
+    influence_group.add_argument("--no-influence-include-predictor", action="store_false", dest="influence_include_predictor")
+    influence_group.add_argument("--influence-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="influence_predictor_control")
+    influence_group.add_argument("--influence-predictor-spline-knots", type=int, default=None, dest="influence_predictor_spline_knots")
+    influence_group.add_argument("--influence-predictor-spline-quantile-low", type=float, default=None, dest="influence_predictor_spline_quantile_low")
+    influence_group.add_argument("--influence-predictor-spline-quantile-high", type=float, default=None, dest="influence_predictor_spline_quantile_high")
+    influence_group.add_argument("--influence-predictor-spline-min-samples", type=int, default=None, dest="influence_predictor_spline_min_samples")
     influence_group.add_argument("--influence-include-trial-order", action="store_true", default=None)
     influence_group.add_argument("--no-influence-include-trial-order", action="store_false", dest="influence_include_trial_order")
     influence_group.add_argument("--influence-include-run-block", action="store_true", default=None)
@@ -355,7 +368,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     correlations_group.add_argument(
         "--correlations-types",
         nargs="+",
-        choices=["raw", "partial_cov", "partial_temp", "partial_cov_temp", "run_mean"],
+        choices=["raw", "partial_cov", "partial_predictor", "partial_cov_predictor", "run_mean"],
         default=None,
         help="Correlation types to compute (default from config)",
     )
@@ -421,16 +434,16 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Target column for multilevel group correlations",
     )
     correlations_group.add_argument(
-        "--group-level-control-temperature",
+        "--group-level-control-predictor",
         action="store_true",
         default=None,
-        dest="group_level_control_temperature",
-        help="Control temperature in multilevel group correlations",
+        dest="group_level_control_predictor",
+        help="Control predictor in multilevel group correlations",
     )
     correlations_group.add_argument(
-        "--no-group-level-control-temperature",
+        "--no-group-level-control-predictor",
         action="store_false",
-        dest="group_level_control_temperature",
+        dest="group_level_control_predictor",
     )
     correlations_group.add_argument(
         "--group-level-control-trial-order",
@@ -484,7 +497,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         "--temporal-target-column",
         type=str,
         default=None,
-        help="events.tsv column to correlate against for temporal analyses (default: rating from event_columns.rating)",
+        help="events.tsv column to correlate against for temporal analyses (default: outcome from event_columns.outcome)",
     )
     temporal_group.add_argument("--temporal-correction-method", choices=["fdr", "cluster"], default=None)
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
@@ -565,8 +578,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     # Mixed effects-specific options
     mixed_group = parser.add_argument_group("Mixed effects options")
     mixed_group.add_argument("--mixed-random-effects", choices=["intercept", "intercept_slope"], default=None, help="Random effects specification")
-    mixed_group.add_argument("--mixed-include-temperature", action="store_true", default=None, dest="mixed_include_temperature")
-    mixed_group.add_argument("--no-mixed-include-temperature", action="store_false", dest="mixed_include_temperature")
+    mixed_group.add_argument("--mixed-include-predictor", action="store_true", default=None, dest="mixed_include_predictor")
+    mixed_group.add_argument("--no-mixed-include-predictor", action="store_false", dest="mixed_include_predictor")
     mixed_group.add_argument("--mixed-max-features", type=int, default=None, help="Maximum features for mixed effects")
     
     # Condition-specific options

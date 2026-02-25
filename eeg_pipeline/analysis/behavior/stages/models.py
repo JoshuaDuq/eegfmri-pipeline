@@ -7,47 +7,47 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.analysis.behavior.result_types import TempBreakpointResult, TempModelComparisonResult
+from eeg_pipeline.analysis.behavior.result_types import PredictorBreakpointResult, PredictorModelComparisonResult
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_int, get_config_value
 
 
-def compute_temp_model_comparison_impl(
-    temperature: pd.Series,
-    rating: pd.Series,
+def compute_predictor_model_comparison_impl(
+    predictor: pd.Series,
+    outcome: pd.Series,
     config: Any,
-) -> TempModelComparisonResult:
-    """Compare temperature→rating model fits (linear vs polynomial vs spline)."""
-    from eeg_pipeline.utils.analysis.stats.temperature_models import compare_temperature_rating_models
+) -> PredictorModelComparisonResult:
+    """Compare predictor→outcome model fits (linear vs polynomial vs spline)."""
+    from eeg_pipeline.utils.analysis.stats.predictor_models import compare_predictor_outcome_models
 
-    df_cmp, meta_cmp = compare_temperature_rating_models(temperature, rating, config=config)
-    return TempModelComparisonResult(df=df_cmp, metadata=meta_cmp)
+    df_cmp, meta_cmp = compare_predictor_outcome_models(predictor, outcome, config=config)
+    return PredictorModelComparisonResult(df=df_cmp, metadata=meta_cmp)
 
 
-def compute_temp_breakpoints_impl(
-    temperature: pd.Series,
-    rating: pd.Series,
+def compute_predictor_breakpoints_impl(
+    predictor: pd.Series,
+    outcome: pd.Series,
     config: Any,
-) -> TempBreakpointResult:
-    """Detect threshold temperatures where sensitivity changes."""
-    from eeg_pipeline.utils.analysis.stats.temperature_models import fit_temperature_breakpoint_test
+) -> PredictorBreakpointResult:
+    """Detect threshold predictor values where sensitivity changes."""
+    from eeg_pipeline.utils.analysis.stats.predictor_models import fit_predictor_breakpoint_test
 
-    df_bp, meta_bp = fit_temperature_breakpoint_test(temperature, rating, config=config)
-    return TempBreakpointResult(df=df_bp, metadata=meta_bp)
+    df_bp, meta_bp = fit_predictor_breakpoint_test(predictor, outcome, config=config)
+    return PredictorBreakpointResult(df=df_bp, metadata=meta_bp)
 
 
-def write_temperature_models_impl(
+def write_predictor_models_impl(
     ctx: Any,
-    model_comparison: Optional[TempModelComparisonResult],
-    breakpoint: Optional[TempBreakpointResult],
+    model_comparison: Optional[PredictorModelComparisonResult],
+    breakpoint: Optional[PredictorBreakpointResult],
     *,
     feature_suffix_from_context_fn: Callable[[Any], str],
     get_stats_subfolder_fn: Callable[[Any, str], Path],
     is_dataframe_valid_fn: Callable[[Optional[pd.DataFrame]], bool],
     write_parquet_with_optional_csv_fn: Callable[[pd.DataFrame, Path, bool], None],
 ) -> Path:
-    """Write temperature model results to disk."""
+    """Write predictor model results to disk."""
     suffix = feature_suffix_from_context_fn(ctx)
-    out_dir = get_stats_subfolder_fn(ctx, "temperature_models")
+    out_dir = get_stats_subfolder_fn(ctx, "predictor_models")
 
     if model_comparison is not None:
         if is_dataframe_valid_fn(model_comparison.df):
@@ -56,8 +56,8 @@ def write_temperature_models_impl(
 
         metadata_path = out_dir / f"model_comparison{suffix}.metadata.json"
         metadata_path.write_text(json.dumps(model_comparison.metadata, indent=2, default=str))
-        ctx.data_qc["temperature_model_comparison"] = model_comparison.metadata
-        ctx.logger.info("Temperature model comparison saved: %s", out_dir.name)
+        ctx.data_qc["predictor_model_comparison"] = model_comparison.metadata
+        ctx.logger.info("Predictor model comparison saved: %s", out_dir.name)
 
     if breakpoint is not None:
         if is_dataframe_valid_fn(breakpoint.df):
@@ -66,23 +66,23 @@ def write_temperature_models_impl(
 
         metadata_path = out_dir / f"breakpoint_test{suffix}.metadata.json"
         metadata_path.write_text(json.dumps(breakpoint.metadata, indent=2, default=str))
-        ctx.data_qc["temperature_breakpoint_test"] = breakpoint.metadata
-        ctx.logger.info("Temperature breakpoint test saved: %s", out_dir.name)
+        ctx.data_qc["predictor_breakpoint_test"] = breakpoint.metadata
+        ctx.logger.info("Predictor breakpoint test saved: %s", out_dir.name)
 
     return out_dir
 
 
-def stage_temperature_models_impl(
+def stage_predictor_models_impl(
     ctx: Any,
     config: Any,
     *,
     load_trial_table_df_fn: Callable[[Any], Optional[pd.DataFrame]],
     is_dataframe_valid_fn: Callable[[Optional[pd.DataFrame]], bool],
-    compute_temp_model_comparison_fn: Callable[[pd.Series, pd.Series, Any], TempModelComparisonResult],
-    compute_temp_breakpoints_fn: Callable[[pd.Series, pd.Series, Any], TempBreakpointResult],
-    write_temperature_models_fn: Callable[[Any, Optional[TempModelComparisonResult], Optional[TempBreakpointResult]], Path],
+    compute_predictor_model_comparison_fn: Callable[[pd.Series, pd.Series, Any], PredictorModelComparisonResult],
+    compute_predictor_breakpoints_fn: Callable[[pd.Series, pd.Series, Any], PredictorBreakpointResult],
+    write_predictor_models_fn: Callable[[Any, Optional[PredictorModelComparisonResult], Optional[PredictorBreakpointResult]], Path],
 ) -> Dict[str, Any]:
-    """Compare temperature→rating model fits and test for breakpoints."""
+    """Compare predictor→outcome model fits and test for breakpoints."""
     from eeg_pipeline.utils.data.columns import (
         resolve_outcome_column,
         resolve_predictor_column,
@@ -90,11 +90,11 @@ def stage_temperature_models_impl(
 
     df = load_trial_table_df_fn(ctx)
     if not is_dataframe_valid_fn(df):
-        ctx.logger.warning("Temperature models: trial table missing; skipping.")
+        ctx.logger.warning("Predictor models: trial table missing; skipping.")
         return {"status": "skipped_missing_data"}
 
-    predictor_column = resolve_predictor_column(df, ctx.config) or "temperature"
-    outcome_column = resolve_outcome_column(df, ctx.config) or "rating"
+    predictor_column = resolve_predictor_column(df, ctx.config) or "predictor"
+    outcome_column = resolve_outcome_column(df, ctx.config) or "outcome"
     required_columns = {predictor_column, outcome_column}
     missing_columns = required_columns - set(df.columns)
     if missing_columns:
@@ -113,25 +113,40 @@ def stage_temperature_models_impl(
     model_comparison = None
     breakpoint = None
 
-    mc_enabled = get_config_bool(ctx.config, "behavior_analysis.temperature_models.model_comparison.enabled", True)
+    mc_enabled = get_config_bool(ctx.config, "behavior_analysis.predictor_models.model_comparison.enabled", True)
     if mc_enabled:
-        model_comparison = compute_temp_model_comparison_fn(
-            df[predictor_column],
-            df[outcome_column],
-            ctx.config,
-        )
-        meta["model_comparison"] = model_comparison.metadata
+        try:
+            model_comparison = compute_predictor_model_comparison_fn(
+                df[predictor_column],
+                df[outcome_column],
+                ctx.config,
+            )
+            meta["model_comparison"] = model_comparison.metadata
+        except ValueError as exc:
+            meta["status"] = "skipped_incompatible_predictor"
+            meta["error"] = str(exc)
+            ctx.data_qc["predictor_models"] = meta
+            ctx.logger.warning("Predictor model comparison skipped: %s", exc)
+            return meta
 
-    bp_enabled = get_config_bool(ctx.config, "behavior_analysis.temperature_models.breakpoint_test.enabled", True)
+    bp_enabled = get_config_bool(ctx.config, "behavior_analysis.predictor_models.breakpoint_test.enabled", True)
     if bp_enabled:
-        breakpoint = compute_temp_breakpoints_fn(
-            df[predictor_column],
-            df[outcome_column],
-            ctx.config,
-        )
-        meta["breakpoint_test"] = breakpoint.metadata
+        try:
+            breakpoint = compute_predictor_breakpoints_fn(
+                df[predictor_column],
+                df[outcome_column],
+                ctx.config,
+            )
+            meta["breakpoint_test"] = breakpoint.metadata
+        except ValueError as exc:
+            meta["status"] = "skipped_incompatible_predictor"
+            meta["error"] = str(exc)
+            ctx.data_qc["predictor_models"] = meta
+            ctx.logger.warning("Predictor breakpoint test skipped: %s", exc)
+            return meta
 
-    write_temperature_models_fn(ctx, model_comparison, breakpoint)
+    write_predictor_models_fn(ctx, model_comparison, breakpoint)
+    ctx.data_qc["predictor_models"] = meta
     meta["status"] = "ok"
     return meta
 
@@ -146,7 +161,7 @@ def stage_regression_impl(
     get_feature_columns_fn: Callable[[pd.DataFrame, Any], List[str]],
     check_early_exit_conditions_fn: Callable[..., tuple[bool, Optional[str]]],
     sanitize_permutation_groups_fn: Callable[[Any, Any, str], Any],
-    attach_temperature_metadata_fn: Callable[[pd.DataFrame, Dict[str, Any], str], pd.DataFrame],
+    attach_predictor_metadata_fn: Callable[[pd.DataFrame, Dict[str, Any], str], pd.DataFrame],
     get_stats_subfolder_fn: Callable[[Any, str], Path],
     write_stats_table_fn: Callable[[Any, pd.DataFrame, Path], Path],
 ) -> pd.DataFrame:
@@ -198,8 +213,8 @@ def stage_regression_impl(
 
     if use_run_unit and run_col in df_trials.columns:
         ctx.logger.info("Regression: aggregating to run-level (primary_unit=%s)", primary_unit)
-        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
-        predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
+        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
+        predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
         agg_cols = [
             c
             for c in (
@@ -249,7 +264,7 @@ def stage_regression_impl(
     )
     reg_meta["primary_unit"] = primary_unit
     ctx.data_qc["trialwise_regression"] = reg_meta
-    reg_df = attach_temperature_metadata_fn(reg_df, reg_meta)
+    reg_df = attach_predictor_metadata_fn(reg_df, reg_meta)
 
     out_dir = get_stats_subfolder_fn(ctx, "trialwise_regression")
     out_path = out_dir / f"regression_feature_effects{suffix}{method_suffix}.parquet"
@@ -268,7 +283,7 @@ def stage_models_impl(
     is_dataframe_valid_fn: Callable[[Optional[pd.DataFrame]], bool],
     get_feature_columns_fn: Callable[[pd.DataFrame, Any], List[str]],
     check_early_exit_conditions_fn: Callable[..., tuple[bool, Optional[str]]],
-    attach_temperature_metadata_fn: Callable[[pd.DataFrame, Dict[str, Any], str], pd.DataFrame],
+    attach_predictor_metadata_fn: Callable[[pd.DataFrame, Dict[str, Any], str], pd.DataFrame],
     get_stats_subfolder_fn: Callable[[Any, str], Path],
     write_stats_table_fn: Callable[[Any, pd.DataFrame, Path], Path],
 ) -> pd.DataFrame:
@@ -329,16 +344,16 @@ def stage_models_impl(
                 f"but run column '{run_col}' is missing from trial table."
             )
         ctx.logger.info("Models: aggregating to run-level (primary_unit=%s)", primary_unit)
-        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["rating", "predictor_residual"])
+        outcomes_cfg = get_config_value(ctx.config, "behavior_analysis.models.outcomes", ["outcome", "predictor_residual"])
         if isinstance(outcomes_cfg, str):
             outcomes_cfg = [outcomes_cfg]
         elif not isinstance(outcomes_cfg, (list, tuple)):
-            outcomes_cfg = ["rating", "predictor_residual"]
+            outcomes_cfg = ["outcome", "predictor_residual"]
         binary_outcome = str(
             get_config_value(ctx.config, "behavior_analysis.models.binary_outcome", "binary_outcome") or "binary_outcome"
         ).strip()
-        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "rating"
-        predictor_column = resolve_predictor_column(df_trials, ctx.config) or "temperature"
+        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
+        predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
         extra_cols = [
             predictor_column,
             outcome_column,
@@ -346,10 +361,10 @@ def stage_models_impl(
             "binary_outcome",
             "trial_index",
             "trial_index_within_group",
-            "prev_temperature",
-            "prev_rating",
-            "delta_temperature",
-            "delta_rating",
+            "prev_predictor",
+            "prev_outcome",
+            "delta_predictor",
+            "delta_outcome",
         ]
         agg_cols = [c for c in set(feature_cols + list(outcomes_cfg) + [binary_outcome] + extra_cols) if c in df_trials.columns]
         agg_numeric = {c: "mean" for c in agg_cols if c != binary_outcome}
@@ -367,7 +382,7 @@ def stage_models_impl(
         config=ctx.config,
     )
     ctx.data_qc["feature_models"] = model_meta
-    model_df = attach_temperature_metadata_fn(model_df, model_meta, target_col="target")
+    model_df = attach_predictor_metadata_fn(model_df, model_meta, target_col="target")
 
     out_dir = get_stats_subfolder_fn(ctx, "feature_models")
     out_path = out_dir / f"models_feature_effects{suffix}{method_suffix}.parquet"

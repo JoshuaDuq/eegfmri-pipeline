@@ -166,7 +166,7 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetPlottingComparisonWindows())
 	case expandedTemporalTopomapsFeatureDir:
 		return len(m.temporalTopomapsStatsFeatureFolders)
-	case expandedPainResidualCrossfitGroupColumn:
+	case expandedPredictorResidualCrossfitGroupColumn:
 		if len(m.GetAvailableColumns()) == 0 {
 			return 2
 		}
@@ -392,7 +392,7 @@ func (m Model) getExpandedListItems() []string {
 		return m.GetPlottingComparisonWindows()
 	case expandedTemporalTopomapsFeatureDir:
 		return m.temporalTopomapsStatsFeatureFolders
-	case expandedPainResidualCrossfitGroupColumn:
+	case expandedPredictorResidualCrossfitGroupColumn:
 		items := []string{"(default: run column)"}
 		cols := m.GetAvailableColumns()
 		if len(cols) == 0 {
@@ -628,8 +628,8 @@ func (m *Model) handleExpandedListToggle() {
 				m.toggleSpaceValue(selectedItem, &cfg.DoseResponseResponseColumn)
 				m.plotItemConfigs[plotID] = cfg
 				return
-			case plotItemConfigFieldDoseResponsePainColumn:
-				cfg.DoseResponsePainColumn = selectedItem
+			case plotItemConfigFieldDoseResponsePredictorColumn:
+				cfg.DoseResponsePredictorColumn = selectedItem
 			default:
 				cfg.ComparisonColumn = selectedItem
 				cfg.ComparisonValuesSpec = "" // Reset values when column changes
@@ -1044,18 +1044,18 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
-	case expandedPainResidualCrossfitGroupColumn:
+	case expandedPredictorResidualCrossfitGroupColumn:
 		switch selectedItem {
 		case "(default: run column)":
-			m.painResidualCrossfitGroupColumn = ""
+			m.predictorResidualCrossfitGroupColumn = ""
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		case "(type manually)":
 			m.expandedOption = expandedNone
 			m.subCursor = 0
-			m.startTextEdit(textFieldPainResidualCrossfitGroupColumn)
+			m.startTextEdit(textFieldPredictorResidualCrossfitGroupColumn)
 		default:
-			m.painResidualCrossfitGroupColumn = selectedItem
+			m.predictorResidualCrossfitGroupColumn = selectedItem
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
@@ -1177,8 +1177,8 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optSourceLocFmriConditionScopeTrialTypes
 	case expandedIAFRois:
 		return opt == optIAFRois
-	case expandedPainResidualCrossfitGroupColumn:
-		return opt == optPainResidualCrossfitGroupColumn
+	case expandedPredictorResidualCrossfitGroupColumn:
+		return opt == optPredictorResidualCrossfitGroupColumn
 	case expandedStabilityGroupColumn:
 		return opt == optStabilityGroupColumn
 	case expandedGroupLevelTarget:
@@ -1366,14 +1366,14 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			}
 		}
 		return false
-	case expandedPainResidualCrossfitGroupColumn:
+	case expandedPredictorResidualCrossfitGroupColumn:
 		if item == "(default: run column)" {
-			return strings.TrimSpace(m.painResidualCrossfitGroupColumn) == ""
+			return strings.TrimSpace(m.predictorResidualCrossfitGroupColumn) == ""
 		}
 		if item == "(type manually)" {
 			return false
 		}
-		return m.painResidualCrossfitGroupColumn == item
+		return m.predictorResidualCrossfitGroupColumn == item
 	case expandedStabilityGroupColumn:
 		switch item {
 		case "(auto)":

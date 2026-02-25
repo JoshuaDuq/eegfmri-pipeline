@@ -3,7 +3,7 @@ Effect Direction Consistency (Subject-Level)
 ===========================================
 
 Builds a per-feature summary that compares effect direction across:
-- correlations (feature vs rating/temperature)
+- correlations (feature vs outcome/predictor)
 - trialwise regression (beta_feature)
 - model families (beta_feature by family)
 
@@ -159,24 +159,24 @@ def _detect_sign_flip(series_a: pd.Series, series_b: pd.Series) -> pd.Series:
 
 def _add_sign_flip_flags(out: pd.DataFrame) -> None:
     """Add sign flip detection columns."""
-    if "reg_rating_beta" in out.columns and "reg_predictor_residual_beta" in out.columns:
-        out["flip_reg_rating_vs_predictor_residual"] = _detect_sign_flip(
-            out["reg_rating_beta"], out["reg_predictor_residual_beta"]
+    if "reg_outcome_beta" in out.columns and "reg_predictor_residual_beta" in out.columns:
+        out["flip_reg_outcome_vs_predictor_residual"] = _detect_sign_flip(
+            out["reg_outcome_beta"], out["reg_predictor_residual_beta"]
         )
     
-    if "corr_rating_r" in out.columns and "reg_rating_beta" in out.columns:
-        out["flip_corr_vs_reg_rating"] = _detect_sign_flip(
-            out["corr_rating_r"], out["reg_rating_beta"]
+    if "corr_outcome_r" in out.columns and "reg_outcome_beta" in out.columns:
+        out["flip_corr_vs_reg_outcome"] = _detect_sign_flip(
+            out["corr_outcome_r"], out["reg_outcome_beta"]
         )
     
-    if "corr_rating_r" in out.columns and "model_ols_hc3_rating_beta" in out.columns:
-        out["flip_corr_vs_model_ols_rating"] = _detect_sign_flip(
-            out["corr_rating_r"], out["model_ols_hc3_rating_beta"]
+    if "corr_outcome_r" in out.columns and "model_ols_hc3_outcome_beta" in out.columns:
+        out["flip_corr_vs_model_ols_outcome"] = _detect_sign_flip(
+            out["corr_outcome_r"], out["model_ols_hc3_outcome_beta"]
         )
     
-    if "reg_rating_beta" in out.columns and "model_ols_hc3_rating_beta" in out.columns:
-        out["flip_reg_vs_model_ols_rating"] = _detect_sign_flip(
-            out["reg_rating_beta"], out["model_ols_hc3_rating_beta"]
+    if "reg_outcome_beta" in out.columns and "model_ols_hc3_outcome_beta" in out.columns:
+        out["flip_reg_vs_model_ols_outcome"] = _detect_sign_flip(
+            out["reg_outcome_beta"], out["model_ols_hc3_outcome_beta"]
         )
 
 
@@ -190,7 +190,7 @@ def build_effect_direction_consistency_summary(
     Merge per-feature evidence across analyses and flag sign flips.
 
     Output is one row per feature with columns like:
-      corr_rating_r, reg_rating_beta, model_ols_rating_beta, ...
+      corr_outcome_r, reg_outcome_beta, model_ols_outcome_beta, ...
       flip_* booleans for contradictions.
     """
     features = _extract_unique_features(corr_df, regression_df, models_df)
@@ -240,8 +240,8 @@ def _process_correlations(out: pd.DataFrame, corr_df: pd.DataFrame) -> None:
     corr_processed["r_val"] = _extract_column(corr_processed, "r_primary", "r")
     corr_processed["p_val"] = _extract_column(corr_processed, "p_primary", "p")
 
-    _add_correlation_columns(out, corr_processed, "rating", "corr_rating")
-    _add_correlation_columns(out, corr_processed, "temperature", "corr_temperature")
+    _add_correlation_columns(out, corr_processed, "outcome", "corr_outcome")
+    _add_correlation_columns(out, corr_processed, "predictor", "corr_predictor")
 
 
 def _process_regressions(out: pd.DataFrame, regression_df: pd.DataFrame) -> None:
@@ -251,9 +251,9 @@ def _process_regressions(out: pd.DataFrame, regression_df: pd.DataFrame) -> None
     reg_processed["beta"] = _extract_column(reg_processed, "beta_feature", "beta")
 
     regression_targets = [
-        ("rating", "reg_rating"),
+        ("outcome", "reg_outcome"),
         ("predictor_residual", "reg_predictor_residual"),
-        ("temperature", "reg_temperature"),
+        ("predictor", "reg_predictor"),
     ]
     for target, prefix in regression_targets:
         _add_regression_columns(out, reg_processed, target, prefix)
@@ -277,7 +277,7 @@ def _process_models(out: pd.DataFrame, models_df: pd.DataFrame) -> None:
         models_processed["p_val"] = np.nan
 
     model_families = ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
-    model_targets = ["rating", "predictor_residual"]
+    model_targets = ["outcome", "predictor_residual"]
     
     for family in model_families:
         for target in model_targets:
@@ -302,4 +302,3 @@ def _build_metadata(
 
 
 __all__ = ["build_effect_direction_consistency_summary"]
-

@@ -1879,7 +1879,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		case optAperiodicSubtractEvoked:
 			label = "Induced spectra"
 			value = m.boolToOnOff(m.aperiodicSubtractEvoked)
-			hint = "subtract evoked for pain"
+			hint = "subtract evoked for condition"
 		case optAsymmetryChannelPairs:
 			label = "Channel pairs"
 			value = asymPairsVal
@@ -2419,14 +2419,14 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "MVAR model adequacy"
-		// ERDS pain markers
-		case optERDSPainMarkerBands:
-			label, hint = "ERDS pain marker bands", "e.g. alpha,beta"
-			val := m.erdsPainMarkerBands
+		// ERDS condition markers
+		case optERDSConditionMarkerBands:
+			label, hint = "ERDS condition marker bands", "e.g. alpha,beta"
+			val := m.erdsConditionMarkerBands
 			if strings.TrimSpace(val) == "" {
 				val = "(default)"
 			}
-			if m.editingText && m.editingTextField == textFieldERDSPainMarkerBands {
+			if m.editingText && m.editingTextField == textFieldERDSConditionMarkerBands {
 				val = m.textBuffer + "█"
 			}
 			value = val

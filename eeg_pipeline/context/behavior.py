@@ -106,7 +106,7 @@ class BehaviorContext:
     n_perm: int = 100
     rng: Optional[np.random.Generator] = None
     partial_covars: Optional[List[str]] = None
-    control_temperature: bool = True
+    control_predictor: bool = True
     control_trial_order: bool = True
     compute_change_scores: bool = True
     compute_reliability: bool = True
@@ -138,10 +138,10 @@ class BehaviorContext:
     asymmetry_df: Optional[pd.DataFrame] = None
     microstates_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
-    temperature: Optional[pd.Series] = None
-    temperature_column: Optional[str] = None
+    predictor_series: Optional[pd.Series] = None
+    predictor_column: Optional[str] = None
     covariates_df: Optional[pd.DataFrame] = None
-    covariates_without_temp_df: Optional[pd.DataFrame] = None
+    covariates_without_predictor_df: Optional[pd.DataFrame] = None
     group_ids: Optional[Union[np.ndarray, pd.Series]] = None
     group_column: Optional[str] = None
     results: Dict[str, ComputationResult] = field(default_factory=dict)
@@ -190,8 +190,8 @@ class BehaviorContext:
         return self.get_min_samples("roi")
 
     @property
-    def has_temperature(self) -> bool:
-        return self.temperature is not None and len(self.temperature) > 0
+    def has_predictor(self) -> bool:
+        return self.predictor_series is not None and len(self.predictor_series) > 0
 
     @property
     def has_covariates(self) -> bool:
@@ -455,8 +455,8 @@ class BehaviorContext:
 
         return self._align_feature_tables()
 
-    def _find_rating_column(self) -> Optional[str]:
-        """Find rating column in aligned_events."""
+    def _find_outcome_column(self) -> Optional[str]:
+        """Find outcome column in aligned_events."""
         if self.aligned_events is None:
             return None
 
@@ -464,14 +464,14 @@ class BehaviorContext:
         if resolved is not None and resolved in self.aligned_events.columns:
             return resolved
 
-        rating_columns = (
-            list(self.config.get("event_columns.rating", []) or [])
+        outcome_columns = (
+            list(self.config.get("event_columns.outcome", []) or [])
             if self.config is not None
             else []
         )
         try:
             return pick_target_column(
-                self.aligned_events, target_columns=rating_columns
+                self.aligned_events, target_columns=outcome_columns
             )
         except (KeyError, AttributeError):
             return None
@@ -743,7 +743,7 @@ class BehaviorContext:
 
     def _build_covariates(self) -> None:
         """Build covariate matrices for partial correlations."""
-        self._extract_temperature()
+        self._extract_predictor()
         raw_covariates = self._build_raw_covariate_matrix()
         cov_report = self._summarize_covariates(raw_covariates)
         self.covariates_df = self._sanitize_covariates(raw_covariates)
@@ -755,26 +755,26 @@ class BehaviorContext:
         self._setup_trial_order_covariate()
         cov_report["trial_order_added"] = self._has_trial_index_column()
 
-        self._remove_temperature_if_disabled(cov_report)
-        self._build_covariates_without_temperature()
+        self._remove_predictor_if_disabled(cov_report)
+        self._build_covariates_without_predictor()
 
         self._finalize_covariate_report(cov_report)
 
-    def _extract_temperature(self) -> None:
-        """Extract temperature data from aligned events."""
+    def _extract_predictor(self) -> None:
+        """Extract predictor data from aligned events."""
         if self.aligned_events is None:
-            self.temperature, self.temperature_column = None, None
+            self.predictor_series, self.predictor_column = None, None
             return
 
         resolved = resolve_predictor_column(self.aligned_events, self.config)
         if resolved is None or resolved not in self.aligned_events.columns:
-            self.temperature, self.temperature_column = None, None
+            self.predictor_series, self.predictor_column = None, None
             return
 
-        self.temperature = pd.to_numeric(
+        self.predictor_series = pd.to_numeric(
             self.aligned_events[resolved], errors="coerce"
         )
-        self.temperature_column = str(resolved)
+        self.predictor_column = str(resolved)
 
     def _build_raw_covariate_matrix(self) -> Optional[pd.DataFrame]:
         """Build raw covariate matrix from aligned events."""
@@ -808,49 +808,49 @@ class BehaviorContext:
             and "trial_index" in self.covariates_df.columns
         )
 
-    def _remove_temperature_if_disabled(self, cov_report: Dict[str, Any]) -> None:
-        """Remove temperature column if control_temperature is disabled."""
+    def _remove_predictor_if_disabled(self, cov_report: Dict[str, Any]) -> None:
+        """Remove predictor column if control_predictor is disabled."""
         should_remove = (
-            not self.control_temperature
-            and self.temperature_column
+            not self.control_predictor
+            and self.predictor_column
             and self.covariates_df is not None
             and not self.covariates_df.empty
-            and self.temperature_column in self.covariates_df.columns
+            and self.predictor_column in self.covariates_df.columns
         )
 
         if not should_remove:
             return
 
         self.covariates_df = self.covariates_df.drop(
-            columns=[self.temperature_column], errors="ignore"
+            columns=[self.predictor_column], errors="ignore"
         )
         self.covariates_df = self._sanitize_covariates(self.covariates_df)
         cov_report.setdefault("dropped_by_rule", []).append(
-            self.temperature_column
+            self.predictor_column
         )
 
-    def _build_covariates_without_temperature(self) -> None:
-        """Build covariates DataFrame without temperature column."""
-        from eeg_pipeline.utils.data.covariates import build_covariates_without_temp
+    def _build_covariates_without_predictor(self) -> None:
+        """Build covariates DataFrame without predictor column."""
+        from eeg_pipeline.utils.data.covariates import build_covariates_without_predictor
 
-        self.covariates_without_temp_df = build_covariates_without_temp(
-            self.covariates_df, self.temperature_column
+        self.covariates_without_predictor_df = build_covariates_without_predictor(
+            self.covariates_df, self.predictor_column
         )
 
         if (
-            self.covariates_without_temp_df is not None
+            self.covariates_without_predictor_df is not None
             and self.aligned_events is not None
         ):
-            if not self.covariates_without_temp_df.index.equals(
+            if not self.covariates_without_predictor_df.index.equals(
                 self.aligned_events.index
             ):
-                self.covariates_without_temp_df = (
-                    self.covariates_without_temp_df.copy()
+                self.covariates_without_predictor_df = (
+                    self.covariates_without_predictor_df.copy()
                 )
-                self.covariates_without_temp_df.index = self.aligned_events.index
+                self.covariates_without_predictor_df.index = self.aligned_events.index
 
-        self.covariates_without_temp_df = self._sanitize_covariates(
-            self.covariates_without_temp_df
+        self.covariates_without_predictor_df = self._sanitize_covariates(
+            self.covariates_without_predictor_df
         )
 
     def _finalize_covariate_report(self, cov_report: Dict[str, Any]) -> None:

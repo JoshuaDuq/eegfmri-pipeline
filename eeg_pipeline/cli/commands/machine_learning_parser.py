@@ -162,7 +162,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Optional extra predictors appended to the EEG feature matrix (meta column names like "
-            "'temperature', 'trial_index', 'block')."
+            "'predictor', 'trial_index', 'block')."
         ),
     )
     parser.add_argument(
@@ -178,7 +178,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=None,
         help=(
-            "Target to predict. Can be a logical name ('rating', 'temperature', 'binary_outcome') "
+            "Target to predict. Can be a logical name ('outcome', 'predictor', 'binary_outcome') "
             "or an explicit events.tsv column name. Use --target=fmri_signature to predict trial-wise "
             "NPS/SIIPS1 expression from fMRI beta-series/LSS. Defaults depend on stage."
         ),
@@ -189,7 +189,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Fixed threshold for binarizing a continuous target when running classification "
-            "(e.g., --target=rating --binary-threshold=30). Median-split is intentionally disabled."
+            "(e.g., --target=outcome --binary-threshold=30). Median-split is intentionally disabled."
         ),
     )
     parser.add_argument(
@@ -259,7 +259,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=None,
         help=(
-            "Baseline predictor columns for incremental_validity (standardized meta names like 'temperature', "
+            "Baseline predictor columns for incremental_validity (standardized meta names like 'predictor', "
             "'trial_index', 'block'). Defaults to config machine_learning.incremental_validity.baseline_predictors."
         ),
     )

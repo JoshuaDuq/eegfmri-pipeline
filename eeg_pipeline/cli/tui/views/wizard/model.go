@@ -499,7 +499,7 @@ type PlotItemConfig struct {
 	// Behavior dose response
 	DoseResponseDoseColumn     string
 	DoseResponseResponseColumn string
-	DoseResponsePainColumn     string
+	DoseResponsePredictorColumn     string
 	DoseResponseSegment        string
 	DoseResponseBandsSpec      string
 	DoseResponseROIsSpec       string
@@ -546,7 +546,7 @@ const (
 	// Behavior dose response
 	plotItemConfigFieldDoseResponseDoseColumn
 	plotItemConfigFieldDoseResponseResponseColumn
-	plotItemConfigFieldDoseResponsePainColumn
+	plotItemConfigFieldDoseResponsePredictorColumn
 	plotItemConfigFieldDoseResponseSegment
 	plotItemConfigFieldDoseResponseBands
 	plotItemConfigFieldDoseResponseROIs
@@ -590,6 +590,7 @@ const (
 	textFieldFmriAnalysisOutputDir
 	textFieldFmriAnalysisFreesurferDir
 	textFieldFmriAnalysisSignatureDir
+	textFieldFmriAnalysisSignatureMaps
 	textFieldFmriTrialSigGroupColumn
 	textFieldFmriTrialSigGroupValues
 	textFieldFmriTrialSigScopeTrialTypes
@@ -614,14 +615,14 @@ const (
 	textFieldRunAdjustmentColumn
 	textFieldBehaviorOutcomeColumn
 	textFieldBehaviorPredictorColumn
-	textFieldPainResidualCrossfitGroupColumn
+	textFieldPredictorResidualCrossfitGroupColumn
 	textFieldClusterConditionColumn
 	textFieldClusterConditionValues
 	textFieldCorrelationsTargetColumn
 	textFieldGroupLevelTarget
 	textFieldCorrelationsTypes
 	textFieldCorrelationsFeatures
-	textFieldPainSensitivityFeatures
+	textFieldPredictorSensitivityFeatures
 	textFieldConditionFeatures
 	textFieldTemporalFeatures
 	textFieldClusterFeatures
@@ -666,8 +667,8 @@ const (
 	textFieldSourceLocFmriStimPhasesToModel
 	textFieldSourceLocFmriWindowAName
 	textFieldSourceLocFmriWindowBName
-	textFieldPainResidualSplineDfCandidates
-	textFieldPainResidualModelComparePolyDegrees
+	textFieldPredictorResidualSplineDfCandidates
+	textFieldPredictorResidualModelComparePolyDegrees
 	// Plotting advanced config text fields
 	textFieldPlotBboxInches
 	textFieldPlotFontFamily
@@ -683,8 +684,8 @@ const (
 	textFieldPlotFigureSizeWide
 	textFieldPlotFigureSizeTFR
 	textFieldPlotFigureSizeTopomap
-	textFieldPlotColorPain
-	textFieldPlotColorNonpain
+	textFieldPlotColorCondB
+	textFieldPlotColorCondA
 	textFieldPlotColorSignificant
 	textFieldPlotColorNonsignificant
 	textFieldPlotColorGray
@@ -746,16 +747,16 @@ const (
 	textFieldPrepAutorejectNInterpolate
 
 	// Event Column Mapping text fields
-	textFieldEventColTemperature
-	textFieldEventColRating
-	textFieldEventColPainBinary
+	textFieldEventColPredictor
+	textFieldEventColOutcome
+	textFieldEventColBinaryOutcome
 	textFieldConditionPreferredPrefixes
 
 	// Change Scores text fields
 	textFieldChangeScoresWindowPairs
 
-	// ERDS Pain Markers text fields
-	textFieldERDSPainMarkerBands
+	// ERDS Condition Markers text fields
+	textFieldERDSConditionMarkerBands
 	textFieldERDSLateralityColumns
 	textFieldERDSSomatosensoryLeftChannels
 	textFieldERDSSomatosensoryRightChannels
@@ -764,7 +765,7 @@ const (
 	textFieldBehaviorPermGroupColumnPreference
 
 	// System / IO text fields
-	textFieldIOTemperatureRange
+	textFieldIOPredictorRange
 
 	// Preprocessing advanced config text fields
 	textFieldIcaLabelsToKeep
@@ -808,11 +809,11 @@ var defaultPlotItems = []PlotItem{
 	{ID: "erp_contrast", Group: "erp", Name: "Contrast", Description: "ERP condition contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	// TFR
 	{ID: "tfr_scalpmean", Group: "tfr", Name: "Scalp-Mean TFR", Description: "Scalp-mean time-frequency representation", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "tfr_scalpmean_contrast", Group: "tfr", Name: "Scalp-Mean Contrast", Description: "Pain vs non-pain scalp-mean TFR contrast", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "tfr_scalpmean_contrast", Group: "tfr", Name: "Scalp-Mean Contrast", Description: "Condition A vs B scalp-mean TFR contrast", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	{ID: "tfr_channels", Group: "tfr", Name: "Channel TFRs", Description: "Time-frequency per channel", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "tfr_channels_contrast", Group: "tfr", Name: "Channel Contrasts", Description: "Pain vs non-pain channel TFR contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "tfr_channels_contrast", Group: "tfr", Name: "Channel Contrasts", Description: "Condition A vs B channel TFR contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	{ID: "tfr_rois", Group: "tfr", Name: "ROI TFRs", Description: "Time-frequency per ROI", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "tfr_rois_contrast", Group: "tfr", Name: "ROI Contrasts", Description: "Pain vs non-pain ROI TFR contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "tfr_rois_contrast", Group: "tfr", Name: "ROI Contrasts", Description: "Condition A vs B ROI TFR contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	{ID: "tfr_topomaps", Group: "tfr", Name: "TFR Topomaps", Description: "Time-frequency topographic maps", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	{ID: "tfr_band_evolution", Group: "tfr", Name: "Band Evolution", Description: "Frequency band power evolution over time", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	// Behavior
@@ -820,7 +821,7 @@ var defaultPlotItems = []PlotItem{
 	{ID: "behavior_scatter", Group: "behavior", Name: "Feature-Behavior Scatter", Description: "Configurable scatter plots correlating any EEG feature with behavioral columns", RequiredFiles: []string{"features_*.tsv", "events.tsv"}, RequiresFeatures: true},
 	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations*/*/temporal_correlations_by_condition*.npz"}, RequiresStats: true},
 	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"stats/trial_table*/*/trials_*.tsv", "stats/trial_table*/*/trials_*.parquet"}, RequiresStats: true},
-	{ID: "behavior_pain_probability", Group: "behavior", Name: "Pain Probability", Description: "Pain probability vs dose (binary outcome vs temperature)", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "behavior_binary_outcome_probability", Group: "behavior", Name: "Binary Outcome Probability", Description: "Binary outcome probability vs predictor (dose-response curve)", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 }
 
 var defaultPlotCategories = []FeatureCategory{
@@ -1120,6 +1121,7 @@ type Model struct {
 	fmriAnalysisPlotEmbedImages          bool
 	fmriAnalysisPlotSignatures           bool
 	fmriAnalysisSignatureDir             string // optional override; empty => auto
+	fmriAnalysisSignatureMaps            string // "NAME:path NAME2:path2" format; empty => from config
 
 	// fMRI trial-wise signatures configuration (beta-series, LSS)
 	fmriTrialSigGroupExpanded           bool
@@ -1134,7 +1136,7 @@ type Model struct {
 	fmriTrialSigSignatureSIIPS1         bool
 	fmriTrialSigLssOtherRegressorsIndex int // 0: per-condition, 1: all
 	// Signature grouping (compute signatures for specific values within an events column)
-	fmriTrialSigGroupColumn     string // e.g., temperature
+	fmriTrialSigGroupColumn     string // e.g., predictor_column
 	fmriTrialSigGroupValuesSpec string // space-separated values (e.g., "44.3 45.3 46.3")
 	fmriTrialSigGroupScopeIndex int    // 0: across-runs (average), 1: per-run
 	fmriTrialSigScopeTrialTypes string // Optional: space-separated trial_type allow-list
@@ -1210,8 +1212,8 @@ type Model struct {
 	plotFigureSizeTFRSpec      string
 	plotFigureSizeTopomapSpec  string
 
-	plotColorPain           string
-	plotColorNonpain        string
+	plotColorCondB           string
+	plotColorCondA        string
 	plotColorSignificant    string
 	plotColorNonsignificant string
 	plotColorGray           string
@@ -1793,12 +1795,13 @@ type Model struct {
 	tfHeatmapTimeResMs int    // Time resolution in ms
 
 	// Behavior pipeline advanced config
+	predictorType           int     // 0=continuous, 1=binary, 2=categorical
 	correlationMethod       string  // "spearman" or "pearson"
 	robustCorrelation       int     // 0=none, 1=percentage_bend, 2=winsorized, 3=shepherd
 	bootstrapSamples        int     // 0 = disabled, 1000+ recommended
 	nPermutations           int     // For cluster tests
 	rngSeed                 int     // 0 = use project default
-	controlTemperature      bool    // Include temperature as covariate
+	controlPredictor      bool    // Include predictor as covariate
 	controlTrialOrder       bool    // Include trial order as covariate
 	behaviorOutcomeColumn   string  // Canonical outcome column (blank=auto)
 	behaviorPredictorColumn string  // Canonical predictor column (blank=auto)
@@ -1825,9 +1828,9 @@ type Model struct {
 	// Behavior advanced config section expansion (collapsed by default for compact UI)
 	behaviorGroupGeneralExpanded      bool
 	behaviorGroupTrialTableExpanded   bool
-	behaviorGroupPainResidualExpanded bool
+	behaviorGroupPredictorResidualExpanded bool
 	behaviorGroupCorrelationsExpanded bool
-	behaviorGroupPainSensExpanded     bool
+	behaviorGroupPredictorSensExpanded     bool
 	behaviorGroupRegressionExpanded   bool
 	behaviorGroupModelsExpanded       bool
 	behaviorGroupStabilityExpanded    bool
@@ -1845,7 +1848,7 @@ type Model struct {
 	behaviorGroupAnalysesExpanded     bool
 	behaviorGroupAdvancedExpanded     bool
 
-	// Trial table / pain residual config (subject-level)
+	// Trial table / predictor residual config (subject-level)
 	trialTableFormat         int // 0=parquet, 1=tsv
 	trialTableAddLagFeatures bool
 
@@ -1860,30 +1863,30 @@ type Model struct {
 	featureQCMinVariance            float64
 	featureQCCheckWithinRunVariance bool
 
-	painResidualEnabled                 bool
-	painResidualMethod                  int // 0=spline, 1=poly
-	painResidualPolyDegree              int
-	painResidualSplineDfCandidates      string // Comma-separated list (e.g., "3,4,5")
-	painResidualModelCompareEnabled     bool
-	painResidualModelComparePolyDegrees string // Comma-separated list (e.g., "2,3")
-	painResidualMinSamples              int
-	painResidualModelCompareMinSamples  int
-	painResidualBreakpointEnabled       bool
-	painResidualBreakpointCandidates    int
-	painResidualBreakpointMinSamples    int
-	painResidualBreakpointQlow          float64
-	painResidualBreakpointQhigh         float64
+	predictorResidualEnabled                 bool
+	predictorResidualMethod                  int // 0=spline, 1=poly
+	predictorResidualPolyDegree              int
+	predictorResidualSplineDfCandidates      string // Comma-separated list (e.g., "3,4,5")
+	predictorResidualModelCompareEnabled     bool
+	predictorResidualModelComparePolyDegrees string // Comma-separated list (e.g., "2,3")
+	predictorResidualMinSamples              int
+	predictorResidualModelCompareMinSamples  int
+	predictorResidualBreakpointEnabled       bool
+	predictorResidualBreakpointCandidates    int
+	predictorResidualBreakpointMinSamples    int
+	predictorResidualBreakpointQlow          float64
+	predictorResidualBreakpointQhigh         float64
 
-	// Pain residual cross-fit (out-of-run prediction)
-	painResidualCrossfitEnabled     bool
-	painResidualCrossfitGroupColumn string
-	painResidualCrossfitNSplits     int
-	painResidualCrossfitMethod      int // 0=spline, 1=poly
-	painResidualCrossfitSplineKnots int
+	// Predictor residual cross-fit (out-of-run prediction)
+	predictorResidualCrossfitEnabled     bool
+	predictorResidualCrossfitGroupColumn string
+	predictorResidualCrossfitNSplits     int
+	predictorResidualCrossfitMethod      int // 0=spline, 1=poly
+	predictorResidualCrossfitSplineKnots int
 
 	// Regression
-	regressionOutcome            int // 0=rating, 1=predictor_residual, 2=temperature
-	regressionIncludeTemperature bool
+	regressionOutcome            int // 0=rating, 1=predictor_residual, 2=predictor
+	regressionIncludePredictor bool
 	regressionTempControl        int // 0=linear, 1=rating_hat, 2=spline
 	regressionTempSplineKnots    int
 	regressionTempSplineQlow     float64
@@ -1900,7 +1903,7 @@ type Model struct {
 	regressionMaxFeatures        int // 0 = no limit
 
 	// Models
-	modelsIncludeTemperature      bool
+	modelsIncludePredictor      bool
 	modelsTempControl             int // 0=linear, 1=rating_hat, 2=spline
 	modelsTempSplineKnots         int
 	modelsTempSplineQlow          float64
@@ -1913,10 +1916,10 @@ type Model struct {
 	modelsStandardize             bool
 	modelsMinSamples              int
 	modelsMaxFeatures             int
-	modelsOutcomeRating           bool
-	modelsOutcomePainResidual     bool
-	modelsOutcomeTemperature      bool
-	modelsOutcomePainBinary       bool
+	modelsOutcomeValue           bool
+	modelsOutcomePredictorResidual     bool
+	modelsOutcomePredictor      bool
+	modelsOutcomeBinaryOutcome       bool
 	modelsFamilyOLS               bool
 	modelsFamilyRobust            bool
 	modelsFamilyQuantile          bool
@@ -1936,11 +1939,11 @@ type Model struct {
 
 	// Consistency & influence
 	consistencyEnabled           bool
-	influenceOutcomeRating       bool
-	influenceOutcomePainResidual bool
-	influenceOutcomeTemperature  bool
+	influenceOutcomeValue       bool
+	influenceOutcomePredictorResidual bool
+	influenceOutcomePredictor  bool
 	influenceMaxFeatures         int
-	influenceIncludeTemperature  bool
+	influenceIncludePredictor  bool
 	influenceTempControl         int // 0=linear, 1=rating_hat, 2=spline
 	influenceTempSplineKnots     int
 	influenceTempSplineQlow      float64
@@ -1954,29 +1957,29 @@ type Model struct {
 	influenceLeverageThreshold   float64 // 0 = default
 
 	// Correlations (trial-table)
-	correlationsTypesSpec             string // Comma-separated list (e.g., "partial_cov_temp,raw")
+	correlationsTypesSpec             string // Comma-separated list (e.g., "partial_cov_predictor,raw")
 	correlationsUseCrossfitResidual   bool
 	correlationsPrimaryUnit           int // 0=trial, 1=run_mean
 	correlationsMinRuns               int // minimum runs for run-mean correlations
-	correlationsPreferPainResidual    bool
+	correlationsPreferPredictorResidual    bool
 	correlationsPermutations          int // 0=use global --n-perm
 	correlationsPermutationPrimary    bool
 	correlationsTargetColumn          string // Custom target column from events (dropdown)
 	correlationsFeaturesSpec          string // Comma-separated feature filters for correlations
 	groupLevelBlockPermutation        bool   // Use block-restricted permutations when block/run is available
 	groupLevelTarget                  string // target column for multilevel correlations
-	groupLevelControlTemperature      bool
+	groupLevelControlPredictor      bool
 	groupLevelControlTrialOrder       bool
 	groupLevelControlRunEffects       bool
 	groupLevelMaxRunDummies           int
 	groupLevelAllowParametricFallback bool
 
-	// Pain sensitivity
-	painSensitivityMinTrials          int // 0=unset
-	painSensitivityPrimaryUnit        int // 0=trial, 1=run_mean
-	painSensitivityPermutations       int // 0=use global permutation setting
-	painSensitivityPermutationPrimary bool
-	painSensitivityFeaturesSpec       string // Comma-separated feature filters for pain sensitivity
+	// Predictor sensitivity
+	predictorSensitivityMinTrials          int // 0=unset
+	predictorSensitivityPrimaryUnit        int // 0=trial, 1=run_mean
+	predictorSensitivityPermutations       int // 0=use global permutation setting
+	predictorSensitivityPermutationPrimary bool
+	predictorSensitivityFeaturesSpec       string // Comma-separated feature filters for predictor sensitivity
 
 	// Report
 	reportTopN int
@@ -2005,7 +2008,7 @@ type Model struct {
 
 	// Mixed effects (group-level; still configurable)
 	mixedEffectsType        int // 0=intercept, 1=intercept_slope
-	mixedIncludeTemperature bool
+	mixedIncludePredictor bool
 
 	// Mediation
 	mediationMinEffect          float64
@@ -2043,7 +2046,7 @@ type Model struct {
 	conditionEffectThreshold float64 // Min effect size to report
 	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.binary_outcome)
 	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
-	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
+	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "cond_a,cond_b")
 	conditionCompareLabels   string  // Optional labels aligned to compare values
 	conditionMinTrials       int     // 0=unset; condition.min_trials_per_condition
 	conditionOverwrite       bool    // Overwrite existing condition effects files
@@ -2227,9 +2230,9 @@ type Model struct {
 	alignFmriOnsetReference  int  // 0: as_is, 1: first_volume, 2: scanner_trigger
 
 	// Event Column Mapping
-	eventColTemperature        string // Temperature column candidates (comma-separated)
-	eventColRating             string // Rating column candidates (comma-separated)
-	eventColPainBinary         string // Binary outcome column candidates (comma-separated)
+	eventColPredictor        string // Predictor column candidates (comma-separated)
+	eventColOutcome             string // Rating column candidates (comma-separated)
+	eventColBinaryOutcome         string // Binary outcome column candidates (comma-separated)
 	conditionPreferredPrefixes string // Preferred trigger prefixes for auto condition detection (comma-separated)
 
 	// Per-Family Spatial Transforms (0: none, 1: csd, 2: laplacian)
@@ -2266,8 +2269,8 @@ type Model struct {
 	// Directed Connectivity Missing
 	directedConnMinSamplesPerMvarParam int // Auto-reduce MVAR order for short windows
 
-	// ERDS Pain Markers
-	erdsPainMarkerBands            string  // Bands for contralateral pain markers (comma-separated)
+	// ERDS Condition Markers
+	erdsConditionMarkerBands            string  // Bands for contralateral condition markers (comma-separated)
 	erdsLateralityColumns          string  // Column names for stimulation side (comma-separated)
 	erdsSomatosensoryLeftChannels  string  // Left somatosensory channels (comma-separated)
 	erdsSomatosensoryRightChannels string  // Right somatosensory channels (comma-separated)
@@ -2298,7 +2301,7 @@ type Model struct {
 	validationMaxAmplitudeUv        float64 // Max amplitude threshold
 
 	// System / IO
-	ioTemperatureRange           string  // Valid temperature range (e.g., "35.0,55.0")
+	ioPredictorRange           string  // Valid predictor range (e.g., "35.0,55.0")
 	ioMaxMissingChannelsFraction float64 // Max missing channels fraction
 
 	// TFR parameters (for features pipeline)
@@ -2776,12 +2779,13 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		qualityLineNoiseWidthHz:   1.0,
 		qualityLineNoiseHarmonics: 3,
 		// Behavior defaults
+		predictorType:           0, // continuous
 		correlationMethod:       "spearman",
 		robustCorrelation:       0,
 		bootstrapSamples:        1000,
 		nPermutations:           1000,
 		rngSeed:                 0,
-		controlTemperature:      true,
+		controlPredictor:      true,
 		controlTrialOrder:       true,
 		behaviorOutcomeColumn:   "",
 		behaviorPredictorColumn: "",
@@ -2810,27 +2814,27 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		featureQCMinVariance:            1e-10,
 		featureQCCheckWithinRunVariance: true,
 
-		painResidualEnabled:                 true,
-		painResidualMethod:                  0,
-		painResidualPolyDegree:              2,
-		painResidualSplineDfCandidates:      "3,4,5",
-		painResidualModelCompareEnabled:     true,
-		painResidualModelComparePolyDegrees: "2,3",
-		painResidualMinSamples:              10,
-		painResidualModelCompareMinSamples:  10,
-		painResidualBreakpointEnabled:       true,
-		painResidualBreakpointCandidates:    15,
-		painResidualBreakpointMinSamples:    12,
-		painResidualBreakpointQlow:          0.15,
-		painResidualBreakpointQhigh:         0.85,
-		painResidualCrossfitEnabled:         false,
-		painResidualCrossfitGroupColumn:     "",
-		painResidualCrossfitNSplits:         5,
-		painResidualCrossfitMethod:          0,
-		painResidualCrossfitSplineKnots:     5,
+		predictorResidualEnabled:                 true,
+		predictorResidualMethod:                  0,
+		predictorResidualPolyDegree:              2,
+		predictorResidualSplineDfCandidates:      "3,4,5",
+		predictorResidualModelCompareEnabled:     true,
+		predictorResidualModelComparePolyDegrees: "2,3",
+		predictorResidualMinSamples:              10,
+		predictorResidualModelCompareMinSamples:  10,
+		predictorResidualBreakpointEnabled:       true,
+		predictorResidualBreakpointCandidates:    15,
+		predictorResidualBreakpointMinSamples:    12,
+		predictorResidualBreakpointQlow:          0.15,
+		predictorResidualBreakpointQhigh:         0.85,
+		predictorResidualCrossfitEnabled:         false,
+		predictorResidualCrossfitGroupColumn:     "",
+		predictorResidualCrossfitNSplits:         5,
+		predictorResidualCrossfitMethod:          0,
+		predictorResidualCrossfitSplineKnots:     5,
 
 		regressionOutcome:            0,
-		regressionIncludeTemperature: true,
+		regressionIncludePredictor: true,
 		regressionTempControl:        0,
 		regressionTempSplineKnots:    4,
 		regressionTempSplineQlow:     0.05,
@@ -2846,7 +2850,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionPermutations:       0,
 		regressionMaxFeatures:        0,
 
-		modelsIncludeTemperature:      true,
+		modelsIncludePredictor:      true,
 		modelsTempControl:             0,
 		modelsTempSplineKnots:         4,
 		modelsTempSplineQlow:          0.05,
@@ -2859,10 +2863,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		modelsStandardize:             true,
 		modelsMinSamples:              20,
 		modelsMaxFeatures:             100,
-		modelsOutcomeRating:           true,
-		modelsOutcomePainResidual:     true,
-		modelsOutcomeTemperature:      false,
-		modelsOutcomePainBinary:       false,
+		modelsOutcomeValue:           true,
+		modelsOutcomePredictorResidual:     true,
+		modelsOutcomePredictor:      false,
+		modelsOutcomeBinaryOutcome:       false,
 		modelsFamilyOLS:               true,
 		modelsFamilyRobust:            true,
 		modelsFamilyQuantile:          true,
@@ -2880,11 +2884,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		stabilityAlpha:       0.05,
 
 		consistencyEnabled:           true,
-		influenceOutcomeRating:       true,
-		influenceOutcomePainResidual: true,
-		influenceOutcomeTemperature:  false,
+		influenceOutcomeValue:       true,
+		influenceOutcomePredictorResidual: true,
+		influenceOutcomePredictor:  false,
 		influenceMaxFeatures:         20,
-		influenceIncludeTemperature:  true,
+		influenceIncludePredictor:  true,
 		influenceTempControl:         0,
 		influenceTempSplineKnots:     4,
 		influenceTempSplineQlow:      0.05,
@@ -2897,26 +2901,26 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		influenceCooksThreshold:      0.0,
 		influenceLeverageThreshold:   0.0,
 
-		correlationsTypesSpec:             "partial_cov_temp",
+		correlationsTypesSpec:             "partial_cov_predictor",
 		correlationsUseCrossfitResidual:   false,
 		correlationsPrimaryUnit:           0,
 		correlationsMinRuns:               3,
-		correlationsPreferPainResidual:    false,
+		correlationsPreferPredictorResidual:    false,
 		correlationsPermutations:          0,
 		correlationsPermutationPrimary:    false,
 		correlationsFeaturesSpec:          "",
 		groupLevelBlockPermutation:        true,
 		groupLevelTarget:                  "",
-		groupLevelControlTemperature:      true,
+		groupLevelControlPredictor:      true,
 		groupLevelControlTrialOrder:       true,
 		groupLevelControlRunEffects:       false,
 		groupLevelMaxRunDummies:           20,
 		groupLevelAllowParametricFallback: false,
-		painSensitivityMinTrials:          0,
-		painSensitivityPrimaryUnit:        0,
-		painSensitivityPermutations:       0,
-		painSensitivityPermutationPrimary: true,
-		painSensitivityFeaturesSpec:       "",
+		predictorSensitivityMinTrials:          0,
+		predictorSensitivityPrimaryUnit:        0,
+		predictorSensitivityPermutations:       0,
+		predictorSensitivityPermutationPrimary: true,
+		predictorSensitivityFeaturesSpec:       "",
 
 		reportTopN:                     15,
 		temporalResolutionMs:           50,
@@ -2939,7 +2943,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalERDSBaselineMax:     -0.1,
 		temporalERDSMethod:          0, // 0=percent, 1=zscore
 		mixedEffectsType:            0,
-		mixedIncludeTemperature:     true,
+		mixedIncludePredictor:     true,
 		mediationMinEffect:          0.05,
 		mediationPermutationPrimary: true,
 		// Cluster defaults
@@ -3109,9 +3113,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		alignFmriOnsetReference:  0, // 0: as_is
 
 		// Event Column Mapping defaults
-		eventColTemperature:        "temp,temperature",
-		eventColRating:             "rating",
-		eventColPainBinary:         "binary_outcome,outcome_binary,label",
+		eventColPredictor:        "predictor",
+		eventColOutcome:             "outcome",
+		eventColBinaryOutcome:         "binary_outcome,outcome_binary,label",
 		conditionPreferredPrefixes: "",
 
 		// Per-Family Spatial Transforms defaults (all 0 = none / inherit global)
@@ -3148,8 +3152,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Directed Connectivity Missing defaults
 		directedConnMinSamplesPerMvarParam: 5,
 
-		// ERDS Pain Markers defaults
-		erdsPainMarkerBands:            "alpha,beta",
+		// ERDS Condition Markers defaults
+		erdsConditionMarkerBands:            "alpha,beta",
 		erdsLateralityColumns:          "stimulation_side,stim_side",
 		erdsSomatosensoryLeftChannels:  "C3,CP3,C5,CP5",
 		erdsSomatosensoryRightChannels: "C4,CP4,C6,CP6",
@@ -3180,7 +3184,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		validationMaxAmplitudeUv:        500.0,
 
 		// System / IO defaults
-		ioTemperatureRange:           "35.0,55.0",
+		ioPredictorRange:           "35.0,55.0",
 		ioMaxMissingChannelsFraction: 0.3,
 
 		// TFR defaults (from config)
@@ -3565,6 +3569,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisPlotEmbedImages = true
 		m.fmriAnalysisPlotSignatures = true
 		m.fmriAnalysisSignatureDir = ""
+		m.fmriAnalysisSignatureMaps = ""
 
 		// Trial-wise signature defaults (used by beta-series / lss modes)
 		m.fmriTrialSigGroupExpanded = true

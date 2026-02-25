@@ -6,12 +6,27 @@ paths:
   # FreeSurfer license file (required for fMRIPrep and BEM generation)
   # Get a free license at: https://surfer.nmr.mgh.harvard.edu/registration.html
   freesurfer_license: null  # Set this path or EEG_PIPELINE_FREESURFER_LICENSE
-  
+
   # fMRI BIDS root directory (raw fMRI data)
   bids_fmri_root: null
 
   # FreeSurfer SUBJECTS_DIR (structural MRI surfaces)
   freesurfer_dir: null
+
+  # Root directory for multivariate signature weight maps.
+  # If null, falls back to <deriv_root>/../external (if it exists).
+  signature_dir: null
+
+  # Multivariate signature weight maps to compute at each contrast/beta map.
+  # Each entry must have a unique "name" and a "path" relative to signature_dir.
+  # Leave empty ([]) to disable signature computation entirely.
+  # Example (thermal pain paradigm, using the bundled NPS and SIIPS1 maps):
+  #   signature_maps:
+  #     - name: "NPS"
+  #       path: "NPS/weights_NSF_grouppred_cvpcr.nii.gz"
+  #     - name: "SIIPS1"
+  #       path: "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+  signature_maps: []
 
 ###################################################################
 # fMRI Preprocessing (fMRIPrep)
@@ -153,6 +168,11 @@ fmri_contrast:
   # If null, no stim_phase scoping is applied.
   # Use ["all"] to disable scoping and model all stimulation phases.
   stim_phases_to_model: null
+
+  # Optional: trial_type value that stim_phase scoping is restricted to.
+  # If null, phase scoping applies to all rows regardless of trial_type.
+  # Set to the relevant event type for your paradigm (e.g. "stimulation" for thermal pain).
+  phase_scope_trial_type: null
 
   # Custom formula (optional, overrides condition_a/b)
   formula: null                # e.g., "condition_a - condition_b"

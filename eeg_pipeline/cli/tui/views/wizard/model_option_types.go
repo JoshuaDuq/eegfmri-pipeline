@@ -31,9 +31,9 @@ const (
 	// Behavior section headers (expand/collapse)
 	optBehaviorGroupGeneral
 	optBehaviorGroupTrialTable
-	optBehaviorGroupPainResidual
+	optBehaviorGroupPredictorResidual
 	optBehaviorGroupCorrelations
-	optBehaviorGroupPainSens
+	optBehaviorGroupPredictorSens
 	optBehaviorGroupRegression
 	optBehaviorGroupModels
 	optBehaviorGroupStability
@@ -350,7 +350,7 @@ const (
 	optModerationPermutationPrimary
 	// Behavior options - Mixed Effects
 	optMixedMaxFeatures
-	optMixedIncludeTemperature
+	optMixedIncludePredictor
 	// Behavior options - Condition
 	optConditionEffectThreshold
 	optConditionFailFast
@@ -374,25 +374,26 @@ const (
 	optFeatureQCMaxMissingPct
 	optFeatureQCMinVariance
 	optFeatureQCCheckWithinRunVariance
-	optPainResidualEnabled
-	optPainResidualMethod
-	optPainResidualPolyDegree
-	optPainResidualSplineDfCandidates
-	optPainResidualModelCompare
-	optPainResidualModelComparePolyDegrees
-	optPainResidualMinSamples
-	optPainResidualModelCompareMinSamples
-	optPainResidualBreakpoint
-	optPainResidualBreakpointCandidates
-	optPainResidualBreakpointMinSamples
-	optPainResidualBreakpointQlow
-	optPainResidualBreakpointQhigh
-	optPainResidualCrossfitEnabled
-	optPainResidualCrossfitGroupColumn
-	optPainResidualCrossfitNSplits
-	optPainResidualCrossfitMethod
-	optPainResidualCrossfitSplineKnots
+	optPredictorResidualEnabled
+	optPredictorResidualMethod
+	optPredictorResidualPolyDegree
+	optPredictorResidualSplineDfCandidates
+	optPredictorResidualModelCompare
+	optPredictorResidualModelComparePolyDegrees
+	optPredictorResidualMinSamples
+	optPredictorResidualModelCompareMinSamples
+	optPredictorResidualBreakpoint
+	optPredictorResidualBreakpointCandidates
+	optPredictorResidualBreakpointMinSamples
+	optPredictorResidualBreakpointQlow
+	optPredictorResidualBreakpointQhigh
+	optPredictorResidualCrossfitEnabled
+	optPredictorResidualCrossfitGroupColumn
+	optPredictorResidualCrossfitNSplits
+	optPredictorResidualCrossfitMethod
+	optPredictorResidualCrossfitSplineKnots
 	// Behavior options - General extra
+	optPredictorType
 	optRobustCorrelation
 	optBehaviorNJobs
 	optBehaviorOutcomeColumn
@@ -403,7 +404,7 @@ const (
 	optBehaviorValidateOnly
 	// Behavior options - Regression
 	optRegressionOutcome
-	optRegressionIncludeTemperature
+	optRegressionIncludePredictor
 	optRegressionTempControl
 	optRegressionTempSplineKnots
 	optRegressionTempSplineQlow
@@ -419,7 +420,7 @@ const (
 	optRegressionPermutations
 	optRegressionMaxFeatures
 	// Behavior options - Models
-	optModelsIncludeTemperature
+	optModelsIncludePredictor
 	optModelsTempControl
 	optModelsTempSplineKnots
 	optModelsTempSplineQlow
@@ -433,9 +434,9 @@ const (
 	optModelsMinSamples
 	optModelsMaxFeatures
 	optModelsOutcomeRating
-	optModelsOutcomePainResidual
-	optModelsOutcomeTemperature
-	optModelsOutcomePainBinary
+	optModelsOutcomePredictorResidual
+	optModelsOutcomePredictor
+	optModelsOutcomeBinaryOutcome
 	optModelsFamilyOLS
 	optModelsFamilyRobust
 	optModelsFamilyQuantile
@@ -454,10 +455,10 @@ const (
 	// Behavior options - Consistency / Influence
 	optConsistencyEnabled
 	optInfluenceOutcomeRating
-	optInfluenceOutcomePainResidual
-	optInfluenceOutcomeTemperature
+	optInfluenceOutcomePredictorResidual
+	optInfluenceOutcomePredictor
 	optInfluenceMaxFeatures
-	optInfluenceIncludeTemperature
+	optInfluenceIncludePredictor
 	optInfluenceTempControl
 	optInfluenceTempSplineKnots
 	optInfluenceTempSplineQlow
@@ -471,30 +472,30 @@ const (
 	optInfluenceLeverageThreshold
 	// Behavior options - Report
 	optReportTopN
-	// Behavior options - Correlations / pain sensitivity
+	// Behavior options - Correlations / predictor sensitivity
 	optCorrelationsTypes
-	optCorrelationsUseCrossfitPainResidual
+	optCorrelationsUseCrossfitPredictorResidual
 	optCorrelationsMultilevel
 	optCorrelationsPrimaryUnit
 	optCorrelationsMinRuns
-	optCorrelationsPreferPainResidual
+	optCorrelationsPreferPredictorResidual
 	optCorrelationsPermutations
 	optCorrelationsPermutationPrimary
 	optCorrelationsTargetColumn
 	optCorrelationsFeatures
 	optGroupLevelBlockPermutation
 	optGroupLevelTarget
-	optGroupLevelControlTemperature
+	optGroupLevelControlPredictor
 	optGroupLevelControlTrialOrder
 	optGroupLevelControlRunEffects
 	optGroupLevelMaxRunDummies
 	optGroupLevelAllowParametricFallback
-	optPainSensitivityMinTrials
-	optPainSensitivityPrimaryUnit
-	optPainSensitivityPermutations
-	optPainSensitivityPermutationPrimary
-	optPainSensitivityFeatures
-	// Behavior options - Pain sensitivity / temporal
+	optPredictorSensitivityMinTrials
+	optPredictorSensitivityPrimaryUnit
+	optPredictorSensitivityPermutations
+	optPredictorSensitivityPermutationPrimary
+	optPredictorSensitivityFeatures
+	// Behavior options - Predictor sensitivity / temporal
 	optTemporalResolutionMs
 	optTemporalCorrectionMethod
 	optTemporalTimeMinMs
@@ -689,8 +690,8 @@ const (
 	optPlotFigureSizeWide
 	optPlotFigureSizeTFR
 	optPlotFigureSizeTopomap
-	optPlotColorPain
-	optPlotColorNonpain
+	optPlotColorCondB
+	optPlotColorCondA
 	optPlotColorSignificant
 	optPlotColorNonsignificant
 	optPlotColorGray
@@ -965,6 +966,7 @@ const (
 	optFmriAnalysisPlotEmbedImages
 	optFmriAnalysisPlotSignatures
 	optFmriAnalysisSignatureDir
+	optFmriAnalysisSignatureMaps
 	// fMRI analysis trial-wise signatures options
 	optFmriTrialSigGroup
 	optFmriTrialSigMethod
@@ -1000,9 +1002,9 @@ const (
 	optAlignFmriOnsetReference
 
 	// Event Column Mapping
-	optEventColTemperature
+	optEventColPredictor
 	optEventColRating
-	optEventColPainBinary
+	optEventColBinaryOutcome
 	optConditionPreferredPrefixes
 
 	// Per-Family Spatial Transforms
@@ -1039,8 +1041,8 @@ const (
 	// Directed Connectivity Missing
 	optDirectedConnMinSamplesPerMvarParam
 
-	// ERDS Pain Markers
-	optERDSPainMarkerBands
+	// ERDS Condition Markers
+	optERDSConditionMarkerBands
 	optERDSLateralityColumns
 	optERDSSomatosensoryLeftChannels
 	optERDSSomatosensoryRightChannels
@@ -1139,6 +1141,6 @@ const (
 	optValidationMaxAmplitudeUv
 
 	// System / IO
-	optIOTemperatureRange
+	optIOPredictorRange
 	optIOMaxMissingChannelsFraction
 )
