@@ -106,6 +106,7 @@ _GENERAL_OVERRIDE_RULES = (
     ConfigOverrideRule("min_samples", "behavior_analysis.min_samples.default", _to_int),
     ConfigOverrideRule("predictor_column", "behavior_analysis.predictor_column", _to_stripped),
     ConfigOverrideRule("outcome_column", "behavior_analysis.outcome_column", _to_stripped),
+    ConfigOverrideRule("predictor_type", "behavior_analysis.predictor_type", _to_lower_stripped),
     ConfigOverrideRule("predictor_control", "behavior_analysis.predictor_control_enabled", _to_bool),
     ConfigOverrideRule("control_trial_order", "behavior_analysis.control_trial_order", _to_bool),
     ConfigOverrideRule("run_adjustment", "behavior_analysis.run_adjustment.enabled", _to_bool),

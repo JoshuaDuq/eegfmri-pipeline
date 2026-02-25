@@ -1647,6 +1647,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.correlationMethod = "spearman"
 		}
 		m.useDefaultAdvanced = false
+	case optPredictorType:
+		m.predictorType = (m.predictorType + 1) % 3
+		m.useDefaultAdvanced = false
 	case optRobustCorrelation:
 		m.robustCorrelation = (m.robustCorrelation + 1) % 4
 		m.useDefaultAdvanced = false

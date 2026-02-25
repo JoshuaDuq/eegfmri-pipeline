@@ -26,6 +26,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// General / statistics
+	predictorTypes := []string{"continuous", "binary", "categorical"}
+	if m.predictorType > 0 && m.predictorType < len(predictorTypes) {
+		args = append(args, "--predictor-type", predictorTypes[m.predictorType])
+	}
+
 	if m.correlationMethod != "spearman" {
 		args = append(args, "--correlation-method", m.correlationMethod)
 	}

@@ -1795,6 +1795,7 @@ type Model struct {
 	tfHeatmapTimeResMs int    // Time resolution in ms
 
 	// Behavior pipeline advanced config
+	predictorType           int     // 0=continuous, 1=binary, 2=categorical
 	correlationMethod       string  // "spearman" or "pearson"
 	robustCorrelation       int     // 0=none, 1=percentage_bend, 2=winsorized, 3=shepherd
 	bootstrapSamples        int     // 0 = disabled, 1000+ recommended
@@ -2778,6 +2779,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		qualityLineNoiseWidthHz:   1.0,
 		qualityLineNoiseHarmonics: 3,
 		// Behavior defaults
+		predictorType:           0, // continuous
 		correlationMethod:       "spearman",
 		robustCorrelation:       0,
 		bootstrapSamples:        1000,

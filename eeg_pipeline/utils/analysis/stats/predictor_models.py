@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from .base import get_config_value as _get_config_value
+from .validation import assert_continuous_predictor
 
 
 def _calculate_rmse(observed: np.ndarray, predicted: np.ndarray) -> float:
@@ -160,7 +161,14 @@ def compare_predictor_outcome_models(
     *,
     config: Optional[Any] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Compare linear / polynomial / spline models for outcome ~ f(predictor)."""
+    """Compare linear / polynomial / spline models for outcome ~ f(predictor).
+
+    Raises
+    ------
+    ValueError
+        If predictor_type is not 'continuous' or has < 5 unique values.
+    """
+    assert_continuous_predictor(predictor, config, context="predictor_models.model_comparison")
     min_samples = int(
         _get_config_value(config, "behavior_analysis.predictor_models.model_comparison.min_samples", 10)
     )
@@ -340,7 +348,13 @@ def fit_predictor_breakpoint_test(
     """Fit a single-breakpoint hinge model and compare to linear baseline.
 
     Model: outcome ~ predictor + max(0, predictor - c)
+
+    Raises
+    ------
+    ValueError
+        If predictor_type is not 'continuous' or has < 5 unique values.
     """
+    assert_continuous_predictor(predictor, config, context="predictor_models.breakpoint_test")
     min_samples = int(
         _get_config_value(config, "behavior_analysis.predictor_models.breakpoint_test.min_samples", 12)
     )

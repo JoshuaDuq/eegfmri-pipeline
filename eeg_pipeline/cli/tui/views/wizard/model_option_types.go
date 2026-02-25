@@ -393,6 +393,7 @@ const (
 	optPredictorResidualCrossfitMethod
 	optPredictorResidualCrossfitSplineKnots
 	// Behavior options - General extra
+	optPredictorType
 	optRobustCorrelation
 	optBehaviorNJobs
 	optBehaviorOutcomeColumn

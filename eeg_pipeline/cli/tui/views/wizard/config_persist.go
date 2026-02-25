@@ -381,6 +381,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["directedConnMinSegSamples"] = m.directedConnMinSegSamples
 
 	// Behavior pipeline
+	cfg["predictorType"] = m.predictorType
 	cfg["correlationMethod"] = m.correlationMethod
 	cfg["robustCorrelation"] = m.robustCorrelation
 	cfg["bootstrapSamples"] = m.bootstrapSamples
@@ -1588,6 +1589,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.directedConnMinSegSamples = getInt("directedConnMinSegSamples", m.directedConnMinSegSamples)
 
 	// Behavior
+	m.predictorType = getInt("predictorType", m.predictorType)
 	m.correlationMethod = getString("correlationMethod", m.correlationMethod)
 	m.robustCorrelation = getInt("robustCorrelation", m.robustCorrelation)
 	m.bootstrapSamples = getInt("bootstrapSamples", m.bootstrapSamples)

@@ -629,6 +629,19 @@ behavior_analysis:
   predictor_column: ""   # e.g., stimulus intensity / dose / any continuous IV
   outcome_column: ""     # e.g., rating / arousal / detection score
 
+  # Nature of the predictor variable. Controls which analyses are scientifically valid.
+  #
+  #   "continuous"  — ordered numeric scale with ≥5 distinct levels (e.g., temperature,
+  #                   dose, current intensity). Enables predictor_residual, predictor_models,
+  #                   psychometrics, and spline/outcome_hat predictor control.
+  #   "binary"      — two-level factor (0/1 or condition A/B). Disables curve-fitting
+  #                   analyses; standard linear regression and group contrasts remain valid.
+  #   "categorical" — unordered multi-level factor (≥3 levels). Same restrictions as binary.
+  #
+  # Attempting to run curve-fitting analyses with a non-continuous predictor raises
+  # a ValueError at the analysis entry point.
+  predictor_type: "continuous"
+
   # Optional robust estimator for correlations:
   # - null/"none": standard Spearman/Pearson
   # - "percentage_bend" | "winsorized" | "shepherd"

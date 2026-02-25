@@ -11,6 +11,10 @@ from eeg_pipeline.plotting.config import PlotConfig, get_plot_config
 from eeg_pipeline.plotting.behavioral.builders import generate_correlation_scatter
 from eeg_pipeline.utils.data import _pick_first_column
 from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir, _load_events_df
+from eeg_pipeline.utils.analysis.stats.validation import (
+    assert_predictor_type_continuous,
+    assert_continuous_predictor,
+)
 from eeg_pipeline.plotting.io.figures import get_band_color
 from eeg_pipeline.infra.logging import get_subject_logger
 
@@ -73,7 +77,17 @@ def _plot_predictor_rating_correlation(
 
 
 def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> None:
-    """Generate psychometric plots for predictor and rating data."""
+    """Generate psychometric plots for predictor vs. outcome.
+
+    Psychometric plots assume a continuous physical predictor on an ordered
+    scale (e.g., stimulus intensity). They are not meaningful for binary or
+    categorical predictors.
+
+    Raises
+    ------
+    ValueError
+        If predictor_type is not 'continuous' or has < 5 unique values.
+    """
     if config is None:
         raise ValueError("config is required for psychometrics plotting")
 
@@ -84,6 +98,8 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
     plot_subdir = behavioral_config.get("plot_subdir", "behavior")
     plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
     ensure_dir(plots_dir)
+
+    assert_predictor_type_continuous(config, context="psychometrics")
 
     events = _load_events_df(subject, task, config=config)
     if events is None or len(events) == 0:
@@ -105,6 +121,8 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
             f"Psychometrics: no predictor column found; skipping for sub-{subject}."
         )
         return
+
+    assert_continuous_predictor(predictor_valid, config, context="psychometrics")
 
     n_valid = len(predictor_valid)
     min_samples_for_plot = plot_config.validation.get("min_samples_for_plot", 5)

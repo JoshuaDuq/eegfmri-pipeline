@@ -48,6 +48,17 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     
     compute_group = parser.add_argument_group("Compute mode options")
+    compute_group.add_argument(
+        "--predictor-type",
+        choices=["continuous", "binary", "categorical"],
+        default=None,
+        help=(
+            "Nature of the predictor variable. "
+            "'continuous' enables curve-fitting analyses (predictor_residual, "
+            "predictor_models, psychometrics, spline/outcome_hat control). "
+            "'binary' or 'categorical' disables these analyses."
+        ),
+    )
     compute_group.add_argument("--correlation-method", choices=["spearman", "pearson"], default=None)
     compute_group.add_argument("--robust-correlation", choices=["none", "percentage_bend", "winsorized", "shepherd"], default=None)
     compute_group.add_argument("--bootstrap", type=int, default=None)

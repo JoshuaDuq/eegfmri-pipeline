@@ -40,6 +40,8 @@ func (m Model) getBehaviorOptions() []optionType {
 			if hasSelectedComputation("correlations", "stability", "predictor_sensitivity") {
 				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
 			}
+			// Predictor variable type — gates curve-fitting analyses
+			options = append(options, optPredictorType)
 			// Canonical behavior columns used across analyses
 			options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
 			// Bootstrap — correlations, stability

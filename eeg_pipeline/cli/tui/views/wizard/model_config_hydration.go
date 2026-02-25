@@ -138,6 +138,18 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
+		{key: "behavior_analysis.predictor_type", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(s) {
+				case "continuous", "":
+					m.predictorType = 0
+				case "binary":
+					m.predictorType = 1
+				case "categorical":
+					m.predictorType = 2
+				}
+			}
+		}},
 		{key: "behavior_analysis.robust_correlation", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(s) {

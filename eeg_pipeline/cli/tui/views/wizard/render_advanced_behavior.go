@@ -200,6 +200,13 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "  ── ERDS", "", ""
 		case optBehaviorSubMultilevel:
 			return "  ── Group-Level", "", ""
+		case optPredictorType:
+			types := []string{"continuous", "binary", "categorical"}
+			v := "continuous"
+			if m.predictorType >= 0 && m.predictorType < len(types) {
+				v = types[m.predictorType]
+			}
+			return "Predictor Type", v, "continuous | binary | categorical"
 		case optCorrMethod:
 			return "Correlation Method", m.correlationMethod, "spearman / pearson"
 		case optRobustCorrelation:

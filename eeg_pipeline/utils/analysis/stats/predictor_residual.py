@@ -1,13 +1,14 @@
 """
-Pain Residual (Subject-Level)
-=============================
+Predictor Residual (Subject-Level)
+===================================
 
-Defines a subject-level pain residual:
+Defines a subject-level predictor residual:
 
-    predictor_residual = rating - f(predictor)
+    predictor_residual = outcome - f(predictor)
 
-where f(·) is a flexible (but stable) dose-response curve. This targets
-"pain beyond stimulus intensity" for downstream feature associations.
+where f(·) is a flexible dose-response curve fitted to outcome ~ predictor.
+This targets "response beyond stimulus intensity" for downstream feature
+associations. Only valid when the predictor is continuous and ordinal.
 """
 
 from __future__ import annotations
@@ -17,8 +18,8 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-
 from .base import get_config_value as _get_config_value
+from .validation import assert_continuous_predictor
 
 
 def _prepare_data(
@@ -165,12 +166,18 @@ def fit_predictor_rating_curve(
     *,
     config: Optional[Any] = None,
 ) -> Tuple[pd.Series, pd.Series, Dict[str, Any]]:
-    """
-    Fit rating ~ f(predictor) and return (predicted, residual, metadata).
+    """Fit outcome ~ f(predictor) and return (predicted, residual, metadata).
 
     Uses a spline model when statsmodels is available; otherwise falls back
-    to a low-order polynomial.
+    to a low-order polynomial. Requires a continuous predictor with sufficient
+    unique values for stable curve fitting.
+
+    Raises
+    ------
+    ValueError
+        If predictor_type is not 'continuous' or has < 5 unique values.
     """
+    assert_continuous_predictor(predictor, config, context="predictor_residual")
     predictor_aligned, rating_aligned, common_index = _prepare_data(predictor, rating)
 
     metadata: Dict[str, Any] = {
