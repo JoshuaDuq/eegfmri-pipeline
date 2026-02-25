@@ -675,6 +675,7 @@ class PreprocessingPipeline(PipelineBase):
             List of unique condition values, or None if detection fails.
         """
         events_files = sorted(self.bids_root.glob("sub-*/eeg/*_events.tsv"))
+        config_obj = getattr(self, "config", None)
         
         if not events_files:
             self.logger.debug("No events files found in %s", self.bids_root)
@@ -688,7 +689,8 @@ class PreprocessingPipeline(PipelineBase):
                 }
                 condition_column = None
                 condition_idx = None
-                for candidate in get_condition_column_candidates(self.config):
+                candidates = get_condition_column_candidates(config_obj)
+                for candidate in candidates:
                     idx = header_lookup.get(candidate.lower())
                     if idx is not None:
                         condition_column = candidate
@@ -698,7 +700,7 @@ class PreprocessingPipeline(PipelineBase):
                 if condition_idx is None:
                     self.logger.debug(
                         "No configured condition column found in events file header (candidates=%s)",
-                        get_condition_column_candidates(self.config),
+                        candidates,
                     )
                     return None
 
@@ -717,10 +719,9 @@ class PreprocessingPipeline(PipelineBase):
                 # Heuristic filtering:
                 # - Prefer task-like triggers using configurable prefixes.
                 # - Avoid scanner/housekeeping markers (Volume, Pulse Artifact, SyncStatus, etc.)
-                cfg_obj = getattr(self, "config", None)
                 configured_prefixes = None
-                if cfg_obj is not None and hasattr(cfg_obj, "get"):
-                    configured_prefixes = cfg_obj.get("preprocessing.condition_preferred_prefixes", None)
+                if config_obj is not None and hasattr(config_obj, "get"):
+                    configured_prefixes = config_obj.get("preprocessing.condition_preferred_prefixes", None)
                 if isinstance(configured_prefixes, (list, tuple)):
                     preferred_prefixes = tuple(
                         str(p).strip()

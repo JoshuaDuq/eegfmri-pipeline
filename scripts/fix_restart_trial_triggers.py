@@ -74,11 +74,37 @@ def _load_numeric(series: pd.Series) -> Optional[list[float]]:
     return [float(v) for v in values.tolist()]
 
 
+def _target_indices_from_events(
+    trial_types: pd.Series,
+    event_prefix: Optional[str],
+) -> tuple[list[int], str]:
+    normalized = trial_types.map(_normalize)
+
+    prefix = _normalize(event_prefix or "")
+    if prefix:
+        return trial_types.index[normalized.str.startswith(prefix)].tolist(), prefix
+
+    excluded_prefixes = (
+        "Volume",
+        "Pulse",
+        "SyncStatus",
+        "New Segment",
+        "Bad",
+        "EDGE",
+        "Response",
+    )
+
+    mask = normalized.ne("") & normalized.str.lower().ne("n/a")
+    for excluded in excluded_prefixes:
+        mask &= ~normalized.str.startswith(excluded)
+    return trial_types.index[mask].tolist(), "auto(non-housekeeping)"
+
+
 def repair_events_file(
     events_path: Path,
     behavior_path: Path,
     *,
-    event_prefix: str,
+    event_prefix: Optional[str],
     behavior_onset_col: str,
     bad_prefix: str,
     median_err_threshold_s: float,
@@ -94,13 +120,15 @@ def repair_events_file(
     if behavior_onset_col not in beh_df.columns:
         return f"skip {events_path.name}: behavior missing {behavior_onset_col}"
 
-    normalized_trial_types = ev_df["trial_type"].map(_normalize)
-    target_indices = ev_df.index[normalized_trial_types.str.startswith(_normalize(event_prefix))].tolist()
+    target_indices, target_label = _target_indices_from_events(
+        ev_df["trial_type"],
+        event_prefix,
+    )
     n_events = len(target_indices)
     n_behavior = int(len(beh_df))
 
     if n_events == 0:
-        return f"skip {events_path.name}: no events matching {event_prefix}"
+        return f"skip {events_path.name}: no events matching {target_label}"
     if n_events == n_behavior:
         return f"ok   {events_path.name}: already aligned ({n_events})"
     if n_events < n_behavior:
@@ -156,7 +184,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--subject", required=True, help="Subject without 'sub-' prefix (e.g., 0002)")
     parser.add_argument("--task", required=True, help="Task label")
     parser.add_argument("--run", type=int, default=None, help="Run number to repair (default: all runs)")
-    parser.add_argument("--event-prefix", required=True, help="Trial_type prefix to align")
+    parser.add_argument(
+        "--event-prefix",
+        default=None,
+        help="Optional trial_type prefix to align (default: auto-detect non-housekeeping events)",
+    )
     parser.add_argument("--behavior-onset-col", default="stim_start_time", help="Behavior onset column")
     parser.add_argument("--bad-prefix", default="BAD_restart/", help="Prefix used to relabel extra triggers")
     parser.add_argument(
