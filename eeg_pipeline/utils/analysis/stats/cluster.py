@@ -559,8 +559,8 @@ def compute_two_condition_time_cluster_test(
 ) -> dict:
     """Time-domain cluster permutation test for two trial groups.
     
-    Generic two-condition comparison that can work with any condition column
-    (not limited to pain/non-pain). Condition is specified via condition_column
+    Generic two-condition comparison that can work with any condition column.
+    Condition is specified via condition_column
     and condition_values parameters.
     """
     logger = logging.getLogger(__name__)

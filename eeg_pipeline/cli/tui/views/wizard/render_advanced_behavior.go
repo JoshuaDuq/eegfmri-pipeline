@@ -1168,6 +1168,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Target Column", val, hint
+		case optCorrelationsPowerSegment:
+			val := strings.TrimSpace(m.correlationsPowerSegment)
+			if val == "" {
+				val = "(auto: all segments)"
+			}
+			if m.editingText && m.editingTextField == textFieldCorrelationsPowerSegment {
+				val = textDisplay
+			}
+			return "Power Segment", val, "optional segment filter for ROI power correlations"
 		case optCorrelationsFeatures:
 			val := m.correlationsFeaturesSpec
 			if strings.TrimSpace(val) == "" {

@@ -37,7 +37,7 @@ __all__ = [
     # Other scatter plots
     "plot_psychometrics",
     # Temporal
-    "plot_temporal_correlation_topomaps_by_pain",
+    "plot_temporal_correlation_topomaps_by_condition",
     # Dose response
     "visualize_dose_response",
     # Orchestration
@@ -58,7 +58,7 @@ def __getattr__(name: str):
         # Scatter
         "plot_psychometrics": "scatter",
         # Temporal
-        "plot_temporal_correlation_topomaps_by_pain": "temporal",
+        "plot_temporal_correlation_topomaps_by_condition": "temporal",
         # Dose response
         "visualize_dose_response": "dose_response",
     }

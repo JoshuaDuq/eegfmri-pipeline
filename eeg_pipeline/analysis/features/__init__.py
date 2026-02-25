@@ -2,7 +2,7 @@
 EEG Feature Extraction Package
 ==============================
 
-Efficient feature extraction for EEG analysis, optimized for pain research.
+Efficient feature extraction for EEG analysis across event-related studies.
 
 Quick Start
 -----------

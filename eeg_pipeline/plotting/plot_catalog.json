@@ -413,7 +413,7 @@
       "id": "tfr_scalpmean_contrast",
       "group": "tfr",
       "label": "Scalp-Mean Contrast",
-      "description": "Pain vs non-pain scalp-mean TFR contrast",
+      "description": "Condition-vs-condition scalp-mean TFR contrast",
       "required_files": [
         "epochs/*.fif",
         "events.tsv"
@@ -440,7 +440,7 @@
       "id": "tfr_channels_contrast",
       "group": "tfr",
       "label": "Channel Contrasts",
-      "description": "Pain vs non-pain channel TFR contrasts",
+      "description": "Condition-vs-condition channel TFR contrasts",
       "required_files": [
         "epochs/*.fif",
         "events.tsv"
@@ -467,7 +467,7 @@
       "id": "tfr_rois_contrast",
       "group": "tfr",
       "label": "ROI Contrasts",
-      "description": "Pain vs non-pain ROI TFR contrasts",
+      "description": "Condition-vs-condition ROI TFR contrasts",
       "required_files": [
         "epochs/*.fif",
         "events.tsv"
@@ -580,15 +580,15 @@
       "requires_stats": true
     },
     {
-      "id": "behavior_pain_probability",
+      "id": "behavior_binary_outcome_probability",
       "group": "behavior",
-      "label": "Pain Probability",
-      "description": "Pain probability vs dose (binary outcome vs temperature)",
+      "label": "Binary Outcome Probability",
+      "description": "Binary outcome probability vs predictor",
       "required_files": [
         "epochs/*.fif"
       ],
       "behavior_plots": [
-        "pain_probability"
+        "binary_outcome_probability"
       ],
       "requires_epochs": true
     }

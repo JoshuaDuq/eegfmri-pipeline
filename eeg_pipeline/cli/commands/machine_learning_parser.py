@@ -12,9 +12,9 @@ from eeg_pipeline.cli.common import (
 )
 
 ML_STAGES = {
-    "regression": "LOSO regression predicting pain intensity",
+    "regression": "LOSO regression predicting a continuous target",
     "timegen": "Time-generalization analysis",
-    "classify": "Binary pain classification",
+    "classify": "Binary classification",
     "model_comparison": "Compare ElasticNet vs Ridge vs RandomForest",
     "incremental_validity": "Quantify Δ performance when adding EEG over baseline",
     "uncertainty": "Conformal prediction intervals for uncertainty quantification",
@@ -180,7 +180,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Target to predict. Can be a logical name ('outcome', 'predictor', 'binary_outcome') "
             "or an explicit events.tsv column name. Use --target=fmri_signature to predict trial-wise "
-            "NPS/SIIPS1 expression from fMRI beta-series/LSS. Defaults depend on stage."
+            "signature expression from fMRI beta-series/LSS. Defaults depend on stage."
         ),
     )
     parser.add_argument(
@@ -341,9 +341,8 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     )
     fmri_sig.add_argument(
         "--fmri-signature-name",
-        choices=["NPS", "SIIPS1"],
         default=None,
-        help="Which signature to use as the ML target (default: NPS).",
+        help="Which signature to use as the ML target (default: config value, or auto-select first available signature).",
     )
     fmri_sig.add_argument(
         "--fmri-signature-metric",
@@ -399,7 +398,7 @@ def setup_ml(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         default="regression",
         help=(
             "ML mode: 'regression' (LOSO regression), 'timegen' (time-generalization), "
-            "'classify' (pain classification), 'model_comparison' (compare ElasticNet/Ridge/RF), "
+            "'classify' (binary classification), 'model_comparison' (compare ElasticNet/Ridge/RF), "
             "'incremental_validity' (Δ performance from EEG over baseline), "
             "'uncertainty' (conformal prediction intervals), 'shap' (SHAP feature importance), "
             "'permutation' (permutation feature importance)"

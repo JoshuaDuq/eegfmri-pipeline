@@ -268,7 +268,11 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocFmriDriftModel"] = m.sourceLocFmriDriftModel
 	cfg["sourceLocFmriHighPassHz"] = m.sourceLocFmriHighPassHz
 	cfg["sourceLocFmriLowPassHz"] = m.sourceLocFmriLowPassHz
+	cfg["sourceLocFmriConditionScopeColumn"] = m.sourceLocFmriConditionScopeColumn
 	cfg["sourceLocFmriConditionScopeTrialTypes"] = m.sourceLocFmriConditionScopeTrialTypes
+	cfg["sourceLocFmriPhaseColumn"] = m.sourceLocFmriPhaseColumn
+	cfg["sourceLocFmriPhaseScopeColumn"] = m.sourceLocFmriPhaseScopeColumn
+	cfg["sourceLocFmriPhaseScopeValue"] = m.sourceLocFmriPhaseScopeValue
 	cfg["sourceLocFmriStimPhasesToModel"] = m.sourceLocFmriStimPhasesToModel
 	cfg["sourceLocFmriClusterCorrection"] = m.sourceLocFmriClusterCorrection
 	cfg["sourceLocFmriClusterPThreshold"] = m.sourceLocFmriClusterPThreshold
@@ -536,6 +540,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// Correlations
 	cfg["correlationsTypesSpec"] = m.correlationsTypesSpec
 	cfg["correlationsTargetColumn"] = m.correlationsTargetColumn
+	cfg["correlationsPowerSegment"] = m.correlationsPowerSegment
 	cfg["correlationsUseCrossfitResidual"] = m.correlationsUseCrossfitResidual
 	cfg["correlationsPrimaryUnit"] = m.correlationsPrimaryUnit
 	cfg["correlationsMinRuns"] = m.correlationsMinRuns
@@ -690,7 +695,12 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriAnalysisContrastName"] = m.fmriAnalysisContrastName
 	cfg["fmriAnalysisFormula"] = m.fmriAnalysisFormula
 	cfg["fmriAnalysisEventsToModel"] = m.fmriAnalysisEventsToModel
+	cfg["fmriAnalysisScopeColumn"] = m.fmriAnalysisScopeColumn
 	cfg["fmriAnalysisScopeTrialTypes"] = m.fmriAnalysisScopeTrialTypes
+	cfg["fmriAnalysisPhaseColumn"] = m.fmriAnalysisPhaseColumn
+	cfg["fmriAnalysisPhaseScopeColumn"] = m.fmriAnalysisPhaseScopeColumn
+	cfg["fmriAnalysisPhaseScopeValue"] = m.fmriAnalysisPhaseScopeValue
+	cfg["fmriAnalysisStimPhasesToModel"] = m.fmriAnalysisStimPhasesToModel
 	cfg["fmriAnalysisHrfModel"] = m.fmriAnalysisHrfModel
 	cfg["fmriAnalysisDriftModel"] = m.fmriAnalysisDriftModel
 	cfg["fmriAnalysisHighPassHz"] = m.fmriAnalysisHighPassHz
@@ -744,12 +754,14 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriTrialSigWriteTrialBetas"] = m.fmriTrialSigWriteTrialBetas
 	cfg["fmriTrialSigWriteTrialVariances"] = m.fmriTrialSigWriteTrialVariances
 	cfg["fmriTrialSigWriteConditionBetas"] = m.fmriTrialSigWriteConditionBetas
-	cfg["fmriTrialSigSignatureNPS"] = m.fmriTrialSigSignatureNPS
-	cfg["fmriTrialSigSignatureSIIPS1"] = m.fmriTrialSigSignatureSIIPS1
+	cfg["fmriTrialSigSignatureOption1"] = m.fmriTrialSigSignatureOption1
+	cfg["fmriTrialSigSignatureOption2"] = m.fmriTrialSigSignatureOption2
 	cfg["fmriTrialSigLssOtherRegressorsIndex"] = m.fmriTrialSigLssOtherRegressorsIndex
 	cfg["fmriTrialSigGroupColumn"] = m.fmriTrialSigGroupColumn
 	cfg["fmriTrialSigGroupValuesSpec"] = m.fmriTrialSigGroupValuesSpec
 	cfg["fmriTrialSigGroupScopeIndex"] = m.fmriTrialSigGroupScopeIndex
+	cfg["fmriTrialSigScopeTrialTypeColumn"] = m.fmriTrialSigScopeTrialTypeColumn
+	cfg["fmriTrialSigScopePhaseColumn"] = m.fmriTrialSigScopePhaseColumn
 	cfg["fmriTrialSigScopeTrialTypes"] = m.fmriTrialSigScopeTrialTypes
 	cfg["fmriTrialSigScopeStimPhases"] = m.fmriTrialSigScopeStimPhases
 
@@ -1056,6 +1068,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["eventColPredictor"] = m.eventColPredictor
 	cfg["eventColOutcome"] = m.eventColOutcome
 	cfg["eventColBinaryOutcome"] = m.eventColBinaryOutcome
+	cfg["eventColCondition"] = m.eventColCondition
 	cfg["conditionPreferredPrefixes"] = m.conditionPreferredPrefixes
 
 	// Per-Family Spatial Transforms
@@ -1476,7 +1489,11 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.sourceLocFmriDriftModel = getInt("sourceLocFmriDriftModel", m.sourceLocFmriDriftModel)
 	m.sourceLocFmriHighPassHz = getFloat("sourceLocFmriHighPassHz", m.sourceLocFmriHighPassHz)
 	m.sourceLocFmriLowPassHz = getFloat("sourceLocFmriLowPassHz", m.sourceLocFmriLowPassHz)
+	m.sourceLocFmriConditionScopeColumn = getString("sourceLocFmriConditionScopeColumn", m.sourceLocFmriConditionScopeColumn)
 	m.sourceLocFmriConditionScopeTrialTypes = getString("sourceLocFmriConditionScopeTrialTypes", m.sourceLocFmriConditionScopeTrialTypes)
+	m.sourceLocFmriPhaseColumn = getString("sourceLocFmriPhaseColumn", m.sourceLocFmriPhaseColumn)
+	m.sourceLocFmriPhaseScopeColumn = getString("sourceLocFmriPhaseScopeColumn", m.sourceLocFmriPhaseScopeColumn)
+	m.sourceLocFmriPhaseScopeValue = getString("sourceLocFmriPhaseScopeValue", m.sourceLocFmriPhaseScopeValue)
 	m.sourceLocFmriStimPhasesToModel = getString("sourceLocFmriStimPhasesToModel", m.sourceLocFmriStimPhasesToModel)
 	m.sourceLocFmriClusterCorrection = getBool("sourceLocFmriClusterCorrection", m.sourceLocFmriClusterCorrection)
 	m.sourceLocFmriClusterPThreshold = getFloat("sourceLocFmriClusterPThreshold", m.sourceLocFmriClusterPThreshold)
@@ -1747,6 +1764,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	// Correlations
 	m.correlationsTypesSpec = getString("correlationsTypesSpec", m.correlationsTypesSpec)
 	m.correlationsTargetColumn = getString("correlationsTargetColumn", m.correlationsTargetColumn)
+	m.correlationsPowerSegment = getString("correlationsPowerSegment", m.correlationsPowerSegment)
 	m.correlationsUseCrossfitResidual = getBool("correlationsUseCrossfitResidual", m.correlationsUseCrossfitResidual)
 	m.correlationsPrimaryUnit = getInt("correlationsPrimaryUnit", m.correlationsPrimaryUnit)
 	m.correlationsMinRuns = getInt("correlationsMinRuns", m.correlationsMinRuns)
@@ -1894,14 +1912,19 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fmriAnalysisRequireFmriprep = getBool("fmriAnalysisRequireFmriprep", m.fmriAnalysisRequireFmriprep)
 	m.fmriAnalysisRunsSpec = getString("fmriAnalysisRunsSpec", m.fmriAnalysisRunsSpec)
 	m.fmriAnalysisContrastType = getInt("fmriAnalysisContrastType", m.fmriAnalysisContrastType)
-	m.fmriAnalysisCondAColumn = getString("fmriAnalysisCondAColumn", "trial_type")
+	m.fmriAnalysisCondAColumn = getString("fmriAnalysisCondAColumn", m.fmriAnalysisCondAColumn)
 	m.fmriAnalysisCondAValue = getString("fmriAnalysisCondAValue", m.fmriAnalysisCondAValue)
-	m.fmriAnalysisCondBColumn = getString("fmriAnalysisCondBColumn", "trial_type")
+	m.fmriAnalysisCondBColumn = getString("fmriAnalysisCondBColumn", m.fmriAnalysisCondBColumn)
 	m.fmriAnalysisCondBValue = getString("fmriAnalysisCondBValue", m.fmriAnalysisCondBValue)
 	m.fmriAnalysisContrastName = getString("fmriAnalysisContrastName", m.fmriAnalysisContrastName)
 	m.fmriAnalysisFormula = getString("fmriAnalysisFormula", m.fmriAnalysisFormula)
 	m.fmriAnalysisEventsToModel = getString("fmriAnalysisEventsToModel", m.fmriAnalysisEventsToModel)
+	m.fmriAnalysisScopeColumn = getString("fmriAnalysisScopeColumn", m.fmriAnalysisScopeColumn)
 	m.fmriAnalysisScopeTrialTypes = getString("fmriAnalysisScopeTrialTypes", m.fmriAnalysisScopeTrialTypes)
+	m.fmriAnalysisPhaseColumn = getString("fmriAnalysisPhaseColumn", m.fmriAnalysisPhaseColumn)
+	m.fmriAnalysisPhaseScopeColumn = getString("fmriAnalysisPhaseScopeColumn", m.fmriAnalysisPhaseScopeColumn)
+	m.fmriAnalysisPhaseScopeValue = getString("fmriAnalysisPhaseScopeValue", m.fmriAnalysisPhaseScopeValue)
+	m.fmriAnalysisStimPhasesToModel = getString("fmriAnalysisStimPhasesToModel", m.fmriAnalysisStimPhasesToModel)
 	m.fmriAnalysisHrfModel = getInt("fmriAnalysisHrfModel", m.fmriAnalysisHrfModel)
 	m.fmriAnalysisDriftModel = getInt("fmriAnalysisDriftModel", m.fmriAnalysisDriftModel)
 	m.fmriAnalysisHighPassHz = getFloat("fmriAnalysisHighPassHz", m.fmriAnalysisHighPassHz)
@@ -1955,12 +1978,14 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fmriTrialSigWriteTrialBetas = getBool("fmriTrialSigWriteTrialBetas", m.fmriTrialSigWriteTrialBetas)
 	m.fmriTrialSigWriteTrialVariances = getBool("fmriTrialSigWriteTrialVariances", m.fmriTrialSigWriteTrialVariances)
 	m.fmriTrialSigWriteConditionBetas = getBool("fmriTrialSigWriteConditionBetas", m.fmriTrialSigWriteConditionBetas)
-	m.fmriTrialSigSignatureNPS = getBool("fmriTrialSigSignatureNPS", m.fmriTrialSigSignatureNPS)
-	m.fmriTrialSigSignatureSIIPS1 = getBool("fmriTrialSigSignatureSIIPS1", m.fmriTrialSigSignatureSIIPS1)
+	m.fmriTrialSigSignatureOption1 = getBool("fmriTrialSigSignatureOption1", m.fmriTrialSigSignatureOption1)
+	m.fmriTrialSigSignatureOption2 = getBool("fmriTrialSigSignatureOption2", m.fmriTrialSigSignatureOption2)
 	m.fmriTrialSigLssOtherRegressorsIndex = getInt("fmriTrialSigLssOtherRegressorsIndex", m.fmriTrialSigLssOtherRegressorsIndex)
 	m.fmriTrialSigGroupColumn = getString("fmriTrialSigGroupColumn", m.fmriTrialSigGroupColumn)
 	m.fmriTrialSigGroupValuesSpec = getString("fmriTrialSigGroupValuesSpec", m.fmriTrialSigGroupValuesSpec)
 	m.fmriTrialSigGroupScopeIndex = getInt("fmriTrialSigGroupScopeIndex", m.fmriTrialSigGroupScopeIndex)
+	m.fmriTrialSigScopeTrialTypeColumn = getString("fmriTrialSigScopeTrialTypeColumn", m.fmriTrialSigScopeTrialTypeColumn)
+	m.fmriTrialSigScopePhaseColumn = getString("fmriTrialSigScopePhaseColumn", m.fmriTrialSigScopePhaseColumn)
 	m.fmriTrialSigScopeTrialTypes = getString("fmriTrialSigScopeTrialTypes", m.fmriTrialSigScopeTrialTypes)
 	m.fmriTrialSigScopeStimPhases = getString("fmriTrialSigScopeStimPhases", m.fmriTrialSigScopeStimPhases)
 
@@ -2275,6 +2300,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.eventColPredictor = getString("eventColPredictor", m.eventColPredictor)
 	m.eventColOutcome = getString("eventColOutcome", m.eventColOutcome)
 	m.eventColBinaryOutcome = getString("eventColBinaryOutcome", m.eventColBinaryOutcome)
+	m.eventColCondition = getString("eventColCondition", m.eventColCondition)
 	m.conditionPreferredPrefixes = getString("conditionPreferredPrefixes", m.conditionPreferredPrefixes)
 
 	// Per-Family Spatial Transforms

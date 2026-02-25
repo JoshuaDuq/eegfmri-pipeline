@@ -164,7 +164,7 @@ def _sanitize_label_for_filename(label: str) -> str:
     """Sanitize label for use in filenames.
     
     Args:
-        label: Label string (e.g., "Condition 1", "pain", "non-pain")
+        label: Label string (e.g., "Condition 1", "Condition 2")
         
     Returns:
         Sanitized, lowercase label suitable for filenames
@@ -372,7 +372,7 @@ def plot_channels_all_trials(
         )
 
 
-def contrast_channels_pain_nonpain(
+def contrast_channels_conditions(
     tfr,
     events_df: Optional[pd.DataFrame],
     out_dir: Path,
@@ -382,14 +382,14 @@ def contrast_channels_pain_nonpain(
     subject: Optional[str] = None,
     channels: Optional[List[str]] = None,
 ) -> None:
-    """Plot channel-level TFR contrast between pain and non-pain conditions.
+    """Plot channel-level TFR contrast between two configured conditions.
     
-    Creates plots for each channel showing pain condition, non-pain condition,
+    Creates plots for each channel showing condition 2, condition 1,
     and their difference.
     
     Args:
         tfr: MNE TFR object (EpochsTFR or AverageTFR)
-        events_df: Optional events DataFrame with pain column
+        events_df: Optional events DataFrame with comparison column
         out_dir: Output directory path
         config: Configuration object
         baseline: Baseline window tuple (tmin, tmax)

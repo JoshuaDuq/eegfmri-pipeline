@@ -659,8 +659,6 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
 def _normalize_condition_key(label: str) -> str:
     """Normalize condition label to a valid key format."""
     key = str(label).strip().lower().replace(" ", "_").replace("-", "_")
-    if key in {"non_pain", "nopain", "no_pain"}:
-        return "nonpain"
     return key or "condition"
 
 
@@ -761,4 +759,3 @@ def erp_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
             ctx.logger,
         )
-

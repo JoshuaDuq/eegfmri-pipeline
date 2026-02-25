@@ -590,6 +590,17 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			value = val
 			hint = "comma-separated column names"
+		case optEventColCondition:
+			label = "Condition Columns"
+			val := m.eventColCondition
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldEventColCondition {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "comma-separated condition label columns"
 		case optConditionPreferredPrefixes:
 			label = "Condition Trigger Prefixes"
 			val := m.conditionPreferredPrefixes

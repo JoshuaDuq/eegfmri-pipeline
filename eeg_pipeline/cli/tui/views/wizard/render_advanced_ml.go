@@ -195,8 +195,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optMLFmriSigContrastName:
 			label, value, hint = "fMRI Contrast Name", renderTextOrDefault(m.mlFmriSigContrastName, "(contrast)"), "must match fmri/(beta_series|lss)/task-*/contrast-*"
 		case optMLFmriSigSignature:
-			sigs := []string{"NPS", "SIIPS1"}
-			label, value, hint = "fMRI Signature", sigs[m.mlFmriSigSignatureIndex%len(sigs)], "signature used as target"
+			label, value, hint = "fMRI Signature", "(config default)", "set machine_learning.fmri_signature.signature_name in config"
 		case optMLFmriSigMetric:
 			metrics := []string{"dot", "cosine", "pearson_r"}
 			label, value, hint = "fMRI Sig Metric", metrics[m.mlFmriSigMetricIndex%len(metrics)], "target metric"

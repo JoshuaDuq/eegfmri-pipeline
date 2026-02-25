@@ -210,7 +210,7 @@ def _plot_roi_tfr_figure(
     )
 
 
-def contrast_pain_nonpain_rois(
+def contrast_conditions_rois(
     roi_tfrs: Dict[str, mne.time_frequency.EpochsTFR],
     events_df: Optional["pd.DataFrame"],
     out_dir: Path,
@@ -218,14 +218,14 @@ def contrast_pain_nonpain_rois(
     baseline: Tuple[Optional[float], Optional[float]],
     logger: Optional[logging.Logger] = None,
 ) -> None:
-    """Plot ROI-level TFR contrast between pain and non-pain conditions.
+    """Plot ROI-level TFR contrast between two configured conditions.
     
-    Creates plots for each ROI showing pain condition, non-pain condition,
+    Creates plots for each ROI showing condition 2, condition 1,
     and their difference.
     
     Args:
         roi_tfrs: Dictionary mapping ROI names to EpochsTFR objects
-        events_df: Optional events DataFrame with pain column
+        events_df: Optional events DataFrame with comparison column
         out_dir: Output directory path
         config: Configuration object
         baseline: Baseline window tuple (tmin, tmax)

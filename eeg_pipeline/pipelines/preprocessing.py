@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.pipelines.progress import ensure_progress_reporter
+from eeg_pipeline.utils.config.loader import get_condition_column_candidates
 
 
 STEP_BAD_CHANNELS = "bad-channels"
@@ -366,6 +367,12 @@ class PreprocessingPipeline(PipelineBase):
         from eeg_pipeline.utils.data.preprocessing import write_clean_events_tsv_for_epochs
 
         conditions = self._resolve_epoch_conditions()
+        raw_condition_columns = self.config.get("event_columns.condition", []) or []
+        if isinstance(raw_condition_columns, (list, tuple)):
+            condition_columns = [str(v).strip() for v in raw_condition_columns if str(v).strip()]
+        else:
+            parsed = str(raw_condition_columns).strip()
+            condition_columns = [parsed] if parsed else []
         overwrite = bool(self.config.get("preprocessing.clean_events_overwrite", True))
         strict = bool(self.config.get("preprocessing.clean_events_strict", True))
 
@@ -390,6 +397,7 @@ class PreprocessingPipeline(PipelineBase):
                     bids_root=self.bids_root,
                     epochs_path=epochs_path,
                     conditions=conditions,
+                    condition_columns=condition_columns,
                     overwrite=overwrite,
                     _logger=self.logger,
                 )
@@ -660,11 +668,11 @@ class PreprocessingPipeline(PipelineBase):
     def _detect_conditions_from_bids(self) -> list | None:
         """Detect unique condition names from BIDS events files.
         
-        Reads trial_type column from first available events TSV and returns
+        Reads a configured condition column from first available events TSV and returns
         unique values as a list suitable for mne_bids_pipeline conditions.
         
         Returns:
-            List of unique trial_type values, or None if detection fails.
+            List of unique condition values, or None if detection fails.
         """
         events_files = sorted(self.bids_root.glob("sub-*/eeg/*_events.tsv"))
         
@@ -675,19 +683,33 @@ class PreprocessingPipeline(PipelineBase):
         try:
             with open(events_files[0], "r", encoding="utf-8") as f:
                 header = f.readline().strip().split("\t")
-                if "trial_type" not in header:
-                    self.logger.debug("No 'trial_type' column in events file")
+                header_lookup = {
+                    str(name).strip().lower(): idx for idx, name in enumerate(header)
+                }
+                condition_column = None
+                condition_idx = None
+                for candidate in get_condition_column_candidates(self.config):
+                    idx = header_lookup.get(candidate.lower())
+                    if idx is not None:
+                        condition_column = candidate
+                        condition_idx = idx
+                        break
+
+                if condition_idx is None:
+                    self.logger.debug(
+                        "No configured condition column found in events file header (candidates=%s)",
+                        get_condition_column_candidates(self.config),
+                    )
                     return None
-                
-                trial_type_idx = header.index("trial_type")
+
                 conditions = set()
                 
                 for line in f:
                     parts = line.strip().split("\t")
-                    if len(parts) > trial_type_idx:
-                        trial_type = parts[trial_type_idx].strip()
-                        if trial_type and trial_type != "n/a":
-                            conditions.add(trial_type)
+                    if len(parts) > condition_idx:
+                        condition_value = parts[condition_idx].strip()
+                        if condition_value and condition_value != "n/a":
+                            conditions.add(condition_value)
 
                 if not conditions:
                     return None
@@ -727,7 +749,11 @@ class PreprocessingPipeline(PipelineBase):
                     t for t in conditions if any(t.startswith(p) for p in preferred_prefixes)
                 )
                 if preferred:
-                    self.logger.info("Auto-detected task conditions from BIDS: %s", preferred)
+                    self.logger.info(
+                        "Auto-detected task conditions from BIDS column '%s': %s",
+                        condition_column,
+                        preferred,
+                    )
                     return preferred
 
                 filtered = sorted(

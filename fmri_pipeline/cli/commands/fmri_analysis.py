@@ -117,9 +117,15 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         default=None,
         metavar="TT",
         help=(
-            "Optional: restrict which events.tsv trial_type rows are eligible for condition A/B selection. "
-            "Use 'all' to disable trial_type scoping."
+            "Optional: restrict which events.tsv rows are eligible for condition A/B selection "
+            "(matched against --condition-scope-column). Use 'all' to disable scoping."
         ),
+    )
+    contrast_group.add_argument(
+        "--condition-scope-column",
+        type=str,
+        default=None,
+        help="Events column used for --condition-scope-trial-types (default: trial_type).",
     )
 
     glm_group = parser.add_argument_group("GLM settings")
@@ -167,20 +173,35 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         type=str,
         default=None,
         help=(
-            "Optional comma-separated allow-list of event sub-phases to include when events.tsv has a stim_phase column. "
-            "If unset, no stim_phase scoping is applied. "
+            "Optional comma-separated allow-list of event phase values to include when events.tsv has the configured phase column. "
+            "If unset, no phase scoping is applied. "
             "Use 'all' to disable phase scoping."
         ),
     )
     glm_group.add_argument(
-        "--phase-scope-trial-type",
+        "--phase-column",
         type=str,
         default=None,
-        dest="phase_scope_trial_type",
         help=(
-            "Optional trial_type value to restrict stim_phase scoping to. "
-            "If unset, phase scoping applies to all rows. "
-            "Example: --phase-scope-trial-type stimulation"
+            "Events column used for phase scoping values passed via --stim-phases-to-model "
+            "(default: stim_phase)."
+        ),
+    )
+    glm_group.add_argument(
+        "--phase-scope-column",
+        type=str,
+        default=None,
+        help=(
+            "Events column used to scope phase filtering to a subset of rows (default: trial_type)."
+        ),
+    )
+    glm_group.add_argument(
+        "--phase-scope-value",
+        type=str,
+        default=None,
+        help=(
+            "Optional value in --phase-scope-column that limits where phase filtering is applied. "
+            "If unset, phase filtering applies to all rows."
         ),
     )
 
@@ -463,7 +484,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         metavar="NAME:REL_PATH",
         help=(
             "Signature weight maps as NAME:RELATIVE_PATH pairs (relative to --signature-dir). "
-            "Example: --signature-maps NPS:NPS/weights.nii.gz SIIPS1:SIIPS1/weights.nii.gz"
+            "Example: --signature-maps SIG_A:maps/sig_a.nii.gz SIG_B:maps/sig_b.nii.gz"
         ),
     )
 
@@ -535,7 +556,6 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
     trial_group.add_argument(
         "--signatures",
         nargs="+",
-        choices=["NPS", "SIIPS1"],
         default=None,
         metavar="SIG",
         help="Which signatures to compute (default: all available)",
@@ -589,8 +609,24 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         default=None,
         metavar="PHASE",
         help=(
-            "Optional: restrict which stim_phase values are eligible for trial selection (only when events.tsv has a stim_phase column). "
+            "Optional: restrict which phase values are eligible for trial selection (in the configured phase column). "
             "Use 'all' to disable scoping."
+        ),
+    )
+    trial_group.add_argument(
+        "--signature-scope-trial-type-column",
+        type=str,
+        default=None,
+        help=(
+            "Events column used for --signature-scope-trial-types (default: trial_type)."
+        ),
+    )
+    trial_group.add_argument(
+        "--signature-scope-phase-column",
+        type=str,
+        default=None,
+        help=(
+            "Events column used for --signature-scope-stim-phases (default: stim_phase)."
         ),
     )
 
@@ -741,6 +777,9 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
 
         events_to_model = normalize_trial_type_list(args.events_to_model)
         stim_phases_to_model = normalize_trial_type_list(getattr(args, "stim_phases_to_model", None))
+        phase_column = str(getattr(args, "phase_column", "") or "").strip() or "stim_phase"
+        phase_scope_column = str(getattr(args, "phase_scope_column", "") or "").strip() or "trial_type"
+        phase_scope_value = str(getattr(args, "phase_scope_value", "") or "").strip() or None
         cfg = ContrastBuilderConfig(
             enabled=True,
             input_source=input_source,
@@ -754,6 +793,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             condition_b_column=str(args.cond_b_column or "trial_type").strip(),
             condition_b_value=str(args.cond_b_value).strip() if args.cond_b_value else None,
             condition_scope_trial_types=list(getattr(args, "condition_scope_trial_types", None) or ()) or None,
+            condition_scope_column=str(getattr(args, "condition_scope_column", "") or "").strip() or "trial_type",
             formula=str(args.formula).strip() if args.formula else None,
             name=contrast_name,
             runs=list(args.runs) if args.runs else None,
@@ -770,7 +810,9 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             smoothing_fwhm=smoothing_fwhm,
             events_to_model=events_to_model,
             stim_phases_to_model=stim_phases_to_model,
-            phase_scope_trial_type=str(args.phase_scope_trial_type).strip() if getattr(args, "phase_scope_trial_type", None) else None,
+            phase_column=phase_column,
+            phase_scope_column=phase_scope_column,
+            phase_scope_value=phase_scope_value,
         )
     else:
         include_other_events = True if args.include_other_events is None else bool(args.include_other_events)
@@ -798,6 +840,12 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             method=mode,
             include_other_events=include_other_events,
             lss_other_regressors=lss_other,
+            condition_scope_trial_type_column=(
+                str(getattr(args, "signature_scope_trial_type_column", "") or "").strip() or "trial_type"
+            ),
+            condition_scope_phase_column=(
+                str(getattr(args, "signature_scope_phase_column", "") or "").strip() or "stim_phase"
+            ),
             condition_scope_trial_types=tuple(getattr(args, "signature_scope_trial_types", None) or ()) or None,
             condition_scope_stim_phases=tuple(getattr(args, "signature_scope_stim_phases", None) or ()) or None,
             max_trials_per_run=int(args.max_trials_per_run) if args.max_trials_per_run else None,

@@ -495,6 +495,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		// Always pass explicit target selection (possibly empty) so the backend
 		// does not silently fall back to built-in defaults.
 		args = append(args, "--correlations-target-column", strings.TrimSpace(m.correlationsTargetColumn))
+		if seg := strings.TrimSpace(m.correlationsPowerSegment); seg != "" {
+			args = append(args, "--correlations-power-segment", seg)
+		}
 	}
 
 	// Multilevel correlations (group-level)

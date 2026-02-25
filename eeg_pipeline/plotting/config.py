@@ -95,8 +95,8 @@ class ColorPalette:
     blue: str = "#1f77b4"
     significant: str = "#C42847"
     nonsignificant: str = "#666666"
-    pain: str = "crimson"
-    nonpain: str = "navy"
+    condition_2: str = "crimson"
+    condition_1: str = "navy"
     network_node: str = "#87CEEB"
 
 
@@ -382,8 +382,8 @@ class PlotConfig:
             blue=colors_dict.get("blue", "#1f77b4"),
             significant=colors_dict.get("significant", "#C42847"),
             nonsignificant=colors_dict.get("nonsignificant", "#666666"),
-            pain=condition_2,
-            nonpain=condition_1,
+            condition_2=condition_2,
+            condition_1=condition_1,
             network_node=colors_dict.get("network_node", "#87CEEB"),
         )
     
@@ -506,10 +506,8 @@ class PlotConfig:
             "blue": self.style.colors.blue,
             "significant": self.style.colors.significant,
             "nonsignificant": self.style.colors.nonsignificant,
-            "condition_1": self.style.colors.nonpain,
-            "condition_2": self.style.colors.pain,
-            "pain": self.style.colors.pain,
-            "nonpain": self.style.colors.nonpain,
+            "condition_1": self.style.colors.condition_1,
+            "condition_2": self.style.colors.condition_2,
             "network_node": self.style.colors.network_node,
         }
         return color_map.get(color_name, self.style.colors.gray)

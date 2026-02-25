@@ -9,7 +9,7 @@ from eeg_pipeline.plotting.behavioral.dose_response import (
 from eeg_pipeline.plotting.behavioral.registry import BehaviorPlotContext, BehaviorPlotRegistry
 from eeg_pipeline.plotting.behavioral.scatter.behavior_scatter import plot_behavior_scatter
 from eeg_pipeline.plotting.behavioral.scatter.psychometrics import plot_psychometrics
-from eeg_pipeline.plotting.behavioral.temporal.topomaps import plot_temporal_correlation_topomaps_by_pain
+from eeg_pipeline.plotting.behavioral.temporal.topomaps import plot_temporal_correlation_topomaps_by_condition
 from eeg_pipeline.utils.config.loader import get_config_value
 
 
@@ -47,7 +47,7 @@ def run_behavior_scatter(ctx: BehaviorPlotContext, saved_plots: dict[str, Any]) 
 
 @BehaviorPlotRegistry.register("temporal", name="temporal_topomaps")
 def run_temporal_topomaps(ctx: BehaviorPlotContext, saved_plots: dict[str, Any]) -> None:
-    plot_temporal_correlation_topomaps_by_pain(
+    plot_temporal_correlation_topomaps_by_condition(
         subject=ctx.subject,
         task=ctx.task,
         plots_dir=ctx.plots_dir,

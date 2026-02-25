@@ -2,7 +2,7 @@
 ERP/LEP Feature Extraction
 ==========================
 
-Time-domain features for pain-related evoked potentials.
+Time-domain features for event-related evoked potentials.
 Computed per-trial within user-defined time windows, including
 peak-to-peak features for matching N/P components (e.g., N2-P2).
 """

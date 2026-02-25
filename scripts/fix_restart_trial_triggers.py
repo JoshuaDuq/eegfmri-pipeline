@@ -154,9 +154,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-root", required=True, help="Path to source_data root")
     parser.add_argument("--bids-root", required=True, help="Path to BIDS EEG root")
     parser.add_argument("--subject", required=True, help="Subject without 'sub-' prefix (e.g., 0002)")
-    parser.add_argument("--task", required=True, help="Task label (e.g., thermalactive)")
+    parser.add_argument("--task", required=True, help="Task label")
     parser.add_argument("--run", type=int, default=None, help="Run number to repair (default: all runs)")
-    parser.add_argument("--event-prefix", default="Trig_therm/T 1", help="Trial_type prefix to align")
+    parser.add_argument("--event-prefix", required=True, help="Trial_type prefix to align")
     parser.add_argument("--behavior-onset-col", default="stim_start_time", help="Behavior onset column")
     parser.add_argument("--bad-prefix", default="BAD_restart/", help="Prefix used to relabel extra triggers")
     parser.add_argument(
@@ -214,4 +214,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

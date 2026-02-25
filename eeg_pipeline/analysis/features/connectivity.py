@@ -40,7 +40,11 @@ except ImportError:
     StandardScaler = None
 
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.utils.config.loader import get_frequency_bands, get_nested_value
+from eeg_pipeline.utils.config.loader import (
+    get_condition_column_candidates,
+    get_frequency_bands,
+    get_nested_value,
+)
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.analysis.graph_metrics import (
     symmetrize_adjacency as _symmetrize_and_clip,
@@ -300,25 +304,16 @@ def _resolve_connectivity_condition_column(
             )
         return condition_column_cfg
 
-    for candidate in ("condition", "trial_type"):
-        if candidate in events.columns:
-            return candidate
-
-    candidates = []
-    if hasattr(config, "get"):
-        candidates = config.get("event_columns.binary_outcome", []) or []
-    elif isinstance(config, dict):
-        candidates = get_nested_value(config, "event_columns.binary_outcome", []) or []
-    if isinstance(candidates, (list, tuple)):
-        for c in candidates:
-            c = str(c).strip()
-            if c and c in events.columns:
-                return c
+    lookup = {str(col).strip().lower(): str(col) for col in events.columns}
+    for candidate in get_condition_column_candidates(config):
+        resolved = lookup.get(candidate.lower())
+        if resolved is not None:
+            return resolved
 
     raise ValueError(
         "Connectivity granularity='condition' requested but no condition column found in aligned_events. "
-        "Set feature_engineering.connectivity.condition_column explicitly (recommended), or ensure one of "
-        "{'condition','trial_type'} exists, or list a valid column in event_columns.binary_outcome."
+        "Set feature_engineering.connectivity.condition_column explicitly (recommended), or configure "
+        "event_columns.condition with a valid events.tsv column name."
     )
 
 
@@ -1115,15 +1110,12 @@ def extract_connectivity_features(
     if ctx_name:
         segments = [ctx_name]
     elif getattr(ctx, "windows", None) is not None:
-        for key in ("active", "plateau"):
+        mask_names = [k for k in ctx.windows.masks.keys() if k != "baseline"]
+        for key in mask_names:
             mask = ctx.windows.get_mask(key)
             if mask is not None and np.any(mask):
                 segments = [key]
                 break
-        if not segments:
-            mask_names = [k for k in ctx.windows.masks.keys() if k != "baseline"]
-            if mask_names:
-                segments = [mask_names[0]]
     if not segments:
         segments = ["full"]
 
@@ -2866,15 +2858,12 @@ def extract_directed_connectivity_features(
     if ctx_name:
         segments = [ctx_name]
     elif getattr(ctx, "windows", None) is not None:
-        for key in ("active", "plateau"):
+        mask_names = [k for k in ctx.windows.masks.keys() if k != "baseline"]
+        for key in mask_names:
             mask = ctx.windows.get_mask(key)
             if mask is not None and np.any(mask):
                 segments = [key]
                 break
-        if not segments:
-            mask_names = [k for k in ctx.windows.masks.keys() if k != "baseline"]
-            if mask_names:
-                segments = [mask_names[0]]
     if not segments:
         segments = ["full"]
     

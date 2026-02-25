@@ -85,6 +85,7 @@ event_columns:
   # Generic column aliases for logical event groups.
   # Add paradigm-specific column names in your overrides file.
   required: ["outcome"]
+  condition: ["condition", "trial_type"]
   predictor: []
   outcome: ["outcome", "rating"]
   binary_outcome: ["binary_outcome", "outcome_binary", "label"]
@@ -258,7 +259,7 @@ feature_engineering:
 
   power:
     require_baseline: true
-    # For event-related pain paradigms, subtracting the evoked (ERP) component is often
+    # For event-related paradigms, subtracting the evoked (ERP) component is often
     # scientifically preferable when interpreting oscillatory power changes as "induced".
     # In trial_ml_safe mode, provide ctx.train_mask to avoid CV leakage; otherwise this
     # is automatically disabled for safety.
@@ -331,7 +332,7 @@ feature_engineering:
     iaf_min_prominence: 0.05
     iaf_min_cycles_at_fmin: 5.0     # Require this many cycles at iaf_search_range_hz[0] for stable PSD/peak detection
     iaf_min_baseline_sec: 0.0       # Additional absolute minimum baseline duration (sec); 0 disables
-    allow_full_fallback: false      # If true and baseline is missing, use full segment (not recommended for pain paradigms)
+    allow_full_fallback: false      # If true and baseline is missing, use full segment (not recommended for event-related paradigms)
     # Use existing ROI names from `rois:` above. If these ROIs are missing, IAF
     # estimation returns null unless allow_all_channels_fallback=true.
     iaf_rois: ["ParOccipital_Midline", "ParOccipital_Left", "ParOccipital_Right"]
@@ -499,13 +500,26 @@ feature_engineering:
         drift_model: "cosine"      # "none" | "cosine" | "polynomial"
         high_pass_hz: 0.008
         low_pass_hz: null          # Optional; avoid unless you know you need it
+        # Optional: restrict which event rows are eligible for condition A/B remapping.
+        # Values are matched against `condition_scope_column`.
+        # If null, no condition-scope filtering is applied.
+        condition_scope_trial_types: null
+        # Events column used for `condition_scope_trial_types`.
+        condition_scope_column: "trial_type"
         # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
         # If null, all event rows are modeled (default).
         events_to_model: null
-        # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
-        # If null, no stim_phase scoping is applied.
-        # Use ["all"] to disable scoping and model all stimulation phases.
+        # Events column used for phase-level scoping.
+        phase_column: "stim_phase"
+        # Optional: restrict which phase values are modeled when events.tsv includes `phase_column`.
+        # If null, no phase scoping is applied.
+        # Use ["all"] to disable scoping and model all phase values.
         stim_phases_to_model: null
+        # Events column used to scope phase filtering to a subset of rows.
+        phase_scope_column: "trial_type"
+        # Optional: value in `phase_scope_column` that phase scoping is restricted to.
+        # If null, phase scoping applies to all rows.
+        phase_scope_value: null
         cluster_correction: true
         cluster_p_threshold: 0.001
         output_type: "z-score"     # "z-score" | "t-stat" | "cope" | "beta"
@@ -589,7 +603,7 @@ feature_engineering:
     # Optional laterality-aware ERDS markers (disabled by default for paradigm-agnostic behavior).
     enable_condition_markers: false
     condition_marker_bands: ["alpha"]     # Bands where contralateral condition markers are extracted
-    laterality_columns: ["stim_side", "stimulated_side", "pain_side", "side", "stimulus_side", "hand"]
+    laterality_columns: ["stim_side", "stimulated_side", "side", "stimulus_side", "hand"]
     infer_contralateral_when_missing: true
     somatosensory_left_channels: ["C1", "C3", "C5", "CP1", "CP3", "CP5", "FC1", "FC3", "FC5"]
     somatosensory_right_channels: ["C2", "C4", "C6", "CP2", "CP4", "CP6", "FC2", "FC4", "FC6"]
@@ -811,7 +825,7 @@ behavior_analysis:
   # Permutation testing configuration
   permutation:
     # Permutation scheme for trialwise inference.
-    # - "circular_shift": preserves within-run autocorrelation (recommended for pain paradigms)
+    # - "circular_shift": preserves within-run autocorrelation (recommended for event-related paradigms)
     # - "shuffle": simple exchangeability within groups (faster, less realistic)
     scheme: "circular_shift"
     # Group column preference for within-group permutation
@@ -843,6 +857,7 @@ behavior_analysis:
   correlations:
     enabled: true
     types: ["partial_cov_predictor"]
+    power_segment_preference: ""      # Optional power segment for ROI correlations (e.g., "active"); empty = use all available segments
     targets: ["outcome", "predictor", "predictor_residual"]
     compute_change_scores: true
     loso_stability: true
@@ -856,7 +871,7 @@ behavior_analysis:
       enabled: true
       n_permutations: 1000
   
-  # Pain sensitivity computation
+  # Predictor sensitivity computation
   predictor_sensitivity:
     enabled: true
 
@@ -866,7 +881,7 @@ behavior_analysis:
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
     compare_column: ""          # Column to split by (empty = use event_columns.binary_outcome)
-    compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
+    compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["condition_a", "condition_b"])
     compare_windows: []          # Empty = compare all available windows
     compare_labels: null         # Optional labels for compare_values (same length)
     primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)

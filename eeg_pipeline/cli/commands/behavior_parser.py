@@ -219,17 +219,17 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     residual_group = parser.add_argument_group("Predictor residual / predictor-model diagnostics")
     residual_group.add_argument("--predictor-residual", action="store_true", default=None, dest="predictor_residual_enabled")
     residual_group.add_argument("--no-predictor-residual", action="store_false", dest="predictor_residual_enabled")
-    residual_group.add_argument("--predictor-residual-method", choices=["spline", "poly"], default=None, dest="pain_residual_method")
-    residual_group.add_argument("--predictor-residual-min-samples", type=int, default=None, dest="pain_residual_min_samples")
+    residual_group.add_argument("--predictor-residual-method", choices=["spline", "poly"], default=None, dest="predictor_residual_method")
+    residual_group.add_argument("--predictor-residual-min-samples", type=int, default=None, dest="predictor_residual_min_samples")
     residual_group.add_argument(
         "--predictor-residual-spline-df-candidates",
         nargs="+",
         type=int,
         default=None,
-        dest="pain_residual_spline_df_candidates",
+        dest="predictor_residual_spline_df_candidates",
         help="Candidate spline degrees of freedom for predictor→outcome residual model (e.g., 3 4 5)",
     )
-    residual_group.add_argument("--predictor-residual-poly-degree", type=int, default=None, dest="pain_residual_poly_degree")
+    residual_group.add_argument("--predictor-residual-poly-degree", type=int, default=None, dest="predictor_residual_poly_degree")
     residual_group.add_argument("--predictor-residual-model-compare", action="store_true", default=None, dest="predictor_residual_model_compare_enabled")
     residual_group.add_argument("--no-predictor-residual-model-compare", action="store_false", dest="predictor_residual_model_compare_enabled")
     residual_group.add_argument("--predictor-residual-model-compare-min-samples", type=int, default=None, dest="predictor_residual_model_compare_min_samples")
@@ -250,10 +250,10 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     # Optional cross-fit residualization (out-of-run prediction)
     residual_group.add_argument("--predictor-residual-crossfit", action="store_true", default=None, dest="predictor_residual_crossfit_enabled")
     residual_group.add_argument("--no-predictor-residual-crossfit", action="store_false", dest="predictor_residual_crossfit_enabled")
-    residual_group.add_argument("--predictor-residual-crossfit-group-column", type=str, default=None, dest="pain_residual_crossfit_group_column")
-    residual_group.add_argument("--predictor-residual-crossfit-n-splits", type=int, default=None, dest="pain_residual_crossfit_n_splits")
-    residual_group.add_argument("--predictor-residual-crossfit-method", choices=["spline", "poly"], default=None, dest="pain_residual_crossfit_method")
-    residual_group.add_argument("--predictor-residual-crossfit-spline-n-knots", type=int, default=None, dest="pain_residual_crossfit_spline_n_knots")
+    residual_group.add_argument("--predictor-residual-crossfit-group-column", type=str, default=None, dest="predictor_residual_crossfit_group_column")
+    residual_group.add_argument("--predictor-residual-crossfit-n-splits", type=int, default=None, dest="predictor_residual_crossfit_n_splits")
+    residual_group.add_argument("--predictor-residual-crossfit-method", choices=["spline", "poly"], default=None, dest="predictor_residual_crossfit_method")
+    residual_group.add_argument("--predictor-residual-crossfit-spline-n-knots", type=int, default=None, dest="predictor_residual_crossfit_spline_n_knots")
 
     regression_group = parser.add_argument_group("Trialwise regression options")
     regression_group.add_argument("--regression-outcome", choices=["outcome", "predictor_residual", "predictor"], default=None)
@@ -416,6 +416,16 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Custom target column name from events (e.g., 'vas_rating', 'pain_intensity')",
     )
     correlations_group.add_argument(
+        "--correlations-power-segment",
+        type=str,
+        default=None,
+        dest="correlations_power_segment",
+        help=(
+            "Optional segment name used for ROI power correlations (NamingSchema segment, "
+            "e.g. 'active', 'stimulation'). Empty uses all available segments."
+        ),
+    )
+    correlations_group.add_argument(
         "--group-level-block-permutation",
         action="store_true",
         default=None,
@@ -536,7 +546,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     cluster_group.add_argument("--cluster-min-size", type=int, default=None, help="Minimum cluster size")
     cluster_group.add_argument("--cluster-tail", type=int, choices=[-1, 0, 1], default=None, help="Test tail: 0=two-tailed, 1=upper, -1=lower")
     cluster_group.add_argument("--cluster-condition-column", type=str, default=None, help="events.tsv column to split by (default: event_columns.binary_outcome)")
-    cluster_group.add_argument("--cluster-condition-values", nargs="+", default=None, metavar="VALUE", help="Exactly 2 values to compare (e.g., 0 1 or pain nonpain)")
+    cluster_group.add_argument("--cluster-condition-values", nargs="+", default=None, metavar="VALUE", help="Exactly 2 values to compare (e.g., 0 1 or condition_a condition_b)")
     
     # Mediation-specific options
     mediation_group = parser.add_argument_group("Mediation analysis options")
@@ -589,7 +599,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--condition-effect-threshold", type=float, default=None, help="Minimum effect size (Cohen's d) to report")
     condition_group.add_argument("--condition-min-trials", type=int, default=None, help="Minimum trials per condition")
     condition_group.add_argument("--condition-compare-column", type=str, default=None, help="events.tsv column to use for condition split (default: event_columns.binary_outcome)")
-    condition_group.add_argument("--condition-compare-values", nargs="+", default=None, metavar="VALUE", help="Values in the column to compare (e.g., 0 1 or pain nonpain)")
+    condition_group.add_argument("--condition-compare-values", nargs="+", default=None, metavar="VALUE", help="Values in the column to compare (e.g., 0 1 or condition_a condition_b)")
     condition_group.add_argument("--condition-compare-labels", nargs="+", default=None, metavar="LABEL", help="Optional labels aligned to --condition-compare-values")
     condition_group.add_argument("--condition-overwrite", action="store_true", default=None, dest="condition_overwrite", help="Overwrite existing condition effects files (default)")
     condition_group.add_argument("--no-condition-overwrite", action="store_false", dest="condition_overwrite", help="Include compare_column in filename to avoid overwriting")

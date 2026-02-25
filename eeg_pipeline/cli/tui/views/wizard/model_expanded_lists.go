@@ -125,9 +125,29 @@ func (m Model) getExpandedListLength() int {
 			return 1
 		}
 		return n
+	case expandedFmriAnalysisScopeColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
 	case expandedFmriAnalysisStimPhases:
 		return len(m.getExpandedListItems())
 	case expandedFmriAnalysisScopeTrialTypes:
+		return len(m.getExpandedListItems())
+	case expandedFmriAnalysisPhaseColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedFmriAnalysisPhaseScopeColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedFmriAnalysisPhaseScopeValue:
 		return len(m.getExpandedListItems())
 	case expandedFmriTrialSigGroupColumn:
 		n := len(m.fmriDiscoveredColumns)
@@ -143,11 +163,43 @@ func (m Model) getExpandedListLength() int {
 		return n
 	case expandedFmriTrialSigStimPhases:
 		return len(m.getExpandedListItems())
+	case expandedFmriTrialSigScopeTrialTypeColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedFmriTrialSigScopePhaseColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
 	case expandedFmriTrialSigScopeTrialTypes:
 		return len(m.getExpandedListItems())
 	case expandedSourceLocFmriStimPhases:
 		return len(m.getExpandedListItems())
 	case expandedSourceLocFmriScopeTrialTypes:
+		return len(m.getExpandedListItems())
+	case expandedSourceLocFmriScopeTrialTypeColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedSourceLocFmriPhaseColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedSourceLocFmriPhaseScopeColumn:
+		n := len(m.fmriDiscoveredColumns)
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedSourceLocFmriPhaseScopeValue:
 		return len(m.getExpandedListItems())
 	case expandedIAFRois:
 		return len(m.rois)
@@ -307,16 +359,41 @@ func (m Model) getExpandedListItems() []string {
 			return []string{"(type manually)"}
 		}
 		return vals
+	case expandedFmriAnalysisScopeColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedFmriAnalysisPhaseColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedFmriAnalysisPhaseScopeColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedFmriAnalysisPhaseScopeValue:
+		items := []string{"(none)"}
+		scopeCol := m.resolveFmriConditionColumn(m.fmriAnalysisPhaseScopeColumn)
+		vals := m.GetFmriDiscoveredColumnValues(scopeCol)
+		if len(vals) == 0 {
+			return append(items, "(type manually)")
+		}
+		return append(items, vals...)
 	case expandedFmriAnalysisStimPhases:
 		items := []string{"(none)", "(all)"}
-		vals := m.GetFmriDiscoveredColumnValues("stim_phase")
+		phaseCol := m.resolveFmriPhaseColumn(m.fmriAnalysisPhaseColumn)
+		vals := m.GetFmriDiscoveredColumnValues(phaseCol)
 		if len(vals) == 0 {
 			return append(items, "(type manually)")
 		}
 		return append(items, vals...)
 	case expandedFmriAnalysisScopeTrialTypes:
 		items := []string{"(none)"}
-		vals := m.GetFmriDiscoveredColumnValues("trial_type")
+		scopeCol := m.resolveFmriConditionColumn(m.fmriAnalysisScopeColumn)
+		vals := m.GetFmriDiscoveredColumnValues(scopeCol)
 		if len(vals) == 0 {
 			return append(items, "(type manually)")
 		}
@@ -337,28 +414,65 @@ func (m Model) getExpandedListItems() []string {
 		return vals
 	case expandedFmriTrialSigStimPhases:
 		items := []string{"(none)", "(all)"}
-		vals := m.GetFmriDiscoveredColumnValues("stim_phase")
+		phaseCol := m.resolveFmriPhaseColumn(m.fmriTrialSigScopePhaseColumn)
+		vals := m.GetFmriDiscoveredColumnValues(phaseCol)
 		if len(vals) == 0 {
 			return append(items, "(type manually)")
 		}
 		return append(items, vals...)
+	case expandedFmriTrialSigScopeTrialTypeColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedFmriTrialSigScopePhaseColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
 	case expandedFmriTrialSigScopeTrialTypes:
 		items := []string{"(none)"}
-		vals := m.GetFmriDiscoveredColumnValues("trial_type")
+		trialScopeCol := m.resolveFmriConditionColumn(m.fmriTrialSigScopeTrialTypeColumn)
+		vals := m.GetFmriDiscoveredColumnValues(trialScopeCol)
 		if len(vals) == 0 {
 			return append(items, "(type manually)")
 		}
 		return append(items, vals...)
 	case expandedSourceLocFmriStimPhases:
 		items := []string{"(none)", "(all)"}
-		vals := m.GetFmriDiscoveredColumnValues("stim_phase")
+		phaseCol := m.resolveFmriPhaseColumn(m.sourceLocFmriPhaseColumn)
+		vals := m.GetFmriDiscoveredColumnValues(phaseCol)
+		if len(vals) == 0 {
+			return append(items, "(type manually)")
+		}
+		return append(items, vals...)
+	case expandedSourceLocFmriScopeTrialTypeColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedSourceLocFmriPhaseColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedSourceLocFmriPhaseScopeColumn:
+		if len(m.fmriDiscoveredColumns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return m.fmriDiscoveredColumns
+	case expandedSourceLocFmriPhaseScopeValue:
+		items := []string{"(none)"}
+		scopeCol := m.resolveFmriConditionColumn(m.sourceLocFmriPhaseScopeColumn)
+		vals := m.GetFmriDiscoveredColumnValues(scopeCol)
 		if len(vals) == 0 {
 			return append(items, "(type manually)")
 		}
 		return append(items, vals...)
 	case expandedSourceLocFmriScopeTrialTypes:
 		items := []string{"(none)"}
-		vals := m.GetFmriDiscoveredColumnValues("trial_type")
+		scopeCol := m.resolveFmriConditionColumn(m.sourceLocFmriConditionScopeColumn)
+		vals := m.GetFmriDiscoveredColumnValues(scopeCol)
 		if len(vals) == 0 {
 			return append(items, "(type manually)")
 		}
@@ -628,8 +742,8 @@ func (m *Model) handleExpandedListToggle() {
 				m.toggleSpaceValue(selectedItem, &cfg.DoseResponseResponseColumn)
 				m.plotItemConfigs[plotID] = cfg
 				return
-			case plotItemConfigFieldDoseResponsePredictorColumn:
-				cfg.DoseResponsePredictorColumn = selectedItem
+			case plotItemConfigFieldDoseResponseBinaryOutcomeColumn:
+				cfg.DoseResponseBinaryOutcomeColumn = selectedItem
 			default:
 				cfg.ComparisonColumn = selectedItem
 				cfg.ComparisonValuesSpec = "" // Reset values when column changes
@@ -828,6 +942,54 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
+	case expandedSourceLocFmriPhaseColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldSourceLocFmriPhaseColumn)
+		} else {
+			m.sourceLocFmriPhaseColumn = selectedItem
+			m.sourceLocFmriStimPhasesToModel = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedSourceLocFmriPhaseScopeColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldSourceLocFmriPhaseScopeColumn)
+		} else {
+			m.sourceLocFmriPhaseScopeColumn = selectedItem
+			m.sourceLocFmriPhaseScopeValue = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedSourceLocFmriPhaseScopeValue:
+		switch selectedItem {
+		case "(none)":
+			m.sourceLocFmriPhaseScopeValue = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(type manually)":
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldSourceLocFmriPhaseScopeValue)
+		default:
+			m.sourceLocFmriPhaseScopeValue = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedSourceLocFmriScopeTrialTypeColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldSourceLocFmriConditionScopeColumn)
+		} else {
+			m.sourceLocFmriConditionScopeColumn = selectedItem
+			m.sourceLocFmriConditionScopeTrialTypes = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
 	case expandedSourceLocFmriScopeTrialTypes:
 		switch selectedItem {
 		case "(none)":
@@ -882,6 +1044,54 @@ func (m *Model) handleExpandedListToggle() {
 			m.startTextEdit(textFieldFmriAnalysisCondBValue)
 		} else {
 			m.fmriAnalysisCondBValue = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriAnalysisScopeColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisScopeColumn)
+		} else {
+			m.fmriAnalysisScopeColumn = selectedItem
+			m.fmriAnalysisScopeTrialTypes = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriAnalysisPhaseColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisPhaseColumn)
+		} else {
+			m.fmriAnalysisPhaseColumn = selectedItem
+			m.fmriAnalysisStimPhasesToModel = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriAnalysisPhaseScopeColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisPhaseScopeColumn)
+		} else {
+			m.fmriAnalysisPhaseScopeColumn = selectedItem
+			m.fmriAnalysisPhaseScopeValue = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriAnalysisPhaseScopeValue:
+		switch selectedItem {
+		case "(none)":
+			m.fmriAnalysisPhaseScopeValue = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(type manually)":
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriAnalysisPhaseScopeValue)
+		default:
+			m.fmriAnalysisPhaseScopeValue = selectedItem
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
@@ -952,6 +1162,28 @@ func (m *Model) handleExpandedListToggle() {
 			m.startTextEdit(textFieldFmriTrialSigScopeStimPhases)
 		default:
 			m.fmriTrialSigScopeStimPhases = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriTrialSigScopeTrialTypeColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriTrialSigScopeTrialTypeColumn)
+		} else {
+			m.fmriTrialSigScopeTrialTypeColumn = selectedItem
+			m.fmriTrialSigScopeTrialTypes = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriTrialSigScopePhaseColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriTrialSigScopePhaseColumn)
+		} else {
+			m.fmriTrialSigScopePhaseColumn = selectedItem
+			m.fmriTrialSigScopeStimPhases = ""
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
@@ -1155,6 +1387,14 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optFmriAnalysisCondBColumn
 	case expandedFmriAnalysisCondBValue:
 		return opt == optFmriAnalysisCondBValue
+	case expandedFmriAnalysisScopeColumn:
+		return opt == optFmriAnalysisScopeColumn
+	case expandedFmriAnalysisPhaseColumn:
+		return opt == optFmriAnalysisPhaseColumn
+	case expandedFmriAnalysisPhaseScopeColumn:
+		return opt == optFmriAnalysisPhaseScopeColumn
+	case expandedFmriAnalysisPhaseScopeValue:
+		return opt == optFmriAnalysisPhaseScopeValue
 	case expandedFmriAnalysisStimPhases:
 		return opt == optFmriAnalysisStimPhasesToModel
 	case expandedFmriAnalysisScopeTrialTypes:
@@ -1165,6 +1405,10 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optFmriTrialSigGroupValues
 	case expandedFmriTrialSigStimPhases:
 		return opt == optFmriTrialSigScopeStimPhases
+	case expandedFmriTrialSigScopeTrialTypeColumn:
+		return opt == optFmriTrialSigScopeTrialTypeColumn
+	case expandedFmriTrialSigScopePhaseColumn:
+		return opt == optFmriTrialSigScopePhaseColumn
 	case expandedFmriTrialSigScopeTrialTypes:
 		return opt == optFmriTrialSigScopeTrialTypes
 	case expandedItpcConditionValues:
@@ -1173,6 +1417,14 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optConnConditionValues
 	case expandedSourceLocFmriStimPhases:
 		return opt == optSourceLocFmriStimPhasesToModel
+	case expandedSourceLocFmriPhaseColumn:
+		return opt == optSourceLocFmriPhaseColumn
+	case expandedSourceLocFmriPhaseScopeColumn:
+		return opt == optSourceLocFmriPhaseScopeColumn
+	case expandedSourceLocFmriPhaseScopeValue:
+		return opt == optSourceLocFmriPhaseScopeValue
+	case expandedSourceLocFmriScopeTrialTypeColumn:
+		return opt == optSourceLocFmriConditionScopeColumn
 	case expandedSourceLocFmriScopeTrialTypes:
 		return opt == optSourceLocFmriConditionScopeTrialTypes
 	case expandedIAFRois:
@@ -1281,6 +1533,15 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			}
 		}
 		return false
+	case expandedSourceLocFmriPhaseColumn:
+		return m.sourceLocFmriPhaseColumn == item
+	case expandedSourceLocFmriPhaseScopeColumn:
+		return m.sourceLocFmriPhaseScopeColumn == item
+	case expandedSourceLocFmriPhaseScopeValue:
+		if item == "(none)" {
+			return strings.TrimSpace(m.sourceLocFmriPhaseScopeValue) == ""
+		}
+		return strings.TrimSpace(m.sourceLocFmriPhaseScopeValue) == item
 	case expandedSourceLocFmriScopeTrialTypes:
 		if item == "(none)" {
 			return strings.TrimSpace(m.sourceLocFmriConditionScopeTrialTypes) == ""
@@ -1291,6 +1552,8 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			}
 		}
 		return false
+	case expandedSourceLocFmriScopeTrialTypeColumn:
+		return m.sourceLocFmriConditionScopeColumn == item
 	case expandedFmriAnalysisCondAColumn:
 		return m.fmriAnalysisCondAColumn == item
 	case expandedFmriAnalysisCondAValue:
@@ -1299,6 +1562,17 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.fmriAnalysisCondBColumn == item
 	case expandedFmriAnalysisCondBValue:
 		return m.fmriAnalysisCondBValue == item
+	case expandedFmriAnalysisScopeColumn:
+		return m.fmriAnalysisScopeColumn == item
+	case expandedFmriAnalysisPhaseColumn:
+		return m.fmriAnalysisPhaseColumn == item
+	case expandedFmriAnalysisPhaseScopeColumn:
+		return m.fmriAnalysisPhaseScopeColumn == item
+	case expandedFmriAnalysisPhaseScopeValue:
+		if item == "(none)" {
+			return strings.TrimSpace(m.fmriAnalysisPhaseScopeValue) == ""
+		}
+		return strings.TrimSpace(m.fmriAnalysisPhaseScopeValue) == item
 	case expandedFmriAnalysisStimPhases:
 		if item == "(none)" {
 			return strings.TrimSpace(m.fmriAnalysisStimPhasesToModel) == ""
@@ -1337,6 +1611,10 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			}
 		}
 		return false
+	case expandedFmriTrialSigScopeTrialTypeColumn:
+		return m.fmriTrialSigScopeTrialTypeColumn == item
+	case expandedFmriTrialSigScopePhaseColumn:
+		return m.fmriTrialSigScopePhaseColumn == item
 	case expandedFmriTrialSigScopeTrialTypes:
 		if item == "(none)" {
 			return strings.TrimSpace(m.fmriTrialSigScopeTrialTypes) == ""

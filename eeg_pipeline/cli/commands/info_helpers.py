@@ -952,12 +952,7 @@ def _print_discovery_report(result: dict) -> None:
     print()
 
 
-def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
-    """Handle fmri-conditions mode: discover available trial_type conditions from fMRI events files."""
-    from fmri_pipeline.analysis.contrast_builder import discover_available_conditions
-
-    task = resolve_task(args.task, config)
-
+def _resolve_fmri_root(config: Any) -> Path:
     fmri_root = config.get("paths.bids_fmri_root")
     if not fmri_root:
         bids = config.get("paths.bids_root", "") or ""
@@ -966,48 +961,179 @@ def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
         if not fmri_root:
             fmri_root = bids.replace("bids_output", "fMRI_data") if bids else "."
 
-    fmri_root = Path(fmri_root)
-    if not fmri_root.is_absolute():
+    fmri_root_path = Path(fmri_root)
+    if not fmri_root_path.is_absolute():
         from eeg_pipeline.utils.config.loader import get_project_root
-        fmri_root = get_project_root() / fmri_root
 
-    subject = args.subject
-    if not subject and fmri_root.exists():
-        for sub_dir in sorted(fmri_root.glob("sub-*")):
-            if sub_dir.is_dir():
-                subject = sub_dir.name.replace("sub-", "")
+        fmri_root_path = get_project_root() / fmri_root_path
+    return fmri_root_path
+
+
+def _resolve_discovered_column(columns: List[str], candidate: str) -> Optional[str]:
+    wanted = str(candidate or "").strip()
+    if not wanted:
+        return None
+    lower_map = {str(col).strip().lower(): str(col).strip() for col in columns if str(col).strip()}
+    return lower_map.get(wanted.lower())
+
+
+def _discover_fmri_events_columns_and_values(
+    *,
+    config: Any,
+    task: Optional[str],
+    subject: Optional[str],
+    max_subjects: int = 5,
+    max_files: int = 10,
+) -> dict:
+    """Discover columns/values from fMRI BIDS events files."""
+    import pandas as pd
+
+    fmri_root = _resolve_fmri_root(config)
+    task_label = str(task or "").strip()
+    chosen_subject = subject.replace("sub-", "") if isinstance(subject, str) and subject.strip() else None
+
+    def glob_events(func_dir: Path, sub: str, task_name: str) -> List[Path]:
+        if task_name:
+            out = sorted(func_dir.glob(f"{sub}_task-{task_name}_run-*_bold_events.tsv"))
+            if not out:
+                out = [
+                    p for p in sorted(func_dir.glob(f"{sub}_task-{task_name}_run-*_events.tsv"))
+                    if not p.name.endswith("_bold_events.tsv")
+                ]
+            if not out:
+                out = sorted(func_dir.glob(f"{sub}_task-{task_name}_*events.tsv"))
+            return out
+
+        out = sorted(func_dir.glob(f"{sub}_task-*_run-*_bold_events.tsv"))
+        if not out:
+            out = [
+                p for p in sorted(func_dir.glob(f"{sub}_task-*_run-*_events.tsv"))
+                if not p.name.endswith("_bold_events.tsv")
+            ]
+        if not out:
+            out = sorted(func_dir.glob(f"{sub}_task-*_*events.tsv"))
+        if not out:
+            out = sorted(func_dir.glob(f"{sub}_*_events.tsv"))
+        return out
+
+    candidates: List[Path] = []
+    if chosen_subject and fmri_root.exists():
+        sub_label = f"sub-{chosen_subject}"
+        func_dir = fmri_root / sub_label / "func"
+        if func_dir.exists():
+            candidates = glob_events(func_dir, sub_label, task_label)
+
+    if not candidates and fmri_root.exists():
+        for sub_dir in sorted(fmri_root.glob("sub-*"))[:max_subjects]:
+            func_dir = sub_dir / "func"
+            if not func_dir.exists():
+                continue
+            found = glob_events(func_dir, sub_dir.name, task_label)
+            if found:
+                candidates = found
+                chosen_subject = sub_dir.name.replace("sub-", "")
                 break
 
-    if not subject:
-        result = {
-            "conditions": [],
-            "subject": None,
-            "task": task,
-            "error": "No subject specified and none found in fMRI directory",
-        }
-        if args.output_json:
-            _print_json_output(result)
-        else:
-            print("Error: No subject specified and none found in fMRI directory")
-        return
+    result = {
+        "columns": [],
+        "values": {},
+        "source": None,
+        "file": None,
+        "subject": chosen_subject,
+        "task": task_label,
+    }
+    if not candidates:
+        return result
 
-    task_candidates = [task] if task else []
+    result["source"] = "fmri_events"
+    result["file"] = str(candidates[0])
 
-    conditions = []
-    used_task = task or ""
-    try:
-        for t in task_candidates:
-            conditions = discover_available_conditions(fmri_root, subject, t)
-            if conditions:
-                used_task = t
-                break
-    except Exception as e:
-        conditions = []
-        error_msg = str(e)
+    columns: set[str] = set()
+    values: Dict[str, set[str]] = {}
+    for events_path in candidates[:max_files]:
+        try:
+            df = pd.read_csv(events_path, sep="\t")
+        except Exception:
+            continue
+
+        for col in df.columns:
+            col_name = str(col).strip()
+            if not col_name:
+                continue
+            columns.add(col_name)
+            if col_name.lower() in {"onset", "duration", "sample"}:
+                continue
+            uniq = df[col].dropna().unique()
+            if len(uniq) > 50:
+                continue
+            bucket = values.setdefault(col_name, set())
+            for val in uniq:
+                if pd.isna(val):
+                    continue
+                sval = str(val).strip()
+                if sval:
+                    bucket.add(sval)
+
+    result["columns"] = sorted(columns)
+    result["values"] = {k: sorted(v) for k, v in values.items()}
+    return result
+
+
+def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
+    """Handle fmri-conditions mode: discover available condition values from fMRI events files."""
+    from eeg_pipeline.utils.config.loader import get_condition_column_candidates
+
+    task = resolve_task(args.task, config)
+    discovered = _discover_fmri_events_columns_and_values(
+        config=config,
+        task=task,
+        subject=args.subject,
+    )
+
+    columns = list(discovered.get("columns") or [])
+    values = dict(discovered.get("values") or {})
+    subject = discovered.get("subject")
+
+    selected_column: Optional[str] = None
+    error_msg: Optional[str] = None
+
+    requested_column = str(getattr(args, "condition_column", "") or "").strip()
+    if requested_column:
+        selected_column = _resolve_discovered_column(columns, requested_column)
+        if selected_column is None:
+            error_msg = (
+                f"Requested condition column '{requested_column}' not found in fMRI events. "
+                f"Available columns: {columns}"
+            )
     else:
-        error_msg = None
+        for candidate in get_condition_column_candidates(config):
+            selected_column = _resolve_discovered_column(columns, candidate)
+            if selected_column:
+                break
 
-    result = {"conditions": conditions, "subject": subject, "task": used_task}
+    if selected_column is None and not error_msg and columns:
+        for col in sorted(values.keys()):
+            if col.lower() in {"onset", "duration", "sample"}:
+                continue
+            selected_column = col
+            break
+
+    if selected_column is None and not error_msg:
+        if not subject:
+            error_msg = "No subject specified and none found in fMRI directory"
+        elif not columns:
+            error_msg = "No fMRI events columns discovered for condition extraction"
+        else:
+            error_msg = f"No usable condition column found. Available columns: {columns}"
+
+    conditions = sorted(values.get(selected_column, [])) if selected_column else []
+    task_out = str(task or discovered.get("task") or "")
+    result = {
+        "conditions": conditions,
+        "condition_column": selected_column,
+        "subject": subject,
+        "task": task_out,
+    }
     if error_msg:
         result["error"] = error_msg
 
@@ -1015,12 +1141,13 @@ def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
         _print_json_output(result)
     else:
         if conditions:
-            print(f"Available fMRI conditions for sub-{subject}, task-{used_task}:")
+            col_label = selected_column or "condition"
+            print(f"Available fMRI condition values for sub-{subject}, task-{task_out} ({col_label}):")
             for cond in conditions:
                 print(f"  - {cond}")
             print(f"\nTotal: {len(conditions)} conditions")
         else:
-            print(f"No conditions found for sub-{subject}, task-{used_task}")
+            print(f"No conditions found for sub-{subject}, task-{task_out}")
             if error_msg:
                 print(f"Error: {error_msg}")
 
@@ -1195,103 +1322,11 @@ def _handle_rois_mode(args: argparse.Namespace, subjects: List[str], config: Any
 def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
     """Handle fmri-columns mode: discover columns from fMRI events files."""
     task = resolve_task(args.task, config)
-
-    fmri_root = config.get("paths.bids_fmri_root")
-    if not fmri_root:
-        bids = config.get("paths.bids_root", "") or ""
-        if bids:
-            # Try bids_output/fmri when bids_root is e.g. .../bids_output/eeg
-            fmri_root = str(Path(bids).parent / "fmri")
-        if not fmri_root:
-            fmri_root = bids.replace("bids_output", "fMRI_data") if bids else "."
-
-    fmri_root = Path(fmri_root)
-    if not fmri_root.is_absolute():
-        from eeg_pipeline.utils.config.loader import get_project_root
-        fmri_root = get_project_root() / fmri_root
-
-    task_candidates = [task] if task else []
-
-    subject = args.subject
-    if not subject and fmri_root.exists():
-        for sub_dir in sorted(fmri_root.glob("sub-*")):
-            if sub_dir.is_dir():
-                subject = sub_dir.name.replace("sub-", "")
-                break
-
-    # Discover columns/values from fMRI BIDS events files.
-    result = {"columns": [], "values": {}, "source": None, "file": None}
-
-    sub_label = None
-    if subject:
-        subj_id = subject.replace("sub-", "")
-        sub_label = f"sub-{subj_id}"
-
-    def glob_events(func_dir: Path, sub: str, t: str) -> list:
-        # Prefer *_bold_events.tsv (time-aligned "analysis-ready" events) when present,
-        # then fall back to standard *_events.tsv.
-        out = sorted(func_dir.glob(f"{sub}_task-{t}_run-*_bold_events.tsv"))
-        if not out:
-            out = [
-                p for p in sorted(func_dir.glob(f"{sub}_task-{t}_run-*_events.tsv"))
-                if not p.name.endswith("_bold_events.tsv")
-            ]
-        if not out:
-            out = sorted(func_dir.glob(f"{sub}_task-{t}_*events.tsv"))
-        return out
-
-    candidates = []
-    if sub_label:
-        func_dir = fmri_root / sub_label / "func"
-        if func_dir.exists():
-            for t in task_candidates:
-                candidates = glob_events(func_dir, sub_label, t)
-                if candidates:
-                    break
-    if not candidates and fmri_root.exists():
-        for sub_dir in sorted(fmri_root.glob("sub-*"))[:5]:
-            func_dir2 = sub_dir / "func"
-            if not func_dir2.exists():
-                continue
-            sub2 = sub_dir.name
-            for t in task_candidates:
-                candidates = glob_events(func_dir2, sub2, t)
-                if candidates:
-                    break
-            if candidates:
-                break
-
-    if candidates:
-        import pandas as pd
-
-        result["source"] = "fmri_events"
-        result["file"] = str(candidates[0])
-
-        columns = set()
-        values: dict[str, set[str]] = {}
-        for events_path in candidates[:10]:
-            try:
-                df = pd.read_csv(events_path, sep="\t")
-            except Exception:
-                continue
-
-            for col in df.columns:
-                columns.add(col)
-                if col.lower() in {"onset", "duration", "sample"}:
-                    continue
-                uniq = df[col].dropna().unique()
-                if len(uniq) > 50:
-                    continue
-                bucket = values.setdefault(col, set())
-                for v in uniq:
-                    if pd.isna(v):
-                        continue
-                    s = str(v).strip()
-                    if s:
-                        bucket.add(s)
-
-        result["columns"] = sorted(columns)
-        result["values"] = {k: sorted(v) for k, v in values.items()}
+    result = _discover_fmri_events_columns_and_values(
+        config=config,
+        task=task,
+        subject=args.subject,
+    )
 
     if args.column:
         if args.column in result["values"]:
@@ -1389,4 +1424,3 @@ def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str],
         print(f"Groups: {', '.join(result['groups'])}")
         print(f"Features: {result['n_features']}")
         print(f"Significant (FDR): {result['n_significant']}")
-

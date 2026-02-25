@@ -43,7 +43,6 @@ _DEFAULT_RIGHT_SOMATOSENSORY_CHANNELS = (
 _DEFAULT_LATERALITY_COLUMNS = (
     "stim_side",
     "stimulated_side",
-    "pain_side",
     "side",
     "stimulus_side",
     "hand",

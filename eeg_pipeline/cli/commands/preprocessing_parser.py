@@ -187,6 +187,13 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--event-col-outcome", nargs="+", type=str, default=None, help="events.tsv candidate columns for the behavioral outcome")
     prep_group.add_argument("--event-col-binary-outcome", nargs="+", type=str, default=None, help="events.tsv candidate columns for binary-outcome split")
     prep_group.add_argument(
+        "--event-col-condition",
+        nargs="+",
+        type=str,
+        default=None,
+        help="events.tsv candidate columns for condition labels used in clean-events alignment",
+    )
+    prep_group.add_argument(
         "--condition-preferred-prefixes",
         nargs="+",
         type=str,

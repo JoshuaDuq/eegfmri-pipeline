@@ -822,9 +822,6 @@ func (m *Model) validate() []string {
 					errors = append(errors, "fMRI trial signatures: Cond B Value is required (or enable grouping)")
 				}
 			}
-			if !m.fmriTrialSigSignatureNPS && !m.fmriTrialSigSignatureSIIPS1 {
-				errors = append(errors, "fMRI trial signatures: select at least one signature (NPS/SIIPS1)")
-			}
 		} else {
 			// First-level
 			if strings.TrimSpace(m.fmriAnalysisCondAValue) == "" {

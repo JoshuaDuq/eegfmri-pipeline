@@ -2,7 +2,7 @@
 Scalp-mean TFR plotting functions.
 
 Functions for creating scalp-averaged time-frequency representations (TFR) plots,
-including single-subject and pain contrast visualizations.
+including single-subject and condition contrast visualizations.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def _sanitize_label_for_filename(label: str) -> str:
     """Sanitize label for use in filenames.
     
     Args:
-        label: Label string (e.g., "Condition 1", "pain", "non-pain")
+        label: Label string (e.g., "Condition 1", "Condition 2")
         
     Returns:
         Sanitized, lowercase label suitable for filenames
@@ -424,7 +424,7 @@ def _create_scalpmean_contrast_plots(
     )
 
 
-def contrast_scalpmean_pain_nonpain(
+def contrast_scalpmean_conditions(
     tfr: "mne.time_frequency.EpochsTFR | mne.time_frequency.AverageTFR",
     events_df: Optional[pd.DataFrame],
     out_dir: Path,
@@ -435,13 +435,13 @@ def contrast_scalpmean_pain_nonpain(
     subject: Optional[str] = None,
     task: Optional[str] = None,
 ) -> None:
-    """Plot scalp-averaged TFR contrast between pain and non-pain conditions.
+    """Plot scalp-averaged TFR contrast between two configured conditions.
     
-    Creates three plots: pain condition, non-pain condition, and their difference.
+    Creates three plots: condition 2, condition 1, and their difference.
     
     Args:
         tfr: MNE TFR object (EpochsTFR or AverageTFR)
-        events_df: Optional events DataFrame with pain column
+        events_df: Optional events DataFrame with comparison column
         out_dir: Output directory path
         config: Configuration object
         baseline: Baseline window tuple (tmin, tmax)

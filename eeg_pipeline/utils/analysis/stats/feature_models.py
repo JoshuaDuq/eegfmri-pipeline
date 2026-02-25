@@ -2,7 +2,7 @@
 Feature Models (Subject-Level)
 ==============================
 
-Per-feature model families that complement correlations/regressions for pain studies.
+Per-feature model families that complement correlations/regressions for event-related studies.
 
 This module is intended for single-subject analysis tables (one row per trial),
 and supports multiple outcomes (e.g., `rating`, `predictor_residual`, and `binary_outcome`).

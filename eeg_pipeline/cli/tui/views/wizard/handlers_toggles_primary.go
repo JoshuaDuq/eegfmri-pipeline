@@ -356,7 +356,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 					break
 				}
 			}
-			m.pendingFmriConditionsCmd = executor.DiscoverFmriConditions(m.repoRoot, subject, m.task)
+			m.pendingFmriConditionsCmd = executor.DiscoverFmriConditions(
+				m.repoRoot,
+				subject,
+				m.task,
+				m.FmriDiscoveryConditionColumn(),
+			)
 		}
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriContrastType:
@@ -420,8 +425,24 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSourceLocFmriLowPassHz:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optSourceLocFmriConditionScopeColumn:
+		m.expandedOption = expandedSourceLocFmriScopeTrialTypeColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
 	case optSourceLocFmriConditionScopeTrialTypes:
 		m.expandedOption = expandedSourceLocFmriScopeTrialTypes
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriPhaseColumn:
+		m.expandedOption = expandedSourceLocFmriPhaseColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriPhaseScopeColumn:
+		m.expandedOption = expandedSourceLocFmriPhaseScopeColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriPhaseScopeValue:
+		m.expandedOption = expandedSourceLocFmriPhaseScopeValue
 		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriStimPhasesToModel:
@@ -1020,8 +1041,8 @@ func (m *Model) togglePlottingAdvancedOption() {
 		case plotItemConfigFieldConnectivityCircleTopFraction, plotItemConfigFieldConnectivityCircleMinLines, plotItemConfigFieldConnectivityNetworkTopFraction:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
-		case plotItemConfigFieldDoseResponseDoseColumn, plotItemConfigFieldDoseResponsePredictorColumn:
-			// Dose/predictor columns come from aligned events / trial metadata.
+		case plotItemConfigFieldDoseResponseDoseColumn, plotItemConfigFieldDoseResponseBinaryOutcomeColumn:
+			// Dose/binary-outcome columns come from aligned events / trial metadata.
 			plotCols := m.GetPlottingComparisonColumns()
 			if len(plotCols) > 0 {
 				m.expandedOption = expandedPlotComparisonColumn
@@ -2022,6 +2043,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		} else {
 			m.startTextEdit(textFieldCorrelationsTargetColumn)
 		}
+		m.useDefaultAdvanced = false
+	case optCorrelationsPowerSegment:
+		m.startTextEdit(textFieldCorrelationsPowerSegment)
 		m.useDefaultAdvanced = false
 	case optCorrelationsTypes:
 		m.startTextEdit(textFieldCorrelationsTypes)

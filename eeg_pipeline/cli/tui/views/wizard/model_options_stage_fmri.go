@@ -130,7 +130,16 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 	options = append(options, optFmriAnalysisGroupConfounds)
 	if m.fmriAnalysisGroupConfoundsExpanded {
 		if isFirstLevel {
-			options = append(options, optFmriAnalysisEventsToModel, optFmriAnalysisScopeTrialTypes, optFmriAnalysisStimPhasesToModel)
+			options = append(
+				options,
+				optFmriAnalysisEventsToModel,
+				optFmriAnalysisScopeColumn,
+				optFmriAnalysisScopeTrialTypes,
+				optFmriAnalysisPhaseColumn,
+				optFmriAnalysisPhaseScopeColumn,
+				optFmriAnalysisPhaseScopeValue,
+				optFmriAnalysisStimPhasesToModel,
+			)
 		}
 		options = append(options, optFmriAnalysisConfoundsStrategy)
 		if isFirstLevel {
@@ -208,10 +217,12 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 				optFmriTrialSigWriteConditionBetas,
 				optFmriTrialSigWriteTrialBetas,
 				optFmriTrialSigWriteTrialVariances,
-				optFmriTrialSigSignatureNPS,
-				optFmriTrialSigSignatureSIIPS1,
+				optFmriTrialSigSignatureOption1,
+				optFmriTrialSigSignatureOption2,
 				optFmriAnalysisSignatureDir,
 				optFmriAnalysisSignatureMaps,
+				optFmriTrialSigScopeTrialTypeColumn,
+				optFmriTrialSigScopePhaseColumn,
 				optFmriTrialSigScopeTrialTypes,
 				optFmriTrialSigScopeStimPhases,
 				optFmriTrialSigGroupColumn,

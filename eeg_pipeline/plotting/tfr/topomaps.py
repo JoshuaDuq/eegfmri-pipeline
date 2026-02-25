@@ -379,8 +379,8 @@ def _build_figure_title(
     
     stat_title = build_statistical_title(
         config, baseline_used, paired=False,
-        n_trials_pain=n_trials_condition_2,
-        n_trials_non=n_trials_condition_1,
+        n_trials_condition_2=n_trials_condition_2,
+        n_trials_condition_1=n_trials_condition_1,
         is_group=False
     )
     
@@ -571,7 +571,7 @@ def _prepare_temporal_topomap_data(
     )
 
 
-def plot_pain_nonpain_temporal_topomaps_diff_allbands(
+def plot_temporal_topomaps_diff_allbands(
     tfr: "mne.time_frequency.EpochsTFR",
     events_df: Optional[pd.DataFrame],
     out_dir: Path,

@@ -149,6 +149,8 @@ def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> Non
         event_cols["outcome"] = [str(v).strip() for v in args.event_col_outcome if str(v).strip()]
     if args.event_col_binary_outcome:
         event_cols["binary_outcome"] = [str(v).strip() for v in args.event_col_binary_outcome if str(v).strip()]
+    if args.event_col_condition:
+        event_cols["condition"] = [str(v).strip() for v in args.event_col_condition if str(v).strip()]
     if args.condition_preferred_prefixes:
         preprocessing_cfg["condition_preferred_prefixes"] = [
             str(v).strip() for v in args.condition_preferred_prefixes if str(v).strip()

@@ -159,6 +159,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			if m.isComputationSelected("correlations") {
 				options = append(options,
 					optCorrelationsTargetColumn,
+					optCorrelationsPowerSegment,
 					optCorrelationsFeatures,
 					optCorrelationsTypes,
 					optCorrelationsPrimaryUnit,

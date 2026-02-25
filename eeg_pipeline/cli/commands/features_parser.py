@@ -149,7 +149,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-window-b-tmin", type=float, default=None, help="Start time for window B in seconds.")
     parser.add_argument("--source-fmri-window-b-tmax", type=float, default=None, help="End time for window B in seconds.")
     parser.add_argument("--source-fmri-contrast-enabled", action="store_true", default=None, dest="source_fmri_contrast_enabled", help="Enable building fMRI contrast from BOLD data (vs. loading pre-computed stats map).")
-    parser.add_argument("--source-fmri-cond-a-column", default=None, help="Column for condition A in events.tsv (e.g., 'trial_type', 'binary_outcome').")
+    parser.add_argument("--source-fmri-cond-a-column", default=None, help="Column for condition A in events.tsv (e.g., 'condition', 'binary_outcome').")
     parser.add_argument("--source-fmri-cond-a-value", default=None, help="Value for condition A (e.g., 'temp49p3', '1').")
     parser.add_argument("--source-fmri-cond-b-column", default=None, help="Column for condition B in events.tsv.")
     parser.add_argument("--source-fmri-cond-b-value", default=None, help="Value for condition B.")
@@ -166,10 +166,28 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         type=str,
         default=None,
         help=(
-            "Optional comma-separated allow-list of stimulation sub-phases to include when events.tsv has a stim_phase column. "
-            "If unset, no stim_phase scoping is applied. "
+            "Optional comma-separated allow-list of phase values to include when events.tsv has the configured phase column. "
+            "If unset, no phase scoping is applied. "
             "Use 'all' to disable phase scoping."
         ),
+    )
+    parser.add_argument(
+        "--source-fmri-phase-column",
+        type=str,
+        default=None,
+        help="Events column used for --source-fmri-stim-phases-to-model (default: stim_phase or phase).",
+    )
+    parser.add_argument(
+        "--source-fmri-phase-scope-column",
+        type=str,
+        default=None,
+        help="Events column used to scope phase filtering to specific rows (default: event_columns.condition candidate).",
+    )
+    parser.add_argument(
+        "--source-fmri-phase-scope-value",
+        type=str,
+        default=None,
+        help="Optional value in --source-fmri-phase-scope-column to limit phase filtering; empty applies to all rows.",
     )
     parser.add_argument(
         "--source-fmri-condition-scope-trial-types",
@@ -177,9 +195,16 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         metavar="TT",
         help=(
-            "Optional: restrict which events.tsv trial_type rows are eligible for condition A/B selection "
-            "in source-fMRI contrast building. Use 'all' to disable scoping."
+            "Optional: restrict which events.tsv rows are eligible for condition A/B selection "
+            "in source-fMRI contrast building (matched against --source-fmri-condition-scope-column). "
+            "Use 'all' to disable scoping."
         ),
+    )
+    parser.add_argument(
+        "--source-fmri-condition-scope-column",
+        type=str,
+        default=None,
+        help="Events column used for --source-fmri-condition-scope-trial-types (default: event_columns.condition candidate).",
     )
     parser.add_argument("--source-fmri-cluster-correction", action="store_true", default=None, dest="source_fmri_cluster_correction", help="Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction).")
     parser.add_argument("--source-fmri-cluster-p-threshold", type=float, default=None, help="Cluster-forming p-threshold (default: 0.001).")
@@ -217,7 +242,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--aperiodic-peak-z", type=float, default=None, help="Peak rejection Z-threshold for aperiodic fit")
     parser.add_argument("--aperiodic-min-r2", type=float, default=None, help="Minimum R2 for aperiodic fit")
     parser.add_argument("--aperiodic-min-points", type=int, default=None, help="Minimum fit points for aperiodic")
-    parser.add_argument("--aperiodic-subtract-evoked", action="store_true", default=None, help="Subtract evoked response for induced spectra (recommended for pain paradigms)")
+    parser.add_argument("--aperiodic-subtract-evoked", action="store_true", default=None, help="Subtract evoked response for induced spectra (recommended for event-related paradigms)")
     parser.add_argument("--aperiodic-min-segment-sec", type=float, default=None, help="Minimum segment duration (seconds) for stable aperiodic fits (default: 2.0)")
     parser.add_argument("--aperiodic-psd-bandwidth", type=float, default=None, help="PSD bandwidth for multitaper aperiodic estimation (Hz)")
     parser.add_argument("--aperiodic-max-rms", type=float, default=None, help="Maximum RMS residual for acceptable aperiodic fits")

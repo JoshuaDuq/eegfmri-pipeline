@@ -242,7 +242,7 @@ def run(progress_json: bool, task: str, timeout_s: float, pipelines: Optional[Li
 
 def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run TUI pipeline smoke checks")
-    parser.add_argument("--task", default="thermalactive", help="Task label for runtime smoke commands")
+    parser.add_argument("--task", default="task", help="Task label for runtime smoke commands")
     parser.add_argument(
         "--timeout-s",
         type=float,

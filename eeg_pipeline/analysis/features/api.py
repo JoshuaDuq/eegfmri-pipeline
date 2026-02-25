@@ -11,7 +11,10 @@ if TYPE_CHECKING:
 from eeg_pipeline.context.features import FeatureContext
 from eeg_pipeline.analysis.features.selection import resolve_feature_categories
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.config.loader import get_frequency_band_names
+from eeg_pipeline.utils.config.loader import (
+    get_condition_column_candidates,
+    get_frequency_band_names,
+)
 from eeg_pipeline.utils.validation import validate_epochs
 from eeg_pipeline.utils.progress import PipelineProgress
 from eeg_pipeline.utils.parallel import get_n_jobs
@@ -77,6 +80,24 @@ def _prepare_working_epochs(
     if tmin is not None or tmax is not None:
         return crop_epochs_to_time_range(ctx.epochs, tmin, tmax, ctx.logger)
     return ctx.epochs
+
+
+def _resolve_condition_labels_from_events(
+    events_df: Optional[pd.DataFrame],
+    config: Any,
+) -> Optional[np.ndarray]:
+    """Resolve condition labels from events using configured column candidates."""
+    if not isinstance(events_df, pd.DataFrame):
+        return None
+    if events_df.empty:
+        return None
+
+    lookup = {str(col).strip().lower(): str(col) for col in events_df.columns}
+    for candidate in get_condition_column_candidates(config):
+        resolved = lookup.get(candidate.lower())
+        if resolved is not None:
+            return events_df[resolved].to_numpy()
+    return None
 
 
 def _prepare_precomputed_data(
@@ -160,12 +181,7 @@ def _prepare_precomputed_data(
         else:
             from eeg_pipeline.utils.analysis.spectral import subtract_evoked
 
-            condition_labels = None
-            if isinstance(ctx.aligned_events, pd.DataFrame):
-                for candidate in ("condition", "trial_type"):
-                    if candidate in ctx.aligned_events.columns:
-                        condition_labels = ctx.aligned_events[candidate].to_numpy()
-                        break
+            condition_labels = _resolve_condition_labels_from_events(ctx.aligned_events, ctx.config)
 
             induced_epochs = epochs_for_precompute.copy()
             data = induced_epochs.get_data()
@@ -333,7 +349,7 @@ def _compute_tfr_for_features(
     epochs_for_tfr = getattr(ctx, "_original_epochs", None) or ctx.epochs
     epochs_for_power_tfr = epochs_for_tfr
 
-    # Evoked subtraction for induced power features (pain paradigms)
+    # Evoked subtraction for induced power features (event-related paradigms)
     power_cfg = ctx.config.get("feature_engineering.power", {}) if hasattr(ctx.config, "get") else {}
     want_induced_power = bool(power_cfg.get("subtract_evoked", False))
     ctx.power_evoked_subtracted = False
@@ -350,12 +366,7 @@ def _compute_tfr_for_features(
         else:
             from eeg_pipeline.utils.analysis.spectral import subtract_evoked
 
-            condition_labels = None
-            if isinstance(ctx.aligned_events, pd.DataFrame):
-                for candidate in ("condition", "trial_type"):
-                    if candidate in ctx.aligned_events.columns:
-                        condition_labels = ctx.aligned_events[candidate].to_numpy()
-                        break
+            condition_labels = _resolve_condition_labels_from_events(ctx.aligned_events, ctx.config)
 
             induced_epochs = epochs_for_tfr.copy()
             data = induced_epochs.get_data()
@@ -866,6 +877,11 @@ def extract_all_features(
             active_key = ctx.name
         elif "active" in new_masks:
             active_key = "active"
+        else:
+            for key in new_masks:
+                if key != "baseline":
+                    active_key = key
+                    break
         active_range = ranges_full.get(active_key, (np.nan, np.nan)) if active_key else (np.nan, np.nan)
 
         empty_mask = np.zeros_like(new_times, dtype=bool)
@@ -1330,10 +1346,7 @@ def extract_precomputed_features(
             )
         else:
             precomputed.metadata = events_df.reset_index(drop=True).copy()
-            if "condition" in events_df.columns:
-                result.condition = events_df["condition"].to_numpy()
-            elif "trial_type" in events_df.columns:
-                result.condition = events_df["trial_type"].to_numpy()
+            result.condition = _resolve_condition_labels_from_events(events_df, config)
             precomputed.condition_labels = result.condition
 
     if "erds" in feature_groups:

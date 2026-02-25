@@ -197,14 +197,14 @@ def _resolve_target_series(
         return series, str(pred_col)
 
     if target_key.lower() in {"binary_outcome", "binary"}:
-        pain_col = find_binary_outcome_column_in_events(events_df, config)
-        if pain_col is None:
+        binary_outcome_col = find_binary_outcome_column_in_events(events_df, config)
+        if binary_outcome_col is None:
             raise ValueError(
                 "No binary_outcome column found in events.tsv. "
                 f"Tried config event_columns.binary_outcome={config.get('event_columns.binary_outcome', [])}; available={list(events_df.columns)}"
             )
-        series = pd.to_numeric(events_df[pain_col], errors="coerce")
-        return series, str(pain_col)
+        series = pd.to_numeric(events_df[binary_outcome_col], errors="coerce")
+        return series, str(binary_outcome_col)
 
     if target_key in events_df.columns:
         series = pd.to_numeric(events_df[target_key], errors="coerce")
@@ -259,7 +259,7 @@ def _fmri_signature_defaults(config: Any) -> dict:
     return {
         "method": str(get_config_value(config, "machine_learning.fmri_signature.method", "beta-series")).strip().lower(),
         "contrast_name": str(get_config_value(config, "machine_learning.fmri_signature.contrast_name", "contrast")).strip(),
-        "signature_name": str(get_config_value(config, "machine_learning.fmri_signature.signature_name", "NPS")).strip(),
+        "signature_name": str(get_config_value(config, "machine_learning.fmri_signature.signature_name", "auto")).strip(),
         "metric": str(get_config_value(config, "machine_learning.fmri_signature.metric", "dot")).strip().lower(),
         "normalization": str(get_config_value(config, "machine_learning.fmri_signature.normalization", "none")).strip().lower(),
         "round_decimals": int(get_config_value(config, "machine_learning.fmri_signature.round_decimals", 3)),
@@ -393,7 +393,7 @@ def _load_fmri_signature_target_for_subject(
     if sig_df is None or sig_df.empty:
         raise ValueError(f"Empty fMRI trial signature table: {sig_path}")
 
-    sig_name = str(cfg["signature_name"]).strip().upper()
+    requested_signature = str(cfg["signature_name"]).strip()
     metric = str(cfg["metric"]).strip().lower()
     if metric not in {"dot", "cosine", "pearson_r"}:
         metric = "dot"
@@ -449,14 +449,36 @@ def _load_fmri_signature_target_for_subject(
     if "duration" in sig_df.columns:
         sig_df["duration"] = pd.to_numeric(sig_df["duration"], errors="coerce")
 
-    sig_df = sig_df.loc[sig_df["signature"].astype(str).str.upper() == sig_name].copy()
-    if sig_df.empty:
-        raise ValueError(f"No rows found for signature={sig_name} in {sig_path}")
-
     sig_df[metric] = pd.to_numeric(sig_df[metric], errors="coerce")
-    sig_df = sig_df.loc[np.isfinite(sig_df[metric].to_numpy(dtype=float))].copy()
+    signature_values = sig_df["signature"].astype(str).str.strip()
+    finite_metric = np.isfinite(sig_df[metric].to_numpy(dtype=float))
+    available_signatures = sorted({val for val in signature_values if val})
+    available_signatures_with_metric = sorted(
+        {
+            val
+            for val in signature_values[finite_metric]
+            if isinstance(val, str) and val.strip()
+        }
+    )
+    if not available_signatures:
+        raise ValueError(f"No signature names found in {sig_path}")
+
+    if requested_signature.lower() in {"", "auto"}:
+        if not available_signatures_with_metric:
+            raise ValueError(
+                f"No finite values found for metric={metric} in {sig_path}. "
+                f"Available signatures: {available_signatures}"
+            )
+        sig_name = available_signatures_with_metric[0]
+    else:
+        sig_name = requested_signature
+
+    sig_df = sig_df.loc[(signature_values.str.casefold() == sig_name.casefold()) & finite_metric].copy()
     if sig_df.empty:
-        raise ValueError(f"All fMRI signature values are non-finite for signature={sig_name}, metric={metric}")
+        raise ValueError(
+            f"No finite values found for signature={sig_name}, metric={metric} in {sig_path}. "
+            f"Available signatures: {available_signatures_with_metric or available_signatures}"
+        )
 
     sig_df["__key__"] = None
     if {"onset", "duration"}.issubset(sig_df.columns):
@@ -743,9 +765,9 @@ def _standardize_meta_columns(
     if pred_col is not None:
         meta_cols["predictor"] = pd.to_numeric(events_df[pred_col], errors="coerce")
 
-    pain_col = find_binary_outcome_column_in_events(events_df, config)
-    if pain_col is not None:
-        meta_cols["binary_outcome"] = pd.to_numeric(events_df[pain_col], errors="coerce")
+    binary_outcome_col = find_binary_outcome_column_in_events(events_df, config)
+    if binary_outcome_col is not None:
+        meta_cols["binary_outcome"] = pd.to_numeric(events_df[binary_outcome_col], errors="coerce")
 
     outcome_columns = config.get("event_columns.outcome", [])
     outcome_col = pick_target_column(events_df, target_columns=list(outcome_columns) if outcome_columns else [])

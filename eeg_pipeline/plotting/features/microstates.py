@@ -32,11 +32,12 @@ def _select_segment(features_df: pd.DataFrame, config: Any) -> Optional[str]:
     if not segments:
         return None
 
-    preferred = str(get_config_value(config, "plotting.comparisons.comparison_segment", "active")).strip()
+    preferred = str(get_config_value(config, "plotting.comparisons.comparison_segment", "")).strip()
     if preferred and preferred in segments:
         return preferred
-    if "active" in segments:
-        return "active"
+    non_baseline = [segment for segment in segments if str(segment).strip().lower() != "baseline"]
+    if non_baseline:
+        return non_baseline[0]
     return segments[0]
 
 
@@ -74,7 +75,7 @@ def _comparison_masks(events_df: pd.DataFrame, config: Any) -> Optional[Tuple[np
         return comparison
 
     # Fallback to binary_outcome if explicit comparison config is missing.
-    candidate_columns = ("binary_outcome", "binary_outcome_coded", "pain")
+    candidate_columns = ("binary_outcome", "binary_outcome_coded")
     for column in candidate_columns:
         if column not in events_df.columns:
             continue
@@ -82,7 +83,7 @@ def _comparison_masks(events_df: pd.DataFrame, config: Any) -> Optional[Tuple[np
         mask1 = (values == 0).to_numpy()
         mask2 = (values == 1).to_numpy()
         if np.any(mask1) and np.any(mask2):
-            return mask1, mask2, "nonpain", "pain"
+            return mask1, mask2, "condition_1", "condition_2"
     return None
 
 

@@ -215,6 +215,61 @@ func TestBuildFmriAnalysisAdvancedArgs_EventsToModelEmittedForFirstLevel(t *test
 	}
 }
 
+func TestBuildFmriAnalysisAdvancedArgs_EmitsConditionScopeColumn(t *testing.T) {
+	m := Model{}
+	m.fmriAnalysisScopeColumn = "event_group"
+	m.fmriAnalysisScopeTrialTypes = "stim"
+
+	args := m.buildFmriAnalysisAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--condition-scope-column", "event_group"}) {
+		t.Fatalf("expected --condition-scope-column event_group, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--condition-scope-trial-types", "stim"}) {
+		t.Fatalf("expected --condition-scope-trial-types stim, got: %#v", args)
+	}
+}
+
+func TestBuildFmriAnalysisAdvancedArgs_EmitsPhaseColumnScopeFlags(t *testing.T) {
+	m := Model{}
+	m.fmriAnalysisPhaseColumn = "event_phase"
+	m.fmriAnalysisPhaseScopeColumn = "event_group"
+	m.fmriAnalysisPhaseScopeValue = "stimulation"
+	m.fmriAnalysisStimPhasesToModel = "plateau,peak"
+
+	args := m.buildFmriAnalysisAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--phase-column", "event_phase"}) {
+		t.Fatalf("expected --phase-column event_phase, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--phase-scope-column", "event_group"}) {
+		t.Fatalf("expected --phase-scope-column event_group, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--phase-scope-value", "stimulation"}) {
+		t.Fatalf("expected --phase-scope-value stimulation, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--stim-phases-to-model", "plateau,peak"}) {
+		t.Fatalf("expected --stim-phases-to-model plateau,peak, got: %#v", args)
+	}
+}
+
+func TestBuildFmriAnalysisAdvancedArgs_EmitsTrialSignatureScopeColumns(t *testing.T) {
+	m := Model{}
+	m.modeOptions = []string{"first-level", "trial-signatures"}
+	m.modeIndex = 1
+	m.fmriTrialSigScopeTrialTypeColumn = "event_group"
+	m.fmriTrialSigScopePhaseColumn = "event_phase"
+
+	args := m.buildFmriAnalysisAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--signature-scope-trial-type-column", "event_group"}) {
+		t.Fatalf("expected --signature-scope-trial-type-column event_group, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--signature-scope-phase-column", "event_phase"}) {
+		t.Fatalf("expected --signature-scope-phase-column event_phase, got: %#v", args)
+	}
+}
+
 func TestBuildFmriAnalysisAdvancedArgs_BetaSeriesEmitsTrialSignatureFlags(t *testing.T) {
 	m := Model{}
 	m.modeOptions = []string{"first-level", "trial-signatures"}
@@ -225,8 +280,6 @@ func TestBuildFmriAnalysisAdvancedArgs_BetaSeriesEmitsTrialSignatureFlags(t *tes
 	m.fmriTrialSigWriteTrialBetas = true
 	m.fmriTrialSigWriteTrialVariances = false
 	m.fmriTrialSigWriteConditionBetas = false
-	m.fmriTrialSigSignatureNPS = true
-	m.fmriTrialSigSignatureSIIPS1 = false
 
 	args := m.buildFmriAnalysisAdvancedArgs()
 
@@ -245,12 +298,8 @@ func TestBuildFmriAnalysisAdvancedArgs_BetaSeriesEmitsTrialSignatureFlags(t *tes
 	if !containsString(args, "--no-write-condition-betas") {
 		t.Fatalf("expected --no-write-condition-betas in args, got: %#v", args)
 	}
-	v, ok := argValue(args, "--signatures")
-	if !ok {
-		t.Fatalf("expected --signatures in args, got: %#v", args)
-	}
-	if v != "NPS" {
-		t.Fatalf("unexpected --signatures value %q (expected NPS)", v)
+	if containsString(args, "--signatures") {
+		t.Fatalf("did not expect --signatures in args (config-driven selection), got: %#v", args)
 	}
 }
 
@@ -291,8 +340,7 @@ func TestBuildMLAdvancedArgs_FmriSignatureTargetEmitsFlags(t *testing.T) {
 	m.mlTarget = "fmri_signature"
 	m.mlFmriSigMethodIndex = 1 // lss
 	m.mlFmriSigContrastName = "contrast"
-	m.mlFmriSigSignatureIndex = 0 // NPS
-	m.mlFmriSigMetricIndex = 2    // pearson_r
+	m.mlFmriSigMetricIndex = 2 // pearson_r
 	m.mlFmriSigNormalizationIndex = 1
 	m.mlFmriSigRoundDecimals = 4
 
@@ -304,8 +352,8 @@ func TestBuildMLAdvancedArgs_FmriSignatureTargetEmitsFlags(t *testing.T) {
 	if v, ok := argValue(args, "--fmri-signature-method"); !ok || v != "lss" {
 		t.Fatalf("expected --fmri-signature-method lss, got: %#v", args)
 	}
-	if v, ok := argValue(args, "--fmri-signature-name"); !ok || v != "NPS" {
-		t.Fatalf("expected --fmri-signature-name NPS, got: %#v", args)
+	if containsString(args, "--fmri-signature-name") {
+		t.Fatalf("did not expect --fmri-signature-name (config-driven selection), got: %#v", args)
 	}
 	if v, ok := argValue(args, "--fmri-signature-metric"); !ok || v != "pearson_r" {
 		t.Fatalf("expected --fmri-signature-metric pearson_r, got: %#v", args)
@@ -462,24 +510,24 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"behavior_analysis.robust_correlation":                                            "winsorized",
 		"behavior_analysis.bootstrap":                                                     1500.0,
 		"behavior_analysis.statistics.default_n_bootstrap":                                2500.0,
-		"behavior_analysis.statistics.predictor_control":                                "linear",
+		"behavior_analysis.statistics.predictor_control":                                  "linear",
 		"behavior_analysis.permutation.scheme":                                            "circular_shift",
 		"behavior_analysis.permutation.group_column_preference":                           []interface{}{"run_id", "block"},
 		"behavior_analysis.features.exclude_non_trialwise_features":                       false,
-		"behavior_analysis.predictor_models.model_comparison.enabled":                   false,
-		"behavior_analysis.predictor_models.breakpoint_test.enabled":                    false,
+		"behavior_analysis.predictor_models.model_comparison.enabled":                     false,
+		"behavior_analysis.predictor_models.breakpoint_test.enabled":                      false,
 		"behavior_analysis.correlations.min_runs":                                         6.0,
 		"behavior_analysis.correlations.target_column":                                    "custom_rating",
-		"behavior_analysis.correlations.prefer_predictor_residual":                             true,
+		"behavior_analysis.correlations.prefer_predictor_residual":                        true,
 		"behavior_analysis.correlations.permutation.n_permutations":                       77.0,
-		"behavior_analysis.predictor_sensitivity.primary_unit":                                 "run_mean",
-		"behavior_analysis.predictor_sensitivity.n_permutations":                               300.0,
-		"behavior_analysis.predictor_sensitivity.p_primary_mode":                               "asymptotic",
+		"behavior_analysis.predictor_sensitivity.primary_unit":                            "run_mean",
+		"behavior_analysis.predictor_sensitivity.n_permutations":                          300.0,
+		"behavior_analysis.predictor_sensitivity.p_primary_mode":                          "asymptotic",
 		"behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback": true,
 		"behavior_analysis.condition.primary_unit":                                        "run_mean",
 		"behavior_analysis.condition.compare_labels":                                      []interface{}{"low", "high"},
 		"behavior_analysis.condition.window_comparison.min_samples":                       12.0,
-		"behavior_analysis.mixed_effects.include_predictor":                             false,
+		"behavior_analysis.mixed_effects.include_predictor":                               false,
 		"behavior_analysis.mediation.p_primary_mode":                                      "asymptotic",
 		"behavior_analysis.moderation.p_primary_mode":                                     "asymptotic",
 		"behavior_analysis.regression.primary_unit":                                       "run_mean",
@@ -491,7 +539,7 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"validation.min_epochs":                                                           30.0,
 		"validation.min_channels":                                                         16.0,
 		"validation.max_amplitude_uv":                                                     400.0,
-		"io.constants.predictor_range":                                                  []interface{}{35.0, 55.0},
+		"io.constants.predictor_range":                                                    []interface{}{35.0, 55.0},
 		"io.constants.max_missing_channels_fraction":                                      0.2,
 	})
 
@@ -771,6 +819,62 @@ func TestBuildFeaturesAdvancedArgs_IncludesSourceSubjectsDirFlag(t *testing.T) {
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_EmitsSourceFmriConditionScopeColumn(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "sourcelocalization" {
+			m.selected[i] = true
+			break
+		}
+	}
+	m.sourceLocMode = 1
+	m.sourceLocFmriEnabled = true
+	m.sourceLocFmriContrastEnabled = true
+	m.sourceLocFmriConditionScopeColumn = "event_group"
+	m.sourceLocFmriConditionScopeTrialTypes = "stimulation"
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--source-fmri-condition-scope-column", "event_group"}) {
+		t.Fatalf("expected --source-fmri-condition-scope-column event_group in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--source-fmri-condition-scope-trial-types", "stimulation"}) {
+		t.Fatalf("expected --source-fmri-condition-scope-trial-types stimulation in args, got: %#v", args)
+	}
+}
+
+func TestBuildFeaturesAdvancedArgs_EmitsSourceFmriPhaseScopeFlags(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "sourcelocalization" {
+			m.selected[i] = true
+			break
+		}
+	}
+	m.sourceLocMode = 1
+	m.sourceLocFmriEnabled = true
+	m.sourceLocFmriContrastEnabled = true
+	m.sourceLocFmriPhaseColumn = "event_phase"
+	m.sourceLocFmriPhaseScopeColumn = "event_group"
+	m.sourceLocFmriPhaseScopeValue = "stimulation"
+	m.sourceLocFmriStimPhasesToModel = "plateau"
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--source-fmri-phase-column", "event_phase"}) {
+		t.Fatalf("expected --source-fmri-phase-column event_phase in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--source-fmri-phase-scope-column", "event_group"}) {
+		t.Fatalf("expected --source-fmri-phase-scope-column event_group in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--source-fmri-phase-scope-value", "stimulation"}) {
+		t.Fatalf("expected --source-fmri-phase-scope-value stimulation in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--source-fmri-stim-phases-to-model", "plateau"}) {
+		t.Fatalf("expected --source-fmri-stim-phases-to-model plateau in args, got: %#v", args)
+	}
+}
+
 func TestBuildFeaturesAdvancedArgs_IncludesPACRandomSeedFlag(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, cat := range m.categories {
@@ -785,6 +889,16 @@ func TestBuildFeaturesAdvancedArgs_IncludesPACRandomSeedFlag(t *testing.T) {
 	args := m.buildFeaturesAdvancedArgs()
 	if !containsSubsequence(args, []string{"--pac-random-seed", "123"}) {
 		t.Fatalf("expected --pac-random-seed 123 in args, got: %#v", args)
+	}
+}
+
+func TestBuildPreprocessingAdvancedArgs_EmitsEventColCondition(t *testing.T) {
+	m := New(types.PipelinePreprocessing, ".")
+	m.eventColCondition = "condition_label,trial_kind"
+
+	args := m.buildPreprocessingAdvancedArgs()
+	if !containsSubsequence(args, []string{"--event-col-condition", "condition_label", "trial_kind"}) {
+		t.Fatalf("expected --event-col-condition condition_label trial_kind in args, got: %#v", args)
 	}
 }
 
@@ -955,6 +1069,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testi
 	m.moderationPermutationPrimary = false
 	m.correlationsPreferPredictorResidual = true
 	m.correlationsPermutations = 111
+	m.correlationsPowerSegment = "stimulation"
 	m.regressionPrimaryUnit = 1
 	m.temporalCorrectionMethod = 1
 
@@ -968,6 +1083,9 @@ func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testi
 	}
 	if !containsSubsequence(args, []string{"--correlations-permutations", "111"}) {
 		t.Fatalf("expected --correlations-permutations 111 in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--correlations-power-segment", "stimulation"}) {
+		t.Fatalf("expected --correlations-power-segment stimulation in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--predictor-sensitivity-primary-unit", "run_mean"}) {
 		t.Fatalf("expected --predictor-sensitivity-primary-unit run_mean in args, got: %#v", args)

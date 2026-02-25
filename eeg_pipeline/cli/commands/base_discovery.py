@@ -25,10 +25,10 @@ def discover_event_columns(
     -------
     dict
         {
-            "columns": ["onset", "duration", "trial_type", "condition", ...],
+            "columns": ["onset", "duration", "condition", "event_type", ...],
             "values": {
-                "condition": ["pain", "nonpain"],
-                "trial_type": ["stim", "outcome"],
+                "condition": ["condition_1", "condition_2"],
+                "event_type": ["stim", "outcome"],
                 ...
             },
             "source": "events" | "metadata",

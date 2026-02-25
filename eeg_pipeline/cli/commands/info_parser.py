@@ -99,6 +99,13 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Get values for a specific column only",
     )
 
+    fmri_group = parser.add_argument_group("fMRI discovery options (modes: fmri-conditions, fmri-columns)")
+    fmri_group.add_argument(
+        "--condition-column",
+        default=None,
+        help="Preferred events.tsv condition column for fmri-conditions (default: event_columns.condition candidates).",
+    )
+
     ml_group = parser.add_argument_group("ML feature-space options (mode: ml-feature-space)")
     ml_group.add_argument(
         "--subjects",
@@ -120,4 +127,3 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
 
     return parser
-

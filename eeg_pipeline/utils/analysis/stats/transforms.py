@@ -245,7 +245,7 @@ def compute_change_features(
         DataFrame with feature columns containing window name segments
     window_pairs : Optional[List[Tuple[str, str]]]
         List of (reference_window, target_window) pairs. If None, uses config or
-        defaults to [("baseline", "active")].
+        auto-detects from available feature segments.
     transform : str
         Transform type: "difference" (target - ref), "percent" ((target - ref) / ref * 100),
         or "log_ratio" (log10(target / ref)).
@@ -266,10 +266,6 @@ def compute_change_features(
         if cfg_transform:
             transform = str(cfg_transform).strip().lower()
     
-    # Default to baseline/active if nothing specified
-    if not window_pairs:
-        window_pairs = [("baseline", "active")]
-    
     transform = transform.lower()
     if transform not in {"difference", "percent", "log_ratio"}:
         transform = "difference"
@@ -279,7 +275,7 @@ def compute_change_features(
     suffix = "change" if transform == "difference" else "pct_change" if transform == "percent" else "log_ratio"
 
     # Build a lookup of parsed feature columns so pairing never relies on substring replacement.
-    # Key ignores segment so we can match baseline vs active cleanly.
+    # Key ignores segment so we can match reference/target windows cleanly.
     by_segment: Dict[Tuple[str, str, str, str, str, str], str] = {}
     for col in features_df.columns:
         col_str = str(col)
@@ -295,6 +291,16 @@ def compute_change_features(
             str(parsed.get("stat") or "").strip().lower(),
         )
         by_segment[key] = col_str
+
+    # If not explicitly configured, infer a sensible window pair from available segments.
+    if not window_pairs:
+        available_segments = sorted({k[1] for k in by_segment.keys() if str(k[1]).strip()})
+        if "baseline" in available_segments and "active" in available_segments:
+            window_pairs = [("baseline", "active")]
+        elif len(available_segments) >= 2:
+            window_pairs = [(available_segments[0], available_segments[1])]
+        else:
+            window_pairs = []
 
     change_data: Dict[str, np.ndarray] = {}
     for ref_window, target_window in window_pairs:

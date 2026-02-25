@@ -20,12 +20,12 @@ paths:
   # Multivariate signature weight maps to compute at each contrast/beta map.
   # Each entry must have a unique "name" and a "path" relative to signature_dir.
   # Leave empty ([]) to disable signature computation entirely.
-  # Example (thermal pain paradigm, using the bundled NPS and SIIPS1 maps):
+  # Example (using two configured signatures):
   #   signature_maps:
-  #     - name: "NPS"
-  #       path: "NPS/weights_NSF_grouppred_cvpcr.nii.gz"
-  #     - name: "SIIPS1"
-  #       path: "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+  #     - name: "SIG_A"
+  #       path: "maps/sig_a_weights.nii.gz"
+  #     - name: "SIG_B"
+  #       path: "maps/sig_b_weights.nii.gz"
   signature_maps: []
 
 ###################################################################
@@ -155,24 +155,31 @@ fmri_contrast:
     column: "trial_type"
     value: null
 
-  # Optional: restrict condition-based trial selection to specific event phases.
-  # Best practice for designs where per-trial columns repeat across phases.
-  # If null, no trial_type scoping is applied.
+  # Optional: restrict condition-based event selection to specific values.
+  # Values are matched against `condition_scope_column`.
+  # If null, no condition-scope filtering is applied.
   condition_scope_trial_types: null  # e.g., ["stimulation"]
+  # Events column used for `condition_scope_trial_types`.
+  condition_scope_column: "trial_type"
 
   # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
   # If null, all event rows are modeled (default).
   events_to_model: null
 
-  # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
-  # If null, no stim_phase scoping is applied.
-  # Use ["all"] to disable scoping and model all stimulation phases.
+  # Events column used for phase-level scoping.
+  phase_column: "stim_phase"
+
+  # Optional: restrict which phase values are modeled when events.tsv includes `phase_column`.
+  # If null, no phase scoping is applied.
+  # Use ["all"] to disable scoping and model all phase values.
   stim_phases_to_model: null
 
-  # Optional: trial_type value that stim_phase scoping is restricted to.
-  # If null, phase scoping applies to all rows regardless of trial_type.
-  # Set to the relevant event type for your paradigm (e.g. "stimulation" for thermal pain).
-  phase_scope_trial_type: null
+  # Events column used to scope phase filtering to a subset of rows.
+  phase_scope_column: "trial_type"
+
+  # Optional: value in `phase_scope_column` that phase scoping is restricted to.
+  # If null, phase scoping applies to all rows.
+  phase_scope_value: null
 
   # Custom formula (optional, overrides condition_a/b)
   formula: null                # e.g., "condition_a - condition_b"

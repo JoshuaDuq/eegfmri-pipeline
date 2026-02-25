@@ -25,6 +25,7 @@ import pandas as pd
 from eeg_pipeline.infra.tsv import read_table as _read_table
 from eeg_pipeline.plotting.io.figures import save_fig as _save_fig
 from eeg_pipeline.plotting.config import PlotConfig, get_plot_config
+from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.plotting.core.registry import (
     CategorizedPlotManager,
     CategorizedPlotRegistry,
@@ -166,7 +167,7 @@ class FeaturePlotContext:
                             str(tmax),
                         )
 
-        preferred = ["baseline", "active"]
+        preferred = self._preferred_window_order()
         ordered_suffixes: List[str] = []
         for name in preferred:
             suffix = name_to_suffix.get(name)
@@ -185,6 +186,16 @@ class FeaturePlotContext:
                 for name, rng in self.window_ranges.items()
             )
             self.logger.info("Detected extracted windows: %s", formatted)
+
+    def _preferred_window_order(self) -> List[str]:
+        """Resolve preferred window ordering from config, with sensible fallback."""
+        if self.config is not None:
+            configured = get_config_value(self.config, "plotting.comparisons.comparison_windows", None)
+            if isinstance(configured, (list, tuple)):
+                out = [str(item).strip().lower() for item in configured if str(item).strip()]
+                if out:
+                    return out
+        return ["baseline", "active"]
     
     def _parse_extraction_config(self, path: Path) -> Optional[Tuple[Optional[str], Optional[str], Optional[float], Optional[float]]]:
         """Parse an extraction config JSON file.
@@ -218,12 +229,11 @@ class FeaturePlotContext:
             # Config may not be deepcopy-able, continue with original
             pass
 
-        baseline = self.window_ranges.get("baseline")
-        active = self.window_ranges.get("active")
-        if baseline:
-            self._set_config_window("baseline", baseline)
-        if active:
-            self._set_config_window("active", active)
+        for label, window in self.window_ranges.items():
+            normalized = str(label).strip().lower().replace(" ", "_")
+            if not normalized:
+                continue
+            self._set_config_window(normalized, window)
 
     def _set_config_window(self, label: str, window: Tuple[float, float]) -> None:
         if self.config is None:

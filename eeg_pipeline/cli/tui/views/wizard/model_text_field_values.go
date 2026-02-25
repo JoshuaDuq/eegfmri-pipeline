@@ -56,8 +56,16 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisFormula
 	case textFieldFmriAnalysisEventsToModel:
 		return m.fmriAnalysisEventsToModel
+	case textFieldFmriAnalysisScopeColumn:
+		return m.fmriAnalysisScopeColumn
 	case textFieldFmriAnalysisScopeTrialTypes:
 		return m.fmriAnalysisScopeTrialTypes
+	case textFieldFmriAnalysisPhaseColumn:
+		return m.fmriAnalysisPhaseColumn
+	case textFieldFmriAnalysisPhaseScopeColumn:
+		return m.fmriAnalysisPhaseScopeColumn
+	case textFieldFmriAnalysisPhaseScopeValue:
+		return m.fmriAnalysisPhaseScopeValue
 	case textFieldFmriAnalysisStimPhasesToModel:
 		return m.fmriAnalysisStimPhasesToModel
 	case textFieldFmriAnalysisOutputDir:
@@ -72,6 +80,10 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriTrialSigGroupColumn
 	case textFieldFmriTrialSigGroupValues:
 		return m.fmriTrialSigGroupValuesSpec
+	case textFieldFmriTrialSigScopeTrialTypeColumn:
+		return m.fmriTrialSigScopeTrialTypeColumn
+	case textFieldFmriTrialSigScopePhaseColumn:
+		return m.fmriTrialSigScopePhaseColumn
 	case textFieldFmriTrialSigScopeTrialTypes:
 		return m.fmriTrialSigScopeTrialTypes
 	case textFieldFmriTrialSigScopeStimPhases:
@@ -126,6 +138,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.clusterConditionValues
 	case textFieldCorrelationsTargetColumn:
 		return m.correlationsTargetColumn
+	case textFieldCorrelationsPowerSegment:
+		return m.correlationsPowerSegment
 	case textFieldGroupLevelTarget:
 		return m.groupLevelTarget
 	case textFieldCorrelationsTypes:
@@ -196,8 +210,16 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.sourceLocFmriContrastName
 	case textFieldSourceLocFmriRunsToInclude:
 		return m.sourceLocFmriRunsToInclude
+	case textFieldSourceLocFmriConditionScopeColumn:
+		return m.sourceLocFmriConditionScopeColumn
 	case textFieldSourceLocFmriConditionScopeTrialTypes:
 		return m.sourceLocFmriConditionScopeTrialTypes
+	case textFieldSourceLocFmriPhaseColumn:
+		return m.sourceLocFmriPhaseColumn
+	case textFieldSourceLocFmriPhaseScopeColumn:
+		return m.sourceLocFmriPhaseScopeColumn
+	case textFieldSourceLocFmriPhaseScopeValue:
+		return m.sourceLocFmriPhaseScopeValue
 	case textFieldSourceLocFmriStimPhasesToModel:
 		return m.sourceLocFmriStimPhasesToModel
 	case textFieldSourceLocFmriWindowAName:
@@ -355,6 +377,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.eventColOutcome
 	case textFieldEventColBinaryOutcome:
 		return m.eventColBinaryOutcome
+	case textFieldEventColCondition:
+		return m.eventColCondition
 	case textFieldConditionPreferredPrefixes:
 		return m.conditionPreferredPrefixes
 	// Change Scores text fields
@@ -436,8 +460,17 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisFormula = strings.TrimSpace(value)
 	case textFieldFmriAnalysisEventsToModel:
 		m.fmriAnalysisEventsToModel = strings.TrimSpace(value)
+	case textFieldFmriAnalysisScopeColumn:
+		m.fmriAnalysisScopeColumn = strings.TrimSpace(value)
+		m.fmriAnalysisScopeTrialTypes = ""
 	case textFieldFmriAnalysisScopeTrialTypes:
 		m.fmriAnalysisScopeTrialTypes = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriAnalysisPhaseColumn:
+		m.fmriAnalysisPhaseColumn = strings.TrimSpace(value)
+	case textFieldFmriAnalysisPhaseScopeColumn:
+		m.fmriAnalysisPhaseScopeColumn = strings.TrimSpace(value)
+	case textFieldFmriAnalysisPhaseScopeValue:
+		m.fmriAnalysisPhaseScopeValue = strings.TrimSpace(value)
 	case textFieldFmriAnalysisStimPhasesToModel:
 		m.fmriAnalysisStimPhasesToModel = strings.TrimSpace(value)
 	case textFieldFmriAnalysisOutputDir:
@@ -453,6 +486,10 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriTrialSigGroupValuesSpec = "" // Reset values when column changes
 	case textFieldFmriTrialSigGroupValues:
 		m.fmriTrialSigGroupValuesSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriTrialSigScopeTrialTypeColumn:
+		m.fmriTrialSigScopeTrialTypeColumn = strings.TrimSpace(value)
+	case textFieldFmriTrialSigScopePhaseColumn:
+		m.fmriTrialSigScopePhaseColumn = strings.TrimSpace(value)
 	case textFieldFmriTrialSigScopeTrialTypes:
 		m.fmriTrialSigScopeTrialTypes = strings.Join(strings.Fields(value), " ")
 	case textFieldFmriTrialSigScopeStimPhases:
@@ -507,6 +544,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.clusterConditionValues = strings.TrimSpace(value)
 	case textFieldCorrelationsTargetColumn:
 		m.correlationsTargetColumn = strings.TrimSpace(value)
+	case textFieldCorrelationsPowerSegment:
+		m.correlationsPowerSegment = strings.TrimSpace(value)
 	case textFieldGroupLevelTarget:
 		m.groupLevelTarget = strings.TrimSpace(value)
 	case textFieldCorrelationsTypes:
@@ -577,8 +616,19 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.sourceLocFmriContrastName = value
 	case textFieldSourceLocFmriRunsToInclude:
 		m.sourceLocFmriRunsToInclude = value
+	case textFieldSourceLocFmriConditionScopeColumn:
+		m.sourceLocFmriConditionScopeColumn = strings.TrimSpace(value)
+		m.sourceLocFmriConditionScopeTrialTypes = ""
 	case textFieldSourceLocFmriConditionScopeTrialTypes:
 		m.sourceLocFmriConditionScopeTrialTypes = strings.Join(strings.Fields(value), " ")
+	case textFieldSourceLocFmriPhaseColumn:
+		m.sourceLocFmriPhaseColumn = strings.TrimSpace(value)
+		m.sourceLocFmriStimPhasesToModel = ""
+	case textFieldSourceLocFmriPhaseScopeColumn:
+		m.sourceLocFmriPhaseScopeColumn = strings.TrimSpace(value)
+		m.sourceLocFmriPhaseScopeValue = ""
+	case textFieldSourceLocFmriPhaseScopeValue:
+		m.sourceLocFmriPhaseScopeValue = strings.TrimSpace(value)
 	case textFieldSourceLocFmriStimPhasesToModel:
 		m.sourceLocFmriStimPhasesToModel = strings.TrimSpace(value)
 	case textFieldSourceLocFmriWindowAName:
@@ -747,6 +797,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.eventColOutcome = strings.Join(splitLooseList(value), ",")
 	case textFieldEventColBinaryOutcome:
 		m.eventColBinaryOutcome = strings.Join(splitLooseList(value), ",")
+	case textFieldEventColCondition:
+		m.eventColCondition = strings.Join(splitLooseList(value), ",")
 	case textFieldConditionPreferredPrefixes:
 		m.conditionPreferredPrefixes = strings.Join(splitLooseList(value), ",")
 	// Change Scores text fields

@@ -48,8 +48,8 @@ func (m Model) SelectedComputations() []string {
 			key := m.computations[i].Key
 
 			switch key {
-		case "predictor_residual":
-			result = append(result, key, "predictor_models")
+			case "predictor_residual":
+				result = append(result, key, "predictor_models")
 			case "validation":
 				result = append(result, "consistency", "influence")
 			case "regression":
@@ -1013,8 +1013,8 @@ func (m Model) buildPlotItemConfigArgs() []string {
 			args = append(args, "--plot-item-config", plotID, "dose_response_response_column")
 			args = append(args, splitSpaceList(strings.TrimSpace(cfg.DoseResponseResponseColumn))...)
 		}
-		if strings.TrimSpace(cfg.DoseResponsePredictorColumn) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_predictor_column", strings.TrimSpace(cfg.DoseResponsePredictorColumn))
+		if strings.TrimSpace(cfg.DoseResponseBinaryOutcomeColumn) != "" {
+			args = append(args, "--plot-item-config", plotID, "dose_response_binary_outcome_column", strings.TrimSpace(cfg.DoseResponseBinaryOutcomeColumn))
 		}
 		if strings.TrimSpace(cfg.DoseResponseSegment) != "" {
 			args = append(args, "--plot-item-config", plotID, "dose_response_segment", strings.TrimSpace(cfg.DoseResponseSegment))

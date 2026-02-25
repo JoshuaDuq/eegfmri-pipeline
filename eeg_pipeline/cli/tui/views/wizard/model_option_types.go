@@ -291,7 +291,11 @@ const (
 	optSourceLocFmriDriftModel
 	optSourceLocFmriHighPassHz
 	optSourceLocFmriLowPassHz
+	optSourceLocFmriConditionScopeColumn
 	optSourceLocFmriConditionScopeTrialTypes
+	optSourceLocFmriPhaseColumn
+	optSourceLocFmriPhaseScopeColumn
+	optSourceLocFmriPhaseScopeValue
 	optSourceLocFmriStimPhasesToModel
 	optSourceLocFmriClusterCorrection
 	optSourceLocFmriClusterPThreshold
@@ -482,6 +486,7 @@ const (
 	optCorrelationsPermutations
 	optCorrelationsPermutationPrimary
 	optCorrelationsTargetColumn
+	optCorrelationsPowerSegment
 	optCorrelationsFeatures
 	optGroupLevelBlockPermutation
 	optGroupLevelTarget
@@ -932,7 +937,11 @@ const (
 	optFmriAnalysisLowPassHz
 	optFmriAnalysisSmoothingFwhm
 	optFmriAnalysisEventsToModel
+	optFmriAnalysisScopeColumn
 	optFmriAnalysisScopeTrialTypes
+	optFmriAnalysisPhaseColumn
+	optFmriAnalysisPhaseScopeColumn
+	optFmriAnalysisPhaseScopeValue
 	optFmriAnalysisStimPhasesToModel
 	optFmriAnalysisConfoundsStrategy
 	optFmriAnalysisWriteDesignMatrix
@@ -976,11 +985,13 @@ const (
 	optFmriTrialSigWriteTrialBetas
 	optFmriTrialSigWriteTrialVariances
 	optFmriTrialSigWriteConditionBetas
-	optFmriTrialSigSignatureNPS
-	optFmriTrialSigSignatureSIIPS1
+	optFmriTrialSigSignatureOption1
+	optFmriTrialSigSignatureOption2
 	optFmriTrialSigLssOtherRegressors
 	optFmriTrialSigGroupColumn
 	optFmriTrialSigGroupValues
+	optFmriTrialSigScopeTrialTypeColumn
+	optFmriTrialSigScopePhaseColumn
 	optFmriTrialSigScopeTrialTypes
 	optFmriTrialSigScopeStimPhases
 	optFmriTrialSigGroupScope
@@ -1005,6 +1016,7 @@ const (
 	optEventColPredictor
 	optEventColRating
 	optEventColBinaryOutcome
+	optEventColCondition
 	optConditionPreferredPrefixes
 
 	// Per-Family Spatial Transforms

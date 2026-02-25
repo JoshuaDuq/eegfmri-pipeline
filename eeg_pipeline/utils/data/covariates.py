@@ -27,7 +27,8 @@ TRIAL_COLUMN_CANDIDATES = ["trial_index", "trial_number", "trial"]
 # These are NOT valid trial order covariates - they are categorical grouping variables
 RUN_BLOCK_COLUMNS = ["run", "block", "run_number", "block_number"]
 
-PREDICTOR_ALIASES = {"temp", "temperature", "predictor"}
+# Canonical predictor alias plus configurable event column aliases.
+PREDICTOR_ALIASES = {"predictor"}
 
 # Only true within-run trial indices should be used as order covariates
 TRIAL_ALIASES = {"trial", "trial_number", "trial_index"}
@@ -82,6 +83,11 @@ def _canonical_covariate_name(name: Optional[str], config: Optional[Any] = None)
     if config is not None and hasattr(config, "get"):
         config_pred_cols = config.get("event_columns.predictor", [])
         predictor_aliases.update(str(col).lower() for col in config_pred_cols)
+        explicit_predictor = config.get("behavior_analysis.predictor_column", None)
+        if explicit_predictor is not None:
+            explicit_predictor_norm = str(explicit_predictor).strip().lower()
+            if explicit_predictor_norm:
+                predictor_aliases.add(explicit_predictor_norm)
     
     if normalized_name in predictor_aliases:
         return "predictor"

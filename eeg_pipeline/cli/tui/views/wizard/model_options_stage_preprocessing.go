@@ -124,6 +124,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 		optEventColPredictor,
 		optEventColRating,
 		optEventColBinaryOutcome,
+		optEventColCondition,
 		optConditionPreferredPrefixes,
 	)
 

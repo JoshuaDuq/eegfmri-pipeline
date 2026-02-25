@@ -900,18 +900,18 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 			lines = append(lines, expandedLines...)
 		}
 		return lines
-	case plotItemConfigFieldDoseResponsePredictorColumn:
-		value := m.getPlotFieldTextValue(cfg.DoseResponsePredictorColumn, "(auto)", row, plotItemConfigFieldDoseResponsePredictorColumn)
+	case plotItemConfigFieldDoseResponseBinaryOutcomeColumn:
+		value := m.getPlotFieldTextValue(cfg.DoseResponseBinaryOutcomeColumn, "(auto)", row, plotItemConfigFieldDoseResponseBinaryOutcomeColumn)
 		plotCols := m.GetPlottingComparisonColumns()
 		hint := "Space to select (events.tsv) · or type manually"
 		if len(plotCols) > 0 {
 			hint = fmt.Sprintf("Space to select · %d columns", len(plotCols))
 		}
-		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponsePredictorColumn
-		lines := []renderLine{m.renderPlotValueLine("predictor_column", value, hint, focused || isEditing, labelWidth)}
+		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldDoseResponseBinaryOutcomeColumn
+		lines := []renderLine{m.renderPlotValueLine("binary_outcome_column", value, hint, focused || isEditing, labelWidth)}
 		if isEditing && len(plotCols) > 0 {
 			expandedLines := m.renderExpandedListItems(plotCols, func(col string) bool {
-				return cfg.DoseResponsePredictorColumn == col
+				return cfg.DoseResponseBinaryOutcomeColumn == col
 			})
 			lines = append(lines, expandedLines...)
 		}

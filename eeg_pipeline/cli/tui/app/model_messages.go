@@ -56,7 +56,12 @@ func (m Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) (tea.Model, 
 			}
 		}
 		if subjectID != "" {
-			return m, executor.DiscoverFmriConditions(m.repoRoot, subjectID, m.task)
+			return m, executor.DiscoverFmriConditions(
+				m.repoRoot,
+				subjectID,
+				m.task,
+				m.wizard.FmriDiscoveryConditionColumn(),
+			)
 		}
 	}
 

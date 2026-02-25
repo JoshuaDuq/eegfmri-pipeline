@@ -326,14 +326,16 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 							args = append(args, "--source-fmri-contrast-formula", strings.TrimSpace(m.sourceLocFmriContrastFormula))
 						}
 					} else {
-						if strings.TrimSpace(m.sourceLocFmriCondAColumn) != "" {
-							args = append(args, "--source-fmri-cond-a-column", strings.TrimSpace(m.sourceLocFmriCondAColumn))
+						condAColumn := m.resolveFmriConditionColumn(m.sourceLocFmriCondAColumn)
+						if condAColumn != "" {
+							args = append(args, "--source-fmri-cond-a-column", condAColumn)
 						}
 						if strings.TrimSpace(m.sourceLocFmriCondAValue) != "" {
 							args = append(args, "--source-fmri-cond-a-value", strings.TrimSpace(m.sourceLocFmriCondAValue))
 						}
-						if strings.TrimSpace(m.sourceLocFmriCondBColumn) != "" {
-							args = append(args, "--source-fmri-cond-b-column", strings.TrimSpace(m.sourceLocFmriCondBColumn))
+						condBColumn := m.resolveFmriConditionColumn(m.sourceLocFmriCondBColumn)
+						if condBColumn != "" {
+							args = append(args, "--source-fmri-cond-b-column", condBColumn)
 						}
 						if strings.TrimSpace(m.sourceLocFmriCondBValue) != "" {
 							args = append(args, "--source-fmri-cond-b-value", strings.TrimSpace(m.sourceLocFmriCondBValue))
@@ -354,8 +356,24 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 						args = append(args, "--source-fmri-drift-model", driftModels[m.sourceLocFmriDriftModel])
 					}
 					if strings.TrimSpace(m.sourceLocFmriConditionScopeTrialTypes) != "" {
+						scopeCol := m.resolveFmriConditionColumn(m.sourceLocFmriConditionScopeColumn)
+						if scopeCol != "" && !strings.EqualFold(scopeCol, "trial_type") {
+							args = append(args, "--source-fmri-condition-scope-column", scopeCol)
+						}
 						args = append(args, "--source-fmri-condition-scope-trial-types")
 						args = append(args, splitSpaceList(strings.TrimSpace(m.sourceLocFmriConditionScopeTrialTypes))...)
+					}
+					phaseColumn := m.resolveFmriPhaseColumn(m.sourceLocFmriPhaseColumn)
+					if phaseColumn != "" && !strings.EqualFold(phaseColumn, "stim_phase") {
+						args = append(args, "--source-fmri-phase-column", phaseColumn)
+					}
+					phaseScopeColumn := m.resolveFmriConditionColumn(m.sourceLocFmriPhaseScopeColumn)
+					if phaseScopeColumn != "" && !strings.EqualFold(phaseScopeColumn, "trial_type") {
+						args = append(args, "--source-fmri-phase-scope-column", phaseScopeColumn)
+					}
+					phaseScopeValue := strings.TrimSpace(m.sourceLocFmriPhaseScopeValue)
+					if phaseScopeValue != "" {
+						args = append(args, "--source-fmri-phase-scope-value", phaseScopeValue)
 					}
 					if strings.TrimSpace(m.sourceLocFmriStimPhasesToModel) != "" {
 						args = append(args, "--source-fmri-stim-phases-to-model", strings.TrimSpace(m.sourceLocFmriStimPhasesToModel))

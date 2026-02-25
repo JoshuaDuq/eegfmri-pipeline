@@ -20,8 +20,8 @@ import seaborn as sns
 DEFAULT_COLOR = "#333333"
 
 COLORS: Dict[str, str] = {
-    "pain": "#E31A1C",
-    "nopain": "#1F78B4",
+    "condition_2": "#E31A1C",
+    "condition_1": "#1F78B4",
     "baseline": DEFAULT_COLOR,
     "grid": "#E0E0E0",
     "text": "#212121",
@@ -79,7 +79,7 @@ def get_color(key: str, default: str = DEFAULT_COLOR) -> str:
     Retrieve color from theme by key.
 
     Args:
-        key: Color key (e.g., 'pain', 'nopain', 'baseline')
+        key: Color key (e.g., 'condition_1', 'condition_2', 'baseline')
         default: Default color if key not found
 
     Returns:

@@ -413,6 +413,9 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optEventColBinaryOutcome:
 		m.startTextEdit(textFieldEventColBinaryOutcome)
 		m.useDefaultAdvanced = false
+	case optEventColCondition:
+		m.startTextEdit(textFieldEventColCondition)
+		m.useDefaultAdvanced = false
 	case optConditionPreferredPrefixes:
 		m.startTextEdit(textFieldConditionPreferredPrefixes)
 		m.useDefaultAdvanced = false
@@ -688,8 +691,24 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriAnalysisEventsToModel:
 		m.startTextEdit(textFieldFmriAnalysisEventsToModel)
 		m.useDefaultAdvanced = false
+	case optFmriAnalysisScopeColumn:
+		m.expandedOption = expandedFmriAnalysisScopeColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
 	case optFmriAnalysisScopeTrialTypes:
 		m.expandedOption = expandedFmriAnalysisScopeTrialTypes
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPhaseColumn:
+		m.expandedOption = expandedFmriAnalysisPhaseColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPhaseScopeColumn:
+		m.expandedOption = expandedFmriAnalysisPhaseScopeColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisPhaseScopeValue:
+		m.expandedOption = expandedFmriAnalysisPhaseScopeValue
 		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optFmriAnalysisStimPhasesToModel:
@@ -827,6 +846,14 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.startTextEdit(textFieldFmriAnalysisSignatureDir)
 	case optFmriAnalysisSignatureMaps:
 		m.startTextEdit(textFieldFmriAnalysisSignatureMaps)
+	case optFmriTrialSigScopeTrialTypeColumn:
+		m.expandedOption = expandedFmriTrialSigScopeTrialTypeColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optFmriTrialSigScopePhaseColumn:
+		m.expandedOption = expandedFmriTrialSigScopePhaseColumn
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
 	case optFmriTrialSigScopeStimPhases:
 		m.expandedOption = expandedFmriTrialSigStimPhases
 		m.subCursor = 0
@@ -881,21 +908,21 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriTrialSigWriteConditionBetas:
 		m.fmriTrialSigWriteConditionBetas = !m.fmriTrialSigWriteConditionBetas
 		m.useDefaultAdvanced = false
-	case optFmriTrialSigSignatureNPS:
-		next := !m.fmriTrialSigSignatureNPS
-		if !next && !m.fmriTrialSigSignatureSIIPS1 {
-			m.ShowToast("Select at least one signature (NPS/SIIPS1)", "warning")
+	case optFmriTrialSigSignatureOption1:
+		next := !m.fmriTrialSigSignatureOption1
+		if !next && !m.fmriTrialSigSignatureOption2 {
+			m.ShowToast("Select at least one signature", "warning")
 			return
 		}
-		m.fmriTrialSigSignatureNPS = next
+		m.fmriTrialSigSignatureOption1 = next
 		m.useDefaultAdvanced = false
-	case optFmriTrialSigSignatureSIIPS1:
-		next := !m.fmriTrialSigSignatureSIIPS1
-		if !next && !m.fmriTrialSigSignatureNPS {
-			m.ShowToast("Select at least one signature (NPS/SIIPS1)", "warning")
+	case optFmriTrialSigSignatureOption2:
+		next := !m.fmriTrialSigSignatureOption2
+		if !next && !m.fmriTrialSigSignatureOption1 {
+			m.ShowToast("Select at least one signature", "warning")
 			return
 		}
-		m.fmriTrialSigSignatureSIIPS1 = next
+		m.fmriTrialSigSignatureOption2 = next
 		m.useDefaultAdvanced = false
 	case optFmriTrialSigLssOtherRegressors:
 		m.fmriTrialSigLssOtherRegressorsIndex = (m.fmriTrialSigLssOtherRegressorsIndex + 1) % 2

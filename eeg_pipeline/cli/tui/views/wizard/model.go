@@ -497,14 +497,14 @@ type PlotItemConfig struct {
 	BehaviorTemporalStatsFeatureFolder string
 
 	// Behavior dose response
-	DoseResponseDoseColumn     string
-	DoseResponseResponseColumn string
-	DoseResponsePredictorColumn     string
-	DoseResponseSegment        string
-	DoseResponseBandsSpec      string
-	DoseResponseROIsSpec       string
-	DoseResponseScopesSpec     string
-	DoseResponseStat           string
+	DoseResponseDoseColumn          string
+	DoseResponseResponseColumn      string
+	DoseResponseBinaryOutcomeColumn string
+	DoseResponseSegment             string
+	DoseResponseBandsSpec           string
+	DoseResponseROIsSpec            string
+	DoseResponseScopesSpec          string
+	DoseResponseStat                string
 }
 
 type plotItemConfigField int
@@ -546,7 +546,7 @@ const (
 	// Behavior dose response
 	plotItemConfigFieldDoseResponseDoseColumn
 	plotItemConfigFieldDoseResponseResponseColumn
-	plotItemConfigFieldDoseResponsePredictorColumn
+	plotItemConfigFieldDoseResponseBinaryOutcomeColumn
 	plotItemConfigFieldDoseResponseSegment
 	plotItemConfigFieldDoseResponseBands
 	plotItemConfigFieldDoseResponseROIs
@@ -585,7 +585,11 @@ const (
 	textFieldFmriAnalysisContrastName
 	textFieldFmriAnalysisFormula
 	textFieldFmriAnalysisEventsToModel
+	textFieldFmriAnalysisScopeColumn
 	textFieldFmriAnalysisScopeTrialTypes
+	textFieldFmriAnalysisPhaseColumn
+	textFieldFmriAnalysisPhaseScopeColumn
+	textFieldFmriAnalysisPhaseScopeValue
 	textFieldFmriAnalysisStimPhasesToModel
 	textFieldFmriAnalysisOutputDir
 	textFieldFmriAnalysisFreesurferDir
@@ -593,6 +597,8 @@ const (
 	textFieldFmriAnalysisSignatureMaps
 	textFieldFmriTrialSigGroupColumn
 	textFieldFmriTrialSigGroupValues
+	textFieldFmriTrialSigScopeTrialTypeColumn
+	textFieldFmriTrialSigScopePhaseColumn
 	textFieldFmriTrialSigScopeTrialTypes
 	textFieldFmriTrialSigScopeStimPhases
 	textFieldPrepMontage
@@ -619,6 +625,7 @@ const (
 	textFieldClusterConditionColumn
 	textFieldClusterConditionValues
 	textFieldCorrelationsTargetColumn
+	textFieldCorrelationsPowerSegment
 	textFieldGroupLevelTarget
 	textFieldCorrelationsTypes
 	textFieldCorrelationsFeatures
@@ -663,7 +670,11 @@ const (
 	textFieldSourceLocFmriContrastFormula
 	textFieldSourceLocFmriContrastName
 	textFieldSourceLocFmriRunsToInclude
+	textFieldSourceLocFmriConditionScopeColumn
 	textFieldSourceLocFmriConditionScopeTrialTypes
+	textFieldSourceLocFmriPhaseColumn
+	textFieldSourceLocFmriPhaseScopeColumn
+	textFieldSourceLocFmriPhaseScopeValue
 	textFieldSourceLocFmriStimPhasesToModel
 	textFieldSourceLocFmriWindowAName
 	textFieldSourceLocFmriWindowBName
@@ -750,6 +761,7 @@ const (
 	textFieldEventColPredictor
 	textFieldEventColOutcome
 	textFieldEventColBinaryOutcome
+	textFieldEventColCondition
 	textFieldConditionPreferredPrefixes
 
 	// Change Scores text fields
@@ -1066,15 +1078,19 @@ type Model struct {
 	fmriAnalysisRequireFmriprep   bool   // Fail if fMRIPrep outputs missing
 	fmriAnalysisRunsSpec          string // Space-separated ints (e.g., "1 2 3") or empty for auto
 	fmriAnalysisContrastType      int    // 0: t-test, 1: custom
-	fmriAnalysisCondAColumn       string // Condition A: events column (e.g. trial_type, binary_outcome_coded)
+	fmriAnalysisCondAColumn       string // Condition A: events column (config/discovery default when empty)
 	fmriAnalysisCondAValue        string // Condition A: value in that column
 	fmriAnalysisCondBColumn       string // Condition B: events column
 	fmriAnalysisCondBValue        string // Condition B: value in that column
 	fmriAnalysisContrastName      string // e.g., "contrast"
 	fmriAnalysisFormula           string // Custom formula
-	fmriAnalysisEventsToModel     string // Optional: comma-separated list of trial_type values to include (first-level only)
-	fmriAnalysisScopeTrialTypes   string // Optional: space-separated trial_type allow-list for condition selection
-	fmriAnalysisStimPhasesToModel string // Optional: comma-separated stim_phase allow-list (empty = no scoping)
+	fmriAnalysisEventsToModel     string // Optional: comma-separated list of condition values to include (first-level only)
+	fmriAnalysisScopeColumn       string // Events column used by condition scope values
+	fmriAnalysisScopeTrialTypes   string // Optional: space-separated allow-list for condition selection
+	fmriAnalysisPhaseColumn       string // Events column used by phase scoping values
+	fmriAnalysisPhaseScopeColumn  string // Events column used to scope phase filtering
+	fmriAnalysisPhaseScopeValue   string // Optional scope value for fmriAnalysisPhaseScopeColumn
+	fmriAnalysisStimPhasesToModel string // Optional: comma-separated phase allow-list (empty = no scoping)
 	fmriAnalysisHrfModel          int    // 0: spm, 1: flobs, 2: fir
 	fmriAnalysisDriftModel        int    // 0: none, 1: cosine, 2: polynomial
 	fmriAnalysisHighPassHz        float64
@@ -1132,15 +1148,17 @@ type Model struct {
 	fmriTrialSigWriteTrialBetas         bool
 	fmriTrialSigWriteTrialVariances     bool
 	fmriTrialSigWriteConditionBetas     bool
-	fmriTrialSigSignatureNPS            bool
-	fmriTrialSigSignatureSIIPS1         bool
+	fmriTrialSigSignatureOption1        bool
+	fmriTrialSigSignatureOption2        bool
 	fmriTrialSigLssOtherRegressorsIndex int // 0: per-condition, 1: all
 	// Signature grouping (compute signatures for specific values within an events column)
-	fmriTrialSigGroupColumn     string // e.g., predictor_column
-	fmriTrialSigGroupValuesSpec string // space-separated values (e.g., "44.3 45.3 46.3")
-	fmriTrialSigGroupScopeIndex int    // 0: across-runs (average), 1: per-run
-	fmriTrialSigScopeTrialTypes string // Optional: space-separated trial_type allow-list
-	fmriTrialSigScopeStimPhases string // Optional: space-separated stim_phase allow-list (empty = no scoping)
+	fmriTrialSigGroupColumn          string // e.g., predictor_column
+	fmriTrialSigGroupValuesSpec      string // space-separated values (e.g., "44.3 45.3 46.3")
+	fmriTrialSigGroupScopeIndex      int    // 0: across-runs (average), 1: per-run
+	fmriTrialSigScopeTrialTypeColumn string // Events column used for trial-type scope values
+	fmriTrialSigScopePhaseColumn     string // Events column used for phase scope values
+	fmriTrialSigScopeTrialTypes      string // Optional: space-separated allow-list for fmriTrialSigScopeTrialTypeColumn
+	fmriTrialSigScopeStimPhases      string // Optional: space-separated phase allow-list (empty = no scoping)
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
 	plotGroupDefaultsExpanded    bool
@@ -1212,8 +1230,8 @@ type Model struct {
 	plotFigureSizeTFRSpec      string
 	plotFigureSizeTopomapSpec  string
 
-	plotColorCondB           string
-	plotColorCondA        string
+	plotColorCondB          string
+	plotColorCondA          string
 	plotColorSignificant    string
 	plotColorNonsignificant string
 	plotColorGray           string
@@ -1692,7 +1710,7 @@ type Model struct {
 	// fMRI GLM contrast builder (for fMRI-informed mode)
 	sourceLocFmriContrastEnabled          bool     // Build contrast from BOLD data (vs. load pre-computed)
 	sourceLocFmriContrastType             int      // 0: t-test, 1: paired t-test, 2: F-test, 3: custom formula
-	sourceLocFmriCondAColumn              string   // Condition A column (e.g., "trial_type", "binary_outcome")
+	sourceLocFmriCondAColumn              string   // Condition A column (config/discovery default when empty)
 	sourceLocFmriCondAValue               string   // Condition A value (e.g., "temp49p3", "1")
 	sourceLocFmriCondBColumn              string   // Condition B column
 	sourceLocFmriCondBValue               string   // Condition B value
@@ -1707,8 +1725,12 @@ type Model struct {
 	sourceLocFmriDriftModel               int      // 0: none, 1: cosine, 2: polynomial
 	sourceLocFmriHighPassHz               float64  // High-pass cutoff (Hz)
 	sourceLocFmriLowPassHz                float64  // Low-pass cutoff (Hz)
-	sourceLocFmriConditionScopeTrialTypes string   // Optional: space-separated trial_type allow-list for condition selection
-	sourceLocFmriStimPhasesToModel        string   // Optional: stim_phase allow-list (empty = no scoping)
+	sourceLocFmriConditionScopeColumn     string   // Events column used by condition scope values
+	sourceLocFmriConditionScopeTrialTypes string   // Optional: space-separated allow-list for condition selection
+	sourceLocFmriPhaseColumn              string   // Events column used by phase filtering values
+	sourceLocFmriPhaseScopeColumn         string   // Events column used to scope phase filtering to subset rows
+	sourceLocFmriPhaseScopeValue          string   // Optional value in sourceLocFmriPhaseScopeColumn for scoped phase filtering
+	sourceLocFmriStimPhasesToModel        string   // Optional: phase allow-list from sourceLocFmriPhaseColumn (empty = no scoping)
 	sourceLocFmriClusterCorrection        bool     // Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction)
 	sourceLocFmriClusterPThreshold        float64  // Cluster-forming p-threshold
 	sourceLocFmriOutputType               int      // 0: z-score, 1: t-stat, 2: cope, 3: beta
@@ -1801,7 +1823,7 @@ type Model struct {
 	bootstrapSamples        int     // 0 = disabled, 1000+ recommended
 	nPermutations           int     // For cluster tests
 	rngSeed                 int     // 0 = use project default
-	controlPredictor      bool    // Include predictor as covariate
+	controlPredictor        bool    // Include predictor as covariate
 	controlTrialOrder       bool    // Include trial order as covariate
 	behaviorOutcomeColumn   string  // Canonical outcome column (blank=auto)
 	behaviorPredictorColumn string  // Canonical predictor column (blank=auto)
@@ -1826,27 +1848,27 @@ type Model struct {
 	behaviorOverwrite bool // Overwrite existing output folders (if false, append timestamp)
 
 	// Behavior advanced config section expansion (collapsed by default for compact UI)
-	behaviorGroupGeneralExpanded      bool
-	behaviorGroupTrialTableExpanded   bool
+	behaviorGroupGeneralExpanded           bool
+	behaviorGroupTrialTableExpanded        bool
 	behaviorGroupPredictorResidualExpanded bool
-	behaviorGroupCorrelationsExpanded bool
+	behaviorGroupCorrelationsExpanded      bool
 	behaviorGroupPredictorSensExpanded     bool
-	behaviorGroupRegressionExpanded   bool
-	behaviorGroupModelsExpanded       bool
-	behaviorGroupStabilityExpanded    bool
-	behaviorGroupConsistencyExpanded  bool
-	behaviorGroupInfluenceExpanded    bool
-	behaviorGroupReportExpanded       bool
-	behaviorGroupConditionExpanded    bool
-	behaviorGroupTemporalExpanded     bool
-	behaviorGroupClusterExpanded      bool
-	behaviorGroupMediationExpanded    bool
-	behaviorGroupModerationExpanded   bool
-	behaviorGroupMixedEffectsExpanded bool
-	behaviorGroupOutputExpanded       bool
-	behaviorGroupStatsExpanded        bool
-	behaviorGroupAnalysesExpanded     bool
-	behaviorGroupAdvancedExpanded     bool
+	behaviorGroupRegressionExpanded        bool
+	behaviorGroupModelsExpanded            bool
+	behaviorGroupStabilityExpanded         bool
+	behaviorGroupConsistencyExpanded       bool
+	behaviorGroupInfluenceExpanded         bool
+	behaviorGroupReportExpanded            bool
+	behaviorGroupConditionExpanded         bool
+	behaviorGroupTemporalExpanded          bool
+	behaviorGroupClusterExpanded           bool
+	behaviorGroupMediationExpanded         bool
+	behaviorGroupModerationExpanded        bool
+	behaviorGroupMixedEffectsExpanded      bool
+	behaviorGroupOutputExpanded            bool
+	behaviorGroupStatsExpanded             bool
+	behaviorGroupAnalysesExpanded          bool
+	behaviorGroupAdvancedExpanded          bool
 
 	// Trial table / predictor residual config (subject-level)
 	trialTableFormat         int // 0=parquet, 1=tsv
@@ -1886,7 +1908,7 @@ type Model struct {
 
 	// Regression
 	regressionOutcome            int // 0=rating, 1=predictor_residual, 2=predictor
-	regressionIncludePredictor bool
+	regressionIncludePredictor   bool
 	regressionTempControl        int // 0=linear, 1=rating_hat, 2=spline
 	regressionTempSplineKnots    int
 	regressionTempSplineQlow     float64
@@ -1903,30 +1925,30 @@ type Model struct {
 	regressionMaxFeatures        int // 0 = no limit
 
 	// Models
-	modelsIncludePredictor      bool
-	modelsTempControl             int // 0=linear, 1=rating_hat, 2=spline
-	modelsTempSplineKnots         int
-	modelsTempSplineQlow          float64
-	modelsTempSplineQhigh         float64
-	modelsTempSplineMinN          int
-	modelsIncludeTrialOrder       bool
-	modelsIncludePrev             bool
-	modelsIncludeRunBlock         bool
-	modelsIncludeInteraction      bool
-	modelsStandardize             bool
-	modelsMinSamples              int
-	modelsMaxFeatures             int
-	modelsOutcomeValue           bool
-	modelsOutcomePredictorResidual     bool
-	modelsOutcomePredictor      bool
-	modelsOutcomeBinaryOutcome       bool
-	modelsFamilyOLS               bool
-	modelsFamilyRobust            bool
-	modelsFamilyQuantile          bool
-	modelsFamilyLogit             bool
-	modelsBinaryOutcome           int // 0=binary_outcome, 1=rating_median
-	modelsPrimaryUnit             int // 0=trial, 1=run_mean
-	modelsForceTrialIIDAsymptotic bool
+	modelsIncludePredictor         bool
+	modelsTempControl              int // 0=linear, 1=rating_hat, 2=spline
+	modelsTempSplineKnots          int
+	modelsTempSplineQlow           float64
+	modelsTempSplineQhigh          float64
+	modelsTempSplineMinN           int
+	modelsIncludeTrialOrder        bool
+	modelsIncludePrev              bool
+	modelsIncludeRunBlock          bool
+	modelsIncludeInteraction       bool
+	modelsStandardize              bool
+	modelsMinSamples               int
+	modelsMaxFeatures              int
+	modelsOutcomeValue             bool
+	modelsOutcomePredictorResidual bool
+	modelsOutcomePredictor         bool
+	modelsOutcomeBinaryOutcome     bool
+	modelsFamilyOLS                bool
+	modelsFamilyRobust             bool
+	modelsFamilyQuantile           bool
+	modelsFamilyLogit              bool
+	modelsBinaryOutcome            int // 0=binary_outcome, 1=rating_median
+	modelsPrimaryUnit              int // 0=trial, 1=run_mean
+	modelsForceTrialIIDAsymptotic  bool
 
 	// Stability
 	stabilityMethod      int // 0=spearman, 1=pearson
@@ -1938,41 +1960,42 @@ type Model struct {
 	stabilityAlpha       float64
 
 	// Consistency & influence
-	consistencyEnabled           bool
-	influenceOutcomeValue       bool
+	consistencyEnabled                bool
+	influenceOutcomeValue             bool
 	influenceOutcomePredictorResidual bool
-	influenceOutcomePredictor  bool
-	influenceMaxFeatures         int
-	influenceIncludePredictor  bool
-	influenceTempControl         int // 0=linear, 1=rating_hat, 2=spline
-	influenceTempSplineKnots     int
-	influenceTempSplineQlow      float64
-	influenceTempSplineQhigh     float64
-	influenceTempSplineMinN      int
-	influenceIncludeTrialOrder   bool
-	influenceIncludeRunBlock     bool
-	influenceIncludeInteraction  bool
-	influenceStandardize         bool
-	influenceCooksThreshold      float64 // 0 = default
-	influenceLeverageThreshold   float64 // 0 = default
+	influenceOutcomePredictor         bool
+	influenceMaxFeatures              int
+	influenceIncludePredictor         bool
+	influenceTempControl              int // 0=linear, 1=rating_hat, 2=spline
+	influenceTempSplineKnots          int
+	influenceTempSplineQlow           float64
+	influenceTempSplineQhigh          float64
+	influenceTempSplineMinN           int
+	influenceIncludeTrialOrder        bool
+	influenceIncludeRunBlock          bool
+	influenceIncludeInteraction       bool
+	influenceStandardize              bool
+	influenceCooksThreshold           float64 // 0 = default
+	influenceLeverageThreshold        float64 // 0 = default
 
 	// Correlations (trial-table)
-	correlationsTypesSpec             string // Comma-separated list (e.g., "partial_cov_predictor,raw")
-	correlationsUseCrossfitResidual   bool
-	correlationsPrimaryUnit           int // 0=trial, 1=run_mean
-	correlationsMinRuns               int // minimum runs for run-mean correlations
-	correlationsPreferPredictorResidual    bool
-	correlationsPermutations          int // 0=use global --n-perm
-	correlationsPermutationPrimary    bool
-	correlationsTargetColumn          string // Custom target column from events (dropdown)
-	correlationsFeaturesSpec          string // Comma-separated feature filters for correlations
-	groupLevelBlockPermutation        bool   // Use block-restricted permutations when block/run is available
-	groupLevelTarget                  string // target column for multilevel correlations
-	groupLevelControlPredictor      bool
-	groupLevelControlTrialOrder       bool
-	groupLevelControlRunEffects       bool
-	groupLevelMaxRunDummies           int
-	groupLevelAllowParametricFallback bool
+	correlationsTypesSpec               string // Comma-separated list (e.g., "partial_cov_predictor,raw")
+	correlationsUseCrossfitResidual     bool
+	correlationsPrimaryUnit             int // 0=trial, 1=run_mean
+	correlationsMinRuns                 int // minimum runs for run-mean correlations
+	correlationsPreferPredictorResidual bool
+	correlationsPermutations            int // 0=use global --n-perm
+	correlationsPermutationPrimary      bool
+	correlationsTargetColumn            string // Custom target column from events (dropdown)
+	correlationsPowerSegment            string // Optional NamingSchema segment for ROI power correlations
+	correlationsFeaturesSpec            string // Comma-separated feature filters for correlations
+	groupLevelBlockPermutation          bool   // Use block-restricted permutations when block/run is available
+	groupLevelTarget                    string // target column for multilevel correlations
+	groupLevelControlPredictor          bool
+	groupLevelControlTrialOrder         bool
+	groupLevelControlRunEffects         bool
+	groupLevelMaxRunDummies             int
+	groupLevelAllowParametricFallback   bool
 
 	// Predictor sensitivity
 	predictorSensitivityMinTrials          int // 0=unset
@@ -2007,7 +2030,7 @@ type Model struct {
 	temporalERDSMethod      int     // 0=percent, 1=zscore
 
 	// Mixed effects (group-level; still configurable)
-	mixedEffectsType        int // 0=intercept, 1=intercept_slope
+	mixedEffectsType      int // 0=intercept, 1=intercept_slope
 	mixedIncludePredictor bool
 
 	// Mediation
@@ -2106,7 +2129,7 @@ type Model struct {
 	mlFmriSigGroupExpanded      bool
 	mlFmriSigMethodIndex        int    // 0: beta-series, 1: lss
 	mlFmriSigContrastName       string // e.g., contrast
-	mlFmriSigSignatureIndex     int    // 0: NPS, 1: SIIPS1
+	mlFmriSigSignatureIndex     int    // Reserved for signature picker UI; config value is used by default.
 	mlFmriSigMetricIndex        int    // 0: dot, 1: cosine, 2: pearson_r
 	mlFmriSigNormalizationIndex int    // 0: none, 1..: zscore/robust options
 	mlFmriSigRoundDecimals      int    // default: 3
@@ -2230,9 +2253,10 @@ type Model struct {
 	alignFmriOnsetReference  int  // 0: as_is, 1: first_volume, 2: scanner_trigger
 
 	// Event Column Mapping
-	eventColPredictor        string // Predictor column candidates (comma-separated)
-	eventColOutcome             string // Rating column candidates (comma-separated)
-	eventColBinaryOutcome         string // Binary outcome column candidates (comma-separated)
+	eventColPredictor          string // Predictor column candidates (comma-separated)
+	eventColOutcome            string // Rating column candidates (comma-separated)
+	eventColBinaryOutcome      string // Binary outcome column candidates (comma-separated)
+	eventColCondition          string // Condition label column candidates (comma-separated)
 	conditionPreferredPrefixes string // Preferred trigger prefixes for auto condition detection (comma-separated)
 
 	// Per-Family Spatial Transforms (0: none, 1: csd, 2: laplacian)
@@ -2270,7 +2294,7 @@ type Model struct {
 	directedConnMinSamplesPerMvarParam int // Auto-reduce MVAR order for short windows
 
 	// ERDS Condition Markers
-	erdsConditionMarkerBands            string  // Bands for contralateral condition markers (comma-separated)
+	erdsConditionMarkerBands       string  // Bands for contralateral condition markers (comma-separated)
 	erdsLateralityColumns          string  // Column names for stimulation side (comma-separated)
 	erdsSomatosensoryLeftChannels  string  // Left somatosensory channels (comma-separated)
 	erdsSomatosensoryRightChannels string  // Right somatosensory channels (comma-separated)
@@ -2301,7 +2325,7 @@ type Model struct {
 	validationMaxAmplitudeUv        float64 // Max amplitude threshold
 
 	// System / IO
-	ioPredictorRange           string  // Valid predictor range (e.g., "35.0,55.0")
+	ioPredictorRange             string  // Valid predictor range (e.g., "35.0,55.0")
 	ioMaxMissingChannelsFraction float64 // Max missing channels fraction
 
 	// TFR parameters (for features pipeline)
@@ -2646,9 +2670,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// fMRI GLM contrast builder defaults
 		sourceLocFmriContrastEnabled:          false,
 		sourceLocFmriContrastType:             0, // 0: t-test
-		sourceLocFmriCondAColumn:              "trial_type",
+		sourceLocFmriCondAColumn:              "",
 		sourceLocFmriCondAValue:               "",
-		sourceLocFmriCondBColumn:              "trial_type",
+		sourceLocFmriCondBColumn:              "",
 		sourceLocFmriCondBValue:               "",
 		sourceLocFmriContrastFormula:          "",
 		sourceLocFmriContrastName:             "contrast",
@@ -2658,7 +2682,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriDriftModel:               1,     // 1: cosine
 		sourceLocFmriHighPassHz:               0.008, // 128s period
 		sourceLocFmriLowPassHz:                0.0,
+		sourceLocFmriConditionScopeColumn:     "",
 		sourceLocFmriConditionScopeTrialTypes: "",
+		sourceLocFmriPhaseColumn:              "",
+		sourceLocFmriPhaseScopeColumn:         "",
+		sourceLocFmriPhaseScopeValue:          "",
 		sourceLocFmriStimPhasesToModel:        "", // no default scoping
 		sourceLocFmriClusterCorrection:        true,
 		sourceLocFmriClusterPThreshold:        0.001,
@@ -2785,7 +2813,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		bootstrapSamples:        1000,
 		nPermutations:           1000,
 		rngSeed:                 0,
-		controlPredictor:      true,
+		controlPredictor:        true,
 		controlTrialOrder:       true,
 		behaviorOutcomeColumn:   "",
 		behaviorPredictorColumn: "",
@@ -2834,7 +2862,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		predictorResidualCrossfitSplineKnots:     5,
 
 		regressionOutcome:            0,
-		regressionIncludePredictor: true,
+		regressionIncludePredictor:   true,
 		regressionTempControl:        0,
 		regressionTempSplineKnots:    4,
 		regressionTempSplineQlow:     0.05,
@@ -2850,30 +2878,30 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionPermutations:       0,
 		regressionMaxFeatures:        0,
 
-		modelsIncludePredictor:      true,
-		modelsTempControl:             0,
-		modelsTempSplineKnots:         4,
-		modelsTempSplineQlow:          0.05,
-		modelsTempSplineQhigh:         0.95,
-		modelsTempSplineMinN:          12,
-		modelsIncludeTrialOrder:       true,
-		modelsIncludePrev:             false,
-		modelsIncludeRunBlock:         true,
-		modelsIncludeInteraction:      true,
-		modelsStandardize:             true,
-		modelsMinSamples:              20,
-		modelsMaxFeatures:             100,
-		modelsOutcomeValue:           true,
-		modelsOutcomePredictorResidual:     true,
-		modelsOutcomePredictor:      false,
-		modelsOutcomeBinaryOutcome:       false,
-		modelsFamilyOLS:               true,
-		modelsFamilyRobust:            true,
-		modelsFamilyQuantile:          true,
-		modelsFamilyLogit:             true,
-		modelsBinaryOutcome:           0,
-		modelsPrimaryUnit:             0,
-		modelsForceTrialIIDAsymptotic: false,
+		modelsIncludePredictor:         true,
+		modelsTempControl:              0,
+		modelsTempSplineKnots:          4,
+		modelsTempSplineQlow:           0.05,
+		modelsTempSplineQhigh:          0.95,
+		modelsTempSplineMinN:           12,
+		modelsIncludeTrialOrder:        true,
+		modelsIncludePrev:              false,
+		modelsIncludeRunBlock:          true,
+		modelsIncludeInteraction:       true,
+		modelsStandardize:              true,
+		modelsMinSamples:               20,
+		modelsMaxFeatures:              100,
+		modelsOutcomeValue:             true,
+		modelsOutcomePredictorResidual: true,
+		modelsOutcomePredictor:         false,
+		modelsOutcomeBinaryOutcome:     false,
+		modelsFamilyOLS:                true,
+		modelsFamilyRobust:             true,
+		modelsFamilyQuantile:           true,
+		modelsFamilyLogit:              true,
+		modelsBinaryOutcome:            0,
+		modelsPrimaryUnit:              0,
+		modelsForceTrialIIDAsymptotic:  false,
 
 		stabilityMethod:      0,
 		stabilityOutcome:     0,
@@ -2883,39 +2911,40 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		stabilityMaxFeatures: 50,
 		stabilityAlpha:       0.05,
 
-		consistencyEnabled:           true,
-		influenceOutcomeValue:       true,
+		consistencyEnabled:                true,
+		influenceOutcomeValue:             true,
 		influenceOutcomePredictorResidual: true,
-		influenceOutcomePredictor:  false,
-		influenceMaxFeatures:         20,
-		influenceIncludePredictor:  true,
-		influenceTempControl:         0,
-		influenceTempSplineKnots:     4,
-		influenceTempSplineQlow:      0.05,
-		influenceTempSplineQhigh:     0.95,
-		influenceTempSplineMinN:      12,
-		influenceIncludeTrialOrder:   true,
-		influenceIncludeRunBlock:     true,
-		influenceIncludeInteraction:  false,
-		influenceStandardize:         true,
-		influenceCooksThreshold:      0.0,
-		influenceLeverageThreshold:   0.0,
+		influenceOutcomePredictor:         false,
+		influenceMaxFeatures:              20,
+		influenceIncludePredictor:         true,
+		influenceTempControl:              0,
+		influenceTempSplineKnots:          4,
+		influenceTempSplineQlow:           0.05,
+		influenceTempSplineQhigh:          0.95,
+		influenceTempSplineMinN:           12,
+		influenceIncludeTrialOrder:        true,
+		influenceIncludeRunBlock:          true,
+		influenceIncludeInteraction:       false,
+		influenceStandardize:              true,
+		influenceCooksThreshold:           0.0,
+		influenceLeverageThreshold:        0.0,
 
-		correlationsTypesSpec:             "partial_cov_predictor",
-		correlationsUseCrossfitResidual:   false,
-		correlationsPrimaryUnit:           0,
-		correlationsMinRuns:               3,
+		correlationsTypesSpec:                  "partial_cov_predictor",
+		correlationsUseCrossfitResidual:        false,
+		correlationsPrimaryUnit:                0,
+		correlationsMinRuns:                    3,
 		correlationsPreferPredictorResidual:    false,
-		correlationsPermutations:          0,
-		correlationsPermutationPrimary:    false,
-		correlationsFeaturesSpec:          "",
-		groupLevelBlockPermutation:        true,
-		groupLevelTarget:                  "",
-		groupLevelControlPredictor:      true,
-		groupLevelControlTrialOrder:       true,
-		groupLevelControlRunEffects:       false,
-		groupLevelMaxRunDummies:           20,
-		groupLevelAllowParametricFallback: false,
+		correlationsPermutations:               0,
+		correlationsPermutationPrimary:         false,
+		correlationsPowerSegment:               "",
+		correlationsFeaturesSpec:               "",
+		groupLevelBlockPermutation:             true,
+		groupLevelTarget:                       "",
+		groupLevelControlPredictor:             true,
+		groupLevelControlTrialOrder:            true,
+		groupLevelControlRunEffects:            false,
+		groupLevelMaxRunDummies:                20,
+		groupLevelAllowParametricFallback:      false,
 		predictorSensitivityMinTrials:          0,
 		predictorSensitivityPrimaryUnit:        0,
 		predictorSensitivityPermutations:       0,
@@ -2943,7 +2972,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalERDSBaselineMax:     -0.1,
 		temporalERDSMethod:          0, // 0=percent, 1=zscore
 		mixedEffectsType:            0,
-		mixedIncludePredictor:     true,
+		mixedIncludePredictor:       true,
 		mediationMinEffect:          0.05,
 		mediationPermutationPrimary: true,
 		// Cluster defaults
@@ -3113,9 +3142,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		alignFmriOnsetReference:  0, // 0: as_is
 
 		// Event Column Mapping defaults
-		eventColPredictor:        "predictor",
-		eventColOutcome:             "outcome",
-		eventColBinaryOutcome:         "binary_outcome,outcome_binary,label",
+		eventColPredictor:          "predictor",
+		eventColOutcome:            "outcome",
+		eventColBinaryOutcome:      "binary_outcome,outcome_binary,label",
+		eventColCondition:          "condition,trial_type",
 		conditionPreferredPrefixes: "",
 
 		// Per-Family Spatial Transforms defaults (all 0 = none / inherit global)
@@ -3153,7 +3183,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		directedConnMinSamplesPerMvarParam: 5,
 
 		// ERDS Condition Markers defaults
-		erdsConditionMarkerBands:            "alpha,beta",
+		erdsConditionMarkerBands:       "alpha,beta",
 		erdsLateralityColumns:          "stimulation_side,stim_side",
 		erdsSomatosensoryLeftChannels:  "C3,CP3,C5,CP5",
 		erdsSomatosensoryRightChannels: "C4,CP4,C6,CP6",
@@ -3184,7 +3214,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		validationMaxAmplitudeUv:        500.0,
 
 		// System / IO defaults
-		ioPredictorRange:           "35.0,55.0",
+		ioPredictorRange:             "35.0,55.0",
 		ioMaxMissingChannelsFraction: 0.3,
 
 		// TFR defaults (from config)
@@ -3501,7 +3531,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.modeOptions = []string{"first-level", "trial-signatures"}
 		m.modeDescriptions = []string{
 			"First-level GLM contrasts (per subject)",
-			"Trial-wise betas + NPS/SIIPS1 readouts (beta-series or LSS)",
+			"Trial-wise betas + multivariate signature readouts (beta-series or LSS)",
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectMode,
@@ -3510,19 +3540,24 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		}
 
 		// Defaults match fmri_pipeline/cli/commands/fmri_analysis.py
+		defaultFmriConditionColumn := m.fmriDefaultConditionColumn()
 		m.fmriAnalysisInputSourceIndex = 0 // fmriprep
 		m.fmriAnalysisFmriprepSpace = "T1w"
 		m.fmriAnalysisRequireFmriprep = true
 		m.fmriAnalysisRunsSpec = ""    // auto-detect
 		m.fmriAnalysisContrastType = 0 // t-test
-		m.fmriAnalysisCondAColumn = "trial_type"
+		m.fmriAnalysisCondAColumn = defaultFmriConditionColumn
 		m.fmriAnalysisCondAValue = ""
-		m.fmriAnalysisCondBColumn = "trial_type"
+		m.fmriAnalysisCondBColumn = defaultFmriConditionColumn
 		m.fmriAnalysisCondBValue = ""
 		m.fmriAnalysisContrastName = "contrast"
 		m.fmriAnalysisFormula = ""
 		m.fmriAnalysisEventsToModel = ""
+		m.fmriAnalysisScopeColumn = defaultFmriConditionColumn
 		m.fmriAnalysisScopeTrialTypes = ""
+		m.fmriAnalysisPhaseColumn = m.fmriDefaultPhaseColumn()
+		m.fmriAnalysisPhaseScopeColumn = defaultFmriConditionColumn
+		m.fmriAnalysisPhaseScopeValue = ""
 		m.fmriAnalysisStimPhasesToModel = "" // no default scoping
 		m.fmriAnalysisHrfModel = 0           // spm
 		m.fmriAnalysisDriftModel = 1         // cosine
@@ -3580,12 +3615,14 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriTrialSigWriteTrialBetas = false
 		m.fmriTrialSigWriteTrialVariances = false
 		m.fmriTrialSigWriteConditionBetas = true
-		m.fmriTrialSigSignatureNPS = true
-		m.fmriTrialSigSignatureSIIPS1 = true
+		m.fmriTrialSigSignatureOption1 = true
+		m.fmriTrialSigSignatureOption2 = true
 		m.fmriTrialSigLssOtherRegressorsIndex = 0 // per-condition
 		m.fmriTrialSigGroupColumn = ""
 		m.fmriTrialSigGroupValuesSpec = ""
 		m.fmriTrialSigGroupScopeIndex = 0 // across-runs (average)
+		m.fmriTrialSigScopeTrialTypeColumn = defaultFmriConditionColumn
+		m.fmriTrialSigScopePhaseColumn = m.fmriDefaultPhaseColumn()
 		m.fmriTrialSigScopeTrialTypes = ""
 		m.fmriTrialSigScopeStimPhases = "" // no default scoping
 

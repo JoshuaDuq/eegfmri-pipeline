@@ -50,10 +50,14 @@ class TrialSignatureExtractionConfig:
     method: str  # "beta-series" | "lss"
     include_other_events: bool = True
     lss_other_regressors: str = "per_condition"  # "per_condition" | "all"
+    # Events column used for `condition_scope_trial_types`.
+    condition_scope_trial_type_column: str = "trial_type"
+    # Events column used for `condition_scope_stim_phases`.
+    condition_scope_phase_column: str = "stim_phase"
     # Optional: scope which events.tsv rows are eligible for trial selection (prevents mixing phases).
     # Use ("all",) to disable scoping.
     condition_scope_trial_types: Optional[Tuple[str, ...]] = None
-    # Optional: further restrict to stim phases (only when a 'stim_phase' column exists).
+    # Optional: further restrict to phase values (only when `condition_scope_phase_column` exists).
     # Use ("all",) to disable scoping.
     condition_scope_stim_phases: Optional[Tuple[str, ...]] = None
     max_trials_per_run: Optional[int] = None
@@ -155,6 +159,9 @@ class TrialSignatureExtractionConfig:
         if group_scope not in {"across_runs", "per_run"}:
             group_scope = "across_runs"
 
+        scope_trial_type_column = (self.condition_scope_trial_type_column or "").strip() or "trial_type"
+        scope_phase_column = (self.condition_scope_phase_column or "").strip() or "stim_phase"
+
         return TrialSignatureExtractionConfig(
             **{
                 **asdict(self),
@@ -166,6 +173,8 @@ class TrialSignatureExtractionConfig:
                 "lss_other_regressors": lss_other,
                 "condition_scope_trial_types": scope_trial_types,
                 "condition_scope_stim_phases": scope_stim_phases,
+                "condition_scope_trial_type_column": scope_trial_type_column,
+                "condition_scope_phase_column": scope_phase_column,
                 "fixed_effects_weighting": weight,
                 "signature_group_column": group_col,
                 "signature_group_values": group_vals,
@@ -375,24 +384,28 @@ def _extract_trials_for_run(
     sel_mask = None
 
     scope_mask = pd.Series([True] * int(len(events_df)), index=events_df.index)
+    scope_trial_type_column = str(cfg.condition_scope_trial_type_column or "").strip() or "trial_type"
+    scope_phase_column = str(cfg.condition_scope_phase_column or "").strip() or "stim_phase"
 
     scope_trial_types = tuple(cfg.condition_scope_trial_types or ())
     if scope_trial_types:
-        if "trial_type" not in events_df.columns:
+        if scope_trial_type_column not in events_df.columns:
             raise ValueError(
-                f"condition_scope_trial_types is set but events file has no 'trial_type' column: {events_path}"
+                "condition_scope_trial_types is set but events file has no "
+                f"'{scope_trial_type_column}' column: {events_path}"
             )
         allow = {str(v).strip() for v in scope_trial_types if str(v).strip()}
-        scope_mask &= events_df["trial_type"].astype(str).str.strip().isin(list(allow))
+        scope_mask &= events_df[scope_trial_type_column].astype(str).str.strip().isin(list(allow))
 
     scope_stim_phases = tuple(cfg.condition_scope_stim_phases or ())
     if scope_stim_phases:
-        if "stim_phase" not in events_df.columns:
+        if scope_phase_column not in events_df.columns:
             raise ValueError(
-                f"condition_scope_stim_phases is set but events file has no 'stim_phase' column: {events_path}"
+                "condition_scope_stim_phases is set but events file has no "
+                f"'{scope_phase_column}' column: {events_path}"
             )
         allow = {str(v).strip() for v in scope_stim_phases if str(v).strip()}
-        scope_mask &= events_df["stim_phase"].astype(str).str.strip().isin(list(allow))
+        scope_mask &= events_df[scope_phase_column].astype(str).str.strip().isin(list(allow))
 
     if group_mode:
         if group_col not in events_df.columns:
@@ -633,7 +646,7 @@ def run_trial_signature_extraction_for_subject(
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
     if signature_root is not None and signature_specs:
         # Signature weight maps must be in the same space as the beta images.
-        # Most multivariate signatures (e.g. NPS, SIIPS1) are defined in MNI space.
+        # Most shared signature maps are distributed in MNI space.
         space = str(cfg.fmriprep_space or "").strip().lower()
         if "mni" not in space:
             raise ValueError(
@@ -667,6 +680,7 @@ def run_trial_signature_extraction_for_subject(
         "signature_root": str(signature_root) if signature_root else None,
         "n_runs": len(runs),
     }
+    phase_column_name = str(cfg.condition_scope_phase_column or "stim_phase").strip() or "stim_phase"
 
     trial_infos: List[TrialInfo] = []
     trial_rows_out: List[Dict[str, Any]] = []
@@ -788,7 +802,8 @@ def run_trial_signature_extraction_for_subject(
                                 "condition": t.condition,
                                 "regressor": t.regressor,
                                 "original_trial_type": t.original_trial_type,
-                                "stim_phase": str(t.extra.get("stim_phase", "")),
+                                "phase_column": phase_column_name,
+                                "phase_value": str(t.extra.get(phase_column_name, "")),
                                 "onset": f"{t.onset:.6f}",
                                 "duration": f"{t.duration:.6f}",
                                 "signature": s.name,
@@ -871,7 +886,8 @@ def run_trial_signature_extraction_for_subject(
                                 "condition": t.condition,
                                 "regressor": "target",
                                 "original_trial_type": t.original_trial_type,
-                                "stim_phase": str(t.extra.get("stim_phase", "")),
+                                "phase_column": phase_column_name,
+                                "phase_value": str(t.extra.get(phase_column_name, "")),
                                 "signature": s.name,
                                 "dot": f"{s.dot:.8g}",
                                 "cosine": "" if s.cosine is None else f"{s.cosine:.8g}",

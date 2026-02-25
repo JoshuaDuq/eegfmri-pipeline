@@ -22,9 +22,9 @@ Notes on target validity
 - For binary outcomes, prefer `mode="classify"`.
 
 Modes:
-- regression: LOSO regression predicting pain intensity
+- regression: LOSO regression predicting a continuous target
 - timegen: Time-generalization analysis
-- classify: Binary pain classification
+- classify: Binary classification
 - model_comparison: Compare multiple models (ElasticNet/Ridge/RF)
 - incremental_validity: Δ performance from EEG over baseline
 - uncertainty: Conformal prediction intervals
@@ -81,9 +81,9 @@ class MLPipeline(PipelineBase):
     The process_subject method is not used; instead use run_batch directly.
     
     Modes:
-        - regression: LOSO regression predicting pain intensity
+        - regression: LOSO regression predicting a continuous target
         - timegen: Time-generalization analysis
-        - classify: Binary pain classification
+        - classify: Binary classification
         - model_comparison: Compare multiple models (ElasticNet/Ridge/RF)
         - incremental_validity: Δ performance from EEG over baseline
         - uncertainty: Conformal prediction intervals

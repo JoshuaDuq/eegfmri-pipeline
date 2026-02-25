@@ -289,8 +289,16 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         contrast_cfg["low_pass_hz"] = args.source_fmri_low_pass
     if getattr(args, "source_fmri_stim_phases_to_model", None) is not None:
         contrast_cfg["stim_phases_to_model"] = args.source_fmri_stim_phases_to_model
+    if getattr(args, "source_fmri_phase_column", None) is not None:
+        contrast_cfg["phase_column"] = args.source_fmri_phase_column
+    if getattr(args, "source_fmri_phase_scope_column", None) is not None:
+        contrast_cfg["phase_scope_column"] = args.source_fmri_phase_scope_column
+    if getattr(args, "source_fmri_phase_scope_value", None) is not None:
+        contrast_cfg["phase_scope_value"] = args.source_fmri_phase_scope_value
     if getattr(args, "source_fmri_condition_scope_trial_types", None) is not None:
         contrast_cfg["condition_scope_trial_types"] = args.source_fmri_condition_scope_trial_types
+    if getattr(args, "source_fmri_condition_scope_column", None) is not None:
+        contrast_cfg["condition_scope_column"] = args.source_fmri_condition_scope_column
     if getattr(args, "source_fmri_cluster_correction", None) is not None:
         contrast_cfg["cluster_correction"] = args.source_fmri_cluster_correction
     if getattr(args, "source_fmri_cluster_p_threshold", None) is not None:
@@ -874,4 +882,3 @@ def _apply_execution_overrides(args: argparse.Namespace, config: Any) -> None:
         parallel_cfg["n_jobs_aperiodic"] = args.n_jobs_aperiodic
     if getattr(args, "n_jobs_complexity", None) is not None:
         parallel_cfg["n_jobs_complexity"] = args.n_jobs_complexity
-

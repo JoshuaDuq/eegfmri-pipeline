@@ -206,6 +206,10 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 		args = append(args, "--event-col-binary-outcome")
 		args = append(args, splitCSVList(m.eventColBinaryOutcome)...)
 	}
+	if strings.TrimSpace(m.eventColCondition) != "" {
+		args = append(args, "--event-col-condition")
+		args = append(args, splitCSVList(m.eventColCondition)...)
+	}
 	if strings.TrimSpace(m.conditionPreferredPrefixes) != "" {
 		args = append(args, "--condition-preferred-prefixes")
 		args = append(args, splitCSVList(m.conditionPreferredPrefixes)...)

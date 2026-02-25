@@ -184,8 +184,8 @@ def build_statistical_title(
     config,
     baseline_used: Optional[Tuple[Optional[float], Optional[float]]],
     paired: bool = False,
-    n_trials_pain: Optional[int] = None,
-    n_trials_non: Optional[int] = None,
+    n_trials_condition_2: Optional[int] = None,
+    n_trials_condition_1: Optional[int] = None,
     n_subjects: Optional[int] = None,
     is_group: bool = False,
 ) -> str:
@@ -195,8 +195,8 @@ def build_statistical_title(
         config: Config dictionary
         baseline_used: Optional tuple of (baseline_start, baseline_end)
         paired: Whether paired test was used
-        n_trials_pain: Optional number of pain trials
-        n_trials_non: Optional number of non-pain trials
+        n_trials_condition_2: Optional number of condition 2 trials
+        n_trials_condition_1: Optional number of condition 1 trials
         n_subjects: Optional number of subjects
         is_group: Whether this is a group-level analysis
     
@@ -221,9 +221,9 @@ def build_statistical_title(
         if n_subjects is not None:
             parts.append(f"N={n_subjects} subjects")
     else:
-        if n_trials_pain is not None and n_trials_non is not None:
+        if n_trials_condition_2 is not None and n_trials_condition_1 is not None:
             parts.append(
-                f"n_pain={n_trials_pain}, n_non={n_trials_non} trials"
+                f"n_condition_2={n_trials_condition_2}, n_condition_1={n_trials_condition_1} trials"
             )
     
     parts.append(f"n_permutations={n_perm}")

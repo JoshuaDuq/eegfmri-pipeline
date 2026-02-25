@@ -27,19 +27,19 @@ def visualize_tfr_for_subjects(*args, **kwargs):
 __all__ = [
     # Channel-level TFR plotting
     "plot_channels_all_trials",
-    "contrast_channels_pain_nonpain",
+    "contrast_channels_conditions",
     # Scalp-mean TFR plotting
     "plot_scalpmean_all_trials",
-    "contrast_scalpmean_pain_nonpain",
+    "contrast_scalpmean_conditions",
     # Contrast plotting
     "contrast_maxmin_predictor",
-    "contrast_pain_nonpain",
+    "contrast_conditions",
     # ROI TFR plotting
     "compute_roi_tfrs",
     "plot_rois_all_trials",
-    "contrast_pain_nonpain_rois",
+    "contrast_conditions_rois",
     # Topomap plotting
-    "plot_pain_nonpain_temporal_topomaps_diff_allbands",
+    "plot_temporal_topomaps_diff_allbands",
     "plot_temporal_topomaps_allbands_active",
     # Band power evolution
     "visualize_band_evolution",
@@ -58,19 +58,19 @@ def __getattr__(name: str):
     _module_map = {
         # Channel-level TFR plotting
         "plot_channels_all_trials": "channels",
-        "contrast_channels_pain_nonpain": "channels",
+        "contrast_channels_conditions": "channels",
         # Scalp-mean TFR plotting
         "plot_scalpmean_all_trials": "scalpmean",
-        "contrast_scalpmean_pain_nonpain": "scalpmean",
+        "contrast_scalpmean_conditions": "scalpmean",
         # Contrast plotting
         "contrast_maxmin_predictor": "contrasts",
-        "contrast_pain_nonpain": "contrasts",
+        "contrast_conditions": "contrasts",
         # ROI TFR plotting
         "compute_roi_tfrs": "rois",
         "plot_rois_all_trials": "rois",
-        "contrast_pain_nonpain_rois": "rois",
+        "contrast_conditions_rois": "rois",
         # Topomap plotting
-        "plot_pain_nonpain_temporal_topomaps_diff_allbands": "topomaps",
+        "plot_temporal_topomaps_diff_allbands": "topomaps",
         "plot_temporal_topomaps_allbands_active": "topomaps",
         # Band power evolution
         "visualize_band_evolution": "band_evolution",

@@ -1501,7 +1501,7 @@ def run_classification_ml(
     feature_scopes: Optional[List[str]] = None,
     feature_stats: Optional[List[str]] = None,
 ) -> Path:
-    """Run LOSO classification machine learning for pain vs no-pain.
+    """Run LOSO binary classification machine learning.
     
     Uses nested CV with hyperparameter tuning in inner loop.
     Reports AUC, balanced accuracy, and calibrated metrics.

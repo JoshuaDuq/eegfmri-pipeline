@@ -168,6 +168,18 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	if m.expandedOption == expandedSourceLocFmriScopeTrialTypes {
 		totalLines += len(m.getExpandedListItems())
 	}
+	if m.expandedOption == expandedSourceLocFmriScopeTrialTypeColumn {
+		totalLines += len(m.getExpandedListItems())
+	}
+	if m.expandedOption == expandedSourceLocFmriPhaseColumn {
+		totalLines += len(m.getExpandedListItems())
+	}
+	if m.expandedOption == expandedSourceLocFmriPhaseScopeColumn {
+		totalLines += len(m.getExpandedListItems())
+	}
+	if m.expandedOption == expandedSourceLocFmriPhaseScopeValue {
+		totalLines += len(m.getExpandedListItems())
+	}
 	if m.expandedOption == expandedSourceLocFmriStimPhases {
 		totalLines += len(m.getExpandedListItems())
 	}
@@ -1273,8 +1285,29 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "optional; generally avoid for task GLM"
+		case optSourceLocFmriConditionScopeColumn:
+			label = "Condition Scope Column"
+			val := strings.TrimSpace(m.sourceLocFmriConditionScopeColumn)
+			if val == "" {
+				val = m.resolveFmriConditionColumn(m.sourceLocFmriConditionScopeColumn)
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriConditionScopeColumn {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			if len(m.fmriDiscoveredColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns", len(m.fmriDiscoveredColumns))
+			} else {
+				hint = "Space to edit"
+			}
+			if m.expandedOption == expandedSourceLocFmriScopeTrialTypeColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
 		case optSourceLocFmriConditionScopeTrialTypes:
-			label = "Condition trial_type Scope"
+			scopeCol := m.resolveFmriConditionColumn(m.sourceLocFmriConditionScopeColumn)
+			label = scopeCol + " Scope"
 			val := strings.TrimSpace(m.sourceLocFmriConditionScopeTrialTypes)
 			if val == "" {
 				val = "(none)"
@@ -1284,8 +1317,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value = val
 			expandIndicatorHint := ""
-			if vals := m.GetFmriDiscoveredColumnValues("trial_type"); len(vals) > 0 {
-				expandIndicatorHint = fmt.Sprintf(" · %d values in trial_type", len(vals))
+			if vals := m.GetFmriDiscoveredColumnValues(scopeCol); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), scopeCol)
 			}
 			hint = "Space to select" + expandIndicatorHint
 			if m.expandedOption == expandedSourceLocFmriScopeTrialTypes {
@@ -1293,8 +1326,69 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				expandIndicator = " [+]"
 			}
+		case optSourceLocFmriPhaseColumn:
+			label = "Phase Column"
+			val := strings.TrimSpace(m.sourceLocFmriPhaseColumn)
+			if val == "" {
+				val = m.resolveFmriPhaseColumn(m.sourceLocFmriPhaseColumn)
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriPhaseColumn {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			if len(m.fmriDiscoveredColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns", len(m.fmriDiscoveredColumns))
+			} else {
+				hint = "Space to edit"
+			}
+			if m.expandedOption == expandedSourceLocFmriPhaseColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optSourceLocFmriPhaseScopeColumn:
+			label = "Phase Scope Column"
+			val := strings.TrimSpace(m.sourceLocFmriPhaseScopeColumn)
+			if val == "" {
+				val = m.resolveFmriConditionColumn(m.sourceLocFmriPhaseScopeColumn)
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriPhaseScopeColumn {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			if len(m.fmriDiscoveredColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns", len(m.fmriDiscoveredColumns))
+			} else {
+				hint = "Space to edit"
+			}
+			if m.expandedOption == expandedSourceLocFmriPhaseScopeColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optSourceLocFmriPhaseScopeValue:
+			label = "Phase Scope Value"
+			val := strings.TrimSpace(m.sourceLocFmriPhaseScopeValue)
+			if val == "" {
+				val = "(all rows)"
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriPhaseScopeValue {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			scopeCol := m.resolveFmriConditionColumn(m.sourceLocFmriPhaseScopeColumn)
+			expandIndicatorHint := ""
+			if vals := m.GetFmriDiscoveredColumnValues(scopeCol); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), scopeCol)
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedSourceLocFmriPhaseScopeValue {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
 		case optSourceLocFmriStimPhasesToModel:
-			label = "Stim Phase Scope"
+			label = "Phase Scope"
 			val := strings.TrimSpace(m.sourceLocFmriStimPhasesToModel)
 			if val == "" {
 				val = "(none)"
@@ -1303,9 +1397,10 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				val = m.textBuffer + "█"
 			}
 			value = val
+			phaseCol := m.resolveFmriPhaseColumn(m.sourceLocFmriPhaseColumn)
 			expandIndicatorHint := ""
-			if vals := m.GetFmriDiscoveredColumnValues("stim_phase"); len(vals) > 0 {
-				expandIndicatorHint = fmt.Sprintf(" · %d values in stim_phase", len(vals))
+			if vals := m.GetFmriDiscoveredColumnValues(phaseCol); len(vals) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), phaseCol)
 			}
 			hint = "Space to select" + expandIndicatorHint
 			if m.expandedOption == expandedSourceLocFmriStimPhases {
@@ -2645,8 +2740,96 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 		}
 
-		// Expanded items (fMRI condition trial_type scope)
+		// Expanded items (fMRI condition scope column)
+		if opt == optSourceLocFmriConditionScopeColumn && m.expandedOption == expandedSourceLocFmriScopeTrialTypeColumn {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (fMRI condition scope values)
 		if opt == optSourceLocFmriConditionScopeTrialTypes && m.expandedOption == expandedSourceLocFmriScopeTrialTypes {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (fMRI phase column)
+		if opt == optSourceLocFmriPhaseColumn && m.expandedOption == expandedSourceLocFmriPhaseColumn {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (fMRI phase scope column)
+		if opt == optSourceLocFmriPhaseScopeColumn && m.expandedOption == expandedSourceLocFmriPhaseScopeColumn {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (fMRI phase scope values)
+		if opt == optSourceLocFmriPhaseScopeValue && m.expandedOption == expandedSourceLocFmriPhaseScopeValue {
 			subIndent := "      " // 6 spaces for sub-items
 			items := m.getExpandedListItems()
 			for j, item := range items {

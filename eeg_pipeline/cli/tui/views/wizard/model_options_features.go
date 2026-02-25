@@ -326,7 +326,17 @@ func (m Model) getFeaturesOptions() []optionType {
 						if !m.sourceLocFmriAutoDetectRuns {
 							options = append(options, optSourceLocFmriRunsToInclude)
 						}
-						options = append(options, optSourceLocFmriHrfModel, optSourceLocFmriDriftModel, optSourceLocFmriConditionScopeTrialTypes, optSourceLocFmriStimPhasesToModel)
+						options = append(
+							options,
+							optSourceLocFmriHrfModel,
+							optSourceLocFmriDriftModel,
+							optSourceLocFmriConditionScopeColumn,
+							optSourceLocFmriConditionScopeTrialTypes,
+							optSourceLocFmriPhaseColumn,
+							optSourceLocFmriPhaseScopeColumn,
+							optSourceLocFmriPhaseScopeValue,
+							optSourceLocFmriStimPhasesToModel,
+						)
 						options = append(options, optSourceLocFmriInputSource, optSourceLocFmriRequireFmriprep)
 						options = append(options, optSourceLocFmriHighPassHz, optSourceLocFmriLowPassHz)
 						options = append(options, optSourceLocFmriClusterCorrection)

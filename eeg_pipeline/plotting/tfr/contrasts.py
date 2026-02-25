@@ -729,7 +729,7 @@ def contrast_maxmin_predictor(
         baseline_used=baseline_used,
         logger=logger,
     )
-def contrast_pain_nonpain(
+def contrast_conditions(
     tfr: "mne.time_frequency.EpochsTFR | mne.time_frequency.AverageTFR",
     events_df: Optional[pd.DataFrame],
     out_dir: Path,
@@ -847,7 +847,7 @@ def contrast_pain_nonpain(
             axes[r, column_idx].axis('off')
     
     
-    def _plot_pain_nonpain_topomaps(
+    def _plot_condition_topomaps(
         axes, column_idx, condition_2_data, condition_1_data, diff_data, info,
         vabs_symmetric, diff_abs, sig_mask, cluster_info, config,
         data_group_a, data_group_b
@@ -927,7 +927,7 @@ def contrast_pain_nonpain(
         data_group_a = extract_trial_band_power(tfr_sub_stats[mask2], fmin, fmax_effective, tmin, tmax)
         data_group_b = extract_trial_band_power(tfr_sub_stats[mask1], fmin, fmax_effective, tmin, tmax)
 
-        _plot_pain_nonpain_topomaps(
+        _plot_condition_topomaps(
             axes, c, data_condition_2, data_condition_1, diff_data, tfr_2.info,
             vabs_symmetric, diff_abs, sig_mask, cluster_info_dict, config,
             data_group_a, data_group_b

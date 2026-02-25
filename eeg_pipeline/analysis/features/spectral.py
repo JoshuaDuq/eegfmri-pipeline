@@ -45,7 +45,7 @@ Recommendations
 Configuration Options
 ---------------------
 - `feature_engineering.aperiodic.subtract_evoked`: False (default) or True
-  - Set True for induced spectra in pain paradigms (subtracts evoked ERP)
+  - Set True for induced spectra in event-related paradigms (subtracts evoked ERP)
 """
 
 from __future__ import annotations
@@ -1420,7 +1420,7 @@ def extract_spectral_features(
     Scientific Notes
     ----------------
     Trial-level peak frequency features (including IAF) can be unstable for short
-    segments. For pain paradigms with short stimulus-locked windows, consider:
+    segments. For event-related paradigms with short stimulus-locked windows, consider:
     1. Using longer time windows (>2s recommended)
     2. Computing IAF from resting-state data as a subject trait
     3. Using center-of-gravity instead of argmax for noisy peaks

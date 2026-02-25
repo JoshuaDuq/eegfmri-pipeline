@@ -176,7 +176,7 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
     ),
     StageSpecDefinition(
         name="predictor_sensitivity",
-        description="Pain sensitivity correlations",
+        description="Predictor sensitivity correlations",
         requires=("trial_table", "predictor", "outcome"),
         produces=("predictor_sensitivity",),
         config_key="behavior_analysis.predictor_sensitivity.enabled",

@@ -1065,6 +1065,11 @@ class FeatureBehaviorCorrelator:
             return None
         
         bands = self.config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+        preferred_segment = str(
+            get_config_value(self.config, "behavior_analysis.correlations.power_segment_preference", "")
+        ).strip().lower()
+        if preferred_segment in {"", "auto", "none"}:
+            preferred_segment = ""
         
         parsed_columns: List[Tuple[str, str, str, str]] = []
         column_to_channel: Dict[str, str] = {}
@@ -1096,13 +1101,20 @@ class FeatureBehaviorCorrelator:
         for band in bands:
             band_lower = str(band).lower()
             band_columns = [col for col, b, _seg, _ch in parsed_columns if b.lower() == band_lower]
-            
-            active_columns = [
-                col for col, b, seg, _ch in parsed_columns
-                if b.lower() == band_lower and seg.lower() == "active"
-            ]
-            if active_columns:
-                band_columns = active_columns
+
+            if preferred_segment:
+                preferred_columns = [
+                    col for col, b, seg, _ch in parsed_columns
+                    if b.lower() == band_lower and seg.lower() == preferred_segment
+                ]
+                if preferred_columns:
+                    band_columns = preferred_columns
+                else:
+                    self.logger.debug(
+                        "Power ROI correlations: segment '%s' not present for band '%s'; using all segments.",
+                        preferred_segment,
+                        band,
+                    )
             
             if not band_columns:
                 continue

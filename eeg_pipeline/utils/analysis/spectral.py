@@ -596,7 +596,7 @@ def subtract_evoked(
     """
     Subtract evoked (phase-locked) response to isolate induced activity.
     
-    For spectral analysis of event-related data (e.g., pain paradigms), the
+    For spectral analysis of event-related data, the
     evoked response (ERP) can contaminate power/spectral estimates, especially
     at low frequencies. Subtracting the evoked response isolates "induced"
     oscillatory activity that is time-locked but not phase-locked to the stimulus.
@@ -621,9 +621,8 @@ def subtract_evoked(
     - Total power = Evoked power + Induced power
     - Induced = Total - Evoked
     
-    For pain paradigms, induced power better reflects ongoing oscillatory
-    changes related to pain processing, while evoked power reflects the
-    transient sensory response.
+    In event-related paradigms, induced power often better reflects ongoing
+    oscillatory changes, while evoked power reflects transient responses.
     
     References
     ----------

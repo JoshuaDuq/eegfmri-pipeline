@@ -166,7 +166,7 @@ _FEATURE_QC_OVERRIDE_RULES = (
     ),
 )
 
-_PAIN_RESIDUAL_OVERRIDE_RULES = (
+_PREDICTOR_RESIDUAL_OVERRIDE_RULES = (
     ConfigOverrideRule("predictor_residual_enabled", "behavior_analysis.predictor_residual.enabled", _to_bool),
     ConfigOverrideRule("predictor_residual_method", "behavior_analysis.predictor_residual.method", _to_lower_stripped),
     ConfigOverrideRule("predictor_residual_min_samples", "behavior_analysis.predictor_residual.min_samples", _to_int),
@@ -178,7 +178,7 @@ _PAIN_RESIDUAL_OVERRIDE_RULES = (
     ConfigOverrideRule("predictor_residual_poly_degree", "behavior_analysis.predictor_residual.poly_degree", _to_int),
 )
 
-_PAIN_RESIDUAL_CROSSFIT_OVERRIDE_RULES = (
+_PREDICTOR_RESIDUAL_CROSSFIT_OVERRIDE_RULES = (
     ConfigOverrideRule("predictor_residual_crossfit_enabled", "behavior_analysis.predictor_residual.crossfit.enabled", _to_bool),
     ConfigOverrideRule(
         "predictor_residual_crossfit_group_column",
@@ -376,6 +376,11 @@ _CORRELATIONS_OVERRIDE_RULES = (
         _to_bool,
     ),
     ConfigOverrideRule("correlations_target_column", "behavior_analysis.correlations.target_column", _to_stripped),
+    ConfigOverrideRule(
+        "correlations_power_segment",
+        "behavior_analysis.correlations.power_segment_preference",
+        _to_stripped,
+    ),
 )
 
 _GROUP_LEVEL_OVERRIDE_RULES = (
@@ -579,7 +584,7 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     _apply_override_rules(args, config, _TRIAL_TABLE_OVERRIDE_RULES)
     _apply_override_rules(args, config, _FEATURE_QC_OVERRIDE_RULES)
-    _apply_override_rules(args, config, _PAIN_RESIDUAL_OVERRIDE_RULES)
+    _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_OVERRIDE_RULES)
 
     # Predictor-model diagnostics are consumed by behavior_analysis.predictor_models.*
     if getattr(args, "predictor_residual_model_compare_enabled", None) is not None:
@@ -632,7 +637,7 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
             q_high,
         )
 
-    _apply_override_rules(args, config, _PAIN_RESIDUAL_CROSSFIT_OVERRIDE_RULES)
+    _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_CROSSFIT_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _REGRESSION_OVERRIDE_RULES)
     if _has_any_arg(

@@ -128,6 +128,41 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.fmriMemMb = n
 			}
 		}},
+		{key: "fmri_preprocessing.fmriprep.nthreads", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.fmriNThreads = n
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.omp_nthreads", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.fmriOmpNThreads = n
+			}
+		}},
+		{key: "event_columns.predictor", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok {
+				m.eventColPredictor = strings.Join(list, ",")
+			}
+		}},
+		{key: "event_columns.outcome", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok {
+				m.eventColOutcome = strings.Join(list, ",")
+			}
+		}},
+		{key: "event_columns.binary_outcome", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok {
+				m.eventColBinaryOutcome = strings.Join(list, ",")
+			}
+		}},
+		{key: "event_columns.condition", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok {
+				m.eventColCondition = strings.Join(list, ",")
+			}
+		}},
+		{key: "preprocessing.condition_preferred_prefixes", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok {
+				m.conditionPreferredPrefixes = strings.Join(list, ",")
+			}
+		}},
 		// Behavior pipeline hydration (YAML -> TUI model)
 		{key: "behavior_analysis.statistics.correlation_method", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
@@ -271,6 +306,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "behavior_analysis.correlations.target_column", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				m.correlationsTargetColumn = s
+			}
+		}},
+		{key: "behavior_analysis.correlations.power_segment_preference", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.correlationsPowerSegment = strings.TrimSpace(s)
 			}
 		}},
 		{key: "behavior_analysis.correlations.use_crossfit_predictor_residual", apply: func(v interface{}) {
@@ -721,6 +761,386 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "feature_engineering.sourcelocalization.subjects_dir", apply: func(v interface{}) {
 			if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
 				m.sourceLocSubjectsDir = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.mode", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "fmri_informed":
+					m.sourceLocMode = 1
+				default:
+					m.sourceLocMode = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.method", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "eloreta":
+					m.sourceLocMethod = 1
+				default:
+					m.sourceLocMethod = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.spacing", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "oct5":
+					m.sourceLocSpacing = 0
+				case "oct6":
+					m.sourceLocSpacing = 1
+				case "ico4":
+					m.sourceLocSpacing = 2
+				case "ico5":
+					m.sourceLocSpacing = 3
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.parcellation", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "aparc":
+					m.sourceLocParc = 0
+				case "aparc.a2009s":
+					m.sourceLocParc = 1
+				case "hcpmmp1":
+					m.sourceLocParc = 2
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.connectivity_method", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "aec":
+					m.sourceLocConnMethod = 0
+				case "wpli":
+					m.sourceLocConnMethod = 1
+				case "plv":
+					m.sourceLocConnMethod = 2
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.subject", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocSubject = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.trans", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocTrans = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.bem", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocBem = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.mindist_mm", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocMindistMm = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.reg", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocReg = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.snr", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocSnr = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.loose", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocLoose = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.depth", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocDepth = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocFmriEnabled = b
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.stats_map_path", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriStatsMap = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.provenance", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "same_dataset":
+					m.sourceLocFmriProvenance = 1
+				default:
+					m.sourceLocFmriProvenance = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.require_provenance", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocFmriRequireProv = b
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriThreshold = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.tail", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "abs":
+					m.sourceLocFmriTail = 1
+				default:
+					m.sourceLocFmriTail = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.cluster_min_voxels", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.sourceLocFmriMinClusterVox = n
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.cluster_min_volume_mm3", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriMinClusterMM3 = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.max_clusters", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.sourceLocFmriMaxClusters = n
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.max_voxels_per_cluster", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.sourceLocFmriMaxVoxPerClus = n
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.max_total_voxels", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.sourceLocFmriMaxTotalVox = n
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.random_seed", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.sourceLocFmriRandomSeed = n
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_a.name", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriWindowAName = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_a.tmin", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriWindowATmin = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_a.tmax", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriWindowATmax = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_b.name", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriWindowBName = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_b.tmin", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriWindowBTmin = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_b.tmax", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriWindowBTmax = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocFmriContrastEnabled = b
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.type", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "paired-t-test":
+					m.sourceLocFmriContrastType = 1
+				case "f-test":
+					m.sourceLocFmriContrastType = 2
+				case "custom":
+					m.sourceLocFmriContrastType = 3
+				default:
+					m.sourceLocFmriContrastType = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.cond_a.column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriCondAColumn = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.cond_a.value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriCondAValue = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.cond_b.column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriCondBColumn = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.cond_b.value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriCondBValue = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.condition_a.column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriCondAColumn = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.condition_a.value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriCondAValue = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.condition_b.column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriCondBColumn = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.condition_b.value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriCondBValue = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.formula", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriContrastFormula = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.name", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriContrastName = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.runs", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.sourceLocFmriRunsToInclude = strings.Join(splitCSVList(spec), ",")
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.hrf_model", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "spm":
+					m.sourceLocFmriHrfModel = 0
+				case "flobs":
+					m.sourceLocFmriHrfModel = 1
+				case "fir":
+					m.sourceLocFmriHrfModel = 2
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.drift_model", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "none":
+					m.sourceLocFmriDriftModel = 0
+				case "cosine":
+					m.sourceLocFmriDriftModel = 1
+				case "polynomial":
+					m.sourceLocFmriDriftModel = 2
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.high_pass_hz", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriHighPassHz = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.low_pass_hz", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriLowPassHz = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.condition_scope_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriConditionScopeColumn = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.condition_scope_trial_types", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.sourceLocFmriConditionScopeTrialTypes = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.phase_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriPhaseColumn = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.phase_scope_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriPhaseScopeColumn = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.phase_scope_value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriPhaseScopeValue = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.stim_phases_to_model", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.sourceLocFmriStimPhasesToModel = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.cluster_correction", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocFmriClusterCorrection = b
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.cluster_p_threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriClusterPThreshold = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.output_type", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "z-score":
+					m.sourceLocFmriOutputType = 0
+				case "t-stat":
+					m.sourceLocFmriOutputType = 1
+				case "cope":
+					m.sourceLocFmriOutputType = 2
+				case "beta":
+					m.sourceLocFmriOutputType = 3
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.resample_to_freesurfer", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocFmriResampleToFS = b
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.input_source", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "fmriprep":
+					m.sourceLocFmriInputSource = 0
+				case "bids_raw":
+					m.sourceLocFmriInputSource = 1
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.require_fmriprep", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocFmriRequireFmriprep = b
 			}
 		}},
 		{key: "machine_learning.targets.regression", apply: func(v interface{}) {

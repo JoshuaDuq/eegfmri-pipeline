@@ -68,10 +68,11 @@ type DiscoverColumnsResponse struct {
 
 // DiscoverFmriConditionsResponse from eeg-pipeline info fmri-conditions --json
 type DiscoverFmriConditionsResponse struct {
-	Conditions []string `json:"conditions"`
-	Subject    string   `json:"subject"`
-	Task       string   `json:"task"`
-	Error      string   `json:"error,omitempty"`
+	Conditions      []string `json:"conditions"`
+	ConditionColumn string   `json:"condition_column,omitempty"`
+	Subject         string   `json:"subject"`
+	Task            string   `json:"task"`
+	Error           string   `json:"error,omitempty"`
 }
 
 // DiscoverROIsResponse from eeg-pipeline info rois --json
@@ -93,8 +94,8 @@ type DiscoverMultigroupStatsResponse struct {
 	Error        string   `json:"error,omitempty"`
 }
 
-// DiscoverFmriConditions runs a Python command to discover available fMRI trial_type conditions
-func DiscoverFmriConditions(repoRoot string, subject string, task string) tea.Cmd {
+// DiscoverFmriConditions runs a Python command to discover available fMRI condition values.
+func DiscoverFmriConditions(repoRoot string, subject string, task string, conditionColumn string) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{"-m", "eeg_pipeline.cli.main", "info", "fmri-conditions", "--json"}
 		if subject != "" {
@@ -102,6 +103,9 @@ func DiscoverFmriConditions(repoRoot string, subject string, task string) tea.Cm
 		}
 		if task != "" {
 			args = append(args, "--task", task)
+		}
+		if strings.TrimSpace(conditionColumn) != "" {
+			args = append(args, "--condition-column", strings.TrimSpace(conditionColumn))
 		}
 
 		output, err := runPythonJSONCommand(repoRoot, args)

@@ -405,7 +405,7 @@ def _get_condition_column(
     events_df: pd.DataFrame,
     config: Any,
 ) -> Optional[str]:
-    """Get condition column name from config or default pain column."""
+    """Get condition column name from config or default binary-outcome column."""
     compare_col = str(
         get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
     ).strip()

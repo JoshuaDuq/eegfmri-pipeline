@@ -866,7 +866,7 @@ def _extract_condition_results(
     return condition_results
 
 
-def plot_temporal_correlation_topomaps_by_pain(
+def plot_temporal_correlation_topomaps_by_condition(
     subject: str,
     task: str,
     plots_dir: Path,
@@ -877,7 +877,7 @@ def plot_temporal_correlation_topomaps_by_pain(
 ) -> None:
     """Plot temporal correlation topomaps by condition.
     
-    Supports user-configurable conditions (not just pain/non-pain).
+    Supports user-configurable condition splits.
     Conditions are determined by the temporal.condition_column and 
     temporal.condition_values settings in the config.
     """

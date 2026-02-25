@@ -431,7 +431,7 @@ def _extract_baseline_data(
     logger : Any
         Logger for warnings
     allow_full_fallback : bool
-        If True, return full data when baseline_mask is empty (risky for pain paradigms).
+        If True, return full data when baseline_mask is empty (risky for event-related paradigms).
         If False, return None and log a warning.
     
     Returns
@@ -446,7 +446,7 @@ def _extract_baseline_data(
         if logger:
             logger.warning(
                 "Baseline mask is empty; using full segment for baseline estimation. "
-                "This is scientifically risky in pain paradigms where evoked/induced "
+                "This is scientifically risky in event-related paradigms where evoked/induced "
                 "changes can shift apparent alpha peak."
             )
         return data

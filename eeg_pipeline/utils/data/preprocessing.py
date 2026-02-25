@@ -392,18 +392,51 @@ def ensure_dataset_description(bids_root: Path, name: str = "EEG BIDS dataset") 
 def _build_epoch_event_mask(
     events_df: pd.DataFrame,
     conditions: List[str],
-) -> pd.Series:
-    if "trial_type" not in events_df.columns:
-        raise ValueError("events.tsv is missing required 'trial_type' column")
-
-    trial_type_norm = events_df["trial_type"].astype(str).map(normalize_string)
+    condition_columns: Optional[List[str]] = None,
+) -> tuple[pd.Series, str]:
+    condition_column = _resolve_epoch_condition_column(
+        events_df,
+        condition_columns=condition_columns,
+    )
+    trial_type_norm = events_df[condition_column].astype(str).map(normalize_string)
     cond_norm = [normalize_string(c) for c in conditions if str(c).strip() != ""]
 
     mask = pd.Series(False, index=events_df.index)
     for cond in cond_norm:
         # Support both exact-match and prefix-match conditions.
         mask = mask | (trial_type_norm == cond) | trial_type_norm.str.startswith(cond)
-    return mask
+    return mask, condition_column
+
+
+def _resolve_epoch_condition_column(
+    events_df: pd.DataFrame,
+    *,
+    condition_columns: Optional[List[str]] = None,
+) -> str:
+    candidates: list[str] = []
+    if condition_columns:
+        candidates.extend(str(col).strip() for col in condition_columns if str(col).strip())
+    candidates.extend(["condition", "trial_type"])
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for col in candidates:
+        key = col.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(col)
+
+    column_lookup = {str(col).strip().lower(): str(col) for col in events_df.columns}
+    for col in deduped:
+        resolved = column_lookup.get(col.lower())
+        if resolved is not None:
+            return resolved
+
+    raise ValueError(
+        "events.tsv is missing a usable condition column for epoch alignment. "
+        f"Tried: {deduped}; available columns: {list(events_df.columns)}"
+    )
 
 
 def _load_subject_events_for_epochs(bids_sub_eeg_dir: Path, subject_label: str, task: str) -> pd.DataFrame:
@@ -479,6 +512,7 @@ def write_clean_events_tsv_for_epochs(
     bids_root: Path,
     epochs_path: Path,
     conditions: Optional[List[str]] = None,
+    condition_columns: Optional[List[str]] = None,
     overwrite: bool = True,
     _logger: Optional[logging.Logger] = None,
 ) -> Path:
@@ -514,13 +548,18 @@ def write_clean_events_tsv_for_epochs(
         )
 
     events_df = _load_subject_events_for_epochs(bids_sub_eeg_dir, subject_label, task)
-    mask = _build_epoch_event_mask(events_df, conditions)
+    mask, condition_column = _build_epoch_event_mask(
+        events_df,
+        conditions,
+        condition_columns=condition_columns,
+    )
     target = events_df.loc[mask].copy().reset_index(drop=True)
 
     if len(target) == 0:
         raise ValueError(
             f"No events matched conditions={conditions} in {subject_label}, task-{task}. "
-            f"Available trial_type values: {sorted(set(events_df.get('trial_type', pd.Series(dtype=str)).dropna().astype(str)))}"
+            f"Available {condition_column} values: "
+            f"{sorted(set(events_df.get(condition_column, pd.Series(dtype=str)).dropna().astype(str)))}"
         )
 
     # Track pre-rejection index within the condition-filtered target set.

@@ -27,7 +27,11 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_extractor_inputs
 from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
 from eeg_pipeline.utils.analysis.spectral import compute_frequency_weights
-from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_bands_for_aperiodic
+from eeg_pipeline.utils.config.loader import (
+    get_condition_column_candidates,
+    get_config_value,
+    get_frequency_bands_for_aperiodic,
+)
 from eeg_pipeline.utils.analysis.stats import compute_residuals
 from eeg_pipeline.utils.parallel import get_n_jobs
 
@@ -785,7 +789,7 @@ def _compute_psd(
     ----------
     subtract_evoked : bool
         If True, subtract evoked response before PSD computation to isolate
-        induced activity. Recommended for pain paradigms where ERPs can bias
+        induced activity. Recommended for event-related paradigms where ERPs can bias
         low-frequency slope estimates.
     condition_labels : Optional[np.ndarray]
         If provided with subtract_evoked=True, subtract condition-specific
@@ -1570,20 +1574,23 @@ def _resolve_condition_labels_from_context(ctx: Any, n_epochs: int) -> Optional[
 
     aligned_events = getattr(ctx, "aligned_events", None)
     if isinstance(aligned_events, pd.DataFrame):
-        for candidate in ("condition", "trial_type"):
-            if candidate in aligned_events.columns:
-                labels_arr = aligned_events[candidate].to_numpy()
-                if labels_arr.shape[0] == n_epochs:
-                    return labels_arr
-                if getattr(ctx, "logger", None):
-                    ctx.logger.warning(
-                        "Aperiodic: skipping condition-wise evoked subtraction labels from '%s' "
-                        "because aligned_events length (%d) != n_epochs (%d).",
-                        candidate,
-                        int(labels_arr.shape[0]),
-                        int(n_epochs),
-                    )
-                break
+        lookup = {str(col).strip().lower(): str(col) for col in aligned_events.columns}
+        for candidate in get_condition_column_candidates(getattr(ctx, "config", None)):
+            resolved = lookup.get(candidate.lower())
+            if resolved is None:
+                continue
+            labels_arr = aligned_events[resolved].to_numpy()
+            if labels_arr.shape[0] == n_epochs:
+                return labels_arr
+            if getattr(ctx, "logger", None):
+                ctx.logger.warning(
+                    "Aperiodic: skipping condition-wise evoked subtraction labels from '%s' "
+                    "because aligned_events length (%d) != n_epochs (%d).",
+                    resolved,
+                    int(labels_arr.shape[0]),
+                    int(n_epochs),
+                )
+            break
 
     return None
 

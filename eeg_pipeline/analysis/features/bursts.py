@@ -16,6 +16,7 @@ from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+from eeg_pipeline.utils.config.loader import get_condition_column_candidates
 
 
 _MAD_TO_STD_SCALE = 1.4826
@@ -197,9 +198,14 @@ def _extract_condition_labels(ctx: Any, n_epochs: int) -> Optional[np.ndarray]:
         return labels if labels.shape[0] == n_epochs else None
 
     aligned = getattr(ctx, "aligned_events", None)
-    if isinstance(aligned, pd.DataFrame) and "condition" in aligned.columns:
-        labels = aligned["condition"].to_numpy()
-        return labels if labels.shape[0] == n_epochs else None
+    if isinstance(aligned, pd.DataFrame):
+        lookup = {str(col).strip().lower(): str(col) for col in aligned.columns}
+        for candidate in get_condition_column_candidates(getattr(ctx, "config", None)):
+            resolved = lookup.get(candidate.lower())
+            if resolved is None:
+                continue
+            labels = aligned[resolved].to_numpy()
+            return labels if labels.shape[0] == n_epochs else None
 
     return None
 

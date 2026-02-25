@@ -206,10 +206,10 @@ def apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> N
                 "plotting.plots.behavior.dose_response.response_column",
                 list(values),
             )
-        elif key == "dose_response_pain_column" and values:
+        elif key == "dose_response_binary_outcome_column" and values:
             _apply_config_override(
                 config,
-                "plotting.plots.behavior.dose_response.pain_column",
+                "plotting.plots.behavior.dose_response.binary_outcome_column",
                 values[0],
             )
         elif key == "dose_response_segment" and values:
@@ -277,7 +277,7 @@ PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "scatter_segment": "plotting.plots.behavior.scatter.segment",
     "dose_response_dose_column": "plotting.plots.behavior.dose_response.dose_column",
     "dose_response_response_column": "plotting.plots.behavior.dose_response.response_column",
-    "dose_response_pain_column": "plotting.plots.behavior.dose_response.pain_column",
+    "dose_response_binary_outcome_column": "plotting.plots.behavior.dose_response.binary_outcome_column",
     "dose_response_segment": "plotting.plots.behavior.dose_response.segment",
     "dose_response_bands": "plotting.plots.behavior.dose_response.bands",
     "dose_response_rois": "plotting.plots.behavior.dose_response.rois",
@@ -319,7 +319,7 @@ def validate_plot_item_configs(
                 "scatter_segment",
                 "dose_response_dose_column",
                 "dose_response_response_column",
-                "dose_response_pain_column",
+                "dose_response_binary_outcome_column",
                 "dose_response_segment",
                 "dose_response_bands",
                 "dose_response_rois",

@@ -28,9 +28,6 @@ func (m Model) buildMLAdvancedArgs() []string {
 			args = append(args, "--fmri-signature-contrast-name", contrast)
 		}
 
-		sigs := []string{"NPS", "SIIPS1"}
-		args = append(args, "--fmri-signature-name", sigs[m.mlFmriSigSignatureIndex%len(sigs)])
-
 		metrics := []string{"dot", "cosine", "pearson_r"}
 		args = append(args, "--fmri-signature-metric", metrics[m.mlFmriSigMetricIndex%len(metrics)])
 

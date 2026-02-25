@@ -206,10 +206,6 @@ def _classify_connectivity_subtype(column: str, column_lower: str) -> str:
 
 def _classify_power_subtype(column_lower: str) -> str:
     """Classify power feature subtype."""
-    if "baseline" in column_lower:
-        return "baseline"
-    if "active" in column_lower:
-        return "active"
     if "roi" in column_lower:
         return "roi"
     return "direct"

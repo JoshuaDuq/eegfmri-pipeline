@@ -53,7 +53,10 @@ from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.tfr import compute_complex_tfr, compute_tfr_morlet
 from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
-from eeg_pipeline.utils.config.loader import get_frequency_band_names
+from eeg_pipeline.utils.config.loader import (
+    get_condition_column_candidates,
+    get_frequency_band_names,
+)
 from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.features import align_feature_dataframes
@@ -88,6 +91,23 @@ def _resolve_time_ranges(explicit_windows: Optional[List[Dict[str, Any]]], tmin:
 def _calculate_total_steps(n_ranges: int) -> int:
     """Calculate total progress steps: load + 3 per time range (extract, align, save)."""
     return 1 + (n_ranges * 3)
+
+
+def _resolve_condition_labels_for_events(
+    events_df: Optional[pd.DataFrame],
+    config: Any,
+) -> Optional[np.ndarray]:
+    if not isinstance(events_df, pd.DataFrame):
+        return None
+    if events_df.empty:
+        return None
+
+    lookup = {str(col).strip().lower(): str(col) for col in events_df.columns}
+    for candidate in get_condition_column_candidates(config):
+        resolved = lookup.get(candidate.lower())
+        if resolved is not None:
+            return events_df[resolved].to_numpy()
+    return None
 
 
 def _load_fixed_templates(
@@ -801,10 +821,10 @@ class FeaturePipeline(PipelineBase):
         if precomputed_full is not None:
             if len(aligned_events) == int(precomputed_full.data.shape[0]):
                 precomputed_full.metadata = aligned_events.reset_index(drop=True).copy()
-                if "condition" in aligned_events.columns:
-                    precomputed_full.condition_labels = aligned_events["condition"].to_numpy()
-                elif "trial_type" in aligned_events.columns:
-                    precomputed_full.condition_labels = aligned_events["trial_type"].to_numpy()
+                precomputed_full.condition_labels = _resolve_condition_labels_for_events(
+                    aligned_events,
+                    self.config,
+                )
             else:
                 self.logger.warning(
                     "Precomputed intermediates: aligned_events length (%d) != n_epochs (%d); skipping metadata.",

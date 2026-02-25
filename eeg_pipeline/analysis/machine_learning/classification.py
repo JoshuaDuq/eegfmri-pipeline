@@ -1,9 +1,9 @@
 """
-Pain Classification Pipelines
+Binary Classification Pipelines
 =============================
 
-Classification models for pain vs no-pain prediction from EEG features.
-Complements the regression pipelines for predicting pain intensity.
+Classification models for binary outcome prediction from EEG features.
+Complements the regression pipelines for continuous outcomes.
 
 Models:
 - SVM with RBF kernel (robust to outliers)
@@ -533,14 +533,14 @@ def decode_binary_outcome(
     config: Any = None,
 ) -> ClassificationResult:
     """
-    Quick pain classification from features.
+    Quick binary classification from features.
     
     Parameters
     ----------
     X : np.ndarray
         Feature matrix (n_samples, n_features)
     y : np.ndarray
-        Binary labels (0=no-pain, 1=pain)
+        Binary labels (0=class A, 1=class B)
     cv : str or int
         Cross-validation strategy:
         - "loso": Leave-one-subject-out (requires groups)

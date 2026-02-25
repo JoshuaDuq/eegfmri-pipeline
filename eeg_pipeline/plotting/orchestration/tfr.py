@@ -21,12 +21,12 @@ from eeg_pipeline.utils.config.loader import require_config_value
 
 from eeg_pipeline.plotting.tfr.scalpmean import (
     plot_scalpmean_all_trials,
-    contrast_scalpmean_pain_nonpain,
+    contrast_scalpmean_conditions,
 )
-from eeg_pipeline.plotting.tfr.channels import plot_channels_all_trials, contrast_channels_pain_nonpain
-from eeg_pipeline.plotting.tfr.rois import plot_rois_all_trials, contrast_pain_nonpain_rois
+from eeg_pipeline.plotting.tfr.channels import plot_channels_all_trials, contrast_channels_conditions
+from eeg_pipeline.plotting.tfr.rois import plot_rois_all_trials, contrast_conditions_rois
 from eeg_pipeline.plotting.tfr.topomaps import (
-    plot_pain_nonpain_temporal_topomaps_diff_allbands,
+    plot_temporal_topomaps_diff_allbands,
     plot_temporal_topomaps_allbands_active,
 )
 from eeg_pipeline.plotting.tfr.band_evolution import visualize_band_evolution
@@ -110,7 +110,7 @@ def _plot_topomaps(
 ) -> None:
     """Plot all topomap visualizations."""
     window_size_ms = float(require_config_value(config, _CONFIG_KEY_TOPOMAP_WINDOW_SIZE))
-    plot_pain_nonpain_temporal_topomaps_diff_allbands(
+    plot_temporal_topomaps_diff_allbands(
         power,
         events_df,
         plots_dir,
@@ -191,8 +191,8 @@ def _plot_roi_visualizations(
         plot_rois_all_trials(roi_tfrs, plots_dir, config=config, baseline=baseline_window, logger=logger)
 
     if _PLOT_ROIS_CONTRAST in plots_to_run and events_df is not None:
-        logger.info("Plotting ROI pain contrast...")
-        contrast_pain_nonpain_rois(
+        logger.info("Plotting ROI condition contrast...")
+        contrast_conditions_rois(
             roi_tfrs, events_df, plots_dir, config=config, baseline=baseline_window, logger=logger
         )
 
@@ -224,8 +224,8 @@ def _plot_scalpmean_visualizations(
         )
 
     if _PLOT_SCALPMEAN_CONTRAST in plots_to_run and events_df is not None:
-        logger.info("Plotting pain contrast...")
-        contrast_scalpmean_pain_nonpain(
+        logger.info("Plotting condition contrast...")
+        contrast_scalpmean_conditions(
             power,
             events_df,
             plots_dir,
@@ -262,8 +262,8 @@ def _plot_channel_visualizations(
         )
 
     if _PLOT_CHANNELS_CONTRAST in plots_to_run and events_df is not None:
-        logger.info("Plotting channel pain contrast...")
-        contrast_channels_pain_nonpain(
+        logger.info("Plotting channel condition contrast...")
+        contrast_channels_conditions(
             power,
             events_df,
             plots_dir,

@@ -65,9 +65,12 @@ class ContrastBuilderConfig:
     cluster_p_threshold: float
     output_type: str
     resample_to_freesurfer: bool
-    # Which trial_type rows are eligible for condition remapping.
-    # If None, no trial_type scoping is applied.
+    # Which events rows are eligible for condition remapping.
+    # Values are matched against `condition_scope_column`.
+    # If None, no condition-scope filtering is applied.
     condition_scope_trial_types: Optional[List[str]] = None
+    # Events column used for `condition_scope_trial_types`.
+    condition_scope_column: str = "trial_type"
     # Confounds / QC (optional)
     confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|auto
     write_design_matrix: bool = False
@@ -79,10 +82,13 @@ class ContrastBuilderConfig:
     # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
     # If None, no stim_phase scoping is applied. Use ["all"] to disable phase scoping.
     stim_phases_to_model: Optional[List[str]] = None
-    # Optional: trial_type value that the stim_phase scoping should be restricted to.
-    # If None, phase scoping applies to all rows regardless of trial_type.
-    # Set to the relevant event type for your paradigm (e.g. "stimulation" for thermal pain).
-    phase_scope_trial_type: Optional[str] = None
+    # Events column that stores phase labels used by `stim_phases_to_model`.
+    phase_column: str = "stim_phase"
+    # Events column used to scope phase filtering to specific rows.
+    phase_scope_column: str = "trial_type"
+    # Optional value in `phase_scope_column` to restrict where phase filtering is applied.
+    # If None, phase filtering applies to all rows.
+    phase_scope_value: Optional[str] = None
 
 
 def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
@@ -105,8 +111,13 @@ def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
         str(getattr(contrast_cfg, "confounds_strategy", "auto")),
         str(bool(getattr(contrast_cfg, "write_design_matrix", False))),
         str(getattr(contrast_cfg, "smoothing_fwhm", None) or ""),
+        str(getattr(contrast_cfg, "condition_scope_trial_types", None) or ""),
+        str(getattr(contrast_cfg, "condition_scope_column", "") or ""),
         str(getattr(contrast_cfg, "events_to_model", None) or ""),
         str(getattr(contrast_cfg, "stim_phases_to_model", None) or ""),
+        str(getattr(contrast_cfg, "phase_column", "") or ""),
+        str(getattr(contrast_cfg, "phase_scope_column", "") or ""),
+        str(getattr(contrast_cfg, "phase_scope_value", "") or ""),
     ]
     key = "_".join(key_parts)
     return hashlib.md5(key.encode()).hexdigest()[:8]
@@ -167,6 +178,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
                 for part in str(scope_raw).split(",")
                 if part.strip()
             ] or None
+    condition_scope_column = str(contrast_cfg.get("condition_scope_column", "trial_type")).strip() or "trial_type"
 
     # Confounds/QC (optional; safe defaults keep behavior stable)
     confounds_strategy = str(contrast_cfg.get("confounds_strategy", "auto")).strip().lower()
@@ -182,6 +194,11 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
 
     events_to_model = normalize_trial_type_list(contrast_cfg.get("events_to_model"))
     stim_phases_to_model = normalize_trial_type_list(contrast_cfg.get("stim_phases_to_model"))
+    phase_column = str(contrast_cfg.get("phase_column", "stim_phase")).strip() or "stim_phase"
+    phase_scope_column = str(contrast_cfg.get("phase_scope_column", "trial_type")).strip() or "trial_type"
+    phase_scope_value = contrast_cfg.get("phase_scope_value")
+    if phase_scope_value is not None:
+        phase_scope_value = str(phase_scope_value).strip() or None
 
     return ContrastBuilderConfig(
         enabled=bool(contrast_cfg.get("enabled", False)),
@@ -198,6 +215,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         condition_b_column=cond_b_cfg.get("column"),
         condition_b_value=cond_b_cfg.get("value"),
         condition_scope_trial_types=condition_scope_trial_types,
+        condition_scope_column=condition_scope_column,
         formula=contrast_cfg.get("formula"),
         name=str(contrast_cfg.get("name", "contrast")),
         runs=runs,
@@ -214,6 +232,9 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         smoothing_fwhm=smoothing_fwhm,
         events_to_model=events_to_model,
         stim_phases_to_model=stim_phases_to_model,
+        phase_column=phase_column,
+        phase_scope_column=phase_scope_column,
+        phase_scope_value=phase_scope_value,
     )
 
 
@@ -221,17 +242,22 @@ def _apply_trial_phase_scoping(
     events_df: pd.DataFrame,
     *,
     allowed_phases: Optional[List[str]],
-    phase_scope_trial_type: Optional[str] = None,
+    phase_column: str = "stim_phase",
+    phase_scope_column: str = "trial_type",
+    phase_scope_value: Optional[str] = None,
 ) -> pd.DataFrame:
     """
-    Restrict events to specific stim_phase values, optionally scoped to one trial_type.
+    Restrict events to specific phase values, optionally scoped to one row subset.
 
     Scoping is only applied when ``allowed_phases`` is explicitly provided.
-    When ``phase_scope_trial_type`` is set, phase filtering only applies to rows
-    where ``trial_type`` matches that value; all other rows are kept as-is.
-    When ``phase_scope_trial_type`` is None, phase filtering applies to all rows.
+    When ``phase_scope_value`` is set, phase filtering only applies to rows
+    where ``phase_scope_column`` matches that value; all other rows are kept as-is.
+    When ``phase_scope_value`` is None, phase filtering applies to all rows.
     """
-    if "stim_phase" not in events_df.columns:
+    phase_column_name = str(phase_column or "").strip() or "stim_phase"
+    phase_scope_column_name = str(phase_scope_column or "").strip() or "trial_type"
+
+    if phase_column_name not in events_df.columns:
         return events_df
 
     raw = allowed_phases
@@ -244,10 +270,10 @@ def _apply_trial_phase_scoping(
         return events_df
     allow = set(allow_norm)
 
-    phase_norm = events_df["stim_phase"].fillna("").astype(str).str.strip().str.lower()
-    if phase_scope_trial_type is not None and "trial_type" in events_df.columns:
-        scope_match = events_df["trial_type"].astype(str).str.strip().str.lower().eq(
-            phase_scope_trial_type.strip().lower()
+    phase_norm = events_df[phase_column_name].fillna("").astype(str).str.strip().str.lower()
+    if phase_scope_value is not None and phase_scope_column_name in events_df.columns:
+        scope_match = events_df[phase_scope_column_name].astype(str).str.strip().str.lower().eq(
+            str(phase_scope_value).strip().lower()
         )
         keep = (~scope_match) | phase_norm.isin(list(allow))
     else:
@@ -594,12 +620,18 @@ def _remap_events_by_condition_columns(
     col_b = cfg.condition_b_column
     val_b = cfg.condition_b_value
     scope_trial_types = cfg.condition_scope_trial_types
+    scope_column = str(getattr(cfg, "condition_scope_column", "") or "").strip() or "trial_type"
 
     scope_mask = pd.Series(True, index=events_df.index)
     if scope_trial_types:
         normalized_scope = [str(v).strip() for v in scope_trial_types if str(v).strip()]
         if normalized_scope and not any(v.lower() in {"all", "*", "@all"} for v in normalized_scope):
-            scope_mask = events_df.get("trial_type", "").astype(str).isin(normalized_scope)
+            if scope_column not in events_df.columns:
+                raise ValueError(
+                    f"Condition scope column '{scope_column}' not found in events. "
+                    f"Available columns: {list(events_df.columns)}"
+                )
+            scope_mask = events_df[scope_column].astype(str).isin(normalized_scope)
 
     # Validate column A exists (this is always required)
     if col_a not in events_df.columns:
@@ -713,7 +745,9 @@ def fit_first_level_glm(
     events_df = _apply_trial_phase_scoping(
         events_df,
         allowed_phases=getattr(cfg, "stim_phases_to_model", None),
-        phase_scope_trial_type=getattr(cfg, "phase_scope_trial_type", None),
+        phase_column=str(getattr(cfg, "phase_column", "stim_phase") or "stim_phase"),
+        phase_scope_column=str(getattr(cfg, "phase_scope_column", "trial_type") or "trial_type"),
+        phase_scope_value=getattr(cfg, "phase_scope_value", None),
     )
 
     # Use strict=True for single-run: cannot skip the only run
@@ -829,7 +863,9 @@ def fit_first_level_glm_multi_run(
         events_df = _apply_trial_phase_scoping(
             events_df,
             allowed_phases=getattr(cfg, "stim_phases_to_model", None),
-            phase_scope_trial_type=getattr(cfg, "phase_scope_trial_type", None),
+            phase_column=str(getattr(cfg, "phase_column", "stim_phase") or "stim_phase"),
+            phase_scope_column=str(getattr(cfg, "phase_scope_column", "trial_type") or "trial_type"),
+            phase_scope_value=getattr(cfg, "phase_scope_value", None),
         )
 
         # Remap conditions, allowing missing values (strict=False)

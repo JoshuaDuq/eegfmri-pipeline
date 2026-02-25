@@ -175,9 +175,9 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		ab.addIfNonEmpty("--formula", strings.TrimSpace(m.fmriAnalysisFormula))
 	} else {
 		ab.args = append(ab.args, "--contrast-type", "t-test")
-		ab.addIfNonEmpty("--cond-a-column", strings.TrimSpace(m.fmriAnalysisCondAColumn))
+		ab.addIfNonEmpty("--cond-a-column", m.resolveFmriConditionColumn(m.fmriAnalysisCondAColumn))
 		ab.addIfNonEmpty("--cond-a-value", strings.TrimSpace(m.fmriAnalysisCondAValue))
-		ab.addIfNonEmpty("--cond-b-column", strings.TrimSpace(m.fmriAnalysisCondBColumn))
+		ab.addIfNonEmpty("--cond-b-column", m.resolveFmriConditionColumn(m.fmriAnalysisCondBColumn))
 		ab.addIfNonEmpty("--cond-b-value", strings.TrimSpace(m.fmriAnalysisCondBValue))
 	}
 
@@ -204,10 +204,26 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	ab.args = append(ab.args, "--confounds-strategy", confoundsOptions[m.fmriAnalysisConfoundsStrategy%len(confoundsOptions)])
 	if isFirstLevel {
 		ab.addIfNonEmpty("--events-to-model", strings.TrimSpace(m.fmriAnalysisEventsToModel))
+		scopeColumn := m.resolveFmriConditionColumn(m.fmriAnalysisScopeColumn)
+		if scopeColumn != "" && !strings.EqualFold(scopeColumn, "trial_type") {
+			ab.args = append(ab.args, "--condition-scope-column", scopeColumn)
+		}
 		scopeTrialTypes := strings.TrimSpace(m.fmriAnalysisScopeTrialTypes)
 		if scopeTrialTypes != "" {
 			ab.args = append(ab.args, "--condition-scope-trial-types")
 			ab.args = append(ab.args, splitSpaceList(scopeTrialTypes)...)
+		}
+		phaseColumn := m.resolveFmriPhaseColumn(m.fmriAnalysisPhaseColumn)
+		if phaseColumn != "" && !strings.EqualFold(phaseColumn, "stim_phase") {
+			ab.args = append(ab.args, "--phase-column", phaseColumn)
+		}
+		phaseScopeColumn := m.resolveFmriConditionColumn(m.fmriAnalysisPhaseScopeColumn)
+		if phaseScopeColumn != "" && !strings.EqualFold(phaseScopeColumn, "trial_type") {
+			ab.args = append(ab.args, "--phase-scope-column", phaseScopeColumn)
+		}
+		phaseScopeValue := strings.TrimSpace(m.fmriAnalysisPhaseScopeValue)
+		if phaseScopeValue != "" {
+			ab.args = append(ab.args, "--phase-scope-value", phaseScopeValue)
 		}
 		if strings.TrimSpace(m.fmriAnalysisStimPhasesToModel) != "" {
 			ab.args = append(ab.args, "--stim-phases-to-model", strings.TrimSpace(m.fmriAnalysisStimPhasesToModel))
@@ -256,19 +272,6 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 			ab.args = append(ab.args, "--no-write-condition-betas")
 		}
 
-		// Signatures: only emit flag if subset selected
-		var sigs []string
-		if m.fmriTrialSigSignatureNPS {
-			sigs = append(sigs, "NPS")
-		}
-		if m.fmriTrialSigSignatureSIIPS1 {
-			sigs = append(sigs, "SIIPS1")
-		}
-		if len(sigs) > 0 && len(sigs) < 2 {
-			ab.args = append(ab.args, "--signatures")
-			ab.args = append(ab.args, sigs...)
-		}
-
 		// Optional: restrict which trial_type/stim_phase values are eligible for trial selection.
 		trialTypeScope := strings.TrimSpace(m.fmriTrialSigScopeTrialTypes)
 		if trialTypeScope != "" {
@@ -282,6 +285,14 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		if phaseSpec != "" {
 			ab.args = append(ab.args, "--signature-scope-stim-phases")
 			ab.args = append(ab.args, splitSpaceList(phaseSpec)...)
+		}
+		trialTypeScopeColumn := m.resolveFmriConditionColumn(m.fmriTrialSigScopeTrialTypeColumn)
+		if trialTypeScopeColumn != "" && !strings.EqualFold(trialTypeScopeColumn, "trial_type") {
+			ab.args = append(ab.args, "--signature-scope-trial-type-column", trialTypeScopeColumn)
+		}
+		phaseScopeColumn := m.resolveFmriPhaseColumn(m.fmriTrialSigScopePhaseColumn)
+		if phaseScopeColumn != "" && !strings.EqualFold(phaseScopeColumn, "stim_phase") {
+			ab.args = append(ab.args, "--signature-scope-phase-column", phaseScopeColumn)
 		}
 
 		if trialMethod == "lss" && m.fmriTrialSigLssOtherRegressorsIndex%2 == 1 {
@@ -364,17 +375,17 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 		if !m.fmriAnalysisPlotEmbedImages {
 			ab.args = append(ab.args, "--plot-no-embed-images")
 		}
-	if !m.fmriAnalysisPlotSignatures {
-		ab.args = append(ab.args, "--plot-no-signatures")
-	} else {
-		if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
-			ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
+		if !m.fmriAnalysisPlotSignatures {
+			ab.args = append(ab.args, "--plot-no-signatures")
+		} else {
+			if strings.TrimSpace(m.fmriAnalysisSignatureDir) != "" {
+				ab.args = append(ab.args, "--signature-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisSignatureDir)))
+			}
+			if strings.TrimSpace(m.fmriAnalysisSignatureMaps) != "" {
+				ab.args = append(ab.args, "--signature-maps")
+				ab.args = append(ab.args, strings.Fields(strings.TrimSpace(m.fmriAnalysisSignatureMaps))...)
+			}
 		}
-		if strings.TrimSpace(m.fmriAnalysisSignatureMaps) != "" {
-			ab.args = append(ab.args, "--signature-maps")
-			ab.args = append(ab.args, strings.Fields(strings.TrimSpace(m.fmriAnalysisSignatureMaps))...)
-		}
-	}
 
 		// Formats: require at least one
 		var formats []string

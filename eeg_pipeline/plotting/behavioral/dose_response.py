@@ -7,7 +7,7 @@ the plotting approach from the repository-root `visualize` script:
 
 - Mean ± SEM curves by dose level (typically predictor)
 - ROI × band panels
-- Optional rating (response) vs dose and pain-probability vs dose
+- Optional rating (response) vs dose and binary-outcome probability vs dose
 
 Critical differences vs the standalone script
 --------------------------------------------
@@ -15,7 +15,7 @@ Critical differences vs the standalone script
   `time_frequency_analysis.rois` in config (no hardcoded ROI lists).
 - **Bands** come from the user's TUI-defined/selected bands (CLI `--bands`,
   `--frequency-bands`), i.e. `time_frequency_analysis.bands` in config.
-- **Column selection** (dose/response/pain) is configurable per-plot via
+- **Column selection** (dose/response/binary outcome) is configurable per-plot via
   `--plot-item-config behavior_dose_response ...` (TUI plot-specific settings).
 """
 
@@ -47,7 +47,7 @@ from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.manipulation import find_column
 
 
-_DEFAULT_SEGMENT = "active"
+_DEFAULT_SEGMENT = ""
 _DEFAULT_STAT = "mean"
 _MAX_ROI_PAIR_PLOTS = 30
 
@@ -68,7 +68,7 @@ _STAT_EQUIVALENTS: dict[str, list[str]] = {
 class DoseResponseColumns:
     dose: str
     responses: list[str]
-    pain: Optional[str]
+    binary_outcome: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -378,6 +378,56 @@ def _collect_category_features(
     return seg_matched
 
 
+def _resolve_dose_response_segment(
+    trials: pd.DataFrame,
+    *,
+    config: Any,
+    logger: logging.Logger,
+) -> str:
+    """Resolve plotting segment with config-first, paradigm-agnostic fallback."""
+    segment = str(
+        get_config_value(config, "plotting.plots.behavior.dose_response.segment", _DEFAULT_SEGMENT)
+    ).strip()
+    if segment:
+        return segment
+
+    comparison_segment = str(
+        get_config_value(config, "plotting.comparisons.comparison_segment", "")
+    ).strip()
+    if comparison_segment:
+        return comparison_segment
+
+    segments: set[str] = set()
+    for category in CATEGORY_PREFIX_MAP.keys():
+        prefix = f"{category}_"
+        for col in trials.columns:
+            col_str = str(col)
+            if not col_str.startswith(prefix):
+                continue
+            parsed = _parse_feature_column_for_category(col_str, category=category)
+            if parsed and str(parsed.segment).strip():
+                segments.add(str(parsed.segment).strip())
+
+    if not segments:
+        raise ValueError(
+            "dose_response.segment is empty and no feature segments were discoverable. "
+            "Set plotting.plots.behavior.dose_response.segment explicitly."
+        )
+
+    non_baseline = sorted([s for s in segments if s.strip().lower() != "baseline"], key=str.lower)
+    if non_baseline:
+        chosen = non_baseline[0]
+    else:
+        chosen = sorted(segments, key=str.lower)[0]
+
+    logger.info(
+        "Dose-response: segment not configured; auto-selected segment=%r from available segments=%s",
+        chosen,
+        sorted(segments, key=str.lower),
+    )
+    return chosen
+
+
 def _resolve_dose_response_columns(
     trials: pd.DataFrame,
     config: Any,
@@ -448,11 +498,12 @@ def _resolve_dose_response_columns(
     else:
         responses = []
 
-    # Dose-response plotting itself does not require a pain column (pain probability is separate).
-    return DoseResponseColumns(dose=str(dose_col), responses=responses, pain=None)
+    # Dose-response plotting itself does not require a binary-outcome column
+    # (probability plot is separate).
+    return DoseResponseColumns(dose=str(dose_col), responses=responses, binary_outcome=None)
 
 
-def _resolve_dose_pain_columns(trials: pd.DataFrame, config: Any) -> tuple[str, str]:
+def _resolve_dose_binary_outcome_columns(trials: pd.DataFrame, config: Any) -> tuple[str, str]:
     dose_col = str(
         get_config_value(config, "plotting.plots.behavior.dose_response.dose_column", "") or ""
     ).strip()
@@ -466,23 +517,23 @@ def _resolve_dose_pain_columns(trials: pd.DataFrame, config: Any) -> tuple[str, 
             raise ValueError(f"Could not resolve dose column from candidates={dose_candidates}.")
         dose_col = str(resolved)
 
-    pain_col = str(
-        get_config_value(config, "plotting.plots.behavior.dose_response.pain_column", "") or ""
+    binary_outcome_col = str(
+        get_config_value(config, "plotting.plots.behavior.dose_response.binary_outcome_column", "") or ""
     ).strip()
-    if pain_col:
-        if pain_col not in trials.columns:
-            raise ValueError(f"Pain column not found in table: {pain_col!r}.")
+    if binary_outcome_col:
+        if binary_outcome_col not in trials.columns:
+            raise ValueError(f"Binary outcome column not found in table: {binary_outcome_col!r}.")
     else:
-        pain_candidates = list(get_config_value(config, "event_columns.binary_outcome", []) or []) + ["binary_outcome"]
-        resolved = find_column(trials, pain_candidates)
+        outcome_candidates = list(get_config_value(config, "event_columns.binary_outcome", []) or []) + ["binary_outcome"]
+        resolved = find_column(trials, outcome_candidates)
         if resolved is None:
             raise ValueError(
-                f"Could not resolve pain column from candidates={pain_candidates}. "
-                "Provide `dose_response_pain_column` or set `event_columns.binary_outcome`."
+                f"Could not resolve binary outcome column from candidates={outcome_candidates}. "
+                "Provide `dose_response_binary_outcome_column` or set `event_columns.binary_outcome`."
             )
-        pain_col = str(resolved)
+        binary_outcome_col = str(resolved)
 
-    return dose_col, pain_col
+    return dose_col, binary_outcome_col
 
 
 def _find_feature_column(
@@ -1149,18 +1200,18 @@ def _plot_binary_outcome_probability_vs_predictor(
     *,
     subject: str,
     dose_col: str,
-    pain_col: str,
+    binary_outcome_col: str,
     out_path: Path,
     config: Any,
 ) -> None:
-    d = df[[dose_col, pain_col]].copy().dropna()
+    d = df[[dose_col, binary_outcome_col]].copy().dropna()
     if d.empty:
-        raise ValueError(f"No valid rows for pain probability with dose={dose_col!r}.")
+        raise ValueError(f"No valid rows for binary outcome probability with dose={dose_col!r}.")
 
-    pain = (pd.to_numeric(d[pain_col], errors="coerce") > 0).astype(float)
-    d = d.assign(_pain=pain).dropna()
+    binary_outcome = (pd.to_numeric(d[binary_outcome_col], errors="coerce") > 0).astype(float)
+    d = d.assign(_binary_outcome=binary_outcome).dropna()
     if d.empty:
-        raise ValueError(f"No valid numeric rows for pain column {pain_col!r}.")
+        raise ValueError(f"No valid numeric rows for binary outcome column {binary_outcome_col!r}.")
 
     with _visualize_style():
         plot_cfg = get_plot_config(config)
@@ -1168,7 +1219,7 @@ def _plot_binary_outcome_probability_vs_predictor(
         ax = fig.add_subplot(111)
         _style_axes(ax)
 
-        g = d.groupby(dose_col)["_pain"].agg(["count", "mean"]).reset_index().rename(columns={"count": "n"})
+        g = d.groupby(dose_col)["_binary_outcome"].agg(["count", "mean"]).reset_index().rename(columns={"count": "n"})
         g["sem_binomial"] = np.sqrt(g["mean"] * (1.0 - g["mean"]) / g["n"].clip(lower=1))
 
         ax.errorbar(
@@ -1187,8 +1238,8 @@ def _plot_binary_outcome_probability_vs_predictor(
         )
         ax.set_ylim(-0.05, 1.05)
         ax.set_xlabel(dose_col)
-        ax.set_ylabel(f"P({pain_col}=1)")
-        ax.set_title(f"Pain probability vs {dose_col} (sub-{subject})")
+        ax.set_ylabel(f"P({binary_outcome_col}=1)")
+        ax.set_title(f"Binary outcome probability vs {dose_col} (sub-{subject})")
         ax.legend(frameon=False, loc="best")
 
         _save_fig_scientific(fig, out_path, plot_cfg=plot_cfg, config=config, has_suptitle=False)
@@ -1287,14 +1338,10 @@ def visualize_dose_response(
     if selected_scopes:
         allowed_scope_set = {str(s).strip() for s in selected_scopes if str(s).strip()}
 
-    segment = str(
-        get_config_value(config, "plotting.plots.behavior.dose_response.segment", _DEFAULT_SEGMENT)
-    ).strip()
+    segment = _resolve_dose_response_segment(trials, config=config, logger=logger)
     stat = str(
         get_config_value(config, "plotting.plots.behavior.dose_response.stat", _DEFAULT_STAT)
     ).strip()
-    if not segment:
-        raise ValueError("dose_response.segment must be non-empty.")
     if not stat:
         raise ValueError("dose_response.stat must be non-empty.")
 
@@ -1431,7 +1478,7 @@ def visualize_binary_outcome_probability(
     config: Any,
     logger: logging.Logger,
 ) -> dict[str, Path]:
-    """Generate pain probability vs dose as a standalone plot."""
+    """Generate binary outcome probability vs dose as a standalone plot."""
     if not isinstance(subject, str) or not subject:
         raise ValueError("subject must be a non-empty string")
     if not isinstance(deriv_root, Path):
@@ -1468,23 +1515,23 @@ def visualize_binary_outcome_probability(
     if aligned_events is None or aligned_events.empty:
         raise ValueError(f"Failed to load aligned events for sub-{subject}, task-{task}")
 
-    dose_col, pain_col = _resolve_dose_pain_columns(aligned_events, config)
+    dose_col, binary_outcome_col = _resolve_dose_binary_outcome_columns(aligned_events, config)
 
     table = aligned_events.reset_index(drop=True).copy()
     table[dose_col] = pd.to_numeric(_require_column(table, dose_col), errors="coerce")
-    table[pain_col] = pd.to_numeric(_require_column(table, pain_col), errors="coerce")
+    table[binary_outcome_col] = pd.to_numeric(_require_column(table, binary_outcome_col), errors="coerce")
 
     out_path = out_dir / f"sub-{subject}_binary_outcome_probability_vs_{dose_col}"
     _plot_binary_outcome_probability_vs_predictor(
         table,
         subject=subject,
         dose_col=dose_col,
-        pain_col=pain_col,
+        binary_outcome_col=binary_outcome_col,
         out_path=out_path,
         config=config,
     )
 
-    logger.info("Created pain probability plot under %s", out_dir)
+    logger.info("Created binary outcome probability plot under %s", out_dir)
     return {f"binary_outcome_probability_vs_{dose_col}": out_path}
 
 
