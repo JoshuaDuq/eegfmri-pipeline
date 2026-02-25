@@ -96,15 +96,15 @@ def _prepare_predictor_data(
     aligned_events = _get_aligned_events_df_for_tfr(tfr, events_df, n_trials)
     temp_col = get_predictor_column_from_config(config, aligned_events) if aligned_events is not None else None
     pred_series = extract_predictor_series(tfr, aligned_events, temp_col, n_trials) if temp_col else None
-    
-    if temp_series is None:
+
+    if pred_series is None:
         return PredictorData(False, None, None, None, None, None, None)
-    
-    pred_result = create_predictor_masks(temp_series)
-    if temp_result[0] is None:
+
+    pred_result = create_predictor_masks(pred_series)
+    if pred_result[0] is None:
         return PredictorData(False, None, None, None, None, None, None)
-    
-    t_min, t_max, mask_min, mask_max = temp_result
+
+    t_min, t_max, mask_min, mask_max = pred_result
     
     if mask_min.sum() == 0 or mask_max.sum() == 0:
         return PredictorData(False, None, None, None, None, None, None)
@@ -112,7 +112,7 @@ def _prepare_predictor_data(
     try:
         ensure_aligned_lengths(
             tfr_sub, mask_min, mask_max,
-            context="Temperature contrast",
+            context="Predictor contrast",
             strict=get_strict_mode(config),
             logger=logger
         )
@@ -120,7 +120,10 @@ def _prepare_predictor_data(
         tfr_min = tfr_sub[mask_min].average()
         tfr_max = tfr_sub[mask_max].average()
         
-        log(f"Temperature contrast: max temp={int(mask_max.sum())}, min temp={int(mask_min.sum())} trials.", logger)
+        log(
+            f"Predictor contrast: max n={int(mask_max.sum())}, min n={int(mask_min.sum())} trials.",
+            logger,
+        )
         return PredictorData(True, tfr_max, tfr_min, mask_max, mask_min, t_min, t_max)
     except ValueError as e:
         log(f"{e}. Skipping predictor contrast.", logger, "warning")
@@ -505,7 +508,7 @@ def _prepare_temporal_topomap_data(
     mne.time_frequency.AverageTFR,
     mne.time_frequency.AverageTFR,
     mne.time_frequency.EpochsTFR,
-    TemperatureData,
+    PredictorData,
     np.ndarray,
     np.ndarray,
     Tuple[float, float],

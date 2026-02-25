@@ -589,16 +589,16 @@ def contrast_maxmin_predictor(
     n = compute_aligned_data_length(tfr, events_df)
     
     pred_series = extract_predictor_series(tfr, events_df, temp_col, n)
-    if temp_series is None:
+    if pred_series is None:
         log("Max-vs-min predictor contrast: no predictor column found; skipping.", logger)
         return
 
-    t_min, t_max = get_predictor_range(temp_series)
+    t_min, t_max = get_predictor_range(pred_series)
     if t_min is None or t_max is None:
         log("Max-vs-min predictor contrast: need at least 2 predictor levels; skipping.", logger)
         return
 
-    mask_min, mask_max = create_predictor_masks_from_range(temp_series, t_min, t_max)
+    mask_min, mask_max = create_predictor_masks_from_range(pred_series, t_min, t_max)
     if mask_min.sum() == 0 or mask_max.sum() == 0:
         log(f"Max-vs-min predictor contrast: zero trials in one group (min n={int(mask_min.sum())}, max n={int(mask_max.sum())}); skipping.", logger)
         return
