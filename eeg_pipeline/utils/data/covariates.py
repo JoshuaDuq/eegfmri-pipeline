@@ -286,7 +286,7 @@ def _build_covariate_matrices(
         covariates_df, predictor_column, config
     )
 
-    return covariates_df, covariates_without_temp
+    return covariates_df, covariates_without_predictor
 
 
 def build_covariate_matrix(

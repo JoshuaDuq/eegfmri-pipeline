@@ -125,10 +125,10 @@ def get_predictor_range(
         return None, None
 
     unique_preds = _extract_unique_predictors(temp_series, predictor_rounding_decimals)
-    if len(unique_temps) < min_predictors_required:
+    if len(unique_preds) < min_predictors_required:
         return None, None
 
-    return float(min(unique_temps)), float(max(unique_temps))
+    return float(min(unique_preds)), float(max(unique_preds))
 
 
 def create_predictor_masks(
@@ -150,11 +150,11 @@ def create_predictor_masks(
         return None, None, None, None
 
     unique_preds = _extract_unique_predictors(temp_series, predictor_rounding_decimals)
-    if len(unique_temps) < min_predictors_required:
+    if len(unique_preds) < min_predictors_required:
         return None, None, None, None
 
-    t_min = float(min(unique_temps))
-    t_max = float(max(unique_temps))
+    t_min = float(min(unique_preds))
+    t_max = float(max(unique_preds))
     mask_min = _create_predictor_mask(temp_series, t_min, predictor_rounding_decimals)
     mask_max = _create_predictor_mask(temp_series, t_max, predictor_rounding_decimals)
     return t_min, t_max, mask_min, mask_max
