@@ -72,7 +72,7 @@ def _coerce_set_value(raw_value: str) -> Any:
     lowered = raw_value.lower()
     if lowered in {"true", "false"}:
         return lowered == "true"
-    if lowered in {"none", "null"}:
+    if lowered == "null":
         return None
 
     try:

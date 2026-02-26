@@ -826,10 +826,12 @@ templates. Labels are backfitted to the full time series with minimum-duration s
 **Per-state statistics** for state $k$:
 
 ```math
-\text{coverage}_k = \frac{\#\{t : s(t) = k\}}{N_t}, \qquad
+\text{coverage}_k = \frac{N_k}{N_t}, \qquad
 \text{mean duration (ms)}, \qquad
 \text{occurrence rate (Hz)}.
 ```
+
+where $N_k$ is the number of time points with $s(t) = k$ and $N_t$ is the total number of time points.
 
 Transition probabilities between states are also computed.
 In `trial_ml_safe` mode, template clustering is restricted to training trials.
@@ -846,7 +848,7 @@ Per segment and channel:
 |--------|---------|
 | Variance | $\mathrm{Var}(x) = \frac{1}{N_t-1}\sum_t (x(t)-\bar{x})^2$ |
 | Peak-to-peak | $\mathrm{ptp} = \max_t x(t) - \min_t x(t)$ |
-| Finite fraction | $\mathrm{finite} = \#\{t : x(t)\ \text{finite}\} \,/\, N_t$ |
+| Finite fraction | $\mathrm{finite} = N_\text{finite} / N_t$ |
 | SNR (dB) | $10\log_{10}(d_\text{signal} / d_\text{noise})$, where $d$ is band-limited power density |
 | Muscle artifact index | Fraction of PSD power in high-frequency band (e.g. 30–80 Hz) |
 

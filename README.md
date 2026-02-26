@@ -423,7 +423,7 @@ Trial-level predictive modeling with leave-one-subject-out (LOSO) cross-validati
 | `classify` | Binary pain classification (SVM, logistic regression, random forest, CNN) |
 | `timegen` | Temporal generalization: train at one time window, evaluate across all windows |
 | `model_comparison` | Compare model families under a shared CV scheme |
-| `incremental_validity` | Quantify $\Delta R^2$ when adding EEG features over a baseline predictor |
+| `incremental_validity` | Quantify change in explained variance (ΔR²) when adding EEG features over a baseline predictor |
 | `uncertainty` | Conformal prediction intervals for calibrated uncertainty estimates |
 | `shap` | SHAP-based feature importance |
 | `permutation` | Permutation-based feature importance |
