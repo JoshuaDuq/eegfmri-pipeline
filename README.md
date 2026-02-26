@@ -11,6 +11,14 @@ machine learning, fMRI first-level GLM, and publication-ready visualization —
 all from a unified CLI and interactive TUI.
 Under active development.
 
+
+
+<p align="center">
+  <img src="docs/screenshots/tui_main_menu.png" width="800" alt="Main menu — All pipeline stages at a glance"/>
+</p>
+
+
+
 ---
 
 ## Table of Contents
@@ -56,9 +64,6 @@ relevant to your workflow:
 | fMRI Analysis | [fmri_pipeline/README.md](fmri_pipeline/README.md) |
 | Interactive TUI | [eeg_pipeline/cli/tui/README.md](eeg_pipeline/cli/tui/README.md) |
 
-<p align="center">
-  <img src="docs/screenshots/tui_main_menu.png" width="800" alt="Main menu — All pipeline stages at a glance"/>
-</p>
 
 ---
 
