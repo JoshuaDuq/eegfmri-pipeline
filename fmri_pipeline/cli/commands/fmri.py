@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List
 
 from eeg_pipeline.cli.common import (
     add_common_subject_args,
@@ -13,6 +13,9 @@ from eeg_pipeline.cli.common import (
     add_task_arg,
     create_progress_reporter,
 )
+from eeg_pipeline.utils.config.overrides import apply_set_overrides
+from fmri_pipeline.cli.commands.subject_selection import resolve_subjects
+from fmri_pipeline.utils.config import apply_fmri_config_defaults
 
 
 def setup_fmri(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -285,53 +288,6 @@ def setup_fmri(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     return parser
 
 
-def _subjects_from_bids_root(
-    bids_root: Path, requested: Optional[List[str]]
-) -> List[str]:
-    if not bids_root.exists():
-        raise FileNotFoundError(f"fMRI BIDS root does not exist: {bids_root}")
-
-    discovered = sorted(
-        p.name.replace("sub-", "")
-        for p in bids_root.glob("sub-*")
-        if p.is_dir()
-    )
-    if requested is None:
-        return discovered
-
-    missing = sorted(set(requested) - set(discovered))
-    if missing:
-        raise ValueError(
-            f"Requested subject(s) not found in BIDS fMRI root: {missing}"
-        )
-    return requested
-
-
-def _parse_group_arg(group: str) -> Optional[List[str]]:
-    group = (group or "").strip()
-    if group.lower() in {"all", "*", "@all"}:
-        return None
-    normalized = group.replace(";", ",").replace(" ", ",")
-    values = [s.strip() for s in normalized.split(",") if s.strip()]
-    return values or None
-
-
-def _resolve_subjects(args: argparse.Namespace, bids_root: Path, config: Any) -> List[str]:
-    requested: Optional[List[str]] = None
-
-    if getattr(args, "group", None):
-        requested = _parse_group_arg(args.group)
-    elif getattr(args, "all_subjects", False):
-        requested = None
-    elif getattr(args, "subject", None):
-        requested = list(dict.fromkeys(args.subject))
-    else:
-        cfg_subjects = getattr(config, "subjects", None) or []
-        requested = list(cfg_subjects) if cfg_subjects else None
-
-    return _subjects_from_bids_root(bids_root, requested)
-
-
 def _update_fmri_config_from_args(args: argparse.Namespace, config: Any) -> None:
     fmri_cfg = config.setdefault("fmri_preprocessing", {})
     fmriprep_cfg = fmri_cfg.setdefault("fmriprep", {})
@@ -417,18 +373,21 @@ def run_fmri(args: argparse.Namespace, _subjects: List[str], config: Any) -> Non
 
     progress = create_progress_reporter(args)
 
+    apply_fmri_config_defaults(config)
+
     if args.bids_fmri_root:
         config.setdefault("paths", {})["bids_fmri_root"] = args.bids_fmri_root
     if args.deriv_root:
         config.setdefault("paths", {})["deriv_root"] = args.deriv_root
 
     _update_fmri_config_from_args(args, config)
+    apply_set_overrides(config, getattr(args, "set_overrides", None))
 
     bids_fmri_root = config.get("paths.bids_fmri_root")
     if not bids_fmri_root:
         raise ValueError("Missing required config value: paths.bids_fmri_root")
 
-    subjects = _resolve_subjects(args, Path(bids_fmri_root), config)
+    subjects = resolve_subjects(args, Path(bids_fmri_root), config)
 
     pipeline = FmriPreprocessingPipeline(config=config)
     pipeline.run_batch(

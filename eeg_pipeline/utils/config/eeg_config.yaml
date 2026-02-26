@@ -1178,11 +1178,6 @@ statistics:
     log_base: *log_base
     percentage_multiplier: *percentage_multiplier
 
-cluster_correction:
-  enabled: false
-  n_permutations: 1000
-  forming_threshold: *default_alpha
-
 validation:
   min_epochs: 20
   min_channels: 10
@@ -1338,12 +1333,8 @@ plotting:
       pac_pairs: ["theta_beta", "theta_gamma", "alpha_beta", "alpha_gamma"]
 
 ###################################################################
-# 7. SYSTEM
+# 7. IO CONSTANTS
 ###################################################################
-system:
-  n_jobs: -1
-  strict_mode: true
-
 io:
   constants:
     predictor_range: []

@@ -4,7 +4,7 @@ package wizard
 
 func (m Model) getPreprocessingOptions() []optionType {
 	isFull := m.modeIndex == 0 || m.modeOptions[m.modeIndex] == "full"
-	options := []optionType{optUseDefaults}
+	options := []optionType{optUseDefaults, optConfigSetOverrides}
 
 	// Stage Selection group (only show if not in full mode)
 	if !isFull {
@@ -125,6 +125,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 		optEventColRating,
 		optEventColBinaryOutcome,
 		optEventColCondition,
+		optEventColRequired,
 		optConditionPreferredPrefixes,
 	)
 

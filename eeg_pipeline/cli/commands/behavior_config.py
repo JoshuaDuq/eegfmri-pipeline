@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
@@ -71,6 +72,30 @@ def _to_optional_robust_method(value: Any) -> str | None:
     return None if parsed in ("", "none") else parsed
 
 
+def _to_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(str(value))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON object value: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("Expected JSON object")
+    return parsed
+
+
+def _to_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    try:
+        parsed = json.loads(str(value))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON array value: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("Expected JSON array")
+    return parsed
+
+
 def _set_nested_config_value(config: Any, config_path: str, value: Any) -> None:
     parts = config_path.split(".")
     current = config
@@ -118,6 +143,7 @@ _GENERAL_OVERRIDE_RULES = (
     ),
     ConfigOverrideRule("run_adjustment_max_dummies", "behavior_analysis.run_adjustment.max_dummies", _to_int),
     ConfigOverrideRule("fdr_alpha", "behavior_analysis.statistics.fdr_alpha", _to_float),
+    ConfigOverrideRule("statistics_alpha", "statistics.alpha", _to_float),
     ConfigOverrideRule("stats_predictor_control", "behavior_analysis.statistics.predictor_control", _to_lower_stripped),
     ConfigOverrideRule("stats_allow_iid_trials", "behavior_analysis.statistics.allow_iid_trials", _to_bool),
     ConfigOverrideRule("stats_hierarchical_fdr", "behavior_analysis.statistics.hierarchical_fdr", _to_bool),
@@ -126,6 +152,31 @@ _GENERAL_OVERRIDE_RULES = (
         "exclude_non_trialwise_features",
         "behavior_analysis.features.exclude_non_trialwise_features",
         _to_bool,
+    ),
+    ConfigOverrideRule(
+        "feature_registry_files_json",
+        "behavior_analysis.feature_registry.files",
+        _to_json_object,
+    ),
+    ConfigOverrideRule(
+        "feature_registry_source_to_feature_type_json",
+        "behavior_analysis.feature_registry.source_to_feature_type",
+        _to_json_object,
+    ),
+    ConfigOverrideRule(
+        "feature_registry_type_hierarchy_json",
+        "behavior_analysis.feature_registry.feature_type_hierarchy",
+        _to_json_object,
+    ),
+    ConfigOverrideRule(
+        "feature_registry_patterns_json",
+        "behavior_analysis.feature_registry.feature_patterns",
+        _to_json_object,
+    ),
+    ConfigOverrideRule(
+        "feature_registry_classifiers_json",
+        "behavior_analysis.feature_registry.feature_classifiers",
+        _to_json_list,
     ),
     ConfigOverrideRule("compute_change_scores", "behavior_analysis.correlations.compute_change_scores", _to_bool),
     ConfigOverrideRule("loso_stability", "behavior_analysis.correlations.loso_stability", _to_bool),
@@ -147,6 +198,11 @@ _GENERAL_OVERRIDE_RULES = (
 _TRIAL_TABLE_OVERRIDE_RULES = (
     ConfigOverrideRule("trial_table_format", "behavior_analysis.trial_table.format", _to_lower_stripped),
     ConfigOverrideRule("trial_table_add_lag_features", "behavior_analysis.trial_table.add_lag_features", _to_bool),
+    ConfigOverrideRule(
+        "trial_table_disallow_positional_alignment",
+        "behavior_analysis.trial_table.disallow_positional_alignment",
+        _to_bool,
+    ),
     ConfigOverrideRule(
         "trial_order_max_missing_fraction",
         "behavior_analysis.trial_order.max_missing_fraction",

@@ -244,6 +244,15 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				hint = "Press Space to use defaults"
 				expandIndicator = " ▼"
 			}
+		case optConfigSetOverrides:
+			label = "Config Overrides"
+			value = strings.TrimSpace(m.configSetOverrides)
+			if m.editingText && m.editingTextField == textFieldConfigSetOverrides {
+				value = m.textBuffer + "█"
+			} else if value == "" {
+				value = "(none)"
+			}
+			hint = "Advanced/uncommon keys: key=value;key2=value2 (emits repeated --set)"
 
 		// Section headers - styled as distinct groups with chevron indicators
 		case optFeatGroupConnectivity:

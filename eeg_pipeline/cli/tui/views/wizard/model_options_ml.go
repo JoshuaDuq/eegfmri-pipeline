@@ -10,7 +10,7 @@ func (m Model) getMLOptions() []optionType {
 		mode = m.modeOptions[m.modeIndex]
 	}
 
-	opts := []optionType{optUseDefaults}
+	opts := []optionType{optUseDefaults, optConfigSetOverrides}
 
 	// ── Data & Features ──────────────────────────────────────────
 	opts = append(opts, optMLGroupData)
@@ -164,6 +164,7 @@ func (m Model) getMLOptions() []optionType {
 			optMLCvMinValidPermFraction,
 			optMLCvDefaultNBins,
 			optMLEvalCIMethod,
+			optMLEvalSubjectWeighting,
 			optMLEvalBootstrapIterations,
 			optMLDataCovariatesStrict,
 			optMLDataMaxExcludedSubjectFraction,
@@ -171,7 +172,7 @@ func (m Model) getMLOptions() []optionType {
 			optMLInterpretabilityGroupedOutputs,
 		)
 		if mode == "incremental_validity" {
-			opts = append(opts, optMLIncrementalBaselineAlpha)
+			opts = append(opts, optMLIncrementalBaselineAlpha, optMLIncrementalRequireBaselinePredictors)
 		}
 		if mode == "uncertainty" {
 			opts = append(opts, optMLUncertaintyAlpha)

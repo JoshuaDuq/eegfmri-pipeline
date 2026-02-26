@@ -206,6 +206,15 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 				value = "Custom"
 				hint = "Space to use defaults"
 			}
+		case optConfigSetOverrides:
+			label = "Config Overrides"
+			value = strings.TrimSpace(m.configSetOverrides)
+			if m.editingText && m.editingTextField == textFieldConfigSetOverrides {
+				value = m.textBuffer + "█"
+			} else if value == "" {
+				value = "(none)"
+			}
+			hint = "Advanced/uncommon keys: key=value;key2=value2 (emits repeated --set)"
 
 		// Group headers with chevron indicators
 		case optPrepGroupStages:
@@ -601,6 +610,17 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 			value = val
 			hint = "comma-separated condition label columns"
+		case optEventColRequired:
+			label = "Required Event Groups"
+			val := m.eventColRequired
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldEventColRequired {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "logical groups (e.g., outcome,predictor,condition)"
 		case optConditionPreferredPrefixes:
 			label = "Condition Trigger Prefixes"
 			val := m.conditionPreferredPrefixes

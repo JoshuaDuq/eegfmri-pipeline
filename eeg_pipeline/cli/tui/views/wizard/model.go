@@ -563,6 +563,7 @@ const (
 	textFieldBidsFmriRoot
 	textFieldDerivRoot
 	textFieldSourceRoot
+	textFieldConfigSetOverrides
 	// fMRI preprocessing text fields
 	textFieldFmriFmriprepImage
 	textFieldFmriFmriprepOutputDir
@@ -762,6 +763,7 @@ const (
 	textFieldEventColOutcome
 	textFieldEventColBinaryOutcome
 	textFieldEventColCondition
+	textFieldEventColRequired
 	textFieldConditionPreferredPrefixes
 
 	// Change Scores text fields
@@ -775,6 +777,11 @@ const (
 
 	// Behavior Statistics text fields
 	textFieldBehaviorPermGroupColumnPreference
+	textFieldBehaviorFeatureRegistryFilesJSON
+	textFieldBehaviorFeatureRegistrySourceToTypeJSON
+	textFieldBehaviorFeatureRegistryTypeHierarchyJSON
+	textFieldBehaviorFeatureRegistryPatternsJSON
+	textFieldBehaviorFeatureRegistryClassifiersJSON
 
 	// System / IO text fields
 	textFieldIOPredictorRange
@@ -925,12 +932,13 @@ type Model struct {
 	stepIndex   int
 
 	// Project setup (received from global config)
-	task         string
-	bidsRoot     string
-	bidsFmriRoot string
-	derivRoot    string
-	sourceRoot   string
-	repoRoot     string // Project repository root for running Python commands
+	task               string
+	bidsRoot           string
+	bidsFmriRoot       string
+	derivRoot          string
+	sourceRoot         string
+	configSetOverrides string // Semicolon-separated KEY=VALUE config overrides
+	repoRoot           string // Project repository root for running Python commands
 
 	// Mode selection
 	modeOptions      []string
@@ -1871,8 +1879,9 @@ type Model struct {
 	behaviorGroupAdvancedExpanded          bool
 
 	// Trial table / predictor residual config (subject-level)
-	trialTableFormat         int // 0=parquet, 1=tsv
-	trialTableAddLagFeatures bool
+	trialTableFormat                      int // 0=parquet, 1=tsv
+	trialTableAddLagFeatures              bool
+	trialTableDisallowPositionalAlignment bool
 
 	// Trial order validation (used when controlTrialOrder=true)
 	trialOrderMaxMissingFraction float64
@@ -2231,10 +2240,12 @@ type Model struct {
 	mlCvMinValidPermFraction         float64 // Min valid permutation fraction
 	mlCvDefaultNBins                 int     // Default stratification bins
 	mlEvalCIMethod                   int     // 0: bootstrap, 1: fixed_effects
+	mlEvalSubjectWeighting           int     // 0: equal, 1: trial_count
 	mlEvalBootstrapIterations        int     // Bootstrap iterations
 	mlDataCovariatesStrict           bool    // Error on missing covariates
 	mlDataMaxExcludedSubjectFraction float64 // Max excluded subject fraction
 	mlIncrementalBaselineAlpha       float64 // Baseline model alpha
+	mlIncrementalRequireBaselinePred bool    // Require baseline predictors in incremental_validity
 	mlInterpretabilityGroupedOutputs bool    // Grouped importance tables
 	mlTimeGenMinSubjects             int     // TG min subjects
 	mlTimeGenMinValidPermFraction    float64 // TG min valid perm fraction
@@ -2257,6 +2268,7 @@ type Model struct {
 	eventColOutcome            string // Rating column candidates (comma-separated)
 	eventColBinaryOutcome      string // Binary outcome column candidates (comma-separated)
 	eventColCondition          string // Condition label column candidates (comma-separated)
+	eventColRequired           string // Required logical event groups (comma-separated)
 	conditionPreferredPrefixes string // Preferred trigger prefixes for auto condition detection (comma-separated)
 
 	// Per-Family Spatial Transforms (0: none, 1: csd, 2: laplacian)
@@ -2306,13 +2318,19 @@ type Model struct {
 	microstatesAssignFromGfpPeaks bool // Assign states at GFP peaks then backfit
 
 	// Behavior Statistics
-	behaviorStatsTempControl            int    // 0: spline, 1: linear
-	behaviorStatsAllowIIDTrials         bool   // Allow i.i.d. trial assumptions
-	behaviorStatsHierarchicalFDR        bool   // Hierarchical FDR correction
-	behaviorStatsComputeReliability     bool   // Compute reliability
-	behaviorPermScheme                  int    // 0: circular_shift, 1: shuffle
-	behaviorPermGroupColumnPreference   string // Group column preference order (comma-separated)
-	behaviorExcludeNonTrialwiseFeatures bool   // Drop broadcast features
+	behaviorStatsTempControl               int     // 0: spline, 1: linear
+	behaviorStatsAllowIIDTrials            bool    // Allow i.i.d. trial assumptions
+	behaviorStatsHierarchicalFDR           bool    // Hierarchical FDR correction
+	behaviorStatsComputeReliability        bool    // Compute reliability
+	statisticsAlpha                        float64 // Global fallback alpha for shared statistics helpers
+	behaviorPermScheme                     int     // 0: circular_shift, 1: shuffle
+	behaviorPermGroupColumnPreference      string  // Group column preference order (comma-separated)
+	behaviorExcludeNonTrialwiseFeatures    bool    // Drop broadcast features
+	behaviorFeatureRegistryFilesJSON       string  // behavior_analysis.feature_registry.files JSON
+	behaviorFeatureRegistrySourceJSON      string  // behavior_analysis.feature_registry.source_to_feature_type JSON
+	behaviorFeatureRegistryHierarchyJSON   string  // behavior_analysis.feature_registry.feature_type_hierarchy JSON
+	behaviorFeatureRegistryPatternsJSON    string  // behavior_analysis.feature_registry.feature_patterns JSON
+	behaviorFeatureRegistryClassifiersJSON string  // behavior_analysis.feature_registry.feature_classifiers JSON
 
 	// Global Statistics & Validation
 	globalNBootstrap                int     // Global bootstrap count
@@ -2832,9 +2850,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		runAdjustmentIncludeInCorrelations: true,
 		runAdjustmentMaxDummies:            20,
 
-		trialTableFormat:             1,
-		trialTableAddLagFeatures:     true,
-		trialOrderMaxMissingFraction: 0.1,
+		trialTableFormat:                      1,
+		trialTableAddLagFeatures:              true,
+		trialTableDisallowPositionalAlignment: false,
+		trialOrderMaxMissingFraction:          0.1,
 
 		featureSummariesEnabled:         true,
 		featureQCEnabled:                false,
@@ -3120,10 +3139,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlCvMinValidPermFraction:         0.8,
 		mlCvDefaultNBins:                 5,
 		mlEvalCIMethod:                   0, // 0: bootstrap
+		mlEvalSubjectWeighting:           0, // 0: equal
 		mlEvalBootstrapIterations:        1000,
 		mlDataCovariatesStrict:           false,
 		mlDataMaxExcludedSubjectFraction: 0.2,
 		mlIncrementalBaselineAlpha:       0.05,
+		mlIncrementalRequireBaselinePred: true,
 		mlInterpretabilityGroupedOutputs: true,
 		mlTimeGenMinSubjects:             5,
 		mlTimeGenMinValidPermFraction:    0.5,
@@ -3146,6 +3167,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		eventColOutcome:            "outcome",
 		eventColBinaryOutcome:      "binary_outcome,outcome_binary,label",
 		eventColCondition:          "condition,trial_type",
+		eventColRequired:           "outcome",
 		conditionPreferredPrefixes: "",
 
 		// Per-Family Spatial Transforms defaults (all 0 = none / inherit global)
@@ -3195,13 +3217,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		microstatesAssignFromGfpPeaks: true,
 
 		// Behavior Statistics defaults
-		behaviorStatsTempControl:            0, // 0: spline
-		behaviorStatsAllowIIDTrials:         false,
-		behaviorStatsHierarchicalFDR:        true,
-		behaviorStatsComputeReliability:     true,
-		behaviorPermScheme:                  0, // 0: circular_shift
-		behaviorPermGroupColumnPreference:   "run_id,block",
-		behaviorExcludeNonTrialwiseFeatures: true,
+		behaviorStatsTempControl:               0, // 0: spline
+		behaviorStatsAllowIIDTrials:            false,
+		behaviorStatsHierarchicalFDR:           true,
+		behaviorStatsComputeReliability:        true,
+		statisticsAlpha:                        0.05,
+		behaviorPermScheme:                     0, // 0: circular_shift
+		behaviorPermGroupColumnPreference:      "run_id,block",
+		behaviorExcludeNonTrialwiseFeatures:    true,
+		behaviorFeatureRegistryFilesJSON:       "",
+		behaviorFeatureRegistrySourceJSON:      "",
+		behaviorFeatureRegistryHierarchyJSON:   "",
+		behaviorFeatureRegistryPatternsJSON:    "",
+		behaviorFeatureRegistryClassifiersJSON: "",
 
 		// Global Statistics & Validation defaults
 		globalNBootstrap:                1000,

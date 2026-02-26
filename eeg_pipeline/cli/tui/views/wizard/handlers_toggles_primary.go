@@ -42,6 +42,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optConfigSetOverrides:
+		m.startTextEdit(textFieldConfigSetOverrides)
+		m.useDefaultAdvanced = false
 	case optFeatGroupConnectivity:
 		m.featGroupConnectivityExpanded = !m.featGroupConnectivityExpanded
 		if !m.featGroupConnectivityExpanded && m.expandedOption == expandedConnectivityMeasures {
@@ -1239,6 +1242,9 @@ func (m *Model) togglePlottingAdvancedOption() {
 		}
 		m.UpdateAdvancedOffset()
 		return
+	case optConfigSetOverrides:
+		m.startTextEdit(textFieldConfigSetOverrides)
+		m.useDefaultAdvanced = false
 
 	case optPlotGroupDefaults, optPlotGroupFonts, optPlotGroupLayout, optPlotGroupFigureSizes,
 		optPlotGroupColors, optPlotGroupAlpha, optPlotGroupScatter, optPlotGroupBar,
@@ -1585,13 +1591,16 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	}
 
 	opt := options[m.advancedCursor]
-	if opt != optUseDefaults && !sectionEnabled {
+	if opt != optUseDefaults && opt != optConfigSetOverrides && !sectionEnabled {
 		return
 	}
 
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optConfigSetOverrides:
+		m.startTextEdit(textFieldConfigSetOverrides)
+		m.useDefaultAdvanced = false
 	// Behavior sub-section headers are non-interactive visual separators
 	case optBehaviorSubCorrelationSettings, optBehaviorSubCovariates, optBehaviorSubRunAdjustment,
 		optBehaviorSubCorrelationsExtra, optBehaviorSubFeatureQC, optBehaviorSubOutcome,
@@ -1751,6 +1760,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optTrialTableAddLagFeatures:
 		m.trialTableAddLagFeatures = !m.trialTableAddLagFeatures
+		m.useDefaultAdvanced = false
+	case optBehaviorTrialTableDisallowPositionalAlignment:
+		m.trialTableDisallowPositionalAlignment = !m.trialTableDisallowPositionalAlignment
 		m.useDefaultAdvanced = false
 	case optTrialOrderMaxMissingFraction:
 		m.startNumberEdit()
@@ -2366,6 +2378,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorStatsComputeReliability:
 		m.behaviorStatsComputeReliability = !m.behaviorStatsComputeReliability
 		m.useDefaultAdvanced = false
+	case optStatisticsAlpha:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optBehaviorPermScheme:
 		m.behaviorPermScheme = (m.behaviorPermScheme + 1) % 2
 		m.useDefaultAdvanced = false
@@ -2374,6 +2389,21 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optBehaviorExcludeNonTrialwiseFeatures:
 		m.behaviorExcludeNonTrialwiseFeatures = !m.behaviorExcludeNonTrialwiseFeatures
+		m.useDefaultAdvanced = false
+	case optBehaviorFeatureRegistryFilesJSON:
+		m.startTextEdit(textFieldBehaviorFeatureRegistryFilesJSON)
+		m.useDefaultAdvanced = false
+	case optBehaviorFeatureRegistrySourceToTypeJSON:
+		m.startTextEdit(textFieldBehaviorFeatureRegistrySourceToTypeJSON)
+		m.useDefaultAdvanced = false
+	case optBehaviorFeatureRegistryTypeHierarchyJSON:
+		m.startTextEdit(textFieldBehaviorFeatureRegistryTypeHierarchyJSON)
+		m.useDefaultAdvanced = false
+	case optBehaviorFeatureRegistryPatternsJSON:
+		m.startTextEdit(textFieldBehaviorFeatureRegistryPatternsJSON)
+		m.useDefaultAdvanced = false
+	case optBehaviorFeatureRegistryClassifiersJSON:
+		m.startTextEdit(textFieldBehaviorFeatureRegistryClassifiersJSON)
 		m.useDefaultAdvanced = false
 	// Global Statistics & Validation
 	case optGlobalNBootstrap:

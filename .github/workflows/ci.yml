@@ -47,6 +47,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Verify CLI/TUI config coverage
+        run: |
+          python eeg_pipeline/utils/config/introspect.py --repo-root . --strict
+
       - name: Run tests
         run: |
           python -m compileall -q eeg_pipeline fmri_pipeline scripts tests

@@ -8,6 +8,10 @@ from typing import Any, List
 
 from eeg_pipeline.pipelines.constants import FEATURE_CATEGORIES
 from eeg_pipeline.cli.commands.base import FEATURE_VISUALIZE_CATEGORIES
+from eeg_pipeline.utils.parsing import (
+    parse_frequency_band_definitions,
+    parse_roi_definitions,
+)
 
 FEATURE_CATEGORY_CHOICES = FEATURE_CATEGORIES + [
     category for category in FEATURE_VISUALIZE_CATEGORIES if category not in FEATURE_CATEGORIES
@@ -769,44 +773,10 @@ def _apply_spatial_transform_overrides(args: argparse.Namespace, config: Any) ->
             per_family_cfg[family] = value
 
 
-def _parse_frequency_band_definitions(band_defs: List[str]) -> dict:
-    """Parse frequency band definitions from CLI format 'name:low:high'."""
-    bands = {}
-    for band_def in band_defs:
-        parts = band_def.split(":")
-        if len(parts) != 3:
-            raise ValueError(f"Invalid frequency band definition '{band_def}'; expected 'name:low:high'")
-        name = parts[0].strip().lower()
-        try:
-            low = float(parts[1].strip())
-            high = float(parts[2].strip())
-        except ValueError:
-            raise ValueError(f"Invalid frequency values in '{band_def}'; expected numeric low:high")
-        if low >= high:
-            raise ValueError(f"Invalid frequency range in '{band_def}'; low must be < high")
-        bands[name] = [low, high]
-    return bands
-
-
-def _parse_roi_definitions(roi_defs: List[str]) -> dict:
-    """Parse ROI definitions from CLI format 'name:ch1,ch2,...'."""
-    rois = {}
-    for roi_def in roi_defs:
-        if ":" not in roi_def:
-            raise ValueError(f"Invalid ROI definition '{roi_def}'; expected 'name:ch1,ch2,...'")
-        name, channels_str = roi_def.split(":", 1)
-        name = name.strip()
-        channels = [ch.strip() for ch in channels_str.split(",") if ch.strip()]
-        if not channels:
-            raise ValueError(f"Invalid ROI definition '{roi_def}'; no channels specified")
-        rois[name] = [f"^({'|'.join(channels)})$"]
-    return rois
-
-
 def _apply_frequency_bands_override(args: argparse.Namespace, config: Any) -> None:
     """Apply custom frequency band definitions to config."""
     if getattr(args, "frequency_bands", None) is not None:
-        custom_bands = _parse_frequency_band_definitions(args.frequency_bands)
+        custom_bands = parse_frequency_band_definitions(args.frequency_bands)
         config["frequency_bands"] = custom_bands
         config.setdefault("time_frequency_analysis", {})["bands"] = custom_bands
 
@@ -819,7 +789,7 @@ def _apply_rois_override(args: argparse.Namespace, config: Any) -> None:
     - 'time_frequency_analysis.rois': Used by get_rois() in TFR analysis
     """
     if getattr(args, "rois", None) is not None:
-        custom_rois = _parse_roi_definitions(args.rois)
+        custom_rois = parse_roi_definitions(args.rois)
         # Apply to top-level rois (used by get_roi_definitions in feature extraction)
         config["rois"] = custom_rois
         # Apply to TFR-specific rois (used by get_rois in TFR extraction)

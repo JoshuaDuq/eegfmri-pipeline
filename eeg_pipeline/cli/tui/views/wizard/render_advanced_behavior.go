@@ -40,10 +40,31 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	getOptionDisplay := func(opt optionType) (string, string, string) {
 		numberDisplay := m.numberBuffer + "█"
 		textDisplay := m.textBuffer + "█"
+		jsonDisplay := func(value string, field textField) string {
+			if m.editingText && m.editingTextField == field {
+				return textDisplay
+			}
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
+				return "(default)"
+			}
+			if len(trimmed) > 72 {
+				return trimmed[:69] + "..."
+			}
+			return trimmed
+		}
 
 		switch opt {
 		case optUseDefaults:
 			return "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"
+		case optConfigSetOverrides:
+			val := strings.TrimSpace(m.configSetOverrides)
+			if m.editingText && m.editingTextField == textFieldConfigSetOverrides {
+				val = textDisplay
+			} else if val == "" {
+				val = "(none)"
+			}
+			return "Config Overrides", val, "Advanced/uncommon keys: key=value;key2=value2 (emits repeated --set)"
 		// Behavior section headers
 		case optBehaviorGroupGeneral:
 			label := "▸ Execution"
@@ -200,6 +221,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "  ── ERDS", "", ""
 		case optBehaviorSubMultilevel:
 			return "  ── Group-Level", "", ""
+		case optBehaviorSubFeatureRegistry:
+			return "  ── Feature Registry", "", ""
 		case optPredictorType:
 			types := []string{"continuous", "binary", "categorical"}
 			v := "continuous"
@@ -359,6 +382,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Trial Table Format", v, "parquet recommended"
 		case optTrialTableAddLagFeatures:
 			return "Lag/Delta Columns", m.boolToOnOff(m.trialTableAddLagFeatures), "prev_* and delta_*"
+		case optBehaviorTrialTableDisallowPositionalAlignment:
+			return "Disallow Positional Align", m.boolToOnOff(m.trialTableDisallowPositionalAlignment), "fail if fallback positional alignment is needed"
 		case optTrialOrderMaxMissingFraction:
 			if !m.controlTrialOrder {
 				return "Trial Order Max Missing", "N/A", "enable Control Trial Order"
@@ -1413,7 +1438,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		// Behavior Statistics
 		case optBehaviorStatsTempControl:
-			controls := []string{"none", "linear", "spline"}
+			controls := []string{"spline", "linear", "none"}
 			return "Stats Predictor Control", controls[m.behaviorStatsTempControl%len(controls)], "global predictor covariate for all analyses"
 		case optBehaviorStatsAllowIIDTrials:
 			return "Allow IID Trials", m.boolToOnOff(m.behaviorStatsAllowIIDTrials), "use asymptotic p-values when N_trials is large"
@@ -1421,6 +1446,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Hierarchical FDR", m.boolToOnOff(m.behaviorStatsHierarchicalFDR), "family-wise correction across feature families"
 		case optBehaviorStatsComputeReliability:
 			return "Compute Reliability", m.boolToOnOff(m.behaviorStatsComputeReliability), "split-half ICC for each feature"
+		case optStatisticsAlpha:
+			val := fmt.Sprintf("%.4f", m.statisticsAlpha)
+			if m.editingNumber && m.isCurrentlyEditing(optStatisticsAlpha) {
+				val = numberDisplay
+			}
+			return "Global Stats Alpha", val, "fallback alpha for shared stats helpers"
 		case optBehaviorPermScheme:
 			schemes := []string{"shuffle", "circular_shift"}
 			return "Perm Scheme", schemes[m.behaviorPermScheme%len(schemes)], "shuffle=iid trials · circular_shift=time-series"
@@ -1435,6 +1466,16 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Perm Group Column", val, "preferred grouping column"
 		case optBehaviorExcludeNonTrialwiseFeatures:
 			return "Exclude Non-Trialwise", m.boolToOnOff(m.behaviorExcludeNonTrialwiseFeatures), "skip features without trial-level resolution"
+		case optBehaviorFeatureRegistryFilesJSON:
+			return "Registry Files JSON", jsonDisplay(m.behaviorFeatureRegistryFilesJSON, textFieldBehaviorFeatureRegistryFilesJSON), "JSON object for behavior_analysis.feature_registry.files"
+		case optBehaviorFeatureRegistrySourceToTypeJSON:
+			return "Registry Source->Type JSON", jsonDisplay(m.behaviorFeatureRegistrySourceJSON, textFieldBehaviorFeatureRegistrySourceToTypeJSON), "JSON object for source_to_feature_type"
+		case optBehaviorFeatureRegistryTypeHierarchyJSON:
+			return "Registry Type Hierarchy JSON", jsonDisplay(m.behaviorFeatureRegistryHierarchyJSON, textFieldBehaviorFeatureRegistryTypeHierarchyJSON), "JSON object for feature_type_hierarchy"
+		case optBehaviorFeatureRegistryPatternsJSON:
+			return "Registry Patterns JSON", jsonDisplay(m.behaviorFeatureRegistryPatternsJSON, textFieldBehaviorFeatureRegistryPatternsJSON), "JSON object for feature_patterns"
+		case optBehaviorFeatureRegistryClassifiersJSON:
+			return "Registry Classifiers JSON", jsonDisplay(m.behaviorFeatureRegistryClassifiersJSON, textFieldBehaviorFeatureRegistryClassifiersJSON), "JSON array for feature_classifiers"
 
 		// Global Statistics & Validation
 		case optGlobalNBootstrap:
@@ -1522,7 +1563,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		// Check if this is a collapsible group header or a non-collapsible sub-header
 		isGroupHeader := opt >= optBehaviorGroupGeneral && opt <= optBehaviorGroupAdvanced
-		isSubHeader := opt >= optBehaviorSubCorrelationSettings && opt <= optBehaviorSubMultilevel
+		isSubHeader := opt >= optBehaviorSubCorrelationSettings && opt <= optBehaviorSubFeatureRegistry
 		isSectionHeader := isGroupHeader || isSubHeader
 
 		var labelStyle, valueStyle lipgloss.Style

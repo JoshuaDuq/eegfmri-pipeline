@@ -21,6 +21,10 @@ REMOVED_LEGACY_ENTRYPOINTS = (
     "eeg_pipeline/analysis/utilities/merge_psychopy.py",
     "eeg_pipeline/cli/commands/utilities.py",
     "fmri_pipeline/analysis/raw_to_bids.py",
+    "eeg_pipeline/preprocessing/pipeline/config.py",
+    "eeg_pipeline/preprocessing/scripts/create_config.py",
+    "eeg_pipeline/preprocessing/scripts/run_pipeline.py",
+    "eeg_pipeline/preprocessing/scripts/__init__.py",
 )
 
 

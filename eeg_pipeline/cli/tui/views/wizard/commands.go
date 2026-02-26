@@ -656,6 +656,10 @@ func (m Model) BuildCommand() string {
 		}
 	}
 
+	for _, override := range parseConfigSetOverrides(m.configSetOverrides) {
+		parts = append(parts, "--set", override)
+	}
+
 	if m.task != "" {
 		parts = append(parts, "--task", m.task)
 	}
@@ -1061,6 +1065,32 @@ func splitCSVList(raw string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+func parseConfigSetOverrides(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ';' || r == '\n' || r == '\r'
+	})
+	overrides := make([]string, 0, len(parts))
+	for _, part := range parts {
+		override := strings.TrimSpace(part)
+		if strings.HasPrefix(override, "--set ") {
+			override = strings.TrimSpace(strings.TrimPrefix(override, "--set "))
+		}
+		if override == "" || !strings.Contains(override, "=") {
+			continue
+		}
+		overrides = append(overrides, override)
+	}
+	if len(overrides) == 0 {
+		return nil
+	}
+	return overrides
 }
 
 func splitSpaceList(raw string) []string {

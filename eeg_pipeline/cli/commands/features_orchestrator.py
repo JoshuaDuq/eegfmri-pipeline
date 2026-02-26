@@ -8,6 +8,7 @@ from typing import Any, List
 
 from eeg_pipeline.cli.common import create_progress_reporter, resolve_task
 from eeg_pipeline.cli.commands.features_helpers import _apply_feature_config_overrides
+from eeg_pipeline.utils.config.overrides import apply_set_overrides
 
 def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the features command."""
@@ -20,7 +21,6 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     
     categories = getattr(args, "categories", None)
     progress = create_progress_reporter(args)
-    task = resolve_task(args.task, config)
     
     if getattr(args, "bids_root", None):
         config.setdefault("paths", {})["bids_root"] = args.bids_root
@@ -31,6 +31,8 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     
     if args.mode == "compute":
         _apply_feature_config_overrides(args, config)
+        apply_set_overrides(config, getattr(args, "set_overrides", None))
+        task = resolve_task(args.task, config)
 
         time_ranges = []
         if getattr(args, "time_range", None):
@@ -57,6 +59,8 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             cli_command=cli_command,
         )
     elif args.mode == "visualize":
+        apply_set_overrides(config, getattr(args, "set_overrides", None))
+        task = resolve_task(args.task, config)
         visualize_features_for_subjects(
             subjects=subjects,
             task=task,

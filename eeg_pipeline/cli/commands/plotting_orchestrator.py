@@ -20,10 +20,13 @@ from eeg_pipeline.cli.commands.plotting_runner_helpers import (
 )
 from eeg_pipeline.cli.commands.plotting_selection import resolve_plot_ids
 from eeg_pipeline.cli.commands.plotting_tfr_mode import run_tfr_mode
+from eeg_pipeline.utils.config.overrides import apply_set_overrides
 
 
 def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the plotting command."""
+    apply_set_overrides(config, getattr(args, "set_overrides", None))
+
     if args.mode == "tfr":
         if getattr(args, "analysis_scope", "subject") == "group":
             raise ValueError("Group analysis scope is not supported for mode='tfr'.")
@@ -49,6 +52,7 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
 
     selected_feature_plotters = getattr(args, "feature_plotters", None)
     apply_all_config_overrides(args, config)
+    apply_set_overrides(config, getattr(args, "set_overrides", None))
 
     task = resolve_task(args.task, config)
     progress = create_progress_reporter(args)

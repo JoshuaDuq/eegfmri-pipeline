@@ -10,6 +10,7 @@ from eeg_pipeline.cli.commands.behavior_config import (
     _build_computation_features,
     _configure_behavior_compute_mode,
 )
+from eeg_pipeline.utils.config.overrides import apply_set_overrides
 
 def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the behavior command."""
@@ -54,7 +55,6 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     
     categories = getattr(args, "categories", None)
     progress = create_progress_reporter(args)
-    task = resolve_task(args.task, config)
     
     if getattr(args, "bids_root", None):
         config.setdefault("paths", {})["bids_root"] = args.bids_root
@@ -63,6 +63,8 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     
     if args.mode == "compute":
         _configure_behavior_compute_mode(args, config)
+        apply_set_overrides(config, getattr(args, "set_overrides", None))
+        task = resolve_task(args.task, config)
 
         computation_features = _build_computation_features(args)
         
@@ -82,6 +84,8 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             progress=progress,
         )
     elif args.mode == "visualize":
+        apply_set_overrides(config, getattr(args, "set_overrides", None))
+        task = resolve_task(args.task, config)
         selected_plots = getattr(args, "plots", None)
         run_all_plots = bool(getattr(args, "all_plots", False))
         skip_scatter = bool(getattr(args, "skip_scatter", False))

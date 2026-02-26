@@ -3,7 +3,7 @@ package wizard
 // fMRI preprocessing and analysis advanced option builders.
 
 func (m Model) getFmriPreprocessingOptions() []optionType {
-	options := []optionType{optUseDefaults}
+	options := []optionType{optUseDefaults, optConfigSetOverrides}
 
 	// Runtime group
 	options = append(options, optFmriGroupRuntime)
@@ -81,7 +81,7 @@ func (m Model) getFmriPreprocessingOptions() []optionType {
 }
 
 func (m Model) getFmriAnalysisOptions() []optionType {
-	options := []optionType{optUseDefaults}
+	options := []optionType{optUseDefaults, optConfigSetOverrides}
 
 	mode := ""
 	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {

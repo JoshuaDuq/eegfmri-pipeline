@@ -102,6 +102,12 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     compute_group.add_argument("--run-adjustment-max-dummies", type=int, default=None)
     compute_group.add_argument("--fdr-alpha", type=float, default=None)
+    compute_group.add_argument(
+        "--statistics-alpha",
+        type=float,
+        default=None,
+        help="Global significance alpha fallback used by shared stats helpers.",
+    )
     compute_group.add_argument("--stats-predictor-control", choices=["linear", "spline"], default=None, dest="stats_predictor_control")
     compute_group.add_argument("--stats-allow-iid-trials", action="store_true", default=None)
     compute_group.add_argument("--no-stats-allow-iid-trials", action="store_false", dest="stats_allow_iid_trials")
@@ -118,6 +124,37 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--perm-group-column-preference", nargs="+", default=None, metavar="COL", dest="perm_group_column_preference", help="Preferred columns for permutation grouping (e.g. run_id block)")
     compute_group.add_argument("--exclude-non-trialwise-features", action="store_true", default=None, dest="exclude_non_trialwise_features")
     compute_group.add_argument("--no-exclude-non-trialwise-features", action="store_false", dest="exclude_non_trialwise_features")
+    compute_group.add_argument(
+        "--feature-registry-files-json",
+        type=str,
+        default=None,
+        help="JSON object for behavior_analysis.feature_registry.files",
+    )
+    compute_group.add_argument(
+        "--feature-registry-source-to-feature-type-json",
+        type=str,
+        default=None,
+        dest="feature_registry_source_to_feature_type_json",
+        help="JSON object for behavior_analysis.feature_registry.source_to_feature_type",
+    )
+    compute_group.add_argument(
+        "--feature-registry-type-hierarchy-json",
+        type=str,
+        default=None,
+        help="JSON object for behavior_analysis.feature_registry.feature_type_hierarchy",
+    )
+    compute_group.add_argument(
+        "--feature-registry-patterns-json",
+        type=str,
+        default=None,
+        help="JSON object for behavior_analysis.feature_registry.feature_patterns",
+    )
+    compute_group.add_argument(
+        "--feature-registry-classifiers-json",
+        type=str,
+        default=None,
+        help="JSON array for behavior_analysis.feature_registry.feature_classifiers",
+    )
     compute_group.add_argument("--predictor-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), dest="predictor_range", help="Valid predictor range (e.g. 0.0 1.0)")
     compute_group.add_argument("--max-missing-channels-fraction", type=float, default=None, help="Max fraction of missing channels allowed")
     compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
@@ -190,6 +227,18 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     trial_table_group.add_argument("--trial-table-format", choices=["parquet", "tsv"], default=None)
     trial_table_group.add_argument("--trial-table-add-lag-features", action="store_true", default=None)
     trial_table_group.add_argument("--no-trial-table-add-lag-features", action="store_false", dest="trial_table_add_lag_features")
+    trial_table_group.add_argument(
+        "--trial-table-disallow-positional-alignment",
+        action="store_true",
+        default=None,
+        dest="trial_table_disallow_positional_alignment",
+        help="Fail when trial-table alignment would rely on positional fallback.",
+    )
+    trial_table_group.add_argument(
+        "--no-trial-table-disallow-positional-alignment",
+        action="store_false",
+        dest="trial_table_disallow_positional_alignment",
+    )
     trial_table_group.add_argument("--feature-summaries", action="store_true", default=None, dest="feature_summaries_enabled")
     trial_table_group.add_argument("--no-feature-summaries", action="store_false", dest="feature_summaries_enabled")
     trial_table_group.add_argument(

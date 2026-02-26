@@ -103,6 +103,17 @@ def add_output_format_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Show what would be done without executing"
     )
+    parser.add_argument(
+        "--set",
+        dest="set_overrides",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help=(
+            "Override config key at runtime (repeatable). "
+            "Example: --set project.task=mytask"
+        ),
+    )
 
 
 def resolve_task(task: Optional[str], config: Any) -> str:

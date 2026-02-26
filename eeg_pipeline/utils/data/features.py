@@ -409,7 +409,7 @@ def align_feature_dataframes(
     baseline_df: pd.DataFrame,
     conn_df: Optional[pd.DataFrame],
     aper_df: Optional[pd.DataFrame],
-    y: pd.Series,
+    y: Optional[pd.Series],
     aligned_events: pd.DataFrame,
     features_dir: Path,
     logger: logging.Logger,
@@ -517,8 +517,13 @@ def align_feature_dataframes(
                 block = _copy_attrs(block.reset_index(drop=True), block)
             extra_aligned[block_name] = block
 
+    n_original = int(n_trials) if n_trials is not None else int(initial_trial_count or 0)
+    n_retained = max(after_lengths.values()) if after_lengths else 0
+
     retention_stats = {
         "initial_trial_count": initial_trial_count,
+        "n_original": n_original,
+        "n_retained": int(n_retained),
         "before_filtering": before_lengths,
         "after_filtering": after_lengths,
         "mask": drop_mask,

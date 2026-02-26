@@ -384,6 +384,10 @@ func (m Model) buildMLAdvancedArgs() []string {
 	if m.mlEvalCIMethod != 0 {
 		args = append(args, "--eval-ci-method", ciMethods[m.mlEvalCIMethod%len(ciMethods)])
 	}
+	weightings := []string{"equal", "trial_count"}
+	if m.mlEvalSubjectWeighting != 0 {
+		args = append(args, "--eval-subject-weighting", weightings[m.mlEvalSubjectWeighting%len(weightings)])
+	}
 	if m.mlEvalBootstrapIterations != 1000 {
 		args = append(args, "--eval-bootstrap-iterations", fmt.Sprintf("%d", m.mlEvalBootstrapIterations))
 	}
@@ -401,6 +405,13 @@ func (m Model) buildMLAdvancedArgs() []string {
 	}
 	if mode == "incremental_validity" && m.mlIncrementalBaselineAlpha != 0.05 {
 		args = append(args, "--incremental-baseline-alpha", fmt.Sprintf("%.6g", m.mlIncrementalBaselineAlpha))
+	}
+	if mode == "incremental_validity" {
+		if m.mlIncrementalRequireBaselinePred {
+			args = append(args, "--incremental-require-baseline-predictors")
+		} else {
+			args = append(args, "--no-incremental-require-baseline-predictors")
+		}
 	}
 	if mode == "timegen" {
 		if m.mlTimeGenMinSubjects != 5 {

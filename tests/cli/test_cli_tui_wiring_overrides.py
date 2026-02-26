@@ -194,6 +194,12 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "--stats-predictor-control",
                 "spline",
                 "--stats-allow-iid-trials",
+                "--feature-registry-files-json",
+                "{\"power\":\"features_power.parquet\"}",
+                "--feature-registry-patterns-json",
+                "{\"erds\":\"^erds_.*$\"}",
+                "--feature-registry-classifiers-json",
+                "[{\"label\":\"power\",\"startswith\":[\"power_\"]}]",
                 "--group-level-target",
                 "predictor_residual",
                 "--group-level-control-predictor",
@@ -254,6 +260,18 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("behavior_analysis.statistics.predictor_control"), "spline")
         self.assertEqual(config.get("behavior_analysis.statistics.base_seed"), 42)
         self.assertTrue(config.get("behavior_analysis.statistics.allow_iid_trials", False))
+        self.assertEqual(
+            config.get("behavior_analysis.feature_registry.files"),
+            {"power": "features_power.parquet"},
+        )
+        self.assertEqual(
+            config.get("behavior_analysis.feature_registry.feature_patterns"),
+            {"erds": "^erds_.*$"},
+        )
+        self.assertEqual(
+            config.get("behavior_analysis.feature_registry.feature_classifiers"),
+            [{"label": "power", "startswith": ["power_"]}],
+        )
         self.assertEqual(
             config.get("behavior_analysis.group_level.multilevel_correlations.target"),
             "predictor_residual",

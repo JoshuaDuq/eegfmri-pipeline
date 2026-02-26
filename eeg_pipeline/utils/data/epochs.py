@@ -12,12 +12,21 @@ from eeg_pipeline.infra.paths import (
     find_clean_epochs_path,
     _find_clean_events_path,
 )
+from eeg_pipeline.utils.data.columns import (
+    find_binary_outcome_column_in_events,
+    resolve_outcome_column,
+    resolve_predictor_column,
+)
 
 EEGConfig = ConfigDict
 
 
 def _validate_event_columns(
-    events_df: pd.DataFrame, config: EEGConfig, logger: logging.Logger
+    events_df: pd.DataFrame,
+    config: EEGConfig,
+    logger: logging.Logger,
+    *,
+    required_groups: Optional[Any] = None,
 ) -> None:
     if events_df is None or events_df.empty:
         return
@@ -27,7 +36,11 @@ def _validate_event_columns(
         logger.warning("No event_columns found in config; skipping validation")
         return
 
-    required_groups = config.get("event_columns.required", None)
+    required_groups = (
+        required_groups
+        if required_groups is not None
+        else config.get("event_columns.required", None)
+    )
     missing_columns = _find_missing_event_columns(
         events_df,
         event_cols_config,
@@ -60,6 +73,8 @@ def _find_missing_event_columns(
 
     missing_columns = []
     for logical_name, candidates in event_cols_config.items():
+        if str(logical_name) == "required":
+            continue
         if required_set is not None and str(logical_name) not in required_set:
             continue
         explicit_key = None
@@ -75,6 +90,18 @@ def _find_missing_event_columns(
             explicit_col = str(config.get(explicit_key, "") or "").strip()
             if explicit_col and explicit_col in events_df.columns:
                 continue
+
+        # Reuse shared resolvers so validation matches downstream behavior.
+        if logical_name == "outcome":
+            if resolve_outcome_column(events_df, config) is not None:
+                continue
+        elif logical_name == "predictor":
+            if resolve_predictor_column(events_df, config) is not None:
+                continue
+        elif logical_name == "binary_outcome":
+            if config is not None and find_binary_outcome_column_in_events(events_df, config) is not None:
+                continue
+
         if not isinstance(candidates, (list, tuple)):
             continue
         found = any(col in events_df.columns for col in candidates)
@@ -119,6 +146,7 @@ def load_epochs_for_analysis(
     config: Optional[EEGConfig] = None,
     constants: Optional[Any] = None,
     use_cache: bool = True,
+    required_event_groups: Optional[Any] = None,
 ) -> Tuple[Optional[mne.Epochs], Optional[pd.DataFrame]]:
     """Load epochs and clean events.tsv (already aligned, no alignment needed)."""
     if logger is None:
@@ -162,7 +190,12 @@ def load_epochs_for_analysis(
             f"events={len(events_df)}, epochs={len(epochs)}"
         )
     
-    _validate_event_columns(events_df, config, logger)
+    _validate_event_columns(
+        events_df,
+        config,
+        logger,
+        required_groups=required_event_groups,
+    )
     
     if use_cache:
         epochs._behavioral = events_df  # type: ignore[attr-defined]

@@ -1091,6 +1091,9 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optUseDefaults:
 		value := m.boolToOnOff(m.useDefaultAdvanced)
 		return []renderLine{m.renderValueLine(opt, "Use Defaults", value, "Skip overrides", focused, labelWidth)}
+	case optConfigSetOverrides:
+		value := m.formatTextFieldWithBuffer(textFieldConfigSetOverrides, m.configSetOverrides, "(none)")
+		return []renderLine{m.renderValueLine(opt, "Config Overrides", value, "Advanced/uncommon keys: key=value;key2=value2 (emits --set)", focused, labelWidth)}
 	case optPlotGroupDefaults:
 		return []renderLine{m.renderGroupLine(opt, "Defaults & Output", m.plotGroupDefaultsExpanded, "bbox/padding overrides", focused)}
 	case optPlotGroupFonts:

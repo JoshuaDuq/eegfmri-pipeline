@@ -40,9 +40,7 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--ecg-channels", type=str, default=None, help="ECG channels (comma-separated, e.g., 'ECG')")
     prep_group.add_argument("--random-state", type=int, default=None, help="Random seed for reproducibility")
     prep_group.add_argument("--task-is-rest", action="store_true", default=False, help="Whether task is resting-state")
-    prep_group.add_argument("--use-icalabel", action="store_true", default=True, help="Use mne-icalabel for ICA component classification (default: True)")
     prep_group.add_argument("--no-icalabel", dest="use_icalabel", action="store_false", help="Disable mne-icalabel, use MNE-BIDS pipeline ICA detection")
-    prep_group.add_argument("--use-pyprep", action="store_true", default=True, help="Use PyPREP for bad channel detection (default: True)")
     prep_group.add_argument("--no-pyprep", dest="use_pyprep", action="store_false", help="Disable PyPREP bad channel detection")
 
     # Clean events.tsv (post-rejection)
@@ -136,7 +134,6 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         action="store_false",
         help="Ignore/clear previously marked bad channels",
     )
-    prep_group.add_argument("--overwrite-channels-tsv", action="store_true", default=True, help="Overwrite channels.tsv file with detected bad channels")
     prep_group.add_argument("--no-overwrite-channels-tsv", dest="overwrite_channels_tsv", action="store_false", help="Do not overwrite channels.tsv file")
     prep_group.add_argument("--delete-breaks", action="store_true", default=False, help="Delete breaks in data during bad channel detection")
     prep_group.add_argument("--breaks-min-length", type=int, default=20, help="Minimum break duration in seconds")
@@ -186,6 +183,13 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--event-col-predictor", nargs="+", type=str, default=None, help="events.tsv candidate columns for predictor")
     prep_group.add_argument("--event-col-outcome", nargs="+", type=str, default=None, help="events.tsv candidate columns for the behavioral outcome")
     prep_group.add_argument("--event-col-binary-outcome", nargs="+", type=str, default=None, help="events.tsv candidate columns for binary-outcome split")
+    prep_group.add_argument(
+        "--event-col-required",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Required logical event groups for downstream validation (e.g., outcome predictor condition)",
+    )
     prep_group.add_argument(
         "--event-col-condition",
         nargs="+",

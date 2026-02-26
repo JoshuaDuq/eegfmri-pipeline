@@ -312,11 +312,30 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cv-min-valid-perm-fraction", type=float, default=None)
     parser.add_argument("--cv-default-n-bins", type=int, default=None)
     parser.add_argument("--eval-ci-method", choices=["bootstrap", "fixed_effects"], default=None)
+    parser.add_argument(
+        "--eval-subject-weighting",
+        choices=["equal", "trial_count"],
+        default=None,
+        help="Subject weighting scheme for group-level aggregation (equal or trial_count).",
+    )
     parser.add_argument("--eval-bootstrap-iterations", type=int, default=None)
     parser.add_argument("--data-covariates-strict", action="store_true", default=None, dest="data_covariates_strict")
     parser.add_argument("--no-data-covariates-strict", action="store_false", dest="data_covariates_strict")
     parser.add_argument("--data-max-excluded-subject-fraction", type=float, default=None)
     parser.add_argument("--incremental-baseline-alpha", type=float, default=None)
+    parser.add_argument(
+        "--incremental-require-baseline-predictors",
+        action="store_true",
+        default=None,
+        dest="incremental_require_baseline_predictors",
+        help="Require configured baseline predictors in incremental_validity mode.",
+    )
+    parser.add_argument(
+        "--no-incremental-require-baseline-predictors",
+        action="store_false",
+        dest="incremental_require_baseline_predictors",
+        help="Allow intercept-only fallback when baseline predictors are missing.",
+    )
     parser.add_argument("--interpretability-grouped-outputs", action="store_true", default=None, dest="interpretability_grouped_outputs")
     parser.add_argument("--no-interpretability-grouped-outputs", action="store_false", dest="interpretability_grouped_outputs")
     parser.add_argument("--timegen-min-subjects", type=int, default=None)

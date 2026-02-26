@@ -17,6 +17,7 @@ from eeg_pipeline.cli.commands.preprocessing_overrides import (
     _update_pyprep_config,
     _validate_epoch_parameters,
 )
+from eeg_pipeline.utils.config.overrides import apply_set_overrides
 
 
 def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
@@ -26,7 +27,6 @@ def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any
     _validate_epoch_parameters(args)
 
     progress = create_progress_reporter(args)
-    task = resolve_task(args.task, config)
 
     _update_path_config(args, config)
     _update_preprocessing_config(args, config)
@@ -35,6 +35,8 @@ def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any
     _update_icalabel_config(args, config)
     _update_epochs_config(args, config)
     _update_alignment_event_config(args, config)
+    apply_set_overrides(config, getattr(args, "set_overrides", None))
+    task = resolve_task(args.task, config)
 
     pipeline = PreprocessingPipeline(config=config)
     n_jobs = _resolve_n_jobs(args, config)

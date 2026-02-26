@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -42,6 +43,31 @@ func containsSubsequence(items []string, subseq []string) bool {
 		}
 	}
 	return false
+}
+
+func TestParseConfigSetOverrides_ParsesAndFiltersEntries(t *testing.T) {
+	got := parseConfigSetOverrides("project.task=rest; analysis.min_subjects_for_group=4\n--set ml.n_perm=100;invalid")
+	want := []string{
+		"project.task=rest",
+		"analysis.min_subjects_for_group=4",
+		"ml.n_perm=100",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected overrides: got=%#v want=%#v", got, want)
+	}
+}
+
+func TestBuildCommand_AppendsConfigSetOverrides(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.configSetOverrides = "project.task=rest;analysis.min_subjects_for_group=4"
+
+	cmd := m.BuildCommand()
+	if !strings.Contains(cmd, "--set project.task=rest") {
+		t.Fatalf("expected first --set override in command, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--set analysis.min_subjects_for_group=4") {
+		t.Fatalf("expected second --set override in command, got: %s", cmd)
+	}
 }
 
 func TestBuildBehaviorAdvancedArgs_OmitsDeprecatedTfHeatmapFlags(t *testing.T) {
@@ -117,6 +143,33 @@ func TestBuildBehaviorAdvancedArgs_EmitsCanonicalColumns(t *testing.T) {
 	predictor, ok := argValue(args, "--predictor-column")
 	if !ok || predictor != "stimulus_intensity" {
 		t.Fatalf("expected --predictor-column stimulus_intensity, got args: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_UsesStatsPredictorControlFlag(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.behaviorStatsTempControl = 1 // linear
+
+	args := m.buildBehaviorAdvancedArgs()
+	if containsString(args, "--stats-temp-control") {
+		t.Fatalf("did not expect legacy --stats-temp-control in args: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--stats-predictor-control", "linear"}) {
+		t.Fatalf("expected --stats-predictor-control linear in args: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_StatsPredictorNoneDisablesPredictorControl(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.behaviorStatsTempControl = 2 // none
+	m.controlPredictor = true
+
+	args := m.buildBehaviorAdvancedArgs()
+	if !containsString(args, "--no-predictor-control") {
+		t.Fatalf("expected --no-predictor-control when stats predictor control is none: %#v", args)
+	}
+	if containsString(args, "--stats-predictor-control") {
+		t.Fatalf("did not expect --stats-predictor-control when set to none: %#v", args)
 	}
 }
 

@@ -5,6 +5,11 @@ from __future__ import annotations
 import argparse
 from typing import Any, Dict, List
 
+from eeg_pipeline.utils.parsing import (
+    parse_frequency_band_definitions,
+    parse_roi_definitions,
+)
+
 def _apply_config_override(config: Any, path: str, value: Any) -> None:
     """Set a config value at the given dot-separated path."""
     config[path] = value
@@ -463,25 +468,6 @@ def _apply_output_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "plotting.overwrite", bool(args.overwrite))
 
 
-def _parse_roi_definitions(roi_defs: List[str]) -> Dict[str, List[str]]:
-    """Parse ROI definitions from CLI format 'name:ch1,ch2,...'.
-    
-    Returns a dict mapping ROI name to list of regex patterns for matching channels.
-    """
-    rois: Dict[str, List[str]] = {}
-    for roi_def in roi_defs:
-        if ":" not in roi_def:
-            raise ValueError(f"Invalid ROI definition '{roi_def}'; expected 'name:ch1,ch2,...'")
-        name, channels_str = roi_def.split(":", 1)
-        name = name.strip()
-        channels = [ch.strip() for ch in channels_str.split(",") if ch.strip()]
-        if not channels:
-            raise ValueError(f"Invalid ROI definition '{roi_def}'; no channels specified")
-        # Convert channel list to regex patterns (matches exact channel names)
-        rois[name] = [f"^({'|'.join(channels)})$"]
-    return rois
-
-
 def _apply_roi_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply custom ROI definitions to config for plotting.
 
@@ -490,30 +476,11 @@ def _apply_roi_overrides(args: argparse.Namespace, config: Any) -> None:
     - 'time_frequency_analysis.rois': Used by get_rois() in TFR plots
     """
     if _get_arg_value(args, "rois"):
-        custom_rois = _parse_roi_definitions(args.rois)
+        custom_rois = parse_roi_definitions(args.rois)
         # Apply to top-level rois (used by get_roi_definitions in plotting/features)
         config["rois"] = custom_rois
         # Apply to TFR-specific rois (used by get_rois in TFR extraction)
         config["time_frequency_analysis.rois"] = custom_rois
-
-
-def _parse_frequency_band_definitions(band_defs: List[str]) -> Dict[str, List[float]]:
-    """Parse frequency band definitions from CLI format 'name:low:high'."""
-    bands: Dict[str, List[float]] = {}
-    for band_def in band_defs:
-        parts = band_def.split(":")
-        if len(parts) != 3:
-            raise ValueError(f"Invalid frequency band definition '{band_def}'; expected 'name:low:high'")
-        name = parts[0].strip().lower()
-        try:
-            low = float(parts[1].strip())
-            high = float(parts[2].strip())
-        except ValueError:
-            raise ValueError(f"Invalid frequency values in '{band_def}'; expected numeric low:high")
-        if low >= high:
-            raise ValueError(f"Invalid frequency range in '{band_def}'; low must be < high")
-        bands[name] = [low, high]
-    return bands
 
 
 def _apply_band_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -527,7 +494,7 @@ def _apply_band_overrides(args: argparse.Namespace, config: Any) -> None:
     - 'time_frequency_analysis.bands': Used by TFR analysis
     """
     if _get_arg_value(args, "frequency_bands"):
-        custom_bands = _parse_frequency_band_definitions(args.frequency_bands)
+        custom_bands = parse_frequency_band_definitions(args.frequency_bands)
         
         selected_bands = getattr(args, "bands", None)
         if selected_bands:

@@ -1362,6 +1362,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 0 {
 			m.globalNBootstrap = int(val)
 		}
+	case optStatisticsAlpha:
+		if val > 0 && val <= 1 {
+			m.statisticsAlpha = val
+		}
 	case optClusterCorrectionAlpha:
 		if val > 0 && val <= 1 {
 			m.clusterCorrectionAlpha = val

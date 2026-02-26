@@ -192,6 +192,15 @@ func (m Model) renderFmriAdvancedConfig() string {
 				value = "Custom"
 				hint = "Space to use defaults"
 			}
+		case optConfigSetOverrides:
+			label = "Config Overrides"
+			value = strings.TrimSpace(m.configSetOverrides)
+			if m.editingText && m.editingTextField == textFieldConfigSetOverrides {
+				value = m.textBuffer + "█"
+			} else if value == "" {
+				value = "(none)"
+			}
+			hint = "Advanced/uncommon keys: key=value;key2=value2 (emits repeated --set)"
 
 		// Group headers with chevron indicators
 		case optFmriGroupRuntime:

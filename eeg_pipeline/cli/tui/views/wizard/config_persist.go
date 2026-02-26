@@ -437,6 +437,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// Trial table
 	cfg["trialTableFormat"] = m.trialTableFormat
 	cfg["trialTableAddLagFeatures"] = m.trialTableAddLagFeatures
+	cfg["trialTableDisallowPositionalAlignment"] = m.trialTableDisallowPositionalAlignment
 	cfg["trialOrderMaxMissingFraction"] = m.trialOrderMaxMissingFraction
 
 	// Feature QC
@@ -977,6 +978,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	}
 
 	// System
+	cfg["configSetOverrides"] = m.configSetOverrides
 	cfg["systemNJobs"] = m.systemNJobs
 	cfg["systemStrictMode"] = m.systemStrictMode
 	cfg["loggingLevel"] = m.loggingLevel
@@ -1043,10 +1045,12 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["mlCvMinValidPermFraction"] = m.mlCvMinValidPermFraction
 	cfg["mlCvDefaultNBins"] = m.mlCvDefaultNBins
 	cfg["mlEvalCIMethod"] = m.mlEvalCIMethod
+	cfg["mlEvalSubjectWeighting"] = m.mlEvalSubjectWeighting
 	cfg["mlEvalBootstrapIterations"] = m.mlEvalBootstrapIterations
 	cfg["mlDataCovariatesStrict"] = m.mlDataCovariatesStrict
 	cfg["mlDataMaxExcludedSubjectFraction"] = m.mlDataMaxExcludedSubjectFraction
 	cfg["mlIncrementalBaselineAlpha"] = m.mlIncrementalBaselineAlpha
+	cfg["mlIncrementalRequireBaselinePred"] = m.mlIncrementalRequireBaselinePred
 	cfg["mlInterpretabilityGroupedOutputs"] = m.mlInterpretabilityGroupedOutputs
 	cfg["mlTimeGenMinSubjects"] = m.mlTimeGenMinSubjects
 	cfg["mlTimeGenMinValidPermFraction"] = m.mlTimeGenMinValidPermFraction
@@ -1069,6 +1073,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["eventColOutcome"] = m.eventColOutcome
 	cfg["eventColBinaryOutcome"] = m.eventColBinaryOutcome
 	cfg["eventColCondition"] = m.eventColCondition
+	cfg["eventColRequired"] = m.eventColRequired
 	cfg["conditionPreferredPrefixes"] = m.conditionPreferredPrefixes
 
 	// Per-Family Spatial Transforms
@@ -1130,9 +1135,15 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["behaviorStatsAllowIIDTrials"] = m.behaviorStatsAllowIIDTrials
 	cfg["behaviorStatsHierarchicalFDR"] = m.behaviorStatsHierarchicalFDR
 	cfg["behaviorStatsComputeReliability"] = m.behaviorStatsComputeReliability
+	cfg["statisticsAlpha"] = m.statisticsAlpha
 	cfg["behaviorPermScheme"] = m.behaviorPermScheme
 	cfg["behaviorPermGroupColumnPreference"] = m.behaviorPermGroupColumnPreference
 	cfg["behaviorExcludeNonTrialwiseFeatures"] = m.behaviorExcludeNonTrialwiseFeatures
+	cfg["behaviorFeatureRegistryFilesJSON"] = m.behaviorFeatureRegistryFilesJSON
+	cfg["behaviorFeatureRegistrySourceJSON"] = m.behaviorFeatureRegistrySourceJSON
+	cfg["behaviorFeatureRegistryHierarchyJSON"] = m.behaviorFeatureRegistryHierarchyJSON
+	cfg["behaviorFeatureRegistryPatternsJSON"] = m.behaviorFeatureRegistryPatternsJSON
+	cfg["behaviorFeatureRegistryClassifiersJSON"] = m.behaviorFeatureRegistryClassifiersJSON
 
 	// Global Statistics & Validation
 	cfg["globalNBootstrap"] = m.globalNBootstrap
@@ -1658,6 +1669,10 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	// Trial table
 	m.trialTableFormat = getInt("trialTableFormat", m.trialTableFormat)
 	m.trialTableAddLagFeatures = getBool("trialTableAddLagFeatures", m.trialTableAddLagFeatures)
+	m.trialTableDisallowPositionalAlignment = getBool(
+		"trialTableDisallowPositionalAlignment",
+		m.trialTableDisallowPositionalAlignment,
+	)
 	m.trialOrderMaxMissingFraction = getFloat("trialOrderMaxMissingFraction", m.trialOrderMaxMissingFraction)
 
 	// Feature QC
@@ -2209,6 +2224,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	}
 
 	// System
+	m.configSetOverrides = getString("configSetOverrides", m.configSetOverrides)
 	m.systemNJobs = getInt("systemNJobs", m.systemNJobs)
 	m.systemStrictMode = getBool("systemStrictMode", m.systemStrictMode)
 	m.loggingLevel = getInt("loggingLevel", m.loggingLevel)
@@ -2275,10 +2291,15 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.mlCvMinValidPermFraction = getFloat("mlCvMinValidPermFraction", m.mlCvMinValidPermFraction)
 	m.mlCvDefaultNBins = getInt("mlCvDefaultNBins", m.mlCvDefaultNBins)
 	m.mlEvalCIMethod = getInt("mlEvalCIMethod", m.mlEvalCIMethod)
+	m.mlEvalSubjectWeighting = getInt("mlEvalSubjectWeighting", m.mlEvalSubjectWeighting)
 	m.mlEvalBootstrapIterations = getInt("mlEvalBootstrapIterations", m.mlEvalBootstrapIterations)
 	m.mlDataCovariatesStrict = getBool("mlDataCovariatesStrict", m.mlDataCovariatesStrict)
 	m.mlDataMaxExcludedSubjectFraction = getFloat("mlDataMaxExcludedSubjectFraction", m.mlDataMaxExcludedSubjectFraction)
 	m.mlIncrementalBaselineAlpha = getFloat("mlIncrementalBaselineAlpha", m.mlIncrementalBaselineAlpha)
+	m.mlIncrementalRequireBaselinePred = getBool(
+		"mlIncrementalRequireBaselinePred",
+		m.mlIncrementalRequireBaselinePred,
+	)
 	m.mlInterpretabilityGroupedOutputs = getBool("mlInterpretabilityGroupedOutputs", m.mlInterpretabilityGroupedOutputs)
 	m.mlTimeGenMinSubjects = getInt("mlTimeGenMinSubjects", m.mlTimeGenMinSubjects)
 	m.mlTimeGenMinValidPermFraction = getFloat("mlTimeGenMinValidPermFraction", m.mlTimeGenMinValidPermFraction)
@@ -2301,6 +2322,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.eventColOutcome = getString("eventColOutcome", m.eventColOutcome)
 	m.eventColBinaryOutcome = getString("eventColBinaryOutcome", m.eventColBinaryOutcome)
 	m.eventColCondition = getString("eventColCondition", m.eventColCondition)
+	m.eventColRequired = getString("eventColRequired", m.eventColRequired)
 	m.conditionPreferredPrefixes = getString("conditionPreferredPrefixes", m.conditionPreferredPrefixes)
 
 	// Per-Family Spatial Transforms
@@ -2362,9 +2384,15 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.behaviorStatsAllowIIDTrials = getBool("behaviorStatsAllowIIDTrials", m.behaviorStatsAllowIIDTrials)
 	m.behaviorStatsHierarchicalFDR = getBool("behaviorStatsHierarchicalFDR", m.behaviorStatsHierarchicalFDR)
 	m.behaviorStatsComputeReliability = getBool("behaviorStatsComputeReliability", m.behaviorStatsComputeReliability)
+	m.statisticsAlpha = getFloat("statisticsAlpha", m.statisticsAlpha)
 	m.behaviorPermScheme = getInt("behaviorPermScheme", m.behaviorPermScheme)
 	m.behaviorPermGroupColumnPreference = getString("behaviorPermGroupColumnPreference", m.behaviorPermGroupColumnPreference)
 	m.behaviorExcludeNonTrialwiseFeatures = getBool("behaviorExcludeNonTrialwiseFeatures", m.behaviorExcludeNonTrialwiseFeatures)
+	m.behaviorFeatureRegistryFilesJSON = getString("behaviorFeatureRegistryFilesJSON", m.behaviorFeatureRegistryFilesJSON)
+	m.behaviorFeatureRegistrySourceJSON = getString("behaviorFeatureRegistrySourceJSON", m.behaviorFeatureRegistrySourceJSON)
+	m.behaviorFeatureRegistryHierarchyJSON = getString("behaviorFeatureRegistryHierarchyJSON", m.behaviorFeatureRegistryHierarchyJSON)
+	m.behaviorFeatureRegistryPatternsJSON = getString("behaviorFeatureRegistryPatternsJSON", m.behaviorFeatureRegistryPatternsJSON)
+	m.behaviorFeatureRegistryClassifiersJSON = getString("behaviorFeatureRegistryClassifiersJSON", m.behaviorFeatureRegistryClassifiersJSON)
 
 	// Global Statistics & Validation
 	m.globalNBootstrap = getInt("globalNBootstrap", m.globalNBootstrap)

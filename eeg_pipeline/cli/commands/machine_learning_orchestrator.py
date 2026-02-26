@@ -20,6 +20,7 @@ from eeg_pipeline.cli.common import (
     validate_min_subjects,
     validate_subjects_not_empty,
 )
+from eeg_pipeline.utils.config.overrides import apply_set_overrides
 
 
 def _print_stage_list() -> None:
@@ -112,7 +113,6 @@ def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     _validate_ml_requirements(subjects, args.cv_scope, config)
 
     progress = create_progress_reporter(args)
-    task = resolve_task(args.task, config)
 
     _update_path_config(args, config)
     _update_model_config(args, config)
@@ -122,6 +122,8 @@ def run_ml(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     # --require-trial-ml-safe is retained for backward-compatible CLI ergonomics.
     config["machine_learning.data.require_trial_ml_safe"] = True
     config["feature_engineering.analysis_mode"] = "trial_ml_safe"
+    apply_set_overrides(config, getattr(args, "set_overrides", None))
+    task = resolve_task(args.task, config)
 
     pipeline_kwargs = _build_pipeline_kwargs(args, config)
     pipeline = MLPipeline(config=config)

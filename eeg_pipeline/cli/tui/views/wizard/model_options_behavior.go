@@ -5,6 +5,7 @@ package wizard
 func (m Model) getBehaviorOptions() []optionType {
 	var options []optionType
 	options = append(options, optUseDefaults)
+	options = append(options, optConfigSetOverrides)
 
 	hasAnyComputation := len(m.SelectedComputations()) > 0
 	hasSelectedComputation := func(keys ...string) bool {
@@ -62,9 +63,16 @@ func (m Model) getBehaviorOptions() []optionType {
 				optBehaviorStatsAllowIIDTrials,
 				optBehaviorStatsHierarchicalFDR,
 				optBehaviorStatsComputeReliability,
+				optStatisticsAlpha,
 				optBehaviorPermScheme,
 				optBehaviorPermGroupColumnPreference,
 				optBehaviorExcludeNonTrialwiseFeatures,
+				optBehaviorSubFeatureRegistry,
+				optBehaviorFeatureRegistryFilesJSON,
+				optBehaviorFeatureRegistrySourceToTypeJSON,
+				optBehaviorFeatureRegistryTypeHierarchyJSON,
+				optBehaviorFeatureRegistryPatternsJSON,
+				optBehaviorFeatureRegistryClassifiersJSON,
 			)
 			// Shared covariate controls
 			if hasSelectedComputation("regression", "models", "influence", "correlations", "stability", "predictor_sensitivity") {
@@ -111,6 +119,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			options = append(options,
 				optTrialTableFormat,
 				optTrialTableAddLagFeatures,
+				optBehaviorTrialTableDisallowPositionalAlignment,
 				optTrialOrderMaxMissingFraction,
 				optFeatureSummariesEnabled,
 			)

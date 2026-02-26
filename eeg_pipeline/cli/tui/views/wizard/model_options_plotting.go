@@ -11,6 +11,7 @@ func (m Model) getPlottingAdvancedRows() []plottingAdvancedRow {
 
 	rows := make([]plottingAdvancedRow, 0, 128)
 	rows = append(rows, plottingAdvancedRow{kind: plottingRowOption, opt: optUseDefaults})
+	rows = append(rows, plottingAdvancedRow{kind: plottingRowOption, opt: optConfigSetOverrides})
 
 	// Only show per-plot configs for selected plots
 	selectedPlots := m.selectedPlotItemsForConfig()

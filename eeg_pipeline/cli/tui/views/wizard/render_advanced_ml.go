@@ -16,6 +16,7 @@ import (
 func isMLRenderedOption(opt optionType) bool {
 	switch opt {
 	case optUseDefaults,
+		optConfigSetOverrides,
 		optMLGroupData, optMLGroupModel, optMLGroupTraining, optMLGroupOutput,
 		optMLTarget,
 		optMLFmriSigGroup, optMLFmriSigMethod, optMLFmriSigContrastName,
@@ -45,9 +46,9 @@ func isMLRenderedOption(opt optionType) bool {
 		optMLClassificationResampler, optMLClassificationResamplerSeed,
 		optMLNPerm, optMLInnerSplits, optMLOuterJobs, optRNGSeed,
 		optMLCvHygieneEnabled, optMLCvPermutationScheme, optMLCvMinValidPermFraction, optMLCvDefaultNBins,
-		optMLEvalCIMethod, optMLEvalBootstrapIterations,
+		optMLEvalCIMethod, optMLEvalSubjectWeighting, optMLEvalBootstrapIterations,
 		optMLDataCovariatesStrict, optMLDataMaxExcludedSubjectFraction,
-		optMLIncrementalBaselineAlpha,
+		optMLIncrementalBaselineAlpha, optMLIncrementalRequireBaselinePredictors,
 		optMLInterpretabilityGroupedOutputs, optMLTargetsStrictRegressionContinuous,
 		optMLTimeGenMinSubjects, optMLTimeGenMinValidPermFraction,
 		optMLClassMinSubjectsForAUC, optMLClassMaxFailedFoldFraction,
@@ -83,6 +84,8 @@ func (m Model) renderMLAdvancedConfig() string {
 
 	textFieldForOpt := func(opt optionType) (textField, bool) {
 		switch opt {
+		case optConfigSetOverrides:
+			return textFieldConfigSetOverrides, true
 		case optMLTarget:
 			return textFieldMLTarget, true
 		case optMLFmriSigContrastName:
@@ -176,6 +179,10 @@ func (m Model) renderMLAdvancedConfig() string {
 		switch opt {
 		case optUseDefaults:
 			label, value, hint = "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"
+		case optConfigSetOverrides:
+			label = "Config Overrides"
+			value = renderTextOrDefault(m.configSetOverrides, "(none)")
+			hint = "Advanced/uncommon keys: key=value;key2=value2 (emits repeated --set)"
 		case optMLTarget:
 			hint = "e.g., outcome / predictor / binary_outcome"
 			if len(availableColumns) > 0 {
@@ -403,6 +410,9 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optMLEvalCIMethod:
 			methods := []string{"bootstrap", "fixed_effects"}
 			label, value, hint = "CI Method", methods[m.mlEvalCIMethod%len(methods)], "confidence interval method"
+		case optMLEvalSubjectWeighting:
+			weights := []string{"equal", "trial_count"}
+			label, value, hint = "Subject Weighting", weights[m.mlEvalSubjectWeighting%len(weights)], "group-level weighting for metrics"
 		case optMLEvalBootstrapIterations:
 			label, value, hint = "Bootstrap Iterations", fmt.Sprintf("%d", m.mlEvalBootstrapIterations), "for CI estimation"
 		case optMLDataCovariatesStrict:
@@ -411,6 +421,8 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "Max Excluded Subj Frac", fmt.Sprintf("%.6g", m.mlDataMaxExcludedSubjectFraction), "0-1"
 		case optMLIncrementalBaselineAlpha:
 			label, value, hint = "Baseline Alpha", fmt.Sprintf("%.6g", m.mlIncrementalBaselineAlpha), "incremental validity baseline"
+		case optMLIncrementalRequireBaselinePredictors:
+			label, value, hint = "Require Baseline Preds", m.boolToOnOff(m.mlIncrementalRequireBaselinePred), "error if baseline predictors are missing"
 		case optMLInterpretabilityGroupedOutputs:
 			label, value, hint = "Grouped Outputs", m.boolToOnOff(m.mlInterpretabilityGroupedOutputs), "grouped importance tables"
 		case optMLTargetsStrictRegressionContinuous:

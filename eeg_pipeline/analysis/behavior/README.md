@@ -100,7 +100,7 @@ behavior/
     ├── models.py            # predictor_models, regression, model families
     ├── feature_qc.py        # feature_qc stage
     ├── correlate.py         # correlate_* stages, predictor_sensitivity
-    ├── condition.py         # condition_column, condition_window, multigroup
+    ├── condition.py         # condition_column, condition_window, multigroup (when 3+ groups)
     ├── temporal.py          # temporal_tfr, temporal_stats, cluster
     ├── advanced.py          # mediation, moderation, mixed_effects
     ├── diagnostics.py       # stability, icc, consistency, influence
@@ -162,9 +162,9 @@ is explicitly set in configuration:
 - `correlate_*`, `predictor_sensitivity`, `regression`, `condition_column`,
   `mediation`, `moderation`
 
-The following stages require an explicit i.i.d. override for trial-level inference:
+The following require an explicit i.i.d. override for trial-level inference:
 
-- `models`, `condition_window`, `condition_multigroup`
+- `models`, `condition_window`, and multigroup condition comparison (when 3+ groups)
 
 Temporal trial-level inference (`temporal_stats`) requires cluster correction with
 valid group labels when `allow_iid_trials = false`.
@@ -192,7 +192,8 @@ The `behavior_analysis.predictor_type` key declares the nature of the predictor:
 
 Attempting to run a curve-fitting analysis (`predictor_residual`, `predictor_models`,
 `psychometrics`) when `predictor_type ≠ continuous` raises a `ValueError` at the
-analysis entry point via `assert_continuous_predictor()` / `assert_predictor_type_continuous()`.
+analysis entry point via `assert_continuous_predictor()` / `assert_predictor_type_continuous()`
+(in `eeg_pipeline.utils.analysis.stats.validation`).
 
 ### 4.4 Multiple Comparison Correction
 
@@ -214,7 +215,8 @@ and trial-wise EEG feature tables into `BehaviorContext`.
 Produces the core behavioral series ($y_i$, $P_i$) and a named mapping
 of feature tables used by all downstream stages.
 
-**`metadata`** — Builds a JSON QC summary:
+The pipeline writes a JSON QC summary (`analysis_metadata.json`) after stage
+execution (not as a separate DAG stage), via `stages/metadata.py`:
 
 - Trial counts, missingness fractions, outcome and predictor distributions.
 - Condition contrasts, covariate coverage, feature counts.
@@ -348,7 +350,7 @@ Run-mean mode computes correlations on run-aggregated means rather than trial-le
 Permutation p-value (one-sided extreme, Phipson–Smyth):
 
 ```math
-p_\text{perm} = \frac{\#\text{extreme} + 1}{n_\text{perm} + 1}.
+p_\text{perm} = \frac{N_{\text{extreme}} + 1}{n_\text{perm} + 1}.
 ```
 
 Grouped permutation schemes: shuffle or circular-shift within groups (`permute_within_groups`).
@@ -375,7 +377,7 @@ by the predictor (i.e. individual variability in response beyond stimulus drive)
 1. Fit $y = \beta_0 + \beta_1 P + \varepsilon$; compute sensitivity residual
    $\psi_i = y_i - (\hat\beta_0 + \hat\beta_1 P_i)$.
 2. Correlate each feature $x_f$ with $\psi$.
-3. Permutation p-values: $(\#\text{extreme} + 1) / (n_\text{perm} + 1)$.
+3. Permutation p-values: $(N_{\text{extreme}} + 1) / (n_\text{perm} + 1)$.
 
 ---
 
@@ -487,11 +489,12 @@ d_z = \frac{\bar{d}}{s_d} \text{ (paired)}.
 ```
 
 Permutation p-values: unpaired mean-difference and paired sign-flip,
-both using $(\#\text{extreme} + 1) / (n_\text{perm} + 1)$.
+both using $(N_{\text{extreme}} + 1) / (n_\text{perm} + 1)$.
 
-#### 5.13.2 Multi-Group (`condition_multigroup`)
+#### 5.13.2 Multi-Group (condition flow, 3+ groups)
 
-Pairwise tests only (no omnibus):
+When the condition column has 3+ levels, the pipeline runs a multigroup comparison
+(via the same condition stage; not a separate DAG node). Pairwise tests only (no omnibus):
 
 - Unpaired: Mann–Whitney U.
 - Paired run-level: Wilcoxon signed-rank.
@@ -582,7 +585,7 @@ z = ab / \mathrm{SE}_{ab}.
 **Proportion mediated:** $ab / c$.
 
 Bootstrap CI: percentile method.
-Permutation p-value: $(\#\text{extreme} + 1) / (n_\text{perm} + 1)$.
+Permutation p-value: $(N_{\text{extreme}} + 1) / (n_\text{perm} + 1)$.
 
 ---
 
@@ -698,7 +701,7 @@ r_\text{group} = \tanh\!\left(\mathrm{mean}_s\bigl[\mathrm{atanh}(r_s)\bigr]\rig
 Group-level permutation p-value:
 
 ```math
-p_\text{perm} = \frac{\#\text{extreme} + 1}{n_\text{perm} + 1}.
+p_\text{perm} = \frac{N_{\text{extreme}} + 1}{n_\text{perm} + 1}.
 ```
 
 ---

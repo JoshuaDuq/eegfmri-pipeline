@@ -293,7 +293,7 @@ Automated EEG preprocessing: bad channel detection, ICA artifact removal, and ep
 eeg-pipeline preprocessing full --subject 0001
 
 # Bad channel detection (PyPREP + RANSAC)
-eeg-pipeline preprocessing bad-channels --subject 0001 --use-pyprep --ransac
+eeg-pipeline preprocessing bad-channels --subject 0001 --ransac
 
 # Custom epoch window with autoreject
 eeg-pipeline preprocessing epochs --subject 0001 \
@@ -676,6 +676,38 @@ CLI flags override config values at runtime.
 | `fmri_preprocessing` | fMRIPrep engine, image, output spaces |
 | `fmri_contrast` | GLM specification, confound strategy, cluster correction |
 | `fmri_constraint` | Source localization fMRI constraint threshold and mask |
+
+### 8.1 Universal Runtime Overrides (`--set`)
+
+For long-tail or rarely used parameters, use universal config overrides instead of
+adding dedicated flags/widgets. This keeps CLI and TUI maintainable while preserving
+full configurability.
+
+- CLI: repeat `--set KEY=VALUE`
+- TUI: use `Config Overrides` in Advanced settings (`key=value;key2=value2`)
+
+```bash
+# Override behavior statistics at runtime
+eeg-pipeline behavior compute --subject 0001 \
+  --set behavior_analysis.statistics.fdr_alpha=0.01 \
+  --set behavior_analysis.cluster.n_permutations=5000
+
+# Override plotting style defaults
+eeg-pipeline plotting visualize --subject 0001 --all-plots \
+  --set plotting.defaults.dpi=400 \
+  --set plotting.styling.colors.significant=\"#D62728\"
+
+# Override ML data/feature filters
+eeg-pipeline ml regression --all-subjects \
+  --set machine_learning.data.feature_harmonization=union_impute \
+  --set machine_learning.data.feature_bands='[\"alpha\",\"beta\"]'
+```
+
+Notes:
+
+- `--set` values are type-coerced (`true/false`, `null`, ints, floats, JSON arrays/objects).
+- `--set` is applied after command-specific overrides, so it has final precedence.
+- Use dedicated flags/widgets for common workflows; use `--set`/`Config Overrides` for uncommon keys.
 
 ---
 

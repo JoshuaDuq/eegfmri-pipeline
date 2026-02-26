@@ -16,6 +16,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.derivRoot
 	case textFieldSourceRoot:
 		return m.sourceRoot
+	case textFieldConfigSetOverrides:
+		return m.configSetOverrides
 	case textFieldFmriFmriprepImage:
 		return m.fmriFmriprepImage
 	case textFieldFmriFmriprepOutputDir:
@@ -379,6 +381,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.eventColBinaryOutcome
 	case textFieldEventColCondition:
 		return m.eventColCondition
+	case textFieldEventColRequired:
+		return m.eventColRequired
 	case textFieldConditionPreferredPrefixes:
 		return m.conditionPreferredPrefixes
 	// Change Scores text fields
@@ -396,6 +400,16 @@ func (m Model) getTextFieldValue(field textField) string {
 	// Behavior Statistics text fields
 	case textFieldBehaviorPermGroupColumnPreference:
 		return m.behaviorPermGroupColumnPreference
+	case textFieldBehaviorFeatureRegistryFilesJSON:
+		return m.behaviorFeatureRegistryFilesJSON
+	case textFieldBehaviorFeatureRegistrySourceToTypeJSON:
+		return m.behaviorFeatureRegistrySourceJSON
+	case textFieldBehaviorFeatureRegistryTypeHierarchyJSON:
+		return m.behaviorFeatureRegistryHierarchyJSON
+	case textFieldBehaviorFeatureRegistryPatternsJSON:
+		return m.behaviorFeatureRegistryPatternsJSON
+	case textFieldBehaviorFeatureRegistryClassifiersJSON:
+		return m.behaviorFeatureRegistryClassifiersJSON
 	// System / IO text fields
 	case textFieldIOPredictorRange:
 		return m.ioPredictorRange
@@ -420,6 +434,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.derivRoot = value
 	case textFieldSourceRoot:
 		m.sourceRoot = value
+	case textFieldConfigSetOverrides:
+		m.configSetOverrides = value
 	case textFieldFmriFmriprepImage:
 		m.fmriFmriprepImage = value
 	case textFieldFmriFmriprepOutputDir:
@@ -799,6 +815,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.eventColBinaryOutcome = strings.Join(splitLooseList(value), ",")
 	case textFieldEventColCondition:
 		m.eventColCondition = strings.Join(splitLooseList(value), ",")
+	case textFieldEventColRequired:
+		m.eventColRequired = strings.Join(splitLooseList(value), ",")
 	case textFieldConditionPreferredPrefixes:
 		m.conditionPreferredPrefixes = strings.Join(splitLooseList(value), ",")
 	// Change Scores text fields
@@ -816,6 +834,16 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 	// Behavior Statistics text fields
 	case textFieldBehaviorPermGroupColumnPreference:
 		m.behaviorPermGroupColumnPreference = strings.Join(splitLooseList(value), ",")
+	case textFieldBehaviorFeatureRegistryFilesJSON:
+		m.behaviorFeatureRegistryFilesJSON = strings.TrimSpace(value)
+	case textFieldBehaviorFeatureRegistrySourceToTypeJSON:
+		m.behaviorFeatureRegistrySourceJSON = strings.TrimSpace(value)
+	case textFieldBehaviorFeatureRegistryTypeHierarchyJSON:
+		m.behaviorFeatureRegistryHierarchyJSON = strings.TrimSpace(value)
+	case textFieldBehaviorFeatureRegistryPatternsJSON:
+		m.behaviorFeatureRegistryPatternsJSON = strings.TrimSpace(value)
+	case textFieldBehaviorFeatureRegistryClassifiersJSON:
+		m.behaviorFeatureRegistryClassifiersJSON = strings.TrimSpace(value)
 	// System / IO text fields
 	case textFieldIOPredictorRange:
 		m.ioPredictorRange = strings.Join(splitLooseList(value), ",")

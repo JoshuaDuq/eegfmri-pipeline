@@ -52,12 +52,9 @@ epoched datasets ready for feature extraction and statistical analysis.
 | `pipeline/ica.py` | ICA component labeling via MNE-ICAlabel (`run_ica_label`) |
 | `pipeline/stats.py` | Preprocessing statistics collection (`collect_preprocessing_stats`) |
 | `pipeline/tfr.py` | Morlet wavelet TFR computation (`custom_tfr`) |
-| `pipeline/config.py` | Configuration file read/write utilities |
 | `pipeline/utils.py` | BIDS file discovery, path manipulation, condition name sanitization |
 | `pipeline/io.py` | MNE object I/O; channels/components TSV read/write |
 | `pipelines/preprocessing.py` | `PreprocessingPipeline` orchestrator: batch execution, subprocess management, logging |
-| `scripts/run_pipeline.py` | Standalone script interface (reads Python config, executes all steps) |
-| `scripts/create_config.py` | Generates a template configuration file |
 
 ---
 
@@ -475,14 +472,14 @@ pipeline.run_batch(subjects=["001"], task="task", mode="epochs")
 pipeline.process_subject("001", task="task", mode="full")
 ```
 
-### 13.2 Script Interface
+### 13.2 Unified CLI Interface
 
 ```bash
-python eeg_pipeline/preprocessing/scripts/run_pipeline.py <config_file.py>
+python -m eeg_pipeline.cli.main preprocessing full --all-subjects --task <task>
 ```
 
-Reads a Python-format config file (generated via `create_config.py`) and executes
-all steps sequentially for each task listed in `tasks_to_process`.
+Use the unified CLI (`eeg_pipeline.cli.main`) for preprocessing runs. Runtime
+overrides are supported via repeatable `--set KEY=VALUE`.
 
 ---
 

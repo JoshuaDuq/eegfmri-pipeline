@@ -8,6 +8,7 @@ type optionType int
 const (
 	// Feature Pipeline Advanced Options
 	optUseDefaults optionType = iota
+	optConfigSetOverrides
 	// Features section headers (expand/collapse)
 	optFeatGroupConnectivity
 	optFeatGroupDirectedConnectivity
@@ -68,6 +69,7 @@ const (
 	optBehaviorSubITPC
 	optBehaviorSubERDS
 	optBehaviorSubMultilevel
+	optBehaviorSubFeatureRegistry
 	optConnectivity
 	optPACPhaseRange
 	optPACAmpRange
@@ -1017,6 +1019,7 @@ const (
 	optEventColRating
 	optEventColBinaryOutcome
 	optEventColCondition
+	optEventColRequired
 	optConditionPreferredPrefixes
 
 	// Per-Family Spatial Transforms
@@ -1122,10 +1125,12 @@ const (
 	optMLCvMinValidPermFraction
 	optMLCvDefaultNBins
 	optMLEvalCIMethod
+	optMLEvalSubjectWeighting
 	optMLEvalBootstrapIterations
 	optMLDataCovariatesStrict
 	optMLDataMaxExcludedSubjectFraction
 	optMLIncrementalBaselineAlpha
+	optMLIncrementalRequireBaselinePredictors
 	optMLInterpretabilityGroupedOutputs
 	optMLTimeGenMinSubjects
 	optMLTimeGenMinValidPermFraction
@@ -1138,9 +1143,16 @@ const (
 	optBehaviorStatsAllowIIDTrials
 	optBehaviorStatsHierarchicalFDR
 	optBehaviorStatsComputeReliability
+	optBehaviorTrialTableDisallowPositionalAlignment
 	optBehaviorPermScheme
 	optBehaviorPermGroupColumnPreference
 	optBehaviorExcludeNonTrialwiseFeatures
+	optStatisticsAlpha
+	optBehaviorFeatureRegistryFilesJSON
+	optBehaviorFeatureRegistrySourceToTypeJSON
+	optBehaviorFeatureRegistryTypeHierarchyJSON
+	optBehaviorFeatureRegistryPatternsJSON
+	optBehaviorFeatureRegistryClassifiersJSON
 
 	// Global Statistics & Validation
 	optGlobalNBootstrap

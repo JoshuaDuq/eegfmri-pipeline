@@ -21,6 +21,9 @@ func (m *Model) toggleMLAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optConfigSetOverrides:
+		m.startTextEdit(textFieldConfigSetOverrides)
+		m.useDefaultAdvanced = false
 	case optMLGroupData:
 		m.mlGroupDataExpanded = !m.mlGroupDataExpanded
 	case optMLGroupModel:
@@ -240,6 +243,9 @@ func (m *Model) toggleMLAdvancedOption() {
 	case optMLEvalCIMethod:
 		m.mlEvalCIMethod = (m.mlEvalCIMethod + 1) % 2
 		m.useDefaultAdvanced = false
+	case optMLEvalSubjectWeighting:
+		m.mlEvalSubjectWeighting = (m.mlEvalSubjectWeighting + 1) % 2
+		m.useDefaultAdvanced = false
 	case optMLDataCovariatesStrict:
 		m.mlDataCovariatesStrict = !m.mlDataCovariatesStrict
 		m.useDefaultAdvanced = false
@@ -248,6 +254,9 @@ func (m *Model) toggleMLAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optMLInterpretabilityGroupedOutputs:
 		m.mlInterpretabilityGroupedOutputs = !m.mlInterpretabilityGroupedOutputs
+		m.useDefaultAdvanced = false
+	case optMLIncrementalRequireBaselinePredictors:
+		m.mlIncrementalRequireBaselinePred = !m.mlIncrementalRequireBaselinePred
 		m.useDefaultAdvanced = false
 	}
 
@@ -269,6 +278,9 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optConfigSetOverrides:
+		m.startTextEdit(textFieldConfigSetOverrides)
+		m.useDefaultAdvanced = false
 	// Group expansion toggles
 	case optPrepGroupStages:
 		m.prepGroupStagesExpanded = !m.prepGroupStagesExpanded
@@ -416,6 +428,9 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optEventColCondition:
 		m.startTextEdit(textFieldEventColCondition)
 		m.useDefaultAdvanced = false
+	case optEventColRequired:
+		m.startTextEdit(textFieldEventColRequired)
+		m.useDefaultAdvanced = false
 	case optConditionPreferredPrefixes:
 		m.startTextEdit(textFieldConditionPreferredPrefixes)
 		m.useDefaultAdvanced = false
@@ -439,6 +454,9 @@ func (m *Model) toggleFmriAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optConfigSetOverrides:
+		m.startTextEdit(textFieldConfigSetOverrides)
+		m.useDefaultAdvanced = false
 
 	// Group expansion toggles
 	case optFmriGroupRuntime:
@@ -604,6 +622,9 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optConfigSetOverrides:
+		m.startTextEdit(textFieldConfigSetOverrides)
+		m.useDefaultAdvanced = false
 
 	// Group headers
 	case optFmriAnalysisGroupInput:

@@ -88,9 +88,43 @@ def _resolve_time_ranges(explicit_windows: Optional[List[Dict[str, Any]]], tmin:
     return [{"name": None, "tmin": tmin, "tmax": tmax}]
 
 
+def _features_required_event_groups(config: Any) -> Optional[List[str]]:
+    """Resolve required event groups for features loading."""
+    required_groups = list(config.get("event_columns.required", []) or [])
+    return [name for name in required_groups if str(name).strip() != "outcome"]
+
+
 def _calculate_total_steps(n_ranges: int) -> int:
     """Calculate total progress steps: load + 3 per time range (extract, align, save)."""
     return 1 + (n_ranges * 3)
+
+
+def _infer_retained_trial_count(
+    retention_stats: Optional[Dict[str, Any]],
+    *,
+    y_aligned: Optional[pd.Series] = None,
+    pow_df_aligned: Optional[pd.DataFrame] = None,
+    baseline_df_aligned: Optional[pd.DataFrame] = None,
+    conn_df_aligned: Optional[pd.DataFrame] = None,
+    aper_df_aligned: Optional[pd.DataFrame] = None,
+) -> int:
+    """Infer retained trial count from retention metadata or aligned blocks."""
+    if isinstance(retention_stats, dict):
+        n_retained = retention_stats.get("n_retained")
+        if isinstance(n_retained, int):
+            return n_retained
+
+    candidates: List[int] = []
+    for block in (y_aligned, pow_df_aligned, baseline_df_aligned, conn_df_aligned, aper_df_aligned):
+        if block is None:
+            continue
+        if hasattr(block, "empty") and bool(getattr(block, "empty")):
+            continue
+        try:
+            candidates.append(int(len(block)))
+        except Exception:
+            continue
+    return candidates[0] if candidates else 0
 
 
 def _resolve_condition_labels_for_events(
@@ -718,6 +752,7 @@ class FeaturePipeline(PipelineBase):
         current_step += 1
         progress.step("Loading epochs", current=current_step, total=total_steps)
         self.logger.info("Loading cleaned epochs...")
+        required_event_groups = _features_required_event_groups(self.config)
         epochs, aligned_events = load_epochs_for_analysis(
             subject,
             task,
@@ -726,6 +761,7 @@ class FeaturePipeline(PipelineBase):
             deriv_root=self.deriv_root,
             logger=self.logger,
             config=self.config,
+            required_event_groups=required_event_groups,
         )
 
         if epochs is None:
@@ -781,15 +817,18 @@ class FeaturePipeline(PipelineBase):
                 c for c in target_columns if str(c) != explicit_outcome
             ]
         target_col = pick_target_column(aligned_events, target_columns=target_columns)
-        if target_col is None:
-            self.logger.warning("No target column found; skipping")
-            return
 
-        y = pd.to_numeric(aligned_events[target_col], errors="coerce")
-        n_valid = int(y.notna().sum())
-        self.logger.info(
-            "Target outcome column: '%s' (%d/%d valid values)", target_col, n_valid, len(y)
-        )
+        y: Optional[pd.Series] = None
+        if target_col is None:
+            self.logger.info(
+                "No target outcome column found; continuing in features-only mode."
+            )
+        else:
+            y = pd.to_numeric(aligned_events[target_col], errors="coerce")
+            n_valid = int(y.notna().sum())
+            self.logger.info(
+                "Target outcome column: '%s' (%d/%d valid values)", target_col, n_valid, len(y)
+            )
 
         fixed_templates_path = kwargs.get("fixed_templates_path")
         fixed_template_labels = None
@@ -902,7 +941,9 @@ class FeaturePipeline(PipelineBase):
                 current=current_step,
                 total=total_steps,
             )
-            critical_features = ["target"]
+            critical_features: List[str] = []
+            if y is not None:
+                critical_features.append("target")
             if "power" in ctx.feature_categories:
                 critical_features.extend(["power", "baseline"])
 
@@ -934,8 +975,18 @@ class FeaturePipeline(PipelineBase):
                 self.logger.error("Feature alignment failed for %s; skipping save", range_info)
                 continue
 
-            n_retained = retention_stats.get("n_retained", len(y_aligned) if y_aligned is not None else 0)
-            n_original = retention_stats.get("n_original", len(y))
+            n_retained = retention_stats.get(
+                "n_retained",
+                _infer_retained_trial_count(
+                    retention_stats,
+                    y_aligned=y_aligned,
+                    pow_df_aligned=pow_df_aligned,
+                    baseline_df_aligned=baseline_df_aligned,
+                    conn_df_aligned=conn_df_aligned,
+                    aper_df_aligned=aper_df_aligned,
+                ),
+            )
+            n_original = retention_stats.get("n_original", int(n_trials))
             if n_retained < n_original:
                 self.logger.info(
                     "Alignment: %d/%d trials retained (%.0f%%)",
@@ -1026,10 +1077,17 @@ class FeaturePipeline(PipelineBase):
                     "aper_df_aligned": aper_df_aligned,
                 }
                 _accumulate_features(accumulated_features, unpacked, features, aligned_dict)
-                if accumulated_y is None and y_aligned is not None:
+                if accumulated_y is None and y_aligned is not None and len(y_aligned) > 0:
                     accumulated_y = y_aligned
 
-            n_trials = len(y_aligned)
+            n_trials_saved = _infer_retained_trial_count(
+                retention_stats,
+                y_aligned=y_aligned,
+                pow_df_aligned=pow_df_aligned,
+                baseline_df_aligned=baseline_df_aligned,
+                conn_df_aligned=conn_df_aligned,
+                aper_df_aligned=aper_df_aligned,
+            )
             n_total = _get_df_cols(combined_df)
 
             extraction_config = {
@@ -1045,7 +1103,7 @@ class FeaturePipeline(PipelineBase):
                 "tmax": ctx.tmax,
                 "bands": ctx.bands,
                 "feature_categories": feature_categories,
-                "n_trials": n_trials,
+                "n_trials": n_trials_saved,
                 "subject": subject,
                 "task": task,
             }
@@ -1053,7 +1111,7 @@ class FeaturePipeline(PipelineBase):
 
             self.logger.info(
                 "Saved %s: %d total columns \u00d7 %d trials",
-                range_info, n_total, n_trials,
+                range_info, n_total, n_trials_saved,
             )
 
             del ctx, features, unpacked, extra_blocks, combined_df
@@ -1085,7 +1143,7 @@ class FeaturePipeline(PipelineBase):
                 ).strip(),
                 "aggregation_method": kwargs.get("aggregation_method", "mean"),
                 "feature_categories": feature_categories,
-                "n_trials": len(accumulated_y) if accumulated_y is not None else 0,
+                "n_trials": int(len(accumulated_y)) if accumulated_y is not None else int(n_trials),
                 "subject": subject,
                 "task": task,
             }

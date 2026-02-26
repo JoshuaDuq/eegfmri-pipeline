@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from ..config.loader import ConfigDict
+from ..parsing import parse_group_arg
 from eeg_pipeline.infra.paths import find_clean_epochs_path, resolve_deriv_root
 
 
@@ -409,24 +410,11 @@ def _determine_discovery_sources(args: Any) -> List[str]:
     return ["derivatives_epochs"]
 
 
-def _parse_group_argument(group_str: str) -> List[str]:
-    """Parse comma or semicolon-separated group string into subject list."""
-    normalized = group_str.replace(";", ",").replace(" ", ",")
-    return [s.strip() for s in normalized.split(",") if s.strip()]
-
-
-def _is_all_subjects_indicator(group_str: str) -> bool:
-    """Check if group string indicates all subjects."""
-    return group_str.lower() in {"all", "*", "@all"}
-
-
 def _extract_subjects_from_args(args: Any) -> Optional[List[str]]:
     """Extract subjects from args attributes."""
     if hasattr(args, "group") and args.group is not None:
         group_str = args.group.strip()
-        if _is_all_subjects_indicator(group_str):
-            return None
-        return _parse_group_argument(group_str)
+        return parse_group_arg(group_str)
     
     if hasattr(args, "all_subjects") and args.all_subjects:
         return None

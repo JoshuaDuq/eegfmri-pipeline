@@ -65,7 +65,12 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--predictor-column", col)
 	}
 
-	appendBoolPair(m.controlPredictor, "--predictor-control", "--no-predictor-control")
+	effectivePredictorControl := m.controlPredictor
+	// "none" for stats predictor control implies disabling global predictor control.
+	if m.behaviorStatsTempControl == 2 {
+		effectivePredictorControl = false
+	}
+	appendBoolPair(effectivePredictorControl, "--predictor-control", "--no-predictor-control")
 	appendBoolPair(m.controlTrialOrder, "--control-trial-order", "--no-control-trial-order")
 
 	// Run adjustment (subject-level; optional)
@@ -108,6 +113,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--trial-table-format", formats[m.trialTableFormat])
 		}
 		appendBoolPair(m.trialTableAddLagFeatures, "--trial-table-add-lag-features", "--no-trial-table-add-lag-features")
+		appendBoolPair(
+			m.trialTableDisallowPositionalAlignment,
+			"--trial-table-disallow-positional-alignment",
+			"--no-trial-table-disallow-positional-alignment",
+		)
 		if m.trialOrderMaxMissingFraction != 0.1 {
 			args = append(args, "--trial-order-max-missing-fraction", fmt.Sprintf("%.3f", m.trialOrderMaxMissingFraction))
 		}
@@ -780,9 +790,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	appendBoolPair(m.alsoSaveCsv, "--also-save-csv", "--no-also-save-csv")
 
 	// Behavior Statistics
-	tempControls := []string{"none", "linear", "spline"}
-	if m.behaviorStatsTempControl != 0 {
-		args = append(args, "--stats-temp-control", tempControls[m.behaviorStatsTempControl%len(tempControls)])
+	tempControls := []string{"spline", "linear", "none"}
+	if m.behaviorStatsTempControl >= 0 && m.behaviorStatsTempControl < len(tempControls) && m.behaviorStatsTempControl != 2 {
+		args = append(args, "--stats-predictor-control", tempControls[m.behaviorStatsTempControl])
 	}
 	appendBoolPair(
 		m.behaviorStatsAllowIIDTrials,
@@ -799,6 +809,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		"--stats-compute-reliability",
 		"--no-stats-compute-reliability",
 	)
+	if m.statisticsAlpha != 0.05 {
+		args = append(args, "--statistics-alpha", fmt.Sprintf("%.4f", m.statisticsAlpha))
+	}
 	permSchemes := []string{"shuffle", "circular_shift"}
 	if m.behaviorPermScheme != 0 {
 		args = append(args, "--perm-scheme", permSchemes[m.behaviorPermScheme%len(permSchemes)])
@@ -811,6 +824,21 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		"--exclude-non-trialwise-features",
 		"--no-exclude-non-trialwise-features",
 	)
+	if strings.TrimSpace(m.behaviorFeatureRegistryFilesJSON) != "" {
+		args = append(args, "--feature-registry-files-json", strings.TrimSpace(m.behaviorFeatureRegistryFilesJSON))
+	}
+	if strings.TrimSpace(m.behaviorFeatureRegistrySourceJSON) != "" {
+		args = append(args, "--feature-registry-source-to-feature-type-json", strings.TrimSpace(m.behaviorFeatureRegistrySourceJSON))
+	}
+	if strings.TrimSpace(m.behaviorFeatureRegistryHierarchyJSON) != "" {
+		args = append(args, "--feature-registry-type-hierarchy-json", strings.TrimSpace(m.behaviorFeatureRegistryHierarchyJSON))
+	}
+	if strings.TrimSpace(m.behaviorFeatureRegistryPatternsJSON) != "" {
+		args = append(args, "--feature-registry-patterns-json", strings.TrimSpace(m.behaviorFeatureRegistryPatternsJSON))
+	}
+	if strings.TrimSpace(m.behaviorFeatureRegistryClassifiersJSON) != "" {
+		args = append(args, "--feature-registry-classifiers-json", strings.TrimSpace(m.behaviorFeatureRegistryClassifiersJSON))
+	}
 
 	// Global Statistics & Validation
 	if m.globalNBootstrap != 1000 {

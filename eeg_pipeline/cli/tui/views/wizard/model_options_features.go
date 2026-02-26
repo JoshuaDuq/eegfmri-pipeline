@@ -9,6 +9,7 @@ import (
 func (m Model) getFeaturesOptions() []optionType {
 	var options []optionType
 	options = append(options, optUseDefaults)
+	options = append(options, optConfigSetOverrides)
 
 	if m.isCategorySelected("connectivity") {
 		options = append(options, optFeatGroupConnectivity)
