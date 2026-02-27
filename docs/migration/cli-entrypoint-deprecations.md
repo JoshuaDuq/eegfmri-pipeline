@@ -6,10 +6,11 @@ removed:
 - `scripts/eeg_raw_to_bids.py`
 - `scripts/merge_psychopy.py`
 
-Use the paradigm-specific CLI script:
+Current approach:
 
-- `python paradigm-specific-scripts/run_paradigm_specific.py eeg-raw-to-bids ...`
-- `python paradigm-specific-scripts/run_paradigm_specific.py merge-psychopy ...`
+- Run raw-to-BIDS conversion and event merging in external dataset-specific tooling.
+- Run this repository's CLI from BIDS onward (`preprocessing`, `features`, `behavior`,
+  `ml`, `plotting`, `fmri preprocess`, `fmri-analysis`).
 
 Rationale:
 

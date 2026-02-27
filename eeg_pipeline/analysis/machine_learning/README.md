@@ -868,7 +868,11 @@ covariate protection) for both conditions.
 3. Per LOSO fold:
    - Fit tuned ElasticNet on $X_\text{base,train}$ → $\hat{y}_\text{base}$.
    - Fit tuned ElasticNet on $X_\text{full,train}$ → $\hat{y}_\text{full}$.
-   - $\Delta R^2_\text{fold} = R^2(y_\text{test}, \hat{y}_\text{full}) - R^2(y_\text{test}, \hat{y}_\text{base})$.
+   - Fold-level incremental explained variance:
+
+```math
+\Delta R^2_\text{fold} = R^2(y_\text{test}, \hat{y}_\text{full}) - R^2(y_\text{test}, \hat{y}_\text{base}).
+```
 4. Primary estimate:
 
 ```math

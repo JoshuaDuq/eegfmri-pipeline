@@ -111,17 +111,18 @@ All paths are configurable in `eeg_pipeline/utils/config/eeg_config.yaml`.
 | Workflow | Minimum required inputs |
 |----------|-------------------------|
 | EEG preprocessing / features from BIDS | `data/bids_output/eeg/sub-XXXX/eeg/*_eeg.<format>` plus matching BIDS sidecars |
-| Behavioral analysis / ML | EEG `*_events.tsv` with at least `onset`, `duration`, `trial_type`; pain/temperature/rating columns |
+| Behavioral analysis / ML | EEG `*_events.tsv` with at least `onset`, `duration`, `trial_type`; plus study-specific predictor/target columns |
 | EEG raw-to-BIDS | `data/source_data/sub-XXXX/eeg/*.vhdr` (+ `.vmrk` and `.eeg`) |
-| PsychoPy merge into EEG events | `data/source_data/sub-XXXX/PsychoPy_Data/*TrialSummary.csv` + BIDS `*_events.tsv` |
+| External event-log merge into EEG events | Study event logs (e.g., PsychoPy `*TrialSummary.csv`) + BIDS `*_events.tsv` |
 | fMRI raw-to-BIDS | `data/source_data/sub-XXXX/fmri/<dicom-series-dir>/` |
 | fMRI first-level analysis | `data/bids_output/fmri/sub-XXXX/func/*_bold.nii.gz` + `*_events.tsv` |
 
 ### 4.2 Starting from Raw Recordings
 
-If you start from raw BrainVision EEG and fMRI DICOMs, run your paradigm-specific
-raw-to-BIDS and event-merge scripts first (EEG → BIDS, fMRI → BIDS, PsychoPy →
-`events.tsv`). These conversion steps are paradigm-specific and are not hard-coded.
+If you start from raw BrainVision EEG and fMRI DICOMs, perform raw-to-BIDS conversion
+and event-log merging before running this pipeline (EEG → BIDS, fMRI → BIDS,
+behavioral logs → `events.tsv`). These steps are intentionally external to this repo
+and may differ by dataset.
 
 ### 4.3 Starting from BIDS-Compliant Data
 
@@ -147,8 +148,8 @@ data/bids_output/eeg/
 
 Behavior and ML workflows read trial-level predictors and outcomes from BIDS
 `*_events.tsv` files. Required columns: `onset`, `duration`, `trial_type`.
-Include any paradigm-specific columns you plan to model (e.g., rating, temperature,
-binary outcome labels).
+Include any study-specific columns you plan to model (e.g., ratings, stimulus
+parameters, binary outcome labels).
 
 For fMRI contrast workflows, ensure events files include whichever columns you
 reference via `--cond-a-column/--cond-a-value` and `--cond-b-column/--cond-b-value`.
@@ -798,7 +799,8 @@ Full tutorial: [docs/eeg/source-localization.md](docs/eeg/source-localization.md
 
 ### 11.2 fMRI Raw-to-BIDS Conversion
 
-DICOM-to-BIDS conversion with event generation from PsychoPy logs.
+DICOM-to-BIDS conversion with optional event generation from behavioral logs
+(for example, PsychoPy TrialSummary files).
 Requires `dcm2niix` on `PATH`.
 
 Guide: [docs/fmri/raw-to-bids.md](docs/fmri/raw-to-bids.md)

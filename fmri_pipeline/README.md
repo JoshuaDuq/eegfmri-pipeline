@@ -2,10 +2,10 @@
 
 **Module:** `fmri_pipeline`
 
-This document is the methods reference for the subject-level fMRI analysis pipeline for
-thermal pain experiments. The pipeline covers DICOM-to-BIDS conversion, fMRIPrep
-preprocessing, first-level GLM contrast analysis, trial-wise beta estimation, and
-multivariate pain signature readout (NPS, SIIPS1).
+This document is the methods reference for the subject-level fMRI analysis pipeline.
+The pipeline starts from BIDS-formatted inputs and covers fMRIPrep preprocessing,
+first-level GLM contrast analysis, trial-wise beta estimation, and multivariate
+signature readout (NPS, SIIPS1).
 
 The resulting fMRI statistical maps are used to constrain EEG inverse solutions in the
 source localization stage of the EEG pipeline.
@@ -17,7 +17,7 @@ source localization stage of the EEG pipeline.
 1. [Notation](#1-notation)
 2. [Module Structure](#2-module-structure)
 3. [Pipeline Overview](#3-pipeline-overview)
-4. [Stage 1 — Raw-to-BIDS Conversion](#4-stage-1--raw-to-bids-conversion)
+4. [Stage 1 — BIDS Inputs and Event Assumptions](#4-stage-1--bids-inputs-and-event-assumptions)
 5. [Stage 2 — fMRIPrep Preprocessing](#5-stage-2--fmriprep-preprocessing)
 6. [Stage 3 — First-Level GLM Contrast Analysis](#6-stage-3--first-level-glm-contrast-analysis)
 7. [Stage 4 — Trial-Wise Beta Estimation](#7-stage-4--trial-wise-beta-estimation)
@@ -55,17 +55,16 @@ source localization stage of the EEG pipeline.
 | `pipelines/fmri_preprocessing.py` | fMRIPrep pipeline orchestrator |
 | `pipelines/fmri_analysis.py` | First-level GLM pipeline orchestrator |
 | `pipelines/fmri_trial_signatures.py` | Trial-wise beta and signature pipeline orchestrator |
-| `analysis/raw_to_bids.py` | DICOM-to-BIDS conversion |
+| `analysis/multivariate_signatures.py` | NPS/SIIPS1 multivariate signature computation |
 | `analysis/contrast_builder.py` | First-level GLM fitting and contrast computation |
 | `analysis/trial_signatures.py` | Trial-wise beta-series (LSA) and LSS extraction |
-| `analysis/pain_signatures.py` | NPS/SIIPS1 multivariate signature computation |
 | `analysis/confounds_selection.py` | fMRIPrep confound regressor selection |
 | `analysis/events_selection.py` | Trial-type normalization and filtering |
 | `analysis/bem_generation.py` | Docker-based BEM model, solution, and coregistration transform |
 | `analysis/reporting.py` | HTML report generation with QC visualizations |
 | `analysis/smoothing.py` | Spatial smoothing FWHM normalization |
 | `analysis/plotting_config.py` | Plot configuration dataclass and validation |
-| `cli/commands/fmri.py` | CLI entry point for conversion and preprocessing |
+| `cli/commands/fmri.py` | CLI entry point for fMRIPrep preprocessing |
 | `cli/commands/fmri_analysis.py` | CLI entry point for first-level analysis and trial signatures |
 | `utils/bold_discovery.py` | BOLD run and confound file discovery |
 | `utils/signature_paths.py` | Signature weight map path resolution |
@@ -76,14 +75,14 @@ source localization stage of the EEG pipeline.
 ## 3. Pipeline Overview
 
 ```
-DICOM ──► BIDS ──► fMRIPrep ──► First-Level GLM ──► Contrast Maps ──► EEG Source Localization
-                                      │
-                                      └──► Trial-Wise Betas ──► Signature Expression (NPS/SIIPS1)
+BIDS ──► fMRIPrep ──► First-Level GLM ──► Contrast Maps ──► EEG Source Localization
+                           │
+                           └──► Trial-Wise Betas ──► Signature Expression (NPS/SIIPS1)
 ```
 
 | Stage | Module | Purpose |
 |-------|--------|---------|
-| 1 | `analysis/raw_to_bids.py` | DICOM → BIDS conversion via `dcm2niix` |
+| 1 | Input BIDS dataset + `events.tsv` | Required input contract for downstream modeling |
 | 2 | `pipelines/fmri_preprocessing.py` | fMRIPrep containerized preprocessing |
 | 3 | `pipelines/fmri_analysis.py` + `analysis/contrast_builder.py` | Multi-run first-level GLM and contrast computation |
 | 4 | `pipelines/fmri_trial_signatures.py` + `analysis/trial_signatures.py` | Trial-wise beta estimation and signature readout |
@@ -94,82 +93,24 @@ Runtime configuration is loaded from `eeg_pipeline/utils/config/eeg_config.yaml`
 
 ---
 
-## 4. Stage 1 — Raw-to-BIDS Conversion
+## 4. Stage 1 — BIDS Inputs and Event Assumptions
 
-**Module:** `analysis/raw_to_bids.py`
+The fMRI pipeline consumes a BIDS dataset and does not perform DICOM conversion.
+Provide at minimum:
 
-Converts per-series DICOM directories into a BIDS-compliant fMRI dataset via `dcm2niix`.
+- `sub-*/func/*_bold.nii.gz`
+- matching `sub-*/func/*_events.tsv`
+- recommended sidecars (`*.json`, fieldmaps, and metadata) for robust preprocessing
 
-### 4.1 Series Discovery and Classification
+Events can be study-specific. The GLM layer expects standard BIDS `events.tsv` columns
+(`onset`, `duration`, `trial_type`) plus any additional columns used by
+`condition_a.column`, `condition_b.column`, and optional scoping filters.
 
-Scans `<source_root>/sub-*/fmri/` for DICOM directories and classifies each by name heuristics:
+Validation includes:
 
-| Name pattern | Classification |
-|--------------|---------------|
-| `mprage`, `t1w`, `t1` | Anatomical T1w |
-| `painrN` | Task BOLD (run number extracted from suffix) |
-| `rs_`, `rest` | Resting-state BOLD |
-| `field` + `map` | Fieldmap |
-
-### 4.2 DICOM-to-NIfTI Conversion
-
-Runs `dcm2niix` per series with flags `-b y` (BIDS sidecars), `-z y` (gzip),
-`-f %p_%s` (predictable naming). Output is written to a temporary directory, then
-moved to the BIDS tree.
-
-### 4.3 Fieldmap Classification
-
-For fieldmap series, outputs are classified as `phasediff`, `magnitude1`, or `magnitude2`
-by the following criteria, in order:
-
-1. Presence of `EchoTime1`/`EchoTime2` in the JSON sidecar.
-2. `ImageType` field containing `PHASE`.
-3. Filename containing `phase`.
-4. When none of the above apply: the smallest file is treated as phase, the largest as magnitude.
-
-### 4.4 Events File Generation
-
-For each BOLD run, a BIDS `*_events.tsv` is generated from PsychoPy TrialSummary CSVs.
-
-| `trial_type` | Description | Duration |
-|--------------|-------------|---------|
-| `fixation_rest` | Pre-stimulus rest interval (35°C baseline) | ITI duration |
-| `fixation_poststim` | Post-stimulus fixation before pain question | Variable (4.5–8.5 s) |
-| `stimulation` | Thermal stimulation epoch | 12.5 s total |
-| `pain_question` | Binary pain yes/no question | ≤ 4 s |
-| `vas_rating` | Visual analogue scale rating | ≤ 7 s |
-
-When `event_granularity = phases`, the stimulation epoch is split into sub-phases:
-`ramp_up` (3 s), `plateau` (7.5 s), `ramp_down` (2 s).
-
-Each event row carries per-trial metadata: `stimulus_temp`, `selected_surface`,
-`binary_outcome_coded`, `vas_final_coded_rating`, `vas_scale_min`, `vas_scale_max`.
-
-### 4.5 Onset Alignment
-
-Configurable via `onset_reference`:
-
-| Mode | Behavior |
-|------|---------|
-| `as_is` *(default)* | Raw PsychoPy timestamps. |
-| `first_iti_start` | Zero-referenced to the first ITI onset. |
-| `first_stim_start` | Zero-referenced to the first stimulation onset. |
-
-An optional `onset_offset_s` is added to all onsets after reference subtraction.
-
-### 4.6 Validation
-
-Events are validated against the BOLD run duration (from NIfTI header or JSON sidecar).
-If any event falls outside the run bounds within a tolerance of $\max(2 \times \text{TR},\, 1\,\text{s})$,
-the conversion raises an error with an actionable message identifying the offending events.
-
-### 4.7 BIDS Metadata
-
-Written automatically:
-- `dataset_description.json`
-- `participants.tsv`
-- `task-<task>_events.json` (column descriptions)
-- Per-run JSON sidecars with `TaskName` and `IntendedFor` (fieldmaps)
+1. Presence of BOLD/events pairs for selected subjects/runs.
+2. Condition values resolvable against available event columns.
+3. Event timing consistency with run duration tolerances during model construction.
 
 ---
 
@@ -533,7 +474,7 @@ Dockerfile: `eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne`.
 
 ## 10. Multivariate Pain Signatures
 
-**Module:** `analysis/pain_signatures.py`
+**Module:** `analysis/multivariate_signatures.py`
 
 Expression of established multivariate pain biomarkers on statistical or beta maps.
 
@@ -646,9 +587,9 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `fmriprep_space` | `T1w` | fMRIPrep output space for BOLD |
 | `require_fmriprep` | `true` | Raise error if preprocessed BOLD is missing |
 | `type` | `t-test` | Contrast type |
-| `condition_a.column` | `binary_outcome_coded` | Events column for condition A |
+| `condition_a.column` | `binary_outcome_coded` | Events column for condition A (study-specific; override as needed) |
 | `condition_a.value` | `1` | Value selecting condition A trials |
-| `condition_b.column` | `binary_outcome_coded` | Events column for condition B |
+| `condition_b.column` | `binary_outcome_coded` | Events column for condition B (study-specific; override as needed) |
 | `condition_b.value` | `0` | Value selecting condition B trials |
 | `condition_scope_trial_types` | `null` | Restrict condition selection to specific trial types |
 | `events_to_model` | `null` | Restrict which event types enter the GLM |

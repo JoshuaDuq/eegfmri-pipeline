@@ -615,8 +615,12 @@ func (m Model) renderSubjectSelection() string {
 			hintStyle.Render("[Tab]") + "\n")
 	}
 
-	if m.subjectsLoading {
+	if m.subjectsLoading && len(m.subjects) == 0 {
 		return b.String() + "  " + m.subjectLoadingSpinner.View()
+	}
+
+	if m.subjectsLoading && len(m.subjects) > 0 {
+		b.WriteString("  " + dimStyle.Render("Refreshing subject status... ") + m.subjectLoadingSpinner.View() + "\n")
 	}
 
 	if m.filteringSubject {

@@ -83,7 +83,7 @@ rois: &roi_definitions
 ###################################################################
 event_columns:
   # Generic column aliases for logical event groups.
-  # Add paradigm-specific column names in your overrides file.
+  # Add study-specific column names in your overrides file.
   required: ["outcome"]
   condition: ["condition", "trial_type"]
   predictor: []
@@ -93,7 +93,7 @@ event_columns:
 alignment:
   allow_misaligned_trim: false
   min_alignment_samples: 5
-  # EEG↔fMRI alignment defaults; paradigm-specific scripts may override.
+  # EEG↔fMRI alignment defaults; dataset-specific preprocessing may override.
   trim_to_first_volume: true         # EEG raw_to_bids: trim to first volume marker
   fmri_onset_reference: "as_is"  # fMRI raw_to_bids onset reference (as_is | first_iti_start | first_stim_start)
 
@@ -116,7 +116,7 @@ preprocessing:
   clean_events_overwrite: true       # Overwrite existing clean events.tsv
   clean_events_strict: true          # Fail preprocessing if clean events.tsv cannot be written/aligned
   # Optional preferred task-trigger prefixes for auto-detecting epoch conditions.
-  # Leave empty for generic use; define paradigm-specific prefixes in your overrides file.
+  # Leave empty for generic use; define study-specific prefixes in your overrides file.
   condition_preferred_prefixes: []
 
 pyprep:

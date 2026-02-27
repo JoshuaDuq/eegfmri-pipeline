@@ -9,8 +9,8 @@ Pipeline Classes:
 - MLPipeline: Machine learning pipeline (LOSO, time-generalization)
 - PreprocessingPipeline: Bad channels, ICA, epochs
 
-Note: Raw-to-BIDS conversion and PsychoPy merge are paradigm-specific
-and live in paradigm-specific-scripts/. Run them before this pipeline.
+Note: Raw-to-BIDS conversion and event-log harmonization are external to this
+package. Run those dataset-specific steps before this pipeline.
 """
 
 from eeg_pipeline.pipelines.base import PipelineBase
