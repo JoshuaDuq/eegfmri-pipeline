@@ -54,7 +54,7 @@ but is applicable to any EEG study with the same structure.
 features/
 ├── api.py                  # Entry points: extract_all_features, extract_precomputed_features
 ├── selection.py            # Feature category resolution and spatial-mode filtering
-├── preparation.py          # Epoch validation, TFR computation, baseline metrics
+├── preparation.py          # Epoch validation, TFR setup, precompute_data (band filtering, PSD, GFP, evoked subtraction), baseline metrics
 ├── cv_hygiene.py           # Cross-validation guards: fold-specific IAF, train-mask enforcement
 ├── normalization.py        # Train/test-separated normalization schemes
 ├── results.py              # FeatureExtractionResult, ExtractionResult dataclasses
@@ -69,7 +69,7 @@ features/
 ├── quality.py              # Trial- and channel-level QC metrics
 ├── source_localization.py  # LCMV / eLORETA source-space features
 └── precomputed/
-    ├── __init__.py         # precompute_data: band filtering, PSD, GFP, evoked subtraction
+    ├── __init__.py         # Package init
     ├── erds.py             # ERDS extraction from precomputed band envelopes
     └── extras.py           # Band-power ratios, hemispheric asymmetry
 ```
@@ -86,12 +86,12 @@ Feature categories are resolved by `resolve_feature_categories` in `selection.py
 2. `feature_engineering.feature_categories` from configuration.
 3. All entries in `FEATURE_CATEGORIES` if neither of the above is set.
 
-Available categories:
+Available categories (order matches `FEATURE_CATEGORIES` in `eeg_pipeline.domain.features.constants`):
 
 ```
-power, spectral, aperiodic, erp, erds, ratios, asymmetry,
-connectivity, directedconnectivity, itpc, phase, pac,
-complexity, bursts, microstates, quality, sourcelocalization
+power, spectral, aperiodic, erp, erds, ratios, asymmetry, microstates,
+connectivity, directedconnectivity, itpc, pac, sourcelocalization,
+complexity, bursts, quality
 ```
 
 ### 3.2 Column Naming Schema
@@ -126,6 +126,9 @@ Controlled by `feature_engineering.spatial_modes` and enforced by
 | `global` | `*_global_*`, columns ending with `_global` |
 
 Non-spatial features (global scalar summaries) are always retained.
+Default when not set in config: `["roi", "global"]` (from `FeatureContext`); config key
+`feature_engineering.spatial_modes` can override. Omit `--spatial` to use config, or pass
+e.g. `--spatial roi global` to restrict to a subset.
 
 ---
 
@@ -200,7 +203,7 @@ All IAF-dependent steps include explicit duration and cycle-count checks.
 
 - Input: boolean `train_mask` over epochs.
 - Output: $\text{IAF}_\text{fold}$ (Hz) and IAF-adjusted band dictionary $\mathcal{B}_\text{fold}$.
-- If the training set is too small, IAF estimation is skipped and an error is raised.
+- If the training set is too small, IAF estimation is skipped and `(None, None)` is returned with a warning logged.
 
 This prevents spectral band definitions from leaking test-trial information.
 
@@ -235,7 +238,10 @@ A failed transform raises a `RuntimeError`; it is never silently skipped.
 - Frequency band definitions (IAF-adjusted if applicable)
 - Quality-control metadata (finite fractions, medians, frequency ranges, window counts)
 
-The main function is `precompute_data(epochs, bands, config, logger, ...)`, which:
+The main function is `precompute_data(epochs, bands, config, logger, ...)`, which accepts
+optional keyword-only arguments `compute_bands` and `compute_psd_data` (both default `True`)
+to control whether band-filtered data and PSD are computed; the precomputed-only pipeline
+may set them to `False` for unused feature groups to avoid unnecessary computation. It:
 
 1. Selects EEG channels and applies the configured spatial transform.
 2. Rebuilds `TimeWindows` on the actual time axis if needed.
@@ -271,14 +277,14 @@ Entry point in `api.py`. Performs the following steps in order:
 
 1. Optionally crop epochs to $[t_\text{min}, t_\text{max}]$ and rebuild `TimeWindows`.
 2. Precompute band data when any of the following categories are requested:
-   `erds`, `aperiodic`, `spectral`, `complexity`, `bursts`, `ratios`, `asymmetry`, `connectivity`.
+   `connectivity`, `directedconnectivity`, `erds`, `ratios`, `asymmetry`, `complexity`, `bursts`, `spectral`, `aperiodic`.
 3. Validate epochs (montage, sampling rate, duration).
 4. Compute TFR and baseline metrics once for categories `power`, `itpc`, `pac`.
 5. Call per-category extractors via `_extract_feature_with_error_handling`, which enforces:
    - Strict trial-count matching between output and input.
    - Timing and logging per category.
    - Immediate surfacing of shape mismatches or unexpected return types.
-6. Apply spatial-mode filtering to each feature DataFrame.
+6. Apply spatial-mode filtering to the following feature DataFrames: power, ERP, aperiodic, connectivity, complexity, bursts, spectral. (Directed connectivity, phase, ITPC, PAC, ERDS, ratios, asymmetry, microstates, quality, and source are not passed through this filter.)
 7. Append change scores (see §9).
 
 Output: `FeatureExtractionResult` dataclass with one DataFrame per domain.
@@ -288,9 +294,11 @@ Output: `FeatureExtractionResult` dataclass with one DataFrame per domain.
 A lighter-weight entry point for cases where TFR features are not needed or
 precomputed intermediates already exist:
 
-- Accepts `epochs`, `bands`, `config`, `logger`, and optional `events_df` and `precomputed`.
+- Accepts `epochs`, `bands`, `config`, `logger`, and optional `events_df`, `precomputed`,
+  and `feature_groups` (list of group names to extract; default `["erds", "spectral"]` when `None`).
 - Calls `precompute_data` if `precomputed` is `None`.
-- Extracts a specified subset of feature groups.
+- Extracts the requested feature groups. Note: the directed-connectivity group key is
+  `directed_connectivity` (with underscore), not `directedconnectivity` (the TFR pipeline category).
 - Returns an `ExtractionResult` with a `features` dict and optional condition labels.
 
 This is the preferred path for large-scale batch processing and cross-modality sharing
@@ -861,18 +869,21 @@ These metrics serve both as QC features and as gatekeepers for downstream proces
 After primary feature extraction, `_add_change_scores_to_results` appends change-score
 columns when `feature_engineering.compute_change_scores = true`.
 
-For a feature column $X$ with baseline and active variants:
+For a feature column $X$ with baseline and active variants, the transform is configured
+via `feature_engineering.change_scores.transform` (or `--change-scores-transform`):
+`difference` (default), `percent`, `log_ratio`, or `ratio` (CLI alias for `percent`). Example (difference):
 
 ```math
 X_\Delta = X^\text{active} - X^\text{baseline}.
 ```
 
 `compute_change_features` inspects column names to identify paired segments and produces
-consistent `_delta`-suffixed columns without recomputing the underlying features.
+consistent columns with segment name `change` (or `pct_change`/`log_ratio`) without recomputing
+the underlying features.
 Change scores are stored alongside original features to avoid redundant derivation downstream.
 
-Supported families: power, connectivity, aperiodic, phase, PAC, ERDS, spectral,
-ratios, asymmetry, microstates.
+Supported families: power, connectivity, directedconnectivity, aperiodic, itpc (in `phase_df`), pac, erds,
+spectral, ratios, asymmetry, complexity, microstates, sourcelocalization.
 
 ---
 
@@ -951,7 +962,9 @@ z_i^{(g)} =
 \sigma_g = \mathrm{sd}\{x_j : g_j = g\}.
 ```
 
-If the requested grouping column is absent, a `KeyError` is raised.
+If the requested grouping column is absent from the DataFrame, normalization falls back to
+using all rows (no grouping). Callers should ensure the grouping column exists when using
+`condition` or `run` reference if group-wise normalization is intended.
 
 ### 10.3 Train/Test-Separated Normalization
 
@@ -960,7 +973,7 @@ If the requested grouping column is absent, a `KeyError` is raised.
 - `FeatureNormalizer(method)` — a stateful normalizer: `.fit(train_df)` stores per-column
   parameters; `.transform(df)` applies them to any DataFrame.
 
-Both utilities exclude non-feature metadata columns (`condition`, `subject`, `trial`,
+Both utilities exclude non-feature metadata columns (`condition`, `epoch`, `subject`, `trial`,
 `run`, `run_id`, …) from transformation.
 
 ---
@@ -1005,6 +1018,9 @@ ratios_df, asymmetry_df, comp_df, bursts_df,
 microstates_df, quality_df, source_df
 ```
 
+ITPC and phase features are stored in `phase_df` / `phase_cols`. The dataclass also defines
+`itpc_trial_df` / `itpc_trial_cols`, but these are not populated by `extract_all_features`.
+
 Also stores associated column lists and baseline/TFR metadata.
 
 ### 12.2 `ExtractionResult` (Precomputed-Based)
@@ -1020,7 +1036,7 @@ Key methods:
 | Method | Returns |
 |--------|---------|
 | `get_combined_df(include_condition)` | Single design matrix from all groups |
-| `get_feature_group_df(group)` | DataFrame for one group |
+| `get_feature_group_df(group, include_condition=True)` | DataFrame for one group |
 | `get_qc_summary()` | Aggregated QC across groups |
 
 ### 12.3 Feature Manifests

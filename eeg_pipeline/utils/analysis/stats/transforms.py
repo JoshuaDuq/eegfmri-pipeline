@@ -267,6 +267,8 @@ def compute_change_features(
             transform = str(cfg_transform).strip().lower()
     
     transform = transform.lower()
+    if transform == "ratio":
+        transform = "percent"
     if transform not in {"difference", "percent", "log_ratio"}:
         transform = "difference"
     

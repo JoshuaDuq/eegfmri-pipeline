@@ -93,7 +93,7 @@ pip install -r requirements.txt
 ```
 
 After installation, the `eeg-pipeline` command is available in the active environment.
-To include optional ML dependencies:
+`requirements.txt` installs with optional `[ml]` extras (PyTorch). To add ML after a base install:
 
 ```bash
 pip install -e ".[ml]"
@@ -192,7 +192,7 @@ data/
     └── sub-XXXX/
         ├── eeg/
         │   ├── sub-XXXX_task-*_proc-clean_epo.fif   # Cleaned epochs
-        │   └── features/       # Extracted feature tables (.parquet/.tsv)
+        │   └── features/       # Extracted feature tables (.parquet; optionally .tsv/.csv)
         │       ├── power/
         │       ├── connectivity/
         │       ├── aperiodic/
@@ -320,7 +320,7 @@ Each feature family produces one row per trial with clearly documented columns.
 
 | Mode | Description |
 |------|-------------|
-| `compute` | Extract features and write to derivatives (Parquet/TSV + provenance metadata) |
+| `compute` | Extract features and write to derivatives (Parquet; optionally TSV/CSV via `--also-save-csv`) plus provenance metadata |
 | `visualize` | Generate descriptive plots from already-computed tables |
 
 **Feature families (16 categories):**
@@ -331,7 +331,7 @@ Each feature family produces one row per trial with clearly documented columns.
 | `spectral` | Spectral summary measures (spectral edge, peak frequency, bandwidth) |
 | `ratios` | Band power ratios (theta/beta, theta/alpha, alpha/beta, delta/alpha, delta/theta) |
 | `aperiodic` | 1/f background (slope, offset) via iterative specparam-style fits |
-| `connectivity` | Functional connectivity (wPLI, AEC, PLV) with per-family spatial transforms |
+| `connectivity` | Functional connectivity (wPLI, imcoh, AEC, PLV, PLI) with per-family spatial transforms |
 | `directedconnectivity` | Directed connectivity (PSI, DTF, PDC) from MVAR models |
 | `microstates` | Microstate sequence statistics (coverage, duration, occurrence, transitions) |
 | `pac` | Phase–amplitude coupling (theta–gamma, alpha–gamma) with surrogate-based nulls |
@@ -356,6 +356,9 @@ eeg-pipeline features compute --subject 0001
 eeg-pipeline features compute --subject 0001 \
   --categories power connectivity aperiodic \
   --spatial roi global
+
+# When --spatial is omitted, config's feature_engineering.spatial_modes is used
+# (default: roi, channels, global). Use --spatial to restrict to a subset.
 
 # Custom frequency bands and ROIs
 eeg-pipeline features compute --subject 0001 \
@@ -569,7 +572,7 @@ eeg-pipeline plotting visualize --subject 0001 --subject 0002 --analysis-scope g
 ```
 
 Available groups: `power`, `connectivity`, `aperiodic`, `phase`, `erds`, `complexity`,
-`spectral`, `ratios`, `asymmetry`, `microstates`, `erp`, `tfr`, `behavior`.
+`spectral`, `ratios`, `asymmetry`, `microstates`, `bursts`, `erp`, `tfr`, `behavior`.
 
 ---
 
@@ -612,15 +615,14 @@ Inspect pipeline state, subject availability, and current configuration.
 | `config` | Current effective configuration (including runtime overrides) |
 | `version` | Installed pipeline version and dependency snapshot |
 | `plotters` | Available plot definitions and groups |
-| `discover` | Auto-discovered subjects from all configured data sources |
+| `discover` | Discover available columns and values from events, trial tables, and condition-effects data |
 | `rois` | Configured ROI definitions (channel groupings) |
 | `fmri-conditions` | fMRI event conditions available for GLM specification |
 | `fmri-columns` | Columns present in `events.tsv` files for fMRI analyses |
 | `multigroup-stats` | Cross-subject summary statistics for selected features |
 | `ml-feature-space` | Dimensions and structure of the ML feature matrix |
 
-**Stats:** Pipeline-wide dashboard summarizing which stages have run, subject counts,
-feature coverage, and storage usage.
+**Stats:** Pipeline-wide dashboard (default: `summary`). Modes: `summary`, `subjects`, `features`, `storage`, `timeline`.
 
 ```bash
 eeg-pipeline info subjects
@@ -763,12 +765,17 @@ derivatives/sub-XXXX/eeg/features/
 ├── connectivity/
 │   ├── features_connectivity.parquet
 │   └── metadata/
+│       └── features_connectivity.json # Extraction config + column descriptions
 ├── aperiodic/
 │   ├── features_aperiodic.parquet
+│   ├── aperiodic_qc.tsv              # Per-segment/channel aperiodic fit QC
 │   └── metadata/
-│       └── qc/                        # Per-channel QC tables
+│       └── features_aperiodic.json     # Extraction config + column descriptions
 └── ...
 ```
+
+Source localization outputs may appear under `sourcelocalization/eeg_only/` or
+`sourcelocalization/fmri_informed/` depending on `feature_engineering.sourcelocalization.mode`.
 
 Plots are saved as PNG by default:
 
