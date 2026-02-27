@@ -111,23 +111,5 @@ func (m Model) getPreprocessingOptions() []optionType {
 		}
 	}
 
-	// Alignment group
-	options = append(options,
-		optAlignAllowMisalignedTrim,
-		optAlignMinAlignmentSamples,
-		optAlignTrimToFirstVolume,
-		optAlignFmriOnsetReference,
-	)
-
-	// Event Column Mapping
-	options = append(options,
-		optEventColPredictor,
-		optEventColRating,
-		optEventColBinaryOutcome,
-		optEventColCondition,
-		optEventColRequired,
-		optConditionPreferredPrefixes,
-	)
-
 	return options
 }

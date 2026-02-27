@@ -299,3 +299,60 @@ func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForPainResidualOnly(t *test
 		t.Fatalf("expected advanced group header for predictor_residual-only selection")
 	}
 }
+
+func TestGetPreprocessingOptions_HidesAlignmentAndEventMappingRows(t *testing.T) {
+	m := Model{modeIndex: 0}
+
+	opts := m.getPreprocessingOptions()
+
+	if !hasOption(opts, optConfigSetOverrides) {
+		t.Fatalf("expected config overrides row to remain available")
+	}
+	if hasOption(opts, optAlignAllowMisalignedTrim) ||
+		hasOption(opts, optAlignMinAlignmentSamples) ||
+		hasOption(opts, optAlignTrimToFirstVolume) ||
+		hasOption(opts, optAlignFmriOnsetReference) {
+		t.Fatalf("did not expect alignment rows in preprocessing advanced options")
+	}
+	if hasOption(opts, optEventColPredictor) ||
+		hasOption(opts, optEventColRating) ||
+		hasOption(opts, optEventColBinaryOutcome) ||
+		hasOption(opts, optEventColCondition) ||
+		hasOption(opts, optEventColRequired) ||
+		hasOption(opts, optConditionPreferredPrefixes) {
+		t.Fatalf("did not expect event column mapping rows in preprocessing advanced options")
+	}
+}
+
+func TestNonPreprocessingPipelines_DoNotShowPreprocessingAlignmentOrEventMappingRows(t *testing.T) {
+	assertNoPrepLeak := func(t *testing.T, opts []optionType) {
+		t.Helper()
+		if hasOption(opts, optAlignAllowMisalignedTrim) ||
+			hasOption(opts, optAlignMinAlignmentSamples) ||
+			hasOption(opts, optAlignTrimToFirstVolume) ||
+			hasOption(opts, optAlignFmriOnsetReference) ||
+			hasOption(opts, optEventColPredictor) ||
+			hasOption(opts, optEventColRating) ||
+			hasOption(opts, optEventColBinaryOutcome) ||
+			hasOption(opts, optEventColCondition) ||
+			hasOption(opts, optEventColRequired) ||
+			hasOption(opts, optConditionPreferredPrefixes) {
+			t.Fatalf("unexpected preprocessing-only alignment/event mapping option in non-preprocessing pipeline")
+		}
+	}
+
+	features := New(types.PipelineFeatures, ".")
+	assertNoPrepLeak(t, features.getFeaturesOptions())
+
+	behavior := New(types.PipelineBehavior, ".")
+	assertNoPrepLeak(t, behavior.getBehaviorOptions())
+
+	ml := New(types.PipelineML, ".")
+	assertNoPrepLeak(t, ml.getMLOptions())
+
+	fmriPrep := New(types.PipelineFmri, ".")
+	assertNoPrepLeak(t, fmriPrep.getFmriPreprocessingOptions())
+
+	fmriAnalysis := New(types.PipelineFmriAnalysis, ".")
+	assertNoPrepLeak(t, fmriAnalysis.getFmriAnalysisOptions())
+}
