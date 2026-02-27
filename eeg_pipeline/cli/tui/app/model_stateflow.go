@@ -101,7 +101,9 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	}
 
 	cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())
-	subjectCmd := executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+	// Always do a fresh on-disk scan on first wizard entry for this cache key.
+	// This avoids transient stale status (e.g., false "missing epochs") from CLI cache.
+	subjectCmd := executor.LoadSubjectsRefresh(m.repoRoot, m.task, m.selectedPipeline)
 	if cached, ok := m.subjectsCache[cacheKey]; ok {
 		// Serve cached subjects instantly; refresh is available via F5.
 		subjectCmd = func() tea.Msg { return cached }

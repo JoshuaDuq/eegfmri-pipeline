@@ -467,6 +467,54 @@ def _validate_segment_duration_for_connectivity(
     return True
 
 
+def _is_wavelet_longer_than_signal_error(exc: BaseException) -> bool:
+    msg = str(exc).strip().lower()
+    return (
+        "at least one of the wavelets is longer than the signal" in msg
+        or "wavelets is longer than the signal" in msg
+        or "wavelet is longer than the signal" in msg
+    )
+
+
+def _safe_n_cycles_for_segment(
+    base_n_cycles: Optional[float],
+    freqs_hz: np.ndarray,
+    sfreq_hz: float,
+    n_times: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute safe cwt_n_cycles and filter frequencies that would violate MNE constraints."""
+    freqs_hz = np.asarray(freqs_hz, dtype=float)
+    if n_times <= 0:
+        return np.array([]), np.array([])
+
+    default_cycles = 7.0
+    try:
+        base = float(base_n_cycles) if base_n_cycles is not None else default_cycles
+    except (TypeError, ValueError):
+        base = default_cycles
+
+    # MNE Morlet check:
+    # len(W) <= n_times, with len(W) = 2*len(arange(0, 5*sigma_t, 1/sfreq)) - 1
+    # sigma_t = n_cycles / (2*pi*freq)
+    n_sigma = 5.0
+    half_len_max = int((n_times + 1) // 2)
+    if half_len_max <= 1:
+        return np.array([]), np.array([])
+
+    safety_factor = 0.95
+    max_cycles_by_wavelet = (
+        safety_factor
+        * float(half_len_max)
+        * (2.0 * np.pi * freqs_hz)
+        / (n_sigma * sfreq_hz)
+    )
+    safe_cycles = np.minimum(base, max_cycles_by_wavelet)
+
+    min_required_cycles = 1.0
+    valid_mask = np.isfinite(safe_cycles) & (safe_cycles >= min_required_cycles)
+    return freqs_hz[valid_mask], safe_cycles[valid_mask]
+
+
 def _resolve_phase_measures(conn_cfg: Dict[str, Any]) -> List[str]:
     """Extract phase-based connectivity measures from config dict."""
     supported_measures = {"wpli", "imcoh", "plv", "pli"}
@@ -476,6 +524,94 @@ def _resolve_phase_measures(conn_cfg: Dict[str, Any]) -> List[str]:
         measures = measures & supported_measures
         return [m for m in ("wpli", "imcoh", "plv", "pli") if m in measures]
     return []
+
+
+def _reduce_epochs_connectivity_to_pairs(
+    con_data: np.ndarray,
+    *,
+    expected_pairs: int,
+) -> np.ndarray:
+    """Reduce SpectroTemporalConnectivity output to one scalar per channel-pair."""
+    arr = np.asarray(con_data, dtype=float)
+    if arr.ndim == 0:
+        raise ValueError("Connectivity: unexpected scalar output from spectral_connectivity_epochs.")
+    if arr.shape[0] != expected_pairs:
+        raise ValueError(
+            "Connectivity: unexpected imcoh shape from spectral_connectivity_epochs "
+            f"(got {arr.shape}, expected first dim={expected_pairs})."
+        )
+    if arr.ndim == 1:
+        return arr
+    return np.nanmean(arr.reshape(expected_pairs, -1), axis=1)
+
+
+def _compute_imcoh_via_epochs_api(
+    seg_data: np.ndarray,
+    *,
+    freqs: np.ndarray,
+    indices: Tuple[np.ndarray, np.ndarray],
+    sfreq: float,
+    fmin: float,
+    fmax: float,
+    conn_mode: str,
+    n_cycles: Any,
+    decim: int,
+    average: bool,
+    n_jobs: int,
+) -> np.ndarray:
+    """Compute imcoh with spectral_connectivity_epochs (supports mne-connectivity>=0.7)."""
+    if spectral_connectivity_epochs is None:
+        raise ImportError(
+            "imcoh connectivity extraction requires 'mne-connectivity' with "
+            "'spectral_connectivity_epochs'. Install it with: pip install mne-connectivity"
+        )
+
+    mode = str(conn_mode or "cwt_morlet").strip().lower()
+    if mode not in {"cwt_morlet", "multitaper", "fourier"}:
+        raise ValueError(
+            "Connectivity: unsupported mode for imcoh extraction "
+            f"(got '{conn_mode}', expected one of cwt_morlet/multitaper/fourier)."
+        )
+
+    data_use = np.asarray(seg_data)
+    sfreq_use = float(sfreq)
+    decim_use = int(decim)
+    if decim_use > 1:
+        data_use = data_use[:, :, ::decim_use]
+        sfreq_use = sfreq_use / float(decim_use)
+
+    kwargs: Dict[str, Any] = {
+        "method": "imcoh",
+        "indices": indices,
+        "sfreq": sfreq_use,
+        "mode": mode,
+        "fmin": float(fmin),
+        "fmax": float(fmax),
+        "faverage": True,
+        "n_jobs": int(max(1, n_jobs)),
+        "verbose": False,
+    }
+    if mode == "cwt_morlet":
+        kwargs["cwt_freqs"] = np.asarray(freqs, dtype=float)
+        kwargs["cwt_n_cycles"] = n_cycles
+
+    n_pairs = int(len(indices[0]))
+    if average:
+        con = spectral_connectivity_epochs(data_use, **kwargs)
+        return _reduce_epochs_connectivity_to_pairs(
+            np.asarray(con.get_data()),
+            expected_pairs=n_pairs,
+        )
+
+    n_epochs = int(data_use.shape[0])
+    out = np.full((n_epochs, n_pairs), np.nan, dtype=float)
+    for epoch_idx in range(n_epochs):
+        con = spectral_connectivity_epochs(data_use[epoch_idx : epoch_idx + 1], **kwargs)
+        out[epoch_idx, :] = _reduce_epochs_connectivity_to_pairs(
+            np.asarray(con.get_data()),
+            expected_pairs=n_pairs,
+        )
+    return out
 
 
 def _apply_across_epochs_phase_estimates_inplace(
@@ -495,16 +631,22 @@ def _apply_across_epochs_phase_estimates_inplace(
     """
     if df is None or df.empty:
         return
-    if spectral_connectivity_time is None:
-        raise ImportError(
-            "Connectivity across-epochs phase estimates require 'mne-connectivity'. "
-            "Install it with: pip install mne-connectivity"
-        )
 
     conn_cfg = config.get("feature_engineering.connectivity", {}) if hasattr(config, "get") else {}
     phase_measures = _resolve_phase_measures(conn_cfg)
     if not phase_measures:
         return
+    if any(m != "imcoh" for m in phase_measures) and spectral_connectivity_time is None:
+        raise ImportError(
+            "Phase-based connectivity extraction requires 'mne-connectivity' "
+            "spectral_connectivity_time for measures other than imcoh. "
+            "Install it with: pip install mne-connectivity"
+        )
+    if "imcoh" in phase_measures and spectral_connectivity_epochs is None:
+        raise ImportError(
+            "imcoh connectivity extraction requires 'mne-connectivity' "
+            "spectral_connectivity_epochs. Install it with: pip install mne-connectivity"
+        )
 
     output_level = str(conn_cfg.get("output_level", "full")).strip().lower()
     if output_level not in {"full", "global_only"}:
@@ -603,26 +745,70 @@ def _apply_across_epochs_phase_estimates_inplace(
 
                 use_n_cycles = n_cycles
                 if conn_mode == "cwt_morlet":
-                    # Ensure n_cycles / f < duration (MNE constraint), with a safety factor.
-                    base = float(use_n_cycles) if use_n_cycles is not None else 7.0
-                    max_cycles = 0.9 * seg_sec * freqs
-                    use_n_cycles = np.minimum(base, np.maximum(max_cycles, 0.5))
+                    valid_freqs, valid_cycles = _safe_n_cycles_for_segment(
+                        use_n_cycles,
+                        freqs,
+                        sfreq,
+                        int(seg_data.shape[-1]),
+                    )
+                    if valid_freqs.size < 2:
+                        continue
+                    freqs = valid_freqs
+                    use_n_cycles = valid_cycles
 
                 for method in phase_measures:
-                    method_use = method
                     method_label = method
-                    con = _run(method_use, seg_data, freqs, fmin, fmax, use_n_cycles)
-
-                    con_data = np.asarray(con.get_data())
-                    if con_data.ndim == 3:
-                        con_mean = np.nanmean(con_data, axis=0)
-                        con_pairs = np.nanmean(con_mean, axis=-1) if con_mean.shape[-1] > 1 else con_mean[:, 0]
-                    elif con_data.ndim == 2:
-                        con_pairs = np.nanmean(con_data, axis=-1) if con_data.shape[-1] > 1 else con_data[:, 0]
-                    elif con_data.ndim == 1:
-                        con_pairs = con_data
-                    else:
-                        continue
+                    try:
+                        if method == "imcoh":
+                            con_pairs = _compute_imcoh_via_epochs_api(
+                                seg_data,
+                                freqs=freqs,
+                                indices=indices,
+                                sfreq=sfreq,
+                                fmin=fmin,
+                                fmax=fmax,
+                                conn_mode=conn_mode,
+                                n_cycles=use_n_cycles,
+                                decim=decim,
+                                average=True,
+                                n_jobs=1,
+                            )
+                        else:
+                            con = _run(method, seg_data, freqs, fmin, fmax, use_n_cycles)
+                            con_data = np.asarray(con.get_data())
+                            if con_data.ndim == 3:
+                                con_mean = np.nanmean(con_data, axis=0)
+                                con_pairs = (
+                                    np.nanmean(con_mean, axis=-1)
+                                    if con_mean.shape[-1] > 1
+                                    else con_mean[:, 0]
+                                )
+                            elif con_data.ndim == 2:
+                                con_pairs = (
+                                    np.nanmean(con_data, axis=-1)
+                                    if con_data.shape[-1] > 1
+                                    else con_data[:, 0]
+                                )
+                            elif con_data.ndim == 1:
+                                con_pairs = con_data
+                            else:
+                                continue
+                    except ValueError as exc:
+                        if _is_wavelet_longer_than_signal_error(exc):
+                            if logger is not None:
+                                logger.warning(
+                                    "Connectivity: skipped %s for segment=%s band=%s (%.3fs; %d samples @ %.1f Hz): "
+                                    "Morlet wavelet longer than signal. Increase segment duration / raise fmin / or set a smaller "
+                                    "feature_engineering.connectivity.n_cycles.",
+                                    method_label,
+                                    seg_name,
+                                    band,
+                                    seg_sec,
+                                    int(seg_data.shape[-1]),
+                                    float(sfreq),
+                                )
+                            continue
+                        raise
                     con_pairs = np.asarray(con_pairs, dtype=float).reshape(-1)
                     if con_pairs.size != len(pair_names):
                         continue
@@ -1522,10 +1708,15 @@ def extract_connectivity_from_precomputed(
             return arr_3d[:, :, mask]
         return arr_3d
 
-    if phase_measures and spectral_connectivity_time is None:
+    if any(m != "imcoh" for m in phase_measures) and spectral_connectivity_time is None:
         raise ImportError(
             "Phase-based connectivity extraction requires 'mne-connectivity'. "
             "Install it with: pip install mne-connectivity"
+        )
+    if "imcoh" in phase_measures and spectral_connectivity_epochs is None:
+        raise ImportError(
+            "imcoh connectivity extraction requires 'mne-connectivity' "
+            "spectral_connectivity_epochs. Install it with: pip install mne-connectivity"
         )
     needs_envelope = bool(enable_aec or (dynamic_requested and "aec" in conn_cfg.dynamic_measures))
     if needs_envelope and envelope_correlation is None:
@@ -1570,7 +1761,6 @@ def extract_connectivity_from_precomputed(
         use_n_cycles: Any,
     ) -> pd.DataFrame:
         t0 = time.perf_counter()
-        method_use = method
         method_label = method
 
         def _run(method_to_use: str, use_average: bool = False):
@@ -1595,7 +1785,23 @@ def extract_connectivity_from_precomputed(
         use_across_epochs = (phase_estimator == "across_epochs")
         
         try:
-            con = _run(method_use, use_average=use_across_epochs)
+            if method == "imcoh":
+                con_data = _compute_imcoh_via_epochs_api(
+                    seg_data,
+                    freqs=freqs,
+                    indices=indices,
+                    sfreq=sfreq,
+                    fmin=fmin,
+                    fmax=fmax,
+                    conn_mode=conn_mode,
+                    n_cycles=use_n_cycles,
+                    decim=decim,
+                    average=use_across_epochs,
+                    n_jobs=inner_n_jobs,
+                )
+            else:
+                con = _run(method, use_average=use_across_epochs)
+                con_data = np.asarray(con.get_data())
         except ValueError as e:
             # User-facing requirement: warn and continue (do not crash the pipeline).
             #
@@ -1609,7 +1815,7 @@ def extract_connectivity_from_precomputed(
                         "Connectivity: skipped %s for segment=%s band=%s (%.3fs; %d samples @ %.1f Hz): "
                         "Morlet wavelet longer than signal. Increase segment duration / raise fmin / or set a smaller "
                         "feature_engineering.connectivity.n_cycles.",
-                        method_use,
+                        method,
                         seg_name,
                         band,
                         seg_sec,
@@ -1619,8 +1825,6 @@ def extract_connectivity_from_precomputed(
                 return pd.DataFrame()
             raise
 
-        con_data = np.asarray(con.get_data())
-        
         # Handle across_epochs mode: broadcast single result to all epochs
         if use_across_epochs:
             # con_data shape is (n_pairs,) or (n_pairs, n_freqs) when average=True
@@ -1631,24 +1835,32 @@ def extract_connectivity_from_precomputed(
             else:
                 raise ValueError(
                     f"Connectivity: unexpected across_epochs connectivity shape {con_data.shape} "
-                    f"for method='{method_use}', segment='{seg_name}', band='{band}'."
+                    f"for method='{method_label}', segment='{seg_name}', band='{band}'."
                 )
         else:
             # within_epoch mode: per-trial connectivity
-            if con_data.ndim == 2:
-                con_data = con_data[None, :, :]
-            if con_data.ndim == 3 and con_data.shape[-1] > 1:
-                con_vals = np.nanmean(con_data, axis=-1)
-            elif con_data.ndim == 3:
-                con_vals = con_data[:, :, 0]
+            if (
+                con_data.ndim == 2
+                and con_data.shape[0] == n_epochs
+                and con_data.shape[1] == len(pair_names)
+            ):
+                # imcoh path returns pre-collapsed (n_epochs, n_pairs)
+                con_vals = con_data
             else:
-                raise ValueError(
-                    f"Connectivity: unexpected within_epoch connectivity shape {con_data.shape} "
-                    f"for method='{method_use}', segment='{seg_name}', band='{band}'."
-                )
+                if con_data.ndim == 2:
+                    con_data = con_data[None, :, :]
+                if con_data.ndim == 3 and con_data.shape[-1] > 1:
+                    con_vals = np.nanmean(con_data, axis=-1)
+                elif con_data.ndim == 3:
+                    con_vals = con_data[:, :, 0]
+                else:
+                    raise ValueError(
+                        f"Connectivity: unexpected within_epoch connectivity shape {con_data.shape} "
+                        f"for method='{method_label}', segment='{seg_name}', band='{band}'."
+                    )
             if con_vals.shape[0] != n_epochs:
                 raise ValueError(
-                    f"Connectivity: connectivity epochs mismatch for method='{method_use}', segment='{seg_name}', "
+                    f"Connectivity: connectivity epochs mismatch for method='{method_label}', segment='{seg_name}', "
                     f"band='{band}' (got {con_vals.shape[0]} epochs, expected {n_epochs})."
                 )
 

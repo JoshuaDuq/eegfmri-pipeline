@@ -830,6 +830,31 @@ func TestBuildFeaturesAdvancedArgs_IncludesConnectivityAdvancedFlags(t *testing.
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_SpatialTransformPerFamilyFlagsAreCategoryScoped(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "connectivity" {
+			m.selected[i] = true
+		}
+	}
+
+	m.spatialTransformPerFamilyConnectivity = 1 // none
+	m.spatialTransformPerFamilyPower = 2        // csd
+	m.spatialTransformPerFamilyItpc = 3         // laplacian
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--spatial-transform-connectivity", "none"}) {
+		t.Fatalf("expected connectivity per-family spatial transform flag in args, got: %#v", args)
+	}
+	if containsString(args, "--spatial-transform-power") {
+		t.Fatalf("did not expect power per-family spatial transform flag when power is not selected: %#v", args)
+	}
+	if containsString(args, "--spatial-transform-itpc") {
+		t.Fatalf("did not expect itpc per-family spatial transform flag when itpc is not selected: %#v", args)
+	}
+}
+
 func TestBuildFeaturesAdvancedArgs_ConnectivityMeasuresIncludeImcoh(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, cat := range m.categories {

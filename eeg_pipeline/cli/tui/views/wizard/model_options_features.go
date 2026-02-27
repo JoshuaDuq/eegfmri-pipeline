@@ -246,23 +246,49 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optFeatGroupSpatialTransform)
 		if m.featGroupSpatialTransformExpanded {
 			options = append(options, optSpatialTransform, optSpatialTransformLambda2, optSpatialTransformStiffness)
-			// Per-family spatial transform overrides
-			options = append(options,
-				optSpatialTransformPerFamilyConnectivity,
-				optSpatialTransformPerFamilyItpc,
-				optSpatialTransformPerFamilyPac,
-				optSpatialTransformPerFamilyPower,
-				optSpatialTransformPerFamilyAperiodic,
-				optSpatialTransformPerFamilyBursts,
-				optSpatialTransformPerFamilyErds,
-				optSpatialTransformPerFamilyComplexity,
-				optSpatialTransformPerFamilyRatios,
-				optSpatialTransformPerFamilyAsymmetry,
-				optSpatialTransformPerFamilySpectral,
-				optSpatialTransformPerFamilyErp,
-				optSpatialTransformPerFamilyQuality,
-				optSpatialTransformPerFamilyMicrostates,
-			)
+			// Per-family spatial transform overrides: only show selected families.
+			if m.isCategorySelected("connectivity") {
+				options = append(options, optSpatialTransformPerFamilyConnectivity)
+			}
+			if m.isCategorySelected("itpc") {
+				options = append(options, optSpatialTransformPerFamilyItpc)
+			}
+			if m.isCategorySelected("pac") {
+				options = append(options, optSpatialTransformPerFamilyPac)
+			}
+			if m.isCategorySelected("power") {
+				options = append(options, optSpatialTransformPerFamilyPower)
+			}
+			if m.isCategorySelected("aperiodic") {
+				options = append(options, optSpatialTransformPerFamilyAperiodic)
+			}
+			if m.isCategorySelected("bursts") {
+				options = append(options, optSpatialTransformPerFamilyBursts)
+			}
+			if m.isCategorySelected("erds") {
+				options = append(options, optSpatialTransformPerFamilyErds)
+			}
+			if m.isCategorySelected("complexity") {
+				options = append(options, optSpatialTransformPerFamilyComplexity)
+			}
+			if m.isCategorySelected("ratios") {
+				options = append(options, optSpatialTransformPerFamilyRatios)
+			}
+			if m.isCategorySelected("asymmetry") {
+				options = append(options, optSpatialTransformPerFamilyAsymmetry)
+			}
+			if m.isCategorySelected("spectral") {
+				options = append(options, optSpatialTransformPerFamilySpectral)
+			}
+			if m.isCategorySelected("erp") {
+				options = append(options, optSpatialTransformPerFamilyErp)
+			}
+			if m.isCategorySelected("quality") {
+				options = append(options, optSpatialTransformPerFamilyQuality)
+			}
+			if m.isCategorySelected("microstates") {
+				options = append(options, optSpatialTransformPerFamilyMicrostates)
+			}
 		}
 	}
 

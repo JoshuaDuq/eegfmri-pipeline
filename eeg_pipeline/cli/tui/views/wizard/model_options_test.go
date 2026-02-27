@@ -196,6 +196,34 @@ func TestGetFeaturesOptions_ExecutionOptionsAreCategoryScoped(t *testing.T) {
 	}
 }
 
+func TestGetFeaturesOptions_SpatialTransformPerFamilyOptionsAreCategoryScoped(t *testing.T) {
+	m := Model{
+		categories: []string{"connectivity", "power", "itpc", "microstates"},
+		selected: map[int]bool{
+			0: true, // connectivity
+		},
+		featGroupSpatialTransformExpanded: true,
+	}
+
+	opts := m.getFeaturesOptions()
+
+	if !hasOption(opts, optFeatGroupSpatialTransform) {
+		t.Fatalf("expected spatial transform group when connectivity is selected")
+	}
+	if !hasOption(opts, optSpatialTransformPerFamilyConnectivity) {
+		t.Fatalf("expected connectivity per-family spatial transform option")
+	}
+	if hasOption(opts, optSpatialTransformPerFamilyPower) {
+		t.Fatalf("did not expect power per-family spatial transform option when power is not selected")
+	}
+	if hasOption(opts, optSpatialTransformPerFamilyItpc) {
+		t.Fatalf("did not expect itpc per-family spatial transform option when itpc is not selected")
+	}
+	if hasOption(opts, optSpatialTransformPerFamilyMicrostates) {
+		t.Fatalf("did not expect microstates per-family spatial transform option when microstates is not selected")
+	}
+}
+
 func TestGetBehaviorOptions_HidesInferenceAndAdvancedForNonStatSelections(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {

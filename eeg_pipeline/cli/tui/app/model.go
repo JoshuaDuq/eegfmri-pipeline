@@ -124,8 +124,8 @@ func New() Model {
 		state:         StateMainMenu,
 		navStack:      []AppState{},
 		mainMenu:      mainmenu.New(),
-		pipelineSmoke: pipelinesmoke.New("task"),
-		task:          "task",
+		pipelineSmoke: pipelinesmoke.New(""),
+		task:          "",
 		repoRoot:      repoRoot,
 		subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
 	}

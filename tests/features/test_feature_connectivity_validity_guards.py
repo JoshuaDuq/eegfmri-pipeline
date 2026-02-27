@@ -9,6 +9,7 @@ import pandas as pd
 
 from eeg_pipeline.analysis.features.connectivity import (
     _compute_psi_imaginary,
+    extract_connectivity_from_precomputed,
     extract_directed_connectivity_from_precomputed,
     extract_connectivity_features,
     extract_directed_connectivity_features,
@@ -81,6 +82,57 @@ def _make_precomputed(*, transform: str, family: str) -> PrecomputedData:
 
 
 class TestConnectivityValidityGuards(unittest.TestCase):
+    def test_imcoh_uses_epochs_backend(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "connectivity": {
+                        "measures": ["imcoh"],
+                        "granularity": "trial",
+                        "phase_estimator": "within_epoch",
+                        "output_level": "global_only",
+                        "enable_graph_metrics": False,
+                        "min_segment_sec": 0.0,
+                    }
+                }
+            }
+        )
+        precomputed = _make_precomputed(transform="csd", family="connectivity")
+
+        class _ConnObj:
+            def __init__(self, data):
+                self._data = data
+
+            def get_data(self):
+                return self._data
+
+        called_methods: list[str] = []
+
+        def _fake_spectral_connectivity_epochs(seg_data, **kwargs):
+            called_methods.append(str(kwargs.get("method")))
+            indices = kwargs.get("indices")
+            n_pairs = int(len(indices[0]))
+            return _ConnObj(np.ones((n_pairs, 1, 2), dtype=float))
+
+        with patch(
+            "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_epochs",
+            side_effect=_fake_spectral_connectivity_epochs,
+        ), patch(
+            "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_time",
+            side_effect=AssertionError("imcoh should not use spectral_connectivity_time"),
+        ):
+            df, cols = extract_connectivity_from_precomputed(
+                precomputed,
+                bands=["alpha"],
+                config=config,
+                logger=logging.getLogger("test-connectivity-imcoh"),
+            )
+
+        self.assertTrue(called_methods)
+        self.assertTrue(all(method == "imcoh" for method in called_methods))
+        self.assertFalse(df.empty)
+        self.assertTrue(any("global_imcoh_mean" in col for col in cols))
+
     def test_psi_is_zero_for_constant_phase_lag(self):
         """PSI should be ~0 when coherency phase is constant across frequency."""
         csd = np.zeros((1, 2, 2, 3), dtype=complex)

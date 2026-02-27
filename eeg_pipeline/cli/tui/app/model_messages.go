@@ -235,7 +235,7 @@ func (m Model) handleConfigLoaded(msg messages.ConfigLoadedMsg) (tea.Model, tea.
 		m.wizard.SetSubjectsLoading()
 		cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())
 		m.pendingSubjectsCacheKey = cacheKey
-		return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+		return m, executor.LoadSubjectsRefresh(m.repoRoot, m.task, m.selectedPipeline)
 	}
 	return m, nil
 }
@@ -250,7 +250,7 @@ func (m Model) handleTaskUpdated(msg messages.TaskUpdatedMsg) (tea.Model, tea.Cm
 		m.wizard.SetSubjectsLoading()
 		cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())
 		m.pendingSubjectsCacheKey = cacheKey
-		return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+		return m, executor.LoadSubjectsRefresh(m.repoRoot, m.task, m.selectedPipeline)
 	}
 	return m, nil
 }

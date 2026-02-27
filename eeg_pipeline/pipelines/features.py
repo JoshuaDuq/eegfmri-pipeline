@@ -57,7 +57,6 @@ from eeg_pipeline.utils.config.loader import (
     get_condition_column_candidates,
     get_frequency_band_names,
 )
-from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.features import align_feature_dataframes
 from eeg_pipeline.utils.data.feature_io import (
@@ -808,27 +807,8 @@ class FeaturePipeline(PipelineBase):
                     100 * int(n_trials) / len(original_events),
                 )
 
-        target_columns = list(self.config.get("event_columns.outcome", []) or [])
-        explicit_outcome = str(
-            self.config.get("behavior_analysis.outcome_column", "") or ""
-        ).strip()
-        if explicit_outcome:
-            target_columns = [explicit_outcome] + [
-                c for c in target_columns if str(c) != explicit_outcome
-            ]
-        target_col = pick_target_column(aligned_events, target_columns=target_columns)
-
+        # Feature extraction is label-agnostic; targets are handled in downstream stages.
         y: Optional[pd.Series] = None
-        if target_col is None:
-            self.logger.info(
-                "No target outcome column found; continuing in features-only mode."
-            )
-        else:
-            y = pd.to_numeric(aligned_events[target_col], errors="coerce")
-            n_valid = int(y.notna().sum())
-            self.logger.info(
-                "Target outcome column: '%s' (%d/%d valid values)", target_col, n_valid, len(y)
-            )
 
         fixed_templates_path = kwargs.get("fixed_templates_path")
         fixed_template_labels = None

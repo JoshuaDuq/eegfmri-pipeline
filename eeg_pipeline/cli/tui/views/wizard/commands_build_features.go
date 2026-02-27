@@ -1093,20 +1093,48 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, flag, stLabels[field%len(stLabels)])
 		}
 	}
-	appendSTOverride(m.spatialTransformPerFamilyConnectivity, "--spatial-transform-connectivity")
-	appendSTOverride(m.spatialTransformPerFamilyItpc, "--spatial-transform-itpc")
-	appendSTOverride(m.spatialTransformPerFamilyPac, "--spatial-transform-pac")
-	appendSTOverride(m.spatialTransformPerFamilyPower, "--spatial-transform-power")
-	appendSTOverride(m.spatialTransformPerFamilyAperiodic, "--spatial-transform-aperiodic")
-	appendSTOverride(m.spatialTransformPerFamilyBursts, "--spatial-transform-bursts")
-	appendSTOverride(m.spatialTransformPerFamilyErds, "--spatial-transform-erds")
-	appendSTOverride(m.spatialTransformPerFamilyComplexity, "--spatial-transform-complexity")
-	appendSTOverride(m.spatialTransformPerFamilyRatios, "--spatial-transform-ratios")
-	appendSTOverride(m.spatialTransformPerFamilyAsymmetry, "--spatial-transform-asymmetry")
-	appendSTOverride(m.spatialTransformPerFamilySpectral, "--spatial-transform-spectral")
-	appendSTOverride(m.spatialTransformPerFamilyErp, "--spatial-transform-erp")
-	appendSTOverride(m.spatialTransformPerFamilyQuality, "--spatial-transform-quality")
-	appendSTOverride(m.spatialTransformPerFamilyMicrostates, "--spatial-transform-microstates")
+	if m.isCategorySelected("connectivity") {
+		appendSTOverride(m.spatialTransformPerFamilyConnectivity, "--spatial-transform-connectivity")
+	}
+	if m.isCategorySelected("itpc") {
+		appendSTOverride(m.spatialTransformPerFamilyItpc, "--spatial-transform-itpc")
+	}
+	if m.isCategorySelected("pac") {
+		appendSTOverride(m.spatialTransformPerFamilyPac, "--spatial-transform-pac")
+	}
+	if m.isCategorySelected("power") {
+		appendSTOverride(m.spatialTransformPerFamilyPower, "--spatial-transform-power")
+	}
+	if m.isCategorySelected("aperiodic") {
+		appendSTOverride(m.spatialTransformPerFamilyAperiodic, "--spatial-transform-aperiodic")
+	}
+	if m.isCategorySelected("bursts") {
+		appendSTOverride(m.spatialTransformPerFamilyBursts, "--spatial-transform-bursts")
+	}
+	if m.isCategorySelected("erds") {
+		appendSTOverride(m.spatialTransformPerFamilyErds, "--spatial-transform-erds")
+	}
+	if m.isCategorySelected("complexity") {
+		appendSTOverride(m.spatialTransformPerFamilyComplexity, "--spatial-transform-complexity")
+	}
+	if m.isCategorySelected("ratios") {
+		appendSTOverride(m.spatialTransformPerFamilyRatios, "--spatial-transform-ratios")
+	}
+	if m.isCategorySelected("asymmetry") {
+		appendSTOverride(m.spatialTransformPerFamilyAsymmetry, "--spatial-transform-asymmetry")
+	}
+	if m.isCategorySelected("spectral") {
+		appendSTOverride(m.spatialTransformPerFamilySpectral, "--spatial-transform-spectral")
+	}
+	if m.isCategorySelected("erp") {
+		appendSTOverride(m.spatialTransformPerFamilyErp, "--spatial-transform-erp")
+	}
+	if m.isCategorySelected("quality") {
+		appendSTOverride(m.spatialTransformPerFamilyQuality, "--spatial-transform-quality")
+	}
+	if m.isCategorySelected("microstates") {
+		appendSTOverride(m.spatialTransformPerFamilyMicrostates, "--spatial-transform-microstates")
+	}
 
 	return args
 }
