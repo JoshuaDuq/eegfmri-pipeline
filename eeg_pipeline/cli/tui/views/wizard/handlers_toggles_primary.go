@@ -203,12 +203,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optERDSMinActivePower:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optERDSMinSegmentSec:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optERDSBands:
-		m.startTextEdit(textFieldERDSBands)
-		m.useDefaultAdvanced = false
 	case optERDSOnsetThresholdSigma:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
@@ -223,9 +217,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optFeatGroupStorage:
 		m.featGroupStorageExpanded = !m.featGroupStorageExpanded
-	case optSaveSubjectLevelFeatures:
-		m.saveSubjectLevelFeatures = !m.saveSubjectLevelFeatures
-		m.useDefaultAdvanced = false
 	case optFeatAlsoSaveCsv:
 		m.featAlsoSaveCsv = !m.featAlsoSaveCsv
 		m.useDefaultAdvanced = false
@@ -695,16 +686,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optPowerEmitDb:
 		m.powerEmitDb = !m.powerEmitDb
 		m.useDefaultAdvanced = false
-	case optSpectralEdge:
-		switch m.spectralEdgePercentile {
-		case 0.90:
-			m.spectralEdgePercentile = 0.95
-		case 0.95:
-			m.spectralEdgePercentile = 0.99
-		default:
-			m.spectralEdgePercentile = 0.90
-		}
-		m.useDefaultAdvanced = false
 	case optSpectralIncludeLogRatios:
 		m.spectralIncludeLogRatios = !m.spectralIncludeLogRatios
 		m.useDefaultAdvanced = false
@@ -938,7 +919,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	// TFR section
 	case optFeatGroupTFR:
 		m.featGroupTFRExpanded = !m.featGroupTFRExpanded
-	case optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrMaxCycles, optTfrNCyclesFactor, optTfrDecim, optTfrDecimPower, optTfrDecimPhase, optTfrWorkers:
+	case optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrMaxCycles, optTfrNCyclesFactor, optTfrDecimPower, optTfrDecimPhase, optTfrWorkers:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optAggregationMethod:

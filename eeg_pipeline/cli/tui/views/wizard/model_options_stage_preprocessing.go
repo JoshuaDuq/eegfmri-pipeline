@@ -46,7 +46,6 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepHFreq,
 				optPrepNotch,
 				optPrepLineFreq,
-				optPrepZaplineFline,
 				optPrepFindBreaks,
 			)
 		}
@@ -103,7 +102,6 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepEpochsReject,
 				optPrepRejectMethod,
 				optPrepAutorejectNInterpolate,
-				optPrepRunSourceEstimation,
 				optPrepWriteCleanEvents,
 				optPrepOverwriteCleanEvents,
 				optPrepCleanEventsStrict,

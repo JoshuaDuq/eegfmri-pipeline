@@ -172,8 +172,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.pacPairsSpec
 	case textFieldBurstBands:
 		return m.burstBandsSpec
-	case textFieldERDSBands:
-		return m.erdsBandsSpec
 	case textFieldMicrostatesFixedTemplatesPath:
 		return m.microstatesFixedTemplatesPath
 	case textFieldSpectralRatioPairs:
@@ -592,8 +590,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldBurstBands:
 		m.burstBandsSpec = strings.Join(strings.Fields(value), "")
-	case textFieldERDSBands:
-		m.erdsBandsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldMicrostatesFixedTemplatesPath:
 		m.microstatesFixedTemplatesPath = strings.TrimSpace(value)
 	case textFieldSpectralRatioPairs:

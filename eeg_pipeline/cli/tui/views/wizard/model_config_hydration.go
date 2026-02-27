@@ -1881,7 +1881,7 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.directedConnMinSamplesPerMvarParam = n
 			}
 		}},
-		{key: "feature_engineering.erds.condition_marker_bands", apply: func(v interface{}) {
+		{key: "feature_engineering.erds.laterality_marker_bands", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
 				m.erdsConditionMarkerBands = strings.Join(splitLooseList(spec), ",")
 			}

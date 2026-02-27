@@ -64,19 +64,20 @@ class PreprocessingPipeline(PipelineBase):
         self,
         task: Optional[str],
         kwargs: Dict[str, Any],
-    ) -> tuple[str, str, bool, int, Any]:
+    ) -> tuple[str, str, bool, bool, int, Any]:
         """Extract and normalize preprocessing parameters from kwargs.
         
         Returns:
-            Tuple of (resolved_task, mode, use_icalabel, n_jobs, progress)
+            Tuple of (resolved_task, mode, use_pyprep, use_icalabel, n_jobs, progress)
         """
         resolved_task = task or self.config.get("project.task", "task")
         mode = kwargs.get("mode", "full")
+        use_pyprep = kwargs.get("use_pyprep", True)
         use_icalabel = kwargs.get("use_icalabel", True)
         n_jobs = kwargs.get("n_jobs", 1)
         progress = ensure_progress_reporter(kwargs.get("progress"))
-        
-        return resolved_task, mode, use_icalabel, n_jobs, progress
+
+        return resolved_task, mode, use_pyprep, use_icalabel, n_jobs, progress
     
     def process_subject(
         self,
@@ -95,7 +96,7 @@ class PreprocessingPipeline(PipelineBase):
                 - n_jobs: Number of parallel jobs
                 - progress: ProgressReporter for TUI feedback
         """
-        resolved_task, mode, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
+        resolved_task, mode, use_pyprep, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
         
         progress.subject_start(f"sub-{subject}")
         
@@ -105,6 +106,7 @@ class PreprocessingPipeline(PipelineBase):
             steps=steps,
             subjects=[subject],
             task=resolved_task,
+            use_pyprep=use_pyprep,
             use_icalabel=use_icalabel,
             n_jobs=n_jobs,
             progress=progress,
@@ -132,7 +134,7 @@ class PreprocessingPipeline(PipelineBase):
         Returns:
             List of per-subject status dictionaries
         """
-        resolved_task, mode, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
+        resolved_task, mode, use_pyprep, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
         run_context = self._create_run_metadata_context(
             subjects=subjects,
             task=resolved_task,
@@ -150,6 +152,7 @@ class PreprocessingPipeline(PipelineBase):
                 steps=steps,
                 subjects=subjects,
                 task=resolved_task,
+                use_pyprep=use_pyprep,
                 use_icalabel=use_icalabel,
                 n_jobs=n_jobs,
                 progress=progress,
@@ -203,6 +206,7 @@ class PreprocessingPipeline(PipelineBase):
         steps: List[str],
         subjects: List[str],
         task: str,
+        use_pyprep: bool,
         use_icalabel: bool,
         n_jobs: int,
         progress: Any,
@@ -213,8 +217,11 @@ class PreprocessingPipeline(PipelineBase):
         for i, step in enumerate(steps, 1):
             progress.step(step, current=i, total=total_steps)
             self.logger.info("Running step: %s", step)
-            
+
             if step == STEP_BAD_CHANNELS:
+                if not use_pyprep:
+                    self.logger.info("Skipping bad channel detection (PyPREP disabled)")
+                    continue
                 self._run_bad_channel_detection(
                     subjects=subjects,
                     task=task,
@@ -656,10 +663,6 @@ class PreprocessingPipeline(PipelineBase):
         ar_n_interp = self.config.get("epochs.autoreject_n_interpolate")
         if ar_n_interp is not None:
             lines.append(f"autoreject_n_interpolate = {ar_n_interp}")
-        
-        # Source estimation
-        run_source_estimation = self.config.get("preprocessing.run_source_estimation", False)
-        lines.append(f'run_source_estimation = {run_source_estimation}')
         
         lines.append("")
         

@@ -51,7 +51,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	}
 	powerBaselineVal := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}[m.powerBaselineMode]
 	powerRequireBaselineVal := m.boolToOnOff(m.powerRequireBaseline)
-	spectralEdgeVal := fmt.Sprintf("%.0f%%", m.spectralEdgePercentile*100)
 	spectralRatioPairsVal := m.spectralRatioPairsSpec
 	if strings.TrimSpace(spectralRatioPairsVal) == "" {
 		spectralRatioPairsVal = "(default)"
@@ -477,13 +476,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "cycles per Hz"
-		case optTfrDecim:
-			label = "Decim (legacy)"
-			value = fmt.Sprintf("%d", m.tfrDecim)
-			if m.editingNumber && m.isCurrentlyEditing(optTfrDecim) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "legacy shared TFR decimation"
 		case optTfrDecimPower:
 			label = "Decim power"
 			value = fmt.Sprintf("%d", m.tfrDecimPower)
@@ -594,10 +586,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
-		case optSaveSubjectLevelFeatures:
-			label = "Save Subject-Level"
-			value = m.boolToOnOff(m.saveSubjectLevelFeatures)
-			hint = "Space to toggle"
 		case optFeatAlsoSaveCsv:
 			label = "Also Save CSV"
 			value = m.boolToOnOff(m.featAlsoSaveCsv)
@@ -1921,12 +1909,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = powerBaselineVal
 			hint = "normalization type"
 
-		// Spectral
-		case optSpectralEdge:
-			label = "Spectral Edge"
-			value = spectralEdgeVal
-			hint = "percentile for SEF"
-
 		// ERP
 		case optERPBaseline:
 			label = "ERP baseline"
@@ -2318,24 +2300,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "clamp active power"
-		case optERDSMinSegmentSec:
-			label = "Min segment (s)"
-			value = fmt.Sprintf("%.2f", m.erdsMinSegmentSec)
-			if m.editingNumber && m.isCurrentlyEditing(optERDSMinSegmentSec) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "minimum segment duration"
-		case optERDSBands:
-			erdsBandsVal := m.erdsBandsSpec
-			if strings.TrimSpace(erdsBandsVal) == "" {
-				erdsBandsVal = "(default: alpha,beta)"
-			}
-			if m.editingText && m.editingTextField == textFieldERDSBands {
-				erdsBandsVal = m.textBuffer + "█"
-			}
-			label = "Bands"
-			value = erdsBandsVal
-			hint = "e.g. alpha,beta"
 		case optERDSOnsetThresholdSigma:
 			label = "Onset threshold (sigma)"
 			value = fmt.Sprintf("%.2f", m.erdsOnsetThresholdSigma)

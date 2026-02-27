@@ -134,7 +134,6 @@ const (
 	optPowerLineNoiseWidthHz
 	optPowerLineNoiseHarmonics
 	optPowerEmitDb
-	optSpectralEdge
 	optSpectralRatioPairs
 	optSpectralSegments
 	optSpectralIncludeLogRatios
@@ -187,8 +186,6 @@ const (
 	optERDSUseLogRatio
 	optERDSMinBaselinePower
 	optERDSMinActivePower
-	optERDSMinSegmentSec
-	optERDSBands
 	optERDSOnsetThresholdSigma
 	optERDSOnsetMinDurationMs
 	optERDSReboundMinLatencyMs
@@ -321,7 +318,6 @@ const (
 	optItpcNJobs
 
 	// Storage options
-	optSaveSubjectLevelFeatures
 	optFeatAlsoSaveCsv
 	// Behavior options - General
 	optCorrMethod
@@ -840,7 +836,6 @@ const (
 	optTfrMinCycles
 	optTfrMaxCycles
 	optTfrNCyclesFactor
-	optTfrDecim
 	optTfrDecimPower
 	optTfrDecimPhase
 	optTfrWorkers

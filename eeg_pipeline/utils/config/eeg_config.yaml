@@ -491,8 +491,8 @@ feature_engineering:
       contrast:
         enabled: false
         type: "t-test"             # "t-test" | "paired-t-test" | "f-test" | "custom"
-        cond_a: {column: "trial_type", value: ""}
-        cond_b: {column: "trial_type", value: ""}
+        condition_a: {column: "trial_type", value: ""}
+        condition_b: {column: "trial_type", value: ""}
         formula: ""
         name: "contrast"
         runs: []                   # explicit runs (empty = auto-detect)
@@ -562,7 +562,6 @@ feature_engineering:
     skip_invalid_segments: true
 
   output:
-    save_subject_level_features: true
     also_save_csv: false
 
   erp:
@@ -598,11 +597,9 @@ feature_engineering:
     use_log_ratio: false             # true = dB (10*log10), false = percent change
     min_baseline_power: 1.0e-12      # Clamp baseline power to avoid division instability
     min_active_power: 1.0e-12        # Clamp active power for log computation
-    min_segment_sec: 0.5             # Minimum segment duration in seconds
-    bands: ["alpha", "beta"]         # Bands for ERDS computation (subset of frequency_bands)
     # Optional laterality-aware ERDS markers (disabled by default for paradigm-agnostic behavior).
-    enable_condition_markers: false
-    condition_marker_bands: ["alpha"]     # Bands where contralateral condition markers are extracted
+    enable_laterality_markers: false
+    laterality_marker_bands: ["alpha"]    # Bands where contralateral condition markers are extracted
     laterality_columns: ["stim_side", "stimulated_side", "side", "stimulus_side", "hand"]
     infer_contralateral_when_missing: true
     somatosensory_left_channels: ["C1", "C3", "C5", "CP1", "CP3", "CP5", "FC1", "FC3", "FC5"]

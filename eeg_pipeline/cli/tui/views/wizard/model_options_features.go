@@ -167,7 +167,6 @@ func (m Model) getFeaturesOptions() []optionType {
 				optSpectralLineNoiseFreq,
 				optSpectralLineNoiseWidthHz,
 				optSpectralLineNoiseHarmonics,
-				optSpectralEdge,
 			)
 		}
 	}
@@ -224,8 +223,6 @@ func (m Model) getFeaturesOptions() []optionType {
 				optERDSUseLogRatio,
 				optERDSMinBaselinePower,
 				optERDSMinActivePower,
-				optERDSMinSegmentSec,
-				optERDSBands,
 				optERDSOnsetThresholdSigma,
 				optERDSOnsetMinDurationMs,
 				optERDSReboundMinLatencyMs,
@@ -404,7 +401,7 @@ func (m Model) getFeaturesOptions() []optionType {
 		if m.featGroupTFRExpanded {
 			options = append(
 				options,
-				optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrMaxCycles, optTfrNCyclesFactor, optTfrDecim, optTfrDecimPower, optTfrDecimPhase, optTfrWorkers,
+				optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrMaxCycles, optTfrNCyclesFactor, optTfrDecimPower, optTfrDecimPhase, optTfrWorkers,
 				optBandEnvelopePadSec, optBandEnvelopePadCycles,
 				optIAFEnabled,
 			)
@@ -427,7 +424,7 @@ func (m Model) getFeaturesOptions() []optionType {
 
 	options = append(options, optFeatGroupStorage)
 	if m.featGroupStorageExpanded {
-		options = append(options, optSaveSubjectLevelFeatures, optFeatAlsoSaveCsv)
+		options = append(options, optFeatAlsoSaveCsv)
 	}
 
 	// Directed connectivity missing

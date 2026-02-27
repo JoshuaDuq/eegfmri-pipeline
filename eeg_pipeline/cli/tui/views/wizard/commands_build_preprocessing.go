@@ -54,9 +54,6 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepLineFreq != 0 && m.prepLineFreq != 60 {
 		args = append(args, "--line-freq", fmt.Sprintf("%d", m.prepLineFreq))
 	}
-	if m.prepZaplineFline != 60.0 {
-		args = append(args, "--zapline-fline", fmt.Sprintf("%.1f", m.prepZaplineFline))
-	}
 	if !m.prepFindBreaks {
 		args = append(args, "--no-find-breaks")
 	}
@@ -151,9 +148,6 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepRejectMethod != 1 {
 		rejectMethodVal := []string{"none", "autoreject_local", "autoreject_global"}[m.prepRejectMethod]
 		args = append(args, "--reject-method", rejectMethodVal)
-	}
-	if m.prepRunSourceEstimation {
-		args = append(args, "--run-source-estimation")
 	}
 
 	// Clean events.tsv options

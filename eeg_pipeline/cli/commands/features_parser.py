@@ -295,9 +295,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-power-emit-db", action="store_false", dest="power_emit_db")
 
     # Spectral
-    parser.add_argument("--spectral-edge-percentile", type=float, default=None, help="Percentile for spectral edge frequency (0-1)")
     parser.add_argument("--ratio-pairs", nargs="+", default=None, metavar="PAIR", help="Band power ratio pairs, e.g. theta:beta theta:alpha alpha:beta")
-    parser.add_argument("--ratio-source", choices=["raw", "powcorr"], default=None, help="Power source for band ratios: raw (absolute) or powcorr (aperiodic-adjusted)")
     parser.add_argument("--spectral-include-log-ratios", action="store_true", default=None, help="Include log ratios in spectral features")
     parser.add_argument("--no-spectral-include-log-ratios", action="store_false", dest="spectral_include_log_ratios")
     parser.add_argument("--spectral-psd-method", choices=["multitaper", "welch"], default=None, help="PSD method for spectral features")
@@ -338,7 +336,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--tfr-n-freqs", type=int, default=None, help="Number of frequencies for TFR")
     parser.add_argument("--tfr-min-cycles", type=float, default=None, help="Minimum number of cycles for Morlet wavelets")
     parser.add_argument("--tfr-n-cycles-factor", type=float, default=None, help="Cycles factor (freq/factor) for Morlet wavelets")
-    parser.add_argument("--tfr-decim", type=int, default=None, help="Decimation factor for TFR")
     parser.add_argument("--tfr-workers", type=int, default=None, help="Number of parallel workers for TFR computation")
     parser.add_argument("--tfr-max-cycles", type=float, default=None, help="Maximum cycles for Morlet wavelets")
     parser.add_argument("--tfr-decim-power", type=int, default=None, help="Decimation factor for power TFR")
@@ -422,8 +419,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-erds-use-log-ratio", action="store_false", dest="erds_use_log_ratio")
     parser.add_argument("--erds-min-baseline-power", type=float, default=None, help="Min baseline power for ERDS")
     parser.add_argument("--erds-min-active-power", type=float, default=None, help="Min active power for ERDS")
-    parser.add_argument("--erds-min-segment-sec", type=float, default=None, help="Min segment duration for ERDS")
-    parser.add_argument("--erds-bands", nargs="+", default=None, help="Bands for ERDS computation (e.g., alpha beta)")
     parser.add_argument("--erds-onset-threshold-sigma", type=float, default=None, help="Onset threshold in baseline SD units for trial-level alpha ERD latency")
     parser.add_argument("--erds-onset-min-duration-ms", type=float, default=None, help="Minimum sustained duration for ERD onset threshold crossing")
     parser.add_argument("--erds-rebound-min-latency-ms", type=float, default=None, help="Minimum latency after ERD peak before searching alpha rebound")
@@ -449,8 +444,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--n-jobs-connectivity", type=int, default=None, help="Parallel jobs for connectivity (-1 = all)")
     parser.add_argument("--n-jobs-aperiodic", type=int, default=None, help="Parallel jobs for aperiodic (-1 = all)")
     parser.add_argument("--n-jobs-complexity", type=int, default=None, help="Parallel jobs for complexity (-1 = all)")
-    parser.add_argument("--save-subject-level-features", action="store_true", default=None, help="Save subject-level features for constant values")
-    parser.add_argument("--no-save-subject-level-features", action="store_false", dest="save_subject_level_features", help="Do not save subject-level features")
     
     output_group = parser.add_argument_group("Output options")
     output_group.add_argument(

@@ -413,13 +413,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// Ratios options (scientific validity)
-	if m.isCategorySelected("ratios") {
-		if m.ratioSource == 1 {
-			args = append(args, "--ratio-source", "powcorr")
-		}
-	}
-
 	// Complexity options
 	if m.isCategorySelected("complexity") {
 		args = append(args, "--pe-order", fmt.Sprintf("%d", m.complexityPEOrder))
@@ -534,11 +527,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// Spectral options
-	if m.isCategorySelected("spectral") {
-		args = append(args, "--spectral-edge-percentile", fmt.Sprintf("%.2f", m.spectralEdgePercentile))
-	}
-
 	// Ratios options
 	if m.isCategorySelected("ratios") && strings.TrimSpace(m.spectralRatioPairsSpec) != "" {
 		args = append(args, "--ratio-pairs")
@@ -577,9 +565,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 	if m.tfrNCyclesFactor != 2.0 {
 		args = append(args, "--tfr-n-cycles-factor", fmt.Sprintf("%.1f", m.tfrNCyclesFactor))
-	}
-	if m.tfrDecim != 4 {
-		args = append(args, "--tfr-decim", fmt.Sprintf("%d", m.tfrDecim))
 	}
 	if m.tfrWorkers != -1 {
 		args = append(args, "--tfr-workers", fmt.Sprintf("%d", m.tfrWorkers))
@@ -979,13 +964,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.erdsMinActivePower != 1.0e-12 {
 			args = append(args, "--erds-min-active-power", fmt.Sprintf("%.2e", m.erdsMinActivePower))
 		}
-		if m.erdsMinSegmentSec != 0.5 {
-			args = append(args, "--erds-min-segment-sec", fmt.Sprintf("%.2f", m.erdsMinSegmentSec))
-		}
-		if strings.TrimSpace(m.erdsBandsSpec) != "" && m.erdsBandsSpec != "alpha,beta" {
-			args = append(args, "--erds-bands")
-			args = append(args, splitCSVList(m.erdsBandsSpec)...)
-		}
 		if m.erdsOnsetThresholdSigma != 1.0 {
 			args = append(args, "--erds-onset-threshold-sigma", fmt.Sprintf("%.2f", m.erdsOnsetThresholdSigma))
 		}
@@ -1063,11 +1041,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 
 	// Storage options
-	if m.saveSubjectLevelFeatures {
-		args = append(args, "--save-subject-level-features")
-	} else {
-		args = append(args, "--no-save-subject-level-features")
-	}
 	if m.featAlsoSaveCsv {
 		args = append(args, "--also-save-csv")
 	} else {

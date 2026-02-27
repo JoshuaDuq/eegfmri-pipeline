@@ -160,7 +160,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["powerLineNoiseWidthHz"] = m.powerLineNoiseWidthHz
 	cfg["powerLineNoiseHarmonics"] = m.powerLineNoiseHarmonics
 	cfg["powerEmitDb"] = m.powerEmitDb
-	cfg["spectralEdgePercentile"] = m.spectralEdgePercentile
 	cfg["spectralRatioPairsSpec"] = m.spectralRatioPairsSpec
 	cfg["spectralSegmentsSpec"] = m.spectralSegmentsSpec
 	cfg["spectralPsdAdaptive"] = m.spectralPsdAdaptive
@@ -297,7 +296,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["featNJobsConnectivity"] = m.featNJobsConnectivity
 	cfg["featNJobsAperiodic"] = m.featNJobsAperiodic
 	cfg["featNJobsComplexity"] = m.featNJobsComplexity
-	cfg["saveSubjectLevelFeatures"] = m.saveSubjectLevelFeatures
 	cfg["featAlsoSaveCsv"] = m.featAlsoSaveCsv
 
 	// Spatial transform
@@ -312,7 +310,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["tfrMinCycles"] = m.tfrMinCycles
 	cfg["tfrMaxCycles"] = m.tfrMaxCycles
 	cfg["tfrNCyclesFactor"] = m.tfrNCyclesFactor
-	cfg["tfrDecim"] = m.tfrDecim
 	cfg["tfrDecimPower"] = m.tfrDecimPower
 	cfg["tfrDecimPhase"] = m.tfrDecimPhase
 	cfg["tfrWorkers"] = m.tfrWorkers
@@ -346,8 +343,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["erdsUseLogRatio"] = m.erdsUseLogRatio
 	cfg["erdsMinBaselinePower"] = m.erdsMinBaselinePower
 	cfg["erdsMinActivePower"] = m.erdsMinActivePower
-	cfg["erdsMinSegmentSec"] = m.erdsMinSegmentSec
-	cfg["erdsBandsSpec"] = m.erdsBandsSpec
 	cfg["erdsOnsetThresholdSigma"] = m.erdsOnsetThresholdSigma
 	cfg["erdsOnsetMinDurationMs"] = m.erdsOnsetMinDurationMs
 	cfg["erdsReboundMinLatencyMs"] = m.erdsReboundMinLatencyMs
@@ -363,7 +358,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["ratiosMinSegmentSec"] = m.ratiosMinSegmentSec
 	cfg["ratiosMinCyclesAtFmin"] = m.ratiosMinCyclesAtFmin
 	cfg["ratiosSkipInvalidSegments"] = m.ratiosSkipInvalidSegments
-	cfg["ratioSource"] = m.ratioSource
 
 	// IAF
 	cfg["iafEnabled"] = m.iafEnabled
@@ -1392,7 +1386,6 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.powerLineNoiseWidthHz = getFloat("powerLineNoiseWidthHz", m.powerLineNoiseWidthHz)
 	m.powerLineNoiseHarmonics = getInt("powerLineNoiseHarmonics", m.powerLineNoiseHarmonics)
 	m.powerEmitDb = getBool("powerEmitDb", m.powerEmitDb)
-	m.spectralEdgePercentile = getFloat("spectralEdgePercentile", m.spectralEdgePercentile)
 	m.spectralRatioPairsSpec = getString("spectralRatioPairsSpec", m.spectralRatioPairsSpec)
 	m.spectralSegmentsSpec = getString("spectralSegmentsSpec", m.spectralSegmentsSpec)
 	m.spectralPsdAdaptive = getBool("spectralPsdAdaptive", m.spectralPsdAdaptive)
@@ -1529,7 +1522,6 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.featNJobsConnectivity = getInt("featNJobsConnectivity", m.featNJobsConnectivity)
 	m.featNJobsAperiodic = getInt("featNJobsAperiodic", m.featNJobsAperiodic)
 	m.featNJobsComplexity = getInt("featNJobsComplexity", m.featNJobsComplexity)
-	m.saveSubjectLevelFeatures = getBool("saveSubjectLevelFeatures", m.saveSubjectLevelFeatures)
 	m.featAlsoSaveCsv = getBool("featAlsoSaveCsv", m.featAlsoSaveCsv)
 
 	// Spatial transform
@@ -1544,7 +1536,6 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.tfrMinCycles = getFloat("tfrMinCycles", m.tfrMinCycles)
 	m.tfrMaxCycles = getFloat("tfrMaxCycles", m.tfrMaxCycles)
 	m.tfrNCyclesFactor = getFloat("tfrNCyclesFactor", m.tfrNCyclesFactor)
-	m.tfrDecim = getInt("tfrDecim", m.tfrDecim)
 	m.tfrDecimPower = getInt("tfrDecimPower", m.tfrDecimPower)
 	m.tfrDecimPhase = getInt("tfrDecimPhase", m.tfrDecimPhase)
 	m.tfrWorkers = getInt("tfrWorkers", m.tfrWorkers)
@@ -1578,8 +1569,6 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.erdsUseLogRatio = getBool("erdsUseLogRatio", m.erdsUseLogRatio)
 	m.erdsMinBaselinePower = getFloat("erdsMinBaselinePower", m.erdsMinBaselinePower)
 	m.erdsMinActivePower = getFloat("erdsMinActivePower", m.erdsMinActivePower)
-	m.erdsMinSegmentSec = getFloat("erdsMinSegmentSec", m.erdsMinSegmentSec)
-	m.erdsBandsSpec = getString("erdsBandsSpec", m.erdsBandsSpec)
 	m.erdsOnsetThresholdSigma = getFloat("erdsOnsetThresholdSigma", m.erdsOnsetThresholdSigma)
 	m.erdsOnsetMinDurationMs = getFloat("erdsOnsetMinDurationMs", m.erdsOnsetMinDurationMs)
 	m.erdsReboundMinLatencyMs = getFloat("erdsReboundMinLatencyMs", m.erdsReboundMinLatencyMs)
@@ -1595,7 +1584,6 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.ratiosMinSegmentSec = getFloat("ratiosMinSegmentSec", m.ratiosMinSegmentSec)
 	m.ratiosMinCyclesAtFmin = getFloat("ratiosMinCyclesAtFmin", m.ratiosMinCyclesAtFmin)
 	m.ratiosSkipInvalidSegments = getBool("ratiosSkipInvalidSegments", m.ratiosSkipInvalidSegments)
-	m.ratioSource = getInt("ratioSource", m.ratioSource)
 
 	// IAF
 	m.iafEnabled = getBool("iafEnabled", m.iafEnabled)

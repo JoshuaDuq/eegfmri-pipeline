@@ -649,7 +649,6 @@ const (
 	textFieldAsymmetryActivationBands
 	textFieldIAFRois
 	textFieldERPComponents
-	textFieldERDSBands
 	textFieldMicrostatesFixedTemplatesPath
 	// ITPC condition-based text fields
 	textFieldItpcConditionColumn
@@ -1529,7 +1528,6 @@ type Model struct {
 	powerEmitDb                bool
 
 	// Spectral configuration
-	spectralEdgePercentile     float64
 	spectralRatioPairsSpec     string // e.g. theta:beta,alpha:beta
 	spectralSegmentsSpec       string // e.g. baseline,active
 	spectralPsdAdaptive        bool
@@ -1553,8 +1551,7 @@ type Model struct {
 	featNJobsComplexity     int
 
 	// Storage configuration
-	saveSubjectLevelFeatures bool
-	featAlsoSaveCsv          bool // Also save feature tables as CSV files
+	featAlsoSaveCsv bool // Also save feature tables as CSV files
 
 	// Asymmetry
 	asymmetryChannelPairsSpec         string  // e.g. F3:F4,C3:C4
@@ -1596,7 +1593,6 @@ type Model struct {
 	aperiodicMinSegmentSec float64 // Minimum segment duration for aperiodic fits
 	connAECOutput          int     // 0: r only, 1: z only, 2: both r and z
 	connForceWithinEpochML bool    // Force within_epoch for CV/machine learning
-	ratioSource            int     // 0: raw, 1: powcorr (aperiodic-adjusted)
 
 	// Spectral validity options
 	aperiodicSubtractEvoked bool // Subtract evoked response for induced spectra
@@ -1807,8 +1803,6 @@ type Model struct {
 	erdsUseLogRatio         bool    // Use dB instead of percent
 	erdsMinBaselinePower    float64 // Minimum baseline power
 	erdsMinActivePower      float64 // Minimum active power
-	erdsMinSegmentSec       float64 // Minimum segment duration
-	erdsBandsSpec           string  // Bands for ERDS (comma-separated)
 	erdsOnsetThresholdSigma float64 // Baseline SD multiplier for ERD onset threshold
 	erdsOnsetMinDurationMs  float64 // Sustained threshold crossing duration
 	erdsReboundMinLatencyMs float64 // Minimum latency from ERD peak to rebound search
@@ -2353,7 +2347,6 @@ type Model struct {
 	tfrMinCycles     float64 // Minimum cycles for wavelet
 	tfrMaxCycles     float64 // Maximum cycles for wavelet
 	tfrNCyclesFactor float64 // Cycles factor
-	tfrDecim         int     // Decimation for power TFR
 	tfrDecimPower    int     // Decimation for power TFR
 	tfrDecimPhase    int     // Decimation for phase TFR
 	tfrWorkers       int     // Workers for parallel TFR (-1 = all)
@@ -2551,7 +2544,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		powerLineNoiseHarmonics:    3,
 		powerEmitDb:                true,
 		// Spectral defaults
-		spectralEdgePercentile:     0.95,
 		spectralRatioPairsSpec:     "theta:beta,theta:alpha,alpha:beta,delta:alpha,delta:theta",
 		spectralSegmentsSpec:       "baseline",
 		spectralPsdAdaptive:        false,
@@ -2579,7 +2571,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		aperiodicMinSegmentSec:    2.0,  // 2.0s minimum for stable fits
 		connAECOutput:             0,    // 0: r only (raw)
 		connForceWithinEpochML:    true, // Force within_epoch for CV-safety
-		ratioSource:               0,    // 0: raw (default)
 
 		// ITPC additional defaults
 		itpcAllowUnsafeLoo:     false,
@@ -2769,8 +2760,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		erdsUseLogRatio:         false,
 		erdsMinBaselinePower:    1.0e-12,
 		erdsMinActivePower:      1.0e-12,
-		erdsMinSegmentSec:       0.5,
-		erdsBandsSpec:           "alpha,beta",
 		erdsOnsetThresholdSigma: 1.0,
 		erdsOnsetMinDurationMs:  30.0,
 		erdsReboundMinLatencyMs: 100.0,
@@ -2788,24 +2777,22 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// TFR advanced defaults
 		tfrMaxCycles:  15.0,
-		tfrDecim:      4,
 		tfrDecimPower: 4,
 		tfrDecimPhase: 1,
 
 		// Validation & Generic
-		minEpochsForFeatures:     10,
-		featAnalysisMode:         0,
-		aggregationMethod:        0,
-		featureTmin:              -7.0,
-		featureTmax:              15.0,
-		featComputeChangeScores:  true,
-		featSaveTfrWithSidecar:   false,
-		featNJobsBands:           -1,
-		featNJobsConnectivity:    -1,
-		featNJobsAperiodic:       -1,
-		featNJobsComplexity:      -1,
-		featAlsoSaveCsv:          false,
-		saveSubjectLevelFeatures: true,
+		minEpochsForFeatures:    10,
+		featAnalysisMode:        0,
+		aggregationMethod:       0,
+		featureTmin:             -7.0,
+		featureTmax:             15.0,
+		featComputeChangeScores: true,
+		featSaveTfrWithSidecar:  false,
+		featNJobsBands:          -1,
+		featNJobsConnectivity:   -1,
+		featNJobsAperiodic:      -1,
+		featNJobsComplexity:     -1,
+		featAlsoSaveCsv:         false,
 
 		// Asymmetry defaults
 		asymmetryChannelPairsSpec:         "F3:F4,F7:F8,C3:C4,P3:P4,O1:O2",

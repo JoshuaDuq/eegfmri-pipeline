@@ -494,12 +494,8 @@ def _apply_power_overrides(args: argparse.Namespace, config: Any) -> None:
 
 def _apply_spectral_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply spectral-related config overrides."""
-    if getattr(args, "spectral_edge_percentile", None) is not None:
-        config["feature_engineering.spectral.edge_percentile"] = args.spectral_edge_percentile
     if getattr(args, "ratio_pairs", None) is not None:
         config["feature_engineering.spectral.ratio_pairs"] = _parse_pair_tokens(args.ratio_pairs, label="ratio")
-    if getattr(args, "ratio_source", None) is not None:
-        config["feature_engineering.spectral.ratio_source"] = args.ratio_source
     
     spectral_cfg = config.setdefault("feature_engineering", {}).setdefault("spectral", {})
     if getattr(args, "spectral_include_log_ratios", None) is not None:
@@ -572,8 +568,6 @@ def _apply_tfr_overrides(args: argparse.Namespace, config: Any) -> None:
         tfr_config["min_cycles"] = args.tfr_min_cycles
     if getattr(args, "tfr_n_cycles_factor", None) is not None:
         tfr_config["n_cycles_factor"] = args.tfr_n_cycles_factor
-    if getattr(args, "tfr_decim", None) is not None:
-        tfr_config["decim"] = args.tfr_decim
     if getattr(args, "tfr_workers", None) is not None:
         tfr_config["workers"] = args.tfr_workers
     if getattr(args, "tfr_max_cycles", None) is not None:
@@ -695,10 +689,6 @@ def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
         erds_cfg["min_baseline_power"] = args.erds_min_baseline_power
     if getattr(args, "erds_min_active_power", None) is not None:
         erds_cfg["min_active_power"] = args.erds_min_active_power
-    if getattr(args, "erds_min_segment_sec", None) is not None:
-        erds_cfg["min_segment_sec"] = args.erds_min_segment_sec
-    if getattr(args, "erds_bands", None) is not None:
-        erds_cfg["bands"] = args.erds_bands
     if getattr(args, "erds_onset_threshold_sigma", None) is not None:
         erds_cfg["onset_threshold_sigma"] = args.erds_onset_threshold_sigma
     if getattr(args, "erds_onset_min_duration_ms", None) is not None:
@@ -707,14 +697,23 @@ def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
         erds_cfg["rebound_min_latency_ms"] = args.erds_rebound_min_latency_ms
     if getattr(args, "erds_infer_contralateral", None) is not None:
         erds_cfg["infer_contralateral_when_missing"] = args.erds_infer_contralateral
+    marker_options_set = False
     if getattr(args, "erds_condition_marker_bands", None) is not None:
-        erds_cfg["condition_marker_bands"] = list(args.erds_condition_marker_bands)
+        erds_cfg["laterality_marker_bands"] = list(args.erds_condition_marker_bands)
+        marker_options_set = True
     if getattr(args, "erds_laterality_columns", None) is not None:
         erds_cfg["laterality_columns"] = list(args.erds_laterality_columns)
+        marker_options_set = True
     if getattr(args, "erds_somatosensory_left_channels", None) is not None:
         erds_cfg["somatosensory_left_channels"] = list(args.erds_somatosensory_left_channels)
+        marker_options_set = True
     if getattr(args, "erds_somatosensory_right_channels", None) is not None:
         erds_cfg["somatosensory_right_channels"] = list(args.erds_somatosensory_right_channels)
+        marker_options_set = True
+    if marker_options_set:
+        # CLI exposes marker tuning options but no explicit enable flag.
+        # If any marker-specific override is provided, enable marker extraction.
+        erds_cfg["enable_laterality_markers"] = True
     if getattr(args, "erds_onset_min_threshold_percent", None) is not None:
         erds_cfg["onset_min_threshold_percent"] = float(args.erds_onset_min_threshold_percent)
     if getattr(args, "erds_rebound_threshold_sigma", None) is not None:
@@ -731,8 +730,6 @@ def _apply_validation_overrides(args: argparse.Namespace, config: Any) -> None:
 
 def _apply_output_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply output-related config overrides."""
-    if getattr(args, "save_subject_level_features", None) is not None:
-        config["feature_engineering.output.save_subject_level_features"] = args.save_subject_level_features
     if getattr(args, "also_save_csv", None) is not None:
         output_cfg = config.setdefault("feature_engineering", {}).setdefault("output", {})
         output_cfg["also_save_csv"] = bool(args.also_save_csv)

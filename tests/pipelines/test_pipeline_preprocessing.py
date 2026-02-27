@@ -158,14 +158,15 @@ class TestPreprocessingCompletion(unittest.TestCase):
 
         fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
         with patch.dict(sys.modules, {"eeg_pipeline.cli.common": fake_cli}):
-            task, mode, use_icalabel, n_jobs, progress = p._extract_preprocessing_params(None, {})
+            task, mode, use_pyprep, use_icalabel, n_jobs, progress = p._extract_preprocessing_params(None, {})
         self.assertEqual(task, "task")
         self.assertEqual(mode, "full")
+        self.assertTrue(use_pyprep)
         self.assertTrue(use_icalabel)
         self.assertEqual(n_jobs, 1)
         self.assertIsNotNone(progress)
 
-        with patch.object(PreprocessingPipeline, "_extract_preprocessing_params", return_value=("task", "full", True, 1, _NoopProgress())), patch.object(
+        with patch.object(PreprocessingPipeline, "_extract_preprocessing_params", return_value=("task", "full", True, True, 1, _NoopProgress())), patch.object(
             PreprocessingPipeline, "_get_steps_for_mode", return_value=["bad-channels"]
         ), patch.object(PreprocessingPipeline, "_execute_steps") as mock_exec:
             p.process_subject("0001", task=None)
@@ -183,13 +184,17 @@ class TestPreprocessingCompletion(unittest.TestCase):
         ) as m2, patch.object(PreprocessingPipeline, "_run_ica_labeling") as m3, patch.object(
             PreprocessingPipeline, "_run_epoch_creation"
         ) as m4, patch.object(PreprocessingPipeline, "_collect_stats") as m5:
-            p._execute_steps(["bad-channels", "ica-fit", "ica-label", "epochs", "stats"], ["0001"], "t", True, 1, _NoopProgress())
+            p._execute_steps(["bad-channels", "ica-fit", "ica-label", "epochs", "stats"], ["0001"], "t", True, True, 1, _NoopProgress())
 
         self.assertTrue(m1.called and m2.called and m3.called and m4.called and m5.called)
 
         with patch.object(PreprocessingPipeline, "_run_ica_labeling") as m3:
-            p._execute_steps(["ica-label"], ["0001"], "t", False, 1, _NoopProgress())
+            p._execute_steps(["ica-label"], ["0001"], "t", True, False, 1, _NoopProgress())
         m3.assert_not_called()
+
+        with patch.object(PreprocessingPipeline, "_run_bad_channel_detection") as m1:
+            p._execute_steps(["bad-channels"], ["0001"], "t", False, True, 1, _NoopProgress())
+        m1.assert_not_called()
 
     def test_run_epoch_creation_and_collect_stats(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -280,7 +285,7 @@ class TestPreprocessingCompletion(unittest.TestCase):
         p.config = DotConfig(
             {
                 "eeg": {"ch_types": "eeg", "reference": "avg", "eog_channels": 1},
-                "preprocessing": {"notch_freq": 60, "resample_freq": 200, "run_source_estimation": True},
+                "preprocessing": {"notch_freq": 60, "resample_freq": 200},
                 "ica": {"reject": {"eeg": 1e-4}},
                 "epochs": {
                     "conditions": ["stim"],
@@ -301,7 +306,6 @@ class TestPreprocessingCompletion(unittest.TestCase):
         self.assertIn("reject_tmin = 0.1", cfg)
         self.assertIn("reject_tmax = 0.5", cfg)
         self.assertIn("autoreject_n_interpolate = [1, 2]", cfg)
-        self.assertIn("run_source_estimation = True", cfg)
 
         # _write_clean_events_tsv exception branches
         p.config = DotConfig({"preprocessing": {"clean_events_strict": False}})

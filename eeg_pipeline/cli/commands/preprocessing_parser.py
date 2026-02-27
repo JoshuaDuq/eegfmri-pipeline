@@ -90,7 +90,6 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--h-freq", type=float, help="Low-pass filter frequency (Hz)")
     prep_group.add_argument("--notch", type=int, help="Notch filter frequency (Hz)")
     prep_group.add_argument("--line-freq", type=int, help="Line frequency for EEG data (Hz), typically 50 or 60")
-    prep_group.add_argument("--zapline-fline", type=float, help="Zapline filtering frequency (Hz)")
 
     # ICA
     prep_group.add_argument("--spatial-filter", choices=["ica", "ssp"], help="Spatial filter type (ica or ssp)")
@@ -170,7 +169,6 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         action="store_false",
         help="Disable automatic break detection",
     )
-    prep_group.add_argument("--run-source-estimation", action="store_true", default=False, help="Run source estimation")
     prep_group.add_argument("--allow-misaligned-trim", action="store_true", default=False, help="Allow trimming when EEG/fMRI trial counts are slightly misaligned")
     prep_group.add_argument("--min-alignment-samples", type=int, default=None, help="Minimum aligned sample count required after trimming")
     prep_group.add_argument("--trim-to-first-volume", action="store_true", default=False, help="Trim EEG events to first fMRI volume start when aligning")

@@ -68,12 +68,8 @@ def _update_preprocessing_config(args: argparse.Namespace, config: Any) -> None:
         preprocessing_config["notch_freq"] = args.notch
     if args.line_freq:
         preprocessing_config["line_freq"] = args.line_freq
-    if args.zapline_fline is not None:
-        preprocessing_config["zapline_fline"] = args.zapline_fline
     if args.find_breaks is not None:
         preprocessing_config["find_breaks"] = bool(args.find_breaks)
-    if args.run_source_estimation:
-        preprocessing_config["run_source_estimation"] = True
     if args.write_clean_events is not None:
         preprocessing_config["write_clean_events"] = bool(args.write_clean_events)
     if args.overwrite_clean_events is not None:

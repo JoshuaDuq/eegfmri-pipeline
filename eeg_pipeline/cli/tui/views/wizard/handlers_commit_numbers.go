@@ -832,10 +832,6 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0.5 {
 			m.tfrNCyclesFactor = val
 		}
-	case optTfrDecim:
-		if val >= 1 {
-			m.tfrDecim = int(val)
-		}
 	case optTfrDecimPower:
 		if val >= 1 {
 			m.tfrDecimPower = int(val)
@@ -1010,10 +1006,6 @@ func (m *Model) commitFeaturesNumber(val float64) {
 	case optERDSMinActivePower:
 		if val > 0 {
 			m.erdsMinActivePower = val
-		}
-	case optERDSMinSegmentSec:
-		if val >= 0 {
-			m.erdsMinSegmentSec = val
 		}
 	case optERDSOnsetThresholdSigma:
 		if val >= 0 {

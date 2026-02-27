@@ -350,7 +350,10 @@ def extract_erds_from_precomputed(
     min_active_power = float(erds_cfg.get("min_active_power", epsilon))
     use_log_ratio = bool(erds_cfg.get("use_log_ratio", False))
 
-    laterality_metrics_enabled = _bool_or_default(erds_cfg.get("enable_laterality_markers"), False)
+    laterality_metrics_enabled = _bool_or_default(
+        erds_cfg.get("enable_laterality_markers"),
+        False,
+    )
     laterality_marker_identifier = str(erds_cfg.get("laterality_marker_identifier", _DEFAULT_LATERALITY_MARKER))
     laterality_marker_bands = {
         str(token).strip().lower()
