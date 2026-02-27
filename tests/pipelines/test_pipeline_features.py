@@ -132,8 +132,6 @@ class TestFeatureHelpers(unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features._load_events_df", return_value=None
         ), patch(
-            "eeg_pipeline.pipelines.features.pick_target_column", return_value=None
-        ), patch(
             "eeg_pipeline.pipelines.features._load_fixed_templates", return_value=(None, None)
         ), patch(
             "eeg_pipeline.pipelines.features._precompute_tfr_if_needed", return_value=None
@@ -216,8 +214,6 @@ class TestFeatureHelpers(unittest.TestCase):
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned)
         ), patch(
             "eeg_pipeline.pipelines.features._load_events_df", return_value=None
-        ), patch(
-            "eeg_pipeline.pipelines.features.pick_target_column", return_value="rating"
         ), patch(
             "eeg_pipeline.pipelines.features._load_fixed_templates", return_value=(None, None)
         ), patch(
@@ -358,8 +354,6 @@ class TestFeatureHelpers(unittest.TestCase):
             "eeg_pipeline.pipelines.features._load_events_df", return_value=original_events
         ), patch(
             "eeg_pipeline.pipelines.features.save_dropped_trials_log"
-        ), patch(
-            "eeg_pipeline.pipelines.features.pick_target_column", return_value="rating"
         ), patch(
             "eeg_pipeline.pipelines.features._load_fixed_templates", return_value=(None, None)
         ), patch(
@@ -507,8 +501,6 @@ class TestFeatureHelpers(unittest.TestCase):
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned_events)
         ), patch(
             "eeg_pipeline.pipelines.features._load_events_df", return_value=None
-        ), patch(
-            "eeg_pipeline.pipelines.features.pick_target_column", return_value="rating"
         ), patch(
             "eeg_pipeline.pipelines.features._load_fixed_templates", return_value=(None, None)
         ), patch(
@@ -947,8 +939,6 @@ class TestFeatureGapfill(unittest.TestCase):
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned)
         ), patch(
             "eeg_pipeline.pipelines.features._load_events_df", return_value=None
-        ), patch(
-            "eeg_pipeline.pipelines.features.pick_target_column", return_value="rating"
         ), patch(
             "eeg_pipeline.pipelines.features._load_fixed_templates", return_value=(None, None)
         ), patch(
