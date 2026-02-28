@@ -379,7 +379,7 @@ Then continue from Step 7 above (create coregistration transform).
 | `--source-fmri-max-clusters` | Maximum number of clusters kept from fMRI map | `20` |
 | `--source-fmri-max-voxels-per-cluster` | Maximum voxels sampled per cluster (set 0 for no limit) | `2000` |
 | `--source-fmri-max-total-voxels` | Maximum total voxels across all clusters (set 0 for no limit) | `20000` |
-| `--source-fmri-random-seed` | Random seed for voxel subsampling (0 = nondeterministic) | `0` |
+| `--source-fmri-random-seed` | Random seed for voxel subsampling (0 = deterministic default seed) | `0` |
 
 ### fMRI Contrast Builder flags
 

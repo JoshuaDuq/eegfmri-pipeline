@@ -246,14 +246,18 @@ def _load_fmri_constraint_config(
         )
     except Exception:
         max_total_voxels = 20000
-    try:
-        random_seed = get_config_int(
+    random_seed = int(
+        get_config_int(
             config,
             "feature_engineering.sourcelocalization.fmri.random_seed",
             0,
         )
-    except Exception:
-        random_seed = 0
+    )
+    if random_seed < 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.random_seed must be >= 0 "
+            f"(got {random_seed})."
+        )
 
     return FMRIConstraintConfig(
         enabled=enabled or (stats_map_path is not None),
@@ -429,6 +433,14 @@ def _setup_volume_source_space_configured(
     return fwd, src, roi_indices
 
 
+def _make_fmri_subsampling_rng(seed: int) -> np.random.Generator:
+    """Create deterministic RNG for fMRI voxel subsampling."""
+    seed_int = int(seed)
+    if seed_int < 0:
+        raise ValueError(f"fMRI random_seed must be >= 0 (got {seed_int}).")
+    return np.random.default_rng(seed_int)
+
+
 def _fmri_roi_coords_from_stats_map(
     stats_map_path: Path,
     cfg: FMRIConstraintConfig,
@@ -557,7 +569,7 @@ def _fmri_roi_coords_from_stats_map(
     clusters.sort(key=lambda t: (t[2], t[1]), reverse=True)
     clusters = clusters[: max(1, int(cfg.max_clusters))]
 
-    rng = np.random.default_rng(None if int(cfg.random_seed) == 0 else int(cfg.random_seed))
+    rng = _make_fmri_subsampling_rng(int(cfg.random_seed))
 
     roi_coords_m: Dict[str, np.ndarray] = {}
     total_selected = 0
@@ -727,6 +739,7 @@ def _compute_eloreta_source_estimates(
     loose: float = 0.2,
     depth: float = 0.8,
     snr: float = 3.0,
+    pick_ori: Optional[str] = "normal",
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[List[Any], Any]:
     """
@@ -746,6 +759,9 @@ def _compute_eloreta_source_estimates(
         Depth weighting (0-1)
     snr : float
         Assumed SNR for regularization
+    pick_ori : {'normal', None, 'vector'}
+        Orientation selection for inverse estimates. Use ``None`` for
+        volume/discrete source spaces.
         
     Returns
     -------
@@ -754,6 +770,31 @@ def _compute_eloreta_source_estimates(
     inv : mne.minimum_norm.InverseOperator
         Inverse operator
     """
+    src_spaces = fwd.get("src") if isinstance(fwd, dict) else None
+    src_types: List[str] = []
+    if isinstance(src_spaces, (list, tuple)):
+        for src in src_spaces:
+            if isinstance(src, dict):
+                src_types.append(str(src.get("type", "")).strip().lower())
+            else:
+                try:
+                    src_types.append(str(src["type"]).strip().lower())
+                except Exception:
+                    continue
+    src_types = [t for t in src_types if t]
+    surface_only = bool(src_types) and all(t == "surf" for t in src_types)
+    has_nonsurface = bool(src_types) and not surface_only
+    if pick_ori == "normal" and has_nonsurface:
+        raise ValueError(
+            "eLORETA pick_ori='normal' is only valid for cortical surface source spaces. "
+            "For volume/discrete source spaces (including fMRI constraints), use pick_ori=None."
+        )
+    if has_nonsurface and float(loose) < 1.0:
+        raise ValueError(
+            "eLORETA with volume/discrete source spaces requires loose=1.0 "
+            "(free orientation)."
+        )
+
     import mne
     from mne.minimum_norm import make_inverse_operator, apply_inverse_epochs
     
@@ -779,7 +820,7 @@ def _compute_eloreta_source_estimates(
         inv,
         lambda2=lambda2,
         method="eLORETA",
-        pick_ori="normal",
+        pick_ori=pick_ori,
         verbose=False,
     )
     
@@ -988,15 +1029,27 @@ def _load_source_localization_config(
 
     method_use = str(src_cfg.get("method", method)).strip().lower()
     if method_use not in {"lcmv", "eloreta"}:
-        method_use = "lcmv"
+        raise ValueError(
+            "feature_engineering.sourcelocalization.method must be one of "
+            "{'lcmv','eloreta'} "
+            f"(got '{method_use}')."
+        )
 
     spacing = str(src_cfg.get("spacing", "oct6")).strip()
     if spacing not in {"oct5", "oct6", "ico4", "ico5"}:
-        spacing = "oct6"
+        raise ValueError(
+            "feature_engineering.sourcelocalization.spacing must be one of "
+            "{'oct5','oct6','ico4','ico5'} "
+            f"(got '{spacing}')."
+        )
 
     parcellation = str(src_cfg.get("parcellation", src_cfg.get("parc", "aparc"))).strip()
     if parcellation not in {"aparc", "aparc.a2009s", "HCPMMP1"}:
-        parcellation = "aparc"
+        raise ValueError(
+            "feature_engineering.sourcelocalization.parcellation must be one of "
+            "{'aparc','aparc.a2009s','HCPMMP1'} "
+            f"(got '{parcellation}')."
+        )
 
     subjects_dir_path = _as_path(src_cfg.get("subjects_dir"))
     if subjects_dir_path is None:
@@ -1011,26 +1064,37 @@ def _load_source_localization_config(
     trans_path = _as_path(src_cfg.get("trans"))
     bem_path = _as_path(src_cfg.get("bem"))
 
-    try:
-        mindist_mm = get_config_float(config, "feature_engineering.sourcelocalization.mindist_mm", 5.0)
-    except Exception:
-        mindist_mm = 5.0
-    try:
-        lcmv_reg = get_config_float(config, "feature_engineering.sourcelocalization.reg", 0.05)
-    except Exception:
-        lcmv_reg = 0.05
-    try:
-        eloreta_snr = get_config_float(config, "feature_engineering.sourcelocalization.snr", 3.0)
-    except Exception:
-        eloreta_snr = 3.0
-    try:
-        eloreta_loose = get_config_float(config, "feature_engineering.sourcelocalization.loose", 0.2)
-    except Exception:
-        eloreta_loose = 0.2
-    try:
-        eloreta_depth = get_config_float(config, "feature_engineering.sourcelocalization.depth", 0.8)
-    except Exception:
-        eloreta_depth = 0.8
+    mindist_mm = float(get_config_float(config, "feature_engineering.sourcelocalization.mindist_mm", 5.0))
+    lcmv_reg = float(get_config_float(config, "feature_engineering.sourcelocalization.reg", 0.05))
+    eloreta_snr = float(get_config_float(config, "feature_engineering.sourcelocalization.snr", 3.0))
+    eloreta_loose = float(get_config_float(config, "feature_engineering.sourcelocalization.loose", 0.2))
+    eloreta_depth = float(get_config_float(config, "feature_engineering.sourcelocalization.depth", 0.8))
+
+    if not np.isfinite(mindist_mm) or mindist_mm < 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.mindist_mm must be a finite float >= 0 "
+            f"(got {mindist_mm})."
+        )
+    if not np.isfinite(lcmv_reg) or lcmv_reg < 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.reg must be a finite float >= 0 "
+            f"(got {lcmv_reg})."
+        )
+    if not np.isfinite(eloreta_snr) or eloreta_snr <= 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.snr must be a finite float > 0 "
+            f"(got {eloreta_snr})."
+        )
+    if not np.isfinite(eloreta_loose) or eloreta_loose < 0 or eloreta_loose > 1:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.loose must be a finite float in [0, 1] "
+            f"(got {eloreta_loose})."
+        )
+    if not np.isfinite(eloreta_depth) or eloreta_depth < 0 or eloreta_depth > 1:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.depth must be a finite float in [0, 1] "
+            f"(got {eloreta_depth})."
+        )
 
     bids_fmri_root = _as_path(get_config_value(config, "paths.bids_fmri_root", None))
     bids_derivatives = _as_path(get_config_value(config, "paths.deriv_root", None))
@@ -1057,6 +1121,15 @@ def _load_source_localization_config(
         raise ValueError(
             "feature_engineering.sourcelocalization.mode='fmri_informed' requires "
             "feature_engineering.sourcelocalization.fmri.enabled=true."
+        )
+    if (
+        bool(fmri_cfg.enabled)
+        and method_use == "eloreta"
+        and not np.isclose(eloreta_loose, 1.0, atol=1e-12)
+    ):
+        raise ValueError(
+            "fMRI-constrained eLORETA requires feature_engineering.sourcelocalization.loose=1.0 "
+            "(free orientation for volume/discrete source spaces)."
         )
 
     return SourceLocalizationConfig(
@@ -1169,6 +1242,34 @@ def _validate_source_connectivity_duration(
     return True
 
 
+def _validate_source_localization_duration(
+    *,
+    n_times: int,
+    sfreq: float,
+    fmin: float,
+    min_cycles: float,
+    band: str,
+    logger: logging.Logger,
+) -> bool:
+    """Check whether per-epoch duration supports stable band-limited source power/envelope."""
+    if n_times <= 0 or not np.isfinite(sfreq) or sfreq <= 0 or not np.isfinite(fmin) or fmin <= 0:
+        return False
+    duration_sec = float(n_times) / float(sfreq)
+    min_duration_sec = float(min_cycles) / float(fmin)
+    if duration_sec < min_duration_sec:
+        logger.warning(
+            "Source localization: epoch duration %.3fs is shorter than recommended %.3fs "
+            "for band '%s' (%d cycles at %.2f Hz); skipping band.",
+            duration_sec,
+            min_duration_sec,
+            band,
+            int(round(min_cycles)),
+            fmin,
+        )
+        return False
+    return True
+
+
 def _enforce_fmri_provenance_policy(
     fmri_cfg: FMRIConstraintConfig,
     logger: logging.Logger,
@@ -1262,6 +1363,7 @@ def extract_source_localization_features(
 
     sfreq = epochs.info["sfreq"]
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
+    min_cycles_per_band = _resolve_source_connectivity_min_cycles(config)
 
     if logger:
         logger.info(f"Extracting source-localized features using {src_cfg.method.upper()}")
@@ -1325,6 +1427,7 @@ def extract_source_localization_features(
                 loose=src_cfg.eloreta_loose,
                 depth=src_cfg.eloreta_depth,
                 snr=src_cfg.eloreta_snr,
+                pick_ori=None,
                 logger=logger,
             )
         roi_data, label_names = _extract_roi_timecourses_from_vertex_indices(stcs, roi_indices)
@@ -1393,6 +1496,7 @@ def extract_source_localization_features(
                 loose=src_cfg.eloreta_loose,
                 depth=src_cfg.eloreta_depth,
                 snr=src_cfg.eloreta_snr,
+                pick_ori="normal",
                 logger=logger,
             )
 
@@ -1408,6 +1512,15 @@ def extract_source_localization_features(
             continue
         
         fmin, fmax = freq_bands[band]
+        if not _validate_source_localization_duration(
+            n_times=int(roi_data.shape[-1]) if np.ndim(roi_data) >= 3 else 0,
+            sfreq=float(sfreq),
+            fmin=float(fmin),
+            min_cycles=min_cycles_per_band,
+            band=str(band),
+            logger=logger,
+        ):
+            continue
         
         power = _compute_roi_power(roi_data, sfreq, fmin, fmax)
         
@@ -1510,9 +1623,15 @@ def extract_source_connectivity_features(
     sfreq = epochs.info["sfreq"]
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
     min_cycles_per_band = _resolve_source_connectivity_min_cycles(config)
+    connectivity_method_l = str(connectivity_method).strip().lower()
+    if connectivity_method_l not in {"aec", "wpli", "plv"}:
+        raise ValueError(
+            "source connectivity method must be one of {'aec','wpli','plv'} "
+            f"(got '{connectivity_method}')."
+        )
     
     if logger:
-        logger.info(f"Extracting source-space {connectivity_method.upper()} connectivity")
+        logger.info(f"Extracting source-space {connectivity_method_l.upper()} connectivity")
 
     if fmri_cfg.enabled:
         if fmri_cfg.stats_map_path is None:
@@ -1608,15 +1727,17 @@ def extract_source_connectivity_features(
             continue
         
         fmin, fmax = freq_bands[band]
-        
-        epochs_band = epochs.copy().filter(fmin, fmax, n_jobs=n_jobs, verbose=False)
+        if connectivity_method_l == "aec":
+            epochs_for_source = epochs.copy().filter(fmin, fmax, n_jobs=n_jobs, verbose=False)
+        else:
+            epochs_for_source = epochs.copy()
         
         if src_cfg.method == "lcmv":
             epochs_fit = None
             if analysis_mode == "trial_ml_safe" and train_mask is not None and np.any(train_mask):
-                epochs_fit = epochs_band[train_mask]
+                epochs_fit = epochs_for_source[train_mask]
             stcs, _ = _compute_lcmv_source_estimates(
-                epochs_band,
+                epochs_for_source,
                 fwd,
                 epochs_fit=epochs_fit,
                 reg=src_cfg.lcmv_reg,
@@ -1624,11 +1745,12 @@ def extract_source_connectivity_features(
             )
         else:
             stcs, _ = _compute_eloreta_source_estimates(
-                epochs_band,
+                epochs_for_source,
                 fwd,
                 loose=src_cfg.eloreta_loose,
                 depth=src_cfg.eloreta_depth,
                 snr=src_cfg.eloreta_snr,
+                pick_ori=None if fmri_cfg.enabled else "normal",
                 logger=None,
             )
 
@@ -1643,12 +1765,12 @@ def extract_source_connectivity_features(
             fmin=float(fmin),
             min_cycles=min_cycles_per_band,
             band=str(band),
-            method=str(connectivity_method).lower(),
+            method=connectivity_method_l,
             logger=logger,
         ):
             continue
         
-        if connectivity_method.lower() == "aec":
+        if connectivity_method_l == "aec":
             for epoch_idx in range(n_epochs):
                 epoch_data = roi_data[epoch_idx:epoch_idx+1, :, :]
                 
@@ -1667,7 +1789,7 @@ def extract_source_connectivity_features(
                     feature_cols.append(col_name)
                 records[epoch_idx][col_name] = mean_conn
                 
-        elif connectivity_method.lower() in ("wpli", "plv"):
+        elif connectivity_method_l in {"wpli", "plv"}:
             roi_data_fit = roi_data
             if (
                 analysis_mode == "trial_ml_safe"
@@ -1679,7 +1801,7 @@ def extract_source_connectivity_features(
             if roi_data_fit.shape[0] < 2:
                 logger.warning(
                     "Source connectivity (%s): insufficient epochs for stable cross-epoch estimate (%d); skipping band %s.",
-                    connectivity_method.lower(),
+                    connectivity_method_l,
                     int(roi_data_fit.shape[0]),
                     band,
                 )
@@ -1691,7 +1813,7 @@ def extract_source_connectivity_features(
 
             con = spectral_connectivity_epochs(
                 roi_data_fit,
-                method=connectivity_method.lower(),
+                method=connectivity_method_l,
                 mode="multitaper",
                 sfreq=sfreq,
                 fmin=fmin,
@@ -1714,7 +1836,7 @@ def extract_source_connectivity_features(
             mean_conn = float(np.nanmean(edge_values)) if edge_values.size else np.nan
 
             for epoch_idx in range(n_epochs):
-                col_name = f"src_{src_cfg.method}_{band}_{connectivity_method}_global"
+                col_name = f"src_{src_cfg.method}_{band}_{connectivity_method_l}_global"
                 if col_name not in feature_cols:
                     feature_cols.append(col_name)
                 records[epoch_idx][col_name] = mean_conn
@@ -1723,10 +1845,10 @@ def extract_source_connectivity_features(
     feature_cols = list(features_df.columns)
 
     features_df.attrs["method"] = str(src_cfg.method)
-    features_df.attrs["connectivity_method"] = str(connectivity_method).lower()
+    features_df.attrs["connectivity_method"] = connectivity_method_l
     features_df.attrs["fmri_constraint_enabled"] = bool(fmri_cfg.enabled)
     features_df.attrs["fmri_provenance"] = str(fmri_cfg.provenance)
-    conn_method_l = str(connectivity_method).strip().lower()
+    conn_method_l = connectivity_method_l
     if conn_method_l in {"wpli", "plv"}:
         features_df.attrs["feature_granularity"] = "subject"
         features_df.attrs["broadcast_warning"] = (

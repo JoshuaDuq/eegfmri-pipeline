@@ -16,6 +16,7 @@ from eeg_pipeline.analysis.features.phase import (
     extract_phase_features,
 )
 from eeg_pipeline.analysis.features.source_localization import (
+    _compute_eloreta_source_estimates,
     extract_source_connectivity_features,
     extract_source_localization_features,
 )
@@ -181,6 +182,74 @@ class TestScientificValidityGuards(unittest.TestCase):
                     connectivity_method="wpli",
                 )
 
+    def test_source_localization_skips_band_when_duration_too_short(self):
+        n_epochs = 4
+        roi_data = np.random.default_rng(23).standard_normal((n_epochs, 2, 20))  # 0.2 s @ 100 Hz
+
+        fmri_cfg = SimpleNamespace(
+            enabled=False,
+            provenance="independent",
+            require_provenance=False,
+        )
+        src_cfg = SimpleNamespace(
+            method="lcmv",
+            fmri_cfg=fmri_cfg,
+            subjects_dir=None,
+            trans_path=None,
+            bem_path=None,
+            parcellation="aparc",
+            spacing="oct6",
+            subject="fsaverage",
+            mindist_mm=5.0,
+            lcmv_reg=0.05,
+            eloreta_loose=0.2,
+            eloreta_depth=0.8,
+            eloreta_snr=3.0,
+        )
+
+        ctx = SimpleNamespace(
+            epochs=_EpochStub(n_epochs, sfreq=100.0),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {
+                            "min_cycles_per_band": 3.0,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("src-loc-duration-guard"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            frequency_bands={"alpha": (8.0, 12.0)},
+            name="active",
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+            return_value=src_cfg,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+            return_value=("fwd", "src", None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+            return_value=(["stc"] * n_epochs, None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+            return_value=roi_data,
+        ), patch(
+            "mne.read_labels_from_annot",
+            return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+        ):
+            df, cols = extract_source_localization_features(
+                ctx,
+                bands=["alpha"],
+                method="lcmv",
+            )
+
+        self.assertEqual(cols, [])
+        self.assertTrue(df.empty)
+
     def test_source_localization_blocks_same_dataset_provenance_by_default(self):
         fmri_cfg = SimpleNamespace(
             enabled=True,
@@ -239,6 +308,16 @@ class TestScientificValidityGuards(unittest.TestCase):
                     method="eloreta",
                     connectivity_method="wpli",
                 )
+
+    def test_eloreta_rejects_normal_orientation_for_volume_sources(self):
+        fwd = {"src": [{"type": "vol"}]}
+        with self.assertRaisesRegex(ValueError, "pick_ori='normal'"):
+            _compute_eloreta_source_estimates(
+                epochs=object(),
+                fwd=fwd,
+                loose=1.0,
+                pick_ori="normal",
+            )
 
     def test_tfr_baseline_validation_is_strict_by_default(self):
         tfr = _TFRStub(n_epochs=2, times=np.array([0.0, 0.1], dtype=float))

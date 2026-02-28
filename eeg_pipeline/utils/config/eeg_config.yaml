@@ -484,7 +484,7 @@ feature_engineering:
       max_clusters: 20
       max_voxels_per_cluster: 2000
       max_total_voxels: 20000
-      random_seed: 0
+      random_seed: 0              # Deterministic by default (seed=0)
       time_windows:
         window_a: {name: "window_a", tmin: 5.0, tmax: 10.0}
         window_b: {name: "baseline", tmin: -2.0, tmax: 0.0}

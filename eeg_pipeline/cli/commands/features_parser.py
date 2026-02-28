@@ -141,7 +141,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-max-clusters", type=int, default=None, help="Maximum number of clusters kept from fMRI map (default: 20).")
     parser.add_argument("--source-fmri-max-voxels-per-cluster", type=int, default=None, help="Maximum voxels sampled per cluster (default: 2000; set 0 for no limit).")
     parser.add_argument("--source-fmri-max-total-voxels", type=int, default=None, help="Maximum total voxels across all clusters (default: 20000; set 0 for no limit).")
-    parser.add_argument("--source-fmri-random-seed", type=int, default=None, help="Random seed for voxel subsampling (default: 0 -> nondeterministic).")
+    parser.add_argument("--source-fmri-random-seed", type=int, default=None, help="Random seed for voxel subsampling (default: 0 -> deterministic).")
     parser.add_argument("--source-fmri-window-a-name", default=None, help="Name for window A (e.g., 'window_a').")
     parser.add_argument("--source-fmri-window-a-tmin", type=float, default=None, help="Start time for window A in seconds.")
     parser.add_argument("--source-fmri-window-a-tmax", type=float, default=None, help="End time for window A in seconds.")
