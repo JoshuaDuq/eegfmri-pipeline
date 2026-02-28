@@ -12,6 +12,7 @@ for anatomically-defined ROIs.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -450,7 +451,7 @@ def _validate_stats_map_grid_against_subject_mri(
     stats_map_path: Path,
     subjects_dir: Path,
     subject: str,
-) -> None:
+) -> Path:
     """Require exact voxel-grid match against FreeSurfer reference MRI."""
     ref_candidates = _iter_subject_mri_reference_paths(subjects_dir, subject)
     existing_refs = [path for path in ref_candidates if path.exists()]
@@ -468,7 +469,7 @@ def _validate_stats_map_grid_against_subject_mri(
         shape_match = tuple(map_shape) == tuple(ref_shape)
         affine_match = np.allclose(map_affine, ref_affine, rtol=1e-5, atol=1e-3)
         if shape_match and affine_match:
-            return
+            return ref_path
 
         max_affine_diff = float(np.max(np.abs(map_affine - ref_affine)))
         mismatch_notes.append(
@@ -483,21 +484,114 @@ def _validate_stats_map_grid_against_subject_mri(
     )
 
 
-def _compute_fmri_analysis_voxel_mask(data: np.ndarray) -> np.ndarray:
+def _compute_fmri_analysis_voxel_mask(
+    stats_data: np.ndarray,
+    subject_ref_data: np.ndarray,
+) -> np.ndarray:
     """
     Select voxel universe for thresholding/FDR.
 
-    Uses finite non-zero voxels so padded/background zeros do not inflate
-    multiple-comparison correction.
+    Uses finite voxels in the subject reference MRI support (non-zero anatomy)
+    so in-brain zero-stat voxels are retained for FDR while padded/background
+    map voxels are excluded.
     """
-    finite = np.isfinite(data)
-    nonzero = np.abs(data) > np.finfo(np.float32).eps
-    analysis_voxels = finite & nonzero
+    if stats_data.shape != subject_ref_data.shape:
+        raise ValueError(
+            "Subject MRI reference shape does not match fMRI stats map shape "
+            f"(stats={stats_data.shape}, ref={subject_ref_data.shape})."
+        )
+    finite_stats = np.isfinite(stats_data)
+    finite_ref = np.isfinite(subject_ref_data)
+    in_reference_support = np.abs(subject_ref_data) > np.finfo(np.float32).eps
+    analysis_voxels = finite_stats & finite_ref & in_reference_support
     if not np.any(analysis_voxels):
         raise ValueError(
-            "fMRI stats map contains no finite non-zero voxels; cannot compute thresholded ROIs."
+            "fMRI stats map contains no finite voxels inside the subject MRI support; "
+            "cannot compute thresholded ROIs."
         )
     return analysis_voxels
+
+
+def _stats_map_sidecar_path(stats_map_path: Path) -> Path:
+    return stats_map_path.with_suffix("").with_suffix(".json")
+
+
+def _read_stats_map_sidecar(stats_map_path: Path) -> Dict[str, Any]:
+    sidecar_path = _stats_map_sidecar_path(stats_map_path)
+    if not sidecar_path.exists():
+        return {}
+    try:
+        payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"fMRI stats map sidecar is not valid JSON: {sidecar_path}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"fMRI stats map sidecar is not a JSON object: {sidecar_path}"
+        )
+    return payload
+
+
+def _is_z_type_value(value: Any) -> bool:
+    token = str(value or "").strip().lower().replace("-", "_")
+    return token in {
+        "z",
+        "zscore",
+        "z_score",
+        "zstat",
+        "z_stat",
+    }
+
+
+def _assert_fdr_compatible_z_map(
+    *,
+    stats_map_path: Path,
+    cfg: FMRIConstraintConfig,
+    nib: Any,
+    img: Any,
+) -> None:
+    """Require explicit evidence that FDR is being applied to a z-stat map."""
+    if str(cfg.threshold_mode).lower() != "fdr":
+        return
+
+    if str(cfg.stat_type).lower() != "z":
+        raise ValueError(
+            "FDR thresholding requires feature_engineering.sourcelocalization.fmri.thresholding.stat_type='z'."
+        )
+
+    evidence: List[str] = []
+
+    sidecar = _read_stats_map_sidecar(stats_map_path)
+    for key in ("output_type_actual", "output_type_requested", "output_type", "stat_type", "StatisticType"):
+        if key in sidecar and _is_z_type_value(sidecar.get(key)):
+            evidence.append(f"sidecar:{key}")
+
+    map_name = stats_map_path.name.lower().replace("-", "_")
+    if any(token in map_name for token in ("_z_", "zmap", "z_score", "zstat", "stat_z")):
+        evidence.append("filename")
+
+    intent_code = int(
+        getattr(getattr(img, "header", None), "get_intent", lambda: (0, (), ""))()[0]
+        or 0
+    )
+    intent_code_map = (
+        getattr(getattr(getattr(nib, "nifti1", None), "intent_codes", None), "code", {})
+        or {}
+    )
+    z_intent_code = int(intent_code_map.get("z score", -1))
+    if intent_code > 0 and intent_code == z_intent_code:
+        evidence.append("nifti_intent")
+
+    if evidence:
+        return
+
+    sidecar_path = _stats_map_sidecar_path(stats_map_path)
+    raise ValueError(
+        "FDR thresholding requires a z-statistics map, but explicit z-map evidence was not found. "
+        f"Map={stats_map_path}. Checked filename, NIfTI intent code, and sidecar ({sidecar_path}). "
+        "Provide a z-map and sidecar with output_type_actual='z_score' (or equivalent)."
+    )
 
 
 def _fmri_roi_coords_from_stats_map(
@@ -545,7 +639,7 @@ def _fmri_roi_coords_from_stats_map(
             "Provide a 3D contrast/stat map (not 4D)."
         )
 
-    _validate_stats_map_grid_against_subject_mri(
+    matched_ref_path = _validate_stats_map_grid_against_subject_mri(
         nib=nib,
         map_shape=tuple(int(v) for v in data.shape),
         map_affine=affine,
@@ -553,6 +647,14 @@ def _fmri_roi_coords_from_stats_map(
         subjects_dir=Path(subjects_dir),
         subject=str(subject),
     )
+    subject_ref_data = np.asarray(
+        nib.load(str(matched_ref_path)).get_fdata(dtype=np.float32)
+    )
+    if subject_ref_data.ndim != 3:
+        raise ValueError(
+            f"Expected 3D subject MRI reference, got shape={subject_ref_data.shape} "
+            f"from {matched_ref_path}."
+        )
 
     thr = float(cfg.threshold)
     if not np.isfinite(thr) or thr <= 0:
@@ -561,7 +663,10 @@ def _fmri_roi_coords_from_stats_map(
             f"(got {thr})."
         )
 
-    analysis_voxels = _compute_fmri_analysis_voxel_mask(data)
+    analysis_voxels = _compute_fmri_analysis_voxel_mask(
+        data,
+        subject_ref_data=subject_ref_data,
+    )
     if str(cfg.threshold_mode).lower() == "fdr":
         q = float(cfg.fdr_q)
         if not (np.isfinite(q) and 0 < q < 1):
@@ -570,8 +675,13 @@ def _fmri_roi_coords_from_stats_map(
                 f"(got {q})."
             )
 
-        # FDR is implemented for z-maps (or maps treated as z).
-        # If a user provides non-z maps, they should convert externally.
+        _assert_fdr_compatible_z_map(
+            stats_map_path=stats_map_path,
+            cfg=cfg,
+            nib=nib,
+            img=img,
+        )
+
         zvals = data[analysis_voxels].astype(float, copy=False)
         if cfg.tail == "abs":
             pvals = 2.0 * (1.0 - stats.norm.cdf(np.abs(zvals)))
@@ -705,6 +815,17 @@ def _extract_roi_timecourses_from_vertex_indices(
     stc_verts = stcs[0].vertices[0]
     # Create mapping: original_vertex_index -> row_index_in_stc_data
     vert_to_idx = {v: i for i, v in enumerate(stc_verts)}
+
+    missing_rois = [
+        roi_name
+        for roi_name, orig_idxs in roi_indices.items()
+        if orig_idxs and not any(v in vert_to_idx for v in orig_idxs)
+    ]
+    if missing_rois:
+        raise ValueError(
+            "fMRI-constrained ROI mapping failed: some ROIs have no surviving vertices "
+            f"after forward/inverse modeling: {', '.join(missing_rois)}"
+        )
     
     out = np.full((n_epochs, n_rois, n_times), np.nan, dtype=float)
     for epoch_idx, stc in enumerate(stcs):
@@ -944,19 +1065,24 @@ def _extract_roi_timecourses(
     n_rois = len(labels)
     n_times = stcs[0].data.shape[1]
     
-    roi_data = np.zeros((n_epochs, n_rois, n_times))
+    roi_data = np.zeros((n_epochs, n_rois, n_times), dtype=float)
     
     for epoch_idx, stc in enumerate(stcs):
-        for roi_idx, label in enumerate(labels):
+        try:
             tc = mne.extract_label_time_course(
                 stc,
-                labels=[label],
+                labels=labels,
                 src=src,
                 mode=mode,
-                allow_empty=True,
+                allow_empty=False,
                 verbose=False,
             )
-            roi_data[epoch_idx, roi_idx, :] = tc.squeeze()
+        except ValueError as exc:
+            raise ValueError(
+                "ROI extraction failed because one or more labels have no vertices in the source space. "
+                "Check parcellation/source-space compatibility and do not use empty labels."
+            ) from exc
+        roi_data[epoch_idx, :, :] = np.asarray(tc, dtype=float)
     
     return roi_data
 
@@ -988,6 +1114,16 @@ def _compute_roi_power(
     
     n_epochs, n_rois, n_times = roi_data.shape
     power = np.zeros((n_epochs, n_rois))
+
+    nyquist = float(sfreq) / 2.0
+    if not np.isfinite(sfreq) or sfreq <= 0:
+        raise ValueError(f"Sampling frequency must be > 0 for ROI power (got {sfreq}).")
+    if not np.isfinite(fmin) or not np.isfinite(fmax) or fmin <= 0 or fmin >= fmax:
+        raise ValueError(f"Invalid band range for ROI power: fmin={fmin}, fmax={fmax}.")
+    if float(fmax) >= nyquist:
+        raise ValueError(
+            f"ROI power band upper edge must be below Nyquist ({nyquist:.6g} Hz), got fmax={fmax}."
+        )
     
     nperseg = min(n_times, int(sfreq * 2))
     
@@ -1000,6 +1136,11 @@ def _compute_roi_power(
             
             freqs, psd = welch(tc, fs=sfreq, nperseg=nperseg)
             freq_mask = (freqs >= fmin) & (freqs <= fmax)
+            if not np.any(freq_mask):
+                raise ValueError(
+                    "ROI power band has no Welch frequency bins; increase segment length or use a lower band. "
+                    f"(fmin={fmin}, fmax={fmax}, sfreq={sfreq}, n_times={n_times})"
+                )
             power[epoch_idx, roi_idx] = np.mean(psd[freq_mask])
     
     return power
@@ -1033,11 +1174,13 @@ def _compute_roi_envelope(
     n_epochs, n_rois, n_times = roi_data.shape
     envelope = np.zeros_like(roi_data)
     
+    if not np.isfinite(sfreq) or sfreq <= 0:
+        raise ValueError(f"Sampling frequency must be > 0 for ROI envelope (got {sfreq}).")
     nyq = sfreq / 2.0
     low = fmin / nyq
-    high = min(fmax / nyq, 0.99)
+    high = fmax / nyq
     
-    if low >= high or low <= 0:
+    if low >= high or low <= 0 or high >= 1:
         raise ValueError(f"Invalid bandpass range for ROI envelope: fmin={fmin}, fmax={fmax}, sfreq={sfreq}.")
 
     b, a = butter(4, [low, high], btype="band")

@@ -461,6 +461,8 @@ Then continue from Step 7 above (create coregistration transform).
 | `--source-fmri-max-total-voxels` | Maximum total voxels across all clusters (set 0 for no limit) | `20000` |
 | `--source-fmri-random-seed` | Random seed for voxel subsampling (0 = deterministic default seed) | `0` |
 
+FDR thresholding is valid only for z-stat maps. Use `--source-fmri-output-type z-score` (or an equivalent external z-map with explicit metadata).
+
 ### fMRI Contrast Builder flags
 
 | Flag | Description | Default |

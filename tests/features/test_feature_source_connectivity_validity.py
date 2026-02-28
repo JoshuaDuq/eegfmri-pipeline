@@ -13,6 +13,7 @@ import numpy as np
 
 from eeg_pipeline.analysis.features.source_localization import (
     FMRIConstraintConfig,
+    _compute_fmri_analysis_voxel_mask,
     _fmri_roi_coords_from_stats_map,
     _load_fmri_constraint_config,
     _load_source_localization_config,
@@ -237,6 +238,102 @@ class TestSourceConnectivityValidity(unittest.TestCase):
                         map_path,
                         cfg,
                         logger=logging.getLogger("fmri-grid-check"),
+                        subjects_dir=root,
+                        subject="sub-0001",
+                    )
+
+    def test_fmri_analysis_mask_includes_zero_stat_voxels_inside_subject_support(self):
+        stats_data = np.array(
+            [
+                [[0.0, 2.0], [0.0, np.nan]],
+                [[1.0, -3.0], [0.0, 0.0]],
+            ],
+            dtype=float,
+        )
+        subject_ref_data = np.array(
+            [
+                [[1.0, 1.0], [1.0, 0.0]],
+                [[1.0, 1.0], [0.0, 0.0]],
+            ],
+            dtype=float,
+        )
+        mask = _compute_fmri_analysis_voxel_mask(stats_data, subject_ref_data)
+        expected = np.array(
+            [
+                [[True, True], [True, False]],
+                [[True, True], [False, False]],
+            ],
+            dtype=bool,
+        )
+        np.testing.assert_array_equal(mask, expected)
+
+    def test_fmri_fdr_requires_explicit_z_map_evidence(self):
+        class _FakeHeader:
+            @staticmethod
+            def get_zooms():
+                return (2.0, 2.0, 2.0)
+
+            @staticmethod
+            def get_intent():
+                return (0, (), "")
+
+        class _FakeImg:
+            def __init__(self, data: np.ndarray, affine: np.ndarray):
+                self._data = np.asarray(data, dtype=np.float32)
+                self.affine = np.asarray(affine, dtype=float)
+                self.header = _FakeHeader()
+                self.shape = self._data.shape
+
+            def get_fdata(self, dtype=None):
+                if dtype is None:
+                    return self._data
+                return self._data.astype(dtype)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            map_path = root / "map.nii.gz"
+            map_path.touch()
+            orig_path = root / "sub-0001" / "mri" / "orig.mgz"
+            orig_path.parent.mkdir(parents=True, exist_ok=True)
+            orig_path.touch()
+
+            map_data = np.zeros((2, 2, 2), dtype=float)
+            map_data[0, 0, 0] = 5.0
+            img_map = _FakeImg(map_data, np.eye(4))
+            img_ref = _FakeImg(np.ones((2, 2, 2), dtype=float), np.eye(4))
+
+            fake_nib = types.ModuleType("nibabel")
+            fake_nib.load = lambda p: img_map if Path(p) == map_path else img_ref
+            fake_nib.nifti1 = SimpleNamespace(
+                intent_codes=SimpleNamespace(code={"z score": 5})
+            )
+
+            base = self._default_fmri_constraint()
+            cfg = FMRIConstraintConfig(
+                enabled=base.enabled,
+                stats_map_path=base.stats_map_path,
+                provenance=base.provenance,
+                require_provenance=base.require_provenance,
+                allow_same_dataset_provenance=base.allow_same_dataset_provenance,
+                threshold=base.threshold,
+                tail=base.tail,
+                threshold_mode="fdr",
+                fdr_q=base.fdr_q,
+                stat_type=base.stat_type,
+                cluster_min_voxels=base.cluster_min_voxels,
+                cluster_min_volume_mm3=base.cluster_min_volume_mm3,
+                max_clusters=base.max_clusters,
+                max_voxels_per_cluster=base.max_voxels_per_cluster,
+                max_total_voxels=base.max_total_voxels,
+                random_seed=base.random_seed,
+            )
+
+            with patch.dict(sys.modules, {"nibabel": fake_nib}):
+                with self.assertRaisesRegex(ValueError, "z-statistics map"):
+                    _fmri_roi_coords_from_stats_map(
+                        map_path,
+                        cfg,
+                        logger=logging.getLogger("fmri-fdr-z-check"),
                         subjects_dir=root,
                         subject="sub-0001",
                     )

@@ -17,6 +17,10 @@ from eeg_pipeline.analysis.features.phase import (
 )
 from eeg_pipeline.analysis.features.source_localization import (
     _compute_eloreta_source_estimates,
+    _compute_roi_envelope,
+    _compute_roi_power,
+    _extract_roi_timecourses,
+    _extract_roi_timecourses_from_vertex_indices,
     extract_source_connectivity_features,
     extract_source_localization_features,
 )
@@ -317,6 +321,48 @@ class TestScientificValidityGuards(unittest.TestCase):
                 fwd=fwd,
                 loose=1.0,
                 pick_ori="normal",
+            )
+
+    def test_source_roi_power_rejects_band_edge_at_nyquist(self):
+        roi_data = np.random.default_rng(9).standard_normal((2, 1, 200))
+        with self.assertRaisesRegex(ValueError, "Nyquist"):
+            _compute_roi_power(
+                roi_data=roi_data,
+                sfreq=100.0,
+                fmin=8.0,
+                fmax=50.0,
+            )
+
+    def test_source_roi_envelope_rejects_band_edge_at_nyquist(self):
+        roi_data = np.random.default_rng(10).standard_normal((2, 1, 200))
+        with self.assertRaisesRegex(ValueError, "Invalid bandpass range"):
+            _compute_roi_envelope(
+                roi_data=roi_data,
+                sfreq=100.0,
+                fmin=8.0,
+                fmax=50.0,
+            )
+
+    def test_source_label_extraction_errors_on_empty_labels(self):
+        stc = SimpleNamespace(data=np.zeros((2, 20), dtype=float))
+        with patch("mne.extract_label_time_course", side_effect=ValueError("empty label")):
+            with self.assertRaisesRegex(ValueError, "labels have no vertices"):
+                _extract_roi_timecourses(
+                    stcs=[stc],
+                    labels=[SimpleNamespace(name="roi1")],
+                    src=object(),
+                    mode="mean_flip",
+                )
+
+    def test_fmri_roi_vertex_mapping_errors_when_vertices_are_missing(self):
+        stc = SimpleNamespace(
+            data=np.zeros((2, 20), dtype=float),
+            vertices=[np.array([0, 1], dtype=int)],
+        )
+        with self.assertRaisesRegex(ValueError, "no surviving vertices"):
+            _extract_roi_timecourses_from_vertex_indices(
+                stcs=[stc],
+                roi_indices={"roi1": [2]},
             )
 
     def test_tfr_baseline_validation_is_strict_by_default(self):

@@ -475,9 +475,9 @@ feature_engineering:
       require_provenance: true     # If true, error when provenance is unknown
       threshold: 3.1
       tail: "pos"                  # "pos" or "abs"
-      threshold_mode: "z"          # "z" or "fdr"
+      threshold_mode: "z"          # "z" or "fdr" (FDR requires an explicit z-stat map)
       fdr_q: 0.05
-      stat_type: "z"
+      stat_type: "z"               # Must be "z" for FDR thresholding
       cluster_min_voxels: 50
       # Preferred: stable across voxel sizes/resampling. When set, overrides cluster_min_voxels.
       # Example: 50 vox @ 2mm isotropic ≈ 50 * 8 = 400 mm^3.
