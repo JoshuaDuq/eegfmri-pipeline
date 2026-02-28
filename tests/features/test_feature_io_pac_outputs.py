@@ -58,6 +58,56 @@ class TestFeatureIoPacOutputs(unittest.TestCase):
         self.assertNotIn("pac_active_theta_gamma_global_mvl", pac_saved.columns)
         self.assertIn("pac_active_theta_gamma_global_mvl", pac_trials_saved.columns)
 
+    def test_save_all_features_routes_source_localization_by_method(self):
+        features_dir = Path(tempfile.mkdtemp())
+
+        pow_df = pd.DataFrame(
+            {"power_active_alpha_global_logratio_mean": [0.1, 0.2]}
+        )
+        source_df = pd.DataFrame(
+            {"src_full_eloreta_alpha_global_power": [0.3, 0.4]}
+        )
+        source_df.attrs["method"] = "eloreta"
+
+        save_all_features(
+            pow_df=pow_df,
+            pow_cols=list(pow_df.columns),
+            baseline_df=pd.DataFrame(),
+            baseline_cols=[],
+            conn_df=None,
+            conn_cols=[],
+            aper_df=None,
+            aper_cols=[],
+            source_df=source_df,
+            source_cols=list(source_df.columns),
+            features_dir=features_dir,
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {
+                            "method": "lcmv",
+                        }
+                    }
+                }
+            ),
+        )
+
+        eloreta_path = (
+            features_dir
+            / "sourcelocalization"
+            / "eloreta"
+            / "features_sourcelocalization.parquet"
+        )
+        lcmv_path = (
+            features_dir
+            / "sourcelocalization"
+            / "lcmv"
+            / "features_sourcelocalization.parquet"
+        )
+
+        self.assertTrue(eloreta_path.exists())
+        self.assertFalse(lcmv_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.utils.data.source_localization_paths import (
+    source_localization_candidate_paths,
+)
 
 
 _BYTES_PER_KILOBYTE = 1024
@@ -125,8 +128,8 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
     
     Features are stored in: features/{key}/{filename}
     
-    For source localization features, checks both fmri_informed/ and eeg_only/
-    subdirectories to ensure files are found regardless of extraction mode.
+    For source localization features, checks method-specific subfolders
+    (`sourcelocalization/lcmv`, `sourcelocalization/eloreta`).
     
     Parameters
     ----------
@@ -143,11 +146,11 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
         Path to the feature file (first existing location found, or expected path)
     """
     if key == "sourcelocalization":
-        candidates = [
-            features_dir / "sourcelocalization" / "fmri_informed" / filename,
-            features_dir / "sourcelocalization" / "eeg_only" / filename,
-            features_dir / "sourcelocalization" / filename,
-        ]
+        candidates = source_localization_candidate_paths(
+            features_dir=features_dir,
+            filename=filename,
+            config=None,
+        )
         for candidate in candidates:
             if candidate.exists():
                 return candidate

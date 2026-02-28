@@ -26,6 +26,12 @@ from eeg_pipeline.infra.paths import (
     find_connectivity_features_path,
 )
 from eeg_pipeline.infra.tsv import read_table, write_parquet, write_tsv
+from eeg_pipeline.utils.data.source_localization_paths import (
+    resolve_source_localization_method,
+    resolve_source_localization_method_from_attrs,
+    source_localization_candidate_paths,
+    source_localization_folder,
+)
 
 
 ###################################################################
@@ -231,21 +237,25 @@ def _safe_read_feature_table_with_path(
 ) -> Tuple[Optional[pd.DataFrame], Optional[Path]]:
     """Read feature table and return the DataFrame and resolved path if found.
     
-    For source localization features, checks both fmri_informed/ and eeg_only/
-    subdirectories to ensure features are found regardless of config mode changes.
+    For source localization features, resolves method-specific subfolders
+    (`sourcelocalization/lcmv` or `sourcelocalization/eloreta`).
     """
-    folder = _get_folder_for_feature(base_name, config)
     filename = f"{base_name}{extension}"
+    name = base_name.replace("features_", "") if base_name.startswith("features_") else base_name
 
     candidates: List[Path] = []
-    if folder:
-        candidates.append(features_dir / folder / filename)
-    
-    name = base_name.replace("features_", "") if base_name.startswith("features_") else base_name
     if name in ("sourcelocalization", "source_localization"):
-        candidates.append(features_dir / "sourcelocalization" / "fmri_informed" / filename)
-        candidates.append(features_dir / "sourcelocalization" / "eeg_only" / filename)
-        candidates.append(features_dir / "sourcelocalization" / filename)
+        candidates.extend(
+            source_localization_candidate_paths(
+                features_dir=features_dir,
+                filename=filename,
+                config=config,
+            )
+        )
+    else:
+        folder = _get_folder_for_feature(base_name, config)
+        if folder:
+            candidates.append(features_dir / folder / filename)
 
     for candidate in candidates:
         if not candidate.exists():
@@ -384,7 +394,12 @@ def _build_filename(base_name: str, suffix: Optional[str] = None, extension: str
     return f"{base_name}{extension}"
 
 
-def _get_folder_for_feature(base_name: str, config: Optional[Any] = None) -> str:
+def _get_folder_for_feature(
+    base_name: str,
+    config: Optional[Any] = None,
+    *,
+    df: Optional[pd.DataFrame] = None,
+) -> str:
     """Determine subfolder name from base filename."""
     if base_name.startswith("features_"):
         name = base_name.replace("features_", "")
@@ -394,16 +409,13 @@ def _get_folder_for_feature(base_name: str, config: Optional[Any] = None) -> str
         if name.startswith("power"):
             return "power"
         if name == "source_localization" or name == "sourcelocalization":
-            # For source localization, classify by fMRI-informed vs EEG-only mode if config provided
-            if config is not None:
-                from eeg_pipeline.analysis.features.source_localization import _cfg_get
-                src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
-                if isinstance(src_cfg, dict):
-                    mode = str(src_cfg.get("mode", "eeg_only")).strip().lower()
-                    if mode == "fmri_informed":
-                        return "sourcelocalization/fmri_informed"
-                    return "sourcelocalization/eeg_only"
-            return "sourcelocalization"
+            method_from_attrs = resolve_source_localization_method_from_attrs(
+                getattr(df, "attrs", None)
+            )
+            if method_from_attrs is not None:
+                return source_localization_folder(method_from_attrs)
+            method_from_config = resolve_source_localization_method(config)
+            return source_localization_folder(method_from_config)
         if name == "directed_connectivity" or name == "directedconnectivity":
             return "directedconnectivity"
         return name
@@ -432,7 +444,7 @@ def _save_feature_dataframe(
     from eeg_pipeline.utils.config.loader import get_config_value
     
     df = _assign_columns_safely(df, column_names, feature_type, logger)
-    folder_name = _get_folder_for_feature(base_filename, config)
+    folder_name = _get_folder_for_feature(base_filename, config, df=df)
     filename = _build_filename(base_filename, suffix)
     file_path = features_dir / folder_name / filename
     
@@ -465,7 +477,7 @@ def _save_feature_metadata(
     try:
         from eeg_pipeline.domain.features.naming import generate_manifest
 
-        folder_name = _get_folder_for_feature(base_filename, config)
+        folder_name = _get_folder_for_feature(base_filename, config, df=df)
         metadata_dir = features_dir / folder_name / "metadata"
         metadata_dir.mkdir(parents=True, exist_ok=True)
 

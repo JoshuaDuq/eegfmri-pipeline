@@ -15,6 +15,9 @@ from eeg_pipeline.cli.commands.base import (
     _empty_feature_availability,
 )
 from eeg_pipeline.cli.common import resolve_task
+from eeg_pipeline.utils.data.source_localization_paths import (
+    source_localization_candidate_paths,
+)
 
 MODE_SUBJECTS = "subjects"
 MODE_FEATURES = "features"
@@ -170,12 +173,11 @@ def _handle_ml_feature_space_mode(args: argparse.Namespace, config: Any, task: s
             if str(fam).startswith("pac"):
                 path = features_dir / "pac" / filename
             elif str(fam) in {"sourcelocalization", "source_localization"} or str(fam).startswith("sourcelocalization"):
-                # Mirror ML loader behavior: sourcelocalization may live in nested subfolders.
-                candidates = [
-                    features_dir / "sourcelocalization" / "fmri_informed" / filename,
-                    features_dir / "sourcelocalization" / "eeg_only" / filename,
-                    features_dir / "sourcelocalization" / filename,
-                ]
+                candidates = source_localization_candidate_paths(
+                    features_dir=features_dir,
+                    filename=filename,
+                    config=config,
+                )
                 path = None
                 for cand in candidates:
                     if cand.exists():

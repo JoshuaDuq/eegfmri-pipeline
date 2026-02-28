@@ -18,6 +18,9 @@ from eeg_pipeline.utils.data.columns import (
     find_predictor_column_in_events,
     pick_target_column,
 )
+from eeg_pipeline.utils.data.source_localization_paths import (
+    source_localization_candidate_paths,
+)
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from ..config.loader import ConfigDict
 
@@ -132,11 +135,11 @@ def _resolve_feature_path(features_dir: Path, family: str, filename: str) -> Pat
         # pac variants (pac_trials, pac_time) live in the shared "pac/" folder.
         return features_dir / "pac" / filename
     if family in {"sourcelocalization", "source_localization"}:
-        candidates = [
-            features_dir / "sourcelocalization" / "fmri_informed" / filename,
-            features_dir / "sourcelocalization" / "eeg_only" / filename,
-            features_dir / "sourcelocalization" / filename,
-        ]
+        candidates = source_localization_candidate_paths(
+            features_dir=features_dir,
+            filename=filename,
+            config=config,
+        )
         for p in candidates:
             if p.exists():
                 return p
