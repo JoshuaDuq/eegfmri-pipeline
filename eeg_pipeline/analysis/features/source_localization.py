@@ -35,14 +35,6 @@ def _as_path(value: Any) -> Optional[Path]:
 
 
 @dataclass(frozen=True)
-class FMRITimeWindow:
-    """fMRI-specific time window definition."""
-    name: str
-    tmin: float
-    tmax: float
-
-
-@dataclass(frozen=True)
 class FMRIConstraintConfig:
     enabled: bool
     stats_map_path: Optional[Path]
@@ -60,9 +52,6 @@ class FMRIConstraintConfig:
     max_voxels_per_cluster: int
     max_total_voxels: int
     random_seed: int
-    # fMRI-specific time windows (independent of EEG feature extraction windows)
-    window_a: Optional[FMRITimeWindow] = None
-    window_b: Optional[FMRITimeWindow] = None
 
 
 def _load_fmri_constraint_config(
@@ -144,6 +133,11 @@ def _load_fmri_constraint_config(
         raise ValueError(
             f"feature_engineering.sourcelocalization.fmri.threshold must be a float (got {fmri_cfg.get('threshold')})."
         )
+    if not np.isfinite(threshold) or threshold <= 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.threshold must be a finite float > 0 "
+            f"(got {threshold})."
+        )
 
     tail = str(fmri_cfg.get("tail", "pos")).strip().lower()
     if tail not in {"pos", "abs"}:
@@ -179,73 +173,74 @@ def _load_fmri_constraint_config(
         )
 
     cluster_min_volume_mm3 = fmri_cfg.get("cluster_min_volume_mm3", None)
-    try:
-        if cluster_min_volume_mm3 is not None:
+    if cluster_min_volume_mm3 is not None:
+        try:
             cluster_min_volume_mm3 = float(cluster_min_volume_mm3)
-            if not np.isfinite(cluster_min_volume_mm3) or cluster_min_volume_mm3 <= 0:
-                cluster_min_volume_mm3 = None
-    except Exception:
-        cluster_min_volume_mm3 = None
+        except (TypeError, ValueError):
+            raise ValueError(
+                "feature_engineering.sourcelocalization.fmri.cluster_min_volume_mm3 must be a float > 0 or null."
+            )
+        if not np.isfinite(cluster_min_volume_mm3) or cluster_min_volume_mm3 <= 0:
+            raise ValueError(
+                "feature_engineering.sourcelocalization.fmri.cluster_min_volume_mm3 must be > 0 when provided."
+            )
 
-    # Parse fMRI-specific time windows
+    # Explicitly reject stale, non-functional settings to avoid false assumptions.
     time_windows_cfg = fmri_cfg.get("time_windows", {}) or {}
-    window_a = None
-    window_b = None
-    
-    window_a_cfg = time_windows_cfg.get("window_a", {}) or {}
-    if window_a_cfg.get("name"):
-        name = str(window_a_cfg.get("name", "")).strip()
-        tmin = float(window_a_cfg.get("tmin", 0.0))
-        tmax = float(window_a_cfg.get("tmax", 0.0))
-        if not name:
-            raise ValueError("fMRI window_a.name is empty.")
-        if not (np.isfinite(tmin) and np.isfinite(tmax) and tmax > tmin):
-            raise ValueError(f"Invalid fMRI window_a range: tmin={tmin}, tmax={tmax}.")
-        window_a = FMRITimeWindow(name=name, tmin=tmin, tmax=tmax)
-    
-    window_b_cfg = time_windows_cfg.get("window_b", {}) or {}
-    if window_b_cfg.get("name"):
-        name = str(window_b_cfg.get("name", "")).strip()
-        tmin = float(window_b_cfg.get("tmin", 0.0))
-        tmax = float(window_b_cfg.get("tmax", 0.0))
-        if not name:
-            raise ValueError("fMRI window_b.name is empty.")
-        if not (np.isfinite(tmin) and np.isfinite(tmax) and tmax > tmin):
-            raise ValueError(f"Invalid fMRI window_b range: tmin={tmin}, tmax={tmax}.")
-        window_b = FMRITimeWindow(name=name, tmin=tmin, tmax=tmax)
+    has_window_settings = False
+    if isinstance(time_windows_cfg, dict):
+        for window_cfg in time_windows_cfg.values():
+            if isinstance(window_cfg, dict):
+                if str(window_cfg.get("name", "")).strip():
+                    has_window_settings = True
+                    break
+            elif str(window_cfg).strip():
+                has_window_settings = True
+                break
+    elif bool(time_windows_cfg):
+        has_window_settings = True
+    if has_window_settings:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.time_windows is currently unsupported for "
+            "source feature computation and can lead to misleading interpretation. Remove this block."
+        )
 
-    try:
-        cluster_min_voxels = get_config_int(
-            config,
-            "feature_engineering.sourcelocalization.fmri.cluster_min_voxels",
-            50,
+    cluster_min_voxels = get_config_int(
+        config,
+        "feature_engineering.sourcelocalization.fmri.cluster_min_voxels",
+        50,
+    )
+    max_clusters = get_config_int(
+        config,
+        "feature_engineering.sourcelocalization.fmri.max_clusters",
+        20,
+    )
+    max_voxels_per_cluster = get_config_int(
+        config,
+        "feature_engineering.sourcelocalization.fmri.max_voxels_per_cluster",
+        2000,
+    )
+    max_total_voxels = get_config_int(
+        config,
+        "feature_engineering.sourcelocalization.fmri.max_total_voxels",
+        20000,
+    )
+    if cluster_min_voxels <= 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.cluster_min_voxels must be > 0."
         )
-    except Exception:
-        cluster_min_voxels = 50
-    try:
-        max_clusters = get_config_int(
-            config,
-            "feature_engineering.sourcelocalization.fmri.max_clusters",
-            20,
+    if max_clusters <= 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.max_clusters must be > 0."
         )
-    except Exception:
-        max_clusters = 20
-    try:
-        max_voxels_per_cluster = get_config_int(
-            config,
-            "feature_engineering.sourcelocalization.fmri.max_voxels_per_cluster",
-            2000,
+    if max_voxels_per_cluster < 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.max_voxels_per_cluster must be >= 0."
         )
-    except Exception:
-        max_voxels_per_cluster = 2000
-    try:
-        max_total_voxels = get_config_int(
-            config,
-            "feature_engineering.sourcelocalization.fmri.max_total_voxels",
-            20000,
+    if max_total_voxels < 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.max_total_voxels must be >= 0."
         )
-    except Exception:
-        max_total_voxels = 20000
     random_seed = int(
         get_config_int(
             config,
@@ -276,8 +271,6 @@ def _load_fmri_constraint_config(
         max_voxels_per_cluster=max_voxels_per_cluster,
         max_total_voxels=max_total_voxels,
         random_seed=random_seed,
-        window_a=window_a,
-        window_b=window_b,
     )
 
 ###################################################################
@@ -441,10 +434,79 @@ def _make_fmri_subsampling_rng(seed: int) -> np.random.Generator:
     return np.random.default_rng(seed_int)
 
 
+def _iter_subject_mri_reference_paths(subjects_dir: Path, subject: str) -> List[Path]:
+    subject_mri_dir = Path(subjects_dir) / str(subject) / "mri"
+    return [
+        subject_mri_dir / "orig.mgz",
+        subject_mri_dir / "T1.mgz",
+    ]
+
+
+def _validate_stats_map_grid_against_subject_mri(
+    *,
+    nib: Any,
+    map_shape: Tuple[int, int, int],
+    map_affine: np.ndarray,
+    stats_map_path: Path,
+    subjects_dir: Path,
+    subject: str,
+) -> None:
+    """Require exact voxel-grid match against FreeSurfer reference MRI."""
+    ref_candidates = _iter_subject_mri_reference_paths(subjects_dir, subject)
+    existing_refs = [path for path in ref_candidates if path.exists()]
+    if not existing_refs:
+        raise FileNotFoundError(
+            "Cannot validate fMRI map alignment: no FreeSurfer reference MRI found. "
+            f"Expected one of: {', '.join(str(p) for p in ref_candidates)}"
+        )
+
+    mismatch_notes: List[str] = []
+    for ref_path in existing_refs:
+        ref_img = nib.load(str(ref_path))
+        ref_shape = tuple(int(v) for v in ref_img.shape[:3])
+        ref_affine = np.asarray(ref_img.affine, dtype=float)
+        shape_match = tuple(map_shape) == tuple(ref_shape)
+        affine_match = np.allclose(map_affine, ref_affine, rtol=1e-5, atol=1e-3)
+        if shape_match and affine_match:
+            return
+
+        max_affine_diff = float(np.max(np.abs(map_affine - ref_affine)))
+        mismatch_notes.append(
+            f"{ref_path.name}: shape={ref_shape}, max_affine_diff={max_affine_diff:.6g}"
+        )
+
+    raise ValueError(
+        "fMRI stats map is not on the same voxel grid as the FreeSurfer subject MRI. "
+        f"Map={stats_map_path} shape={map_shape}. Checked references: "
+        + "; ".join(mismatch_notes)
+        + ". Resample the map to subject space (orig.mgz or T1.mgz) and retry."
+    )
+
+
+def _compute_fmri_analysis_voxel_mask(data: np.ndarray) -> np.ndarray:
+    """
+    Select voxel universe for thresholding/FDR.
+
+    Uses finite non-zero voxels so padded/background zeros do not inflate
+    multiple-comparison correction.
+    """
+    finite = np.isfinite(data)
+    nonzero = np.abs(data) > np.finfo(np.float32).eps
+    analysis_voxels = finite & nonzero
+    if not np.any(analysis_voxels):
+        raise ValueError(
+            "fMRI stats map contains no finite non-zero voxels; cannot compute thresholded ROIs."
+        )
+    return analysis_voxels
+
+
 def _fmri_roi_coords_from_stats_map(
     stats_map_path: Path,
     cfg: FMRIConstraintConfig,
     logger: Optional[logging.Logger],
+    *,
+    subjects_dir: Path,
+    subject: str,
 ) -> Dict[str, np.ndarray]:
     """
     Convert a thresholded fMRI statistical map into discrete volume-source coordinates.
@@ -477,24 +539,40 @@ def _fmri_roi_coords_from_stats_map(
     except Exception:
         voxel_vol_mm3 = None
 
-    if data.ndim == 4:
-        data = data[..., 0]
     if data.ndim != 3:
-        raise ValueError(f"Expected 3D NIfTI fMRI map, got shape={data.shape}.")
+        raise ValueError(
+            f"Expected a single-volume 3D NIfTI fMRI map, got shape={data.shape}. "
+            "Provide a 3D contrast/stat map (not 4D)."
+        )
+
+    _validate_stats_map_grid_against_subject_mri(
+        nib=nib,
+        map_shape=tuple(int(v) for v in data.shape),
+        map_affine=affine,
+        stats_map_path=stats_map_path,
+        subjects_dir=Path(subjects_dir),
+        subject=str(subject),
+    )
 
     thr = float(cfg.threshold)
     if not np.isfinite(thr) or thr <= 0:
-        thr = 3.1
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.threshold must be > 0 "
+            f"(got {thr})."
+        )
 
-    finite = np.isfinite(data)
+    analysis_voxels = _compute_fmri_analysis_voxel_mask(data)
     if str(cfg.threshold_mode).lower() == "fdr":
         q = float(cfg.fdr_q)
         if not (np.isfinite(q) and 0 < q < 1):
-            q = 0.05
+            raise ValueError(
+                "feature_engineering.sourcelocalization.fmri.thresholding.fdr_q must be in (0, 1). "
+                f"(got {q})."
+            )
 
         # FDR is implemented for z-maps (or maps treated as z).
         # If a user provides non-z maps, they should convert externally.
-        zvals = data[finite].astype(float, copy=False)
+        zvals = data[analysis_voxels].astype(float, copy=False)
         if cfg.tail == "abs":
             pvals = 2.0 * (1.0 - stats.norm.cdf(np.abs(zvals)))
         else:
@@ -516,16 +594,16 @@ def _fmri_roi_coords_from_stats_map(
             cutoff = float(ranked[k])
             keep = pvals <= cutoff
             mask = np.zeros_like(data, dtype=bool)
-            mask[finite] = keep
+            mask[analysis_voxels] = keep
     else:
         if cfg.tail == "abs":
-            mask = finite & (np.abs(data) >= thr)
+            mask = analysis_voxels & (np.abs(data) >= thr)
         else:
-            mask = finite & (data >= thr)
+            mask = analysis_voxels & (data >= thr)
 
     if not np.any(mask):
         # Log statistics about the contrast map to diagnose the issue
-        finite_data = data[finite]
+        finite_data = data[analysis_voxels]
         if len(finite_data) > 0:
             logger.warning(
                 f"fMRI stats map threshold produced empty mask (threshold={thr}, tail={cfg.tail}, mode={cfg.threshold_mode}). "
@@ -1115,7 +1193,7 @@ def _load_source_localization_config(
     )
 
     allow_template_fallback = bool(
-        src_cfg.get("allow_template_fallback", mode != "fmri_informed")
+        src_cfg.get("allow_template_fallback", False)
     )
     if mode == "fmri_informed" and not bool(fmri_cfg.enabled):
         raise ValueError(
@@ -1401,7 +1479,13 @@ def extract_source_localization_features(
         if not fmri_cfg.stats_map_path.exists():
             raise FileNotFoundError(f"Missing fMRI stats map: {fmri_cfg.stats_map_path}")
 
-        roi_coords_m = _fmri_roi_coords_from_stats_map(fmri_cfg.stats_map_path, fmri_cfg, logger)
+        roi_coords_m = _fmri_roi_coords_from_stats_map(
+            fmri_cfg.stats_map_path,
+            fmri_cfg,
+            logger,
+            subjects_dir=Path(src_cfg.subjects_dir),
+            subject=src_cfg.subject,
+        )
         fwd, src, roi_indices = _setup_volume_source_space_configured(
             epochs.info,
             subject=src_cfg.subject,
@@ -1453,7 +1537,7 @@ def extract_source_localization_features(
                 verbose=False,
             )
         else:
-            if not bool(getattr(src_cfg, "allow_template_fallback", True)):
+            if not bool(getattr(src_cfg, "allow_template_fallback", False)):
                 raise ValueError(
                     "Source localization template fallback is disabled "
                     "(feature_engineering.sourcelocalization.allow_template_fallback=false). "
@@ -1657,7 +1741,13 @@ def extract_source_connectivity_features(
         if not fmri_cfg.stats_map_path.exists():
             raise FileNotFoundError(f"Missing fMRI stats map: {fmri_cfg.stats_map_path}")
 
-        roi_coords_m = _fmri_roi_coords_from_stats_map(fmri_cfg.stats_map_path, fmri_cfg, logger)
+        roi_coords_m = _fmri_roi_coords_from_stats_map(
+            fmri_cfg.stats_map_path,
+            fmri_cfg,
+            logger,
+            subjects_dir=Path(src_cfg.subjects_dir),
+            subject=src_cfg.subject,
+        )
         fwd, src, roi_indices = _setup_volume_source_space_configured(
             epochs.info,
             subject=src_cfg.subject,
@@ -1689,7 +1779,7 @@ def extract_source_connectivity_features(
                 verbose=False,
             )
         else:
-            if not bool(getattr(src_cfg, "allow_template_fallback", True)):
+            if not bool(getattr(src_cfg, "allow_template_fallback", False)):
                 raise ValueError(
                     "Source connectivity template fallback is disabled "
                     "(feature_engineering.sourcelocalization.allow_template_fallback=false). "

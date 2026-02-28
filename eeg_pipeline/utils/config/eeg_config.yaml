@@ -467,6 +467,7 @@ feature_engineering:
     subject: null                  # e.g., "sub-0001"
     trans: null                    # e.g., "../../../data/derivatives/coreg/sub-0001-trans.fif"
     bem: null                      # e.g., "../../../data/derivatives/bem/sub-0001-bem-sol.fif"
+    allow_template_fallback: false # Require explicit opt-in to fsaverage fallback
     fmri:
       enabled: false
       stats_map_path: null         # NIfTI statistical map in the subject's FreeSurfer MRI space (e.g., orig.mgz space)
@@ -485,9 +486,7 @@ feature_engineering:
       max_voxels_per_cluster: 2000
       max_total_voxels: 20000
       random_seed: 0              # Deterministic by default (seed=0)
-      time_windows:
-        window_a: {name: "window_a", tmin: 5.0, tmax: 10.0}
-        window_b: {name: "baseline", tmin: -2.0, tmax: 0.0}
+      time_windows: {}            # Unsupported for source features; keep empty
       contrast:
         enabled: false
         type: "t-test"             # "t-test" | "paired-t-test" | "f-test" | "custom"

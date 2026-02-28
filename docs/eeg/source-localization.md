@@ -33,6 +33,10 @@ eeg_pipeline/data/derivatives/preprocessed/sub-0000/eeg/sub-0000_task-task_proc-
 
 This uses the `fsaverage` template head model. No subject MRI or fMRI required.
 
+Template fallback is intentionally **opt-in** for scientific transparency.
+Set `feature_engineering.sourcelocalization.allow_template_fallback: true`
+before running this mode.
+
 ### What you need
 
 | File | Location | Purpose |

@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import logging
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
 
 from eeg_pipeline.analysis.features.source_localization import (
+    FMRIConstraintConfig,
+    _fmri_roi_coords_from_stats_map,
     _load_fmri_constraint_config,
     _load_source_localization_config,
     _make_fmri_subsampling_rng,
@@ -60,6 +64,27 @@ class _FakeCon:
 
 
 class TestSourceConnectivityValidity(unittest.TestCase):
+    @staticmethod
+    def _default_fmri_constraint() -> FMRIConstraintConfig:
+        return FMRIConstraintConfig(
+            enabled=True,
+            stats_map_path=Path("/tmp/map.nii.gz"),
+            provenance="independent",
+            require_provenance=False,
+            allow_same_dataset_provenance=False,
+            threshold=3.1,
+            tail="pos",
+            threshold_mode="z",
+            fdr_q=0.05,
+            stat_type="z",
+            cluster_min_voxels=1,
+            cluster_min_volume_mm3=None,
+            max_clusters=10,
+            max_voxels_per_cluster=0,
+            max_total_voxels=0,
+            random_seed=0,
+        )
+
     def test_make_fmri_rng_seed_zero_is_deterministic(self):
         rng_a = _make_fmri_subsampling_rng(0)
         rng_b = _make_fmri_subsampling_rng(0)
@@ -82,6 +107,154 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "random_seed"):
             _load_fmri_constraint_config(config)
+
+    def test_fmri_threshold_must_be_positive_finite(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "fmri": {
+                            "enabled": True,
+                            "stats_map_path": "/tmp/map.nii.gz",
+                            "provenance": "independent",
+                            "threshold": 0,
+                        }
+                    }
+                }
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "threshold"):
+            _load_fmri_constraint_config(config)
+
+    def test_fmri_time_windows_are_rejected(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "fmri": {
+                            "enabled": True,
+                            "stats_map_path": "/tmp/map.nii.gz",
+                            "provenance": "independent",
+                            "time_windows": {
+                                "window_a": {"name": "active", "tmin": 1.0, "tmax": 2.0}
+                            },
+                        }
+                    }
+                }
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "time_windows"):
+            _load_fmri_constraint_config(config)
+
+    def test_fmri_stats_map_must_be_3d(self):
+        class _FakeHeader:
+            @staticmethod
+            def get_zooms():
+                return (2.0, 2.0, 2.0)
+
+        class _FakeImg:
+            def __init__(self, data: np.ndarray, affine: np.ndarray):
+                self._data = np.asarray(data, dtype=np.float32)
+                self.affine = np.asarray(affine, dtype=float)
+                self.header = _FakeHeader()
+                self.shape = self._data.shape
+
+            def get_fdata(self, dtype=None):
+                if dtype is None:
+                    return self._data
+                return self._data.astype(dtype)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            map_path = root / "map.nii.gz"
+            map_path.touch()
+            orig_path = root / "sub-0001" / "mri" / "orig.mgz"
+            orig_path.parent.mkdir(parents=True, exist_ok=True)
+            orig_path.touch()
+
+            img_map = _FakeImg(np.zeros((2, 2, 2, 2), dtype=float), np.eye(4))
+            img_ref = _FakeImg(np.zeros((2, 2, 2), dtype=float), np.eye(4))
+            fake_nib = types.ModuleType("nibabel")
+            fake_nib.load = lambda p: img_map if Path(p) == map_path else img_ref
+
+            cfg = self._default_fmri_constraint()
+            with patch.dict(sys.modules, {"nibabel": fake_nib}):
+                with self.assertRaisesRegex(ValueError, "single-volume 3D"):
+                    _fmri_roi_coords_from_stats_map(
+                        map_path,
+                        cfg,
+                        logger=logging.getLogger("fmri-3d-check"),
+                        subjects_dir=root,
+                        subject="sub-0001",
+                    )
+
+    def test_fmri_stats_map_grid_must_match_subject_mri(self):
+        class _FakeHeader:
+            @staticmethod
+            def get_zooms():
+                return (2.0, 2.0, 2.0)
+
+        class _FakeImg:
+            def __init__(self, data: np.ndarray, affine: np.ndarray):
+                self._data = np.asarray(data, dtype=np.float32)
+                self.affine = np.asarray(affine, dtype=float)
+                self.header = _FakeHeader()
+                self.shape = self._data.shape
+
+            def get_fdata(self, dtype=None):
+                if dtype is None:
+                    return self._data
+                return self._data.astype(dtype)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            map_path = root / "map.nii.gz"
+            map_path.touch()
+            orig_path = root / "sub-0001" / "mri" / "orig.mgz"
+            orig_path.parent.mkdir(parents=True, exist_ok=True)
+            orig_path.touch()
+
+            map_data = np.zeros((2, 2, 2), dtype=float)
+            map_data[0, 0, 0] = 5.0
+            img_map = _FakeImg(map_data, np.eye(4))
+            shifted_affine = np.array(
+                [
+                    [1.0, 0.0, 0.0, 10.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=float,
+            )
+            img_ref = _FakeImg(np.zeros((2, 2, 2), dtype=float), shifted_affine)
+            fake_nib = types.ModuleType("nibabel")
+            fake_nib.load = lambda p: img_map if Path(p) == map_path else img_ref
+
+            cfg = self._default_fmri_constraint()
+            with patch.dict(sys.modules, {"nibabel": fake_nib}):
+                with self.assertRaisesRegex(ValueError, "same voxel grid"):
+                    _fmri_roi_coords_from_stats_map(
+                        map_path,
+                        cfg,
+                        logger=logging.getLogger("fmri-grid-check"),
+                        subjects_dir=root,
+                        subject="sub-0001",
+                    )
+
+    def test_template_fallback_is_opt_in(self):
+        ctx = SimpleNamespace(subject="0001")
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "mode": "eeg_only",
+                        "fmri": {"enabled": False, "provenance": "independent"},
+                    }
+                }
+            }
+        )
+        src_cfg = _load_source_localization_config(ctx, config, method="lcmv")
+        self.assertFalse(bool(src_cfg.allow_template_fallback))
 
     def test_wpli_uses_train_mask_and_marks_broadcast_attrs(self):
         n_epochs = 4

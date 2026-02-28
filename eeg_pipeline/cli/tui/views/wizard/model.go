@@ -2703,11 +2703,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriResampleToFS:             true,
 		sourceLocFmriInputSource:              0, // 0: fmriprep
 		sourceLocFmriRequireFmriprep:          true,
-		sourceLocFmriWindowAName:              "window_a",
-		sourceLocFmriWindowATmin:              5.0,
-		sourceLocFmriWindowATmax:              10.0,
-		sourceLocFmriWindowBName:              "window_b",
-		sourceLocFmriWindowBTmin:              -2.0,
+		sourceLocFmriWindowAName:              "",
+		sourceLocFmriWindowATmin:              0.0,
+		sourceLocFmriWindowATmax:              0.0,
+		sourceLocFmriWindowBName:              "",
+		sourceLocFmriWindowBTmin:              0.0,
 		sourceLocFmriWindowBTmax:              0.0,
 
 		// Source localization UI expansion states
