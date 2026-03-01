@@ -468,6 +468,13 @@ feature_engineering:
     trans: null                    # e.g., "../../../data/derivatives/coreg/sub-0001-trans.fif"
     bem: null                      # e.g., "../../../data/derivatives/bem/sub-0001-bem-sol.fif"
     allow_template_fallback: false # Require explicit opt-in to fsaverage fallback
+    contrast:
+      enabled: false
+      condition_column: null       # Required when enabled (e.g., "trial_type" or "binary_outcome")
+      condition_a: null            # Required condition A value
+      condition_b: null            # Required condition B value
+      min_trials_per_condition: 5
+      emit_welch_stats: true
     fmri:
       enabled: false
       stats_map_path: null         # NIfTI statistical map in the subject's FreeSurfer MRI space (e.g., orig.mgz space)

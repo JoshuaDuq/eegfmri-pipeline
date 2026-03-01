@@ -662,6 +662,9 @@ const (
 	textFieldSourceLocTrans
 	textFieldSourceLocBem
 	textFieldSourceLocFmriStatsMap
+	textFieldSourceLocContrastConditionColumn
+	textFieldSourceLocContrastConditionA
+	textFieldSourceLocContrastConditionB
 	// fMRI contrast builder text fields
 	textFieldSourceLocFmriCondAColumn
 	textFieldSourceLocFmriCondAValue
@@ -1677,33 +1680,40 @@ type Model struct {
 	featGroupDirectedConnExpanded bool         // UI expansion state
 
 	// Source localization options (LCMV, eLORETA)
-	sourceLocEnabled           bool    // Enable source localization
-	sourceLocMode              int     // 0: EEG-only (template), 1: fMRI-informed (subject-specific)
-	sourceLocMethod            int     // 0: lcmv, 1: eloreta
-	sourceLocSpacing           int     // 0: oct5, 1: oct6, 2: ico4, 3: ico5
-	sourceLocParc              int     // 0: aparc, 1: aparc.a2009s, 2: HCPMMP1
-	sourceLocReg               float64 // LCMV regularization
-	sourceLocSnr               float64 // eLORETA SNR
-	sourceLocLoose             float64 // eLORETA loose constraint
-	sourceLocDepth             float64 // eLORETA depth weighting
-	sourceLocConnMethod        int     // 0: aec, 1: wpli, 2: plv
-	sourceLocSubject           string  // FreeSurfer subject name (e.g., sub-0001)
-	sourceLocSubjectsDir       string  // FreeSurfer SUBJECTS_DIR override
-	sourceLocTrans             string  // EEG↔MRI transform .fif
-	sourceLocBem               string  // BEM solution .fif
-	sourceLocMindistMm         float64 // MNE mindist (mm)
-	sourceLocFmriEnabled       bool    // Enable fMRI-informed source localization
-	sourceLocFmriStatsMap      string  // Path to fMRI stats map NIfTI
-	sourceLocFmriProvenance    int     // 0: independent, 1: same_dataset
-	sourceLocFmriRequireProv   bool    // Require explicit provenance
-	sourceLocFmriThreshold     float64 // Threshold (e.g., z>=3.1)
-	sourceLocFmriTail          int     // 0: pos, 1: abs
-	sourceLocFmriMinClusterVox int     // Minimum cluster size (voxels)
-	sourceLocFmriMinClusterMM3 float64 // Minimum cluster volume (mm^3); preferred when > 0
-	sourceLocFmriMaxClusters   int     // Max clusters retained
-	sourceLocFmriMaxVoxPerClus int     // Max voxels sampled per cluster
-	sourceLocFmriMaxTotalVox   int     // Max total voxels across clusters
-	sourceLocFmriRandomSeed    int     // Random seed for voxel subsampling
+	sourceLocEnabled            bool    // Enable source localization
+	sourceLocMode               int     // 0: EEG-only (template), 1: fMRI-informed (subject-specific)
+	sourceLocMethod             int     // 0: lcmv, 1: eloreta
+	sourceLocSpacing            int     // 0: oct5, 1: oct6, 2: ico4, 3: ico5
+	sourceLocParc               int     // 0: aparc, 1: aparc.a2009s, 2: HCPMMP1
+	sourceLocReg                float64 // LCMV regularization
+	sourceLocSnr                float64 // eLORETA SNR
+	sourceLocLoose              float64 // eLORETA loose constraint
+	sourceLocDepth              float64 // eLORETA depth weighting
+	sourceLocSaveStc            bool    // Save STCs for 3D plotting
+	sourceLocConnMethod         int     // 0: aec, 1: wpli, 2: plv
+	sourceLocSubject            string  // FreeSurfer subject name (e.g., sub-0001)
+	sourceLocSubjectsDir        string  // FreeSurfer SUBJECTS_DIR override
+	sourceLocTrans              string  // EEG↔MRI transform .fif
+	sourceLocBem                string  // BEM solution .fif
+	sourceLocMindistMm          float64 // MNE mindist (mm)
+	sourceLocContrastEnabled    bool    // Enable condition contrasts from source trial features
+	sourceLocContrastCondition  string  // Condition column for source contrasts
+	sourceLocContrastA          string  // Condition A value for source contrasts
+	sourceLocContrastB          string  // Condition B value for source contrasts
+	sourceLocContrastMinTrials  int     // Minimum trials per condition for source contrasts
+	sourceLocContrastWelchStats bool    // Emit Welch t/p statistics for source contrasts
+	sourceLocFmriEnabled        bool    // Enable fMRI-informed source localization
+	sourceLocFmriStatsMap       string  // Path to fMRI stats map NIfTI
+	sourceLocFmriProvenance     int     // 0: independent, 1: same_dataset
+	sourceLocFmriRequireProv    bool    // Require explicit provenance
+	sourceLocFmriThreshold      float64 // Threshold (e.g., z>=3.1)
+	sourceLocFmriTail           int     // 0: pos, 1: abs
+	sourceLocFmriMinClusterVox  int     // Minimum cluster size (voxels)
+	sourceLocFmriMinClusterMM3  float64 // Minimum cluster volume (mm^3); preferred when > 0
+	sourceLocFmriMaxClusters    int     // Max clusters retained
+	sourceLocFmriMaxVoxPerClus  int     // Max voxels sampled per cluster
+	sourceLocFmriMaxTotalVox    int     // Max total voxels across clusters
+	sourceLocFmriRandomSeed     int     // Random seed for voxel subsampling
 
 	// BEM/Trans generation options (Docker-based)
 	sourceLocCreateTrans        bool // Auto-create coregistration transform via Docker
@@ -2649,32 +2659,38 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		featGroupDirectedConnExpanded: false,
 
 		// Source localization defaults
-		sourceLocEnabled:           false, // Disabled by default (opt-in, requires fsaverage)
-		sourceLocMethod:            0,     // 0: lcmv
-		sourceLocSpacing:           1,     // 1: oct6 (default)
-		sourceLocParc:              0,     // 0: aparc (Desikan-Killiany)
-		sourceLocReg:               0.05,  // LCMV regularization
-		sourceLocSnr:               3.0,   // eLORETA SNR
-		sourceLocLoose:             0.2,   // eLORETA loose constraint
-		sourceLocDepth:             0.8,   // eLORETA depth weighting
-		sourceLocConnMethod:        0,     // 0: aec
-		sourceLocSubject:           "",
-		sourceLocSubjectsDir:       "",
-		sourceLocTrans:             "",
-		sourceLocBem:               "",
-		sourceLocMindistMm:         5.0,
-		sourceLocFmriEnabled:       false,
-		sourceLocFmriStatsMap:      "",
-		sourceLocFmriProvenance:    0,
-		sourceLocFmriRequireProv:   true,
-		sourceLocFmriThreshold:     3.1,
-		sourceLocFmriTail:          0, // 0: pos
-		sourceLocFmriMinClusterVox: 50,
-		sourceLocFmriMinClusterMM3: 400.0,
-		sourceLocFmriMaxClusters:   20,
-		sourceLocFmriMaxVoxPerClus: 2000,
-		sourceLocFmriMaxTotalVox:   20000,
-		sourceLocFmriRandomSeed:    0,
+		sourceLocEnabled:            false, // Disabled by default (opt-in, requires fsaverage)
+		sourceLocMethod:             0,     // 0: lcmv
+		sourceLocSpacing:            1,     // 1: oct6 (default)
+		sourceLocParc:               0,     // 0: aparc (Desikan-Killiany)
+		sourceLocReg:                0.05,  // LCMV regularization
+		sourceLocSnr:                3.0,   // eLORETA SNR
+		sourceLocLoose:              0.2,   // eLORETA loose constraint
+		sourceLocDepth:              0.8,   // eLORETA depth weighting
+		sourceLocConnMethod:         0,     // 0: aec
+		sourceLocSubject:            "",
+		sourceLocSubjectsDir:        "",
+		sourceLocTrans:              "",
+		sourceLocBem:                "",
+		sourceLocMindistMm:          5.0,
+		sourceLocContrastEnabled:    false,
+		sourceLocContrastCondition:  "",
+		sourceLocContrastA:          "",
+		sourceLocContrastB:          "",
+		sourceLocContrastMinTrials:  5,
+		sourceLocContrastWelchStats: true,
+		sourceLocFmriEnabled:        false,
+		sourceLocFmriStatsMap:       "",
+		sourceLocFmriProvenance:     0,
+		sourceLocFmriRequireProv:    true,
+		sourceLocFmriThreshold:      3.1,
+		sourceLocFmriTail:           0, // 0: pos
+		sourceLocFmriMinClusterVox:  50,
+		sourceLocFmriMinClusterMM3:  400.0,
+		sourceLocFmriMaxClusters:    20,
+		sourceLocFmriMaxVoxPerClus:  2000,
+		sourceLocFmriMaxTotalVox:    20000,
+		sourceLocFmriRandomSeed:     0,
 
 		// fMRI GLM contrast builder defaults
 		sourceLocFmriContrastEnabled:          false,

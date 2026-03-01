@@ -253,12 +253,19 @@ const (
 	optSourceLocSnr
 	optSourceLocLoose
 	optSourceLocDepth
+	optSourceLocSaveStc
 	optSourceLocConnMethod
 	optSourceLocSubject
 	optSourceLocSubjectsDir
 	optSourceLocTrans
 	optSourceLocBem
 	optSourceLocMindistMm
+	optSourceLocContrastEnabled
+	optSourceLocContrastConditionColumn
+	optSourceLocContrastConditionA
+	optSourceLocContrastConditionB
+	optSourceLocContrastMinTrials
+	optSourceLocContrastWelchStats
 	optSourceLocFmriEnabled
 	optSourceLocFmriStatsMap
 	optSourceLocFmriProvenance

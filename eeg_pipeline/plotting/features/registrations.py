@@ -60,6 +60,10 @@ from eeg_pipeline.plotting.features.power import (
     plot_power_spectral_density,
 )
 
+from eeg_pipeline.plotting.features.source_localization import (
+    plot_source_stc_3d,
+)
+
 from eeg_pipeline.plotting.erp import (
     plot_butterfly_erp,
     plot_roi_erp,
@@ -759,3 +763,41 @@ def erp_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
             ctx.logger,
         )
+
+###################################################################
+# Source Localization
+###################################################################
+
+@VisualizationRegistry.register("sourcelocalization")
+def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
+    source_dir = ctx.subdir("sourcelocalization")
+    source_dir.mkdir(parents=True, exist_ok=True)
+    
+    # We retrieve the actual STC files saved during feature extraction
+    stc_plot_enabled = get_config_value(
+        ctx.config, "plotting.plots.features.sourcelocalization.plot_stc", True
+    )
+    
+    if stc_plot_enabled:
+        out_dir = ctx.deriv_root / "source_estimates" / f"sub-{ctx.subject}"
+        if out_dir.exists():
+            stc_files = list(out_dir.glob(f"sub-{ctx.subject}_*_lcmv-vl.stc"))
+            if not stc_files:
+                stc_files = list(out_dir.glob(f"sub-{ctx.subject}_*_lcmv-lh.stc"))
+                
+            if stc_files:
+                ctx.logger.info("Plotting 3D Source Localization Brains...")
+                safe_plot(
+                    ctx,
+                    saved_files,
+                    "source_stc_3d_plots",
+                    "sourcelocalization",
+                    None,
+                    plot_source_stc_3d,
+                    subject=ctx.subject,
+                    stc_files=stc_files,
+                    save_dir=source_dir,
+                    config=ctx.config,
+                    logger=ctx.logger,
+                )
+

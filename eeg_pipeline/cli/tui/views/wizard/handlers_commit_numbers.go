@@ -744,6 +744,10 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 {
 			m.sourceLocMindistMm = val
 		}
+	case optSourceLocContrastMinTrials:
+		if val >= 1 {
+			m.sourceLocContrastMinTrials = int(val)
+		}
 
 	case optSourceLocFmriThreshold:
 		if val > 0 {

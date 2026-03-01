@@ -196,6 +196,12 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.sourceLocBem
 	case textFieldSourceLocFmriStatsMap:
 		return m.sourceLocFmriStatsMap
+	case textFieldSourceLocContrastConditionColumn:
+		return m.sourceLocContrastCondition
+	case textFieldSourceLocContrastConditionA:
+		return m.sourceLocContrastA
+	case textFieldSourceLocContrastConditionB:
+		return m.sourceLocContrastB
 	case textFieldSourceLocFmriCondAColumn:
 		return m.sourceLocFmriCondAColumn
 	case textFieldSourceLocFmriCondAValue:
@@ -614,6 +620,12 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.sourceLocBem = value
 	case textFieldSourceLocFmriStatsMap:
 		m.sourceLocFmriStatsMap = value
+	case textFieldSourceLocContrastConditionColumn:
+		m.sourceLocContrastCondition = strings.TrimSpace(value)
+	case textFieldSourceLocContrastConditionA:
+		m.sourceLocContrastA = strings.TrimSpace(value)
+	case textFieldSourceLocContrastConditionB:
+		m.sourceLocContrastB = strings.TrimSpace(value)
 	case textFieldSourceLocFmriCondAColumn:
 		m.sourceLocFmriCondAColumn = value
 	case textFieldSourceLocFmriCondAValue:

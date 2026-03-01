@@ -371,3 +371,6 @@ class FeatureExtractionResult:
     # Source localization features (LCMV, eLORETA)
     source_df: Optional[pd.DataFrame] = None
     source_cols: List[str] = field(default_factory=list)
+    # Source condition-contrast features (subject-level deltas/effect sizes)
+    source_contrast_df: Optional[pd.DataFrame] = None
+    source_contrast_cols: List[str] = field(default_factory=list)

@@ -126,6 +126,16 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-create-bem-model", action="store_true", default=None, dest="source_create_bem_model", help="Auto-create BEM model via Docker (requires Docker; FS license from global config).")
     parser.add_argument("--source-create-bem-solution", action="store_true", default=None, dest="source_create_bem_solution", help="Auto-create BEM solution via Docker (requires Docker; FS license from global config).")
     parser.add_argument("--source-allow-identity-trans", action="store_true", default=None, dest="source_allow_identity_trans", help="Allow creating identity transform (DEBUG ONLY - scientifically invalid for production; use only when proper coregistration is unavailable).")
+    parser.add_argument("--source-contrast", action="store_true", default=None, dest="source_contrast_enabled", help="Enable condition-contrast computation from source-localized trial features.")
+    parser.add_argument("--no-source-contrast", action="store_false", dest="source_contrast_enabled", help="Disable source condition-contrast computation.")
+    parser.add_argument("--source-contrast-condition-column", default=None, help="Condition column in aligned events for source contrast grouping.")
+    parser.add_argument("--source-contrast-condition-a", default=None, help="Condition A value for source contrast.")
+    parser.add_argument("--source-contrast-condition-b", default=None, help="Condition B value for source contrast.")
+    parser.add_argument("--source-contrast-min-trials-per-condition", type=int, default=None, help="Minimum trials required per source-contrast condition (default: 5).")
+    parser.add_argument("--source-contrast-welch-stats", action="store_true", default=None, dest="source_contrast_welch_stats", help="Enable Welch t/p statistics in source contrast outputs.")
+    parser.add_argument("--source-contrast-no-welch-stats", action="store_false", dest="source_contrast_welch_stats", help="Disable Welch t/p statistics in source contrast outputs (keep means/deltas/effect sizes).")
+    parser.add_argument("--source-save-stc", action="store_true", default=None, dest="source_save_stc", help="Save the full source estimate (STC) arrays for 3D plotting.")
+    parser.add_argument("--no-source-save-stc", action="store_false", dest="source_save_stc", help="Do not save the full STC arrays.")
 
     # fMRI-informed source localization
     parser.add_argument("--source-fmri", action="store_true", default=None, dest="source_fmri_enabled", help="Enable fMRI-informed source localization (requires --source-subjects-dir/--source-trans/--source-bem and a stats map).")

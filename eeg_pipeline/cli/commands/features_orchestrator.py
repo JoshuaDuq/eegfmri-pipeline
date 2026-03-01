@@ -44,7 +44,7 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
                 })
         
         pipeline = FeaturePipeline(config=config)
-        pipeline.run_batch(
+        ledger = pipeline.run_batch(
             subjects=subjects,
             task=task,
             feature_categories=categories,
@@ -58,6 +58,15 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             progress=progress,
             cli_command=cli_command,
         )
+        failed_subjects = [
+            str(entry.get("subject"))
+            for entry in (ledger or [])
+            if str(entry.get("status", "")).strip().lower() == "failed"
+        ]
+        if failed_subjects:
+            raise RuntimeError(
+                f"{len(failed_subjects)}/{len(subjects)} subjects failed; see batch ledger for details."
+            )
     elif args.mode == "visualize":
         apply_set_overrides(config, getattr(args, "set_overrides", None))
         task = resolve_task(args.task, config)

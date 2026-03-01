@@ -194,6 +194,12 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	if m.expandedOption == expandedConnConditionValues {
 		totalLines += len(m.GetDiscoveredColumnValues(m.connConditionColumn))
 	}
+	if m.expandedOption == expandedSourceLocContrastColumn {
+		totalLines += len(m.GetAvailableColumns())
+	}
+	if m.expandedOption == expandedSourceLocContrastValueA || m.expandedOption == expandedSourceLocContrastValueB {
+		totalLines += len(m.GetDiscoveredColumnValues(m.sourceLocContrastCondition))
+	}
 
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
@@ -945,11 +951,100 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "eLORETA depth weighting"
+		case optSourceLocSaveStc:
+			label = "Save STCs for Plotting"
+			value = m.boolToOnOff(m.sourceLocSaveStc)
+			hint = "save STCs for 3D plotter pipeline"
 		case optSourceLocConnMethod:
 			label = "Connectivity"
 			connMethods := []string{"AEC", "wPLI", "PLV"}
 			value = connMethods[m.sourceLocConnMethod]
 			hint = "source-space connectivity"
+		case optSourceLocContrastEnabled:
+			label = "Condition Contrast"
+			value = m.boolToOnOff(m.sourceLocContrastEnabled)
+			hint = "compute subject-level source contrasts (A vs B)"
+		case optSourceLocContrastConditionColumn:
+			label = "Contrast Column"
+			if strings.TrimSpace(m.sourceLocContrastCondition) == "" {
+				value = "(select column)"
+			} else {
+				value = m.sourceLocContrastCondition
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocContrastConditionColumn {
+				value = m.textBuffer + "█"
+			}
+			expandIndicatorHint := ""
+			if len(m.GetAvailableColumns()) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.GetAvailableColumns()))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedSourceLocContrastColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optSourceLocContrastConditionA:
+			label = "Condition A"
+			if strings.TrimSpace(m.sourceLocContrastCondition) == "" {
+				value = "(select column first)"
+				hint = "requires column selection"
+			} else {
+				if strings.TrimSpace(m.sourceLocContrastA) == "" {
+					value = "(select value)"
+				} else {
+					value = m.sourceLocContrastA
+				}
+				if m.editingText && m.editingTextField == textFieldSourceLocContrastConditionA {
+					value = m.textBuffer + "█"
+				}
+				expandIndicatorHint := ""
+				if vals := m.GetDiscoveredColumnValues(m.sourceLocContrastCondition); len(vals) > 0 {
+					expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), m.sourceLocContrastCondition)
+				}
+				hint = "Space to select" + expandIndicatorHint
+				if m.expandedOption == expandedSourceLocContrastValueA {
+					expandIndicator = " [-]"
+				} else {
+					expandIndicator = " [+]"
+				}
+			}
+		case optSourceLocContrastConditionB:
+			label = "Condition B"
+			if strings.TrimSpace(m.sourceLocContrastCondition) == "" {
+				value = "(select column first)"
+				hint = "requires column selection"
+			} else {
+				if strings.TrimSpace(m.sourceLocContrastB) == "" {
+					value = "(select value)"
+				} else {
+					value = m.sourceLocContrastB
+				}
+				if m.editingText && m.editingTextField == textFieldSourceLocContrastConditionB {
+					value = m.textBuffer + "█"
+				}
+				expandIndicatorHint := ""
+				if vals := m.GetDiscoveredColumnValues(m.sourceLocContrastCondition); len(vals) > 0 {
+					expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), m.sourceLocContrastCondition)
+				}
+				hint = "Space to select" + expandIndicatorHint
+				if m.expandedOption == expandedSourceLocContrastValueB {
+					expandIndicator = " [-]"
+				} else {
+					expandIndicator = " [+]"
+				}
+			}
+		case optSourceLocContrastMinTrials:
+			label = "Contrast Min Trials"
+			value = fmt.Sprintf("%d", m.sourceLocContrastMinTrials)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocContrastMinTrials) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum trials per condition"
+		case optSourceLocContrastWelchStats:
+			label = "Contrast Welch Stats"
+			value = m.boolToOnOff(m.sourceLocContrastWelchStats)
+			hint = "emit per-feature Welch t/p columns"
 		case optSourceLocSubject:
 			label = "FS Subject"
 			if strings.TrimSpace(m.sourceLocSubject) == "" {
@@ -2926,6 +3021,72 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 				if lineIdx >= startLine && lineIdx < endLine {
 					b.WriteString(subIndent + checkbox + nameStyle.Render(v) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (source localization contrast column)
+		if opt == optSourceLocContrastConditionColumn && m.expandedOption == expandedSourceLocContrastColumn {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (source localization contrast condition A)
+		if opt == optSourceLocContrastConditionA && m.expandedOption == expandedSourceLocContrastValueA {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (source localization contrast condition B)
+		if opt == optSourceLocContrastConditionB && m.expandedOption == expandedSourceLocContrastValueB {
+			subIndent := "      " // 6 spaces for sub-items
+			items := m.getExpandedListItems()
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(item) + "\n")
 				}
 				lineIdx++
 			}

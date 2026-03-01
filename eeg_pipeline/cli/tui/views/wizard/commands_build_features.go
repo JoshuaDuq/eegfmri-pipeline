@@ -231,9 +231,51 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			}
 		}
 
+		if m.sourceLocSaveStc {
+			args = append(args, "--source-save-stc")
+		} else {
+			args = append(args, "--no-source-save-stc")
+		}
+
 		connMethods := []string{"aec", "wpli", "plv"}
 		if m.sourceLocConnMethod != 0 {
 			args = append(args, "--source-connectivity-method", connMethods[m.sourceLocConnMethod])
+		}
+		if m.sourceLocContrastEnabled {
+			args = append(args, "--source-contrast")
+			if strings.TrimSpace(m.sourceLocContrastCondition) != "" {
+				args = append(
+					args,
+					"--source-contrast-condition-column",
+					strings.TrimSpace(m.sourceLocContrastCondition),
+				)
+			}
+			if strings.TrimSpace(m.sourceLocContrastA) != "" {
+				args = append(
+					args,
+					"--source-contrast-condition-a",
+					strings.TrimSpace(m.sourceLocContrastA),
+				)
+			}
+			if strings.TrimSpace(m.sourceLocContrastB) != "" {
+				args = append(
+					args,
+					"--source-contrast-condition-b",
+					strings.TrimSpace(m.sourceLocContrastB),
+				)
+			}
+			if m.sourceLocContrastMinTrials != 5 {
+				args = append(
+					args,
+					"--source-contrast-min-trials-per-condition",
+					fmt.Sprintf("%d", m.sourceLocContrastMinTrials),
+				)
+			}
+			if m.sourceLocContrastWelchStats {
+				args = append(args, "--source-contrast-welch-stats")
+			} else {
+				args = append(args, "--source-contrast-no-welch-stats")
+			}
 		}
 
 		if m.sourceLocMode == 1 {
@@ -303,17 +345,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 				}
 				if m.sourceLocFmriRandomSeed != 0 {
 					args = append(args, "--source-fmri-random-seed", fmt.Sprintf("%d", m.sourceLocFmriRandomSeed))
-				}
-
-				if strings.TrimSpace(m.sourceLocFmriWindowAName) != "" {
-					args = append(args, "--source-fmri-window-a-name", strings.TrimSpace(m.sourceLocFmriWindowAName))
-					args = append(args, "--source-fmri-window-a-tmin", fmt.Sprintf("%.3f", m.sourceLocFmriWindowATmin))
-					args = append(args, "--source-fmri-window-a-tmax", fmt.Sprintf("%.3f", m.sourceLocFmriWindowATmax))
-				}
-				if strings.TrimSpace(m.sourceLocFmriWindowBName) != "" {
-					args = append(args, "--source-fmri-window-b-name", strings.TrimSpace(m.sourceLocFmriWindowBName))
-					args = append(args, "--source-fmri-window-b-tmin", fmt.Sprintf("%.3f", m.sourceLocFmriWindowBTmin))
-					args = append(args, "--source-fmri-window-b-tmax", fmt.Sprintf("%.3f", m.sourceLocFmriWindowBTmax))
 				}
 
 				// fMRI contrast builder options

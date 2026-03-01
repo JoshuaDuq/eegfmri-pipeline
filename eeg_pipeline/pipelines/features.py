@@ -65,7 +65,7 @@ from eeg_pipeline.utils.data.feature_io import (
 )
 
 
-_ACCUMULATOR_EXTRAS = ["baseline", "pac_time"]
+_ACCUMULATOR_EXTRAS = ["baseline", "pac_time", "sourcecontrast"]
 _FEATURE_ACCUMULATOR_KEYS = list(FEATURE_CATEGORIES) + _ACCUMULATOR_EXTRAS
 
 _TFR_CATEGORIES = {"power", "itpc", "pac"}
@@ -323,6 +323,8 @@ def _unpack_feature_results(features: FeatureExtractionResult) -> Dict[str, Any]
         "dconn_cols": features.dconn_cols,
         "source_df": features.source_df,
         "source_cols": features.source_cols,
+        "source_contrast_df": features.source_contrast_df,
+        "source_contrast_cols": features.source_contrast_cols,
         "aper_df": features.aper_df,
         "aper_cols": features.aper_cols,
         "erp_df": features.erp_df,
@@ -431,6 +433,7 @@ def _accumulate_features(
         "connectivity": aligned.get("conn_df_aligned"),
         "directedconnectivity": unpacked["dconn_df"],
         "sourcelocalization": unpacked["source_df"],
+        "sourcecontrast": unpacked["source_contrast_df"],
         "aperiodic": aligned.get("aper_df_aligned"),
         "erp": unpacked["erp_df"],
         "itpc": unpacked["itpc_df"],
@@ -456,6 +459,46 @@ def _accumulate_features(
 def _get_df_cols(df: Optional[pd.DataFrame]) -> int:
     """Get number of columns from DataFrame, returning 0 if None or empty."""
     return df.shape[1] if df is not None and not df.empty else 0
+
+
+def _count_saved_range_columns(
+    *,
+    direct_df: Optional[pd.DataFrame],
+    conn_df: Optional[pd.DataFrame],
+    aper_df: Optional[pd.DataFrame],
+    unpacked: Dict[str, Any],
+    features: FeatureExtractionResult,
+) -> int:
+    """Count columns saved for one time range across all feature files."""
+    itpc_trial_or_standard = unpacked.get("itpc_trial_df")
+    if itpc_trial_or_standard is None or getattr(itpc_trial_or_standard, "empty", False):
+        itpc_trial_or_standard = unpacked.get("itpc_df")
+
+    pac_trial_or_standard = unpacked.get("pac_trials_df")
+    if pac_trial_or_standard is None or getattr(pac_trial_or_standard, "empty", False):
+        pac_trial_or_standard = unpacked.get("pac_df")
+
+    tables = [
+        direct_df,
+        conn_df,
+        aper_df,
+        unpacked.get("dconn_df"),
+        unpacked.get("source_df"),
+        unpacked.get("source_contrast_df"),
+        unpacked.get("erp_df"),
+        itpc_trial_or_standard,
+        pac_trial_or_standard,
+        unpacked.get("pac_time_df"),
+        unpacked.get("comp_df"),
+        unpacked.get("bursts_df"),
+        unpacked.get("spectral_df"),
+        unpacked.get("erds_df"),
+        getattr(features, "ratios_df", None),
+        getattr(features, "asymmetry_df", None),
+        unpacked.get("microstates_df"),
+        getattr(features, "quality_df", None),
+    ]
+    return int(sum(_get_df_cols(df) for df in tables))
 
 
 def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
@@ -498,6 +541,7 @@ def _save_merged_features(
         "connectivity": ("features_connectivity.parquet", ["connectivity"]),
         "directedconnectivity": ("features_directedconnectivity.parquet", ["directedconnectivity"]),
         "sourcelocalization": ("features_sourcelocalization.parquet", ["sourcelocalization"]),
+        "sourcecontrast": ("features_sourcecontrast.parquet", ["sourcecontrast"]),
         "aperiodic": ("features_aperiodic.parquet", ["aperiodic"]),
         "erp": ("features_erp.parquet", ["erp"]),
         "itpc": ("features_itpc.parquet", ["itpc"]),
@@ -609,6 +653,7 @@ def _collect_trial_table_feature_tables(
         ("aperiodic", aper_df_aligned),
         ("directedconnectivity", unpacked.get("dconn_df")),
         ("sourcelocalization", unpacked.get("source_df")),
+        ("sourcecontrast", unpacked["source_contrast_df"]),
         ("erp", unpacked.get("erp_df")),
         ("itpc", itpc_trial_or_standard),
         ("pac", pac_trial_or_standard),
@@ -1026,6 +1071,8 @@ class FeaturePipeline(PipelineBase):
                 dconn_cols=unpacked["dconn_cols"],
                 source_df=unpacked["source_df"],
                 source_cols=unpacked["source_cols"],
+                source_contrast_df=unpacked["source_contrast_df"],
+                source_contrast_cols=unpacked["source_contrast_cols"],
                 feature_qc=feature_qc or None,
                 suffix=suffix,
             )
@@ -1068,7 +1115,13 @@ class FeaturePipeline(PipelineBase):
                 conn_df_aligned=conn_df_aligned,
                 aper_df_aligned=aper_df_aligned,
             )
-            n_total = _get_df_cols(combined_df)
+            n_total = _count_saved_range_columns(
+                direct_df=combined_df,
+                conn_df=conn_df_aligned,
+                aper_df=aper_df_aligned,
+                unpacked=unpacked,
+                features=features,
+            )
 
             extraction_config = {
                 "cli_command": kwargs.get("cli_command"),

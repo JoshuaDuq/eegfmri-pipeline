@@ -97,21 +97,118 @@ def get_bem_generation_config(config: Any) -> Dict[str, Any]:
     }
 
 
+def _load_eeg_info_for_coregistration(
+    *,
+    eeg_info: Optional[Any],
+    eeg_info_path: Optional[Path],
+) -> Optional[Any]:
+    """Load EEG info with digitization for coregistration if available."""
+    if eeg_info is not None:
+        return eeg_info
+    if eeg_info_path is None:
+        return None
+
+    import mne
+
+    info_path = Path(eeg_info_path).expanduser().resolve()
+    if not info_path.exists():
+        raise FileNotFoundError(f"EEG info path not found: {info_path}")
+
+    suffixes = "".join(info_path.suffixes).lower()
+    if suffixes.endswith("_epo.fif") or info_path.name.endswith("-epo.fif"):
+        epochs = mne.read_epochs(info_path, preload=False, verbose="ERROR")
+        return epochs.info
+    return mne.io.read_info(info_path, verbose="ERROR")
+
+
+def _count_headshape_points(info: Any) -> tuple[int, int, int]:
+    """Count fiducial, extra headshape, and EEG dig points."""
+    import mne
+
+    dig = list(info.get("dig") or [])
+    n_fids = sum(1 for d in dig if int(d.get("kind", -1)) == int(mne.io.constants.FIFF.FIFFV_POINT_CARDINAL))
+    n_extra = sum(1 for d in dig if int(d.get("kind", -1)) == int(mne.io.constants.FIFF.FIFFV_POINT_EXTRA))
+    n_eeg = sum(1 for d in dig if int(d.get("kind", -1)) == int(mne.io.constants.FIFF.FIFFV_POINT_EEG))
+    return int(n_fids), int(n_extra), int(n_eeg)
+
+
+def _generate_trans_from_eeg_info(
+    *,
+    subject: str,
+    subjects_dir: Path,
+    info: Any,
+    trans_path: Path,
+    overwrite: bool,
+) -> Optional[Path]:
+    """Generate head↔MRI transform from EEG digitization and MRI anatomy."""
+    import numpy as np
+    import mne
+
+    n_fids, n_extra, n_eeg = _count_headshape_points(info)
+    if n_fids < 3:
+        raise RuntimeError(
+            f"Insufficient fiducials for coregistration (found {n_fids}, need 3)."
+        )
+
+    coreg = mne.coreg.Coregistration(
+        info=info,
+        subject=subject,
+        subjects_dir=subjects_dir,
+        fiducials="auto",
+    )
+    coreg.fit_fiducials(verbose=False)
+
+    if n_extra > 10:
+        # Refine with head-shape ICP when enough head points are available.
+        coreg.fit_icp(n_iterations=50, nasion_weight=10.0, verbose=False)
+        coreg.omit_head_shape_points(distance=0.005)
+        coreg.fit_icp(n_iterations=20, nasion_weight=10.0, verbose=False)
+    elif n_eeg > 0:
+        logger.warning(
+            "Coregistration for %s is fiducial-only (%d fiducials, %d headshape points, %d EEG points). "
+            "No extra headshape points were found; transform quality depends on fiducials.",
+            subject,
+            n_fids,
+            n_extra,
+            n_eeg,
+        )
+
+    trans_candidate = coreg.trans
+    matrix: np.ndarray
+    if isinstance(trans_candidate, dict) and "trans" in trans_candidate:
+        matrix = np.asarray(trans_candidate["trans"], dtype=float)
+    elif hasattr(trans_candidate, "trans"):
+        matrix = np.asarray(getattr(trans_candidate, "trans"), dtype=float)
+    else:
+        matrix = np.asarray(trans_candidate, dtype=float)
+    if matrix.shape != (4, 4):
+        raise RuntimeError("Coregistration produced an invalid transform matrix shape.")
+    if np.allclose(matrix, np.eye(4), atol=1e-9):
+        raise RuntimeError(
+            "Coregistration produced an identity-like transform, which is not valid for source localization."
+        )
+
+    trans = mne.transforms.Transform("head", "mri", trans=matrix)
+    mne.write_trans(trans_path, trans, overwrite=overwrite)
+    return trans_path if trans_path.exists() else None
+
+
 def generate_coregistration_transform(
     subject: str,
     subjects_dir: Path,
     fs_license_path: Path,
     eeg_info_path: Optional[Path] = None,
+    eeg_info: Optional[Any] = None,
     docker_image: str = "freesurfer-mne:7.4.1",
     overwrite: bool = True,
     *,
     allow_identity_trans: bool = False,
 ) -> Optional[Path]:
     """
-    Generate coregistration transform (EEG↔MRI alignment) using Docker.
+    Generate coregistration transform (EEG↔MRI alignment).
 
-    Uses MNE's coregistration with fiducials from the FreeSurfer subject.
-    For EEG-only (no digitization), uses fsaverage fiducials scaled to subject.
+    Preferred path uses MNE coregistration from EEG digitization/fiducials.
+    Identity transforms are only allowed as explicit debug fallback.
 
     Parameters
     ----------
@@ -122,7 +219,9 @@ def generate_coregistration_transform(
     fs_license_path : Path
         Path to FreeSurfer license.txt file
     eeg_info_path : Path, optional
-        Path to EEG info file (.fif) with digitization points (if available)
+        Path to EEG info/epochs FIF containing digitization points
+    eeg_info : Any, optional
+        In-memory MNE Info object with digitization points
     docker_image : str
         Docker image name with FreeSurfer + MNE installed
     overwrite : bool
@@ -133,14 +232,6 @@ def generate_coregistration_transform(
     trans_path : Path or None
         Path to generated transform file
     """
-    # Reserved for future support of subject-specific EEG digitization points.
-    _ = eeg_info_path
-    if not check_docker_available():
-        raise RuntimeError(
-            "Docker is not available. Please install Docker and ensure it is running. "
-            "See https://docs.docker.com/get-docker/"
-        )
-
     subjects_dir = Path(subjects_dir).resolve()
     fs_license_path = Path(fs_license_path).resolve()
 
@@ -162,13 +253,43 @@ def generate_coregistration_transform(
         logger.info(f"Using existing trans file: {trans_path}")
         return trans_path
 
+    # Preferred: generate a real transform from EEG digitization/coregistration data.
+    info = _load_eeg_info_for_coregistration(
+        eeg_info=eeg_info,
+        eeg_info_path=eeg_info_path,
+    )
+    if info is not None:
+        logger.info("Generating EEG↔MRI transform from EEG digitization for subject %s", subject)
+        try:
+            generated = _generate_trans_from_eeg_info(
+                subject=subject,
+                subjects_dir=subjects_dir,
+                info=info,
+                trans_path=trans_path,
+                overwrite=overwrite,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to generate EEG↔MRI transform from digitization for {subject}: {exc}"
+            ) from exc
+        if generated is not None:
+            logger.info("Coregistration transform created: %s", generated)
+            return generated
+
     # Safety check: refuse to auto-generate identity transform unless explicitly allowed
     if not allow_identity_trans:
         raise RuntimeError(
-            "Refusing to auto-generate an EEG↔MRI transform because doing so without digitization/coregistration "
-            "is scientifically invalid. Provide an existing `*-trans.fif` (recommended), or set "
+            "Refusing to auto-generate an EEG↔MRI transform because no usable digitization/coregistration "
+            "data were provided. Provide an existing `*-trans.fif` (recommended), pass EEG info with "
+            "fiducials/digitization, or set "
             "`feature_engineering.sourcelocalization.bem_generation.allow_identity_trans=true` to force creation "
             "of an identity transform for debugging only."
+        )
+
+    if not check_docker_available():
+        raise RuntimeError(
+            "Docker is not available. Please install Docker and ensure it is running. "
+            "See https://docs.docker.com/get-docker/"
         )
 
     python_script = f"""import mne
@@ -323,22 +444,71 @@ def generate_bem_model_and_solution(
     cond_str = f"[{conductivity[0]}, {conductivity[1]}, {conductivity[2]}]"
 
     python_script = f"""import mne
-bem_model = mne.make_bem_model(
-    subject="{subject}",
-    ico={ico},
-    subjects_dir="/subjects",
-    conductivity={cond_str}
-)
+import numpy as np
+import os
+import shutil
+
+subject = "{subject}"
+ico = {ico}
+cond_str = {cond_str}
+subjects_dir = "/subjects"
+
+def get_surf_path(name):
+    return f"{{subjects_dir}}/{{subject}}/bem/{{name}}.surf"
+
+for name in ['inner_skull', 'outer_skull', 'outer_skin']:
+    surf_path = get_surf_path(name)
+    if not os.path.exists(surf_path):
+        alt_path = f"{{subjects_dir}}/{{subject}}/bem/watershed/{{subject}}_{{name}}_surface"
+        if os.path.exists(alt_path):
+            shutil.copy(alt_path, surf_path)
+
+MAX_RETRIES = 5
+import sys
+for attempt in range(MAX_RETRIES):
+    try:
+        bem_model = mne.make_bem_model(
+            subject=subject,
+            ico=ico,
+            subjects_dir=subjects_dir,
+            conductivity=cond_str
+        )
+        break
+    except RuntimeError as e:
+        err_str = str(e).lower()
+        if 'completely inside surface' in err_str:
+            print(f"BEM intersection detected (attempt {{attempt + 1}}): {{e}}", file=sys.stderr)
+            if attempt == MAX_RETRIES - 1:
+                print("Max retries reached, cannot fix BEM intersection.", file=sys.stderr)
+                raise
+            
+            print("Auto-scaling surfaces to fix topology...", file=sys.stderr)
+            scales = dict(
+                inner_skull=0.98,
+                outer_skull=1.00,
+                outer_skin=1.02
+            )
+            for name, scale in scales.items():
+                if scale != 1.0:
+                    surf_path = get_surf_path(name)
+                    if os.path.exists(surf_path):
+                        coords, faces = mne.read_surface(surf_path)
+                        center = np.mean(coords, axis=0)
+                        coords = center + (coords - center) * scale
+                        mne.write_surface(surf_path, coords, faces, overwrite=True)
+        else:
+            raise
+
 mne.write_bem_surfaces(
-    "/subjects/{subject}/bem/{bem_model_name}",
+    f"/subjects/{{subject}}/bem/{bem_model_name}",
     bem_model,
     overwrite={overwrite}
 )
 bem_solution = mne.make_bem_solution(
-    "/subjects/{subject}/bem/{bem_model_name}"
+    f"/subjects/{{subject}}/bem/{bem_model_name}"
 )
 mne.write_bem_solution(
-    "/subjects/{subject}/bem/{bem_solution_name}",
+    f"/subjects/{{subject}}/bem/{bem_solution_name}",
     bem_solution,
     overwrite={overwrite}
 )
@@ -399,6 +569,8 @@ def ensure_bem_and_trans_files(
     subjects_dir: Path,
     config: Any,
     logger_instance: Optional[logging.Logger] = None,
+    eeg_info_path: Optional[Path] = None,
+    eeg_info: Optional[Any] = None,
 ) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
     """
     Ensure BEM model, solution, and trans files exist, creating them if configured.
@@ -415,6 +587,10 @@ def ensure_bem_and_trans_files(
         Pipeline configuration containing bem_generation settings
     logger_instance : Logger, optional
         Logger instance to use
+    eeg_info_path : Path, optional
+        Path to EEG info/epochs FIF for trans coregistration
+    eeg_info : Any, optional
+        In-memory MNE Info object for trans coregistration
 
     Returns
     -------
@@ -452,16 +628,6 @@ def ensure_bem_and_trans_files(
     bem_model_path = None
     bem_solution_path = None
 
-    if create_trans:
-        trans_path = generate_coregistration_transform(
-            subject=subject,
-            subjects_dir=subjects_dir,
-            fs_license_path=fs_license_path,
-            docker_image=docker_image,
-            overwrite=False,
-            allow_identity_trans=bool(bem_cfg.get("allow_identity_trans", False)),
-        )
-
     if create_model or create_solution:
         bem_model_path, bem_solution_path = generate_bem_model_and_solution(
             subject=subject,
@@ -473,6 +639,18 @@ def ensure_bem_and_trans_files(
             create_model=create_model,
             create_solution=create_solution,
             overwrite=False,
+        )
+
+    if create_trans:
+        trans_path = generate_coregistration_transform(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            fs_license_path=fs_license_path,
+            eeg_info_path=eeg_info_path,
+            eeg_info=eeg_info,
+            docker_image=docker_image,
+            overwrite=False,
+            allow_identity_trans=bool(bem_cfg.get("allow_identity_trans", False)),
         )
 
     return trans_path, bem_model_path, bem_solution_path

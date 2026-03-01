@@ -801,50 +801,57 @@ def _fmri_roi_coords_from_stats_map(
 def _extract_roi_timecourses_from_vertex_indices(
     stcs: List[Any],
     roi_indices: Dict[str, List[int]],
+    logger: Optional[logging.Logger] = None,
 ) -> Tuple[np.ndarray, List[str]]:
     """Extract ROI timecourses from STCs using explicit vertex mapping to handle pruned sources."""
     n_epochs = len(stcs)
     if n_epochs == 0:
         return np.zeros((0, 0, 0)), []
-    
-    roi_names = list(roi_indices.keys())
-    n_rois = len(roi_names)
+
     n_times = int(stcs[0].data.shape[1])
-    
+
     # stcs[0].vertices is a list (one per source space). For volume, usually [vertno]
     stc_verts = stcs[0].vertices[0]
     # Create mapping: original_vertex_index -> row_index_in_stc_data
     vert_to_idx = {v: i for i, v in enumerate(stc_verts)}
 
-    missing_rois = [
-        roi_name
-        for roi_name, orig_idxs in roi_indices.items()
-        if orig_idxs and not any(v in vert_to_idx for v in orig_idxs)
-    ]
-    if missing_rois:
-        raise ValueError(
-            "fMRI-constrained ROI mapping failed: some ROIs have no surviving vertices "
-            f"after forward/inverse modeling: {', '.join(missing_rois)}"
+    surviving_roi_names: List[str] = []
+    dropped_rois: List[str] = []
+    roi_row_indices: Dict[str, List[int]] = {}
+    for roi_name, orig_idxs in roi_indices.items():
+        if not orig_idxs:
+            dropped_rois.append(roi_name)
+            continue
+        row_idxs = [vert_to_idx[v] for v in orig_idxs if v in vert_to_idx]
+        if not row_idxs:
+            dropped_rois.append(roi_name)
+            continue
+        surviving_roi_names.append(roi_name)
+        roi_row_indices[roi_name] = row_idxs
+
+    if dropped_rois and logger is not None:
+        logger.warning(
+            "fMRI-constrained ROI mapping dropped %d ROI(s) with no surviving vertices: %s",
+            len(dropped_rois),
+            ", ".join(dropped_rois),
         )
-    
+
+    if not surviving_roi_names:
+        raise ValueError(
+            "fMRI-constrained ROI mapping failed: no surviving vertices remained "
+            "after forward/inverse modeling for any ROI."
+        )
+
+    n_rois = len(surviving_roi_names)
     out = np.full((n_epochs, n_rois, n_times), np.nan, dtype=float)
     for epoch_idx, stc in enumerate(stcs):
         data = np.asarray(stc.data, dtype=float)
-        for roi_idx, roi_name in enumerate(roi_names):
-            # Get original indices for this ROI
-            orig_idxs = roi_indices.get(roi_name, [])
-            if not orig_idxs:
-                continue
-            
-            # Find which of these indices survived in the STC
-            row_idxs = [vert_to_idx[v] for v in orig_idxs if v in vert_to_idx]
-            if not row_idxs:
-                continue
-                
+        for roi_idx, roi_name in enumerate(surviving_roi_names):
+            row_idxs = roi_row_indices[roi_name]
             block = data[row_idxs, :]
             out[epoch_idx, roi_idx, :] = np.nanmean(block, axis=0)
-            
-    return out, roi_names
+
+    return out, surviving_roi_names
 
 
 ###################################################################
@@ -1110,7 +1117,7 @@ def _compute_roi_power(
     power : ndarray, shape (n_epochs, n_rois)
         Band power per epoch and ROI
     """
-    from scipy.signal import welch
+    from mne.time_frequency import psd_array_welch
     
     n_epochs, n_rois, n_times = roi_data.shape
     power = np.zeros((n_epochs, n_rois))
@@ -1125,23 +1132,40 @@ def _compute_roi_power(
             f"ROI power band upper edge must be below Nyquist ({nyquist:.6g} Hz), got fmax={fmax}."
         )
     
+    bad_mask = np.any(np.isnan(roi_data), axis=-1) | (np.std(roi_data, axis=-1) < 1e-12)
+    valid_mask = ~bad_mask
+
+    if not np.any(valid_mask):
+        power[:] = np.nan
+        return power
+    
+    valid_data = roi_data[valid_mask]
     nperseg = min(n_times, int(sfreq * 2))
     
-    for epoch_idx in range(n_epochs):
-        for roi_idx in range(n_rois):
-            tc = roi_data[epoch_idx, roi_idx, :]
-            if np.any(np.isnan(tc)):
-                power[epoch_idx, roi_idx] = np.nan
-                continue
-            
-            freqs, psd = welch(tc, fs=sfreq, nperseg=nperseg)
-            freq_mask = (freqs >= fmin) & (freqs <= fmax)
-            if not np.any(freq_mask):
-                raise ValueError(
-                    "ROI power band has no Welch frequency bins; increase segment length or use a lower band. "
-                    f"(fmin={fmin}, fmax={fmax}, sfreq={sfreq}, n_times={n_times})"
-                )
-            power[epoch_idx, roi_idx] = np.mean(psd[freq_mask])
+    psds, freqs = psd_array_welch(
+        valid_data,
+        sfreq=sfreq,
+        fmin=fmin,
+        fmax=fmax,
+        n_fft=nperseg,
+        n_per_seg=nperseg,
+        n_overlap=nperseg // 2,
+        n_jobs=1,
+        verbose=False,
+    )
+    
+    if len(freqs) < 1:
+        raise ValueError(
+            "ROI power band has no Welch frequency bins; increase segment length or use a lower band. "
+            f"(fmin={fmin}, fmax={fmax}, sfreq={sfreq}, n_times={n_times})"
+        )
+    
+    # Integrate discrete PSD over frequency to compute total band power
+    df = freqs[1] - freqs[0] if len(freqs) > 1 else sfreq / nperseg
+    valid_power = np.sum(psds, axis=-1) * df
+    
+    power[valid_mask] = valid_power
+    power[bad_mask] = np.nan
     
     return power
 
@@ -1169,7 +1193,8 @@ def _compute_roi_envelope(
     envelope : ndarray, shape (n_epochs, n_rois, n_times)
         Amplitude envelope
     """
-    from scipy.signal import butter, filtfilt, hilbert
+    from mne.filter import filter_data
+    from scipy.signal import hilbert
     
     n_epochs, n_rois, n_times = roi_data.shape
     envelope = np.zeros_like(roi_data)
@@ -1177,30 +1202,36 @@ def _compute_roi_envelope(
     if not np.isfinite(sfreq) or sfreq <= 0:
         raise ValueError(f"Sampling frequency must be > 0 for ROI envelope (got {sfreq}).")
     nyq = sfreq / 2.0
-    low = fmin / nyq
-    high = fmax / nyq
-    
-    if low >= high or low <= 0 or high >= 1:
+    if fmin <= 0 or fmax >= nyq or fmin >= fmax:
         raise ValueError(f"Invalid bandpass range for ROI envelope: fmin={fmin}, fmax={fmax}, sfreq={sfreq}.")
 
-    b, a = butter(4, [low, high], btype="band")
-    padlen = 3 * (max(len(a), len(b)) - 1)
-    if n_times <= padlen:
-        raise ValueError(
-            f"ROI envelope requires at least {padlen + 1} samples for filtfilt padding "
-            f"(n_times={n_times}, sfreq={sfreq}, fmin={fmin}, fmax={fmax})."
-        )
+    bad_mask = np.any(np.isnan(roi_data), axis=-1) | (np.std(roi_data, axis=-1) < 1e-12)
+    valid_mask = ~bad_mask
+
+    if not np.any(valid_mask):
+        envelope[:] = np.nan
+        return envelope
     
-    for epoch_idx in range(n_epochs):
-        for roi_idx in range(n_rois):
-            tc = roi_data[epoch_idx, roi_idx, :]
-            if np.any(np.isnan(tc)) or np.std(tc) < 1e-12:
-                envelope[epoch_idx, roi_idx, :] = np.nan
-                continue
-            
-            filtered = filtfilt(b, a, tc)
-            analytic = hilbert(filtered)
-            envelope[epoch_idx, roi_idx, :] = np.abs(analytic)
+    valid_data = roi_data[valid_mask]
+    
+    # Filter valid data using MNE's FIR zero-phase filter (avoids IIR edge ringing)
+    filtered_data = filter_data(
+        valid_data,
+        sfreq=sfreq,
+        l_freq=fmin,
+        h_freq=fmax,
+        method="fir",
+        phase="zero",
+        copy=True,
+        verbose=False,
+    )
+    
+    # Hilbert transform applies across last axis
+    analytic = hilbert(filtered_data)
+    valid_envelope = np.abs(analytic)
+    
+    envelope[valid_mask] = valid_envelope
+    envelope[bad_mask] = np.nan
     
     return envelope
 
@@ -1228,6 +1259,170 @@ class SourceLocalizationConfig:
     eloreta_loose: float
     eloreta_depth: float
     fmri_cfg: FMRIConstraintConfig
+    save_stc: bool = False
+
+
+@dataclass(frozen=True)
+class SourceContrastConfig:
+    """Condition-contrast configuration for source-localized features."""
+
+    enabled: bool
+    condition_column: str
+    condition_a: str
+    condition_b: str
+    min_trials_per_condition: int
+    emit_welch_stats: bool
+
+
+def _parse_bool_config(value: Any, key: str, *, default: bool) -> bool:
+    """Parse a boolean config value with strict type validation."""
+    if value is None:
+        return default
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    raise ValueError(f"{key} must be a boolean (got {value!r}).")
+
+
+def _sanitize_feature_token(value: Any) -> str:
+    token = str(value).strip()
+    for symbol in (" ", "-", "/", "\\", ":", ";", ",", "|", "(", ")", "[", "]", "{", "}", "+", "="):
+        token = token.replace(symbol, "_")
+    token = "_".join(part for part in token.split("_") if part)
+    if not token:
+        raise ValueError(f"Invalid empty token in source contrast naming (value={value!r}).")
+    return token
+
+
+def _cohen_d_unpaired(sample_a: np.ndarray, sample_b: np.ndarray) -> float:
+    """Compute Cohen's d for two independent samples."""
+    a = np.asarray(sample_a, dtype=float)
+    b = np.asarray(sample_b, dtype=float)
+    if a.size < 2 or b.size < 2:
+        return float("nan")
+    var_a = float(np.var(a, ddof=1))
+    var_b = float(np.var(b, ddof=1))
+    dof = int(a.size + b.size - 2)
+    if dof <= 0:
+        return float("nan")
+    pooled_var = (((a.size - 1) * var_a) + ((b.size - 1) * var_b)) / float(dof)
+    if not np.isfinite(pooled_var) or pooled_var <= 0:
+        return float("nan")
+    return float((np.mean(a) - np.mean(b)) / np.sqrt(pooled_var))
+
+
+def _load_source_contrast_config(config: Any) -> SourceContrastConfig:
+    """Load and validate source contrast configuration."""
+    src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
+    if not isinstance(src_cfg, dict):
+        src_cfg = {}
+    contrast_cfg = src_cfg.get("contrast", {}) or {}
+    if not isinstance(contrast_cfg, dict):
+        raise ValueError(
+            "feature_engineering.sourcelocalization.contrast must be a mapping."
+        )
+
+    enabled = _parse_bool_config(
+        contrast_cfg.get("enabled", False),
+        "feature_engineering.sourcelocalization.contrast.enabled",
+        default=False,
+    )
+
+    condition_column = str(contrast_cfg.get("condition_column", "") or "").strip()
+    condition_a = str(contrast_cfg.get("condition_a", "") or "").strip()
+    condition_b = str(contrast_cfg.get("condition_b", "") or "").strip()
+    min_trials_raw = contrast_cfg.get("min_trials_per_condition", 5)
+    emit_welch_stats = _parse_bool_config(
+        contrast_cfg.get("emit_welch_stats", True),
+        "feature_engineering.sourcelocalization.contrast.emit_welch_stats",
+        default=True,
+    )
+    if isinstance(min_trials_raw, bool):
+        raise ValueError(
+            "feature_engineering.sourcelocalization.contrast.min_trials_per_condition must be an integer >= 1."
+        )
+
+    try:
+        min_trials_per_condition = int(min_trials_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.contrast.min_trials_per_condition must be an integer >= 1."
+        ) from exc
+    if min_trials_per_condition < 1:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.contrast.min_trials_per_condition must be >= 1."
+        )
+
+    if enabled:
+        if not condition_column:
+            raise ValueError(
+                "feature_engineering.sourcelocalization.contrast.condition_column is required when "
+                "feature_engineering.sourcelocalization.contrast.enabled=true."
+            )
+        if not condition_a:
+            raise ValueError(
+                "feature_engineering.sourcelocalization.contrast.condition_a is required when "
+                "feature_engineering.sourcelocalization.contrast.enabled=true."
+            )
+        if not condition_b:
+            raise ValueError(
+                "feature_engineering.sourcelocalization.contrast.condition_b is required when "
+                "feature_engineering.sourcelocalization.contrast.enabled=true."
+            )
+        if condition_a == condition_b:
+            raise ValueError(
+                "feature_engineering.sourcelocalization.contrast.condition_a and condition_b must differ."
+            )
+
+    return SourceContrastConfig(
+        enabled=enabled,
+        condition_column=condition_column,
+        condition_a=condition_a,
+        condition_b=condition_b,
+        min_trials_per_condition=min_trials_per_condition,
+        emit_welch_stats=emit_welch_stats,
+    )
+
+
+def _preflight_fmri_trans_requirements(
+    config: Any,
+    *,
+    mode: str,
+    fmri_cfg_raw: Dict[str, Any],
+    subjects_dir: Optional[Path],
+    subject: str,
+    trans_path: Optional[Path],
+) -> None:
+    """Fail fast when fMRI-informed source runs cannot satisfy trans requirements."""
+    contrast_cfg = fmri_cfg_raw.get("contrast", {}) or {}
+    fmri_needed = (
+        str(mode).strip().lower() == "fmri_informed"
+        or bool(fmri_cfg_raw.get("enabled", False))
+        or bool(contrast_cfg.get("enabled", False))
+    )
+    if not fmri_needed:
+        return
+    if trans_path is not None:
+        return
+    if subjects_dir is None:
+        return
+
+    default_trans_path = Path(subjects_dir) / str(subject) / "bem" / f"{subject}-trans.fif"
+    if default_trans_path.exists():
+        return
+
+    from fmri_pipeline.analysis.bem_generation import get_bem_generation_config
+
+    bem_cfg = get_bem_generation_config(config)
+    create_trans = bool(bem_cfg.get("create_trans", False))
+    if create_trans:
+        # When create_trans is enabled, generation can proceed from EEG
+        # digitization/fiducials at runtime.
+        return
+    if not create_trans:
+        raise ValueError(
+            "fMRI-constrained source localization requires feature_engineering.sourcelocalization.trans "
+            "(EEG↔MRI transform .fif). Set path or enable --source-create-trans to auto-generate."
+        )
 
 
 def _load_source_localization_config(
@@ -1326,6 +1521,18 @@ def _load_source_localization_config(
     eeg_task = str(get_config_value(config, "project.task", "")).strip()
     fmri_task = eeg_task
 
+    fmri_cfg_raw = src_cfg.get("fmri", {}) if isinstance(src_cfg, dict) else {}
+    if not isinstance(fmri_cfg_raw, dict):
+        fmri_cfg_raw = {}
+    _preflight_fmri_trans_requirements(
+        config,
+        mode=mode,
+        fmri_cfg_raw=fmri_cfg_raw,
+        subjects_dir=subjects_dir_path,
+        subject=subject,
+        trans_path=trans_path,
+    )
+
     fmri_cfg = _load_fmri_constraint_config(
         config,
         bids_fmri_root=bids_fmri_root,
@@ -1369,7 +1576,153 @@ def _load_source_localization_config(
         eloreta_loose=eloreta_loose,
         eloreta_depth=eloreta_depth,
         fmri_cfg=fmri_cfg,
+        save_stc=bool(src_cfg.get("save_stc", False)),
     )
+
+
+def extract_source_contrast_features(
+    ctx: Any,
+    source_df: Optional[pd.DataFrame],
+    source_cols: Optional[List[str]] = None,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Compute condition contrasts from source-localized per-trial features.
+
+    Returns a one-row, subject-level table where each column is a contrast statistic
+    for one source feature. This avoids pseudo-replication at the trial level.
+    """
+    logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
+    contrast_cfg = _load_source_contrast_config(getattr(ctx, "config", None))
+    if not contrast_cfg.enabled:
+        return pd.DataFrame(), []
+
+    if source_df is None or source_df.empty:
+        raise ValueError(
+            "Source contrast requested, but source localization features are empty. "
+            "Enable and validate source localization first."
+        )
+    if not isinstance(getattr(ctx, "aligned_events", None), pd.DataFrame):
+        raise ValueError(
+            "Source contrast requires trial-aligned events in ctx.aligned_events."
+        )
+    events_df = ctx.aligned_events.reset_index(drop=True)
+    if events_df.empty:
+        raise ValueError("Source contrast requires non-empty aligned events.")
+    if len(events_df) != len(source_df):
+        raise ValueError(
+            "Source contrast requires events and source features to be row-aligned "
+            f"(events={len(events_df)}, source={len(source_df)})."
+        )
+
+    source_features = source_df.reset_index(drop=True)
+    if source_cols:
+        candidate_cols = [str(col) for col in source_cols if str(col) in source_features.columns]
+    else:
+        candidate_cols = [str(col) for col in source_features.columns]
+    if not candidate_cols:
+        raise ValueError("Source contrast has no candidate source feature columns.")
+
+    lookup = {str(col).strip().lower(): str(col) for col in events_df.columns}
+    resolved_condition_col = lookup.get(contrast_cfg.condition_column.lower())
+    if resolved_condition_col is None:
+        raise ValueError(
+            "Source contrast condition column was not found in aligned events: "
+            f"{contrast_cfg.condition_column!r}. Available columns: {list(events_df.columns)}"
+        )
+
+    condition_series = events_df[resolved_condition_col]
+    normalized_conditions = condition_series.astype(str).str.strip()
+    normalized_conditions = normalized_conditions.mask(condition_series.isna(), "")
+
+    mask_a = normalized_conditions == contrast_cfg.condition_a
+    mask_b = normalized_conditions == contrast_cfg.condition_b
+    n_a = int(mask_a.sum())
+    n_b = int(mask_b.sum())
+
+    if n_a < contrast_cfg.min_trials_per_condition or n_b < contrast_cfg.min_trials_per_condition:
+        raise ValueError(
+            "Source contrast requires minimum trials per condition, but got "
+            f"{contrast_cfg.condition_a}={n_a}, {contrast_cfg.condition_b}={n_b}, "
+            f"required>={contrast_cfg.min_trials_per_condition}."
+        )
+
+    numeric_features = source_features.loc[:, candidate_cols].apply(pd.to_numeric, errors="coerce")
+    numeric_features = numeric_features.replace([np.inf, -np.inf], np.nan)
+    numeric_features = numeric_features.loc[:, numeric_features.notna().any(axis=0)]
+    if numeric_features.empty:
+        raise ValueError("Source contrast found no numeric source feature columns.")
+
+    cond_a_token = _sanitize_feature_token(contrast_cfg.condition_a)
+    cond_b_token = _sanitize_feature_token(contrast_cfg.condition_b)
+    if cond_a_token == cond_b_token:
+        raise ValueError(
+            "Source contrast condition names collide after sanitization. "
+            "Use condition values that map to distinct tokens."
+        )
+
+    row: Dict[str, float] = {
+        f"sourcecontrast_n_trials_{cond_a_token}": int(n_a),
+        f"sourcecontrast_n_trials_{cond_b_token}": int(n_b),
+    }
+    feature_token_to_original: Dict[str, str] = {}
+
+    for feature_name in numeric_features.columns:
+        feature_token = _sanitize_feature_token(feature_name)
+        previous_name = feature_token_to_original.get(feature_token)
+        if previous_name is not None and previous_name != str(feature_name):
+            raise ValueError(
+                "Source contrast feature naming collision after sanitization: "
+                f"{previous_name!r} and {feature_name!r} both map to token {feature_token!r}."
+            )
+        feature_token_to_original[feature_token] = str(feature_name)
+        values_a = numeric_features.loc[mask_a, feature_name].dropna().to_numpy(dtype=float)
+        values_b = numeric_features.loc[mask_b, feature_name].dropna().to_numpy(dtype=float)
+
+        mean_a = float(np.nanmean(values_a)) if values_a.size else float("nan")
+        mean_b = float(np.nanmean(values_b)) if values_b.size else float("nan")
+        delta = mean_a - mean_b if np.isfinite(mean_a) and np.isfinite(mean_b) else float("nan")
+        cohen_d = _cohen_d_unpaired(values_a, values_b)
+
+        prefix = f"sourcecontrast_{feature_token}"
+        row[f"{prefix}_mean_{cond_a_token}"] = mean_a
+        row[f"{prefix}_mean_{cond_b_token}"] = mean_b
+        row[f"{prefix}_delta_{cond_a_token}_minus_{cond_b_token}"] = delta
+        row[f"{prefix}_cohen_d_{cond_a_token}_vs_{cond_b_token}"] = cohen_d
+
+        if contrast_cfg.emit_welch_stats:
+            if values_a.size >= 2 and values_b.size >= 2:
+                t_stat, p_val = stats.ttest_ind(
+                    values_a,
+                    values_b,
+                    equal_var=False,
+                    nan_policy="omit",
+                )
+                row[f"{prefix}_welch_t"] = float(t_stat)
+                row[f"{prefix}_welch_p"] = float(p_val)
+            else:
+                row[f"{prefix}_welch_t"] = float("nan")
+                row[f"{prefix}_welch_p"] = float("nan")
+
+    contrast_df = pd.DataFrame([row])
+    contrast_df.attrs["feature_granularity"] = "subject"
+    contrast_df.attrs["condition_column"] = resolved_condition_col
+    contrast_df.attrs["condition_a"] = contrast_cfg.condition_a
+    contrast_df.attrs["condition_b"] = contrast_cfg.condition_b
+    contrast_df.attrs["min_trials_per_condition"] = int(contrast_cfg.min_trials_per_condition)
+    contrast_df.attrs["source_contrast_enabled"] = True
+    contrast_df.attrs["statistical_scope"] = "within_subject_trial_level_descriptive"
+
+    logger.info(
+        "Source contrast: %d columns computed for '%s' vs '%s' (%s=%d, %s=%d).",
+        int(contrast_df.shape[1]),
+        contrast_cfg.condition_a,
+        contrast_cfg.condition_b,
+        contrast_cfg.condition_a,
+        n_a,
+        contrast_cfg.condition_b,
+        n_b,
+    )
+    return contrast_df, list(contrast_df.columns)
 
 
 ###################################################################
@@ -1602,6 +1955,7 @@ def extract_source_localization_features(
             subjects_dir=src_cfg.subjects_dir,
             config=config,
             logger_instance=logger,
+            eeg_info=epochs.info,
         )
 
         if fmri_cfg.stats_map_path is None:
@@ -1657,7 +2011,11 @@ def extract_source_localization_features(
                 pick_ori=None,
                 logger=logger,
             )
-        roi_data, label_names = _extract_roi_timecourses_from_vertex_indices(stcs, roi_indices)
+        roi_data, label_names = _extract_roi_timecourses_from_vertex_indices(
+            stcs,
+            roi_indices,
+            logger=logger,
+        )
         if roi_data.size == 0 or not label_names:
             logger.warning("fMRI-constrained source localization produced no ROI time courses.")
             return pd.DataFrame(), []
@@ -1774,6 +2132,52 @@ def extract_source_localization_features(
             for epoch_idx in range(n_epochs):
                 records[epoch_idx][col_name] = mean_env[epoch_idx, roi_idx]
     
+    if src_cfg.save_stc and hasattr(ctx, "aligned_events") and ctx.aligned_events is not None:
+        from eeg_pipeline.utils.data.columns import find_predictor_column_in_events
+        cond_col = find_predictor_column_in_events(ctx.aligned_events, ctx.config)
+        
+        # fallback if not found
+        if not cond_col and "condition" in ctx.aligned_events.columns:
+            cond_col = "condition"
+            
+        if cond_col and cond_col in ctx.aligned_events.columns:
+            if logger:
+                logger.info(f"Computing and saving condition-averaged band power STCs based on column '{cond_col}'...")
+            
+            out_dir = ctx.deriv_root / "source_estimates" / f"sub-{ctx.subject}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            
+            conditions_list = ctx.aligned_events[cond_col].unique()
+            for cond in conditions_list:
+                if pd.isna(cond): continue
+                
+                cond_mask = (ctx.aligned_events[cond_col] == cond).values
+                cond_indices = np.where(cond_mask)[0]
+                if len(cond_indices) == 0: continue
+                
+                # shape (epochs, vertices, times)
+                cond_stc_data = np.stack([stcs[idx].data for idx in cond_indices], axis=0) 
+                
+                for band in bands:
+                    if band not in freq_bands: continue
+                    fmin_b, fmax_b = freq_bands[band]
+                    
+                    # Compute power per epoch per vertex
+                    power_stc = _compute_roi_power(cond_stc_data, sfreq, fmin_b, fmax_b) # returns (n_epochs, n_vertices)
+                    mean_power = np.nanmean(power_stc, axis=0) # shape (n_vertices,)
+                    
+                    out_stc = stcs[0].copy()
+                    out_stc.data = mean_power[:, np.newaxis]
+                    out_stc.tmin = 0.0
+                    out_stc.tstep = 1.0
+                    if hasattr(out_stc, "times"):
+                        out_stc.times = np.array([0.0])
+                    
+                    # MNE automatically appends appropriate extension like -vl.stc or -lh.stc
+                    safe_cond = str(cond).replace(" ", "_").replace("/", "_")
+                    stc_name = out_dir / f"sub-{ctx.subject}_task-{ctx.task}_cond-{safe_cond}_band-{band}_{src_cfg.method}"
+                    out_stc.save(str(stc_name), overwrite=True)
+
     features_df = pd.DataFrame(records)
     feature_cols = list(features_df.columns)
     features_df.attrs["method"] = str(src_cfg.method)
@@ -1948,7 +2352,7 @@ def extract_source_connectivity_features(
         label_names = [l.name for l in labels]
 
     n_rois = len(label_names)
-    if n_rois < 2:
+    if not fmri_cfg.enabled and n_rois < 2:
         logger.warning("Need at least 2 ROIs for connectivity")
         return pd.DataFrame(), []
     
@@ -1988,9 +2392,22 @@ def extract_source_connectivity_features(
             )
 
         if fmri_cfg.enabled:
-            roi_data, _ = _extract_roi_timecourses_from_vertex_indices(stcs, roi_indices)
+            roi_data, _mapped_label_names = _extract_roi_timecourses_from_vertex_indices(
+                stcs,
+                roi_indices,
+                logger=logger,
+            )
         else:
             roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
+
+        n_rois_band = int(roi_data.shape[1]) if np.ndim(roi_data) >= 2 else 0
+        if n_rois_band < 2:
+            logger.warning(
+                "Need at least 2 surviving ROIs for source connectivity; got %d for band %s.",
+                n_rois_band,
+                band,
+            )
+            continue
 
         if not _validate_source_connectivity_duration(
             n_times=int(roi_data.shape[-1]) if np.ndim(roi_data) >= 3 else 0,
@@ -2014,7 +2431,7 @@ def extract_source_connectivity_features(
                 )
                 con_matrix = con.combine().get_data(output="dense")[:, :, 0]
                 
-                triu_idx = np.triu_indices(n_rois, k=1)
+                triu_idx = np.triu_indices(n_rois_band, k=1)
                 mean_conn = np.nanmean(con_matrix[triu_idx])
                 
                 col_name = f"src_{src_cfg.method}_{band}_aec_global"
@@ -2040,7 +2457,7 @@ def extract_source_connectivity_features(
                 )
                 continue
 
-            edge_indices = np.triu_indices(n_rois, k=1)
+            edge_indices = np.triu_indices(n_rois_band, k=1)
             if edge_indices[0].size < 1:
                 continue
 
@@ -2058,7 +2475,11 @@ def extract_source_connectivity_features(
             )
 
             con_data = np.asarray(con.get_data(), dtype=float)
-            if con_data.ndim >= 3 and con_data.shape[0] == n_rois and con_data.shape[1] == n_rois:
+            if (
+                con_data.ndim >= 3
+                and con_data.shape[0] == n_rois_band
+                and con_data.shape[1] == n_rois_band
+            ):
                 edge_values = con_data[:, :, 0][edge_indices]
             elif con_data.ndim == 2:
                 edge_values = con_data[:, 0]

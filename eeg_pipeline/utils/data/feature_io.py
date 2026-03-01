@@ -195,6 +195,7 @@ class FeatureBundle:
     connectivity_df: Optional[pd.DataFrame] = None
     directed_connectivity_df: Optional[pd.DataFrame] = None
     source_localization_df: Optional[pd.DataFrame] = None
+    source_contrast_df: Optional[pd.DataFrame] = None
     aperiodic_df: Optional[pd.DataFrame] = None
     erp_df: Optional[pd.DataFrame] = None
     pac_df: Optional[pd.DataFrame] = None
@@ -337,6 +338,7 @@ def load_feature_bundle(
 
     bundle.directed_connectivity_df = _load("features_directedconnectivity", "directedconnectivity")
     bundle.source_localization_df = _load("features_sourcelocalization", "sourcelocalization")
+    bundle.source_contrast_df = _load("features_sourcecontrast", "sourcecontrast")
     bundle.aperiodic_df = _load("features_aperiodic", "aperiodic")
     bundle.erp_df = _load("features_erp", "erp")
     bundle.pac_df = _load("features_pac", "pac")
@@ -735,6 +737,8 @@ def save_all_features(
     dconn_cols: Optional[List[str]] = None,
     source_df: Optional[pd.DataFrame] = None,
     source_cols: Optional[List[str]] = None,
+    source_contrast_df: Optional[pd.DataFrame] = None,
+    source_contrast_cols: Optional[List[str]] = None,
     feature_qc: Optional[Dict[str, Any]] = None,
     suffix: Optional[str] = None,
 ) -> pd.DataFrame:
@@ -793,6 +797,7 @@ def save_all_features(
         (quality_df, quality_cols, "features_quality", "quality metrics"),
         (dconn_df, dconn_cols, "features_directedconnectivity", "directed connectivity features (PSI, DTF, PDC)"),
         (source_df, source_cols, "features_sourcelocalization", "source localization features (LCMV, eLORETA)"),
+        (source_contrast_df, source_contrast_cols, "features_sourcecontrast", "source condition-contrast features"),
     ]
 
     for df, cols, base_name, description in feature_save_configs:

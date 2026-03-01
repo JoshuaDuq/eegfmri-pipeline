@@ -882,6 +882,36 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.sourceLocMindistMm = f
 			}
 		}},
+		{key: "feature_engineering.sourcelocalization.contrast.enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocContrastEnabled = b
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.contrast.condition_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocContrastCondition = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.contrast.condition_a", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocContrastA = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.contrast.condition_b", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocContrastB = s
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.contrast.min_trials_per_condition", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.sourceLocContrastMinTrials = n
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.contrast.emit_welch_stats", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocContrastWelchStats = b
+			}
+		}},
 		{key: "feature_engineering.sourcelocalization.reg", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
 				m.sourceLocReg = f
@@ -900,6 +930,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "feature_engineering.sourcelocalization.depth", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
 				m.sourceLocDepth = f
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.save_stc", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.sourceLocSaveStc = b
 			}
 		}},
 		{key: "feature_engineering.sourcelocalization.fmri.enabled", apply: func(v interface{}) {

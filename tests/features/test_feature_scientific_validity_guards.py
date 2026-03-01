@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +22,10 @@ from eeg_pipeline.analysis.features.source_localization import (
     _compute_roi_power,
     _extract_roi_timecourses,
     _extract_roi_timecourses_from_vertex_indices,
+    _load_source_contrast_config,
+    _load_source_localization_config,
     extract_source_connectivity_features,
+    extract_source_contrast_features,
     extract_source_localization_features,
 )
 from eeg_pipeline.types import BandData, PrecomputedData, PrecomputedQC, TimeWindows
@@ -186,6 +190,44 @@ class TestScientificValidityGuards(unittest.TestCase):
                     connectivity_method="wpli",
                 )
 
+    def test_source_localization_preflights_missing_trans_without_auto_create(self):
+        fs_root = Path(tempfile.mkdtemp())
+        (fs_root / "sub-0001" / "bem").mkdir(parents=True, exist_ok=True)
+
+        config = DotConfig(
+            {
+                "project": {"task": "thermalactive"},
+                "paths": {
+                    "bids_root": str(fs_root / "bids"),
+                    "deriv_root": str(fs_root / "derivatives"),
+                },
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "mode": "fmri_informed",
+                        "method": "lcmv",
+                        "subjects_dir": str(fs_root),
+                        "fmri": {
+                            "enabled": True,
+                            "contrast": {"enabled": True},
+                        },
+                        "bem_generation": {
+                            "create_trans": False,
+                            "allow_identity_trans": False,
+                        },
+                    }
+                },
+            }
+        )
+        ctx = SimpleNamespace(subject="0001")
+
+        with patch(
+            "eeg_pipeline.analysis.features.source_localization._load_fmri_constraint_config"
+        ) as mock_load_fmri_cfg:
+            with self.assertRaisesRegex(ValueError, "requires feature_engineering.sourcelocalization.trans"):
+                _load_source_localization_config(ctx, config, method="lcmv")
+
+        mock_load_fmri_cfg.assert_not_called()
+
     def test_source_localization_skips_band_when_duration_too_short(self):
         n_epochs = 4
         roi_data = np.random.default_rng(23).standard_normal((n_epochs, 2, 20))  # 0.2 s @ 100 Hz
@@ -313,6 +355,96 @@ class TestScientificValidityGuards(unittest.TestCase):
                     connectivity_method="wpli",
                 )
 
+    def test_source_contrast_config_rejects_non_boolean_emit_welch_stats(self):
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "contrast": {
+                            "enabled": True,
+                            "condition_column": "trial_type",
+                            "condition_a": "A",
+                            "condition_b": "B",
+                            "emit_welch_stats": "false",
+                        }
+                    }
+                }
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "emit_welch_stats"):
+            _load_source_contrast_config(cfg)
+
+    def test_source_contrast_extracts_subject_level_row_without_welch(self):
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "contrast": {
+                            "enabled": True,
+                            "condition_column": "trial_type",
+                            "condition_a": "A",
+                            "condition_b": "B",
+                            "min_trials_per_condition": 2,
+                            "emit_welch_stats": False,
+                        }
+                    }
+                }
+            }
+        )
+        ctx = SimpleNamespace(
+            config=cfg,
+            aligned_events=pd.DataFrame({"trial_type": ["A", "A", "B", "B"]}),
+            logger=logging.getLogger("src-contrast-no-welch"),
+        )
+        source_df = pd.DataFrame({"src_full_lcmv_alpha_global_power": [1.0, 2.0, 3.0, 4.0]})
+
+        contrast_df, contrast_cols = extract_source_contrast_features(
+            ctx,
+            source_df,
+            list(source_df.columns),
+        )
+
+        self.assertEqual(len(contrast_df), 1)
+        self.assertIn(
+            "sourcecontrast_src_full_lcmv_alpha_global_power_delta_A_minus_B",
+            contrast_cols,
+        )
+        self.assertNotIn("sourcecontrast_src_full_lcmv_alpha_global_power_welch_t", contrast_cols)
+        self.assertEqual(int(contrast_df["sourcecontrast_n_trials_A"].iloc[0]), 2)
+        self.assertEqual(int(contrast_df["sourcecontrast_n_trials_B"].iloc[0]), 2)
+
+    def test_source_contrast_errors_on_feature_token_collision(self):
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "contrast": {
+                            "enabled": True,
+                            "condition_column": "trial_type",
+                            "condition_a": "A",
+                            "condition_b": "B",
+                            "min_trials_per_condition": 2,
+                            "emit_welch_stats": False,
+                        }
+                    }
+                }
+            }
+        )
+        ctx = SimpleNamespace(
+            config=cfg,
+            aligned_events=pd.DataFrame({"trial_type": ["A", "A", "B", "B"]}),
+            logger=logging.getLogger("src-contrast-token-collision"),
+        )
+        source_df = pd.DataFrame(
+            {
+                "src-a": [1.0, 1.0, 1.0, 1.0],
+                "src a": [2.0, 2.0, 2.0, 2.0],
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "naming collision"):
+            extract_source_contrast_features(ctx, source_df, list(source_df.columns))
+
     def test_eloreta_rejects_normal_orientation_for_volume_sources(self):
         fwd = {"src": [{"type": "vol"}]}
         with self.assertRaisesRegex(ValueError, "pick_ori='normal'"):
@@ -364,6 +496,44 @@ class TestScientificValidityGuards(unittest.TestCase):
                 stcs=[stc],
                 roi_indices={"roi1": [2]},
             )
+
+    def test_fmri_roi_vertex_mapping_drops_empty_rois_when_others_survive(self):
+        stc_a = SimpleNamespace(
+            data=np.array(
+                [
+                    [1.0, 3.0],
+                    [2.0, 4.0],
+                    [5.0, 7.0],
+                ],
+                dtype=float,
+            ),
+            vertices=[np.array([0, 1, 2], dtype=int)],
+        )
+        stc_b = SimpleNamespace(
+            data=np.array(
+                [
+                    [2.0, 4.0],
+                    [4.0, 6.0],
+                    [6.0, 8.0],
+                ],
+                dtype=float,
+            ),
+            vertices=[np.array([0, 1, 2], dtype=int)],
+        )
+
+        roi_data, roi_names = _extract_roi_timecourses_from_vertex_indices(
+            stcs=[stc_a, stc_b],
+            roi_indices={
+                "roi_keep": [1, 2],
+                "roi_drop": [99],
+            },
+            logger=logging.getLogger("src-vertex-partial"),
+        )
+
+        self.assertEqual(roi_names, ["roi_keep"])
+        self.assertEqual(tuple(roi_data.shape), (2, 1, 2))
+        np.testing.assert_allclose(roi_data[0, 0, :], np.array([3.5, 5.5], dtype=float))
+        np.testing.assert_allclose(roi_data[1, 0, :], np.array([5.0, 7.0], dtype=float))
 
     def test_tfr_baseline_validation_is_strict_by_default(self):
         tfr = _TFRStub(n_epochs=2, times=np.array([0.0, 0.1], dtype=float))

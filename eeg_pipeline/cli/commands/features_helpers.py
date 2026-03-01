@@ -203,6 +203,22 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         src_cfg["bem"] = args.source_bem
     if getattr(args, "source_mindist_mm", None) is not None:
         src_cfg["mindist_mm"] = args.source_mindist_mm
+    if getattr(args, "source_save_stc", None) is not None:
+        src_cfg["save_stc"] = args.source_save_stc
+
+    contrast_cfg = src_cfg.setdefault("contrast", {})
+    if getattr(args, "source_contrast_enabled", None) is not None:
+        contrast_cfg["enabled"] = args.source_contrast_enabled
+    if getattr(args, "source_contrast_condition_column", None) is not None:
+        contrast_cfg["condition_column"] = args.source_contrast_condition_column
+    if getattr(args, "source_contrast_condition_a", None) is not None:
+        contrast_cfg["condition_a"] = args.source_contrast_condition_a
+    if getattr(args, "source_contrast_condition_b", None) is not None:
+        contrast_cfg["condition_b"] = args.source_contrast_condition_b
+    if getattr(args, "source_contrast_min_trials_per_condition", None) is not None:
+        contrast_cfg["min_trials_per_condition"] = args.source_contrast_min_trials_per_condition
+    if getattr(args, "source_contrast_welch_stats", None) is not None:
+        contrast_cfg["emit_welch_stats"] = args.source_contrast_welch_stats
 
     bem_cfg = src_cfg.setdefault("bem_generation", {})
     if getattr(args, "source_create_trans", None) is not None:
@@ -242,22 +258,21 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         fmri_cfg["max_total_voxels"] = args.source_fmri_max_total_voxels
     if getattr(args, "source_fmri_random_seed", None) is not None:
         fmri_cfg["random_seed"] = args.source_fmri_random_seed
-    
-    time_windows_cfg = fmri_cfg.setdefault("time_windows", {})
-    window_a_cfg = time_windows_cfg.setdefault("window_a", {})
-    window_b_cfg = time_windows_cfg.setdefault("window_b", {})
-    if getattr(args, "source_fmri_window_a_name", None) is not None:
-        window_a_cfg["name"] = args.source_fmri_window_a_name
-    if getattr(args, "source_fmri_window_a_tmin", None) is not None:
-        window_a_cfg["tmin"] = args.source_fmri_window_a_tmin
-    if getattr(args, "source_fmri_window_a_tmax", None) is not None:
-        window_a_cfg["tmax"] = args.source_fmri_window_a_tmax
-    if getattr(args, "source_fmri_window_b_name", None) is not None:
-        window_b_cfg["name"] = args.source_fmri_window_b_name
-    if getattr(args, "source_fmri_window_b_tmin", None) is not None:
-        window_b_cfg["tmin"] = args.source_fmri_window_b_tmin
-    if getattr(args, "source_fmri_window_b_tmax", None) is not None:
-        window_b_cfg["tmax"] = args.source_fmri_window_b_tmax
+
+    source_fmri_window_args = (
+        getattr(args, "source_fmri_window_a_name", None),
+        getattr(args, "source_fmri_window_a_tmin", None),
+        getattr(args, "source_fmri_window_a_tmax", None),
+        getattr(args, "source_fmri_window_b_name", None),
+        getattr(args, "source_fmri_window_b_tmin", None),
+        getattr(args, "source_fmri_window_b_tmax", None),
+    )
+    if any(value is not None for value in source_fmri_window_args):
+        raise ValueError(
+            "Source feature computation does not support --source-fmri-window-* arguments. "
+            "Remove these flags from the features command. "
+            "fMRI time-window configuration is unsupported for source feature computation."
+        )
 
     contrast_cfg = fmri_cfg.setdefault("contrast", {})
     if getattr(args, "source_fmri_contrast_enabled", None) is not None:

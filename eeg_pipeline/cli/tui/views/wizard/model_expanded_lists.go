@@ -101,6 +101,13 @@ func (m Model) getExpandedListLength() int {
 			return 0
 		}
 		return len(m.GetDiscoveredColumnValues(m.connConditionColumn))
+	case expandedSourceLocContrastColumn:
+		return len(m.GetAvailableColumns())
+	case expandedSourceLocContrastValueA, expandedSourceLocContrastValueB:
+		if strings.TrimSpace(m.sourceLocContrastCondition) == "" {
+			return 0
+		}
+		return len(m.GetDiscoveredColumnValues(m.sourceLocContrastCondition))
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
 		return len(m.fmriDiscoveredColumns)
 	case expandedFmriCondAValue:
@@ -336,6 +343,8 @@ func (m Model) getExpandedListItems() []string {
 		return m.mlFeatureStatsOptions()
 	case expandedItpcConditionColumn:
 		return m.GetAvailableColumns()
+	case expandedSourceLocContrastColumn:
+		return m.GetAvailableColumns()
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
 		return m.fmriDiscoveredColumns
 	case expandedFmriCondAValue:
@@ -496,6 +505,11 @@ func (m Model) getExpandedListItems() []string {
 			return nil
 		}
 		return m.GetDiscoveredColumnValues(m.connConditionColumn)
+	case expandedSourceLocContrastValueA, expandedSourceLocContrastValueB:
+		if strings.TrimSpace(m.sourceLocContrastCondition) == "" {
+			return nil
+		}
+		return m.GetDiscoveredColumnValues(m.sourceLocContrastCondition)
 	case expandedBehaviorScatterFeatures:
 		return behaviorScatterFeatureTypes
 	case expandedBehaviorScatterColumns:
@@ -905,6 +919,12 @@ func (m *Model) handleExpandedListToggle() {
 		m.connConditionValues = "" // Reset values when column changes
 		m.expandedOption = expandedNone
 		m.subCursor = 0
+	case expandedSourceLocContrastColumn:
+		m.sourceLocContrastCondition = selectedItem
+		m.sourceLocContrastA = ""
+		m.sourceLocContrastB = ""
+		m.expandedOption = expandedNone
+		m.subCursor = 0
 	case expandedFmriCondAColumn:
 		m.sourceLocFmriCondAColumn = selectedItem
 		m.sourceLocFmriCondAValue = "" // Reset value when column changes
@@ -1205,6 +1225,14 @@ func (m *Model) handleExpandedListToggle() {
 		m.toggleColumnValue(selectedItem, &m.itpcConditionValues)
 	case expandedConnConditionValues:
 		m.toggleColumnValue(selectedItem, &m.connConditionValues)
+	case expandedSourceLocContrastValueA:
+		m.sourceLocContrastA = selectedItem
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+	case expandedSourceLocContrastValueB:
+		m.sourceLocContrastB = selectedItem
+		m.expandedOption = expandedNone
+		m.subCursor = 0
 
 	case expandedBehaviorScatterFeatures:
 		if m.editingPlotID != "" {
@@ -1371,6 +1399,8 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optItpcConditionColumn
 	case expandedConnConditionColumn:
 		return opt == optConnConditionColumn
+	case expandedSourceLocContrastColumn:
+		return opt == optSourceLocContrastConditionColumn
 	case expandedFmriCondAColumn:
 		return opt == optSourceLocFmriCondAColumn
 	case expandedFmriCondAValue:
@@ -1415,6 +1445,10 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optItpcConditionValues
 	case expandedConnConditionValues:
 		return opt == optConnConditionValues
+	case expandedSourceLocContrastValueA:
+		return opt == optSourceLocContrastConditionA
+	case expandedSourceLocContrastValueB:
+		return opt == optSourceLocContrastConditionB
 	case expandedSourceLocFmriStimPhases:
 		return opt == optSourceLocFmriStimPhasesToModel
 	case expandedSourceLocFmriPhaseColumn:
@@ -1512,6 +1546,8 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.itpcConditionColumn == item
 	case expandedConnConditionColumn:
 		return m.connConditionColumn == item
+	case expandedSourceLocContrastColumn:
+		return m.sourceLocContrastCondition == item
 	case expandedFmriCondAColumn:
 		return m.sourceLocFmriCondAColumn == item
 	case expandedFmriCondAValue:
@@ -1520,6 +1556,10 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.sourceLocFmriCondBColumn == item
 	case expandedFmriCondBValue:
 		return m.sourceLocFmriCondBValue == item
+	case expandedSourceLocContrastValueA:
+		return m.sourceLocContrastA == item
+	case expandedSourceLocContrastValueB:
+		return m.sourceLocContrastB == item
 	case expandedSourceLocFmriStimPhases:
 		if item == "(none)" {
 			return strings.TrimSpace(m.sourceLocFmriStimPhasesToModel) == ""

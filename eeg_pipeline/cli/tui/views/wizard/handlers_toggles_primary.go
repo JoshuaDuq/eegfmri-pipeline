@@ -1,6 +1,8 @@
 package wizard
 
 import (
+	"strings"
+
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/types"
 )
@@ -271,8 +273,55 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSourceLocDepth:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optSourceLocSaveStc:
+		m.sourceLocSaveStc = !m.sourceLocSaveStc
+		m.useDefaultAdvanced = false
 	case optSourceLocConnMethod:
 		m.sourceLocConnMethod = (m.sourceLocConnMethod + 1) % 3 // 0: aec, 1: wpli, 2: plv
+		m.useDefaultAdvanced = false
+	case optSourceLocContrastEnabled:
+		m.sourceLocContrastEnabled = !m.sourceLocContrastEnabled
+		m.useDefaultAdvanced = false
+	case optSourceLocContrastConditionColumn:
+		if len(m.GetAvailableColumns()) > 0 {
+			m.expandedOption = expandedSourceLocContrastColumn
+			m.subCursor = 0
+		} else {
+			m.ShowToast("No discovered metadata columns available", "warning")
+			return
+		}
+		m.useDefaultAdvanced = false
+	case optSourceLocContrastConditionA:
+		if strings.TrimSpace(m.sourceLocContrastCondition) == "" {
+			m.ShowToast("Select a contrast column first", "warning")
+			return
+		}
+		if vals := m.GetDiscoveredColumnValues(m.sourceLocContrastCondition); len(vals) > 0 {
+			m.expandedOption = expandedSourceLocContrastValueA
+			m.subCursor = 0
+		} else {
+			m.ShowToast("No discovered values for selected contrast column", "warning")
+			return
+		}
+		m.useDefaultAdvanced = false
+	case optSourceLocContrastConditionB:
+		if strings.TrimSpace(m.sourceLocContrastCondition) == "" {
+			m.ShowToast("Select a contrast column first", "warning")
+			return
+		}
+		if vals := m.GetDiscoveredColumnValues(m.sourceLocContrastCondition); len(vals) > 0 {
+			m.expandedOption = expandedSourceLocContrastValueB
+			m.subCursor = 0
+		} else {
+			m.ShowToast("No discovered values for selected contrast column", "warning")
+			return
+		}
+		m.useDefaultAdvanced = false
+	case optSourceLocContrastMinTrials:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocContrastWelchStats:
+		m.sourceLocContrastWelchStats = !m.sourceLocContrastWelchStats
 		m.useDefaultAdvanced = false
 	case optSourceLocSubject:
 		m.startTextEdit(textFieldSourceLocSubject)

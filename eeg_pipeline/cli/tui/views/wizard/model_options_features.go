@@ -302,7 +302,19 @@ func (m Model) getFeaturesOptions() []optionType {
 			} else { // eLORETA
 				options = append(options, optSourceLocSnr, optSourceLocLoose, optSourceLocDepth)
 			}
+			options = append(options, optSourceLocSaveStc)
 			options = append(options, optSourceLocConnMethod)
+			options = append(options, optSourceLocContrastEnabled)
+			if m.sourceLocContrastEnabled {
+				options = append(
+					options,
+					optSourceLocContrastConditionColumn,
+					optSourceLocContrastConditionA,
+					optSourceLocContrastConditionB,
+					optSourceLocContrastMinTrials,
+					optSourceLocContrastWelchStats,
+				)
+			}
 
 			// fMRI-informed mode (mode == 1) requires additional paths
 			if m.sourceLocMode == 1 {
@@ -368,9 +380,6 @@ func (m Model) getFeaturesOptions() []optionType {
 							options = append(options, optSourceLocFmriClusterPThreshold)
 						}
 						options = append(options, optSourceLocFmriOutputType, optSourceLocFmriResampleToFS)
-						// fMRI-specific time windows
-						options = append(options, optSourceLocFmriWindowAName, optSourceLocFmriWindowATmin, optSourceLocFmriWindowATmax)
-						options = append(options, optSourceLocFmriWindowBName, optSourceLocFmriWindowBTmin, optSourceLocFmriWindowBTmax)
 					}
 				}
 			}

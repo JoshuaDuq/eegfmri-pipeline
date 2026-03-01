@@ -24,7 +24,9 @@ class TestFeatureHelpers(unittest.TestCase):
         f = SimpleNamespace(
             pow_df=None, pow_cols=[], baseline_df=None, baseline_cols=[],
             conn_df=None, conn_cols=[], dconn_df=None, dconn_cols=[],
-            source_df=None, source_cols=[], aper_df=None, aper_cols=[],
+            source_df=None, source_cols=[],
+            source_contrast_df=None, source_contrast_cols=[],
+            aper_df=None, aper_cols=[],
             erp_df=None, erp_cols=[], phase_df=None, phase_cols=[],
             itpc_trial_df=None, itpc_trial_cols=[], pac_df=None,
             pac_trials_df=None, pac_time_df=None, comp_df=None, comp_cols=[],
@@ -112,6 +114,7 @@ class TestFeatureHelpers(unittest.TestCase):
             "aper_df": pd.DataFrame(), "aper_cols": [],
             "dconn_df": pd.DataFrame(), "dconn_cols": [],
             "source_df": pd.DataFrame(), "source_cols": [],
+            "source_contrast_df": pd.DataFrame(), "source_contrast_cols": [],
             "erp_df": pd.DataFrame(), "erp_cols": [],
             "itpc_df": pd.DataFrame(), "itpc_cols": [],
             "itpc_trial_df": pd.DataFrame(), "itpc_trial_cols": [],
@@ -196,6 +199,7 @@ class TestFeatureHelpers(unittest.TestCase):
             "aper_df": pd.DataFrame({"ap": [1]}), "aper_cols": ["ap"],
             "dconn_df": pd.DataFrame(), "dconn_cols": [],
             "source_df": pd.DataFrame(), "source_cols": [],
+            "source_contrast_df": pd.DataFrame(), "source_contrast_cols": [],
             "erp_df": pd.DataFrame(), "erp_cols": [],
             "itpc_df": pd.DataFrame(), "itpc_cols": [],
             "itpc_trial_df": pd.DataFrame(), "itpc_trial_cols": [],
@@ -306,6 +310,8 @@ class TestFeatureHelpers(unittest.TestCase):
             "dconn_cols": ["dc"],
             "source_df": pd.DataFrame({"s": [1]}),
             "source_cols": ["s"],
+            "source_contrast_df": pd.DataFrame(),
+            "source_contrast_cols": [],
             "aper_df": pd.DataFrame({"ap": [1]}),
             "aper_cols": ["ap"],
             "erp_df": pd.DataFrame({"e": [1]}),
@@ -457,6 +463,8 @@ class TestFeatureHelpers(unittest.TestCase):
             "dconn_cols": ["dc"],
             "source_df": pd.DataFrame({"s": [1]}),
             "source_cols": ["s"],
+            "source_contrast_df": pd.DataFrame(),
+            "source_contrast_cols": [],
             "aper_df": pd.DataFrame({"ap": [1]}),
             "aper_cols": ["ap"],
             "erp_df": pd.DataFrame({"e": [1]}),
@@ -636,6 +644,7 @@ class TestFeatureHelpers(unittest.TestCase):
             "erds_df": df_a,
             "dconn_df": df_a,
             "source_df": df_a,
+            "source_contrast_df": pd.DataFrame(),
         }
 
         extra = _build_extra_blocks(unpacked, features)
@@ -687,6 +696,7 @@ class TestFeatureHelpers(unittest.TestCase):
             "erds_df": pd.DataFrame(),
             "dconn_df": pd.DataFrame(),
             "source_df": pd.DataFrame(),
+            "source_contrast_df": pd.DataFrame(),
             "microstates_df": pd.DataFrame(),
         }
         features = SimpleNamespace(
@@ -921,6 +931,7 @@ class TestFeatureGapfill(unittest.TestCase):
             "aper_df": pd.DataFrame({"ap": [1]}), "aper_cols": ["ap"],
             "dconn_df": pd.DataFrame(), "dconn_cols": [],
             "source_df": pd.DataFrame(), "source_cols": [],
+            "source_contrast_df": pd.DataFrame(), "source_contrast_cols": [],
             "erp_df": pd.DataFrame(), "erp_cols": [],
             "itpc_df": pd.DataFrame(), "itpc_cols": [],
             "itpc_trial_df": pd.DataFrame(), "itpc_trial_cols": [],

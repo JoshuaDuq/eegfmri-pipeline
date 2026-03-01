@@ -72,4 +72,7 @@ const (
 	expandedSourceLocFmriPhaseColumn             = 64
 	expandedSourceLocFmriPhaseScopeColumn        = 65
 	expandedSourceLocFmriPhaseScopeValue         = 66
+	expandedSourceLocContrastColumn              = 67
+	expandedSourceLocContrastValueA              = 68
+	expandedSourceLocContrastValueB              = 69
 )

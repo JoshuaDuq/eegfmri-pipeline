@@ -57,6 +57,7 @@ _FEATURE_TABLE_SPECS: List[Tuple[str, str, List[str], str]] = [
     ("itpc_df", "features_itpc", [".parquet", ".tsv"], "wide"),
     ("temporal_df", "features_temporal", [".parquet", ".tsv"], "wide"),
     ("erp_df", "features_erp", [".parquet", ".tsv"], "wide"),
+    ("sourcelocalization_df", "features_sourcelocalization", [".parquet", ".tsv"], "wide"),
 ]
 
 
@@ -93,6 +94,7 @@ class FeaturePlotContext:
     pac_time_df: Optional[pd.DataFrame] = None
     itpc_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
+    sourcelocalization_df: Optional[pd.DataFrame] = None
     all_features: Optional[pd.DataFrame] = None
 
     window_ranges: Dict[str, Tuple[float, float]] = field(default_factory=dict)
@@ -442,6 +444,7 @@ class FeaturePlotContext:
             self.pac_trials_df,
             self.temporal_df,
             self.quality_df,
+            self.sourcelocalization_df,
         ]
         for df in candidate_dataframes:
             if df is not None and not df.empty:
@@ -462,6 +465,7 @@ class FeaturePlotContext:
             self.bursts_df,
             self.itpc_df,
             self.quality_df,
+            self.sourcelocalization_df,
         ]
         frames = [df for df in merge_candidates if df is not None and not df.empty]
         if not frames:

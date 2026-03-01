@@ -52,6 +52,7 @@ from eeg_pipeline.analysis.features.connectivity import (
     extract_directed_connectivity_from_precomputed,
 )
 from eeg_pipeline.analysis.features.source_localization import (
+    extract_source_contrast_features,
     extract_source_localization_features,
 )
 from eeg_pipeline.analysis.features.preparation import precompute_data
@@ -698,6 +699,7 @@ def _extract_feature_with_error_handling(
     expected_trials: int,
     progress: PipelineProgress,
     *args,
+    expect_trial_aligned: bool = True,
     **kwargs,
 ) -> tuple[Optional[pd.DataFrame], Optional[List[str]], Optional[Any]]:
     """Extract a feature category with standardized error handling and validation."""
@@ -720,7 +722,7 @@ def _extract_feature_with_error_handling(
         df, cols, qc = extraction_result, [], None
 
     if df is not None and not df.empty:
-        if len(df) != expected_trials:
+        if expect_trial_aligned and len(df) != expected_trials:
             raise ValueError(f"{feature_name} length mismatch: {len(df)} vs {expected_trials}")
         ctx.logger.info(
             "  ✓ %s: %d columns × %d trials (%.1fs)",
@@ -730,6 +732,16 @@ def _extract_feature_with_error_handling(
         ctx.logger.info("  – %s: no features produced (%.1fs)", feature_name, elapsed)
 
     return df, cols, qc
+
+
+def _feature_progress_total(feature_categories: List[str]) -> int:
+    """Return the expected number of feature extraction progress steps."""
+    categories = [str(category).strip().lower() for category in (feature_categories or [])]
+    total = len(categories)
+    if "sourcelocalization" in categories:
+        # Source contrast is extracted as an additional step under sourcelocalization.
+        total += 1
+    return max(total, 1)
 
 
 def _apply_spatial_filtering_to_results(
@@ -760,6 +772,9 @@ def _apply_spatial_filtering_to_results(
             setattr(results, df_attr, filtered_df)
             setattr(results, cols_attr, list(filtered_df.columns) if filtered_df is not None else [])
             total_after += filtered_df.shape[1] if filtered_df is not None else 0
+
+    if total_before == 0:
+        return
 
     removed = total_before - total_after
     if removed > 0:
@@ -949,7 +964,11 @@ def extract_all_features(
     else:
         ctx.logger.info("Skipping TFR (not needed for requested categories)")
 
-    progress = PipelineProgress(total=len(ctx.feature_categories), logger=ctx.logger, desc="Features")
+    progress = PipelineProgress(
+        total=_feature_progress_total(ctx.feature_categories),
+        logger=ctx.logger,
+        desc="Features",
+    )
     progress.start()
 
     if "power" in ctx.feature_categories:
@@ -1003,6 +1022,20 @@ def extract_all_features(
         )
         results.source_df = source_df
         results.source_cols = source_cols or []
+
+        source_contrast_df, source_contrast_cols, _ = _extract_feature_with_error_handling(
+            ctx,
+            "source contrast",
+            extract_source_contrast_features,
+            expected_n_trials,
+            progress,
+            ctx,
+            source_df,
+            source_cols,
+            expect_trial_aligned=False,
+        )
+        results.source_contrast_df = source_contrast_df
+        results.source_contrast_cols = source_contrast_cols or []
 
     if "aperiodic" in ctx.feature_categories:
         aper_df, aper_cols, qc_payload = _extract_feature_with_error_handling(
@@ -1189,7 +1222,7 @@ def extract_all_features(
     total_cols = sum(
         getattr(getattr(results, attr, None), "shape", (0, 0))[1]
         for attr in (
-            "pow_df", "conn_df", "dconn_df", "source_df", "aper_df",
+            "pow_df", "conn_df", "dconn_df", "source_df", "source_contrast_df", "aper_df",
             "erp_df", "phase_df", "pac_trials_df", "pac_time_df",
             "comp_df", "bursts_df", "spectral_df", "erds_df",
             "ratios_df", "asymmetry_df", "microstates_df", "quality_df",

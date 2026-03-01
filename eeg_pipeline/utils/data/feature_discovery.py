@@ -35,6 +35,7 @@ STANDARD_FEATURE_FILES = {
     "connectivity": "features_connectivity.parquet",
     "directedconnectivity": "features_directedconnectivity.parquet",
     "sourcelocalization": "features_sourcelocalization.parquet",
+    "sourcecontrast": "features_sourcecontrast.parquet",
     "itpc": "features_itpc.parquet",
     "pac": "features_pac_trials.parquet",
     # Exploratory & QC
@@ -58,6 +59,7 @@ FEATURE_FILE_DISPLAY_NAMES = {
     "connectivity": "Connectivity Features",
     "directedconnectivity": "Directed Connectivity (PSI, DTF, PDC)",
     "sourcelocalization": "Source Localization (LCMV, eLORETA)",
+    "sourcecontrast": "Source Condition Contrasts",
     "itpc": "Inter-Trial Phase Coherence",
     "pac": "Phase-Amplitude Coupling",
     # Exploratory & QC
