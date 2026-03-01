@@ -2133,9 +2133,17 @@ def extract_source_localization_features(
                 records[epoch_idx][col_name] = mean_env[epoch_idx, roi_idx]
     
     if src_cfg.save_stc and hasattr(ctx, "aligned_events") and ctx.aligned_events is not None:
-        from eeg_pipeline.utils.data.columns import find_predictor_column_in_events
-        cond_col = find_predictor_column_in_events(ctx.aligned_events, ctx.config)
+        contrast_cfg = _load_source_contrast_config(getattr(ctx, "config", None))
+        cond_col = contrast_cfg.condition_column if contrast_cfg and getattr(contrast_cfg, "condition_column", None) else None
         
+        if not cond_col:
+            from eeg_pipeline.utils.config.loader import get_config_value
+            from eeg_pipeline.utils.data.columns import find_column_in_events
+            cond_col_candidates = get_config_value(ctx.config, "event_columns.condition", ["condition"])
+            if isinstance(cond_col_candidates, str):
+                cond_col_candidates = [cond_col_candidates]
+            cond_col = find_column_in_events(ctx.aligned_events, cond_col_candidates)
+            
         # fallback if not found
         if not cond_col and "condition" in ctx.aligned_events.columns:
             cond_col = "condition"
@@ -2170,8 +2178,6 @@ def extract_source_localization_features(
                     out_stc.data = mean_power[:, np.newaxis]
                     out_stc.tmin = 0.0
                     out_stc.tstep = 1.0
-                    if hasattr(out_stc, "times"):
-                        out_stc.times = np.array([0.0])
                     
                     # MNE automatically appends appropriate extension like -vl.stc or -lh.stc
                     safe_cond = str(cond).replace(" ", "_").replace("/", "_")
