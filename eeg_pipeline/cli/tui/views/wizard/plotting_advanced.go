@@ -747,6 +747,23 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 	case plotItemConfigFieldConnectivityNetworkTopFraction:
 		value := m.getPlotFieldTextValue(cfg.ConnectivityNetworkTopFraction, "0.0", row, plotItemConfigFieldConnectivityNetworkTopFraction)
 		return []renderLine{m.renderPlotValueLine("network_top_fraction", value, "0.0-1.0 (default: 0.0 = all edges)", focused, labelWidth)}
+	case plotItemConfigFieldSourceSegment:
+		value := m.getPlotFieldTextValue(cfg.SourceSegment, "(all)", row, plotItemConfigFieldSourceSegment)
+		featureGroup := m.getFeatureGroupForPlot(row.plotID)
+		windows := m.GetPlottingComparisonWindows(featureGroup)
+		hint := "Space to select segment · or type manually"
+		if len(windows) > 0 {
+			hint = fmt.Sprintf("Space to select · %d segments", len(windows))
+		}
+		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldSourceSegment
+		lines := []renderLine{m.renderPlotValueLine("source_segment", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(windows) > 0 {
+			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
+				return cfg.SourceSegment == w
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
 	case plotItemConfigFieldSourceHemi:
 		value := m.getPlotFieldTextValue(cfg.SourceHemi, "both", row, plotItemConfigFieldSourceHemi)
 		return []renderLine{m.renderPlotValueLine("source_hemi", value, "lh, rh, or both", focused, labelWidth)}

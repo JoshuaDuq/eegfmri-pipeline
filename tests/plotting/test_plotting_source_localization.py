@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from eeg_pipeline.plotting.features.source_localization import (
+    _resolve_source_views,
     _resolve_fs_subject_name,
     _resolve_volume_source_space,
 )
@@ -89,3 +90,12 @@ def test_resolve_volume_source_space_raises_when_src_missing(tmp_path: Path) -> 
 
     with pytest.raises(FileNotFoundError, match="sub-0000_task-thermalactive_lcmv-src.fif"):
         _resolve_volume_source_space([stc_path])
+
+
+def test_resolve_source_views_maps_long_and_short_names() -> None:
+    assert _resolve_source_views(["lateral", "med", "dorsal"]) == ["lat", "med", "dor"]
+
+
+def test_resolve_source_views_rejects_unknown_values() -> None:
+    with pytest.raises(ValueError, match="Invalid source view"):
+        _resolve_source_views(["lateral", "invalid_view"])

@@ -2023,14 +2023,31 @@ def extract_source_localization_features(
             logger.warning("fMRI-constrained source localization produced no ROI time courses.")
             return pd.DataFrame(), []
     else:
-        if src_cfg.subjects_dir is not None and src_cfg.trans_path is not None and src_cfg.bem_path is not None:
+        trans_path = src_cfg.trans_path
+        bem_path = src_cfg.bem_path
+
+        # Auto-generate or discover BEM/trans if subjects_dir is set but paths aren't.
+        # This makes --source-create-trans/bem work in EEG-only mode (no fMRI constraint needed).
+        if src_cfg.subjects_dir is not None and (trans_path is None or bem_path is None):
+            from fmri_pipeline.analysis.bem_generation import ensure_bem_and_trans_files
+            resolved_trans, _, resolved_bem = ensure_bem_and_trans_files(
+                subject=src_cfg.subject,
+                subjects_dir=src_cfg.subjects_dir,
+                config=config,
+                logger_instance=logger,
+                eeg_info=epochs.info,
+            )
+            trans_path = trans_path or resolved_trans
+            bem_path = bem_path or resolved_bem
+
+        if src_cfg.subjects_dir is not None and trans_path is not None and bem_path is not None:
             fwd, src = _setup_surface_forward_model_configured(
                 epochs.info,
                 subject=src_cfg.subject,
                 subjects_dir=str(src_cfg.subjects_dir),
                 spacing=src_cfg.spacing,
-                trans=str(src_cfg.trans_path),
-                bem=str(src_cfg.bem_path),
+                trans=str(trans_path),
+                bem=str(bem_path),
                 mindist_mm=src_cfg.mindist_mm,
                 logger=logger,
             )
@@ -2158,6 +2175,7 @@ def extract_source_localization_features(
             out_dir = source_localization_estimates_dir(
                 features_dir=deriv_features_path(Path(ctx.deriv_root), str(ctx.subject)),
                 method=str(src_cfg.method),
+                mode=str(src_cfg.mode),
             )
             out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2339,14 +2357,30 @@ def extract_source_connectivity_features(
         labels = None
         label_names = list(roi_indices.keys())
     else:
-        if src_cfg.subjects_dir is not None and src_cfg.trans_path is not None and src_cfg.bem_path is not None:
+        trans_path = src_cfg.trans_path
+        bem_path = src_cfg.bem_path
+
+        # Auto-generate or discover BEM/trans if subjects_dir is set but paths aren't.
+        if src_cfg.subjects_dir is not None and (trans_path is None or bem_path is None):
+            from fmri_pipeline.analysis.bem_generation import ensure_bem_and_trans_files
+            resolved_trans, _, resolved_bem = ensure_bem_and_trans_files(
+                subject=src_cfg.subject,
+                subjects_dir=src_cfg.subjects_dir,
+                config=config,
+                logger_instance=logger,
+                eeg_info=epochs.info,
+            )
+            trans_path = trans_path or resolved_trans
+            bem_path = bem_path or resolved_bem
+
+        if src_cfg.subjects_dir is not None and trans_path is not None and bem_path is not None:
             fwd, src = _setup_surface_forward_model_configured(
                 epochs.info,
                 subject=src_cfg.subject,
                 subjects_dir=str(src_cfg.subjects_dir),
                 spacing=src_cfg.spacing,
-                trans=str(src_cfg.trans_path),
-                bem=str(src_cfg.bem_path),
+                trans=str(trans_path),
+                bem=str(bem_path),
                 mindist_mm=src_cfg.mindist_mm,
                 logger=logger,
             )
@@ -2374,6 +2408,7 @@ def extract_source_connectivity_features(
                 subjects_dir=None,
                 verbose=False,
             )
+
         labels = [l for l in labels if "unknown" not in l.name.lower()]
         if roi_labels is not None:
             labels = [l for l in labels if any(r in l.name for r in roi_labels)]
@@ -2381,6 +2416,7 @@ def extract_source_connectivity_features(
             logger.warning("Need at least 2 ROIs for connectivity")
             return pd.DataFrame(), []
         label_names = [l.name for l in labels]
+
 
     n_rois = len(label_names)
     if not fmri_cfg.enabled and n_rois < 2:

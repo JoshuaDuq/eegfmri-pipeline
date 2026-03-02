@@ -868,9 +868,6 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	ab.addIfNonZero("--connectivity-network-top-fraction", m.plotConnectivityNetworkTopFraction, "%.4f")
 
 	// Source Localization Plotting Overrides
-	ab.addIfNonEmpty("--source-plot-hemi", m.plotSourceHemi)
-	ab.addSpaceListFlag("--source-plot-views", m.plotSourceViews)
-	ab.addIfNonEmpty("--source-plot-cortex", m.plotSourceCortex)
 	ab.addIfNonEmpty("--source-subjects-dir", m.plotSourceSubjectsDir)
 
 	// Selection overrides
@@ -995,15 +992,8 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		if strings.TrimSpace(cfg.ConnectivityNetworkTopFraction) != "" {
 			args = append(args, "--plot-item-config", plotID, "connectivity_network_top_fraction", strings.TrimSpace(cfg.ConnectivityNetworkTopFraction))
 		}
-		if strings.TrimSpace(cfg.SourceHemi) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_hemi", strings.TrimSpace(cfg.SourceHemi))
-		}
-		if strings.TrimSpace(cfg.SourceViewsSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_views")
-			args = append(args, splitSpaceList(cfg.SourceViewsSpec)...)
-		}
-		if strings.TrimSpace(cfg.SourceCortex) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_cortex", strings.TrimSpace(cfg.SourceCortex))
+		if strings.TrimSpace(cfg.SourceSegment) != "" {
+			args = append(args, "--plot-item-config", plotID, "source_segment", strings.TrimSpace(cfg.SourceSegment))
 		}
 		if strings.TrimSpace(cfg.SourceSubjectsDir) != "" {
 			args = append(args, "--plot-item-config", plotID, "source_subjects_dir", strings.TrimSpace(cfg.SourceSubjectsDir))

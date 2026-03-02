@@ -1046,7 +1046,7 @@ func (m *Model) togglePlottingAdvancedOption() {
 			cfg.ItpcSharedColorbar = cycleTriState(cfg.ItpcSharedColorbar)
 			m.plotItemConfigs[row.plotID] = cfg
 			m.useDefaultAdvanced = false
-		case plotItemConfigFieldComparisonWindows, plotItemConfigFieldComparisonSegment, plotItemConfigFieldTopomapWindow:
+		case plotItemConfigFieldComparisonWindows, plotItemConfigFieldComparisonSegment, plotItemConfigFieldTopomapWindow, plotItemConfigFieldSourceSegment:
 			// Open dropdown if windows available for this feature, otherwise text edit
 			featureGroup := m.getFeatureGroupForPlot(row.plotID)
 			windows := m.GetPlottingComparisonWindows(featureGroup)

@@ -772,44 +772,79 @@ def erp_suite(ctx: FeaturePlotContext, saved_files):
 # Source Localization
 ###################################################################
 
+
+def _find_stc_files(out_dir: Path, subject: str, source_method: str) -> list[Path]:
+    """Glob STC files matching both segmented and legacy (no-seg) naming conventions."""
+    patterns = [
+        f"sub-{subject}_*_seg-*_cond-*_band-*_{source_method}-vl.stc",
+        f"sub-{subject}_*_seg-*_cond-*_band-*_{source_method}-lh.stc",
+        f"sub-{subject}_*_cond-*_band-*_{source_method}-vl.stc",
+        f"sub-{subject}_*_cond-*_band-*_{source_method}-lh.stc",
+    ]
+    seen: set[Path] = set()
+    files: list[Path] = []
+    for pattern in patterns:
+        for path in sorted(out_dir.glob(pattern)):
+            if path not in seen and not path.name.startswith("._"):
+                seen.add(path)
+                files.append(path)
+    return files
+
+
 @VisualizationRegistry.register("sourcelocalization")
 def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
     source_dir = ctx.subdir("sourcelocalization")
     source_dir.mkdir(parents=True, exist_ok=True)
 
-    # We retrieve the actual STC files saved during feature extraction.
     stc_plot_enabled = get_config_value(
         ctx.config, "plotting.plots.features.sourcelocalization.plot_stc", True
     )
-    if stc_plot_enabled:
-        source_method = resolve_source_localization_method(ctx.config)
-        out_dir = source_localization_estimates_dir(
+    if not stc_plot_enabled:
+        return
+
+    source_method = resolve_source_localization_method(ctx.config)
+
+    for mode in ("eeg_only", "fmri_informed"):
+        # Check mode-keyed subdir first (new layout).
+        mode_dir = source_localization_estimates_dir(
             features_dir=ctx.features_dir,
             method=source_method,
+            mode=mode,
         )
-        if out_dir.exists():
-            stc_files = sorted(out_dir.glob(f"sub-{ctx.subject}_*_seg-*_cond-*_band-*_{source_method}-vl.stc"))
-            if not stc_files:
-                stc_files = sorted(out_dir.glob(f"sub-{ctx.subject}_*_seg-*_cond-*_band-*_{source_method}-lh.stc"))
+        stc_files = _find_stc_files(mode_dir, ctx.subject, source_method) if mode_dir.exists() else []
 
+        # For eeg_only, also check the legacy flat dir as a fallback.
+        if not stc_files and mode == "eeg_only":
+            legacy_dir = source_localization_estimates_dir(
+                features_dir=ctx.features_dir,
+                method=source_method,
+            )
+            stc_files = _find_stc_files(legacy_dir, ctx.subject, source_method) if legacy_dir.exists() else []
             if stc_files:
-                ctx.logger.info("Plotting 3D Source Localization Brains...")
-                safe_plot(
-                    ctx,
-                    saved_files,
-                    "source_localization_3d",
-                    "sourcelocalization",
-                    None,
-                    plot_source_stc_3d,
-                    subject=ctx.subject,
-                    stc_files=stc_files,
-                    save_dir=source_dir,
-                    config=ctx.config,
-                    logger=ctx.logger,
+                ctx.logger.info(
+                    "Source localization: using legacy flat source_estimates/ dir for eeg_only plotting."
                 )
-            else:
-                raise FileNotFoundError(
-                    "No segmented source-estimate STCs found for source_localization_3d. "
-                    f"Expected files like sub-{ctx.subject}_task-*_seg-*_cond-*_band-*_{source_method}-vl.stc "
-                    f"under {out_dir}."
-                )
+
+        if not stc_files:
+            continue
+
+        catalog_id = (
+            "source_localization_3d_eeg_only"
+            if mode == "eeg_only"
+            else "source_localization_3d_fmri_informed"
+        )
+        ctx.logger.info("Plotting 3D Source Localization Brains (%s, %d files)...", mode, len(stc_files))
+        safe_plot(
+            ctx,
+            saved_files,
+            catalog_id,
+            "sourcelocalization",
+            None,
+            plot_source_stc_3d,
+            subject=ctx.subject,
+            stc_files=stc_files,
+            save_dir=source_dir / mode,
+            config=ctx.config,
+            logger=ctx.logger,
+        )
+

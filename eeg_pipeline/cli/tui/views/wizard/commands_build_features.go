@@ -278,36 +278,36 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			}
 		}
 
-		if m.sourceLocMode == 1 {
-			if strings.TrimSpace(m.sourceLocSubject) != "" {
-				args = append(args, "--source-subject", strings.TrimSpace(m.sourceLocSubject))
+		// Subject-specific anatomy args are valid for both EEG-only and fMRI-informed modes.
+		if strings.TrimSpace(m.sourceLocSubject) != "" {
+			args = append(args, "--source-subject", strings.TrimSpace(m.sourceLocSubject))
+		}
+		if strings.TrimSpace(m.sourceLocSubjectsDir) != "" {
+			args = append(args, "--source-subjects-dir", expandUserPath(strings.TrimSpace(m.sourceLocSubjectsDir)))
+		}
+		if m.sourceLocCreateTrans {
+			args = append(args, "--source-create-trans")
+			if m.sourceLocAllowIdentityTrans {
+				args = append(args, "--source-allow-identity-trans")
 			}
-			if strings.TrimSpace(m.sourceLocSubjectsDir) != "" {
-				args = append(args, "--source-subjects-dir", expandUserPath(strings.TrimSpace(m.sourceLocSubjectsDir)))
-			}
-			if m.sourceLocCreateTrans {
-				args = append(args, "--source-create-trans")
-				if m.sourceLocAllowIdentityTrans {
-					args = append(args, "--source-allow-identity-trans")
-				}
-			}
-			if m.sourceLocCreateBemModel {
-				args = append(args, "--source-create-bem-model")
-			}
-			if m.sourceLocCreateBemSolution {
-				args = append(args, "--source-create-bem-solution")
-			}
-			// If not auto-creating, user must provide paths
-			if !m.sourceLocCreateTrans && strings.TrimSpace(m.sourceLocTrans) != "" {
-				args = append(args, "--source-trans", expandUserPath(strings.TrimSpace(m.sourceLocTrans)))
-			}
-			if !m.sourceLocCreateBemSolution && strings.TrimSpace(m.sourceLocBem) != "" {
-				args = append(args, "--source-bem", expandUserPath(strings.TrimSpace(m.sourceLocBem)))
-			}
-			if m.sourceLocMindistMm != 5.0 {
-				args = append(args, "--source-mindist-mm", fmt.Sprintf("%.1f", m.sourceLocMindistMm))
-			}
+		}
+		if m.sourceLocCreateBemModel {
+			args = append(args, "--source-create-bem-model")
+		}
+		if m.sourceLocCreateBemSolution {
+			args = append(args, "--source-create-bem-solution")
+		}
+		if !m.sourceLocCreateTrans && strings.TrimSpace(m.sourceLocTrans) != "" {
+			args = append(args, "--source-trans", expandUserPath(strings.TrimSpace(m.sourceLocTrans)))
+		}
+		if !m.sourceLocCreateBemSolution && strings.TrimSpace(m.sourceLocBem) != "" {
+			args = append(args, "--source-bem", expandUserPath(strings.TrimSpace(m.sourceLocBem)))
+		}
+		if m.sourceLocMindistMm != 5.0 {
+			args = append(args, "--source-mindist-mm", fmt.Sprintf("%.1f", m.sourceLocMindistMm))
+		}
 
+		if m.sourceLocMode == 1 {
 			fmriEnabled := m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != ""
 			if fmriEnabled {
 				args = append(args, "--source-fmri")

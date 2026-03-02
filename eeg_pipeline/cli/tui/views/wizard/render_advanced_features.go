@@ -905,9 +905,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		// Source Localization (LCMV, eLORETA)
 		case optSourceLocMode:
 			label = "Mode"
-			modes := []string{"EEG-only (template)", "fMRI-informed"}
+			modes := []string{"EEG-only", "fMRI-informed"}
 			value = modes[m.sourceLocMode]
-			hint = "template or subject-specific (requires fmri-prep)"
+			hint = "EEG-only = no fMRI constraint (anatomy below is optional); fMRI-informed = requires fMRI prior"
 		case optSourceLocMethod:
 			label = "Method"
 			methods := []string{"LCMV", "eLORETA"}
@@ -1066,7 +1066,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldSourceLocSubjectsDir {
 				value = m.textBuffer + "█"
 			}
-			hint = "override FreeSurfer SUBJECTS_DIR"
+			hint = "optional in EEG-only mode; uses fsaverage if unset"
 		case optSourceLocTrans:
 			label = "Coreg trans"
 			if strings.TrimSpace(m.sourceLocTrans) == "" {
@@ -1074,7 +1074,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				value = m.sourceLocTrans
 			}
-			hint = "EEG↔MRI transform .fif"
+			hint = "EEG↔MRI transform .fif (optional; skipped if unset)"
 		case optSourceLocBem:
 			label = "BEM sol"
 			if strings.TrimSpace(m.sourceLocBem) == "" {
@@ -1082,7 +1082,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				value = m.sourceLocBem
 			}
-			hint = "BEM solution .fif"
+			hint = "BEM solution .fif (optional; skipped if unset)"
 		case optSourceLocMindistMm:
 			label = "Mindist (mm)"
 			value = fmt.Sprintf("%.1f", m.sourceLocMindistMm)

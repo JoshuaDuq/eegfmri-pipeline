@@ -279,9 +279,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     overrides.add_argument("--connectivity-circle-top-fraction", type=float, default=None, help="Connectivity circle top fraction (default from config)")
     overrides.add_argument("--connectivity-circle-min-lines", type=int, default=None, help="Connectivity circle min lines (default from config)")
 
-    overrides.add_argument("--source-plot-hemi", type=str, default=None, help="Hemisphere(s) to plot (default from config)")
-    overrides.add_argument("--source-plot-views", nargs="+", default=None, metavar="VIEW", help="Views to plot (e.g. lateral medial)")
-    overrides.add_argument("--source-plot-cortex", type=str, default=None, help="Cortex colormap (default from config)")
     overrides.add_argument("--source-subjects-dir", type=str, default=None, help="FreeSurfer subjects directory for 3D plotting")
 
     # Ordering / selection controls (plotting.plots.features.*)
@@ -330,7 +327,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "Example: --plot-item-config tfr_scalpmean compare_windows true. "
             "Keys: compare_windows, comparison_windows, compare_columns, "
             "comparison_segment, comparison_column, comparison_values, comparison_labels, comparison_rois, "
-            "source_hemi, source_views, source_cortex, source_subjects_dir, "
+            "source_segment, source_subjects_dir, "
             "topomap_windows (or topomap_window for single value), tfr_topomap_active_window, "
             "tfr_topomap_window_size_ms, tfr_topomap_window_count, tfr_topomap_label_x_position, tfr_topomap_label_y_position_bottom, "
             "tfr_topomap_label_y_position, tfr_topomap_title_y, tfr_topomap_title_pad, "

@@ -134,10 +134,12 @@ var extraPlotFieldsByPlotID = map[string][]plotItemConfigField{
 		plotItemConfigFieldTfrTopomapTemporalHspace,
 		plotItemConfigFieldTfrTopomapTemporalWspace,
 	},
-	"source_localization_3d": {
-		plotItemConfigFieldSourceHemi,
-		plotItemConfigFieldSourceViews,
-		plotItemConfigFieldSourceCortex,
+	"source_localization_3d_eeg_only": {
+		plotItemConfigFieldSourceSegment,
+		plotItemConfigFieldSourceSubjectsDir,
+	},
+	"source_localization_3d_fmri_informed": {
+		plotItemConfigFieldSourceSegment,
 		plotItemConfigFieldSourceSubjectsDir,
 	},
 }

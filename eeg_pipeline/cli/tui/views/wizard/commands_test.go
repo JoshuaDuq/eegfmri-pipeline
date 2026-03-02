@@ -1418,22 +1418,14 @@ func TestBuildPlotItemConfigArgs_SourceLocalization3DEmitsSourceOverrides(t *tes
 	m.plotSelected = map[int]bool{0: true}
 	m.plotItemConfigs = map[string]PlotItemConfig{
 		"source_localization_3d": {
-			SourceHemi:        "both",
-			SourceViewsSpec:   "lateral medial",
-			SourceCortex:      "classic",
+			SourceSegment:     "plateau",
 			SourceSubjectsDir: "/fs/subjects",
 		},
 	}
 
 	args := m.buildPlotItemConfigArgs()
-	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_hemi", "both"}) {
-		t.Fatalf("expected source_hemi args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_views", "lateral", "medial"}) {
-		t.Fatalf("expected source_views args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_cortex", "classic"}) {
-		t.Fatalf("expected source_cortex args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_segment", "plateau"}) {
+		t.Fatalf("expected source_segment args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_subjects_dir", "/fs/subjects"}) {
 		t.Fatalf("expected source_subjects_dir args, got: %#v", args)

@@ -621,12 +621,24 @@
       "requires_epochs": true
     },
     {
-      "id": "source_localization_3d",
+      "id": "source_localization_3d_eeg_only",
       "group": "sourcelocalization",
-      "label": "3D Source Brains",
-      "description": "Plot 3D brain map projections from STCs",
+      "label": "3D Source Brains (EEG-only)",
+      "description": "3D brain map projections from EEG-only LCMV/eLORETA source estimates",
       "required_files": [
-        "features/sourcelocalization/*/source_estimates/*.stc"
+        "features/sourcelocalization/*/source_estimates/eeg_only/*.stc"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
+    },
+    {
+      "id": "source_localization_3d_fmri_informed",
+      "group": "sourcelocalization",
+      "label": "3D Source Brains (fMRI-informed)",
+      "description": "3D brain map projections from fMRI-constrained discrete source estimates",
+      "required_files": [
+        "features/sourcelocalization/*/source_estimates/fmri_informed/*.stc"
       ],
       "feature_categories": [
         "sourcelocalization"

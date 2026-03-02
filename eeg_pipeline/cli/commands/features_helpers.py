@@ -233,6 +233,10 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
     fmri_cfg = src_cfg.setdefault("fmri", {})
     if getattr(args, "source_fmri_enabled", None) is not None:
         fmri_cfg["enabled"] = args.source_fmri_enabled
+        # Sync mode: disabling fMRI must also revert the source mode so that a
+        # stale "fmri_informed" override in .tui_overrides.json doesn't block EEG-only runs.
+        if not args.source_fmri_enabled:
+            src_cfg["mode"] = "eeg_only"
     if getattr(args, "source_fmri_stats_map", None) is not None:
         fmri_cfg["stats_map_path"] = args.source_fmri_stats_map
     if getattr(args, "source_fmri_provenance", None) is not None:

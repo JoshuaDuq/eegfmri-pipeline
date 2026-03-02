@@ -590,6 +590,8 @@ func (m Model) isColumnValueSelected(value string) bool {
 				switch m.editingPlotField {
 				case plotItemConfigFieldComparisonSegment:
 					selectedValues = cfg.ComparisonSegment
+				case plotItemConfigFieldSourceSegment:
+					selectedValues = cfg.SourceSegment
 				case plotItemConfigFieldDoseResponseSegment:
 					selectedValues = cfg.DoseResponseSegment
 				case plotItemConfigFieldTopomapWindow:
@@ -795,6 +797,14 @@ func (m *Model) handleExpandedListToggle() {
 			case plotItemConfigFieldComparisonSegment:
 				// Segment is single-select
 				cfg.ComparisonSegment = selectedItem
+				m.plotItemConfigs[plotID] = cfg
+				m.editingPlotID = ""
+				m.editingPlotField = plotItemConfigFieldNone
+				m.expandedOption = expandedNone
+				m.subCursor = 0
+			case plotItemConfigFieldSourceSegment:
+				// Source segment is single-select
+				cfg.SourceSegment = selectedItem
 				m.plotItemConfigs[plotID] = cfg
 				m.editingPlotID = ""
 				m.editingPlotField = plotItemConfigFieldNone

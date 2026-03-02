@@ -251,8 +251,9 @@ def _validate_context_has_data(context: FeaturePlotContext, subject: str, logger
             context.sourcelocalization_df,
         )
     )
-    has_source_estimates = any(
-        context.features_dir.glob("sourcelocalization/*/source_estimates/*.stc")
+    has_source_estimates = (
+        any(context.features_dir.glob("sourcelocalization/*/source_estimates/*.stc"))
+        or any(context.features_dir.glob("sourcelocalization/*/source_estimates/*/*.stc"))
     )
     
     if not has_feature_data and not has_source_estimates:

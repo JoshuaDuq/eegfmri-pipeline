@@ -54,6 +54,8 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.ConnectivityCircleMinLines
 	case plotItemConfigFieldConnectivityNetworkTopFraction:
 		return cfg.ConnectivityNetworkTopFraction
+	case plotItemConfigFieldSourceSegment:
+		return cfg.SourceSegment
 	case plotItemConfigFieldSourceHemi:
 		return cfg.SourceHemi
 	case plotItemConfigFieldSourceViews:
@@ -174,6 +176,16 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 		cfg.ConnectivityCircleMinLines = strings.TrimSpace(value)
 	case plotItemConfigFieldConnectivityNetworkTopFraction:
 		cfg.ConnectivityNetworkTopFraction = strings.TrimSpace(value)
+	case plotItemConfigFieldSourceSegment:
+		cfg.SourceSegment = strings.TrimSpace(value)
+		featureGroup := m.getFeatureGroupForPlot(plotID)
+		windows := m.GetPlottingComparisonWindows(featureGroup)
+		if cfg.SourceSegment != "" && len(windows) > 0 {
+			unknown := unknownFromList([]string{cfg.SourceSegment}, windows)
+			if len(unknown) > 0 {
+				m.ShowToast("Unknown segment: "+unknown[0], "warning")
+			}
+		}
 	case plotItemConfigFieldSourceHemi:
 		cfg.SourceHemi = strings.TrimSpace(value)
 	case plotItemConfigFieldSourceViews:

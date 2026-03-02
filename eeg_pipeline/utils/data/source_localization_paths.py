@@ -9,6 +9,7 @@ from eeg_pipeline.utils.config.loader import get_config_value
 
 
 SOURCE_LOCALIZATION_METHODS: tuple[str, str] = ("lcmv", "eloreta")
+SOURCE_LOCALIZATION_MODES: tuple[str, str] = ("eeg_only", "fmri_informed")
 _DEFAULT_SOURCE_LOCALIZATION_METHOD = "lcmv"
 
 
@@ -49,6 +50,17 @@ def resolve_source_localization_method_from_attrs(
     return normalize_source_localization_method(method_raw)
 
 
+def normalize_source_localization_mode(mode: Any) -> str:
+    """Normalize and validate source localization mode name."""
+    normalized = str(mode or "").strip().lower()
+    if normalized not in SOURCE_LOCALIZATION_MODES:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.mode must be one of "
+            f"{SOURCE_LOCALIZATION_MODES} (got {mode!r})."
+        )
+    return normalized
+
+
 def source_localization_folder(method: str) -> str:
     """Return source-localization subfolder for a given method."""
     return f"sourcelocalization/{normalize_source_localization_method(method)}"
@@ -75,6 +87,15 @@ def source_localization_estimates_dir(
     *,
     features_dir: Path,
     method: str,
+    mode: Optional[str] = None,
 ) -> Path:
-    """Return directory for source-estimate STC artifacts."""
-    return features_dir / source_localization_folder(method) / "source_estimates"
+    """Return directory for source-estimate STC artifacts.
+
+    When ``mode`` is provided the STCs are stored in a mode-keyed subdirectory
+    (``source_estimates/eeg_only/`` or ``source_estimates/fmri_informed/``) so
+    that EEG-only and fMRI-informed estimates stay separate.
+    """
+    base = features_dir / source_localization_folder(method) / "source_estimates"
+    if mode is None:
+        return base
+    return base / normalize_source_localization_mode(mode)

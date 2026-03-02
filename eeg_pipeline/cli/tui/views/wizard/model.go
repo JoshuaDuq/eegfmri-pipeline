@@ -485,6 +485,7 @@ type PlotItemConfig struct {
 	ConnectivityNetworkTopFraction string
 
 	// Source localization
+	SourceSegment     string
 	SourceHemi        string
 	SourceViewsSpec   string
 	SourceCortex      string
@@ -541,6 +542,7 @@ const (
 	plotItemConfigFieldConnectivityCircleTopFraction
 	plotItemConfigFieldConnectivityCircleMinLines
 	plotItemConfigFieldConnectivityNetworkTopFraction
+	plotItemConfigFieldSourceSegment
 	plotItemConfigFieldSourceHemi
 	plotItemConfigFieldSourceViews
 	plotItemConfigFieldSourceCortex

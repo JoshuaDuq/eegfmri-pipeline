@@ -316,20 +316,20 @@ func (m Model) getFeaturesOptions() []optionType {
 				)
 			}
 
+			// Both modes: subject-specific anatomy fields are optional in EEG-only
+			// and required in fMRI-informed. Show them regardless of mode.
+			options = append(options, optSourceLocSubjectsDir)
+			options = append(options, optSourceLocCreateTrans, optSourceLocCreateBemModel, optSourceLocCreateBemSolution)
+			if !m.sourceLocCreateTrans {
+				options = append(options, optSourceLocTrans)
+			}
+			if !m.sourceLocCreateBemSolution {
+				options = append(options, optSourceLocBem)
+			}
+			options = append(options, optSourceLocMindistMm)
+
 			// fMRI-informed mode (mode == 1) requires additional paths
 			if m.sourceLocMode == 1 {
-				// BEM/Trans generation options (Docker-based)
-				// Note: FS License is configured in global paths, subject is from step 1
-				options = append(options, optSourceLocSubjectsDir)
-				options = append(options, optSourceLocCreateTrans, optSourceLocCreateBemModel, optSourceLocCreateBemSolution)
-				// If not auto-creating, user must provide paths
-				if !m.sourceLocCreateTrans {
-					options = append(options, optSourceLocTrans)
-				}
-				if !m.sourceLocCreateBemSolution {
-					options = append(options, optSourceLocBem)
-				}
-				options = append(options, optSourceLocMindistMm)
 				options = append(options, optSourceLocFmriEnabled)
 				if m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
 					options = append(options,

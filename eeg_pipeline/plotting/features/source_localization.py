@@ -50,6 +50,60 @@ def _auto_detect_subjects_dir_from_deriv_root(config: Any) -> Optional[str]:
     return None
 
 
+_SOURCE_VIEW_ALIASES: dict[str, str] = {
+    "lat": "lat",
+    "lateral": "lat",
+    "med": "med",
+    "medial": "med",
+    "fro": "fro",
+    "frontal": "fro",
+    "cau": "cau",
+    "caudal": "cau",
+    "dor": "dor",
+    "dorsal": "dor",
+    "par": "par",
+    "parietal": "par",
+    "ros": "ros",
+    "rostral": "ros",
+    "ven": "ven",
+    "ventral": "ven",
+}
+
+
+def _resolve_source_views(raw_views: Any) -> list[str]:
+    """Resolve source-plot views to MNE-compatible short view codes."""
+    if isinstance(raw_views, str):
+        tokens = [tok for tok in re.split(r"[\s,]+", raw_views.strip()) if tok]
+    elif isinstance(raw_views, (list, tuple)):
+        tokens = [str(item).strip() for item in raw_views if str(item).strip()]
+    else:
+        raise TypeError(
+            f"source views must be string/list/tuple, got {type(raw_views).__name__}."
+        )
+
+    if not tokens:
+        raise ValueError("source views list cannot be empty.")
+
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for token in tokens:
+        key = token.strip().lower()
+        mapped = _SOURCE_VIEW_ALIASES.get(key)
+        if mapped is None:
+            unknown.append(token)
+            continue
+        if mapped not in resolved:
+            resolved.append(mapped)
+
+    if unknown:
+        allowed = ", ".join(sorted(_SOURCE_VIEW_ALIASES.keys()))
+        raise ValueError(
+            f"Invalid source view(s): {', '.join(unknown)}. Allowed values: {allowed}."
+        )
+
+    return resolved
+
+
 def _resolve_source_plot_subjects_dir(config: Any, logger: logging.Logger) -> Optional[str]:
     """Resolve subjects_dir for source plotting with deterministic priority."""
     configured_candidates = [
@@ -147,6 +201,33 @@ def _parse_stc_plot_metadata(stc_path: Path) -> dict[str, Optional[str]]:
         "band": match.group("band"),
         "method": match.group("method"),
     }
+
+
+def _filter_stc_files_by_segment(stc_files: List[Path], segment: str) -> List[Path]:
+    """Filter STC files to one segment, raising if segment is unavailable."""
+    segment_label = str(segment).strip()
+    if not segment_label:
+        return stc_files
+
+    filtered: List[Path] = []
+    available_segments: set[str] = set()
+    for stc_path in stc_files:
+        metadata = _parse_stc_plot_metadata(stc_path)
+        stc_segment = metadata["segment"]
+        if stc_segment is None:
+            continue
+        available_segments.add(str(stc_segment))
+        if stc_segment == segment_label:
+            filtered.append(stc_path)
+
+    if filtered:
+        return filtered
+
+    available_text = ", ".join(sorted(available_segments)) if available_segments else "<none>"
+    raise ValueError(
+        f"No STC files found for requested source segment '{segment_label}'. "
+        f"Available segments: {available_text}."
+    )
 
 
 def _resolve_source_plot_condition_pair(
@@ -305,14 +386,29 @@ def _compute_discrete_difference_absmax(
     return diff_absmax
 
 
-def _resolve_volume_source_space(stc_files: List[Path]) -> Optional[Any]:
-    """Load source space required for volumetric STC 3D plotting."""
-    volume_files = [path for path in stc_files if path.name.endswith("-vl.stc")]
-    if not volume_files:
-        return None
+def _detect_stc_kind(stc_files: List[Path]) -> str:
+    """Detect STC rendering kind by inspecting the first non-empty STC file.
 
-    subject, task, method = _parse_stc_identifiers(volume_files[0])
-    src_path = volume_files[0].parent / f"sub-{subject}_task-{task}_{method}-src.fif"
+    Returns one of 'surface', 'volume', or 'discrete'.
+    Using the STC object type is authoritative; we never rely on the
+    separately-saved src.fif kind, which can be stale or mismatched.
+    """
+    vol_files = [p for p in stc_files if p.name.endswith("-vl.stc")]
+    probe_path = vol_files[0] if vol_files else stc_files[0]
+    stc = mne.read_source_estimate(str(probe_path))
+    stc_type = type(stc).__name__  # 'SourceEstimate', 'VolSourceEstimate', 'MixedSourceEstimate'
+    if stc_type == "SourceEstimate":
+        return "surface"
+    return "volume"  # VolSourceEstimate; discrete is a sub-variant we verify via src.fif
+
+
+def _load_volume_source_space(stc_files: List[Path]) -> Optional[Any]:
+    """Load source space from the saved *-src.fif, only for volume/discrete rendering."""
+    vol_files = [p for p in stc_files if p.name.endswith("-vl.stc")]
+    if not vol_files:
+        return None
+    subject, task, method = _parse_stc_identifiers(vol_files[0])
+    src_path = vol_files[0].parent / f"sub-{subject}_task-{task}_{method}-src.fif"
     if not src_path.exists():
         raise FileNotFoundError(
             f"Missing source space for volumetric STC plotting: {src_path}. "
@@ -576,6 +672,144 @@ def _load_discrete_context_mesh(subjects_dir: str, fs_subject: str) -> tuple[np.
     return rr, tris
 
 
+def _plot_surface_stc_canonical(
+    stc: Any,
+    *,
+    subject: str,
+    subjects_dir: Optional[str],
+    size: tuple,
+) -> Any:
+    """Render a surface STC as a publication-quality 2×2 brain grid.
+
+    Uses MNE's compute_source_morph to perform geodesic smoothing along the
+    cortical mesh, spreading sparse source-space values (~4k vertices) to the
+    full cortical surface (~160k vertices). This is the same algorithm MNE
+    uses internally in stc.plot() and is considered the gold standard for
+    source estimate visualization. Layout:
+
+        LH lateral  |  RH lateral
+        LH medial   |  RH medial
+    """
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.colors as mcolors
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    try:
+        from nilearn import plotting as nipl
+    except ImportError:
+        raise RuntimeError(
+            "nilearn is required for quality surface STC rendering. "
+            "Install with: pip install nilearn"
+        )
+
+    fs_dir = Path(subjects_dir) / subject if subjects_dir else None
+    if fs_dir is None or not fs_dir.exists():
+        raise FileNotFoundError(f"FreeSurfer directory not found: {fs_dir}")
+
+    # Geodesic smoothing: morph sparse STC to full-resolution cortical surface.
+    # subject_from == subject_to with spacing=None expands to all vertices
+    # while smooth=10 performs 10 iterations of nearest-neighbor averaging
+    # along the cortical mesh, respecting sulcal boundaries.
+    morph = mne.compute_source_morph(
+        stc,
+        subject_from=subject,
+        subject_to=subject,
+        subjects_dir=subjects_dir,
+        smooth=10,
+        spacing=None,
+        verbose=False,
+    )
+    stc_full = morph.apply(stc)
+
+    # Mean absolute source power across time
+    vals = np.abs(
+        stc_full.data.mean(axis=1) if stc_full.data.shape[1] > 1 else stc_full.data[:, 0]
+    )
+    n_lh = len(stc_full.vertices[0])
+
+    # Percentile-based thresholds: show top ~35% of activation
+    active = vals[np.isfinite(vals) & (vals > 0)]
+    vmin = float(np.percentile(active, 65)) if active.size else 0.0
+    vmax = float(np.percentile(active, 99.5)) if active.size else 1.0
+    if vmax <= vmin:
+        vmax = vmin * 2.0 + 1e-30
+
+    lh_tex = vals[:n_lh]
+    rh_tex = vals[n_lh:]
+
+    # (texture, mesh, sulc, hemi, view, label)
+    panels_cfg = [
+        (lh_tex, "lh.inflated", "lh.sulc", "left",  "lateral", "LH — Lateral"),
+        (rh_tex, "rh.inflated", "rh.sulc", "right", "lateral", "RH — Lateral"),
+        (lh_tex, "lh.inflated", "lh.sulc", "left",  "medial",  "LH — Medial"),
+        (rh_tex, "rh.inflated", "rh.sulc", "right", "medial",  "RH — Medial"),
+    ]
+
+    imgs: list[np.ndarray] = []
+    for tex, mesh_f, sulc_f, hemi, view, label in panels_cfg:
+        pfig = nipl.plot_surf_stat_map(
+            surf_mesh=str(fs_dir / "surf" / mesh_f),
+            stat_map=tex,
+            bg_map=str(fs_dir / "surf" / sulc_f),
+            hemi=hemi,
+            view=view,
+            colorbar=False,
+            cmap="hot",
+            vmax=vmax,
+            threshold=vmin,
+            bg_on_data=True,
+            darkness=0.5,
+            title=label,
+            title_font_size=12,
+        )
+        pfig.set_facecolor("white")
+        buf = io.BytesIO()
+        pfig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
+        buf.seek(0)
+        imgs.append(plt.imread(buf))
+        plt.close(pfig)
+
+    # Pad all panels to identical dimensions before concatenation
+    max_h = max(img.shape[0] for img in imgs)
+    max_w = max(img.shape[1] for img in imgs)
+
+    def _pad(img: np.ndarray) -> np.ndarray:
+        ph, pw = max_h - img.shape[0], max_w - img.shape[1]
+        return np.pad(img, ((ph // 2, ph - ph // 2), (pw // 2, pw - pw // 2), (0, 0)),
+                      mode="constant", constant_values=1.0)
+
+    imgs = [_pad(img) for img in imgs]
+    grid = np.concatenate([
+        np.concatenate(imgs[:2], axis=1),
+        np.concatenate(imgs[2:], axis=1),
+    ], axis=0)
+
+    # Build output figure with shared colorbar
+    dpi = 150
+    w_in = grid.shape[1] / dpi
+    h_in = grid.shape[0] / dpi
+    out_fig = plt.figure(figsize=(w_in + 1.0, h_in), dpi=dpi, facecolor="white")
+    gs = out_fig.add_gridspec(1, 2, width_ratios=[40, 1], wspace=0.03)
+
+    ax_img = out_fig.add_subplot(gs[0])
+    ax_img.imshow(grid, interpolation="lanczos")
+    ax_img.axis("off")
+
+    ax_cb = out_fig.add_subplot(gs[1])
+    cb = out_fig.colorbar(
+        plt.cm.ScalarMappable(norm=mcolors.Normalize(vmin=vmin, vmax=vmax), cmap="hot"),
+        cax=ax_cb,
+    )
+    cb.set_label("Source power (a.u.)", fontsize=9, labelpad=8)
+    cb.ax.tick_params(labelsize=8)
+
+    out_fig.tight_layout(pad=0.4)
+    return out_fig
+
+
 def plot_source_stc_3d(
     subject: str,
     stc_files: List[Path],
@@ -588,6 +822,18 @@ def plot_source_stc_3d(
     if not stc_files:
         logger.info("No STC files provided for source plotting.")
         return
+
+    source_segment_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.segment", None
+    )
+    source_segment = "" if source_segment_raw is None else str(source_segment_raw).strip()
+    if source_segment:
+        stc_files = _filter_stc_files_by_segment(stc_files, source_segment)
+        logger.info(
+            "Filtered source STCs to segment '%s' (%d files).",
+            source_segment,
+            len(stc_files),
+        )
 
     if subjects_dir is None:
         subjects_dir = _resolve_source_plot_subjects_dir(config, logger)
@@ -603,17 +849,26 @@ def plot_source_stc_3d(
             subjects_dir,
         )
 
-    hemi = get_config_value(config, "plotting.plots.features.sourcelocalization.hemi", "both")
-    views_list = get_config_value(config, "plotting.plots.features.sourcelocalization.views", ["lateral", "medial"])
-    cortex = get_config_value(config, "plotting.plots.features.sourcelocalization.cortex", "classic")
-
     out_dir = save_dir / "3d_brains"
     out_dir.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Plotting 3D brains for {len(stc_files)} STC combinations...")
 
-    volume_src = _resolve_volume_source_space(stc_files)
-    volume_src_kind = None if volume_src is None else str(volume_src.kind)
+    # Detect rendering mode from the STC object type rather than the src.fif kind,
+    # which can be stale or mismatched with actual STC data.
+    vol_stc_files = [p for p in stc_files if p.name.endswith("-vl.stc")]
+    stc_kind = _detect_stc_kind(stc_files) if vol_stc_files else "surface"
+    if stc_kind == "surface":
+        logger.info(
+            "Using canonical surface rendering for EEG-only source STCs "
+            "(hemi=both, view=lat, cortex=classic)."
+        )
+    else:
+        hemi = "both"
+        views_list = ["lat"]
+        cortex = "classic"
+
+    volume_src: Optional[Any] = None
     discrete_mesh_rr_mm: Optional[np.ndarray] = None
     discrete_mesh_tris: Optional[np.ndarray] = None
     discrete_stc_map: dict[Path, Any] = {}
@@ -622,78 +877,99 @@ def plot_source_stc_3d(
     condition_a: Optional[str] = None
     condition_b: Optional[str] = None
     discrete_diff_absmax: dict[tuple[str, Optional[str], str, str], float] = {}
-    if volume_src_kind == "volume":
-        backend = mne.viz.get_3d_backend()
-        if not backend:
-            raise RuntimeError(_build_3d_backend_error_message())
-    elif volume_src_kind == "discrete":
-        if subjects_dir is None:
-            raise ValueError(
-                "Discrete source plotting requires a valid subjects_dir for anatomical context."
-            )
-        discrete_mesh_rr_mm, discrete_mesh_tris = _load_discrete_context_mesh(
-            subjects_dir=subjects_dir,
-            fs_subject=fs_subject,
-        )
-        logger.warning(
-            "source_localization_3d is rendering a discrete fMRI-constrained source space. "
-            "Only constrained source points are shown; this is not a dense whole-brain volumetric map."
-        )
-        discrete_stc_map = {path: mne.read_source_estimate(str(path)) for path in stc_files}
-        discrete_condition_limits = _compute_discrete_group_limits(discrete_stc_map)
 
-        available_conditions = {
-            str(_parse_stc_plot_metadata(path)["condition"])
-            for path in discrete_stc_map.keys()
-        }
-        condition_a, condition_b = _resolve_source_plot_condition_pair(
-            config,
-            available_conditions=available_conditions,
-            logger=logger,
-        )
-        discrete_diff_records = _build_discrete_condition_differences(
-            discrete_stc_map,
-            condition_a=condition_a,
-            condition_b=condition_b,
-        )
-        if discrete_diff_records:
-            discrete_diff_absmax = _compute_discrete_difference_absmax(discrete_diff_records)
-            logger.info(
-                "Rendering %d condition-difference maps (%s minus %s) with per-(segment,band) limits.",
-                len(discrete_diff_records),
-                condition_b,
-                condition_a,
-            )
+    if stc_kind == "volume":
+        # Load src.fif and check whether it describes a discrete (fMRI-constrained)
+        # or regular volumetric source space.
+        volume_src = _load_volume_source_space(stc_files)
+        if volume_src is not None:
+            src_space_kind = str(volume_src.kind)
         else:
-            logger.warning(
-                "No matched condition pairs found for difference plotting (%s vs %s).",
-                condition_a,
-                condition_b,
-            )
+            src_space_kind = "volume"
 
-        logger.info("Using per-(segment,band) condition color limits for discrete STC maps.")
-        logger.info("Using discrete source-space point-cloud rendering for volumetric STCs.")
-    elif volume_src_kind is not None:
-        raise ValueError(
-            f"Unsupported volumetric source space kind '{volume_src_kind}' for 3D source plotting."
-        )
+        if src_space_kind == "surface":
+            # VolSourceEstimate paired with a surface src.fif — these are stale artifacts
+            # from an incompatible earlier run. They cannot be rendered correctly.
+            logger.warning(
+                "Source estimates are VolSourceEstimate but the saved source space (src.fif) is a "
+                "surface source space — these files are stale from an incompatible pipeline run. "
+                "Rerun 'features compute --source-save-stc' to regenerate compatible STC files. "
+                "Skipping all volume STC files for this subject."
+            )
+            stc_files = [p for p in stc_files if not p.name.endswith("-vl.stc")]
+            stc_kind = "surface"  # redirect remaining surface files through surface path
+        elif src_space_kind == "discrete":
+            if subjects_dir is None:
+                raise ValueError(
+                    "Discrete source plotting requires a valid subjects_dir for anatomical context."
+                )
+            discrete_mesh_rr_mm, discrete_mesh_tris = _load_discrete_context_mesh(
+                subjects_dir=subjects_dir,
+                fs_subject=fs_subject,
+            )
+            logger.warning(
+                "source_localization_3d is rendering a discrete fMRI-constrained source space. "
+                "Only constrained source points are shown; this is not a dense whole-brain volumetric map."
+            )
+            discrete_stc_map = {path: mne.read_source_estimate(str(path)) for path in stc_files}
+            discrete_condition_limits = _compute_discrete_group_limits(discrete_stc_map)
+
+            available_conditions = {
+                str(_parse_stc_plot_metadata(path)["condition"])
+                for path in discrete_stc_map.keys()
+            }
+            condition_a, condition_b = _resolve_source_plot_condition_pair(
+                config,
+                available_conditions=available_conditions,
+                logger=logger,
+            )
+            discrete_diff_records = _build_discrete_condition_differences(
+                discrete_stc_map,
+                condition_a=condition_a,
+                condition_b=condition_b,
+            )
+            if discrete_diff_records:
+                discrete_diff_absmax = _compute_discrete_difference_absmax(discrete_diff_records)
+                logger.info(
+                    "Rendering %d condition-difference maps (%s minus %s) with per-(segment,band) limits.",
+                    len(discrete_diff_records),
+                    condition_b,
+                    condition_a,
+                )
+            else:
+                logger.warning(
+                    "No matched condition pairs found for difference plotting (%s vs %s).",
+                    condition_a,
+                    condition_b,
+                )
+            logger.info("Using per-(segment,band) condition color limits for discrete STC maps.")
+            logger.info("Using discrete source-space point-cloud rendering for volumetric STCs.")
+        else:
+            # Regular volumetric source space — needs MNE 3D backend in offscreen mode.
+            backend = mne.viz.get_3d_backend()
+            if not backend:
+                raise RuntimeError(_build_3d_backend_error_message())
 
     failures: List[str] = []
     for stc_path in stc_files:
         try:
             # We assume the STC path stem has a specific naming convention we set during feature computation
             # E.g., sub-0000_task-..._cond-..._band-..._lcmv
-            stc = discrete_stc_map.get(stc_path) if volume_src_kind == "discrete" else mne.read_source_estimate(str(stc_path))
+            stc = (
+                discrete_stc_map.get(stc_path)
+                if stc_kind == "volume" and src_space_kind == "discrete"
+                else mne.read_source_estimate(str(stc_path))
+            )
             if stc is None:
                 raise RuntimeError(f"Discrete STC cache missing for {stc_path.name}.")
 
             # Volume STCs (-vl.stc) are rendered differently by source-space kind:
             # regular volume source spaces use MNE 3D brain rendering, while
             # discrete source spaces are shown as 3D point clouds.
-            if stc_path.name.endswith("-vl.stc"):
+            if stc_path.name.endswith("-vl.stc") and stc_kind == "volume":
                 image_name = stc_path.name.replace("-vl.stc", "")
                 save_path = out_dir / f"{image_name}_3d.png"
-                if volume_src_kind == "discrete":
+                if src_space_kind == "discrete":
                     if discrete_mesh_rr_mm is None or discrete_mesh_tris is None:
                         raise RuntimeError("Discrete source plotting mesh was not initialized.")
                     metadata = _parse_stc_plot_metadata(stc_path)
@@ -747,25 +1023,28 @@ def plot_source_stc_3d(
                     show_traces=False,
                     size=(1200, 600),
                     cortex=cortex,
+                    brain_kwargs={"show": False},
                 )
             else:
-                brain = stc.plot(
+                brain = _plot_surface_stc_canonical(
+                    stc,
                     subject=fs_subject,
                     subjects_dir=subjects_dir,
-                    hemi=hemi,
-                    views=views_list,
-                    background="white",
-                    time_viewer=False,
-                    show_traces=False,
                     size=(1200, 600),
-                    cortex=cortex,
                 )
-            
+
             image_name = stc_path.name.replace("-lh.stc", "").replace("-rh.stc", "").replace("-vl.stc", "")
             save_path = out_dir / f"{image_name}_3d.png"
-            
-            brain.save_image(str(save_path))
-            brain.close()
+
+            import matplotlib.figure as _mpl_fig
+            import matplotlib.pyplot as _plt
+            if isinstance(brain, _mpl_fig.Figure):
+                brain.savefig(str(save_path), dpi=150, bbox_inches="tight", facecolor="white")
+                _plt.close(brain)
+            else:
+                brain.save_image(str(save_path))
+                brain.close()
+
             
             if logger:
                 logger.debug(f"Saved 3D source plot: {save_path.name}")
@@ -775,7 +1054,7 @@ def plot_source_stc_3d(
             if logger:
                 logger.error(f"Failed to plot STC 3D brain for {stc_path.name}: {exc}")
 
-    if volume_src_kind == "discrete" and discrete_diff_records:
+    if stc_kind == "volume" and src_space_kind == "discrete" and discrete_diff_records:
         if condition_a is None or condition_b is None:
             raise RuntimeError("Discrete contrast plotting state is incomplete.")
         for diff_record in discrete_diff_records:
