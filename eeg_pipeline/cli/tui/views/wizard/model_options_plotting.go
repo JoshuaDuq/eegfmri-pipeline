@@ -170,5 +170,16 @@ func (m Model) getGlobalStylingOptions() []optionType {
 		)
 	}
 
+	// Source Localization
+	options = append(options, optPlotGroupSourceLoc)
+	if m.plotGroupSourceLocExpanded {
+		options = append(options,
+			optPlotSourceHemi,
+			optPlotSourceViews,
+			optPlotSourceCortex,
+			optPlotSourceSubjectsDir,
+		)
+	}
+
 	return options
 }

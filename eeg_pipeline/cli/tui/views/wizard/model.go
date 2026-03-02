@@ -484,6 +484,12 @@ type PlotItemConfig struct {
 	ConnectivityCircleMinLines     string
 	ConnectivityNetworkTopFraction string
 
+	// Source localization
+	SourceHemi        string
+	SourceViewsSpec   string
+	SourceCortex      string
+	SourceSubjectsDir string
+
 	// ITPC
 	ItpcSharedColorbar *bool
 
@@ -535,6 +541,10 @@ const (
 	plotItemConfigFieldConnectivityCircleTopFraction
 	plotItemConfigFieldConnectivityCircleMinLines
 	plotItemConfigFieldConnectivityNetworkTopFraction
+	plotItemConfigFieldSourceHemi
+	plotItemConfigFieldSourceViews
+	plotItemConfigFieldSourceCortex
+	plotItemConfigFieldSourceSubjectsDir
 	plotItemConfigFieldItpcSharedColorbar
 	// Behavior Scatter
 	plotItemConfigFieldBehaviorScatterFeatures
@@ -730,6 +740,10 @@ const (
 	textFieldPlotTemporalTimeBins
 	textFieldPlotTemporalTimeLabels
 	textFieldPlotAsymmetryStat
+	textFieldPlotSourceHemi
+	textFieldPlotSourceViews
+	textFieldPlotSourceCortex
+	textFieldPlotSourceSubjectsDir
 	// Machine Learning advanced config text fields
 	textFieldMLTarget
 	textFieldMLFmriSigContrastName
@@ -1185,11 +1199,11 @@ type Model struct {
 	plotGroupErrorbarExpanded    bool
 	plotGroupTextExpanded        bool
 	plotGroupValidationExpanded  bool
-	plotGroupTFRMiscExpanded     bool
-
 	plotGroupTopomapExpanded     bool
 	plotGroupTFRExpanded         bool
+	plotGroupTFRMiscExpanded     bool
 	plotGroupSizingExpanded      bool
+	plotGroupSourceLocExpanded   bool
 	plotGroupSelectionExpanded   bool
 	plotGroupComparisonsExpanded bool
 
@@ -1385,6 +1399,11 @@ type Model struct {
 	plotTemporalTimeBinsSpec   string
 	plotTemporalTimeLabelsSpec string
 	plotAsymmetryStatSpec      string
+
+	plotSourceHemi        string
+	plotSourceViews       string
+	plotSourceCortex      string
+	plotSourceSubjectsDir string
 
 	// Plotting comparisons (global)
 	plotCompareWindows        *bool

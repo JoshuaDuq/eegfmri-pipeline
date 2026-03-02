@@ -78,19 +78,19 @@ func TestApplyConfigKeys_HydratesFmriThreadConfig(t *testing.T) {
 func TestApplyConfigKeys_HydratesExtendedMLConfig(t *testing.T) {
 	m := New(types.PipelineML, ".")
 	values := map[string]interface{}{
-		"machine_learning.preprocessing.imputer_strategy":                      "most_frequent",
-		"machine_learning.preprocessing.pca.enabled":                           true,
-		"machine_learning.preprocessing.pca.svd_solver":                        "randomized",
-		"machine_learning.preprocessing.pca.n_components":                      0.9,
-		"machine_learning.classification.resampler":                            "smote",
-		"machine_learning.models.svm.kernel":                                   "poly",
-		"machine_learning.models.svm.C_grid":                                   []interface{}{0.1, 1.0, 10.0},
-		"machine_learning.models.random_forest.class_weight":                   "none",
-		"machine_learning.analysis.time_generalization.min_subjects_per_cell":  float64(7),
-		"machine_learning.targets.strict_regression_target_continuous":         true,
-		"machine_learning.interpretability.grouped_outputs":                    false,
-		"machine_learning.classification.max_failed_fold_fraction":             0.33,
-		"machine_learning.evaluation.bootstrap_iterations":                     float64(2500),
+		"machine_learning.preprocessing.imputer_strategy":                     "most_frequent",
+		"machine_learning.preprocessing.pca.enabled":                          true,
+		"machine_learning.preprocessing.pca.svd_solver":                       "randomized",
+		"machine_learning.preprocessing.pca.n_components":                     0.9,
+		"machine_learning.classification.resampler":                           "smote",
+		"machine_learning.models.svm.kernel":                                  "poly",
+		"machine_learning.models.svm.C_grid":                                  []interface{}{0.1, 1.0, 10.0},
+		"machine_learning.models.random_forest.class_weight":                  "none",
+		"machine_learning.analysis.time_generalization.min_subjects_per_cell": float64(7),
+		"machine_learning.targets.strict_regression_target_continuous":        true,
+		"machine_learning.interpretability.grouped_outputs":                   false,
+		"machine_learning.classification.max_failed_fold_fraction":            0.33,
+		"machine_learning.evaluation.bootstrap_iterations":                    float64(2500),
 	}
 
 	m.ApplyConfigKeys(values)
@@ -139,19 +139,19 @@ func TestApplyConfigKeys_HydratesExtendedMLConfig(t *testing.T) {
 func TestApplyConfigKeys_HydratesAdditionalFeatureAndPreprocessingConfig(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	values := map[string]interface{}{
-		"alignment.allow_misaligned_trim":                                  true,
-		"alignment.min_alignment_samples":                                  float64(11),
-		"alignment.fmri_onset_reference":                                   "first_iti_start",
-		"eeg.ecg_channels":                                                 []interface{}{"ECG", "EKG"},
-		"epochs.autoreject_n_interpolate":                                  []interface{}{4, 8, 16},
-		"feature_engineering.spatial_transform_per_family.connectivity":    "laplacian",
-		"feature_engineering.change_scores.transform":                      "log_ratio",
-		"feature_engineering.change_scores.window_pairs":                   []interface{}{[]interface{}{"baseline", "active"}},
-		"feature_engineering.pac.surrogate_method":                         "time_shift",
-		"feature_engineering.aperiodic.max_freq_resolution_hz":             0.5,
+		"alignment.allow_misaligned_trim":                                         true,
+		"alignment.min_alignment_samples":                                         float64(11),
+		"alignment.fmri_onset_reference":                                          "first_iti_start",
+		"eeg.ecg_channels":                                                        []interface{}{"ECG", "EKG"},
+		"epochs.autoreject_n_interpolate":                                         []interface{}{4, 8, 16},
+		"feature_engineering.spatial_transform_per_family.connectivity":           "laplacian",
+		"feature_engineering.change_scores.transform":                             "log_ratio",
+		"feature_engineering.change_scores.window_pairs":                          []interface{}{[]interface{}{"baseline", "active"}},
+		"feature_engineering.pac.surrogate_method":                                "time_shift",
+		"feature_engineering.aperiodic.max_freq_resolution_hz":                    0.5,
 		"feature_engineering.directedconnectivity.min_samples_per_mvar_parameter": float64(25),
-		"feature_engineering.erds.laterality_columns":                      []interface{}{"stim_side", "hand"},
-		"feature_engineering.microstates.assign_from_gfp_peaks":            false,
+		"feature_engineering.erds.laterality_columns":                             []interface{}{"stim_side", "hand"},
+		"feature_engineering.microstates.assign_from_gfp_peaks":                   false,
 	}
 
 	m.ApplyConfigKeys(values)
@@ -194,5 +194,69 @@ func TestApplyConfigKeys_HydratesAdditionalFeatureAndPreprocessingConfig(t *test
 	}
 	if m.microstatesAssignFromGfpPeaks {
 		t.Fatalf("expected microstatesAssignFromGfpPeaks=false")
+	}
+}
+
+func TestApplyConfigKeys_HydratesPlottingSourceLocalizationAndComparisons(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	values := map[string]interface{}{
+		"feature_engineering.sourcelocalization.subjects_dir": "/fs/subjects",
+		"plotting.plots.features.sourcelocalization.hemi":     "both",
+		"plotting.plots.features.sourcelocalization.views":    []interface{}{"lateral", "medial"},
+		"plotting.plots.features.sourcelocalization.cortex":   "classic",
+		"plotting.comparisons.compare_windows":                true,
+		"plotting.comparisons.comparison_windows":             []interface{}{"baseline", "plateau"},
+		"plotting.comparisons.compare_columns":                false,
+		"plotting.comparisons.comparison_segment":             "plateau",
+		"plotting.comparisons.comparison_column":              "pain_binary_coded",
+		"plotting.comparisons.comparison_values":              []interface{}{"0", "1"},
+		"plotting.comparisons.comparison_labels":              []interface{}{"nonpain", "pain"},
+		"plotting.comparisons.comparison_rois":                []interface{}{"ParOccipital_Left", "ParOccipital_Right"},
+		"plotting.overwrite":                                  true,
+	}
+
+	m.ApplyConfigKeys(values)
+
+	if m.plotSourceSubjectsDir != "/fs/subjects" {
+		t.Fatalf("expected plotSourceSubjectsDir '/fs/subjects', got %q", m.plotSourceSubjectsDir)
+	}
+	if m.plotSourceHemi != "both" {
+		t.Fatalf("expected plotSourceHemi='both', got %q", m.plotSourceHemi)
+	}
+	if m.plotSourceViews != "lateral medial" {
+		t.Fatalf("expected plotSourceViews='lateral medial', got %q", m.plotSourceViews)
+	}
+	if m.plotSourceCortex != "classic" {
+		t.Fatalf("expected plotSourceCortex='classic', got %q", m.plotSourceCortex)
+	}
+	if m.plotCompareWindows == nil || !*m.plotCompareWindows {
+		t.Fatalf("expected plotCompareWindows=true")
+	}
+	if m.plotComparisonWindowsSpec != "baseline plateau" {
+		t.Fatalf("expected plotComparisonWindowsSpec='baseline plateau', got %q", m.plotComparisonWindowsSpec)
+	}
+	if m.plotCompareColumns == nil || *m.plotCompareColumns {
+		t.Fatalf("expected plotCompareColumns=false")
+	}
+	if m.plotComparisonSegment != "plateau" {
+		t.Fatalf("expected plotComparisonSegment='plateau', got %q", m.plotComparisonSegment)
+	}
+	if m.plotComparisonColumn != "pain_binary_coded" {
+		t.Fatalf("expected plotComparisonColumn='pain_binary_coded', got %q", m.plotComparisonColumn)
+	}
+	if m.plotComparisonValuesSpec != "0 1" {
+		t.Fatalf("expected plotComparisonValuesSpec='0 1', got %q", m.plotComparisonValuesSpec)
+	}
+	if m.plotComparisonLabelsSpec != "nonpain pain" {
+		t.Fatalf("expected plotComparisonLabelsSpec='nonpain pain', got %q", m.plotComparisonLabelsSpec)
+	}
+	if m.plotComparisonROIsSpec != "ParOccipital_Left ParOccipital_Right" {
+		t.Fatalf(
+			"expected plotComparisonROIsSpec='ParOccipital_Left ParOccipital_Right', got %q",
+			m.plotComparisonROIsSpec,
+		)
+	}
+	if m.plotOverwrite == nil || !*m.plotOverwrite {
+		t.Fatalf("expected plotOverwrite=true")
 	}
 }

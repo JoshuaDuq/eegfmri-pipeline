@@ -668,6 +668,7 @@ const (
 	optPlotGroupTopomap
 	optPlotGroupTFR
 	optPlotGroupSizing
+	optPlotGroupSourceLoc
 	optPlotGroupSelection
 	optPlotGroupComparisons
 	optPlotBboxInches
@@ -825,6 +826,13 @@ const (
 	optPlotAsymmetryStat
 	optPlotTemporalTimeBins
 	optPlotTemporalTimeLabels
+
+	// Source Localization overrides
+	optPlotSourceHemi
+	optPlotSourceViews
+	optPlotSourceCortex
+	optPlotSourceSubjectsDir
+
 	// Plotting comparisons (global)
 	optPlotCompareWindows
 	optPlotComparisonWindows

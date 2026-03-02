@@ -1411,3 +1411,31 @@ func TestBuildPlotItemConfigArgs_DoseResponseEmitsBandsRoisScopesAndStat(t *test
 		t.Fatalf("expected dose_response_stat args, got: %#v", args)
 	}
 }
+
+func TestBuildPlotItemConfigArgs_SourceLocalization3DEmitsSourceOverrides(t *testing.T) {
+	m := Model{}
+	m.plotItems = []PlotItem{{ID: "source_localization_3d", Group: "sourcelocalization"}}
+	m.plotSelected = map[int]bool{0: true}
+	m.plotItemConfigs = map[string]PlotItemConfig{
+		"source_localization_3d": {
+			SourceHemi:        "both",
+			SourceViewsSpec:   "lateral medial",
+			SourceCortex:      "classic",
+			SourceSubjectsDir: "/fs/subjects",
+		},
+	}
+
+	args := m.buildPlotItemConfigArgs()
+	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_hemi", "both"}) {
+		t.Fatalf("expected source_hemi args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_views", "lateral", "medial"}) {
+		t.Fatalf("expected source_views args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_cortex", "classic"}) {
+		t.Fatalf("expected source_cortex args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_subjects_dir", "/fs/subjects"}) {
+		t.Fatalf("expected source_subjects_dir args, got: %#v", args)
+	}
+}

@@ -69,3 +69,12 @@ def source_localization_candidate_paths(
         features_dir / source_localization_folder(method) / filename
         for method in SOURCE_LOCALIZATION_METHODS
     ]
+
+
+def source_localization_estimates_dir(
+    *,
+    features_dir: Path,
+    method: str,
+) -> Path:
+    """Return directory for source-estimate STC artifacts."""
+    return features_dir / source_localization_folder(method) / "source_estimates"

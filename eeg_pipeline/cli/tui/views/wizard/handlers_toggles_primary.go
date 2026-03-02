@@ -1167,6 +1167,9 @@ func (m *Model) togglePlottingAdvancedOption() {
 			plotItemConfigFieldTfrTopomapTemporalHspace, plotItemConfigFieldTfrTopomapTemporalWspace:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
+		case plotItemConfigFieldSourceHemi, plotItemConfigFieldSourceViews, plotItemConfigFieldSourceCortex, plotItemConfigFieldSourceSubjectsDir:
+			m.startPlotTextEdit(row.plotID, row.plotField)
+			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonValues:
 			// Always open dropdown if column selected (values may be discovered later)
 			cfg := m.plotItemConfigs[row.plotID]
@@ -1280,7 +1283,7 @@ func (m *Model) togglePlottingAdvancedOption() {
 		optPlotGroupColors, optPlotGroupAlpha, optPlotGroupScatter, optPlotGroupBar,
 		optPlotGroupLine, optPlotGroupHistogram, optPlotGroupKDE, optPlotGroupErrorbar,
 		optPlotGroupText, optPlotGroupValidation, optPlotGroupTopomap, optPlotGroupTFR,
-		optPlotGroupSizing, optPlotGroupSelection, optPlotGroupComparisons, optPlotGroupTFRMisc:
+		optPlotGroupSizing, optPlotGroupSourceLoc, optPlotGroupSelection, optPlotGroupComparisons, optPlotGroupTFRMisc:
 		m.togglePlotGroupExpansion(opt)
 		m.useDefaultAdvanced = false
 
@@ -1527,6 +1530,18 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPlotTemporalTimeLabels:
 		m.startTextEdit(textFieldPlotTemporalTimeLabels)
+		m.useDefaultAdvanced = false
+	case optPlotSourceHemi:
+		m.startTextEdit(textFieldPlotSourceHemi)
+		m.useDefaultAdvanced = false
+	case optPlotSourceViews:
+		m.startTextEdit(textFieldPlotSourceViews)
+		m.useDefaultAdvanced = false
+	case optPlotSourceCortex:
+		m.startTextEdit(textFieldPlotSourceCortex)
+		m.useDefaultAdvanced = false
+	case optPlotSourceSubjectsDir:
+		m.startTextEdit(textFieldPlotSourceSubjectsDir)
 		m.useDefaultAdvanced = false
 
 	case optPlotCompareWindows:

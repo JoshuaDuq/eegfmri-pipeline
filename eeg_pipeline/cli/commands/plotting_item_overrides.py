@@ -64,6 +64,18 @@ def apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> N
             _apply_config_override(config, "plotting.plots.features.power.topomap_windows", list(values))
         elif key == "topomap_window" and values:
             _apply_config_override(config, "plotting.plots.features.power.topomap_windows", [values[0]])
+        elif key == "source_hemi" and values:
+            _apply_config_override(config, "plotting.plots.features.sourcelocalization.hemi", values[0])
+        elif key == "source_views" and values:
+            _apply_config_override(config, "plotting.plots.features.sourcelocalization.views", list(values))
+        elif key == "source_cortex" and values:
+            _apply_config_override(config, "plotting.plots.features.sourcelocalization.cortex", values[0])
+        elif key == "source_subjects_dir" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.features.sourcelocalization.subjects_dir",
+                values[0],
+            )
         elif key == "connectivity_circle_top_fraction" and values:
             try:
                 _apply_config_override(config, "plotting.plots.features.connectivity.circle_top_fraction", float(values[0]))
@@ -256,6 +268,10 @@ PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "temporal_stats_feature_folder": "plotting.plots.behavior.temporal_topomaps.stats_feature_folder",
     "topomap_windows": "plotting.plots.features.power.topomap_windows",
     "topomap_window": "plotting.plots.features.power.topomap_windows",
+    "source_hemi": "plotting.plots.features.sourcelocalization.hemi",
+    "source_views": "plotting.plots.features.sourcelocalization.views",
+    "source_cortex": "plotting.plots.features.sourcelocalization.cortex",
+    "source_subjects_dir": "plotting.plots.features.sourcelocalization.subjects_dir",
     "tfr_topomap_active_window": "time_frequency_analysis.active_window",
     "tfr_topomap_window_size_ms": "time_frequency_analysis.topomap.temporal.window_size_ms",
     "tfr_topomap_window_count": "time_frequency_analysis.topomap.temporal.window_count",
@@ -329,6 +345,9 @@ def validate_plot_item_configs(
                 "connectivity_circle_min_lines",
                 "connectivity_network_top_fraction",
                 "temporal_stats_feature_folder",
+                "source_hemi",
+                "source_cortex",
+                "source_subjects_dir",
             }:
                 if not values or not str(values[0]).strip():
                     errors.append(f"plot_id '{plot_id}': {key} expects a non-empty value.")
@@ -381,7 +400,8 @@ def validate_plot_item_configs(
                 continue
 
             if key in {"comparison_windows", "comparison_values", "comparison_rois",
-                       "scatter_features", "scatter_columns", "scatter_aggregation_modes"}:
+                       "scatter_features", "scatter_columns", "scatter_aggregation_modes",
+                       "source_views"}:
                 if not values:
                     errors.append(f"plot_id '{plot_id}': {key} expects one or more values.")
 

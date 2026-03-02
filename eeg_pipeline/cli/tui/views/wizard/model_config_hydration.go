@@ -802,6 +802,72 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "feature_engineering.sourcelocalization.subjects_dir", apply: func(v interface{}) {
 			if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
 				m.sourceLocSubjectsDir = s
+				m.plotSourceSubjectsDir = s
+			}
+		}},
+		{key: "plotting.plots.features.sourcelocalization.hemi", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.plotSourceHemi = s
+			}
+		}},
+		{key: "plotting.plots.features.sourcelocalization.views", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotSourceViews = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.plots.features.sourcelocalization.cortex", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.plotSourceCortex = s
+			}
+		}},
+		{key: "plotting.plots.features.sourcelocalization.subjects_dir", apply: func(v interface{}) {
+			if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
+				m.plotSourceSubjectsDir = s
+			}
+		}},
+		{key: "plotting.comparisons.compare_windows", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.plotCompareWindows = &b
+			}
+		}},
+		{key: "plotting.comparisons.comparison_windows", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotComparisonWindowsSpec = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.comparisons.compare_columns", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.plotCompareColumns = &b
+			}
+		}},
+		{key: "plotting.comparisons.comparison_segment", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.plotComparisonSegment = s
+			}
+		}},
+		{key: "plotting.comparisons.comparison_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.plotComparisonColumn = s
+			}
+		}},
+		{key: "plotting.comparisons.comparison_values", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotComparisonValuesSpec = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.comparisons.comparison_labels", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotComparisonLabelsSpec = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.comparisons.comparison_rois", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotComparisonROIsSpec = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.overwrite", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.plotOverwrite = &b
 			}
 		}},
 		{key: "feature_engineering.sourcelocalization.mode", apply: func(v interface{}) {

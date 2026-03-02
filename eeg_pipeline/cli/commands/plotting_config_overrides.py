@@ -442,6 +442,18 @@ def _apply_feature_selection_overrides(args: argparse.Namespace, config: Any) ->
         _apply_config_override(config, "plotting.plots.features.temporal.time_labels", list(args.temporal_time_labels))
 
 
+def _apply_source_localization_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply source localization plot overrides."""
+    if _get_arg_value(args, "source_plot_hemi"):
+        _apply_config_override(config, "plotting.plots.features.sourcelocalization.hemi", str(args.source_plot_hemi))
+    if _get_arg_value(args, "source_plot_views"):
+        _apply_config_override(config, "plotting.plots.features.sourcelocalization.views", list(args.source_plot_views))
+    if _get_arg_value(args, "source_plot_cortex"):
+        _apply_config_override(config, "plotting.plots.features.sourcelocalization.cortex", str(args.source_plot_cortex))
+    if _get_arg_value(args, "source_subjects_dir"):
+        _apply_config_override(config, "feature_engineering.sourcelocalization.subjects_dir", str(args.source_subjects_dir))
+
+
 def _apply_comparison_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply comparison-related overrides."""
     if _get_arg_value(args, "compare_windows") is not None:
@@ -528,6 +540,7 @@ def apply_all_config_overrides(args: argparse.Namespace, config: Any) -> None:
     _apply_topomap_overrides(args, config)
     _apply_plot_sizing_overrides(args, config)
     _apply_feature_selection_overrides(args, config)
+    _apply_source_localization_overrides(args, config)
     _apply_comparison_overrides(args, config)
     _apply_roi_overrides(args, config)
     _apply_band_overrides(args, config)

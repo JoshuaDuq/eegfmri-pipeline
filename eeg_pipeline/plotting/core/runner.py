@@ -65,3 +65,4 @@ def safe_plot(
             ctx.logger.info(f"Executed: {name}")
     except Exception as exc:
         ctx.logger.warning(f"Failed to create {name}: {exc}")
+        raise RuntimeError(f"Failed to create plot '{name}'") from exc

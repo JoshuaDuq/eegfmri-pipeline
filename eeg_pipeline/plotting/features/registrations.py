@@ -18,6 +18,10 @@ from eeg_pipeline.plotting.core.runner import safe_plot
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
 from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
+from eeg_pipeline.utils.data.source_localization_paths import (
+    resolve_source_localization_method,
+    source_localization_estimates_dir,
+)
 
 from eeg_pipeline.plotting.features.aperiodic import (
     plot_aperiodic_topomaps,
@@ -772,25 +776,28 @@ def erp_suite(ctx: FeaturePlotContext, saved_files):
 def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
     source_dir = ctx.subdir("sourcelocalization")
     source_dir.mkdir(parents=True, exist_ok=True)
-    
-    # We retrieve the actual STC files saved during feature extraction
+
+    # We retrieve the actual STC files saved during feature extraction.
     stc_plot_enabled = get_config_value(
         ctx.config, "plotting.plots.features.sourcelocalization.plot_stc", True
     )
-    
     if stc_plot_enabled:
-        out_dir = ctx.deriv_root / "source_estimates" / f"sub-{ctx.subject}"
+        source_method = resolve_source_localization_method(ctx.config)
+        out_dir = source_localization_estimates_dir(
+            features_dir=ctx.features_dir,
+            method=source_method,
+        )
         if out_dir.exists():
-            stc_files = list(out_dir.glob(f"sub-{ctx.subject}_*_lcmv-vl.stc"))
+            stc_files = sorted(out_dir.glob(f"sub-{ctx.subject}_*_seg-*_cond-*_band-*_{source_method}-vl.stc"))
             if not stc_files:
-                stc_files = list(out_dir.glob(f"sub-{ctx.subject}_*_lcmv-lh.stc"))
-                
+                stc_files = sorted(out_dir.glob(f"sub-{ctx.subject}_*_seg-*_cond-*_band-*_{source_method}-lh.stc"))
+
             if stc_files:
                 ctx.logger.info("Plotting 3D Source Localization Brains...")
                 safe_plot(
                     ctx,
                     saved_files,
-                    "source_stc_3d_plots",
+                    "source_localization_3d",
                     "sourcelocalization",
                     None,
                     plot_source_stc_3d,
@@ -800,4 +807,9 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
                     config=ctx.config,
                     logger=ctx.logger,
                 )
-
+            else:
+                raise FileNotFoundError(
+                    "No segmented source-estimate STCs found for source_localization_3d. "
+                    f"Expected files like sub-{ctx.subject}_task-*_seg-*_cond-*_band-*_{source_method}-vl.stc "
+                    f"under {out_dir}."
+                )

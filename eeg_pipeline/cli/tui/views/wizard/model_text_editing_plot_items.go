@@ -54,6 +54,14 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.ConnectivityCircleMinLines
 	case plotItemConfigFieldConnectivityNetworkTopFraction:
 		return cfg.ConnectivityNetworkTopFraction
+	case plotItemConfigFieldSourceHemi:
+		return cfg.SourceHemi
+	case plotItemConfigFieldSourceViews:
+		return cfg.SourceViewsSpec
+	case plotItemConfigFieldSourceCortex:
+		return cfg.SourceCortex
+	case plotItemConfigFieldSourceSubjectsDir:
+		return cfg.SourceSubjectsDir
 	case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
 		return cfg.BehaviorTemporalStatsFeatureFolder
 	case plotItemConfigFieldDoseResponseDoseColumn:
@@ -166,6 +174,14 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 		cfg.ConnectivityCircleMinLines = strings.TrimSpace(value)
 	case plotItemConfigFieldConnectivityNetworkTopFraction:
 		cfg.ConnectivityNetworkTopFraction = strings.TrimSpace(value)
+	case plotItemConfigFieldSourceHemi:
+		cfg.SourceHemi = strings.TrimSpace(value)
+	case plotItemConfigFieldSourceViews:
+		cfg.SourceViewsSpec = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldSourceCortex:
+		cfg.SourceCortex = strings.TrimSpace(value)
+	case plotItemConfigFieldSourceSubjectsDir:
+		cfg.SourceSubjectsDir = strings.TrimSpace(value)
 	case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
 		cfg.BehaviorTemporalStatsFeatureFolder = strings.TrimSpace(value)
 	case plotItemConfigFieldDoseResponseDoseColumn:

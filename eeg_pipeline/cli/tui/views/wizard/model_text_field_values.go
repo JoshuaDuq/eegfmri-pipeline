@@ -312,6 +312,14 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.plotTemporalTimeLabelsSpec
 	case textFieldPlotAsymmetryStat:
 		return m.plotAsymmetryStatSpec
+	case textFieldPlotSourceHemi:
+		return m.plotSourceHemi
+	case textFieldPlotSourceViews:
+		return m.plotSourceViews
+	case textFieldPlotSourceCortex:
+		return m.plotSourceCortex
+	case textFieldPlotSourceSubjectsDir:
+		return m.plotSourceSubjectsDir
 	case textFieldPlotComparisonWindows:
 		return m.plotComparisonWindowsSpec
 	case textFieldPlotComparisonSegment:
@@ -750,6 +758,14 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.plotTemporalTimeLabelsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotAsymmetryStat:
 		m.plotAsymmetryStatSpec = value
+	case textFieldPlotSourceHemi:
+		m.plotSourceHemi = value
+	case textFieldPlotSourceViews:
+		m.plotSourceViews = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotSourceCortex:
+		m.plotSourceCortex = value
+	case textFieldPlotSourceSubjectsDir:
+		m.plotSourceSubjectsDir = strings.TrimSpace(value)
 	case textFieldPlotComparisonWindows:
 		m.plotComparisonWindowsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotComparisonSegment:

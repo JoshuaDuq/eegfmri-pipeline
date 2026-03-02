@@ -134,6 +134,12 @@ var extraPlotFieldsByPlotID = map[string][]plotItemConfigField{
 		plotItemConfigFieldTfrTopomapTemporalHspace,
 		plotItemConfigFieldTfrTopomapTemporalWspace,
 	},
+	"source_localization_3d": {
+		plotItemConfigFieldSourceHemi,
+		plotItemConfigFieldSourceViews,
+		plotItemConfigFieldSourceCortex,
+		plotItemConfigFieldSourceSubjectsDir,
+	},
 }
 
 var roiComparisonExcludedPlotIDs = map[string]struct{}{

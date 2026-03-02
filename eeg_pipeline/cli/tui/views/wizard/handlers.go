@@ -1367,6 +1367,8 @@ func (m *Model) togglePlotGroupExpansion(opt optionType) {
 		m.plotGroupTFRMiscExpanded = !m.plotGroupTFRMiscExpanded
 	case optPlotGroupSizing:
 		m.plotGroupSizingExpanded = !m.plotGroupSizingExpanded
+	case optPlotGroupSourceLoc:
+		m.plotGroupSourceLocExpanded = !m.plotGroupSourceLocExpanded
 	case optPlotGroupSelection:
 		m.plotGroupSelectionExpanded = !m.plotGroupSelectionExpanded
 	case optPlotGroupComparisons:

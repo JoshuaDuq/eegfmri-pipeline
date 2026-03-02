@@ -230,9 +230,32 @@ def _validate_context_has_data(context: FeaturePlotContext, subject: str, logger
     -------
     True if context has sufficient data, False otherwise.
     """
-    has_feature_data = context.power_df is not None or context.connectivity_df is not None
+    has_feature_data = any(
+        df is not None
+        for df in (
+            context.power_df,
+            context.connectivity_df,
+            context.aperiodic_df,
+            context.erp_df,
+            context.erds_df,
+            context.bursts_df,
+            context.quality_df,
+            context.spectral_df,
+            context.ratios_df,
+            context.asymmetry_df,
+            context.microstates_df,
+            context.pac_df,
+            context.complexity_df,
+            context.itpc_df,
+            context.temporal_df,
+            context.sourcelocalization_df,
+        )
+    )
+    has_source_estimates = any(
+        context.features_dir.glob("sourcelocalization/*/source_estimates/*.stc")
+    )
     
-    if not has_feature_data:
+    if not has_feature_data and not has_source_estimates:
         logger.warning(f"No feature data found for subject {subject}")
         if context.epochs is None:
             logger.warning("No epochs data found either")

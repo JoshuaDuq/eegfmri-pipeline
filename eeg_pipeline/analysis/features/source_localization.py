@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.utils.data.source_localization_paths import source_localization_estimates_dir
 from eeg_pipeline.utils.config.loader import get_config_float, get_config_int, get_config_value, get_frequency_bands
 
 if TYPE_CHECKING:
@@ -1214,13 +1216,14 @@ def _compute_roi_envelope(
     
     valid_data = roi_data[valid_mask]
     
-    # Filter valid data using MNE's FIR zero-phase filter (avoids IIR edge ringing)
+    # Use zero-phase IIR filtering to avoid FIR-kernel-length distortion on short windows.
     filtered_data = filter_data(
         valid_data,
         sfreq=sfreq,
         l_freq=fmin,
         h_freq=fmax,
-        method="fir",
+        method="iir",
+        iir_params={"order": 4, "ftype": "butter"},
         phase="zero",
         copy=True,
         verbose=False,
@@ -2152,8 +2155,16 @@ def extract_source_localization_features(
             if logger:
                 logger.info(f"Computing and saving condition-averaged band power STCs based on column '{cond_col}'...")
             
-            out_dir = ctx.deriv_root / "source_estimates" / f"sub-{ctx.subject}"
+            out_dir = source_localization_estimates_dir(
+                features_dir=deriv_features_path(Path(ctx.deriv_root), str(ctx.subject)),
+                method=str(src_cfg.method),
+            )
             out_dir.mkdir(parents=True, exist_ok=True)
+
+            src_path = out_dir / f"sub-{ctx.subject}_task-{ctx.task}_{src_cfg.method}-src.fif"
+            mne.write_source_spaces(str(src_path), src, overwrite=True)
+            if logger:
+                logger.info("Saved source space for STC plotting: %s", str(src_path))
             
             conditions_list = ctx.aligned_events[cond_col].unique()
             for cond in conditions_list:
@@ -2167,12 +2178,22 @@ def extract_source_localization_features(
                 cond_stc_data = np.stack([stcs[idx].data for idx in cond_indices], axis=0) 
                 
                 for band in bands:
-                    if band not in freq_bands: continue
+                    if band not in freq_bands:
+                        continue
                     fmin_b, fmax_b = freq_bands[band]
+                    if not _validate_source_localization_duration(
+                        n_times=int(cond_stc_data.shape[-1]) if np.ndim(cond_stc_data) >= 3 else 0,
+                        sfreq=float(sfreq),
+                        fmin=float(fmin_b),
+                        min_cycles=min_cycles_per_band,
+                        band=str(band),
+                        logger=logger,
+                    ):
+                        continue
                     
                     # Compute power per epoch per vertex
-                    power_stc = _compute_roi_power(cond_stc_data, sfreq, fmin_b, fmax_b) # returns (n_epochs, n_vertices)
-                    mean_power = np.nanmean(power_stc, axis=0) # shape (n_vertices,)
+                    power_stc = _compute_roi_power(cond_stc_data, sfreq, fmin_b, fmax_b)
+                    mean_power = np.nanmean(power_stc, axis=0)
                     
                     out_stc = stcs[0].copy()
                     out_stc.data = mean_power[:, np.newaxis]
@@ -2181,7 +2202,11 @@ def extract_source_localization_features(
                     
                     # MNE automatically appends appropriate extension like -vl.stc or -lh.stc
                     safe_cond = str(cond).replace(" ", "_").replace("/", "_")
-                    stc_name = out_dir / f"sub-{ctx.subject}_task-{ctx.task}_cond-{safe_cond}_band-{band}_{src_cfg.method}"
+                    safe_segment = _sanitize_feature_token(segment_label)
+                    stc_name = (
+                        out_dir
+                        / f"sub-{ctx.subject}_task-{ctx.task}_seg-{safe_segment}_cond-{safe_cond}_band-{band}_{src_cfg.method}"
+                    )
                     out_stc.save(str(stc_name), overwrite=True)
 
     features_df = pd.DataFrame(records)

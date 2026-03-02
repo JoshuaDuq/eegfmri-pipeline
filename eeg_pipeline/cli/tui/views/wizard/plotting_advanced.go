@@ -747,6 +747,18 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 	case plotItemConfigFieldConnectivityNetworkTopFraction:
 		value := m.getPlotFieldTextValue(cfg.ConnectivityNetworkTopFraction, "0.0", row, plotItemConfigFieldConnectivityNetworkTopFraction)
 		return []renderLine{m.renderPlotValueLine("network_top_fraction", value, "0.0-1.0 (default: 0.0 = all edges)", focused, labelWidth)}
+	case plotItemConfigFieldSourceHemi:
+		value := m.getPlotFieldTextValue(cfg.SourceHemi, "both", row, plotItemConfigFieldSourceHemi)
+		return []renderLine{m.renderPlotValueLine("source_hemi", value, "lh, rh, or both", focused, labelWidth)}
+	case plotItemConfigFieldSourceViews:
+		value := m.getPlotFieldTextValue(cfg.SourceViewsSpec, "lateral medial", row, plotItemConfigFieldSourceViews)
+		return []renderLine{m.renderPlotValueLine("source_views", value, "space-separated views", focused, labelWidth)}
+	case plotItemConfigFieldSourceCortex:
+		value := m.getPlotFieldTextValue(cfg.SourceCortex, "classic", row, plotItemConfigFieldSourceCortex)
+		return []renderLine{m.renderPlotValueLine("source_cortex", value, "colormap (e.g. classic)", focused, labelWidth)}
+	case plotItemConfigFieldSourceSubjectsDir:
+		value := m.getPlotFieldTextValue(cfg.SourceSubjectsDir, "(auto)", row, plotItemConfigFieldSourceSubjectsDir)
+		return []renderLine{m.renderPlotValueLine("source_subjects_dir", value, "FreeSurfer subjects dir", focused, labelWidth)}
 	case plotItemConfigFieldItpcSharedColorbar:
 		value := formatTriState(cfg.ItpcSharedColorbar)
 		return []renderLine{m.renderPlotValueLine("shared_colorbar", value, "default/ON/OFF", focused, labelWidth)}
@@ -1130,6 +1142,8 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 		return []renderLine{m.renderGroupLine(opt, "TFR", m.plotGroupTFRExpanded, "time-frequency controls", focused)}
 	case optPlotGroupSizing:
 		return []renderLine{m.renderGroupLine(opt, "Plot Sizing", m.plotGroupSizingExpanded, "per-plot sizing", focused)}
+	case optPlotGroupSourceLoc:
+		return []renderLine{m.renderGroupLine(opt, "Source Loc", m.plotGroupSourceLocExpanded, "3d brain plotting options", focused)}
 	case optPlotGroupSelection:
 		return []renderLine{m.renderGroupLine(opt, "Selections", m.plotGroupSelectionExpanded, "metric lists & measures", focused)}
 	case optPlotGroupComparisons:
@@ -1604,6 +1618,18 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optPlotTemporalTimeLabels:
 		value := m.formatTextFieldWithBuffer(textFieldPlotTemporalTimeLabels, m.plotTemporalTimeLabelsSpec, "")
 		return []renderLine{m.renderValueLine(opt, "temporal_labels", value, "space-separated", focused, labelWidth)}
+	case optPlotSourceHemi:
+		value := m.formatTextFieldWithBuffer(textFieldPlotSourceHemi, m.plotSourceHemi, "both")
+		return []renderLine{m.renderValueLine(opt, "hemi", value, "lh, rh, or both", focused, labelWidth)}
+	case optPlotSourceViews:
+		value := m.formatTextFieldWithBuffer(textFieldPlotSourceViews, m.plotSourceViews, "lateral medial")
+		return []renderLine{m.renderValueLine(opt, "views", value, "lateral, medial, etc.", focused, labelWidth)}
+	case optPlotSourceCortex:
+		value := m.formatTextFieldWithBuffer(textFieldPlotSourceCortex, m.plotSourceCortex, "classic")
+		return []renderLine{m.renderValueLine(opt, "cortex", value, "colormap (e.g. classic, bone)", focused, labelWidth)}
+	case optPlotSourceSubjectsDir:
+		value := m.formatTextFieldWithBuffer(textFieldPlotSourceSubjectsDir, m.plotSourceSubjectsDir, "")
+		return []renderLine{m.renderValueLine(opt, "subjects_dir", value, "path to freesurfer subjects", focused, labelWidth)}
 	case optPlotCompareWindows:
 		value := formatTriState(m.plotCompareWindows)
 		return []renderLine{m.renderValueLine(opt, "compare_windows", value, "tri-state", focused, labelWidth)}

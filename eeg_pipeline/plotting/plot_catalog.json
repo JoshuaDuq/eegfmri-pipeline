@@ -56,6 +56,11 @@
       "description": "Oscillatory burst dynamics"
     },
     {
+      "key": "sourcelocalization",
+      "label": "Source Localization",
+      "description": "3D cortical source estimates (e.g. LCMV/eLORETA)"
+    },
+    {
       "key": "erp",
       "label": "ERP",
       "description": "Event-related potential waveforms and topographies"
@@ -533,22 +538,45 @@
           "type": "multi_select",
           "label": "Features",
           "description": "EEG features to correlate",
-          "options": ["power", "connectivity", "aperiodic", "complexity", "itpc", "pac", "erds", "spectral", "ratios", "asymmetry", "microstates"],
-          "default": ["power"]
+          "options": [
+            "power",
+            "connectivity",
+            "aperiodic",
+            "complexity",
+            "itpc",
+            "pac",
+            "erds",
+            "spectral",
+            "ratios",
+            "asymmetry",
+            "microstates"
+          ],
+          "default": [
+            "power"
+          ]
         },
         "columns": {
           "type": "multi_select_discovered",
           "label": "Behavioral Columns",
           "description": "Columns from events.tsv to correlate with",
           "source": "events_columns",
-          "default": ["rating"]
+          "default": [
+            "rating"
+          ]
         },
         "aggregation_modes": {
           "type": "multi_select",
           "label": "Aggregation",
           "description": "How to aggregate features",
-          "options": ["roi", "global", "channel"],
-          "default": ["roi", "global"]
+          "options": [
+            "roi",
+            "global",
+            "channel"
+          ],
+          "default": [
+            "roi",
+            "global"
+          ]
         }
       }
     },
@@ -591,6 +619,18 @@
         "binary_outcome_probability"
       ],
       "requires_epochs": true
+    },
+    {
+      "id": "source_localization_3d",
+      "group": "sourcelocalization",
+      "label": "3D Source Brains",
+      "description": "Plot 3D brain map projections from STCs",
+      "required_files": [
+        "features/sourcelocalization/*/source_estimates/*.stc"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
     }
   ]
 }
