@@ -649,14 +649,19 @@ def _fmri_roi_coords_from_stats_map(
         subjects_dir=Path(subjects_dir),
         subject=str(subject),
     )
-    subject_ref_data = np.asarray(
-        nib.load(str(matched_ref_path)).get_fdata(dtype=np.float32)
-    )
+    ref_img = nib.load(str(matched_ref_path))
+    subject_ref_data = np.asarray(ref_img.get_fdata(dtype=np.float32))
     if subject_ref_data.ndim != 3:
         raise ValueError(
             f"Expected 3D subject MRI reference, got shape={subject_ref_data.shape} "
             f"from {matched_ref_path}."
         )
+
+    # MNE source spaces use FreeSurfer surface RAS (tkRAS), NOT scanner RAS.
+    # The NIfTI affine maps voxels → scanner RAS, but the BEM surfaces live
+    # in surface RAS. The vox2ras_tkr transform from the FreeSurfer reference
+    # volume provides the correct voxel → surface RAS mapping.
+    vox2ras_tkr = np.asarray(ref_img.header.get_vox2ras_tkr(), dtype=float)
 
     thr = float(cfg.threshold)
     if not np.isfinite(thr) or thr <= 0:
@@ -780,7 +785,7 @@ def _fmri_roi_coords_from_stats_map(
                 pick = rng.choice(int(vox.shape[0]), size=int(remaining), replace=False)
                 vox = vox[pick]
 
-        coords_mm = nib.affines.apply_affine(affine, vox)
+        coords_mm = nib.affines.apply_affine(vox2ras_tkr, vox)
         coords_m = np.asarray(coords_mm, dtype=float) / 1000.0
         roi_name = f"fmri_c{out_idx:02d}_peak{peak_val:.2f}".replace(".", "p")
         roi_coords_m[roi_name] = coords_m
@@ -844,14 +849,41 @@ def _extract_roi_timecourses_from_vertex_indices(
             "after forward/inverse modeling for any ROI."
         )
 
+    # Lift raw array extraction out of the nested ROI / epoch loops
+    stc_data_list = [np.asarray(stc.data, dtype=float) for stc in stcs]
+    
     n_rois = len(surviving_roi_names)
     out = np.full((n_epochs, n_rois, n_times), np.nan, dtype=float)
-    for epoch_idx, stc in enumerate(stcs):
-        data = np.asarray(stc.data, dtype=float)
-        for roi_idx, roi_name in enumerate(surviving_roi_names):
-            row_idxs = roi_row_indices[roi_name]
-            block = data[row_idxs, :]
-            out[epoch_idx, roi_idx, :] = np.nanmean(block, axis=0)
+
+    for roi_idx, roi_name in enumerate(surviving_roi_names):
+        row_idxs = roi_row_indices[roi_name]
+        
+        blocks: List[np.ndarray] = []
+        for data in stc_data_list:
+            block = data[row_idxs]
+            if block.ndim == 3:
+                # e.g., VectorSourceEstimate with 3 unconstrained orientations per region
+                block = block.reshape(-1, block.shape[-1])
+            blocks.append(block)
+            
+        block_stack = np.stack(blocks, axis=0)  # (n_epochs, n_verts, n_times)
+        
+        if block_stack.shape[1] == 0:
+            out[:, roi_idx, :] = np.nan
+        elif block_stack.shape[1] == 1:
+            out[:, roi_idx, :] = block_stack[:, 0, :]
+        else:
+            # Flatten to (n_verts, n_epochs * n_times) to compute stable cross-epoch covariance
+            block_flat = np.nan_to_num(block_stack).transpose(1, 0, 2).reshape(block_stack.shape[1], -1)
+            cov = block_flat @ block_flat.T
+            
+            u, _, _ = np.linalg.svd(cov, full_matrices=False)
+            flip = np.sign(u[:, 0])
+            flip_sign = np.sign(np.sum(flip))
+            if flip_sign != 0:
+                flip *= flip_sign
+                
+            out[:, roi_idx, :] = np.nanmean(block_stack * flip[np.newaxis, :, np.newaxis], axis=1)
 
     return out, surviving_roi_names
 
@@ -1070,30 +1102,22 @@ def _extract_roi_timecourses(
     """
     import mne
     
-    n_epochs = len(stcs)
-    n_rois = len(labels)
-    n_times = stcs[0].data.shape[1]
-    
-    roi_data = np.zeros((n_epochs, n_rois, n_times), dtype=float)
-    
-    for epoch_idx, stc in enumerate(stcs):
-        try:
-            tc = mne.extract_label_time_course(
-                stc,
-                labels=labels,
-                src=src,
-                mode=mode,
-                allow_empty=False,
-                verbose=False,
-            )
-        except ValueError as exc:
-            raise ValueError(
-                "ROI extraction failed because one or more labels have no vertices in the source space. "
-                "Check parcellation/source-space compatibility and do not use empty labels."
-            ) from exc
-        roi_data[epoch_idx, :, :] = np.asarray(tc, dtype=float)
-    
-    return roi_data
+    try:
+        tcs = mne.extract_label_time_course(
+            stcs,
+            labels=labels,
+            src=src,
+            mode=mode,
+            allow_empty=False,
+            verbose=False,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "ROI extraction failed because one or more labels have no vertices in the source space. "
+            "Check parcellation/source-space compatibility and do not use empty labels."
+        ) from exc
+        
+    return np.asarray(tcs, dtype=float)
 
 
 def _compute_roi_power(
@@ -1553,6 +1577,14 @@ def _load_source_localization_config(
             "feature_engineering.sourcelocalization.mode='fmri_informed' requires "
             "feature_engineering.sourcelocalization.fmri.enabled=true."
         )
+    if bool(fmri_cfg.enabled) and mode != "fmri_informed":
+        logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
+        logger.warning(
+            "fMRI constraint is enabled but mode='%s'; auto-promoting to 'fmri_informed' "
+            "so STC outputs are saved in the correct directory.",
+            mode,
+        )
+        mode = "fmri_informed"
     if (
         bool(fmri_cfg.enabled)
         and method_use == "eloreta"
@@ -2488,22 +2520,20 @@ def extract_source_connectivity_features(
             continue
         
         if connectivity_method_l == "aec":
+            con = envelope_correlation(
+                roi_data,
+                orthogonalize="pairwise",
+                verbose=False,
+            )
+            con_tensor = con.get_data(output="dense")[:, :, :, 0]
+            triu_idx = np.triu_indices(n_rois_band, k=1)
+
+            col_name = f"src_{src_cfg.method}_{band}_aec_global"
+            if col_name not in feature_cols:
+                feature_cols.append(col_name)
+
             for epoch_idx in range(n_epochs):
-                epoch_data = roi_data[epoch_idx:epoch_idx+1, :, :]
-                
-                con = envelope_correlation(
-                    epoch_data,
-                    orthogonalize="pairwise",
-                    verbose=False,
-                )
-                con_matrix = con.combine().get_data(output="dense")[:, :, 0]
-                
-                triu_idx = np.triu_indices(n_rois_band, k=1)
-                mean_conn = np.nanmean(con_matrix[triu_idx])
-                
-                col_name = f"src_{src_cfg.method}_{band}_aec_global"
-                if col_name not in feature_cols:
-                    feature_cols.append(col_name)
+                mean_conn = float(np.nanmean(con_tensor[epoch_idx][triu_idx]))
                 records[epoch_idx][col_name] = mean_conn
                 
         elif connectivity_method_l in {"wpli", "plv"}:

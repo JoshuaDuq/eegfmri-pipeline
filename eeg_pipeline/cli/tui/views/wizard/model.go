@@ -490,6 +490,10 @@ type PlotItemConfig struct {
 	SourceViewsSpec   string
 	SourceCortex      string
 	SourceSubjectsDir string
+	SourceCondition   string
+	SourceConditionA  string
+	SourceConditionB  string
+	SourceBandsSpec   string
 
 	// ITPC
 	ItpcSharedColorbar *bool
@@ -547,6 +551,10 @@ const (
 	plotItemConfigFieldSourceViews
 	plotItemConfigFieldSourceCortex
 	plotItemConfigFieldSourceSubjectsDir
+	plotItemConfigFieldSourceCondition
+	plotItemConfigFieldSourceConditionA
+	plotItemConfigFieldSourceConditionB
+	plotItemConfigFieldSourceBands
 	plotItemConfigFieldItpcSharedColorbar
 	// Behavior Scatter
 	plotItemConfigFieldBehaviorScatterFeatures

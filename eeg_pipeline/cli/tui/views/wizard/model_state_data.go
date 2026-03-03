@@ -709,6 +709,27 @@ func (m Model) GetPlottingComparisonColumnValues(column string) []string {
 	return m.GetDiscoveredColumnValues(column)
 }
 
+// GetSourcePlotConditions returns detected condition labels for source plot filtering.
+func (m Model) GetSourcePlotConditions() []string {
+	conditionColumn := strings.TrimSpace(m.sourceLocContrastCondition)
+	if conditionColumn == "" {
+		return nil
+	}
+	return m.GetDiscoveredColumnValues(conditionColumn)
+}
+
+// GetSourcePlotBands returns the available frequency band keys for source plot band selection.
+// Derived from the configured bands (same set used by all other pipelines).
+func (m Model) GetSourcePlotBands() []string {
+	out := make([]string, 0, len(m.bands))
+	for _, b := range m.bands {
+		if key := strings.TrimSpace(b.Key); key != "" {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
 // SetFmriDiscoveredColumns sets the columns and values discovered from fMRI events files
 func (m *Model) SetFmriDiscoveredColumns(columns []string, values map[string][]string, source string) {
 	m.fmriDiscoveredColumns = columns

@@ -776,6 +776,44 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 	case plotItemConfigFieldSourceSubjectsDir:
 		value := m.getPlotFieldTextValue(cfg.SourceSubjectsDir, "(auto)", row, plotItemConfigFieldSourceSubjectsDir)
 		return []renderLine{m.renderPlotValueLine("source_subjects_dir", value, "FreeSurfer subjects dir", focused, labelWidth)}
+	case plotItemConfigFieldSourceCondition:
+		value := m.getPlotFieldTextValue(cfg.SourceCondition, "(all)", row, plotItemConfigFieldSourceCondition)
+		conditions := m.GetSourcePlotConditions()
+		hint := "Space to select condition · or type manually"
+		if len(conditions) > 0 {
+			hint = fmt.Sprintf("Space to select · %d detected conditions", len(conditions))
+		}
+		isEditing := m.expandedOption == expandedSourcePlotCondition && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldSourceCondition
+		lines := []renderLine{m.renderPlotValueLine("source_condition", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(conditions) > 0 {
+			expandedLines := m.renderExpandedListItems(conditions, func(cond string) bool {
+				return cfg.SourceCondition == cond
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldSourceConditionA:
+		value := m.getPlotFieldTextValue(cfg.SourceConditionA, "(auto)", row, plotItemConfigFieldSourceConditionA)
+		return []renderLine{m.renderPlotValueLine("source_condition_a", value, "contrast baseline condition (e.g. 44.3)", focused, labelWidth)}
+	case plotItemConfigFieldSourceConditionB:
+		value := m.getPlotFieldTextValue(cfg.SourceConditionB, "(auto)", row, plotItemConfigFieldSourceConditionB)
+		return []renderLine{m.renderPlotValueLine("source_condition_b", value, "contrast active condition (e.g. 49.3)", focused, labelWidth)}
+	case plotItemConfigFieldSourceBands:
+		value := m.getPlotFieldTextValue(cfg.SourceBandsSpec, "(all)", row, plotItemConfigFieldSourceBands)
+		bands := m.GetSourcePlotBands()
+		hint := "Space to select bands · or type manually"
+		if len(bands) > 0 {
+			hint = fmt.Sprintf("Space to select · %d bands available", len(bands))
+		}
+		isEditing := m.expandedOption == expandedSourcePlotBands && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldSourceBands
+		lines := []renderLine{m.renderPlotValueLine("source_bands", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(bands) > 0 {
+			expandedLines := m.renderExpandedListItems(bands, func(band string) bool {
+				return m.isPlotFieldValueSelected(cfg.SourceBandsSpec)(band)
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
 	case plotItemConfigFieldItpcSharedColorbar:
 		value := formatTriState(cfg.ItpcSharedColorbar)
 		return []renderLine{m.renderPlotValueLine("shared_colorbar", value, "default/ON/OFF", focused, labelWidth)}

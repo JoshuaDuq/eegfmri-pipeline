@@ -75,4 +75,6 @@ const (
 	expandedSourceLocContrastColumn              = 67
 	expandedSourceLocContrastValueA              = 68
 	expandedSourceLocContrastValueB              = 69
+	expandedSourcePlotCondition                  = 70
+	expandedSourcePlotBands                      = 71
 )

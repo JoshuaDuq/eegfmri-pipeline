@@ -274,6 +274,33 @@ func (m *Model) restoreWizardConfig() {
 
 }
 
+// restoreWizardConfigValues restores bands and pipeline configuration from
+// persistent state without overwriting UI selections. Used after async config
+// hydration (ApplyConfigKeys) to re-apply persisted parameter values that
+// were overwritten by YAML defaults, while preserving any selection changes
+// the user has already made in the current session.
+func (m *Model) restoreWizardConfigValues() {
+	if len(m.persistentState.Bands) > 0 {
+		bands := make([]wizard.FrequencyBand, len(m.persistentState.Bands))
+		for i, b := range m.persistentState.Bands {
+			bands[i] = wizard.FrequencyBand{
+				Key:    b.Key,
+				Name:   b.Name,
+				LowHz:  b.LowHz,
+				HighHz: b.HighHz,
+			}
+		}
+		m.wizard.SetBands(bands, m.persistentState.BandSelected)
+	}
+
+	if m.persistentState.PipelineConfigs != nil {
+		pipelineName := m.selectedPipeline.String()
+		if cfg, ok := m.persistentState.PipelineConfigs[pipelineName]; ok {
+			m.wizard.ImportConfigValues(cfg)
+		}
+	}
+}
+
 // saveWizardConfig copies bands, ROIs, spatial selection, and pipeline config to persistent state
 func (m *Model) saveWizardConfig() {
 	// Save bands

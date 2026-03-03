@@ -165,6 +165,7 @@ def _create_plot_context(
     epochs: Optional[Any],
     tfr: Optional[Any],
     plot_name_patterns: Optional[List[str]] = None,
+    feature_categories_to_load: Optional[Set[str]] = None,
 ) -> FeaturePlotContext:
     """Create and initialize feature plot context.
     
@@ -203,6 +204,7 @@ def _create_plot_context(
         config=config,
         logger=logger,
         plot_name_patterns=plot_name_patterns,
+        feature_categories_to_load=feature_categories_to_load,
         stats_dir=stats_dir,
         epochs_info=epochs_info,
         aligned_events=aligned_events,
@@ -312,6 +314,14 @@ def visualize_features(
     if logger is None:
         logger = get_logger(__name__)
     
+    selected_by_category = _parse_plotter_tokens(feature_plotters) if feature_plotters else {}
+
+    categories_to_load: Optional[Set[str]] = None
+    if visualize_categories is not None:
+        categories_to_load = {str(cat).strip() for cat in visualize_categories if str(cat).strip()}
+    elif selected_by_category:
+        categories_to_load = set(selected_by_category.keys())
+
     context = _create_plot_context(
         subject=subject,
         deriv_root=deriv_root,
@@ -322,14 +332,13 @@ def visualize_features(
         epochs=epochs,
         tfr=tfr,
         plot_name_patterns=plot_name_patterns,
+        feature_categories_to_load=categories_to_load,
     )
     
     if not _validate_context_has_data(context, subject, logger):
         return {}
     
     manager = VisualizationManager(context)
-    
-    selected_by_category = _parse_plotter_tokens(feature_plotters) if feature_plotters else {}
     
     saved_plots = _run_visualizations(
         manager=manager,

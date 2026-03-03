@@ -897,9 +897,21 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	return ab.build()
 }
 
+func (m Model) selectedFeaturePlotterIDs() []string {
+	items := m.featurePlotterItems()
+	ids := make([]string, 0, len(items))
+	for _, p := range items {
+		if m.featurePlotterSelected[p.ID] {
+			ids = append(ids, p.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 func (m Model) buildPlotItemConfigArgs() []string {
 	var args []string
-	plotIDs := m.SelectedPlotIDs()
+	plotIDs := append(m.SelectedPlotIDs(), m.selectedFeaturePlotterIDs()...)
 	for _, plotID := range plotIDs {
 		cfg, ok := m.plotItemConfigs[plotID]
 		if !ok {
@@ -997,6 +1009,19 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		}
 		if strings.TrimSpace(cfg.SourceSubjectsDir) != "" {
 			args = append(args, "--plot-item-config", plotID, "source_subjects_dir", strings.TrimSpace(cfg.SourceSubjectsDir))
+		}
+		if strings.TrimSpace(cfg.SourceCondition) != "" {
+			args = append(args, "--plot-item-config", plotID, "source_condition", strings.TrimSpace(cfg.SourceCondition))
+		}
+		if strings.TrimSpace(cfg.SourceConditionA) != "" {
+			args = append(args, "--plot-item-config", plotID, "source_condition_a", strings.TrimSpace(cfg.SourceConditionA))
+		}
+		if strings.TrimSpace(cfg.SourceConditionB) != "" {
+			args = append(args, "--plot-item-config", plotID, "source_condition_b", strings.TrimSpace(cfg.SourceConditionB))
+		}
+		if strings.TrimSpace(cfg.SourceBandsSpec) != "" {
+			args = append(args, "--plot-item-config", plotID, "source_bands")
+			args = append(args, splitSpaceList(cfg.SourceBandsSpec)...)
 		}
 		if cfg.ItpcSharedColorbar != nil {
 			args = append(args, "--plot-item-config", plotID, "itpc_shared_colorbar", strconv.FormatBool(*cfg.ItpcSharedColorbar))

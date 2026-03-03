@@ -50,7 +50,7 @@ frequency_bands: &frequency_bands
 
 # 2.2 Time Windows
 time_windows:
-  active: &active_window [3.0, 10.5]  # Primary analysis period [s]
+  active: &active_window [3.0, 10.5]  # Active/task period [s]
   baseline_tfr: &baseline_window_tfr [-5.0, -0.01]  # TFR baseline window [s]
   baseline_erp: [-0.2, 0.0]  # ERP baseline window [s]
 
@@ -82,20 +82,20 @@ rois: &roi_definitions
 # 3. CORE PROCESSING PIPELINE
 ###################################################################
 event_columns:
-  # Generic column aliases for logical event groups.
-  # Add study-specific column names in your overrides file.
-  required: ["outcome"]
-  condition: ["condition", "trial_type"]
-  predictor: []
-  outcome: ["outcome", "rating"]
-  binary_outcome: ["binary_outcome", "outcome_binary", "label"]
+  # Optional: restrict strict event validation to these logical groups.
+  # Keep as ["rating"] for paradigm-agnostic use; add "temperature"/"binary_outcome"
+  # when those analyses are required.
+  required: ["rating"]
+  temperature: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
+  rating: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
+  binary_outcome: ["binary_outcome_coded", "binary_outcome", "pain"]
 
 alignment:
   allow_misaligned_trim: false
   min_alignment_samples: 5
-  # EEG↔fMRI alignment defaults; dataset-specific preprocessing may override.
+  # EEG↔fMRI: recommended for simultaneous acquisition
   trim_to_first_volume: true         # EEG raw_to_bids: trim to first volume marker
-  fmri_onset_reference: "as_is"  # fMRI raw_to_bids onset reference (as_is | first_iti_start | first_stim_start)
+  fmri_onset_reference: "first_iti_start"  # fMRI raw_to_bids: event onsets relative to first ITI
 
 eeg:
   montage: "easycap-M1"
@@ -115,9 +115,6 @@ preprocessing:
   write_clean_events: true           # Write post-rejection (kept-epochs) *_proc-clean_events.tsv in derivatives
   clean_events_overwrite: true       # Overwrite existing clean events.tsv
   clean_events_strict: true          # Fail preprocessing if clean events.tsv cannot be written/aligned
-  # Optional preferred task-trigger prefixes for auto-detecting epoch conditions.
-  # Leave empty for generic use; define study-specific prefixes in your overrides file.
-  condition_preferred_prefixes: []
 
 pyprep:
   ransac: true
@@ -259,7 +256,7 @@ feature_engineering:
 
   power:
     require_baseline: true
-    # For event-related paradigms, subtracting the evoked (ERP) component is often
+    # For event-related pain paradigms, subtracting the evoked (ERP) component is often
     # scientifically preferable when interpreting oscillatory power changes as "induced".
     # In trial_ml_safe mode, provide ctx.train_mask to avoid CV leakage; otherwise this
     # is automatically disabled for safety.
@@ -332,7 +329,7 @@ feature_engineering:
     iaf_min_prominence: 0.05
     iaf_min_cycles_at_fmin: 5.0     # Require this many cycles at iaf_search_range_hz[0] for stable PSD/peak detection
     iaf_min_baseline_sec: 0.0       # Additional absolute minimum baseline duration (sec); 0 disables
-    allow_full_fallback: false      # If true and baseline is missing, use full segment (not recommended for event-related paradigms)
+    allow_full_fallback: false      # If true and baseline is missing, use full segment (not recommended for pain paradigms)
     # Use existing ROI names from `rois:` above. If these ROIs are missing, IAF
     # estimation returns null unless allow_all_channels_fallback=true.
     iaf_rois: ["ParOccipital_Midline", "ParOccipital_Left", "ParOccipital_Right"]
@@ -467,14 +464,6 @@ feature_engineering:
     subject: null                  # e.g., "sub-0001"
     trans: null                    # e.g., "../../../data/derivatives/coreg/sub-0001-trans.fif"
     bem: null                      # e.g., "../../../data/derivatives/bem/sub-0001-bem-sol.fif"
-    allow_template_fallback: false # Require explicit opt-in to fsaverage fallback
-    contrast:
-      enabled: false
-      condition_column: null       # Required when enabled (e.g., "trial_type" or "binary_outcome")
-      condition_a: null            # Required condition A value
-      condition_b: null            # Required condition B value
-      min_trials_per_condition: 5
-      emit_welch_stats: true
     fmri:
       enabled: false
       stats_map_path: null         # NIfTI statistical map in the subject's FreeSurfer MRI space (e.g., orig.mgz space)
@@ -482,9 +471,9 @@ feature_engineering:
       require_provenance: true     # If true, error when provenance is unknown
       threshold: 3.1
       tail: "pos"                  # "pos" or "abs"
-      threshold_mode: "z"          # "z" or "fdr" (FDR requires an explicit z-stat map)
+      threshold_mode: "z"          # "z" or "fdr"
       fdr_q: 0.05
-      stat_type: "z"               # Must be "z" for FDR thresholding
+      stat_type: "z"
       cluster_min_voxels: 50
       # Preferred: stable across voxel sizes/resampling. When set, overrides cluster_min_voxels.
       # Example: 50 vox @ 2mm isotropic ≈ 50 * 8 = 400 mm^3.
@@ -492,40 +481,30 @@ feature_engineering:
       max_clusters: 20
       max_voxels_per_cluster: 2000
       max_total_voxels: 20000
-      random_seed: 0              # Deterministic by default (seed=0)
-      time_windows: {}            # Unsupported for source features; keep empty
+      random_seed: 0
+      time_windows:
+        window_a: {name: "plateau", tmin: 5.0, tmax: 10.0}
+        window_b: {name: "baseline", tmin: -2.0, tmax: 0.0}
       contrast:
         enabled: false
         type: "t-test"             # "t-test" | "paired-t-test" | "f-test" | "custom"
-        condition_a: {column: "trial_type", value: ""}
-        condition_b: {column: "trial_type", value: ""}
+        cond_a: {column: "trial_type", value: ""}
+        cond_b: {column: "trial_type", value: ""}
         formula: ""
-        name: "contrast"
+        name: "pain_vs_baseline"
         runs: []                   # explicit runs (empty = auto-detect)
         hrf_model: "spm"           # "spm" | "flobs" | "fir"
         drift_model: "cosine"      # "none" | "cosine" | "polynomial"
         high_pass_hz: 0.008
         low_pass_hz: null          # Optional; avoid unless you know you need it
-        # Optional: restrict which event rows are eligible for condition A/B remapping.
-        # Values are matched against `condition_scope_column`.
-        # If null, no condition-scope filtering is applied.
-        condition_scope_trial_types: null
-        # Events column used for `condition_scope_trial_types`.
-        condition_scope_column: "trial_type"
         # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
-        # If null, all event rows are modeled (default).
+        # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
+        #   ["stimulation", "pain_question", "vas_rating"]
         events_to_model: null
-        # Events column used for phase-level scoping.
-        phase_column: "stim_phase"
-        # Optional: restrict which phase values are modeled when events.tsv includes `phase_column`.
-        # If null, no phase scoping is applied.
-        # Use ["all"] to disable scoping and model all phase values.
+        # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
+        # If null, no stim_phase scoping is applied.
+        # Use ["all"] to disable scoping and model all stimulation phases.
         stim_phases_to_model: null
-        # Events column used to scope phase filtering to a subset of rows.
-        phase_scope_column: "trial_type"
-        # Optional: value in `phase_scope_column` that phase scoping is restricted to.
-        # If null, phase scoping applies to all rows.
-        phase_scope_value: null
         cluster_correction: true
         cluster_p_threshold: 0.001
         output_type: "z-score"     # "z-score" | "t-stat" | "cope" | "beta"
@@ -568,6 +547,7 @@ feature_engineering:
     skip_invalid_segments: true
 
   output:
+    save_subject_level_features: true
     also_save_csv: false
 
   erp:
@@ -603,10 +583,11 @@ feature_engineering:
     use_log_ratio: false             # true = dB (10*log10), false = percent change
     min_baseline_power: 1.0e-12      # Clamp baseline power to avoid division instability
     min_active_power: 1.0e-12        # Clamp active power for log computation
-    # Optional laterality-aware ERDS markers (disabled by default for paradigm-agnostic behavior).
-    enable_laterality_markers: false
-    laterality_marker_bands: ["alpha"]    # Bands where contralateral condition markers are extracted
-    laterality_columns: ["stim_side", "stimulated_side", "side", "stimulus_side", "hand"]
+    min_segment_sec: 0.5             # Minimum segment duration in seconds
+    bands: ["alpha", "beta"]         # Bands for ERDS computation (subset of frequency_bands)
+    # Pain-focused alpha markers (trial-level contralateral somatosensory kinetics)
+    pain_marker_bands: ["alpha"]     # Bands where contralateral pain markers are extracted
+    laterality_columns: ["stim_side", "stimulated_side", "pain_side", "side", "stimulus_side", "hand"]
     infer_contralateral_when_missing: true
     somatosensory_left_channels: ["C1", "C3", "C5", "CP1", "CP3", "CP5", "FC1", "FC3", "FC5"]
     somatosensory_right_channels: ["C2", "C4", "C6", "CP2", "CP4", "CP6", "FC2", "FC4", "FC6"]
@@ -643,28 +624,15 @@ feature_engineering:
 behavior_analysis:
   # Canonical behavior columns used across stages. If empty, auto-resolve from
   # event_columns.* aliases and existing trial-table columns.
-  predictor_column: ""   # e.g., stimulus intensity / dose / any continuous IV
+  predictor_column: ""   # e.g., stimulus intensity / dose / temperature
   outcome_column: ""     # e.g., rating / arousal / detection score
-
-  # Nature of the predictor variable. Controls which analyses are scientifically valid.
-  #
-  #   "continuous"  — ordered numeric scale with ≥5 distinct levels (e.g., temperature,
-  #                   dose, current intensity). Enables predictor_residual, predictor_models,
-  #                   psychometrics, and spline/outcome_hat predictor control.
-  #   "binary"      — two-level factor (0/1 or condition A/B). Disables curve-fitting
-  #                   analyses; standard linear regression and group contrasts remain valid.
-  #   "categorical" — unordered multi-level factor (≥3 levels). Same restrictions as binary.
-  #
-  # Attempting to run curve-fitting analyses with a non-continuous predictor raises
-  # a ValueError at the analysis entry point.
-  predictor_type: "continuous"
 
   # Optional robust estimator for correlations:
   # - null/"none": standard Spearman/Pearson
   # - "percentage_bend" | "winsorized" | "shepherd"
   robust_correlation: null
   pooling_strategy: "within_subject_centered"
-  predictor_control_enabled: true
+  control_temperature: true
   control_trial_order: true
   bootstrap: 1000
   n_jobs: -1
@@ -705,7 +673,7 @@ behavior_analysis:
     min_variance: 1.0e-10
     check_within_run_variance: true
 
-  # Predictor residual = outcome - f(predictor) for "response beyond stimulus intensity"
+  # Pain residual = rating - f(temperature) for "pain beyond stimulus intensity"
   predictor_residual:
     enabled: true
     method: "spline"          # "spline" (requires statsmodels) or "poly"
@@ -723,8 +691,8 @@ behavior_analysis:
       method: "spline"        # "spline" | "poly" (crossfit uses sklearn splines/poly + ridge)
       spline_n_knots: 5
 
-  # Predictor→outcome model diagnostics (model comparison + breakpoint detection)
-  predictor_models:
+  # Temperature→rating model diagnostics (model comparison + breakpoint detection)
+  temperature_models:
     enabled: true
     model_comparison:
       enabled: true
@@ -738,15 +706,15 @@ behavior_analysis:
       quantile_high: 0.85
       n_candidates: 15
 
-
+  
   # Trialwise regression/moderation (complements correlations)
   regression:
     enabled: false
     primary_unit: "trial"            # "trial" | "run_mean"
-    outcome: "outcome"              # "outcome" | "predictor_residual" | "predictor"
-    include_predictor: true
-    predictor_control: "linear"    # "linear" | "outcome_hat" (uses outcome_hat_from_predictor) | "spline" (restricted cubic spline on predictor)
-    predictor_spline:
+    outcome: "rating"              # "rating" | "predictor_residual" | "temperature"
+    include_temperature: true
+    temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
+    temperature_spline:
       n_knots: 4
       quantile_low: 0.05
       quantile_high: 0.95
@@ -754,7 +722,7 @@ behavior_analysis:
     include_trial_order: true
     include_prev_terms: false      # uses prev_/delta_ columns from trial table
     include_run_block: true
-    include_interaction: true      # feature × predictor
+    include_interaction: true      # feature × temperature
     standardize: true
     min_samples: 15
     n_permutations: 0
@@ -763,11 +731,11 @@ behavior_analysis:
   # Sensitivity model families per feature (robust/quantile/logistic)
   models:
     enabled: false
-    outcomes: ["outcome", "predictor_residual"]  # optionally add "predictor"
+    outcomes: ["rating", "predictor_residual"]  # optionally add "temperature"
     families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
-    include_predictor: true
-    predictor_control: "linear"    # "linear" | "outcome_hat" (uses outcome_hat_from_predictor) | "spline" (restricted cubic spline on predictor)
-    predictor_spline:
+    include_temperature: true
+    temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
+    temperature_spline:
       n_knots: 4
       quantile_low: 0.05
       quantile_high: 0.95
@@ -779,7 +747,7 @@ behavior_analysis:
     standardize: true
     min_samples: 20
     max_features: 100
-    binary_outcome: "binary_outcome"     # or "outcome_median"
+    binary_outcome: "binary_outcome"     # or "rating_median"
 
   # Within-subject stability across runs/blocks (non-gating diagnostics)
   stability:
@@ -787,7 +755,7 @@ behavior_analysis:
     outcome: ""                     # "" -> auto (predictor_residual if present, else rating)
     group_column: ""                # "" -> auto (run if present, else block)
     method: "spearman"
-    partial_predictor: true
+    partial_temperature: true
     max_features: 50
     alpha: 0.05
 
@@ -798,11 +766,11 @@ behavior_analysis:
   # Influence diagnostics (non-gating)
   influence:
     enabled: true
-    outcomes: ["outcome", "predictor_residual"]  # optionally add "predictor"
+    outcomes: ["rating", "predictor_residual"]  # optionally add "temperature"
     max_features: 20
-    include_predictor: true
-    predictor_control: "linear"  # "linear" | "outcome_hat" | "spline"
-    predictor_spline:
+    include_temperature: true
+    temperature_control: "linear"  # "linear" | "rating_hat" | "spline"
+    temperature_spline:
       n_knots: 4
       quantile_low: 0.05
       quantile_high: 0.95
@@ -828,7 +796,7 @@ behavior_analysis:
   # Permutation testing configuration
   permutation:
     # Permutation scheme for trialwise inference.
-    # - "circular_shift": preserves within-run autocorrelation (recommended for event-related paradigms)
+    # - "circular_shift": preserves within-run autocorrelation (recommended for pain paradigms)
     # - "shuffle": simple exchangeability within groups (faster, less realistic)
     scheme: "circular_shift"
     # Group column preference for within-group permutation
@@ -845,9 +813,9 @@ behavior_analysis:
     default_n_bootstrap: 1000
     base_seed: 42
     hierarchical_fdr: true
-    # Predictor control used in partial correlations / permutation tests for correlations.
+    # Temperature control used in partial correlations / permutation tests for correlations.
     # "spline" uses a restricted cubic spline basis (linear regression on nonlinear terms).
-    predictor_control: "spline"  # "linear" | "spline"
+    temperature_control: "spline"  # "linear" | "spline"
     # If false, trial-level tests require permutation or aggregation.
     # Set true only if you explicitly accept i.i.d. trial assumptions.
     allow_iid_trials: false
@@ -859,9 +827,8 @@ behavior_analysis:
   # Correlations computation
   correlations:
     enabled: true
-    types: ["partial_cov_predictor"]
-    power_segment_preference: ""      # Optional power segment for ROI correlations (e.g., "active"); empty = use all available segments
-    targets: ["outcome", "predictor", "predictor_residual"]
+    types: ["partial_cov_temp"]
+    targets: ["rating", "temperature", "predictor_residual"]
     compute_change_scores: true
     loso_stability: true
     compute_bayes_factors: false
@@ -874,7 +841,7 @@ behavior_analysis:
       enabled: true
       n_permutations: 1000
   
-  # Predictor sensitivity computation
+  # Pain sensitivity computation
   predictor_sensitivity:
     enabled: true
 
@@ -884,7 +851,7 @@ behavior_analysis:
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
     compare_column: ""          # Column to split by (empty = use event_columns.binary_outcome)
-    compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["condition_a", "condition_b"])
+    compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
     compare_windows: []          # Empty = compare all available windows
     compare_labels: null         # Optional labels for compare_values (same length)
     primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
@@ -899,7 +866,7 @@ behavior_analysis:
   # Temporal correlations computation  
   temporal:
     enabled: true
-    target_column: ""                 # Empty = use event_columns.outcome
+    target_column: ""                 # Empty = use event_columns.rating
     time_resolution_ms: 50
     time_range_ms: [-200, 1000]
     smooth_window_ms: 100
@@ -1057,20 +1024,20 @@ machine_learning:
     feature_stats: null                  # Optional restriction (NamingSchema stat), e.g. ["wpli", "aec"] for connectivity
     feature_harmonization: "intersection"  # "intersection" | "union_impute"
     feature_files: {}                    # Optional overrides per family: { power: "features_power.parquet", ... }
-    covariates: []                       # Optional extra predictors appended to X (meta names: predictor, trial_index, block, ...)
+    covariates: []                       # Optional extra predictors appended to X (meta names: temperature, trial_index, block, ...)
     covariates_strict: false             # If true, error when requested covariates are missing
     require_trial_ml_safe: true          # If true, error unless feature_engineering.analysis_mode="trial_ml_safe"
     max_excluded_subject_fraction: 0.25  # Fail ML matrix build if excluded subjects exceed this fraction of requested subjects
 
-  # Targets can be logical names ('rating', 'predictor', 'binary_outcome') or explicit events.tsv column names.
+  # Targets can be logical names ('rating', 'temperature', 'binary_outcome') or explicit events.tsv column names.
   targets:
-    regression: "outcome"
+    regression: "rating"
     classification: "binary_outcome"
     binary_threshold: null               # Required when classifying a continuous target (e.g., rating > 30)
     strict_regression_target_continuous: false  # If true, error when regression target is binary-like (prefer ml classify)
 
   incremental_validity:
-    baseline_predictors: ["predictor"]  # Standardized meta names: predictor, trial_index, block
+    baseline_predictors: ["temperature"] # Standardized meta names: temperature, trial_index, block
     require_baseline_predictors: true    # If true, missing baseline predictors raise an error instead of intercept-only fallback
     baseline_alpha: 1.0
 
@@ -1180,6 +1147,11 @@ statistics:
     min_dof_for_correlation: 2
     log_base: *log_base
     percentage_multiplier: *percentage_multiplier
+
+cluster_correction:
+  enabled: false
+  n_permutations: 1000
+  forming_threshold: *default_alpha
 
 validation:
   min_epochs: 20
@@ -1336,9 +1308,13 @@ plotting:
       pac_pairs: ["theta_beta", "theta_gamma", "alpha_beta", "alpha_gamma"]
 
 ###################################################################
-# 7. IO CONSTANTS
+# 7. SYSTEM
 ###################################################################
+system:
+  n_jobs: -1
+  strict_mode: true
+
 io:
   constants:
-    predictor_range: []
+    temperature_range: [35.0, 55.0]
     max_missing_channels_fraction: 0.5

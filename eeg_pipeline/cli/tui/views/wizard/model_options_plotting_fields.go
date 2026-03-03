@@ -13,6 +13,11 @@ func (m Model) selectedPlotItemsForConfig() []PlotItem {
 		}
 		items = append(items, plot)
 	}
+	for _, p := range m.featurePlotterItems() {
+		if m.featurePlotterSelected[p.ID] {
+			items = append(items, PlotItem{ID: p.ID, Group: p.Category, Name: p.Name})
+		}
+	}
 	return items
 }
 

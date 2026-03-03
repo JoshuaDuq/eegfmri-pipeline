@@ -44,10 +44,12 @@ def test_apply_plot_item_overrides_sets_expected_paths() -> None:
             "compare_windows": ["true"],
             "comparison_column": ["condition"],
             "source_segment": ["plateau"],
+            "source_condition": ["1.0"],
             "tfr_topomap_window_count": ["4"],
         },
     )
     assert config["plotting.comparisons.compare_windows"] is True
     assert config["plotting.comparisons.comparison_column"] == "condition"
     assert config["plotting.plots.features.sourcelocalization.segment"] == "plateau"
+    assert config["plotting.plots.features.sourcelocalization.condition"] == "1.0"
     assert config["time_frequency_analysis.topomap.temporal.window_count"] == 4

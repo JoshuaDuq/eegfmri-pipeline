@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 import copy
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import matplotlib.figure
@@ -72,6 +72,7 @@ class FeaturePlotContext:
     # Optional allow-list (supports fnmatch patterns) used by safe_plot() to
     # selectively run plot primitives within category suites.
     plot_name_patterns: Optional[List[str]] = None
+    feature_categories_to_load: Optional[Set[str]] = None
     stats_dir: Optional[Path] = None
     n_trials: int = 0
     epochs_info: Optional[mne.Info] = None
@@ -268,10 +269,30 @@ class FeaturePlotContext:
     def _load_feature_tables(self) -> None:
         """Load all feature data tables from TSV files."""
         for attr_name, stem, exts, mode in _FEATURE_TABLE_SPECS:
+            if not self._should_load_feature_stem(stem):
+                continue
             paths = self._collect_feature_paths(stem, exts)
             df = self._load_feature_set(paths, mode=mode, stem=stem)
             if df is not None and not df.empty:
                 setattr(self, attr_name, df)
+
+    def _should_load_feature_stem(self, stem: str) -> bool:
+        """Return True when the feature stem should be loaded for this context."""
+        categories = self.feature_categories_to_load
+        if not categories:
+            return True
+
+        category = self._stem_to_category(stem)
+        return category in categories
+
+    @staticmethod
+    def _stem_to_category(stem: str) -> str:
+        if not stem.startswith("features_"):
+            return stem
+        raw = stem.replace("features_", "", 1)
+        if raw in {"pac_trials", "pac_time"}:
+            return "pac"
+        return raw
 
     def _collect_feature_paths(self, stem: str, exts: Sequence[str]) -> List[Path]:
         """Collect feature file paths using deterministic logic.
@@ -285,43 +306,46 @@ class FeaturePlotContext:
         - Otherwise, use base file if it exists
         - Never mix base and suffix files (they contain overlapping columns)
         
-        Searches in both the base features directory and category subdirectories
-        (e.g., features/power/ for features_power files).
+        Searches in a single canonical directory to avoid mixing stale and
+        current extraction outputs across directories.
         """
         suffixes = self.time_range_suffixes
-        
-        # Derive category subdirectory from stem (e.g., "features_power" -> "power")
-        category = stem.replace("features_", "", 1) if stem.startswith("features_") else None
-        
-        # Directories to search: base features dir + category subdir if applicable
-        search_dirs = [self.features_dir]
-        if category:
-            category_dir = self.features_dir / category
-            if category_dir.is_dir():
-                search_dirs.insert(0, category_dir)  # Prefer category subdir
 
-        # Collect suffix-specific files (authoritative source for window-specific data)
-        suffix_paths: List[Path] = []
+        search_dir = self._select_feature_directory(stem, exts)
+
+        # Prefer one extension family (parquet before tsv), never mix both.
         if suffixes:
-            for search_dir in search_dirs:
-                for ext in exts:
-                    for suffix in suffixes:
-                        candidate_path = search_dir / f"{stem}_{suffix}{ext}"
-                        if candidate_path.exists():
-                            suffix_paths.append(candidate_path)
-
-        # If suffix-specific files exist, use only those (base file would duplicate columns)
-        if suffix_paths:
-            return self._dedupe_paths(suffix_paths)
-
-        # Otherwise, use base file (contains merged features from all windows)
-        for search_dir in search_dirs:
             for ext in exts:
-                base_path = search_dir / f"{stem}{ext}"
-                if base_path.exists():
-                    return [base_path]
+                suffix_paths: List[Path] = []
+                for suffix in suffixes:
+                    candidate_path = search_dir / f"{stem}_{suffix}{ext}"
+                    if candidate_path.exists():
+                        suffix_paths.append(candidate_path)
+                if suffix_paths:
+                    return suffix_paths
+
+        # Otherwise, use base file (contains merged features from all windows).
+        for ext in exts:
+            base_path = search_dir / f"{stem}{ext}"
+            if base_path.exists():
+                return [base_path]
 
         return []
+
+    def _select_feature_directory(self, stem: str, exts: Sequence[str]) -> Path:
+        """Select a single directory from which to load one feature family."""
+        if not stem.startswith("features_"):
+            return self.features_dir
+
+        category = stem.replace("features_", "", 1)
+        category_dir = self.features_dir / category
+        if not category_dir.is_dir():
+            return self.features_dir
+
+        for ext in exts:
+            if any(category_dir.glob(f"{stem}*{ext}")):
+                return category_dir
+        return self.features_dir
 
     def _load_feature_set(
         self,

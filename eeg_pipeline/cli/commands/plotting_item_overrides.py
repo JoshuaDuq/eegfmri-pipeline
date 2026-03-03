@@ -66,10 +66,30 @@ def apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> N
             _apply_config_override(config, "plotting.plots.features.power.topomap_windows", [values[0]])
         elif key == "source_segment" and values:
             _apply_config_override(config, "plotting.plots.features.sourcelocalization.segment", values[0])
+        elif key == "source_condition" and values:
+            _apply_config_override(config, "plotting.plots.features.sourcelocalization.condition", values[0])
         elif key == "source_subjects_dir" and values:
             _apply_config_override(
                 config,
                 "plotting.plots.features.sourcelocalization.subjects_dir",
+                values[0],
+            )
+        elif key == "source_bands" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.features.sourcelocalization.bands",
+                list(values),
+            )
+        elif key == "source_condition_a" and values:
+            _apply_config_override(
+                config,
+                "feature_engineering.sourcelocalization.contrast.condition_a",
+                values[0],
+            )
+        elif key == "source_condition_b" and values:
+            _apply_config_override(
+                config,
+                "feature_engineering.sourcelocalization.contrast.condition_b",
                 values[0],
             )
         elif key == "connectivity_circle_top_fraction" and values:
@@ -265,7 +285,11 @@ PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "topomap_windows": "plotting.plots.features.power.topomap_windows",
     "topomap_window": "plotting.plots.features.power.topomap_windows",
     "source_segment": "plotting.plots.features.sourcelocalization.segment",
+    "source_condition": "plotting.plots.features.sourcelocalization.condition",
+    "source_bands": "plotting.plots.features.sourcelocalization.bands",
     "source_subjects_dir": "plotting.plots.features.sourcelocalization.subjects_dir",
+    "source_condition_a": "feature_engineering.sourcelocalization.contrast.condition_a",
+    "source_condition_b": "feature_engineering.sourcelocalization.contrast.condition_b",
     "tfr_topomap_active_window": "time_frequency_analysis.active_window",
     "tfr_topomap_window_size_ms": "time_frequency_analysis.topomap.temporal.window_size_ms",
     "tfr_topomap_window_count": "time_frequency_analysis.topomap.temporal.window_count",
@@ -340,7 +364,10 @@ def validate_plot_item_configs(
                 "connectivity_network_top_fraction",
                 "temporal_stats_feature_folder",
                 "source_segment",
+                "source_condition",
                 "source_subjects_dir",
+                "source_condition_a",
+                "source_condition_b",
             }:
                 if not values or not str(values[0]).strip():
                     errors.append(f"plot_id '{plot_id}': {key} expects a non-empty value.")
@@ -394,6 +421,7 @@ def validate_plot_item_configs(
 
             if key in {"comparison_windows", "comparison_values", "comparison_rois",
                        "scatter_features", "scatter_columns", "scatter_aggregation_modes",
+                       "source_bands"
                        }:
                 if not values:
                     errors.append(f"plot_id '{plot_id}': {key} expects one or more values.")

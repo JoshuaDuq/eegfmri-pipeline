@@ -643,6 +643,66 @@
       "feature_categories": [
         "sourcelocalization"
       ]
+    },
+    {
+      "id": "source_glass_brain_eeg_only",
+      "group": "sourcelocalization",
+      "label": "Glass Brain (EEG-only)",
+      "description": "Transparent glass-brain projections from EEG-only source estimates",
+      "required_files": [
+        "features/sourcelocalization/*/source_estimates/eeg_only/*.stc"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
+    },
+    {
+      "id": "source_glass_brain_fmri_informed",
+      "group": "sourcelocalization",
+      "label": "Glass Brain (fMRI-informed)",
+      "description": "Transparent glass-brain projections from fMRI-constrained source estimates",
+      "required_files": [
+        "features/sourcelocalization/*/source_estimates/fmri_informed/*.stc"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
+    },
+    {
+      "id": "source_band_panel_eeg_only",
+      "group": "sourcelocalization",
+      "label": "Band Comparison Panel (EEG-only)",
+      "description": "Multi-band source power comparison panel from EEG-only source estimates",
+      "required_files": [
+        "features/sourcelocalization/*/source_estimates/eeg_only/*.stc"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
+    },
+    {
+      "id": "source_band_panel_fmri_informed",
+      "group": "sourcelocalization",
+      "label": "Band Comparison Panel (fMRI-informed)",
+      "description": "Multi-band source power comparison panel from fMRI-constrained source estimates",
+      "required_files": [
+        "features/sourcelocalization/*/source_estimates/fmri_informed/*.stc"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
+    },
+    {
+      "id": "source_cluster_timecourse",
+      "group": "sourcelocalization",
+      "label": "Cluster Time Course (fMRI-informed)",
+      "description": "Temporal dynamics of source power within fMRI-constrained clusters, by condition",
+      "required_files": [
+        "features/sourcelocalization/*/source_estimates/fmri_informed/*.stc"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
     }
   ]
 }

@@ -223,6 +223,10 @@ func (m Model) getExpandedListLength() int {
 		return len(behaviorScatterAggregationModes)
 	case expandedBehaviorScatterSegment:
 		return len(m.GetPlottingComparisonWindows())
+	case expandedSourcePlotCondition:
+		return len(m.GetSourcePlotConditions())
+	case expandedSourcePlotBands:
+		return len(m.GetSourcePlotBands())
 	case expandedTemporalTopomapsFeatureDir:
 		return len(m.temporalTopomapsStatsFeatureFolders)
 	case expandedPredictorResidualCrossfitGroupColumn:
@@ -518,6 +522,10 @@ func (m Model) getExpandedListItems() []string {
 		return behaviorScatterAggregationModes
 	case expandedBehaviorScatterSegment:
 		return m.GetPlottingComparisonWindows()
+	case expandedSourcePlotCondition:
+		return m.GetSourcePlotConditions()
+	case expandedSourcePlotBands:
+		return m.GetSourcePlotBands()
 	case expandedTemporalTopomapsFeatureDir:
 		return m.temporalTopomapsStatsFeatureFolders
 	case expandedPredictorResidualCrossfitGroupColumn:
@@ -639,6 +647,18 @@ func (m Model) isColumnValueSelected(value string) bool {
 		if m.editingPlotID != "" {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
 				selectedValues = cfg.BehaviorScatterSegmentSpec
+			}
+		}
+	case expandedSourcePlotCondition:
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				selectedValues = cfg.SourceCondition
+			}
+		}
+	case expandedSourcePlotBands:
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				selectedValues = cfg.SourceBandsSpec
 			}
 		}
 	case expandedDoseResponseBands:
@@ -1276,6 +1296,22 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
+	case expandedSourcePlotCondition:
+		if m.editingPlotID != "" {
+			cfg := m.ensurePlotItemConfig(m.editingPlotID)
+			cfg.SourceCondition = selectedItem
+			m.plotItemConfigs[m.editingPlotID] = cfg
+			m.editingPlotID = ""
+			m.editingPlotField = plotItemConfigFieldNone
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedSourcePlotBands:
+		if m.editingPlotID != "" {
+			cfg := m.ensurePlotItemConfig(m.editingPlotID)
+			m.toggleSpaceValue(selectedItem, &cfg.SourceBandsSpec)
+			m.plotItemConfigs[m.editingPlotID] = cfg
+		}
 	case expandedTemporalTopomapsFeatureDir:
 		if m.editingPlotID != "" {
 			cfg := m.ensurePlotItemConfig(m.editingPlotID)
@@ -1691,6 +1727,13 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		if m.editingPlotID != "" {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
 				return cfg.BehaviorScatterSegmentSpec == item
+			}
+		}
+		return false
+	case expandedSourcePlotCondition:
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				return cfg.SourceCondition == item
 			}
 		}
 		return false

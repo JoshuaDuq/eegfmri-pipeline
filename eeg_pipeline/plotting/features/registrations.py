@@ -66,6 +66,9 @@ from eeg_pipeline.plotting.features.power import (
 
 from eeg_pipeline.plotting.features.source_localization import (
     plot_source_stc_3d,
+    plot_source_glass_brain,
+    plot_source_band_panel,
+    plot_source_cluster_timecourse,
 )
 
 from eeg_pipeline.plotting.erp import (
@@ -805,6 +808,33 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
     source_method = resolve_source_localization_method(ctx.config)
 
     for mode in ("eeg_only", "fmri_informed"):
+        # All catalog_id → plot_func pairs for this mode.
+        plot_specs: list[tuple[str, Any, str]] = []
+        if mode == "eeg_only":
+            plot_specs = [
+                ("source_localization_3d_eeg_only", plot_source_stc_3d, "3D Source Brains"),
+                ("source_glass_brain_eeg_only", plot_source_glass_brain, "Glass Brain"),
+                ("source_band_panel_eeg_only", plot_source_band_panel, "Band Comparison Panel"),
+            ]
+        else:
+            plot_specs = [
+                ("source_localization_3d_fmri_informed", plot_source_stc_3d, "3D Source Brains"),
+                ("source_glass_brain_fmri_informed", plot_source_glass_brain, "Glass Brain"),
+                ("source_band_panel_fmri_informed", plot_source_band_panel, "Band Comparison Panel"),
+                ("source_cluster_timecourse", plot_source_cluster_timecourse, "Cluster Time Course"),
+            ]
+
+        # Filter to only the catalog IDs requested by the user.
+        patterns = getattr(ctx, "plot_name_patterns", None)
+        if patterns:
+            plot_specs = [
+                (cid, func, label)
+                for cid, func, label in plot_specs
+                if any(fnmatch.fnmatch(cid, str(p)) for p in patterns)
+            ]
+        if not plot_specs:
+            continue
+
         # Check mode-keyed subdir first (new layout).
         mode_dir = source_localization_estimates_dir(
             features_dir=ctx.features_dir,
@@ -826,25 +856,31 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
                 )
 
         if not stc_files:
+            expected_dir = mode_dir
+            ctx.logger.warning(
+                "No %s source estimate files found for sub-%s "
+                "(expected STC files in %s). "
+                "Run 'features compute --source-save-stc' with the appropriate mode first.",
+                mode,
+                ctx.subject,
+                expected_dir,
+            )
             continue
 
-        catalog_id = (
-            "source_localization_3d_eeg_only"
-            if mode == "eeg_only"
-            else "source_localization_3d_fmri_informed"
-        )
-        ctx.logger.info("Plotting 3D Source Localization Brains (%s, %d files)...", mode, len(stc_files))
-        safe_plot(
-            ctx,
-            saved_files,
-            catalog_id,
-            "sourcelocalization",
-            None,
-            plot_source_stc_3d,
-            subject=ctx.subject,
-            stc_files=stc_files,
-            save_dir=source_dir / mode,
-            config=ctx.config,
-            logger=ctx.logger,
-        )
+        mode_save_dir = source_dir / mode
+        for catalog_id, plot_func, label in plot_specs:
+            ctx.logger.info("  → %s (%s, %d files)", label, mode, len(stc_files))
+            safe_plot(
+                ctx,
+                saved_files,
+                catalog_id,
+                "sourcelocalization",
+                None,
+                plot_func,
+                subject=ctx.subject,
+                stc_files=stc_files,
+                save_dir=mode_save_dir,
+                config=ctx.config,
+                logger=ctx.logger,
+            )
 

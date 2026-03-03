@@ -1419,6 +1419,7 @@ func TestBuildPlotItemConfigArgs_SourceLocalization3DEmitsSourceOverrides(t *tes
 	m.plotItemConfigs = map[string]PlotItemConfig{
 		"source_localization_3d": {
 			SourceSegment:     "plateau",
+			SourceCondition:   "1.0",
 			SourceSubjectsDir: "/fs/subjects",
 		},
 	}
@@ -1429,5 +1430,8 @@ func TestBuildPlotItemConfigArgs_SourceLocalization3DEmitsSourceOverrides(t *tes
 	}
 	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_subjects_dir", "/fs/subjects"}) {
 		t.Fatalf("expected source_subjects_dir args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--plot-item-config", "source_localization_3d", "source_condition", "1.0"}) {
+		t.Fatalf("expected source_condition args, got: %#v", args)
 	}
 }

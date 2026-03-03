@@ -26,7 +26,7 @@ source eeg_pipeline/.venv311/bin/activate
 ### 2. Verify cleaned epochs exist
 You must have cleaned epochs for your subject/task. Example location:
 ```
-eeg_pipeline/data/derivatives/preprocessed/sub-0000/eeg/sub-0000_task-task_proc-clean_epo.fif
+eeg_pipeline/data/derivatives/preprocessed/sub-pilot001/eeg/sub-pilot001_task-task_proc-clean_epo.fif
 ```
 
 ## Path 1: EEG-Only Source Localization (Template-Based)
@@ -76,7 +76,7 @@ Available methods:
 
 Check for source localization features:
 ```bash
-ls derivatives/sub-0000/eeg/features/sourcelocalization/
+ls derivatives/sub-pilot001/eeg/features/sourcelocalization/
 ```
 
 Expected files:
@@ -143,7 +143,7 @@ The pipeline can **automatically generate BEM model, BEM solution, and coregistr
 
 5. Set **FS License** to your FreeSurfer license path (default: `eeg_pipeline/licenses/license_freesurfer.txt`)
 
-6. Set **FS Subject** to your FreeSurfer subject name (e.g., `sub-0000`)
+6. Set **FS Subject** to your FreeSurfer subject name (e.g., `sub-pilot001`)
 
 7. Provide your **fMRI Stats Map** path
 
@@ -156,8 +156,8 @@ python -m eeg_pipeline.cli.main features compute \
   --subject 0000 \
   --categories sourcelocalization \
   --source-fmri \
-  --source-fmri-stats-map /path/to/sub-0000_pain_vs_baseline_zmap.nii.gz \
-  --source-subject sub-0000 \
+  --source-fmri-stats-map /path/to/sub-pilot001_pain_vs_baseline_zmap.nii.gz \
+  --source-subject sub-pilot001 \
   --source-subjects-dir /path/to/freesurfer \
   --source-create-trans \
   --source-create-bem-model \
@@ -212,8 +212,8 @@ docker run --rm \
   --platform linux/amd64 \
   freesurfer-mne:7.4.1 \
   recon-all \
-    -subjid sub-0000 \
-    -i /data/eeg_pipeline/data/fMRI_data/sub-0000/anat/sub-0000_acq-mprageipat2_T1w.nii.gz \
+    -subjid sub-pilot001 \
+    -i /data/eeg_pipeline/data/fMRI_data/sub-pilot001/anat/sub-pilot001_acq-mprageipat2_T1w.nii.gz \
     -all \
     -sd /subjects
 ```
@@ -223,7 +223,7 @@ Wait for completion. This takes 1-3 hours depending on your hardware.
 #### Step 5: Verify FreeSurfer output
 
 ```bash
-ls -la $SUBJECTS_DIR/sub-0000/mri/
+ls -la $SUBJECTS_DIR/sub-pilot001/mri/
 ```
 
 You should see files like `orig.mgz`, `T1.mgz`, `brain.mgz`, `wmparc.mgz`.
@@ -243,19 +243,19 @@ docker run --rm \
     source \$FREESURFER_HOME/SetUpFreeSurfer.sh
     set -u
 
-    mne watershed_bem --subject sub-0000 --overwrite
+    mne watershed_bem --subject sub-pilot001 --overwrite
 
-    python -c 'import mne; bem_model = mne.make_bem_model(subject=\"sub-0000\", ico=4, subjects_dir=\"/subjects\", conductivity=[0.3, 0.006, 0.3]); mne.write_bem_surfaces(\"/subjects/sub-0000/bem/sub-0000-5120-5120-5120-bem.fif\", bem_model, overwrite=True); bem_solution = mne.make_bem_solution(\"/subjects/sub-0000/bem/sub-0000-5120-5120-5120-bem.fif\"); mne.write_bem_solution(\"/subjects/sub-0000/bem/sub-0000-5120-5120-5120-bem-sol.fif\", bem_solution, overwrite=True)'
+    python -c 'import mne; bem_model = mne.make_bem_model(subject=\"sub-pilot001\", ico=4, subjects_dir=\"/subjects\", conductivity=[0.3, 0.006, 0.3]); mne.write_bem_surfaces(\"/subjects/sub-pilot001/bem/sub-pilot001-5120-5120-5120-bem.fif\", bem_model, overwrite=True); bem_solution = mne.make_bem_solution(\"/subjects/sub-pilot001/bem/sub-pilot001-5120-5120-5120-bem.fif\"); mne.write_bem_solution(\"/subjects/sub-pilot001/bem/sub-pilot001-5120-5120-5120-bem-sol.fif\", bem_solution, overwrite=True)'
   "
 ```
 
 #### Step 7: Verify BEM solution
 
 ```bash
-ls -la $SUBJECTS_DIR/sub-0000/bem/
+ls -la $SUBJECTS_DIR/sub-pilot001/bem/
 ```
 
-You should see `sub-0000-5120-5120-5120-bem-sol.fif`.
+You should see `sub-pilot001-5120-5120-5120-bem-sol.fif`.
 
 #### Step 8: Create coregistration transform
 
@@ -286,7 +286,7 @@ raw.set_montage(montage)
 
 # Coregister (requires MRI surfaces)
 mne.gui.coregistration(
-    subject="sub-0000",
+    subject="sub-pilot001",
     subjects_dir="/Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer",
     inst=raw,
 )
@@ -298,12 +298,12 @@ Run the script:
 python create_trans.py
 ```
 
-A GUI will open. Manually align the electrodes to the MRI, then save the transform as `sub-0000-trans.fif` in the current directory.
+A GUI will open. Manually align the electrodes to the MRI, then save the transform as `sub-pilot001-trans.fif` in the current directory.
 
 #### Step 9: Move the transform file
 
 ```bash
-mv sub-0000-trans.fif /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-0000/bem/
+mv sub-pilot001-trans.fif /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-pilot001/bem/
 ```
 
 #### Step 10: Generate fMRI statistical map
@@ -345,7 +345,7 @@ The contrast builder will:
 If you already have an fMRI stats map or prefer to use external tools (SPM, FSL, AFNI), provide the path directly:
 
 ```bash
---source-fmri-stats-map /path/to/sub-0000_pain_vs_baseline_zmap.nii.gz
+--source-fmri-stats-map /path/to/sub-pilot001_pain_vs_baseline_zmap.nii.gz
 ```
 
 The stats map must be a 3D NIfTI file resampled to the FreeSurfer subject space (aligned with `T1.mgz` or `orig.mgz`).
@@ -362,9 +362,9 @@ flm.fit(fmri_img, events=events_df)
 z_map = flm.compute_contrast("pain_high - baseline", output_type="z_score")
 
 # Resample to FreeSurfer subject space
-fs_t1 = "/path/to/freesurfer/sub-0000/mri/T1.mgz"
+fs_t1 = "/path/to/freesurfer/sub-pilot001/mri/T1.mgz"
 z_map_resampled = resample_to_img(z_map, fs_t1, interpolation="continuous")
-z_map_resampled.to_filename("sub-0000_pain_vs_baseline_zmap.nii.gz")
+z_map_resampled.to_filename("sub-pilot001_pain_vs_baseline_zmap.nii.gz")
 ```
 
 #### Step 11: Run fMRI-constrained source localization
@@ -374,13 +374,13 @@ python -m eeg_pipeline.cli.main features compute \
   --subject 0000 \
   --categories sourcelocalization \
   --source-fmri \
-  --source-fmri-stats-map /path/to/sub-0000_pain_vs_baseline_zmap.nii.gz \
+  --source-fmri-stats-map /path/to/sub-pilot001_pain_vs_baseline_zmap.nii.gz \
   --source-fmri-threshold 3.1 \
   --source-fmri-tail pos \
-  --source-subject sub-0000 \
+  --source-subject sub-pilot001 \
   --source-subjects-dir /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer \
-  --source-trans /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-0000/bem/sub-0000-trans.fif \
-  --source-bem /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-0000/bem/sub-0000-5120-5120-5120-bem-sol.fif \
+  --source-trans /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-pilot001/bem/sub-pilot001-trans.fif \
+  --source-bem /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-pilot001/bem/sub-pilot001-5120-5120-5120-bem-sol.fif \
   --source-method lcmv \
   --spatial global
 ```
@@ -388,7 +388,7 @@ python -m eeg_pipeline.cli.main features compute \
 #### Step 12: Verify outputs
 
 ```bash
-ls -la derivatives/sub-0000/eeg/features/sourcelocalization/
+ls -la derivatives/sub-pilot001/eeg/features/sourcelocalization/
 ```
 
 You should see `features_sourcelocalization.tsv` with fMRI-constrained source features.
@@ -410,15 +410,15 @@ export SUBJECTS_DIR=/Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/deriv
 
 # Run recon-all
 recon-all \
-  -subjid sub-0000 \
-  -i /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/fMRI_data/sub-0000/anat/sub-0000_acq-mprageipat2_T1w.nii.gz \
+  -subjid sub-pilot001 \
+  -i /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/fMRI_data/sub-pilot001/anat/sub-pilot001_acq-mprageipat2_T1w.nii.gz \
   -all \
   -sd $SUBJECTS_DIR
 
 # Generate BEM
-cd $SUBJECTS_DIR/sub-0000
-mne watershed_bem --subject sub-0000 --overwrite
-mne make_bem_solution --subject sub-0000 --bem-model watershed --bem-sol-name sub-0000-5120-5120-5120-bem-sol
+cd $SUBJECTS_DIR/sub-pilot001
+mne watershed_bem --subject sub-pilot001 --overwrite
+mne make_bem_solution --subject sub-pilot001 --bem-model watershed --bem-sol-name sub-pilot001-5120-5120-5120-bem-sol
 ```
 
 Then continue from Step 7 above (create coregistration transform).
@@ -439,7 +439,7 @@ Then continue from Step 7 above (create coregistration transform).
 | `--source-depth` | eLORETA depth weighting 0-1 | `0.8` |
 | `--source-parc` | Parcellation for ROI extraction: `aparc`, `aparc.a2009s`, `HCPMMP1` | `aparc` |
 | `--source-connectivity-method` | Connectivity method for source-space analysis: `aec`, `wpli`, `plv` | `aec` |
-| `--source-subject` | FreeSurfer subject name (e.g., `sub-0001`). If unset, defaults to `sub-{subject}` | `sub-{subject}` |
+| `--source-subject` | FreeSurfer subject name (e.g., `sub-pilot002`). If unset, defaults to `sub-{subject}` | `sub-{subject}` |
 | `--source-subjects-dir` | FreeSurfer SUBJECTS_DIR path for subject-specific source localization | (none) |
 | `--source-trans` | EEG ↔ MRI coregistration transform .fif | (none) |
 | `--source-bem` | BEM solution .fif (e.g., `*-bem-sol.fif`) | (none) |

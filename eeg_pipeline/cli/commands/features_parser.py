@@ -57,7 +57,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--analysis-mode", choices=["group_stats", "trial_ml_safe"], default=None, help="Feature analysis mode: group_stats (default) or trial_ml_safe (ML/CV leakage-safe)")
 
     # Connectivity
-    parser.add_argument("--connectivity-measures", nargs="+", choices=["wpli", "imcoh", "aec", "plv", "pli"], default=None, help="Connectivity measures to compute")
+    parser.add_argument("--connectivity-measures", nargs="+", choices=["wpli", "aec", "plv", "pli"], default=None, help="Connectivity measures to compute")
     parser.add_argument("--conn-output-level", choices=["full", "global_only"], default=None, help="Connectivity output level")
     parser.add_argument("--conn-graph-metrics", action="store_true", default=None, help="Enable graph metrics for connectivity")
     parser.add_argument("--no-conn-graph-metrics", action="store_false", dest="conn_graph_metrics", help="Disable graph metrics for connectivity")
@@ -126,16 +126,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-create-bem-model", action="store_true", default=None, dest="source_create_bem_model", help="Auto-create BEM model via Docker (requires Docker; FS license from global config).")
     parser.add_argument("--source-create-bem-solution", action="store_true", default=None, dest="source_create_bem_solution", help="Auto-create BEM solution via Docker (requires Docker; FS license from global config).")
     parser.add_argument("--source-allow-identity-trans", action="store_true", default=None, dest="source_allow_identity_trans", help="Allow creating identity transform (DEBUG ONLY - scientifically invalid for production; use only when proper coregistration is unavailable).")
-    parser.add_argument("--source-contrast", action="store_true", default=None, dest="source_contrast_enabled", help="Enable condition-contrast computation from source-localized trial features.")
-    parser.add_argument("--no-source-contrast", action="store_false", dest="source_contrast_enabled", help="Disable source condition-contrast computation.")
-    parser.add_argument("--source-contrast-condition-column", default=None, help="Condition column in aligned events for source contrast grouping.")
-    parser.add_argument("--source-contrast-condition-a", default=None, help="Condition A value for source contrast.")
-    parser.add_argument("--source-contrast-condition-b", default=None, help="Condition B value for source contrast.")
-    parser.add_argument("--source-contrast-min-trials-per-condition", type=int, default=None, help="Minimum trials required per source-contrast condition (default: 5).")
-    parser.add_argument("--source-contrast-welch-stats", action="store_true", default=None, dest="source_contrast_welch_stats", help="Enable Welch t/p statistics in source contrast outputs.")
-    parser.add_argument("--source-contrast-no-welch-stats", action="store_false", dest="source_contrast_welch_stats", help="Disable Welch t/p statistics in source contrast outputs (keep means/deltas/effect sizes).")
-    parser.add_argument("--source-save-stc", action="store_true", default=None, dest="source_save_stc", help="Save the full source estimate (STC) arrays for 3D plotting.")
-    parser.add_argument("--no-source-save-stc", action="store_false", dest="source_save_stc", help="Do not save the full STC arrays.")
 
     # fMRI-informed source localization
     parser.add_argument("--source-fmri", action="store_true", default=None, dest="source_fmri_enabled", help="Enable fMRI-informed source localization (requires --source-subjects-dir/--source-trans/--source-bem and a stats map).")
@@ -151,7 +141,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-max-clusters", type=int, default=None, help="Maximum number of clusters kept from fMRI map (default: 20).")
     parser.add_argument("--source-fmri-max-voxels-per-cluster", type=int, default=None, help="Maximum voxels sampled per cluster (default: 2000; set 0 for no limit).")
     parser.add_argument("--source-fmri-max-total-voxels", type=int, default=None, help="Maximum total voxels across all clusters (default: 20000; set 0 for no limit).")
-    parser.add_argument("--source-fmri-random-seed", type=int, default=None, help="Random seed for voxel subsampling (default: 0 -> deterministic).")
+    parser.add_argument("--source-fmri-random-seed", type=int, default=None, help="Random seed for voxel subsampling (default: 0 -> nondeterministic).")
     parser.add_argument("--source-fmri-window-a-name", default=None, help="Name for window A (e.g., 'window_a').")
     parser.add_argument("--source-fmri-window-a-tmin", type=float, default=None, help="Start time for window A in seconds.")
     parser.add_argument("--source-fmri-window-a-tmax", type=float, default=None, help="End time for window A in seconds.")
@@ -159,7 +149,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-window-b-tmin", type=float, default=None, help="Start time for window B in seconds.")
     parser.add_argument("--source-fmri-window-b-tmax", type=float, default=None, help="End time for window B in seconds.")
     parser.add_argument("--source-fmri-contrast-enabled", action="store_true", default=None, dest="source_fmri_contrast_enabled", help="Enable building fMRI contrast from BOLD data (vs. loading pre-computed stats map).")
-    parser.add_argument("--source-fmri-cond-a-column", default=None, help="Column for condition A in events.tsv (e.g., 'condition', 'binary_outcome').")
+    parser.add_argument("--source-fmri-cond-a-column", default=None, help="Column for condition A in events.tsv (e.g., 'trial_type', 'binary_outcome').")
     parser.add_argument("--source-fmri-cond-a-value", default=None, help="Value for condition A (e.g., 'temp49p3', '1').")
     parser.add_argument("--source-fmri-cond-b-column", default=None, help="Column for condition B in events.tsv.")
     parser.add_argument("--source-fmri-cond-b-value", default=None, help="Value for condition B.")
@@ -176,28 +166,10 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         type=str,
         default=None,
         help=(
-            "Optional comma-separated allow-list of phase values to include when events.tsv has the configured phase column. "
-            "If unset, no phase scoping is applied. "
+            "Optional comma-separated allow-list of stimulation sub-phases to include when events.tsv has a stim_phase column. "
+            "If unset, no stim_phase scoping is applied. "
             "Use 'all' to disable phase scoping."
         ),
-    )
-    parser.add_argument(
-        "--source-fmri-phase-column",
-        type=str,
-        default=None,
-        help="Events column used for --source-fmri-stim-phases-to-model (default: stim_phase or phase).",
-    )
-    parser.add_argument(
-        "--source-fmri-phase-scope-column",
-        type=str,
-        default=None,
-        help="Events column used to scope phase filtering to specific rows (default: event_columns.condition candidate).",
-    )
-    parser.add_argument(
-        "--source-fmri-phase-scope-value",
-        type=str,
-        default=None,
-        help="Optional value in --source-fmri-phase-scope-column to limit phase filtering; empty applies to all rows.",
     )
     parser.add_argument(
         "--source-fmri-condition-scope-trial-types",
@@ -205,16 +177,9 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         metavar="TT",
         help=(
-            "Optional: restrict which events.tsv rows are eligible for condition A/B selection "
-            "in source-fMRI contrast building (matched against --source-fmri-condition-scope-column). "
-            "Use 'all' to disable scoping."
+            "Optional: restrict which events.tsv trial_type rows are eligible for condition A/B selection "
+            "in source-fMRI contrast building. Use 'all' to disable scoping."
         ),
-    )
-    parser.add_argument(
-        "--source-fmri-condition-scope-column",
-        type=str,
-        default=None,
-        help="Events column used for --source-fmri-condition-scope-trial-types (default: event_columns.condition candidate).",
     )
     parser.add_argument("--source-fmri-cluster-correction", action="store_true", default=None, dest="source_fmri_cluster_correction", help="Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction).")
     parser.add_argument("--source-fmri-cluster-p-threshold", type=float, default=None, help="Cluster-forming p-threshold (default: 0.001).")
@@ -252,7 +217,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--aperiodic-peak-z", type=float, default=None, help="Peak rejection Z-threshold for aperiodic fit")
     parser.add_argument("--aperiodic-min-r2", type=float, default=None, help="Minimum R2 for aperiodic fit")
     parser.add_argument("--aperiodic-min-points", type=int, default=None, help="Minimum fit points for aperiodic")
-    parser.add_argument("--aperiodic-subtract-evoked", action="store_true", default=None, help="Subtract evoked response for induced spectra (recommended for event-related paradigms)")
+    parser.add_argument("--aperiodic-subtract-evoked", action="store_true", default=None, help="Subtract evoked response for induced spectra (recommended for pain paradigms)")
     parser.add_argument("--aperiodic-min-segment-sec", type=float, default=None, help="Minimum segment duration (seconds) for stable aperiodic fits (default: 2.0)")
     parser.add_argument("--aperiodic-psd-bandwidth", type=float, default=None, help="PSD bandwidth for multitaper aperiodic estimation (Hz)")
     parser.add_argument("--aperiodic-max-rms", type=float, default=None, help="Maximum RMS residual for acceptable aperiodic fits")
@@ -305,7 +270,9 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-power-emit-db", action="store_false", dest="power_emit_db")
 
     # Spectral
+    parser.add_argument("--spectral-edge-percentile", type=float, default=None, help="Percentile for spectral edge frequency (0-1)")
     parser.add_argument("--ratio-pairs", nargs="+", default=None, metavar="PAIR", help="Band power ratio pairs, e.g. theta:beta theta:alpha alpha:beta")
+    parser.add_argument("--ratio-source", choices=["raw", "powcorr"], default=None, help="Power source for band ratios: raw (absolute) or powcorr (aperiodic-adjusted)")
     parser.add_argument("--spectral-include-log-ratios", action="store_true", default=None, help="Include log ratios in spectral features")
     parser.add_argument("--no-spectral-include-log-ratios", action="store_false", dest="spectral_include_log_ratios")
     parser.add_argument("--spectral-psd-method", choices=["multitaper", "welch"], default=None, help="PSD method for spectral features")
@@ -346,6 +313,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--tfr-n-freqs", type=int, default=None, help="Number of frequencies for TFR")
     parser.add_argument("--tfr-min-cycles", type=float, default=None, help="Minimum number of cycles for Morlet wavelets")
     parser.add_argument("--tfr-n-cycles-factor", type=float, default=None, help="Cycles factor (freq/factor) for Morlet wavelets")
+    parser.add_argument("--tfr-decim", type=int, default=None, help="Decimation factor for TFR")
     parser.add_argument("--tfr-workers", type=int, default=None, help="Number of parallel workers for TFR computation")
     parser.add_argument("--tfr-max-cycles", type=float, default=None, help="Maximum cycles for Morlet wavelets")
     parser.add_argument("--tfr-decim-power", type=int, default=None, help="Decimation factor for power TFR")
@@ -429,15 +397,17 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-erds-use-log-ratio", action="store_false", dest="erds_use_log_ratio")
     parser.add_argument("--erds-min-baseline-power", type=float, default=None, help="Min baseline power for ERDS")
     parser.add_argument("--erds-min-active-power", type=float, default=None, help="Min active power for ERDS")
+    parser.add_argument("--erds-min-segment-sec", type=float, default=None, help="Min segment duration for ERDS")
+    parser.add_argument("--erds-bands", nargs="+", default=None, help="Bands for ERDS computation (e.g., alpha beta)")
     parser.add_argument("--erds-onset-threshold-sigma", type=float, default=None, help="Onset threshold in baseline SD units for trial-level alpha ERD latency")
     parser.add_argument("--erds-onset-min-duration-ms", type=float, default=None, help="Minimum sustained duration for ERD onset threshold crossing")
     parser.add_argument("--erds-rebound-min-latency-ms", type=float, default=None, help="Minimum latency after ERD peak before searching alpha rebound")
     parser.add_argument("--erds-infer-contralateral", action="store_true", default=None, help="Infer contralateral hemisphere when trial laterality metadata is missing")
     parser.add_argument("--no-erds-infer-contralateral", action="store_false", dest="erds_infer_contralateral")
-    parser.add_argument("--erds-condition-marker-bands", nargs="+", default=None, help="Bands for ERDS condition-marker extraction")
+    parser.add_argument("--erds-pain-marker-bands", nargs="+", default=None, help="Bands for ERDS pain-marker extraction")
     parser.add_argument("--erds-laterality-columns", nargs="+", default=None, help="Candidate events.tsv columns for stimulation laterality")
-    parser.add_argument("--erds-somatosensory-left-channels", nargs="+", default=None, help="Left somatosensory channels for condition markers")
-    parser.add_argument("--erds-somatosensory-right-channels", nargs="+", default=None, help="Right somatosensory channels for condition markers")
+    parser.add_argument("--erds-somatosensory-left-channels", nargs="+", default=None, help="Left somatosensory channels for pain markers")
+    parser.add_argument("--erds-somatosensory-right-channels", nargs="+", default=None, help="Right somatosensory channels for pain markers")
     parser.add_argument("--erds-onset-min-threshold-percent", type=float, default=None, help="Minimum percent threshold for ERD onset")
     parser.add_argument("--erds-rebound-threshold-sigma", type=float, default=None, help="Sigma threshold for ERD rebound detection")
     parser.add_argument("--erds-rebound-min-threshold-percent", type=float, default=None, help="Minimum percent threshold for ERD rebound")
@@ -454,6 +424,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--n-jobs-connectivity", type=int, default=None, help="Parallel jobs for connectivity (-1 = all)")
     parser.add_argument("--n-jobs-aperiodic", type=int, default=None, help="Parallel jobs for aperiodic (-1 = all)")
     parser.add_argument("--n-jobs-complexity", type=int, default=None, help="Parallel jobs for complexity (-1 = all)")
+    parser.add_argument("--save-subject-level-features", action="store_true", default=None, help="Save subject-level features for constant values")
+    parser.add_argument("--no-save-subject-level-features", action="store_false", dest="save_subject_level_features", help="Do not save subject-level features")
     
     output_group = parser.add_argument_group("Output options")
     output_group.add_argument(

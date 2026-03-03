@@ -1167,7 +1167,30 @@ func (m *Model) togglePlottingAdvancedOption() {
 			plotItemConfigFieldTfrTopomapTemporalHspace, plotItemConfigFieldTfrTopomapTemporalWspace:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
-		case plotItemConfigFieldSourceHemi, plotItemConfigFieldSourceViews, plotItemConfigFieldSourceCortex, plotItemConfigFieldSourceSubjectsDir:
+		case plotItemConfigFieldSourceCondition:
+			conditions := m.GetSourcePlotConditions()
+			if len(conditions) > 0 {
+				m.expandedOption = expandedSourcePlotCondition
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldSourceBands:
+			bands := m.GetSourcePlotBands()
+			if len(bands) > 0 {
+				m.expandedOption = expandedSourcePlotBands
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldSourceHemi, plotItemConfigFieldSourceViews, plotItemConfigFieldSourceCortex,
+			plotItemConfigFieldSourceSubjectsDir, plotItemConfigFieldSourceConditionA, plotItemConfigFieldSourceConditionB:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonValues:

@@ -230,45 +230,136 @@ def _filter_stc_files_by_segment(stc_files: List[Path], segment: str) -> List[Pa
     )
 
 
+def _filter_stc_files_by_condition(stc_files: List[Path], condition: str) -> List[Path]:
+    """Filter STC files to one condition, raising if condition is unavailable."""
+    condition_label = str(condition).strip()
+    if not condition_label:
+        return stc_files
+
+    filtered: List[Path] = []
+    available_conditions: set[str] = set()
+    for stc_path in stc_files:
+        metadata = _parse_stc_plot_metadata(stc_path)
+        stc_condition = metadata["condition"]
+        if stc_condition is None:
+            continue
+        available_conditions.add(str(stc_condition))
+        if stc_condition == condition_label:
+            filtered.append(stc_path)
+
+    if filtered:
+        return filtered
+
+    available_text = ", ".join(sorted(available_conditions)) if available_conditions else "<none>"
+    raise ValueError(
+        f"No STC files found for requested source condition '{condition_label}'. "
+        f"Available conditions: {available_text}."
+    )
+
+
+def _filter_stc_files_by_bands(
+    stc_files: List[Path],
+    bands: List[str],
+    logger: Optional[logging.Logger] = None,
+) -> List[Path]:
+    """Filter STC files to only those whose band matches any entry in *bands*.
+
+    Filtering is case-insensitive and skips files with unparseable names.
+    Logs a warning (rather than raising) when no files survive the filter so
+    that the pipeline degrades gracefully for a mistyped band name.
+    """
+    requested = {b.strip().lower() for b in bands if b.strip()}
+    if not requested:
+        return stc_files
+
+    filtered: List[Path] = []
+    available_bands: set[str] = set()
+    for stc_path in stc_files:
+        try:
+            metadata = _parse_stc_plot_metadata(stc_path)
+        except ValueError:
+            filtered.append(stc_path)  # keep unparseable files unfiltered
+            continue
+        stc_band = metadata.get("band")
+        if stc_band is None:
+            continue
+        available_bands.add(str(stc_band))
+        if str(stc_band).lower() in requested:
+            filtered.append(stc_path)
+
+    if not filtered and logger is not None:
+        available_text = ", ".join(sorted(available_bands)) if available_bands else "<none>"
+        logger.warning(
+            "No STC files matched requested source bands %s. "
+            "Available bands: %s. Falling back to all files.",
+            list(requested),
+            available_text,
+        )
+        return stc_files
+
+    return filtered
+
+
+def _has_contrast_conditions(config: Any) -> bool:
+    """Return True if both condition_a and condition_b are configured."""
+    raw_a = get_config_value(
+        config, "feature_engineering.sourcelocalization.contrast.condition_a", None
+    )
+    raw_b = get_config_value(
+        config, "feature_engineering.sourcelocalization.contrast.condition_b", None
+    )
+    cond_a = str(raw_a).strip() if raw_a is not None else ""
+    cond_b = str(raw_b).strip() if raw_b is not None else ""
+    return bool(cond_a and cond_b and cond_a.lower() != "none" and cond_b.lower() != "none" and cond_a != cond_b)
+
+
+def _should_skip_absolute_plot(stc_condition: str, config_source_condition: str, has_contrasts: bool) -> bool:
+    """Determine if an absolute (single-condition) plot should be skipped.
+    
+    Rules:
+    - If user explicitly asked for one absolute condition (`config_source_condition`), only plot that one.
+    - If user didn't ask for an absolute condition, but DID ask for contrasts, skip all absolute plots.
+    - If user didn't ask for anything, plot all conditions absolutely (fallback).
+    """
+    if config_source_condition:
+        return stc_condition != config_source_condition
+    if has_contrasts:
+        return True
+    return False
+
+
 def _resolve_source_plot_condition_pair(
     config: Any,
     available_conditions: set[str],
     logger: Optional[logging.Logger] = None,
 ) -> tuple[str, str]:
-    """Resolve condition labels for contrast plotting."""
-    cond_a = str(
-        get_config_value(config, "feature_engineering.sourcelocalization.contrast.condition_a", "0.0")
-    ).strip()
-    cond_b = str(
-        get_config_value(config, "feature_engineering.sourcelocalization.contrast.condition_b", "1.0")
-    ).strip()
-    if not cond_a or not cond_b:
-        raise ValueError("Source plot contrast conditions must be non-empty.")
-    if cond_a != cond_b:
-        return cond_a, cond_b
+    """Resolve condition labels for contrast plotting.
 
-    ordered_conditions: list[str]
-    try:
-        ordered_conditions = sorted(available_conditions, key=lambda value: float(value))
-    except Exception:
-        ordered_conditions = sorted(available_conditions)
-    if len(ordered_conditions) == 2:
-        inferred_a, inferred_b = ordered_conditions
-        if logger is not None:
-            logger.warning(
-                "Source plot contrast conditions were identical in config ('%s'). "
-                "Using inferred pair from STC files: '%s' vs '%s'.",
-                cond_a,
-                inferred_a,
-                inferred_b,
-            )
-        return inferred_a, inferred_b
-
-    available_text = ", ".join(ordered_conditions) if ordered_conditions else "<none>"
-    raise ValueError(
-        "Source plot contrast conditions must differ. "
-        f"Configured values were both '{cond_a}'. Available STC conditions: {available_text}."
+    Reads condition_a and condition_b from config.
+    Both must be explicitly configured, non-empty, and distinct.
+    """
+    raw_a = get_config_value(
+        config, "feature_engineering.sourcelocalization.contrast.condition_a", None
     )
+    raw_b = get_config_value(
+        config, "feature_engineering.sourcelocalization.contrast.condition_b", None
+    )
+    cond_a = str(raw_a).strip() if raw_a is not None else ""
+    cond_b = str(raw_b).strip() if raw_b is not None else ""
+
+    is_missing = not cond_a or not cond_b or cond_a.lower() == "none" or cond_b.lower() == "none"
+    if is_missing or cond_a == cond_b:
+        available_text = ", ".join(sorted(available_conditions)) if available_conditions else "<none>"
+        raise ValueError(
+            "Source plot contrast conditions must be explicitly configured and distinct. "
+            f"Got condition_a={cond_a!r}, condition_b={cond_b!r}. "
+            f"Available STC conditions: {available_text}. "
+            "Configure via --plot-item-config <plot_id> "
+            "source_condition_a <value> source_condition_b <value>, "
+            "or set them in the TUI under the plot's per-item config."
+        )
+
+    return cond_a, cond_b
 
 
 def _build_discrete_condition_differences(
@@ -427,6 +518,132 @@ def _summarize_stc_values_for_discrete_plot(stc: Any) -> np.ndarray:
     return np.nanmax(np.abs(data), axis=1)
 
 
+def _discrete_stc_to_nifti(
+    stc: Any,
+    src: Any,
+    *,
+    vmin: float = 0.0,
+    vmax: float = 1.0,
+    voxel_size_mm: float = 2.0,
+) -> Any:
+    """Build a NIfTI from a discrete source estimate.
+
+    MNE's ``stc.as_volume()`` raises ``AssertionError`` on discrete source
+    spaces.  This function manually snaps each source coordinate onto a
+    regular voxel grid in MRI-RAS space, producing a sparse 3-D NIfTI that
+    nilearn can render with ``plot_stat_map``.
+
+    Returns a ``nibabel.Nifti1Image`` with non-zero voxels clamped to
+    ``[vmin, vmax]`` (zeros = transparent background in nilearn).
+    """
+    import nibabel as nib
+
+    if len(src) != 1:
+        raise ValueError(
+            f"Discrete source space must contain exactly one volume block (got {len(src)})."
+        )
+
+    vertices = np.asarray(stc.vertices[0], dtype=int)
+    rr_m = np.asarray(src[0]["rr"], dtype=float)
+    coords_mm = rr_m[vertices] * 1000.0  # MRI-RAS, millimeters
+
+    # Collapse time dimension: mean across time points.
+    data = np.asarray(stc.data, dtype=float)
+    values = data.mean(axis=1) if data.ndim == 2 and data.shape[1] > 1 else data[:, 0]
+
+    # Define a bounding box with some padding and build the voxel grid.
+    pad = 10.0  # mm of padding around the cluster
+    origin = coords_mm.min(axis=0) - pad
+    extent = coords_mm.max(axis=0) + pad - origin
+    grid_shape = np.ceil(extent / voxel_size_mm).astype(int) + 1
+
+    # Affine: maps (i, j, k) voxel indices → MRI-RAS mm.
+    affine = np.eye(4)
+    np.fill_diagonal(affine[:3, :3], voxel_size_mm)
+    affine[:3, 3] = origin
+
+    # Map source coordinates to voxel indices and fill the volume.
+    ijk = np.round((coords_mm - origin) / voxel_size_mm).astype(int)
+    vol = np.zeros(tuple(grid_shape), dtype=float)
+    for idx, (i, j, k) in enumerate(ijk):
+        if 0 <= i < grid_shape[0] and 0 <= j < grid_shape[1] and 0 <= k < grid_shape[2]:
+            # If multiple sources map to the same voxel, keep the maximum.
+            vol[i, j, k] = max(vol[i, j, k], values[idx])
+
+    # Clamp non-zero voxels; zeros stay zero (nilearn background).
+    nonzero = vol != 0.0
+    vol[nonzero] = np.clip(vol[nonzero], vmin, vmax)
+
+    return nib.Nifti1Image(vol, affine)
+
+def _plot_discrete_stc_volumetric(
+    stc: Any,
+    src: Any,
+    save_path: Path,
+    title: str,
+    subjects_dir: str,
+    fs_subject: str,
+    *,
+    cmap: str,
+    vmin: float,
+    vmax: float,
+    colorbar_label: str,
+    symmetric_cbar: bool = False,
+) -> None:
+    """Render a discrete fMRI-constrained STC as a dense volumetric stat map.
+
+    Uses stc.as_volume(src) to produce a NIfTI image in MRI voxel space, then
+    renders publication-quality orthogonal slices (axial, sagittal, coronal) via
+    nilearn.plotting.plot_stat_map on the subject's T1.mgz anatomical background.
+
+    The result looks identical to an fMRI activation map: only fMRI-cluster voxels
+    carry EEG source values; the rest of the volume is zero (transparent in nilearn).
+    """
+    try:
+        from nilearn import plotting as nipl
+        import nibabel as nib
+    except ImportError:
+        raise RuntimeError(
+            "nilearn and nibabel are required for volumetric STC rendering. "
+            "Install with: pip install nilearn nibabel"
+        )
+
+    # MNE's as_volume() does not support discrete source spaces (AssertionError
+    # in _interpolate_data). Build a sparse NIfTI manually instead:
+    # snap each source coordinate onto a regular 2 mm grid.
+    nii_clamped = _discrete_stc_to_nifti(stc, src, vmin=vmin, vmax=vmax)
+
+    # Use the subject's T1.mgz as anatomical background if available.
+    t1_path = Path(subjects_dir) / fs_subject / "mri" / "T1.mgz"
+    bg_img = str(t1_path) if t1_path.exists() else "MNI152"
+
+    # Find the peak voxel to center the ortho slices.
+    vol_data = np.asarray(nii_clamped.dataobj, dtype=float)
+    abs_vol = np.abs(vol_data)
+    peak_flat = int(np.argmax(abs_vol))
+    peak_ijk = np.unravel_index(peak_flat, vol_data.shape)
+    peak_xyz = (nii_clamped.affine @ np.array([*peak_ijk, 1.0]))[:3]
+    cut_coords = tuple(float(v) for v in peak_xyz)
+
+    threshold = float(vmin) if vmin > 0 else None
+
+    display = nipl.plot_stat_map(
+        nii_clamped,
+        bg_img=bg_img,
+        display_mode="ortho",
+        cut_coords=cut_coords,
+        colorbar=True,
+        cmap=cmap,
+        vmax=float(vmax),
+        threshold=threshold,
+        symmetric_cbar=symmetric_cbar,
+        title=title,
+        draw_cross=True,
+    )
+    display.savefig(str(save_path), dpi=150)
+    display.close()
+
+
 def _plot_discrete_stc_3d_points(
     stc: Any,
     src: Any,
@@ -539,103 +756,120 @@ def _plot_discrete_stc_orthogonal_projections(
     src: Any,
     save_path: Path,
     title: str,
-    mesh_rr_mm: np.ndarray,
+    subjects_dir: str,
+    fs_subject: str,
     *,
     cmap: str,
     vmin: float,
     vmax: float,
     colorbar_label: str,
+    symmetric_cbar: bool = False,
 ) -> None:
-    """Render orthogonal slice-style projections for a discrete source space."""
+    """Render publication-quality multi-slice views for a discrete fMRI-constrained STC.
+
+    Produces a two-row nilearn figure:
+      - Top row : 6 equidistant axial slices spanning the cluster volume.
+      - Bottom row : 3-plane ortho view (sagittal / coronal / axial) at peak voxel.
+
+    Background is the subject's T1.mgz (falls back to MNI152 if absent).
+    """
+    try:
+        from nilearn import plotting as nipl
+        import nibabel as nib
+        import io
+    except ImportError:
+        raise RuntimeError(
+            "nilearn and nibabel are required for orthogonal STC rendering. "
+            "Install with: pip install nilearn nibabel"
+        )
+
     if len(src) != 1:
         raise ValueError(
             f"Discrete source space must contain exactly one volume block (got {len(src)})."
         )
 
-    vertices = np.asarray(stc.vertices[0], dtype=int)
-    rr = np.asarray(src[0]["rr"], dtype=float)
-    if vertices.size == 0:
-        raise ValueError("No vertices available in STC for discrete orthogonal plotting.")
-    if np.max(vertices) >= rr.shape[0]:
-        raise ValueError("STC vertex index exceeds available source-space coordinates.")
+    # MNE's as_volume() does not support discrete source spaces.
+    # Build a sparse NIfTI manually via a regular 2 mm grid.
+    nii_clamped = _discrete_stc_to_nifti(stc, src, vmin=vmin, vmax=vmax)
 
-    coords_mm = rr[vertices] * 1000.0
-    values = _summarize_stc_values_for_discrete_plot(stc)
-    if values.shape[0] != vertices.size:
-        raise ValueError(
-            f"STC/source mismatch for discrete orthogonal plotting: values={values.shape[0]}, vertices={vertices.size}."
-        )
+    t1_path = Path(subjects_dir) / fs_subject / "mri" / "T1.mgz"
+    bg_img = str(t1_path) if t1_path.exists() else "MNI152"
 
-    peak_idx = int(np.argmax(values))
-    peak = coords_mm[peak_idx]
-    slab_thickness_mm = 4.0
+    # Peak voxel in world coordinates ---------------------------------------
+    vol_data = np.asarray(nii_clamped.dataobj, dtype=float)
+    abs_vol = np.abs(vol_data)
+    peak_ijk = np.unravel_index(int(np.argmax(abs_vol)), vol_data.shape)
+    peak_xyz = tuple(float(v) for v in (nii_clamped.affine @ np.array([*peak_ijk, 1.0]))[:3])
 
-    fig, all_axes = plt.subplots(
-        1,
-        4,
-        figsize=(16, 5),
-        gridspec_kw={"width_ratios": [1.0, 1.0, 1.0, 0.04]},
+    threshold = float(vmin) if vmin > 0 else None
+
+    # Determine 6 axial z-cuts spanning the active cluster ------------------
+    z_indices = np.where(np.any(vol_data != 0, axis=(0, 1)))[0]
+    if z_indices.size >= 2:
+        z_lo = float((nii_clamped.affine @ np.array([0, 0, int(z_indices[0]), 1.0]))[2])
+        z_hi = float((nii_clamped.affine @ np.array([0, 0, int(z_indices[-1]), 1.0]))[2])
+    else:
+        z_lo, z_hi = peak_xyz[2] - 20.0, peak_xyz[2] + 20.0
+    z_cuts = np.linspace(z_lo, z_hi, 6).tolist()
+
+    # Render nilearn displays into RGBA arrays ------------------------------
+    def _render(display_obj: Any) -> np.ndarray:
+        buf = io.BytesIO()
+        display_obj.savefig(buf, dpi=180)
+        buf.seek(0)
+        arr = plt.imread(buf)
+        display_obj.close()
+        return arr
+
+    axial_arr = _render(nipl.plot_stat_map(
+        nii_clamped,
+        bg_img=bg_img,
+        display_mode="z",
+        cut_coords=z_cuts,
+        colorbar=False,
+        cmap=cmap,
+        vmax=float(vmax),
+        threshold=threshold,
+        symmetric_cbar=symmetric_cbar,
+        annotate=True,
+        draw_cross=False,
+    ))
+
+    ortho_arr = _render(nipl.plot_stat_map(
+        nii_clamped,
+        bg_img=bg_img,
+        display_mode="ortho",
+        cut_coords=peak_xyz,
+        colorbar=True,
+        cmap=cmap,
+        vmax=float(vmax),
+        threshold=threshold,
+        symmetric_cbar=symmetric_cbar,
+        annotate=True,
+        draw_cross=True,
+    ))
+
+    # Composite into a single figure ----------------------------------------
+    import matplotlib.gridspec as gridspec
+    fig = plt.figure(figsize=(16, 8), facecolor="white")
+    gs = gridspec.GridSpec(2, 1, figure=fig, hspace=0.08, height_ratios=[1.0, 1.1])
+
+    ax_top = fig.add_subplot(gs[0])
+    ax_top.imshow(axial_arr, interpolation="lanczos", aspect="equal")
+    ax_top.axis("off")
+    ax_top.set_title("Axial slices through cluster", fontsize=10, pad=4, color="#333333")
+
+    ax_bot = fig.add_subplot(gs[1])
+    ax_bot.imshow(ortho_arr, interpolation="lanczos", aspect="equal")
+    ax_bot.axis("off")
+    ax_bot.set_title(
+        f"Orthogonal view at peak  "
+        f"(x={peak_xyz[0]:.0f}, y={peak_xyz[1]:.0f}, z={peak_xyz[2]:.0f} mm)",
+        fontsize=10, pad=4, color="#333333",
     )
-    axes = all_axes[:3]
-    colorbar_ax = all_axes[3]
-    view_specs = [
-        ("Sagittal", 0, ("y", "z"), "x"),
-        ("Coronal", 1, ("x", "z"), "y"),
-        ("Axial", 2, ("x", "y"), "z"),
-    ]
-    label_to_idx = {"x": 0, "y": 1, "z": 2}
-    scatter_ref = None
 
-    for ax, (label, fixed_idx, (axis_a, axis_b), fixed_name) in zip(axes, view_specs):
-        mesh_mask = np.abs(mesh_rr_mm[:, fixed_idx] - peak[fixed_idx]) <= slab_thickness_mm
-        mesh_slice = mesh_rr_mm[mesh_mask]
-        if mesh_slice.size > 0:
-            ax.scatter(
-                mesh_slice[:, label_to_idx[axis_a]],
-                mesh_slice[:, label_to_idx[axis_b]],
-                s=0.2,
-                color="#b8b8b8",
-                alpha=0.28,
-                linewidths=0.0,
-                zorder=1,
-            )
-
-        src_mask = np.abs(coords_mm[:, fixed_idx] - peak[fixed_idx]) <= slab_thickness_mm
-        if np.any(src_mask):
-            scatter_ref = ax.scatter(
-                coords_mm[src_mask, label_to_idx[axis_a]],
-                coords_mm[src_mask, label_to_idx[axis_b]],
-                c=values[src_mask],
-                cmap=cmap,
-                vmin=float(vmin),
-                vmax=float(vmax),
-                s=18.0,
-                alpha=0.95,
-                linewidths=0.0,
-                zorder=2,
-            )
-        else:
-            scatter_ref = ax.scatter([], [], c=[], cmap=cmap, vmin=float(vmin), vmax=float(vmax))
-
-        ax.set_xlabel(f"{axis_a.upper()} (mm)")
-        ax.set_ylabel(f"{axis_b.upper()} (mm)")
-        ax.set_title(
-            f"{label}\n({fixed_name}={peak[fixed_idx]:.1f} mm, +/-{slab_thickness_mm:.1f} mm)"
-        )
-        ax.set_aspect("equal", adjustable="box")
-        ax.grid(False)
-
-    if scatter_ref is None:
-        raise RuntimeError("Discrete orthogonal plotting failed to create a scatter artist.")
-
-    fig.colorbar(scatter_ref, cax=colorbar_ax, label=colorbar_label)
-    fig.suptitle(
-        f"{title}\n(fMRI-constrained discrete source space: orthogonal projections)",
-        fontsize=12,
-        y=0.98,
-    )
-    fig.tight_layout(rect=(0.0, 0.02, 1.0, 0.93))
-    fig.savefig(str(save_path), dpi=300, bbox_inches="tight")
+    fig.suptitle(title, fontsize=11, y=0.998, color="#111111", fontweight="bold")
+    fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
@@ -810,6 +1044,1141 @@ def _plot_surface_stc_canonical(
     return out_fig
 
 
+def _plot_surface_stc_contrast(
+    diff_stc: Any,
+    *,
+    subject: str,
+    subjects_dir: Optional[str],
+    condition_a: str,
+    condition_b: str,
+    title: str,
+) -> Any:
+    """Render a condition-difference surface STC as a 2×2 diverging brain grid.
+
+    Uses geodesic smoothing (compute_source_morph) and nilearn rendering,
+    with a symmetric RdBu_r colormap centered at zero. Red indicates
+    condition B > A; blue indicates A > B.
+    """
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.colors as mcolors
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    try:
+        from nilearn import plotting as nipl
+    except ImportError:
+        raise RuntimeError(
+            "nilearn is required for quality surface STC rendering. "
+            "Install with: pip install nilearn"
+        )
+
+    fs_dir = Path(subjects_dir) / subject if subjects_dir else None
+    if fs_dir is None or not fs_dir.exists():
+        raise FileNotFoundError(f"FreeSurfer directory not found: {fs_dir}")
+
+    # Geodesic smoothing to full cortical surface
+    morph = mne.compute_source_morph(
+        diff_stc,
+        subject_from=subject,
+        subject_to=subject,
+        subjects_dir=subjects_dir,
+        smooth=10,
+        spacing=None,
+        verbose=False,
+    )
+    stc_full = morph.apply(diff_stc)
+
+    # Signed mean difference across time
+    vals = stc_full.data.mean(axis=1) if stc_full.data.shape[1] > 1 else stc_full.data[:, 0]
+    n_lh = len(stc_full.vertices[0])
+
+    # Symmetric color limits for diverging map
+    abs_max = float(np.percentile(np.abs(vals[np.isfinite(vals)]), 99.5))
+    if abs_max <= 0:
+        abs_max = 1e-30
+
+    lh_tex = vals[:n_lh]
+    rh_tex = vals[n_lh:]
+
+    panels_cfg = [
+        (lh_tex, "lh.inflated", "lh.sulc", "left",  "lateral", "LH — Lateral"),
+        (rh_tex, "rh.inflated", "rh.sulc", "right", "lateral", "RH — Lateral"),
+        (lh_tex, "lh.inflated", "lh.sulc", "left",  "medial",  "LH — Medial"),
+        (rh_tex, "rh.inflated", "rh.sulc", "right", "medial",  "RH — Medial"),
+    ]
+
+    imgs: list[np.ndarray] = []
+    for tex, mesh_f, sulc_f, hemi, view, label in panels_cfg:
+        pfig = nipl.plot_surf_stat_map(
+            surf_mesh=str(fs_dir / "surf" / mesh_f),
+            stat_map=tex,
+            bg_map=str(fs_dir / "surf" / sulc_f),
+            hemi=hemi,
+            view=view,
+            colorbar=False,
+            cmap="RdBu_r",
+            vmax=abs_max,
+            threshold=abs_max * 0.10,
+            bg_on_data=True,
+            darkness=0.5,
+            symmetric_cbar=True,
+            title=label,
+            title_font_size=12,
+        )
+        pfig.set_facecolor("white")
+        buf = io.BytesIO()
+        pfig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
+        buf.seek(0)
+        imgs.append(plt.imread(buf))
+        plt.close(pfig)
+
+    # Pad and assemble grid
+    max_h = max(img.shape[0] for img in imgs)
+    max_w = max(img.shape[1] for img in imgs)
+
+    def _pad(img: np.ndarray) -> np.ndarray:
+        ph, pw = max_h - img.shape[0], max_w - img.shape[1]
+        return np.pad(img, ((ph // 2, ph - ph // 2), (pw // 2, pw - pw // 2), (0, 0)),
+                      mode="constant", constant_values=1.0)
+
+    imgs = [_pad(img) for img in imgs]
+    grid = np.concatenate([
+        np.concatenate(imgs[:2], axis=1),
+        np.concatenate(imgs[2:], axis=1),
+    ], axis=0)
+
+    dpi = 150
+    w_in = grid.shape[1] / dpi
+    h_in = grid.shape[0] / dpi
+    out_fig = plt.figure(figsize=(w_in + 1.0, h_in + 0.6), dpi=dpi, facecolor="white")
+    gs = out_fig.add_gridspec(1, 2, width_ratios=[40, 1], wspace=0.03)
+
+    ax_img = out_fig.add_subplot(gs[0])
+    ax_img.imshow(grid, interpolation="lanczos")
+    ax_img.axis("off")
+
+    ax_cb = out_fig.add_subplot(gs[1])
+    cb = out_fig.colorbar(
+        plt.cm.ScalarMappable(
+            norm=mcolors.Normalize(vmin=-abs_max, vmax=abs_max), cmap="RdBu_r"
+        ),
+        cax=ax_cb,
+    )
+    cb.set_label(f"Source difference ({condition_b} − {condition_a}, a.u.)", fontsize=9, labelpad=8)
+    cb.ax.tick_params(labelsize=8)
+
+    out_fig.suptitle(title, fontsize=11, y=0.99)
+    out_fig.tight_layout(pad=0.4, rect=(0, 0, 1, 0.96))
+    return out_fig
+
+
+def _build_surface_condition_contrasts(
+    stc_files: List[Path],
+    condition_a: str,
+    condition_b: str,
+) -> list[dict[str, Any]]:
+    """Build condition-difference STCs for surface source estimates.
+
+    Groups STC files by (task, segment, band, method), reads conditions A
+    and B, and computes B − A. Returns a list of diff records.
+    """
+    grouped: dict[tuple, dict[str, Path]] = {}
+    for path in stc_files:
+        if not path.name.endswith("-lh.stc"):
+            continue
+        metadata = _parse_stc_plot_metadata(path)
+        key = (
+            str(metadata["task"]),
+            metadata["segment"],
+            str(metadata["band"]),
+            str(metadata["method"]),
+        )
+        cond = str(metadata["condition"])
+        grouped.setdefault(key, {})[cond] = path
+
+    diff_records: list[dict[str, Any]] = []
+    for (task, segment, band, method), cond_map in grouped.items():
+        if condition_a not in cond_map or condition_b not in cond_map:
+            continue
+        stc_a = mne.read_source_estimate(str(cond_map[condition_a]))
+        stc_b = mne.read_source_estimate(str(cond_map[condition_b]))
+
+        if stc_a.data.shape != stc_b.data.shape:
+            continue
+
+        diff_stc = stc_b.copy()
+        diff_stc.data = np.asarray(stc_b.data, dtype=float) - np.asarray(stc_a.data, dtype=float)
+        diff_records.append({
+            "task": task,
+            "segment": segment,
+            "band": band,
+            "method": method,
+            "stc": diff_stc,
+        })
+
+    return diff_records
+
+
+###################################################################
+# Glass Brain Projections
+###################################################################
+
+
+def plot_source_glass_brain(
+    subject: str,
+    stc_files: List[Path],
+    save_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+    subjects_dir: Optional[str] = None,
+) -> None:
+    """Render nilearn glass-brain projections for source estimates.
+
+    For fMRI-informed (discrete) STCs, uses _discrete_stc_to_nifti.
+    For EEG-only (surface) STCs, renders each condition on an inflated surface.
+    Produces per-condition glass brains and, if two conditions are configured,
+    a B-A contrast glass brain.
+    """
+    try:
+        from nilearn import plotting as nipl
+    except ImportError:
+        raise RuntimeError("nilearn is required for glass brain rendering.")
+
+    if not stc_files:
+        logger.info("No STC files for glass brain plotting.")
+        return
+
+    source_segment_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.segment", None
+    )
+    source_segment = "" if source_segment_raw is None else str(source_segment_raw).strip()
+    if source_segment:
+        stc_files = _filter_stc_files_by_segment(stc_files, source_segment)
+
+    has_contrasts = _has_contrast_conditions(config)
+    source_condition_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.condition", None
+    )
+    source_condition = "" if source_condition_raw is None else str(source_condition_raw).strip()
+
+    source_bands_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.bands", None
+    )
+    if source_bands_raw is not None:
+        if isinstance(source_bands_raw, str):
+            source_bands = [b.strip() for b in source_bands_raw.split() if b.strip()]
+        elif isinstance(source_bands_raw, (list, tuple)):
+            source_bands = [str(b).strip() for b in source_bands_raw if str(b).strip()]
+        else:
+            source_bands = [str(source_bands_raw).strip()]
+        stc_files = _filter_stc_files_by_bands(stc_files, source_bands, logger)
+
+        subjects_dir = _resolve_source_plot_subjects_dir(config, logger)
+
+    out_dir = save_dir / "glass_brain"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    is_discrete = any(p.name.endswith("-vl.stc") for p in stc_files)
+
+    if is_discrete:
+        src = _load_volume_source_space(stc_files)
+        if src is None:
+            logger.warning("No src.fif found for glass brain rendering.")
+            return
+
+        for stc_path in stc_files:
+            if not stc_path.name.endswith("-vl.stc"):
+                continue
+            cond = str(_parse_stc_plot_metadata(stc_path).get("condition", ""))
+            if _should_skip_absolute_plot(cond, source_condition, has_contrasts):
+                continue
+            try:
+                stc = mne.read_source_estimate(str(stc_path))
+                nii = _discrete_stc_to_nifti(stc, src)
+                image_name = stc_path.name.replace("-vl.stc", "")
+                save_path = out_dir / f"{image_name}_glass_brain.png"
+                display = nipl.plot_glass_brain(
+                    nii,
+                    display_mode="ortho",
+                    colorbar=True,
+                    cmap="hot",
+                    threshold=None,
+                    plot_abs=False,
+                    black_bg=True,
+                    alpha=0.8,
+                    title=image_name.replace("_", " "),
+                    draw_cross=True,
+                )
+                display.savefig(str(save_path), dpi=200)
+                display.close()
+                logger.debug("Saved glass brain: %s", save_path.name)
+            except Exception as exc:
+                logger.error("Glass brain failed for %s: %s", stc_path.name, exc)
+
+        # Contrast glass brain (B-A)
+        try:
+            available_conditions = {
+                str(_parse_stc_plot_metadata(p)["condition"])
+                for p in stc_files if p.name.endswith("-vl.stc")
+            }
+            if len(available_conditions) >= 2:
+                cond_a, cond_b = _resolve_source_plot_condition_pair(
+                    config, available_conditions, logger,
+                )
+                stc_map = {
+                    p: mne.read_source_estimate(str(p))
+                    for p in stc_files if p.name.endswith("-vl.stc")
+                }
+                diff_records = _build_discrete_condition_differences(stc_map, cond_a, cond_b)
+                for rec in diff_records:
+                    try:
+                        seg_t = f"_seg-{rec['segment']}" if rec["segment"] else ""
+                        name = (
+                            f"sub-{subject}_task-{rec['task']}{seg_t}"
+                            f"_contrast-{cond_b}-minus-{cond_a}"
+                            f"_band-{rec['band']}_{rec['method']}"
+                        )
+                        nii = _discrete_stc_to_nifti(rec["stc"], src, vmin=-1.0, vmax=1.0)
+                        save_path = out_dir / f"{name}_glass_brain.png"
+                        display = nipl.plot_glass_brain(
+                            nii,
+                            display_mode="ortho",
+                            colorbar=True,
+                            cmap="RdBu_r",
+                            threshold=1e-15,
+                            plot_abs=False,
+                            black_bg=True,
+                            alpha=0.8,
+                            symmetric_cbar=True,
+                            title=name.replace("_", " "),
+                            draw_cross=True,
+                        )
+                        display.savefig(str(save_path), dpi=200)
+                        display.close()
+                        logger.debug("Saved contrast glass brain: %s", save_path.name)
+                    except Exception as exc:
+                        logger.error("Contrast glass brain failed (%s): %s", rec.get("band"), exc)
+        except Exception as exc:
+            logger.warning("Glass brain contrast computation failed: %s", exc)
+    else:
+        # Surface STC: render on fsaverage inflated cortex (4-view composite)
+        fs_subject = _resolve_fs_subject_name(subject, subjects_dir)
+        for stc_path in stc_files:
+            if not stc_path.name.endswith("-lh.stc"):
+                continue
+            cond = str(_parse_stc_plot_metadata(stc_path).get("condition", ""))
+            if _should_skip_absolute_plot(cond, source_condition, has_contrasts):
+                continue
+            try:
+                import io as _io
+                import nibabel as nib
+                from nilearn import datasets as nids, plotting as nipl
+
+                stc = mne.read_source_estimate(str(stc_path))
+                morph = mne.compute_source_morph(
+                    stc,
+                    subject_from=fs_subject,
+                    subject_to="fsaverage",
+                    subjects_dir=subjects_dir,
+                    smooth=10,
+                    verbose=False,
+                )
+                stc_fs = morph.apply(stc)
+                data = np.asarray(stc_fs.data, dtype=float)
+                scalar = data.mean(axis=1) if data.ndim == 2 and data.shape[1] > 1 else data[:, 0]
+
+                fsaverage = nids.fetch_surf_fsaverage()
+
+                # Determine vertex counts from the actual mesh files.
+                n_verts_lh = nib.load(fsaverage["infl_left"]).agg_data()[0].shape[0]
+                n_verts_rh = nib.load(fsaverage["infl_right"]).agg_data()[0].shape[0]
+
+                view_specs = [
+                    ("left",  "lateral",  fsaverage["infl_left"],  "lh", n_verts_lh),
+                    ("left",  "medial",   fsaverage["infl_left"],  "lh", n_verts_lh),
+                    ("right", "lateral",  fsaverage["infl_right"], "rh", n_verts_rh),
+                    ("right", "medial",   fsaverage["infl_right"], "rh", n_verts_rh),
+                ]
+
+                panels: list[np.ndarray] = []
+                for hemi_side, view, surf_mesh, hemi_label, n_mesh_verts in view_specs:
+                    hemi_idx = 0 if hemi_label == "lh" else 1
+                    verts = stc_fs.vertices[hemi_idx]
+                    offset = 0 if hemi_label == "lh" else len(stc_fs.vertices[0])
+                    n_hemi = len(verts)
+                    vals = scalar[offset : offset + n_hemi]
+
+                    surf_data = np.zeros(n_mesh_verts)
+                    surf_data[verts] = vals
+
+                    threshold = (
+                        np.percentile(np.abs(scalar[scalar != 0]), 1)
+                        if np.any(scalar != 0)
+                        else None
+                    )
+                    fig_tmp = nipl.plot_surf_stat_map(
+                        surf_mesh,
+                        stat_map=surf_data,
+                        hemi=hemi_side,
+                        view=view,
+                        colorbar=False,
+                        cmap="hot",
+                        bg_map=fsaverage["sulc_" + hemi_side],
+                        threshold=threshold,
+                        engine="matplotlib",
+                    )
+                    buf = _io.BytesIO()
+                    fig_tmp.savefig(buf, dpi=150, bbox_inches="tight", facecolor="white")
+                    buf.seek(0)
+                    panels.append(plt.imread(buf))
+                    plt.close(fig_tmp)
+
+                # Pad panels to equal width before concatenation.
+                max_w = max(p.shape[1] for p in panels)
+                padded = []
+                for p in panels:
+                    pw = max_w - p.shape[1]
+                    if pw > 0:
+                        p = np.pad(p, ((0, 0), (pw // 2, pw - pw // 2), (0, 0)),
+                                   mode="constant", constant_values=1.0)
+                    padded.append(p)
+
+                # Pad rows to equal height before stacking.
+                max_h_top = max(padded[0].shape[0], padded[1].shape[0])
+                max_h_bot = max(padded[2].shape[0], padded[3].shape[0])
+
+                def _pad_h(img: np.ndarray, target_h: int) -> np.ndarray:
+                    ph = target_h - img.shape[0]
+                    if ph > 0:
+                        return np.pad(img, ((ph // 2, ph - ph // 2), (0, 0), (0, 0)),
+                                      mode="constant", constant_values=1.0)
+                    return img
+
+                top_row = np.concatenate([_pad_h(padded[0], max_h_top), _pad_h(padded[1], max_h_top)], axis=1)
+                bot_row = np.concatenate([_pad_h(padded[2], max_h_bot), _pad_h(padded[3], max_h_bot)], axis=1)
+
+                # Equalize widths of top and bot rows.
+                final_w = max(top_row.shape[1], bot_row.shape[1])
+                def _pad_row_w(row: np.ndarray) -> np.ndarray:
+                    pw = final_w - row.shape[1]
+                    if pw > 0:
+                        return np.pad(row, ((0, 0), (pw // 2, pw - pw // 2), (0, 0)),
+                                      mode="constant", constant_values=1.0)
+                    return row
+
+                grid = np.concatenate([_pad_row_w(top_row), _pad_row_w(bot_row)], axis=0)
+
+                image_name = stc_path.name.replace("-lh.stc", "")
+                save_path = out_dir / f"{image_name}_glass_brain.png"
+                fig = plt.figure(figsize=(12, 8), facecolor="white")
+                ax = fig.add_subplot(111)
+                ax.imshow(grid, interpolation="lanczos", aspect="equal")
+                ax.axis("off")
+                fig.suptitle(
+                    image_name.replace("_", " "),
+                    fontsize=11, y=0.995, fontweight="bold",
+                )
+                fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
+                plt.close(fig)
+                logger.debug("Saved surface glass brain: %s", save_path.name)
+            except Exception as exc:
+                logger.error("Surface glass brain failed for %s: %s", stc_path.name, exc)
+
+        # Surface contrast glass brain (B-A)
+        try:
+            available_conditions = {
+                str(_parse_stc_plot_metadata(p)["condition"])
+                for p in stc_files if p.name.endswith("-lh.stc")
+            }
+            if len(available_conditions) >= 2:
+                cond_a, cond_b = _resolve_source_plot_condition_pair(
+                    config, available_conditions, logger,
+                )
+                diff_records = _build_surface_condition_contrasts(stc_files, cond_a, cond_b)
+                fs_subject = _resolve_fs_subject_name(subject, subjects_dir)
+                for rec in diff_records:
+                    try:
+                        import io as _io
+                        import nibabel as nib
+                        from nilearn import datasets as nids, plotting as nipl
+
+                        diff_stc = rec["stc"]
+                        morph = mne.compute_source_morph(
+                            diff_stc,
+                            subject_from=fs_subject,
+                            subject_to="fsaverage",
+                            subjects_dir=subjects_dir,
+                            smooth=10,
+                            verbose=False,
+                        )
+                        stc_fs = morph.apply(diff_stc)
+                        data = np.asarray(stc_fs.data, dtype=float)
+                        scalar = data.mean(axis=1) if data.ndim == 2 and data.shape[1] > 1 else data[:, 0]
+
+                        fsaverage_m = nids.fetch_surf_fsaverage()
+                        n_lh = nib.load(fsaverage_m["infl_left"]).agg_data()[0].shape[0]
+                        n_rh = nib.load(fsaverage_m["infl_right"]).agg_data()[0].shape[0]
+
+                        vmax = np.abs(scalar).max()
+                        view_specs = [
+                            ("left",  "lateral",  fsaverage_m["infl_left"],  "lh", n_lh),
+                            ("left",  "medial",   fsaverage_m["infl_left"],  "lh", n_lh),
+                            ("right", "lateral",  fsaverage_m["infl_right"], "rh", n_rh),
+                            ("right", "medial",   fsaverage_m["infl_right"], "rh", n_rh),
+                        ]
+
+                        panels: list[np.ndarray] = []
+                        for hemi_side, view, surf_mesh, hemi_label, n_mesh_verts in view_specs:
+                            hemi_idx = 0 if hemi_label == "lh" else 1
+                            verts = stc_fs.vertices[hemi_idx]
+                            offset = 0 if hemi_label == "lh" else len(stc_fs.vertices[0])
+                            vals = scalar[offset : offset + len(verts)]
+                            surf_data = np.zeros(n_mesh_verts)
+                            surf_data[verts] = vals
+
+                            fig_tmp = nipl.plot_surf_stat_map(
+                                surf_mesh,
+                                stat_map=surf_data,
+                                hemi=hemi_side,
+                                view=view,
+                                colorbar=False,
+                                cmap="RdBu_r",
+                                bg_map=fsaverage_m["sulc_" + hemi_side],
+                                threshold=None,
+                                vmax=vmax,
+                                engine="matplotlib",
+                            )
+                            buf = _io.BytesIO()
+                            fig_tmp.savefig(buf, dpi=150, bbox_inches="tight", facecolor="white")
+                            buf.seek(0)
+                            panels.append(plt.imread(buf))
+                            plt.close(fig_tmp)
+
+                        # Composite 2x2 with padding
+                        max_w = max(p.shape[1] for p in panels)
+                        padded = []
+                        for p in panels:
+                            pw = max_w - p.shape[1]
+                            if pw > 0:
+                                p = np.pad(p, ((0, 0), (pw // 2, pw - pw // 2), (0, 0)),
+                                           mode="constant", constant_values=1.0)
+                            padded.append(p)
+                        max_h_top = max(padded[0].shape[0], padded[1].shape[0])
+                        max_h_bot = max(padded[2].shape[0], padded[3].shape[0])
+
+                        def _ph(img, th):
+                            d = th - img.shape[0]
+                            return np.pad(img, ((d // 2, d - d // 2), (0, 0), (0, 0)),
+                                          mode="constant", constant_values=1.0) if d > 0 else img
+
+                        top = np.concatenate([_ph(padded[0], max_h_top), _ph(padded[1], max_h_top)], axis=1)
+                        bot = np.concatenate([_ph(padded[2], max_h_bot), _ph(padded[3], max_h_bot)], axis=1)
+                        fw = max(top.shape[1], bot.shape[1])
+
+                        def _pw(row):
+                            d = fw - row.shape[1]
+                            return np.pad(row, ((0, 0), (d // 2, d - d // 2), (0, 0)),
+                                          mode="constant", constant_values=1.0) if d > 0 else row
+
+                        grid = np.concatenate([_pw(top), _pw(bot)], axis=0)
+
+                        seg_t = f"_seg-{rec['segment']}" if rec["segment"] else ""
+                        image_name = (
+                            f"sub-{subject}_task-{rec['task']}{seg_t}"
+                            f"_contrast-{cond_b}-minus-{cond_a}"
+                            f"_band-{rec['band']}_{rec['method']}"
+                        )
+                        save_path = out_dir / f"{image_name}_glass_brain.png"
+                        fig = plt.figure(figsize=(12, 8), facecolor="white")
+                        ax = fig.add_subplot(111)
+                        ax.imshow(grid, interpolation="lanczos", aspect="equal")
+                        ax.axis("off")
+                        fig.suptitle(
+                            f"Contrast: {cond_b} − {cond_a}\n{rec['band']} band",
+                            fontsize=11, y=0.995, fontweight="bold",
+                        )
+                        fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
+                        plt.close(fig)
+                        logger.debug("Saved surface contrast glass brain: %s", save_path.name)
+                    except Exception as exc:
+                        logger.error("Surface contrast glass brain failed (%s): %s", rec.get("band"), exc)
+        except Exception as exc:
+            logger.warning("Surface glass brain contrast computation failed: %s", exc)
+
+
+###################################################################
+# Band Comparison Panel
+###################################################################
+
+
+def plot_source_band_panel(
+    subject: str,
+    stc_files: List[Path],
+    save_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+    subjects_dir: Optional[str] = None,
+) -> None:
+    """Render a multi-band comparison panel: one row per frequency band, same view.
+
+    Groups STCs by (condition, segment), produces one figure per group with
+    all frequency bands as rows. Uses glass-brain rendering for consistency.
+    """
+    try:
+        from nilearn import plotting as nipl
+        import io
+    except ImportError:
+        raise RuntimeError("nilearn is required for band comparison panel.")
+
+    if not stc_files:
+        logger.info("No STC files for band comparison panel.")
+        return
+
+    source_segment_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.segment", None
+    )
+    source_segment = "" if source_segment_raw is None else str(source_segment_raw).strip()
+    if source_segment:
+        stc_files = _filter_stc_files_by_segment(stc_files, source_segment)
+
+    has_contrasts = _has_contrast_conditions(config)
+    source_condition_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.condition", None
+    )
+    source_condition = "" if source_condition_raw is None else str(source_condition_raw).strip()
+
+    source_bands_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.bands", None
+    )
+    if source_bands_raw is not None:
+        if isinstance(source_bands_raw, str):
+            source_bands = [b.strip() for b in source_bands_raw.split() if b.strip()]
+        elif isinstance(source_bands_raw, (list, tuple)):
+            source_bands = [str(b).strip() for b in source_bands_raw if str(b).strip()]
+        else:
+            source_bands = [str(source_bands_raw).strip()]
+        stc_files = _filter_stc_files_by_bands(stc_files, source_bands, logger)
+
+    if subjects_dir is None:
+        subjects_dir = _resolve_source_plot_subjects_dir(config, logger)
+
+    out_dir = save_dir / "band_panel"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    is_discrete = any(p.name.endswith("-vl.stc") for p in stc_files)
+    suffix = "-vl.stc" if is_discrete else "-lh.stc"
+
+    src = None
+    if is_discrete:
+        src = _load_volume_source_space(stc_files)
+        if src is None:
+            logger.warning("No src.fif found for band panel rendering.")
+            return
+
+    # Group STC files by (task, segment, condition) -> list of (band, path)
+    grouped: dict[tuple[str, Optional[str], str], list[tuple[str, Path]]] = {}
+    for stc_path in stc_files:
+        if not stc_path.name.endswith(suffix):
+            continue
+        metadata = _parse_stc_plot_metadata(stc_path)
+        cond = str(metadata.get("condition", ""))
+        if _should_skip_absolute_plot(cond, source_condition, has_contrasts):
+            continue
+        key = (str(metadata["task"]), metadata["segment"], str(metadata["condition"]))
+        grouped.setdefault(key, []).append((str(metadata["band"]), stc_path))
+
+    for (task, segment, condition), band_files in grouped.items():
+        band_files.sort(key=lambda x: x[0])
+        n_bands = len(band_files)
+        if n_bands == 0:
+            continue
+
+        seg_token = f"_seg-{segment}" if segment else ""
+        figure_name = f"sub-{subject}_task-{task}{seg_token}_cond-{condition}_band-panel"
+
+        band_images: list[tuple[str, np.ndarray]] = []
+        for band_label, stc_path in band_files:
+            try:
+                stc = mne.read_source_estimate(str(stc_path))
+                if is_discrete and src is not None:
+                    nii = _discrete_stc_to_nifti(stc, src)
+                    display = nipl.plot_glass_brain(
+                        nii,
+                        display_mode="ortho",
+                        colorbar=False,
+                        cmap="hot",
+                        threshold=None,
+                        plot_abs=False,
+                        black_bg=True,
+                        alpha=0.8,
+                        title=band_label,
+                        draw_cross=False,
+                    )
+                    buf = io.BytesIO()
+                    display.savefig(buf, dpi=150)
+                    buf.seek(0)
+                    band_images.append((band_label, plt.imread(buf)))
+                    display.close()
+                else:
+                    # Surface STC: morph to fsaverage, render left lateral view
+                    import nibabel as nib
+                    from nilearn import datasets as nids
+                    fs_subject = _resolve_fs_subject_name(subject, subjects_dir)
+                    morph = mne.compute_source_morph(
+                        stc,
+                        subject_from=fs_subject,
+                        subject_to="fsaverage",
+                        subjects_dir=subjects_dir,
+                        smooth=10,
+                        verbose=False,
+                    )
+                    stc_fs = morph.apply(stc)
+                    data_fs = np.asarray(stc_fs.data, dtype=float)
+                    scalar = data_fs.mean(axis=1) if data_fs.ndim == 2 and data_fs.shape[1] > 1 else data_fs[:, 0]
+
+                    fsaverage_meshes = nids.fetch_surf_fsaverage()
+                    n_mesh = nib.load(fsaverage_meshes["infl_left"]).agg_data()[0].shape[0]
+
+                    # Left lateral view
+                    verts_lh = stc_fs.vertices[0]
+                    surf_data_lh = np.zeros(n_mesh)
+                    surf_data_lh[verts_lh] = scalar[: len(verts_lh)]
+
+                    threshold = (
+                        np.percentile(np.abs(scalar[scalar != 0]), 1)
+                        if np.any(scalar != 0)
+                        else None
+                    )
+                    fig_tmp = nipl.plot_surf_stat_map(
+                        fsaverage_meshes["infl_left"],
+                        stat_map=surf_data_lh,
+                        hemi="left",
+                        view="lateral",
+                        colorbar=False,
+                        cmap="hot",
+                        bg_map=fsaverage_meshes["sulc_left"],
+                        threshold=threshold,
+                        title=band_label,
+                        engine="matplotlib",
+                    )
+                    buf = io.BytesIO()
+                    fig_tmp.savefig(buf, dpi=150, bbox_inches="tight", facecolor="white")
+                    buf.seek(0)
+                    band_images.append((band_label, plt.imread(buf)))
+                    plt.close(fig_tmp)
+            except Exception as exc:
+                logger.warning("Band panel: skipping %s: %s", band_label, exc)
+
+        if not band_images:
+            continue
+
+        # Composite: vertical stack
+        max_w = max(img.shape[1] for _, img in band_images)
+
+        def _pad_w(img: np.ndarray) -> np.ndarray:
+            pw = max_w - img.shape[1]
+            if pw > 0:
+                return np.pad(img, ((0, 0), (pw // 2, pw - pw // 2), (0, 0)),
+                              mode="constant", constant_values=1.0)
+            return img
+
+        padded = [_pad_w(img) for _, img in band_images]
+        grid = np.concatenate(padded, axis=0)
+
+        fig = plt.figure(figsize=(12, 2.5 * n_bands), facecolor="white")
+        ax = fig.add_subplot(111)
+        ax.imshow(grid, interpolation="lanczos", aspect="equal")
+        ax.axis("off")
+        fig.suptitle(
+            f"Source power by frequency band\n{condition} ({task}{seg_token})",
+            fontsize=12, y=0.998, fontweight="bold",
+        )
+        save_path = out_dir / f"{figure_name}.png"
+        fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        logger.debug("Saved band panel: %s", save_path.name)
+
+    # Contrast band panel (B-A)
+    try:
+        available_conditions: set[str] = set()
+        for stc_path in stc_files:
+            if not stc_path.name.endswith(suffix):
+                continue
+            metadata = _parse_stc_plot_metadata(stc_path)
+            cond = metadata["condition"]
+            if cond is not None:
+                available_conditions.add(str(cond))
+
+        if len(available_conditions) >= 2:
+            cond_a, cond_b = _resolve_source_plot_condition_pair(
+                config, available_conditions, logger,
+            )
+
+            if is_discrete and src is not None:
+                stc_map = {
+                    p: mne.read_source_estimate(str(p))
+                    for p in stc_files if p.name.endswith("-vl.stc")
+                }
+                diff_records = _build_discrete_condition_differences(stc_map, cond_a, cond_b)
+            else:
+                diff_records = _build_surface_condition_contrasts(stc_files, cond_a, cond_b)
+
+            if diff_records:
+                diff_records.sort(key=lambda r: str(r["band"]))
+                n_bands = len(diff_records)
+
+                band_images: list[tuple[str, np.ndarray]] = []
+                for rec in diff_records:
+                    try:
+                        diff_stc = rec["stc"]
+                        band_label = str(rec["band"])
+
+                        if is_discrete and src is not None:
+                            nii = _discrete_stc_to_nifti(diff_stc, src, vmin=-1.0, vmax=1.0)
+                            display = nipl.plot_glass_brain(
+                                nii,
+                                display_mode="ortho",
+                                colorbar=False,
+                                cmap="RdBu_r",
+                                threshold=1e-15,
+                                plot_abs=False,
+                                black_bg=True,
+                                alpha=0.8,
+                                symmetric_cbar=True,
+                                title=band_label,
+                                draw_cross=False,
+                            )
+                            buf = io.BytesIO()
+                            display.savefig(buf, dpi=150)
+                            buf.seek(0)
+                            band_images.append((band_label, plt.imread(buf)))
+                            display.close()
+                        else:
+                            import nibabel as nib
+                            from nilearn import datasets as nids
+                            fs_subject = _resolve_fs_subject_name(subject, subjects_dir)
+                            morph = mne.compute_source_morph(
+                                diff_stc,
+                                subject_from=fs_subject,
+                                subject_to="fsaverage",
+                                subjects_dir=subjects_dir,
+                                smooth=10,
+                                verbose=False,
+                            )
+                            stc_fs = morph.apply(diff_stc)
+                            data_fs = np.asarray(stc_fs.data, dtype=float)
+                            scalar = data_fs.mean(axis=1) if data_fs.ndim == 2 and data_fs.shape[1] > 1 else data_fs[:, 0]
+
+                            fsaverage_meshes = nids.fetch_surf_fsaverage()
+                            n_mesh = nib.load(fsaverage_meshes["infl_left"]).agg_data()[0].shape[0]
+                            verts_lh = stc_fs.vertices[0]
+                            surf_data_lh = np.zeros(n_mesh)
+                            surf_data_lh[verts_lh] = scalar[: len(verts_lh)]
+
+                            fig_tmp = nipl.plot_surf_stat_map(
+                                fsaverage_meshes["infl_left"],
+                                stat_map=surf_data_lh,
+                                hemi="left",
+                                view="lateral",
+                                colorbar=False,
+                                cmap="RdBu_r",
+                                bg_map=fsaverage_meshes["sulc_left"],
+                                threshold=None,
+                                vmax=np.abs(scalar).max(),
+                                title=band_label,
+                                engine="matplotlib",
+                            )
+                            buf = io.BytesIO()
+                            fig_tmp.savefig(buf, dpi=150, bbox_inches="tight", facecolor="white")
+                            buf.seek(0)
+                            band_images.append((band_label, plt.imread(buf)))
+                            plt.close(fig_tmp)
+                    except Exception as exc:
+                        logger.warning("Band panel contrast: skipping %s: %s", rec.get("band"), exc)
+
+                if band_images:
+                    max_w = max(img.shape[1] for _, img in band_images)
+
+                    def _pad_contrast_w(img: np.ndarray) -> np.ndarray:
+                        pw = max_w - img.shape[1]
+                        if pw > 0:
+                            return np.pad(img, ((0, 0), (pw // 2, pw - pw // 2), (0, 0)),
+                                          mode="constant", constant_values=1.0)
+                        return img
+
+                    padded = [_pad_contrast_w(img) for _, img in band_images]
+                    grid = np.concatenate(padded, axis=0)
+
+                    # Use metadata from first record for naming
+                    r0 = diff_records[0]
+                    seg_t = f"_seg-{r0['segment']}" if r0["segment"] else ""
+                    contrast_name = (
+                        f"sub-{subject}_task-{r0['task']}{seg_t}"
+                        f"_contrast-{cond_b}-minus-{cond_a}_band-panel"
+                    )
+                    fig = plt.figure(figsize=(12, 2.5 * n_bands), facecolor="white")
+                    ax = fig.add_subplot(111)
+                    ax.imshow(grid, interpolation="lanczos", aspect="equal")
+                    ax.axis("off")
+                    fig.suptitle(
+                        f"Source contrast: {cond_b} − {cond_a}\nby frequency band",
+                        fontsize=12, y=0.998, fontweight="bold",
+                    )
+                    save_path = out_dir / f"{contrast_name}.png"
+                    fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
+                    plt.close(fig)
+                    logger.debug("Saved contrast band panel: %s", save_path.name)
+    except Exception as exc:
+        logger.warning("Band panel contrast computation failed: %s", exc)
+
+
+###################################################################
+# Cluster Time Course
+###################################################################
+
+
+def plot_source_cluster_timecourse(
+    subject: str,
+    stc_files: List[Path],
+    save_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+    subjects_dir: Optional[str] = None,
+) -> None:
+    """Plot source cluster comparison across conditions.
+
+    Adapts to the STC time dimension:
+    - **Single time point** (band-averaged power): renders a grouped bar chart
+      comparing mean cluster amplitude across conditions for each frequency
+      band. This is the typical output for band-power source localization.
+    - **Multiple time points** (time-resolved): renders a trace of mean
+      cluster amplitude over time, one line per condition.
+    """
+    if not stc_files:
+        logger.info("No STC files for cluster time course plotting.")
+        return
+
+    source_segment_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.segment", None
+    )
+    source_segment = "" if source_segment_raw is None else str(source_segment_raw).strip()
+    if source_segment:
+        stc_files = _filter_stc_files_by_segment(stc_files, source_segment)
+
+    source_condition_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.condition", None
+    )
+    source_condition = "" if source_condition_raw is None else str(source_condition_raw).strip()
+
+    source_bands_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.bands", None
+    )
+    if source_bands_raw is not None:
+        if isinstance(source_bands_raw, str):
+            source_bands = [b.strip() for b in source_bands_raw.split() if b.strip()]
+        elif isinstance(source_bands_raw, (list, tuple)):
+            source_bands = [str(b).strip() for b in source_bands_raw if str(b).strip()]
+        else:
+            source_bands = [str(source_bands_raw).strip()]
+        stc_files = _filter_stc_files_by_bands(stc_files, source_bands, logger)
+
+    vol_stc_files = [p for p in stc_files if p.name.endswith("-vl.stc")]
+    if not vol_stc_files:
+        logger.info("Cluster time course requires volume (-vl.stc) STCs; none found.")
+        return
+
+    out_dir = save_dir / "cluster_timecourse"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Group by (task, segment, band, method) → {condition: stc}
+    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Any]] = {}
+    for stc_path in vol_stc_files:
+        try:
+            metadata = _parse_stc_plot_metadata(stc_path)
+            key = (
+                str(metadata["task"]),
+                metadata["segment"],
+                str(metadata["band"]),
+                str(metadata["method"]),
+            )
+            cond = str(metadata["condition"])
+            if source_condition and cond != source_condition:
+                continue
+            stc = mne.read_source_estimate(str(stc_path))
+            grouped.setdefault(key, {})[cond] = stc
+        except Exception as exc:
+            logger.warning("Cluster time course: skipping %s: %s", stc_path.name, exc)
+
+    # Detect whether STCs are single-timepoint (band power) or multi-timepoint.
+    sample_stc = next(iter(next(iter(grouped.values())).values()), None) if grouped else None
+    is_single_tp = sample_stc is not None and sample_stc.data.shape[1] <= 1
+
+    if is_single_tp:
+        _plot_cluster_bar_comparison(subject, grouped, out_dir, config, logger)
+    else:
+        _plot_cluster_timeseries(subject, grouped, out_dir, logger)
+
+
+def _plot_cluster_bar_comparison(
+    subject: str,
+    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Any]],
+    out_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+) -> None:
+    """Grouped bar chart: mean cluster amplitude per condition, one group per band."""
+    # Re-group by (task, segment, method) → {band: {condition: scalar}}
+    by_context: dict[tuple[str, Optional[str], str], dict[str, dict[str, float]]] = {}
+    for (task, segment, band, method), cond_stcs in grouped.items():
+        ctx_key = (task, segment, method)
+        band_data: dict[str, float] = {}
+        for cond, stc in cond_stcs.items():
+            band_data[cond] = float(np.abs(stc.data).mean())
+        by_context.setdefault(ctx_key, {})[band] = band_data
+
+    for (task, segment, method), band_cond_data in by_context.items():
+        seg_token = f"_seg-{segment}" if segment else ""
+        figure_name = f"sub-{subject}_task-{task}{seg_token}_{method}_cluster_comparison"
+
+        bands = sorted(band_cond_data.keys())
+        all_conditions = sorted({c for bd in band_cond_data.values() for c in bd})
+        n_bands = len(bands)
+        n_conds = len(all_conditions)
+
+        if n_bands == 0 or n_conds == 0:
+            continue
+
+        x = np.arange(n_bands)
+        width = 0.7 / n_conds
+        colors = plt.cm.Set2(np.linspace(0, 1, max(n_conds, 3)))
+
+        fig, ax = plt.subplots(figsize=(max(8, 1.5 * n_bands * n_conds), 5), facecolor="white")
+
+        for i, cond in enumerate(all_conditions):
+            values = [band_cond_data[b].get(cond, 0.0) for b in bands]
+            offset = (i - (n_conds - 1) / 2) * width
+            bars = ax.bar(x + offset, values, width * 0.9, label=cond,
+                          color=colors[i], edgecolor="white", linewidth=0.5)
+            # Value labels on bars
+            for bar_rect, val in zip(bars, values):
+                ax.text(
+                    bar_rect.get_x() + bar_rect.get_width() / 2,
+                    bar_rect.get_height(),
+                    f"{val:.2e}",
+                    ha="center", va="bottom", fontsize=7, rotation=45,
+                )
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([b.capitalize() for b in bands], fontsize=10)
+        ax.set_xlabel("Frequency Band", fontsize=11)
+        ax.set_ylabel("Mean source amplitude (a.u.)", fontsize=11)
+        ax.set_title(
+            f"Cluster source power by condition\n{task}{seg_token} — {method}",
+            fontsize=12, fontweight="bold",
+        )
+        ax.legend(title="Condition", fontsize=9, title_fontsize=10, framealpha=0.8)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.tick_params(labelsize=9)
+        fig.tight_layout()
+
+        save_path = out_dir / f"{figure_name}.png"
+        fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        logger.debug("Saved cluster bar comparison: %s", save_path.name)
+
+        # Contrast bar chart (B-A difference)
+        if n_conds >= 2:
+            try:
+                cond_a, cond_b = _resolve_source_plot_condition_pair(
+                    config, set(all_conditions), logger,
+                )
+                diff_values = [
+                    band_cond_data[b].get(cond_b, 0.0) - band_cond_data[b].get(cond_a, 0.0)
+                    for b in bands
+                ]
+                bar_colors = ["#c0392b" if v > 0 else "#2980b9" for v in diff_values]
+
+                fig_c, ax_c = plt.subplots(
+                    figsize=(max(8, 1.5 * n_bands), 5), facecolor="white",
+                )
+                bars_c = ax_c.bar(
+                    np.arange(n_bands), diff_values, 0.5,
+                    color=bar_colors, edgecolor="white", linewidth=0.5,
+                )
+                for bar_rect, val in zip(bars_c, diff_values):
+                    va = "bottom" if val >= 0 else "top"
+                    ax_c.text(
+                        bar_rect.get_x() + bar_rect.get_width() / 2,
+                        bar_rect.get_height(),
+                        f"{val:+.2e}",
+                        ha="center", va=va, fontsize=8,
+                    )
+                ax_c.axhline(0, color="grey", linewidth=0.8, linestyle="--")
+                ax_c.set_xticks(np.arange(n_bands))
+                ax_c.set_xticklabels([b.capitalize() for b in bands], fontsize=10)
+                ax_c.set_xlabel("Frequency Band", fontsize=11)
+                ax_c.set_ylabel("Δ Mean amplitude (B − A)", fontsize=11)
+                ax_c.set_title(
+                    f"Cluster contrast: {cond_b} − {cond_a}\n{task}{seg_token} — {method}",
+                    fontsize=12, fontweight="bold",
+                )
+                ax_c.spines["top"].set_visible(False)
+                ax_c.spines["right"].set_visible(False)
+                ax_c.tick_params(labelsize=9)
+                fig_c.tight_layout()
+
+                contrast_path = out_dir / f"{figure_name}_contrast.png"
+                fig_c.savefig(str(contrast_path), dpi=200, bbox_inches="tight", facecolor="white")
+                plt.close(fig_c)
+                logger.debug("Saved cluster contrast bar: %s", contrast_path.name)
+            except Exception as exc:
+                logger.warning("Cluster contrast bar failed: %s", exc)
+
+
+def _plot_cluster_timeseries(
+    subject: str,
+    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Any]],
+    out_dir: Path,
+    logger: logging.Logger,
+) -> None:
+    """Line plot: mean cluster amplitude over time, one line per condition."""
+    for (task, segment, band, method), cond_stcs in grouped.items():
+        if not cond_stcs:
+            continue
+
+        seg_token = f"_seg-{segment}" if segment else ""
+        figure_name = f"sub-{subject}_task-{task}{seg_token}_band-{band}_{method}_timecourse"
+
+        fig, ax = plt.subplots(figsize=(10, 5), facecolor="white")
+
+        sorted_conditions = sorted(cond_stcs.keys())
+        for cond_label in sorted_conditions:
+            stc = cond_stcs[cond_label]
+            mean_power = np.abs(stc.data).mean(axis=0)
+            times_ms = stc.times * 1000.0
+            ax.plot(times_ms, mean_power, linewidth=1.5, label=cond_label, alpha=0.85)
+
+        ax.set_xlabel("Time (ms)", fontsize=11)
+        ax.set_ylabel("Mean source amplitude (a.u.)", fontsize=11)
+        ax.set_title(
+            f"Cluster time course — {band} band ({task}{seg_token})",
+            fontsize=12, fontweight="bold",
+        )
+        ax.legend(title="Condition", fontsize=9, title_fontsize=10, framealpha=0.8)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.tick_params(labelsize=9)
+        fig.tight_layout()
+
+        save_path = out_dir / f"{figure_name}.png"
+        fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        logger.debug("Saved cluster time course: %s", save_path.name)
+
+
 def plot_source_stc_3d(
     subject: str,
     stc_files: List[Path],
@@ -834,6 +2203,30 @@ def plot_source_stc_3d(
             source_segment,
             len(stc_files),
         )
+
+    has_contrasts = _has_contrast_conditions(config)
+    source_condition_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.condition", None
+    )
+    source_condition = "" if source_condition_raw is None else str(source_condition_raw).strip()
+
+    source_bands_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.bands", None
+    )
+    if source_bands_raw is not None:
+        if isinstance(source_bands_raw, str):
+            source_bands = [b.strip() for b in source_bands_raw.split() if b.strip()]
+        elif isinstance(source_bands_raw, (list, tuple)):
+            source_bands = [str(b).strip() for b in source_bands_raw if str(b).strip()]
+        else:
+            source_bands = [str(source_bands_raw).strip()]
+        if source_bands:
+            stc_files = _filter_stc_files_by_bands(stc_files, source_bands, logger)
+            logger.info(
+                "Filtered source STCs to bands %s (%d files).",
+                source_bands,
+                len(stc_files),
+            )
 
     if subjects_dir is None:
         subjects_dir = _resolve_source_plot_subjects_dir(config, logger)
@@ -918,30 +2311,34 @@ def plot_source_stc_3d(
                 str(_parse_stc_plot_metadata(path)["condition"])
                 for path in discrete_stc_map.keys()
             }
-            condition_a, condition_b = _resolve_source_plot_condition_pair(
-                config,
-                available_conditions=available_conditions,
-                logger=logger,
-            )
-            discrete_diff_records = _build_discrete_condition_differences(
-                discrete_stc_map,
-                condition_a=condition_a,
-                condition_b=condition_b,
-            )
-            if discrete_diff_records:
-                discrete_diff_absmax = _compute_discrete_difference_absmax(discrete_diff_records)
-                logger.info(
-                    "Rendering %d condition-difference maps (%s minus %s) with per-(segment,band) limits.",
-                    len(discrete_diff_records),
-                    condition_b,
-                    condition_a,
-                )
-            else:
-                logger.warning(
-                    "No matched condition pairs found for difference plotting (%s vs %s).",
-                    condition_a,
-                    condition_b,
-                )
+            if has_contrasts:
+                try:
+                    condition_a, condition_b = _resolve_source_plot_condition_pair(
+                        config,
+                        available_conditions=available_conditions,
+                        logger=logger,
+                    )
+                    discrete_diff_records = _build_discrete_condition_differences(
+                        discrete_stc_map,
+                        condition_a=condition_a,
+                        condition_b=condition_b,
+                    )
+                    if discrete_diff_records:
+                        discrete_diff_absmax = _compute_discrete_difference_absmax(discrete_diff_records)
+                        logger.info(
+                            "Rendering %d condition-difference maps (%s minus %s) with per-(segment,band) limits.",
+                            len(discrete_diff_records),
+                            condition_b,
+                            condition_a,
+                        )
+                    else:
+                        logger.warning(
+                            "No matched condition pairs found for difference plotting (%s vs %s).",
+                            condition_a,
+                            condition_b,
+                        )
+                except Exception as exc:
+                    logger.warning("Contrast 3d brain setup failed: %s", exc)
             logger.info("Using per-(segment,band) condition color limits for discrete STC maps.")
             logger.info("Using discrete source-space point-cloud rendering for volumetric STCs.")
         else:
@@ -962,6 +2359,10 @@ def plot_source_stc_3d(
             )
             if stc is None:
                 raise RuntimeError(f"Discrete STC cache missing for {stc_path.name}.")
+
+            cond = str(_parse_stc_plot_metadata(stc_path).get("condition", ""))
+            if _should_skip_absolute_plot(cond, source_condition, has_contrasts):
+                continue
 
             # Volume STCs (-vl.stc) are rendered differently by source-space kind:
             # regular volume source spaces use MNE 3D brain rendering, while
@@ -1002,12 +2403,35 @@ def plot_source_stc_3d(
                         src=volume_src,
                         save_path=orth_save_path,
                         title=image_name,
-                        mesh_rr_mm=discrete_mesh_rr_mm,
+                        subjects_dir=subjects_dir,
+                        fs_subject=fs_subject,
                         cmap="hot",
                         vmin=discrete_condition_vmin,
                         vmax=discrete_condition_vmax,
                         colorbar_label="Source amplitude (a.u.)",
                     )
+                    vol_save_path = out_dir / f"{image_name}_volumetric.png"
+                    try:
+                        _plot_discrete_stc_volumetric(
+                            stc=stc,
+                            src=volume_src,
+                            save_path=vol_save_path,
+                            title=image_name.replace("_", " "),
+                            subjects_dir=subjects_dir,
+                            fs_subject=fs_subject,
+                            cmap="hot",
+                            vmin=float(discrete_condition_vmin),
+                            vmax=float(discrete_condition_vmax),
+                            colorbar_label="Source amplitude (a.u.)",
+                        )
+                        if logger:
+                            logger.debug(f"Saved volumetric source plot: {vol_save_path.name}")
+                    except Exception as vol_exc:
+                        if logger:
+                            logger.warning(
+                                "Volumetric NIfTI rendering skipped for %s: %s",
+                                image_name, vol_exc,
+                            )
                     if logger:
                         logger.debug(f"Saved 3D source plot: {save_path.name}")
                         logger.debug(f"Saved orthogonal source plot: {orth_save_path.name}")
@@ -1054,6 +2478,61 @@ def plot_source_stc_3d(
             if logger:
                 logger.error(f"Failed to plot STC 3D brain for {stc_path.name}: {exc}")
 
+    # Surface condition contrasts (B − A)
+    if stc_kind == "surface" and has_contrasts:
+        try:
+            available_conditions = {
+                str(_parse_stc_plot_metadata(p)["condition"])
+                for p in stc_files
+                if p.name.endswith("-lh.stc")
+            }
+            if len(available_conditions) >= 2:
+                cond_a, cond_b = _resolve_source_plot_condition_pair(
+                    config,
+                    available_conditions=available_conditions,
+                    logger=logger,
+                )
+                surf_diff_records = _build_surface_condition_contrasts(
+                    stc_files, condition_a=cond_a, condition_b=cond_b,
+                )
+                if surf_diff_records:
+                    logger.info(
+                        "Rendering %d surface condition-contrast maps (%s minus %s).",
+                        len(surf_diff_records), cond_b, cond_a,
+                    )
+                    for rec in surf_diff_records:
+                        try:
+                            seg_token = f"_seg-{rec['segment']}" if rec["segment"] else ""
+                            image_name = (
+                                f"sub-{subject}_task-{rec['task']}{seg_token}"
+                                f"_contrast-{cond_b}-minus-{cond_a}"
+                                f"_band-{rec['band']}_{rec['method']}"
+                            )
+                            contrast_fig = _plot_surface_stc_contrast(
+                                rec["stc"],
+                                subject=fs_subject,
+                                subjects_dir=subjects_dir,
+                                condition_a=cond_a,
+                                condition_b=cond_b,
+                                title=image_name.replace("_", " "),
+                            )
+                            save_path = out_dir / f"{image_name}_contrast_3d.png"
+                            contrast_fig.savefig(
+                                str(save_path), dpi=150, bbox_inches="tight", facecolor="white",
+                            )
+                            plt.close(contrast_fig)
+                            if logger:
+                                logger.debug(f"Saved contrast plot: {save_path.name}")
+                        except Exception as exc:
+                            label = f"contrast:{rec.get('band')}/{rec.get('segment')}"
+                            failures.append(label)
+                            if logger:
+                                logger.error("Failed to render surface contrast (%s): %s", label, exc)
+                else:
+                    logger.info("No matched condition pairs for surface contrast plotting.")
+        except Exception as exc:
+            logger.warning("Could not compute surface contrasts: %s", exc)
+
     if stc_kind == "volume" and src_space_kind == "discrete" and discrete_diff_records:
         if condition_a is None or condition_b is None:
             raise RuntimeError("Discrete contrast plotting state is incomplete.")
@@ -1095,12 +2574,37 @@ def plot_source_stc_3d(
                     src=volume_src,
                     save_path=orth_save_path,
                     title=image_name,
-                    mesh_rr_mm=discrete_mesh_rr_mm,
+                    subjects_dir=subjects_dir,
+                    fs_subject=fs_subject,
                     cmap="RdBu_r",
                     vmin=-diff_absmax,
                     vmax=diff_absmax,
                     colorbar_label=f"Source difference ({condition_b} - {condition_a}, a.u.)",
+                    symmetric_cbar=True,
                 )
+                vol_save_path = out_dir / f"{image_name}_volumetric.png"
+                try:
+                    _plot_discrete_stc_volumetric(
+                        stc=diff_stc,
+                        src=volume_src,
+                        save_path=vol_save_path,
+                        title=image_name.replace("_", " "),
+                        subjects_dir=subjects_dir,
+                        fs_subject=fs_subject,
+                        cmap="RdBu_r",
+                        vmin=-diff_absmax,
+                        vmax=diff_absmax,
+                        colorbar_label=f"Source difference ({condition_b} − {condition_a}, a.u.)",
+                        symmetric_cbar=True,
+                    )
+                    if logger:
+                        logger.debug(f"Saved volumetric contrast plot: {vol_save_path.name}")
+                except Exception as vol_exc:
+                    if logger:
+                        logger.warning(
+                            "Volumetric NIfTI contrast rendering skipped for %s: %s",
+                            image_name, vol_exc,
+                        )
                 if logger:
                     logger.debug(f"Saved 3D contrast plot: {save_path.name}")
                     logger.debug(f"Saved orthogonal contrast plot: {orth_save_path.name}")

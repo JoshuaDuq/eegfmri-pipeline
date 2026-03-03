@@ -64,6 +64,14 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.SourceCortex
 	case plotItemConfigFieldSourceSubjectsDir:
 		return cfg.SourceSubjectsDir
+	case plotItemConfigFieldSourceCondition:
+		return cfg.SourceCondition
+	case plotItemConfigFieldSourceConditionA:
+		return cfg.SourceConditionA
+	case plotItemConfigFieldSourceConditionB:
+		return cfg.SourceConditionB
+	case plotItemConfigFieldSourceBands:
+		return cfg.SourceBandsSpec
 	case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
 		return cfg.BehaviorTemporalStatsFeatureFolder
 	case plotItemConfigFieldDoseResponseDoseColumn:
@@ -194,6 +202,14 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 		cfg.SourceCortex = strings.TrimSpace(value)
 	case plotItemConfigFieldSourceSubjectsDir:
 		cfg.SourceSubjectsDir = strings.TrimSpace(value)
+	case plotItemConfigFieldSourceCondition:
+		cfg.SourceCondition = strings.TrimSpace(value)
+	case plotItemConfigFieldSourceConditionA:
+		cfg.SourceConditionA = strings.TrimSpace(value)
+	case plotItemConfigFieldSourceConditionB:
+		cfg.SourceConditionB = strings.TrimSpace(value)
+	case plotItemConfigFieldSourceBands:
+		cfg.SourceBandsSpec = strings.Join(strings.Fields(value), " ")
 	case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
 		cfg.BehaviorTemporalStatsFeatureFolder = strings.TrimSpace(value)
 	case plotItemConfigFieldDoseResponseDoseColumn:

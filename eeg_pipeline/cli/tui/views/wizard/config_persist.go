@@ -1163,8 +1163,20 @@ func (m Model) ExportConfig() map[string]interface{} {
 	return cfg
 }
 
-// ImportConfig restores configuration from a persisted map.
+// ImportConfig restores all configuration from a persisted map, including
+// UI selections (categories, plots, computations, etc.).
 func (m *Model) ImportConfig(cfg map[string]interface{}) {
+	m.importConfigInner(cfg, true)
+}
+
+// ImportConfigValues restores only configuration parameters from a persisted
+// map, without overwriting UI selections. Use this instead of ImportConfig
+// when the wizard is already live and the user may have changed selections.
+func (m *Model) ImportConfigValues(cfg map[string]interface{}) {
+	m.importConfigInner(cfg, false)
+}
+
+func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections bool) {
 	if cfg == nil {
 		return
 	}
@@ -1205,34 +1217,37 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 		return def
 	}
 
-	// UI State - Selections
-	m.modeIndex = getInt("modeIndex", m.modeIndex)
-	if v, ok := cfg["computationSelected"]; ok {
-		m.computationSelected = listToMap(v)
-	}
-	if v, ok := cfg["categorySelected"]; ok {
-		m.selected = listToMap(v)
-	}
-	if v, ok := cfg["prepStageSelected"]; ok {
-		m.prepStageSelected = listToMap(v)
-	}
-	if v, ok := cfg["featureFileSelected"]; ok {
-		m.featureFileSelected = boolMapToStringsMap(v)
-	}
-	if v, ok := cfg["plotSelected"]; ok {
-		m.plotSelected = listToMap(v)
-	}
-	if v, ok := cfg["featurePlotterSelected"]; ok {
-		m.featurePlotterSelected = boolMapToStringsMap(v)
-	}
-	if v, ok := cfg["plotFormatSelected"]; ok {
-		m.plotFormatSelected = boolMapToStringsMap(v)
-	}
-	if v, ok := cfg["connectivityMeasures"]; ok {
-		m.connectivityMeasures = listToMap(v)
-	}
-	if v, ok := cfg["directedConnMeasures"]; ok {
-		m.directedConnMeasures = listToMap(v)
+	// UI State - Selections (only restored on initial hydration, not during
+	// async config reloads where the user may have already changed them)
+	if restoreSelections {
+		m.modeIndex = getInt("modeIndex", m.modeIndex)
+		if v, ok := cfg["computationSelected"]; ok {
+			m.computationSelected = listToMap(v)
+		}
+		if v, ok := cfg["categorySelected"]; ok {
+			m.selected = listToMap(v)
+		}
+		if v, ok := cfg["prepStageSelected"]; ok {
+			m.prepStageSelected = listToMap(v)
+		}
+		if v, ok := cfg["featureFileSelected"]; ok {
+			m.featureFileSelected = boolMapToStringsMap(v)
+		}
+		if v, ok := cfg["plotSelected"]; ok {
+			m.plotSelected = listToMap(v)
+		}
+		if v, ok := cfg["featurePlotterSelected"]; ok {
+			m.featurePlotterSelected = boolMapToStringsMap(v)
+		}
+		if v, ok := cfg["plotFormatSelected"]; ok {
+			m.plotFormatSelected = boolMapToStringsMap(v)
+		}
+		if v, ok := cfg["connectivityMeasures"]; ok {
+			m.connectivityMeasures = listToMap(v)
+		}
+		if v, ok := cfg["directedConnMeasures"]; ok {
+			m.directedConnMeasures = listToMap(v)
+		}
 	}
 
 	// UI State - Group Expansion

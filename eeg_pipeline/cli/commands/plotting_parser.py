@@ -327,7 +327,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "Example: --plot-item-config tfr_scalpmean compare_windows true. "
             "Keys: compare_windows, comparison_windows, compare_columns, "
             "comparison_segment, comparison_column, comparison_values, comparison_labels, comparison_rois, "
-            "source_segment, source_subjects_dir, "
+            "source_segment, source_condition, source_subjects_dir, source_condition_a, source_condition_b, "
             "topomap_windows (or topomap_window for single value), tfr_topomap_active_window, "
             "tfr_topomap_window_size_ms, tfr_topomap_window_count, tfr_topomap_label_x_position, tfr_topomap_label_y_position_bottom, "
             "tfr_topomap_label_y_position, tfr_topomap_title_y, tfr_topomap_title_pad, "

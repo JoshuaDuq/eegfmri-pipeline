@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from eeg_pipeline.plotting.features.source_localization import (
+    _filter_stc_files_by_condition,
     _resolve_source_views,
     _resolve_fs_subject_name,
     _resolve_volume_source_space,
@@ -99,3 +100,30 @@ def test_resolve_source_views_maps_long_and_short_names() -> None:
 def test_resolve_source_views_rejects_unknown_values() -> None:
     with pytest.raises(ValueError, match="Invalid source view"):
         _resolve_source_views(["lateral", "invalid_view"])
+
+
+def test_filter_stc_files_by_condition_returns_matching_files(tmp_path: Path) -> None:
+    estimates_dir = tmp_path / "source_estimates"
+    estimates_dir.mkdir(parents=True)
+    stc_a = estimates_dir / "sub-0000_task-thermalactive_cond-1.0_band-alpha_lcmv-vl.stc"
+    stc_b = estimates_dir / "sub-0000_task-thermalactive_cond-2.0_band-alpha_lcmv-vl.stc"
+    stc_a.touch()
+    stc_b.touch()
+
+    filtered = _filter_stc_files_by_condition([stc_a, stc_b], "2.0")
+    assert filtered == [stc_b]
+
+
+def test_filter_stc_files_by_condition_raises_with_detected_conditions(tmp_path: Path) -> None:
+    estimates_dir = tmp_path / "source_estimates"
+    estimates_dir.mkdir(parents=True)
+    stc_a = estimates_dir / "sub-0000_task-thermalactive_cond-1.0_band-alpha_lcmv-vl.stc"
+    stc_b = estimates_dir / "sub-0000_task-thermalactive_cond-2.0_band-alpha_lcmv-vl.stc"
+    stc_a.touch()
+    stc_b.touch()
+
+    with pytest.raises(
+        ValueError,
+        match="requested source condition '3.0'.*Available conditions: 1.0, 2.0",
+    ):
+        _filter_stc_files_by_condition([stc_a, stc_b], "3.0")

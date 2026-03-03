@@ -276,9 +276,12 @@ func (m *Model) handleConfigKeysLoaded(msg messages.ConfigKeysLoadedMsg) {
 		m.global.SetConfigValues(msg.Values)
 	case StatePipelineWizard:
 		m.wizard.ApplyConfigKeys(msg.Values)
-		// Config hydration provides YAML defaults and can arrive after we have
-		// restored persisted wizard state; reapply persisted values so user edits
-		// survive across sessions.
-		m.restoreWizardConfig()
+		// ApplyConfigKeys overwrites bands from YAML defaults. Restore only
+		// bands from persisted state so user-customised bands survive. Do NOT
+		// call the full restoreWizardConfig() here — it would also reapply
+		// persisted selections (categories, plots, etc.) and overwrite any
+		// changes the user has already made in the current session, causing
+		// plot options to flash and disappear.
+		m.restoreWizardConfigValues()
 	}
 }
