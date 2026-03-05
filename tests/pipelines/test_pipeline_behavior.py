@@ -32,9 +32,6 @@ class TestBehaviorDeep(unittest.TestCase):
                 run_condition_comparison=True,
                 run_temporal_correlations=True,
                 run_cluster_tests=True,
-                run_mediation=True,
-                run_moderation=True,
-                run_mixed_effects=True,
             )
             p.feature_categories = None
             p.feature_files = None
@@ -87,15 +84,11 @@ class TestBehaviorDeep(unittest.TestCase):
             res = BehaviorPipelineResults(
                 subject="0001",
                 correlations=pd.DataFrame({"p_raw": [0.01, 0.2], "p_primary": [0.04, 0.6], "q_global": [0.03, 0.2]}),
-                predictor_sensitivity=pd.DataFrame({"p_psi": [0.01], "q_global": [0.04]}),
                 condition_effects=pd.DataFrame({"p_value": [0.02], "q_global": [0.03]}),
                 regression=pd.DataFrame({"p_primary": [0.01], "q_global": [0.04], "hedges_g": [0.9]}),
-                mediation=pd.DataFrame({"sobel_p": [0.01], "q_global": [0.04]}),
-                moderation=pd.DataFrame({"p_interaction": [0.01], "q_global": [0.03]}),
-                mixed_effects=pd.DataFrame({"fixed_p": [0.01], "q_global": [0.03]}),
                 tf={"n_tests": 2, "n_sig_raw": 1, "n_sig_fdr": 1},
                 temporal={"n_tests": 3, "n_sig_raw": 2, "n_sig_fdr": 1},
-                cluster={"alpha": {"cluster_records": [{"q_global": 0.04}, {"p_value": 0.2}]}} ,
+                cluster={"alpha": {"cluster_records": [{"q_global": 0.04}, {"p_value": 0.2}]}},
             )
             summary = res.to_summary()
             self.assertGreater(summary["n_features"], 0)
@@ -108,16 +101,16 @@ class TestBehaviorDeep(unittest.TestCase):
 
             res = BehaviorPipelineResults(
                 subject="0001",
-                mediation=pd.DataFrame(
+                correlations=pd.DataFrame(
                     {
-                        "sobel_p": [0.01],
+                        "p_raw": [0.01],
                         "p_primary": [0.30],
                         "q_global": [0.40],
                     }
                 ),
-                moderation=pd.DataFrame(
+                regression=pd.DataFrame(
                     {
-                        "p_interaction": [0.01],
+                        "p_raw": [0.01],
                         "p_primary": [0.40],
                         "q_global": [0.60],
                     }
@@ -143,9 +136,6 @@ class TestBehaviorDeep(unittest.TestCase):
                 run_condition_comparison=True,
                 run_temporal_correlations=True,
                 run_cluster_tests=True,
-                run_mediation=True,
-                run_moderation=True,
-                run_mixed_effects=True,
             )
             p.feature_categories = None
             p.feature_files = None
@@ -186,9 +176,7 @@ class TestBehaviorCompletion(unittest.TestCase):
             cfg = DotConfig({})
             pcfg = BehaviorPipelineConfig()
             with patch("eeg_pipeline.pipelines.behavior.PipelineBase.__init__", lambda self, name, config=None: (setattr(self, "config", config or cfg), setattr(self, "logger", Mock()), setattr(self, "deriv_root", Path(tempfile.mkdtemp())))):
-                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, computations=["validation", "report"])
-            self.assertTrue(b.pipeline_config.run_consistency)
-            self.assertTrue(b.pipeline_config.run_influence)
+                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, computations=["report"])
             self.assertTrue(b.pipeline_config.run_report)
 
             fake_result = SimpleNamespace(
@@ -196,7 +184,7 @@ class TestBehaviorCompletion(unittest.TestCase):
                     multilevel_correlations=pd.DataFrame({"q_within_family": [0.01, 0.2]}),
                 )
             with patch("eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis", return_value=fake_result):
-                out = b.run_group_level(["0001", "0002"], run_mixed_effects=True, run_multilevel_correlations=True)
+                out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
             self.assertIs(out, fake_result)
 
 class TestBehaviorGapfill(unittest.TestCase):
@@ -254,9 +242,6 @@ class TestBehaviorGapfill(unittest.TestCase):
                 run_condition_comparison=True,
                 run_temporal_correlations=True,
                 run_cluster_tests=True,
-                run_mediation=True,
-                run_moderation=True,
-                run_mixed_effects=True,
             )
             p.feature_categories = None
             p.feature_files = None

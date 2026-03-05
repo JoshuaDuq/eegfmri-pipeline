@@ -113,8 +113,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--no-stats-allow-iid-trials", action="store_false", dest="stats_allow_iid_trials")
     compute_group.add_argument("--compute-change-scores", action="store_true", default=None)
     compute_group.add_argument("--no-compute-change-scores", action="store_false", dest="compute_change_scores")
-    compute_group.add_argument("--loso-stability", action="store_true", default=None)
-    compute_group.add_argument("--no-loso-stability", action="store_false", dest="loso_stability")
     compute_group.add_argument("--compute-bayes-factors", action="store_true", default=None)
     compute_group.add_argument("--no-compute-bayes-factors", action="store_false", dest="compute_bayes_factors")
     compute_group.add_argument("--stats-hierarchical-fdr", action="store_true", default=None, dest="stats_hierarchical_fdr")
@@ -163,8 +161,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         action="store_true",
         help="Load and validate data only (no statistics). Still writes metadata and outputs manifest.",
     )
-    compute_group.add_argument("--consistency", action="store_true", default=None, dest="consistency_enabled")
-    compute_group.add_argument("--no-consistency", action="store_false", dest="consistency_enabled")
     compute_group.add_argument("--cluster-correction-enabled", action="store_true", default=None, dest="cluster_correction_enabled")
     compute_group.add_argument("--no-cluster-correction-enabled", action="store_false", dest="cluster_correction_enabled")
     compute_group.add_argument("--cluster-correction-alpha", type=float, default=None)
@@ -184,10 +180,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Feature categories for correlations analysis"
     )
     compute_group.add_argument(
-        "--predictor-sensitivity-features", nargs="+", choices=feature_choices, default=None,
-        help="Feature categories for predictor sensitivity analysis"
-    )
-    compute_group.add_argument(
         "--condition-features", nargs="+", choices=feature_choices, default=None,
         help="Feature categories for condition comparison"
     )
@@ -198,14 +190,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument(
         "--cluster-features", nargs="+", choices=feature_choices, default=None,
         help="Feature categories for cluster permutation tests"
-    )
-    compute_group.add_argument(
-        "--mediation-features", nargs="+", choices=feature_choices, default=None,
-        help="Feature categories for mediation analysis"
-    )
-    compute_group.add_argument(
-        "--moderation-features", nargs="+", choices=feature_choices, default=None,
-        help="Feature categories for moderation analysis"
     )
     compute_group.add_argument(
         "--feature-files",
@@ -225,8 +209,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     trial_table_group = parser.add_argument_group("Trial table options")
     trial_table_group.add_argument("--trial-table-format", choices=["parquet", "tsv"], default=None)
-    trial_table_group.add_argument("--trial-table-add-lag-features", action="store_true", default=None)
-    trial_table_group.add_argument("--no-trial-table-add-lag-features", action="store_false", dest="trial_table_add_lag_features")
     trial_table_group.add_argument(
         "--trial-table-disallow-positional-alignment",
         action="store_true",
@@ -279,23 +261,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Candidate spline degrees of freedom for predictor→outcome residual model (e.g., 3 4 5)",
     )
     residual_group.add_argument("--predictor-residual-poly-degree", type=int, default=None, dest="predictor_residual_poly_degree")
-    residual_group.add_argument("--predictor-residual-model-compare", action="store_true", default=None, dest="predictor_residual_model_compare_enabled")
-    residual_group.add_argument("--no-predictor-residual-model-compare", action="store_false", dest="predictor_residual_model_compare_enabled")
-    residual_group.add_argument("--predictor-residual-model-compare-min-samples", type=int, default=None, dest="predictor_residual_model_compare_min_samples")
-    residual_group.add_argument(
-        "--predictor-residual-model-compare-poly-degrees",
-        nargs="+",
-        type=int,
-        default=None,
-        dest="predictor_residual_model_compare_poly_degrees",
-        help="Polynomial degrees to compare in predictor-residual model comparison (e.g., 2 3)",
-    )
-    residual_group.add_argument("--predictor-residual-breakpoint-test", action="store_true", default=None, dest="predictor_residual_breakpoint_enabled")
-    residual_group.add_argument("--no-predictor-residual-breakpoint-test", action="store_false", dest="predictor_residual_breakpoint_enabled")
-    residual_group.add_argument("--predictor-residual-breakpoint-min-samples", type=int, default=None, dest="predictor_residual_breakpoint_min_samples")
-    residual_group.add_argument("--predictor-residual-breakpoint-candidates", type=int, default=None, dest="predictor_residual_breakpoint_candidates")
-    residual_group.add_argument("--predictor-residual-breakpoint-quantile-low", type=float, default=None, dest="predictor_residual_breakpoint_quantile_low")
-    residual_group.add_argument("--predictor-residual-breakpoint-quantile-high", type=float, default=None, dest="predictor_residual_breakpoint_quantile_high")
     # Optional cross-fit residualization (out-of-run prediction)
     residual_group.add_argument("--predictor-residual-crossfit", action="store_true", default=None, dest="predictor_residual_crossfit_enabled")
     residual_group.add_argument("--no-predictor-residual-crossfit", action="store_false", dest="predictor_residual_crossfit_enabled")
@@ -327,91 +292,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     regression_group.add_argument("--regression-primary-unit", choices=["trial", "run_mean"], default=None)
     regression_group.add_argument("--regression-permutations", type=int, default=None)
     regression_group.add_argument("--regression-max-features", type=int, default=None)
-
-    models_group = parser.add_argument_group("Model families options")
-    models_group.add_argument("--models-outcomes", nargs="+", choices=["outcome", "predictor_residual", "predictor", "binary_outcome"], default=None)
-    models_group.add_argument("--models-families", nargs="+", choices=["ols_hc3", "robust_rlm", "quantile_50", "logit"], default=None)
-    models_group.add_argument("--models-include-predictor", action="store_true", default=None, dest="models_include_predictor")
-    models_group.add_argument("--no-models-include-predictor", action="store_false", dest="models_include_predictor")
-    models_group.add_argument("--models-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="models_predictor_control")
-    models_group.add_argument("--models-predictor-spline-knots", type=int, default=None, dest="models_predictor_spline_knots")
-    models_group.add_argument("--models-predictor-spline-quantile-low", type=float, default=None, dest="models_predictor_spline_quantile_low")
-    models_group.add_argument("--models-predictor-spline-quantile-high", type=float, default=None, dest="models_predictor_spline_quantile_high")
-    models_group.add_argument("--models-predictor-spline-min-samples", type=int, default=None, dest="models_predictor_spline_min_samples")
-    models_group.add_argument("--models-include-trial-order", action="store_true", default=None)
-    models_group.add_argument("--no-models-include-trial-order", action="store_false", dest="models_include_trial_order")
-    models_group.add_argument("--models-include-prev-terms", action="store_true", default=None)
-    models_group.add_argument("--no-models-include-prev-terms", action="store_false", dest="models_include_prev_terms")
-    models_group.add_argument("--models-include-run-block", action="store_true", default=None)
-    models_group.add_argument("--no-models-include-run-block", action="store_false", dest="models_include_run_block")
-    models_group.add_argument("--models-include-interaction", action="store_true", default=None)
-    models_group.add_argument("--no-models-include-interaction", action="store_false", dest="models_include_interaction")
-    models_group.add_argument("--models-standardize", action="store_true", default=None)
-    models_group.add_argument("--no-models-standardize", action="store_false", dest="models_standardize")
-    models_group.add_argument("--models-min-samples", type=int, default=None)
-    models_group.add_argument("--models-max-features", type=int, default=None)
-    models_group.add_argument("--models-binary-outcome", choices=["binary_outcome", "outcome_median"], default=None)
-    models_group.add_argument("--models-primary-unit", choices=["trial", "run_mean"], default=None)
-    models_group.add_argument(
-        "--models-force-trial-iid-asymptotic",
-        action="store_true",
-        default=None,
-        dest="models_force_trial_iid_asymptotic",
-        help="Explicitly allow trial-level feature models with i.i.d asymptotic inference",
-    )
-    models_group.add_argument(
-        "--no-models-force-trial-iid-asymptotic",
-        action="store_false",
-        dest="models_force_trial_iid_asymptotic",
-    )
-
-    stability_group = parser.add_argument_group("Stability options")
-    stability_group.add_argument("--stability-method", choices=["spearman", "pearson"], default=None)
-    stability_group.add_argument("--stability-outcome", choices=["auto", "outcome", "predictor_residual"], default=None)
-    stability_group.add_argument("--stability-group-column", choices=["auto", "run", "block"], default=None)
-    stability_group.add_argument("--stability-partial-predictor", action="store_true", default=None, dest="stability_partial_predictor")
-    stability_group.add_argument("--no-stability-partial-predictor", action="store_false", dest="stability_partial_predictor")
-    stability_group.add_argument("--stability-min-group-trials", type=int, default=None)
-    stability_group.add_argument("--stability-max-features", type=int, default=None)
-    stability_group.add_argument("--stability-alpha", type=float, default=None)
-
-    influence_group = parser.add_argument_group("Influence diagnostics options")
-    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["outcome", "predictor_residual", "predictor"], default=None)
-    influence_group.add_argument("--influence-max-features", type=int, default=None)
-    influence_group.add_argument("--influence-include-predictor", action="store_true", default=None, dest="influence_include_predictor")
-    influence_group.add_argument("--no-influence-include-predictor", action="store_false", dest="influence_include_predictor")
-    influence_group.add_argument("--influence-predictor-control", choices=["linear", "outcome_hat", "spline"], default=None, dest="influence_predictor_control")
-    influence_group.add_argument("--influence-predictor-spline-knots", type=int, default=None, dest="influence_predictor_spline_knots")
-    influence_group.add_argument("--influence-predictor-spline-quantile-low", type=float, default=None, dest="influence_predictor_spline_quantile_low")
-    influence_group.add_argument("--influence-predictor-spline-quantile-high", type=float, default=None, dest="influence_predictor_spline_quantile_high")
-    influence_group.add_argument("--influence-predictor-spline-min-samples", type=int, default=None, dest="influence_predictor_spline_min_samples")
-    influence_group.add_argument("--influence-include-trial-order", action="store_true", default=None)
-    influence_group.add_argument("--no-influence-include-trial-order", action="store_false", dest="influence_include_trial_order")
-    influence_group.add_argument("--influence-include-run-block", action="store_true", default=None)
-    influence_group.add_argument("--no-influence-include-run-block", action="store_false", dest="influence_include_run_block")
-    influence_group.add_argument("--influence-include-interaction", action="store_true", default=None)
-    influence_group.add_argument("--no-influence-include-interaction", action="store_false", dest="influence_include_interaction")
-    influence_group.add_argument("--influence-standardize", action="store_true", default=None)
-    influence_group.add_argument("--no-influence-standardize", action="store_false", dest="influence_standardize")
-    influence_group.add_argument("--influence-cooks-threshold", type=float, default=None)
-    influence_group.add_argument("--influence-leverage-threshold", type=float, default=None)
-
-    predictor_sensitivity_group = parser.add_argument_group("Predictor sensitivity options")
-    predictor_sensitivity_group.add_argument("--predictor-sensitivity-min-trials", type=int, default=None)
-    predictor_sensitivity_group.add_argument("--predictor-sensitivity-primary-unit", choices=["trial", "run_mean"], default=None)
-    predictor_sensitivity_group.add_argument("--predictor-sensitivity-permutations", type=int, default=None)
-    predictor_sensitivity_group.add_argument(
-        "--predictor-sensitivity-permutation-primary",
-        action="store_true",
-        default=None,
-        dest="predictor_sensitivity_permutation_primary",
-        help="Use permutation-based p_primary when available",
-    )
-    predictor_sensitivity_group.add_argument(
-        "--no-predictor-sensitivity-permutation-primary",
-        action="store_false",
-        dest="predictor_sensitivity_permutation_primary",
-    )
 
     correlations_group = parser.add_argument_group("Correlations (trial-table) options")
     correlations_group.add_argument(
@@ -596,50 +476,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     cluster_group.add_argument("--cluster-tail", type=int, choices=[-1, 0, 1], default=None, help="Test tail: 0=two-tailed, 1=upper, -1=lower")
     cluster_group.add_argument("--cluster-condition-column", type=str, default=None, help="events.tsv column to split by (default: event_columns.binary_outcome)")
     cluster_group.add_argument("--cluster-condition-values", nargs="+", default=None, metavar="VALUE", help="Exactly 2 values to compare (e.g., 0 1 or condition_a condition_b)")
-    
-    # Mediation-specific options
-    mediation_group = parser.add_argument_group("Mediation analysis options")
-    mediation_group.add_argument("--mediation-bootstrap", type=int, default=None, help="Bootstrap iterations for mediation")
-    mediation_group.add_argument("--mediation-permutations", type=int, default=None, help="Permutation iterations for mediation (0=disabled)")
-    mediation_group.add_argument(
-        "--mediation-permutation-primary",
-        action="store_true",
-        default=None,
-        dest="mediation_permutation_primary",
-        help="Use permutation-based p_primary when available",
-    )
-    mediation_group.add_argument(
-        "--no-mediation-permutation-primary",
-        action="store_false",
-        dest="mediation_permutation_primary",
-    )
-    mediation_group.add_argument("--mediation-min-effect-size", type=float, default=None, help="Minimum mediation effect size")
-    mediation_group.add_argument("--mediation-max-mediators", type=int, default=None, help="Maximum mediators to test")
-    
-    # Moderation-specific options
-    moderation_group = parser.add_argument_group("Moderation analysis options")
-    moderation_group.add_argument("--moderation-max-features", type=int, default=None, help="Maximum features for moderation")
-    moderation_group.add_argument("--moderation-min-samples", type=int, default=None, help="Minimum samples for moderation")
-    moderation_group.add_argument("--moderation-permutations", type=int, default=None, help="Permutation iterations for moderation (0=disabled)")
-    moderation_group.add_argument(
-        "--moderation-permutation-primary",
-        action="store_true",
-        default=None,
-        dest="moderation_permutation_primary",
-        help="Use permutation-based p_primary when available",
-    )
-    moderation_group.add_argument(
-        "--no-moderation-permutation-primary",
-        action="store_false",
-        dest="moderation_permutation_primary",
-    )
-    
-    # Mixed effects-specific options
-    mixed_group = parser.add_argument_group("Mixed effects options")
-    mixed_group.add_argument("--mixed-random-effects", choices=["intercept", "intercept_slope"], default=None, help="Random effects specification")
-    mixed_group.add_argument("--mixed-include-predictor", action="store_true", default=None, dest="mixed_include_predictor")
-    mixed_group.add_argument("--no-mixed-include-predictor", action="store_false", dest="mixed_include_predictor")
-    mixed_group.add_argument("--mixed-max-features", type=int, default=None, help="Maximum features for mixed effects")
     
     # Condition-specific options
     condition_group = parser.add_argument_group("Condition comparison options")

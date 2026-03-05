@@ -101,7 +101,6 @@ def primary_unit_for_computation_impl(ctx: Any, computation_name: Optional[str])
         "correlations": "behavior_analysis.correlations.primary_unit",
         "regression": "behavior_analysis.regression.primary_unit",
         "condition": "behavior_analysis.condition.primary_unit",
-        "predictor_sensitivity": "behavior_analysis.predictor_sensitivity.primary_unit",
         "condition_window_comparison": "behavior_analysis.condition.window_comparison.primary_unit",
     }
     key = mapping.get(str(computation_name or "").strip().lower(), None)

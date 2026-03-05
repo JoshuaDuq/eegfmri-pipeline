@@ -137,48 +137,6 @@ def stage_trial_table_impl(
     return write_trial_table_fn(ctx, result)
 
 
-def stage_lag_features_impl(
-    ctx: Any,
-    config: Any,
-    *,
-    load_trial_table_df_fn: Callable[[Any], Optional[pd.DataFrame]],
-    is_dataframe_valid_fn: Callable[[Optional[pd.DataFrame]], bool],
-    feature_suffix_from_context_fn: Callable[[Any], str],
-    get_stats_subfolder_fn: Callable[[Any, str], Path],
-    write_parquet_with_optional_csv_fn: Callable[[pd.DataFrame, Path, bool], None],
-    write_metadata_file_fn: Callable[[Path, Dict[str, Any]], None],
-    set_trial_table_cache_fn: Optional[Callable[[pd.DataFrame], None]] = None,
-) -> Optional[Path]:
-    """Add lagged and delta variables to the trial table."""
-    _ = config
-    from eeg_pipeline.utils.data.trial_table import add_lag_and_delta_features
-
-    df = load_trial_table_df_fn(ctx)
-    if not is_dataframe_valid_fn(df):
-        ctx.logger.warning("Lag features: trial table missing; skipping.")
-        return None
-
-    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
-    group_cols = [c for c in [run_col, "run_id", "run", "block"] if c]
-    seen = set()
-    group_cols = [c for c in group_cols if not (c in seen or seen.add(c))]
-
-    df_augmented, lag_meta = add_lag_and_delta_features(df, group_columns=group_cols)
-
-    suffix = feature_suffix_from_context_fn(ctx)
-    out_dir = get_stats_subfolder_fn(ctx, "lag_features")
-    out_path = out_dir / f"trials_with_lags{suffix}.parquet"
-    write_parquet_with_optional_csv_fn(df_augmented, out_path, also_save_csv=ctx.also_save_csv)
-
-    meta_path = out_dir / f"lag_features{suffix}.metadata.json"
-    write_metadata_file_fn(meta_path, lag_meta)
-    ctx.data_qc["lag_features"] = lag_meta
-    if set_trial_table_cache_fn is not None:
-        set_trial_table_cache_fn(df_augmented)
-    ctx.logger.info("Lag features saved: %s/%s", out_dir.name, out_path.name)
-
-    return out_path
-
 
 def stage_predictor_residual_impl(
     ctx: Any,

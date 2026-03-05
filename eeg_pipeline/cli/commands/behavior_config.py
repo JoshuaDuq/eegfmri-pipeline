@@ -300,118 +300,6 @@ _REGRESSION_PREDICTOR_SPLINE_OVERRIDE_RULES = (
     ),
 )
 
-_MODELS_OVERRIDE_RULES = (
-    ConfigOverrideRule("models_outcomes", "behavior_analysis.models.outcomes", _to_lower_stripped_list),
-    ConfigOverrideRule("models_families", "behavior_analysis.models.families", _to_lower_stripped_list),
-    ConfigOverrideRule("models_include_predictor", "behavior_analysis.models.include_predictor", _to_bool),
-    ConfigOverrideRule("models_predictor_control", "behavior_analysis.models.predictor_control", _to_lower_stripped),
-    ConfigOverrideRule("models_include_trial_order", "behavior_analysis.models.include_trial_order", _to_bool),
-    ConfigOverrideRule("models_include_prev_terms", "behavior_analysis.models.include_prev_terms", _to_bool),
-    ConfigOverrideRule("models_include_run_block", "behavior_analysis.models.include_run_block", _to_bool),
-    ConfigOverrideRule("models_include_interaction", "behavior_analysis.models.include_interaction", _to_bool),
-    ConfigOverrideRule("models_standardize", "behavior_analysis.models.standardize", _to_bool),
-    ConfigOverrideRule("models_min_samples", "behavior_analysis.models.min_samples", _to_int),
-    ConfigOverrideRule("models_max_features", "behavior_analysis.models.max_features", _to_optional_int_max),
-    ConfigOverrideRule("models_binary_outcome", "behavior_analysis.models.binary_outcome", _to_lower_stripped),
-    ConfigOverrideRule("models_primary_unit", "behavior_analysis.models.primary_unit", _to_lower_stripped),
-    ConfigOverrideRule(
-        "models_force_trial_iid_asymptotic",
-        "behavior_analysis.models.force_trial_iid_asymptotic",
-        _to_bool,
-    ),
-)
-
-_MODELS_PREDICTOR_SPLINE_OVERRIDE_RULES = (
-    ConfigOverrideRule("models_predictor_spline_knots", "behavior_analysis.models.predictor_spline.n_knots", _to_int),
-    ConfigOverrideRule(
-        "models_predictor_spline_quantile_low",
-        "behavior_analysis.models.predictor_spline.quantile_low",
-        _to_float,
-    ),
-    ConfigOverrideRule(
-        "models_predictor_spline_quantile_high",
-        "behavior_analysis.models.predictor_spline.quantile_high",
-        _to_float,
-    ),
-    ConfigOverrideRule(
-        "models_predictor_spline_min_samples",
-        "behavior_analysis.models.predictor_spline.min_samples",
-        _to_int,
-    ),
-)
-
-_STABILITY_OVERRIDE_RULES = (
-    ConfigOverrideRule("stability_method", "behavior_analysis.stability.method", _to_lower_stripped),
-    ConfigOverrideRule("stability_outcome", "behavior_analysis.stability.outcome", _to_auto_blank_or_lower),
-    ConfigOverrideRule("stability_group_column", "behavior_analysis.stability.group_column", _to_auto_blank_or_lower),
-    ConfigOverrideRule("stability_partial_predictor", "behavior_analysis.stability.partial_predictor", _to_bool),
-    ConfigOverrideRule("stability_min_group_trials", "behavior_analysis.stability.min_group_trials", _to_int),
-    ConfigOverrideRule("stability_max_features", "behavior_analysis.stability.max_features", _to_optional_int_max),
-    ConfigOverrideRule("stability_alpha", "behavior_analysis.stability.alpha", _to_float),
-)
-
-_INFLUENCE_OVERRIDE_RULES = (
-    ConfigOverrideRule("influence_outcomes", "behavior_analysis.influence.outcomes", _to_lower_stripped_list),
-    ConfigOverrideRule("influence_max_features", "behavior_analysis.influence.max_features", _to_int),
-    ConfigOverrideRule("influence_include_predictor", "behavior_analysis.influence.include_predictor", _to_bool),
-    ConfigOverrideRule(
-        "influence_predictor_control",
-        "behavior_analysis.influence.predictor_control",
-        _to_lower_stripped,
-    ),
-    ConfigOverrideRule("influence_include_trial_order", "behavior_analysis.influence.include_trial_order", _to_bool),
-    ConfigOverrideRule("influence_include_run_block", "behavior_analysis.influence.include_run_block", _to_bool),
-    ConfigOverrideRule("influence_include_interaction", "behavior_analysis.influence.include_interaction", _to_bool),
-    ConfigOverrideRule("influence_standardize", "behavior_analysis.influence.standardize", _to_bool),
-    ConfigOverrideRule(
-        "influence_cooks_threshold",
-        "behavior_analysis.influence.cooks_threshold",
-        _to_optional_float_threshold,
-    ),
-    ConfigOverrideRule(
-        "influence_leverage_threshold",
-        "behavior_analysis.influence.leverage_threshold",
-        _to_optional_float_threshold,
-    ),
-)
-
-_INFLUENCE_PREDICTOR_SPLINE_OVERRIDE_RULES = (
-    ConfigOverrideRule(
-        "influence_predictor_spline_knots",
-        "behavior_analysis.influence.predictor_spline.n_knots",
-        _to_int,
-    ),
-    ConfigOverrideRule(
-        "influence_predictor_spline_quantile_low",
-        "behavior_analysis.influence.predictor_spline.quantile_low",
-        _to_float,
-    ),
-    ConfigOverrideRule(
-        "influence_predictor_spline_quantile_high",
-        "behavior_analysis.influence.predictor_spline.quantile_high",
-        _to_float,
-    ),
-    ConfigOverrideRule(
-        "influence_predictor_spline_min_samples",
-        "behavior_analysis.influence.predictor_spline.min_samples",
-        _to_int,
-    ),
-)
-
-_PAIN_SENSITIVITY_OVERRIDE_RULES = (
-    ConfigOverrideRule("predictor_sensitivity_min_trials", "behavior_analysis.predictor_sensitivity.min_trials", _to_int),
-    ConfigOverrideRule(
-        "predictor_sensitivity_primary_unit",
-        "behavior_analysis.predictor_sensitivity.primary_unit",
-        _to_lower_stripped,
-    ),
-    ConfigOverrideRule(
-        "predictor_sensitivity_permutations",
-        "behavior_analysis.predictor_sensitivity.n_permutations",
-        _to_int,
-    ),
-)
-
 _CORRELATIONS_OVERRIDE_RULES = (
     ConfigOverrideRule("correlations_types", "behavior_analysis.correlations.types", _to_list),
     ConfigOverrideRule("correlations_primary_unit", "behavior_analysis.correlations.primary_unit", _to_lower_stripped),
@@ -548,29 +436,6 @@ _CLUSTER_OVERRIDE_RULES = (
     ConfigOverrideRule("cluster_condition_values", "behavior_analysis.cluster.condition_values", _to_stripped_list),
 )
 
-_MEDIATION_OVERRIDE_RULES = (
-    ConfigOverrideRule("mediation_bootstrap", "behavior_analysis.mediation.n_bootstrap", _to_int),
-    ConfigOverrideRule("mediation_permutations", "behavior_analysis.mediation.n_permutations", _to_int),
-    ConfigOverrideRule("mediation_min_effect_size", "behavior_analysis.mediation.min_effect_size", _to_float),
-    ConfigOverrideRule("mediation_max_mediators", "behavior_analysis.mediation.max_mediators", _to_int),
-)
-
-_MODERATION_OVERRIDE_RULES = (
-    ConfigOverrideRule("moderation_max_features", "behavior_analysis.moderation.max_features", _to_int),
-    ConfigOverrideRule("moderation_min_samples", "behavior_analysis.moderation.min_samples", _to_int),
-    ConfigOverrideRule("moderation_permutations", "behavior_analysis.moderation.n_permutations", _to_int),
-)
-
-_MIXED_EFFECTS_OVERRIDE_RULES = (
-    ConfigOverrideRule("mixed_random_effects", "behavior_analysis.mixed_effects.random_effects", _to_lower_stripped),
-    ConfigOverrideRule(
-        "mixed_include_predictor",
-        "behavior_analysis.mixed_effects.include_predictor",
-        _to_bool,
-    ),
-    ConfigOverrideRule("mixed_max_features", "behavior_analysis.mixed_effects.max_features", _to_int),
-)
-
 _OUTPUT_OVERRIDE_RULES = (
     ConfigOverrideRule("also_save_csv", "behavior_analysis.output.also_save_csv", _to_bool),
     ConfigOverrideRule("overwrite", "behavior_analysis.output.overwrite", _to_bool),
@@ -641,58 +506,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     _apply_override_rules(args, config, _TRIAL_TABLE_OVERRIDE_RULES)
     _apply_override_rules(args, config, _FEATURE_QC_OVERRIDE_RULES)
     _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_OVERRIDE_RULES)
-
-    # Predictor-model diagnostics are consumed by behavior_analysis.predictor_models.*
-    if getattr(args, "predictor_residual_model_compare_enabled", None) is not None:
-        enabled = bool(args.predictor_residual_model_compare_enabled)
-        _set_nested_config_value(config, "behavior_analysis.predictor_models.model_comparison.enabled", enabled)
-    if getattr(args, "predictor_residual_model_compare_min_samples", None) is not None:
-        min_samples = int(args.predictor_residual_model_compare_min_samples)
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.predictor_models.model_comparison.min_samples",
-            min_samples,
-        )
-    if getattr(args, "predictor_residual_model_compare_poly_degrees", None) is not None:
-        poly_degrees = list(args.predictor_residual_model_compare_poly_degrees)
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.predictor_models.model_comparison.poly_degrees",
-            poly_degrees,
-        )
-
-    if getattr(args, "predictor_residual_breakpoint_enabled", None) is not None:
-        enabled = bool(args.predictor_residual_breakpoint_enabled)
-        _set_nested_config_value(config, "behavior_analysis.predictor_models.breakpoint_test.enabled", enabled)
-    if getattr(args, "predictor_residual_breakpoint_min_samples", None) is not None:
-        min_samples = int(args.predictor_residual_breakpoint_min_samples)
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.predictor_models.breakpoint_test.min_samples",
-            min_samples,
-        )
-    if getattr(args, "predictor_residual_breakpoint_candidates", None) is not None:
-        candidates = int(args.predictor_residual_breakpoint_candidates)
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.predictor_models.breakpoint_test.n_candidates",
-            candidates,
-        )
-    if getattr(args, "predictor_residual_breakpoint_quantile_low", None) is not None:
-        q_low = float(args.predictor_residual_breakpoint_quantile_low)
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.predictor_models.breakpoint_test.quantile_low",
-            q_low,
-        )
-    if getattr(args, "predictor_residual_breakpoint_quantile_high", None) is not None:
-        q_high = float(args.predictor_residual_breakpoint_quantile_high)
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.predictor_models.breakpoint_test.quantile_high",
-            q_high,
-        )
-
     _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_CROSSFIT_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _REGRESSION_OVERRIDE_RULES)
@@ -706,40 +519,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         ),
     ):
         _apply_override_rules(args, config, _REGRESSION_PREDICTOR_SPLINE_OVERRIDE_RULES)
-
-    _apply_override_rules(args, config, _MODELS_OVERRIDE_RULES)
-    if _has_any_arg(
-        args,
-        (
-            "models_predictor_spline_knots",
-            "models_predictor_spline_quantile_low",
-            "models_predictor_spline_quantile_high",
-            "models_predictor_spline_min_samples",
-        ),
-    ):
-        _apply_override_rules(args, config, _MODELS_PREDICTOR_SPLINE_OVERRIDE_RULES)
-
-    _apply_override_rules(args, config, _STABILITY_OVERRIDE_RULES)
-
-    _apply_override_rules(args, config, _INFLUENCE_OVERRIDE_RULES)
-    if _has_any_arg(
-        args,
-        (
-            "influence_predictor_spline_knots",
-            "influence_predictor_spline_quantile_low",
-            "influence_predictor_spline_quantile_high",
-            "influence_predictor_spline_min_samples",
-        ),
-    ):
-        _apply_override_rules(args, config, _INFLUENCE_PREDICTOR_SPLINE_OVERRIDE_RULES)
-
-    _apply_override_rules(args, config, _PAIN_SENSITIVITY_OVERRIDE_RULES)
-    if getattr(args, "predictor_sensitivity_permutation_primary", None) is not None:
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.predictor_sensitivity.p_primary_mode",
-            "perm_if_available" if bool(args.predictor_sensitivity_permutation_primary) else "asymptotic",
-        )
 
     _apply_override_rules(args, config, _CORRELATIONS_OVERRIDE_RULES)
     if getattr(args, "correlations_permutation_primary", None) is not None:
@@ -806,24 +585,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     _apply_override_rules(args, config, _CLUSTER_OVERRIDE_RULES)
 
-    _apply_override_rules(args, config, _MEDIATION_OVERRIDE_RULES)
-    if getattr(args, "mediation_permutation_primary", None) is not None:
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.mediation.p_primary_mode",
-            "perm_if_available" if bool(args.mediation_permutation_primary) else "asymptotic",
-        )
-
-    _apply_override_rules(args, config, _MODERATION_OVERRIDE_RULES)
-    if getattr(args, "moderation_permutation_primary", None) is not None:
-        _set_nested_config_value(
-            config,
-            "behavior_analysis.moderation.p_primary_mode",
-            "perm_if_available" if bool(args.moderation_permutation_primary) else "asymptotic",
-        )
-
-    _apply_override_rules(args, config, _MIXED_EFFECTS_OVERRIDE_RULES)
-
     _apply_override_rules(args, config, _OUTPUT_OVERRIDE_RULES)
 
 
@@ -837,17 +598,11 @@ def _build_computation_features(args: argparse.Namespace) -> dict[str, list[str]
 
     if getattr(args, "correlations_features", None):
         computation_features["correlations"] = args.correlations_features
-    if getattr(args, "predictor_sensitivity_features", None):
-        computation_features["predictor_sensitivity"] = args.predictor_sensitivity_features
     if getattr(args, "condition_features", None):
         computation_features["condition"] = args.condition_features
     if getattr(args, "temporal_features", None):
         computation_features["temporal"] = args.temporal_features
     if getattr(args, "cluster_features", None):
         computation_features["cluster"] = args.cluster_features
-    if getattr(args, "mediation_features", None):
-        computation_features["mediation"] = args.mediation_features
-    if getattr(args, "moderation_features", None):
-        computation_features["moderation"] = args.moderation_features
 
     return computation_features or None

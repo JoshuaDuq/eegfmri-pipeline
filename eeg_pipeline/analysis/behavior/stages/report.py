@@ -70,14 +70,8 @@ def stage_report_impl(
 
     patterns = [
         "correlations*.parquet",
-        "predictor_sensitivity*.parquet",
         "regression_feature_effects*.parquet",
-        "models_feature_effects*.parquet",
         "condition_effects*.parquet",
-        "consistency_summary*.parquet",
-        "influence_diagnostics*.parquet",
-        "predictor_model_comparison*.parquet",
-        "predictor_breakpoint_candidates*.parquet",
         "hierarchical_fdr_summary.parquet",
         "normalized_results*.parquet",
         "summary.json",

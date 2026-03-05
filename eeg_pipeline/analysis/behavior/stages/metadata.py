@@ -157,7 +157,6 @@ def write_analysis_metadata_impl(
         "control_predictor": pipeline_config.control_predictor,
         "control_trial_order": pipeline_config.control_trial_order,
         "compute_change_scores": pipeline_config.compute_change_scores,
-        "compute_sensitivity": pipeline_config.compute_predictor_sensitivity,
         "compute_reliability": pipeline_config.compute_reliability,
         "n_permutations": pipeline_config.n_permutations,
         "fdr_alpha": pipeline_config.fdr_alpha,
@@ -175,34 +174,14 @@ def write_analysis_metadata_impl(
             "compute_change_scores": pipeline_config.compute_change_scores,
             "compute_reliability": pipeline_config.compute_reliability,
             "compute_bayes_factors": getattr(pipeline_config, "compute_bayes_factors", False),
-            "compute_loso_stability": getattr(pipeline_config, "compute_loso_stability", False),
         },
         "outputs": {
             "has_trial_table": bool(getattr(results, "trial_table_path", None)),
             "has_regression": bool(getattr(results, "regression", None) is not None and not results.regression.empty),
-            "has_stability": bool(getattr(results, "stability", None) is not None and not getattr(results, "stability").empty)
-            if getattr(results, "stability", None) is not None
-            else False,
-            "has_models": bool(getattr(results, "models", None) is not None and not getattr(results, "models").empty)
-            if getattr(results, "models", None) is not None
-            else False,
             "has_correlations": bool(getattr(results, "correlations", None) is not None and not results.correlations.empty),
-            "has_sensitivity": bool(
-                getattr(results, "predictor_sensitivity", None) is not None and not results.predictor_sensitivity.empty
-            ),
             "has_condition_effects": bool(
                 getattr(results, "condition_effects", None) is not None and not results.condition_effects.empty
             ),
-            "has_mediation": bool(
-                getattr(results, "mediation", None) is not None and not getattr(results, "mediation").empty
-            )
-            if getattr(results, "mediation", None) is not None
-            else False,
-            "has_moderation": bool(
-                getattr(results, "moderation", None) is not None and not getattr(results, "moderation").empty
-            )
-            if getattr(results, "moderation", None) is not None
-            else False,
         },
         "qc": build_behavior_qc_fn(ctx),
     }
@@ -215,13 +194,6 @@ def write_analysis_metadata_impl(
     }
     if not payload["predictor_status"]["available"]:
         payload["predictor_status"]["reason"] = "missing_predictor"
-
-    if not pipeline_config.compute_predictor_sensitivity:
-        payload["sensitivity_status"] = "disabled"
-    elif payload["predictor_status"]["available"]:
-        payload["sensitivity_status"] = "computed" if payload["outputs"]["has_sensitivity"] else "skipped"
-    else:
-        payload["sensitivity_status"] = "skipped_no_predictor"
 
     payload["covariates_qc"] = summarize_covariates_qc_fn(ctx)
 

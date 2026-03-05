@@ -124,18 +124,3 @@ class TrialTableResult:
     df: pd.DataFrame
     metadata: Dict[str, Any]
 
-
-@dataclass
-class PredictorModelComparisonResult:
-    """Result from compute_predictor_model_comparison."""
-
-    df: Optional[pd.DataFrame]
-    metadata: Dict[str, Any]
-
-
-@dataclass
-class PredictorBreakpointResult:
-    """Result from compute_predictor_breakpoints."""
-
-    df: Optional[pd.DataFrame]
-    metadata: Dict[str, Any]

@@ -44,37 +44,22 @@ class TestBehaviorStageCatalog(unittest.TestCase):
     def test_apply_computation_flags_updates_pipeline_config(self):
         cfg = SimpleNamespace(
             run_trial_table=False,
-            run_lag_features=False,
             run_predictor_residual=False,
-            run_temperature_models=False,
             run_regression=False,
-            run_models=False,
-            run_stability=False,
-            run_icc=False,
-            run_consistency=False,
-            run_influence=False,
             run_report=False,
             run_correlations=False,
             run_multilevel_correlations=False,
             run_condition_comparison=False,
             run_temporal_correlations=False,
             run_cluster_tests=False,
-            run_mediation=False,
-            run_moderation=False,
-            run_mixed_effects=False,
-            compute_predictor_sensitivity=False,
         )
         flags = {name: False for name in COMPUTATION_TO_PIPELINE_ATTR}
         flags["report"] = True
-        flags["stability"] = True
-        flags["icc"] = False
         flags["multilevel_correlations"] = True
 
         apply_computation_flags_impl(cfg, flags)
 
         self.assertTrue(cfg.run_report)
-        self.assertTrue(cfg.run_stability)
-        self.assertTrue(cfg.run_icc)  # stability implies ICC
         self.assertTrue(cfg.run_multilevel_correlations)
 
     def test_apply_computation_flags_rejects_unknown_keys(self):
@@ -96,8 +81,8 @@ class TestBehaviorStageCatalog(unittest.TestCase):
             "behavior_analysis.regression.enabled",
         )
         self.assertEqual(
-            StageRegistry.get("predictor_sensitivity").config_key,
-            "behavior_analysis.predictor_sensitivity.enabled",
+            StageRegistry.get("condition_column").config_key,
+            "behavior_analysis.condition.enabled",
         )
 
     def test_stage_registry_matches_catalog_definitions(self):

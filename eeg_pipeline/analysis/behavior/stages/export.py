@@ -30,26 +30,11 @@ def is_valid_df(obj: Any) -> bool:
 OUTPUT_KIND_PATTERNS = [
     ("corr_stats_", "correlations"),
     ("correlations", "correlations"),
-    ("predictor_sensitivity", "predictor_sensitivity"),
     ("condition_effects", "condition_effects"),
-    ("mediation", "mediation"),
-    ("moderation", "moderation"),
-    ("mixed_effects", "mixed_effects"),
     ("regression_feature_effects", "trialwise_regression"),
-    ("models_feature_effects", "feature_models"),
-    ("trials_with_lags", "lag_features"),
     ("trials_with_residual", "predictor_residual"),
-    ("lag_features", "lag_features"),
     ("predictor_residual", "predictor_residual"),
-    ("model_comparison", "predictor_models"),
-    ("breakpoint_candidates", "predictor_models"),
-    ("breakpoint_test", "predictor_models"),
     ("trials", "trial_table"),
-    ("predictor_model_comparison", "predictor_model_comparison"),
-    ("predictor_breakpoint", "predictor_breakpoint_test"),
-    ("stability_groupwise", "stability_groupwise"),
-    ("consistency_summary", "consistency_summary"),
-    ("influence_diagnostics", "influence_diagnostics"),
     ("normalized_results", "normalized"),
     ("feature_screening", "feature_screening"),
     ("paired_comparisons", "paired_comparisons"),
@@ -99,36 +84,14 @@ def stage_export_impl(
         filename = build_output_filename_fn(ctx, pipeline_config, "correlations")
         saved.append(write_stats_table_fn(ctx, results.correlations, out_dir / f"{filename}.tsv"))
 
-    if is_valid_df(getattr(results, "predictor_sensitivity", None)):
-        out_dir = get_stats_subfolder_fn(ctx, "predictor_sensitivity")
-        filename = build_output_filename_fn(ctx, pipeline_config, "predictor_sensitivity")
-        saved.append(write_stats_table_fn(ctx, results.predictor_sensitivity, out_dir / f"{filename}.tsv"))
-
     if is_valid_df(getattr(results, "condition_effects", None)):
         out_dir = get_stats_subfolder_fn(ctx, "condition_effects")
         filename = build_output_filename_fn(ctx, pipeline_config, "condition_effects")
         saved.append(write_stats_table_fn(ctx, results.condition_effects, out_dir / f"{filename}.tsv"))
 
-    if is_valid_df(getattr(results, "mediation", None)):
-        out_dir = get_stats_subfolder_fn(ctx, "mediation")
-        filename = build_output_filename_fn(ctx, pipeline_config, "mediation")
-        saved.append(write_stats_table_fn(ctx, results.mediation, out_dir / f"{filename}.tsv"))
-
-    if is_valid_df(getattr(results, "mixed_effects", None)):
-        out_dir = get_stats_subfolder_fn(ctx, "mixed_effects")
-        filename = build_output_filename_fn(ctx, pipeline_config, "mixed_effects")
-        saved.append(write_stats_table_fn(ctx, results.mixed_effects, out_dir / f"{filename}.tsv"))
-
     if is_valid_df(getattr(results, "regression", None)):
         out_dir = get_stats_subfolder_fn(ctx, "trialwise_regression")
         filename = build_output_filename_fn(ctx, pipeline_config, "regression_feature_effects")
-        path = out_dir / f"{filename}.tsv"
-        if path.exists():
-            saved.append(path)
-
-    if is_valid_df(getattr(results, "models", None)):
-        out_dir = get_stats_subfolder_fn(ctx, "feature_models")
-        filename = build_output_filename_fn(ctx, pipeline_config, "models_feature_effects")
         path = out_dir / f"{filename}.tsv"
         if path.exists():
             saved.append(path)

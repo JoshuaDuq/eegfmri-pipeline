@@ -17,9 +17,9 @@ func (m Model) getBehaviorOptions() []optionType {
 		return false
 	}
 	needsInferenceSettings := hasSelectedComputation(
-		"correlations", "multilevel_correlations", "predictor_sensitivity", "predictor_residual",
-		"regression", "models", "stability", "influence",
-		"condition", "temporal", "cluster", "mediation", "moderation", "mixed_effects",
+		"correlations", "multilevel_correlations", "predictor_residual",
+		"regression",
+		"condition", "temporal", "cluster",
 	)
 
 	// ── Execution ─────────────────────────────────────────────────────────────
@@ -37,16 +37,16 @@ func (m Model) getBehaviorOptions() []optionType {
 	if needsInferenceSettings {
 		options = append(options, optBehaviorGroupStats)
 		if m.behaviorGroupStatsExpanded {
-			// Correlation method — only when correlations/stability/predictor_sensitivity selected
-			if hasSelectedComputation("correlations", "stability", "predictor_sensitivity") {
+			// Correlation method — only when correlations selected
+			if hasSelectedComputation("correlations") {
 				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
 			}
 			// Predictor variable type — gates curve-fitting analyses
 			options = append(options, optPredictorType)
 			// Canonical behavior columns used across analyses
 			options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
-			// Bootstrap — correlations, stability
-			if hasSelectedComputation("correlations", "stability") {
+			// Bootstrap — correlations
+			if hasSelectedComputation("correlations") {
 				options = append(options, optBootstrap)
 			}
 			// FDR alpha — any analysis with multiple comparisons
@@ -54,7 +54,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				options = append(options, optFDRAlpha)
 			}
 			// Global permutations
-			if hasSelectedComputation("cluster", "temporal", "regression", "correlations", "mediation", "moderation") {
+			if hasSelectedComputation("cluster", "temporal", "regression", "correlations") {
 				options = append(options, optNPerm)
 			}
 			// Shared statistics settings
@@ -75,7 +75,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optBehaviorFeatureRegistryClassifiersJSON,
 			)
 			// Shared covariate controls
-			if hasSelectedComputation("regression", "models", "influence", "correlations", "stability", "predictor_sensitivity") {
+			if hasSelectedComputation("regression", "correlations") {
 				options = append(options, optBehaviorSubCovariates, optControlTemp, optControlOrder)
 			}
 			// Run adjustment
@@ -109,6 +109,7 @@ func (m Model) getBehaviorOptions() []optionType {
 					)
 				}
 			}
+
 		}
 	}
 
@@ -118,7 +119,6 @@ func (m Model) getBehaviorOptions() []optionType {
 		if m.behaviorGroupTrialTableExpanded {
 			options = append(options,
 				optTrialTableFormat,
-				optTrialTableAddLagFeatures,
 				optBehaviorTrialTableDisallowPositionalAlignment,
 				optTrialOrderMaxMissingFraction,
 				optFeatureSummariesEnabled,
@@ -127,7 +127,6 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// Predictor Residual — only valid for continuous predictors.
-	// predictor_residual = outcome - f(predictor) requires a dose-response curve fit.
 	if m.isComputationSelected("predictor_residual") && m.predictorType == 0 {
 		options = append(options, optBehaviorGroupPredictorResidual)
 		if m.behaviorGroupPredictorResidualExpanded {
@@ -138,15 +137,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optPredictorResidualPolyDegree,
 				optPredictorResidualSplineDfCandidates,
 				optPredictorResidualMinSamples,
-				optBehaviorSubDiagnostics,
-				optPredictorResidualModelCompare,
-				optPredictorResidualModelComparePolyDegrees,
-				optPredictorResidualModelCompareMinSamples,
-				optPredictorResidualBreakpoint,
-				optPredictorResidualBreakpointCandidates,
-				optPredictorResidualBreakpointMinSamples,
-				optPredictorResidualBreakpointQlow,
-				optPredictorResidualBreakpointQhigh,
 				optBehaviorSubCrossfit,
 				optPredictorResidualCrossfitEnabled,
 			)
@@ -199,7 +189,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Regression section (includes model sensitivity options)
+	// Regression section
 	if m.isComputationSelected("regression") {
 		options = append(options, optBehaviorGroupRegression)
 		if m.behaviorGroupRegressionExpanded {
@@ -229,75 +219,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optRegressionPrimaryUnit,
 				optRegressionPermutations,
 				optRegressionMaxFeatures,
-				optBehaviorSubModelFamilies,
-				optModelsFamilyOLS,
-				optModelsFamilyRobust,
-				optModelsFamilyQuantile,
-				optModelsFamilyLogit,
-			)
-		}
-	}
-
-	// Models section
-	if m.isComputationSelected("models") {
-		options = append(options, optBehaviorGroupModels)
-		if m.behaviorGroupModelsExpanded {
-			options = append(options,
-				optBehaviorSubOutcomes,
-				optModelsOutcomeRating,
-				optModelsOutcomePredictor,
-				optModelsOutcomeBinaryOutcome,
-			)
-			// predictor_residual outcome only exists for continuous predictors.
-			if m.predictorType == 0 {
-				options = append(options, optModelsOutcomePredictorResidual)
-			}
-			options = append(options,
-				optBehaviorSubCovariates,
-				optModelsIncludePredictor,
-				optModelsTempControl,
-			)
-			// Spline sub-options only relevant for continuous predictors.
-			if m.predictorType == 0 && m.modelsTempControl == 2 {
-				options = append(options,
-					optModelsTempSplineKnots,
-					optModelsTempSplineQlow,
-					optModelsTempSplineQhigh,
-					optModelsTempSplineMinN,
-				)
-			}
-			options = append(options,
-				optModelsIncludeTrialOrder,
-				optModelsIncludePrev,
-				optModelsIncludeRunBlock,
-				optModelsIncludeInteraction,
-				optModelsStandardize,
-				optModelsMinSamples,
-				optBehaviorSubModelFamilies,
-				optModelsFamilyOLS,
-				optModelsFamilyRobust,
-				optModelsFamilyQuantile,
-				optModelsFamilyLogit,
-				optModelsBinaryOutcome,
-				optBehaviorSubInference,
-				optModelsMaxFeatures,
-				optModelsPrimaryUnit,
-				optModelsForceTrialIIDAsymptotic,
-			)
-		}
-	}
-
-	// Predictor sensitivity section
-	if m.isComputationSelected("predictor_sensitivity") {
-		options = append(options, optBehaviorGroupPredictorSens)
-		if m.behaviorGroupPredictorSensExpanded {
-			options = append(
-				options,
-				optPredictorSensitivityMinTrials,
-				optPredictorSensitivityPrimaryUnit,
-				optPredictorSensitivityPermutations,
-				optPredictorSensitivityPermutationPrimary,
-				optPredictorSensitivityFeatures,
 			)
 		}
 	}
@@ -381,111 +302,11 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// ── Analyses (umbrella) ───────────────────────────────────────────────────
-	// Stability, Consistency, Influence, Report, Mediation, Moderation, Mixed Effects.
-	// Small analyses share one collapsible group to reduce visual noise.
-	hasAnalysesGroup := hasSelectedComputation(
-		"stability", "consistency", "influence", "report", "mediation", "moderation", "mixed_effects",
-	)
-	if hasAnalysesGroup {
-		options = append(options, optBehaviorGroupAnalyses)
-		if m.behaviorGroupAnalysesExpanded {
-			if m.isComputationSelected("stability") {
-				options = append(options,
-					optBehaviorGroupStability,
-				)
-				if m.behaviorGroupStabilityExpanded {
-					options = append(options,
-						optStabilityMethod,
-						optStabilityOutcome,
-						optStabilityGroupColumn,
-						optStabilityPartialTemp,
-						optStabilityMinGroupTrials,
-						optStabilityMaxFeatures,
-						optStabilityAlpha,
-					)
-				}
-			}
-			if m.isComputationSelected("consistency") {
-				options = append(options, optBehaviorGroupConsistency)
-				if m.behaviorGroupConsistencyExpanded {
-					options = append(options, optConsistencyEnabled)
-				}
-			}
-			if m.isComputationSelected("influence") {
-				options = append(options, optBehaviorGroupInfluence)
-				if m.behaviorGroupInfluenceExpanded {
-					options = append(options,
-						optBehaviorSubOutcomes,
-						optInfluenceOutcomeRating,
-						optInfluenceOutcomePredictor,
-						optBehaviorSubCovariates,
-						optInfluenceIncludePredictor,
-						optInfluenceTempControl,
-					)
-					// predictor_residual outcome and spline control: continuous only.
-					if m.predictorType == 0 {
-						options = append(options, optInfluenceOutcomePredictorResidual)
-					}
-					if m.predictorType == 0 && m.influenceTempControl == 2 {
-						options = append(options,
-							optInfluenceTempSplineKnots,
-							optInfluenceTempSplineQlow,
-							optInfluenceTempSplineQhigh,
-							optInfluenceTempSplineMinN,
-						)
-					}
-					options = append(options,
-						optInfluenceIncludeTrialOrder,
-						optInfluenceIncludeRunBlock,
-						optInfluenceIncludeInteraction,
-						optInfluenceStandardize,
-						optBehaviorSubDiagnostics,
-						optInfluenceMaxFeatures,
-						optInfluenceCooksThreshold,
-						optInfluenceLeverageThreshold,
-					)
-				}
-			}
-			if m.isComputationSelected("report") {
-				options = append(options, optBehaviorGroupReport)
-				if m.behaviorGroupReportExpanded {
-					options = append(options, optReportTopN)
-				}
-			}
-			if m.isComputationSelected("mediation") {
-				options = append(options, optBehaviorGroupMediation)
-				if m.behaviorGroupMediationExpanded {
-					options = append(options,
-						optMediationBootstrap,
-						optMediationPermutations,
-						optMediationPermutationPrimary,
-						optMediationMinEffect,
-						optMediationFeatures,
-						optMediationMaxMediatorsEnabled,
-						optMediationMaxMediators,
-					)
-				}
-			}
-			if m.isComputationSelected("moderation") {
-				options = append(options, optBehaviorGroupModeration)
-				if m.behaviorGroupModerationExpanded {
-					options = append(options,
-						optModerationMaxFeaturesEnabled,
-						optModerationMaxFeatures,
-						optModerationMinSamples,
-						optModerationPermutations,
-						optModerationPermutationPrimary,
-						optModerationFeatures,
-					)
-				}
-			}
-			if m.isComputationSelected("mixed_effects") {
-				options = append(options, optBehaviorGroupMixedEffects)
-				if m.behaviorGroupMixedEffectsExpanded {
-					options = append(options, optMixedEffectsType, optMixedIncludePredictor, optMixedMaxFeatures)
-				}
-			}
+	// Report section
+	if m.isComputationSelected("report") {
+		options = append(options, optBehaviorGroupReport)
+		if m.behaviorGroupReportExpanded {
+			options = append(options, optReportTopN)
 		}
 	}
 

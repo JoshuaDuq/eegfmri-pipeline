@@ -95,7 +95,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	appendBoolPair(m.behaviorComputeChangeScores, "--compute-change-scores", "--no-compute-change-scores")
-	appendBoolPair(m.behaviorComputeLosoStability, "--loso-stability", "--no-loso-stability")
 	appendBoolPair(m.behaviorComputeBayesFactors, "--compute-bayes-factors", "--no-compute-bayes-factors")
 	if m.behaviorValidateOnly {
 		args = append(args, "--validate-only")
@@ -106,13 +105,12 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--no-overwrite")
 	}
 
-	// Trial table / predictor residual / diagnostics
+	// Trial table / predictor residual
 	if m.isComputationSelected("trial_table") {
 		formats := []string{"parquet", "tsv"}
 		if m.trialTableFormat >= 0 && m.trialTableFormat < len(formats) && m.trialTableFormat != 0 {
 			args = append(args, "--trial-table-format", formats[m.trialTableFormat])
 		}
-		appendBoolPair(m.trialTableAddLagFeatures, "--trial-table-add-lag-features", "--no-trial-table-add-lag-features")
 		appendBoolPair(
 			m.trialTableDisallowPositionalAlignment,
 			"--trial-table-disallow-positional-alignment",
@@ -121,7 +119,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.trialOrderMaxMissingFraction != 0.1 {
 			args = append(args, "--trial-order-max-missing-fraction", fmt.Sprintf("%.3f", m.trialOrderMaxMissingFraction))
 		}
-
 		appendBoolPair(m.featureSummariesEnabled, "--feature-summaries", "--no-feature-summaries")
 
 		appendBoolPair(m.predictorResidualEnabled, "--predictor-residual", "--no-predictor-residual")
@@ -140,39 +137,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 				args = append(args, "--predictor-residual-spline-df-candidates")
 				args = append(args, splitCSVList(m.predictorResidualSplineDfCandidates)...)
 			}
-		}
-
-		appendBoolPair(
-			m.predictorResidualModelCompareEnabled,
-			"--predictor-residual-model-compare",
-			"--no-predictor-residual-model-compare",
-		)
-		if m.predictorResidualModelCompareMinSamples != 10 {
-			args = append(args, "--predictor-residual-model-compare-min-samples", fmt.Sprintf("%d", m.predictorResidualModelCompareMinSamples))
-		}
-		if strings.TrimSpace(m.predictorResidualModelComparePolyDegrees) != "" && m.predictorResidualModelComparePolyDegrees != "2,3" {
-			args = append(args, "--predictor-residual-model-compare-poly-degrees")
-			args = append(args, splitCSVList(m.predictorResidualModelComparePolyDegrees)...)
-		}
-		appendBoolPair(
-			m.predictorResidualBreakpointEnabled,
-			"--predictor-residual-breakpoint-test",
-			"--no-predictor-residual-breakpoint-test",
-		)
-		if m.predictorResidualBreakpointMinSamples != 12 {
-			args = append(args, "--predictor-residual-breakpoint-min-samples", fmt.Sprintf("%d", m.predictorResidualBreakpointMinSamples))
-		}
-		if m.predictorResidualBreakpointCandidates != 15 {
-			args = append(args, "--predictor-residual-breakpoint-candidates", fmt.Sprintf("%d", m.predictorResidualBreakpointCandidates))
-		}
-		if m.predictorResidualBreakpointQlow != 0.15 {
-			args = append(args, "--predictor-residual-breakpoint-quantile-low", fmt.Sprintf("%.3f", m.predictorResidualBreakpointQlow))
-		}
-		if m.predictorResidualBreakpointQhigh != 0.85 {
-			args = append(args, "--predictor-residual-breakpoint-quantile-high", fmt.Sprintf("%.3f", m.predictorResidualBreakpointQhigh))
-		}
-
-		if m.predictorResidualEnabled {
 			appendBoolPair(m.predictorResidualCrossfitEnabled, "--predictor-residual-crossfit", "--no-predictor-residual-crossfit")
 		}
 		if m.predictorResidualEnabled && m.predictorResidualCrossfitEnabled {
@@ -275,202 +239,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 	}
 
-	// Models
-	if m.isComputationSelected("models") {
-		appendBoolPair(
-			m.modelsIncludePredictor,
-			"--models-include-predictor",
-			"--no-models-include-predictor",
-		)
-		tempCtrl := []string{"linear", "outcome_hat", "spline"}
-		if m.modelsTempControl >= 0 && m.modelsTempControl < len(tempCtrl) && m.modelsTempControl != 0 {
-			args = append(args, "--models-predictor-control", tempCtrl[m.modelsTempControl])
-		}
-		if m.modelsTempControl == 2 {
-			args = append(args, "--models-predictor-spline-knots", fmt.Sprintf("%d", m.modelsTempSplineKnots))
-			args = append(args, "--models-predictor-spline-quantile-low", fmt.Sprintf("%.3f", m.modelsTempSplineQlow))
-			args = append(args, "--models-predictor-spline-quantile-high", fmt.Sprintf("%.3f", m.modelsTempSplineQhigh))
-			if m.modelsTempSplineMinN != 12 {
-				args = append(args, "--models-predictor-spline-min-samples", fmt.Sprintf("%d", m.modelsTempSplineMinN))
-			}
-		}
-		appendBoolPair(
-			m.modelsIncludeTrialOrder,
-			"--models-include-trial-order",
-			"--no-models-include-trial-order",
-		)
-		appendBoolPair(
-			m.modelsIncludePrev,
-			"--models-include-prev-terms",
-			"--no-models-include-prev-terms",
-		)
-		appendBoolPair(
-			m.modelsIncludeRunBlock,
-			"--models-include-run-block",
-			"--no-models-include-run-block",
-		)
-		appendBoolPair(
-			m.modelsIncludeInteraction,
-			"--models-include-interaction",
-			"--no-models-include-interaction",
-		)
-		appendBoolPair(
-			m.modelsStandardize,
-			"--models-standardize",
-			"--no-models-standardize",
-		)
-		if m.modelsMinSamples != 20 {
-			args = append(args, "--models-min-samples", fmt.Sprintf("%d", m.modelsMinSamples))
-		}
-		if m.modelsMaxFeatures != 100 {
-			args = append(args, "--models-max-features", fmt.Sprintf("%d", m.modelsMaxFeatures))
-		}
-		out := []string{}
-		if m.modelsOutcomeValue {
-			out = append(out, "outcome")
-		}
-		if m.modelsOutcomePredictorResidual {
-			out = append(out, "predictor_residual")
-		}
-		if m.modelsOutcomePredictor {
-			out = append(out, "predictor")
-		}
-		if m.modelsOutcomeBinaryOutcome {
-			out = append(out, "binary_outcome")
-		}
-		if len(out) > 0 && !(len(out) == 2 && out[0] == "outcome" && out[1] == "predictor_residual") {
-			args = append(args, "--models-outcomes")
-			args = append(args, out...)
-		}
-		fams := []string{}
-		if m.modelsFamilyOLS {
-			fams = append(fams, "ols_hc3")
-		}
-		if m.modelsFamilyRobust {
-			fams = append(fams, "robust_rlm")
-		}
-		if m.modelsFamilyQuantile {
-			fams = append(fams, "quantile_50")
-		}
-		if m.modelsFamilyLogit {
-			fams = append(fams, "logit")
-		}
-		if len(fams) > 0 && len(fams) < 4 {
-			args = append(args, "--models-families")
-			args = append(args, fams...)
-		}
-		binOut := []string{"binary_outcome", "outcome_median"}
-		if m.modelsBinaryOutcome >= 0 && m.modelsBinaryOutcome < len(binOut) && m.modelsBinaryOutcome != 0 {
-			args = append(args, "--models-binary-outcome", binOut[m.modelsBinaryOutcome])
-		}
-		if m.modelsPrimaryUnit == 1 {
-			args = append(args, "--models-primary-unit", "run_mean")
-		}
-		appendBoolPair(
-			m.modelsForceTrialIIDAsymptotic,
-			"--models-force-trial-iid-asymptotic",
-			"--no-models-force-trial-iid-asymptotic",
-		)
-	}
-
-	// Stability
-	if m.isComputationSelected("stability") {
-		if m.stabilityMethod == 1 {
-			args = append(args, "--stability-method", "pearson")
-		}
-		outcome := []string{"auto", "outcome", "predictor_residual"}
-		if m.stabilityOutcome > 0 && m.stabilityOutcome < len(outcome) {
-			args = append(args, "--stability-outcome", outcome[m.stabilityOutcome])
-		}
-		groupCol := []string{"auto", "run", "block"}
-		if m.stabilityGroupColumn > 0 && m.stabilityGroupColumn < len(groupCol) {
-			args = append(args, "--stability-group-column", groupCol[m.stabilityGroupColumn])
-		}
-		appendBoolPair(
-			m.stabilityPartialTemp,
-			"--stability-partial-predictor",
-			"--no-stability-partial-predictor",
-		)
-		if m.stabilityMaxFeatures != 50 {
-			args = append(args, "--stability-max-features", fmt.Sprintf("%d", m.stabilityMaxFeatures))
-		}
-		if m.stabilityAlpha != 0.05 {
-			args = append(args, "--stability-alpha", fmt.Sprintf("%.4f", m.stabilityAlpha))
-		}
-		if m.stabilityMinGroupN > 0 {
-			args = append(args, "--stability-min-group-trials", fmt.Sprintf("%d", m.stabilityMinGroupN))
-		}
-	}
-
-	// Consistency
-	if m.isComputationSelected("consistency") {
-		appendBoolPair(m.consistencyEnabled, "--consistency", "--no-consistency")
-	}
-
-	// Influence
-	if m.isComputationSelected("influence") {
-		out := []string{}
-		if m.influenceOutcomeValue {
-			out = append(out, "outcome")
-		}
-		if m.influenceOutcomePredictorResidual {
-			out = append(out, "predictor_residual")
-		}
-		if m.influenceOutcomePredictor {
-			out = append(out, "predictor")
-		}
-		if len(out) > 0 && !(len(out) == 2 && out[0] == "outcome" && out[1] == "predictor_residual") {
-			args = append(args, "--influence-outcomes")
-			args = append(args, out...)
-		}
-		if m.influenceMaxFeatures != 20 {
-			args = append(args, "--influence-max-features", fmt.Sprintf("%d", m.influenceMaxFeatures))
-		}
-		appendBoolPair(
-			m.influenceIncludePredictor,
-			"--influence-include-predictor",
-			"--no-influence-include-predictor",
-		)
-		tempCtrl := []string{"linear", "outcome_hat", "spline"}
-		if m.influenceTempControl >= 0 && m.influenceTempControl < len(tempCtrl) && m.influenceTempControl != 0 {
-			args = append(args, "--influence-predictor-control", tempCtrl[m.influenceTempControl])
-		}
-		if m.influenceTempControl == 2 {
-			args = append(args, "--influence-predictor-spline-knots", fmt.Sprintf("%d", m.influenceTempSplineKnots))
-			args = append(args, "--influence-predictor-spline-quantile-low", fmt.Sprintf("%.3f", m.influenceTempSplineQlow))
-			args = append(args, "--influence-predictor-spline-quantile-high", fmt.Sprintf("%.3f", m.influenceTempSplineQhigh))
-			if m.influenceTempSplineMinN != 12 {
-				args = append(args, "--influence-predictor-spline-min-samples", fmt.Sprintf("%d", m.influenceTempSplineMinN))
-			}
-		}
-		appendBoolPair(
-			m.influenceIncludeTrialOrder,
-			"--influence-include-trial-order",
-			"--no-influence-include-trial-order",
-		)
-		appendBoolPair(
-			m.influenceIncludeRunBlock,
-			"--influence-include-run-block",
-			"--no-influence-include-run-block",
-		)
-		appendBoolPair(
-			m.influenceIncludeInteraction,
-			"--influence-include-interaction",
-			"--no-influence-include-interaction",
-		)
-		appendBoolPair(
-			m.influenceStandardize,
-			"--influence-standardize",
-			"--no-influence-standardize",
-		)
-		if m.influenceCooksThreshold > 0 {
-			args = append(args, "--influence-cooks-threshold", fmt.Sprintf("%.6f", m.influenceCooksThreshold))
-		}
-		if m.influenceLeverageThreshold > 0 {
-			args = append(args, "--influence-leverage-threshold", fmt.Sprintf("%.6f", m.influenceLeverageThreshold))
-		}
-	}
-
 	// Correlations (trial-table)
 	if m.isComputationSelected("correlations") {
 		appendFeatureSpec("--correlations-features", m.correlationsFeaturesSpec)
@@ -548,25 +316,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	// Report
 	if m.isComputationSelected("report") && m.reportTopN != 15 {
 		args = append(args, "--report-top-n", fmt.Sprintf("%d", m.reportTopN))
-	}
-
-	// Predictor sensitivity
-	if m.isComputationSelected("predictor_sensitivity") {
-		appendFeatureSpec("--predictor-sensitivity-features", m.predictorSensitivityFeaturesSpec)
-		if m.predictorSensitivityMinTrials > 0 {
-			args = append(args, "--predictor-sensitivity-min-trials", fmt.Sprintf("%d", m.predictorSensitivityMinTrials))
-		}
-		if m.predictorSensitivityPrimaryUnit == 1 {
-			args = append(args, "--predictor-sensitivity-primary-unit", "run_mean")
-		}
-		if m.predictorSensitivityPermutations > 0 {
-			args = append(args, "--predictor-sensitivity-permutations", fmt.Sprintf("%d", m.predictorSensitivityPermutations))
-		}
-		appendBoolPair(
-			m.predictorSensitivityPermutationPrimary,
-			"--predictor-sensitivity-permutation-primary",
-			"--no-predictor-sensitivity-permutation-primary",
-		)
 	}
 
 	// Condition
@@ -723,66 +472,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--cluster-condition-values")
 			spec := strings.ReplaceAll(m.clusterConditionValues, ",", " ")
 			args = append(args, splitSpaceList(spec)...)
-		}
-	}
-
-	// Mediation-specific options
-	if m.isComputationSelected("mediation") {
-		appendFeatureSpec("--mediation-features", m.mediationFeaturesSpec)
-		if m.mediationBootstrap != 1000 {
-			args = append(args, "--mediation-bootstrap", fmt.Sprintf("%d", m.mediationBootstrap))
-		}
-		if m.mediationPermutations > 0 {
-			args = append(args, "--mediation-permutations", fmt.Sprintf("%d", m.mediationPermutations))
-		}
-		appendBoolPair(
-			m.mediationPermutationPrimary,
-			"--mediation-permutation-primary",
-			"--no-mediation-permutation-primary",
-		)
-		if m.mediationMinEffect != 0.05 {
-			args = append(args, "--mediation-min-effect-size", fmt.Sprintf("%.4f", m.mediationMinEffect))
-		}
-		if m.mediationMaxMediatorsEnabled {
-			if m.mediationMaxMediators != 20 {
-				args = append(args, "--mediation-max-mediators", fmt.Sprintf("%d", m.mediationMaxMediators))
-			}
-		}
-	}
-
-	// Moderation-specific options
-	if m.isComputationSelected("moderation") {
-		appendFeatureSpec("--moderation-features", m.moderationFeaturesSpec)
-		if m.moderationMinSamples != 15 {
-			args = append(args, "--moderation-min-samples", fmt.Sprintf("%d", m.moderationMinSamples))
-		}
-		if m.moderationPermutations > 0 {
-			args = append(args, "--moderation-permutations", fmt.Sprintf("%d", m.moderationPermutations))
-		}
-		appendBoolPair(
-			m.moderationPermutationPrimary,
-			"--moderation-permutation-primary",
-			"--no-moderation-permutation-primary",
-		)
-		if m.moderationMaxFeaturesEnabled {
-			if m.moderationMaxFeatures != 50 {
-				args = append(args, "--moderation-max-features", fmt.Sprintf("%d", m.moderationMaxFeatures))
-			}
-		}
-	}
-
-	// Mixed effects-specific options
-	if m.isComputationSelected("mixed_effects") {
-		if m.mixedEffectsType == 1 {
-			args = append(args, "--mixed-random-effects", "intercept_slope")
-		}
-		appendBoolPair(
-			m.mixedIncludePredictor,
-			"--mixed-include-predictor",
-			"--no-mixed-include-predictor",
-		)
-		if m.mixedMaxFeatures != 50 {
-			args = append(args, "--mixed-max-features", fmt.Sprintf("%d", m.mixedMaxFeatures))
 		}
 	}
 

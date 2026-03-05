@@ -184,7 +184,6 @@ class TestAllPipelines(unittest.TestCase):
 
         pipeline = object.__new__(BehaviorPipeline)
         pipeline.pipeline_config = SimpleNamespace(
-            run_mixed_effects=False,
             run_multilevel_correlations=False,
         )
         pipeline.deriv_root = Path(tempfile.mkdtemp()) / "derivatives"
@@ -198,11 +197,9 @@ class TestAllPipelines(unittest.TestCase):
     def test_behavior_flag_resolution_and_optional_int(self):
         from eeg_pipeline.pipelines.behavior import _resolve_behavior_computation_flags, _get_optional_int
 
-        flags = _resolve_behavior_computation_flags(["validation", "report", "unknown"], logger=Mock())
-        self.assertTrue(flags["consistency"])
-        self.assertTrue(flags["influence"])
+        flags = _resolve_behavior_computation_flags(["correlations", "report", "unknown"], logger=Mock())
+        self.assertTrue(flags["correlations"])
         self.assertTrue(flags["report"])
-        self.assertFalse(flags["models"])
 
         cfg = DotConfig({"a": {"b": "7"}, "x": {"y": None}})
         self.assertEqual(_get_optional_int(cfg, "a.b", None), 7)
@@ -213,8 +210,7 @@ class TestAllPipelines(unittest.TestCase):
 
         pipeline = object.__new__(BehaviorPipeline)
         pipeline.pipeline_config = SimpleNamespace(
-            run_mixed_effects=True,
-            run_multilevel_correlations=False,
+            run_multilevel_correlations=True,
         )
         pipeline.deriv_root = Path(tempfile.mkdtemp()) / "derivatives"
         pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
