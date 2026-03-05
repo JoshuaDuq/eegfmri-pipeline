@@ -50,7 +50,10 @@ def _safe_relpath(base_dir: Path, target_path: Path) -> str:
         return str(target_path)
 
 
-def _discover_design_matrix_qc(contrast_dir: Path) -> List[Tuple[Optional[Path], Optional[Path]]]:
+def _discover_design_matrix_qc(
+    contrast_dir: Path,
+    run_meta: Optional[Dict[str, Any]] = None,
+) -> List[Tuple[Optional[Path], Optional[Path]]]:
     """
     Return list of (png, tsv) pairs for design matrix QC files, best-effort.
     """
@@ -58,8 +61,21 @@ def _discover_design_matrix_qc(contrast_dir: Path) -> List[Tuple[Optional[Path],
     if not qc_dir.exists():
         return []
 
-    pngs = sorted(qc_dir.glob("*design_matrix.png"))
-    tsvs = sorted(qc_dir.glob("*design_matrix.tsv"))
+    pngs: List[Path] = []
+    tsvs: List[Path] = []
+    if isinstance(run_meta, dict):
+        raw_pngs = run_meta.get("design_matrix_png_paths")
+        raw_tsvs = run_meta.get("design_matrix_tsv_paths")
+        if isinstance(raw_pngs, list):
+            pngs = [Path(str(p)) for p in raw_pngs if p]
+            pngs = [p for p in pngs if p.exists()]
+        if isinstance(raw_tsvs, list):
+            tsvs = [Path(str(p)) for p in raw_tsvs if p]
+            tsvs = [p for p in tsvs if p.exists()]
+
+    if not pngs and not tsvs:
+        pngs = sorted(qc_dir.glob("*design_matrix.png"))
+        tsvs = sorted(qc_dir.glob("*design_matrix.tsv"))
 
     def _run_key(p: Path) -> str:
         # Match filenames like ..._run-06_design_matrix.png
@@ -518,6 +534,7 @@ def build_fmri_report_html(
     extra_notes: Optional[Sequence[str]] = None,
     embed_images: bool = True,
     methods_payload: Optional[Dict[str, Any]] = None,
+    run_meta: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Build a self-contained HTML report.
@@ -532,7 +549,7 @@ def build_fmri_report_html(
     if include_unthresholded:
         notes.append("Unthresholded panels are also included.")
 
-    qc_pairs = _discover_design_matrix_qc(base_dir)
+    qc_pairs = _discover_design_matrix_qc(base_dir, run_meta=run_meta)
 
     def _mime_for_path(p: Path) -> str:
         suf = p.suffix.lower()
@@ -694,6 +711,50 @@ def _maybe_import_nibabel():
         import nibabel as nib  # type: ignore
 
         return nib
+    except Exception:
+        return None
+
+
+def _build_mean_bold_background_from_run_meta(run_meta: Optional[Dict[str, Any]]) -> Optional[Any]:
+    """
+    Build a 3D mean-BOLD background image from the first included run.
+
+    This keeps stat overlays anatomically interpretable even when boldref
+    discovery misses derivative naming variants.
+    """
+    if not isinstance(run_meta, dict):
+        return None
+
+    bold_paths = run_meta.get("included_bold_paths")
+    if not isinstance(bold_paths, list) or not bold_paths:
+        return None
+
+    nib = _maybe_import_nibabel()
+    if nib is None:
+        return None
+
+    for raw_path in bold_paths:
+        if not raw_path:
+            continue
+        path = Path(str(raw_path))
+        if not path.exists():
+            continue
+        img = nib.load(str(path))
+        data = np.asanyarray(img.dataobj)
+        if data.ndim == 4:
+            mean_data = np.mean(data, axis=3)
+            return nib.Nifti1Image(mean_data, img.affine, img.header)
+        if data.ndim == 3:
+            return img
+    return None
+
+
+def _load_mni_template_background() -> Optional[Any]:
+    """Load Nilearn's canonical MNI template for anatomical background plotting."""
+    try:
+        from nilearn.datasets import load_mni152_template  # type: ignore
+
+        return load_mni152_template()
     except Exception:
         return None
 
@@ -924,19 +985,24 @@ def generate_fmri_space_section(
                     threshold=None,
                     colorbar=True,
                     vmax=z_vmax,
+                    dim=0,
+                    black_bg=False,
                     symmetric_cbar=True,
                     annotate=False,
                 )
                 _add_image("Stat map (slices) · unthresholded", disp, "stat_slices_unthresholded")
             if thr_label != "none":
+                thr_plot_threshold = float(thr_val) if thr_val is not None else 1e-6
                 disp = plotting.plot_stat_map(
                     thr_img if thr_img is not None else stat_img,
                     bg_img=bg_img,
                     title=f"{title_prefix}Z map (thresholded: {thr_label})".strip(),
                     display_mode="mosaic",
-                    threshold=None if thr_img is not None else (float(thr_val) if thr_val is not None else None),
+                    threshold=thr_plot_threshold,
                     colorbar=True,
                     vmax=z_vmax,
+                    dim=0,
+                    black_bg=False,
                     symmetric_cbar=True,
                     annotate=False,
                 )
@@ -954,15 +1020,18 @@ def generate_fmri_space_section(
                     threshold=None,
                     colorbar=True,
                     vmax=z_vmax,
+                    black_bg=False,
                 )
                 _add_image("Glass brain · unthresholded", disp, "glass_unthresholded")
             if thr_label != "none":
+                thr_plot_threshold = float(thr_val) if thr_val is not None else 1e-6
                 disp = plotting.plot_glass_brain(
                     thr_img if thr_img is not None else stat_img,
                     title=f"{title_prefix}Glass brain (thresholded: {thr_label})".strip(),
-                    threshold=None if thr_img is not None else (float(thr_val) if thr_val is not None else None),
+                    threshold=thr_plot_threshold,
                     colorbar=True,
                     vmax=z_vmax,
+                    black_bg=False,
                 )
                 _add_image("Glass brain · thresholded", disp, "glass_thresholded", caption=thr_label)
         except Exception as exc:
@@ -1066,6 +1135,8 @@ def generate_fmri_space_section(
                     threshold=None,
                     colorbar=True,
                     vmax=eff_vmax,
+                    dim=0,
+                    black_bg=False,
                     symmetric_cbar=True,
                     cmap="cold_hot",
                     annotate=False,
@@ -1078,6 +1149,7 @@ def generate_fmri_space_section(
                     threshold=None,
                     colorbar=True,
                     vmax=eff_vmax,
+                    black_bg=False,
                     cmap="cold_hot",
                 )
                 _add_image("Effect size (glass)", disp, "effect_glass")
@@ -1102,6 +1174,8 @@ def generate_fmri_space_section(
                     threshold=None,
                     colorbar=True,
                     vmax=se_vmax,
+                    dim=0,
+                    black_bg=False,
                     symmetric_cbar=False,
                     cmap="viridis",
                     annotate=False,
@@ -1126,6 +1200,7 @@ def write_fmri_report(
     extra_notes: Optional[Sequence[str]] = None,
     embed_images: bool = True,
     methods_payload: Optional[Dict[str, Any]] = None,
+    run_meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
     report_path = contrast_dir / report_filename
     html_text = build_fmri_report_html(
@@ -1139,6 +1214,7 @@ def write_fmri_report(
         extra_notes=extra_notes,
         embed_images=embed_images,
         methods_payload=methods_payload,
+        run_meta=run_meta,
     )
     report_path.write_text(html_text, encoding="utf-8")
     return report_path
@@ -1195,6 +1271,15 @@ def run_fmri_plotting_and_report(
     if cfg.vmax_mode == "shared_robust":
         vals = [v for v in [native_vmax, mni_vmax] if v is not None]
         shared_vmax = max(vals) if vals else None
+
+    if want_native:
+        have_native_bg_path = native_bg_img_path is not None and native_bg_img_path.exists()
+        if native_bg_img is None and not have_native_bg_path:
+            native_bg_img = _build_mean_bold_background_from_run_meta(run_meta)
+    if want_mni:
+        have_mni_bg_path = mni_bg_img_path is not None and mni_bg_img_path.exists()
+        if mni_bg_img is None and not have_mni_bg_path:
+            mni_bg_img = _load_mni_template_background()
 
     if want_native and (
         (native_stat_img is not None)
@@ -1342,9 +1427,18 @@ def run_fmri_plotting_and_report(
                 import pandas as pd
                 import numpy as np
 
+                design_tsv_paths: List[Path] = []
+                if isinstance(run_meta, dict):
+                    raw_tsv_paths = run_meta.get("design_matrix_tsv_paths")
+                    if isinstance(raw_tsv_paths, list):
+                        design_tsv_paths = [Path(str(p)) for p in raw_tsv_paths if p]
+                        design_tsv_paths = [p for p in design_tsv_paths if p.exists()]
+                if not design_tsv_paths:
+                    design_tsv_paths = sorted(qc_dir.glob("*design_matrix.tsv"))
+
                 rows: List[Dict[str, Any]] = []
-                for tsv in sorted(qc_dir.glob("*design_matrix.tsv")):
-                    dm = pd.read_csv(tsv, sep="\t")
+                for tsv in design_tsv_paths:
+                    dm = pd.read_csv(tsv, sep="\t", encoding="utf-8")
                     # Drop frame index if present
                     if "frame" in dm.columns:
                         dm = dm.drop(columns=["frame"])
@@ -1401,7 +1495,7 @@ def run_fmri_plotting_and_report(
                     tsv_out = contrast_dir / "plots" / "qc" / "design_qc_summary.tsv"
                     tsv_out.parent.mkdir(parents=True, exist_ok=True)
                     try:
-                        df.to_csv(tsv_out, sep="\t", index=False)
+                        df.to_csv(tsv_out, sep="\t", index=False, encoding="utf-8")
                     except Exception:
                         tsv_out = None
                     qc_tables.append(
@@ -1468,6 +1562,7 @@ def run_fmri_plotting_and_report(
             sections=sections,
             embed_images=bool(cfg.embed_images),
             methods_payload=methods_payload,
+            run_meta=run_meta if isinstance(run_meta, dict) else None,
         )
         meta["report_html"] = str(report_path)
 

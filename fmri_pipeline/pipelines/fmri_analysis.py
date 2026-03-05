@@ -34,6 +34,16 @@ def _contrast_hash(cfg: Any) -> str:
     return hashlib.md5(raw).hexdigest()[:8]
 
 
+def _contrast_arg_for_model_runs(flm: Any, contrast_def: Any) -> Any:
+    """Provide an explicit per-run contrast list for multi-run models."""
+    if isinstance(contrast_def, (list, tuple, dict)):
+        return contrast_def
+    n_runs = len(getattr(flm, "design_matrices_", []) or [])
+    if n_runs > 1:
+        return [contrast_def] * n_runs
+    return contrast_def
+
+
 class FmriAnalysisPipeline(PipelineBase):
     """Compute first-level fMRI contrasts for each subject."""
 
@@ -68,6 +78,12 @@ class FmriAnalysisPipeline(PipelineBase):
         deriv_root = self.deriv_root
         space = (space or "").strip().lower()
 
+        def _first_existing(candidates: list[Path]) -> Optional[Path]:
+            for candidate in candidates:
+                if candidate.exists():
+                    return candidate
+            return None
+
         # 1) Preferred: func-level brain mask + boldref in the same space
         func_dirs = [
             deriv_root / "preprocessed" / "fmri" / sub_label / "func",
@@ -75,15 +91,6 @@ class FmriAnalysisPipeline(PipelineBase):
             deriv_root / "fmriprep" / sub_label / "func",
         ]
         space_tok = "MNI152NLin2009cAsym" if space == "mni" else "T1w"
-        # Use run-01 as the representative reference (typically consistent across runs).
-        func_mask_patterns = [
-            f"{sub_label}_task-{task}_run-01_space-{space_tok}_desc-brain_mask.nii.gz",
-            f"{sub_label}_task-{task}_run-1_space-{space_tok}_desc-brain_mask.nii.gz",
-        ]
-        func_boldref_patterns = [
-            f"{sub_label}_task-{task}_run-01_space-{space_tok}_boldref.nii.gz",
-            f"{sub_label}_task-{task}_run-1_space-{space_tok}_boldref.nii.gz",
-        ]
 
         func_mask: Optional[Path] = None
         func_bg: Optional[Path] = None
@@ -91,9 +98,14 @@ class FmriAnalysisPipeline(PipelineBase):
             if not d.exists():
                 continue
             if func_mask is None:
-                func_mask = next((d / n for n in func_mask_patterns if (d / n).exists()), None)
+                masks = sorted(d.glob(f"{sub_label}_task-{task}_run-*_space-{space_tok}_desc-brain_mask.nii.gz"))
+                func_mask = masks[0] if masks else None
             if func_bg is None:
-                func_bg = next((d / n for n in func_boldref_patterns if (d / n).exists()), None)
+                # fMRIPrep commonly writes *_desc-preproc_boldref.nii.gz.
+                boldrefs = sorted(d.glob(f"{sub_label}_task-{task}_run-*_space-{space_tok}_desc-preproc_boldref.nii.gz"))
+                if not boldrefs:
+                    boldrefs = sorted(d.glob(f"{sub_label}_task-{task}_run-*_space-{space_tok}_boldref.nii.gz"))
+                func_bg = boldrefs[0] if boldrefs else None
             if func_mask is not None and func_bg is not None:
                 break
 
@@ -104,20 +116,24 @@ class FmriAnalysisPipeline(PipelineBase):
             deriv_root / "fmriprep" / sub_label / "anat",
         ]
 
-        if space == "mni":
-            bg_names = [
-                f"{sub_label}_space-MNI152NLin2009cAsym_desc-preproc_T1w.nii.gz",
-            ]
-        else:
-            bg_names = [
-                f"{sub_label}_desc-preproc_T1w.nii.gz",
-            ]
-
         anat_bg: Optional[Path] = None
         for d in search_dirs:
             if not d.exists():
                 continue
-            anat_bg = next((d / n for n in bg_names if (d / n).exists()), None)
+            if space == "mni":
+                anat_bg = _first_existing(
+                    [
+                        d / f"{sub_label}_space-MNI152NLin2009cAsym_desc-preproc_T1w.nii.gz",
+                        d / f"{sub_label}_space-MNI152NLin6Asym_desc-preproc_T1w.nii.gz",
+                    ]
+                )
+            else:
+                anat_bg = _first_existing(
+                    [
+                        d / f"{sub_label}_desc-preproc_T1w.nii.gz",
+                        d / f"{sub_label}_space-T1w_desc-preproc_T1w.nii.gz",
+                    ]
+                )
             if anat_bg is not None:
                 break
 
@@ -292,8 +308,12 @@ class FmriAnalysisPipeline(PipelineBase):
                                 )
 
                             try:
-                                mni_effect = mni_glm.flm.compute_contrast(mni_contrast_def, output_type="effect_size")
-                                mni_variance = mni_glm.flm.compute_contrast(mni_contrast_def, output_type="variance")
+                                mni_contrast_arg = _contrast_arg_for_model_runs(mni_glm.flm, mni_contrast_def)
+                                mni_effect = mni_glm.flm.compute_contrast(mni_contrast_arg, output_type="effect_size")
+                                mni_variance = mni_glm.flm.compute_contrast(
+                                    mni_contrast_arg,
+                                    output_type="effect_variance",
+                                )
                             except Exception as exc:
                                 self.logger.warning(
                                     "Failed to compute MNI effect/variance maps for plotting: %s",
@@ -312,8 +332,12 @@ class FmriAnalysisPipeline(PipelineBase):
                     if bool(getattr(cfg_obj, "include_effect_size", True)) or bool(
                         getattr(cfg_obj, "include_standard_error", True)
                     ):
-                        native_effect = glm_result.flm.compute_contrast(contrast_def, output_type="effect_size")
-                        native_variance = glm_result.flm.compute_contrast(contrast_def, output_type="variance")
+                        native_contrast_arg = _contrast_arg_for_model_runs(glm_result.flm, contrast_def)
+                        native_effect = glm_result.flm.compute_contrast(native_contrast_arg, output_type="effect_size")
+                        native_variance = glm_result.flm.compute_contrast(
+                            native_contrast_arg,
+                            output_type="effect_variance",
+                        )
                 except Exception as exc:
                     self.logger.warning(
                         "Failed to compute native effect/variance maps for plotting: %s",

@@ -531,7 +531,7 @@ def _write_design_matrices(
 
         tsv_path = qc_dir / f"{prefix}_{run_label}_design_matrix.tsv"
         try:
-            dm.to_csv(tsv_path, sep="\t", index=True, index_label="frame")
+            dm.to_csv(tsv_path, sep="\t", index=True, index_label="frame", encoding="utf-8")
             tsv_paths.append(str(tsv_path))
         except Exception as exc:
             logger.warning("Failed to write design matrix TSV for %s (%s)", run_label, exc)
