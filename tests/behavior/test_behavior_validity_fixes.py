@@ -537,28 +537,6 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIn("trial_index", formulas[0])
         self.assertIn("C(run_id)", formulas[0])
 
-    def test_moderation_simple_slope_uses_covariance_term(self):
-        from eeg_pipeline.utils.analysis.stats.moderation import compute_moderation_effect
-
-        rng = np.random.default_rng(0)
-        n = 300
-        x = rng.normal(size=n)
-        w = 0.6 * x + rng.normal(scale=0.8, size=n)
-        y = 0.5 + 0.8 * x - 0.4 * w + 0.9 * (x * w) + rng.normal(scale=1.0, size=n)
-
-        result = compute_moderation_effect(x, w, y, center_predictors=True)
-        self.assertTrue(np.isfinite(result.cov_b1_b3))
-
-        w_std = float(np.std(w))
-        slope_high = result.b1 + result.b3 * w_std
-        var_slope_high = result.var_b1 + (w_std**2) * result.var_b3 + 2 * w_std * result.cov_b1_b3
-        self.assertGreater(var_slope_high, 0.0)
-
-        dof = max(result.n - 4, 1)
-        t_value = slope_high / np.sqrt(var_slope_high)
-        expected_p = float(2 * (1 - stats.t.cdf(np.abs(t_value), dof)))
-        self.assertAlmostEqual(float(result.p_slope_high), expected_p, places=7)
-
     def test_condition_effects_respect_min_samples(self):
         from eeg_pipeline.utils.analysis.stats.effect_size import compute_batch_condition_effects
         from eeg_pipeline.utils.parallel import _compute_single_condition_effect

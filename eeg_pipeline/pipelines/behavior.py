@@ -31,7 +31,7 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     format_correlation_method_label,
     normalize_robust_correlation_method,
 )
-from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
+from eeg_pipeline.utils.analysis.stats.base import get_subject_seed
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.analysis.behavior.stage_catalog import (

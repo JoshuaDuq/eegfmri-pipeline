@@ -35,7 +35,6 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     safe_correlation,
     save_correlation_results,
 )
-from eeg_pipeline.utils.analysis.stats.reliability import compute_correlation_split_half_reliability
 from eeg_pipeline.utils.config.loader import get_config_value, get_min_samples
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_feature_types
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
@@ -570,17 +569,6 @@ def _add_loso_stability(
     record["loso_stability"] = stability
 
 
-def _add_reliability(
-    record: Dict[str, Any],
-    col_values: np.ndarray,
-    targets: np.ndarray,
-    method: str,
-) -> None:
-    """Add split-half reliability to record."""
-    rel = compute_correlation_split_half_reliability(col_values, targets, method, n_splits=50)
-    record["reliability_split_half"] = rel
-
-
 def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str, Any]]:
     """Process correlations for a single column. Designed for parallel execution."""
     from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
@@ -706,20 +694,6 @@ def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str,
         except (ValueError, RuntimeError) as exc:
             raise RuntimeError(
                 f"LOSO stability failed for feature '{params.column_name}' "
-                f"(type={params.feature_type}, target={params.target_name})"
-            ) from exc
-
-    if params.compute_reliability:
-        try:
-            _add_reliability(
-                record,
-                params.column_values,
-                params.targets_aligned,
-                params.correlation_method,
-            )
-        except (ValueError, RuntimeError) as exc:
-            raise RuntimeError(
-                f"Split-half reliability failed for feature '{params.column_name}' "
                 f"(type={params.feature_type}, target={params.target_name})"
             ) from exc
 
