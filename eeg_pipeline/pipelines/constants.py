@@ -39,6 +39,7 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "regression",
     "report",
     "correlations",
+    "multilevel_correlations",
     "condition",
     "temporal",
     "cluster",
