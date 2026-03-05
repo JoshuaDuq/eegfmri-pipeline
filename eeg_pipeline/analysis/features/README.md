@@ -729,8 +729,41 @@ Harmonic overlap guards reject scientifically invalid band combinations.
 
 **Module:** `source_localization.py` → `extract_source_localization_features`
 
-Using a forward model and LCMV or eLORETA inverse solution, source signals $x_v(t)$ are
-projected to ROI time courses:
+#### 8.12.1 Inverse Methods
+
+Configured via `feature_engineering.sourcelocalization.method ∈ {lcmv, eloreta}`.
+
+**LCMV Beamformer** (`method = lcmv`):
+
+Data covariance is estimated from the fitting epochs; spatial filters are constructed with
+regularization `reg` (default 0.05) and applied to all epochs:
+
+```math
+x_v(t) = w_v^\top x(t), \qquad w_v = \bigl(C + \text{reg}\cdot\mathrm{tr}(C)\,I\bigr)^{-1} l_v \bigl(l_v^\top \bigl(C + \text{reg}\cdot\mathrm{tr}(C)\,I\bigr)^{-1} l_v\bigr)^{-1},
+```
+
+where $l_v$ is the lead-field column for source $v$.
+
+**eLORETA** (`method = eloreta`):
+
+```math
+\lambda^2 = \frac{1}{\mathrm{SNR}^2}, \qquad \hat{J}(t) = (A^\top A + \lambda^2 R)^{-1} A^\top x(t),
+```
+
+where $R$ is the eLORETA depth-weighted regularizer, $\mathrm{SNR}$ is configured via
+`feature_engineering.sourcelocalization.snr` (default 3.0),
+`loose` (default 0.2) and `depth` (default 0.8) control orientation constraint
+and depth weighting.
+
+#### 8.12.2 Forward Model
+
+Subject-specific or fsaverage-template surface source space (`_setup_surface_forward_model_configured`)
+with a BEM conductor model. Volume/discrete source spaces are used when fMRI constraints are active.
+Configuration keys: `subjects_dir`, `subject`, `spacing`, `trans`, `bem`, `mindist_mm`.
+
+#### 8.12.3 Source Features
+
+ROI time courses (mean over ROI voxels):
 
 ```math
 x_\text{ROI}(t) = \frac{1}{|V_\text{ROI}|}\sum_{v \in V_\text{ROI}} x_v(t).
@@ -743,26 +776,45 @@ x_\text{ROI}(t) = \frac{1}{|V_\text{ROI}|}\sum_{v \in V_\text{ROI}} x_v(t).
 \frac{\sum_{f \in B} \mathrm{PSD}_\text{ROI}(f)\,\Delta f}{\sum_{f \in B} \Delta f}.
 ```
 
-Additional outputs include source-space Hilbert envelopes averaged over segments
-and global averages across ROIs.
-When fMRI constraints are enabled, the source space is restricted to suprathreshold
-fMRI activation clusters.
+Additional outputs: Hilbert envelopes per segment, global cross-ROI averages.
 
-Current fMRI-informed output families:
+#### 8.12.4 fMRI Constraint System
 
-- `cluster` space: subject-specific constrained clusters (`..._fmri_cluster_*`).
-- `atlas` space: constrained-voxel aggregation into subject-space `aparc+aseg` labels (`..._atlas_*`).
-- `dual`: emit both families in one run.
+Enabled via `feature_engineering.sourcelocalization.fmri.enabled = true`.
+When active, the source space is restricted to suprathreshold fMRI activation voxels.
 
-Source-localization outputs are amplitude/power-like quantities. Sign-level
-"activation vs suppression" interpretation should be based on explicit contrasts
-or change-scores, not on raw standalone power columns.
+**Voxel selection:**
 
-`feature_engineering.sourcelocalization.fmri.time_windows` is intentionally unsupported
-for feature computation and raises a hard error if present.
+1. Load a z-stat NIfTI (`stats_map_path`), or auto-build from BOLD via `ensure_fmri_stats_map`.
+2. Threshold with mode `z` (z-score cutoff) or `fdr` (BH q-value) and tail `pos` or `abs`.
+3. Cluster voxels: minimum `cluster_min_voxels` (default 50), optional `cluster_min_volume_mm3`.
+4. Subsample large clusters to `max_voxels_per_cluster` (default 2000) with a seeded RNG (`random_seed`).
+5. Map remaining voxels to subject-space `aparc+aseg` atlas labels for cross-subject harmonization.
 
-For cross-subject inferential statistics, use atlas-harmonized outputs; cluster-space
-outputs remain useful for per-subject interpretation and QC.
+**Provenance validation:**
+`provenance ∈ {independent, same_dataset, unknown}` — `same_dataset` requires explicit opt-in
+via `allow_same_dataset_provenance = true`.
+
+**Output spaces** (`output_space ∈ {cluster, atlas, dual}`):
+
+| Space | Column prefix | Description |
+|-------|--------------|-------------|
+| `cluster` | `..._fmri_cluster_*` | Subject-specific constrained clusters |
+| `atlas` | `..._atlas_*` | Voxels mapped to `aparc+aseg` label averages |
+| `dual` | both | Emit cluster and atlas families together (default) |
+
+`atlas` and `dual` require `aparc+aseg.mgz` in the subject FreeSurfer directory.
+
+> **Hard constraint:** `feature_engineering.sourcelocalization.fmri.time_windows` raises a
+> `ValueError` if present — it is intentionally unsupported to avoid misleading interpretation.
+
+#### 8.12.5 Interpretation Notes
+
+- Outputs are amplitude/power-like quantities. Sign-level "activation vs suppression"
+  interpretation requires explicit contrasts or change-scores.
+- For cross-subject inferential statistics, use atlas-harmonized outputs (`_atlas_*`);
+  cluster-space outputs are per-subject and not directly comparable across subjects.
+- Columns use the `src_*` prefix for fMRI pipeline compatibility (see §3.2).
 
 ---
 

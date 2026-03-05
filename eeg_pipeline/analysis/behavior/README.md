@@ -23,14 +23,13 @@ binary, or categorical predictors and any scalar outcome measure.
    - 5.1 [Load and Metadata](#51-load-and-metadata)
    - 5.2 [Trial Table](#52-trial-table)
    - 5.3 [Predictor Residual](#53-predictor-residual)
-   - 5.4 [Feature QC](#54-feature-qc)
-   - 5.5 [Correlations](#55-correlations)
-   - 5.6 [Regression](#56-regression)
-   - 5.7 [Condition Comparisons](#57-condition-comparisons)
-   - 5.8 [Temporal Statistics](#58-temporal-statistics)
-   - 5.9 [Cluster Tests](#59-cluster-tests)
-   - 5.10 [Hierarchical FDR Summary](#510-hierarchical-fdr-summary)
-   - 5.11 [Report and Export](#511-report-and-export)
+   - 5.4 [Correlations](#54-correlations)
+   - 5.5 [Regression](#55-regression)
+   - 5.6 [Condition Comparisons](#56-condition-comparisons)
+   - 5.7 [Temporal Statistics](#57-temporal-statistics)
+   - 5.8 [Cluster Tests](#58-cluster-tests)
+   - 5.9 [Hierarchical FDR Summary](#59-hierarchical-fdr-summary)
+   - 5.10 [Report and Export](#510-report-and-export)
 6. [Group-Level Analysis](#6-group-level-analysis)
 7. [Multiple Comparison Correction](#7-multiple-comparison-correction)
 
@@ -86,9 +85,8 @@ behavior/
     ├── metadata.py          # load, metadata stages
     ├── trial_table.py       # trial_table, predictor_residual
     ├── models.py            # regression
-    ├── feature_qc.py        # feature_qc stage
     ├── correlate.py         # correlate_* stages
-    ├── condition.py         # condition_column, condition_window, multigroup (when 3+ groups)
+    ├── condition.py         # condition_column, multigroup (when 3+ groups)
     ├── temporal.py          # temporal_tfr, temporal_stats, cluster
     ├── fdr.py               # hierarchical_fdr_summary
     ├── report.py            # report stage
@@ -105,18 +103,16 @@ Stages run in dependency order. Arrows denote data dependencies.
 load
 └── trial_table
     ├── predictor_residual          [continuous predictor only]
-    ├── feature_qc
     ├── correlate_design
-    │   ├── correlate_effect_sizes
-    │   │   ├── correlate_pvalues
-    │   │   │   └── correlate_primary_selection
-    │   │   │       └── correlate_fdr
-    ├── regression
+    │   └── correlate_effect_sizes
+    │       ├── correlate_pvalues           [optional permutation]
+    │       └── correlate_primary_selection
+    │           └── correlate_fdr
+    ├── regression                          [off by default]
     ├── condition_column
-    ├── condition_window
     ├── temporal_tfr
     │   └── temporal_stats
-    │       └── cluster
+    │       └── cluster                     [off by default]
     └── hierarchical_fdr_summary
         ├── report
         └── export
@@ -138,7 +134,7 @@ is explicitly set in configuration:
 
 The following require an explicit i.i.d. override for trial-level inference:
 
-- `condition_window` and multigroup condition comparison (when 3+ groups)
+- multigroup condition comparison (when 3+ groups)
 
 Temporal trial-level inference (`temporal_stats`) requires cluster correction with
 valid group labels when `allow_iid_trials = false`.
@@ -166,9 +162,8 @@ The `behavior_analysis.predictor_type` key declares the nature of the predictor:
 
 ### 4.4 Multiple Comparison Correction
 
-- **Unified hierarchical FDR** is applied across wrapped stages (see §7).
-- **Local BH correction** (`p_fdr`) is computed within regression and model-family stages.
-- **Temporal correction** mode is configurable per analysis:
+- **Unified hierarchical FDR** is applied across all analysis stages (see §7).
+- **Temporal correction** mode is configurable independently:
   `cluster`, `fdr`, `bonferroni`, or `none`.
 
 ---
@@ -224,24 +219,15 @@ Model selection procedure:
 
 ---
 
-### 5.4 Feature QC
-
-**Module:** `stages/feature_qc.py`
-
-Applies feature-quality screening based on missingness, variance, and configurable
-thresholds. Emits per-feature QC metadata used to gate downstream stages.
-
----
-
-### 5.5 Correlations
+### 5.4 Correlations
 
 **Modules:** `stages/correlate.py`, `feature_correlator.py`
 
-#### 5.5.1 Design (`correlate_design`)
+#### 5.4.1 Design (`correlate_design`)
 
 Defines analysis targets, covariate sets, and permutation group assignments.
 
-#### 5.5.2 Effect Sizes (`correlate_effect_sizes`)
+#### 5.4.2 Effect Sizes (`correlate_effect_sizes`)
 
 **Pearson:** $r = \mathrm{corr}(x, y)$.
 
@@ -257,7 +243,7 @@ p = 2\, P\!\left(|T_{n-k-2}| \ge |t|\right).
 
 Run-mean mode computes correlations on run-aggregated means rather than trial-level values.
 
-#### 5.5.3 P-values (`correlate_pvalues`)
+#### 5.4.3 P-values (`correlate_pvalues`)
 
 Permutation p-value (one-sided extreme, Phipson–Smyth):
 
@@ -268,20 +254,20 @@ p_\text{perm} = \frac{N_{\text{extreme}} + 1}{n_\text{perm} + 1}.
 Grouped permutation schemes: shuffle or circular-shift within groups (`permute_within_groups`).
 Partial permutation uses Freedman–Lane residual permutation.
 
-#### 5.5.4 Primary Selection (`correlate_primary_selection`)
+#### 5.4.4 Primary Selection (`correlate_primary_selection`)
 
 Selects the primary effect size and p-value according to control path (partial vs. simple),
 analysis unit (trial vs. run), and non-i.i.d. enforcement status.
 
-#### 5.5.5 FDR Correction (`correlate_fdr`)
+#### 5.4.5 FDR Correction (`correlate_fdr`)
 
 Benjamini–Hochberg q-values applied across features (see §7).
 
 ---
 
-### 5.6 Regression
+### 5.5 Regression
 
-**Module:** `stages/models.py`
+**Module:** `stages/models.py`  **Off by default** (`run_regression = False`; enable via `--computations regression`).
 
 Per-feature OLS model with optional predictor interaction:
 
@@ -313,11 +299,11 @@ Feature-term permutation uses reduced-model residual permutation (Freedman–Lan
 
 ---
 
-### 5.7 Condition Comparisons
+### 5.6 Condition Comparisons
 
 **Module:** `stages/condition.py`
 
-#### 5.7.1 Two-Group (`condition_column`)
+#### 5.6.1 Two-Group (`condition_column`)
 
 **Unpaired (default) — Welch t-test:**
 
@@ -336,7 +322,7 @@ d_z = \frac{\bar{d}}{s_d} \text{ (paired)}.
 Permutation p-values: unpaired mean-difference and paired sign-flip,
 both using $(N_{\text{extreme}} + 1) / (n_\text{perm} + 1)$.
 
-#### 5.7.2 Multi-Group (condition flow, 3+ groups)
+#### 5.6.2 Multi-Group (condition flow, 3+ groups)
 
 When the condition column has 3+ levels, the pipeline runs a multigroup comparison
 (via the same condition stage; not a separate DAG node). Pairwise tests only (no omnibus):
@@ -344,20 +330,9 @@ When the condition column has 3+ levels, the pipeline runs a multigroup comparis
 - Unpaired: Mann–Whitney U.
 - Paired run-level: Wilcoxon signed-rank.
 
-#### 5.7.3 Window Comparison (`condition_window`)
-
-Paired window comparison using Wilcoxon signed-rank test.
-Difference-score effect sizes:
-
-```math
-d_z = \bar{d} / s_d, \qquad
-g_z = d_z\!\left(1 - \frac{3}{4n - 1}\right),
-\quad d_i = v_{2i} - v_{1i}.
-```
-
 ---
 
-### 5.8 Temporal Statistics
+### 5.7 Temporal Statistics
 
 **Module:** `stages/temporal.py`
 
@@ -393,9 +368,9 @@ Temporal multiple-comparison correction: `fdr`, `bonferroni`, `cluster`, or `non
 
 ---
 
-### 5.9 Cluster Tests
+### 5.8 Cluster Tests
 
-**Module:** `stages/temporal.py`
+**Module:** `stages/temporal.py`  **Off by default** (`run_cluster_tests = False`).
 
 Cluster-mass permutation test over time–frequency maps:
 
@@ -407,7 +382,7 @@ p_c = \frac{\#\{M_\text{max}^\text{perm} \ge M_c\} + 1}{n_\text{perm} + 1}.
 
 ---
 
-### 5.10 Hierarchical FDR Summary
+### 5.9 Hierarchical FDR Summary
 
 **Module:** `stages/fdr.py`
 
@@ -416,7 +391,7 @@ multiple-comparison summary (see §7).
 
 ---
 
-### 5.11 Report and Export
+### 5.10 Report and Export
 
 **Modules:** `stages/report.py`, `stages/export.py`
 
