@@ -15,7 +15,6 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.analysis.behavior.result_types import (
-    FeatureQCResult,
     GroupLevelResult,
     TrialTableResult,
 )
@@ -35,7 +34,6 @@ from eeg_pipeline.analysis.behavior.stages import (
     correlate as _stages_correlate,
     export as _stages_export,
     fdr as _stages_fdr,
-    feature_qc as _stages_feature_qc,
     metadata as _stages_metadata,
     models as _stages_models,
     report as _stages_report,
@@ -122,29 +120,6 @@ def _get_runtime(ctx: Any) -> BehaviorOrchestrationRuntime:
 
 def _get_cache(ctx: Any) -> BehaviorResultCache:
     return _get_runtime(ctx).cache
-
-
-###################################################################
-# Feature QC Screen Stage
-###################################################################
-
-
-def stage_feature_qc_screen(
-    ctx: BehaviorContext,
-    config: Any,
-) -> FeatureQCResult:
-    return _stages_feature_qc.stage_feature_qc_screen_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        feature_column_prefixes=FEATURE_COLUMN_PREFIXES,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
-        max_missing_pct_default=MAX_MISSING_PCT_DEFAULT,
-        min_variance_threshold=MIN_VARIANCE_THRESHOLD,
-    )
 
 
 ###################################################################
@@ -779,60 +754,6 @@ def _compute_pairwise_effect_sizes(
     return mean_diff, std_diff, cohens_d, hedges_g, hedges_correction
 
 
-def stage_condition_window(
-    ctx: BehaviorContext,
-    config: Any,
-    df_trials: Optional[pd.DataFrame] = None,
-    feature_cols: Optional[List[str]] = None,
-    compare_windows: Optional[List[str]] = None,
-) -> pd.DataFrame:
-    """Run window-based condition comparison (e.g., baseline vs active).
-    
-    Single responsibility: Window contrast comparison.
-    """
-
-    return _stages_condition.stage_condition_window_impl(
-        ctx,
-        config,
-        df_trials=df_trials,
-        feature_cols=feature_cols,
-        compare_windows=compare_windows,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=_get_feature_columns,
-        check_early_exit_conditions_fn=_check_early_exit_conditions,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        resolve_condition_compare_column_fn=_resolve_condition_compare_column,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        run_window_comparison_fn=_run_window_comparison,
-        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
-    )
-
-
-def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Backward-compatible condition stage (column + optional window + optional multigroup).
-    
-    The pipeline wrapper historically called a single stage and expected a DataFrame.
-    Internally, we keep single-responsibility sub-stages:
-    - stage_condition_column (2-group comparison)
-    - stage_condition_window (paired window comparison)
-    - stage_condition_multigroup (3+ group comparison)
-    """
-    cache = _get_cache(ctx)
-    return _stages_condition.stage_condition_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_filtered_feature_cols_fn=lambda df, context: cache.get_filtered_feature_cols(
-            [c for c in df.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)],
-            context,
-            "condition",
-        ),
-        stage_condition_multigroup_fn=stage_condition_multigroup,
-        stage_condition_column_fn=stage_condition_column,
-        stage_condition_window_fn=stage_condition_window,
-    )
 
 
 def stage_condition_multigroup(

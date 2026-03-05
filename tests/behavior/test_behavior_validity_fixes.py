@@ -38,7 +38,6 @@ class TestBehaviorValidityFixes(unittest.TestCase):
     def test_stage_registry_includes_validation_and_qc(self):
         from eeg_pipeline.analysis.behavior.orchestration import StageRegistry
 
-        self.assertIsNotNone(StageRegistry.get("feature_qc"))
         self.assertIsNotNone(StageRegistry.get("hierarchical_fdr_summary"))
 
         primary_spec = StageRegistry.get("correlate_primary_selection")
@@ -1867,52 +1866,6 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertIsNone(out)
         self.assertEqual(report["power"]["reason"], "positional_alignment_disallowed")
-
-    def test_condition_window_forwards_configured_min_samples(self):
-        from eeg_pipeline.analysis.behavior.orchestration import stage_condition_window
-
-        cfg = DotConfig(
-            {
-                "behavior_analysis": {
-                    "condition": {
-                        "compare_windows": ["baseline", "active"],
-                        "window_comparison": {"primary_unit": "trial", "min_samples": 9},
-                    },
-                    "statistics": {"allow_iid_trials": True},
-                },
-                "event_columns": {"binary_outcome": ["binary_outcome"]},
-            }
-        )
-        ctx = self._ctx(cfg)
-        df_trials = pd.DataFrame(
-            {
-                "power_baseline_alpha_ch_Fp1_mean": [1.0, 2.0, 3.0, 2.0, 1.0, 4.0, 5.0, 3.0, 2.0, 1.0],
-                "power_active_alpha_ch_Fp1_mean": [1.5, 2.5, 3.5, 2.5, 1.5, 4.5, 5.5, 3.5, 2.5, 1.5],
-                "binary_outcome": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-            }
-        )
-        captured = {}
-
-        def _fake_window(_ctx, _df, _features, _windows, min_samples, _fdr_alpha, _suffix):
-            captured["min_samples"] = int(min_samples)
-            return pd.DataFrame()
-
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration._run_window_comparison",
-            side_effect=_fake_window,
-        ):
-            stage_condition_window(
-                ctx,
-                SimpleNamespace(fdr_alpha=0.05, min_samples=3),
-                df_trials=df_trials,
-                feature_cols=[
-                    "power_baseline_alpha_ch_Fp1_mean",
-                    "power_active_alpha_ch_Fp1_mean",
-                ],
-                compare_windows=["baseline", "active"],
-            )
-
-        self.assertEqual(int(captured["min_samples"]), 9)
 
     def test_window_run_level_reports_run_level_descriptives(self):
         from eeg_pipeline.analysis.behavior.orchestration import _run_window_comparison

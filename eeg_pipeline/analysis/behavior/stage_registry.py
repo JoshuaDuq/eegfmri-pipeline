@@ -41,7 +41,6 @@ class StageRegistry:
     RESOURCE_EFFECT_SIZES = "effect_sizes"
     RESOURCE_PVALUES = "pvalues"
     RESOURCE_CORRELATIONS = "correlations"
-    RESOURCE_CONDITION_EFFECTS = "condition_effects"
 
     GROUP_DATA_PREP = "data_prep"
     GROUP_CORRELATIONS = "correlations"

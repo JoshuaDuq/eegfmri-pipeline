@@ -115,7 +115,6 @@ class BehaviorPipelineConfig:
     # Computation flags
     run_trial_table: bool = True
     run_predictor_residual: bool = True
-    run_feature_qc: bool = False
     run_regression: bool = False
     run_validation: bool = True
     run_report: bool = True
@@ -172,7 +171,6 @@ class BehaviorPipelineConfig:
             correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_predictor"]),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
             run_predictor_residual=bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)),
-            run_feature_qc=bool(get_config_value(config, "behavior_analysis.feature_qc.enabled", False)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
             run_validation=bool(get_config_value(config, "behavior_analysis.validation.enabled", True)),
             run_report=bool(get_config_value(config, "behavior_analysis.report.enabled", True)),

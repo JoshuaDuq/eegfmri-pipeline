@@ -29,7 +29,6 @@ class StageSpecDefinition:
 PIPELINE_STAGE_RULES: Tuple[PipelineStageRule, ...] = (
     PipelineStageRule("run_trial_table", ("trial_table",), default=True),
     PipelineStageRule("run_predictor_residual", ("predictor_residual",)),
-    PipelineStageRule("run_feature_qc", ("feature_qc",)),
     PipelineStageRule("run_regression", ("regression",)),
     PipelineStageRule(
         "run_correlations",
@@ -42,7 +41,7 @@ PIPELINE_STAGE_RULES: Tuple[PipelineStageRule, ...] = (
         ),
         default=True,
     ),
-    PipelineStageRule("run_condition_comparison", ("condition_column", "condition_window")),
+    PipelineStageRule("run_condition_comparison", ("condition_column",)),
     PipelineStageRule("run_temporal_correlations", ("temporal_tfr", "temporal_stats")),
     PipelineStageRule("run_cluster_tests", ("cluster",)),
     PipelineStageRule("run_validation", ("hierarchical_fdr_summary",), default=True),
@@ -86,14 +85,6 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         requires=("trial_table", "predictor", "outcome"),
         produces=("predictor_residual",),
         config_key="behavior_analysis.predictor_residual.enabled",
-        group="data_prep",
-    ),
-    StageSpecDefinition(
-        name="feature_qc",
-        description="Screen feature quality",
-        requires=("trial_table",),
-        produces=("feature_qc",),
-        config_key="behavior_analysis.feature_qc.enabled",
         group="data_prep",
     ),
     StageSpecDefinition(
@@ -150,14 +141,6 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         requires=("trial_table",),
         produces=("condition_effects",),
         config_key="behavior_analysis.condition.enabled",
-        group="condition",
-    ),
-    StageSpecDefinition(
-        name="condition_window",
-        description="Window-based condition contrast",
-        requires=("trial_table",),
-        produces=("window_effects",),
-        config_key="behavior_analysis.condition.compare_windows",
         group="condition",
     ),
     StageSpecDefinition(

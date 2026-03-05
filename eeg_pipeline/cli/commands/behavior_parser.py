@@ -230,23 +230,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Max fraction of missing trial-order values before disabling trial-order control (default: 0.1)",
     )
 
-    feature_qc_group = parser.add_argument_group("Feature QC options")
-    feature_qc_group.add_argument("--feature-qc-enabled", action="store_true", default=None, dest="feature_qc_enabled")
-    feature_qc_group.add_argument("--no-feature-qc-enabled", action="store_false", dest="feature_qc_enabled")
-    feature_qc_group.add_argument("--feature-qc-max-missing-pct", type=float, default=None)
-    feature_qc_group.add_argument("--feature-qc-min-variance", type=float, default=None)
-    feature_qc_group.add_argument(
-        "--feature-qc-check-within-run-variance",
-        action="store_true",
-        default=None,
-        dest="feature_qc_check_within_run_variance",
-    )
-    feature_qc_group.add_argument(
-        "--no-feature-qc-check-within-run-variance",
-        action="store_false",
-        dest="feature_qc_check_within_run_variance",
-    )
-
     residual_group = parser.add_argument_group("Predictor residual / predictor-model diagnostics")
     residual_group.add_argument("--predictor-residual", action="store_true", default=None, dest="predictor_residual_enabled")
     residual_group.add_argument("--no-predictor-residual", action="store_false", dest="predictor_residual_enabled")
@@ -489,9 +472,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--condition-overwrite", action="store_true", default=None, dest="condition_overwrite", help="Overwrite existing condition effects files (default)")
     condition_group.add_argument("--no-condition-overwrite", action="store_false", dest="condition_overwrite", help="Include compare_column in filename to avoid overwriting")
     condition_group.add_argument("--condition-primary-unit", choices=["trial", "run_mean"], default=None)
-    condition_group.add_argument("--condition-compare-windows", nargs="+", default=None, metavar="WINDOW", help="Time windows to compare (e.g., baseline active)")
-    condition_group.add_argument("--condition-window-primary-unit", choices=["trial", "run_mean"], default=None)
-    condition_group.add_argument("--condition-window-min-samples", type=int, default=None)
     condition_group.add_argument("--condition-permutation-primary", action="store_true", default=None, dest="condition_permutation_primary")
     condition_group.add_argument("--no-condition-permutation-primary", action="store_false", dest="condition_permutation_primary")
 

@@ -211,17 +211,6 @@ _TRIAL_TABLE_OVERRIDE_RULES = (
     ConfigOverrideRule("feature_summaries_enabled", "behavior_analysis.feature_summaries.enabled", _to_bool),
 )
 
-_FEATURE_QC_OVERRIDE_RULES = (
-    ConfigOverrideRule("feature_qc_enabled", "behavior_analysis.feature_qc.enabled", _to_bool),
-    ConfigOverrideRule("feature_qc_max_missing_pct", "behavior_analysis.feature_qc.max_missing_pct", _to_float),
-    ConfigOverrideRule("feature_qc_min_variance", "behavior_analysis.feature_qc.min_variance", _to_float),
-    ConfigOverrideRule(
-        "feature_qc_check_within_run_variance",
-        "behavior_analysis.feature_qc.check_within_run_variance",
-        _to_bool,
-    ),
-)
-
 _PREDICTOR_RESIDUAL_OVERRIDE_RULES = (
     ConfigOverrideRule("predictor_residual_enabled", "behavior_analysis.predictor_residual.enabled", _to_bool),
     ConfigOverrideRule("predictor_residual_method", "behavior_analysis.predictor_residual.method", _to_lower_stripped),
@@ -376,19 +365,6 @@ _CONDITION_OVERRIDE_RULES = (
     ConfigOverrideRule("condition_compare_windows", "behavior_analysis.condition.compare_windows", _to_stripped_list),
 )
 
-_CONDITION_WINDOW_OVERRIDE_RULES = (
-    ConfigOverrideRule(
-        "condition_window_primary_unit",
-        "behavior_analysis.condition.window_comparison.primary_unit",
-        _to_lower_stripped,
-    ),
-    ConfigOverrideRule(
-        "condition_window_min_samples",
-        "behavior_analysis.condition.window_comparison.min_samples",
-        _to_int,
-    ),
-)
-
 _TEMPORAL_OVERRIDE_RULES = (
     ConfigOverrideRule("temporal_target_column", "behavior_analysis.temporal.target_column", _to_stripped),
     ConfigOverrideRule(
@@ -504,7 +480,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         )
 
     _apply_override_rules(args, config, _TRIAL_TABLE_OVERRIDE_RULES)
-    _apply_override_rules(args, config, _FEATURE_QC_OVERRIDE_RULES)
     _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_OVERRIDE_RULES)
     _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_CROSSFIT_OVERRIDE_RULES)
 
@@ -543,7 +518,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     _apply_override_rules(args, config, _REPORT_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _CONDITION_OVERRIDE_RULES)
-    _apply_override_rules(args, config, _CONDITION_WINDOW_OVERRIDE_RULES)
     if getattr(args, "condition_permutation_primary", None) is not None:
         enabled = bool(args.condition_permutation_primary)
         _set_nested_config_value(

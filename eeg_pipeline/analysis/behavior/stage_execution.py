@@ -11,7 +11,6 @@ _STAGE_TO_ATTR_MAP = {
     "correlate_fdr": "correlations",
     "regression": "regression",
     "condition_column": "condition_effects",
-    "condition_window": "condition_effects_window",
     "temporal_tfr": "tf",
     "temporal_stats": "temporal",
     "cluster": "cluster",
