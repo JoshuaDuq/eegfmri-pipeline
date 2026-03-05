@@ -346,6 +346,10 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 				if m.sourceLocFmriRandomSeed != 0 {
 					args = append(args, "--source-fmri-random-seed", fmt.Sprintf("%d", m.sourceLocFmriRandomSeed))
 				}
+				outputSpaces := []string{"cluster", "atlas", "dual"}
+				if m.sourceLocFmriOutputSpace != 2 {
+					args = append(args, "--source-fmri-output-space", outputSpaces[m.sourceLocFmriOutputSpace%len(outputSpaces)])
+				}
 
 				// fMRI contrast builder options
 				if m.sourceLocFmriContrastEnabled {

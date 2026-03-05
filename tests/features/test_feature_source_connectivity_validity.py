@@ -84,6 +84,7 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             max_voxels_per_cluster=0,
             max_total_voxels=0,
             random_seed=0,
+            output_space="dual",
         )
 
     def test_make_fmri_rng_seed_zero_is_deterministic(self):
@@ -145,6 +146,41 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             }
         )
         with self.assertRaisesRegex(ValueError, "time_windows"):
+            _load_fmri_constraint_config(config)
+
+    def test_fmri_output_space_defaults_to_dual(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "fmri": {
+                            "enabled": True,
+                            "stats_map_path": "/tmp/map.nii.gz",
+                            "provenance": "independent",
+                        }
+                    }
+                }
+            }
+        )
+        fmri_cfg = _load_fmri_constraint_config(config)
+        self.assertEqual(fmri_cfg.output_space, "dual")
+
+    def test_fmri_output_space_rejects_invalid_value(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "fmri": {
+                            "enabled": True,
+                            "stats_map_path": "/tmp/map.nii.gz",
+                            "provenance": "independent",
+                            "output_space": "subject_native",
+                        }
+                    }
+                }
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "output_space"):
             _load_fmri_constraint_config(config)
 
     def test_fmri_stats_map_must_be_3d(self):
@@ -766,6 +802,120 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         spectral_connectivity_mock.assert_not_called()
         self.assertEqual(cols, [])
         self.assertTrue(df.empty)
+
+    def test_fmri_source_connectivity_uses_resolved_bem_and_trans_files(self):
+        n_epochs = 4
+        roi_data = np.random.default_rng(31).standard_normal((n_epochs, 2, 80))
+
+        class _FakeEnvelopeCon:
+            def get_data(self, output="dense"):
+                _ = output
+                return np.array(
+                    [
+                        [[[0.0], [0.2]], [[0.2], [0.0]]],
+                        [[[0.0], [0.3]], [[0.3], [0.0]]],
+                        [[[0.0], [0.4]], [[0.4], [0.0]]],
+                        [[[0.0], [0.5]], [[0.5], [0.0]]],
+                    ],
+                    dtype=float,
+                )
+
+        fake_conn_mod = types.ModuleType("mne_connectivity")
+        fake_conn_mod.spectral_connectivity_epochs = lambda *_args, **_kwargs: _FakeCon(
+            np.array([[0.5]], dtype=float)
+        )
+        fake_conn_mod.envelope_correlation = lambda *_args, **_kwargs: _FakeEnvelopeCon()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            map_path = root / "map.nii.gz"
+            map_path.touch()
+            trans_path = root / "sub-0001-trans.fif"
+            trans_path.touch()
+            bem_path = root / "sub-0001-bem-sol.fif"
+            bem_path.touch()
+
+            fmri_cfg = SimpleNamespace(
+                enabled=True,
+                stats_map_path=map_path,
+                provenance="independent",
+                require_provenance=False,
+                allow_same_dataset_provenance=False,
+            )
+            src_cfg = SimpleNamespace(
+                method="lcmv",
+                fmri_cfg=fmri_cfg,
+                subjects_dir=str(root / "freesurfer"),
+                trans_path=None,
+                bem_path=None,
+                parcellation="aparc",
+                spacing="oct6",
+                subject="sub-0001",
+                mindist_mm=5.0,
+                lcmv_reg=0.05,
+                eloreta_loose=0.2,
+                eloreta_depth=0.8,
+                eloreta_snr=3.0,
+            )
+
+            ctx = SimpleNamespace(
+                epochs=_EpochStub(n_epochs, sfreq=100.0),
+                config=DotConfig({}),
+                logger=logging.getLogger("source-connectivity-fmri-resolve"),
+                analysis_mode="group_stats",
+                train_mask=None,
+                name="active",
+                frequency_bands={"alpha": (8.0, 12.0)},
+            )
+
+            with (
+                patch.dict(sys.modules, {"mne_connectivity": fake_conn_mod}),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                    return_value=src_cfg,
+                ),
+                patch(
+                    "fmri_pipeline.analysis.bem_generation.ensure_bem_and_trans_files",
+                    return_value=(trans_path, root / "sub-0001-bem.fif", bem_path),
+                ) as mock_ensure,
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._fmri_roi_coords_from_stats_map",
+                    return_value={
+                        "roi1": np.array([[0.0, 0.0, 0.0]], dtype=float),
+                        "roi2": np.array([[0.0, 0.0, 0.01]], dtype=float),
+                    },
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._setup_volume_source_space_configured",
+                    return_value=("fwd", "src", {"roi1": [0], "roi2": [1]}),
+                ) as mock_setup,
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                    return_value=(["stc"] * n_epochs, None),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses_from_vertex_indices",
+                    return_value=(roi_data, ["roi1", "roi2"]),
+                ),
+            ):
+                df, cols = extract_source_connectivity_features(
+                    ctx,
+                    bands=["alpha"],
+                    method="lcmv",
+                    connectivity_method="aec",
+                )
+
+        self.assertTrue(cols)
+        self.assertEqual(len(df), n_epochs)
+        mock_ensure.assert_called_once_with(
+            subject="sub-0001",
+            subjects_dir=src_cfg.subjects_dir,
+            config=ctx.config,
+            logger_instance=ctx.logger,
+            eeg_info=ctx.epochs.info,
+        )
+        self.assertEqual(mock_setup.call_args.kwargs["trans"], str(trans_path))
+        self.assertEqual(mock_setup.call_args.kwargs["bem"], str(bem_path))
 
 
 if __name__ == "__main__":

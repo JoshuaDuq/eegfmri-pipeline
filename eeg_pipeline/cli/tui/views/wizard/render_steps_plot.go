@@ -17,7 +17,7 @@ func (m Model) renderPlotSelection() string {
 
 	visibleItems := []int{}
 	for i, plot := range m.plotItems {
-		if !m.IsPlotCategorySelected(plot.Group) {
+		if !m.IsPlotVisibleForSelection(plot) {
 			continue
 		}
 		visibleItems = append(visibleItems, i)
@@ -35,7 +35,7 @@ func (m Model) renderPlotSelection() string {
 
 	currentGroup := ""
 	for i, plot := range m.plotItems {
-		if !m.IsPlotCategorySelected(plot.Group) {
+		if !m.IsPlotVisibleForSelection(plot) {
 			continue
 		}
 		if plot.Group != currentGroup {
@@ -63,7 +63,7 @@ func (m Model) renderPlotSelection() string {
 		b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
 	}
 
-	if m.plotCursor >= 0 && m.plotCursor < len(m.plotItems) {
+	if m.plotCursor >= 0 && m.plotCursor < len(m.plotItems) && m.IsPlotVisibleForSelection(m.plotItems[m.plotCursor]) {
 		plot := m.plotItems[m.plotCursor]
 		b.WriteString("\n" + styles.RenderDivider(50) + "\n")
 		b.WriteString(styles.RenderDimSectionLabel("Requirements") + "\n")

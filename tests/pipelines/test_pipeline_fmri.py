@@ -328,6 +328,81 @@ class TestFmriPreprocessingGapfill(unittest.TestCase):
         ):
             p.process_subject("0001", task="", dry_run=True)
 
+    def test_freesurfer_license_defaults_to_home_license_txt(self):
+        from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        bids = tmp / "bids"
+        bids.mkdir(parents=True, exist_ok=True)
+        (bids / "sub-0001").mkdir(parents=True, exist_ok=True)
+
+        home_dir = Path(tempfile.mkdtemp())
+        default_license = home_dir / "license.txt"
+        default_license.write_text("x", encoding="utf-8")
+
+        p = object.__new__(FmriPreprocessingPipeline)
+        p.deriv_root = tmp / "deriv"
+        p.deriv_root.mkdir(parents=True, exist_ok=True)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "paths": {"bids_fmri_root": str(bids)},
+                "fmri_preprocessing": {"engine": "docker", "fmriprep": {}},
+            }
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"HOME": str(home_dir), "EEG_PIPELINE_FREESURFER_LICENSE": ""},
+        ), patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"):
+            p.process_subject("0001", task="", dry_run=True)
+
+        cmd_str = p.logger.info.call_args[0][1]
+        self.assertIn(str(default_license.resolve()), cmd_str)
+
+    def test_docker_mount_uses_sanitized_view_when_macos_metadata_exists(self):
+        from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        bids = tmp / "bids"
+        bids.mkdir(parents=True, exist_ok=True)
+        (bids / "sub-0001" / "func").mkdir(parents=True, exist_ok=True)
+        (bids / "dataset_description.json").write_text(
+            '{"Name":"x","BIDSVersion":"1.7.0","DatasetType":"raw"}',
+            encoding="utf-8",
+        )
+        (bids / "sub-0001" / "func" / "sub-0001_task-rest_run-01_bold.nii.gz").write_text(
+            "x", encoding="utf-8"
+        )
+        (bids / "._sub-0001").write_text("x", encoding="utf-8")
+        (bids / ".DS_Store").write_text("x", encoding="utf-8")
+
+        lic = tmp / "license.txt"
+        lic.write_text("x", encoding="utf-8")
+
+        p = object.__new__(FmriPreprocessingPipeline)
+        p.deriv_root = tmp / "deriv"
+        p.deriv_root.mkdir(parents=True, exist_ok=True)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "paths": {"bids_fmri_root": str(bids)},
+                "fmri_preprocessing": {
+                    "engine": "docker",
+                    "fmriprep": {"fs_license_file": str(lic)},
+                },
+            }
+        )
+
+        with patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"):
+            p.process_subject("0001", task="", dry_run=True)
+
+        cmd_str = p.logger.info.call_args[0][1]
+        self.assertNotIn(f"{bids}:/data:ro", cmd_str)
+        self.assertIn(":/data:ro", cmd_str)
+        self.assertIn(f"{bids}:/bids_source:ro", cmd_str)
+        self.assertTrue(p.logger.warning.called)
+
 
 class TestBemGenerationLicensePath(unittest.TestCase):
     def test_get_fs_license_path_uses_env_var(self):

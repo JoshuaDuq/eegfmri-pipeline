@@ -143,7 +143,7 @@ func (m *Model) UpdatePlotOffset() {
 	cursorLine := -1
 
 	for i, plot := range m.plotItems {
-		if !m.IsPlotCategorySelected(plot.Group) {
+		if !m.IsPlotVisibleForSelection(plot) {
 			continue
 		}
 
@@ -174,7 +174,7 @@ func (m Model) selectedFeaturePlotterCategories() []string {
 	var ordered []string
 	seen := make(map[string]bool)
 	for i, plot := range m.plotItems {
-		if !m.plotSelected[i] || !m.IsPlotCategorySelected(plot.Group) {
+		if !m.plotSelected[i] || !m.IsPlotVisibleForSelection(plot) {
 			continue
 		}
 		if plot.Group != "features" {

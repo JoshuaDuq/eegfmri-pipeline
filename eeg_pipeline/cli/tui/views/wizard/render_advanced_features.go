@@ -943,7 +943,11 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optSourceLocLoose) {
 				value = m.numberBuffer + "█"
 			}
-			hint = "eLORETA loose constraint"
+			if m.sourceLocMethod == 1 && m.sourceLocMode == 1 && m.sourceLocFmriEnabled && m.sourceLocLoose != 1.0 {
+				hint = "INVALID for fMRI+eLORETA: must be exactly 1.0"
+			} else {
+				hint = "eLORETA loose constraint"
+			}
 		case optSourceLocDepth:
 			label = "Depth"
 			value = fmt.Sprintf("%.2f", m.sourceLocDepth)
@@ -1176,7 +1180,12 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriRandomSeed) {
 				value = m.numberBuffer + "█"
 			}
-			hint = "0 = nondeterministic"
+			hint = "0 = deterministic"
+		case optSourceLocFmriOutputSpace:
+			label = "Output Space"
+			spaces := []string{"cluster", "atlas", "dual"}
+			value = spaces[m.sourceLocFmriOutputSpace%len(spaces)]
+			hint = "cluster(subject), atlas(group), or dual"
 
 		// BEM/Trans generation options (Docker-based)
 		case optSourceLocCreateTrans:
@@ -1537,56 +1546,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Require fMRIPrep"
 			value = m.boolToOnOff(m.sourceLocFmriRequireFmriprep)
 			hint = "enforce fMRIPrep inputs"
-		case optSourceLocFmriWindowAName:
-			label = "Window A Name"
-			if m.sourceLocFmriWindowAName == "" {
-				value = "(not set)"
-			} else {
-				value = m.sourceLocFmriWindowAName
-			}
-			if m.editingText && m.editingTextField == textFieldSourceLocFmriWindowAName {
-				value = m.textBuffer + "█"
-			}
-			hint = "e.g., window_a"
-		case optSourceLocFmriWindowATmin:
-			label = "Window A Tmin"
-			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowATmin)
-			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriWindowATmin) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "start time in seconds"
-		case optSourceLocFmriWindowATmax:
-			label = "Window A Tmax"
-			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowATmax)
-			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriWindowATmax) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "end time in seconds"
-		case optSourceLocFmriWindowBName:
-			label = "Window B Name"
-			if m.sourceLocFmriWindowBName == "" {
-				value = "(not set)"
-			} else {
-				value = m.sourceLocFmriWindowBName
-			}
-			if m.editingText && m.editingTextField == textFieldSourceLocFmriWindowBName {
-				value = m.textBuffer + "█"
-			}
-			hint = "e.g., window_b (optional)"
-		case optSourceLocFmriWindowBTmin:
-			label = "Window B Tmin"
-			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowBTmin)
-			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriWindowBTmin) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "start time in seconds"
-		case optSourceLocFmriWindowBTmax:
-			label = "Window B Tmax"
-			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowBTmax)
-			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriWindowBTmax) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "end time in seconds"
 
 		// ITPC options
 		case optFeatGroupITPC:

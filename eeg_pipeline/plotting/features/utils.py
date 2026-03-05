@@ -410,40 +410,30 @@ def _plot_single_band_comparison(
         return
     
     box_positions = [0, 1]
-    box_width = 0.4
     
-    boxplot = ax.boxplot(
-        [condition1_values, condition2_values],
-        positions=box_positions,
-        widths=box_width,
-        patch_artist=True
-    )
-    boxplot["boxes"][0].set_facecolor(condition1_color)
-    boxplot["boxes"][0].set_alpha(0.6)
-    boxplot["boxes"][1].set_facecolor(condition2_color)
-    boxplot["boxes"][1].set_alpha(0.6)
+    colors = [condition1_color, condition2_color]
+    data_list = [condition1_values, condition2_values]
     
-    jitter_range = 0.08
-    rng = np.random.default_rng(42)
-    condition1_jitter = rng.uniform(-jitter_range, jitter_range, len(condition1_values))
-    condition2_jitter = rng.uniform(-jitter_range, jitter_range, len(condition2_values))
-    
-    ax.scatter(
-        condition1_jitter, condition1_values,
-        c=condition1_color, alpha=0.3, s=6
-    )
-    ax.scatter(
-        1 + condition2_jitter, condition2_values,
-        c=condition2_color, alpha=0.3, s=6
-    )
-    
-    max_paired_lines = 100
-    if len(condition1_values) == len(condition2_values) and len(condition1_values) <= max_paired_lines:
-        for i in range(len(condition1_values)):
-            ax.plot(
-                [0, 1], [condition1_values[i], condition2_values[i]],
-                c="gray", alpha=0.15, lw=0.5
-            )
+    for j, (data, color) in enumerate(zip(data_list, colors)):
+        pos = box_positions[j]
+        # Half violin
+        v = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.5)
+        for b in v['bodies']:
+            b.get_paths()[0].vertices[:, 0] = np.clip(b.get_paths()[0].vertices[:, 0], pos, np.inf)
+            b.set_facecolor(color)
+            b.set_edgecolor(color)
+            b.set_alpha(0.6)
+        
+        # Boxplot
+        ax.boxplot(data, positions=[pos - 0.1], widths=0.1, showfliers=False,
+                   patch_artist=True, boxprops=dict(facecolor="white", color=color),
+                   medianprops=dict(color="black", linewidth=1.5),
+                   whiskerprops=dict(color=color), capprops=dict(color=color))
+        
+        # Jitter scatter
+        rng = np.random.default_rng(42 + j)
+        jitter = rng.uniform(pos - 0.25, pos - 0.15, size=len(data))
+        ax.scatter(jitter, data, s=8, color=color, alpha=0.4, zorder=10, linewidths=0)
     
     all_values = np.concatenate([condition1_values, condition2_values])
     y_min = np.nanmin(all_values)
@@ -788,6 +778,8 @@ def plot_multi_window_comparison(
     *,
     roi_name: Optional[str] = None,
     stats_dir: Optional[Union[Path, str]] = None,
+    sample_unit: str = "trials",
+    comparison_dimension_name: str = "windows",
 ) -> None:
     """Multi-window paired comparison plot with significance brackets.
     
@@ -877,18 +869,30 @@ def plot_multi_window_comparison(
             continue
         
         positions = list(range(len(available_segments)))
-        box_width = 0.6
         
         box_data = [segment_data[seg] for seg in available_segments]
-        boxplot = ax.boxplot(box_data, positions=positions, widths=box_width, patch_artist=True)
-        
-        for i, seg in enumerate(available_segments):
-            boxplot["boxes"][i].set_facecolor(segment_color_map[seg])
-            boxplot["boxes"][i].set_alpha(0.6)
+        for i, (seg, data) in enumerate(zip(available_segments, box_data)):
+            color = segment_color_map[seg]
+            pos = positions[i]
             
-            jitter = np.random.default_rng(42).uniform(-0.15, 0.15, len(segment_data[seg]))
-            ax.scatter(positions[i] + jitter, segment_data[seg],
-                      c=[segment_color_map[seg]], alpha=0.3, s=8)
+            # Half violin
+            v = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.5)
+            for b in v['bodies']:
+                b.get_paths()[0].vertices[:, 0] = np.clip(b.get_paths()[0].vertices[:, 0], pos, np.inf)
+                b.set_facecolor(color)
+                b.set_edgecolor(color)
+                b.set_alpha(0.6)
+            
+            # Boxplot
+            ax.boxplot(data, positions=[pos - 0.1], widths=0.1, showfliers=False,
+                       patch_artist=True, boxprops=dict(facecolor="white", color=color),
+                       medianprops=dict(color="black", linewidth=1.5),
+                       whiskerprops=dict(color=color), capprops=dict(color=color))
+            
+            # Jitter scatter
+            rng = np.random.default_rng(42 + i)
+            jitter = rng.uniform(pos - 0.25, pos - 0.15, size=len(data))
+            ax.scatter(jitter, data, s=8, color=color, alpha=0.4, zorder=10, linewidths=0)
         
         all_values = np.concatenate([segment_data[seg] for seg in available_segments])
         y_min = np.nanmin(all_values)
@@ -898,7 +902,9 @@ def plot_multi_window_comparison(
         bracket_y = y_max + 0.08 * y_range
         bracket_spacing = 0.12 * y_range
         
-        pair_list = list(combinations(range(len(available_segments)), 2))
+        # Only plot brackets compared to the first element (Control) to avoid ladder density
+        pair_list = [(0, j) for j in range(1, len(available_segments))]
+        drawn_brackets = 0
         for pair_idx, (i, j) in enumerate(pair_list):
             seg1, seg2 = available_segments[i], available_segments[j]
             key = (band, seg1, seg2)
@@ -910,13 +916,14 @@ def plot_multi_window_comparison(
                 stars = _get_significance_stars(q_val)
                 text = f"{stars}" if is_sig else "ns"
                 
-                current_y = bracket_y + pair_idx * bracket_spacing
+                current_y = bracket_y + drawn_brackets * bracket_spacing
                 _draw_significance_bracket(
                     ax, positions[i], positions[j], current_y, text, is_sig,
                     bracket_height=0.02 * y_range, text_offset=0.01 * y_range
                 )
+                drawn_brackets += 1
         
-        top_bracket_y = bracket_y + len(pair_list) * bracket_spacing
+        top_bracket_y = bracket_y + drawn_brackets * bracket_spacing
         ax.set_ylim(y_min - 0.1 * y_range, top_bracket_y + 0.1 * y_range)
         
         ax.set_xticks(positions)
@@ -931,11 +938,15 @@ def plot_multi_window_comparison(
     
     roi_display = roi_name.replace("_", " ").title() if roi_name and roi_name != "all" else "All Channels"
     
-    title_parts = [f"{feature_label}: Multi-Window Comparison ({n_segments} windows, {n_pairs} pairs)"]
+    dimension_name = str(comparison_dimension_name).strip() or "windows"
+    title_parts = [
+        f"{feature_label}: Multi-{dimension_name.capitalize()} Comparison "
+        f"({n_segments} {dimension_name}, {n_pairs} pairs)"
+    ]
     info_parts = [
         f"Subject: {subject}",
         f"ROI: {roi_display}",
-        f"N: {n_trials} trials",
+        f"N: {n_trials} {sample_unit}",
         "Wilcoxon signed-rank",
         f"FDR: {n_significant}/{n_tests} significant (*p<.05, **p<.01, ***p<.001)"
     ]
@@ -974,6 +985,7 @@ def plot_paired_comparison(
     roi_name: Optional[str] = None,
     precomputed_stats: Optional[pd.DataFrame] = None,
     stats_dir: Optional[Union[Path, str]] = None,
+    sample_unit: str = "trials",
 ) -> None:
     """Unified paired comparison plot.
     
@@ -1111,7 +1123,7 @@ def plot_paired_comparison(
         )
         info_parts.append(f"ROI: {roi_display}")
     info_parts.extend([
-        f"N: {n_trials} trials",
+        f"N: {n_trials} {sample_unit}",
         "Wilcoxon signed-rank",
         f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
     ])
@@ -1359,19 +1371,28 @@ def _plot_multi_group_separate_bands(
         positions = list(range(len(available_groups)))
         box_data = [band_data[g] for g in available_groups]
         
-        bp = ax.boxplot(box_data, positions=positions, widths=0.6, patch_artist=True)
-        
-        for i, (box, g) in enumerate(zip(bp["boxes"], available_groups)):
-            box.set_facecolor(group_colors[groups.index(g) % len(group_colors)])
-            box.set_alpha(0.7)
-        
-        rng = np.random.default_rng(42)
-        for i, g in enumerate(available_groups):
-            vals = band_data[g]
-            jitter = rng.uniform(-0.15, 0.15, len(vals))
-            ax.scatter(i + jitter, vals, 
-                      c=[group_colors[groups.index(g) % len(group_colors)]], 
-                      alpha=0.5, s=15, zorder=3)
+        for i, (g, data) in enumerate(zip(available_groups, box_data)):
+            color = group_colors[groups.index(g) % len(group_colors)]
+            pos = positions[i]
+            
+            # Half violin
+            v = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.5)
+            for b in v['bodies']:
+                b.get_paths()[0].vertices[:, 0] = np.clip(b.get_paths()[0].vertices[:, 0], pos, np.inf)
+                b.set_facecolor(color)
+                b.set_edgecolor(color)
+                b.set_alpha(0.6)
+            
+            # Boxplot
+            ax.boxplot(data, positions=[pos - 0.1], widths=0.1, showfliers=False,
+                       patch_artist=True, boxprops=dict(facecolor="white", color=color),
+                       medianprops=dict(color="black", linewidth=1.5),
+                       whiskerprops=dict(color=color), capprops=dict(color=color))
+            
+            # Scatter jitter
+            rng = np.random.default_rng(42 + i)
+            jitter = rng.uniform(pos - 0.25, pos - 0.15, size=len(data))
+            ax.scatter(jitter, data, s=15, color=color, alpha=0.5, zorder=3, linewidths=0)
         
         all_vals = np.concatenate([band_data[g] for g in available_groups])
         y_min, y_max = np.nanmin(all_vals), np.nanmax(all_vals)

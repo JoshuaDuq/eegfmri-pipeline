@@ -13,10 +13,12 @@ Requires:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -39,6 +41,86 @@ def check_docker_available() -> bool:
         return result.returncode == 0
     except Exception:
         return False
+
+
+def _iso_utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _truncate_text(value: str, max_chars: int = 12000) -> str:
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text
+    return text[-max_chars:]
+
+
+def _surface_geometry_report(path: Path) -> Dict[str, Any]:
+    report: Dict[str, Any] = {
+        "path": str(path),
+        "exists": bool(path.exists()),
+    }
+    if not path.exists():
+        return report
+
+    try:
+        import mne
+        import numpy as np
+
+        rr, tris = mne.read_surface(str(path))
+        rr = np.asarray(rr, dtype=float)
+        tris = np.asarray(tris, dtype=int)
+        report["n_vertices"] = int(rr.shape[0])
+        report["n_faces"] = int(tris.shape[0])
+        report["bbox_min"] = [float(v) for v in np.min(rr, axis=0).tolist()]
+        report["bbox_max"] = [float(v) for v in np.max(rr, axis=0).tolist()]
+    except Exception as exc:
+        report["read_error"] = str(exc)
+    return report
+
+
+def _collect_bem_surface_reports(subjects_dir: Path, subject: str) -> Dict[str, Dict[str, Any]]:
+    subject_bem_dir = Path(subjects_dir) / str(subject) / "bem"
+    reports: Dict[str, Dict[str, Any]] = {}
+    for surf_name in ("inner_skull", "outer_skull", "outer_skin"):
+        primary = subject_bem_dir / f"{surf_name}.surf"
+        watershed = subject_bem_dir / "watershed" / f"{subject}_{surf_name}_surface"
+        reports[surf_name] = {
+            "primary": _surface_geometry_report(primary),
+            "watershed": _surface_geometry_report(watershed),
+        }
+    return reports
+
+
+def _write_bem_failure_qc_artifact(
+    *,
+    subject: str,
+    subjects_dir: Path,
+    docker_cmd: list[str],
+    returncode: Optional[int],
+    started_at_utc: str,
+    ended_at_utc: str,
+    stderr: str,
+    stdout: str,
+) -> Path:
+    subject_dir = Path(subjects_dir) / str(subject)
+    qc_dir = subject_dir / "bem" / "qc"
+    qc_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    qc_path = qc_dir / f"{subject}_bem_failure_{stamp}.json"
+
+    payload: Dict[str, Any] = {
+        "subject": str(subject),
+        "subjects_dir": str(subjects_dir),
+        "started_at_utc": str(started_at_utc),
+        "ended_at_utc": str(ended_at_utc),
+        "docker_command": list(docker_cmd),
+        "returncode": int(returncode) if returncode is not None else None,
+        "stderr_tail": _truncate_text(stderr),
+        "stdout_tail": _truncate_text(stdout),
+        "surface_reports": _collect_bem_surface_reports(subjects_dir, subject),
+    }
+    qc_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return qc_path
 
 
 def _auto_detect_fs_license() -> Optional[Path]:
@@ -444,7 +526,6 @@ def generate_bem_model_and_solution(
     cond_str = f"[{conductivity[0]}, {conductivity[1]}, {conductivity[2]}]"
 
     python_script = f"""import mne
-import numpy as np
 import os
 import shutil
 
@@ -456,53 +537,23 @@ subjects_dir = "/subjects"
 def get_surf_path(name):
     return f"{{subjects_dir}}/{{subject}}/bem/{{name}}.surf"
 
-for name in ['inner_skull', 'outer_skull', 'outer_skin']:
+for name in ["inner_skull", "outer_skull", "outer_skin"]:
     surf_path = get_surf_path(name)
     if not os.path.exists(surf_path):
         alt_path = f"{{subjects_dir}}/{{subject}}/bem/watershed/{{subject}}_{{name}}_surface"
         if os.path.exists(alt_path):
             shutil.copy(alt_path, surf_path)
 
-MAX_RETRIES = 5
-import sys
-for attempt in range(MAX_RETRIES):
-    try:
-        bem_model = mne.make_bem_model(
-            subject=subject,
-            ico=ico,
-            subjects_dir=subjects_dir,
-            conductivity=cond_str
-        )
-        break
-    except RuntimeError as e:
-        err_str = str(e).lower()
-        if 'completely inside surface' in err_str:
-            print(f"BEM intersection detected (attempt {{attempt + 1}}): {{e}}", file=sys.stderr)
-            if attempt == MAX_RETRIES - 1:
-                print("Max retries reached, cannot fix BEM intersection.", file=sys.stderr)
-                raise
-            
-            print("Auto-scaling surfaces to fix topology...", file=sys.stderr)
-            scales = dict(
-                inner_skull=0.98,
-                outer_skull=1.00,
-                outer_skin=1.02
-            )
-            for name, scale in scales.items():
-                if scale != 1.0:
-                    surf_path = get_surf_path(name)
-                    if os.path.exists(surf_path):
-                        coords, faces = mne.read_surface(surf_path)
-                        center = np.mean(coords, axis=0)
-                        coords = center + (coords - center) * scale
-                        mne.write_surface(surf_path, coords, faces, overwrite=True)
-        else:
-            raise
-
+bem_model = mne.make_bem_model(
+    subject=subject,
+    ico=ico,
+    subjects_dir=subjects_dir,
+    conductivity=cond_str,
+)
 mne.write_bem_surfaces(
     f"/subjects/{{subject}}/bem/{bem_model_name}",
     bem_model,
-    overwrite={overwrite}
+    overwrite={overwrite},
 )
 bem_solution = mne.make_bem_solution(
     f"/subjects/{{subject}}/bem/{bem_model_name}"
@@ -510,7 +561,7 @@ bem_solution = mne.make_bem_solution(
 mne.write_bem_solution(
     f"/subjects/{{subject}}/bem/{bem_solution_name}",
     bem_solution,
-    overwrite={overwrite}
+    overwrite={overwrite},
 )
 """
 
@@ -537,6 +588,7 @@ mne.write_bem_solution(
     logger.info(f"Running Docker BEM generation for subject {subject}")
     logger.debug(f"Docker command: {' '.join(docker_cmd)}")
 
+    run_started_utc = _iso_utc_now()
     try:
         result = subprocess.run(
             docker_cmd,
@@ -547,16 +599,40 @@ mne.write_bem_solution(
 
         if result.returncode != 0:
             logger.error(f"Docker BEM generation failed:\n{result.stderr}")
+            qc_path = _write_bem_failure_qc_artifact(
+                subject=subject,
+                subjects_dir=subjects_dir,
+                docker_cmd=docker_cmd,
+                returncode=result.returncode,
+                started_at_utc=run_started_utc,
+                ended_at_utc=_iso_utc_now(),
+                stderr=result.stderr,
+                stdout=result.stdout,
+            )
             raise RuntimeError(
-                f"Docker BEM generation failed with exit code {result.returncode}:\n{result.stderr}"
+                "Docker BEM generation failed "
+                f"(exit code {result.returncode}). QC report: {qc_path}\n"
+                f"{result.stderr}"
             )
 
         logger.info(f"BEM generation completed successfully")
         if result.stdout:
             logger.debug(f"Docker output:\n{result.stdout}")
 
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("Docker BEM generation timed out after 1 hour")
+    except subprocess.TimeoutExpired as exc:
+        qc_path = _write_bem_failure_qc_artifact(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            docker_cmd=docker_cmd,
+            returncode=None,
+            started_at_utc=run_started_utc,
+            ended_at_utc=_iso_utc_now(),
+            stderr=f"Docker BEM generation timed out after 1 hour: {exc}",
+            stdout="",
+        )
+        raise RuntimeError(
+            f"Docker BEM generation timed out after 1 hour. QC report: {qc_path}"
+        ) from exc
 
     return (
         bem_model_path if bem_model_path.exists() else None,

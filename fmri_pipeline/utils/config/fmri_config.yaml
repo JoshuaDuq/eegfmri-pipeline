@@ -5,7 +5,7 @@
 paths:
   # FreeSurfer license file (required for fMRIPrep and BEM generation)
   # Get a free license at: https://surfer.nmr.mgh.harvard.edu/registration.html
-  freesurfer_license: null  # Set this path or EEG_PIPELINE_FREESURFER_LICENSE
+  freesurfer_license: null  # Optional override (otherwise: EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt)
 
   # fMRI BIDS root directory (raw fMRI data)
   bids_fmri_root: null
@@ -38,7 +38,7 @@ fmri_preprocessing:
     image: "nipreps/fmriprep:25.2.4"
     output_dir: null            # Default: <deriv_root>/preprocessed/fmri
     work_dir: null              # Default: <deriv_root>/work/fmriprep
-    fs_license_file: null       # Default: paths.freesurfer_license
+    fs_license_file: null       # Default: paths.freesurfer_license, then EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt
     fs_subjects_dir: null       # Optional: FreeSurfer SUBJECTS_DIR
     
     # Output spaces (standard and subject-specific)

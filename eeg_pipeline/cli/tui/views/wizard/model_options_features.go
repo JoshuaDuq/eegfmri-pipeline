@@ -342,6 +342,7 @@ func (m Model) getFeaturesOptions() []optionType {
 						optSourceLocFmriMaxVoxPerClus,
 						optSourceLocFmriMaxTotalVox,
 						optSourceLocFmriRandomSeed,
+						optSourceLocFmriOutputSpace,
 					)
 					options = append(options, optSourceLocFmriMinClusterMM3)
 					if m.sourceLocFmriMinClusterMM3 <= 0 {

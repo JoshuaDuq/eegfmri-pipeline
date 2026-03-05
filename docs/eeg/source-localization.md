@@ -16,6 +16,29 @@ This tutorial covers two ways to run EEG source localization in this pipeline:
 
 ---
 
+## What Is Computed (And What Is Not)
+
+- Computed per trial/window: source-band power and source-band envelope features.
+- Optional: one-row subject-level source contrast tables (`sourcecontrast`) for condition A vs B.
+- fMRI-informed outputs can be emitted in:
+  - `cluster` space (subject-specific fMRI clusters),
+  - `atlas` space (subject-space `aparc+aseg` labels),
+  - `dual` (both families).
+
+Not computed directly:
+- Raw "activation vs suppression sign" interpretation from standalone power columns.
+- Signed interpretation should come from explicit contrasts/change-scores (for example baseline vs plateau, condition A vs B).
+
+Scientific constraints:
+- `feature_engineering.sourcelocalization.fmri.time_windows` is unsupported for source feature computation and must not be used.
+- fMRI-constrained eLORETA requires `--source-loose 1.0`.
+
+Group-level recommendation:
+- Use atlas-harmonized source outputs for inferential cross-subject statistics.
+- Keep cluster outputs for subject-level interpretation and QC.
+
+---
+
 ## Prerequisites (both paths)
 
 ### 1. Activate environment
@@ -460,6 +483,7 @@ Then continue from Step 7 above (create coregistration transform).
 | `--source-fmri-max-voxels-per-cluster` | Maximum voxels sampled per cluster (set 0 for no limit) | `2000` |
 | `--source-fmri-max-total-voxels` | Maximum total voxels across all clusters (set 0 for no limit) | `20000` |
 | `--source-fmri-random-seed` | Random seed for voxel subsampling (0 = deterministic default seed) | `0` |
+| `--source-fmri-output-space` | Feature output family: `cluster`, `atlas`, or `dual` | `dual` |
 
 FDR thresholding is valid only for z-stat maps. Use `--source-fmri-output-type z-score` (or an equivalent external z-map with explicit metadata).
 

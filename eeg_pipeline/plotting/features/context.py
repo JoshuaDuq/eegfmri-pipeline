@@ -369,6 +369,11 @@ class FeaturePlotContext:
 
         data_frames: List[pd.DataFrame] = []
         base_len: Optional[int] = None
+        expected_len: Optional[int] = None
+        if mode == "wide" and self.aligned_events is not None:
+            aligned_len = len(self.aligned_events)
+            if aligned_len > 0:
+                expected_len = aligned_len
 
         for path in paths:
             df = self._safe_read_table(path)
@@ -376,16 +381,26 @@ class FeaturePlotContext:
                 continue
 
             df = df.reset_index(drop=True)
-            if base_len is None:
-                base_len = len(df)
-            elif len(df) != base_len and mode == "wide":
-                self.logger.warning(
-                    "Skipping %s (rows=%d) due to length mismatch (expected %d)",
-                    path.name,
-                    len(df),
-                    base_len,
-                )
-                continue
+            if mode == "wide":
+                if expected_len is not None and len(df) != expected_len:
+                    self.logger.warning(
+                        "Skipping %s (rows=%d) due to length mismatch (expected aligned events=%d)",
+                        path.name,
+                        len(df),
+                        expected_len,
+                    )
+                    continue
+                if expected_len is None:
+                    if base_len is None:
+                        base_len = len(df)
+                    elif len(df) != base_len:
+                        self.logger.warning(
+                            "Skipping %s (rows=%d) due to length mismatch (expected %d)",
+                            path.name,
+                            len(df),
+                            base_len,
+                        )
+                        continue
 
             if mode == "long":
                 suffix = self._suffix_from_path(path, stem)

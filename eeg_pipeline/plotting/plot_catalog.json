@@ -111,19 +111,6 @@
       "requires_epochs": true
     },
     {
-      "id": "cross_frequency_power_correlation",
-      "group": "power",
-      "label": "Cross-Frequency Correlation",
-      "description": "Correlation matrix between frequency bands",
-      "required_files": [
-        "features_power*.parquet"
-      ],
-      "feature_categories": [
-        "power"
-      ],
-      "requires_features": true
-    },
-    {
       "id": "power_spectral_density",
       "group": "power",
       "label": "PSD Summary",
@@ -703,6 +690,69 @@
       "feature_categories": [
         "sourcelocalization"
       ]
+    },
+    {
+      "id": "source_cluster_tfr",
+      "group": "sourcelocalization",
+      "label": "Cluster Source TFR (fMRI-informed)",
+      "description": "Continuous Time-Frequency Representation explicitly isolated for each fMRI-constrained source cluster",
+      "required_files": [
+        "features/sourcelocalization/*/source_estimates/fmri_informed/*-tfr.h5"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
+    },
+    {
+      "id": "source_cluster_composition",
+      "group": "sourcelocalization",
+      "label": "Cluster Composition (fMRI-informed)",
+      "description": "Stacked bar chart showing proportional atlas composition of each fMRI cluster",
+      "required_files": [
+        "features/sourcelocalization/*/metadata/fmri_constraint_*.json"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ]
+    },
+    {
+      "id": "source_atlas_roi_heatmap",
+      "group": "sourcelocalization",
+      "label": "Atlas ROI Heatmap (fMRI-informed)",
+      "description": "Band × atlas-region heatmap of harmonized source power for group-level comparison",
+      "required_files": [
+        "features_sourcelocalization*.parquet"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "source_atlas_surface",
+      "group": "sourcelocalization",
+      "label": "Atlas Surface Topography (fMRI-informed)",
+      "description": "Atlas ROI power projected onto fsaverage cortical surface per frequency band",
+      "required_files": [
+        "features_sourcelocalization*.parquet"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "source_cluster_raincloud",
+      "group": "sourcelocalization",
+      "label": "Cluster Epoch Distribution (fMRI-informed)",
+      "description": "Trial-wise raincloud plots (half-violin, boxplot, scatter) of source power per active fMRI cluster",
+      "required_files": [
+        "features_sourcelocalization*.parquet"
+      ],
+      "feature_categories": [
+        "sourcelocalization"
+      ],
+      "requires_features": true
     }
   ]
 }

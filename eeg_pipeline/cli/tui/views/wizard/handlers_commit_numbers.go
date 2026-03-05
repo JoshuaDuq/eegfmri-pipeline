@@ -789,14 +789,6 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 && val <= 1 {
 			m.sourceLocFmriClusterPThreshold = val
 		}
-	case optSourceLocFmriWindowATmin:
-		m.sourceLocFmriWindowATmin = val
-	case optSourceLocFmriWindowATmax:
-		m.sourceLocFmriWindowATmax = val
-	case optSourceLocFmriWindowBTmin:
-		m.sourceLocFmriWindowBTmin = val
-	case optSourceLocFmriWindowBTmax:
-		m.sourceLocFmriWindowBTmax = val
 	// ITPC options
 	case optItpcMinTrialsPerCondition:
 		if val >= 1 {

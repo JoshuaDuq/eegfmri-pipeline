@@ -265,21 +265,8 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         fmri_cfg["max_total_voxels"] = args.source_fmri_max_total_voxels
     if getattr(args, "source_fmri_random_seed", None) is not None:
         fmri_cfg["random_seed"] = args.source_fmri_random_seed
-
-    source_fmri_window_args = (
-        getattr(args, "source_fmri_window_a_name", None),
-        getattr(args, "source_fmri_window_a_tmin", None),
-        getattr(args, "source_fmri_window_a_tmax", None),
-        getattr(args, "source_fmri_window_b_name", None),
-        getattr(args, "source_fmri_window_b_tmin", None),
-        getattr(args, "source_fmri_window_b_tmax", None),
-    )
-    if any(value is not None for value in source_fmri_window_args):
-        raise ValueError(
-            "Source feature computation does not support --source-fmri-window-* arguments. "
-            "Remove these flags from the features command. "
-            "fMRI time-window configuration is unsupported for source feature computation."
-        )
+    if getattr(args, "source_fmri_output_space", None) is not None:
+        fmri_cfg["output_space"] = args.source_fmri_output_space
 
     contrast_cfg = fmri_cfg.setdefault("contrast", {})
     if getattr(args, "source_fmri_contrast_enabled", None) is not None:

@@ -748,6 +748,22 @@ and global averages across ROIs.
 When fMRI constraints are enabled, the source space is restricted to suprathreshold
 fMRI activation clusters.
 
+Current fMRI-informed output families:
+
+- `cluster` space: subject-specific constrained clusters (`..._fmri_cluster_*`).
+- `atlas` space: constrained-voxel aggregation into subject-space `aparc+aseg` labels (`..._atlas_*`).
+- `dual`: emit both families in one run.
+
+Source-localization outputs are amplitude/power-like quantities. Sign-level
+"activation vs suppression" interpretation should be based on explicit contrasts
+or change-scores, not on raw standalone power columns.
+
+`feature_engineering.sourcelocalization.fmri.time_windows` is intentionally unsupported
+for feature computation and raises a hard error if present.
+
+For cross-subject inferential statistics, use atlas-harmonized outputs; cluster-space
+outputs remain useful for per-subject interpretation and QC.
+
 ---
 
 ### 8.13 Complexity

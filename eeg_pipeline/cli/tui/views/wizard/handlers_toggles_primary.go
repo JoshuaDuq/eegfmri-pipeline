@@ -377,6 +377,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSourceLocFmriRandomSeed:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optSourceLocFmriOutputSpace:
+		m.sourceLocFmriOutputSpace = (m.sourceLocFmriOutputSpace + 1) % 3 // 0: cluster, 1: atlas, 2: dual
+		m.useDefaultAdvanced = false
 	// BEM/Trans generation options (Docker-based)
 	case optSourceLocCreateTrans:
 		m.sourceLocCreateTrans = !m.sourceLocCreateTrans
@@ -509,24 +512,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriRequireFmriprep:
 		m.sourceLocFmriRequireFmriprep = !m.sourceLocFmriRequireFmriprep
-		m.useDefaultAdvanced = false
-	case optSourceLocFmriWindowAName:
-		m.startTextEdit(textFieldSourceLocFmriWindowAName)
-		m.useDefaultAdvanced = false
-	case optSourceLocFmriWindowATmin:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optSourceLocFmriWindowATmax:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optSourceLocFmriWindowBName:
-		m.startTextEdit(textFieldSourceLocFmriWindowBName)
-		m.useDefaultAdvanced = false
-	case optSourceLocFmriWindowBTmin:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optSourceLocFmriWindowBTmax:
-		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// ITPC options
 	case optFeatGroupITPC:

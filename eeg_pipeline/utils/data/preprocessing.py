@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 def find_brainvision_vhdrs(source_root: Path) -> List[Path]:
     vhdrs = sorted(source_root.glob("sub-*/eeg/*.vhdr"))
-    return [p for p in vhdrs if p.is_file()]
+    return [p for p in vhdrs if p.is_file() and not p.name.startswith("._")]
 
 
 def parse_subject_id(path: Path) -> str:
@@ -102,7 +102,9 @@ def find_behavior_csv_for_run(
     if not behavior_dir.exists():
         return None
 
-    csvs: List[Path] = sorted(behavior_dir.glob(glob_pattern))
+    csvs: List[Path] = sorted(
+        p for p in behavior_dir.glob(glob_pattern) if p.is_file() and not p.name.startswith("._")
+    )
     if not csvs:
         return None
     if run is None:

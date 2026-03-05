@@ -699,8 +699,6 @@ const (
 	textFieldSourceLocFmriPhaseScopeColumn
 	textFieldSourceLocFmriPhaseScopeValue
 	textFieldSourceLocFmriStimPhasesToModel
-	textFieldSourceLocFmriWindowAName
-	textFieldSourceLocFmriWindowBName
 	textFieldPredictorResidualSplineDfCandidates
 	textFieldPredictorResidualModelComparePolyDegrees
 	// Plotting advanced config text fields
@@ -1743,6 +1741,7 @@ type Model struct {
 	sourceLocFmriMaxVoxPerClus  int     // Max voxels sampled per cluster
 	sourceLocFmriMaxTotalVox    int     // Max total voxels across clusters
 	sourceLocFmriRandomSeed     int     // Random seed for voxel subsampling
+	sourceLocFmriOutputSpace    int     // 0: cluster, 1: atlas, 2: dual
 
 	// BEM/Trans generation options (Docker-based)
 	sourceLocCreateTrans        bool // Auto-create coregistration transform via Docker
@@ -1780,14 +1779,6 @@ type Model struct {
 	sourceLocFmriResampleToFS             bool     // Auto-resample to FreeSurfer space
 	sourceLocFmriInputSource              int      // 0: fmriprep, 1: bids_raw
 	sourceLocFmriRequireFmriprep          bool     // Require fMRIPrep for contrast building
-
-	// fMRI-specific time windows (independent of EEG feature extraction windows)
-	sourceLocFmriWindowAName string  // Name for window A (e.g., "window_a")
-	sourceLocFmriWindowATmin float64 // Start time for window A (seconds)
-	sourceLocFmriWindowATmax float64 // End time for window A (seconds)
-	sourceLocFmriWindowBName string  // Name for window B (e.g., "baseline")
-	sourceLocFmriWindowBTmin float64 // Start time for window B (seconds)
-	sourceLocFmriWindowBTmax float64 // End time for window B (seconds)
 
 	// Source localization UI expansion states
 	featGroupSourceLocExpanded         bool // UI expansion state for source localization
@@ -2720,6 +2711,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriMaxVoxPerClus:  2000,
 		sourceLocFmriMaxTotalVox:    20000,
 		sourceLocFmriRandomSeed:     0,
+		sourceLocFmriOutputSpace:    2, // 2: dual
 
 		// fMRI GLM contrast builder defaults
 		sourceLocFmriContrastEnabled:          false,
@@ -2748,12 +2740,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriResampleToFS:             true,
 		sourceLocFmriInputSource:              0, // 0: fmriprep
 		sourceLocFmriRequireFmriprep:          true,
-		sourceLocFmriWindowAName:              "",
-		sourceLocFmriWindowATmin:              0.0,
-		sourceLocFmriWindowATmax:              0.0,
-		sourceLocFmriWindowBName:              "",
-		sourceLocFmriWindowBTmin:              0.0,
-		sourceLocFmriWindowBTmax:              0.0,
 
 		// Source localization UI expansion states
 		featGroupSourceLocExpanded:         false,
@@ -3714,23 +3700,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			m.selected[i] = true // Default to all categories
 		}
 
-		// Initialize ROI selection for plotting (same as features pipeline)
-		for i := range defaultROIs {
-			m.roiSelected[i] = true
-		}
-
-		// Initialize band selection for plotting (same as features pipeline)
-		for i := range frequencyBands {
-			m.bandSelected[i] = true
-		}
-
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepSelectPlotCategories,
 			types.StepSelectPlots,
 			types.StepSelectFeaturePlotters,
-			types.StepSelectBands,
-			types.StepSelectROIs,
 			types.StepAdvancedConfig,
 			types.StepPlotConfig,
 		}

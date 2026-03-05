@@ -28,6 +28,12 @@ const (
 	timeRangeFieldCount   = 3
 )
 
+var groupSupportedPlotIDs = map[string]struct{}{
+	"band_power_topomaps":    {},
+	"power_by_condition":     {},
+	"power_spectral_density": {},
+}
+
 ///////////////////////////////////////////////////////////////////
 // Cursor Reset Helper
 ///////////////////////////////////////////////////////////////////
@@ -115,9 +121,6 @@ func (m *Model) shouldSkipStep(step types.WizardStep) bool {
 		}
 	case types.PipelinePlotting:
 		if step == types.StepSelectFeaturePlotters && len(m.selectedFeaturePlotterCategories()) == 0 {
-			return true
-		}
-		if step == types.StepSelectROIs && !m.plottingNeedsROIs() {
 			return true
 		}
 	}
@@ -430,7 +433,7 @@ func (m *Model) validateStep() []string {
 			errors = append(errors, "Select at least one frequency band")
 		}
 	case types.StepSelectPlots:
-		count := countSelectedItems(m.plotSelected)
+		count := m.countSelectedVisiblePlots()
 		if count == 0 {
 			errors = append(errors, "Select at least one plot to generate")
 		}
@@ -513,6 +516,15 @@ func (m *Model) handleSpace() {
 		}
 	case types.StepSelectPlots:
 		if m.plotCursor < len(m.plotItems) {
+			if !m.IsPlotVisibleForSelection(m.plotItems[m.plotCursor]) {
+				m.plotCursor = m.findNextVisiblePlot(m.plotCursor, 1)
+				if m.plotCursor < 0 || m.plotCursor >= len(m.plotItems) {
+					break
+				}
+				if !m.IsPlotVisibleForSelection(m.plotItems[m.plotCursor]) {
+					break
+				}
+			}
 			m.plotSelected[m.plotCursor] = !m.plotSelected[m.plotCursor]
 			plotID := m.plotItems[m.plotCursor].ID
 			if m.plotSelected[m.plotCursor] {
@@ -638,7 +650,7 @@ func (m *Model) selectAll() {
 		}
 	case types.StepSelectPlots:
 		for i, plot := range m.plotItems {
-			if m.IsPlotCategorySelected(plot.Group) {
+			if m.IsPlotVisibleForSelection(plot) {
 				m.plotSelected[i] = true
 			}
 		}
@@ -676,7 +688,7 @@ func (m *Model) selectNone() {
 		m.featureFileSelected = make(map[string]bool)
 	case types.StepSelectPlots:
 		for i, plot := range m.plotItems {
-			if m.IsPlotCategorySelected(plot.Group) {
+			if m.IsPlotVisibleForSelection(plot) {
 				m.plotSelected[i] = false
 			}
 		}
@@ -922,7 +934,7 @@ func (m *Model) validateTimeRanges() []string {
 
 func (m Model) plotRequirements() (requiresEpochs bool, requiresFeatures bool, requiresStats bool) {
 	for i, plot := range m.plotItems {
-		if !m.plotSelected[i] || !m.IsPlotCategorySelected(plot.Group) {
+		if !m.plotSelected[i] || !m.IsPlotVisibleForSelection(plot) {
 			continue
 		}
 		if plot.RequiresEpochs {
@@ -1019,7 +1031,7 @@ func (m Model) findNextVisiblePlot(current int, delta int) int {
 	maxIterations := len(m.plotItems)
 	for i := 0; i < maxIterations; i++ {
 		next = moveCursorInList(next, delta, len(m.plotItems))
-		if m.IsPlotCategorySelected(m.plotItems[next].Group) {
+		if m.IsPlotVisibleForSelection(m.plotItems[next]) {
 			return next
 		}
 	}
@@ -1090,6 +1102,34 @@ func (m Model) IsPlotCategorySelected(group string) bool {
 		}
 	}
 	return false
+}
+
+func (m Model) isPlotSupportedForScope(plot PlotItem) bool {
+	if m.Pipeline != types.PipelinePlotting || m.plottingScope != PlottingScopeGroup {
+		return true
+	}
+	_, ok := groupSupportedPlotIDs[strings.TrimSpace(plot.ID)]
+	return ok
+}
+
+func (m Model) IsPlotVisibleForSelection(plot PlotItem) bool {
+	if !m.IsPlotCategorySelected(plot.Group) {
+		return false
+	}
+	return m.isPlotSupportedForScope(plot)
+}
+
+func (m Model) countSelectedVisiblePlots() int {
+	count := 0
+	for i, plot := range m.plotItems {
+		if !m.IsPlotVisibleForSelection(plot) {
+			continue
+		}
+		if m.plotSelected[i] {
+			count++
+		}
+	}
+	return count
 }
 
 // SelectedPlotCategoryKeys returns the keys of selected plot categories

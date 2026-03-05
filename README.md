@@ -88,7 +88,7 @@ cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 
 ```bash
 python -m venv .venv311
-source .venv311/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -487,9 +487,11 @@ eeg-pipeline fmri preprocess --subject 0001 \
 | `--engine` | `docker` or `apptainer` | `docker` |
 | `--fmriprep-image` | Container image tag or URI | `nipreps/fmriprep:25.2.4` |
 | `--output-spaces` | Output coordinate spaces | `MNI152NLin2009cAsym`, `T1w` |
-| `--fs-license-file` | FreeSurfer license path | `paths.freesurfer_license` or env var |
+| `--fs-license-file` | FreeSurfer license path | `paths.freesurfer_license`, else `EEG_PIPELINE_FREESURFER_LICENSE`, else `~/license.txt` |
 | `--fs-subjects-dir` | FreeSurfer `SUBJECTS_DIR` | auto |
 | `--ignore` | Skip steps (e.g., `fieldmaps slicetiming`) | none |
+
+Note: for container runs, the pipeline automatically ignores macOS metadata files (`._*`, `.DS_Store`) by mounting a sanitized temporary BIDS view.
 
 ---
 

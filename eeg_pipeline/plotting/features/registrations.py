@@ -58,10 +58,10 @@ from eeg_pipeline.plotting.features.phase import (
 )
 from eeg_pipeline.plotting.features.power import (
     plot_power_by_condition,
-    plot_cross_frequency_power_correlation,
     plot_band_power_topomaps,
     plot_band_power_topomaps_window_contrast,
     plot_power_spectral_density,
+    plot_band_power_evolution,
 )
 
 from eeg_pipeline.plotting.features.source_localization import (
@@ -69,6 +69,11 @@ from eeg_pipeline.plotting.features.source_localization import (
     plot_source_glass_brain,
     plot_source_band_panel,
     plot_source_cluster_timecourse,
+    plot_source_cluster_composition,
+    plot_source_atlas_roi_heatmap,
+    plot_source_atlas_surface,
+    plot_source_cluster_raincloud,
+    plot_source_cluster_tfr,
 )
 
 from eeg_pipeline.plotting.erp import (
@@ -545,6 +550,46 @@ def plot_psd_visualization(ctx: FeaturePlotContext, saved_files):
     )
 
 
+###################################################################
+# TFR
+###################################################################
+
+
+@VisualizationRegistry.register("tfr")
+def tfr_suite(ctx: FeaturePlotContext, saved_files):
+    if ctx.epochs is None:
+        return
+
+    tfr = ctx.get_or_compute_tfr()
+    if tfr is None:
+        return
+
+    conditions = [("All", np.ones(len(ctx.epochs), dtype=bool))]
+    if ctx.aligned_events is not None:
+        from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
+        spec = extract_multi_group_masks(ctx.aligned_events, ctx.config, require_enabled=True)
+        if spec:
+            masks_dict, group_labels = spec
+            conditions = [(label, masks_dict[label]) for label in group_labels]
+            
+    # Always try to plot if tfr is available
+    safe_plot(
+        ctx,
+        saved_files,
+        "tfr_band_evolution",
+        "tfr",
+        None,
+        plot_band_power_evolution,
+        tfr_epochs=tfr,
+        conditions=conditions,
+        subject=ctx.subject,
+        save_dir=ctx.subdir("tfr"),
+        logger=ctx.logger,
+        config=ctx.config,
+        roi_name="all",
+    )
+
+
 @VisualizationRegistry.register("power")
 def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
     if ctx.power_df is None or ctx.aligned_events is None:
@@ -566,22 +611,6 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
         logger=ctx.logger,
         config=ctx.config,
         stats_dir=ctx.stats_dir,
-    )
-
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "cross_frequency_power_correlation",
-        "power",
-        None,
-        plot_cross_frequency_power_correlation,
-        pow_df=ctx.power_df,
-        bands=power_bands,
-        subject=ctx.subject,
-        save_dir=ctx.subdir("power"),
-        logger=ctx.logger,
-        config=ctx.config,
     )
 
 
@@ -794,6 +823,16 @@ def _find_stc_files(out_dir: Path, subject: str, source_method: str) -> list[Pat
     return files
 
 
+# Plots that read parquet/metadata rather than STC files.
+_PARQUET_BASED_PLOT_IDS = frozenset({
+    "source_cluster_composition",
+    "source_atlas_roi_heatmap",
+    "source_atlas_surface",
+    "source_cluster_raincloud",
+    "source_cluster_tfr",
+})
+
+
 @VisualizationRegistry.register("sourcelocalization")
 def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
     source_dir = ctx.subdir("sourcelocalization")
@@ -822,6 +861,11 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
                 ("source_glass_brain_fmri_informed", plot_source_glass_brain, "Glass Brain"),
                 ("source_band_panel_fmri_informed", plot_source_band_panel, "Band Comparison Panel"),
                 ("source_cluster_timecourse", plot_source_cluster_timecourse, "Cluster Time Course"),
+                ("source_cluster_composition", plot_source_cluster_composition, "Cluster Composition"),
+                ("source_atlas_roi_heatmap", plot_source_atlas_roi_heatmap, "Atlas ROI Heatmap"),
+                ("source_atlas_surface", plot_source_atlas_surface, "Atlas Surface Topography"),
+                ("source_cluster_raincloud", plot_source_cluster_raincloud, "Cluster Epoch Distribution"),
+                ("source_cluster_tfr", plot_source_cluster_tfr, "Cluster Source TFR"),
             ]
 
         # Filter to only the catalog IDs requested by the user.
@@ -855,7 +899,30 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
                     "Source localization: using legacy flat source_estimates/ dir for eeg_only plotting."
                 )
 
-        if not stc_files:
+        # STC-based plots require source estimate files.
+        stc_plot_specs = [
+            (cid, fn, lb) for cid, fn, lb in plot_specs
+            if cid not in _PARQUET_BASED_PLOT_IDS
+        ]
+
+        if stc_files:
+            mode_save_dir = source_dir / mode
+            for catalog_id, plot_func, label in stc_plot_specs:
+                ctx.logger.info("  → %s (%s, %d files)", label, mode, len(stc_files))
+                safe_plot(
+                    ctx,
+                    saved_files,
+                    catalog_id,
+                    "sourcelocalization",
+                    None,
+                    plot_func,
+                    subject=ctx.subject,
+                    stc_files=stc_files,
+                    save_dir=mode_save_dir,
+                    config=ctx.config,
+                    logger=ctx.logger,
+                )
+        elif stc_plot_specs:
             expected_dir = mode_dir
             ctx.logger.warning(
                 "No %s source estimate files found for sub-%s "
@@ -865,11 +932,16 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
                 ctx.subject,
                 expected_dir,
             )
-            continue
 
-        mode_save_dir = source_dir / mode
-        for catalog_id, plot_func, label in plot_specs:
-            ctx.logger.info("  → %s (%s, %d files)", label, mode, len(stc_files))
+    # Parquet/metadata-based plots: dispatched once, independently of STC files.
+    parquet_plot_specs = [
+        (cid, fn, lb) for cid, fn, lb in plot_specs
+        if cid in _PARQUET_BASED_PLOT_IDS
+    ]
+    if parquet_plot_specs:
+        parquet_save_dir = source_dir / "fmri_informed"
+        for catalog_id, plot_func, label in parquet_plot_specs:
+            ctx.logger.info("  → %s (fmri_informed)", label)
             safe_plot(
                 ctx,
                 saved_files,
@@ -878,8 +950,8 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
                 None,
                 plot_func,
                 subject=ctx.subject,
-                stc_files=stc_files,
-                save_dir=mode_save_dir,
+                features_dir=ctx.features_dir,
+                save_dir=parquet_save_dir,
                 config=ctx.config,
                 logger=ctx.logger,
             )

@@ -6,12 +6,17 @@ import shlex
 import shutil
 import subprocess
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, List, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
 
 FS_LICENSE_ENV_VAR = "EEG_PIPELINE_FREESURFER_LICENSE"
+FS_LICENSE_DEFAULT_PATH = "~/license.txt"
+MACOS_METADATA_FILENAMES = {".DS_Store"}
+MACOS_METADATA_PREFIX = "._"
+BIDS_SANITIZED_SOURCE_MOUNT = "/bids_source"
 
 
 def _require_executable(name: str) -> None:
@@ -30,15 +35,72 @@ def _resolve_path(value: Optional[str]) -> Optional[Path]:
     return Path(trimmed).expanduser().resolve()
 
 
-def _resolve_fs_license_path(config: Any, fmriprep_cfg: dict[str, Any]) -> Optional[Path]:
-    """Resolve FreeSurfer license path from config or environment."""
+def _resolve_fs_license_path(config: Any, fmriprep_cfg: dict[str, Any]) -> Path:
+    """Resolve FreeSurfer license path from config, environment, or default."""
     configured = (
         _resolve_path(fmriprep_cfg.get("fs_license_file"))
         or _resolve_path(config.get("paths.freesurfer_license"))
     )
     if configured is not None:
         return configured
-    return _resolve_path(os.getenv(FS_LICENSE_ENV_VAR))
+    env_path = _resolve_path(os.getenv(FS_LICENSE_ENV_VAR))
+    if env_path is not None:
+        return env_path
+    return Path(FS_LICENSE_DEFAULT_PATH).expanduser().resolve()
+
+
+def _is_macos_metadata_path(path: Path) -> bool:
+    name = path.name
+    return name.startswith(MACOS_METADATA_PREFIX) or name in MACOS_METADATA_FILENAMES
+
+
+def _dataset_has_macos_metadata(dataset_root: Path) -> bool:
+    return any(_is_macos_metadata_path(path) for path in dataset_root.rglob("*"))
+
+
+def _create_sanitized_bids_view(
+    bids_dir: Path,
+    source_mount_path: str,
+) -> tuple[Path, tempfile.TemporaryDirectory, int]:
+    temp_dir = tempfile.TemporaryDirectory(prefix="eeg_pipeline_bids_")
+    sanitized_root = Path(temp_dir.name) / "bids"
+    sanitized_root.mkdir(parents=True, exist_ok=True)
+
+    skipped_files = 0
+    for source_path in bids_dir.rglob("*"):
+        relative_path = source_path.relative_to(bids_dir)
+        if _is_macos_metadata_path(source_path):
+            skipped_files += 1
+            continue
+
+        target_path = sanitized_root / relative_path
+        if source_path.is_dir():
+            target_path.mkdir(parents=True, exist_ok=True)
+            continue
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        container_source_path = Path(source_mount_path) / relative_path
+        os.symlink(str(container_source_path), str(target_path))
+
+    return sanitized_root, temp_dir, skipped_files
+
+
+def _resolve_bids_mount_root(
+    bids_dir: Path,
+    logger: Any,
+) -> tuple[Path, Optional[tempfile.TemporaryDirectory]]:
+    if not _dataset_has_macos_metadata(bids_dir):
+        return bids_dir, None
+
+    sanitized_root, temp_dir, skipped_files = _create_sanitized_bids_view(
+        bids_dir, BIDS_SANITIZED_SOURCE_MOUNT
+    )
+    logger.warning(
+        "Detected %d macOS metadata files (._*, .DS_Store); using sanitized BIDS mount: %s",
+        skipped_files,
+        sanitized_root,
+    )
+    return sanitized_root, temp_dir
 
 
 def _stream_subprocess(
@@ -87,6 +149,7 @@ class FmriPreprocessingPipeline(PipelineBase):
         if progress is not None and hasattr(progress, "subject_start"):
             progress.subject_start(subj_label)
         success = False
+        bids_mount_tmp: Optional[tempfile.TemporaryDirectory] = None
         try:
             fmri_root = self.config.get("paths.bids_fmri_root")
             if not fmri_root:
@@ -104,6 +167,10 @@ class FmriPreprocessingPipeline(PipelineBase):
             bids_dir = Path(str(fmri_root)).expanduser().resolve()
             if not bids_dir.exists():
                 raise FileNotFoundError(f"fMRI BIDS root does not exist: {bids_dir}")
+            bids_mount_root, bids_mount_tmp = _resolve_bids_mount_root(
+                bids_dir, self.logger
+            )
+            needs_sanitized_source_mount = bids_mount_tmp is not None
 
             output_dir = _resolve_path(fmriprep_cfg.get("output_dir"))
             if output_dir is None:
@@ -116,12 +183,6 @@ class FmriPreprocessingPipeline(PipelineBase):
             work_dir.mkdir(parents=True, exist_ok=True)
 
             fs_license = _resolve_fs_license_path(self.config, fmriprep_cfg)
-            if fs_license is None:
-                raise ValueError(
-                    "Missing FreeSurfer license file. Set --fs-license-file, "
-                    "fmri_preprocessing.fmriprep.fs_license_file, paths.freesurfer_license, "
-                    f"or {FS_LICENSE_ENV_VAR}."
-                )
             if not fs_license.exists():
                 raise FileNotFoundError(
                     f"FreeSurfer license file not found: {fs_license}"
@@ -258,7 +319,7 @@ class FmriPreprocessingPipeline(PipelineBase):
                     "--rm",
                     *user_args,
                     "-v",
-                    f"{bids_dir}:/data:ro",
+                    f"{bids_mount_root}:/data:ro",
                     "-v",
                     f"{output_dir}:/out",
                     "-v",
@@ -266,6 +327,8 @@ class FmriPreprocessingPipeline(PipelineBase):
                     "-v",
                     f"{fs_license}:/license.txt:ro",
                 ]
+                if needs_sanitized_source_mount:
+                    cmd += ["-v", f"{bids_dir}:{BIDS_SANITIZED_SOURCE_MOUNT}:ro"]
                 if bids_filter_file is not None:
                     cmd += ["-v", f"{bids_filter_file}:/bids_filter.json:ro"]
                 if fs_subjects_dir is not None:
@@ -280,7 +343,7 @@ class FmriPreprocessingPipeline(PipelineBase):
                     "run",
                     "--cleanenv",
                     "-B",
-                    f"{bids_dir}:/data",
+                    f"{bids_mount_root}:/data",
                     "-B",
                     f"{output_dir}:/out",
                     "-B",
@@ -288,6 +351,8 @@ class FmriPreprocessingPipeline(PipelineBase):
                     "-B",
                     f"{fs_license}:/license.txt",
                 ]
+                if needs_sanitized_source_mount:
+                    cmd += ["-B", f"{bids_dir}:{BIDS_SANITIZED_SOURCE_MOUNT}"]
                 if bids_filter_file is not None:
                     cmd += ["-B", f"{bids_filter_file}:/bids_filter.json"]
                 if fs_subjects_dir is not None:
@@ -310,5 +375,7 @@ class FmriPreprocessingPipeline(PipelineBase):
             _stream_subprocess(cmd, subject_logger)
             success = True
         finally:
+            if bids_mount_tmp is not None:
+                bids_mount_tmp.cleanup()
             if progress is not None and hasattr(progress, "subject_done"):
                 progress.subject_done(subj_label, success=success)

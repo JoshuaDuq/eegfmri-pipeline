@@ -254,23 +254,12 @@ func (m Model) GetApplicableFeatureFiles() []FeatureFile {
 func (m Model) SelectedPlotIDs() []string {
 	var result []string
 	for i, plot := range m.plotItems {
-		if m.plotSelected[i] && m.IsPlotCategorySelected(plot.Group) {
+		if m.plotSelected[i] && m.IsPlotVisibleForSelection(plot) {
 			result = append(result, plot.ID)
 		}
 	}
 	sort.Strings(result)
 	return result
-}
-
-func (m Model) plottingNeedsROIs() bool {
-	if m.Pipeline != types.PipelinePlotting {
-		return true
-	}
-	selected := m.SelectedPlotIDs()
-	if len(selected) == 1 && selected[0] == "band_power_topomaps" {
-		return false
-	}
-	return true
 }
 
 func (m Model) SelectedPlotFormats() []string {
@@ -521,27 +510,6 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--no-shared-colorbar")
 		}
 
-		if m.plottingNeedsROIs() {
-			// Pass ROI definitions to plotting command
-			roiDefs := m.GetROIDefinitions()
-			if len(roiDefs) > 0 {
-				parts = append(parts, "--rois")
-				parts = append(parts, roiDefs...)
-			}
-		}
-
-		// Pass band selection and definitions to plotting command
-		bands := m.SelectedBands()
-		if len(bands) > 0 && len(bands) < len(m.bands) {
-			parts = append(parts, "--bands")
-			parts = append(parts, bands...)
-		}
-
-		freqBandDefs := m.GetFrequencyBandDefinitions()
-		if len(freqBandDefs) > 0 {
-			parts = append(parts, "--frequency-bands")
-			parts = append(parts, freqBandDefs...)
-		}
 	}
 
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
@@ -913,15 +881,12 @@ func (m Model) buildPlotItemConfigArgs() []string {
 	var args []string
 	plotIDs := append(m.SelectedPlotIDs(), m.selectedFeaturePlotterIDs()...)
 	for _, plotID := range plotIDs {
-		cfg, ok := m.plotItemConfigs[plotID]
-		if !ok {
-			continue
-		}
+		cfg := m.plotItemConfigs[plotID]
 
 		if cfg.CompareWindows != nil {
 			args = append(args, "--plot-item-config", plotID, "compare_windows", strconv.FormatBool(*cfg.CompareWindows))
 		}
-		if strings.TrimSpace(cfg.ComparisonWindowsSpec) != "" {
+		if plotID != "band_power_topomaps" && strings.TrimSpace(cfg.ComparisonWindowsSpec) != "" {
 			args = append(args, "--plot-item-config", plotID, "comparison_windows")
 			args = append(args, splitSpaceList(cfg.ComparisonWindowsSpec)...)
 		}
@@ -952,9 +917,7 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		}
 		topomapSpec := strings.TrimSpace(cfg.TopomapWindowsSpec)
 		if topomapSpec == "" && plotID == "band_power_topomaps" {
-			if strings.TrimSpace(cfg.ComparisonWindowsSpec) != "" {
-				topomapSpec = strings.TrimSpace(cfg.ComparisonWindowsSpec)
-			} else if strings.TrimSpace(m.plotComparisonWindowsSpec) != "" {
+			if strings.TrimSpace(m.plotComparisonWindowsSpec) != "" {
 				topomapSpec = strings.TrimSpace(m.plotComparisonWindowsSpec)
 			}
 		}

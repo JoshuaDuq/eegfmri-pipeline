@@ -166,10 +166,17 @@ def run_group_plotting(
 
     from eeg_pipeline.plotting.orchestration.features import (
         visualize_band_power_topomaps_for_group,
+        visualize_power_by_condition_for_group,
+        visualize_power_spectral_density_for_group,
     )
 
     logger = logging.getLogger(__name__)
-    supported = {"band_power_topomaps"}
+    group_plotters = {
+        "band_power_topomaps": visualize_band_power_topomaps_for_group,
+        "power_by_condition": visualize_power_by_condition_for_group,
+        "power_spectral_density": visualize_power_spectral_density_for_group,
+    }
+    supported = set(group_plotters.keys())
 
     total = len(plot_ids)
     for idx, plot_id in enumerate(plot_ids, start=1):
@@ -190,7 +197,7 @@ def run_group_plotting(
         if overrides:
             apply_plot_item_overrides(plot_config, overrides)
 
-        visualize_band_power_topomaps_for_group(
+        group_plotters[plot_id](
             subjects=subjects,
             task=task,
             config=plot_config,

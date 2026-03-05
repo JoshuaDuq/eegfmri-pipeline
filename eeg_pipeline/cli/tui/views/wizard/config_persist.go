@@ -254,6 +254,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocFmriMaxVoxPerClus"] = m.sourceLocFmriMaxVoxPerClus
 	cfg["sourceLocFmriMaxTotalVox"] = m.sourceLocFmriMaxTotalVox
 	cfg["sourceLocFmriRandomSeed"] = m.sourceLocFmriRandomSeed
+	cfg["sourceLocFmriOutputSpace"] = m.sourceLocFmriOutputSpace
 	cfg["sourceLocCreateTrans"] = m.sourceLocCreateTrans
 	cfg["sourceLocAllowIdentityTrans"] = m.sourceLocAllowIdentityTrans
 	cfg["sourceLocCreateBemModel"] = m.sourceLocCreateBemModel
@@ -286,12 +287,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocFmriResampleToFS"] = m.sourceLocFmriResampleToFS
 	cfg["sourceLocFmriInputSource"] = m.sourceLocFmriInputSource
 	cfg["sourceLocFmriRequireFmriprep"] = m.sourceLocFmriRequireFmriprep
-	cfg["sourceLocFmriWindowAName"] = m.sourceLocFmriWindowAName
-	cfg["sourceLocFmriWindowATmin"] = m.sourceLocFmriWindowATmin
-	cfg["sourceLocFmriWindowATmax"] = m.sourceLocFmriWindowATmax
-	cfg["sourceLocFmriWindowBName"] = m.sourceLocFmriWindowBName
-	cfg["sourceLocFmriWindowBTmin"] = m.sourceLocFmriWindowBTmin
-	cfg["sourceLocFmriWindowBTmax"] = m.sourceLocFmriWindowBTmax
 
 	// Aggregation/storage
 	cfg["aggregationMethod"] = m.aggregationMethod
@@ -1502,6 +1497,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.sourceLocFmriMaxVoxPerClus = getInt("sourceLocFmriMaxVoxPerClus", m.sourceLocFmriMaxVoxPerClus)
 	m.sourceLocFmriMaxTotalVox = getInt("sourceLocFmriMaxTotalVox", m.sourceLocFmriMaxTotalVox)
 	m.sourceLocFmriRandomSeed = getInt("sourceLocFmriRandomSeed", m.sourceLocFmriRandomSeed)
+	m.sourceLocFmriOutputSpace = getInt("sourceLocFmriOutputSpace", m.sourceLocFmriOutputSpace)
 	m.sourceLocCreateTrans = getBool("sourceLocCreateTrans", m.sourceLocCreateTrans)
 	m.sourceLocAllowIdentityTrans = getBool("sourceLocAllowIdentityTrans", m.sourceLocAllowIdentityTrans)
 	m.sourceLocCreateBemModel = getBool("sourceLocCreateBemModel", m.sourceLocCreateBemModel)
@@ -1534,12 +1530,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.sourceLocFmriResampleToFS = getBool("sourceLocFmriResampleToFS", m.sourceLocFmriResampleToFS)
 	m.sourceLocFmriInputSource = getInt("sourceLocFmriInputSource", m.sourceLocFmriInputSource)
 	m.sourceLocFmriRequireFmriprep = getBool("sourceLocFmriRequireFmriprep", m.sourceLocFmriRequireFmriprep)
-	m.sourceLocFmriWindowAName = getString("sourceLocFmriWindowAName", m.sourceLocFmriWindowAName)
-	m.sourceLocFmriWindowATmin = getFloat("sourceLocFmriWindowATmin", m.sourceLocFmriWindowATmin)
-	m.sourceLocFmriWindowATmax = getFloat("sourceLocFmriWindowATmax", m.sourceLocFmriWindowATmax)
-	m.sourceLocFmriWindowBName = getString("sourceLocFmriWindowBName", m.sourceLocFmriWindowBName)
-	m.sourceLocFmriWindowBTmin = getFloat("sourceLocFmriWindowBTmin", m.sourceLocFmriWindowBTmin)
-	m.sourceLocFmriWindowBTmax = getFloat("sourceLocFmriWindowBTmax", m.sourceLocFmriWindowBTmax)
 
 	// Aggregation/storage
 	m.aggregationMethod = getInt("aggregationMethod", m.aggregationMethod)

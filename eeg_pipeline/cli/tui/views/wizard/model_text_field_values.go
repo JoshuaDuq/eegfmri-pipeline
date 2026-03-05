@@ -228,10 +228,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.sourceLocFmriPhaseScopeValue
 	case textFieldSourceLocFmriStimPhasesToModel:
 		return m.sourceLocFmriStimPhasesToModel
-	case textFieldSourceLocFmriWindowAName:
-		return m.sourceLocFmriWindowAName
-	case textFieldSourceLocFmriWindowBName:
-		return m.sourceLocFmriWindowBName
 	case textFieldPlotBboxInches:
 		return m.plotBboxInches
 	case textFieldPlotFontFamily:
@@ -663,10 +659,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.sourceLocFmriPhaseScopeValue = strings.TrimSpace(value)
 	case textFieldSourceLocFmriStimPhasesToModel:
 		m.sourceLocFmriStimPhasesToModel = strings.TrimSpace(value)
-	case textFieldSourceLocFmriWindowAName:
-		m.sourceLocFmriWindowAName = value
-	case textFieldSourceLocFmriWindowBName:
-		m.sourceLocFmriWindowBName = value
 	case textFieldPlotBboxInches:
 		m.plotBboxInches = value
 	case textFieldPlotFontFamily:

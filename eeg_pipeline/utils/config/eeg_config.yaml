@@ -12,7 +12,7 @@ paths:
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
   source_data: "../../../data/source_data"  # Raw source data directory
   freesurfer_dir: "../../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
-  freesurfer_license: null  # Path to FreeSurfer license.txt (or set EEG_PIPELINE_FREESURFER_LICENSE env var)
+  freesurfer_license: null  # Path to FreeSurfer license.txt (otherwise use EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt)
 
 ###################################################################
 # 1b. fMRI PREPROCESSING (fMRIPrep-style)
@@ -23,7 +23,7 @@ fmri_preprocessing:
     image: "nipreps/fmriprep:25.2.4"  # Docker image tag or apptainer URI/path
     output_dir: null  # BIDS derivatives root (null = <deriv_root>/preprocessed/fmri)
     work_dir: null  # Scratch/work directory (null = <deriv_root>/work/fmriprep)
-    fs_license_file: null  # FreeSurfer license.txt (null = paths.freesurfer_license or EEG_PIPELINE_FREESURFER_LICENSE)
+    fs_license_file: null  # FreeSurfer license.txt (null = paths.freesurfer_license, then EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt)
     fs_subjects_dir: null  # Optional FreeSurfer SUBJECTS_DIR
     output_spaces: ["MNI152NLin2009cAsym", "T1w"]
     ignore: []  # e.g., ["fieldmaps", "slicetiming"]
@@ -482,9 +482,8 @@ feature_engineering:
       max_voxels_per_cluster: 2000
       max_total_voxels: 20000
       random_seed: 0
-      time_windows:
-        window_a: {name: "plateau", tmin: 5.0, tmax: 10.0}
-        window_b: {name: "baseline", tmin: -2.0, tmax: 0.0}
+      output_space: "dual"         # "cluster" | "atlas" | "dual"
+      # NOTE: fmri.time_windows is intentionally unsupported for source feature computation.
       contrast:
         enabled: false
         type: "t-test"             # "t-test" | "paired-t-test" | "f-test" | "custom"

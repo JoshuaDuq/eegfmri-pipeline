@@ -17,6 +17,7 @@ from eeg_pipeline.analysis.features.phase import (
     extract_phase_features,
 )
 from eeg_pipeline.analysis.features.source_localization import (
+    FMRIVoxelSelection,
     _compute_eloreta_source_estimates,
     _compute_roi_envelope,
     _compute_roi_power,
@@ -295,6 +296,251 @@ class TestScientificValidityGuards(unittest.TestCase):
 
         self.assertEqual(cols, [])
         self.assertTrue(df.empty)
+
+    def test_fmri_output_space_controls_feature_families(self):
+        n_epochs = 3
+        n_times = 100
+        stcs = [
+            SimpleNamespace(
+                data=np.ones((3, n_times), dtype=float),
+                vertices=[np.array([0, 1, 2], dtype=int)],
+            )
+            for _ in range(n_epochs)
+        ]
+
+        voxel_selection = FMRIVoxelSelection(
+            selected_voxels_ijk=np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]], dtype=int),
+            selected_coords_m=np.array(
+                [[0.000, 0.000, 0.000], [0.000, 0.000, 0.001], [0.000, 0.001, 0.000]],
+                dtype=float,
+            ),
+            cluster_indices={"fmri_c01_peak5p00": [0, 1], "fmri_c02_peak4p00": [2]},
+            cluster_voxel_counts={"fmri_c01_peak5p00": 2, "fmri_c02_peak4p00": 1},
+            atlas_indices={"aparc_aseg_id17": [0, 2], "aparc_aseg_id53": [1]},
+            atlas_voxel_counts={"aparc_aseg_id17": 2, "aparc_aseg_id53": 1},
+            cluster_to_atlas_counts={
+                "fmri_c01_peak5p00": {"aparc_aseg_id17": 1, "aparc_aseg_id53": 1},
+                "fmri_c02_peak4p00": {"aparc_aseg_id17": 1},
+            },
+            dropped_unlabeled_voxels=0,
+            matched_reference_path=Path("/tmp/ref.mgz"),
+            voxel_volume_mm3=8.0,
+        )
+
+        def run_output_space(output_space: str) -> list[str]:
+            fmri_cfg = SimpleNamespace(
+                enabled=True,
+                stats_map_path=Path(__file__),
+                provenance="independent",
+                require_provenance=False,
+                allow_same_dataset_provenance=False,
+                output_space=output_space,
+            )
+            src_cfg = SimpleNamespace(
+                method="lcmv",
+                fmri_cfg=fmri_cfg,
+                subjects_dir="/tmp/freesurfer",
+                subject="sub-0001",
+                mindist_mm=5.0,
+                lcmv_reg=0.05,
+                eloreta_loose=1.0,
+                eloreta_depth=0.8,
+                eloreta_snr=3.0,
+                save_stc=False,
+                mode="fmri_informed",
+            )
+            ctx = SimpleNamespace(
+                epochs=_EpochStub(n_epochs, sfreq=100.0),
+                config=DotConfig({}),
+                logger=logging.getLogger(f"src-loc-output-space-{output_space}"),
+                analysis_mode="group_stats",
+                train_mask=None,
+                frequency_bands={"alpha": (8.0, 12.0)},
+                name="active",
+                deriv_root="/tmp",
+                subject="0001",
+                task="task",
+            )
+
+            seen_families: list[str] = []
+
+            def _fake_append(
+                *,
+                records,
+                feature_cols,
+                n_epochs,
+                family_prefix,
+                **_kwargs,
+            ):
+                seen_families.append(str(family_prefix))
+                col_name = f"src_active_lcmv_alpha_{family_prefix}_dummy"
+                feature_cols.append(col_name)
+                for epoch_idx in range(n_epochs):
+                    records[epoch_idx][col_name] = float(epoch_idx)
+
+            with (
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                    return_value=src_cfg,
+                ),
+                patch(
+                    "fmri_pipeline.analysis.bem_generation.ensure_bem_and_trans_files",
+                    return_value=(Path("/tmp/trans.fif"), Path("/tmp/bem.fif"), Path("/tmp/bem-sol.fif")),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._select_fmri_constrained_voxels",
+                    return_value=voxel_selection,
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._setup_volume_source_space_from_points_configured",
+                    return_value=("fwd", "src"),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                    return_value=(stcs, None),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._compute_roi_timecourses_from_row_indices",
+                    side_effect=lambda **kwargs: np.ones(
+                        (n_epochs, len(kwargs["roi_names"]), n_times), dtype=float
+                    ),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._validate_source_localization_duration",
+                    return_value=True,
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._append_source_band_family_features",
+                    side_effect=_fake_append,
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._write_fmri_constraint_metadata_sidecar",
+                    return_value=None,
+                ),
+            ):
+                _df, cols = extract_source_localization_features(
+                    ctx,
+                    bands=["alpha"],
+                    method="lcmv",
+                )
+            self.assertEqual(len(cols), len(set(cols)))
+            return seen_families
+
+        self.assertEqual(run_output_space("cluster"), ["fmri_cluster"])
+        self.assertEqual(run_output_space("atlas"), ["atlas"])
+        self.assertEqual(run_output_space("dual"), ["fmri_cluster", "atlas"])
+
+    def test_fmri_atlas_columns_align_across_subjects(self):
+        n_epochs = 3
+        n_times = 100
+        stcs = [
+            SimpleNamespace(
+                data=np.ones((3, n_times), dtype=float),
+                vertices=[np.array([0, 1, 2], dtype=int)],
+            )
+            for _ in range(n_epochs)
+        ]
+
+        def make_selection(cluster_name: str) -> FMRIVoxelSelection:
+            return FMRIVoxelSelection(
+                selected_voxels_ijk=np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]], dtype=int),
+                selected_coords_m=np.array(
+                    [[0.000, 0.000, 0.000], [0.000, 0.000, 0.001], [0.000, 0.001, 0.000]],
+                    dtype=float,
+                ),
+                cluster_indices={cluster_name: [0, 1, 2]},
+                cluster_voxel_counts={cluster_name: 3},
+                atlas_indices={"aparc_aseg_id17": [0, 2], "aparc_aseg_id53": [1]},
+                atlas_voxel_counts={"aparc_aseg_id17": 2, "aparc_aseg_id53": 1},
+                cluster_to_atlas_counts={
+                    cluster_name: {"aparc_aseg_id17": 2, "aparc_aseg_id53": 1}
+                },
+                dropped_unlabeled_voxels=0,
+                matched_reference_path=Path("/tmp/ref.mgz"),
+                voxel_volume_mm3=8.0,
+            )
+
+        def extract_columns(subject_label: str, selection: FMRIVoxelSelection) -> list[str]:
+            fmri_cfg = SimpleNamespace(
+                enabled=True,
+                stats_map_path=Path(__file__),
+                provenance="independent",
+                require_provenance=False,
+                allow_same_dataset_provenance=False,
+                output_space="atlas",
+            )
+            src_cfg = SimpleNamespace(
+                method="lcmv",
+                fmri_cfg=fmri_cfg,
+                subjects_dir="/tmp/freesurfer",
+                subject=subject_label,
+                mindist_mm=5.0,
+                lcmv_reg=0.05,
+                eloreta_loose=1.0,
+                eloreta_depth=0.8,
+                eloreta_snr=3.0,
+                save_stc=False,
+                mode="fmri_informed",
+            )
+            ctx = SimpleNamespace(
+                epochs=_EpochStub(n_epochs, sfreq=100.0),
+                config=DotConfig({}),
+                logger=logging.getLogger(f"src-loc-atlas-align-{subject_label}"),
+                analysis_mode="group_stats",
+                train_mask=None,
+                frequency_bands={"alpha": (8.0, 12.0)},
+                name="active",
+                deriv_root="/tmp",
+                subject=subject_label.replace("sub-", ""),
+                task="task",
+            )
+
+            with (
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                    return_value=src_cfg,
+                ),
+                patch(
+                    "fmri_pipeline.analysis.bem_generation.ensure_bem_and_trans_files",
+                    return_value=(Path("/tmp/trans.fif"), Path("/tmp/bem.fif"), Path("/tmp/bem-sol.fif")),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._select_fmri_constrained_voxels",
+                    return_value=selection,
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._setup_volume_source_space_from_points_configured",
+                    return_value=("fwd", "src"),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                    return_value=(stcs, None),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._compute_roi_timecourses_from_row_indices",
+                    side_effect=lambda **kwargs: np.ones(
+                        (n_epochs, len(kwargs["roi_names"]), n_times), dtype=float
+                    ),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._validate_source_localization_duration",
+                    return_value=True,
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._write_fmri_constraint_metadata_sidecar",
+                    return_value=None,
+                ),
+            ):
+                _df, cols = extract_source_localization_features(
+                    ctx,
+                    bands=["alpha"],
+                    method="lcmv",
+                )
+            return cols
+
+        cols_sub_1 = extract_columns("sub-0001", make_selection("fmri_c01_peak5p00"))
+        cols_sub_2 = extract_columns("sub-0002", make_selection("fmri_c03_peak6p20"))
+        self.assertEqual(cols_sub_1, cols_sub_2)
 
     def test_source_localization_blocks_same_dataset_provenance_by_default(self):
         fmri_cfg = SimpleNamespace(

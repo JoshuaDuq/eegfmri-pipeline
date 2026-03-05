@@ -1073,34 +1073,16 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.sourceLocFmriRandomSeed = n
 			}
 		}},
-		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_a.name", apply: func(v interface{}) {
+		{key: "feature_engineering.sourcelocalization.fmri.output_space", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
-				m.sourceLocFmriWindowAName = s
-			}
-		}},
-		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_a.tmin", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.sourceLocFmriWindowATmin = f
-			}
-		}},
-		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_a.tmax", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.sourceLocFmriWindowATmax = f
-			}
-		}},
-		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_b.name", apply: func(v interface{}) {
-			if s, ok := asString(v); ok {
-				m.sourceLocFmriWindowBName = s
-			}
-		}},
-		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_b.tmin", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.sourceLocFmriWindowBTmin = f
-			}
-		}},
-		{key: "feature_engineering.sourcelocalization.fmri.time_windows.window_b.tmax", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.sourceLocFmriWindowBTmax = f
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "cluster":
+					m.sourceLocFmriOutputSpace = 0
+				case "atlas":
+					m.sourceLocFmriOutputSpace = 1
+				default:
+					m.sourceLocFmriOutputSpace = 2 // dual
+				}
 			}
 		}},
 		{key: "feature_engineering.sourcelocalization.fmri.contrast.enabled", apply: func(v interface{}) {

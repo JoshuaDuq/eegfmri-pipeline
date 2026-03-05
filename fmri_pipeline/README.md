@@ -559,7 +559,7 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 |-----|-------------|
 | `paths.bids_fmri_root` | BIDS root directory containing raw fMRI data |
 | `paths.freesurfer_dir` | FreeSurfer `SUBJECTS_DIR` |
-| `paths.freesurfer_license` | Path to FreeSurfer `license.txt` (or env var `EEG_PIPELINE_FREESURFER_LICENSE`) |
+| `paths.freesurfer_license` | Path to FreeSurfer `license.txt` (if unset: `EEG_PIPELINE_FREESURFER_LICENSE`, then `~/license.txt`) |
 | `paths.signature_dir` | Root directory containing NPS/SIIPS1 weight maps |
 
 ### 12.2 fMRI Preprocessing (`fmri_preprocessing.fmriprep`)

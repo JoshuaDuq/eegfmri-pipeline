@@ -278,6 +278,7 @@ const (
 	optSourceLocFmriMaxVoxPerClus
 	optSourceLocFmriMaxTotalVox
 	optSourceLocFmriRandomSeed
+	optSourceLocFmriOutputSpace
 	// BEM/Trans generation options (Docker-based)
 	optSourceLocCreateTrans
 	optSourceLocCreateBemModel
@@ -309,12 +310,6 @@ const (
 	optSourceLocFmriResampleToFS
 	optSourceLocFmriInputSource
 	optSourceLocFmriRequireFmriprep
-	optSourceLocFmriWindowAName
-	optSourceLocFmriWindowATmin
-	optSourceLocFmriWindowATmax
-	optSourceLocFmriWindowBName
-	optSourceLocFmriWindowBTmin
-	optSourceLocFmriWindowBTmax
 	// ITPC options (condition-based)
 	optItpcMethod
 	optItpcAllowUnsafeLoo

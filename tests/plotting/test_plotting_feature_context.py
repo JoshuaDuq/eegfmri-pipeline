@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import pandas as pd
+
 from eeg_pipeline.plotting.features.context import FeaturePlotContext
 
 
@@ -119,3 +121,35 @@ def test_load_feature_tables_respects_category_filter_pac_aliases(tmp_path: Path
     context._load_feature_tables()
 
     assert requested_stems == ["features_pac", "features_pac_trials", "features_pac_time"]
+
+
+def test_load_feature_set_wide_prefers_aligned_events_length_over_first_file(tmp_path: Path) -> None:
+    features_dir = tmp_path / "features"
+    plots_dir = tmp_path / "plots"
+    features_dir.mkdir(parents=True)
+    plots_dir.mkdir(parents=True)
+
+    context = _build_context(features_dir, plots_dir)
+    context.aligned_events = pd.DataFrame({"trial": [1, 2, 3, 4]})
+
+    short_path = features_dir / "features_power_baseline.parquet"
+    full_path = features_dir / "features_power_plateau.parquet"
+    short_path.touch()
+    full_path.touch()
+
+    frames = {
+        short_path: pd.DataFrame({"power_baseline_alpha_Fz": [0.1, 0.2]}),
+        full_path: pd.DataFrame({"power_plateau_alpha_Fz": [1.0, 2.0, 3.0, 4.0]}),
+    }
+
+    context._safe_read_table = lambda path: frames.get(path)  # type: ignore[method-assign]
+
+    loaded = context._load_feature_set(
+        [short_path, full_path],
+        mode="wide",
+        stem="features_power",
+    )
+
+    assert loaded is not None
+    assert loaded.shape[0] == 4
+    assert list(loaded.columns) == ["power_plateau_alpha_Fz"]

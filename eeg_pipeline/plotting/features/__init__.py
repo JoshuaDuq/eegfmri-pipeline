@@ -11,7 +11,6 @@ import importlib
 
 __all__ = [
     "plot_power_spectral_density",
-    "plot_cross_frequency_power_correlation",
     "plot_band_power_topomaps",
     "plot_connectivity_heatmap",
     "plot_connectivity_network",
@@ -21,13 +20,13 @@ __all__ = [
     "plot_complexity_by_condition",
     "plot_ratios_by_condition",
     "plot_asymmetry_by_condition",
+    "plot_band_power_evolution",
 ]
 
 
 def __getattr__(name: str):
     _module_map = {
         "plot_power_spectral_density": "power",
-        "plot_cross_frequency_power_correlation": "power",
         "plot_band_power_topomaps": "power",
         "plot_connectivity_heatmap": "connectivity",
         "plot_connectivity_network": "connectivity",
@@ -37,6 +36,7 @@ def __getattr__(name: str):
         "plot_complexity_by_condition": "complexity",
         "plot_ratios_by_condition": "ratios",
         "plot_asymmetry_by_condition": "asymmetry",
+        "plot_band_power_evolution": "power",
     }
 
     module_name = _module_map.get(name)

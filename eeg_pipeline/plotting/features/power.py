@@ -975,6 +975,29 @@ def _plot_psd_by_conditions(
             label=f"{psd_data['label']} (n={psd_data['n_trials']})",
             zorder=3,
         )
+        
+        alpha_band = features_freq_bands.get('alpha', (8, 13))
+        alpha_mask = (psd_data['freqs'] >= alpha_band[0]) & (psd_data['freqs'] <= alpha_band[1])
+        if np.any(alpha_mask):
+            alpha_freqs = psd_data['freqs'][alpha_mask]
+            alpha_psd = psd_data['mean'][alpha_mask]
+            peak_idx = np.argmax(alpha_psd)
+            peak_freq = alpha_freqs[peak_idx]
+            peak_val = alpha_psd[peak_idx]
+            
+            ax.plot(peak_freq, peak_val, marker='v', color=psd_data['color'], markersize=6, zorder=4)
+            ax.annotate(
+                f"{peak_freq:.1f}Hz",
+                xy=(peak_freq, peak_val),
+                xytext=(0, 6),
+                textcoords='offset points',
+                ha='center',
+                va='bottom',
+                fontsize=7,
+                color=psd_data['color'],
+                fontweight='bold',
+                zorder=4
+            )
     
     for band, (fmin, fmax) in features_freq_bands.items():
         if fmin < psd_data_by_condition[0]['freqs'].max():
@@ -990,6 +1013,10 @@ def _plot_psd_by_conditions(
                 )
     
     ax.axhline(0, color="0.4", linewidth=1.0, alpha=0.5, linestyle='--', zorder=2)
+    ax.set_xscale('log')
+    import matplotlib.ticker as ticker
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda y, _: '{:g}'.format(y)))
+    ax.set_xticks([2, 4, 8, 16, 32, 64])
     ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
     ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
     ax.legend(loc='best', fontsize=plot_cfg.font.medium, frameon=False, handlelength=1.5)
@@ -1160,6 +1187,29 @@ def _plot_psd_by_predictor(
             label=f"{psd_data['label']} (n={psd_data['n_trials']})",
             zorder=3,
         )
+        
+        alpha_band = features_freq_bands.get('alpha', (8, 13))
+        alpha_mask = (psd_data['freqs'] >= alpha_band[0]) & (psd_data['freqs'] <= alpha_band[1])
+        if np.any(alpha_mask):
+            alpha_freqs = psd_data['freqs'][alpha_mask]
+            alpha_psd = psd_data['mean'][alpha_mask]
+            peak_idx = np.argmax(alpha_psd)
+            peak_freq = alpha_freqs[peak_idx]
+            peak_val = alpha_psd[peak_idx]
+            
+            ax.plot(peak_freq, peak_val, marker='v', color=psd_data['color'], markersize=6, zorder=4)
+            ax.annotate(
+                f"{peak_freq:.1f}Hz",
+                xy=(peak_freq, peak_val),
+                xytext=(0, 6),
+                textcoords='offset points',
+                ha='center',
+                va='bottom',
+                fontsize=7,
+                color=psd_data['color'],
+                fontweight='bold',
+                zorder=4
+            )
     
     for band, (fmin, fmax) in features_freq_bands.items():
         if fmin < psd_data_by_temp[0]['freqs'].max():
@@ -1175,6 +1225,10 @@ def _plot_psd_by_predictor(
                 )
     
     ax.axhline(0, color="0.4", linewidth=1.0, alpha=0.5, linestyle='--', zorder=2)
+    ax.set_xscale('log')
+    import matplotlib.ticker as ticker
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda y, _: '{:g}'.format(y)))
+    ax.set_xticks([2, 4, 8, 16, 32, 64])
     ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
     ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
     ax.legend(loc='best', fontsize=plot_cfg.font.medium, frameon=False, handlelength=1.5)
@@ -1227,6 +1281,32 @@ def _plot_psd_overall(
     
     fig, ax = plt.subplots(figsize=(4.0, 2.5), constrained_layout=True)
     ax.plot(tfr_avg_win.freqs, psd_avg, color="0.2", linewidth=1.0)
+    
+    freq_bands = get_frequency_bands(config)
+    features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
+    alpha_band = features_freq_bands.get('alpha', (8, 13))
+    alpha_mask = (tfr_avg_win.freqs >= alpha_band[0]) & (tfr_avg_win.freqs <= alpha_band[1])
+    if np.any(alpha_mask):
+        alpha_freqs = tfr_avg_win.freqs[alpha_mask]
+        alpha_psd = psd_avg[alpha_mask]
+        peak_idx = np.argmax(alpha_psd)
+        peak_freq = alpha_freqs[peak_idx]
+        peak_val = alpha_psd[peak_idx]
+        
+        ax.plot(peak_freq, peak_val, marker='v', color='0.2', markersize=6, zorder=4)
+        ax.annotate(
+            f"{peak_freq:.1f}Hz",
+            xy=(peak_freq, peak_val),
+            xytext=(0, 6),
+            textcoords='offset points',
+            ha='center',
+            va='bottom',
+            fontsize=7,
+            color='0.2',
+            fontweight='bold',
+            zorder=4
+        )
+
     ax.axhline(0, color="0.7", linewidth=0.5, alpha=0.6)
     
     freq_bands = get_frequency_bands(config)
@@ -1245,6 +1325,10 @@ def _plot_psd_overall(
                 )
     
     plot_cfg = get_plot_config(config)
+    ax.set_xscale('log')
+    import matplotlib.ticker as ticker
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda y, _: '{:g}'.format(y)))
+    ax.set_xticks([2, 4, 8, 16, 32, 64])
     ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.medium)
     ax.set_ylabel(r"$\log_{10}$(power/baseline)", fontsize=plot_cfg.font.medium)
     ax.tick_params(labelsize=plot_cfg.font.small)
@@ -1384,189 +1468,6 @@ def plot_power_spectral_density(
         roi_suffix = f"_roi-{roi_safe}" if roi_safe else ""
         
         _plot_psd_by_conditions(tfr_roi, conditions, subject, save_dir, logger, config, roi_suffix=roi_suffix, roi_name=roi_name)
-
-
-def plot_cross_frequency_power_correlation(
-    pow_df: pd.DataFrame,
-    bands: List[str],
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Cross-frequency power correlation matrix with significance testing.
-    
-    Shows how power in different frequency bands co-varies across trials.
-    Includes raw p-values and FDR-corrected significance markers.
-    """
-    if pow_df is None or pow_df.empty:
-        return
-    
-    from .utils import apply_fdr_correction, get_fdr_alpha
-    from scipy.stats import spearmanr
-    
-    plot_cfg = get_plot_config(config)
-    
-    band_power = {}
-    for band in bands:
-        band_str = str(band)
-        cols = [c for c in pow_df.columns 
-                if c.startswith("power_") and f"_{band_str}_" in c and "_ch_" in c]
-        if not cols:
-            continue
-        vals = pow_df[cols].mean(axis=1).dropna().values
-        if len(vals) >= MIN_TRIALS_FOR_VARIABILITY:
-            band_power[band_str] = vals
-    
-    valid_bands = list(band_power.keys())
-    n_bands = len(valid_bands)
-    
-    if n_bands < 2:
-        return
-    
-    corr_matrix = np.zeros((n_bands, n_bands))
-    pval_matrix = np.zeros((n_bands, n_bands))
-    
-    for i, band1 in enumerate(valid_bands):
-        for j, band2 in enumerate(valid_bands):
-            if i == j:
-                corr_matrix[i, j] = 1.0
-                pval_matrix[i, j] = 0.0
-            else:
-                vals1 = band_power[band1]
-                vals2 = band_power[band2]
-                min_len = min(len(vals1), len(vals2))
-                correlation, p_value = spearmanr(vals1[:min_len], vals2[:min_len])
-                corr_matrix[i, j] = correlation
-                pval_matrix[i, j] = p_value
-    
-    upper_tri_idx = np.triu_indices(n_bands, k=1)
-    pvals_upper = pval_matrix[upper_tri_idx]
-    
-    alpha_fdr = get_fdr_alpha(config)
-
-    if len(pvals_upper) > 0:
-        rejected, qvals, alpha_fdr_arr = apply_fdr_correction(list(pvals_upper), config=config)
-        try:
-            alpha_fdr_flat = np.asarray(alpha_fdr_arr).ravel()
-            alpha_fdr = float(alpha_fdr_flat[0])
-        except Exception:
-            alpha_fdr = get_fdr_alpha(config)
-        qval_matrix = np.zeros((n_bands, n_bands))
-        qval_matrix[upper_tri_idx] = qvals
-        qval_matrix = qval_matrix + qval_matrix.T
-        np.fill_diagonal(qval_matrix, 0)
-        n_significant = int(np.sum(rejected))
-    else:
-        qval_matrix = pval_matrix.copy()
-        n_significant = 0
-    
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-    
-    ax1 = axes[0]
-    is_significant = np.isfinite(qval_matrix) & (qval_matrix < alpha_fdr)
-    diagonal_mask = np.eye(n_bands, dtype=bool)
-    sig_mask = is_significant | diagonal_mask
-    corr_sig_only = np.where(sig_mask, corr_matrix, np.nan)
-    im1 = ax1.imshow(corr_sig_only, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
-    ax1.set_xticks(range(n_bands))
-    ax1.set_yticks(range(n_bands))
-    ax1.set_xticklabels([b.capitalize() for b in valid_bands], rotation=45, ha="right", 
-                        fontsize=plot_cfg.font.medium)
-    ax1.set_yticklabels([b.capitalize() for b in valid_bands], fontsize=plot_cfg.font.medium)
-    ax1.set_title("Spearman Correlation", fontsize=plot_cfg.font.title, fontweight="bold")
-    
-    for i in range(n_bands):
-        for j in range(n_bands):
-            correlation = corr_matrix[i, j]
-            p_value = pval_matrix[i, j]
-            q_value = qval_matrix[i, j]
-            
-            is_high_correlation = abs(correlation) > 0.5
-            text_color = "white" if is_high_correlation else "black"
-            
-            if i != j:
-                is_fdr_significant = q_value < FDR_ALPHA_DEFAULT
-                is_uncorrected_significant = p_value < FDR_ALPHA_DEFAULT
-                sig_marker = "†" if is_fdr_significant else ("*" if is_uncorrected_significant else "")
-                text = f"{correlation:.2f}{sig_marker}"
-            else:
-                text = "1.00"
-                is_fdr_significant = False
-            
-            fontweight = "bold" if is_fdr_significant else "normal"
-            ax1.text(j, i, text, ha="center", va="center", color=text_color, 
-                    fontsize=plot_cfg.font.small, fontweight=fontweight)
-    
-    cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8)
-    cbar1.set_label("Spearman ρ", fontsize=plot_cfg.font.label)
-    
-    ax2 = axes[1]
-    EPSILON = 1e-10
-    MIN_LOG_PVAL_DISPLAY = 3
-    log_pvals = -np.log10(pval_matrix + EPSILON)
-    np.fill_diagonal(log_pvals, 0)
-    
-    max_log_pval = np.max(log_pvals)
-    vmax_log_pval = max(MIN_LOG_PVAL_DISPLAY, max_log_pval)
-    im2 = ax2.imshow(log_pvals, cmap="YlOrRd", vmin=0, vmax=vmax_log_pval, aspect="equal")
-    ax2.set_xticks(range(n_bands))
-    ax2.set_yticks(range(n_bands))
-    ax2.set_xticklabels([b.capitalize() for b in valid_bands], rotation=45, ha="right",
-                        fontsize=plot_cfg.font.medium)
-    ax2.set_yticklabels([b.capitalize() for b in valid_bands], fontsize=plot_cfg.font.medium)
-    ax2.set_title(r"Significance ($-\log_{10}$ p)", fontsize=plot_cfg.font.title, fontweight="bold")
-    
-    P_VALUE_THRESHOLD_DISPLAY = 0.001
-    LOG_PVAL_TEXT_THRESHOLD = 1.5
-    
-    for i in range(n_bands):
-        for j in range(n_bands):
-            if i == j:
-                continue
-            
-            p_value = pval_matrix[i, j]
-            q_value = qval_matrix[i, j]
-            log_pval = log_pvals[i, j]
-            
-            if p_value < P_VALUE_THRESHOLD_DISPLAY:
-                p_text = "<.001"
-            else:
-                p_text = f"{p_value:.3f}"
-            
-            is_fdr_significant = q_value < FDR_ALPHA_DEFAULT
-            fdr_marker = "†" if is_fdr_significant else ""
-            is_high_log_pval = log_pval > LOG_PVAL_TEXT_THRESHOLD
-            text_color = "white" if is_high_log_pval else "black"
-            
-            ax2.text(j, i, f"{p_text}{fdr_marker}", ha="center", va="center", 
-                    color=text_color, fontsize=plot_cfg.font.small - 1)
-    
-    cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8)
-    cbar2.set_label(r"$-\log_{10}$(p)", fontsize=plot_cfg.font.label)
-    
-    ax2.axhline(-0.5, color="gray", linewidth=0.5)
-    ax2.axhline(n_bands - 0.5, color="gray", linewidth=0.5)
-    ax2.axvline(-0.5, color="gray", linewidth=0.5)
-    ax2.axvline(n_bands - 0.5, color="gray", linewidth=0.5)
-    
-    fig.suptitle(f"Cross-Frequency Power Correlations (sub-{subject})", 
-                fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.98)
-    
-    n_tests = len(pvals_upper)
-    footer = (f"n={len(pow_df)} trials | {n_tests} tests | FDR-BH α={FDR_ALPHA_DEFAULT} | "
-              f"{n_significant} significant | *p<{FDR_ALPHA_DEFAULT} uncorrected, †q<{FDR_ALPHA_DEFAULT} FDR")
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    save_fig(fig, save_dir / f"sub-{subject}_cross_frequency_power_correlation",
-             formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    
-    if logger:
-        logger.info(f"Saved cross-frequency power correlation ({n_significant}/{n_tests} FDR significant)")
-
 
 def plot_band_power_topomaps(
     pow_df: pd.DataFrame,
@@ -2148,6 +2049,7 @@ def plot_band_power_topomaps_window_contrast(
         vmax = float(np.nanmax(np.abs(valid_data))) if np.isfinite(valid_data).any() else 1.0
         vmin = -vmax
 
+        # Primary data plot
         im, _ = plot_topomap(
             valid_data,
             valid_info,
@@ -2156,9 +2058,43 @@ def plot_band_power_topomaps_window_contrast(
             cmap="RdBu_r",
             contours=6,
             vlim=(vmin, vmax),
-            mask=valid_sig,
-            mask_params=dict(markersize=2, markerfacecolor="none", markeredgecolor="k"),
         )
+        
+        # Apply opacity masking via secondary interpolation
+        try:
+            # Interpolate the boolean significance mask (0.3 for non-sig, 1.0 for sig)
+            im_mask, _ = plot_topomap(
+                valid_sig.astype(float) * 0.7 + 0.3,
+                valid_info,
+                axes=ax,
+                show=False,
+                contours=0,
+                cmap="gray",
+                vlim=(0, 1),
+            )
+            
+            # Extract the alpha grid and remove the dummy plot
+            alpha_grid = im_mask.get_array().copy()
+            im_mask.remove()
+            
+            # Apply alpha channel to the original image data
+            img_grid = im.get_array()
+            rgba = im.cmap(im.norm(img_grid))
+            
+            if np.ma.is_masked(img_grid):
+                alpha_grid[img_grid.mask] = 0.0
+                rgba[:, :, 3] = alpha_grid
+            else:
+                rgba[:, :, 3] = alpha_grid
+                
+            im.set_data(rgba)
+            
+            # Ensure dots are hidden if using opacity
+            for coll in ax.collections:
+                if isinstance(coll, matplotlib.collections.PathCollection):
+                    coll.set_visible(False)
+        except Exception:
+            pass
         plt.colorbar(im, ax=ax, shrink=0.6, label="Δ power")
 
         band_color = get_band_color(band, config)
@@ -2334,6 +2270,7 @@ def plot_band_power_topomaps_group_condition_contrast(
         vmax = float(np.nanmax(np.abs(valid_data))) if np.isfinite(valid_data).any() else 1.0
         vmin = -vmax
 
+        # Primary data plot
         im, _ = plot_topomap(
             valid_data,
             valid_info,
@@ -2342,9 +2279,44 @@ def plot_band_power_topomaps_group_condition_contrast(
             cmap="RdBu_r",
             contours=6,
             vlim=(vmin, vmax),
-            mask=valid_sig,
-            mask_params=viz_params.get("sig_mask_params"),
         )
+        
+        # Apply opacity masking via secondary interpolation
+        try:
+            # Interpolate the boolean significance mask (0.3 for non-sig, 1.0 for sig)
+            im_mask, _ = plot_topomap(
+                valid_sig.astype(float) * 0.7 + 0.3,
+                valid_info,
+                axes=ax,
+                show=False,
+                contours=0,
+                cmap="gray",
+                vlim=(0, 1),
+            )
+            
+            # Extract the alpha grid and remove the dummy plot
+            alpha_grid = im_mask.get_array().copy()
+            im_mask.remove()
+            
+            # Apply alpha channel to the original image data
+            img_grid = im.get_array()
+            rgba = im.cmap(im.norm(img_grid))
+            
+            if np.ma.is_masked(img_grid):
+                alpha_grid[img_grid.mask] = 0.0
+                rgba[:, :, 3] = alpha_grid
+            else:
+                rgba[:, :, 3] = alpha_grid
+                
+            im.set_data(rgba)
+            
+            # Ensure dots are hidden if using opacity
+            import matplotlib.collections
+            for coll in ax.collections:
+                if isinstance(coll, matplotlib.collections.PathCollection):
+                    coll.set_visible(False)
+        except Exception:
+            pass
         plt.colorbar(im, ax=ax, shrink=0.6, label="Δ power")
 
         band_color = get_band_color(band, config)
@@ -2387,3 +2359,116 @@ def plot_band_power_topomaps_group_condition_contrast(
         config=config,
     )
     plt.close(fig)
+
+
+def plot_band_power_evolution(
+    tfr_epochs: Any,
+    conditions: List[Tuple[str, np.ndarray]],
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    roi_suffix: str = "",
+    roi_name: Optional[str] = None,
+) -> bool:
+    """Plot continuous time-resolved band power trace with 95% CI.
+    
+    Shows the Time vs Power trajectory per frequency band to better 
+    illustrate the onset/offset of ERS/ERD dynamics relative to events.
+    """
+    if len(conditions) < 1:
+        raise ValueError(
+            f"plot_band_power_evolution requires at least 1 condition, got {len(conditions)}"
+        )
+
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+    from eeg_pipeline.plotting.config import get_plot_config
+    
+    plot_cfg = get_plot_config(config)
+    freq_bands = get_frequency_bands(config)
+    
+    active_window = _get_active_window(config)
+    tfr_baseline = _get_plotting_tfr_baseline_window(config)
+    
+    # Check if there are valid trials to avoid empty plots
+    has_valid_data = False
+    for label, mask in conditions:
+        if int(mask.sum()) > 0:
+            has_valid_data = True
+            break
+            
+    if not has_valid_data:
+        logger.warning("No valid trials found across conditions for plot_band_power_evolution.")
+        return False
+        
+    condition_colors = plt.cm.Set2(np.linspace(0.2, 0.8, len(conditions)))
+    band_colors = {band: get_band_color(band, config) for band in freq_bands.keys()}
+    
+    fig_width = min(4.0 * len(freq_bands), 16.0)
+    fig, axes = plt.subplots(1, len(freq_bands), figsize=(fig_width, 4.0), sharey=True)
+    if len(freq_bands) == 1:
+        axes = [axes]
+    
+    for cond_idx, (label, mask) in enumerate(conditions):
+        n_trials_cond = int(mask.sum())
+        if n_trials_cond < 1:
+            continue
+            
+        tfr_cond = tfr_epochs[mask]
+        
+        psd_per_trial = []
+        for trial_idx in range(len(tfr_cond)):
+            tfr_trial = tfr_cond[[trial_idx]].average()
+            apply_baseline_and_crop(tfr_trial, baseline=tfr_baseline, mode="logratio", logger=logger)
+            tfr_trial_win = _crop_tfr_to_active(tfr_trial, active_window, logger)
+            if tfr_trial_win is not None:
+                psd_per_trial.append(tfr_trial_win.data)
+                
+        if not psd_per_trial:
+            continue
+            
+        psd_per_trial = np.array(psd_per_trial)
+        psd_per_trial_roi = psd_per_trial.mean(axis=1)
+        freqs = tfr_trial_win.freqs
+        times = tfr_trial_win.times
+        
+        for band_idx, (band_name, (fmin, fmax)) in enumerate(freq_bands.items()):
+            ax = axes[band_idx]
+            
+            fmask = (freqs >= fmin) & (freqs <= fmax)
+            if not np.any(fmask):
+                continue
+                
+            band_power_trials = psd_per_trial_roi[:, fmask, :].mean(axis=1)
+            band_mean = band_power_trials.mean(axis=0)
+            
+            band_sem = band_power_trials.std(axis=0, ddof=1) / np.sqrt(len(band_power_trials))
+            ci_lower = band_mean - 1.96 * band_sem
+            ci_upper = band_mean + 1.96 * band_sem
+            
+            color = condition_colors[cond_idx]
+            
+            ax.plot(times, band_mean, label=f"{label} (n={n_trials_cond})" if band_idx == 0 else "", color=color, lw=2)
+            ax.fill_between(times, ci_lower, ci_upper, color=color, alpha=0.2, lw=0)
+            
+    for band_idx, band_name in enumerate(freq_bands.keys()):
+        ax = axes[band_idx]
+        ax.set_title(band_name.capitalize(), color=band_colors.get(band_name, "0.2"), fontweight="bold")
+        ax.axhline(0, color="0.4", linestyle="--", alpha=0.5, lw=1)
+        ax.axvline(0, color="0.4", linestyle="--", alpha=0.5, lw=1)
+        ax.set_xlabel("Time (s)", fontsize=plot_cfg.font.medium)
+        if band_idx == 0:
+            ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.medium)
+            ax.legend(loc="best", frameon=False, fontsize=plot_cfg.font.small)
+        sns.despine(ax=ax, trim=True)
+        
+    roi_display = roi_name.replace("_", " ").title() if roi_name and roi_name != "all" else "All Channels"
+    fig.suptitle(f"Continuous Time-Resolved Band Power Trace | {roi_display} (sub-{subject})", 
+                 fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.05)
+    
+    plt.tight_layout()
+    output_path = save_dir / f'sub-{subject}_power_continuous_trace_by_condition{roi_suffix}'
+    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi, 
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
+    plt.close(fig)
+    return True

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
@@ -55,6 +56,23 @@ class FMRIConstraintConfig:
     max_voxels_per_cluster: int
     max_total_voxels: int
     random_seed: int
+    output_space: str = "dual"  # "cluster" | "atlas" | "dual"
+
+
+@dataclass(frozen=True)
+class FMRIVoxelSelection:
+    """Selected fMRI-constrained voxels and derived ROI groupings."""
+
+    selected_voxels_ijk: np.ndarray  # shape (n_voxels, 3), MRI voxel indices
+    selected_coords_m: np.ndarray  # shape (n_voxels, 3), surface RAS in meters
+    cluster_indices: Dict[str, List[int]]
+    cluster_voxel_counts: Dict[str, int]
+    atlas_indices: Dict[str, List[int]]
+    atlas_voxel_counts: Dict[str, int]
+    cluster_to_atlas_counts: Dict[str, Dict[str, int]]
+    dropped_unlabeled_voxels: int
+    matched_reference_path: Path
+    voxel_volume_mm3: Optional[float]
 
 
 def _load_fmri_constraint_config(
@@ -257,6 +275,14 @@ def _load_fmri_constraint_config(
             f"(got {random_seed})."
         )
 
+    output_space = str(fmri_cfg.get("output_space", "dual")).strip().lower()
+    if output_space not in {"cluster", "atlas", "dual"}:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.output_space must be one of "
+            "{'cluster','atlas','dual'} "
+            f"(got '{output_space}')."
+        )
+
     return FMRIConstraintConfig(
         enabled=enabled or (stats_map_path is not None),
         stats_map_path=stats_map_path,
@@ -274,6 +300,7 @@ def _load_fmri_constraint_config(
         max_voxels_per_cluster=max_voxels_per_cluster,
         max_total_voxels=max_total_voxels,
         random_seed=random_seed,
+        output_space=output_space,
     )
 
 ###################################################################
@@ -429,6 +456,46 @@ def _setup_volume_source_space_configured(
     return fwd, src, roi_indices
 
 
+def _setup_volume_source_space_from_points_configured(
+    info: Any,
+    *,
+    subject: str,
+    subjects_dir: str,
+    trans: str,
+    bem: str,
+    coords_m: np.ndarray,
+    mindist_mm: float,
+    logger: Optional[logging.Logger],
+) -> Tuple[Any, Any]:
+    """Set up a discrete volume source space from explicit point coordinates."""
+    import mne
+
+    coords = np.atleast_2d(np.asarray(coords_m, dtype=float))
+    pos = {
+        "rr": coords,
+        "nn": np.tile([0.0, 0.0, 1.0], (int(coords.shape[0]), 1)),
+    }
+
+    src = mne.setup_volume_source_space(
+        subject,
+        pos=pos,
+        subjects_dir=subjects_dir,
+        verbose=False,
+    )
+    fwd = mne.make_forward_solution(
+        info,
+        trans=trans,
+        src=src,
+        bem=bem,
+        eeg=True,
+        mindist=float(mindist_mm),
+        verbose=False,
+    )
+    if logger:
+        logger.info("Volume forward model (fMRI constrained): %d sources", int(fwd["nsource"]))
+    return fwd, src
+
+
 def _make_fmri_subsampling_rng(seed: int) -> np.random.Generator:
     """Create deterministic RNG for fMRI voxel subsampling."""
     seed_int = int(seed)
@@ -443,6 +510,32 @@ def _iter_subject_mri_reference_paths(subjects_dir: Path, subject: str) -> List[
         subject_mri_dir / "orig.mgz",
         subject_mri_dir / "T1.mgz",
     ]
+
+
+def _iter_subject_aparcaseg_paths(subjects_dir: Path, subject: str) -> List[Path]:
+    subject_mri_dir = Path(subjects_dir) / str(subject) / "mri"
+    return [
+        subject_mri_dir / "aparc+aseg.mgz",
+        subject_mri_dir / "aparc+aseg.nii.gz",
+        subject_mri_dir / "aparc+aseg.nii",
+    ]
+
+
+def _resolve_subject_aparcaseg_path(subjects_dir: Path, subject: str) -> Path:
+    candidates = _iter_subject_aparcaseg_paths(subjects_dir, subject)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "fMRI output_space='atlas' or 'dual' requires aparc+aseg in subject MRI space. "
+        f"Expected one of: {', '.join(str(path) for path in candidates)}"
+    )
+
+
+def _atlas_label_name(label_id: int) -> str:
+    if label_id <= 0:
+        raise ValueError(f"Atlas label id must be > 0 (got {label_id}).")
+    return f"aparc_aseg_id{int(label_id)}"
 
 
 def _validate_stats_map_grid_against_subject_mri(
@@ -604,12 +697,102 @@ def _fmri_roi_coords_from_stats_map(
     subjects_dir: Path,
     subject: str,
 ) -> Dict[str, np.ndarray]:
-    """
-    Convert a thresholded fMRI statistical map into discrete volume-source coordinates.
+    """Backward-compatible wrapper returning cluster ROI coordinates only."""
+    selection = _select_fmri_constrained_voxels(
+        stats_map_path=stats_map_path,
+        cfg=cfg,
+        logger=logger,
+        subjects_dir=subjects_dir,
+        subject=subject,
+        include_atlas=False,
+    )
+    roi_coords_m: Dict[str, np.ndarray] = {}
+    for roi_name, roi_idxs in selection.cluster_indices.items():
+        if not roi_idxs:
+            continue
+        roi_coords_m[roi_name] = selection.selected_coords_m[np.asarray(roi_idxs, dtype=int)]
+    if not roi_coords_m:
+        raise ValueError("fMRI constraint produced no ROI coordinates after subsampling.")
+    return roi_coords_m
 
-    IMPORTANT: For accurate EEG↔MRI alignment, `stats_map_path` must be in the SAME MRI
-    space as your FreeSurfer subject (typically produced by resampling into `orig.mgz`
-    or `T1.mgz` space and then converting to NIfTI).
+
+def _map_selected_voxels_to_aparcaseg(
+    *,
+    nib: Any,
+    selected_voxels_ijk: np.ndarray,
+    subjects_dir: Path,
+    subject: str,
+) -> Tuple[Dict[str, List[int]], Dict[str, int], np.ndarray, int]:
+    """
+    Map selected voxels to subject-space aparc+aseg atlas labels.
+
+    Returns
+    -------
+    atlas_indices
+        Atlas label name -> selected-point indices.
+    atlas_counts
+        Atlas label name -> number of selected points.
+    atlas_ids_per_point
+        Integer atlas ID per selected point (0 means unlabeled/background).
+    dropped_unlabeled
+        Number of selected points with atlas ID <= 0.
+    """
+    atlas_path = _resolve_subject_aparcaseg_path(Path(subjects_dir), str(subject))
+    atlas_img = nib.load(str(atlas_path))
+    atlas_data = np.asarray(atlas_img.get_fdata(dtype=np.float32))
+    if atlas_data.ndim != 3:
+        raise ValueError(
+            f"Expected 3D aparc+aseg atlas, got shape={atlas_data.shape} from {atlas_path}."
+        )
+
+    selected_voxels = np.asarray(selected_voxels_ijk, dtype=int)
+    if selected_voxels.ndim != 2 or selected_voxels.shape[1] != 3:
+        raise ValueError(
+            f"Selected voxels must have shape (n, 3), got {selected_voxels.shape}."
+        )
+    if np.any(selected_voxels < 0):
+        raise ValueError("Selected voxel indices must be non-negative.")
+    if (
+        np.any(selected_voxels[:, 0] >= atlas_data.shape[0])
+        or np.any(selected_voxels[:, 1] >= atlas_data.shape[1])
+        or np.any(selected_voxels[:, 2] >= atlas_data.shape[2])
+    ):
+        raise ValueError(
+            "Selected voxel indices exceed aparc+aseg bounds "
+            f"(atlas_shape={atlas_data.shape})."
+        )
+
+    atlas_ids = atlas_data[
+        selected_voxels[:, 0],
+        selected_voxels[:, 1],
+        selected_voxels[:, 2],
+    ].astype(int, copy=False)
+
+    atlas_indices: Dict[str, List[int]] = {}
+    for point_idx, atlas_id in enumerate(atlas_ids.tolist()):
+        if int(atlas_id) <= 0:
+            continue
+        label_name = _atlas_label_name(int(atlas_id))
+        atlas_indices.setdefault(label_name, []).append(int(point_idx))
+
+    atlas_counts = {name: int(len(idxs)) for name, idxs in atlas_indices.items()}
+    dropped_unlabeled = int(np.sum(atlas_ids <= 0))
+    return atlas_indices, atlas_counts, atlas_ids, dropped_unlabeled
+
+
+def _select_fmri_constrained_voxels(
+    *,
+    stats_map_path: Path,
+    cfg: FMRIConstraintConfig,
+    logger: Optional[logging.Logger],
+    subjects_dir: Path,
+    subject: str,
+    include_atlas: bool,
+) -> FMRIVoxelSelection:
+    """
+    Select thresholded fMRI voxels and build cluster/atlas ROI index mappings.
+
+    IMPORTANT: `stats_map_path` must be on the same voxel grid as the subject MRI.
     """
     try:
         import nibabel as nib
@@ -721,7 +904,7 @@ def _fmri_roi_coords_from_stats_map(
     if not np.any(mask):
         # Log statistics about the contrast map to diagnose the issue
         finite_data = data[analysis_voxels]
-        if len(finite_data) > 0:
+        if logger is not None and len(finite_data) > 0:
             logger.warning(
                 f"fMRI stats map threshold produced empty mask (threshold={thr}, tail={cfg.tail}, mode={cfg.threshold_mode}). "
                 f"Stats: min={np.nanmin(finite_data):.3f}, max={np.nanmax(finite_data):.3f}, "
@@ -766,7 +949,8 @@ def _fmri_roi_coords_from_stats_map(
 
     rng = _make_fmri_subsampling_rng(int(cfg.random_seed))
 
-    roi_coords_m: Dict[str, np.ndarray] = {}
+    selected_voxels_by_cluster: Dict[str, np.ndarray] = {}
+    cluster_voxel_counts: Dict[str, int] = {}
     total_selected = 0
     for out_idx, (cluster_id, _, peak_val) in enumerate(clusters, start=1):
         vox = np.argwhere(labeled == cluster_id)
@@ -785,24 +969,99 @@ def _fmri_roi_coords_from_stats_map(
                 pick = rng.choice(int(vox.shape[0]), size=int(remaining), replace=False)
                 vox = vox[pick]
 
-        coords_mm = nib.affines.apply_affine(vox2ras_tkr, vox)
-        coords_m = np.asarray(coords_mm, dtype=float) / 1000.0
         roi_name = f"fmri_c{out_idx:02d}_peak{peak_val:.2f}".replace(".", "p")
-        roi_coords_m[roi_name] = coords_m
-        total_selected += int(coords_m.shape[0])
+        selected_voxels_by_cluster[roi_name] = np.asarray(vox, dtype=int)
+        n_kept = int(vox.shape[0])
+        cluster_voxel_counts[roi_name] = n_kept
+        total_selected += n_kept
 
     if logger:
         logger.info(
             "fMRI constraint: %d clusters, %d voxels (map=%s)",
-            len(roi_coords_m),
+            len(selected_voxels_by_cluster),
             total_selected,
             str(stats_map_path),
         )
 
-    if not roi_coords_m:
+    if not selected_voxels_by_cluster:
         raise ValueError("fMRI constraint produced no ROI coordinates after subsampling.")
 
-    return roi_coords_m
+    selected_voxels = np.vstack(list(selected_voxels_by_cluster.values()))
+    selected_voxels = np.asarray(selected_voxels, dtype=int)
+    coords_mm = nib.affines.apply_affine(vox2ras_tkr, selected_voxels)
+    selected_coords_m = np.asarray(coords_mm, dtype=float) / 1000.0
+
+    cluster_indices: Dict[str, List[int]] = {}
+    cluster_to_atlas_counts: Dict[str, Dict[str, int]] = {}
+    atlas_indices: Dict[str, List[int]] = {}
+    atlas_counts: Dict[str, int] = {}
+    dropped_unlabeled = 0
+
+    start = 0
+    for cluster_name, vox in selected_voxels_by_cluster.items():
+        n_points = int(vox.shape[0])
+        cluster_indices[cluster_name] = list(range(start, start + n_points))
+        cluster_to_atlas_counts[cluster_name] = {}
+        start += n_points
+
+    if include_atlas:
+        (
+            atlas_indices,
+            atlas_counts,
+            atlas_ids_per_point,
+            dropped_unlabeled,
+        ) = _map_selected_voxels_to_aparcaseg(
+            nib=nib,
+            selected_voxels_ijk=selected_voxels,
+            subjects_dir=Path(subjects_dir),
+            subject=str(subject),
+        )
+        for cluster_name, point_indices in cluster_indices.items():
+            coverage: Dict[str, int] = {}
+            for point_idx in point_indices:
+                atlas_id = int(atlas_ids_per_point[int(point_idx)])
+                if atlas_id <= 0:
+                    continue
+                atlas_name = _atlas_label_name(atlas_id)
+                coverage[atlas_name] = int(coverage.get(atlas_name, 0) + 1)
+            cluster_to_atlas_counts[cluster_name] = coverage
+
+    return FMRIVoxelSelection(
+        selected_voxels_ijk=selected_voxels,
+        selected_coords_m=selected_coords_m,
+        cluster_indices=cluster_indices,
+        cluster_voxel_counts=cluster_voxel_counts,
+        atlas_indices=atlas_indices,
+        atlas_voxel_counts=atlas_counts,
+        cluster_to_atlas_counts=cluster_to_atlas_counts,
+        dropped_unlabeled_voxels=dropped_unlabeled,
+        matched_reference_path=Path(matched_ref_path),
+        voxel_volume_mm3=voxel_vol_mm3,
+    )
+
+
+def _resolve_surviving_roi_rows(
+    *,
+    stc_vertices: np.ndarray,
+    roi_indices: Dict[str, List[int]],
+) -> Tuple[Dict[str, List[int]], List[str], List[str]]:
+    """Map requested ROI vertex indices onto surviving STC rows."""
+    vert_to_idx = {v: i for i, v in enumerate(stc_vertices)}
+
+    surviving_roi_names: List[str] = []
+    dropped_rois: List[str] = []
+    roi_row_indices: Dict[str, List[int]] = {}
+    for roi_name, orig_idxs in roi_indices.items():
+        if not orig_idxs:
+            dropped_rois.append(roi_name)
+            continue
+        row_idxs = [vert_to_idx[v] for v in orig_idxs if v in vert_to_idx]
+        if not row_idxs:
+            dropped_rois.append(roi_name)
+            continue
+        surviving_roi_names.append(roi_name)
+        roi_row_indices[roi_name] = row_idxs
+    return roi_row_indices, surviving_roi_names, dropped_rois
 
 
 def _extract_roi_timecourses_from_vertex_indices(
@@ -818,23 +1077,11 @@ def _extract_roi_timecourses_from_vertex_indices(
     n_times = int(stcs[0].data.shape[1])
 
     # stcs[0].vertices is a list (one per source space). For volume, usually [vertno]
-    stc_verts = stcs[0].vertices[0]
-    # Create mapping: original_vertex_index -> row_index_in_stc_data
-    vert_to_idx = {v: i for i, v in enumerate(stc_verts)}
-
-    surviving_roi_names: List[str] = []
-    dropped_rois: List[str] = []
-    roi_row_indices: Dict[str, List[int]] = {}
-    for roi_name, orig_idxs in roi_indices.items():
-        if not orig_idxs:
-            dropped_rois.append(roi_name)
-            continue
-        row_idxs = [vert_to_idx[v] for v in orig_idxs if v in vert_to_idx]
-        if not row_idxs:
-            dropped_rois.append(roi_name)
-            continue
-        surviving_roi_names.append(roi_name)
-        roi_row_indices[roi_name] = row_idxs
+    stc_verts = np.asarray(stcs[0].vertices[0], dtype=int)
+    roi_row_indices, surviving_roi_names, dropped_rois = _resolve_surviving_roi_rows(
+        stc_vertices=stc_verts,
+        roi_indices=roi_indices,
+    )
 
     if dropped_rois and logger is not None:
         logger.warning(
@@ -849,15 +1096,34 @@ def _extract_roi_timecourses_from_vertex_indices(
             "after forward/inverse modeling for any ROI."
         )
 
-    # Lift raw array extraction out of the nested ROI / epoch loops
+    out = _compute_roi_timecourses_from_row_indices(
+        stcs=stcs,
+        roi_row_indices=roi_row_indices,
+        roi_names=surviving_roi_names,
+    )
+    return out, surviving_roi_names
+
+
+def _compute_roi_timecourses_from_row_indices(
+    *,
+    stcs: List[Any],
+    roi_row_indices: Dict[str, List[int]],
+    roi_names: List[str],
+) -> np.ndarray:
+    """Extract ROI time-courses from pre-resolved STC row indices."""
+    n_epochs = len(stcs)
+    if n_epochs == 0:
+        return np.zeros((0, 0, 0), dtype=float)
+
+    n_times = int(stcs[0].data.shape[1])
     stc_data_list = [np.asarray(stc.data, dtype=float) for stc in stcs]
-    
-    n_rois = len(surviving_roi_names)
+
+    n_rois = len(roi_names)
     out = np.full((n_epochs, n_rois, n_times), np.nan, dtype=float)
 
-    for roi_idx, roi_name in enumerate(surviving_roi_names):
+    for roi_idx, roi_name in enumerate(roi_names):
         row_idxs = roi_row_indices[roi_name]
-        
+
         blocks: List[np.ndarray] = []
         for data in stc_data_list:
             block = data[row_idxs]
@@ -865,27 +1131,26 @@ def _extract_roi_timecourses_from_vertex_indices(
                 # e.g., VectorSourceEstimate with 3 unconstrained orientations per region
                 block = block.reshape(-1, block.shape[-1])
             blocks.append(block)
-            
+
         block_stack = np.stack(blocks, axis=0)  # (n_epochs, n_verts, n_times)
-        
         if block_stack.shape[1] == 0:
             out[:, roi_idx, :] = np.nan
-        elif block_stack.shape[1] == 1:
+            continue
+        if block_stack.shape[1] == 1:
             out[:, roi_idx, :] = block_stack[:, 0, :]
-        else:
-            # Flatten to (n_verts, n_epochs * n_times) to compute stable cross-epoch covariance
-            block_flat = np.nan_to_num(block_stack).transpose(1, 0, 2).reshape(block_stack.shape[1], -1)
-            cov = block_flat @ block_flat.T
-            
-            u, _, _ = np.linalg.svd(cov, full_matrices=False)
-            flip = np.sign(u[:, 0])
-            flip_sign = np.sign(np.sum(flip))
-            if flip_sign != 0:
-                flip *= flip_sign
-                
-            out[:, roi_idx, :] = np.nanmean(block_stack * flip[np.newaxis, :, np.newaxis], axis=1)
+            continue
 
-    return out, surviving_roi_names
+        # Flatten to (n_verts, n_epochs * n_times) to compute stable cross-epoch covariance
+        block_flat = np.nan_to_num(block_stack).transpose(1, 0, 2).reshape(block_stack.shape[1], -1)
+        cov = block_flat @ block_flat.T
+        u, _, _ = np.linalg.svd(cov, full_matrices=False)
+        flip = np.sign(u[:, 0])
+        flip_sign = np.sign(np.sum(flip))
+        if flip_sign != 0:
+            flip *= flip_sign
+        out[:, roi_idx, :] = np.nanmean(block_stack * flip[np.newaxis, :, np.newaxis], axis=1)
+
+    return out
 
 
 ###################################################################
@@ -1913,6 +2178,81 @@ def _enforce_fmri_provenance_policy(
     )
 
 
+def _sanitize_segment_token(value: str) -> str:
+    token = _sanitize_feature_token(value)
+    return token.lower()
+
+
+def _write_fmri_constraint_metadata_sidecar(
+    *,
+    ctx: Any,
+    src_cfg: SourceLocalizationConfig,
+    segment_label: str,
+    payload: Dict[str, Any],
+    logger: logging.Logger,
+) -> Optional[Path]:
+    """Write per-subject fMRI-constraint metadata sidecar for source features."""
+    deriv_root = getattr(ctx, "deriv_root", None)
+    subject = getattr(ctx, "subject", None)
+    if deriv_root is None or subject is None:
+        return None
+
+    base_features_dir = deriv_features_path(Path(str(deriv_root)), str(subject))
+    metadata_dir = base_features_dir / "sourcelocalization" / str(src_cfg.method) / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    safe_segment = _sanitize_segment_token(str(segment_label or "full"))
+    out_path = metadata_dir / f"fmri_constraint_{safe_segment}.json"
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    logger.info("Saved fMRI constraint metadata sidecar: %s", str(out_path))
+    return out_path
+
+
+def _normalize_fmri_cluster_name(roi_name: str) -> str:
+    token = _sanitize_feature_token(str(roi_name)).lower()
+    if token.startswith("fmri_"):
+        token = token[len("fmri_") :]
+    return token
+
+
+def _append_source_band_family_features(
+    *,
+    records: List[Dict[str, float]],
+    feature_cols: List[str],
+    n_epochs: int,
+    roi_data: np.ndarray,
+    label_names: List[str],
+    sfreq: float,
+    fmin: float,
+    fmax: float,
+    segment_label: str,
+    method: str,
+    band: str,
+    family_prefix: str,
+) -> None:
+    power = _compute_roi_power(roi_data, sfreq, fmin, fmax)
+    for roi_idx, roi_name in enumerate(label_names):
+        safe_name = _sanitize_feature_token(roi_name).lower()
+        col_name = f"src_{segment_label}_{method}_{band}_{family_prefix}_{safe_name}_power"
+        feature_cols.append(col_name)
+        for epoch_idx in range(n_epochs):
+            records[epoch_idx][col_name] = power[epoch_idx, roi_idx]
+
+    global_power = np.nanmean(power, axis=1)
+    col_name = f"src_{segment_label}_{method}_{band}_{family_prefix}_global_power"
+    feature_cols.append(col_name)
+    for epoch_idx in range(n_epochs):
+        records[epoch_idx][col_name] = global_power[epoch_idx]
+
+    envelope = _compute_roi_envelope(roi_data, sfreq, fmin, fmax)
+    mean_env = np.nanmean(envelope, axis=2)
+    for roi_idx, roi_name in enumerate(label_names):
+        safe_name = _sanitize_feature_token(roi_name).lower()
+        col_name = f"src_{segment_label}_{method}_{band}_{family_prefix}_{safe_name}_envelope"
+        feature_cols.append(col_name)
+        for epoch_idx in range(n_epochs):
+            records[epoch_idx][col_name] = mean_env[epoch_idx, roi_idx]
+
+
 def extract_source_localization_features(
     ctx: Any,
     bands: List[str],
@@ -1977,6 +2317,9 @@ def extract_source_localization_features(
     if logger:
         logger.info(f"Extracting source-localized features using {src_cfg.method.upper()}")
 
+    fmri_family_series: Dict[str, Tuple[np.ndarray, List[str]]] = {}
+    fmri_metadata_payload: Optional[Dict[str, Any]] = None
+
     if fmri_cfg.enabled:
         if src_cfg.subjects_dir is None:
             raise ValueError(
@@ -2011,20 +2354,22 @@ def extract_source_localization_features(
         if not fmri_cfg.stats_map_path.exists():
             raise FileNotFoundError(f"Missing fMRI stats map: {fmri_cfg.stats_map_path}")
 
-        roi_coords_m = _fmri_roi_coords_from_stats_map(
-            fmri_cfg.stats_map_path,
-            fmri_cfg,
-            logger,
+        include_atlas = str(fmri_cfg.output_space) in {"atlas", "dual"}
+        voxel_selection = _select_fmri_constrained_voxels(
+            stats_map_path=fmri_cfg.stats_map_path,
+            cfg=fmri_cfg,
+            logger=logger,
             subjects_dir=Path(src_cfg.subjects_dir),
             subject=src_cfg.subject,
+            include_atlas=include_atlas,
         )
-        fwd, src, roi_indices = _setup_volume_source_space_configured(
+        fwd, src = _setup_volume_source_space_from_points_configured(
             epochs.info,
             subject=src_cfg.subject,
             subjects_dir=str(src_cfg.subjects_dir),
             trans=str(trans_path),
             bem=str(bem_path),
-            roi_coords_m=roi_coords_m,
+            coords_m=voxel_selection.selected_coords_m,
             mindist_mm=src_cfg.mindist_mm,
             logger=logger,
         )
@@ -2046,14 +2391,95 @@ def extract_source_localization_features(
                 pick_ori=None,
                 logger=logger,
             )
-        roi_data, label_names = _extract_roi_timecourses_from_vertex_indices(
-            stcs,
-            roi_indices,
-            logger=logger,
-        )
-        if roi_data.size == 0 or not label_names:
-            logger.warning("fMRI-constrained source localization produced no ROI time courses.")
-            return pd.DataFrame(), []
+
+        stc_verts = np.asarray(stcs[0].vertices[0], dtype=int)
+        requested_roi_sets: Dict[str, Dict[str, List[int]]] = {}
+        if str(fmri_cfg.output_space) in {"cluster", "dual"}:
+            requested_roi_sets["fmri_cluster"] = {
+                _normalize_fmri_cluster_name(name): list(indices)
+                for name, indices in voxel_selection.cluster_indices.items()
+            }
+        if str(fmri_cfg.output_space) in {"atlas", "dual"}:
+            if not voxel_selection.atlas_indices:
+                raise ValueError(
+                    "fMRI output_space includes atlas mapping but no non-background aparc+aseg "
+                    "labels survived in the selected voxels."
+                )
+            requested_roi_sets["atlas"] = {
+                str(name): list(indices)
+                for name, indices in voxel_selection.atlas_indices.items()
+            }
+        if not requested_roi_sets:
+            raise ValueError(
+                f"Unsupported fMRI output_space '{fmri_cfg.output_space}'. "
+                "Expected one of {'cluster','atlas','dual'}."
+            )
+
+        roi_survival_metadata: Dict[str, Dict[str, Any]] = {}
+        for family_name, family_indices in requested_roi_sets.items():
+            roi_row_indices, surviving_roi_names, dropped_rois = _resolve_surviving_roi_rows(
+                stc_vertices=stc_verts,
+                roi_indices=family_indices,
+            )
+            if dropped_rois:
+                logger.warning(
+                    "fMRI-constrained %s mapping dropped %d ROI(s) with no surviving vertices: %s",
+                    family_name,
+                    len(dropped_rois),
+                    ", ".join(dropped_rois),
+                )
+            if not surviving_roi_names:
+                raise ValueError(
+                    f"fMRI-constrained {family_name} ROI mapping failed: no surviving vertices "
+                    "remained after forward/inverse modeling."
+                )
+            roi_data_family = _compute_roi_timecourses_from_row_indices(
+                stcs=stcs,
+                roi_row_indices=roi_row_indices,
+                roi_names=surviving_roi_names,
+            )
+            if roi_data_family.size == 0:
+                raise ValueError(
+                    f"fMRI-constrained {family_name} ROI mapping produced empty time-courses."
+                )
+            fmri_family_series[family_name] = (roi_data_family, surviving_roi_names)
+            roi_survival_metadata[family_name] = {
+                "requested_rois": sorted(family_indices.keys()),
+                "surviving_rois": list(surviving_roi_names),
+                "dropped_rois": list(dropped_rois),
+                "surviving_vertices_per_roi": {
+                    roi_name: int(len(roi_row_indices[roi_name]))
+                    for roi_name in surviving_roi_names
+                },
+            }
+
+        if not fmri_family_series:
+            raise ValueError(
+                "fMRI-constrained source localization produced no surviving ROI families."
+            )
+
+        fmri_metadata_payload = {
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "subject": str(src_cfg.subject),
+            "method": str(src_cfg.method),
+            "output_space": str(fmri_cfg.output_space),
+            "stats_map_path": str(fmri_cfg.stats_map_path),
+            "matched_reference_mri": str(voxel_selection.matched_reference_path),
+            "selected_voxels_total": int(voxel_selection.selected_voxels_ijk.shape[0]),
+            "voxel_volume_mm3": (
+                float(voxel_selection.voxel_volume_mm3)
+                if voxel_selection.voxel_volume_mm3 is not None
+                else None
+            ),
+            "cluster_voxel_counts": dict(voxel_selection.cluster_voxel_counts),
+            "atlas_voxel_counts": dict(voxel_selection.atlas_voxel_counts),
+            "cluster_to_atlas_counts": {
+                cluster_name: dict(counts)
+                for cluster_name, counts in voxel_selection.cluster_to_atlas_counts.items()
+            },
+            "dropped_unlabeled_voxels": int(voxel_selection.dropped_unlabeled_voxels),
+            "roi_survival": roi_survival_metadata,
+        }
     else:
         trans_path = src_cfg.trans_path
         bem_path = src_cfg.bem_path
@@ -2140,49 +2566,89 @@ def extract_source_localization_features(
         roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
     
     segment_label = ctx.name or getattr(ctx.windows, "name", None) or "full"
-    
-    records = [{} for _ in range(n_epochs)]
-    feature_cols = []
-    
-    for band in bands:
-        if band not in freq_bands:
-            continue
-        
-        fmin, fmax = freq_bands[band]
-        if not _validate_source_localization_duration(
-            n_times=int(roi_data.shape[-1]) if np.ndim(roi_data) >= 3 else 0,
-            sfreq=float(sfreq),
-            fmin=float(fmin),
-            min_cycles=min_cycles_per_band,
-            band=str(band),
+    if fmri_metadata_payload is not None:
+        sidecar_path = _write_fmri_constraint_metadata_sidecar(
+            ctx=ctx,
+            src_cfg=src_cfg,
+            segment_label=str(segment_label),
+            payload=fmri_metadata_payload,
             logger=logger,
-        ):
-            continue
-        
-        power = _compute_roi_power(roi_data, sfreq, fmin, fmax)
-        
-        for roi_idx, roi_name in enumerate(label_names):
-            safe_name = roi_name.replace("-", "_").replace(" ", "_")
-            col_name = f"src_{segment_label}_{src_cfg.method}_{band}_{safe_name}_power"
+        )
+        if sidecar_path is not None:
+            fmri_metadata_payload["metadata_sidecar_path"] = str(sidecar_path)
+
+    records = [{} for _ in range(n_epochs)]
+    feature_cols: List[str] = []
+
+    if fmri_cfg.enabled:
+        for band in bands:
+            if band not in freq_bands:
+                continue
+            fmin, fmax = freq_bands[band]
+            for family_name, (family_roi_data, family_label_names) in fmri_family_series.items():
+                if not _validate_source_localization_duration(
+                    n_times=int(family_roi_data.shape[-1]) if np.ndim(family_roi_data) >= 3 else 0,
+                    sfreq=float(sfreq),
+                    fmin=float(fmin),
+                    min_cycles=min_cycles_per_band,
+                    band=str(band),
+                    logger=logger,
+                ):
+                    continue
+                _append_source_band_family_features(
+                    records=records,
+                    feature_cols=feature_cols,
+                    n_epochs=n_epochs,
+                    roi_data=family_roi_data,
+                    label_names=family_label_names,
+                    sfreq=sfreq,
+                    fmin=float(fmin),
+                    fmax=float(fmax),
+                    segment_label=str(segment_label),
+                    method=str(src_cfg.method),
+                    band=str(band),
+                    family_prefix=str(family_name),
+                )
+    else:
+        for band in bands:
+            if band not in freq_bands:
+                continue
+
+            fmin, fmax = freq_bands[band]
+            if not _validate_source_localization_duration(
+                n_times=int(roi_data.shape[-1]) if np.ndim(roi_data) >= 3 else 0,
+                sfreq=float(sfreq),
+                fmin=float(fmin),
+                min_cycles=min_cycles_per_band,
+                band=str(band),
+                logger=logger,
+            ):
+                continue
+
+            power = _compute_roi_power(roi_data, sfreq, fmin, fmax)
+
+            for roi_idx, roi_name in enumerate(label_names):
+                safe_name = roi_name.replace("-", "_").replace(" ", "_")
+                col_name = f"src_{segment_label}_{src_cfg.method}_{band}_{safe_name}_power"
+                feature_cols.append(col_name)
+                for epoch_idx in range(n_epochs):
+                    records[epoch_idx][col_name] = power[epoch_idx, roi_idx]
+
+            global_power = np.nanmean(power, axis=1)
+            col_name = f"src_{segment_label}_{src_cfg.method}_{band}_global_power"
             feature_cols.append(col_name)
             for epoch_idx in range(n_epochs):
-                records[epoch_idx][col_name] = power[epoch_idx, roi_idx]
-        
-        global_power = np.nanmean(power, axis=1)
-        col_name = f"src_{segment_label}_{src_cfg.method}_{band}_global_power"
-        feature_cols.append(col_name)
-        for epoch_idx in range(n_epochs):
-            records[epoch_idx][col_name] = global_power[epoch_idx]
-        
-        envelope = _compute_roi_envelope(roi_data, sfreq, fmin, fmax)
-        mean_env = np.nanmean(envelope, axis=2)
-        
-        for roi_idx, roi_name in enumerate(label_names):
-            safe_name = roi_name.replace("-", "_").replace(" ", "_")
-            col_name = f"src_{segment_label}_{src_cfg.method}_{band}_{safe_name}_envelope"
-            feature_cols.append(col_name)
-            for epoch_idx in range(n_epochs):
-                records[epoch_idx][col_name] = mean_env[epoch_idx, roi_idx]
+                records[epoch_idx][col_name] = global_power[epoch_idx]
+
+            envelope = _compute_roi_envelope(roi_data, sfreq, fmin, fmax)
+            mean_env = np.nanmean(envelope, axis=2)
+
+            for roi_idx, roi_name in enumerate(label_names):
+                safe_name = roi_name.replace("-", "_").replace(" ", "_")
+                col_name = f"src_{segment_label}_{src_cfg.method}_{band}_{safe_name}_envelope"
+                feature_cols.append(col_name)
+                for epoch_idx in range(n_epochs):
+                    records[epoch_idx][col_name] = mean_env[epoch_idx, roi_idx]
     
     if src_cfg.save_stc and hasattr(ctx, "aligned_events") and ctx.aligned_events is not None:
         contrast_cfg = _load_source_contrast_config(getattr(ctx, "config", None))
@@ -2259,11 +2725,66 @@ def extract_source_localization_features(
                     )
                     out_stc.save(str(stc_name), overwrite=True)
 
+                if fmri_cfg.enabled and fmri_family_series and "fmri_cluster" in fmri_family_series:
+                    cluster_roi_data, cluster_roi_names = fmri_family_series["fmri_cluster"]
+                    cond_cluster_data = cluster_roi_data[cond_indices]
+                    
+                    if len(cond_indices) > 0 and cond_cluster_data.shape[-1] > 100:
+                        from mne.time_frequency import AverageTFR, tfr_array_morlet
+                        
+                        freqs = np.logspace(*np.log10([3.0, 100.0]), num=40)
+                        n_cycles = freqs / 3.0
+                        
+                        try:
+                            if logger:
+                                logger.info(f"Computing source-level Morlet TFR for {len(cluster_roi_names)} clusters for condition '{cond}'...")
+                            power_tfr = tfr_array_morlet(
+                                cond_cluster_data,
+                                sfreq=sfreq,
+                                freqs=freqs,
+                                n_cycles=n_cycles,
+                                output='power',
+                                n_jobs=getattr(ctx, "n_jobs", 1),
+                                verbose=False
+                            )
+                            mean_power_tfr = np.nanmean(power_tfr, axis=0) # shape (n_rois, n_freqs, n_times)
+                            
+                            info = mne.create_info(
+                                ch_names=list(cluster_roi_names),
+                                sfreq=sfreq,
+                                ch_types='eeg'
+                            )
+                            tfr_obj = AverageTFR(
+                                info=info,
+                                data=mean_power_tfr,
+                                times=epochs.times,
+                                freqs=freqs,
+                                nave=len(cond_indices),
+                                comment=f"Source cluster TFR: {cond}"
+                            )
+                            
+                            safe_cond = str(cond).replace(" ", "_").replace("/", "_")
+                            safe_segment = _sanitize_feature_token(segment_label)
+                            tfr_path = out_dir / f"sub-{ctx.subject}_task-{ctx.task}_seg-{safe_segment}_cond-{safe_cond}_{src_cfg.method}-tfr.h5"
+                            tfr_obj.save(str(tfr_path), overwrite=True)
+                            if logger:
+                                logger.info(f"Saved cluster Source TFR to {tfr_path.name}")
+                        except Exception as e:
+                            if logger:
+                                logger.warning(f"Failed to compute/save Source TFR for condition '{cond}': {e}")
+
     features_df = pd.DataFrame(records)
     feature_cols = list(features_df.columns)
     features_df.attrs["method"] = str(src_cfg.method)
     features_df.attrs["fmri_constraint_enabled"] = bool(fmri_cfg.enabled)
     features_df.attrs["fmri_provenance"] = str(fmri_cfg.provenance)
+    features_df.attrs["fmri_output_space"] = (
+        str(fmri_cfg.output_space) if bool(fmri_cfg.enabled) else "none"
+    )
+    if fmri_metadata_payload is not None:
+        metadata_path = fmri_metadata_payload.get("metadata_sidecar_path")
+        if metadata_path:
+            features_df.attrs["fmri_constraint_metadata_sidecar"] = str(metadata_path)
     features_df.attrs["train_mask_used_for_covariance"] = bool(epochs_fit is not None and src_cfg.method == "lcmv")
     
     if logger:
@@ -2356,15 +2877,25 @@ def extract_source_connectivity_features(
                 "fMRI-constrained source connectivity requires feature_engineering.sourcelocalization.subjects_dir "
                 "(FreeSurfer SUBJECTS_DIR)."
             )
-        if src_cfg.trans_path is None:
+
+        from fmri_pipeline.analysis.bem_generation import ensure_bem_and_trans_files
+
+        resolved_trans, _, resolved_bem = ensure_bem_and_trans_files(
+            subject=src_cfg.subject,
+            subjects_dir=src_cfg.subjects_dir,
+            config=config,
+            logger_instance=logger,
+            eeg_info=epochs.info,
+        )
+        if resolved_trans is None:
             raise ValueError(
                 "fMRI-constrained source connectivity requires feature_engineering.sourcelocalization.trans "
-                "(EEG↔MRI transform .fif)."
+                "(EEG↔MRI transform .fif). Set path or enable --source-create-trans to auto-generate."
             )
-        if src_cfg.bem_path is None:
+        if resolved_bem is None:
             raise ValueError(
                 "fMRI-constrained source connectivity requires feature_engineering.sourcelocalization.bem "
-                "(*-bem-sol.fif)."
+                "(*-bem-sol.fif). Set path or enable --source-create-bem-model and --source-create-bem-solution to auto-generate."
             )
         if not fmri_cfg.stats_map_path.exists():
             raise FileNotFoundError(f"Missing fMRI stats map: {fmri_cfg.stats_map_path}")
@@ -2380,8 +2911,8 @@ def extract_source_connectivity_features(
             epochs.info,
             subject=src_cfg.subject,
             subjects_dir=str(src_cfg.subjects_dir),
-            trans=str(src_cfg.trans_path),
-            bem=str(src_cfg.bem_path),
+            trans=str(resolved_trans),
+            bem=str(resolved_bem),
             roi_coords_m=roi_coords_m,
             mindist_mm=src_cfg.mindist_mm,
             logger=logger,

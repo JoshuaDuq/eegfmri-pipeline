@@ -8,7 +8,7 @@ func (m Model) selectedPlotItemsForConfig() []PlotItem {
 		if !m.plotSelected[i] {
 			continue
 		}
-		if !m.IsPlotCategorySelected(plot.Group) {
+		if !m.IsPlotVisibleForSelection(plot) {
 			continue
 		}
 		items = append(items, plot)

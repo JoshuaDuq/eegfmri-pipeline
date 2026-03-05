@@ -716,6 +716,24 @@ func TestBuildCommand_PlottingGroupScopeAddsAnalysisScopeFlag(t *testing.T) {
 	}
 }
 
+func TestSelectedPlotIDs_PlottingGroupScopeFiltersUnsupportedPlots(t *testing.T) {
+	m := Model{}
+	m.Pipeline = types.PipelinePlotting
+	m.plottingScope = PlottingScopeGroup
+	m.plotItems = []PlotItem{
+		{ID: "band_power_topomaps", Group: "power"},
+		{ID: "power_by_condition", Group: "power"},
+		{ID: "power_spectral_density", Group: "power"},
+	}
+	m.plotSelected = map[int]bool{0: true, 1: true, 2: true}
+
+	got := m.SelectedPlotIDs()
+	want := []string{"band_power_topomaps", "power_by_condition", "power_spectral_density"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected group plotting IDs %v, got %v", want, got)
+	}
+}
+
 func TestBuildFeaturesAdvancedArgs_IncludesERDSPainMarkerFlags(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, cat := range m.categories {
@@ -1330,37 +1348,37 @@ func TestBuildBehaviorAdvancedArgs_GroupLevelTargetUsesAvailableTargetList(t *te
 	}
 }
 
-func TestShouldSkipStep_PlottingRoiStepSkippedForBandPowerTopomapsOnly(t *testing.T) {
-	m := Model{}
-	m.Pipeline = types.PipelinePlotting
-	m.plotItems = []PlotItem{{ID: "band_power_topomaps", Group: "power"}}
-	m.plotSelected = map[int]bool{0: true}
-	m.selected = map[int]bool{}
+func TestNew_PlottingPipelineStepSequenceExcludesBandsAndROIs(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
 
-	if m.plottingNeedsROIs() {
-		t.Fatalf("expected plottingNeedsROIs=false for band_power_topomaps only")
-	}
-	if !m.shouldSkipStep(types.StepSelectROIs) {
-		t.Fatalf("expected StepSelectROIs to be skipped for band_power_topomaps only")
+	for _, step := range m.steps {
+		if step == types.StepSelectBands {
+			t.Fatalf("StepSelectBands must not be in the plotting pipeline step sequence")
+		}
+		if step == types.StepSelectROIs {
+			t.Fatalf("StepSelectROIs must not be in the plotting pipeline step sequence")
+		}
 	}
 }
 
-func TestBuildCommand_PlottingBandPowerTopomapsDoesNotEmitRois(t *testing.T) {
+func TestBuildCommand_PlottingNeverEmitsRoisOrBands(t *testing.T) {
 	m := Model{}
 	m.Pipeline = types.PipelinePlotting
 	m.modeOptions = []string{"visualize"}
 	m.modeIndex = 0
-	m.plotItems = []PlotItem{{ID: "band_power_topomaps", Group: "power"}}
+	m.plotItems = []PlotItem{{ID: "roi_timeseries", Group: "features"}}
 	m.plotSelected = map[int]bool{0: true}
 	m.selected = map[int]bool{}
 
-	// Force ROI definitions to be non-default so we'd emit --rois if the pipeline needed ROIs.
-	m.rois = []ROIDefinition{{Key: "TestROI", Name: "TestROI", Channels: "Fp1,Fp2"}}
-	m.roiSelected = map[int]bool{0: true}
-
 	cmd := m.BuildCommand()
 	if strings.Contains(cmd, "--rois") {
-		t.Fatalf("did not expect --rois in command, got: %s", cmd)
+		t.Fatalf("did not expect --rois in plotting command, got: %s", cmd)
+	}
+	if strings.Contains(cmd, "--bands") {
+		t.Fatalf("did not expect --bands in plotting command, got: %s", cmd)
+	}
+	if strings.Contains(cmd, "--frequency-bands") {
+		t.Fatalf("did not expect --frequency-bands in plotting command, got: %s", cmd)
 	}
 }
 
@@ -1368,16 +1386,12 @@ func TestBuildPlotItemConfigArgs_BandPowerTopomapsFallsBackToComparisonWindows(t
 	m := Model{}
 	m.plotItems = []PlotItem{{ID: "band_power_topomaps", Group: "power"}}
 	m.plotSelected = map[int]bool{0: true}
-	m.plotItemConfigs = map[string]PlotItemConfig{
-		"band_power_topomaps": {
-			ComparisonWindowsSpec: "baseline plateau",
-		},
-	}
+	m.plotComparisonWindowsSpec = "baseline plateau"
 
 	args := m.buildPlotItemConfigArgs()
 	want := []string{"--plot-item-config", "band_power_topomaps", "topomap_windows", "baseline", "plateau"}
 	if !containsSubsequence(args, want) {
-		t.Fatalf("expected topomap_windows to default to comparison windows; args=%#v", args)
+		t.Fatalf("expected topomap_windows to default to global comparison windows; args=%#v", args)
 	}
 }
 

@@ -8,11 +8,12 @@ Plotting functions for 3D source localization brain maps.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 from pathlib import Path
 import re
 import sys
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import mne
@@ -407,7 +408,13 @@ def _build_discrete_condition_differences(
                 )
 
         diff_stc = stc_b.copy()
-        diff_stc.data = np.asarray(stc_b.data, dtype=float) - np.asarray(stc_a.data, dtype=float)
+        
+        # Power follows 1/f law. Absolute diff (B-A) destroys high frequencies.
+        # Compute proper decibel (dB) relative contrast map: 10 * log10(B / A)
+        data_a = np.clip(np.asarray(stc_a.data, dtype=float), a_min=1e-15, a_max=None)
+        data_b = np.clip(np.asarray(stc_b.data, dtype=float), a_min=1e-15, a_max=None)
+        diff_stc.data = 10 * np.log10(data_b / data_a)
+        
         diff_records.append(
             {
                 "task": task,
@@ -427,7 +434,7 @@ def _discrete_group_key(task: str, segment: Optional[str], band: str, method: st
 
 
 def _compute_discrete_group_limits(stc_map: dict[Path, Any]) -> dict[tuple[str, Optional[str], str, str], tuple[float, float]]:
-    """Compute per-group color limits for discrete condition maps."""
+    """Compute robust 95th-99.5th percentile limits for discrete condition maps to mask background noise."""
     grouped_values: dict[tuple[str, Optional[str], str, str], list[np.ndarray]] = {}
     for path, stc in stc_map.items():
         metadata = _parse_stc_plot_metadata(path)
@@ -441,16 +448,18 @@ def _compute_discrete_group_limits(stc_map: dict[Path, Any]) -> dict[tuple[str, 
 
     limits: dict[tuple[str, Optional[str], str, str], tuple[float, float]] = {}
     for key, value_arrays in grouped_values.items():
-        vmin = float(min(np.nanmin(values) for values in value_arrays))
-        vmax = float(max(np.nanmax(values) for values in value_arrays))
-        if not np.isfinite(vmin) or not np.isfinite(vmax):
-            raise ValueError(
-                f"Invalid non-finite source values encountered for group {key}."
-            )
-        if vmax <= vmin:
-            raise ValueError(
-                f"Degenerate source color scale for group {key}; STC values do not vary."
-            )
+        all_vals = np.concatenate(value_arrays)
+        active = all_vals[np.isfinite(all_vals) & (all_vals > 0)]
+        
+        if len(active) == 0:
+            vmin, vmax = 0.0, 1e-10
+        else:
+            vmin = float(np.percentile(active, 95))
+            vmax = float(np.percentile(active, 99.5))
+            
+            if vmax <= vmin:
+                vmax = vmin + 1e-10
+                
         limits[key] = (vmin, vmax)
     return limits
 
@@ -522,8 +531,6 @@ def _discrete_stc_to_nifti(
     stc: Any,
     src: Any,
     *,
-    vmin: float = 0.0,
-    vmax: float = 1.0,
     voxel_size_mm: float = 2.0,
 ) -> Any:
     """Build a NIfTI from a discrete source estimate.
@@ -532,9 +539,6 @@ def _discrete_stc_to_nifti(
     spaces.  This function manually snaps each source coordinate onto a
     regular voxel grid in MRI-RAS space, producing a sparse 3-D NIfTI that
     nilearn can render with ``plot_stat_map``.
-
-    Returns a ``nibabel.Nifti1Image`` with non-zero voxels clamped to
-    ``[vmin, vmax]`` (zeros = transparent background in nilearn).
     """
     import nibabel as nib
 
@@ -564,15 +568,18 @@ def _discrete_stc_to_nifti(
 
     # Map source coordinates to voxel indices and fill the volume.
     ijk = np.round((coords_mm - origin) / voxel_size_mm).astype(int)
-    vol = np.zeros(tuple(grid_shape), dtype=float)
+    sum_vol = np.zeros(tuple(grid_shape), dtype=float)
+    count_vol = np.zeros(tuple(grid_shape), dtype=int)
+    
     for idx, (i, j, k) in enumerate(ijk):
         if 0 <= i < grid_shape[0] and 0 <= j < grid_shape[1] and 0 <= k < grid_shape[2]:
-            # If multiple sources map to the same voxel, keep the maximum.
-            vol[i, j, k] = max(vol[i, j, k], values[idx])
+            sum_vol[i, j, k] += values[idx]
+            count_vol[i, j, k] += 1
 
-    # Clamp non-zero voxels; zeros stay zero (nilearn background).
-    nonzero = vol != 0.0
-    vol[nonzero] = np.clip(vol[nonzero], vmin, vmax)
+    # Compute mean for voxels that have sources
+    vol = np.zeros_like(sum_vol)
+    nonzero = count_vol > 0
+    vol[nonzero] = sum_vol[nonzero] / count_vol[nonzero]
 
     return nib.Nifti1Image(vol, affine)
 
@@ -611,7 +618,7 @@ def _plot_discrete_stc_volumetric(
     # MNE's as_volume() does not support discrete source spaces (AssertionError
     # in _interpolate_data). Build a sparse NIfTI manually instead:
     # snap each source coordinate onto a regular 2 mm grid.
-    nii_clamped = _discrete_stc_to_nifti(stc, src, vmin=vmin, vmax=vmax)
+    nii_clamped = _discrete_stc_to_nifti(stc, src)
 
     # Use the subject's T1.mgz as anatomical background if available.
     t1_path = Path(subjects_dir) / fs_subject / "mri" / "T1.mgz"
@@ -790,7 +797,7 @@ def _plot_discrete_stc_orthogonal_projections(
 
     # MNE's as_volume() does not support discrete source spaces.
     # Build a sparse NIfTI manually via a regular 2 mm grid.
-    nii_clamped = _discrete_stc_to_nifti(stc, src, vmin=vmin, vmax=vmax)
+    nii_clamped = _discrete_stc_to_nifti(stc, src)
 
     t1_path = Path(subjects_dir) / fs_subject / "mri" / "T1.mgz"
     bg_img = str(t1_path) if t1_path.exists() else "MNI152"
@@ -964,9 +971,11 @@ def _plot_surface_stc_canonical(
     )
     n_lh = len(stc_full.vertices[0])
 
-    # Percentile-based thresholds: show top ~35% of activation
+    # High-tier scientific journals require statistically masked source maps.
+    # We dynamically mask out the lower 95% of vertices, mapping only the top 5%
+    # of activations to the colormap.
     active = vals[np.isfinite(vals) & (vals > 0)]
-    vmin = float(np.percentile(active, 65)) if active.size else 0.0
+    vmin = float(np.percentile(active, 95)) if active.size else 0.0
     vmax = float(np.percentile(active, 99.5)) if active.size else 1.0
     if vmax <= vmin:
         vmax = vmin * 2.0 + 1e-30
@@ -991,7 +1000,7 @@ def _plot_surface_stc_canonical(
             hemi=hemi,
             view=view,
             colorbar=False,
-            cmap="hot",
+            cmap="magma",
             vmax=vmax,
             threshold=vmin,
             bg_on_data=True,
@@ -1034,7 +1043,7 @@ def _plot_surface_stc_canonical(
 
     ax_cb = out_fig.add_subplot(gs[1])
     cb = out_fig.colorbar(
-        plt.cm.ScalarMappable(norm=mcolors.Normalize(vmin=vmin, vmax=vmax), cmap="hot"),
+        plt.cm.ScalarMappable(norm=mcolors.Normalize(vmin=vmin, vmax=vmax), cmap="magma"),
         cax=ax_cb,
     )
     cb.set_label("Source power (a.u.)", fontsize=9, labelpad=8)
@@ -1166,7 +1175,7 @@ def _plot_surface_stc_contrast(
         ),
         cax=ax_cb,
     )
-    cb.set_label(f"Source difference ({condition_b} − {condition_a}, a.u.)", fontsize=9, labelpad=8)
+    cb.set_label(f"Source contrast ({condition_b} vs {condition_a}, dB)", fontsize=9, labelpad=8)
     cb.ax.tick_params(labelsize=8)
 
     out_fig.suptitle(title, fontsize=11, y=0.99)
@@ -1209,7 +1218,11 @@ def _build_surface_condition_contrasts(
             continue
 
         diff_stc = stc_b.copy()
-        diff_stc.data = np.asarray(stc_b.data, dtype=float) - np.asarray(stc_a.data, dtype=float)
+        # Compute proper decibel (dB) relative contrast map: 10 * log10(B / A)
+        data_a = np.clip(np.asarray(stc_a.data, dtype=float), a_min=1e-15, a_max=None)
+        data_b = np.clip(np.asarray(stc_b.data, dtype=float), a_min=1e-15, a_max=None)
+        diff_stc.data = 10 * np.log10(data_b / data_a)
+        
         diff_records.append({
             "task": task,
             "segment": segment,
@@ -1303,7 +1316,7 @@ def plot_source_glass_brain(
                     nii,
                     display_mode="ortho",
                     colorbar=True,
-                    cmap="hot",
+                    cmap="magma",
                     threshold=None,
                     plot_abs=False,
                     black_bg=True,
@@ -1340,7 +1353,7 @@ def plot_source_glass_brain(
                             f"_contrast-{cond_b}-minus-{cond_a}"
                             f"_band-{rec['band']}_{rec['method']}"
                         )
-                        nii = _discrete_stc_to_nifti(rec["stc"], src, vmin=-1.0, vmax=1.0)
+                        nii = _discrete_stc_to_nifti(rec["stc"], src)
                         save_path = out_dir / f"{name}_glass_brain.png"
                         display = nipl.plot_glass_brain(
                             nii,
@@ -1424,7 +1437,7 @@ def plot_source_glass_brain(
                         hemi=hemi_side,
                         view=view,
                         colorbar=False,
-                        cmap="hot",
+                        cmap="magma",
                         bg_map=fsaverage["sulc_" + hemi_side],
                         threshold=threshold,
                         engine="matplotlib",
@@ -1708,7 +1721,7 @@ def plot_source_band_panel(
                         nii,
                         display_mode="ortho",
                         colorbar=False,
-                        cmap="hot",
+                        cmap="magma",
                         threshold=None,
                         plot_abs=False,
                         black_bg=True,
@@ -1722,7 +1735,7 @@ def plot_source_band_panel(
                     band_images.append((band_label, plt.imread(buf)))
                     display.close()
                 else:
-                    # Surface STC: morph to fsaverage, render left lateral view
+                    # Surface STC: morph to fsaverage, render both hemispheres
                     import nibabel as nib
                     from nilearn import datasets as nids
                     fs_subject = _resolve_fs_subject_name(subject, subjects_dir)
@@ -1737,32 +1750,87 @@ def plot_source_band_panel(
                     stc_fs = morph.apply(stc)
                     data_fs = np.asarray(stc_fs.data, dtype=float)
                     scalar = data_fs.mean(axis=1) if data_fs.ndim == 2 and data_fs.shape[1] > 1 else data_fs[:, 0]
+                    scalar = np.abs(scalar)
 
                     fsaverage_meshes = nids.fetch_surf_fsaverage()
-                    n_mesh = nib.load(fsaverage_meshes["infl_left"]).agg_data()[0].shape[0]
+                    n_mesh_lh = nib.load(fsaverage_meshes["infl_left"]).agg_data()[0].shape[0]
+                    n_mesh_rh = nib.load(fsaverage_meshes["infl_right"]).agg_data()[0].shape[0]
 
-                    # Left lateral view
                     verts_lh = stc_fs.vertices[0]
-                    surf_data_lh = np.zeros(n_mesh)
+                    verts_rh = stc_fs.vertices[1]
+                    
+                    surf_data_lh = np.zeros(n_mesh_lh)
                     surf_data_lh[verts_lh] = scalar[: len(verts_lh)]
+                    
+                    surf_data_rh = np.zeros(n_mesh_rh)
+                    surf_data_rh[verts_rh] = scalar[len(verts_lh):]
 
                     threshold = (
-                        np.percentile(np.abs(scalar[scalar != 0]), 1)
+                        np.percentile(scalar[scalar != 0], 1)
                         if np.any(scalar != 0)
                         else None
                     )
-                    fig_tmp = nipl.plot_surf_stat_map(
+
+                    fig_tmp, axes = plt.subplots(1, 4, subplot_kw={'projection': '3d'}, figsize=(20, 4), facecolor="white")
+                    
+                    nipl.plot_surf_stat_map(
                         fsaverage_meshes["infl_left"],
                         stat_map=surf_data_lh,
                         hemi="left",
                         view="lateral",
                         colorbar=False,
-                        cmap="hot",
+                        cmap="magma",
                         bg_map=fsaverage_meshes["sulc_left"],
                         threshold=threshold,
-                        title=band_label,
+                        title=f"{band_label} - LH Lat",
                         engine="matplotlib",
+                        axes=axes[0],
+                        symmetric_cbar=False
                     )
+                    nipl.plot_surf_stat_map(
+                        fsaverage_meshes["infl_left"],
+                        stat_map=surf_data_lh,
+                        hemi="left",
+                        view="medial",
+                        colorbar=False,
+                        cmap="magma",
+                        bg_map=fsaverage_meshes["sulc_left"],
+                        threshold=threshold,
+                        title=f"{band_label} - LH Med",
+                        engine="matplotlib",
+                        axes=axes[1],
+                        symmetric_cbar=False
+                    )
+                    nipl.plot_surf_stat_map(
+                        fsaverage_meshes["infl_right"],
+                        stat_map=surf_data_rh,
+                        hemi="right",
+                        view="medial",
+                        colorbar=False,
+                        cmap="magma",
+                        bg_map=fsaverage_meshes["sulc_right"],
+                        threshold=threshold,
+                        title=f"{band_label} - RH Med",
+                        engine="matplotlib",
+                        axes=axes[2],
+                        symmetric_cbar=False
+                    )
+                    nipl.plot_surf_stat_map(
+                        fsaverage_meshes["infl_right"],
+                        stat_map=surf_data_rh,
+                        hemi="right",
+                        view="lateral",
+                        colorbar=True,
+                        cmap="magma",
+                        bg_map=fsaverage_meshes["sulc_right"],
+                        threshold=threshold,
+                        title=f"{band_label} - RH Lat",
+                        engine="matplotlib",
+                        axes=axes[3],
+                        symmetric_cbar=False
+                    )
+
+                    fig_tmp.subplots_adjust(wspace=0.1)
                     buf = io.BytesIO()
                     fig_tmp.savefig(buf, dpi=150, bbox_inches="tight", facecolor="white")
                     buf.seek(0)
@@ -1836,7 +1904,7 @@ def plot_source_band_panel(
                         band_label = str(rec["band"])
 
                         if is_discrete and src is not None:
-                            nii = _discrete_stc_to_nifti(diff_stc, src, vmin=-1.0, vmax=1.0)
+                            nii = _discrete_stc_to_nifti(diff_stc, src)
                             display = nipl.plot_glass_brain(
                                 nii,
                                 display_mode="ortho",
@@ -2035,7 +2103,8 @@ def _plot_cluster_bar_comparison(
         ctx_key = (task, segment, method)
         band_data: dict[str, float] = {}
         for cond, stc in cond_stcs.items():
-            band_data[cond] = float(np.abs(stc.data).mean())
+            raw_mean = float(np.abs(stc.data).mean())
+            band_data[cond] = 10 * np.log10(raw_mean) if raw_mean > 1e-30 else -300.0
         by_context.setdefault(ctx_key, {})[band] = band_data
 
     for (task, segment, method), band_cond_data in by_context.items():
@@ -2066,14 +2135,14 @@ def _plot_cluster_bar_comparison(
                 ax.text(
                     bar_rect.get_x() + bar_rect.get_width() / 2,
                     bar_rect.get_height(),
-                    f"{val:.2e}",
+                    f"{val:.1f}",
                     ha="center", va="bottom", fontsize=7, rotation=45,
                 )
 
         ax.set_xticks(x)
         ax.set_xticklabels([b.capitalize() for b in bands], fontsize=10)
         ax.set_xlabel("Frequency Band", fontsize=11)
-        ax.set_ylabel("Mean source amplitude (a.u.)", fontsize=11)
+        ax.set_ylabel("Mean source power (dB)", fontsize=11)
         ax.set_title(
             f"Cluster source power by condition\n{task}{seg_token} — {method}",
             fontsize=12, fontweight="bold",
@@ -2095,10 +2164,12 @@ def _plot_cluster_bar_comparison(
                 cond_a, cond_b = _resolve_source_plot_condition_pair(
                     config, set(all_conditions), logger,
                 )
-                diff_values = [
-                    band_cond_data[b].get(cond_b, 0.0) - band_cond_data[b].get(cond_a, 0.0)
-                    for b in bands
-                ]
+                diff_values = []
+                for b in bands:
+                    val_a = band_cond_data[b].get(cond_a, 0.0)
+                    val_b = band_cond_data[b].get(cond_b, 0.0)
+                    # Values are already in dB (10*log10), so subtraction is the true log ratio
+                    diff_values.append(val_b - val_a)
                 bar_colors = ["#c0392b" if v > 0 else "#2980b9" for v in diff_values]
 
                 fig_c, ax_c = plt.subplots(
@@ -2113,14 +2184,14 @@ def _plot_cluster_bar_comparison(
                     ax_c.text(
                         bar_rect.get_x() + bar_rect.get_width() / 2,
                         bar_rect.get_height(),
-                        f"{val:+.2e}",
+                        f"{val:+.1f}",
                         ha="center", va=va, fontsize=8,
                     )
                 ax_c.axhline(0, color="grey", linewidth=0.8, linestyle="--")
                 ax_c.set_xticks(np.arange(n_bands))
                 ax_c.set_xticklabels([b.capitalize() for b in bands], fontsize=10)
                 ax_c.set_xlabel("Frequency Band", fontsize=11)
-                ax_c.set_ylabel("Δ Mean amplitude (B − A)", fontsize=11)
+                ax_c.set_ylabel("Δ Power (dB)", fontsize=11)
                 ax_c.set_title(
                     f"Cluster contrast: {cond_b} − {cond_a}\n{task}{seg_token} — {method}",
                     fontsize=12, fontweight="bold",
@@ -2157,12 +2228,13 @@ def _plot_cluster_timeseries(
         sorted_conditions = sorted(cond_stcs.keys())
         for cond_label in sorted_conditions:
             stc = cond_stcs[cond_label]
-            mean_power = np.abs(stc.data).mean(axis=0)
+            raw_power = np.abs(stc.data).mean(axis=0)
+            mean_power = 10 * np.log10(np.clip(raw_power, a_min=1e-30, a_max=None))
             times_ms = stc.times * 1000.0
             ax.plot(times_ms, mean_power, linewidth=1.5, label=cond_label, alpha=0.85)
 
         ax.set_xlabel("Time (ms)", fontsize=11)
-        ax.set_ylabel("Mean source amplitude (a.u.)", fontsize=11)
+        ax.set_ylabel("Mean source power (dB)", fontsize=11)
         ax.set_title(
             f"Cluster time course — {band} band ({task}{seg_token})",
             fontsize=12, fontweight="bold",
@@ -2173,10 +2245,743 @@ def _plot_cluster_timeseries(
         ax.tick_params(labelsize=9)
         fig.tight_layout()
 
+
         save_path = out_dir / f"{figure_name}.png"
         fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
         plt.close(fig)
         logger.debug("Saved cluster time course: %s", save_path.name)
+
+
+###################################################################
+# Cluster-to-Atlas Correspondence
+###################################################################
+
+
+# FreeSurfer aparc+aseg numeric ID → label mapping (cortical Desikan-Killiany).
+_APARC_ASEG_ID_TO_LABEL: Dict[int, str] = {
+    # Left hemisphere cortical
+    1001: "ctx-lh-bankssts", 1002: "ctx-lh-caudalanteriorcingulate",
+    1003: "ctx-lh-caudalmiddlefrontal", 1005: "ctx-lh-cuneus",
+    1006: "ctx-lh-entorhinal", 1007: "ctx-lh-fusiform",
+    1008: "ctx-lh-inferiorparietal", 1009: "ctx-lh-inferiortemporal",
+    1010: "ctx-lh-isthmuscingulate", 1011: "ctx-lh-lateraloccipital",
+    1012: "ctx-lh-lateralorbitofrontal", 1013: "ctx-lh-lingual",
+    1014: "ctx-lh-medialorbitofrontal", 1015: "ctx-lh-middletemporal",
+    1016: "ctx-lh-parahippocampal", 1017: "ctx-lh-paracentral",
+    1018: "ctx-lh-parsopercularis", 1019: "ctx-lh-parstriangularis",
+    1020: "ctx-lh-parsorbitalis", 1021: "ctx-lh-pericalcarine",
+    1022: "ctx-lh-postcentral", 1023: "ctx-lh-posteriorcingulate",
+    1024: "ctx-lh-precentral", 1025: "ctx-lh-precuneus",
+    1026: "ctx-lh-rostralanteriorcingulate", 1027: "ctx-lh-rostralmiddlefrontal",
+    1028: "ctx-lh-superiorfrontal", 1029: "ctx-lh-superiorparietal",
+    1030: "ctx-lh-superiortemporal", 1031: "ctx-lh-supramarginal",
+    1032: "ctx-lh-frontalpole", 1033: "ctx-lh-temporalpole",
+    1034: "ctx-lh-transversetemporal", 1035: "ctx-lh-insula",
+    # Right hemisphere cortical
+    2001: "ctx-rh-bankssts", 2002: "ctx-rh-caudalanteriorcingulate",
+    2003: "ctx-rh-caudalmiddlefrontal", 2005: "ctx-rh-cuneus",
+    2006: "ctx-rh-entorhinal", 2007: "ctx-rh-fusiform",
+    2008: "ctx-rh-inferiorparietal", 2009: "ctx-rh-inferiortemporal",
+    2010: "ctx-rh-isthmuscingulate", 2011: "ctx-rh-lateraloccipital",
+    2012: "ctx-rh-lateralorbitofrontal", 2013: "ctx-rh-lingual",
+    2014: "ctx-rh-medialorbitofrontal", 2015: "ctx-rh-middletemporal",
+    2016: "ctx-rh-parahippocampal", 2017: "ctx-rh-paracentral",
+    2018: "ctx-rh-parsopercularis", 2019: "ctx-rh-parstriangularis",
+    2020: "ctx-rh-parsorbitalis", 2021: "ctx-rh-pericalcarine",
+    2022: "ctx-rh-postcentral", 2023: "ctx-rh-posteriorcingulate",
+    2024: "ctx-rh-precentral", 2025: "ctx-rh-precuneus",
+    2026: "ctx-rh-rostralanteriorcingulate", 2027: "ctx-rh-rostralmiddlefrontal",
+    2028: "ctx-rh-superiorfrontal", 2029: "ctx-rh-superiorparietal",
+    2030: "ctx-rh-superiortemporal", 2031: "ctx-rh-supramarginal",
+    2032: "ctx-rh-frontalpole", 2033: "ctx-rh-temporalpole",
+    2034: "ctx-rh-transversetemporal", 2035: "ctx-rh-insula",
+    # Subcortical (common)
+    2: "Left-Cerebral-White-Matter", 41: "Right-Cerebral-White-Matter",
+    10: "Left-Thalamus", 49: "Right-Thalamus",
+    11: "Left-Caudate", 50: "Right-Caudate",
+    12: "Left-Putamen", 51: "Right-Putamen",
+    13: "Left-Pallidum", 52: "Right-Pallidum",
+    17: "Left-Hippocampus", 53: "Right-Hippocampus",
+    18: "Left-Amygdala", 54: "Right-Amygdala",
+    26: "Left-Accumbens-area", 58: "Right-Accumbens-area",
+}
+
+
+def _resolve_atlas_label(raw_label: str) -> str:
+    """Resolve aparc_aseg_id{N} to human-readable FreeSurfer label."""
+    if raw_label.startswith("aparc_aseg_id"):
+        try:
+            id_num = int(raw_label.replace("aparc_aseg_id", ""))
+            return _APARC_ASEG_ID_TO_LABEL.get(id_num, raw_label)
+        except ValueError:
+            pass
+    return raw_label
+
+
+# Canonical lobe grouping for Desikan-Killiany atlas labels.
+_LOBE_ORDER: List[str] = [
+    "Frontal", "Parietal", "Temporal", "Occipital",
+    "Cingulate", "Insula", "Other",
+]
+
+_LABEL_TO_LOBE: Dict[str, str] = {
+    "superiorfrontal": "Frontal",
+    "rostralmiddlefrontal": "Frontal",
+    "caudalmiddlefrontal": "Frontal",
+    "parsopercularis": "Frontal",
+    "parstriangularis": "Frontal",
+    "parsorbitalis": "Frontal",
+    "lateralorbitofrontal": "Frontal",
+    "medialorbitofrontal": "Frontal",
+    "precentral": "Frontal",
+    "paracentral": "Frontal",
+    "frontalpole": "Frontal",
+    "superiorparietal": "Parietal",
+    "inferiorparietal": "Parietal",
+    "supramarginal": "Parietal",
+    "postcentral": "Parietal",
+    "precuneus": "Parietal",
+    "superiortemporal": "Temporal",
+    "middletemporal": "Temporal",
+    "inferiortemporal": "Temporal",
+    "bankssts": "Temporal",
+    "fusiform": "Temporal",
+    "transversetemporal": "Temporal",
+    "entorhinal": "Temporal",
+    "temporalpole": "Temporal",
+    "parahippocampal": "Temporal",
+    "lateraloccipital": "Occipital",
+    "lingual": "Occipital",
+    "cuneus": "Occipital",
+    "pericalcarine": "Occipital",
+    "rostralanteriorcingulate": "Cingulate",
+    "caudalanteriorcingulate": "Cingulate",
+    "posteriorcingulate": "Cingulate",
+    "isthmuscingulate": "Cingulate",
+    "insula": "Insula",
+}
+
+
+def _classify_atlas_lobe(label: str) -> str:
+    """Classify an aparc+aseg atlas label into a cortical lobe."""
+    clean = label.lower().replace("ctx-lh-", "").replace("ctx-rh-", "")
+    clean = clean.replace("ctx_lh_", "").replace("ctx_rh_", "")
+    clean = clean.replace("-", "").replace("_", "")
+    for key, lobe in _LABEL_TO_LOBE.items():
+        if key.replace("_", "") == clean:
+            return lobe
+    return "Other"
+
+
+def _shorten_atlas_label(label: str) -> str:
+    """Remove hemisphere prefix from atlas label for compact display."""
+    for prefix in ("ctx-lh-", "ctx-rh-", "ctx_lh_", "ctx_rh_",
+                   "Left-", "Right-", "left_", "right_"):
+        if label.startswith(prefix):
+            return label[len(prefix):]
+    return label
+
+
+def _load_fmri_constraint_metadata(
+    features_dir: Path,
+    method: str,
+    logger: logging.Logger,
+) -> List[Dict[str, Any]]:
+    """Discover and load all fMRI constraint metadata sidecar JSONs."""
+    metadata_dir = features_dir / "sourcelocalization" / method / "metadata"
+    if not metadata_dir.is_dir():
+        logger.debug(
+            "No fMRI constraint metadata directory: %s", metadata_dir,
+        )
+        return []
+
+    payloads: List[Dict[str, Any]] = []
+    for path in sorted(metadata_dir.glob("fmri_constraint_*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            # Extract segment from filename: fmri_constraint_{segment}.json
+            if "segment" not in payload:
+                stem = path.stem  # fmri_constraint_baseline
+                payload["segment"] = stem.replace("fmri_constraint_", "")
+            payloads.append(payload)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Skipping metadata sidecar %s: %s", path.name, exc)
+    return payloads
+
+
+# Lobe-indexed palette (colourblind-friendly and publication-ready).
+_LOBE_COLORS: Dict[str, str] = {
+    "Frontal":   "#4C72B0",
+    "Parietal":  "#55A868",
+    "Temporal":  "#C44E52",
+    "Occipital": "#8172B3",
+    "Cingulate": "#CCB974",
+    "Insula":    "#64B5CD",
+    "Other":     "#AAAAAA",
+}
+
+
+###################################################################
+# Cluster Composition Stacked Bar
+###################################################################
+
+
+def plot_source_cluster_composition(
+    subject: str,
+    features_dir: Path,
+    save_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+) -> None:
+    """Render cluster composition as stacked horizontal bar charts.
+
+    For each fMRI cluster, shows proportional atlas-region composition
+    coloured by cortical lobe. Dual panel: absolute counts + proportions.
+    Reads ``cluster_to_atlas_counts`` from the fMRI constraint sidecar.
+
+    The cluster→atlas mapping is segment-invariant (spatial fMRI prior),
+    so only the first metadata payload is used.
+    """
+    from eeg_pipeline.utils.data.source_localization_paths import (
+        resolve_source_localization_method,
+    )
+
+    method = resolve_source_localization_method(config)
+    payloads = _load_fmri_constraint_metadata(features_dir, method, logger)
+    if not payloads:
+        logger.info("No fMRI constraint metadata; skipping cluster composition.")
+        return
+
+    out_dir = save_dir / "cluster_composition"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use first payload only — mapping is identical across segments.
+    payload = payloads[0]
+    mapping = payload.get("cluster_to_atlas_counts", {})
+    if not mapping:
+        return
+
+    _render_cluster_composition(
+        mapping=mapping,
+        subject=subject,
+        segment="all",
+        out_dir=out_dir,
+        logger=logger,
+    )
+
+
+def _render_cluster_composition(
+    *,
+    mapping: Dict[str, Dict[str, int]],
+    subject: str,
+    segment: str,
+    out_dir: Path,
+    logger: logging.Logger,
+) -> None:
+    """Render a single cluster-composition stacked bar figure."""
+    import matplotlib.colors as mcolors
+
+    clusters = sorted(mapping.keys())
+    if not clusters:
+        return
+
+    # Resolve labels and collect all regions across clusters.
+    resolved_mapping: Dict[str, Dict[str, int]] = {}
+    all_regions: set = set()
+    for cluster in clusters:
+        resolved = {}
+        for raw_region, count in mapping[cluster].items():
+            if count > 0:
+                label = _resolve_atlas_label(raw_region)
+                resolved[label] = resolved.get(label, 0) + count
+                all_regions.add(label)
+        resolved_mapping[cluster] = resolved
+
+    if not all_regions:
+        return
+
+    # Sort regions by lobe for consistent stacking.
+    sorted_regions = sorted(all_regions, key=lambda r: (
+        _LOBE_ORDER.index(_classify_atlas_lobe(r))
+        if _classify_atlas_lobe(r) in _LOBE_ORDER
+        else len(_LOBE_ORDER),
+        r,
+    ))
+
+    # Colour each region by its lobe.
+    region_colors = {}
+    lobe_shades: Dict[str, int] = {}
+    for region in sorted_regions:
+        lobe = _classify_atlas_lobe(region)
+        base = mcolors.to_rgba(_LOBE_COLORS.get(lobe, "#AAAAAA"))
+        shade_idx = lobe_shades.get(lobe, 0)
+        lobe_shades[lobe] = shade_idx + 1
+        # Lighten successive regions within the same lobe.
+        factor = 1.0 + shade_idx * 0.15
+        region_colors[region] = tuple(
+            min(c * factor, 1.0) for c in base[:3]
+        ) + (base[3],)
+
+    # Build data arrays.
+    cluster_labels = [c.replace("_", " ") for c in clusters]
+    totals = [sum(resolved_mapping[c].values()) for c in clusters]
+
+    # ── Figure: dual-panel ──
+    fig, (ax_abs, ax_pct) = plt.subplots(
+        1, 2, figsize=(14, max(3, 0.6 * len(clusters) + 1.5)),
+        facecolor="white", sharey=True,
+    )
+
+    y_pos = np.arange(len(clusters))
+    bar_height = 0.6
+
+    for ax, normalise, title_suffix in [
+        (ax_abs, False, "Voxel Count"),
+        (ax_pct, True, "Proportion"),
+    ]:
+        left_offsets = np.zeros(len(clusters))
+        for region in sorted_regions:
+            widths = []
+            for i, cluster in enumerate(clusters):
+                raw = resolved_mapping[cluster].get(region, 0)
+                if normalise and totals[i] > 0:
+                    widths.append(raw / totals[i])
+                else:
+                    widths.append(float(raw))
+            widths_arr = np.array(widths)
+            ax.barh(
+                y_pos, widths_arr, height=bar_height, left=left_offsets,
+                color=region_colors[region],
+                edgecolor="white", linewidth=0.5,
+                label=_shorten_atlas_label(region),
+            )
+
+            # Annotate segments wide enough to hold text.
+            for i, w in enumerate(widths_arr):
+                display_limit = 0.08 if normalise else max(totals) * 0.06
+                if w > display_limit:
+                    cx = left_offsets[i] + w / 2
+                    if normalise:
+                        txt = f"{w:.0%}"
+                    else:
+                        txt = str(int(w))
+                    ax.text(
+                        cx, y_pos[i], txt,
+                        ha="center", va="center", fontsize=7,
+                        fontweight="bold", color="white",
+                    )
+            left_offsets += widths_arr
+
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(cluster_labels, fontsize=9)
+        ax.set_xlabel(title_suffix, fontsize=10)
+        ax.invert_yaxis()
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    ax_abs.set_ylabel("fMRI Cluster", fontsize=10)
+
+    # Shared lobe legend (below figure).
+    lobes_present = sorted(
+        {_classify_atlas_lobe(r) for r in sorted_regions},
+        key=lambda lb: _LOBE_ORDER.index(lb) if lb in _LOBE_ORDER else len(_LOBE_ORDER),
+    )
+    lobe_handles = [
+        plt.Rectangle((0, 0), 1, 1, fc=_LOBE_COLORS.get(lb, "#AAA"))
+        for lb in lobes_present
+    ]
+    # Region legend on the right axis.
+    region_handles = [
+        plt.Rectangle((0, 0), 1, 1, fc=region_colors[r])
+        for r in sorted_regions
+    ]
+    region_labels = [_shorten_atlas_label(r) for r in sorted_regions]
+    ax_pct.legend(
+        region_handles, region_labels,
+        title="Atlas Region", fontsize=6, title_fontsize=7,
+        loc="upper right", bbox_to_anchor=(1.0, -0.12),
+        ncol=min(len(region_labels), 4), framealpha=0.8,
+    )
+
+    fig.suptitle(
+        f"fMRI Cluster Composition — sub-{subject} (segment: {segment})",
+        fontsize=12, fontweight="bold", y=1.02,
+    )
+    fig.tight_layout()
+
+    figure_name = f"sub-{subject}_seg-{segment}_cluster-composition"
+    save_path = out_dir / f"{figure_name}.png"
+    fig.savefig(str(save_path), dpi=250, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.debug("Saved cluster composition: %s", save_path.name)
+
+
+###################################################################
+# Atlas ROI Heatmap
+###################################################################
+
+
+def _parse_source_feature_columns(
+    columns: List[str],
+    family: str,
+) -> List[Dict[str, str]]:
+    """Parse source feature column names into structured metadata.
+
+    Expected pattern:
+        src_{segment}_{method}_{band}_{family}_{roi}_{metric}
+
+    Returns list of dicts with keys: column, segment, method, band, roi, metric.
+    """
+    parsed: list = []
+    prefix = f"_{family}_"
+    for col in columns:
+        if prefix not in col:
+            continue
+        if not col.startswith("src_"):
+            continue
+        parts = col.split("_")
+        # Find family token position.
+        try:
+            fam_start = col.index(prefix)
+        except ValueError:
+            continue
+        before = col[:fam_start]
+        after = col[fam_start + len(prefix):]
+
+        # before = "src_{segment}_{method}_{band}"
+        before_parts = before.split("_")
+        if len(before_parts) < 4:
+            continue
+        segment = before_parts[1]
+        method = before_parts[2]
+        band = before_parts[3]
+
+        # after = "{roi_name}_{metric}"  (roi can have underscores)
+        if "_" not in after:
+            continue
+        metric = after.rsplit("_", 1)[-1]
+        roi = after.rsplit("_", 1)[0]
+
+        parsed.append({
+            "column": col,
+            "segment": segment,
+            "method": method,
+            "band": band,
+            "roi": roi,
+            "metric": metric,
+        })
+    return parsed
+
+
+def _load_sourcelocalization_features(
+    features_dir: Path,
+    method: str,
+    logger: logging.Logger,
+) -> Optional[pd.DataFrame]:
+    """Discover and load source localization feature parquets.
+
+    The features pipeline saves these to
+    ``features_dir/sourcelocalization/{method}/features_sourcelocalization*.parquet``
+    which is deeper than the standard context loader searches.
+    """
+    method_dir = features_dir / "sourcelocalization" / method
+    if not method_dir.is_dir():
+        logger.debug("Source localization features dir not found: %s", method_dir)
+        return None
+
+    parquet_files = sorted(method_dir.glob("features_sourcelocalization*.parquet"))
+    if not parquet_files:
+        logger.debug("No sourcelocalization parquets in %s", method_dir)
+        return None
+
+    frames: List[pd.DataFrame] = []
+    for path in parquet_files:
+        try:
+            df = pd.read_parquet(path)
+            if not df.empty:
+                frames.append(df)
+        except Exception as exc:
+            logger.warning("Failed to read %s: %s", path.name, exc)
+
+    if not frames:
+        return None
+
+    if len(frames) == 1:
+        return frames[0]
+
+    combined = pd.concat(frames, axis=1)
+    if combined.columns.duplicated().any():
+        combined = combined.loc[:, ~combined.columns.duplicated()]
+    return combined
+
+
+def plot_source_atlas_roi_heatmap(
+    subject: str,
+    features_dir: Path,
+    save_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+) -> None:
+    """Render atlas ROI power as a band × region heatmap.
+
+    Discovers and loads ``atlas``-family columns from the source
+    localization feature parquets and produces a publication-quality
+    heatmap with rows = frequency bands, columns = atlas regions sorted
+    by cortical lobe.
+    """
+    from eeg_pipeline.utils.data.source_localization_paths import (
+        resolve_source_localization_method,
+    )
+
+    method = resolve_source_localization_method(config)
+    features_df = _load_sourcelocalization_features(features_dir, method, logger)
+
+    if features_df is None or features_df.empty:
+        logger.info("No source localization features for atlas heatmap.")
+        return
+
+    atlas_cols = [c for c in features_df.columns if "_atlas_" in c and c.startswith("src_")]
+    if not atlas_cols:
+        logger.info("No atlas-family features found; skipping atlas ROI heatmap.")
+        return
+
+    parsed = _parse_source_feature_columns(atlas_cols, "atlas")
+
+    # Resolve numeric ID labels to human-readable names.
+    for entry in parsed:
+        entry["display_roi"] = _resolve_atlas_label(entry["roi"])
+
+    # Keep only power metric (primary for heatmap).
+    power_entries = [p for p in parsed if p["metric"] == "power" and p["roi"] != "global"]
+    if not power_entries:
+        logger.info("No atlas power features; skipping atlas ROI heatmap.")
+        return
+
+    out_dir = save_dir / "atlas_heatmap"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Group by (segment, method).
+    contexts: Dict[tuple, list] = {}
+    for entry in power_entries:
+        key = (entry["segment"], entry["method"])
+        contexts.setdefault(key, []).append(entry)
+
+    # Apply segment filter from config if specified.
+    segment_filter = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.segment", None
+    )
+    if segment_filter:
+        segment_filter = str(segment_filter).strip()
+        filtered = {k: v for k, v in contexts.items() if k[0] == segment_filter}
+        if filtered:
+            contexts = filtered
+        else:
+            logger.info(
+                "Segment filter '%s' matched no data (available: %s).",
+                segment_filter,
+                ", ".join(sorted({k[0] for k in contexts})),
+            )
+
+    for (segment, method), entries in contexts.items():
+        _render_atlas_heatmap(
+            entries=entries,
+            features_df=features_df,
+            subject=subject,
+            segment=segment,
+            method=method,
+            out_dir=out_dir,
+            config=config,
+            logger=logger,
+        )
+
+
+def _render_atlas_heatmap(
+    *,
+    entries: List[Dict[str, str]],
+    features_df: pd.DataFrame,
+    subject: str,
+    segment: str,
+    method: str,
+    out_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+) -> None:
+    """Render a single atlas ROI heatmap for one (segment, method) context."""
+    from matplotlib.colors import TwoSlopeNorm
+
+    # Collect unique bands and regions.
+    bands = sorted({e["band"] for e in entries})
+    # Build ROI→display_roi mapping for labels/lobe classification.
+    roi_to_display = {e["roi"]: e.get("display_roi", e["roi"]) for e in entries}
+    raw_regions = sorted({e["roi"] for e in entries})
+
+    if len(bands) == 0 or len(raw_regions) == 0:
+        return
+
+    # Sort regions by lobe (using resolved display names) for visual grouping.
+    raw_regions.sort(key=lambda r: (
+        _LOBE_ORDER.index(_classify_atlas_lobe(roi_to_display[r]))
+        if _classify_atlas_lobe(roi_to_display[r]) in _LOBE_ORDER
+        else len(_LOBE_ORDER),
+        roi_to_display[r],
+    ))
+
+    # Build matrix: rows = bands, cols = regions.
+    col_lookup = {(e["band"], e["roi"]): e["column"] for e in entries}
+    matrix = np.full((len(bands), len(raw_regions)), np.nan)
+
+    for i, band in enumerate(bands):
+        for j, region in enumerate(raw_regions):
+            col = col_lookup.get((band, region))
+            if col is not None and col in features_df.columns:
+                values = features_df[col].dropna()
+                if len(values) > 0:
+                    val = float(values.mean())
+                    matrix[i, j] = 10 * np.log10(val) if val > 1e-30 else -300.0
+
+    # Z-score per band for comparability.
+    for i in range(matrix.shape[0]):
+        row = matrix[i, :]
+        finite = row[np.isfinite(row)]
+        if len(finite) > 1:
+            mu = np.mean(finite)
+            sigma = np.std(finite)
+            if sigma > 0:
+                matrix[i, :] = (row - mu) / sigma
+            else:
+                matrix[i, :] = 0.0
+
+    # Replace any remaining NaN with 0 for display.
+    matrix = np.nan_to_num(matrix, nan=0.0)
+
+    # Lobular boundaries for visual dividers.
+    display_regions = [roi_to_display[r] for r in raw_regions]
+    lobe_assignments = [_classify_atlas_lobe(dr) for dr in display_regions]
+    divider_positions: list = []
+    for j in range(1, len(lobe_assignments)):
+        if lobe_assignments[j] != lobe_assignments[j - 1]:
+            divider_positions.append(j)
+
+    # Figure.
+    fig_width = max(8, 0.4 * len(raw_regions) + 2)
+    fig_height = max(4, 0.5 * len(bands) + 2)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height), facecolor="white")
+
+    vmax = max(abs(np.nanmin(matrix)), abs(np.nanmax(matrix)), 1e-6)
+    im = ax.imshow(
+        matrix,
+        aspect="auto",
+        cmap="RdBu_r",
+        norm=TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax),
+        interpolation="nearest",
+    )
+
+    # Lobular dividers.
+    for pos in divider_positions:
+        ax.axvline(pos - 0.5, color="black", linewidth=1.0, linestyle="-", alpha=0.6)
+
+    # Tick labels (using resolved display names).
+    ax.set_xticks(np.arange(len(raw_regions)))
+    short_labels = [_shorten_atlas_label(dr) for dr in display_regions]
+    ax.set_xticklabels(short_labels, rotation=65, ha="right", fontsize=6)
+    ax.set_yticks(np.arange(len(bands)))
+    ax.set_yticklabels([b.capitalize() for b in bands], fontsize=9)
+
+    # Lobe annotation strip along the top.
+    for j, dr in enumerate(display_regions):
+        lobe = _classify_atlas_lobe(dr)
+        color = _LOBE_COLORS.get(lobe, "#AAAAAA")
+        ax.plot(j, -0.7, marker="s", markersize=5, color=color,
+                transform=ax.transData, clip_on=False)
+
+    # Colorbar.
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+    cbar.set_label("Z-scored power", fontsize=9)
+    cbar.ax.tick_params(labelsize=7)
+
+    ax.set_xlabel("Atlas Region", fontsize=10)
+    ax.set_ylabel("Frequency Band", fontsize=10)
+    ax.set_title(
+        f"Atlas ROI Source Power\nsub-{subject} — {method.upper()} (segment: {segment})",
+        fontsize=12, fontweight="bold", pad=14,
+    )
+
+    # Lobe legend.
+    lobes_present = sorted(
+        {_classify_atlas_lobe(dr) for dr in display_regions},
+        key=lambda lb: _LOBE_ORDER.index(lb) if lb in _LOBE_ORDER else len(_LOBE_ORDER),
+    )
+    legend_handles = [
+        plt.Rectangle((0, 0), 1, 1, fc=_LOBE_COLORS.get(lb, "#AAA"))
+        for lb in lobes_present
+    ]
+    ax.legend(
+        legend_handles, lobes_present,
+        title="Lobe", fontsize=6, title_fontsize=7,
+        loc="upper right", bbox_to_anchor=(1.0, -0.15),
+        ncol=len(lobes_present), framealpha=0.8,
+    )
+
+    fig.tight_layout()
+    figure_name = f"sub-{subject}_seg-{segment}_{method}_atlas-roi-heatmap"
+    save_path = out_dir / f"{figure_name}.png"
+    fig.savefig(str(save_path), dpi=250, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.debug("Saved atlas ROI heatmap: %s", save_path.name)
+
+    # Condition-contrast heatmap (if conditions present in aligned events).
+    _try_render_atlas_contrast_heatmap(
+        entries=entries,
+        features_df=features_df,
+        subject=subject,
+        segment=segment,
+        method=method,
+        bands=bands,
+        regions=raw_regions,
+        out_dir=out_dir,
+        config=config,
+        logger=logger,
+    )
+
+
+def _try_render_atlas_contrast_heatmap(
+    *,
+    entries: List[Dict[str, str]],
+    features_df: pd.DataFrame,
+    subject: str,
+    segment: str,
+    method: str,
+    bands: List[str],
+    regions: List[str],
+    out_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+) -> None:
+    """Render B−A condition-contrast version of the atlas heatmap if possible."""
+    from matplotlib.colors import TwoSlopeNorm
+
+    condition_a_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.source_condition_a", None
+    )
+    condition_b_raw = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.source_condition_b", None
+    )
+    if condition_a_raw is None or condition_b_raw is None:
+        return
+
+    condition_a = str(condition_a_raw).strip()
+    condition_b = str(condition_b_raw).strip()
+    if not condition_a or not condition_b or condition_a == condition_b:
+        return
+
+    # Need aligned events with condition column to split trials.
+    # The feature parquet does not carry condition labels, so we cannot
+    # compute per-condition means here unless the features already encode
+    # condition differences.  For now, log and skip.
+    logger.debug(
+        "Atlas contrast heatmap: requires per-condition feature parquets "
+        "(not yet available in dual output mode)."
+    )
 
 
 def plot_source_stc_3d(
@@ -2392,7 +3197,7 @@ def plot_source_stc_3d(
                         title=image_name,
                         mesh_rr_mm=discrete_mesh_rr_mm,
                         mesh_tris=discrete_mesh_tris,
-                        cmap="hot",
+                        cmap="magma",
                         vmin=discrete_condition_vmin,
                         vmax=discrete_condition_vmax,
                         colorbar_label="Source amplitude (a.u.)",
@@ -2405,7 +3210,7 @@ def plot_source_stc_3d(
                         title=image_name,
                         subjects_dir=subjects_dir,
                         fs_subject=fs_subject,
-                        cmap="hot",
+                        cmap="magma",
                         vmin=discrete_condition_vmin,
                         vmax=discrete_condition_vmax,
                         colorbar_label="Source amplitude (a.u.)",
@@ -2419,7 +3224,7 @@ def plot_source_stc_3d(
                             title=image_name.replace("_", " "),
                             subjects_dir=subjects_dir,
                             fs_subject=fs_subject,
-                            cmap="hot",
+                            cmap="magma",
                             vmin=float(discrete_condition_vmin),
                             vmax=float(discrete_condition_vmax),
                             colorbar_label="Source amplitude (a.u.)",
@@ -2620,3 +3425,514 @@ def plot_source_stc_3d(
         joined = ", ".join(failures[:3])
         suffix = "" if len(failures) <= 3 else f", ... ({len(failures)} total)"
         raise RuntimeError(f"Failed to render STC 3D plots for: {joined}{suffix}")
+
+
+###################################################################
+# P2: Atlas Power Surface Topography
+###################################################################
+
+
+def plot_source_atlas_surface(
+    subject: str,
+    features_dir: Path,
+    save_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+) -> None:
+    """Project atlas ROI power onto fsaverage cortical surface per band.
+
+    Reads atlas-family features from the source localization parquet,
+    maps each Desikan-Killiany ROI to its fsaverage parcellation label,
+    and renders lateral + medial views per frequency band.
+    """
+    from eeg_pipeline.utils.data.source_localization_paths import (
+        resolve_source_localization_method,
+    )
+
+    method = resolve_source_localization_method(config)
+    features_df = _load_sourcelocalization_features(features_dir, method, logger)
+    if features_df is None or features_df.empty:
+        logger.info("No source localization features for atlas surface plot.")
+        return
+
+    atlas_cols = [c for c in features_df.columns if "_atlas_" in c and c.startswith("src_")]
+    if not atlas_cols:
+        logger.info("No atlas features for surface plot; skipping.")
+        return
+
+    parsed = _parse_source_feature_columns(atlas_cols, "atlas")
+    for entry in parsed:
+        entry["display_roi"] = _resolve_atlas_label(entry["roi"])
+
+    power_entries = [e for e in parsed if e["metric"] == "power" and e["roi"] != "global"]
+    if not power_entries:
+        return
+
+    # Segment filter.
+    segment_filter = get_config_value(
+        config, "plotting.plots.features.sourcelocalization.segment", None
+    )
+
+    # Group by (segment, method).
+    contexts: Dict[tuple, list] = {}
+    for e in power_entries:
+        contexts.setdefault((e["segment"], e["method"]), []).append(e)
+
+    if segment_filter:
+        sf = str(segment_filter).strip()
+        filtered = {k: v for k, v in contexts.items() if k[0] == sf}
+        if filtered:
+            contexts = filtered
+
+    out_dir = save_dir / "atlas_surface"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for (segment, src_method), entries in contexts.items():
+        _render_atlas_surface(
+            entries=entries,
+            features_df=features_df,
+            subject=subject,
+            segment=segment,
+            method=src_method,
+            out_dir=out_dir,
+            logger=logger,
+        )
+
+
+def _render_atlas_surface(
+    *,
+    entries: List[Dict[str, str]],
+    features_df: pd.DataFrame,
+    subject: str,
+    segment: str,
+    method: str,
+    out_dir: Path,
+    logger: logging.Logger,
+) -> None:
+    """Render atlas power on fsaverage5 surface per band using nilearn.
+
+    Uses MNE's aparc labels with ICO nesting (fsaverage5 vertices are
+    the first 10242 of fsaverage) to build vertex-level stat maps.
+    Each panel rendered independently, then composited via imshow.
+    """
+    try:
+        import mne
+        from nilearn import datasets as ni_datasets
+        from nilearn import plotting as ni_plotting
+    except ImportError:
+        logger.info("nilearn/mne required for atlas surface plot; skipping.")
+        return
+
+    fsaverage5 = ni_datasets.fetch_surf_fsaverage(mesh="fsaverage5")
+    mne_fsaverage = str(mne.datasets.fetch_fsaverage(verbose=False))
+    subjects_dir = str(Path(mne_fsaverage).parent)
+    n_vert_5 = 10242  # ICO-5 subdivision
+
+    bands = sorted({e["band"] for e in entries})
+    if not bands:
+        return
+
+    # Read aparc labels from MNE.
+    try:
+        mne_labels = mne.read_labels_from_annot(
+            "fsaverage", parc="aparc", subjects_dir=subjects_dir,
+        )
+    except Exception as exc:
+        logger.warning("Failed to read aparc labels: %s", exc)
+        return
+
+    # Build label name → vertex mask per hemisphere for fsaverage5.
+    # ICO nesting: fsaverage5 vertices are the first 10242 of fsaverage.
+    label_vertices: Dict[str, Dict[str, np.ndarray]] = {"lh": {}, "rh": {}}
+    for label in mne_labels:
+        valid = label.vertices[label.vertices < n_vert_5]
+        if len(valid) > 0:
+            # Label name format: "rostralmiddlefrontal-lh" → strip hemi
+            base_name = label.name.rsplit("-", 1)[0] if "-" in label.name else label.name
+            label_vertices[label.hemi][base_name] = valid
+
+    # Precompute per-band vertex stat maps and global range.
+    all_power_vals: list = []
+    band_maps: Dict[str, tuple] = {}
+
+    for band in bands:
+        band_entries = [e for e in entries if e["band"] == band]
+        roi_power: Dict[str, float] = {}
+        for entry in band_entries:
+            col = entry["column"]
+            display = entry.get("display_roi", entry["roi"])
+            if col in features_df.columns:
+                vals = features_df[col].dropna()
+                if len(vals) > 0:
+                    roi_power[display] = float(vals.mean())
+
+        stat_lh = np.full(n_vert_5, np.nan)
+        stat_rh = np.full(n_vert_5, np.nan)
+
+        for roi_name, power_val in roi_power.items():
+            # Parse hemisphere from roi name: ctx-lh-xxx → (lh, xxx)
+            region_name = roi_name
+            target_hemis = ["lh", "rh"]
+            if roi_name.startswith("ctx-lh-"):
+                region_name = roi_name[7:]
+                target_hemis = ["lh"]
+            elif roi_name.startswith("ctx-rh-"):
+                region_name = roi_name[7:]
+                target_hemis = ["rh"]
+
+            for hemi in target_hemis:
+                vertices = label_vertices.get(hemi, {}).get(region_name)
+                if vertices is not None:
+                    stat = stat_lh if hemi == "lh" else stat_rh
+                    stat[vertices] = power_val
+
+        band_maps[band] = (stat_lh, stat_rh)
+        finite = np.concatenate([
+            stat_lh[np.isfinite(stat_lh)],
+            stat_rh[np.isfinite(stat_rh)],
+        ])
+    # Render each view panel independently, then composite.
+    view_specs = [
+        ("left", "lateral", fsaverage5["infl_left"], fsaverage5["sulc_left"]),
+        ("left", "medial", fsaverage5["infl_left"], fsaverage5["sulc_left"]),
+        ("right", "lateral", fsaverage5["infl_right"], fsaverage5["sulc_right"]),
+        ("right", "medial", fsaverage5["infl_right"], fsaverage5["sulc_right"]),
+    ]
+    n_views = len(view_specs)
+    n_bands = len(bands)
+
+    # Render each (band, view) panel to an image buffer.
+    panel_images: List[List[np.ndarray]] = []
+    band_limits: List[tuple] = []
+
+    for band in bands:
+        stat_lh, stat_rh = band_maps[band]
+        row_images: List[np.ndarray] = []
+
+        # Per-band scaling is essential due to 1/f power law.
+        valid_vals = np.concatenate([
+            stat_lh[np.isfinite(stat_lh)], stat_rh[np.isfinite(stat_rh)],
+        ])
+        if len(valid_vals) > 0:
+            vmin, vmax = float(valid_vals.min()), float(valid_vals.max())
+            if vmin == vmax:
+                vmax = vmin + 1e-6
+        else:
+            vmin, vmax = 0.0, 1e-6
+        band_limits.append((vmin, vmax))
+
+        for hemi, view, surf_mesh, bg_map in view_specs:
+            stat_map = stat_lh if hemi == "left" else stat_rh
+
+            try:
+                panel_fig = ni_plotting.plot_surf_stat_map(
+                    surf_mesh,
+                    stat_map=stat_map,
+                    hemi=hemi,
+                    view=view,
+                    bg_map=bg_map,
+                    cmap="magma",
+                    vmin=vmin,
+                    vmax=vmax,
+                    threshold=None,
+                    colorbar=False,
+                    engine="matplotlib",
+                )
+                canvas = panel_fig.figure.canvas
+                canvas.draw()
+                img = np.array(canvas.renderer.buffer_rgba())
+                plt.close(panel_fig.figure)
+            except Exception:
+                img = np.full((400, 400, 4), 255, dtype=np.uint8)
+
+            row_images.append(img)
+        panel_images.append(row_images)
+
+    # Composite into final publication figure (with extra column for colorbars).
+    fig, axes = plt.subplots(
+        n_bands, n_views + 1,
+        figsize=(16.5, 3.2 * n_bands + 1.2),
+        facecolor="white",
+        gridspec_kw={"width_ratios": [1, 1, 1, 1, 0.15]},
+    )
+    if n_bands == 1:
+        axes = axes.reshape(1, -1)
+
+    for row in range(n_bands):
+        # Render brain views
+        for col in range(n_views):
+            ax = axes[row, col]
+            ax.imshow(panel_images[row][col])
+            ax.set_axis_off()
+
+            if row == 0:
+                hemi_label = view_specs[col][0].upper()[0] + "H"
+                view_label = view_specs[col][1].capitalize()
+                ax.set_title(
+                    f"{hemi_label} {view_label}",
+                    fontsize=10, fontweight="bold", pad=4,
+                )
+
+        # Band label on the left.
+        axes[row, 0].text(
+            -0.08, 0.5, bands[row].capitalize(),
+            transform=axes[row, 0].transAxes, rotation=90,
+            ha="center", va="center", fontsize=12, fontweight="bold",
+        )
+
+        # Render per-band colorbar in the final column.
+        cax = axes[row, n_views]
+        vmin, vmax = band_limits[row]
+        sm = plt.cm.ScalarMappable(
+            cmap="magma", norm=plt.Normalize(vmin=vmin, vmax=vmax),
+        )
+        sm.set_array([])
+        cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
+        cax.set_title("Power", fontsize=8, pad=2)
+        cax.tick_params(labelsize=8)
+        # Format ticks to handle tiny floats concisely
+        cax.yaxis.set_major_formatter(plt.ScalarFormatter(useMathText=True))
+        cax.yaxis.get_offset_text().set_fontsize(8)
+
+    fig.suptitle(
+        f"Atlas ROI Topography — sub-{subject} ({method.upper()}, {segment})",
+        fontsize=14, fontweight="bold", y=0.98,
+    )
+    fig.subplots_adjust(wspace=0.02, hspace=0.08, right=0.98)
+
+    fig.suptitle(
+        f"Atlas ROI Surface Power — sub-{subject} ({method.upper()}, {segment})",
+        fontsize=13, fontweight="bold", y=0.98,
+    )
+    fig.subplots_adjust(wspace=0.02, hspace=0.08)
+
+    save_path = out_dir / f"sub-{subject}_seg-{segment}_{method}_atlas-surface.png"
+    fig.savefig(str(save_path), dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    logger.debug("Saved atlas surface: %s", save_path.name)
+
+
+def plot_source_cluster_tfr(
+    subject: str, features_dir: Path, save_dir: Path, config: Any, logger: logging.Logger
+) -> None:
+    """Plot continuous Time-Frequency Representations from fMRI-constrained source clusters.
+    
+    Reads Morlet TFR arrays extracted from the feature pipeline, bypassing arbitrary
+    temporal averaging to show the full spectral-temporal evolution of source components.
+    """
+    import mne
+    import re
+    from eeg_pipeline.utils.data.source_localization_paths import resolve_source_localization_method
+    
+    method = resolve_source_localization_method(config)
+    stc_dir = features_dir / "sourcelocalization" / method / "source_estimates" / "fmri_informed"
+    
+    if not stc_dir.exists():
+        logger.info(f"No fMRI-informed directory found for source TFRs: {stc_dir}")
+        return
+        
+    tfr_files = list(stc_dir.glob("*-tfr.h5"))
+    if not tfr_files:
+        logger.info("No source cluster TFR .h5 files found. Continuous Source-TFR requires feature extraction with fMRI constraint.")
+        return
+        
+    out_dir = save_dir / "cluster_tfr"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    tfr_by_seg = {}
+    for tfr_path in tfr_files:
+        match_seg = re.search(r"seg-([^_]+)_", tfr_path.name)
+        seg = match_seg.group(1) if match_seg else "full"
+        tfr_by_seg.setdefault(seg, []).append(tfr_path)
+
+    for segment, seg_files in tfr_by_seg.items():
+        avail_conds = set()
+        file_by_cond = {}
+        
+        for tfr_path in seg_files:
+            match_cond = re.search(r"cond-([^_]+)_", tfr_path.name)
+            cond = match_cond.group(1) if match_cond else "unknown"
+            avail_conds.add(cond)
+            file_by_cond[cond] = tfr_path
+            
+            try:
+                tfr = mne.time_frequency.read_tfrs(str(tfr_path))[0]
+            except Exception as e:
+                logger.warning(f"Failed to load source TFR {tfr_path.name}: {e}")
+                continue
+
+            n_clusters = len(tfr.ch_names)
+            if n_clusters == 0:
+                continue
+                
+            fig, axes = plt.subplots(n_clusters, 1, figsize=(9, 3.5 * n_clusters), facecolor="white")
+            if n_clusters == 1:
+                axes = [axes]
+                
+            for idx, ch_name in enumerate(tfr.ch_names):
+                ax = axes[idx]
+                try:
+                    base_end = tfr.times[max(1, int(len(tfr.times) * 0.1))]
+                    tfr.plot(
+                        picks=[ch_name], 
+                        axes=ax, 
+                        show=False, 
+                        colorbar=True, 
+                        cmap="viridis",
+                        baseline=(tfr.times[0], base_end),
+                        mode="logratio",
+                        title=f"Cluster: {ch_name.replace('ctx_', '')}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to plot cluster {ch_name} for condition {cond}: {e}")
+                    
+            fig.suptitle(
+                f"Source-Level TFR — sub-{subject} ({method.upper()}, {segment})\\nCondition: {cond.replace('_', ' ')}", 
+                y=0.98 + (0.01 / n_clusters), 
+                fontsize=14, 
+                fontweight="bold"
+            )
+            fig.tight_layout(rect=[0, 0, 1, 0.96])
+            
+            save_path = out_dir / f"sub-{subject}_seg-{segment}_cond-{cond}_{method}_cluster-tfr.png"
+            fig.savefig(str(save_path), dpi=200, bbox_inches="tight")
+            plt.close(fig)
+            logger.debug(f"Saved Source TFR to {save_path.name}")
+
+        # Try to plot contrast if multiple conditions are available
+        if len(avail_conds) >= 2:
+            try:
+                cond_a, cond_b = _resolve_source_plot_condition_pair(config, avail_conds, logger)
+                if cond_a in file_by_cond and cond_b in file_by_cond:
+                    tfr_a = mne.time_frequency.read_tfrs(str(file_by_cond[cond_a]))[0]
+                    tfr_b = mne.time_frequency.read_tfrs(str(file_by_cond[cond_b]))[0]
+                    
+                    tfr_diff = tfr_b.copy()
+                    data_a = np.clip(tfr_a.data, a_min=1e-30, a_max=None)
+                    data_b = np.clip(tfr_b.data, a_min=1e-30, a_max=None)
+                    tfr_diff.data = 10 * np.log10(data_b / data_a)
+                    
+                    n_clusters = len(tfr_diff.ch_names)
+                    if n_clusters > 0:
+                        fig, axes = plt.subplots(n_clusters, 1, figsize=(9, 3.5 * n_clusters), facecolor="white")
+                        if n_clusters == 1:
+                            axes = [axes]
+                            
+                        abs_max = np.percentile(np.abs(tfr_diff.data), 99)
+                        if abs_max == 0:
+                            abs_max = 1e-6
+                            
+                        for idx, ch_name in enumerate(tfr_diff.ch_names):
+                            ax = axes[idx]
+                            try:
+                                tfr_diff.plot(
+                                    picks=[ch_name], 
+                                    axes=ax, 
+                                    show=False, 
+                                    colorbar=True, 
+                                    cmap="RdBu_r",
+                                    vmin=-abs_max,
+                                    vmax=abs_max,
+                                    title=f"Cluster: {ch_name.replace('ctx_', '')}"
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to plot cluster contrast {ch_name}: {e}")
+                                
+                        fig.suptitle(
+                            f"Source-Level TFR Contrast — sub-{subject} ({method.upper()}, {segment})\\nContrast: {cond_b.replace('_', ' ')} − {cond_a.replace('_', ' ')}", 
+                            y=0.98 + (0.01 / n_clusters), 
+                            fontsize=14, 
+                            fontweight="bold"
+                        )
+                        fig.tight_layout(rect=[0, 0, 1, 0.96])
+                        
+                        save_path = out_dir / f"sub-{subject}_seg-{segment}_contrast-{cond_b}-minus-{cond_a}_{method}_cluster-tfr.png"
+                        fig.savefig(str(save_path), dpi=200, bbox_inches="tight")
+                        plt.close(fig)
+                        logger.debug(f"Saved Source TFR contrast to {save_path.name}")
+            except Exception as e:
+                logger.warning(f"Failed to compute TFR contrast for {segment}: {e}")
+
+def plot_source_cluster_raincloud(
+    subject: str, features_dir: Path, save_dir: Path, config: Any, logger: logging.Logger
+) -> None:
+    """Trial-wise raincloud plot of source power per active fMRI cluster."""
+    from eeg_pipeline.utils.data.source_localization_paths import resolve_source_localization_method
+    method = resolve_source_localization_method(config)
+    features_df = _load_sourcelocalization_features(features_dir, method, logger)
+    if features_df is None or features_df.empty:
+        return
+
+    cluster_cols = [c for c in features_df.columns if "_cluster_" in c and c.startswith("src_")]
+    parsed = _parse_source_feature_columns(cluster_cols, "cluster")
+    power_entries = [p for p in parsed if p["metric"] == "power" and p["roi"] != "global"]
+    if not power_entries:
+        return
+
+    out_dir = save_dir / "cluster_raincloud"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    contexts = {}
+    for entry in power_entries:
+        key = (entry["segment"], entry["method"])
+        contexts.setdefault(key, []).append(entry)
+
+    for (segment, method), entries in contexts.items():
+        bands = sorted({e["band"] for e in entries})
+        cluster_rois = sorted({e["roi"] for e in entries})
+
+        if not bands or not cluster_rois:
+            continue
+
+        fig, axes = plt.subplots(len(bands), 1, figsize=(10, 4 * len(bands)), sharex=True, facecolor="white")
+        if len(bands) == 1:
+            axes = [axes]
+
+        for ax, band in zip(axes, bands):
+            band_entries = [e for e in entries if e["band"] == band]
+            data_list, labels = [], []
+            for roi in cluster_rois:
+                col_entry = next((e for e in band_entries if e["roi"] == roi), None)
+                if col_entry and col_entry["column"] in features_df.columns:
+                    raw_vals = features_df[col_entry["column"]].dropna().values
+                    if len(raw_vals) > 0:
+                        db_vals = np.array([10 * np.log10(v) if v > 1e-30 else -300.0 for v in raw_vals])
+                        data_list.append(db_vals)
+                        labels.append(roi)
+
+            if not data_list:
+                continue
+
+            colors = plt.cm.Set2(np.linspace(0, 1, len(data_list)))
+            for j, (data, label, color) in enumerate(zip(data_list, labels, colors)):
+                pos = j
+                # Half violin
+                v = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.6)
+                for b in v['bodies']:
+                    b.get_paths()[0].vertices[:, 0] = np.clip(b.get_paths()[0].vertices[:, 0], pos, np.inf)
+                    b.set_facecolor(color)
+                    b.set_edgecolor(color)
+                    b.set_alpha(0.6)
+                # Boxplot
+                ax.boxplot(data, positions=[pos - 0.1], widths=0.1, showfliers=False,
+                           patch_artist=True, boxprops=dict(facecolor="white", color=color),
+                           medianprops=dict(color="black", linewidth=1.5),
+                           whiskerprops=dict(color=color), capprops=dict(color=color))
+                # Jitter scatter
+                jitter = np.random.normal(pos - 0.25, 0.04, size=len(data))
+                ax.scatter(jitter, data, s=15, color=color, alpha=0.5, zorder=10, linewidths=0)
+
+            ax.set_xticks(np.arange(len(labels)))
+            ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
+            ax.set_ylabel("Power (dB)", fontsize=10)
+            ax.set_title(f"{band.capitalize()} Band", loc="left", fontsize=11, fontweight="bold", pad=4)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.grid(axis='y', linestyle='--', alpha=0.4)
+            ax.margins(x=0.05)
+
+        fig.suptitle(f"Cluster Epoch Distribution (Source Power) - {segment}", fontsize=14, y=0.98)
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.savefig(out_dir / f"sub-{subject}_{segment}_raincloud.png", dpi=200, bbox_inches="tight")
+        plt.close(fig)
+

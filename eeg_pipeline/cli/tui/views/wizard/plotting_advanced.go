@@ -640,13 +640,16 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		return []renderLine{m.renderPlotValueLine("compare_windows", value, "default/ON/OFF", focused, labelWidth)}
 	case plotItemConfigFieldComparisonWindows:
 		value := m.getPlotFieldTextValue(cfg.ComparisonWindowsSpec, plotDefaults.comparisonWindows, row, plotItemConfigFieldComparisonWindows)
-		hint := m.buildComparisonWindowsHint()
-		// When dropdown is expanded for this field, treat as focused
-		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonWindows
-		lines := []renderLine{m.renderPlotValueLine("windows", value, hint, focused || isEditing, labelWidth)}
-		// Show dropdown if expanded for this field - use feature-specific windows
 		featureGroup := m.getFeatureGroupForPlot(row.plotID)
 		windows := m.GetPlottingComparisonWindows(featureGroup)
+		hint := "window contrasts"
+		if len(windows) > 0 {
+			hint = fmt.Sprintf("Space to select · %d windows for window contrasts", len(windows))
+		}
+		// When dropdown is expanded for this field, treat as focused
+		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonWindows
+		lines := []renderLine{m.renderPlotValueLine("comparison_windows", value, hint, focused || isEditing, labelWidth)}
+		// Show dropdown if expanded for this field - use feature-specific windows
 		if isEditing && len(windows) > 0 {
 			expandedLines := m.renderExpandedListItems(windows, m.isPlotFieldWindowSelected(cfg.ComparisonWindowsSpec))
 			lines = append(lines, expandedLines...)
@@ -726,11 +729,14 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		return []renderLine{m.renderPlotValueLine("labels", value, "e.g. condA condB or \"High\" \"Low\"", focused, labelWidth)}
 	case plotItemConfigFieldTopomapWindow:
 		value := m.getPlotFieldTextValue(cfg.TopomapWindowsSpec, "baseline", row, plotItemConfigFieldTopomapWindow)
-		hint := m.buildComparisonSegmentHint()
-		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldTopomapWindow
-		lines := []renderLine{m.renderPlotValueLine("windows", value, hint, focused || isEditing, labelWidth)}
 		plot := m.getPlotByID(row.plotID)
 		windows := m.GetPlottingComparisonWindows(plot.Group)
+		hint := "windows to render as topomap figures"
+		if len(windows) > 0 {
+			hint = fmt.Sprintf("Space to select · %d windows for topomap output", len(windows))
+		}
+		isEditing := m.expandedOption == expandedPlotComparisonWindows && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldTopomapWindow
+		lines := []renderLine{m.renderPlotValueLine("topomap_windows", value, hint, focused || isEditing, labelWidth)}
 		if isEditing && len(windows) > 0 {
 			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
 				return m.isColumnValueSelected(w)
