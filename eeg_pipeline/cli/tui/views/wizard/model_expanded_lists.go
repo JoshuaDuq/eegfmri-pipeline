@@ -49,8 +49,6 @@ func (m Model) getExpandedListLength() int {
 			return 0
 		}
 		return len(m.GetPlottingComparisonColumnValues(col))
-	case expandedConditionCompareWindows:
-		return len(m.availableWindows)
 	case expandedPlotComparisonWindows:
 		if m.editingPlotID != "" {
 			if m.editingPlotField == plotItemConfigFieldDoseResponseSegment {
@@ -234,8 +232,6 @@ func (m Model) getExpandedListLength() int {
 			return 2
 		}
 		return len(m.GetAvailableColumns()) + 1
-	case expandedStabilityGroupColumn:
-		return 3
 	case expandedGroupLevelTarget:
 		targets := m.availableGroupLevelTargets()
 		if len(targets) == 0 {
@@ -300,8 +296,6 @@ func (m Model) getExpandedListItems() []string {
 			return nil
 		}
 		return m.GetPlottingComparisonColumnValues(col)
-	case expandedConditionCompareWindows:
-		return m.availableWindows
 	case expandedPlotComparisonWindows:
 		if m.editingPlotID != "" {
 			if m.editingPlotField == plotItemConfigFieldDoseResponseSegment {
@@ -535,8 +529,6 @@ func (m Model) getExpandedListItems() []string {
 			return append(items, "(type manually)")
 		}
 		return append(items, cols...)
-	case expandedStabilityGroupColumn:
-		return []string{"(auto)", "run", "block"}
 	case expandedGroupLevelTarget:
 		targets := m.availableGroupLevelTargets()
 		if len(targets) == 0 {
@@ -589,8 +581,6 @@ func (m Model) isColumnValueSelected(value string) bool {
 		if selectedValues == "" {
 			selectedValues = m.plotComparisonValuesSpec
 		}
-	case expandedConditionCompareWindows:
-		selectedValues = m.conditionCompareWindows
 	case expandedPlotComparisonWindows:
 		// Check plot-specific config first
 		if m.editingPlotID != "" {
@@ -804,9 +794,6 @@ func (m *Model) handleExpandedListToggle() {
 		} else {
 			m.toggleSpaceValue(selectedItem, &m.plotComparisonValuesSpec)
 		}
-
-	case expandedConditionCompareWindows:
-		m.toggleSpaceValue(selectedItem, &m.conditionCompareWindows)
 
 	case expandedPlotComparisonWindows:
 		// Update plot-specific config if editing a plot field, otherwise global
@@ -1365,17 +1352,6 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
-	case expandedStabilityGroupColumn:
-		switch selectedItem {
-		case "run":
-			m.stabilityGroupColumn = 1
-		case "block":
-			m.stabilityGroupColumn = 2
-		default:
-			m.stabilityGroupColumn = 0
-		}
-		m.expandedOption = expandedNone
-		m.subCursor = 0
 	case expandedGroupLevelTarget:
 		switch selectedItem {
 		case "(default)":
@@ -1403,8 +1379,6 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optConditionCompareColumn
 	case expandedConditionCompareValues:
 		return opt == optConditionCompareValues
-	case expandedConditionCompareWindows:
-		return opt == optConditionCompareWindows
 	case expandedTemporalConditionColumn:
 		return opt == optTemporalConditionColumn
 	case expandedTemporalConditionValues:
@@ -1511,8 +1485,6 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optIAFRois
 	case expandedPredictorResidualCrossfitGroupColumn:
 		return opt == optPredictorResidualCrossfitGroupColumn
-	case expandedStabilityGroupColumn:
-		return opt == optStabilityGroupColumn
 	case expandedGroupLevelTarget:
 		return opt == optGroupLevelTarget
 	}
@@ -1719,7 +1691,7 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		}
 		return false
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
-		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues,
+		expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues,
 		expandedFmriTrialSigGroupValues, expandedDoseResponseBands, expandedDoseResponseROIs, expandedDoseResponseScopes, expandedDoseResponseStat:
 		return m.isColumnValueSelected(item)
 	case expandedBehaviorScatterSegment:
@@ -1745,16 +1717,6 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			return false
 		}
 		return m.predictorResidualCrossfitGroupColumn == item
-	case expandedStabilityGroupColumn:
-		switch item {
-		case "(auto)":
-			return m.stabilityGroupColumn == 0
-		case "run":
-			return m.stabilityGroupColumn == 1
-		case "block":
-			return m.stabilityGroupColumn == 2
-		}
-		return false
 	case expandedGroupLevelTarget:
 		if item == "(default)" {
 			return strings.TrimSpace(m.groupLevelTarget) == ""

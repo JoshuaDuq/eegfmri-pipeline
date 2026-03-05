@@ -84,37 +84,13 @@ class FDRResults:
 
 
 @dataclass
-class MixedEffectsResult:
-    """Output contract for mixed-effects models (group-level)."""
-
-    df: pd.DataFrame
-    n_subjects: int = 0
-    n_features: int = 0
-    n_significant: int = 0
-    random_effects: str = "intercept"
-    family_structure: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-
-@dataclass
 class GroupLevelResult:
     """Output contract for group-level analysis."""
 
-    mixed_effects: Optional[MixedEffectsResult] = None
     multilevel_correlations: Optional[pd.DataFrame] = None
     n_subjects: int = 0
     subjects: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class FeatureQCResult:
-    """Result from feature QC screening."""
-
-    passed_features: List[str]
-    failed_features: Dict[str, List[str]]
-    qc_df: pd.DataFrame
-    metadata: Dict[str, Any]
 
 
 @dataclass

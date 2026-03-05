@@ -6,218 +6,11 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.analysis.behavior.result_types import GroupLevelResult, MixedEffectsResult
+from eeg_pipeline.analysis.behavior.result_types import GroupLevelResult
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_float, get_config_int, get_config_value
 from eeg_pipeline.utils.data.columns import resolve_outcome_column, resolve_predictor_column
-
-
-def run_group_level_mixed_effects_impl(
-    subjects: List[str],
-    deriv_root: Path,
-    config: Any,
-    logger: Any,
-    random_effects: str = "intercept",
-    max_features: int = 50,
-    fdr_alpha: float = 0.05,
-    *,
-    find_trial_table_path_fn: Callable[[Path, Optional[List[str]]], Optional[Path]],
-    feature_prefixes: Sequence[str],
-    feature_type_resolver: Callable[[str, Any], str],
-) -> MixedEffectsResult:
-    """Run mixed-effects analysis across subjects."""
-    from eeg_pipeline.infra.paths import deriv_stats_path
-    from eeg_pipeline.infra.tsv import read_table
-
-    import statsmodels.formula.api as smf
-
-    feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
-    if isinstance(feature_files, str):
-        feature_files = [feature_files]
-    elif feature_files is None:
-        feature_files = get_config_value(config, "behavior_analysis.feature_categories", None)
-        if isinstance(feature_files, str):
-            feature_files = [feature_files]
-
-    all_trials: List[pd.DataFrame] = []
-
-    for sub in subjects:
-        stats_dir = deriv_stats_path(deriv_root, sub)
-        trial_path = find_trial_table_path_fn(stats_dir, feature_files=feature_files)
-
-        if trial_path is None:
-            logger.warning(f"No trial table for sub-{sub}; skipping.")
-            continue
-
-        df = read_table(trial_path)
-        if df.empty:
-            continue
-
-        df["subject_id"] = sub
-        all_trials.append(df)
-
-    if len(all_trials) < 2:
-        logger.warning("Mixed-effects requires >=2 subjects; only %d found.", len(all_trials))
-        return MixedEffectsResult(df=pd.DataFrame(), metadata={"status": "insufficient_subjects"})
-
-    combined = pd.concat(all_trials, ignore_index=True)
-    logger.info("Mixed-effects: %d subjects, %d total trials", len(all_trials), len(combined))
-
-    outcome_column = resolve_outcome_column(combined, config) or "outcome"
-    predictor_column = resolve_predictor_column(combined, config) or "predictor"
-    if outcome_column not in combined.columns:
-        raise KeyError(
-            f"Mixed-effects requires outcome column '{outcome_column}' in the combined trial table."
-        )
-
-    feature_cols = [c for c in combined.columns if str(c).startswith(tuple(feature_prefixes))]
-
-    if len(feature_cols) > max_features:
-        variances = combined[feature_cols].var()
-        feature_cols = variances.nlargest(max_features).index.tolist()
-        logger.info("Mixed-effects: limited to top %d features by variance", max_features)
-
-    n_subjects = combined["subject_id"].nunique()
-    if n_subjects < 3:
-        logger.warning(
-            "Mixed-effects: only %d subjects. Convergence warnings are expected with small sample sizes. "
-            "Results may be unreliable.",
-            n_subjects,
-        )
-
-    run_col_cfg = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
-    run_col_candidates = [run_col_cfg, "run_id", "run", "block"]
-    run_col = next((c for c in run_col_candidates if c and c in combined.columns), None)
-    trial_order_col = next((c for c in ("trial_index_within_group", "trial_index") if c in combined.columns), None)
-    include_predictor = bool(get_config_value(config, "behavior_analysis.mixed_effects.include_predictor", True))
-    max_run_dummies = int(get_config_value(config, "behavior_analysis.run_adjustment.max_dummies", 20))
-
-    records: List[Dict[str, Any]] = []
-
-    for feat in feature_cols:
-        feat_type = feature_type_resolver(str(feat), config)
-        family_id = f"mixed_{feat_type}"
-
-        model_cols = ["subject_id", outcome_column, feat]
-        if (
-            include_predictor
-            and predictor_column != outcome_column
-            and predictor_column in combined.columns
-        ):
-            model_cols.append(predictor_column)
-        if trial_order_col is not None:
-            model_cols.append(trial_order_col)
-        if run_col is not None:
-            model_cols.append(run_col)
-        model_cols = list(dict.fromkeys(model_cols))
-
-        df_valid = combined[model_cols].dropna()
-        if len(df_valid) < 10 or df_valid["subject_id"].nunique() < 2:
-            continue
-
-        df_valid = df_valid.rename(columns={feat: "feature_value"})
-        formula_terms = ["feature_value"]
-        covariate_terms: List[str] = []
-        if (
-            include_predictor
-            and predictor_column in df_valid.columns
-            and df_valid[predictor_column].nunique(dropna=True) > 1
-        ):
-            formula_terms.append(predictor_column)
-            covariate_terms.append(predictor_column)
-        if trial_order_col is not None and trial_order_col in df_valid.columns and df_valid[trial_order_col].nunique(dropna=True) > 1:
-            formula_terms.append(trial_order_col)
-            covariate_terms.append(trial_order_col)
-        if run_col is not None and run_col in df_valid.columns:
-            n_run_levels = int(df_valid[run_col].nunique(dropna=True))
-            if n_run_levels > 1 and n_run_levels <= max(1, max_run_dummies + 1):
-                formula_terms.append(f"C({run_col})")
-                covariate_terms.append(f"C({run_col})")
-
-        formula = f"{outcome_column} ~ " + " + ".join(formula_terms)
-
-        try:
-            if random_effects == "slope":
-                model = smf.mixedlm(
-                    formula,
-                    df_valid,
-                    groups=df_valid["subject_id"],
-                    re_formula="~feature_value",
-                )
-            else:
-                model = smf.mixedlm(
-                    formula,
-                    df_valid,
-                    groups=df_valid["subject_id"],
-                )
-
-            result = model.fit(reml=True)
-
-            records.append(
-                {
-                    "feature": str(feat),
-                    "feature_type": feat_type,
-                    "family_id": family_id,
-                    "family_kind": "feature_type",
-                    "n_subjects": df_valid["subject_id"].nunique(),
-                    "n_trials": len(df_valid),
-                    "fixed_coef": result.fe_params.get("feature_value", np.nan),
-                    "fixed_se": result.bse.get("feature_value", np.nan),
-                    "fixed_z": result.tvalues.get("feature_value", np.nan),
-                    "fixed_p": result.pvalues.get("feature_value", np.nan),
-                    "random_effects": random_effects,
-                    "formula": formula,
-                    "covariates": "|".join(covariate_terms) if covariate_terms else "",
-                    "aic": result.aic,
-                    "bic": result.bic,
-                    "converged": result.converged,
-                    "outcome_column": outcome_column,
-                    "predictor_column": predictor_column,
-                }
-            )
-
-        except Exception as exc:
-            logger.warning("Mixed-effects failed for feature '%s': %s", feat, exc)
-            continue
-
-    if not records:
-        logger.warning("Mixed-effects: no valid results.")
-        return MixedEffectsResult(df=pd.DataFrame(), metadata={"status": "no_valid_results"})
-
-    from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
-
-    results_df = pd.DataFrame(records)
-    results_df = hierarchical_fdr(
-        results_df,
-        p_col="fixed_p",
-        family_col="family_id",
-        alpha=fdr_alpha,
-        config=config,
-    )
-
-    if "reject_within_family" in results_df.columns:
-        n_sig = int(results_df["reject_within_family"].fillna(False).astype(bool).sum())
-    else:
-        n_sig = int((results_df["q_within_family"] < fdr_alpha).sum()) if "q_within_family" in results_df.columns else 0
-
-    logger.info("Mixed-effects: %d features tested, %d significant (hierarchical FDR)", len(results_df), n_sig)
-
-    family_structure = {
-        "method": "hierarchical_fdr",
-        "families": results_df["family_id"].unique().tolist() if "family_id" in results_df.columns else [],
-        "n_families": results_df["family_id"].nunique() if "family_id" in results_df.columns else 0,
-    }
-
-    return MixedEffectsResult(
-        df=results_df,
-        n_subjects=len(all_trials),
-        n_features=len(results_df),
-        n_significant=n_sig,
-        random_effects=random_effects,
-        family_structure=family_structure,
-        metadata={"status": "ok"},
-    )
 
 
 def run_group_level_correlations_impl(
@@ -606,11 +399,9 @@ def run_group_level_analysis_impl(
     deriv_root: Path,
     config: Any,
     logger: Any,
-    run_mixed_effects: bool = False,
     run_multilevel_correlations: bool = False,
     output_dir: Optional[Path] = None,
     *,
-    run_mixed_effects_fn: Callable[..., MixedEffectsResult],
     run_multilevel_correlations_fn: Callable[..., pd.DataFrame],
     write_parquet_with_optional_csv_fn: Callable[[pd.DataFrame, Path, bool], None],
     also_save_csv_from_config_fn: Callable[[Any], bool],
@@ -623,30 +414,7 @@ def run_group_level_analysis_impl(
     logger.info("=" * 60)
     logger.info("Subjects: %s", ", ".join(subjects))
 
-    mixed_result = None
     multilevel_df = None
-
-    if run_mixed_effects:
-        logger.info("Running mixed-effects models...")
-        mixed_result = run_mixed_effects_fn(
-            subjects=subjects,
-            deriv_root=deriv_root,
-            config=config,
-            logger=logger,
-            random_effects=get_config_value(config, "behavior_analysis.mixed_effects.random_effects", "intercept"),
-            max_features=get_config_int(config, "behavior_analysis.mixed_effects.max_features", 50),
-            fdr_alpha=get_config_float(config, "behavior_analysis.statistics.fdr_alpha", 0.05),
-        )
-
-        if output_dir and mixed_result.df is not None and not mixed_result.df.empty:
-            ensure_dir(output_dir)
-            out_path = output_dir / "group_mixed_effects.parquet"
-            write_parquet_with_optional_csv_fn(
-                mixed_result.df,
-                out_path,
-                also_save_csv=also_save_csv_from_config_fn(config),
-            )
-            logger.info("Saved mixed-effects results: %s", out_path)
 
     if run_multilevel_correlations:
         logger.info("Running multilevel correlations with block-restricted permutations...")
@@ -705,7 +473,6 @@ def run_group_level_analysis_impl(
             logger.info("Saved multilevel correlations: %s", out_path)
 
     return GroupLevelResult(
-        mixed_effects=mixed_result,
         multilevel_correlations=multilevel_df,
         n_subjects=len(subjects),
         subjects=subjects,

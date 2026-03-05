@@ -47,19 +47,7 @@ func (m Model) SelectedComputations() []string {
 		if sel && i < len(m.computations) {
 			key := m.computations[i].Key
 
-			switch key {
-			case "predictor_residual":
-				result = append(result, key, "predictor_models")
-			case "validation":
-				result = append(result, "consistency", "influence")
-			case "regression":
-				result = append(result, key)
-				if m.modelsFamilyRobust || m.modelsFamilyQuantile || m.modelsFamilyLogit {
-					result = append(result, "models")
-				}
-			default:
-				result = append(result, key)
-			}
+			result = append(result, key)
 		}
 	}
 
@@ -81,26 +69,12 @@ func (m Model) SelectedComputations() []string {
 }
 
 // isComputationSelected checks if a specific computation is currently selected.
-// Handles bundled computations: 'validation' includes 'consistency' and 'influence';
-// 'predictor_residual' includes 'predictor_models'; 'regression' includes 'models' when multi-family enabled.
 func (m Model) isComputationSelected(computation string) bool {
 	for i, sel := range m.computationSelected {
 		if sel && i < len(m.computations) {
 			key := m.computations[i].Key
 			if key == computation {
 				return true
-			}
-			if key == "validation" && (computation == "consistency" || computation == "influence") {
-				return true
-			}
-			if key == "predictor_residual" && computation == "predictor_models" {
-				return true
-			}
-			if key == "regression" && computation == "models" {
-				// models is selected if regression is selected and multi-family is enabled
-				if m.modelsFamilyRobust || m.modelsFamilyQuantile || m.modelsFamilyLogit {
-					return true
-				}
 			}
 		}
 	}

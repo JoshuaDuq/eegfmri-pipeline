@@ -181,7 +181,6 @@ _GENERAL_OVERRIDE_RULES = (
     ConfigOverrideRule("compute_change_scores", "behavior_analysis.correlations.compute_change_scores", _to_bool),
     ConfigOverrideRule("loso_stability", "behavior_analysis.correlations.loso_stability", _to_bool),
     ConfigOverrideRule("compute_bayes_factors", "behavior_analysis.correlations.compute_bayes_factors", _to_bool),
-    ConfigOverrideRule("consistency_enabled", "behavior_analysis.consistency.enabled", _to_bool),
     ConfigOverrideRule("cluster_correction_enabled", "behavior_analysis.cluster_correction.enabled", _to_bool),
     ConfigOverrideRule("cluster_correction_alpha", "behavior_analysis.cluster_correction.alpha", _to_float),
     ConfigOverrideRule(
@@ -362,7 +361,6 @@ _CONDITION_OVERRIDE_RULES = (
     ConfigOverrideRule("condition_compare_labels", "behavior_analysis.condition.compare_labels", _to_stripped_list),
     ConfigOverrideRule("condition_overwrite", "behavior_analysis.condition.overwrite", _to_bool),
     ConfigOverrideRule("condition_primary_unit", "behavior_analysis.condition.primary_unit", _to_lower_stripped),
-    ConfigOverrideRule("condition_compare_windows", "behavior_analysis.condition.compare_windows", _to_stripped_list),
 )
 
 _TEMPORAL_OVERRIDE_RULES = (
@@ -481,6 +479,7 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     _apply_override_rules(args, config, _TRIAL_TABLE_OVERRIDE_RULES)
     _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_OVERRIDE_RULES)
+
     _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_CROSSFIT_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _REGRESSION_OVERRIDE_RULES)

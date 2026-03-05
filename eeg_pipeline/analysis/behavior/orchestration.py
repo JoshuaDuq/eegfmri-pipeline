@@ -32,6 +32,7 @@ from eeg_pipeline.analysis.behavior import (
 from eeg_pipeline.analysis.behavior.stages import (
     condition as _stages_condition,
     correlate as _stages_correlate,
+    diagnostics as _stages_diagnostics,
     export as _stages_export,
     fdr as _stages_fdr,
     metadata as _stages_metadata,
@@ -478,8 +479,6 @@ def _sanitize_permutation_groups(
     return groups_array
 
 
-
-
 def _feature_suffix_from_context(ctx: BehaviorContext) -> str:
     feature_files = ctx.selected_feature_files or ctx.feature_categories or []
     return "_" + "_".join(sorted(str(x) for x in feature_files)) if feature_files else ""
@@ -577,6 +576,26 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     )
 
 
+def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
+    cache = _get_cache(ctx)
+    out_path = _stages_trial_table.stage_lag_features_impl(
+        ctx,
+        config,
+        load_trial_table_df_fn=_load_trial_table_df,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
+        feature_suffix_from_context_fn=_feature_suffix_from_context,
+        get_stats_subfolder_fn=_get_stats_subfolder,
+        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
+        write_metadata_file_fn=_write_metadata_file,
+        set_trial_table_cache_fn=lambda df: setattr(cache, "_trial_table_df", df),
+    )
+    if out_path is not None and out_path.exists():
+        from eeg_pipeline.infra.tsv import read_table
+
+        cache._trial_table_df = read_table(out_path)
+    return out_path
+
+
 def stage_predictor_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     cache = _get_cache(ctx)
     out_path = _stages_trial_table.stage_predictor_residual_impl(
@@ -615,6 +634,22 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         attach_predictor_metadata_fn=_attach_predictor_metadata,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_stats_table_fn=_write_stats_table,
+    )
+
+
+def stage_icc(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Assess within-subject run-to-run reliability (ICC) of EEG features."""
+    return _stages_diagnostics.stage_icc_impl(
+        ctx,
+        config,
+        build_output_filename_fn=_build_output_filename,
+        load_trial_table_df_fn=_load_trial_table_df,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
+        get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
+        check_early_exit_conditions_fn=_check_early_exit_conditions,
+        get_stats_subfolder_fn=_get_stats_subfolder,
+        write_stats_table_fn=_write_stats_table,
+        write_metadata_file_fn=_write_metadata_file,
     )
 
 
@@ -732,28 +767,28 @@ def stage_condition_column(
 
 
 
-def _compute_pairwise_effect_sizes(
-    v1: np.ndarray,
-    v2: np.ndarray,
-) -> Tuple[float, float, float, float, float]:
-    """Compute paired (within-subject) effect sizes (Cohen's dz and Hedge's gz).
-
-    Returns:
-        (mean_diff, std_diff, cohens_d, hedges_g, hedges_correction)
+def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Backward-compatible condition stage (column or multigroup).
+    
+    The pipeline wrapper historically called a single stage and expected a DataFrame.
+    Internally, we keep single-responsibility sub-stages:
+    - stage_condition_column (2-group comparison)
+    - stage_condition_multigroup (3+ group comparison)
     """
-    diff = v2 - v1
-    mean_diff = float(np.nanmean(diff))
-    std_diff = float(np.nanstd(diff, ddof=1))
-    cohens_d = mean_diff / std_diff if np.isfinite(std_diff) and std_diff > 0 else np.nan
-
-    # Hedge's g correction
-    n = int(np.sum(np.isfinite(v1) & np.isfinite(v2)))
-    hedges_correction = 1 - (3 / (4 * n - 1)) if n > 1 else 1.0
-    hedges_g = cohens_d * hedges_correction if np.isfinite(cohens_d) else np.nan
-
-    return mean_diff, std_diff, cohens_d, hedges_g, hedges_correction
-
-
+    cache = _get_cache(ctx)
+    return _stages_condition.stage_condition_impl(
+        ctx,
+        config,
+        load_trial_table_df_fn=_load_trial_table_df,
+        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
+        get_filtered_feature_cols_fn=lambda df, context: cache.get_filtered_feature_cols(
+            [c for c in df.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)],
+            context,
+            "condition",
+        ),
+        stage_condition_multigroup_fn=stage_condition_multigroup,
+        stage_condition_column_fn=stage_condition_column,
+    )
 
 
 def stage_condition_multigroup(
@@ -783,33 +818,6 @@ def stage_condition_multigroup(
         feature_suffix_from_context_fn=_feature_suffix_from_context,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_stats_table_fn=_write_stats_table,
-        unified_fdr_family_columns=UNIFIED_FDR_FAMILY_COLUMNS,
-    )
-
-
-def _run_window_comparison(
-    ctx: BehaviorContext,
-    df_trials: pd.DataFrame,
-    feature_cols: List[str],
-    windows: List[str],
-    min_samples: int,
-    fdr_alpha: float,
-    suffix: str,
-) -> pd.DataFrame:
-    """Run paired window comparison on feature columns."""
-    cache = _get_cache(ctx)
-    return _stages_condition.run_window_comparison_impl(
-        ctx,
-        df_trials,
-        feature_cols,
-        windows,
-        min_samples,
-        fdr_alpha,
-        suffix,
-        feature_prefixes=FEATURE_COLUMN_PREFIXES,
-        compute_pairwise_effect_sizes_fn=_compute_pairwise_effect_sizes,
-        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(feature_name, cfg),
-        compute_unified_fdr_fn=_compute_unified_fdr,
         unified_fdr_family_columns=UNIFIED_FDR_FAMILY_COLUMNS,
     )
 
@@ -859,30 +867,6 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
 ###################################################################
 
 
-def run_group_level_mixed_effects(
-    subjects: List[str],
-    deriv_root: Path,
-    config: Any,
-    logger: Any,
-    random_effects: str = "intercept",
-    max_features: int = 50,
-    fdr_alpha: float = 0.05,
-) -> MixedEffectsResult:
-    """Run proper mixed-effects models across all subjects."""
-    return _group_level.run_group_level_mixed_effects_impl(
-        subjects=subjects,
-        deriv_root=deriv_root,
-        config=config,
-        logger=logger,
-        random_effects=random_effects,
-        max_features=max_features,
-        fdr_alpha=fdr_alpha,
-        find_trial_table_path_fn=_find_trial_table_path,
-        feature_prefixes=FEATURE_COLUMN_PREFIXES,
-        feature_type_resolver=lambda feature_name, cfg: _infer_feature_type(str(feature_name), cfg),
-    )
-
-
 def run_group_level_correlations(
     subjects: List[str],
     deriv_root: Path,
@@ -925,7 +909,6 @@ def run_group_level_analysis(
     deriv_root: Path,
     config: Any,
     logger: Any,
-    run_mixed_effects: bool = False,
     run_multilevel_correlations: bool = False,
     output_dir: Optional[Path] = None,
 ) -> GroupLevelResult:
@@ -935,16 +918,12 @@ def run_group_level_analysis(
         deriv_root=deriv_root,
         config=config,
         logger=logger,
-        run_mixed_effects=run_mixed_effects,
         run_multilevel_correlations=run_multilevel_correlations,
         output_dir=output_dir,
-        run_mixed_effects_fn=run_group_level_mixed_effects,
         run_multilevel_correlations_fn=run_group_level_correlations,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
         also_save_csv_from_config_fn=_also_save_csv_from_config,
     )
-
-
 def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     """Compute hierarchical FDR summary across analysis types from cached FDR results."""
     cache = _get_cache(ctx)

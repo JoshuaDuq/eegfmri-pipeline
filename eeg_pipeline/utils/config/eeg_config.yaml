@@ -665,13 +665,6 @@ behavior_analysis:
     enabled: true
     group_columns: []  # Empty = auto-detect from run_adjustment.column, run_id, run, block
   
-  # Feature QC (optional gating before running statistics)
-  feature_qc:
-    enabled: false
-    max_missing_pct: 0.2
-    min_variance: 1.0e-10
-    check_within_run_variance: true
-
   # Pain residual = rating - f(temperature) for "pain beyond stimulus intensity"
   predictor_residual:
     enabled: true
@@ -679,31 +672,12 @@ behavior_analysis:
     min_samples: 10
     spline_df_candidates: [3, 4, 5]
     poly_degree: 2
-    model_comparison:
-      enabled: true
-      min_samples: 10
-      poly_degrees: [2, 3]
     crossfit:
       enabled: true
       group_column: ""        # "" -> use behavior_analysis.run_adjustment.column
       n_splits: 5
       method: "spline"        # "spline" | "poly" (crossfit uses sklearn splines/poly + ridge)
       spline_n_knots: 5
-
-  # Temperature→rating model diagnostics (model comparison + breakpoint detection)
-  temperature_models:
-    enabled: true
-    model_comparison:
-      enabled: true
-      min_samples: 10
-      poly_degrees: [2, 3]
-      spline_df_candidates: [3, 4, 5]
-    breakpoint_test:
-      enabled: true
-      min_samples: 12
-      quantile_low: 0.15
-      quantile_high: 0.85
-      n_candidates: 15
 
   
   # Trialwise regression/moderation (complements correlations)
@@ -726,61 +700,6 @@ behavior_analysis:
     min_samples: 15
     n_permutations: 0
     max_features: null
-
-  # Sensitivity model families per feature (robust/quantile/logistic)
-  models:
-    enabled: false
-    outcomes: ["rating", "predictor_residual"]  # optionally add "temperature"
-    families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
-    include_temperature: true
-    temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
-    temperature_spline:
-      n_knots: 4
-      quantile_low: 0.05
-      quantile_high: 0.95
-      min_samples: 12
-    include_trial_order: true
-    include_prev_terms: false
-    include_run_block: true
-    include_interaction: true
-    standardize: true
-    min_samples: 20
-    max_features: 100
-    binary_outcome: "binary_outcome"     # or "rating_median"
-
-  # Within-subject stability across runs/blocks (non-gating diagnostics)
-  stability:
-    enabled: true
-    outcome: ""                     # "" -> auto (predictor_residual if present, else rating)
-    group_column: ""                # "" -> auto (run if present, else block)
-    method: "spearman"
-    partial_temperature: true
-    max_features: 50
-    alpha: 0.05
-
-  # Effect direction consistency across outcomes/methods (non-gating)
-  consistency:
-    enabled: true
-
-  # Influence diagnostics (non-gating)
-  influence:
-    enabled: true
-    outcomes: ["rating", "predictor_residual"]  # optionally add "temperature"
-    max_features: 20
-    include_temperature: true
-    temperature_control: "linear"  # "linear" | "rating_hat" | "spline"
-    temperature_spline:
-      n_knots: 4
-      quantile_low: 0.05
-      quantile_high: 0.95
-      min_samples: 12
-    include_trial_order: true
-    include_run_block: true
-    include_interaction: false
-    standardize: true
-    # Optional overrides (defaults use common heuristics)
-    cooks_threshold: null
-    leverage_threshold: null
 
   # Single-subject report (non-gating; summarizes outputs and diagnostics)
   report:
@@ -840,10 +759,6 @@ behavior_analysis:
       enabled: true
       n_permutations: 1000
   
-  # Pain sensitivity computation
-  predictor_sensitivity:
-    enabled: true
-
   # Condition comparison computation
   condition:
     enabled: true
@@ -851,7 +766,6 @@ behavior_analysis:
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
     compare_column: ""          # Column to split by (empty = use event_columns.binary_outcome)
     compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
-    compare_windows: []          # Empty = compare all available windows
     compare_labels: null         # Optional labels for compare_values (same length)
     primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
     overwrite: true
@@ -859,8 +773,6 @@ behavior_analysis:
     permutation:
       enabled: true
       n_permutations: 1000
-    window_comparison:
-      primary_unit: "run_mean"     # "trial" | "run_mean"
   
   # Temporal correlations computation  
   temporal:
@@ -901,31 +813,11 @@ behavior_analysis:
     condition_column: ""         # Column to split by (empty = use event_columns.binary_outcome)
     condition_values: []         # Exactly 2 values to compare (default [0, 1] if empty)
   
-  # Mediation analysis
-  mediation:
-    enabled: false
-    n_bootstrap: 1000
-    min_effect_size: 0.05
-    max_mediators: 20
-  
-  # Moderation analysis
-  moderation:
-    enabled: false
-    min_samples: 15
-    max_features: null
-    n_permutations: 0
-
   # Group-level analysis controls
   group_level:
     block_permutation: true
     multilevel_correlations:
       allow_parametric_fallback: false  # If false, missing permutation p-values remain NaN (strict non-i.i.d)
-
-  # Mixed effects modeling
-  mixed_effects:
-    enabled: false
-    random_effects: "intercept"  # "intercept" or "slope"
-    max_features: 50
   
   min_samples:
     channel: 10

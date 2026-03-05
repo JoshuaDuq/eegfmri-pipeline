@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, List, Optional
 
-import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_int, get_config_value
@@ -130,4 +129,3 @@ def stage_regression_impl(
         actual_path = write_stats_table_fn(ctx, reg_df, out_path)
         ctx.logger.info("Regression results saved: %s (%d features)", actual_path.name, len(reg_df))
     return reg_df
-

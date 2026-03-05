@@ -230,27 +230,12 @@ def _validate_behavior(
             ["r_primary", "r"],
         ),
         (
-            "predictor_sensitivity",
-            ["predictor_sensitivity*/*/predictor_sensitivity*.tsv", "predictor_sensitivity*/*/predictor_sensitivity*.parquet"],
-            ["feature", "p_primary"],
-            None,
-        ),
-        (
             "regression",
             [
                 "trialwise_regression*/*/regression_feature_effects*.tsv",
                 "trialwise_regression*/*/regression_feature_effects*.parquet",
             ],
             ["feature", "target", "beta_feature", "p_primary"],
-            None,
-        ),
-        (
-            "models",
-            [
-                "feature_models*/*/models_feature_effects*.tsv",
-                "feature_models*/*/models_feature_effects*.parquet",
-            ],
-            ["feature", "target", "model_family", "beta_feature", "p_primary"],
             None,
         ),
         (

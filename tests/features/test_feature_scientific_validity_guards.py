@@ -542,6 +542,121 @@ class TestScientificValidityGuards(unittest.TestCase):
         cols_sub_2 = extract_columns("sub-0002", make_selection("fmri_c03_peak6p20"))
         self.assertEqual(cols_sub_1, cols_sub_2)
 
+    def test_fmri_metadata_records_surviving_stc_rows_per_cluster(self):
+        n_epochs = 2
+        n_times = 50
+        stcs = [
+            SimpleNamespace(
+                data=np.ones((3, n_times), dtype=float),
+                vertices=[np.array([0, 1, 2], dtype=int)],
+            )
+            for _ in range(n_epochs)
+        ]
+        voxel_selection = FMRIVoxelSelection(
+            selected_voxels_ijk=np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]], dtype=int),
+            selected_coords_m=np.array(
+                [[0.000, 0.000, 0.000], [0.000, 0.000, 0.001], [0.000, 0.001, 0.000]],
+                dtype=float,
+            ),
+            cluster_indices={"fmri_c01_peak5p00": [0, 1], "fmri_c02_peak4p00": [2]},
+            cluster_voxel_counts={"fmri_c01_peak5p00": 2, "fmri_c02_peak4p00": 1},
+            atlas_indices={},
+            atlas_voxel_counts={},
+            cluster_to_atlas_counts={},
+            dropped_unlabeled_voxels=0,
+            matched_reference_path=Path("/tmp/ref.mgz"),
+            voxel_volume_mm3=8.0,
+        )
+        fmri_cfg = SimpleNamespace(
+            enabled=True,
+            stats_map_path=Path(__file__),
+            provenance="independent",
+            require_provenance=False,
+            allow_same_dataset_provenance=False,
+            output_space="cluster",
+        )
+        src_cfg = SimpleNamespace(
+            method="lcmv",
+            fmri_cfg=fmri_cfg,
+            subjects_dir="/tmp/freesurfer",
+            subject="sub-0001",
+            mindist_mm=5.0,
+            lcmv_reg=0.05,
+            eloreta_loose=1.0,
+            eloreta_depth=0.8,
+            eloreta_snr=3.0,
+            save_stc=False,
+            mode="fmri_informed",
+        )
+        ctx = SimpleNamespace(
+            epochs=_EpochStub(n_epochs, sfreq=100.0),
+            config=DotConfig({}),
+            logger=logging.getLogger("src-loc-cluster-rows"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            frequency_bands={"alpha": (8.0, 12.0)},
+            name="active",
+            deriv_root="/tmp",
+            subject="0001",
+            task="task",
+        )
+        captured_payload: dict[str, object] = {}
+
+        def _capture_metadata(**kwargs):
+            captured_payload.update(kwargs["payload"])
+            return None
+
+        with (
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                return_value=src_cfg,
+            ),
+            patch(
+                "fmri_pipeline.analysis.bem_generation.ensure_bem_and_trans_files",
+                return_value=(Path("/tmp/trans.fif"), Path("/tmp/bem.fif"), Path("/tmp/bem-sol.fif")),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._select_fmri_constrained_voxels",
+                return_value=voxel_selection,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._setup_volume_source_space_from_points_configured",
+                return_value=("fwd", "src"),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                return_value=(stcs, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_timecourses_from_row_indices",
+                side_effect=lambda **kwargs: np.ones(
+                    (n_epochs, len(kwargs["roi_names"]), n_times), dtype=float
+                ),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._validate_source_localization_duration",
+                return_value=True,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._write_fmri_constraint_metadata_sidecar",
+                side_effect=_capture_metadata,
+            ),
+        ):
+            extract_source_localization_features(
+                ctx,
+                bands=["alpha"],
+                method="lcmv",
+            )
+
+        roi_survival = captured_payload["roi_survival"]["fmri_cluster"]
+        self.assertEqual(
+            roi_survival["surviving_stc_rows_per_roi"],
+            {
+                "c01_peak5p00": [0, 1],
+                "c02_peak4p00": [2],
+            },
+        )
+
     def test_source_localization_blocks_same_dataset_provenance_by_default(self):
         fmri_cfg = SimpleNamespace(
             enabled=True,
@@ -618,6 +733,25 @@ class TestScientificValidityGuards(unittest.TestCase):
             }
         )
         with self.assertRaisesRegex(ValueError, "emit_welch_stats"):
+            _load_source_contrast_config(cfg)
+
+    def test_source_contrast_config_rejects_trial_level_welch_stats(self):
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "sourcelocalization": {
+                        "contrast": {
+                            "enabled": True,
+                            "condition_column": "trial_type",
+                            "condition_a": "A",
+                            "condition_b": "B",
+                            "emit_welch_stats": True,
+                        }
+                    }
+                }
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "scientifically valid"):
             _load_source_contrast_config(cfg)
 
     def test_source_contrast_extracts_subject_level_row_without_welch(self):

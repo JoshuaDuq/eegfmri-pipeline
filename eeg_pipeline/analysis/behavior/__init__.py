@@ -14,7 +14,9 @@ from eeg_pipeline.analysis.behavior.api import (
     compute_change_features,
     compute_condition_effects,
     compute_multigroup_condition_effects,
+    compute_icc,
     compute_two_condition_time_cluster_test,
+    compute_split_half_reliability,
     compute_temporal_from_context,
     compute_time_frequency_from_context,
     run_cluster_test_from_context,
@@ -43,6 +45,7 @@ __all__ = [
     "FeatureCorrelationResult",
     "run_unified_feature_correlations",
     "compute_change_features",
+    "compute_split_half_reliability",
     "CorrelationResult",
     # Condition and temporal stats
     "split_by_condition",
@@ -53,6 +56,7 @@ __all__ = [
     # Cluster helpers
     "compute_two_condition_time_cluster_test",
     "run_cluster_test_from_context",
+    "compute_icc",
     # Stats utilities
     "interpret_effect_size",
     "interpret_correlation",

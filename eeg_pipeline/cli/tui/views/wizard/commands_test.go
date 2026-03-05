@@ -567,22 +567,13 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"behavior_analysis.permutation.scheme":                                            "circular_shift",
 		"behavior_analysis.permutation.group_column_preference":                           []interface{}{"run_id", "block"},
 		"behavior_analysis.features.exclude_non_trialwise_features":                       false,
-		"behavior_analysis.predictor_models.model_comparison.enabled":                     false,
-		"behavior_analysis.predictor_models.breakpoint_test.enabled":                      false,
 		"behavior_analysis.correlations.min_runs":                                         6.0,
 		"behavior_analysis.correlations.target_column":                                    "custom_rating",
 		"behavior_analysis.correlations.prefer_predictor_residual":                        true,
 		"behavior_analysis.correlations.permutation.n_permutations":                       77.0,
-		"behavior_analysis.predictor_sensitivity.primary_unit":                            "run_mean",
-		"behavior_analysis.predictor_sensitivity.n_permutations":                          300.0,
-		"behavior_analysis.predictor_sensitivity.p_primary_mode":                          "asymptotic",
 		"behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback": true,
 		"behavior_analysis.condition.primary_unit":                                        "run_mean",
 		"behavior_analysis.condition.compare_labels":                                      []interface{}{"low", "high"},
-		"behavior_analysis.condition.window_comparison.min_samples":                       12.0,
-		"behavior_analysis.mixed_effects.include_predictor":                               false,
-		"behavior_analysis.mediation.p_primary_mode":                                      "asymptotic",
-		"behavior_analysis.moderation.p_primary_mode":                                     "asymptotic",
 		"behavior_analysis.regression.primary_unit":                                       "run_mean",
 		"behavior_analysis.temporal.correction_method":                                    "cluster",
 		"behavior_analysis.cluster_correction.enabled":                                    true,
@@ -620,12 +611,6 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	if m.behaviorExcludeNonTrialwiseFeatures {
 		t.Fatalf("expected behaviorExcludeNonTrialwiseFeatures=false")
 	}
-	if m.predictorResidualModelCompareEnabled {
-		t.Fatalf("expected predictorResidualModelCompareEnabled=false")
-	}
-	if m.predictorResidualBreakpointEnabled {
-		t.Fatalf("expected predictorResidualBreakpointEnabled=false")
-	}
 	if m.correlationsMinRuns != 6 {
 		t.Fatalf("expected correlationsMinRuns=6, got %d", m.correlationsMinRuns)
 	}
@@ -638,15 +623,6 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	if m.correlationsTargetColumn != "custom_rating" {
 		t.Fatalf("unexpected correlationsTargetColumn: %q", m.correlationsTargetColumn)
 	}
-	if m.predictorSensitivityPrimaryUnit != 1 {
-		t.Fatalf("expected predictorSensitivityPrimaryUnit=1 (run_mean), got %d", m.predictorSensitivityPrimaryUnit)
-	}
-	if m.predictorSensitivityPermutations != 300 {
-		t.Fatalf("expected predictorSensitivityPermutations=300, got %d", m.predictorSensitivityPermutations)
-	}
-	if m.predictorSensitivityPermutationPrimary {
-		t.Fatalf("expected predictorSensitivityPermutationPrimary=false")
-	}
 	if !m.groupLevelAllowParametricFallback {
 		t.Fatalf("expected groupLevelAllowParametricFallback=true")
 	}
@@ -655,18 +631,6 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	}
 	if m.conditionCompareLabels != "low,high" {
 		t.Fatalf("unexpected conditionCompareLabels: %q", m.conditionCompareLabels)
-	}
-	if m.conditionWindowMinSamples != 12 {
-		t.Fatalf("expected conditionWindowMinSamples=12, got %d", m.conditionWindowMinSamples)
-	}
-	if m.mixedIncludePredictor {
-		t.Fatalf("expected mixedIncludePredictor=false")
-	}
-	if m.mediationPermutationPrimary {
-		t.Fatalf("expected mediationPermutationPrimary=false")
-	}
-	if m.moderationPermutationPrimary {
-		t.Fatalf("expected moderationPermutationPrimary=false")
 	}
 	if m.regressionPrimaryUnit != 1 {
 		t.Fatalf("expected regressionPrimaryUnit=1 (run_mean), got %d", m.regressionPrimaryUnit)
@@ -1029,7 +993,7 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
-		case "trial_table", "predictor_residual", "regression", "models", "validation", "moderation", "stability", "predictor_sensitivity", "condition":
+		case "trial_table", "predictor_residual", "regression", "condition":
 			m.computationSelected[i] = true
 		}
 	}
@@ -1042,18 +1006,8 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	m.regressionTempSplineMinN = 18
 	m.regressionMinSamples = 22
 
-	m.modelsTempControl = 2
-	m.modelsTempSplineMinN = 17
-	m.modelsMinSamples = 25
-
-	m.influenceTempControl = 2
-	m.influenceTempSplineMinN = 19
-
 	m.behaviorMinSamples = 7
-	m.stabilityMinGroupN = 4
-	m.predictorSensitivityMinTrials = 9
 	m.conditionMinTrials = 6
-	m.moderationMinSamples = 21
 
 	args := m.buildBehaviorAdvancedArgs()
 	if !containsSubsequence(args, []string{"--min-samples", "7"}) {
@@ -1074,34 +1028,16 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	if !containsSubsequence(args, []string{"--regression-min-samples", "22"}) {
 		t.Fatalf("expected --regression-min-samples 22 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--models-predictor-spline-min-samples", "17"}) {
-		t.Fatalf("expected --models-predictor-spline-min-samples 17 in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--models-min-samples", "25"}) {
-		t.Fatalf("expected --models-min-samples 25 in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--influence-predictor-spline-min-samples", "19"}) {
-		t.Fatalf("expected --influence-predictor-spline-min-samples 19 in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--stability-min-group-trials", "4"}) {
-		t.Fatalf("expected --stability-min-group-trials 4 in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--predictor-sensitivity-min-trials", "9"}) {
-		t.Fatalf("expected --predictor-sensitivity-min-trials 9 in args, got: %#v", args)
-	}
 	if !containsSubsequence(args, []string{"--condition-min-trials", "6"}) {
 		t.Fatalf("expected --condition-min-trials 6 in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--moderation-min-samples", "21"}) {
-		t.Fatalf("expected --moderation-min-samples 21 in args, got: %#v", args)
-	}
 }
 
-func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testing.T) {
+func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelFlags(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
-		case "models", "multilevel_correlations":
+		case "multilevel_correlations":
 			m.computationSelected[i] = true
 		}
 	}
@@ -1113,8 +1049,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 	m.groupLevelControlRunEffects = false
 	m.groupLevelMaxRunDummies = 12
 	m.groupLevelAllowParametricFallback = true
-	m.modelsPrimaryUnit = 1 // run_mean
-	m.modelsForceTrialIIDAsymptotic = true
 
 	args := m.buildBehaviorAdvancedArgs()
 
@@ -1136,33 +1070,20 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelAndModelValidityFlags(t *testi
 	if !containsString(args, "--group-level-allow-parametric-fallback") {
 		t.Fatalf("expected --group-level-allow-parametric-fallback in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--models-primary-unit", "run_mean"}) {
-		t.Fatalf("expected --models-primary-unit run_mean in args, got: %#v", args)
-	}
-	if !containsString(args, "--models-force-trial-iid-asymptotic") {
-		t.Fatalf("expected --models-force-trial-iid-asymptotic in args, got: %#v", args)
-	}
 }
 
-func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testing.T) {
+func TestBuildBehaviorAdvancedArgs_EmitsRuntimeCoverageFlags(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
-		case "correlations", "predictor_sensitivity", "condition", "temporal", "regression", "mediation", "moderation", "mixed_effects":
+		case "correlations", "condition", "temporal", "regression":
 			m.computationSelected[i] = true
 		}
 	}
 
 	m.correlationsMinRuns = 5
-	m.predictorSensitivityPrimaryUnit = 1
-	m.predictorSensitivityPermutations = 250
-	m.predictorSensitivityPermutationPrimary = false
 	m.conditionPrimaryUnit = 1
-	m.conditionWindowMinSamples = 14
 	m.conditionCompareLabels = "low,high"
-	m.mixedIncludePredictor = false
-	m.mediationPermutationPrimary = false
-	m.moderationPermutationPrimary = false
 	m.correlationsPreferPredictorResidual = true
 	m.correlationsPermutations = 111
 	m.correlationsPowerSegment = "stimulation"
@@ -1183,15 +1104,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testi
 	if !containsSubsequence(args, []string{"--correlations-power-segment", "stimulation"}) {
 		t.Fatalf("expected --correlations-power-segment stimulation in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--predictor-sensitivity-primary-unit", "run_mean"}) {
-		t.Fatalf("expected --predictor-sensitivity-primary-unit run_mean in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--predictor-sensitivity-permutations", "250"}) {
-		t.Fatalf("expected --predictor-sensitivity-permutations 250 in args, got: %#v", args)
-	}
-	if !containsString(args, "--no-predictor-sensitivity-permutation-primary") {
-		t.Fatalf("expected --no-predictor-sensitivity-permutation-primary in args, got: %#v", args)
-	}
 	if !containsSubsequence(args, []string{"--condition-primary-unit", "run_mean"}) {
 		t.Fatalf("expected --condition-primary-unit run_mean in args, got: %#v", args)
 	}
@@ -1201,20 +1113,8 @@ func TestBuildBehaviorAdvancedArgs_EmitsNewBehaviorRuntimeCoverageFlags(t *testi
 	if !containsSubsequence(args, []string{"--temporal-correction-method", "cluster"}) {
 		t.Fatalf("expected --temporal-correction-method cluster in args, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--condition-window-min-samples", "14"}) {
-		t.Fatalf("expected --condition-window-min-samples 14 in args, got: %#v", args)
-	}
 	if !containsSubsequence(args, []string{"--condition-compare-labels", "low", "high"}) {
 		t.Fatalf("expected --condition-compare-labels low high in args, got: %#v", args)
-	}
-	if !containsString(args, "--no-mixed-include-predictor") {
-		t.Fatalf("expected --no-mixed-include-predictor in args, got: %#v", args)
-	}
-	if !containsString(args, "--no-mediation-permutation-primary") {
-		t.Fatalf("expected --no-mediation-permutation-primary in args, got: %#v", args)
-	}
-	if !containsString(args, "--no-moderation-permutation-primary") {
-		t.Fatalf("expected --no-moderation-permutation-primary in args, got: %#v", args)
 	}
 }
 
@@ -1222,7 +1122,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
-		case "trial_table", "correlations", "regression", "models", "validation", "condition":
+		case "trial_table", "correlations", "regression", "condition":
 			m.computationSelected[i] = true
 		}
 	}
@@ -1231,9 +1131,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 	m.predictorResidualEnabled = true
 	m.predictorResidualCrossfitEnabled = false
 	m.regressionIncludePrev = false
-	m.modelsIncludePrev = false
-	m.modelsForceTrialIIDAsymptotic = false
-	m.influenceIncludeInteraction = false
 	m.correlationsPermutationPrimary = false
 	m.correlationsUseCrossfitResidual = false
 	m.conditionPermutationPrimary = false
@@ -1249,9 +1146,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 		"--no-run-adjustment",
 		"--no-predictor-residual-crossfit",
 		"--no-regression-include-prev-terms",
-		"--no-models-include-prev-terms",
-		"--no-models-force-trial-iid-asymptotic",
-		"--no-influence-include-interaction",
 		"--no-correlations-permutation-primary",
 		"--no-correlations-use-crossfit-predictor-residual",
 		"--no-condition-permutation-primary",
@@ -1293,19 +1187,16 @@ func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
-		case "correlations", "predictor_sensitivity", "condition", "temporal", "cluster", "mediation", "moderation":
+		case "correlations", "condition", "temporal", "cluster":
 			m.computationSelected[i] = true
 		}
 	}
 
 	m.behaviorValidateOnly = true
 	m.correlationsFeaturesSpec = "power,connectivity"
-	m.predictorSensitivityFeaturesSpec = "erp,itpc"
 	m.conditionFeaturesSpec = "spectral"
 	m.temporalFeaturesSpec = "power,erds"
 	m.clusterFeaturesSpec = "connectivity"
-	m.mediationFeaturesSpec = "quality"
-	m.moderationFeaturesSpec = "aperiodic,complexity"
 
 	args := m.buildBehaviorAdvancedArgs()
 	if !containsString(args, "--validate-only") {
@@ -1313,9 +1204,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing
 	}
 	if !containsSubsequence(args, []string{"--correlations-features", "power", "connectivity"}) {
 		t.Fatalf("expected --correlations-features power connectivity in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--predictor-sensitivity-features", "erp", "itpc"}) {
-		t.Fatalf("expected --predictor-sensitivity-features erp itpc in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--condition-features", "spectral"}) {
 		t.Fatalf("expected --condition-features spectral in args, got: %#v", args)
@@ -1325,12 +1213,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing
 	}
 	if !containsSubsequence(args, []string{"--cluster-features", "connectivity"}) {
 		t.Fatalf("expected --cluster-features connectivity in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--mediation-features", "quality"}) {
-		t.Fatalf("expected --mediation-features quality in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--moderation-features", "aperiodic", "complexity"}) {
-		t.Fatalf("expected --moderation-features aperiodic complexity in args, got: %#v", args)
 	}
 }
 

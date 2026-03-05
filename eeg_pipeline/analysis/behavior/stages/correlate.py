@@ -889,5 +889,3 @@ def stage_correlate_impl(
     records = stage_correlate_pvalues_fn(ctx, config, design, records)
     records = stage_correlate_primary_selection_fn(ctx, config, design, records)
     return stage_correlate_fdr_fn(ctx, config, records)
-
-

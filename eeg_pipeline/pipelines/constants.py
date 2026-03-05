@@ -35,14 +35,16 @@ FREQUENCY_BANDS: List[str] = [
 
 BEHAVIOR_COMPUTATIONS: List[str] = [
     "trial_table",
+    "lag_features",
     "predictor_residual",
     "regression",
+    "icc",
     "report",
     "correlations",
-    "multilevel_correlations",
     "condition",
     "temporal",
     "cluster",
+    "multilevel_correlations",
 ]
 
 

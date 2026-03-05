@@ -29,6 +29,10 @@ from eeg_pipeline.utils.analysis.stats.effect_size import (
     compute_multigroup_condition_effects,
     split_by_condition,
 )
+from eeg_pipeline.utils.analysis.stats.reliability import (
+    compute_correlation_split_half_reliability as compute_split_half_reliability,
+    compute_icc,
+)
 from eeg_pipeline.utils.analysis.stats.temporal import (
     compute_time_frequency_from_context,
     compute_temporal_from_context,
@@ -70,6 +74,7 @@ def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
 __all__ = [
     # Correlation helpers
     "compute_change_features",
+    "compute_split_half_reliability",
     "interpret_effect_size",
     "interpret_correlation",
     "CorrelationResult",
@@ -86,6 +91,7 @@ __all__ = [
     # Cluster tests
     "compute_two_condition_time_cluster_test",
     "run_cluster_test_from_context",
+    "compute_icc",
     # Condition
     "split_by_condition",
     "compute_condition_effects",

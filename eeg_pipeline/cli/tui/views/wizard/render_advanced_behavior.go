@@ -90,42 +90,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				label = "▾ Correlations"
 			}
 			return label, "", "target · features · types · multilevel"
-		case optBehaviorGroupPredictorSens:
-			label := "▸ Predictor Sensitivity"
-			if m.behaviorGroupPredictorSensExpanded {
-				label = "▾ Predictor Sensitivity"
-			}
-			return label, "", "min trials · features · permutations"
 		case optBehaviorGroupRegression:
 			label := "▸ Regression"
 			if m.behaviorGroupRegressionExpanded {
 				label = "▾ Regression"
 			}
 			return label, "", "outcome · covariates · model families"
-		case optBehaviorGroupModels:
-			label := "▸ Models"
-			if m.behaviorGroupModelsExpanded {
-				label = "▾ Models"
-			}
-			return label, "", "outcomes · covariates · families · inference"
-		case optBehaviorGroupStability:
-			label := "▸ Stability"
-			if m.behaviorGroupStabilityExpanded {
-				label = "▾ Stability"
-			}
-			return label, "", "within-group correlation consistency"
-		case optBehaviorGroupConsistency:
-			label := "▸ Consistency"
-			if m.behaviorGroupConsistencyExpanded {
-				label = "▾ Consistency"
-			}
-			return label, "", "sign-flip detection across subjects"
-		case optBehaviorGroupInfluence:
-			label := "▸ Influence"
-			if m.behaviorGroupInfluenceExpanded {
-				label = "▾ Influence"
-			}
-			return label, "", "Cook's D · leverage · outlier detection"
 		case optBehaviorGroupReport:
 			label := "▸ Report"
 			if m.behaviorGroupReportExpanded {
@@ -150,36 +120,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				label = "▾ Cluster"
 			}
 			return label, "", "threshold · min size · tail · features"
-		case optBehaviorGroupMediation:
-			label := "▸ Mediation"
-			if m.behaviorGroupMediationExpanded {
-				label = "▾ Mediation"
-			}
-			return label, "", "bootstrap · permutations · mediator limit"
-		case optBehaviorGroupModeration:
-			label := "▸ Moderation"
-			if m.behaviorGroupModerationExpanded {
-				label = "▾ Moderation"
-			}
-			return label, "", "feature limit · min samples · permutations"
-		case optBehaviorGroupMixedEffects:
-			label := "▸ Mixed Effects"
-			if m.behaviorGroupMixedEffectsExpanded {
-				label = "▾ Mixed Effects"
-			}
-			return label, "", "random effects type · predictor · features"
 		case optBehaviorGroupStats:
 			label := "▸ Inference & Shared Settings"
 			if m.behaviorGroupStatsExpanded {
 				label = "▾ Inference & Shared Settings"
 			}
 			return label, "", "corr method · FDR · perms · covariates"
-		case optBehaviorGroupAnalyses:
-			label := "▸ Analyses"
-			if m.behaviorGroupAnalysesExpanded {
-				label = "▾ Analyses"
-			}
-			return label, "", "stability · influence · mediation · more"
 		case optBehaviorGroupAdvanced:
 			label := "▸ Advanced"
 			if m.behaviorGroupAdvancedExpanded {
@@ -195,8 +141,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "  ── Run Adjustment", "", ""
 		case optBehaviorSubCorrelationsExtra:
 			return "  ── Correlations Extra", "", ""
-		case optBehaviorSubFeatureQC:
-			return "  ── Feature QC", "", ""
 		case optBehaviorSubOutcome:
 			return "  ── Outcome", "", ""
 		case optBehaviorSubOutcomes:
@@ -347,31 +291,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Bayes Factors", m.boolToOnOff(m.behaviorComputeBayesFactors), "optional BF reporting"
 		case optBehaviorValidateOnly:
 			return "Validate Only", m.boolToOnOff(m.behaviorValidateOnly), "load and validate without statistics"
-		case optFeatureQCEnabled:
-			return "Feature QC", m.boolToOnOff(m.featureQCEnabled), "pre-filter features (optional gating)"
-		case optFeatureQCMaxMissingPct:
-			if !m.featureQCEnabled {
-				return "QC Max Missing %", "N/A", "enable Feature QC"
-			}
-			val := fmt.Sprintf("%.2f", m.featureQCMaxMissingPct)
-			if m.editingNumber && m.isCurrentlyEditing(optFeatureQCMaxMissingPct) {
-				val = numberDisplay
-			}
-			return "QC Max Missing %", val, "fraction missing allowed"
-		case optFeatureQCMinVariance:
-			if !m.featureQCEnabled {
-				return "QC Min Variance", "N/A", "enable Feature QC"
-			}
-			val := fmt.Sprintf("%.2e", m.featureQCMinVariance)
-			if m.editingNumber && m.isCurrentlyEditing(optFeatureQCMinVariance) {
-				val = numberDisplay
-			}
-			return "QC Min Variance", val, "drop near-constant features"
-		case optFeatureQCCheckWithinRunVariance:
-			if !m.featureQCEnabled {
-				return "QC Within-Run Var", "N/A", "enable Feature QC"
-			}
-			return "QC Within-Run Var", m.boolToOnOff(m.featureQCCheckWithinRunVariance), "check per-run variance"
 
 		// Trial table
 		case optTrialTableFormat:
@@ -609,238 +528,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "Max Features", val, "0=no limit"
 
-		// Models
-		case optModelsIncludePredictor:
-			return "Include Predictor", m.boolToOnOff(m.modelsIncludePredictor), "add predictor covariate"
-		case optModelsTempControl:
-			v := "linear"
-			if m.predictorType == 0 {
-				switch m.modelsTempControl {
-				case 1:
-					v = "outcome_hat"
-				case 2:
-					v = "spline"
-				}
-			}
-			hint := "linear | outcome_hat | spline"
-			if m.predictorType != 0 {
-				hint = "linear (continuous predictor required for outcome_hat/spline)"
-			}
-			return "Predictor Control", v, hint
-		case optModelsTempSplineKnots:
-			val := fmt.Sprintf("%d", m.modelsTempSplineKnots)
-			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineKnots) {
-				val = numberDisplay
-			}
-			return "Temp Spline Knots", val, "restricted cubic (>=4)"
-		case optModelsTempSplineQlow:
-			val := fmt.Sprintf("%.3f", m.modelsTempSplineQlow)
-			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineQlow) {
-				val = numberDisplay
-			}
-			return "Spline Q Low", val, "knot quantile"
-		case optModelsTempSplineQhigh:
-			val := fmt.Sprintf("%.3f", m.modelsTempSplineQhigh)
-			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineQhigh) {
-				val = numberDisplay
-			}
-			return "Spline Q High", val, "knot quantile"
-		case optModelsTempSplineMinN:
-			val := fmt.Sprintf("%d", m.modelsTempSplineMinN)
-			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineMinN) {
-				val = numberDisplay
-			}
-			return "Spline Min Samples", val, "minimum rows for spline basis"
-		case optModelsIncludeTrialOrder:
-			return "Include Trial Order", m.boolToOnOff(m.modelsIncludeTrialOrder), "add trial_index covariate"
-		case optModelsIncludePrev:
-			return "Prev/Delta Terms", m.boolToOnOff(m.modelsIncludePrev), "use prev_/delta_"
-		case optModelsIncludeRunBlock:
-			return "Run/Block Dummies", m.boolToOnOff(m.modelsIncludeRunBlock), "categorical controls"
-		case optModelsIncludeInteraction:
-			return "Feature×Temp", m.boolToOnOff(m.modelsIncludeInteraction), "moderation term"
-		case optModelsStandardize:
-			return "Standardize", m.boolToOnOff(m.modelsStandardize), "z-score predictors"
-		case optModelsMinSamples:
-			val := fmt.Sprintf("%d", m.modelsMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optModelsMinSamples) {
-				val = numberDisplay
-			}
-			return "Min Samples", val, "minimum rows per model fit"
-		case optModelsMaxFeatures:
-			val := fmt.Sprintf("%d", m.modelsMaxFeatures)
-			if m.editingNumber && m.isCurrentlyEditing(optModelsMaxFeatures) {
-				val = numberDisplay
-			}
-			return "Max Features", val, "0=no limit"
-		case optModelsOutcomeRating:
-			return "Outcome: raw", m.boolToOnOff(m.modelsOutcomeValue), "include raw outcome"
-		case optModelsOutcomePredictorResidual:
-			return "Outcome: residual", m.boolToOnOff(m.modelsOutcomePredictorResidual), "include residualized outcome"
-		case optModelsOutcomePredictor:
-			return "Outcome: predictor", m.boolToOnOff(m.modelsOutcomePredictor), "include predictor"
-		case optModelsOutcomeBinaryOutcome:
-			return "Outcome: binary", m.boolToOnOff(m.modelsOutcomeBinaryOutcome), "include binary outcome"
-		case optModelsFamilyOLS:
-			return "Family: OLS-HC3", m.boolToOnOff(m.modelsFamilyOLS), "ols_hc3"
-		case optModelsFamilyRobust:
-			return "Family: Robust", m.boolToOnOff(m.modelsFamilyRobust), "robust_rlm"
-		case optModelsFamilyQuantile:
-			return "Family: Quantile", m.boolToOnOff(m.modelsFamilyQuantile), "quantile_50"
-		case optModelsFamilyLogit:
-			return "Family: Logistic", m.boolToOnOff(m.modelsFamilyLogit), "logit"
-		case optModelsBinaryOutcome:
-			v := "binary"
-			if m.modelsBinaryOutcome == 1 {
-				v = "outcome_median"
-			}
-			return "Binary Outcome", v, "for logit models"
-		case optModelsPrimaryUnit:
-			v := "trial"
-			if m.modelsPrimaryUnit == 1 {
-				v = "run_mean"
-			}
-			return "Primary Unit", v, "trial | run_mean"
-		case optModelsForceTrialIIDAsymptotic:
-			if m.modelsPrimaryUnit != 0 {
-				return "Force Trial IID", "N/A", "only used for trial-level models"
-			}
-			return "Force Trial IID", m.boolToOnOff(m.modelsForceTrialIIDAsymptotic), "explicit asymptotic override"
-
-		// Stability
-		case optStabilityMethod:
-			v := "spearman"
-			if m.stabilityMethod == 1 {
-				v = "pearson"
-			}
-			return "Method", v, "within-group correlation"
-		case optStabilityOutcome:
-			v := "auto"
-			switch m.stabilityOutcome {
-			case 1:
-				v = "outcome"
-			case 2:
-				v = "residual"
-			}
-			return "Outcome", v, "auto prefers residual outcome"
-		case optStabilityGroupColumn:
-			v := "(auto)"
-			switch m.stabilityGroupColumn {
-			case 1:
-				v = "run"
-			case 2:
-				v = "block"
-			}
-			return "Group Column", v, "Space to select"
-		case optStabilityPartialTemp:
-			return "Partial Predictor", m.boolToOnOff(m.stabilityPartialTemp), "control predictor"
-		case optStabilityMinGroupTrials:
-			val := "unset"
-			if m.stabilityMinGroupN > 0 {
-				val = fmt.Sprintf("%d", m.stabilityMinGroupN)
-			}
-			if m.editingNumber && m.isCurrentlyEditing(optStabilityMinGroupTrials) {
-				val = numberDisplay
-			}
-			return "Min Group Trials", val, "0=unset"
-		case optStabilityMaxFeatures:
-			val := fmt.Sprintf("%d", m.stabilityMaxFeatures)
-			if m.editingNumber && m.isCurrentlyEditing(optStabilityMaxFeatures) {
-				val = numberDisplay
-			}
-			return "Max Features", val, "0=no limit"
-		case optStabilityAlpha:
-			val := fmt.Sprintf("%.3f", m.stabilityAlpha)
-			if m.editingNumber && m.isCurrentlyEditing(optStabilityAlpha) {
-				val = numberDisplay
-			}
-			return "Alpha", val, "min |r| to flag as stable"
-
-		// Consistency
-		case optConsistencyEnabled:
-			return "Consistency Summary", m.boolToOnOff(m.consistencyEnabled), "flag sign flips"
-
-		// Influence
-		case optInfluenceOutcomeRating:
-			return "Outcome: raw", m.boolToOnOff(m.influenceOutcomeValue), "include raw outcome"
-		case optInfluenceOutcomePredictorResidual:
-			return "Outcome: residual", m.boolToOnOff(m.influenceOutcomePredictorResidual), "include residual"
-		case optInfluenceOutcomePredictor:
-			return "Outcome: predictor", m.boolToOnOff(m.influenceOutcomePredictor), "include predictor"
-		case optInfluenceMaxFeatures:
-			val := fmt.Sprintf("%d", m.influenceMaxFeatures)
-			if m.editingNumber && m.isCurrentlyEditing(optInfluenceMaxFeatures) {
-				val = numberDisplay
-			}
-			return "Max Features", val, "top effects to inspect"
-		case optInfluenceIncludePredictor:
-			return "Include Predictor", m.boolToOnOff(m.influenceIncludePredictor), "add covariate"
-		case optInfluenceTempControl:
-			v := "linear"
-			if m.predictorType == 0 {
-				switch m.influenceTempControl {
-				case 1:
-					v = "outcome_hat"
-				case 2:
-					v = "spline"
-				}
-			}
-			hint := "linear | outcome_hat | spline"
-			if m.predictorType != 0 {
-				hint = "linear (continuous predictor required for outcome_hat/spline)"
-			}
-			return "Predictor Control", v, hint
-		case optInfluenceTempSplineKnots:
-			val := fmt.Sprintf("%d", m.influenceTempSplineKnots)
-			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineKnots) {
-				val = numberDisplay
-			}
-			return "Temp Spline Knots", val, "restricted cubic (>=4)"
-		case optInfluenceTempSplineQlow:
-			val := fmt.Sprintf("%.3f", m.influenceTempSplineQlow)
-			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineQlow) {
-				val = numberDisplay
-			}
-			return "Spline Q Low", val, "knot quantile"
-		case optInfluenceTempSplineQhigh:
-			val := fmt.Sprintf("%.3f", m.influenceTempSplineQhigh)
-			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineQhigh) {
-				val = numberDisplay
-			}
-			return "Spline Q High", val, "knot quantile"
-		case optInfluenceTempSplineMinN:
-			val := fmt.Sprintf("%d", m.influenceTempSplineMinN)
-			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineMinN) {
-				val = numberDisplay
-			}
-			return "Spline Min Samples", val, "minimum rows for spline basis"
-		case optInfluenceIncludeTrialOrder:
-			return "Include Trial Order", m.boolToOnOff(m.influenceIncludeTrialOrder), "add covariate"
-		case optInfluenceIncludeRunBlock:
-			return "Include Run/Block", m.boolToOnOff(m.influenceIncludeRunBlock), "categorical controls"
-		case optInfluenceIncludeInteraction:
-			return "Feature×Temp", m.boolToOnOff(m.influenceIncludeInteraction), "moderation term"
-		case optInfluenceStandardize:
-			return "Standardize", m.boolToOnOff(m.influenceStandardize), "z-score predictors"
-		case optInfluenceCooksThreshold:
-			val := "auto"
-			if m.influenceCooksThreshold > 0 {
-				val = fmt.Sprintf("%.4f", m.influenceCooksThreshold)
-			}
-			if m.editingNumber && m.isCurrentlyEditing(optInfluenceCooksThreshold) {
-				val = numberDisplay
-			}
-			return "Cook's Threshold", val, "0=auto heuristic"
-		case optInfluenceLeverageThreshold:
-			val := "auto"
-			if m.influenceLeverageThreshold > 0 {
-				val = fmt.Sprintf("%.4f", m.influenceLeverageThreshold)
-			}
-			if m.editingNumber && m.isCurrentlyEditing(optInfluenceLeverageThreshold) {
-				val = numberDisplay
-			}
-			return "Leverage Threshold", val, "0=auto heuristic"
-
 		// Condition
 		case optConditionCompareColumn:
 			val := m.conditionCompareColumn
@@ -855,19 +542,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d columns available", len(availableColumns))
 			}
 			return "Compare Column", val, hint
-		case optConditionCompareWindows:
-			val := m.conditionCompareWindows
-			if val == "" {
-				val = "(select windows)"
-			}
-			if m.editingText && m.editingTextField == textFieldConditionCompareWindows {
-				val = textDisplay
-			}
-			hint := "Space to select"
-			if len(m.availableWindows) > 0 {
-				hint = fmt.Sprintf("Space to select · %d windows available", len(m.availableWindows))
-			}
-			return "Compare Windows", val, hint
 		case optConditionCompareValues:
 			if m.conditionCompareColumn == "" {
 				return "Compare Values", "(select column first)", "requires column selection"
@@ -917,18 +591,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "run_mean"
 			}
 			return "Primary Unit", v, "trial | run_mean"
-		case optConditionWindowPrimaryUnit:
-			v := "trial"
-			if m.conditionWindowPrimaryUnit == 1 {
-				v = "run_mean"
-			}
-			return "Window Unit", v, "trial | run_mean"
-		case optConditionWindowMinSamples:
-			val := fmt.Sprintf("%d", m.conditionWindowMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optConditionWindowMinSamples) {
-				val = numberDisplay
-			}
-			return "Window Min Samples", val, "minimum rows for window comparison"
 		case optConditionPermutationPrimary:
 			return "Permutation p-primary", m.boolToOnOff(m.conditionPermutationPrimary), "within-run/block when available"
 		case optConditionFailFast:
@@ -941,40 +603,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Effect Threshold", val, "Cohen's d cutoff"
-
-		// Temporal
-		case optPredictorSensitivityMinTrials:
-			val := "unset"
-			if m.predictorSensitivityMinTrials > 0 {
-				val = fmt.Sprintf("%d", m.predictorSensitivityMinTrials)
-			}
-			if m.editingNumber && m.isCurrentlyEditing(optPredictorSensitivityMinTrials) {
-				val = numberDisplay
-			}
-			return "Min Trials", val, "0=unset"
-		case optPredictorSensitivityPrimaryUnit:
-			v := "trial"
-			if m.predictorSensitivityPrimaryUnit == 1 {
-				v = "run_mean"
-			}
-			return "Primary Unit", v, "trial | run_mean"
-		case optPredictorSensitivityPermutations:
-			val := fmt.Sprintf("%d", m.predictorSensitivityPermutations)
-			if m.editingNumber && m.isCurrentlyEditing(optPredictorSensitivityPermutations) {
-				val = numberDisplay
-			}
-			return "Permutations", val, "0=use global"
-		case optPredictorSensitivityPermutationPrimary:
-			return "Permutation p-primary", m.boolToOnOff(m.predictorSensitivityPermutationPrimary), "perm_if_available | asymptotic"
-		case optPredictorSensitivityFeatures:
-			val := m.predictorSensitivityFeaturesSpec
-			if strings.TrimSpace(val) == "" {
-				val = "(all)"
-			}
-			if m.editingText && m.editingTextField == textFieldPredictorSensitivityFeatures {
-				val = textDisplay
-			}
-			return "Feature Filters", val, "comma-separated feature families"
 
 		// Temporal
 		case optTemporalResolutionMs:
@@ -1329,100 +957,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.clusterConditionColumn)
 			}
 			return "Cluster Values", val, hint
-
-		// Mediation
-		case optMediationBootstrap:
-			val := fmt.Sprintf("%d", m.mediationBootstrap)
-			if m.editingNumber && m.isCurrentlyEditing(optMediationBootstrap) {
-				val = numberDisplay
-			}
-			return "Mediation Bootstrap", val, "bootstrap iterations"
-		case optMediationPermutations:
-			val := fmt.Sprintf("%d", m.mediationPermutations)
-			if m.editingNumber && m.isCurrentlyEditing(optMediationPermutations) {
-				val = numberDisplay
-			}
-			return "Mediation Permutations", val, "0=disabled"
-		case optMediationPermutationPrimary:
-			return "Permutation p-primary", m.boolToOnOff(m.mediationPermutationPrimary), "perm_if_available | asymptotic"
-		case optMediationMinEffect:
-			val := fmt.Sprintf("%.3f", m.mediationMinEffect)
-			if m.editingNumber && m.isCurrentlyEditing(optMediationMinEffect) {
-				val = numberDisplay
-			}
-			return "Min Effect Size", val, "minimum indirect effect"
-		case optMediationFeatures:
-			val := m.mediationFeaturesSpec
-			if strings.TrimSpace(val) == "" {
-				val = "(all)"
-			}
-			if m.editingText && m.editingTextField == textFieldMediationFeatures {
-				val = textDisplay
-			}
-			return "Feature Filters", val, "comma-separated feature families"
-		case optMediationMaxMediatorsEnabled:
-			return "Limit Max Mediators", m.boolToOnOff(m.mediationMaxMediatorsEnabled), "enable mediator limit"
-		case optMediationMaxMediators:
-			if !m.mediationMaxMediatorsEnabled {
-				return "Max Mediators", "N/A", "limit disabled"
-			}
-			val := fmt.Sprintf("%d", m.mediationMaxMediators)
-			if m.editingNumber && m.isCurrentlyEditing(optMediationMaxMediators) {
-				val = numberDisplay
-			}
-			return "Max Mediators", val, "max mediators tested"
-
-		// Moderation
-		case optModerationMaxFeaturesEnabled:
-			return "Limit Max Features", m.boolToOnOff(m.moderationMaxFeaturesEnabled), "enable feature limit"
-		case optModerationMaxFeatures:
-			if !m.moderationMaxFeaturesEnabled {
-				return "Max Features", "N/A", "limit disabled"
-			}
-			val := fmt.Sprintf("%d", m.moderationMaxFeatures)
-			if m.editingNumber && m.isCurrentlyEditing(optModerationMaxFeatures) {
-				val = numberDisplay
-			}
-			return "Max Features", val, "max features for moderation"
-		case optModerationMinSamples:
-			val := fmt.Sprintf("%d", m.moderationMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optModerationMinSamples) {
-				val = numberDisplay
-			}
-			return "Min Samples", val, "minimum rows for moderation model"
-		case optModerationPermutations:
-			val := fmt.Sprintf("%d", m.moderationPermutations)
-			if m.editingNumber && m.isCurrentlyEditing(optModerationPermutations) {
-				val = numberDisplay
-			}
-			return "Moderation Permutations", val, "0=disabled"
-		case optModerationPermutationPrimary:
-			return "Permutation p-primary", m.boolToOnOff(m.moderationPermutationPrimary), "perm_if_available | asymptotic"
-		case optModerationFeatures:
-			val := m.moderationFeaturesSpec
-			if strings.TrimSpace(val) == "" {
-				val = "(all)"
-			}
-			if m.editingText && m.editingTextField == textFieldModerationFeatures {
-				val = textDisplay
-			}
-			return "Feature Filters", val, "comma-separated feature families"
-
-		// Mixed effects
-		case optMixedEffectsType:
-			v := "intercept"
-			if m.mixedEffectsType == 1 {
-				v = "intercept_slope"
-			}
-			return "Random Effects", v, "intercept=random intercept · intercept_slope=full random"
-		case optMixedIncludePredictor:
-			return "Include Predictor", m.boolToOnOff(m.mixedIncludePredictor), "add predictor covariate"
-		case optMixedMaxFeatures:
-			val := fmt.Sprintf("%d", m.mixedMaxFeatures)
-			if m.editingNumber && m.isCurrentlyEditing(optMixedMaxFeatures) {
-				val = numberDisplay
-			}
-			return "Max Features", val, "max features to include"
 
 		// Output section
 		case optBehaviorGroupOutput:

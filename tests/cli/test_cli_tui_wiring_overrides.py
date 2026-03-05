@@ -215,8 +215,6 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "111",
                 "--condition-primary-unit",
                 "run_mean",
-                "--condition-window-min-samples",
-                "14",
                 "--condition-compare-labels",
                 "low",
                 "high",
@@ -285,7 +283,6 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertTrue(config.get("behavior_analysis.correlations.prefer_predictor_residual", False))
         self.assertEqual(config.get("behavior_analysis.correlations.permutation.n_permutations"), 111)
         self.assertEqual(config.get("behavior_analysis.condition.primary_unit"), "run_mean")
-        self.assertEqual(config.get("behavior_analysis.condition.window_comparison.min_samples"), 14)
         self.assertEqual(config.get("behavior_analysis.condition.compare_labels"), ["low", "high"])
         self.assertEqual(config.get("behavior_analysis.regression.primary_unit"), "run_mean")
         self.assertEqual(config.get("behavior_analysis.temporal.correction_method"), "cluster")

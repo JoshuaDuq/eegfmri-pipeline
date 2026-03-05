@@ -31,7 +31,7 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     format_correlation_method_label,
     normalize_robust_correlation_method,
 )
-from eeg_pipeline.utils.analysis.stats.base import get_subject_seed
+from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.analysis.behavior.stage_catalog import (
@@ -51,6 +51,7 @@ SIGNIFICANCE_THRESHOLD = 0.05
 
 BEHAVIOR_COMPUTATION_FLAGS = list(COMPUTATION_TO_PIPELINE_ATTR)
 
+# Bundled computation aliases for cleaner TUI/CLI
 BEHAVIOR_COMPUTATION_BUNDLES: dict[str, list[str]] = {}
 
 
@@ -62,7 +63,7 @@ def _resolve_behavior_computation_flags(
     Normalize requested behavior computations into stage flags.
     
     If requested is None, returns None to indicate no override (use config).
-    Handles bundled aliases like 'validation' -> ['consistency', 'influence'].
+    Bundled aliases are expanded through `BEHAVIOR_COMPUTATION_BUNDLES`.
     """
     if requested is None:
         return None
@@ -114,8 +115,10 @@ class BehaviorPipelineConfig:
     
     # Computation flags
     run_trial_table: bool = True
+    run_lag_features: bool = True
     run_predictor_residual: bool = True
     run_regression: bool = False
+    run_icc: bool = True
     run_validation: bool = True
     run_report: bool = True
     run_correlations: bool = True
@@ -123,7 +126,7 @@ class BehaviorPipelineConfig:
     run_condition_comparison: bool = True
     run_temporal_correlations: bool = True
     run_cluster_tests: bool = False
-
+    
     # General stats
     fdr_alpha: float = 0.05
     n_permutations: int = 0
@@ -170,8 +173,16 @@ class BehaviorPipelineConfig:
             method_label=method_label,
             correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_predictor"]),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
+            run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
             run_predictor_residual=bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
+            run_icc=bool(
+                get_config_value(
+                    config,
+                    "behavior_analysis.icc.enabled",
+                    True,
+                )
+            ),
             run_validation=bool(get_config_value(config, "behavior_analysis.validation.enabled", True)),
             run_report=bool(get_config_value(config, "behavior_analysis.report.enabled", True)),
             run_correlations=bool(get_config_value(config, "behavior_analysis.correlations.enabled", True)),
@@ -519,9 +530,7 @@ class BehaviorPipeline(PipelineBase):
         """Run group-level behavior analysis across multiple subjects.
         
         Implements multi-subject analyses including:
-        - Mixed-effects models with subject random effects
         - Multilevel correlations with block-restricted permutations
-        - Hierarchical FDR correction by feature family
         
         Parameters
         ----------
@@ -536,7 +545,7 @@ class BehaviorPipeline(PipelineBase):
         Returns
         -------
         GroupLevelResult
-            Aggregated group-level results with mixed-effects and multilevel correlations
+            Aggregated group-level results
         """
         from eeg_pipeline.analysis.behavior.orchestration import (
             run_group_level_analysis,
@@ -546,7 +555,8 @@ class BehaviorPipeline(PipelineBase):
         run_multilevel_correlations = kwargs.get("run_multilevel_correlations")
         if run_multilevel_correlations is None:
             run_multilevel_correlations = getattr(self.pipeline_config, "run_multilevel_correlations", False)
-
+        
+        # Only run group-level analysis if at least one computation is enabled
         if not run_multilevel_correlations:
             return None
         
@@ -566,14 +576,9 @@ class BehaviorPipeline(PipelineBase):
             deriv_root=self.deriv_root,
             config=self.config,
             logger=self.logger,
-            run_mixed_effects=False,
             run_multilevel_correlations=run_multilevel_correlations,
             output_dir=output_dir,
         )
-        
-        if result.mixed_effects and result.mixed_effects.df is not None:
-            n_sig = result.mixed_effects.n_significant
-            self.logger.info("Mixed-effects: %d significant features", n_sig)
         
         if result.multilevel_correlations is not None and not result.multilevel_correlations.empty:
             reject = result.multilevel_correlations.get("reject_within_family")

@@ -55,7 +55,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help=(
             "Nature of the predictor variable. "
             "'continuous' enables curve-fitting analyses (predictor_residual, "
-            "predictor_models, psychometrics, spline/outcome_hat control). "
+            "psychometrics, spline/outcome_hat control). "
             "'binary' or 'categorical' disables these analyses."
         ),
     )

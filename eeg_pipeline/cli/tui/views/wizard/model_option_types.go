@@ -34,29 +34,19 @@ const (
 	optBehaviorGroupTrialTable
 	optBehaviorGroupPredictorResidual
 	optBehaviorGroupCorrelations
-	optBehaviorGroupPredictorSens
 	optBehaviorGroupRegression
-	optBehaviorGroupModels
-	optBehaviorGroupStability
-	optBehaviorGroupConsistency
-	optBehaviorGroupInfluence
 	optBehaviorGroupReport
 	optBehaviorGroupCondition
 	optBehaviorGroupTemporal
 	optBehaviorGroupCluster
-	optBehaviorGroupMediation
-	optBehaviorGroupModeration
-	optBehaviorGroupMixedEffects
 	optBehaviorGroupOutput
 	optBehaviorGroupStats
-	optBehaviorGroupAnalyses
 	optBehaviorGroupAdvanced
 	// Behavior sub-section headers (non-collapsible, visual separators within expanded groups)
 	optBehaviorSubCorrelationSettings
 	optBehaviorSubCovariates
 	optBehaviorSubRunAdjustment
 	optBehaviorSubCorrelationsExtra
-	optBehaviorSubFeatureQC
 	optBehaviorSubOutcome
 	optBehaviorSubModelFamilies
 	optBehaviorSubInference
@@ -340,33 +330,15 @@ const (
 	optClusterTail
 	optClusterConditionColumn
 	optClusterConditionValues
-	// Behavior options - Mediation
-	optMediationBootstrap
-	optMediationMaxMediatorsEnabled
-	optMediationMaxMediators
-	optMediationPermutations
-	optMediationPermutationPrimary
-	// Behavior options - Moderation
-	optModerationMaxFeaturesEnabled
-	optModerationMaxFeatures
-	optModerationMinSamples
-	optModerationPermutations
-	optModerationPermutationPrimary
-	// Behavior options - Mixed Effects
-	optMixedMaxFeatures
-	optMixedIncludePredictor
 	// Behavior options - Condition
 	optConditionEffectThreshold
 	optConditionFailFast
 	optConditionOverwrite
 	optConditionCompareColumn
-	optConditionCompareWindows
 	optConditionCompareValues
 	optConditionCompareLabels
 	optConditionMinTrials
 	optConditionPrimaryUnit
-	optConditionWindowPrimaryUnit
-	optConditionWindowMinSamples
 	optConditionPermutationPrimary
 	optConditionFeatures
 	// Behavior options - Trial table / residual
@@ -374,10 +346,6 @@ const (
 	optTrialTableAddLagFeatures
 	optTrialOrderMaxMissingFraction
 	optFeatureSummariesEnabled
-	optFeatureQCEnabled
-	optFeatureQCMaxMissingPct
-	optFeatureQCMinVariance
-	optFeatureQCCheckWithinRunVariance
 	optPredictorResidualEnabled
 	optPredictorResidualMethod
 	optPredictorResidualPolyDegree
@@ -423,57 +391,6 @@ const (
 	optRegressionPrimaryUnit
 	optRegressionPermutations
 	optRegressionMaxFeatures
-	// Behavior options - Models
-	optModelsIncludePredictor
-	optModelsTempControl
-	optModelsTempSplineKnots
-	optModelsTempSplineQlow
-	optModelsTempSplineQhigh
-	optModelsTempSplineMinN
-	optModelsIncludeTrialOrder
-	optModelsIncludePrev
-	optModelsIncludeRunBlock
-	optModelsIncludeInteraction
-	optModelsStandardize
-	optModelsMinSamples
-	optModelsMaxFeatures
-	optModelsOutcomeRating
-	optModelsOutcomePredictorResidual
-	optModelsOutcomePredictor
-	optModelsOutcomeBinaryOutcome
-	optModelsFamilyOLS
-	optModelsFamilyRobust
-	optModelsFamilyQuantile
-	optModelsFamilyLogit
-	optModelsBinaryOutcome
-	optModelsPrimaryUnit
-	optModelsForceTrialIIDAsymptotic
-	// Behavior options - Stability
-	optStabilityMethod
-	optStabilityOutcome
-	optStabilityGroupColumn
-	optStabilityPartialTemp
-	optStabilityMinGroupTrials
-	optStabilityMaxFeatures
-	optStabilityAlpha
-	// Behavior options - Consistency / Influence
-	optConsistencyEnabled
-	optInfluenceOutcomeRating
-	optInfluenceOutcomePredictorResidual
-	optInfluenceOutcomePredictor
-	optInfluenceMaxFeatures
-	optInfluenceIncludePredictor
-	optInfluenceTempControl
-	optInfluenceTempSplineKnots
-	optInfluenceTempSplineQlow
-	optInfluenceTempSplineQhigh
-	optInfluenceTempSplineMinN
-	optInfluenceIncludeTrialOrder
-	optInfluenceIncludeRunBlock
-	optInfluenceIncludeInteraction
-	optInfluenceStandardize
-	optInfluenceCooksThreshold
-	optInfluenceLeverageThreshold
 	// Behavior options - Report
 	optReportTopN
 	// Behavior options - Correlations / predictor sensitivity
@@ -495,12 +412,7 @@ const (
 	optGroupLevelControlRunEffects
 	optGroupLevelMaxRunDummies
 	optGroupLevelAllowParametricFallback
-	optPredictorSensitivityMinTrials
-	optPredictorSensitivityPrimaryUnit
-	optPredictorSensitivityPermutations
-	optPredictorSensitivityPermutationPrimary
-	optPredictorSensitivityFeatures
-	// Behavior options - Predictor sensitivity / temporal
+	// Behavior options - Temporal
 	optTemporalResolutionMs
 	optTemporalCorrectionMethod
 	optTemporalTimeMinMs
@@ -530,11 +442,6 @@ const (
 	optTemporalTfHeatmapFreqs
 	optTemporalTfHeatmapTimeResMs
 	optClusterFeatures
-	// Behavior options - Mixed effects / mediation
-	optMixedEffectsType
-	optMediationMinEffect
-	optMediationFeatures
-	optModerationFeatures
 	// Behavior options - Output
 	optAlsoSaveCsv
 	optBehaviorOverwrite

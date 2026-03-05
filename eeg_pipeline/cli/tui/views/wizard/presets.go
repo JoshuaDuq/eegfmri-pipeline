@@ -78,9 +78,9 @@ func (m *Model) getBehaviorPresetComputations(presetKey string) []string {
 	case "quick":
 		return []string{"correlations", "report"}
 	case "regression":
-		return []string{"regression", "models", "stability", "influence"}
+		return []string{"regression", "report"}
 	case "temporal":
-		return []string{"temporal", "cluster", "mediation"}
+		return []string{"temporal", "cluster", "report"}
 	case "full":
 		return []string{}
 	default:

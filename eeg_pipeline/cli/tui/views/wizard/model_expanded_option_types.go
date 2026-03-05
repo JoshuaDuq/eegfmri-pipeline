@@ -8,7 +8,6 @@ const (
 	expandedConnectivityMeasures                 = 0
 	expandedConditionCompareColumn               = 1
 	expandedConditionCompareValues               = 2
-	expandedConditionCompareWindows              = 3
 	expandedTemporalConditionColumn              = 4
 	expandedTemporalConditionValues              = 5
 	expandedClusterConditionColumn               = 6
@@ -47,7 +46,6 @@ const (
 	expandedFmriTrialSigGroupValues              = 39
 	expandedSourceLocFmriStimPhases              = 40
 	expandedPredictorResidualCrossfitGroupColumn = 41
-	expandedStabilityGroupColumn                 = 42
 	expandedGroupLevelTarget                     = 43
 	expandedFmriTrialSigStimPhases               = 44
 	expandedFmriAnalysisScopeTrialTypes          = 45

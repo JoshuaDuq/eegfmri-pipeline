@@ -1656,7 +1656,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	// Behavior sub-section headers are non-interactive visual separators
 	case optBehaviorSubCorrelationSettings, optBehaviorSubCovariates, optBehaviorSubRunAdjustment,
-		optBehaviorSubCorrelationsExtra, optBehaviorSubFeatureQC, optBehaviorSubOutcome,
+		optBehaviorSubCorrelationsExtra, optBehaviorSubOutcome,
 		optBehaviorSubOutcomes, optBehaviorSubModelFamilies, optBehaviorSubInference,
 		optBehaviorSubDiagnostics, optBehaviorSubFitting, optBehaviorSubCrossfit,
 		optBehaviorSubTimeWindow, optBehaviorSubFeatures, optBehaviorSubITPC,
@@ -1675,23 +1675,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupCorrelations:
 		m.behaviorGroupCorrelationsExpanded = !m.behaviorGroupCorrelationsExpanded
 		m.useDefaultAdvanced = false
-	case optBehaviorGroupPredictorSens:
-		m.behaviorGroupPredictorSensExpanded = !m.behaviorGroupPredictorSensExpanded
-		m.useDefaultAdvanced = false
 	case optBehaviorGroupRegression:
 		m.behaviorGroupRegressionExpanded = !m.behaviorGroupRegressionExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupModels:
-		m.behaviorGroupModelsExpanded = !m.behaviorGroupModelsExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupStability:
-		m.behaviorGroupStabilityExpanded = !m.behaviorGroupStabilityExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupConsistency:
-		m.behaviorGroupConsistencyExpanded = !m.behaviorGroupConsistencyExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupInfluence:
-		m.behaviorGroupInfluenceExpanded = !m.behaviorGroupInfluenceExpanded
 		m.useDefaultAdvanced = false
 	case optBehaviorGroupReport:
 		m.behaviorGroupReportExpanded = !m.behaviorGroupReportExpanded
@@ -1705,20 +1690,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupCluster:
 		m.behaviorGroupClusterExpanded = !m.behaviorGroupClusterExpanded
 		m.useDefaultAdvanced = false
-	case optBehaviorGroupMediation:
-		m.behaviorGroupMediationExpanded = !m.behaviorGroupMediationExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupModeration:
-		m.behaviorGroupModerationExpanded = !m.behaviorGroupModerationExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupMixedEffects:
-		m.behaviorGroupMixedEffectsExpanded = !m.behaviorGroupMixedEffectsExpanded
-		m.useDefaultAdvanced = false
 	case optBehaviorGroupStats:
 		m.behaviorGroupStatsExpanded = !m.behaviorGroupStatsExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupAnalyses:
-		m.behaviorGroupAnalysesExpanded = !m.behaviorGroupAnalysesExpanded
 		m.useDefaultAdvanced = false
 	case optBehaviorGroupAdvanced:
 		m.behaviorGroupAdvancedExpanded = !m.behaviorGroupAdvancedExpanded
@@ -1823,15 +1796,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optFeatureSummariesEnabled:
 		m.featureSummariesEnabled = !m.featureSummariesEnabled
 		m.useDefaultAdvanced = false
-	case optFeatureQCEnabled:
-		m.featureQCEnabled = !m.featureQCEnabled
-		m.useDefaultAdvanced = false
-	case optFeatureQCMaxMissingPct, optFeatureQCMinVariance:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optFeatureQCCheckWithinRunVariance:
-		m.featureQCCheckWithinRunVariance = !m.featureQCCheckWithinRunVariance
-		m.useDefaultAdvanced = false
 	case optPredictorResidualEnabled:
 		m.predictorResidualEnabled = !m.predictorResidualEnabled
 		m.useDefaultAdvanced = false
@@ -1915,166 +1879,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optRegressionPrimaryUnit:
 		m.regressionPrimaryUnit = (m.regressionPrimaryUnit + 1) % 2
-		m.useDefaultAdvanced = false
-
-	// Models
-	case optModelsIncludePredictor:
-		m.modelsIncludePredictor = !m.modelsIncludePredictor
-		m.useDefaultAdvanced = false
-	case optModelsTempControl:
-		if m.predictorType == 0 {
-			m.modelsTempControl = (m.modelsTempControl + 1) % 3
-		}
-		m.useDefaultAdvanced = false
-	case optModelsTempSplineKnots, optModelsTempSplineQlow, optModelsTempSplineQhigh, optModelsTempSplineMinN:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optModelsIncludeTrialOrder:
-		m.modelsIncludeTrialOrder = !m.modelsIncludeTrialOrder
-		m.useDefaultAdvanced = false
-	case optModelsIncludePrev:
-		m.modelsIncludePrev = !m.modelsIncludePrev
-		m.useDefaultAdvanced = false
-	case optModelsIncludeRunBlock:
-		m.modelsIncludeRunBlock = !m.modelsIncludeRunBlock
-		m.useDefaultAdvanced = false
-	case optModelsIncludeInteraction:
-		m.modelsIncludeInteraction = !m.modelsIncludeInteraction
-		m.useDefaultAdvanced = false
-	case optModelsStandardize:
-		m.modelsStandardize = !m.modelsStandardize
-		m.useDefaultAdvanced = false
-	case optModelsMinSamples, optModelsMaxFeatures:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optModelsOutcomeRating:
-		m.modelsOutcomeValue = !m.modelsOutcomeValue
-		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
-			m.modelsOutcomeValue = true
-		}
-		m.useDefaultAdvanced = false
-	case optModelsOutcomePredictorResidual:
-		m.modelsOutcomePredictorResidual = !m.modelsOutcomePredictorResidual
-		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
-			m.modelsOutcomePredictorResidual = true
-		}
-		m.useDefaultAdvanced = false
-	case optModelsOutcomePredictor:
-		m.modelsOutcomePredictor = !m.modelsOutcomePredictor
-		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
-			m.modelsOutcomePredictor = true
-		}
-		m.useDefaultAdvanced = false
-	case optModelsOutcomeBinaryOutcome:
-		m.modelsOutcomeBinaryOutcome = !m.modelsOutcomeBinaryOutcome
-		if !m.modelsOutcomeValue && !m.modelsOutcomePredictorResidual && !m.modelsOutcomePredictor && !m.modelsOutcomeBinaryOutcome {
-			m.modelsOutcomeBinaryOutcome = true
-		}
-		m.useDefaultAdvanced = false
-	case optModelsFamilyOLS:
-		m.modelsFamilyOLS = !m.modelsFamilyOLS
-		if !m.modelsFamilyOLS && !m.modelsFamilyRobust && !m.modelsFamilyQuantile && !m.modelsFamilyLogit {
-			m.modelsFamilyOLS = true
-		}
-		m.useDefaultAdvanced = false
-	case optModelsFamilyRobust:
-		m.modelsFamilyRobust = !m.modelsFamilyRobust
-		if !m.modelsFamilyOLS && !m.modelsFamilyRobust && !m.modelsFamilyQuantile && !m.modelsFamilyLogit {
-			m.modelsFamilyRobust = true
-		}
-		m.useDefaultAdvanced = false
-	case optModelsFamilyQuantile:
-		m.modelsFamilyQuantile = !m.modelsFamilyQuantile
-		if !m.modelsFamilyOLS && !m.modelsFamilyRobust && !m.modelsFamilyQuantile && !m.modelsFamilyLogit {
-			m.modelsFamilyQuantile = true
-		}
-		m.useDefaultAdvanced = false
-	case optModelsFamilyLogit:
-		m.modelsFamilyLogit = !m.modelsFamilyLogit
-		if !m.modelsFamilyOLS && !m.modelsFamilyRobust && !m.modelsFamilyQuantile && !m.modelsFamilyLogit {
-			m.modelsFamilyLogit = true
-		}
-		m.useDefaultAdvanced = false
-	case optModelsBinaryOutcome:
-		m.modelsBinaryOutcome = (m.modelsBinaryOutcome + 1) % 2
-		m.useDefaultAdvanced = false
-	case optModelsPrimaryUnit:
-		m.modelsPrimaryUnit = (m.modelsPrimaryUnit + 1) % 2
-		m.useDefaultAdvanced = false
-	case optModelsForceTrialIIDAsymptotic:
-		m.modelsForceTrialIIDAsymptotic = !m.modelsForceTrialIIDAsymptotic
-		m.useDefaultAdvanced = false
-
-	// Stability
-	case optStabilityMethod:
-		m.stabilityMethod = (m.stabilityMethod + 1) % 2
-		m.useDefaultAdvanced = false
-	case optStabilityOutcome:
-		m.stabilityOutcome = (m.stabilityOutcome + 1) % 3
-		m.useDefaultAdvanced = false
-	case optStabilityGroupColumn:
-		m.expandedOption = expandedStabilityGroupColumn
-		m.subCursor = 0
-		m.useDefaultAdvanced = false
-	case optStabilityPartialTemp:
-		m.stabilityPartialTemp = !m.stabilityPartialTemp
-		m.useDefaultAdvanced = false
-	case optStabilityMinGroupTrials, optStabilityMaxFeatures, optStabilityAlpha:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-
-	// Consistency
-	case optConsistencyEnabled:
-		m.consistencyEnabled = !m.consistencyEnabled
-		m.useDefaultAdvanced = false
-
-	// Influence
-	case optInfluenceOutcomeRating:
-		m.influenceOutcomeValue = !m.influenceOutcomeValue
-		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
-			m.influenceOutcomeValue = true
-		}
-		m.useDefaultAdvanced = false
-	case optInfluenceOutcomePredictorResidual:
-		m.influenceOutcomePredictorResidual = !m.influenceOutcomePredictorResidual
-		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
-			m.influenceOutcomePredictorResidual = true
-		}
-		m.useDefaultAdvanced = false
-	case optInfluenceOutcomePredictor:
-		m.influenceOutcomePredictor = !m.influenceOutcomePredictor
-		if !m.influenceOutcomeValue && !m.influenceOutcomePredictorResidual && !m.influenceOutcomePredictor {
-			m.influenceOutcomePredictor = true
-		}
-		m.useDefaultAdvanced = false
-	case optInfluenceMaxFeatures:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optInfluenceIncludePredictor:
-		m.influenceIncludePredictor = !m.influenceIncludePredictor
-		m.useDefaultAdvanced = false
-	case optInfluenceTempControl:
-		if m.predictorType == 0 {
-			m.influenceTempControl = (m.influenceTempControl + 1) % 3
-		}
-		m.useDefaultAdvanced = false
-	case optInfluenceTempSplineKnots, optInfluenceTempSplineQlow, optInfluenceTempSplineQhigh, optInfluenceTempSplineMinN:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optInfluenceIncludeTrialOrder:
-		m.influenceIncludeTrialOrder = !m.influenceIncludeTrialOrder
-		m.useDefaultAdvanced = false
-	case optInfluenceIncludeRunBlock:
-		m.influenceIncludeRunBlock = !m.influenceIncludeRunBlock
-		m.useDefaultAdvanced = false
-	case optInfluenceIncludeInteraction:
-		m.influenceIncludeInteraction = !m.influenceIncludeInteraction
-		m.useDefaultAdvanced = false
-	case optInfluenceStandardize:
-		m.influenceStandardize = !m.influenceStandardize
-		m.useDefaultAdvanced = false
-	case optInfluenceCooksThreshold, optInfluenceLeverageThreshold:
-		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
 	// Report
@@ -2286,52 +2090,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startTextEdit(textFieldClusterConditionValues)
 		}
 		m.useDefaultAdvanced = false
-	// Mediation options
-	case optMediationBootstrap, optMediationMinEffect, optMediationPermutations:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optMediationPermutationPrimary:
-		m.mediationPermutationPrimary = !m.mediationPermutationPrimary
-		m.useDefaultAdvanced = false
-	case optMediationFeatures:
-		m.startTextEdit(textFieldMediationFeatures)
-		m.useDefaultAdvanced = false
-	case optMediationMaxMediatorsEnabled:
-		m.mediationMaxMediatorsEnabled = !m.mediationMaxMediatorsEnabled
-		m.useDefaultAdvanced = false
-	case optMediationMaxMediators:
-		if m.mediationMaxMediatorsEnabled {
-			m.startNumberEdit()
-			m.useDefaultAdvanced = false
-		}
-	// Moderation options
-	case optModerationMaxFeaturesEnabled:
-		m.moderationMaxFeaturesEnabled = !m.moderationMaxFeaturesEnabled
-		m.useDefaultAdvanced = false
-	case optModerationMaxFeatures:
-		if m.moderationMaxFeaturesEnabled {
-			m.startNumberEdit()
-			m.useDefaultAdvanced = false
-		}
-	case optModerationMinSamples, optModerationPermutations:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optModerationPermutationPrimary:
-		m.moderationPermutationPrimary = !m.moderationPermutationPrimary
-		m.useDefaultAdvanced = false
-	case optModerationFeatures:
-		m.startTextEdit(textFieldModerationFeatures)
-		m.useDefaultAdvanced = false
-	// Mixed effects options
-	case optMixedMaxFeatures:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optMixedIncludePredictor:
-		m.mixedIncludePredictor = !m.mixedIncludePredictor
-		m.useDefaultAdvanced = false
-	case optMixedEffectsType:
-		m.mixedEffectsType = (m.mixedEffectsType + 1) % 2
-		m.useDefaultAdvanced = false
 	// Condition options
 	case optConditionCompareColumn:
 		if len(m.GetAvailableColumns()) > 0 {
@@ -2339,14 +2097,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.subCursor = 0
 		} else {
 			m.startTextEdit(textFieldConditionCompareColumn)
-		}
-		m.useDefaultAdvanced = false
-	case optConditionCompareWindows:
-		if len(m.availableWindows) > 0 {
-			m.expandedOption = expandedConditionCompareWindows
-			m.subCursor = 0
-		} else {
-			m.startTextEdit(textFieldConditionCompareWindows)
 		}
 		m.useDefaultAdvanced = false
 	case optConditionFeatures:
@@ -2370,29 +2120,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optConditionMinTrials:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPredictorSensitivityMinTrials:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optPredictorSensitivityPrimaryUnit:
-		m.predictorSensitivityPrimaryUnit = (m.predictorSensitivityPrimaryUnit + 1) % 2
-		m.useDefaultAdvanced = false
-	case optPredictorSensitivityPermutations:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optPredictorSensitivityPermutationPrimary:
-		m.predictorSensitivityPermutationPrimary = !m.predictorSensitivityPermutationPrimary
-		m.useDefaultAdvanced = false
-	case optPredictorSensitivityFeatures:
-		m.startTextEdit(textFieldPredictorSensitivityFeatures)
-		m.useDefaultAdvanced = false
 	case optConditionPrimaryUnit:
 		m.conditionPrimaryUnit = (m.conditionPrimaryUnit + 1) % 2
-		m.useDefaultAdvanced = false
-	case optConditionWindowPrimaryUnit:
-		m.conditionWindowPrimaryUnit = (m.conditionWindowPrimaryUnit + 1) % 2
-		m.useDefaultAdvanced = false
-	case optConditionWindowMinSamples:
-		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optConditionPermutationPrimary:
 		m.conditionPermutationPrimary = !m.conditionPermutationPrimary

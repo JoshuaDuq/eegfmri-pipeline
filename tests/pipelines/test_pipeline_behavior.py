@@ -88,37 +88,13 @@ class TestBehaviorDeep(unittest.TestCase):
                 regression=pd.DataFrame({"p_primary": [0.01], "q_global": [0.04], "hedges_g": [0.9]}),
                 tf={"n_tests": 2, "n_sig_raw": 1, "n_sig_fdr": 1},
                 temporal={"n_tests": 3, "n_sig_raw": 2, "n_sig_fdr": 1},
-                cluster={"alpha": {"cluster_records": [{"q_global": 0.04}, {"p_value": 0.2}]}},
+                cluster={"alpha": {"cluster_records": [{"q_global": 0.04}, {"p_value": 0.2}]}} ,
             )
             summary = res.to_summary()
             self.assertGreater(summary["n_features"], 0)
             self.assertGreater(summary["n_sig_raw"], 0)
             self.assertGreater(summary["n_sig_fdr"], 0)
             self.assertEqual(summary["n_clusters"], 2)
-
-        def test_behavior_summary_controlled_counts_use_primary_pvalues(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipelineResults
-
-            res = BehaviorPipelineResults(
-                subject="0001",
-                correlations=pd.DataFrame(
-                    {
-                        "p_raw": [0.01],
-                        "p_primary": [0.30],
-                        "q_global": [0.40],
-                    }
-                ),
-                regression=pd.DataFrame(
-                    {
-                        "p_raw": [0.01],
-                        "p_primary": [0.40],
-                        "q_global": [0.60],
-                    }
-                ),
-            )
-            summary = res.to_summary()
-            self.assertEqual(summary["n_sig_raw"], 2)
-            self.assertEqual(summary["n_sig_controlled"], 0)
 
         def test_behavior_process_subject_failure_path(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline
@@ -180,7 +156,6 @@ class TestBehaviorCompletion(unittest.TestCase):
             self.assertTrue(b.pipeline_config.run_report)
 
             fake_result = SimpleNamespace(
-                    mixed_effects=SimpleNamespace(df=pd.DataFrame({"x": [1]}), n_significant=1),
                     multilevel_correlations=pd.DataFrame({"q_within_family": [0.01, 0.2]}),
                 )
             with patch("eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis", return_value=fake_result):
@@ -227,7 +202,7 @@ class TestBehaviorGapfill(unittest.TestCase):
                 p = BehaviorPipeline(
                     config=DotConfig({}),
                     pipeline_config=BehaviorPipelineConfig(),
-                    computations=["validation"],
+                    computations=["report"],
                     feature_categories=["power"],
                     computation_features={"regression": ["power_alpha"]},
                 )

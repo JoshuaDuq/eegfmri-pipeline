@@ -44,8 +44,10 @@ class TestBehaviorStageCatalog(unittest.TestCase):
     def test_apply_computation_flags_updates_pipeline_config(self):
         cfg = SimpleNamespace(
             run_trial_table=False,
+            run_lag_features=False,
             run_predictor_residual=False,
             run_regression=False,
+            run_icc=False,
             run_report=False,
             run_correlations=False,
             run_multilevel_correlations=False,
@@ -55,11 +57,13 @@ class TestBehaviorStageCatalog(unittest.TestCase):
         )
         flags = {name: False for name in COMPUTATION_TO_PIPELINE_ATTR}
         flags["report"] = True
+        flags["icc"] = False
         flags["multilevel_correlations"] = True
 
         apply_computation_flags_impl(cfg, flags)
 
         self.assertTrue(cfg.run_report)
+        self.assertFalse(cfg.run_icc)
         self.assertTrue(cfg.run_multilevel_correlations)
 
     def test_apply_computation_flags_rejects_unknown_keys(self):

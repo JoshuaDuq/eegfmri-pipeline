@@ -20,6 +20,7 @@ import mne
 import numpy as np
 import pandas as pd
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
+from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus
 
 
 def _normalize_optional_path(value: Any) -> Optional[str]:
@@ -971,9 +972,9 @@ def _plot_surface_stc_canonical(
     )
     n_lh = len(stc_full.vertices[0])
 
-    # High-tier scientific journals require statistically masked source maps.
-    # We dynamically mask out the lower 95% of vertices, mapping only the top 5%
-    # of activations to the colormap.
+    # Descriptive display threshold: suppress the lower-amplitude tail so the
+    # figure emphasizes the dominant sources without implying statistical
+    # significance.
     active = vals[np.isfinite(vals) & (vals > 0)]
     vmin = float(np.percentile(active, 95)) if active.size else 0.0
     vmax = float(np.percentile(active, 99.5)) if active.size else 1.0
@@ -1046,7 +1047,7 @@ def _plot_surface_stc_canonical(
         plt.cm.ScalarMappable(norm=mcolors.Normalize(vmin=vmin, vmax=vmax), cmap="magma"),
         cax=ax_cb,
     )
-    cb.set_label("Source power (a.u.)", fontsize=9, labelpad=8)
+    cb.set_label("Source power (a.u.; descriptive display scale)", fontsize=9, labelpad=8)
     cb.ax.tick_params(labelsize=8)
 
     out_fig.tight_layout(pad=0.4)
@@ -2060,8 +2061,8 @@ def plot_source_cluster_timecourse(
     out_dir = save_dir / "cluster_timecourse"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Group by (task, segment, band, method) → {condition: stc}
-    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Any]] = {}
+    # Group by (task, segment, band, method) → {condition: {stc, path}}
+    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Dict[str, Any]]] = {}
     for stc_path in vol_stc_files:
         try:
             metadata = _parse_stc_plot_metadata(stc_path)
@@ -2075,12 +2076,13 @@ def plot_source_cluster_timecourse(
             if source_condition and cond != source_condition:
                 continue
             stc = mne.read_source_estimate(str(stc_path))
-            grouped.setdefault(key, {})[cond] = stc
+            grouped.setdefault(key, {})[cond] = {"stc": stc, "path": stc_path}
         except Exception as exc:
             logger.warning("Cluster time course: skipping %s: %s", stc_path.name, exc)
 
     # Detect whether STCs are single-timepoint (band power) or multi-timepoint.
-    sample_stc = next(iter(next(iter(grouped.values())).values()), None) if grouped else None
+    sample_record = next(iter(next(iter(grouped.values())).values()), None) if grouped else None
+    sample_stc = sample_record["stc"] if isinstance(sample_record, dict) else None
     is_single_tp = sample_stc is not None and sample_stc.data.shape[1] <= 1
 
     if is_single_tp:
@@ -2091,61 +2093,77 @@ def plot_source_cluster_timecourse(
 
 def _plot_cluster_bar_comparison(
     subject: str,
-    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Any]],
+    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Dict[str, Any]]],
     out_dir: Path,
     config: Any,
     logger: logging.Logger,
 ) -> None:
-    """Grouped bar chart: mean cluster amplitude per condition, one group per band."""
-    # Re-group by (task, segment, method) → {band: {condition: scalar}}
-    by_context: dict[tuple[str, Optional[str], str], dict[str, dict[str, float]]] = {}
+    """Grouped bar chart: per-cluster mean amplitude per condition for one band."""
     for (task, segment, band, method), cond_stcs in grouped.items():
-        ctx_key = (task, segment, method)
-        band_data: dict[str, float] = {}
-        for cond, stc in cond_stcs.items():
-            raw_mean = float(np.abs(stc.data).mean())
-            band_data[cond] = 10 * np.log10(raw_mean) if raw_mean > 1e-30 else -300.0
-        by_context.setdefault(ctx_key, {})[band] = band_data
-
-    for (task, segment, method), band_cond_data in by_context.items():
-        seg_token = f"_seg-{segment}" if segment else ""
-        figure_name = f"sub-{subject}_task-{task}{seg_token}_{method}_cluster_comparison"
-
-        bands = sorted(band_cond_data.keys())
-        all_conditions = sorted({c for bd in band_cond_data.values() for c in bd})
-        n_bands = len(bands)
-        n_conds = len(all_conditions)
-
-        if n_bands == 0 or n_conds == 0:
+        if not cond_stcs:
             continue
 
-        x = np.arange(n_bands)
-        width = 0.7 / n_conds
+        first_record = next(iter(cond_stcs.values()))
+        cluster_rows = _load_segment_fmri_cluster_rows(first_record["path"], logger)
+        cluster_names = list(cluster_rows.keys())
+        all_conditions = sorted(cond_stcs.keys())
+        n_clusters = len(cluster_names)
+        n_conds = len(all_conditions)
+        if n_clusters == 0 or n_conds == 0:
+            continue
+
+        per_condition: Dict[str, Dict[str, float]] = {}
+        for cond, record in cond_stcs.items():
+            cluster_power = _compute_cluster_power_db(record["stc"], cluster_rows)
+            per_condition[cond] = {
+                cluster_name: float(cluster_power[cluster_name][0])
+                for cluster_name in cluster_names
+            }
+
+        seg_token = f"_seg-{segment}" if segment else ""
+        figure_name = f"sub-{subject}_task-{task}{seg_token}_band-{band}_{method}_cluster_comparison"
+        x = np.arange(n_clusters)
+        width = 0.8 / n_conds
         colors = plt.cm.Set2(np.linspace(0, 1, max(n_conds, 3)))
 
-        fig, ax = plt.subplots(figsize=(max(8, 1.5 * n_bands * n_conds), 5), facecolor="white")
-
-        for i, cond in enumerate(all_conditions):
-            values = [band_cond_data[b].get(cond, 0.0) for b in bands]
-            offset = (i - (n_conds - 1) / 2) * width
-            bars = ax.bar(x + offset, values, width * 0.9, label=cond,
-                          color=colors[i], edgecolor="white", linewidth=0.5)
-            # Value labels on bars
-            for bar_rect, val in zip(bars, values):
+        fig, ax = plt.subplots(
+            figsize=(max(8, 1.2 * n_clusters * max(n_conds, 2)), 5),
+            facecolor="white",
+        )
+        for idx, cond in enumerate(all_conditions):
+            values = [per_condition[cond][cluster_name] for cluster_name in cluster_names]
+            offset = (idx - (n_conds - 1) / 2) * width
+            bars = ax.bar(
+                x + offset,
+                values,
+                width * 0.92,
+                label=cond,
+                color=colors[idx],
+                edgecolor="white",
+                linewidth=0.5,
+            )
+            for bar_rect, value in zip(bars, values):
                 ax.text(
-                    bar_rect.get_x() + bar_rect.get_width() / 2,
+                    bar_rect.get_x() + bar_rect.get_width() / 2.0,
                     bar_rect.get_height(),
-                    f"{val:.1f}",
-                    ha="center", va="bottom", fontsize=7, rotation=45,
+                    f"{value:.1f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    rotation=45,
                 )
 
         ax.set_xticks(x)
-        ax.set_xticklabels([b.capitalize() for b in bands], fontsize=10)
-        ax.set_xlabel("Frequency Band", fontsize=11)
+        ax.set_xticklabels(
+            [_format_cluster_display_name(cluster_name) for cluster_name in cluster_names],
+            fontsize=9,
+        )
+        ax.set_xlabel("fMRI Cluster", fontsize=11)
         ax.set_ylabel("Mean source power (dB)", fontsize=11)
         ax.set_title(
-            f"Cluster source power by condition\n{task}{seg_token} — {method}",
-            fontsize=12, fontweight="bold",
+            f"Cluster-resolved source power by condition\n{task}{seg_token} — {band} — {method}",
+            fontsize=12,
+            fontweight="bold",
         )
         ax.legend(title="Condition", fontsize=9, title_fontsize=10, framealpha=0.8)
         ax.spines["top"].set_visible(False)
@@ -2158,43 +2176,50 @@ def _plot_cluster_bar_comparison(
         plt.close(fig)
         logger.debug("Saved cluster bar comparison: %s", save_path.name)
 
-        # Contrast bar chart (B-A difference)
         if n_conds >= 2:
             try:
                 cond_a, cond_b = _resolve_source_plot_condition_pair(
                     config, set(all_conditions), logger,
                 )
-                diff_values = []
-                for b in bands:
-                    val_a = band_cond_data[b].get(cond_a, 0.0)
-                    val_b = band_cond_data[b].get(cond_b, 0.0)
-                    # Values are already in dB (10*log10), so subtraction is the true log ratio
-                    diff_values.append(val_b - val_a)
-                bar_colors = ["#c0392b" if v > 0 else "#2980b9" for v in diff_values]
+                diff_values = [
+                    per_condition[cond_b][cluster_name] - per_condition[cond_a][cluster_name]
+                    for cluster_name in cluster_names
+                ]
+                bar_colors = ["#c0392b" if value > 0 else "#2980b9" for value in diff_values]
 
                 fig_c, ax_c = plt.subplots(
-                    figsize=(max(8, 1.5 * n_bands), 5), facecolor="white",
+                    figsize=(max(8, 1.2 * n_clusters), 5),
+                    facecolor="white",
                 )
                 bars_c = ax_c.bar(
-                    np.arange(n_bands), diff_values, 0.5,
-                    color=bar_colors, edgecolor="white", linewidth=0.5,
+                    x,
+                    diff_values,
+                    0.55,
+                    color=bar_colors,
+                    edgecolor="white",
+                    linewidth=0.5,
                 )
-                for bar_rect, val in zip(bars_c, diff_values):
-                    va = "bottom" if val >= 0 else "top"
+                for bar_rect, value in zip(bars_c, diff_values):
                     ax_c.text(
-                        bar_rect.get_x() + bar_rect.get_width() / 2,
+                        bar_rect.get_x() + bar_rect.get_width() / 2.0,
                         bar_rect.get_height(),
-                        f"{val:+.1f}",
-                        ha="center", va=va, fontsize=8,
+                        f"{value:+.1f}",
+                        ha="center",
+                        va="bottom" if value >= 0 else "top",
+                        fontsize=8,
                     )
                 ax_c.axhline(0, color="grey", linewidth=0.8, linestyle="--")
-                ax_c.set_xticks(np.arange(n_bands))
-                ax_c.set_xticklabels([b.capitalize() for b in bands], fontsize=10)
-                ax_c.set_xlabel("Frequency Band", fontsize=11)
+                ax_c.set_xticks(x)
+                ax_c.set_xticklabels(
+                    [_format_cluster_display_name(cluster_name) for cluster_name in cluster_names],
+                    fontsize=9,
+                )
+                ax_c.set_xlabel("fMRI Cluster", fontsize=11)
                 ax_c.set_ylabel("Δ Power (dB)", fontsize=11)
                 ax_c.set_title(
-                    f"Cluster contrast: {cond_b} − {cond_a}\n{task}{seg_token} — {method}",
-                    fontsize=12, fontweight="bold",
+                    f"Cluster-resolved contrast: {cond_b} − {cond_a}\n{task}{seg_token} — {band} — {method}",
+                    fontsize=12,
+                    fontweight="bold",
                 )
                 ax_c.spines["top"].set_visible(False)
                 ax_c.spines["right"].set_visible(False)
@@ -2211,40 +2236,69 @@ def _plot_cluster_bar_comparison(
 
 def _plot_cluster_timeseries(
     subject: str,
-    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Any]],
+    grouped: dict[tuple[str, Optional[str], str, str], dict[str, Dict[str, Any]]],
     out_dir: Path,
     logger: logging.Logger,
 ) -> None:
-    """Line plot: mean cluster amplitude over time, one line per condition."""
+    """Line plot: per-cluster amplitude over time, one panel per cluster."""
     for (task, segment, band, method), cond_stcs in grouped.items():
         if not cond_stcs:
+            continue
+
+        first_record = next(iter(cond_stcs.values()))
+        cluster_rows = _load_segment_fmri_cluster_rows(first_record["path"], logger)
+        cluster_names = list(cluster_rows.keys())
+        if not cluster_names:
             continue
 
         seg_token = f"_seg-{segment}" if segment else ""
         figure_name = f"sub-{subject}_task-{task}{seg_token}_band-{band}_{method}_timecourse"
 
-        fig, ax = plt.subplots(figsize=(10, 5), facecolor="white")
+        fig, axes = plt.subplots(
+            len(cluster_names),
+            1,
+            figsize=(10, max(4, 2.6 * len(cluster_names))),
+            facecolor="white",
+            sharex=True,
+        )
+        if len(cluster_names) == 1:
+            axes = [axes]
 
         sorted_conditions = sorted(cond_stcs.keys())
-        for cond_label in sorted_conditions:
-            stc = cond_stcs[cond_label]
-            raw_power = np.abs(stc.data).mean(axis=0)
-            mean_power = 10 * np.log10(np.clip(raw_power, a_min=1e-30, a_max=None))
-            times_ms = stc.times * 1000.0
-            ax.plot(times_ms, mean_power, linewidth=1.5, label=cond_label, alpha=0.85)
+        times_ms: Optional[np.ndarray] = None
+        cluster_power_by_condition = {
+            cond_label: _compute_cluster_power_db(cond_stcs[cond_label]["stc"], cluster_rows)
+            for cond_label in sorted_conditions
+        }
+        for cluster_name, ax in zip(cluster_names, axes):
+            for cond_label in sorted_conditions:
+                stc = cond_stcs[cond_label]["stc"]
+                times_ms = stc.times * 1000.0
+                ax.plot(
+                    times_ms,
+                    cluster_power_by_condition[cond_label][cluster_name],
+                    linewidth=1.5,
+                    label=cond_label,
+                    alpha=0.85,
+                )
+            ax.set_ylabel("Power (dB)", fontsize=10)
+            ax.set_title(
+                _format_cluster_display_name(cluster_name),
+                fontsize=10,
+                loc="left",
+            )
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.tick_params(labelsize=9)
 
-        ax.set_xlabel("Time (ms)", fontsize=11)
-        ax.set_ylabel("Mean source power (dB)", fontsize=11)
-        ax.set_title(
-            f"Cluster time course — {band} band ({task}{seg_token})",
-            fontsize=12, fontweight="bold",
+        axes[-1].set_xlabel("Time (ms)", fontsize=11)
+        axes[0].legend(title="Condition", fontsize=9, title_fontsize=10, framealpha=0.8)
+        fig.suptitle(
+            f"Cluster-resolved time course — {band} band ({task}{seg_token} — {method})",
+            fontsize=12,
+            fontweight="bold",
         )
-        ax.legend(title="Condition", fontsize=9, title_fontsize=10, framealpha=0.8)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.tick_params(labelsize=9)
         fig.tight_layout()
-
 
         save_path = out_dir / f"{figure_name}.png"
         fig.savefig(str(save_path), dpi=200, bbox_inches="tight", facecolor="white")
@@ -2407,6 +2461,146 @@ def _load_fmri_constraint_metadata(
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Skipping metadata sidecar %s: %s", path.name, exc)
     return payloads
+
+
+def _normalize_source_segment_key(segment: Optional[str]) -> str:
+    """Normalize a source-segment token for metadata matching."""
+    text = str(segment or "full").strip()
+    if not text:
+        text = "full"
+    return text.lower()
+
+
+def _load_segment_fmri_cluster_rows(
+    stc_path: Path,
+    logger: logging.Logger,
+) -> Dict[str, List[int]]:
+    """Load per-cluster STC row indices for one saved fMRI-informed STC."""
+    metadata_dir = stc_path.parents[2] / "metadata"
+    if not metadata_dir.is_dir():
+        raise FileNotFoundError(
+            f"Missing fMRI metadata directory for cluster plotting: {metadata_dir}. "
+            "Recompute source localization features so cluster row metadata is written."
+        )
+
+    segment = _normalize_source_segment_key(_parse_stc_plot_metadata(stc_path).get("segment"))
+    payload: Optional[Dict[str, Any]] = None
+    for path in sorted(metadata_dir.glob("fmri_constraint_*.json")):
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Skipping metadata sidecar %s: %s", path.name, exc)
+            continue
+        candidate_segment = candidate.get("segment")
+        if candidate_segment is None:
+            candidate_segment = path.stem.replace("fmri_constraint_", "")
+        if _normalize_source_segment_key(candidate_segment) == segment:
+            payload = candidate
+            break
+
+    if payload is None:
+        raise FileNotFoundError(
+            f"No fMRI metadata sidecar matched segment '{segment}' for {stc_path.name}. "
+            "Recompute source localization features so segment-specific cluster metadata is available."
+        )
+
+    roi_survival = payload.get("roi_survival", {})
+    if not isinstance(roi_survival, dict):
+        raise ValueError(f"Invalid roi_survival payload in {stc_path.name}.")
+    cluster_payload = roi_survival.get("fmri_cluster", {})
+    if not isinstance(cluster_payload, dict):
+        raise ValueError(
+            f"Cluster plotting requires fmri_cluster metadata for {stc_path.name}. "
+            "Use fMRI output_space='cluster' or 'dual' and recompute the source features."
+        )
+    rows_per_roi = cluster_payload.get("surviving_stc_rows_per_roi")
+    if not isinstance(rows_per_roi, dict) or not rows_per_roi:
+        raise ValueError(
+            f"Cluster plotting requires surviving_stc_rows_per_roi metadata for {stc_path.name}. "
+            "Recompute the source localization features with the updated metadata schema."
+        )
+
+    surviving_rois = cluster_payload.get("surviving_rois")
+    if isinstance(surviving_rois, list) and surviving_rois:
+        roi_order = [str(name) for name in surviving_rois]
+    else:
+        roi_order = [str(name) for name in rows_per_roi.keys()]
+
+    cluster_rows: Dict[str, List[int]] = {}
+    for roi_name in roi_order:
+        raw_rows = rows_per_roi.get(roi_name)
+        if not isinstance(raw_rows, list) or not raw_rows:
+            raise ValueError(
+                f"Cluster '{roi_name}' has no surviving STC rows in metadata for {stc_path.name}."
+            )
+        cluster_rows[str(roi_name)] = [int(idx) for idx in raw_rows]
+    return cluster_rows
+
+
+def _compute_cluster_power_db(
+    stc: Any,
+    cluster_rows: Dict[str, List[int]],
+) -> Dict[str, np.ndarray]:
+    """Compute per-cluster source power in dB from a discrete STC."""
+    data = np.asarray(stc.data, dtype=float)
+    if data.ndim != 2 or data.shape[0] == 0:
+        raise ValueError("Cluster plotting requires non-empty 2D STC data.")
+
+    cluster_power: Dict[str, np.ndarray] = {}
+    n_rows = int(data.shape[0])
+    for cluster_name, rows in cluster_rows.items():
+        row_idx = np.asarray(rows, dtype=int)
+        if row_idx.ndim != 1 or row_idx.size == 0:
+            raise ValueError(f"Cluster '{cluster_name}' has no valid STC rows.")
+        if np.any(row_idx < 0) or np.any(row_idx >= n_rows):
+            raise ValueError(
+                f"Cluster '{cluster_name}' row indices exceed STC bounds "
+                f"(max_row={n_rows - 1}, rows={row_idx.tolist()})."
+            )
+        mean_power = np.nanmean(np.abs(data[row_idx]), axis=0)
+        cluster_power[cluster_name] = 10.0 * np.log10(
+            np.clip(mean_power, a_min=1e-30, a_max=None)
+        )
+    return cluster_power
+
+
+def _format_cluster_display_name(cluster_name: str) -> str:
+    """Create a compact display label for one fMRI cluster."""
+    label = str(cluster_name).replace("fmri_", "")
+    return label.replace("_", "\n")
+
+
+def _resolve_source_cluster_tfr_baseline_window(
+    config: Any,
+    times: np.ndarray,
+    logger: logging.Logger,
+) -> Optional[tuple[float, float]]:
+    """Return a validated pre-stimulus baseline window for source-cluster TFR plots."""
+    baseline_raw = get_config_value(config, "time_frequency_analysis.baseline_window", None)
+    if baseline_raw is None:
+        return None
+
+    baseline_window = validate_baseline_window_pre_stimulus(
+        baseline_raw,
+        logger=logger,
+        strict=True,
+    )
+    times_array = np.asarray(times, dtype=float)
+    if times_array.ndim != 1 or times_array.size == 0:
+        raise ValueError("Source cluster TFR plotting requires a non-empty 1D time axis.")
+
+    baseline_mask = (
+        (times_array >= float(baseline_window[0]))
+        & (times_array <= float(baseline_window[1]))
+    )
+    if not np.any(baseline_mask):
+        logger.info(
+            "Source cluster TFR: skipping baseline correction because the configured "
+            "pre-stimulus window %s is not present in the plotted segment.",
+            baseline_window,
+        )
+        return None
+    return (float(baseline_window[0]), float(baseline_window[1]))
 
 
 # Lobe-indexed palette (colourblind-friendly and publication-ready).
@@ -3772,16 +3966,24 @@ def plot_source_cluster_tfr(
             for idx, ch_name in enumerate(tfr.ch_names):
                 ax = axes[idx]
                 try:
-                    base_end = tfr.times[max(1, int(len(tfr.times) * 0.1))]
+                    plot_kwargs = {
+                        "picks": [ch_name],
+                        "axes": ax,
+                        "show": False,
+                        "colorbar": True,
+                        "cmap": "viridis",
+                        "title": f"Cluster: {ch_name.replace('ctx_', '')}",
+                    }
+                    baseline_window = _resolve_source_cluster_tfr_baseline_window(
+                        config,
+                        np.asarray(tfr.times, dtype=float),
+                        logger,
+                    )
+                    if baseline_window is not None:
+                        plot_kwargs["baseline"] = baseline_window
+                        plot_kwargs["mode"] = "logratio"
                     tfr.plot(
-                        picks=[ch_name], 
-                        axes=ax, 
-                        show=False, 
-                        colorbar=True, 
-                        cmap="viridis",
-                        baseline=(tfr.times[0], base_end),
-                        mode="logratio",
-                        title=f"Cluster: {ch_name.replace('ctx_', '')}"
+                        **plot_kwargs
                     )
                 except Exception as e:
                     logger.warning(f"Failed to plot cluster {ch_name} for condition {cond}: {e}")
@@ -3935,4 +4137,3 @@ def plot_source_cluster_raincloud(
         fig.tight_layout(rect=[0, 0, 1, 0.96])
         fig.savefig(out_dir / f"sub-{subject}_{segment}_raincloud.png", dpi=200, bbox_inches="tight")
         plt.close(fig)
-

@@ -108,8 +108,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.prepCustomBadDict
 	case textFieldConditionCompareColumn:
 		return m.conditionCompareColumn
-	case textFieldConditionCompareWindows:
-		return m.conditionCompareWindows
 	case textFieldConditionCompareValues:
 		return m.conditionCompareValues
 	case textFieldConditionCompareLabels:
@@ -148,18 +146,12 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.correlationsTypesSpec
 	case textFieldCorrelationsFeatures:
 		return m.correlationsFeaturesSpec
-	case textFieldPredictorSensitivityFeatures:
-		return m.predictorSensitivityFeaturesSpec
 	case textFieldConditionFeatures:
 		return m.conditionFeaturesSpec
 	case textFieldTemporalFeatures:
 		return m.temporalFeaturesSpec
 	case textFieldClusterFeatures:
 		return m.clusterFeaturesSpec
-	case textFieldMediationFeatures:
-		return m.mediationFeaturesSpec
-	case textFieldModerationFeatures:
-		return m.moderationFeaturesSpec
 	case textFieldItpcConditionColumn:
 		return m.itpcConditionColumn
 	case textFieldItpcConditionValues:
@@ -536,8 +528,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.prepCustomBadDict = value
 	case textFieldConditionCompareColumn:
 		m.conditionCompareColumn = strings.TrimSpace(value)
-	case textFieldConditionCompareWindows:
-		m.conditionCompareWindows = strings.TrimSpace(value)
 	case textFieldConditionCompareValues:
 		m.conditionCompareValues = strings.TrimSpace(value)
 	case textFieldConditionCompareLabels:
@@ -576,18 +566,12 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.correlationsTypesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldCorrelationsFeatures:
 		m.correlationsFeaturesSpec = strings.Join(strings.Fields(value), "")
-	case textFieldPredictorSensitivityFeatures:
-		m.predictorSensitivityFeaturesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldConditionFeatures:
 		m.conditionFeaturesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldTemporalFeatures:
 		m.temporalFeaturesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldClusterFeatures:
 		m.clusterFeaturesSpec = strings.Join(strings.Fields(value), "")
-	case textFieldMediationFeatures:
-		m.mediationFeaturesSpec = strings.Join(strings.Fields(value), "")
-	case textFieldModerationFeatures:
-		m.moderationFeaturesSpec = strings.Join(strings.Fields(value), "")
 	case textFieldItpcConditionColumn:
 		m.itpcConditionColumn = strings.TrimSpace(value)
 	case textFieldItpcConditionValues:

@@ -71,7 +71,7 @@ def assert_continuous_predictor(
     """Raise ValueError if the predictor is not suitable for curve fitting.
 
     Performs both the config-level type check and a data-level uniqueness check.
-    Curve-fitting analyses (predictor_residual, predictor_models) require a
+    Curve-fitting analyses (predictor_residual) require a
     continuous predictor with sufficient unique values to identify a dose-response
     function. This guard prevents silently meaningless results for binary or
     categorical predictors.
@@ -160,4 +160,3 @@ def validate_baseline_window_pre_stimulus(
             logger.warning(msg)
     
     return (tmin, baseline_end_value)
-

@@ -65,17 +65,19 @@ type FeatureCategory struct {
 var behaviorComputations = []Computation{
 	// Data Preparation
 	{"trial_table", "Trial Table", "Build canonical per-trial analysis table", "DataPrep"},
-	{"predictor_residual", "Residual", "Compute residualized outcome (outcome - f(predictor))", "DataPrep"},
+	{"lag_features", "Lag Features", "Add temporal dynamics (prev_*, delta_*) for habituation", "DataPrep"},
+	{"predictor_residual", "Residual + Diagnostics", "Compute residualized outcome and predictor model diagnostics", "DataPrep"},
 
 	// Core Analyses
 	{"correlations", "Correlations", "EEG-outcome correlations with bootstrap CIs", "Core"},
 	{"multilevel_correlations", "Group Multilevel Correlations", "Group-level correlations with block-restricted permutations", "Core"},
-	{"regression", "Regression", "Trialwise feature regression with permutation inference", "Core"},
+	{"regression", "Regression", "Feature regression with optional permutation inference", "Core"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., condition A vs condition B)", "Core"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis", "Core"},
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests", "Core"},
 
-	// Quality & Output
+	// Quality & Validation
+	{"icc", "Reliability (ICC)", "Run-to-run feature reliability", "Quality"},
 	{"report", "Subject Report", "Single-subject summary report", "Quality"},
 }
 
@@ -396,8 +398,6 @@ var computationApplicableFeatures = map[string][]string{
 	"correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Multilevel correlations uses the same features as correlations (group-level)
 	"multilevel_correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	// Predictor sensitivity uses the same features as correlations
-	"predictor_sensitivity": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Condition comparison uses trial-level features
 	"condition": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Temporal: power, itpc, erds are the temporal-specific features computed from epochs
@@ -405,17 +405,10 @@ var computationApplicableFeatures = map[string][]string{
 	"temporal": {"power", "itpc", "erds"},
 	// Cluster permutation uses TFR data directly
 	"cluster": {"power"},
-	// Mediation/moderation use correlations features
-	"mediation":     {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	"moderation":    {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	"mixed_effects": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	// Quality & Validation analyses
-	"regression":  {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	"stability":   {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	"validation":  {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	"consistency": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	"influence":   {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	"report":      {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"regression": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"icc":        {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
+	"report":     {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 }
 
 type PlotItem struct {
@@ -621,7 +614,6 @@ const (
 	textFieldPrepCustomBadDict
 	// Behavior advanced config text fields
 	textFieldConditionCompareColumn
-	textFieldConditionCompareWindows
 	textFieldConditionCompareValues
 	textFieldConditionCompareLabels
 	textFieldTemporalConditionColumn
@@ -639,12 +631,9 @@ const (
 	textFieldGroupLevelTarget
 	textFieldCorrelationsTypes
 	textFieldCorrelationsFeatures
-	textFieldPredictorSensitivityFeatures
 	textFieldConditionFeatures
 	textFieldTemporalFeatures
 	textFieldClusterFeatures
-	textFieldMediationFeatures
-	textFieldModerationFeatures
 	// Frequency band editing text fields
 	textFieldBandName
 	textFieldBandLowHz
@@ -1873,22 +1862,13 @@ type Model struct {
 	behaviorGroupTrialTableExpanded        bool
 	behaviorGroupPredictorResidualExpanded bool
 	behaviorGroupCorrelationsExpanded      bool
-	behaviorGroupPredictorSensExpanded     bool
 	behaviorGroupRegressionExpanded        bool
-	behaviorGroupModelsExpanded            bool
-	behaviorGroupStabilityExpanded         bool
-	behaviorGroupConsistencyExpanded       bool
-	behaviorGroupInfluenceExpanded         bool
 	behaviorGroupReportExpanded            bool
 	behaviorGroupConditionExpanded         bool
 	behaviorGroupTemporalExpanded          bool
 	behaviorGroupClusterExpanded           bool
-	behaviorGroupMediationExpanded         bool
-	behaviorGroupModerationExpanded        bool
-	behaviorGroupMixedEffectsExpanded      bool
 	behaviorGroupOutputExpanded            bool
 	behaviorGroupStatsExpanded             bool
-	behaviorGroupAnalysesExpanded          bool
 	behaviorGroupAdvancedExpanded          bool
 
 	// Trial table / predictor residual config (subject-level)
@@ -1900,12 +1880,6 @@ type Model struct {
 	trialOrderMaxMissingFraction float64
 
 	featureSummariesEnabled bool
-
-	// Feature QC (pre-statistics gating)
-	featureQCEnabled                bool
-	featureQCMaxMissingPct          float64
-	featureQCMinVariance            float64
-	featureQCCheckWithinRunVariance bool
 
 	predictorResidualEnabled                 bool
 	predictorResidualMethod                  int // 0=spline, 1=poly
@@ -1946,60 +1920,6 @@ type Model struct {
 	regressionPermutations       int
 	regressionMaxFeatures        int // 0 = no limit
 
-	// Models
-	modelsIncludePredictor         bool
-	modelsTempControl              int // 0=linear, 1=rating_hat, 2=spline
-	modelsTempSplineKnots          int
-	modelsTempSplineQlow           float64
-	modelsTempSplineQhigh          float64
-	modelsTempSplineMinN           int
-	modelsIncludeTrialOrder        bool
-	modelsIncludePrev              bool
-	modelsIncludeRunBlock          bool
-	modelsIncludeInteraction       bool
-	modelsStandardize              bool
-	modelsMinSamples               int
-	modelsMaxFeatures              int
-	modelsOutcomeValue             bool
-	modelsOutcomePredictorResidual bool
-	modelsOutcomePredictor         bool
-	modelsOutcomeBinaryOutcome     bool
-	modelsFamilyOLS                bool
-	modelsFamilyRobust             bool
-	modelsFamilyQuantile           bool
-	modelsFamilyLogit              bool
-	modelsBinaryOutcome            int // 0=binary_outcome, 1=rating_median
-	modelsPrimaryUnit              int // 0=trial, 1=run_mean
-	modelsForceTrialIIDAsymptotic  bool
-
-	// Stability
-	stabilityMethod      int // 0=spearman, 1=pearson
-	stabilityOutcome     int // 0=auto, 1=rating, 2=predictor_residual
-	stabilityGroupColumn int // 0=auto, 1=run, 2=block
-	stabilityPartialTemp bool
-	stabilityMinGroupN   int // 0=unset
-	stabilityMaxFeatures int
-	stabilityAlpha       float64
-
-	// Consistency & influence
-	consistencyEnabled                bool
-	influenceOutcomeValue             bool
-	influenceOutcomePredictorResidual bool
-	influenceOutcomePredictor         bool
-	influenceMaxFeatures              int
-	influenceIncludePredictor         bool
-	influenceTempControl              int // 0=linear, 1=rating_hat, 2=spline
-	influenceTempSplineKnots          int
-	influenceTempSplineQlow           float64
-	influenceTempSplineQhigh          float64
-	influenceTempSplineMinN           int
-	influenceIncludeTrialOrder        bool
-	influenceIncludeRunBlock          bool
-	influenceIncludeInteraction       bool
-	influenceStandardize              bool
-	influenceCooksThreshold           float64 // 0 = default
-	influenceLeverageThreshold        float64 // 0 = default
-
 	// Correlations (trial-table)
 	correlationsTypesSpec               string // Comma-separated list (e.g., "partial_cov_predictor,raw")
 	correlationsUseCrossfitResidual     bool
@@ -2018,13 +1938,6 @@ type Model struct {
 	groupLevelControlRunEffects         bool
 	groupLevelMaxRunDummies             int
 	groupLevelAllowParametricFallback   bool
-
-	// Predictor sensitivity
-	predictorSensitivityMinTrials          int // 0=unset
-	predictorSensitivityPrimaryUnit        int // 0=trial, 1=run_mean
-	predictorSensitivityPermutations       int // 0=use global permutation setting
-	predictorSensitivityPermutationPrimary bool
-	predictorSensitivityFeaturesSpec       string // Comma-separated feature filters for predictor sensitivity
 
 	// Report
 	reportTopN int
@@ -2051,20 +1964,10 @@ type Model struct {
 	temporalERDSBaselineMax float64 // ERDS baseline window end (seconds)
 	temporalERDSMethod      int     // 0=percent, 1=zscore
 
-	// Mixed effects (group-level; still configurable)
-	mixedEffectsType      int // 0=intercept, 1=intercept_slope
-	mixedIncludePredictor bool
-
-	// Mediation
-	mediationMinEffect          float64
-	mediationPermutationPrimary bool
-
 	// Condition extras
 	conditionFailFast           bool
 	conditionPermutationPrimary bool
 	conditionPrimaryUnit        int // 0=trial, 1=run_mean
-	conditionWindowPrimaryUnit  int // 0=trial, 1=run_mean
-	conditionWindowMinSamples   int
 	// Cluster-specific
 	clusterThreshold       float64 // Forming threshold for clusters
 	clusterMinSize         int     // Minimum cluster size
@@ -2072,25 +1975,9 @@ type Model struct {
 	clusterConditionColumn string  // events.tsv column to split by (empty=event_columns.binary_outcome)
 	clusterConditionValues string  // Exactly 2 values (space/comma-separated) to compare
 	clusterFeaturesSpec    string  // Comma-separated feature filters for cluster
-	// Mediation-specific
-	mediationBootstrap           int    // Bootstrap iterations for mediation
-	mediationMaxMediatorsEnabled bool   // Enable max mediators limit
-	mediationMaxMediators        int    // Max mediators to test
-	mediationPermutations        int    // Permutation iterations for mediation (0=disabled)
-	mediationFeaturesSpec        string // Comma-separated feature filters for mediation
-	// Moderation-specific
-	moderationMaxFeaturesEnabled bool // Enable max features limit
-	moderationMaxFeatures        int  // Max features for moderation
-	moderationMinSamples         int
-	moderationPermutations       int // Permutation iterations for moderation (0=disabled)
-	moderationPermutationPrimary bool
-	moderationFeaturesSpec       string // Comma-separated feature filters for moderation
-	// Mixed effects-specific
-	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
 	conditionEffectThreshold float64 // Min effect size to report
 	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.binary_outcome)
-	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "cond_a,cond_b")
 	conditionCompareLabels   string  // Optional labels aligned to compare values
 	conditionMinTrials       int     // 0=unset; condition.min_trials_per_condition
@@ -2862,12 +2749,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		trialTableDisallowPositionalAlignment: false,
 		trialOrderMaxMissingFraction:          0.1,
 
-		featureSummariesEnabled:         true,
-		featureQCEnabled:                false,
-		featureQCMaxMissingPct:          0.2,
-		featureQCMinVariance:            1e-10,
-		featureQCCheckWithinRunVariance: true,
-
+		featureSummariesEnabled:                  true,
 		predictorResidualEnabled:                 true,
 		predictorResidualMethod:                  0,
 		predictorResidualPolyDegree:              2,
@@ -2904,103 +2786,42 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionPermutations:       0,
 		regressionMaxFeatures:        0,
 
-		modelsIncludePredictor:         true,
-		modelsTempControl:              0,
-		modelsTempSplineKnots:          4,
-		modelsTempSplineQlow:           0.05,
-		modelsTempSplineQhigh:          0.95,
-		modelsTempSplineMinN:           12,
-		modelsIncludeTrialOrder:        true,
-		modelsIncludePrev:              false,
-		modelsIncludeRunBlock:          true,
-		modelsIncludeInteraction:       true,
-		modelsStandardize:              true,
-		modelsMinSamples:               20,
-		modelsMaxFeatures:              100,
-		modelsOutcomeValue:             true,
-		modelsOutcomePredictorResidual: true,
-		modelsOutcomePredictor:         false,
-		modelsOutcomeBinaryOutcome:     false,
-		modelsFamilyOLS:                true,
-		modelsFamilyRobust:             true,
-		modelsFamilyQuantile:           true,
-		modelsFamilyLogit:              true,
-		modelsBinaryOutcome:            0,
-		modelsPrimaryUnit:              0,
-		modelsForceTrialIIDAsymptotic:  false,
-
-		stabilityMethod:      0,
-		stabilityOutcome:     0,
-		stabilityGroupColumn: 0,
-		stabilityPartialTemp: true,
-		stabilityMinGroupN:   0,
-		stabilityMaxFeatures: 50,
-		stabilityAlpha:       0.05,
-
-		consistencyEnabled:                true,
-		influenceOutcomeValue:             true,
-		influenceOutcomePredictorResidual: true,
-		influenceOutcomePredictor:         false,
-		influenceMaxFeatures:              20,
-		influenceIncludePredictor:         true,
-		influenceTempControl:              0,
-		influenceTempSplineKnots:          4,
-		influenceTempSplineQlow:           0.05,
-		influenceTempSplineQhigh:          0.95,
-		influenceTempSplineMinN:           12,
-		influenceIncludeTrialOrder:        true,
-		influenceIncludeRunBlock:          true,
-		influenceIncludeInteraction:       false,
-		influenceStandardize:              true,
-		influenceCooksThreshold:           0.0,
-		influenceLeverageThreshold:        0.0,
-
-		correlationsTypesSpec:                  "partial_cov_predictor",
-		correlationsUseCrossfitResidual:        false,
-		correlationsPrimaryUnit:                0,
-		correlationsMinRuns:                    3,
-		correlationsPreferPredictorResidual:    false,
-		correlationsPermutations:               0,
-		correlationsPermutationPrimary:         false,
-		correlationsPowerSegment:               "",
-		correlationsFeaturesSpec:               "",
-		groupLevelBlockPermutation:             true,
-		groupLevelTarget:                       "",
-		groupLevelControlPredictor:             true,
-		groupLevelControlTrialOrder:            true,
-		groupLevelControlRunEffects:            false,
-		groupLevelMaxRunDummies:                20,
-		groupLevelAllowParametricFallback:      false,
-		predictorSensitivityMinTrials:          0,
-		predictorSensitivityPrimaryUnit:        0,
-		predictorSensitivityPermutations:       0,
-		predictorSensitivityPermutationPrimary: true,
-		predictorSensitivityFeaturesSpec:       "",
-
-		reportTopN:                     15,
-		temporalResolutionMs:           50,
-		temporalCorrectionMethod:       0,
-		temporalSmoothMs:               100,
-		temporalTimeMinMs:              -200,
-		temporalTimeMaxMs:              1000,
-		temporalTargetColumn:           "",
-		temporalSplitByCondition:       true,
-		temporalConditionColumn:        "",
-		temporalConditionValues:        "",
-		temporalIncludeROIAverages:     true,
-		temporalIncludeTFGrid:          true,
-		temporalFeaturesSpec:           "",
-		temporalITPCBaselineCorrection: true,
-		temporalITPCBaselineMin:        -0.5,
-		temporalITPCBaselineMax:        -0.01,
+		correlationsTypesSpec:               "partial_cov_predictor",
+		correlationsUseCrossfitResidual:     false,
+		correlationsPrimaryUnit:             0,
+		correlationsMinRuns:                 3,
+		correlationsPreferPredictorResidual: false,
+		correlationsPermutations:            0,
+		correlationsPermutationPrimary:      false,
+		correlationsPowerSegment:            "",
+		correlationsFeaturesSpec:            "",
+		groupLevelBlockPermutation:          true,
+		groupLevelTarget:                    "",
+		groupLevelControlPredictor:          true,
+		groupLevelControlTrialOrder:         true,
+		groupLevelControlRunEffects:         false,
+		groupLevelMaxRunDummies:             20,
+		groupLevelAllowParametricFallback:   false,
+		reportTopN:                          15,
+		temporalResolutionMs:                50,
+		temporalCorrectionMethod:            0,
+		temporalSmoothMs:                    100,
+		temporalTimeMinMs:                   -200,
+		temporalTimeMaxMs:                   1000,
+		temporalTargetColumn:                "",
+		temporalSplitByCondition:            true,
+		temporalConditionColumn:             "",
+		temporalConditionValues:             "",
+		temporalIncludeROIAverages:          true,
+		temporalIncludeTFGrid:               true,
+		temporalFeaturesSpec:                "",
+		temporalITPCBaselineCorrection:      true,
+		temporalITPCBaselineMin:             -0.5,
+		temporalITPCBaselineMax:             -0.01,
 		// ERDS defaults
-		temporalERDSBaselineMin:     -0.5,
-		temporalERDSBaselineMax:     -0.1,
-		temporalERDSMethod:          0, // 0=percent, 1=zscore
-		mixedEffectsType:            0,
-		mixedIncludePredictor:       true,
-		mediationMinEffect:          0.05,
-		mediationPermutationPrimary: true,
+		temporalERDSBaselineMin: -0.5,
+		temporalERDSBaselineMax: -0.1,
+		temporalERDSMethod:      0, // 0=percent, 1=zscore
 		// Cluster defaults
 		clusterThreshold:       0.05,
 		clusterMinSize:         2,
@@ -3008,28 +2829,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		clusterConditionColumn: "",
 		clusterConditionValues: "",
 		clusterFeaturesSpec:    "",
-		// Mediation defaults
-		mediationBootstrap:           1000,
-		mediationMaxMediatorsEnabled: true,
-		mediationMaxMediators:        20,
-		mediationPermutations:        0, // Disabled by default
-		mediationFeaturesSpec:        "",
-		// Moderation defaults
-		moderationMaxFeaturesEnabled: true,
-		moderationMaxFeatures:        50,
-		moderationMinSamples:         15,
-		moderationPermutations:       0, // Disabled by default
-		moderationPermutationPrimary: true,
-		moderationFeaturesSpec:       "",
-		// Mixed effects defaults
-		mixedMaxFeatures: 50,
 		// Condition defaults
 		conditionEffectThreshold:    0.5,
 		conditionFailFast:           true,
 		conditionPermutationPrimary: false,
 		conditionPrimaryUnit:        0,
-		conditionWindowPrimaryUnit:  0,
-		conditionWindowMinSamples:   10,
 		conditionCompareLabels:      "",
 		conditionMinTrials:          0,
 		conditionFeaturesSpec:       "",
@@ -3424,18 +3228,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"regression":              false,
 			"condition":               false,
 			"temporal":                false,
-			"predictor_sensitivity":   false,
 			"cluster":                 false,
 
-			// Advanced/Causal Analyses
-			"mediation":     false,
-			"moderation":    false,
-			"mixed_effects": false,
-
-			// Quality & Validation
-			"stability":  false,
-			"validation": false,
-			"report":     false,
+			// Reporting
+			"report": false,
 		}
 		for i, c := range behaviorComputations {
 			m.computationSelected[i] = defaultComps[c.Key]

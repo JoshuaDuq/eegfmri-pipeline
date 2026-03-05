@@ -470,6 +470,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
+		{key: "behavior_analysis.trial_table.add_lag_features", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.trialTableAddLagFeatures = b
+			}
+		}},
 		{key: "behavior_analysis.trial_order.max_missing_fraction", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
 				m.trialOrderMaxMissingFraction = f

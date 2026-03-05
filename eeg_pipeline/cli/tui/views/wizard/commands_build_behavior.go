@@ -314,21 +314,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--condition-compare-labels")
 			args = append(args, splitCSVList(m.conditionCompareLabels)...)
 		}
-		if strings.TrimSpace(m.conditionCompareWindows) != "" {
-			args = append(args, "--condition-compare-windows")
-			args = append(args, splitSpaceList(m.conditionCompareWindows)...)
-		}
 		if m.conditionMinTrials > 0 {
 			args = append(args, "--condition-min-trials", fmt.Sprintf("%d", m.conditionMinTrials))
 		}
 		if m.conditionPrimaryUnit == 1 {
 			args = append(args, "--condition-primary-unit", "run_mean")
-		}
-		if m.conditionWindowPrimaryUnit == 1 {
-			args = append(args, "--condition-window-primary-unit", "run_mean")
-		}
-		if m.conditionWindowMinSamples != 10 {
-			args = append(args, "--condition-window-min-samples", fmt.Sprintf("%d", m.conditionWindowMinSamples))
 		}
 		appendBoolPair(
 			m.conditionPermutationPrimary,

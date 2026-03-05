@@ -7,6 +7,7 @@ def build_stage_runners_impl(
     *,
     stage_load_fn: Callable[[Any], Any],
     stage_trial_table_fn: Callable[[Any, Any], Any],
+    stage_lag_features_fn: Callable[[Any, Any], Any],
     stage_predictor_residual_fn: Callable[[Any, Any], Any],
     stage_correlate_design_fn: Callable[[Any, Any], Any],
     stage_correlate_effect_sizes_fn: Callable[[Any, Any, Any], Any],
@@ -14,6 +15,7 @@ def build_stage_runners_impl(
     stage_correlate_primary_selection_fn: Callable[[Any, Any, Any, Any], Any],
     stage_correlate_fdr_fn: Callable[[Any, Any, Any], Any],
     stage_regression_fn: Callable[[Any, Any], Any],
+    stage_icc_fn: Callable[[Any, Any], Any],
     stage_condition_column_fn: Callable[[Any, Any], Any],
     stage_temporal_tfr_fn: Callable[[Any], Any],
     stage_temporal_stats_fn: Callable[[Any], Any],
@@ -27,6 +29,7 @@ def build_stage_runners_impl(
     return {
         "load": lambda ctx, config, outputs: stage_load_fn(ctx),
         "trial_table": lambda ctx, config, outputs: stage_trial_table_fn(ctx, config),
+        "lag_features": lambda ctx, config, outputs: stage_lag_features_fn(ctx, config),
         "predictor_residual": lambda ctx, config, outputs: stage_predictor_residual_fn(ctx, config),
         "correlate_design": lambda ctx, config, outputs: stage_correlate_design_fn(ctx, config),
         "correlate_effect_sizes": lambda ctx, config, outputs: stage_correlate_effect_sizes_fn(
@@ -49,6 +52,7 @@ def build_stage_runners_impl(
             or outputs.get("correlate_effect_sizes", []),
         ),
         "regression": lambda ctx, config, outputs: stage_regression_fn(ctx, config),
+        "icc": lambda ctx, config, outputs: stage_icc_fn(ctx, config),
         "condition_column": lambda ctx, config, outputs: stage_condition_column_fn(ctx, config),
         "temporal_tfr": lambda ctx, config, outputs: stage_temporal_tfr_fn(ctx),
         "temporal_stats": lambda ctx, config, outputs: stage_temporal_stats_fn(ctx),
@@ -68,6 +72,7 @@ def build_stage_runners_from_namespace_impl(
     return build_stage_runners_impl(
         stage_load_fn=ns["stage_load"],
         stage_trial_table_fn=ns["stage_trial_table"],
+        stage_lag_features_fn=ns["stage_lag_features"],
         stage_predictor_residual_fn=ns["stage_predictor_residual"],
         stage_correlate_design_fn=ns["stage_correlate_design"],
         stage_correlate_effect_sizes_fn=ns["stage_correlate_effect_sizes"],
@@ -75,6 +80,7 @@ def build_stage_runners_from_namespace_impl(
         stage_correlate_primary_selection_fn=ns["stage_correlate_primary_selection"],
         stage_correlate_fdr_fn=ns["stage_correlate_fdr"],
         stage_regression_fn=ns["stage_regression"],
+        stage_icc_fn=ns["stage_icc"],
         stage_condition_column_fn=ns["stage_condition_column"],
         stage_temporal_tfr_fn=ns["stage_temporal_tfr"],
         stage_temporal_stats_fn=ns["stage_temporal_stats"],

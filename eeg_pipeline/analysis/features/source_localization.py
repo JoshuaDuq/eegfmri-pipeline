@@ -1624,9 +1624,9 @@ def _load_source_contrast_config(config: Any) -> SourceContrastConfig:
     condition_b = str(contrast_cfg.get("condition_b", "") or "").strip()
     min_trials_raw = contrast_cfg.get("min_trials_per_condition", 5)
     emit_welch_stats = _parse_bool_config(
-        contrast_cfg.get("emit_welch_stats", True),
+        contrast_cfg.get("emit_welch_stats", False),
         "feature_engineering.sourcelocalization.contrast.emit_welch_stats",
-        default=True,
+        default=False,
     )
     if isinstance(min_trials_raw, bool):
         raise ValueError(
@@ -1663,6 +1663,12 @@ def _load_source_contrast_config(config: Any) -> SourceContrastConfig:
         if condition_a == condition_b:
             raise ValueError(
                 "feature_engineering.sourcelocalization.contrast.condition_a and condition_b must differ."
+            )
+        if emit_welch_stats:
+            raise ValueError(
+                "feature_engineering.sourcelocalization.contrast.emit_welch_stats=true is not "
+                "scientifically valid for within-subject trial rows. Keep source contrasts "
+                "descriptive here and run inferential models at the subject/group level."
             )
 
     return SourceContrastConfig(
@@ -1989,20 +1995,6 @@ def extract_source_contrast_features(
         row[f"{prefix}_delta_{cond_a_token}_minus_{cond_b_token}"] = delta
         row[f"{prefix}_cohen_d_{cond_a_token}_vs_{cond_b_token}"] = cohen_d
 
-        if contrast_cfg.emit_welch_stats:
-            if values_a.size >= 2 and values_b.size >= 2:
-                t_stat, p_val = stats.ttest_ind(
-                    values_a,
-                    values_b,
-                    equal_var=False,
-                    nan_policy="omit",
-                )
-                row[f"{prefix}_welch_t"] = float(t_stat)
-                row[f"{prefix}_welch_p"] = float(p_val)
-            else:
-                row[f"{prefix}_welch_t"] = float("nan")
-                row[f"{prefix}_welch_p"] = float("nan")
-
     contrast_df = pd.DataFrame([row])
     contrast_df.attrs["feature_granularity"] = "subject"
     contrast_df.attrs["condition_column"] = resolved_condition_col
@@ -2010,7 +2002,7 @@ def extract_source_contrast_features(
     contrast_df.attrs["condition_b"] = contrast_cfg.condition_b
     contrast_df.attrs["min_trials_per_condition"] = int(contrast_cfg.min_trials_per_condition)
     contrast_df.attrs["source_contrast_enabled"] = True
-    contrast_df.attrs["statistical_scope"] = "within_subject_trial_level_descriptive"
+    contrast_df.attrs["statistical_scope"] = "within_subject_trial_level_descriptive_only"
 
     logger.info(
         "Source contrast: %d columns computed for '%s' vs '%s' (%s=%d, %s=%d).",
@@ -2449,6 +2441,10 @@ def extract_source_localization_features(
                 "dropped_rois": list(dropped_rois),
                 "surviving_vertices_per_roi": {
                     roi_name: int(len(roi_row_indices[roi_name]))
+                    for roi_name in surviving_roi_names
+                },
+                "surviving_stc_rows_per_roi": {
+                    roi_name: [int(idx) for idx in roi_row_indices[roi_name]]
                     for roi_name in surviving_roi_names
                 },
             }

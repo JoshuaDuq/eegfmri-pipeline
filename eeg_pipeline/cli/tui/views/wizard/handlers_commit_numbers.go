@@ -1108,15 +1108,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 0 && val <= 1 {
 			m.trialOrderMaxMissingFraction = val
 		}
-	case optFeatureQCMaxMissingPct:
-		if val >= 0 && val <= 1 {
-			m.featureQCMaxMissingPct = val
-		}
-	case optFeatureQCMinVariance:
-		if val > 0 {
-			m.featureQCMinVariance = val
-		}
-
 	// Predictor residual + diagnostics
 	case optPredictorResidualPolyDegree:
 		if val >= 1 {
@@ -1184,78 +1175,7 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 0 {
 			m.regressionMaxFeatures = int(val)
 		}
-
-	// Models
-	case optModelsTempSplineKnots:
-		if val >= 4 {
-			m.modelsTempSplineKnots = int(val)
-		}
-	case optModelsTempSplineQlow:
-		if val > 0 && val < 1 {
-			m.modelsTempSplineQlow = val
-		}
-	case optModelsTempSplineQhigh:
-		if val > 0 && val < 1 {
-			m.modelsTempSplineQhigh = val
-		}
-	case optModelsTempSplineMinN:
-		if val >= 1 {
-			m.modelsTempSplineMinN = int(val)
-		}
-	case optModelsMaxFeatures:
-		if val >= 0 {
-			m.modelsMaxFeatures = int(val)
-		}
-	case optModelsMinSamples:
-		if val >= 1 {
-			m.modelsMinSamples = int(val)
-		}
-
-	// Stability
-	case optStabilityMaxFeatures:
-		if val >= 0 {
-			m.stabilityMaxFeatures = int(val)
-		}
-	case optStabilityAlpha:
-		if val > 0 && val <= 1 {
-			m.stabilityAlpha = val
-		}
-	case optStabilityMinGroupTrials:
-		if val >= 0 {
-			m.stabilityMinGroupN = int(val)
-		}
-
-	// Influence
-	case optInfluenceTempSplineKnots:
-		if val >= 4 {
-			m.influenceTempSplineKnots = int(val)
-		}
-	case optInfluenceTempSplineQlow:
-		if val > 0 && val < 1 {
-			m.influenceTempSplineQlow = val
-		}
-	case optInfluenceTempSplineQhigh:
-		if val > 0 && val < 1 {
-			m.influenceTempSplineQhigh = val
-		}
-	case optInfluenceTempSplineMinN:
-		if val >= 1 {
-			m.influenceTempSplineMinN = int(val)
-		}
-	case optInfluenceMaxFeatures:
-		if val >= 0 {
-			m.influenceMaxFeatures = int(val)
-		}
-	case optInfluenceCooksThreshold:
-		if val >= 0 {
-			m.influenceCooksThreshold = val
-		}
-	case optInfluenceLeverageThreshold:
-		if val >= 0 {
-			m.influenceLeverageThreshold = val
-		}
-
-	// Predictor sensitivity / temporal
+	// Report / temporal
 	case optReportTopN:
 		if val >= 1 {
 			m.reportTopN = int(val)
@@ -1287,25 +1207,9 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 1 {
 			m.tfHeatmapTimeResMs = int(val)
 		}
-	case optPredictorSensitivityMinTrials:
-		if val >= 0 {
-			m.predictorSensitivityMinTrials = int(val)
-		}
-	case optPredictorSensitivityPermutations:
-		if val >= 0 {
-			m.predictorSensitivityPermutations = int(val)
-		}
 	case optConditionMinTrials:
 		if val >= 0 {
 			m.conditionMinTrials = int(val)
-		}
-	case optConditionWindowMinSamples:
-		if val >= 1 {
-			m.conditionWindowMinSamples = int(val)
-		}
-	case optModerationMinSamples:
-		if val >= 1 {
-			m.moderationMinSamples = int(val)
 		}
 	case optClusterMinSize:
 		if val >= 1 {
@@ -1314,34 +1218,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optClusterThreshold:
 		if val > 0 && val <= 1 {
 			m.clusterThreshold = val
-		}
-	case optMediationBootstrap:
-		if val >= 0 {
-			m.mediationBootstrap = int(val)
-		}
-	case optMediationPermutations:
-		if val >= 0 {
-			m.mediationPermutations = int(val)
-		}
-	case optMediationMinEffect:
-		if val >= 0 {
-			m.mediationMinEffect = val
-		}
-	case optMediationMaxMediators:
-		if val >= 1 {
-			m.mediationMaxMediators = int(val)
-		}
-	case optModerationMaxFeatures:
-		if val >= 1 {
-			m.moderationMaxFeatures = int(val)
-		}
-	case optModerationPermutations:
-		if val >= 0 {
-			m.moderationPermutations = int(val)
-		}
-	case optMixedMaxFeatures:
-		if val >= 1 {
-			m.mixedMaxFeatures = int(val)
 		}
 	case optConditionEffectThreshold:
 		m.conditionEffectThreshold = val
