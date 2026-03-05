@@ -7,7 +7,7 @@ Per-subject regression analyses that complement correlations:
 Primary model (default):
     outcome ~ predictor + trial_order (+ run/block dummies) + feature
 
-Optional moderation:
+Optional interaction term:
     + feature*predictor
 
 Outputs robust (HC3) standard errors and optional Freedman–Lane permutation p-values.

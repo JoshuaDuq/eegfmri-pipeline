@@ -3,7 +3,7 @@ Internal Regression Utilities
 ==============================
 
 Shared internal utilities for OLS regression, HC3 standard errors, and R² computation.
-These are private helpers used by feature_models, trialwise_regression, moderation, and mediation modules.
+These are private helpers used by feature_models and trialwise_regression.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def _ols_regression(
 ) -> Tuple[np.ndarray, np.ndarray, float, Optional[float]]:
     """Complete OLS regression with standard errors and optional R².
     
-    Consolidated implementation used by moderation and mediation modules.
+    Consolidated implementation shared by regression helpers.
     
     Parameters
     ----------

@@ -470,28 +470,6 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertLess(abs(float(out.iloc[0]["r"])), 0.35)
 
-    def test_moderation_simple_slope_uses_covariance_term(self):
-        from eeg_pipeline.utils.analysis.stats.moderation import compute_moderation_effect
-
-        rng = np.random.default_rng(0)
-        n = 300
-        x = rng.normal(size=n)
-        w = 0.6 * x + rng.normal(scale=0.8, size=n)
-        y = 0.5 + 0.8 * x - 0.4 * w + 0.9 * (x * w) + rng.normal(scale=1.0, size=n)
-
-        result = compute_moderation_effect(x, w, y, center_predictors=True)
-        self.assertTrue(np.isfinite(result.cov_b1_b3))
-
-        w_std = float(np.std(w))
-        slope_high = result.b1 + result.b3 * w_std
-        var_slope_high = result.var_b1 + (w_std**2) * result.var_b3 + 2 * w_std * result.cov_b1_b3
-        self.assertGreater(var_slope_high, 0.0)
-
-        dof = max(result.n - 4, 1)
-        t_value = slope_high / np.sqrt(var_slope_high)
-        expected_p = float(2 * (1 - stats.t.cdf(np.abs(t_value), dof)))
-        self.assertAlmostEqual(float(result.p_slope_high), expected_p, places=7)
-
     def test_condition_effects_respect_min_samples(self):
         from eeg_pipeline.utils.analysis.stats.effect_size import compute_batch_condition_effects
         from eeg_pipeline.utils.parallel import _compute_single_condition_effect
@@ -601,24 +579,6 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             strict=False,
         )
         self.assertEqual(sorted(idx.tolist()), [0, 1, 2, 3])
-
-    def test_predictor_sensitivity_perm_mode_marks_missing_when_permutation_unavailable(self):
-        from eeg_pipeline.utils.analysis.stats.correlation import run_predictor_sensitivity_correlations
-
-        out = run_predictor_sensitivity_correlations(
-            features_df=pd.DataFrame({"power_alpha": [0.1, 0.2, 0.3, 0.4, 0.6, 0.7]}),
-            outcomes=pd.Series([10, 20, 30, 40, 50, 60], dtype=float),
-            predictors=pd.Series([44.1, 44.3, 44.6, 45.0, 45.3, 45.6], dtype=float),
-            method="spearman",
-            min_samples=5,
-            n_perm=0,
-            p_primary_mode="perm",
-        )
-
-        self.assertFalse(out.empty)
-        self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
-        self.assertEqual(str(out.iloc[0]["p_kind_primary"]), "perm_missing_required")
-        self.assertEqual(str(out.iloc[0]["p_primary_source"]), "perm_missing_required")
 
     def test_behavior_pipeline_config_parses_run_validation_flag(self):
         from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig

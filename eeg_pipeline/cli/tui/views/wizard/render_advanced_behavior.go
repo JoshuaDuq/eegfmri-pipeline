@@ -500,7 +500,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optRegressionIncludeRunBlock:
 			return "Run/Block Dummies", m.boolToOnOff(m.regressionIncludeRunBlock), "categorical controls"
 		case optRegressionIncludeInteraction:
-			return "Feature×Temp", m.boolToOnOff(m.regressionIncludeInteraction), "moderation term"
+			return "Feature×Temp", m.boolToOnOff(m.regressionIncludeInteraction), "interaction term"
 		case optRegressionStandardize:
 			return "Standardize", m.boolToOnOff(m.regressionStandardize), "z-score predictors"
 		case optRegressionMinSamples:

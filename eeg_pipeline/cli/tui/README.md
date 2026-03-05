@@ -243,7 +243,7 @@ A command-palette overlay activated with `Ctrl+K` from the main menu or wizard:
 | EEG Preprocessing | `preprocessing` | `bids` | Bad channel detection, filtering, ICA, epoching |
 | fMRI Preprocessing | `fmri` | `bids_fmri` | fMRIPrep-style preprocessing |
 | Features | `features` | `epochs` | Power, connectivity, aperiodic, ITPC, PAC, complexity, ratios, asymmetry, microstates, ERDS, spectral |
-| Behavior | `behavior` | `epochs` | Trial tables, correlations, regression, condition comparison, mediation, mixed effects |
+| Behavior | `behavior` | `epochs` | Trial tables, correlations, regression, condition comparison |
 | Machine Learning | `ml` | `features` | LOSO regression (ElasticNet/Ridge/RF), classification (SVM/LR/RF/CNN), time generalization |
 | Plotting | `plotting` | `all` | 40+ plot types across power, connectivity, TFR, ERP, behavior, and more |
 | fMRI Analysis | `fmri-analysis` | `bids_fmri` | First-level contrasts, trial-wise signatures |

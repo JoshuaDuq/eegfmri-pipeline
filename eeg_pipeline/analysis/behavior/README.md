@@ -8,7 +8,6 @@ pipeline and its group-level correlation aggregation.
 The current behavior DAG includes:
 
 - `load`
-- `metadata`
 - `trial_table`
 - `lag_features`
 - `predictor_residual`
@@ -17,10 +16,8 @@ The current behavior DAG includes:
 - `correlate_pvalues`
 - `correlate_primary_selection`
 - `correlate_fdr`
-- `correlations`
 - `regression`
 - `condition_column`
-- `condition_multigroup`
 - `temporal_tfr`
 - `temporal_stats`
 - `cluster`
@@ -28,11 +25,6 @@ The current behavior DAG includes:
 - `hierarchical_fdr_summary`
 - `report`
 - `export`
-
-Removed computations such as `feature_qc`, `condition_window`, `predictor_models`,
-`models`, `stability`, `consistency`, `influence`, `predictor_sensitivity`,
-`mediation`, `moderation`, and subject-level `mixed_effects` are not part of the
-pipeline anymore.
 
 ## Main modules
 
@@ -56,4 +48,4 @@ pipeline anymore.
 
 - Trial-level inference is guarded against invalid i.i.d. assumptions.
 - Group-level analysis currently supports multilevel correlations only.
-- The CLI and TUI should only expose the active stage surface above.
+- The CLI and TUI should expose only the stage surface above.

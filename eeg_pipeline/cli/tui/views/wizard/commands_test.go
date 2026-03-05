@@ -999,8 +999,6 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	}
 
 	m.predictorResidualMinSamples = 14
-	m.predictorResidualModelCompareMinSamples = 11
-	m.predictorResidualBreakpointMinSamples = 16
 
 	m.regressionTempControl = 2
 	m.regressionTempSplineMinN = 18
@@ -1015,12 +1013,6 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	}
 	if !containsSubsequence(args, []string{"--predictor-residual-min-samples", "14"}) {
 		t.Fatalf("expected --predictor-residual-min-samples 14 in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--predictor-residual-model-compare-min-samples", "11"}) {
-		t.Fatalf("expected --predictor-residual-model-compare-min-samples 11 in args, got: %#v", args)
-	}
-	if !containsSubsequence(args, []string{"--predictor-residual-breakpoint-min-samples", "16"}) {
-		t.Fatalf("expected --predictor-residual-breakpoint-min-samples 16 in args, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--regression-predictor-spline-min-samples", "18"}) {
 		t.Fatalf("expected --regression-predictor-spline-min-samples 18 in args, got: %#v", args)

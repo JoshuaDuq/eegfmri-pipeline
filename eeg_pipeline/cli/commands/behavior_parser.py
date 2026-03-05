@@ -230,7 +230,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Max fraction of missing trial-order values before disabling trial-order control (default: 0.1)",
     )
 
-    residual_group = parser.add_argument_group("Predictor residual / predictor-model diagnostics")
+    residual_group = parser.add_argument_group("Predictor residual diagnostics")
     residual_group.add_argument("--predictor-residual", action="store_true", default=None, dest="predictor_residual_enabled")
     residual_group.add_argument("--no-predictor-residual", action="store_false", dest="predictor_residual_enabled")
     residual_group.add_argument("--predictor-residual-method", choices=["spline", "poly"], default=None, dest="predictor_residual_method")

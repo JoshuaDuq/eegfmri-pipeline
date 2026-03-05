@@ -680,7 +680,7 @@ behavior_analysis:
       spline_n_knots: 5
 
   
-  # Trialwise regression/moderation (complements correlations)
+  # Trialwise regression (complements correlations)
   regression:
     enabled: false
     primary_unit: "trial"            # "trial" | "run_mean"
