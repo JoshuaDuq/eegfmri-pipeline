@@ -1,0 +1,452 @@
+###############################################################################
+# EEG-fMRI Pipeline — Canonical Configuration Reference
+#
+# This file documents every supported configuration key.
+# Copy and rename it to your project directory (e.g. config.yaml), populate
+# the required values, and run any pipeline stage without the TUI:
+#
+#   eeg-pipeline behavior compute --subjects 0001 0002
+#   eeg-pipeline features compute --subjects 0001 0002
+#   eeg-pipeline preprocessing full --subjects 0001 0002
+#
+# All TUI advanced options correspond 1-to-1 to keys in this file.
+# Keys marked [required] must be set; all others have usable defaults.
+###############################################################################
+
+
+###############################################################################
+# Project / Paths
+###############################################################################
+
+project:
+  task: "task"                        # [required] BIDS task label (e.g. "pain", "rest")
+  random_state: 42                    # Global RNG seed
+
+paths:
+  bids_root: ""                       # [required] Path to EEG BIDS dataset root
+  deriv_root: ""                      # [required] Path to derivatives root (outputs)
+  bids_fmri_root: ""                  # Path to fMRI BIDS dataset (optional)
+
+
+###############################################################################
+# Event Columns — maps behavioral concepts to events.tsv column names
+###############################################################################
+
+event_columns:
+  predictor: ["predictor"]           # Column(s) for continuous predictor (e.g. dose, intensity)
+  outcome: ["outcome"]               # Column(s) for outcome variable (e.g. rating, score)
+  binary_outcome: ["binary_outcome"] # Column(s) for binary condition label (e.g. hit/miss)
+
+
+###############################################################################
+# Behavior Analysis Pipeline
+# Run: eeg-pipeline behavior compute [options]
+###############################################################################
+
+behavior_analysis:
+
+  # ── Core settings ──────────────────────────────────────────────────────────
+  predictor_type: "continuous"        # "continuous" | "binary" | "categorical"
+  predictor_column: "predictor"       # Explicit predictor column override
+  outcome_column: "outcome"           # Explicit outcome column override
+  predictor_control_enabled: true     # Partial-out predictor in correlations
+  control_trial_order: true           # Control for within-run trial position
+
+  # ── Computation flags (what to run) ────────────────────────────────────────
+  trial_table:
+    enabled: true
+    format: "tsv"                     # "tsv" | "parquet"
+    disallow_positional_alignment: false
+    add_lag_features: false           # kept for config compat; stage removed
+
+  predictor_residual:
+    enabled: true                     # Requires predictor_type = continuous
+    method: "spline"                  # "spline" | "poly"
+    min_samples: 10
+    poly_degree: 2
+    spline_df_candidates: [3, 4, 5]
+    crossfit:
+      enabled: false
+      group_column: "run_id"
+      n_splits: 5
+      method: "spline"
+      spline_n_knots: 5
+
+  correlations:
+    enabled: true
+    types: ["partial_cov_predictor"]  # "raw" | "partial_cov" | "partial_predictor" | "partial_cov_predictor" | "run_mean"
+    primary_unit: "run_mean"          # "trial" | "run_mean" — IMPORTANT: trial requires permutations
+    prefer_predictor_residual: false
+    use_crossfit_predictor_residual: true
+    target_column: ""                 # Custom target column (empty = auto-resolve)
+    power_segment_preference: ""      # Preferred segment for power correlations
+    min_runs: 3
+    permutation:
+      enabled: true                   # Required when primary_unit=trial (non-i.i.d.)
+      n_permutations: 1000
+    p_primary_mode: "perm_if_available"  # "perm" | "asymptotic" | "perm_if_available"
+    compute_change_scores: true
+    loso_stability: true
+    compute_bayes_factors: false
+
+  regression:
+    enabled: false                    # Off by default — optional enrichment
+    outcome: "outcome"                # "outcome" | "predictor_residual" | "predictor"
+    primary_unit: "run_mean"          # "trial" | "run_mean"
+    include_predictor: true
+    predictor_control: "linear"       # "linear" | "outcome_hat" | "spline"
+    include_trial_order: true
+    include_prev_terms: false
+    include_run_block: false
+    include_interaction: false
+    standardize: false
+    min_samples: 15
+    n_permutations: 0
+    max_features: 0                   # 0 = unlimited
+
+  condition:
+    enabled: true
+    compare_column: ""                # events.tsv column (empty = auto from event_columns.binary_outcome)
+    compare_values: []                # e.g. [0, 1] or ["control", "treatment"]
+    compare_labels: []                # Optional display labels aligned to compare_values
+    primary_unit: "run_mean"          # "trial" | "run_mean"
+    permutation:
+      enabled: true
+    p_primary_mode: "perm_if_available"
+    fail_fast: true
+    effect_size_threshold: 0.5
+    min_trials_per_condition: 5
+    overwrite: true
+
+  temporal:
+    enabled: true
+    target_column: ""                 # Column for temporal correlation (empty = auto)
+    correction_method: "fdr"          # "fdr" | "bonferroni" | "cluster" | "none"
+    time_resolution_ms: 50
+    smooth_window_ms: 100
+    split_by_condition: false
+    condition_column: ""
+    condition_values: []
+    include_roi_averages: true
+    include_tf_grid: false
+    features:
+      power: true
+      itpc: false
+      erds: false
+    itpc:
+      baseline_correction: false
+      baseline_window: [-0.5, -0.01]
+    erds:
+      method: "percent"               # "percent" | "zscore"
+      baseline_window: [-0.5, -0.1]
+
+  cluster:
+    enabled: false                    # Off by default
+    forming_threshold: 0.05
+    min_cluster_size: 2
+    tail: 0                           # 0=two-tailed, 1=upper, -1=lower
+    n_permutations: 1000
+    condition_column: ""
+    condition_values: []
+
+  validation:
+    enabled: true                     # Hierarchical FDR summary
+
+  report:
+    enabled: true
+    top_n: 15
+
+  # ── Group-level (multilevel correlations across subjects) ──────────────────
+  group_level:
+    multilevel_correlations:
+      target: "outcome"
+      control_predictor: false
+      control_trial_order: false
+      control_run_effects: false
+      max_run_dummies: 20
+      allow_parametric_fallback: false
+      block_permutation: true
+
+  # ── Statistics & inference ─────────────────────────────────────────────────
+  statistics:
+    correlation_method: "spearman"    # "spearman" | "pearson"
+    robust_correlation: null          # null | "percentage_bend" | "winsorized" | "shepherd"
+    fdr_alpha: 0.05
+    hierarchical_fdr: true
+    allow_iid_trials: false           # DO NOT set true without understanding implications
+    n_permutations: 1000              # Global default for all stages
+    default_n_bootstrap: 1000
+    compute_reliability: false
+    predictor_control: "spline"       # "linear" | "spline" | "none"
+    base_seed: 42
+    allow_parametric_fallback: false
+
+  permutation:
+    scheme: "shuffle"                 # "shuffle" | "circular_shift"
+    group_column_preference: ["run_id", "block"]
+
+  run_adjustment:
+    enabled: true
+    column: "run_id"
+    include_in_correlations: false
+    max_dummies: 20
+
+  min_samples:
+    default: 10
+
+  # ── Features filter ────────────────────────────────────────────────────────
+  features:
+    exclude_non_trialwise_features: true
+
+  # ── Output ─────────────────────────────────────────────────────────────────
+  output:
+    also_save_csv: false
+    overwrite: true
+
+  n_jobs: -1
+
+
+###############################################################################
+# Feature Extraction Pipeline
+# Run: eeg-pipeline features compute [options]
+###############################################################################
+
+feature_engineering:
+
+  # ── Which feature categories to compute ────────────────────────────────────
+  feature_categories:
+    - power
+    - connectivity
+    - aperiodic
+    - erp
+    - erds
+    - itpc
+    - pac
+    - complexity
+    - bursts
+    - spectral
+    - ratios
+    - asymmetry
+    - microstates
+    - directedconnectivity
+    - sourcelocalization
+    - quality
+
+  # ── Spatial aggregation modes ───────────────────────────────────────────────
+  spatial_modes: ["roi", "global"]    # "channels" | "roi" | "global"
+
+  # ── Spatial transform ───────────────────────────────────────────────────────
+  spatial_transform: "none"           # "none" | "csd" | "laplacian"
+  spatial_transform_per_family: {}    # e.g. {connectivity: "csd", itpc: "laplacian"}
+
+  # ── TFR parameters ─────────────────────────────────────────────────────────
+  time_frequency_analysis:
+    freq_min: 1.0
+    freq_max: 40.0
+    n_freqs: 20
+    min_cycles: 3.0
+    max_cycles: 10.0
+    decim_power: 1
+    decim_phase: 1
+    workers: 1
+
+  # ── Frequency bands ─────────────────────────────────────────────────────────
+  bands:
+    use_iaf: false
+    delta: [1.0, 3.9]
+    theta: [4.0, 7.9]
+    alpha: [8.0, 12.9]
+    beta: [13.0, 30.0]
+    gamma: [30.1, 80.0]
+
+  # ── Power ───────────────────────────────────────────────────────────────────
+  power:
+    baseline_mode: "logratio"
+    require_baseline: true
+    subtract_evoked: false
+    exclude_line_noise: true
+    line_noise_freq: 50
+    line_noise_width_hz: 2.0
+    line_noise_harmonics: 3
+    emit_db: false
+
+  # ── Aperiodic ───────────────────────────────────────────────────────────────
+  aperiodic:
+    fmin: 2.0
+    fmax: 40.0
+    min_points: 10
+    peak_z: 2.0
+    min_r2: 0.7
+    model: "fixed"                    # "fixed" | "knee"
+    min_segment_sec: 0.5
+
+  # ── Connectivity ────────────────────────────────────────────────────────────
+  connectivity:
+    mode: "multitaper"
+    output_level: "roi"
+    graph_metrics: false
+    n_freqs_per_band: 5
+    n_cycles: 7
+    decim: 1
+    min_cycles_per_band: 3
+    min_segment_sec: 0.5
+
+  # ── Source localization ─────────────────────────────────────────────────────
+  sourcelocalization:
+    method: "lcmv"                    # "lcmv" | "eloreta"
+    subject: "fsaverage"
+    subjects_dir: null                # Path to FreeSurfer subjects directory
+    spacing: "oct6"
+    mindist_mm: 5.0
+    reg: 0.05                         # LCMV regularization
+    snr: 3.0                          # eLORETA SNR
+    loose: 0.2                        # eLORETA orientation constraint
+    depth: 0.8                        # eLORETA depth weighting
+    save_stc: false
+    fmri:
+      enabled: false
+      stats_map_path: null            # Path to z-stat NIfTI
+      provenance: "unknown"           # "independent" | "same_dataset" | "unknown"
+      require_provenance: true
+      allow_same_dataset_provenance: false
+      threshold: 3.1
+      tail: "pos"                     # "pos" | "abs"
+      thresholding:
+        mode: "z"                     # "z" | "fdr"
+        fdr_q: 0.05
+        stat_type: "z"
+      cluster_min_voxels: 50
+      cluster_min_volume_mm3: null
+      max_clusters: 20
+      max_voxels_per_cluster: 2000
+      max_total_voxels: 20000
+      random_seed: 0
+      output_space: "dual"            # "cluster" | "atlas" | "dual"
+
+  # ── Change scores ────────────────────────────────────────────────────────────
+  compute_change_scores: true
+  change_scores:
+    transform: "difference"           # "difference" | "percent" | "log_ratio" | "ratio"
+
+  # ── Storage ──────────────────────────────────────────────────────────────────
+  also_save_csv: false
+  min_epochs_for_features: 10
+
+
+###############################################################################
+# EEG Preprocessing Pipeline
+# Run: eeg-pipeline preprocessing full [options]
+###############################################################################
+
+preprocessing:
+  n_jobs: 1
+  resample_freq: null
+  l_freq: 1.0
+  h_freq: 40.0
+  notch_freqs: null
+  line_freq: 50
+  montage: "standard_1020"
+  eeg_reference: "average"
+  eog_channels: []
+
+  bad_channels:
+    use_pyprep: true
+    ransac: false
+    repeats: 1
+    average_reref: true
+    consider_previous_bads: true
+    overwrite_channels_tsv: true
+
+  ica:
+    algorithm: "fastica"              # "fastica" | "infomax" | "picard"
+    n_components: 0.999
+    l_freq: 1.0
+    rejection_threshold: 0.9
+    probability_threshold: 0.5
+    labels_to_keep: ["brain"]
+    use_icalabel: true
+    keep_mne_bids_bads: false
+
+  epochs:
+    tmin: -0.5
+    tmax: 1.5
+    baseline: [-0.5, 0.0]
+    reject_amplitude_uv: null
+
+
+###############################################################################
+# fMRI Preprocessing Pipeline (fMRIPrep wrapper)
+# Run: eeg-pipeline fmri preprocess [options]
+###############################################################################
+
+fmri_preprocessing:
+  engine: "docker"                    # "docker" | "apptainer"
+  fmriprep:
+    image: "nipreps/fmriprep:latest"
+    output_dir: null
+    work_dir: null
+    fs_license_file: null
+    output_spaces: ["T1w", "MNI152NLin2009cAsym"]
+    skip_bids_validation: false
+    stop_on_first_crash: false
+    use_aroma: false
+    mem_mb: 8000
+    n_threads: 4
+    omp_n_threads: 4
+    low_mem: false
+    dummy_scans: 0
+
+
+###############################################################################
+# Machine Learning Pipeline
+# Run: eeg-pipeline ml regression [options]
+#      eeg-pipeline ml classify [options]
+###############################################################################
+
+machine_learning:
+  n_permutations: 1000
+  inner_splits: 5
+  outer_jobs: 1
+  target: null                        # Target variable for regression/classification
+  preprocessing:
+    imputer_strategy: "median"
+    pca:
+      enabled: false
+      n_components: 0.95
+      whiten: false
+  models:
+    elasticnet:
+      alpha_grid: [0.001, 0.01, 0.1, 1.0]
+      l1_ratio_grid: [0.1, 0.5, 0.9]
+    ridge:
+      alpha_grid: [0.01, 0.1, 1.0, 10.0]
+    random_forest:
+      n_estimators: 100
+      max_depth_grid: [null, 5, 10]
+  cv:
+    permutation_scheme: "within_subject"
+  evaluation:
+    ci_method: "bootstrap"
+    bootstrap_iterations: 1000
+
+
+###############################################################################
+# Validation thresholds (applied across pipelines)
+###############################################################################
+
+validation:
+  min_epochs: 20
+  min_channels: 10
+  max_amplitude_uv: 500.0
+
+
+###############################################################################
+# System
+###############################################################################
+
+system:
+  n_jobs: -1
+  strict_mode: false
+
+logging:
+  level: "INFO"                       # "DEBUG" | "INFO" | "WARNING" | "ERROR"

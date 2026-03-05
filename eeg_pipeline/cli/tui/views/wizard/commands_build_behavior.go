@@ -101,7 +101,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// Output options
-	if !m.behaviorOverwrite {
+	if m.behaviorOverwrite {
+		args = append(args, "--overwrite")
+	} else {
 		args = append(args, "--no-overwrite")
 	}
 
@@ -154,26 +156,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			if m.predictorResidualCrossfitMethod == 0 && m.predictorResidualCrossfitSplineKnots != 5 {
 				args = append(args, "--predictor-residual-crossfit-spline-n-knots", fmt.Sprintf("%d", m.predictorResidualCrossfitSplineKnots))
 			}
-		}
-	}
-
-	// Feature QC (optional gating)
-	if m.isComputationSelected("correlations") || m.isComputationSelected("multilevel_correlations") {
-		if m.featureQCEnabled {
-			args = append(args, "--feature-qc-enabled")
-			if m.featureQCMaxMissingPct != 0.2 {
-				args = append(args, "--feature-qc-max-missing-pct", fmt.Sprintf("%.3f", m.featureQCMaxMissingPct))
-			}
-			if m.featureQCMinVariance != 1e-10 {
-				args = append(args, "--feature-qc-min-variance", fmt.Sprintf("%.6e", m.featureQCMinVariance))
-			}
-			appendBoolPair(
-				m.featureQCCheckWithinRunVariance,
-				"--feature-qc-check-within-run-variance",
-				"--no-feature-qc-check-within-run-variance",
-			)
-		} else {
-			args = append(args, "--no-feature-qc-enabled")
 		}
 	}
 

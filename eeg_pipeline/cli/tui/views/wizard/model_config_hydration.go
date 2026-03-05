@@ -384,30 +384,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.groupLevelAllowParametricFallback = b
 			}
 		}},
-		{key: "behavior_analysis.predictor_sensitivity.min_trials", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.predictorSensitivityMinTrials = n
-			}
-		}},
-		{key: "behavior_analysis.predictor_sensitivity.primary_unit", apply: func(v interface{}) {
-			if s, ok := asString(v); ok {
-				if strings.EqualFold(s, "run_mean") || strings.EqualFold(s, "run") {
-					m.predictorSensitivityPrimaryUnit = 1
-				} else {
-					m.predictorSensitivityPrimaryUnit = 0
-				}
-			}
-		}},
-		{key: "behavior_analysis.predictor_sensitivity.n_permutations", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.predictorSensitivityPermutations = n
-			}
-		}},
-		{key: "behavior_analysis.predictor_sensitivity.p_primary_mode", apply: func(v interface{}) {
-			if s, ok := asString(v); ok {
-				m.predictorSensitivityPermutationPrimary = !strings.EqualFold(strings.TrimSpace(s), "asymptotic")
-			}
-		}},
 		{key: "behavior_analysis.condition.compare_values", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
 				m.conditionCompareValues = strings.Join(splitLooseList(spec), ",")
@@ -457,35 +433,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
-		{key: "behavior_analysis.condition.window_comparison.primary_unit", apply: func(v interface{}) {
-			if s, ok := asString(v); ok {
-				if strings.EqualFold(s, "run_mean") || strings.EqualFold(s, "run") {
-					m.conditionWindowPrimaryUnit = 1
-				} else {
-					m.conditionWindowPrimaryUnit = 0
-				}
-			}
-		}},
-		{key: "behavior_analysis.condition.window_comparison.min_samples", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.conditionWindowMinSamples = n
-			}
-		}},
-		{key: "behavior_analysis.mixed_effects.include_predictor", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.mixedIncludePredictor = b
-			}
-		}},
-		{key: "behavior_analysis.mediation.p_primary_mode", apply: func(v interface{}) {
-			if s, ok := asString(v); ok {
-				m.mediationPermutationPrimary = !strings.EqualFold(strings.TrimSpace(s), "asymptotic")
-			}
-		}},
-		{key: "behavior_analysis.moderation.p_primary_mode", apply: func(v interface{}) {
-			if s, ok := asString(v); ok {
-				m.moderationPermutationPrimary = !strings.EqualFold(strings.TrimSpace(s), "asymptotic")
-			}
-		}},
 		{key: "behavior_analysis.report.top_n", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.reportTopN = n
@@ -528,11 +475,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
-		{key: "behavior_analysis.trial_table.add_lag_features", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.trialTableAddLagFeatures = b
-			}
-		}},
 		{key: "behavior_analysis.trial_order.max_missing_fraction", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
 				m.trialOrderMaxMissingFraction = f
@@ -570,46 +512,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "behavior_analysis.predictor_residual.poly_degree", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.predictorResidualPolyDegree = n
-			}
-		}},
-		{key: "behavior_analysis.predictor_models.model_comparison.enabled", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.predictorResidualModelCompareEnabled = b
-			}
-		}},
-		{key: "behavior_analysis.predictor_models.model_comparison.min_samples", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.predictorResidualModelCompareMinSamples = n
-			}
-		}},
-		{key: "behavior_analysis.predictor_models.model_comparison.poly_degrees", apply: func(v interface{}) {
-			if spec, ok := asListSpec(v); ok {
-				m.predictorResidualModelComparePolyDegrees = strings.Join(splitLooseList(spec), ",")
-			}
-		}},
-		{key: "behavior_analysis.predictor_models.breakpoint_test.enabled", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.predictorResidualBreakpointEnabled = b
-			}
-		}},
-		{key: "behavior_analysis.predictor_models.breakpoint_test.min_samples", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.predictorResidualBreakpointMinSamples = n
-			}
-		}},
-		{key: "behavior_analysis.predictor_models.breakpoint_test.n_candidates", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.predictorResidualBreakpointCandidates = n
-			}
-		}},
-		{key: "behavior_analysis.predictor_models.breakpoint_test.quantile_low", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.predictorResidualBreakpointQlow = f
-			}
-		}},
-		{key: "behavior_analysis.predictor_models.breakpoint_test.quantile_high", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.predictorResidualBreakpointQhigh = f
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.crossfit.enabled", apply: func(v interface{}) {
@@ -777,6 +679,252 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "behavior_analysis.feature_registry.feature_classifiers", apply: func(v interface{}) {
 			if s, ok := asCompactJSON(v); ok {
 				m.behaviorFeatureRegistryClassifiersJSON = s
+			}
+		}},
+		// RNG seed from project config
+		{key: "project.random_state", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok && m.rngSeed == 0 {
+				m.rngSeed = n
+			}
+		}},
+		// Global permutations (statistics-level)
+		{key: "behavior_analysis.statistics.n_permutations", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.nPermutations = n
+			}
+		}},
+		// Output options
+		{key: "behavior_analysis.output.also_save_csv", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.alsoSaveCsv = b
+			}
+		}},
+		{key: "behavior_analysis.output.overwrite", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.behaviorOverwrite = b
+			}
+		}},
+		// Regression — full set
+		{key: "behavior_analysis.regression.outcome", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "predictor_residual":
+					m.regressionOutcome = 1
+				case "predictor":
+					m.regressionOutcome = 2
+				default:
+					m.regressionOutcome = 0
+				}
+			}
+		}},
+		{key: "behavior_analysis.regression.include_predictor", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludePredictor = b
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_control", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "outcome_hat":
+					m.regressionTempControl = 1
+				case "spline":
+					m.regressionTempControl = 2
+				default:
+					m.regressionTempControl = 0
+				}
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_spline.n_knots", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.regressionTempSplineKnots = n
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_spline.quantile_low", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.regressionTempSplineQlow = f
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_spline.quantile_high", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.regressionTempSplineQhigh = f
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_spline.min_samples", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.regressionTempSplineMinN = n
+			}
+		}},
+		{key: "behavior_analysis.regression.include_trial_order", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludeTrialOrder = b
+			}
+		}},
+		{key: "behavior_analysis.regression.include_prev_terms", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludePrev = b
+			}
+		}},
+		{key: "behavior_analysis.regression.include_run_block", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludeRunBlock = b
+			}
+		}},
+		{key: "behavior_analysis.regression.include_interaction", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludeInteraction = b
+			}
+		}},
+		{key: "behavior_analysis.regression.standardize", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionStandardize = b
+			}
+		}},
+		{key: "behavior_analysis.regression.min_samples", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.regressionMinSamples = n
+			}
+		}},
+		{key: "behavior_analysis.regression.max_features", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.regressionMaxFeatures = n
+			}
+		}},
+		// Condition — missing fields
+		{key: "behavior_analysis.condition.min_trials_per_condition", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.conditionMinTrials = n
+			}
+		}},
+		{key: "behavior_analysis.condition.effect_size_threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.conditionEffectThreshold = f
+			}
+		}},
+		// Temporal — full set
+		{key: "behavior_analysis.temporal.time_resolution_ms", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.temporalResolutionMs = n
+			}
+		}},
+		{key: "behavior_analysis.temporal.smooth_window_ms", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.temporalSmoothMs = n
+			}
+		}},
+		{key: "behavior_analysis.temporal.time_range_ms", apply: func(v interface{}) {
+			raw, ok := v.([]interface{})
+			if !ok || len(raw) != 2 {
+				return
+			}
+			if lo, ok := asInt(raw[0]); ok {
+				m.temporalTimeMinMs = lo
+			}
+			if hi, ok := asInt(raw[1]); ok {
+				m.temporalTimeMaxMs = hi
+			}
+		}},
+		{key: "behavior_analysis.temporal.split_by_condition", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalSplitByCondition = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.condition_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.temporalConditionColumn = strings.TrimSpace(s)
+			}
+		}},
+		{key: "behavior_analysis.temporal.condition_values", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.temporalConditionValues = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "behavior_analysis.temporal.include_roi_averages", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalIncludeROIAverages = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.include_tf_grid", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalIncludeTFGrid = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.features.power", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalFeaturePowerEnabled = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.features.itpc", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalFeatureITPCEnabled = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.features.erds", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalFeatureERDSEnabled = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.itpc.baseline_correction", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalITPCBaselineCorrection = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.itpc.baseline_window", apply: func(v interface{}) {
+			raw, ok := v.([]interface{})
+			if !ok || len(raw) != 2 {
+				return
+			}
+			if lo, ok := asFloat(raw[0]); ok {
+				m.temporalITPCBaselineMin = lo
+			}
+			if hi, ok := asFloat(raw[1]); ok {
+				m.temporalITPCBaselineMax = hi
+			}
+		}},
+		{key: "behavior_analysis.temporal.erds.method", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				if strings.EqualFold(strings.TrimSpace(s), "zscore") {
+					m.temporalERDSMethod = 1
+				} else {
+					m.temporalERDSMethod = 0
+				}
+			}
+		}},
+		{key: "behavior_analysis.temporal.erds.baseline_window", apply: func(v interface{}) {
+			raw, ok := v.([]interface{})
+			if !ok || len(raw) != 2 {
+				return
+			}
+			if lo, ok := asFloat(raw[0]); ok {
+				m.temporalERDSBaselineMin = lo
+			}
+			if hi, ok := asFloat(raw[1]); ok {
+				m.temporalERDSBaselineMax = hi
+			}
+		}},
+		// Cluster — full set
+		{key: "behavior_analysis.cluster.forming_threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.clusterThreshold = f
+			}
+		}},
+		{key: "behavior_analysis.cluster.min_cluster_size", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterMinSize = n
+			}
+		}},
+		{key: "behavior_analysis.cluster.tail", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterTail = n
+			}
+		}},
+		{key: "behavior_analysis.cluster.condition_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.clusterConditionColumn = strings.TrimSpace(s)
+			}
+		}},
+		{key: "behavior_analysis.cluster.condition_values", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.clusterConditionValues = strings.Join(splitLooseList(spec), " ")
 			}
 		}},
 		{key: "feature_engineering.sourcelocalization.subjects_dir", apply: func(v interface{}) {
@@ -1995,11 +2143,8 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				joined := strings.Join(splitLooseList(spec), ",")
 				if strings.TrimSpace(joined) != "" {
 					m.correlationsFeaturesSpec = joined
-					m.predictorSensitivityFeaturesSpec = joined
 					m.conditionFeaturesSpec = joined
 					m.clusterFeaturesSpec = joined
-					m.mediationFeaturesSpec = joined
-					m.moderationFeaturesSpec = joined
 				}
 			}
 		}},
@@ -2258,16 +2403,9 @@ func (m Model) behaviorSections() []behaviorSection {
 		{Key: "general", Label: "General", Enabled: true},
 		{Key: "trial_table", Label: "Trial Table", Enabled: m.isComputationSelected("trial_table")},
 		{Key: "correlations", Label: "Correlations", Enabled: m.isComputationSelected("correlations")},
-		{Key: "predictor_sensitivity", Label: "Predictor Sensitivity", Enabled: m.isComputationSelected("predictor_sensitivity")},
 		{Key: "regression", Label: "Regression", Enabled: m.isComputationSelected("regression")},
-		{Key: "stability", Label: "Stability", Enabled: m.isComputationSelected("stability")},
-		{Key: "consistency", Label: "Consistency", Enabled: m.isComputationSelected("consistency")},
-		{Key: "influence", Label: "Influence", Enabled: m.isComputationSelected("influence")},
 		{Key: "condition", Label: "Condition", Enabled: m.isComputationSelected("condition")},
 		{Key: "temporal", Label: "Temporal", Enabled: m.isComputationSelected("temporal")},
 		{Key: "cluster", Label: "Cluster", Enabled: m.isComputationSelected("cluster")},
-		{Key: "mediation", Label: "Mediation", Enabled: m.isComputationSelected("mediation")},
-		{Key: "moderation", Label: "Moderation", Enabled: m.isComputationSelected("moderation")},
-		{Key: "mixed_effects", Label: "Mixed Effects", Enabled: m.isComputationSelected("mixed_effects")},
 	}
 }

@@ -402,8 +402,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["conditionMinTrials"] = m.conditionMinTrials
 	cfg["conditionFailFast"] = m.conditionFailFast
 	cfg["conditionPrimaryUnit"] = m.conditionPrimaryUnit
-	cfg["conditionWindowPrimaryUnit"] = m.conditionWindowPrimaryUnit
-	cfg["conditionWindowMinSamples"] = m.conditionWindowMinSamples
 	cfg["conditionEffectThreshold"] = m.conditionEffectThreshold
 	cfg["conditionOverwrite"] = m.conditionOverwrite
 	cfg["temporalTargetColumn"] = m.temporalTargetColumn
@@ -432,15 +430,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 
 	// Trial table
 	cfg["trialTableFormat"] = m.trialTableFormat
-	cfg["trialTableAddLagFeatures"] = m.trialTableAddLagFeatures
 	cfg["trialTableDisallowPositionalAlignment"] = m.trialTableDisallowPositionalAlignment
 	cfg["trialOrderMaxMissingFraction"] = m.trialOrderMaxMissingFraction
-
-	// Feature QC
-	cfg["featureQCEnabled"] = m.featureQCEnabled
-	cfg["featureQCMaxMissingPct"] = m.featureQCMaxMissingPct
-	cfg["featureQCMinVariance"] = m.featureQCMinVariance
-	cfg["featureQCCheckWithinRunVariance"] = m.featureQCCheckWithinRunVariance
 
 	// Predictor residual
 	cfg["predictorResidualEnabled"] = m.predictorResidualEnabled
@@ -448,14 +439,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["predictorResidualPolyDegree"] = m.predictorResidualPolyDegree
 	cfg["predictorResidualSplineDfCandidates"] = m.predictorResidualSplineDfCandidates
 	cfg["predictorResidualMinSamples"] = m.predictorResidualMinSamples
-	cfg["predictorResidualModelCompareEnabled"] = m.predictorResidualModelCompareEnabled
-	cfg["predictorResidualModelComparePolyDegrees"] = m.predictorResidualModelComparePolyDegrees
-	cfg["predictorResidualModelCompareMinSamples"] = m.predictorResidualModelCompareMinSamples
-	cfg["predictorResidualBreakpointEnabled"] = m.predictorResidualBreakpointEnabled
-	cfg["predictorResidualBreakpointCandidates"] = m.predictorResidualBreakpointCandidates
-	cfg["predictorResidualBreakpointMinSamples"] = m.predictorResidualBreakpointMinSamples
-	cfg["predictorResidualBreakpointQlow"] = m.predictorResidualBreakpointQlow
-	cfg["predictorResidualBreakpointQhigh"] = m.predictorResidualBreakpointQhigh
 	cfg["predictorResidualCrossfitEnabled"] = m.predictorResidualCrossfitEnabled
 	cfg["predictorResidualCrossfitGroupColumn"] = m.predictorResidualCrossfitGroupColumn
 	cfg["predictorResidualCrossfitNSplits"] = m.predictorResidualCrossfitNSplits
@@ -480,60 +463,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["regressionPermutations"] = m.regressionPermutations
 	cfg["regressionMaxFeatures"] = m.regressionMaxFeatures
 
-	// Models
-	cfg["modelsIncludePredictor"] = m.modelsIncludePredictor
-	cfg["modelsTempControl"] = m.modelsTempControl
-	cfg["modelsTempSplineKnots"] = m.modelsTempSplineKnots
-	cfg["modelsTempSplineQlow"] = m.modelsTempSplineQlow
-	cfg["modelsTempSplineQhigh"] = m.modelsTempSplineQhigh
-	cfg["modelsTempSplineMinN"] = m.modelsTempSplineMinN
-	cfg["modelsIncludeTrialOrder"] = m.modelsIncludeTrialOrder
-	cfg["modelsIncludePrev"] = m.modelsIncludePrev
-	cfg["modelsIncludeRunBlock"] = m.modelsIncludeRunBlock
-	cfg["modelsIncludeInteraction"] = m.modelsIncludeInteraction
-	cfg["modelsStandardize"] = m.modelsStandardize
-	cfg["modelsMinSamples"] = m.modelsMinSamples
-	cfg["modelsMaxFeatures"] = m.modelsMaxFeatures
-	cfg["modelsOutcomeValue"] = m.modelsOutcomeValue
-	cfg["modelsOutcomePredictorResidual"] = m.modelsOutcomePredictorResidual
-	cfg["modelsOutcomePredictor"] = m.modelsOutcomePredictor
-	cfg["modelsOutcomeBinaryOutcome"] = m.modelsOutcomeBinaryOutcome
-	cfg["modelsFamilyOLS"] = m.modelsFamilyOLS
-	cfg["modelsFamilyRobust"] = m.modelsFamilyRobust
-	cfg["modelsFamilyQuantile"] = m.modelsFamilyQuantile
-	cfg["modelsFamilyLogit"] = m.modelsFamilyLogit
-	cfg["modelsBinaryOutcome"] = m.modelsBinaryOutcome
-	cfg["modelsPrimaryUnit"] = m.modelsPrimaryUnit
-	cfg["modelsForceTrialIIDAsymptotic"] = m.modelsForceTrialIIDAsymptotic
-
-	// Stability
-	cfg["stabilityMethod"] = m.stabilityMethod
-	cfg["stabilityOutcome"] = m.stabilityOutcome
-	cfg["stabilityGroupColumn"] = m.stabilityGroupColumn
-	cfg["stabilityPartialTemp"] = m.stabilityPartialTemp
-	cfg["stabilityMinGroupN"] = m.stabilityMinGroupN
-	cfg["stabilityMaxFeatures"] = m.stabilityMaxFeatures
-	cfg["stabilityAlpha"] = m.stabilityAlpha
-
-	// Consistency & influence
-	cfg["consistencyEnabled"] = m.consistencyEnabled
-	cfg["influenceOutcomeValue"] = m.influenceOutcomeValue
-	cfg["influenceOutcomePredictorResidual"] = m.influenceOutcomePredictorResidual
-	cfg["influenceOutcomePredictor"] = m.influenceOutcomePredictor
-	cfg["influenceMaxFeatures"] = m.influenceMaxFeatures
-	cfg["influenceIncludePredictor"] = m.influenceIncludePredictor
-	cfg["influenceTempControl"] = m.influenceTempControl
-	cfg["influenceTempSplineKnots"] = m.influenceTempSplineKnots
-	cfg["influenceTempSplineQlow"] = m.influenceTempSplineQlow
-	cfg["influenceTempSplineQhigh"] = m.influenceTempSplineQhigh
-	cfg["influenceTempSplineMinN"] = m.influenceTempSplineMinN
-	cfg["influenceIncludeTrialOrder"] = m.influenceIncludeTrialOrder
-	cfg["influenceIncludeRunBlock"] = m.influenceIncludeRunBlock
-	cfg["influenceIncludeInteraction"] = m.influenceIncludeInteraction
-	cfg["influenceStandardize"] = m.influenceStandardize
-	cfg["influenceCooksThreshold"] = m.influenceCooksThreshold
-	cfg["influenceLeverageThreshold"] = m.influenceLeverageThreshold
-
 	// Correlations
 	cfg["correlationsTypesSpec"] = m.correlationsTypesSpec
 	cfg["correlationsTargetColumn"] = m.correlationsTargetColumn
@@ -551,26 +480,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["groupLevelControlRunEffects"] = m.groupLevelControlRunEffects
 	cfg["groupLevelMaxRunDummies"] = m.groupLevelMaxRunDummies
 	cfg["groupLevelAllowParametricFallback"] = m.groupLevelAllowParametricFallback
-	cfg["predictorSensitivityMinTrials"] = m.predictorSensitivityMinTrials
-	cfg["predictorSensitivityPrimaryUnit"] = m.predictorSensitivityPrimaryUnit
-	cfg["predictorSensitivityPermutations"] = m.predictorSensitivityPermutations
-	cfg["predictorSensitivityPermutationPrimary"] = m.predictorSensitivityPermutationPrimary
-
-	// Mixed Effects & Mediation
-	cfg["mixedEffectsType"] = m.mixedEffectsType
-	cfg["mixedIncludePredictor"] = m.mixedIncludePredictor
-	cfg["mixedMaxFeatures"] = m.mixedMaxFeatures
-	cfg["mediationMinEffect"] = m.mediationMinEffect
-	cfg["mediationBootstrap"] = m.mediationBootstrap
-	cfg["mediationMaxMediatorsEnabled"] = m.mediationMaxMediatorsEnabled
-	cfg["mediationMaxMediators"] = m.mediationMaxMediators
-	cfg["mediationPermutations"] = m.mediationPermutations
-	cfg["mediationPermutationPrimary"] = m.mediationPermutationPrimary
-	cfg["moderationMaxFeaturesEnabled"] = m.moderationMaxFeaturesEnabled
-	cfg["moderationMaxFeatures"] = m.moderationMaxFeatures
-	cfg["moderationMinSamples"] = m.moderationMinSamples
-	cfg["moderationPermutations"] = m.moderationPermutations
-	cfg["moderationPermutationPrimary"] = m.moderationPermutationPrimary
 
 	// Cluster tests
 	cfg["clusterThreshold"] = m.clusterThreshold
@@ -1121,12 +1030,9 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// Behavior Statistics
 	cfg["behaviorValidateOnly"] = m.behaviorValidateOnly
 	cfg["correlationsFeaturesSpec"] = m.correlationsFeaturesSpec
-	cfg["predictorSensitivityFeaturesSpec"] = m.predictorSensitivityFeaturesSpec
 	cfg["conditionFeaturesSpec"] = m.conditionFeaturesSpec
 	cfg["temporalFeaturesSpec"] = m.temporalFeaturesSpec
 	cfg["clusterFeaturesSpec"] = m.clusterFeaturesSpec
-	cfg["mediationFeaturesSpec"] = m.mediationFeaturesSpec
-	cfg["moderationFeaturesSpec"] = m.moderationFeaturesSpec
 	cfg["behaviorStatsTempControl"] = m.behaviorStatsTempControl
 	cfg["behaviorStatsAllowIIDTrials"] = m.behaviorStatsAllowIIDTrials
 	cfg["behaviorStatsHierarchicalFDR"] = m.behaviorStatsHierarchicalFDR
@@ -1645,8 +1551,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.conditionMinTrials = getInt("conditionMinTrials", m.conditionMinTrials)
 	m.conditionFailFast = getBool("conditionFailFast", m.conditionFailFast)
 	m.conditionPrimaryUnit = getInt("conditionPrimaryUnit", m.conditionPrimaryUnit)
-	m.conditionWindowPrimaryUnit = getInt("conditionWindowPrimaryUnit", m.conditionWindowPrimaryUnit)
-	m.conditionWindowMinSamples = getInt("conditionWindowMinSamples", m.conditionWindowMinSamples)
 	m.conditionEffectThreshold = getFloat("conditionEffectThreshold", m.conditionEffectThreshold)
 	m.conditionOverwrite = getBool("conditionOverwrite", m.conditionOverwrite)
 	m.temporalTargetColumn = getString("temporalTargetColumn", m.temporalTargetColumn)
@@ -1675,18 +1579,11 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 
 	// Trial table
 	m.trialTableFormat = getInt("trialTableFormat", m.trialTableFormat)
-	m.trialTableAddLagFeatures = getBool("trialTableAddLagFeatures", m.trialTableAddLagFeatures)
 	m.trialTableDisallowPositionalAlignment = getBool(
 		"trialTableDisallowPositionalAlignment",
 		m.trialTableDisallowPositionalAlignment,
 	)
 	m.trialOrderMaxMissingFraction = getFloat("trialOrderMaxMissingFraction", m.trialOrderMaxMissingFraction)
-
-	// Feature QC
-	m.featureQCEnabled = getBool("featureQCEnabled", m.featureQCEnabled)
-	m.featureQCMaxMissingPct = getFloat("featureQCMaxMissingPct", m.featureQCMaxMissingPct)
-	m.featureQCMinVariance = getFloat("featureQCMinVariance", m.featureQCMinVariance)
-	m.featureQCCheckWithinRunVariance = getBool("featureQCCheckWithinRunVariance", m.featureQCCheckWithinRunVariance)
 
 	// Predictor residual
 	m.predictorResidualEnabled = getBool("predictorResidualEnabled", m.predictorResidualEnabled)
@@ -1694,14 +1591,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.predictorResidualPolyDegree = getInt("predictorResidualPolyDegree", m.predictorResidualPolyDegree)
 	m.predictorResidualSplineDfCandidates = getString("predictorResidualSplineDfCandidates", m.predictorResidualSplineDfCandidates)
 	m.predictorResidualMinSamples = getInt("predictorResidualMinSamples", m.predictorResidualMinSamples)
-	m.predictorResidualModelCompareEnabled = getBool("predictorResidualModelCompareEnabled", m.predictorResidualModelCompareEnabled)
-	m.predictorResidualModelComparePolyDegrees = getString("predictorResidualModelComparePolyDegrees", m.predictorResidualModelComparePolyDegrees)
-	m.predictorResidualModelCompareMinSamples = getInt("predictorResidualModelCompareMinSamples", m.predictorResidualModelCompareMinSamples)
-	m.predictorResidualBreakpointEnabled = getBool("predictorResidualBreakpointEnabled", m.predictorResidualBreakpointEnabled)
-	m.predictorResidualBreakpointCandidates = getInt("predictorResidualBreakpointCandidates", m.predictorResidualBreakpointCandidates)
-	m.predictorResidualBreakpointMinSamples = getInt("predictorResidualBreakpointMinSamples", m.predictorResidualBreakpointMinSamples)
-	m.predictorResidualBreakpointQlow = getFloat("predictorResidualBreakpointQlow", m.predictorResidualBreakpointQlow)
-	m.predictorResidualBreakpointQhigh = getFloat("predictorResidualBreakpointQhigh", m.predictorResidualBreakpointQhigh)
 	m.predictorResidualCrossfitEnabled = getBool("predictorResidualCrossfitEnabled", m.predictorResidualCrossfitEnabled)
 	m.predictorResidualCrossfitGroupColumn = getString("predictorResidualCrossfitGroupColumn", m.predictorResidualCrossfitGroupColumn)
 	m.predictorResidualCrossfitNSplits = getInt("predictorResidualCrossfitNSplits", m.predictorResidualCrossfitNSplits)
@@ -1726,63 +1615,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.regressionPermutations = getInt("regressionPermutations", m.regressionPermutations)
 	m.regressionMaxFeatures = getInt("regressionMaxFeatures", m.regressionMaxFeatures)
 
-	// Models
-	m.modelsIncludePredictor = getBool("modelsIncludePredictor", m.modelsIncludePredictor)
-	m.modelsTempControl = getInt("modelsTempControl", m.modelsTempControl)
-	m.modelsTempSplineKnots = getInt("modelsTempSplineKnots", m.modelsTempSplineKnots)
-	m.modelsTempSplineQlow = getFloat("modelsTempSplineQlow", m.modelsTempSplineQlow)
-	m.modelsTempSplineQhigh = getFloat("modelsTempSplineQhigh", m.modelsTempSplineQhigh)
-	m.modelsTempSplineMinN = getInt("modelsTempSplineMinN", m.modelsTempSplineMinN)
-	m.modelsIncludeTrialOrder = getBool("modelsIncludeTrialOrder", m.modelsIncludeTrialOrder)
-	m.modelsIncludePrev = getBool("modelsIncludePrev", m.modelsIncludePrev)
-	m.modelsIncludeRunBlock = getBool("modelsIncludeRunBlock", m.modelsIncludeRunBlock)
-	m.modelsIncludeInteraction = getBool("modelsIncludeInteraction", m.modelsIncludeInteraction)
-	m.modelsStandardize = getBool("modelsStandardize", m.modelsStandardize)
-	m.modelsMinSamples = getInt("modelsMinSamples", m.modelsMinSamples)
-	m.modelsMaxFeatures = getInt("modelsMaxFeatures", m.modelsMaxFeatures)
-	m.modelsOutcomeValue = getBool("modelsOutcomeValue", m.modelsOutcomeValue)
-	m.modelsOutcomePredictorResidual = getBool("modelsOutcomePredictorResidual", m.modelsOutcomePredictorResidual)
-	m.modelsOutcomePredictor = getBool("modelsOutcomePredictor", m.modelsOutcomePredictor)
-	m.modelsOutcomeBinaryOutcome = getBool("modelsOutcomeBinaryOutcome", m.modelsOutcomeBinaryOutcome)
-	m.modelsFamilyOLS = getBool("modelsFamilyOLS", m.modelsFamilyOLS)
-	m.modelsFamilyRobust = getBool("modelsFamilyRobust", m.modelsFamilyRobust)
-	m.modelsFamilyQuantile = getBool("modelsFamilyQuantile", m.modelsFamilyQuantile)
-	m.modelsFamilyLogit = getBool("modelsFamilyLogit", m.modelsFamilyLogit)
-	m.modelsBinaryOutcome = getInt("modelsBinaryOutcome", m.modelsBinaryOutcome)
-	m.modelsPrimaryUnit = getInt("modelsPrimaryUnit", m.modelsPrimaryUnit)
-	m.modelsForceTrialIIDAsymptotic = getBool(
-		"modelsForceTrialIIDAsymptotic",
-		m.modelsForceTrialIIDAsymptotic,
-	)
-
-	// Stability
-	m.stabilityMethod = getInt("stabilityMethod", m.stabilityMethod)
-	m.stabilityOutcome = getInt("stabilityOutcome", m.stabilityOutcome)
-	m.stabilityGroupColumn = getInt("stabilityGroupColumn", m.stabilityGroupColumn)
-	m.stabilityPartialTemp = getBool("stabilityPartialTemp", m.stabilityPartialTemp)
-	m.stabilityMinGroupN = getInt("stabilityMinGroupN", m.stabilityMinGroupN)
-	m.stabilityMaxFeatures = getInt("stabilityMaxFeatures", m.stabilityMaxFeatures)
-	m.stabilityAlpha = getFloat("stabilityAlpha", m.stabilityAlpha)
-
-	// Consistency & influence
-	m.consistencyEnabled = getBool("consistencyEnabled", m.consistencyEnabled)
-	m.influenceOutcomeValue = getBool("influenceOutcomeValue", m.influenceOutcomeValue)
-	m.influenceOutcomePredictorResidual = getBool("influenceOutcomePredictorResidual", m.influenceOutcomePredictorResidual)
-	m.influenceOutcomePredictor = getBool("influenceOutcomePredictor", m.influenceOutcomePredictor)
-	m.influenceMaxFeatures = getInt("influenceMaxFeatures", m.influenceMaxFeatures)
-	m.influenceIncludePredictor = getBool("influenceIncludePredictor", m.influenceIncludePredictor)
-	m.influenceTempControl = getInt("influenceTempControl", m.influenceTempControl)
-	m.influenceTempSplineKnots = getInt("influenceTempSplineKnots", m.influenceTempSplineKnots)
-	m.influenceTempSplineQlow = getFloat("influenceTempSplineQlow", m.influenceTempSplineQlow)
-	m.influenceTempSplineQhigh = getFloat("influenceTempSplineQhigh", m.influenceTempSplineQhigh)
-	m.influenceTempSplineMinN = getInt("influenceTempSplineMinN", m.influenceTempSplineMinN)
-	m.influenceIncludeTrialOrder = getBool("influenceIncludeTrialOrder", m.influenceIncludeTrialOrder)
-	m.influenceIncludeRunBlock = getBool("influenceIncludeRunBlock", m.influenceIncludeRunBlock)
-	m.influenceIncludeInteraction = getBool("influenceIncludeInteraction", m.influenceIncludeInteraction)
-	m.influenceStandardize = getBool("influenceStandardize", m.influenceStandardize)
-	m.influenceCooksThreshold = getFloat("influenceCooksThreshold", m.influenceCooksThreshold)
-	m.influenceLeverageThreshold = getFloat("influenceLeverageThreshold", m.influenceLeverageThreshold)
-
 	// Correlations
 	m.correlationsTypesSpec = getString("correlationsTypesSpec", m.correlationsTypesSpec)
 	m.correlationsTargetColumn = getString("correlationsTargetColumn", m.correlationsTargetColumn)
@@ -1800,26 +1632,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.groupLevelControlRunEffects = getBool("groupLevelControlRunEffects", m.groupLevelControlRunEffects)
 	m.groupLevelMaxRunDummies = getInt("groupLevelMaxRunDummies", m.groupLevelMaxRunDummies)
 	m.groupLevelAllowParametricFallback = getBool("groupLevelAllowParametricFallback", m.groupLevelAllowParametricFallback)
-	m.predictorSensitivityMinTrials = getInt("predictorSensitivityMinTrials", m.predictorSensitivityMinTrials)
-	m.predictorSensitivityPrimaryUnit = getInt("predictorSensitivityPrimaryUnit", m.predictorSensitivityPrimaryUnit)
-	m.predictorSensitivityPermutations = getInt("predictorSensitivityPermutations", m.predictorSensitivityPermutations)
-	m.predictorSensitivityPermutationPrimary = getBool("predictorSensitivityPermutationPrimary", m.predictorSensitivityPermutationPrimary)
-
-	// Mixed Effects & Mediation
-	m.mixedEffectsType = getInt("mixedEffectsType", m.mixedEffectsType)
-	m.mixedIncludePredictor = getBool("mixedIncludePredictor", m.mixedIncludePredictor)
-	m.mixedMaxFeatures = getInt("mixedMaxFeatures", m.mixedMaxFeatures)
-	m.mediationMinEffect = getFloat("mediationMinEffect", m.mediationMinEffect)
-	m.mediationBootstrap = getInt("mediationBootstrap", m.mediationBootstrap)
-	m.mediationMaxMediatorsEnabled = getBool("mediationMaxMediatorsEnabled", m.mediationMaxMediatorsEnabled)
-	m.mediationMaxMediators = getInt("mediationMaxMediators", m.mediationMaxMediators)
-	m.mediationPermutations = getInt("mediationPermutations", m.mediationPermutations)
-	m.mediationPermutationPrimary = getBool("mediationPermutationPrimary", m.mediationPermutationPrimary)
-	m.moderationMaxFeaturesEnabled = getBool("moderationMaxFeaturesEnabled", m.moderationMaxFeaturesEnabled)
-	m.moderationMaxFeatures = getInt("moderationMaxFeatures", m.moderationMaxFeatures)
-	m.moderationMinSamples = getInt("moderationMinSamples", m.moderationMinSamples)
-	m.moderationPermutations = getInt("moderationPermutations", m.moderationPermutations)
-	m.moderationPermutationPrimary = getBool("moderationPermutationPrimary", m.moderationPermutationPrimary)
 
 	// Cluster tests
 	m.clusterThreshold = getFloat("clusterThreshold", m.clusterThreshold)
@@ -2381,12 +2193,9 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	// Behavior Statistics
 	m.behaviorValidateOnly = getBool("behaviorValidateOnly", m.behaviorValidateOnly)
 	m.correlationsFeaturesSpec = getString("correlationsFeaturesSpec", m.correlationsFeaturesSpec)
-	m.predictorSensitivityFeaturesSpec = getString("predictorSensitivityFeaturesSpec", m.predictorSensitivityFeaturesSpec)
 	m.conditionFeaturesSpec = getString("conditionFeaturesSpec", m.conditionFeaturesSpec)
 	m.temporalFeaturesSpec = getString("temporalFeaturesSpec", m.temporalFeaturesSpec)
 	m.clusterFeaturesSpec = getString("clusterFeaturesSpec", m.clusterFeaturesSpec)
-	m.mediationFeaturesSpec = getString("mediationFeaturesSpec", m.mediationFeaturesSpec)
-	m.moderationFeaturesSpec = getString("moderationFeaturesSpec", m.moderationFeaturesSpec)
 	m.behaviorStatsTempControl = getInt("behaviorStatsTempControl", m.behaviorStatsTempControl)
 	m.behaviorStatsAllowIIDTrials = getBool("behaviorStatsAllowIIDTrials", m.behaviorStatsAllowIIDTrials)
 	m.behaviorStatsHierarchicalFDR = getBool("behaviorStatsHierarchicalFDR", m.behaviorStatsHierarchicalFDR)
